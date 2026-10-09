@@ -159,6 +159,14 @@ pub mod files {
         Err(super::unsupported())
     }
 
+    pub fn write_private(_path: &Path, _body: &[u8]) -> io::Result<()> {
+        Err(super::unsupported())
+    }
+
+    pub fn is_owner_only(_path: &Path) -> io::Result<bool> {
+        Err(super::unsupported())
+    }
+
     pub fn sync_dir(_dir: &Path) -> io::Result<()> {
         Err(super::unsupported())
     }

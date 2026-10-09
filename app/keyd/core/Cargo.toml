@@ -14,9 +14,12 @@ name = "keyd_core"
 [features]
 # keyd's half: the vault, the ops, `forward`, the server loop, and the OS
 # secret store behind them.
-server = ["dep:chacha20poly1305", "dep:getrandom", "dep:ureq", "dep:core-foundation", "dep:core-foundation-sys", "dep:security-framework"]
+server = ["okta", "dep:chacha20poly1305", "dep:getrandom", "dep:ureq", "dep:core-foundation", "dep:core-foundation-sys", "dep:security-framework"]
 # The app's and CLI's half: the client and the registrar.
 client = []
+# The headless Okta sign-in. keyd runs it (so `server` includes it); the app
+# links it too, to run it in-process while keyd is absent.
+okta = ["dep:ureq", "dep:scraper", "dep:url"]
 
 [dependencies]
 # The one definition of the data dir, the same base Tauri's `app_data_dir()` uses.
@@ -28,6 +31,10 @@ getrandom = { version = "=0.2.17", optional = true }
 # `gzip`, so the answer's bytes pass through as the origin sent them. Never
 # `proxy-from-env`: an environment variable must not move where a key goes.
 ureq = { version = "=2.12.1", default-features = false, features = ["tls"], optional = true }
+# The sign-in reads Okta's SAML auto-submit form (`parse_saml_form`) and joins
+# redirect targets. No `main` feature: that is scraper's own CLI.
+scraper = { version = "=0.27.0", default-features = false, optional = true }
+url = { version = "=2.5.8", optional = true }
 
 # The POSIX file helpers (`platform/unix.rs`).
 [target.'cfg(unix)'.dependencies]

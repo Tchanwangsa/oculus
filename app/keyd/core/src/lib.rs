@@ -4,9 +4,11 @@
 //!
 //! keyd links it with `server`; the app and CLI link it with `client`, so
 //! neither links the other and an app edit never changes keyd's bytes. The
-//! framing, the secret names, the paths and the platform's base types are
-//! always on.
+//! framing, the secret names, the paths, the clock and the platform's base
+//! types are always on; `okta` is the headless sign-in, which keyd runs and
+//! the app runs when keyd is absent.
 
+pub mod clock;
 pub mod framing;
 pub mod names;
 pub mod paths;
@@ -16,6 +18,8 @@ pub mod platform;
 pub mod client;
 #[cfg(feature = "server")]
 pub mod forward;
+#[cfg(feature = "okta")]
+pub mod okta;
 #[cfg(feature = "server")]
 pub mod ops;
 #[cfg(feature = "server")]
@@ -23,7 +27,7 @@ pub mod server;
 #[cfg(feature = "server")]
 pub mod vault;
 
-#[cfg(all(test, feature = "server"))]
+#[cfg(all(test, any(feature = "server", feature = "okta")))]
 mod test_support;
 
 /// One line of keyd's log (stderr, which the agent sends to a file): the

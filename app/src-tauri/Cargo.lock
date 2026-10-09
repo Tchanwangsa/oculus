@@ -3163,7 +3163,10 @@ version = "0.1.0"
 dependencies = [
  "dirs",
  "libc",
+ "scraper",
  "serde_json",
+ "ureq",
+ "url",
 ]
 
 [[package]]

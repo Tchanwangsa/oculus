@@ -39,6 +39,27 @@ pub fn create_private(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+/// Writes `body` to `path` readable by this user only. A new file is created
+/// 0600 and an existing one narrowed before the body lands, so the secret is
+/// never on disk world-readable.
+pub fn write_private(path: &Path, body: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    file.write_all(body)
+}
+
+/// Whether only this user can read or write `path`: no group or other bit.
+pub fn is_owner_only(path: &Path) -> io::Result<bool> {
+    Ok(std::fs::metadata(path)?.permissions().mode() & 0o077 == 0)
+}
+
 /// Flushes `dir`, so a rename inside it survives a crash.
 pub fn sync_dir(dir: &Path) -> io::Result<()> {
     File::open(dir)?.sync_all()
@@ -116,6 +137,21 @@ mod tests {
         set_executable(&f).unwrap();
         assert_eq!(mode(&f), 0o755);
         sync_dir(&dir.0).unwrap();
+    }
+
+    #[test]
+    fn private_writes_narrow_an_existing_file() {
+        let dir = scratch("write-private");
+        let f = dir.0.join("session.cookie");
+        write_private(&f, b"fresh").unwrap();
+        assert_eq!(mode(&f), 0o600);
+        assert!(is_owner_only(&f).unwrap());
+
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!is_owner_only(&f).unwrap());
+        write_private(&f, b"tok").unwrap();
+        assert_eq!(mode(&f), 0o600);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "tok");
     }
 
     /// The vault's sealed file is written through `create_private`.

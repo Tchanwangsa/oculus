@@ -1,5 +1,6 @@
 //! A temp directory per test, removed on drop, a fixed `ping` identity, a
-//! caller check that answers as told, and a fake HTTP origin for `forward`.
+//! caller check that answers as told, and a fake HTTP origin for `forward`
+//! and the sign-in.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -7,12 +8,15 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "server")]
 use crate::ops::Build;
+#[cfg(feature = "server")]
 use crate::platform::{Caller, Conn, PeerCheck, Role};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 /// What a test keyd reports from `ping`.
+#[cfg(feature = "server")]
 pub const BUILD: Build = Build {
     version: "0.0.0-test",
     source_hash: "5555555555555555555555555555555555555555555555555555555555555555",
@@ -36,11 +40,13 @@ impl Drop for Scratch {
 }
 
 /// Admits or refuses every caller, counting the connections it inspected.
+#[cfg(feature = "server")]
 pub struct Peers {
     verdict: Result<(), String>,
     pub seen: Arc<AtomicUsize>,
 }
 
+#[cfg(feature = "server")]
 impl Peers {
     pub fn admit() -> Peers {
         Peers {
@@ -57,6 +63,7 @@ impl Peers {
     }
 }
 
+#[cfg(feature = "server")]
 impl PeerCheck for Peers {
     fn inspect(&self, _conn: &Conn) -> Caller {
         self.seen.fetch_add(1, Ordering::SeqCst);

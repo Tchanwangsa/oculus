@@ -18,36 +18,23 @@ pub fn data_dir() -> PathBuf {
     keyd_core::paths::data_dir()
 }
 
+// The session files the headless sign-in writes are named in `keyd_core::paths`,
+// which keyd shares; these keep the app's call sites as they were.
+
 pub fn cookie_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("canvas-session.cookie")
+    keyd_core::paths::cookie(data_dir)
 }
 
 /// Okta's cookies for `sso.unimelb.edu.au`, the same bare `name=value; …`
 /// header as the Canvas one. Only the in-app browser replays it.
 pub fn sso_cookie_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("sso-session.cookie")
+    keyd_core::paths::sso_cookie(data_dir)
 }
 
-/// Writes a session file readable by this user only. A new file is created
-/// 0600 and an existing one narrowed before the body lands, so the secret is
-/// never on disk world-readable.
+/// Writes a session file readable by this user only, narrowing an existing
+/// one before the body lands.
 pub fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> {
-    use std::io::Write;
-
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    }
-    file.write_all(body.as_bytes())
+    keyd_core::paths::write_private(path, body)
 }
 
 /// Ed's `x-token`, minted from the Canvas session (`ed.rs`).
@@ -56,13 +43,13 @@ pub fn ed_token_path(data_dir: &std::path::Path) -> PathBuf {
 }
 
 pub fn auth_flag_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("canvas-session").join("authenticated")
+    keyd_core::paths::session_dir(data_dir).join("authenticated")
 }
 
 /// Present from a sign-out until the next session (`mark_authenticated`).
 /// While it is, automatic sign-ins stand down (`okta::sign_in`).
 pub fn signed_out_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("canvas-session").join("signed-out")
+    keyd_core::paths::signed_out(data_dir)
 }
 
 /// Drops the saved Canvas, Okta and Ed sessions and the auth flag, and marks
@@ -114,55 +101,18 @@ pub fn append_keepalive_log(data_dir: &std::path::Path, message: &str) {
     append_bounded_log(&keepalive_log_path(data_dir), message);
 }
 
-/// Every headless Okta sign-in attempt, whoever made it (`okta::sign_in`).
-pub fn sign_in_log_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("okta-sign-in.log")
-}
-
 /// The attempt record every process checks before an automatic sign-in.
 pub fn sign_in_record_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("canvas-session").join("sign-in.json")
-}
-
-pub fn append_sign_in_log(data_dir: &std::path::Path, message: &str) {
-    append_bounded_log(&sign_in_log_path(data_dir), message);
+    keyd_core::paths::sign_in_record(data_dir)
 }
 
 /// Append one timestamped line, keeping the file bounded.
 fn append_bounded_log(path: &std::path::Path, message: &str) {
-    use std::io::Write;
-
-    let stamp = crate::clock::now_secs();
-    let line = format!("{}Z {message}\n", iso8601_utc(stamp));
-
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        f.write_all(line.as_bytes()).ok();
-    }
-
-    // Only rewrite once the file has grown past the cap.
-    if let Ok(meta) = std::fs::metadata(&path) {
-        if meta.len() > 64 * 1024 {
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                let lines: Vec<&str> = text.lines().collect();
-                let keep = lines[lines.len().saturating_sub(200)..].join("\n");
-                std::fs::write(&path, format!("{keep}\n")).ok();
-            }
-        }
-    }
+    keyd_core::paths::append_bounded_log(path, message, crate::clock::now_secs());
 }
 
 /// `YYYY-MM-DDTHH:MM:SS` from a Unix timestamp, without a date crate.
-pub fn iso8601_utc(secs: u64) -> String {
-    let (days, rem) = (secs / 86_400, secs % 86_400);
-    let (h, mi, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
-
-    let (y, m, d) = crate::clock::civil_from_days(days as i64);
-    format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}")
-}
+pub use keyd_core::clock::iso8601_utc;
 
 /// `oculus-keyd`'s endpoint (`keyd.rs`).
 pub fn keyd_socket_path(data_dir: &std::path::Path) -> PathBuf {

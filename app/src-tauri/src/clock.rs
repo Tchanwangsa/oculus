@@ -16,25 +16,7 @@ pub fn now_nanos() -> u128 {
         .unwrap_or_default()
 }
 
-/// Days since 1970-01-01 to `(year, month, day)` (Howard Hinnant's
-/// `civil_from_days`).
-pub fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let shifted = days + 719_468;
-    let era = shifted.div_euclid(146_097);
-    let day_of_era = shifted.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let shifted_month = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
-    let month = if shifted_month < 10 {
-        shifted_month + 3
-    } else {
-        shifted_month - 9
-    };
-    (if month <= 2 { year + 1 } else { year }, month, day)
-}
+pub use keyd_core::clock::civil_from_days;
 
 /// `YYYY-MM-DD` for a day number since the epoch.
 pub fn ymd(days: i64) -> String {
