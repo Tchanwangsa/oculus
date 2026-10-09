@@ -18,6 +18,12 @@ default-run = "app"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Lets a release build find libpdfium through `OCULUS_PDFIUM_LIB`, an ancestor
+# `binaries/`, the build tree and the system, as a debug build does. Only
+# `bun run cli` sets it; a bundle's CLI must not (docs/development.md).
+dev-pdfium = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

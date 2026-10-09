@@ -261,9 +261,20 @@ It rasterizes pages for embedding (`app/src-tauri/src/embed/raster.rs`) and has
 no crates.io source, so `app/scripts/fetch-pdfium.mjs` downloads a prebuilt one.
 Its release tag must match the revision `pdfium-render`'s feature flag binds
 against: a mismatch fails at *bind* time, not compile time, so bump both
-together. At runtime it is found beside the executable (`Contents/Frameworks/`
-in the bundle, an ancestor `binaries/` in dev); `OCULUS_PDFIUM_LIB` overrides
-the path.
+together. At runtime (`app/src-tauri/src/embed/raster/library.rs`) a release
+bundle finds it only in `Contents/Frameworks/` or beside the executable. The
+app and CLI run with library validation off, so any dylib they `dlopen` is
+trusted; an environment variable, a nearby folder or the system's search path
+must not be able to name one. Those sources exist only where a developer runs
+the build: `OCULUS_PDFIUM_LIB` (the dylib or its directory), an ancestor
+`binaries/`, the build tree's `src-tauri/binaries/` and a system pdfium are
+compiled under `cfg(any(debug_assertions, test, feature = "dev-pdfium"))`.
+That covers `tauri dev`, `cli:dev`, and `cargo test` in either profile;
+`bun run cli` builds the release CLI with `--features dev-pdfium`, so
+`cli:install` keeps finding the library from `~/.local/bin`. `stage-cli`,
+`docs:cli` and `tauri build` do not pass the feature, which makes them rebuild
+the release CLI (and `docs:cli` replaces `target/release/oculus`): run `bun run
+cli` again afterwards if you use that binary.
 
 ## A UI change is verified by screenshot, not by `tsc`
 
