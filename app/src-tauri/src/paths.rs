@@ -42,6 +42,21 @@ pub fn auth_flag_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("canvas-session").join("authenticated")
 }
 
+/// Drops the saved Canvas and Okta sessions and the auth flag, returning
+/// whether there was anything to drop. The attempt record beside the flag
+/// stays: forgetting a lockout pause would let automatic sign-in resume.
+pub fn sign_out(data_dir: &std::path::Path) -> std::io::Result<bool> {
+    let mut had = false;
+    for path in [cookie_path(data_dir), sso_cookie_path(data_dir), auth_flag_path(data_dir)] {
+        match std::fs::remove_file(&path) {
+            Ok(()) => had = true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(had)
+}
+
 /// Record that we hold a session Canvas has accepted.
 ///
 /// The app's startup probe ignores the cookie without this flag, so every path
@@ -357,6 +372,22 @@ pub fn category_from_path(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sign_out_keeps_the_attempt_record() {
+        let dir = crate::test_support::Scratch::new("sign-out");
+        mark_authenticated(&dir);
+        write_private(&cookie_path(&dir), "canvas_session=a").unwrap();
+        write_private(&sso_cookie_path(&dir), "idx=b").unwrap();
+        std::fs::write(sign_in_record_path(&dir), r#"{"paused":"locked"}"#).unwrap();
+
+        assert!(sign_out(&dir).unwrap());
+        assert!(!cookie_path(&dir).exists());
+        assert!(!sso_cookie_path(&dir).exists());
+        assert!(!auth_flag_path(&dir).exists());
+        assert!(sign_in_record_path(&dir).exists());
+        assert!(!sign_out(&dir).unwrap());
+    }
 
     #[test]
     fn identifier_matches_tauri_conf() {

@@ -241,13 +241,6 @@ pub async fn disconnect_canvas(
         win.close().map_err(|e| e.to_string())?;
     }
 
-    let session_dir = canvas_session_dir();
-    if session_dir.exists() {
-        std::fs::remove_dir_all(&session_dir).map_err(|e| e.to_string())?;
-    }
-    let cookie = cookie_file_path();
-    if cookie.exists() {
-        std::fs::remove_file(&cookie).map_err(|e| e.to_string())?;
-    }
+    crate::paths::sign_out(&crate::paths::data_dir()).map_err(|e| e.to_string())?;
     Ok(())
 }

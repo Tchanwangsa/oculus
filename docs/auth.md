@@ -9,7 +9,7 @@ cookie.
 | --- | --- |
 | Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
 | Session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas.rs` |
-| Cookie (Canvas and Okta), auth-flag and keep-alive log paths | `app/src-tauri/src/paths.rs` |
+| Cookie (Canvas and Okta), auth-flag and keep-alive log paths; sign-out | `app/src-tauri/src/paths.rs` |
 | Headless Okta sign-in, TOTP, stored credentials, the attempt guard | `app/src-tauri/src/okta.rs` |
 | LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
 | The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
@@ -38,7 +38,12 @@ is on the page either way; only its `disabled` attribute tells you.)
   or by hand.
 - On launch with the flag present, the app starts connected while a thread
   probes the cookie: `Valid` confirms, `Rejected` clears the flag (keeping the
-  SSO profile) and emits `canvas-auth-expired`, `Unreachable` stays connected.
+  Okta snapshot) and emits `canvas-auth-expired`, `Unreachable` stays connected.
+- Signing out (Settings or `oculus auth logout`, both `paths::sign_out`)
+  deletes the Canvas and Okta snapshots and the flag. The Okta one goes too,
+  or the in-app browser would pass through SSO and re-save a Canvas session.
+  The [attempt record](#every-sign-in-attempt-goes-through-one-guard) stays,
+  so a lockout pause outlives a sign-out.
 
 ## The in-app browser is seeded with the same sessions
 
