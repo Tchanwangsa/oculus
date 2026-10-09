@@ -62,6 +62,12 @@ pub fn sign_in_record(data_dir: &Path) -> PathBuf {
     session_dir(data_dir).join("sign-in.json")
 }
 
+/// The lock `sign_in_record` is read and replaced under. A file of its own,
+/// because a save replaces the record's inode and a lock on it would go with it.
+pub fn sign_in_lock(data_dir: &Path) -> PathBuf {
+    session_dir(data_dir).join("sign-in.json.lock")
+}
+
 /// Every headless Okta sign-in attempt, whoever made it.
 pub fn sign_in_log(data_dir: &Path) -> PathBuf {
     data_dir.join("okta-sign-in.log")

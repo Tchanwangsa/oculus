@@ -93,7 +93,9 @@ fn keychain_store(username: &str, password: &str, totp_secret: &str) -> Result<(
     write("username", &creds.username)?;
     write("password", &creds.password)?;
     write("totp_secret", &creds.totp_secret)?;
-    resume_automatic_sign_in(&crate::paths::data_dir());
+    if let Err(why) = resume_automatic_sign_in(&crate::paths::data_dir()) {
+        eprintln!("[oculus] the attempt guard was not cleared: {why}");
+    }
     Ok(())
 }
 

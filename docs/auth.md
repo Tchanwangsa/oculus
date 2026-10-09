@@ -198,10 +198,20 @@ too many attempts. So `keyd_core::okta::sign_in` checks one record,
 every attempt with its caller to `okta-sign-in.log`. The guard is that one
 function, so keyd and the in-process fallback share it and the file.
 
-- An automatic attempt is refused (`LoginError::Paused`) when the record
-  cannot be locked, opened or saved: with no count of earlier attempts, running
-  could lock the account. A manual attempt still runs, since a person is
-  waiting.
+- The record is replaced atomically (a temp file in the same directory,
+  fsynced, then renamed over it) under a lock on a sibling file,
+  `sign-in.json.lock`, so a crash leaves the old record or the new one and
+  never an empty file. The lock file is created on first use, so a record with
+  none beside it is read as it is.
+- A file that is missing is a blank record: nothing has been attempted. A file
+  that exists but is empty, truncated, mistyped or short of a field is
+  *damaged*, and a blank record would forget a lockout pause, so an automatic
+  attempt is refused (`LoginError::Paused`, naming the file) and the file is
+  left untouched. A manual attempt, saving credentials or a person's sign-in
+  writes a good record over it.
+- An automatic attempt is also refused when the record cannot be locked, read
+  or saved: with no count of earlier attempts, running could lock the account.
+  A manual attempt still runs, since a person is waiting.
 
 - An automatic attempt waits 10 min after any attempt, then 1 h after two
   failures in a row and 6 h after three. A success resets the count.

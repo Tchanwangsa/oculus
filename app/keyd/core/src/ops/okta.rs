@@ -198,7 +198,11 @@ impl State {
             }
         })?;
         // New credentials deserve an immediate automatic try.
-        okta::resume_automatic_sign_in(&self.data_dir);
+        if let Err(why) = okta::resume_automatic_sign_in(&self.data_dir) {
+            crate::log(&format!(
+                "okta_save: the attempt guard was not cleared ({why})"
+            ));
+        }
         Ok(json!({"saved": true}).into())
     }
 

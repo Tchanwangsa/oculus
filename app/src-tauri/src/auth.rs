@@ -137,7 +137,9 @@ pub enum Via {
 pub fn session_established(app: &AppHandle, dir: &std::path::Path, via: Via) {
     crate::paths::mark_authenticated(dir);
     if via != Via::Headless {
-        crate::okta::resume_automatic_sign_in(dir);
+        if let Err(why) = crate::okta::resume_automatic_sign_in(dir) {
+            eprintln!("[oculus] the attempt guard was not cleared: {why}");
+        }
     }
     if let Some(state) = app.try_state::<AuthState>() {
         *state.0.lock().unwrap() = true;

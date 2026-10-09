@@ -1,13 +1,16 @@
 //! The attempt guard. The app's startup probe, its keep-alive thread, the
 //! browser and the CLI's `auth tick` each sign in on their own, and Okta locks
 //! the account after too many attempts. So every attempt goes through one
-//! record on disk, and an automatic attempt that cannot reach it does not run.
+//! record on disk (`record.rs`), and an automatic attempt that cannot reach it
+//! or cannot read it does not run.
 
 use std::path::Path;
 
 use super::LoginError;
-use crate::paths;
-use crate::platform::files;
+
+mod record;
+
+pub(super) use record::{with_record, AttemptRecord};
 
 /// Who asked for a sign-in. Only `Manual` skips the guard: a person is
 /// waiting on the answer.
@@ -52,16 +55,6 @@ impl Trigger {
     }
 }
 
-#[derive(Default)]
-pub(super) struct AttemptRecord {
-    /// Unix seconds when the last attempt started.
-    last: u64,
-    /// Failed attempts since the last success; sets the wait.
-    failures: u32,
-    /// Why automatic sign-in is paused, if it is.
-    paused: Option<String>,
-}
-
 /// How long automatic sign-in waits after an attempt.
 pub(super) fn wait_after(failures: u32) -> u64 {
     match failures {
@@ -73,6 +66,16 @@ pub(super) fn wait_after(failures: u32) -> u64 {
 
 /// Whether an attempt may start at `now`, recording it if so.
 pub(super) fn admit(r: &mut AttemptRecord, trigger: Trigger, now: u64) -> Result<(), LoginError> {
+    if let Some(damage) = &r.damaged {
+        if trigger != Trigger::Manual {
+            return Err(LoginError::Paused(format!(
+                "the attempt record {damage}, so there is no telling how recent the last \
+                 attempt was"
+            )));
+        }
+        // A person is waiting. The save after this attempt writes a good record.
+        r.damaged = None;
+    }
     if trigger != Trigger::Manual {
         if let Some(why) = &r.paused {
             return Err(LoginError::Paused(why.clone()));
@@ -107,76 +110,6 @@ pub(super) fn settle(r: &mut AttemptRecord, result: &Result<String, LoginError>)
     }
 }
 
-impl AttemptRecord {
-    /// A record that is empty, or not in the shape `to_json` writes, acts as
-    /// a blank one.
-    fn from_json(text: &str) -> AttemptRecord {
-        let parsed = serde_json::from_str::<serde_json::Value>(text).ok();
-        let field = |key: &str| parsed.as_ref().and_then(|v| v.get(key));
-        let (Some(last), Some(failures)) = (
-            field("last").and_then(|v| v.as_u64()),
-            field("failures")
-                .and_then(|v| v.as_u64())
-                .and_then(|n| u32::try_from(n).ok()),
-        ) else {
-            return AttemptRecord::default();
-        };
-        let paused = match field("paused") {
-            None | Some(serde_json::Value::Null) => None,
-            Some(serde_json::Value::String(why)) => Some(why.clone()),
-            Some(_) => return AttemptRecord::default(),
-        };
-        AttemptRecord {
-            last,
-            failures,
-            paused,
-        }
-    }
-
-    fn to_json(&self) -> String {
-        format!(
-            r#"{{"last":{},"failures":{},"paused":{}}}"#,
-            self.last,
-            self.failures,
-            serde_json::to_string(&self.paused).unwrap_or_else(|_| "null".to_string())
-        )
-    }
-}
-
-/// Runs `f` on the record under an exclusive file lock, so two processes
-/// cannot both decide to sign in, and saves what `f` left. `Err` says why the
-/// record could not be locked, opened or saved; `f` has not run for the first
-/// two. An unreadable record's contents act as a blank one.
-pub(super) fn with_record<T>(
-    data_dir: &Path,
-    f: impl FnOnce(&mut AttemptRecord) -> T,
-) -> Result<T, String> {
-    use std::io::{Read, Seek, Write};
-
-    let path = paths::sign_in_record(data_dir);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    let fail = |what: &str, e: std::io::Error| format!("{what} {}: {e}", path.display());
-    let _lock = files::lock(&path).map_err(|e| fail("locking", e))?;
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&path)
-        .map_err(|e| fail("opening", e))?;
-    let mut text = String::new();
-    file.read_to_string(&mut text).ok();
-    let mut record = AttemptRecord::from_json(&text);
-    let out = f(&mut record);
-    file.set_len(0)
-        .and_then(|()| file.rewind())
-        .and_then(|()| file.write_all(record.to_json().as_bytes()))
-        .map_err(|e| fail("saving", e))?;
-    Ok(out)
-}
-
 /// Whether an attempt may start at `now`, recording it if so. An automatic
 /// attempt is refused when the record is out of reach: with no count of the
 /// attempts before it, running could lock the account. A manual one runs,
@@ -204,8 +137,10 @@ pub(super) fn settle_recorded(data_dir: &Path, result: &Result<String, LoginErro
 
 /// Clears the wait and any pause: newly saved credentials, or a sign-in a
 /// person finished in the window, deserve an immediate automatic try.
-pub fn resume_automatic_sign_in(data_dir: &Path) {
-    with_record(data_dir, |r| *r = AttemptRecord::default()).ok();
+/// A damaged record is repaired by it. `Err` says why the record could not be
+/// replaced.
+pub fn resume_automatic_sign_in(data_dir: &Path) -> Result<(), String> {
+    with_record(data_dir, |r| *r = AttemptRecord::default())
 }
 
 #[cfg(test)]
@@ -261,8 +196,8 @@ mod tests {
         assert!(r.paused.is_none());
         assert!(admit(&mut r, Trigger::KeepAlive, 1_000_600).is_ok());
     }
-    // ── On disk ──────────────────────────────────────────────────────────────
 
+    use crate::paths;
     use crate::test_support::Scratch;
 
     fn on_disk(dir: &Scratch) -> serde_json::Value {
@@ -313,7 +248,7 @@ mod tests {
         assert!(on_disk(&dir)["paused"].is_null());
         assert!(admit_recorded(&dir.0, Trigger::KeepAlive, 1_000_600).is_ok());
 
-        resume_automatic_sign_in(&dir.0);
+        resume_automatic_sign_in(&dir.0).unwrap();
         assert_eq!(on_disk(&dir)["last"], 0);
     }
 
@@ -335,28 +270,214 @@ mod tests {
         assert!(admit_recorded(&dir.0, Trigger::Manual, 1_000).is_ok());
     }
 
-    #[test]
-    fn the_record_reads_back_what_it_wrote_and_a_damaged_one_is_blank() {
-        let mut r = AttemptRecord {
-            last: 77,
-            failures: 3,
-            paused: Some("locked \"out\"".into()),
-        };
-        let back = AttemptRecord::from_json(&r.to_json());
-        assert_eq!((back.last, back.failures), (77, 3));
-        assert_eq!(back.paused.as_deref(), Some("locked \"out\""));
+    fn write_record(dir: &Scratch, bytes: &[u8]) {
+        let path = paths::sign_in_record(&dir.0);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
 
-        r.paused = None;
-        assert!(AttemptRecord::from_json(&r.to_json()).paused.is_none());
-        for damaged in [
-            "",
-            "{",
-            "[]",
-            r#"{"last":"x","failures":1}"#,
-            r#"{"last":1}"#,
-        ] {
-            let blank = AttemptRecord::from_json(damaged);
-            assert_eq!((blank.last, blank.failures, blank.paused), (0, 0, None));
+    fn record_bytes(dir: &Scratch) -> Vec<u8> {
+        std::fs::read(paths::sign_in_record(&dir.0)).unwrap()
+    }
+
+    /// Everything that is not a record, and so must not read as a blank one.
+    const DAMAGED: [&[u8]; 11] = [
+        b"",
+        b"  \n",
+        b"{",
+        b"[]",
+        b"null",
+        br#"{"last":1}"#,
+        br#"{"failures":1}"#,
+        br#"{"last":"x","failures":1}"#,
+        br#"{"last":1,"failures":-1,"paused":null}"#,
+        br#"{"last":1,"failures":1,"paused":5}"#,
+        b"\xff\xfe not text",
+    ];
+
+    #[test]
+    fn a_damaged_record_pauses_every_automatic_attempt_and_is_left_alone() {
+        for bytes in DAMAGED {
+            let dir = Scratch::new("guard-damaged");
+            write_record(&dir, bytes);
+            for trigger in [Trigger::Startup, Trigger::KeepAlive, Trigger::Browser] {
+                let Err(LoginError::Paused(why)) = admit_recorded(&dir.0, trigger, 1_000_000)
+                else {
+                    panic!("{trigger:?} ran on {:?}", String::from_utf8_lossy(bytes));
+                };
+                assert!(
+                    why.contains("sign-in.json is damaged") && why.contains("no telling"),
+                    "{why}"
+                );
+            }
+            // Refusing did not repair it into a blank record.
+            assert_eq!(record_bytes(&dir), bytes);
+        }
+    }
+
+    #[test]
+    fn a_missing_record_is_a_blank_one_and_the_first_attempt_runs() {
+        let dir = Scratch::new("guard-absent");
+        assert!(!paths::sign_in_record(&dir.0).exists());
+        assert!(admit_recorded(&dir.0, Trigger::Startup, 1_000_000).is_ok());
+        assert_eq!(on_disk(&dir)["last"], 1_000_000);
+    }
+
+    #[test]
+    fn a_manual_attempt_repairs_a_damaged_record() {
+        for bytes in DAMAGED {
+            let dir = Scratch::new("guard-repair");
+            write_record(&dir, bytes);
+            admit_recorded(&dir.0, Trigger::Manual, 1_000_000).unwrap();
+            settle_recorded(&dir.0, &Ok(String::new()));
+            let repaired = on_disk(&dir);
+            assert_eq!(repaired["last"], 1_000_000);
+            assert_eq!(repaired["failures"], 0);
+            assert!(repaired["paused"].is_null());
+            // Automatic attempts judge the repaired record as any other.
+            assert!(matches!(
+                admit_recorded(&dir.0, Trigger::Startup, 1_000_100),
+                Err(LoginError::Waiting(500))
+            ));
+            assert!(admit_recorded(&dir.0, Trigger::Startup, 1_000_600).is_ok());
+        }
+    }
+
+    #[test]
+    fn a_failed_manual_attempt_on_a_damaged_record_records_its_failure_and_pause() {
+        let dir = Scratch::new("guard-repair-fail");
+        write_record(&dir, b"");
+        admit_recorded(&dir.0, Trigger::Manual, 1_000_000).unwrap();
+        settle_recorded(&dir.0, &Err(LoginError::Locked("Too many attempts".into())));
+        assert_eq!(on_disk(&dir)["failures"], 1);
+        assert!(on_disk(&dir)["paused"].is_string());
+        assert!(matches!(
+            admit_recorded(&dir.0, Trigger::KeepAlive, 9_000_000),
+            Err(LoginError::Paused(_))
+        ));
+    }
+
+    #[test]
+    fn saving_new_credentials_or_a_browser_sign_in_repairs_a_damaged_record() {
+        let dir = Scratch::new("guard-resume-repair");
+        write_record(&dir, b"{");
+        resume_automatic_sign_in(&dir.0).unwrap();
+        assert_eq!(on_disk(&dir)["failures"], 0);
+        assert!(admit_recorded(&dir.0, Trigger::Startup, 1_000).is_ok());
+    }
+
+    #[test]
+    fn a_damaged_record_cannot_be_used_to_hammer_in_parallel() {
+        let dir = Scratch::new("guard-damaged-threads");
+        write_record(&dir, b"");
+        let path = dir.0.clone();
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || admit_recorded(&path, Trigger::KeepAlive, 5_000))
+            })
+            .collect();
+        for t in threads {
+            assert!(matches!(t.join().unwrap(), Err(LoginError::Paused(_))));
+        }
+        assert_eq!(record_bytes(&dir), b"");
+    }
+
+    #[test]
+    fn only_one_of_many_simultaneous_automatic_attempts_is_admitted() {
+        let dir = Scratch::new("guard-threads");
+        let path = dir.0.clone();
+        let threads: Vec<_> = (0..16)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || admit_recorded(&path, Trigger::Startup, 5_000))
+            })
+            .collect();
+        let verdicts: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+        assert_eq!(verdicts.iter().filter(|v| v.is_ok()).count(), 1);
+        assert!(verdicts
+            .iter()
+            .filter_map(|v| v.as_ref().err())
+            .all(|e| matches!(e, LoginError::Waiting(600))));
+    }
+
+    #[test]
+    fn a_save_interrupted_before_the_rename_leaves_the_record_as_it_was() {
+        let dir = Scratch::new("guard-interrupted");
+        write_record(&dir, br#"{"last":777,"failures":2,"paused":"locked"}"#);
+        // A crash mid-write leaves a partial temp file beside the record.
+        let temp = paths::sign_in_record(&dir.0)
+            .with_file_name(format!(".sign-in.json.{}.tmp", std::process::id()));
+        std::fs::write(&temp, b"{\"last\":9").unwrap();
+        assert_eq!(
+            record_bytes(&dir),
+            br#"{"last":777,"failures":2,"paused":"locked"}"#
+        );
+
+        // The next reader sees the old record, pause and all.
+        let Err(LoginError::Paused(why)) = admit_recorded(&dir.0, Trigger::KeepAlive, 9_000_000)
+        else {
+            panic!("the pause was forgotten");
+        };
+        assert_eq!(why, "locked");
+        // And a save over the stale temp completes.
+        resume_automatic_sign_in(&dir.0).unwrap();
+        assert_eq!(on_disk(&dir)["failures"], 0);
+        assert!(!temp.exists(), "the temp file was renamed over the record");
+    }
+
+    #[test]
+    fn a_save_that_fails_leaves_the_old_record_and_says_so() {
+        let dir = Scratch::new("guard-save-fails");
+        write_record(&dir, br#"{"last":777,"failures":1,"paused":null}"#);
+        // The temp file's name is taken by a directory, so it cannot be written.
+        let temp = paths::sign_in_record(&dir.0)
+            .with_file_name(format!(".sign-in.json.{}.tmp", std::process::id()));
+        std::fs::create_dir(&temp).unwrap();
+
+        let why = with_record(&dir.0, |r| r.last = 5).unwrap_err();
+        assert!(
+            why.starts_with("saving") && why.contains("sign-in.json"),
+            "{why}"
+        );
+        assert_eq!(
+            record_bytes(&dir),
+            br#"{"last":777,"failures":1,"paused":null}"#
+        );
+        // An automatic attempt that cannot be recorded does not run.
+        assert!(matches!(
+            admit_recorded(&dir.0, Trigger::Startup, 9_000_000),
+            Err(LoginError::Paused(_))
+        ));
+    }
+
+    #[test]
+    fn an_old_layout_record_without_a_lock_file_is_read_and_a_lock_file_appears() {
+        let dir = Scratch::new("guard-old-layout");
+        write_record(&dir, br#"{"last":1000,"failures":0,"paused":null}"#);
+        assert!(!paths::sign_in_lock(&dir.0).exists());
+        assert!(matches!(
+            admit_recorded(&dir.0, Trigger::Startup, 1_100),
+            Err(LoginError::Waiting(500))
+        ));
+        assert!(paths::sign_in_lock(&dir.0).exists());
+        assert_ne!(
+            paths::sign_in_lock(&dir.0),
+            paths::sign_in_record(&dir.0),
+            "the lock is not the record's own file"
+        );
+    }
+
+    #[test]
+    fn the_record_and_its_lock_are_private_to_this_user() {
+        let dir = Scratch::new("guard-modes");
+        admit_recorded(&dir.0, Trigger::Startup, 1_000).unwrap();
+        for path in [paths::sign_in_record(&dir.0), paths::sign_in_lock(&dir.0)] {
+            assert!(
+                crate::platform::files::is_owner_only(&path).unwrap(),
+                "{}",
+                path.display()
+            );
         }
     }
 }
