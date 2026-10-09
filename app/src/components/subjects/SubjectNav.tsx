@@ -144,11 +144,6 @@ export function SubjectNav({
               <p className={cn("mt-1.5 truncate text-[12px] leading-snug text-muted-foreground", SIDE_NAV_FOLDS)} title={name}>
                 {name}
               </p>
-              {!subject.is_current && (
-                <span className={cn("mt-2 inline-block whitespace-nowrap rounded bg-surface-raised px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground", SIDE_NAV_FOLDS)}>
-                  {subject.term_name ?? "Past"}
-                </span>
-              )}
             </div>
             <SideNavSearch
               value={query}
