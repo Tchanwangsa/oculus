@@ -293,3 +293,21 @@ fn credentials_are_trimmed_and_validated_before_they_are_saved() {
     );
     assert!(refusal("u", "pw", "GEZD1").starts_with("That does not look like a TOTP setup key:"));
 }
+
+#[test]
+fn a_keyd_failure_and_an_unreadable_credential_are_described_as_what_they_are() {
+    let broker =
+        LoginError::Broker("oculus-keyd refused this program (no role)".into()).to_string();
+    assert!(
+        broker.contains("oculus-keyd") && broker.contains("no role"),
+        "{broker}"
+    );
+    assert!(!broker.contains("Unexpected sign-in step"), "{broker}");
+
+    let unreadable = LoginError::UnreadableCredentials("OSStatus -128".into()).to_string();
+    assert!(unreadable.contains("OSStatus -128") && unreadable.contains("not missing"));
+    assert!(
+        unreadable.contains("oculus-keyd") && unreadable.contains("this program"),
+        "{unreadable}"
+    );
+}

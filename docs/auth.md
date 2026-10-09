@@ -167,8 +167,10 @@ typed.
 - **Failures map to the sign-in's own errors.** `ensure_signed_in` carries a
   failed sign-in as its `LoginError`, variant for variant, so callers act on
   it as they do in-process. A `keychain` error is
-  `LoginError::UnreadableCredentials`; any other keyd error is
-  `LoginError::Unexpected` with keyd's message.
+  `LoginError::UnreadableCredentials` (macOS refused either this program or
+  keyd's master key); any other keyd error is `LoginError::Broker` with the
+  client's description of it ("The sign-in request to oculus-keyd failed: …"),
+  which is not a sign-in step.
 - **keyd validates a save.** The app sends the values as typed, and
   `validate_credentials` (the check the keychain route applies too) runs in
   keyd; its message for bad input reaches the user unchanged. A save also

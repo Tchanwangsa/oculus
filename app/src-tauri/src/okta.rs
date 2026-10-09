@@ -201,7 +201,7 @@ fn sign_in_in(
         Ok(outcome) => outcome,
         Err(KeydError::Absent) => in_process(),
         Err(KeydError::Keychain(e)) => Err(LoginError::UnreadableCredentials(e)),
-        Err(e) => Err(LoginError::Unexpected(e.to_string())),
+        Err(e) => Err(LoginError::Broker(e.to_string())),
     }
 }
 
@@ -324,6 +324,7 @@ mod tests {
             LoginError::Locked("Too many attempts".into()),
             LoginError::Network("dns error".into()),
             LoginError::Unexpected("identify, enroll-authenticator".into()),
+            LoginError::Broker("oculus-keyd refused this program (no role)".into()),
             LoginError::Waiting(125),
             LoginError::Paused("Okta rejected the password: x".into()),
         ]
@@ -497,21 +498,19 @@ mod tests {
             ),
             (
                 "caller",
-                LoginError::Unexpected(KeydError::Caller("OSStatus -128".into()).to_string()),
+                LoginError::Broker(KeydError::Caller("OSStatus -128".into()).to_string()),
             ),
             (
                 "vault",
-                LoginError::Unexpected(KeydError::Vault("OSStatus -128".into()).to_string()),
+                LoginError::Broker(KeydError::Vault("OSStatus -128".into()).to_string()),
             ),
             (
                 "upstream",
-                LoginError::Unexpected(KeydError::Upstream("OSStatus -128".into()).to_string()),
+                LoginError::Broker(KeydError::Upstream("OSStatus -128".into()).to_string()),
             ),
             (
                 "teapot",
-                LoginError::Unexpected(
-                    KeydError::Broken("teapot: OSStatus -128".into()).to_string(),
-                ),
+                LoginError::Broker(KeydError::Broken("teapot: OSStatus -128".into()).to_string()),
             ),
         ] {
             let dir = Scratch::new("okta-no-second-route");
@@ -522,6 +521,7 @@ mod tests {
             })
             .unwrap_err();
             assert_eq!(got, want, "{kind}");
+            assert!(!got.to_string().contains("Unexpected"), "{kind}: {got}");
             assert_eq!(keyd.requests().len(), 1, "{kind}: exactly one request");
             assert_eq!(entries(&dir), before, "{kind}: nothing written");
         }

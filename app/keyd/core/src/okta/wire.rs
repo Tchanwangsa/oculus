@@ -54,6 +54,7 @@ pub fn outcome_to_wire(outcome: &Result<String, LoginError>) -> Value {
                 | LoginError::Locked(d)
                 | LoginError::Network(d)
                 | LoginError::Unexpected(d)
+                | LoginError::Broker(d)
                 | LoginError::Paused(d) => v["detail"] = json!(d),
                 LoginError::UnsupportedFactor(factors) => v["factors"] = json!(factors),
                 LoginError::Waiting(secs) => v["wait_secs"] = json!(secs),
@@ -79,6 +80,7 @@ pub fn outcome_from_wire(v: &Value) -> Option<Result<(), LoginError>> {
                 "locked" => LoginError::Locked(detail()?),
                 "network" => LoginError::Network(detail()?),
                 "unexpected" => LoginError::Unexpected(detail()?),
+                "broker" => LoginError::Broker(detail()?),
                 "paused" => LoginError::Paused(detail()?),
                 "unsupported_factor" => LoginError::UnsupportedFactor(
                     v.get("factors")?
@@ -108,6 +110,7 @@ impl LoginError {
             LoginError::Locked(_) => "locked",
             LoginError::Network(_) => "network",
             LoginError::Unexpected(_) => "unexpected",
+            LoginError::Broker(_) => "broker",
             LoginError::Waiting(_) => "waiting",
             LoginError::Paused(_) => "paused",
         }
@@ -130,6 +133,7 @@ mod tests {
             LoginError::Locked("Too many attempts".into()),
             LoginError::Network("dns error\nline two".into()),
             LoginError::Unexpected("identify, enroll-authenticator".into()),
+            LoginError::Broker("oculus-keyd refused this program (outside the bundle)".into()),
             LoginError::Waiting(0),
             LoginError::Waiting(599),
             LoginError::Paused("Okta rejected the password: x".into()),

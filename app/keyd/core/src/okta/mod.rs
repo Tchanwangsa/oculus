@@ -139,6 +139,10 @@ pub enum LoginError {
     /// The state machine went somewhere this code does not model; carries the
     /// remediation names.
     Unexpected(String),
+    /// oculus-keyd refused or failed the request, or the connection broke, so
+    /// the sign-in may not have run; carries the client's description of it.
+    /// Never a second attempt in-process: that route is for an absent keyd.
+    Broker(String),
     /// The attempt guard held a sign-in back; carries seconds until the next
     /// one is allowed.
     Waiting(u64),
@@ -165,7 +169,8 @@ impl std::fmt::Display for LoginError {
             LoginError::UnreadableCredentials(m) => write!(
                 f,
                 "The keychain refused to give out the saved sign-in credentials ({m}). They \
-                 are not missing — macOS denied this process access to them."
+                 are not missing — macOS denied access, either to this program or to the key \
+                 oculus-keyd opens its vault with."
             ),
             LoginError::BadPassword(m) => write!(f, "Okta rejected the password: {m}"),
             LoginError::BadTotp(m) => write!(
@@ -187,6 +192,7 @@ impl std::fmt::Display for LoginError {
             LoginError::Locked(m) => write!(f, "The account is locked or blocked: {m}"),
             LoginError::Network(m) => write!(f, "Could not reach the sign-in service: {m}"),
             LoginError::Unexpected(m) => write!(f, "Unexpected sign-in step: {m}"),
+            LoginError::Broker(m) => write!(f, "The sign-in request to oculus-keyd failed: {m}"),
             LoginError::Waiting(secs) => write!(
                 f,
                 "Holding off sign-in after the last attempt; try again in {}.",
