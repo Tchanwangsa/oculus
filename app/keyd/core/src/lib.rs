@@ -31,6 +31,9 @@ mod test_support;
 #[cfg(feature = "server")]
 pub fn log(msg: &str) {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    let t = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
     eprintln!("[{t:.3}] pid={} {msg}", std::process::id());
 }

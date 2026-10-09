@@ -11,7 +11,10 @@ use std::time::Duration;
 use super::ConnectError;
 
 fn unsupported() -> io::Error {
-    io::Error::new(io::ErrorKind::Unsupported, format!("oculus-keyd has no adapter for {}", std::env::consts::OS))
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        format!("oculus-keyd has no adapter for {}", std::env::consts::OS),
+    )
 }
 
 /// No endpoint can exist, so no value of either type does.
@@ -42,7 +45,10 @@ pub(crate) fn bind(_path: &Path) -> io::Result<Listener> {
     Err(unsupported())
 }
 
-pub(crate) fn accept_any(_listeners: &[&Listener], _within: Option<Duration>) -> io::Result<Option<Stream>> {
+pub(crate) fn accept_any(
+    _listeners: &[&Listener],
+    _within: Option<Duration>,
+) -> io::Result<Option<Stream>> {
     Err(unsupported())
 }
 
@@ -63,7 +69,10 @@ mod server {
 
     impl PeerCheck for NoPeers {
         fn inspect(&self, _conn: &Conn) -> Caller {
-            Caller { problems: vec![super::unsupported().to_string()], ..Caller::default() }
+            Caller {
+                problems: vec![super::unsupported().to_string()],
+                ..Caller::default()
+            }
         }
 
         fn admit(&self, _caller: &Caller) -> Result<(), String> {
@@ -158,7 +167,10 @@ pub mod files {
         Err(super::unsupported())
     }
 
-    pub fn replace_file(_dest: &Path, _fill: impl FnOnce(&Path) -> io::Result<()>) -> Result<(), String> {
+    pub fn replace_file(
+        _dest: &Path,
+        _fill: impl FnOnce(&Path) -> io::Result<()>,
+    ) -> Result<(), String> {
         Err(super::unsupported().to_string())
     }
 }

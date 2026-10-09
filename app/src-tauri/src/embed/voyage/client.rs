@@ -137,8 +137,12 @@ impl Unanswered {
     fn from_keyd(error: KeydError) -> Self {
         match error {
             KeydError::Missing(_) => Unanswered::Fatal(EmbedError::MissingCredentials),
-            KeydError::Keychain(detail) => Unanswered::Fatal(EmbedError::UnreadableCredentials(detail)),
-            KeydError::Upstream(detail) | KeydError::Broken(detail) => Unanswered::Transport(detail),
+            KeydError::Keychain(detail) => {
+                Unanswered::Fatal(EmbedError::UnreadableCredentials(detail))
+            }
+            KeydError::Upstream(detail) | KeydError::Broken(detail) => {
+                Unanswered::Transport(detail)
+            }
             KeydError::Absent => Unanswered::Transport("oculus-keyd stopped listening".into()),
             other @ (KeydError::Request(_) | KeydError::Caller(_) | KeydError::Vault(_)) => {
                 Unanswered::Fatal(EmbedError::Broker(other.to_string()))
@@ -166,7 +170,9 @@ impl VoyageCloud {
     }
 
     pub fn with_config(config: &EmbedConfig) -> Result<Self, EmbedError> {
-        Self::with_config_in(config, &crate::paths::data_dir(), || config.credentials.key())
+        Self::with_config_in(config, &crate::paths::data_dir(), || {
+            config.credentials.key()
+        })
     }
 
     /// keyd when it is installed and `config` names Voyage's own API root, so
@@ -203,7 +209,10 @@ impl VoyageCloud {
         if key.is_empty() {
             return Err(EmbedError::MissingCredentials);
         }
-        Ok(Self::with_auth(base_url, Auth::Direct(Arc::new(key.to_string()))))
+        Ok(Self::with_auth(
+            base_url,
+            Auth::Direct(Arc::new(key.to_string())),
+        ))
     }
 
     fn through_keyd(broker: Credentialed) -> Self {
@@ -246,7 +255,10 @@ impl VoyageCloud {
     /// One POST of `body` by this client's route. A status is an answer,
     /// whatever it is; `send` reads it.
     fn post(&self, body: &[u8]) -> Result<RawResponse, Unanswered> {
-        let headers = [("Content-Type", "application/json"), ("Accept", "application/json")];
+        let headers = [
+            ("Content-Type", "application/json"),
+            ("Accept", "application/json"),
+        ];
         match &self.auth {
             Auth::Keyd(broker) => broker
                 .send(
@@ -281,7 +293,11 @@ impl VoyageCloud {
                     })
                     .collect();
                 let body = response.into_string().unwrap_or_default().into_bytes();
-                Ok(RawResponse { status, headers, body })
+                Ok(RawResponse {
+                    status,
+                    headers,
+                    body,
+                })
             }
         }
     }
@@ -357,8 +373,10 @@ impl VoyageCloud {
                         return Err(SendFailure::Resize);
                     }
                     if Instant::now() >= throttled_until {
-                        return Err(EmbedError::RateLimited { retry_after_secs: last_retry_after }
-                            .into());
+                        return Err(EmbedError::RateLimited {
+                            retry_after_secs: last_retry_after,
+                        }
+                        .into());
                     }
                     // The gate's pause and drained buckets may outlast the nap.
                     let resume = wait
@@ -1331,13 +1349,19 @@ mod tests {
         FakeKeyd::start(scratch, move |req, _| match req["op"].as_str().unwrap() {
             "has" => (json!({ "has": true }), vec![]),
             "forward" => answer(forwards.fetch_add(1, Ordering::SeqCst)),
-            op => (json!({ "error": "request", "detail": format!("unexpected {op}") }), vec![]),
+            op => (
+                json!({ "error": "request", "detail": format!("unexpected {op}") }),
+                vec![],
+            ),
         })
     }
 
     fn forwarded(status: u16, headers: Value, body: &Value) -> (Value, Vec<u8>) {
         let body = body.to_string().into_bytes();
-        (json!({ "status": status, "headers": headers, "body_len": body.len() }), body)
+        (
+            json!({ "status": status, "headers": headers, "body_len": body.len() }),
+            body,
+        )
     }
 
     fn keyd_client(scratch: &Scratch) -> VoyageCloud {
@@ -1349,7 +1373,11 @@ mod tests {
         };
         client
             .with_ledger(ledger.clone())
-            .with_gate(Arc::new(RateGate::with_pace(ledger, Duration::from_secs(3_600), TEST_PACE)))
+            .with_gate(Arc::new(RateGate::with_pace(
+                ledger,
+                Duration::from_secs(3_600),
+                TEST_PACE,
+            )))
             .with_time_scale(0.002)
     }
 
@@ -1370,7 +1398,9 @@ mod tests {
     fn through_keyd_a_query_is_forwarded_without_the_key() {
         let scratch = Scratch::new("vk-ok");
         let keyd = keyd_with(&scratch, |_| forwarded(200, json!([]), &ok_body(1)));
-        let vector = keyd_client(&scratch).embed_query("what is a martingale").unwrap();
+        let vector = keyd_client(&scratch)
+            .embed_query("what is a martingale")
+            .unwrap();
         assert_eq!(vector.len(), EMBED_DIM);
 
         assert_eq!(keyd.ops(), ["has", "forward"]);
@@ -1380,9 +1410,15 @@ mod tests {
         assert_eq!(header["path"], "/v1/multimodalembeddings");
         assert_eq!(
             header["headers"],
-            json!([["Content-Type", "application/json"], ["Accept", "application/json"]])
+            json!([
+                ["Content-Type", "application/json"],
+                ["Accept", "application/json"]
+            ])
         );
-        assert!(!header.to_string().to_lowercase().contains("authorization"), "{header}");
+        assert!(
+            !header.to_string().to_lowercase().contains("authorization"),
+            "{header}"
+        );
         let sent: Value = serde_json::from_slice(body).unwrap();
         assert_eq!(sent["input_type"], "query");
         assert_eq!(sent["output_encoding"], "base64");
@@ -1404,9 +1440,14 @@ mod tests {
             }
         });
         let ledger = Arc::new(UsageLedger::at(scratch.join("voyage-usage.json")));
-        let gate =
-            Arc::new(RateGate::with_pace(ledger.clone(), Duration::from_secs(3_600), TEST_PACE));
-        let client = keyd_client(&scratch).with_ledger(ledger).with_gate(gate.clone());
+        let gate = Arc::new(RateGate::with_pace(
+            ledger.clone(),
+            Duration::from_secs(3_600),
+            TEST_PACE,
+        ));
+        let client = keyd_client(&scratch)
+            .with_ledger(ledger)
+            .with_gate(gate.clone());
 
         client.embed_query("hello").unwrap();
         assert_eq!(keyd.ops(), ["has", "forward", "forward"]);
@@ -1418,29 +1459,53 @@ mod tests {
     fn through_keyd_a_refused_key_and_spent_credit_read_as_they_do_direct() {
         let scratch = Scratch::new("vk-401");
         let keyd = keyd_with(&scratch, |_| {
-            forwarded(401, json!([]), &json!({ "detail": "This API key has expired." }))
+            forwarded(
+                401,
+                json!([]),
+                &json!({ "detail": "This API key has expired." }),
+            )
         });
         let error = keyd_client(&scratch).embed_query("x").unwrap_err();
-        assert!(matches!(error, EmbedError::RejectedCredentials { expired: true, .. }), "{error:?}");
-        assert_eq!(keyd.ops(), ["has", "forward"], "a rejected key is not retried");
+        assert!(
+            matches!(error, EmbedError::RejectedCredentials { expired: true, .. }),
+            "{error:?}"
+        );
+        assert_eq!(
+            keyd.ops(),
+            ["has", "forward"],
+            "a rejected key is not retried"
+        );
 
         let scratch = Scratch::new("vk-402");
         let _keyd = keyd_with(&scratch, |_| {
-            forwarded(403, json!([]), &json!({ "detail": "Your account has run out of credit." }))
+            forwarded(
+                403,
+                json!([]),
+                &json!({ "detail": "Your account has run out of credit." }),
+            )
         });
-        assert_eq!(keyd_client(&scratch).embed_query("x").unwrap_err().kind(), "quota_exhausted");
+        assert_eq!(
+            keyd_client(&scratch).embed_query("x").unwrap_err().kind(),
+            "quota_exhausted"
+        );
     }
 
     #[test]
     fn keyd_without_a_key_is_missing_before_and_during_a_request() {
         let scratch = Scratch::new("vk-none");
         let _keyd = FakeKeyd::start(&scratch, |_, _| (json!({ "has": false }), vec![]));
-        assert!(matches!(config_error(&cloud(), &scratch), EmbedError::MissingCredentials));
+        assert!(matches!(
+            config_error(&cloud(), &scratch),
+            EmbedError::MissingCredentials
+        ));
 
         // Deleted between the check and the request.
         let scratch = Scratch::new("vk-gone");
         let _keyd = keyd_with(&scratch, |_| {
-            (json!({ "error": "missing", "detail": "no voyage key is stored" }), vec![])
+            (
+                json!({ "error": "missing", "detail": "no voyage key is stored" }),
+                vec![],
+            )
         });
         let error = keyd_client(&scratch).embed_query("x").unwrap_err();
         assert_eq!(error.kind(), "missing_credentials");
@@ -1450,7 +1515,10 @@ mod tests {
     fn keyd_reaching_no_origin_backs_off_then_reads_as_offline() {
         let scratch = Scratch::new("vk-upstream");
         let keyd = keyd_with(&scratch, |_| {
-            (json!({ "error": "upstream", "detail": "Dns Failed: no such host" }), vec![])
+            (
+                json!({ "error": "upstream", "detail": "Dns Failed: no such host" }),
+                vec![],
+            )
         });
         let error = keyd_client(&scratch).embed_query("x").unwrap_err();
         assert_eq!(error.kind(), "offline");
@@ -1486,13 +1554,19 @@ mod tests {
             panic!("a direct client");
         };
         assert!(matches!(&client.auth, Auth::Direct(key) if key.as_str() == TEST_KEY));
-        assert!(matches!(config_error_none(&scratch), EmbedError::MissingCredentials));
+        assert!(matches!(
+            config_error_none(&scratch),
+            EmbedError::MissingCredentials
+        ));
 
         // A hand-edited `engineUrl` never goes through keyd, even when it is there.
         let scratch = Scratch::new("vk-elsewhere");
         let keyd = keyd_with(&scratch, |_| forwarded(500, json!([]), &json!({})));
         let fake = FakeServer::start(|_| ok_response(1));
-        let config = EmbedConfig { base_url: format!("{}/v1", fake.origin()), ..cloud() };
+        let config = EmbedConfig {
+            base_url: format!("{}/v1", fake.origin()),
+            ..cloud()
+        };
         let Ok(client) =
             VoyageCloud::with_config_in(&config, &scratch, || Ok(Some(TEST_KEY.to_string())))
         else {
@@ -1501,11 +1575,18 @@ mod tests {
         let ledger = Arc::new(UsageLedger::at(scratch.join("voyage-usage.json")));
         client
             .with_ledger(ledger.clone())
-            .with_gate(Arc::new(RateGate::with_pace(ledger, Duration::from_secs(3_600), TEST_PACE)))
+            .with_gate(Arc::new(RateGate::with_pace(
+                ledger,
+                Duration::from_secs(3_600),
+                TEST_PACE,
+            )))
             .embed_query("x")
             .unwrap();
         assert!(keyd.requests().is_empty());
-        assert_eq!(fake.hits()[0].header("authorization"), Some(format!("Bearer {TEST_KEY}").as_str()));
+        assert_eq!(
+            fake.hits()[0].header("authorization"),
+            Some(format!("Bearer {TEST_KEY}").as_str())
+        );
     }
 
     /// No keyd and no key in the keychain.

@@ -24,7 +24,11 @@ pub fn source_hash_of(bin: &Path) -> Result<String, String> {
         .map_err(|e| format!("running {}: {e}", bin.display()))?;
     let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if !out.status.success() || hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(format!("{} is not an oculus-keyd (source-hash gave {:?})", bin.display(), hash));
+        return Err(format!(
+            "{} is not an oculus-keyd (source-hash gave {:?})",
+            bin.display(),
+            hash
+        ));
     }
     Ok(hash)
 }
@@ -44,7 +48,9 @@ pub fn candidate() -> Option<PathBuf> {
         return Some(sibling);
     }
     if cfg!(debug_assertions) {
-        let built = Path::new(env!("CARGO_MANIFEST_DIR")).join("../keyd/target/signed").join(BINARY);
+        let built = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../keyd/target/signed")
+            .join(BINARY);
         return built.canonicalize().ok().filter(|p| p.is_file());
     }
     None
@@ -71,7 +77,9 @@ fn program_for(data_dir: &Path, from: &Path) -> PathBuf {
 /// Installs `from` and (re)loads its registration. A keyd that runs in place
 /// is registered where it is; any other is copied to `<data_dir>/bin` first.
 pub fn install(data_dir: &Path, from: &Path) -> Result<Installed, String> {
-    let from = from.canonicalize().map_err(|e| format!("{}: {e}", from.display()))?;
+    let from = from
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", from.display()))?;
     let source_hash = source_hash_of(&from)?;
     install_hashed(data_dir, &from, source_hash)
 }
@@ -80,7 +88,9 @@ pub fn install(data_dir: &Path, from: &Path) -> Result<Installed, String> {
 /// registration already runs where `from` would be installed. `None` when
 /// nothing changed.
 pub fn install_if_changed(data_dir: &Path, from: &Path) -> Result<Option<Installed>, String> {
-    let from = from.canonicalize().map_err(|e| format!("{}: {e}", from.display()))?;
+    let from = from
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", from.display()))?;
     let source_hash = source_hash_of(&from)?;
     if is_current(data_dir, &from, &source_hash)? {
         return Ok(None);
@@ -91,7 +101,8 @@ pub fn install_if_changed(data_dir: &Path, from: &Path) -> Result<Option<Install
 fn is_current(data_dir: &Path, from: &Path, source_hash: &str) -> Result<bool, String> {
     let program = platform::registrar().status()?.program;
     let wanted = program_for(data_dir, from);
-    Ok(installed_stamp(data_dir).as_deref() == Some(source_hash) && program.as_deref() == Some(wanted.to_string_lossy().as_ref()))
+    Ok(installed_stamp(data_dir).as_deref() == Some(source_hash)
+        && program.as_deref() == Some(wanted.to_string_lossy().as_ref()))
 }
 
 fn install_hashed(data_dir: &Path, from: &Path, source_hash: String) -> Result<Installed, String> {
@@ -111,8 +122,14 @@ fn install_hashed(data_dir: &Path, from: &Path, source_hash: String) -> Result<I
     let plist = registrar.install(&program, data_dir)?;
 
     // Last, so a failed load is retried by the next preflight or launch.
-    files::replace_file(&paths::stamp(data_dir), |tmp| std::fs::write(tmp, format!("{source_hash}\n")))?;
-    Ok(Installed { program, source_hash, plist })
+    files::replace_file(&paths::stamp(data_dir), |tmp| {
+        std::fs::write(tmp, format!("{source_hash}\n"))
+    })?;
+    Ok(Installed {
+        program,
+        source_hash,
+        plist,
+    })
 }
 
 /// Unloads keyd and removes its registration, dev binary, stamp and any
@@ -120,7 +137,11 @@ fn install_hashed(data_dir: &Path, from: &Path, source_hash: String) -> Result<I
 /// reinstall reads the same secrets.
 pub fn uninstall(data_dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut removed = platform::registrar().uninstall()?;
-    for p in [paths::installed_bin(data_dir), paths::stamp(data_dir), paths::socket(data_dir)] {
+    for p in [
+        paths::installed_bin(data_dir),
+        paths::stamp(data_dir),
+        paths::socket(data_dir),
+    ] {
         match std::fs::remove_file(&p) {
             Ok(()) => removed.push(p),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -139,7 +160,11 @@ pub fn ensure_installed() {
         return;
     }
     std::thread::spawn(|| match ensure_bundled(&crate::paths::data_dir()) {
-        Ok(Some(i)) => eprintln!("[oculus] keyd installed from {} ({})", i.program.display(), &i.source_hash[..12]),
+        Ok(Some(i)) => eprintln!(
+            "[oculus] keyd installed from {} ({})",
+            i.program.display(),
+            &i.source_hash[..12]
+        ),
         Ok(None) => {}
         Err(e) => eprintln!("[oculus] could not install keyd: {e}"),
     });
@@ -225,6 +250,9 @@ mod tests {
     #[test]
     fn a_keyd_that_does_not_run_in_place_is_registered_from_the_data_dir() {
         let data = Path::new("/d");
-        assert_eq!(program_for(data, Path::new("/x/target/signed/oculus-keyd")), Path::new("/d/bin/oculus-keyd"));
+        assert_eq!(
+            program_for(data, Path::new("/x/target/signed/oculus-keyd")),
+            Path::new("/d/bin/oculus-keyd")
+        );
     }
 }

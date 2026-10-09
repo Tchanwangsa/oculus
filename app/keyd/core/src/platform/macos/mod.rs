@@ -46,16 +46,28 @@ pub(crate) fn bind(path: &Path) -> io::Result<UnixListener> {
 
 /// `poll` on the (non-blocking) listeners, then `accept` on a ready one. A
 /// client that left between the two is no connection: `Ok(None)`.
-pub(crate) fn accept_any(listeners: &[&UnixListener], within: Option<Duration>) -> io::Result<Option<UnixStream>> {
-    let mut fds: Vec<libc::pollfd> =
-        listeners.iter().map(|l| libc::pollfd { fd: l.as_raw_fd(), events: libc::POLLIN, revents: 0 }).collect();
+pub(crate) fn accept_any(
+    listeners: &[&UnixListener],
+    within: Option<Duration>,
+) -> io::Result<Option<UnixStream>> {
+    let mut fds: Vec<libc::pollfd> = listeners
+        .iter()
+        .map(|l| libc::pollfd {
+            fd: l.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        })
+        .collect();
     let timeout = within.map_or(-1, |d| d.as_millis().min(c_int::MAX as u128) as c_int);
     if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout) } < 0 {
         return Err(io::Error::last_os_error());
     }
     for (fd, listener) in fds.iter().zip(listeners) {
         if fd.revents & (libc::POLLERR | libc::POLLNVAL) != 0 {
-            return Err(io::Error::other(format!("listener {} failed (poll revents {:#x})", fd.fd, fd.revents)));
+            return Err(io::Error::other(format!(
+                "listener {} failed (poll revents {:#x})",
+                fd.fd, fd.revents
+            )));
         }
         if fd.revents & libc::POLLIN == 0 {
             continue;
@@ -78,14 +90,20 @@ pub(crate) fn accept_any(listeners: &[&UnixListener], within: Option<Duration>) 
 /// `Broken`.
 pub(crate) fn connect(path: &Path) -> Result<UnixStream, ConnectError> {
     UnixStream::connect(path).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => ConnectError::Absent(e.to_string()),
+        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => {
+            ConnectError::Absent(e.to_string())
+        }
         _ => ConnectError::Broken(e.to_string()),
     })
 }
 
 // launch.h, in libSystem. Returns 0 or an errno; the caller frees the array.
 extern "C" {
-    fn launch_activate_socket(name: *const c_char, fds: *mut *mut c_int, cnt: *mut libc::size_t) -> c_int;
+    fn launch_activate_socket(
+        name: *const c_char,
+        fds: *mut *mut c_int,
+        cnt: *mut libc::size_t,
+    ) -> c_int;
 }
 
 /// The listener launchd made from the plist's `Sockets`, non-blocking (as
@@ -96,10 +114,15 @@ pub(crate) fn activated() -> io::Result<Vec<UnixListener>> {
     let mut cnt: libc::size_t = 0;
     let rc = unsafe { launch_activate_socket(name.as_ptr(), &mut fds, &mut cnt) };
     if rc != 0 {
-        return Err(io::Error::other(format!("launch_activate_socket failed: {}", io::Error::from_raw_os_error(rc))));
+        return Err(io::Error::other(format!(
+            "launch_activate_socket failed: {}",
+            io::Error::from_raw_os_error(rc)
+        )));
     }
     if cnt == 0 || fds.is_null() {
-        return Err(io::Error::other("launch_activate_socket returned no sockets"));
+        return Err(io::Error::other(
+            "launch_activate_socket returned no sockets",
+        ));
     }
     let raw = unsafe { std::slice::from_raw_parts(fds, cnt) }.to_vec();
     unsafe { libc::free(fds as *mut libc::c_void) };
@@ -148,16 +171,25 @@ mod tests {
     fn no_socket_or_no_listener_is_absent() {
         let dir = scratch("absent");
         let sock = dir.join("keyd.sock");
-        assert!(matches!(platform::connect(&sock), Err(ConnectError::Absent(_))));
+        assert!(matches!(
+            platform::connect(&sock),
+            Err(ConnectError::Absent(_))
+        ));
 
         // A socket file launchd left behind with nothing loaded refuses the connect.
         drop(UnixListener::bind(&sock).unwrap());
-        assert!(matches!(platform::connect(&sock), Err(ConnectError::Absent(_))));
+        assert!(matches!(
+            platform::connect(&sock),
+            Err(ConnectError::Absent(_))
+        ));
 
         // A directory where the socket should be is no keyd and no absence either.
         std::fs::remove_file(&sock).unwrap();
         std::fs::create_dir(&sock).unwrap();
-        assert!(matches!(platform::connect(&sock), Err(ConnectError::Broken(_))));
+        assert!(matches!(
+            platform::connect(&sock),
+            Err(ConnectError::Broken(_))
+        ));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -168,7 +200,10 @@ mod tests {
         let sock = dir.join("keyd.sock");
         std::fs::write(&sock, "stale").unwrap();
         let listener = AnyListener::bind(&sock).unwrap();
-        assert_eq!(std::fs::metadata(&sock).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(&sock).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         let mut client = platform::connect(&sock).unwrap();
         let mut server = listener.accept().unwrap();
         client.write_all(b"hi").unwrap();
@@ -178,7 +213,13 @@ mod tests {
 
         client.set_timeout(Some(Duration::from_millis(50))).unwrap();
         let err = client.read(&mut buf).unwrap_err();
-        assert!(matches!(err.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut), "{err:?}");
+        assert!(
+            matches!(
+                err.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            ),
+            "{err:?}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

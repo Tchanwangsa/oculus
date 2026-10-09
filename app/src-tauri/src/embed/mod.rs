@@ -96,10 +96,16 @@ pub fn pack_vector(vector: &[f32]) -> Result<Vec<u8>, EmbedError> {
         });
     }
     let head = &vector[..EMBED_DIM];
-    let norm = head.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>().sqrt();
+    let norm = head
+        .iter()
+        .map(|v| (*v as f64) * (*v as f64))
+        .sum::<f64>()
+        .sqrt();
     // A zero vector cannot be normalised and would rank 0 against every query.
     if !norm.is_finite() || norm <= 0.0 {
-        return Err(EmbedError::Document { code: "zero_vector".into() });
+        return Err(EmbedError::Document {
+            code: "zero_vector".into(),
+        });
     }
     let mut bytes = Vec::with_capacity(EMBED_DIM * 2);
     for value in head {
@@ -114,14 +120,18 @@ pub fn pack_vector(vector: &[f32]) -> Result<Vec<u8>, EmbedError> {
 pub fn decode_vector(encoded: &str) -> Result<Vec<f32>, EmbedError> {
     let raw = base64::engine::general_purpose::STANDARD
         .decode(encoded)
-        .map_err(|e| EmbedError::Document { code: format!("bad base64: {e}") })?;
+        .map_err(|e| EmbedError::Document {
+            code: format!("bad base64: {e}"),
+        })?;
     Ok(unpack_vector(&raw))
 }
 
 /// float16 little-endian -> f32. Vectors are stored normalised, so a dot
 /// product is cosine similarity.
 pub fn unpack_vector(raw: &[u8]) -> Vec<f32> {
-    raw.chunks_exact(2).map(|c| f16::from_le_bytes([c[0], c[1]]).to_f32()).collect()
+    raw.chunks_exact(2)
+        .map(|c| f16::from_le_bytes([c[0], c[1]]).to_f32())
+        .collect()
 }
 
 // ── The embedded document ────────────────────────────────────────────────────
@@ -139,7 +149,10 @@ pub struct EmbedPage {
 impl EmbedPage {
     /// Encode one page's vector, normalising it on the way in.
     pub fn new(page_no: u32, vector: &[f32]) -> Result<Self, EmbedError> {
-        Ok(Self { page_no, vector: encode_vector(vector)? })
+        Ok(Self {
+            page_no,
+            vector: encode_vector(vector)?,
+        })
     }
 }
 
@@ -162,7 +175,8 @@ impl EmbedOutput {
     /// Identity and coverage checked against the parse record already read by
     /// the caller, so ingest does not decode either artifact twice.
     pub(crate) fn is_current(&self, expected_pages: Option<u32>) -> bool {
-        self.model == EMBED_MODEL && self.dim == EMBED_DIM
+        self.model == EMBED_MODEL
+            && self.dim == EMBED_DIM
             && self.instruction == QUERY_INSTRUCTION
             && expected_pages.is_none_or(|count| self.pages.len() >= count as usize)
     }
@@ -183,7 +197,10 @@ impl EmbedOutput {
         }
         kept.sort_by_key(|page| page.page_no);
         Self {
-            pdf: pdf.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+            pdf: pdf
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
             model: EMBED_MODEL.to_string(),
             dim: EMBED_DIM,
             dtype: EMBED_DTYPE.to_string(),
@@ -233,7 +250,10 @@ impl Wait {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
-        Self { until_ms: (now + duration).as_millis() as u64, limiter }
+        Self {
+            until_ms: (now + duration).as_millis() as u64,
+            limiter,
+        }
     }
 }
 
@@ -244,8 +264,12 @@ impl Wait {
 pub enum Limiter {
     /// Voyage answered 429.
     Throttled,
-    Requests { per_minute: u32 },
-    Tokens { per_minute: u32 },
+    Requests {
+        per_minute: u32,
+    },
+    Tokens {
+        per_minute: u32,
+    },
 }
 
 impl Limiter {
@@ -255,10 +279,16 @@ impl Limiter {
         match self {
             Limiter::Throttled => "rate-limited by Voyage".to_string(),
             Limiter::Requests { per_minute } => {
-                format!("pacing to Voyage's {} requests/min limit", compact(*per_minute))
+                format!(
+                    "pacing to Voyage's {} requests/min limit",
+                    compact(*per_minute)
+                )
             }
             Limiter::Tokens { per_minute } => {
-                format!("pacing to Voyage's {} tokens/min limit", compact(*per_minute))
+                format!(
+                    "pacing to Voyage's {} tokens/min limit",
+                    compact(*per_minute)
+                )
             }
         }
     }
@@ -297,7 +327,9 @@ impl Health {
             });
         }
         if !self.ready {
-            return Err(EmbedError::NotReady { backend: self.backend.clone() });
+            return Err(EmbedError::NotReady {
+                backend: self.backend.clone(),
+            });
         }
         Ok(())
     }
@@ -370,7 +402,12 @@ pub enum EmbedError {
     /// the file; the rest of the queue keeps going.
     Document { code: String },
     /// The backend embeds into a different space (see `Health::check`).
-    ModelMismatch { app_model: String, app_dim: usize, backend_model: String, backend_dim: usize },
+    ModelMismatch {
+        app_model: String,
+        app_dim: usize,
+        backend_model: String,
+        backend_dim: usize,
+    },
     /// The backend answered but is not accepting work yet.
     NotReady { backend: String },
     /// Writing the record failed. The embedding may have succeeded — and been
@@ -441,7 +478,10 @@ impl fmt::Display for EmbedError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EmbedError::MissingCredentials => {
-                write!(f, "No Voyage API key is saved — add one in Settings to index PDFs.")
+                write!(
+                    f,
+                    "No Voyage API key is saved — add one in Settings to index PDFs."
+                )
             }
             EmbedError::UnreadableCredentials(detail) => write!(
                 f,
@@ -454,7 +494,10 @@ impl fmt::Display for EmbedError {
                  {detail}"
             ),
             EmbedError::RejectedCredentials { code, expired } => {
-                let code = code.as_deref().map(|c| format!(" ({c})")).unwrap_or_default();
+                let code = code
+                    .as_deref()
+                    .map(|c| format!(" ({c})"))
+                    .unwrap_or_default();
                 if *expired {
                     write!(
                         f,
@@ -472,7 +515,10 @@ impl fmt::Display for EmbedError {
             // Not phrased as a failure: on the free tier this is a healthy run.
             EmbedError::RateLimited { retry_after_secs } => match retry_after_secs {
                 Some(secs) => {
-                    write!(f, "Voyage is rate-limiting this account — indexing resumes in {secs}s.")
+                    write!(
+                        f,
+                        "Voyage is rate-limiting this account — indexing resumes in {secs}s."
+                    )
                 }
                 None => write!(
                     f,
@@ -495,14 +541,22 @@ impl fmt::Display for EmbedError {
                 "Could not read the pages of this PDF to index it (error {code}). Other files \
                  are unaffected."
             ),
-            EmbedError::ModelMismatch { app_model, app_dim, backend_model, backend_dim } => write!(
+            EmbedError::ModelMismatch {
+                app_model,
+                app_dim,
+                backend_model,
+                backend_dim,
+            } => write!(
                 f,
                 "The embedder produces {backend_model} vectors at {backend_dim} dimensions but \
                  this app's index holds {app_model} at {app_dim}. Mixing them would make search \
                  results meaningless, so nothing was indexed."
             ),
             EmbedError::NotReady { backend } => {
-                write!(f, "The {backend} embedder is not ready yet. Try again in a moment.")
+                write!(
+                    f,
+                    "The {backend} embedder is not ready yet. Try again in a moment."
+                )
             }
             EmbedError::Io(detail) => write!(f, "Could not save the page index: {detail}"),
         }
@@ -592,19 +646,30 @@ struct StoredEmbedSettings {
 /// unreadable resolves to the cloud default.
 pub fn embed_config() -> EmbedConfig {
     let stored = stored_settings().unwrap_or_default();
-    let engine = stored.engine.as_deref().and_then(Engine::parse).unwrap_or(Engine::Cloud);
-    let base_url = stored.engine_url.filter(|u| !u.trim().is_empty()).unwrap_or_else(|| {
-        match engine {
-            Engine::Cloud => CLOUD_BASE_URL,
-            Engine::Local => LOCAL_BASE_URL,
-        }
-        .to_string()
-    });
+    let engine = stored
+        .engine
+        .as_deref()
+        .and_then(Engine::parse)
+        .unwrap_or(Engine::Cloud);
+    let base_url = stored
+        .engine_url
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| {
+            match engine {
+                Engine::Cloud => CLOUD_BASE_URL,
+                Engine::Local => LOCAL_BASE_URL,
+            }
+            .to_string()
+        });
     let credentials = match engine {
         Engine::Cloud => CredentialSource::Keychain,
         Engine::Local => CredentialSource::None,
     };
-    EmbedConfig { engine, base_url, credentials }
+    EmbedConfig {
+        engine,
+        base_url,
+        credentials,
+    }
 }
 
 /// The embedder this app's settings select. Every call site about to embed
@@ -615,7 +680,9 @@ pub fn backend() -> Result<Box<dyn Embedder>, EmbedError> {
         Engine::Cloud => Ok(Box::new(voyage::client::VoyageCloud::with_config(&config)?)),
         // No local client exists in this process. `NotReady`, never a fallback
         // to the cloud: that would embed into a space the user did not choose.
-        Engine::Local => Err(EmbedError::NotReady { backend: "local".into() }),
+        Engine::Local => Err(EmbedError::NotReady {
+            backend: "local".into(),
+        }),
     }
 }
 
@@ -641,7 +708,10 @@ mod tests {
             .build()
             .unwrap();
         let base = runtime.block_on(async { embed_config().base_url });
-        assert!(!base.is_empty(), "a backend always resolves to some API root");
+        assert!(
+            !base.is_empty(),
+            "a backend always resolves to some API root"
+        );
     }
 
     /// A real scratch directory: the record's temp+rename must be same-filesystem.
@@ -657,7 +727,9 @@ mod tests {
 
     /// Deliberately not unit length, so every round trip also tests normalising.
     fn raw_vector(seed: u32, len: usize) -> Vec<f32> {
-        (0..len).map(|i| ((i as u32 * 37 + seed) % 101) as f32 - 50.0).collect()
+        (0..len)
+            .map(|i| ((i as u32 * 37 + seed) % 101) as f32 - 50.0)
+            .collect()
     }
 
     /// A tolerance, not an equality, because of f16 rounding.
@@ -686,10 +758,17 @@ mod tests {
         assert_eq!(decoded, unpack_vector(&bytes));
 
         // Same direction as what went in, at f16 precision, after normalising.
-        let norm = raw.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>().sqrt();
+        let norm = raw
+            .iter()
+            .map(|v| (*v as f64) * (*v as f64))
+            .sum::<f64>()
+            .sqrt();
         for (i, value) in decoded.iter().enumerate() {
             let expected = (raw[i] as f64 / norm) as f32;
-            assert!((value - expected).abs() < 1e-3, "dim {i}: {value} vs {expected}");
+            assert!(
+                (value - expected).abs() < 1e-3,
+                "dim {i}: {value} vs {expected}"
+            );
         }
     }
 
@@ -713,7 +792,9 @@ mod tests {
     #[test]
     fn a_short_vector_is_a_different_space_not_something_to_pad() {
         let error = pack_vector(&raw_vector(1, EMBED_DIM - 1)).unwrap_err();
-        assert!(matches!(error, EmbedError::ModelMismatch { backend_dim, .. } if backend_dim == EMBED_DIM - 1));
+        assert!(
+            matches!(error, EmbedError::ModelMismatch { backend_dim, .. } if backend_dim == EMBED_DIM - 1)
+        );
         assert!(!error.retryable());
         assert!(error.latching());
     }
@@ -729,10 +810,27 @@ mod tests {
     #[test]
     fn record_keeps_its_wire_shape() {
         let pdf = Path::new("/library/Lecture 3.pdf");
-        let out = EmbedOutput::new(pdf, 1, vec![EmbedPage::new(1, &raw_vector(5, EMBED_DIM)).unwrap()]);
+        let out = EmbedOutput::new(
+            pdf,
+            1,
+            vec![EmbedPage::new(1, &raw_vector(5, EMBED_DIM)).unwrap()],
+        );
         let json = serde_json::to_string(&out).unwrap();
-        for key in ["pdf", "model", "dim", "dtype", "instruction", "page_count", "pages", "page_no", "vector"] {
-            assert!(json.contains(&format!("\"{key}\"")), "missing {key}: {json}");
+        for key in [
+            "pdf",
+            "model",
+            "dim",
+            "dtype",
+            "instruction",
+            "page_count",
+            "pages",
+            "page_no",
+            "vector",
+        ] {
+            assert!(
+                json.contains(&format!("\"{key}\"")),
+                "missing {key}: {json}"
+            );
         }
         assert!(json.contains("\"dim\":512"), "{json}");
         assert!(json.contains("\"dtype\":\"float16\""), "{json}");
@@ -775,7 +873,10 @@ mod tests {
                 EmbedPage::new(1, &raw_vector(2, EMBED_DIM)).unwrap(),
             ],
         );
-        assert_eq!(out.pages.iter().map(|p| p.page_no).collect::<Vec<_>>(), vec![1, 3]);
+        assert_eq!(
+            out.pages.iter().map(|p| p.page_no).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
         // Counts embedded pages, not document pages.
         assert_eq!(out.page_count, 2);
     }
@@ -823,20 +924,31 @@ mod tests {
         assert!(!error.retryable());
         assert!(error.latching());
 
-        let waiting =
-            Health { backend: "voyage".into(), model: EMBED_MODEL.into(), dim: EMBED_DIM, ready: false };
+        let waiting = Health {
+            backend: "voyage".into(),
+            model: EMBED_MODEL.into(),
+            dim: EMBED_DIM,
+            ready: false,
+        };
         let error = waiting.check().unwrap_err();
         assert_eq!(error.kind(), "not_ready");
         assert!(error.retryable());
         assert!(!error.latching());
 
-        let ok = Health { backend: "voyage".into(), model: EMBED_MODEL.into(), dim: EMBED_DIM, ready: true };
+        let ok = Health {
+            backend: "voyage".into(),
+            model: EMBED_MODEL.into(),
+            dim: EMBED_DIM,
+            ready: true,
+        };
         assert!(ok.check().is_ok());
     }
 
     #[test]
     fn a_rate_limit_is_routine_not_fatal() {
-        let error = EmbedError::RateLimited { retry_after_secs: Some(20) };
+        let error = EmbedError::RateLimited {
+            retry_after_secs: Some(20),
+        };
         assert_eq!(error.kind(), "rate_limited");
         assert!(error.retryable());
         assert!(!error.latching());
@@ -848,7 +960,10 @@ mod tests {
     fn credential_failures_keep_the_word_the_failure_ui_matches_on() {
         for error in [
             EmbedError::MissingCredentials,
-            EmbedError::RejectedCredentials { code: None, expired: false },
+            EmbedError::RejectedCredentials {
+                code: None,
+                expired: false,
+            },
         ] {
             assert!(error.kind().contains("credential"), "{}", error.kind());
             assert!(!error.retryable());
@@ -856,16 +971,26 @@ mod tests {
         }
         // Retrying asks the keychain again, and that prompt can be allowed.
         let unreadable = EmbedError::UnreadableCredentials("denied".into());
-        assert!(unreadable.kind().contains("credential"), "{}", unreadable.kind());
+        assert!(
+            unreadable.kind().contains("credential"),
+            "{}",
+            unreadable.kind()
+        );
         assert!(unreadable.retryable());
         assert!(unreadable.latching());
-        assert!(!unreadable.to_string().contains("No Voyage API key"), "{unreadable}");
+        assert!(
+            !unreadable.to_string().contains("No Voyage API key"),
+            "{unreadable}"
+        );
         let broker = EmbedError::Broker("caller refused".into());
         assert!(broker.kind().contains("credential"), "{}", broker.kind());
         assert!(broker.latching());
         assert!(!broker.to_string().contains("keychain refused"), "{broker}");
-        let shown = EmbedError::RejectedCredentials { code: Some("401".into()), expired: true }
-            .to_string();
+        let shown = EmbedError::RejectedCredentials {
+            code: Some("401".into()),
+            expired: true,
+        }
+        .to_string();
         assert!(shown.contains("Settings"), "{shown}");
         assert!(shown.contains("401"), "{shown}");
     }

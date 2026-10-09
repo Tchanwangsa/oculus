@@ -265,7 +265,8 @@ impl FakeKeyd {
     {
         use keyd_core::framing;
 
-        let listener = keyd_core::platform::Listener::bind(&crate::paths::keyd_socket_path(dir)).unwrap();
+        let listener =
+            keyd_core::platform::Listener::bind(&crate::paths::keyd_socket_path(dir)).unwrap();
         let requests: Arc<Mutex<Vec<(Value, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
         let log = requests.clone();
         std::thread::spawn(move || {
@@ -290,6 +291,9 @@ impl FakeKeyd {
 
     /// The ops requested so far, in order.
     pub fn ops(&self) -> Vec<String> {
-        self.requests().iter().map(|(h, _)| h["op"].as_str().unwrap_or("").to_string()).collect()
+        self.requests()
+            .iter()
+            .map(|(h, _)| h["op"].as_str().unwrap_or("").to_string())
+            .collect()
     }
 }

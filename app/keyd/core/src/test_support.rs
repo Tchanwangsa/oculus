@@ -13,7 +13,10 @@ use crate::platform::{Caller, Conn, PeerCheck, Role};
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 /// What a test keyd reports from `ping`.
-pub const BUILD: Build = Build { version: "0.0.0-test", source_hash: "5555555555555555555555555555555555555555555555555555555555555555" };
+pub const BUILD: Build = Build {
+    version: "0.0.0-test",
+    source_hash: "5555555555555555555555555555555555555555555555555555555555555555",
+};
 
 pub struct Scratch(pub PathBuf);
 
@@ -40,18 +43,28 @@ pub struct Peers {
 
 impl Peers {
     pub fn admit() -> Peers {
-        Peers { verdict: Ok(()), seen: Arc::new(AtomicUsize::new(0)) }
+        Peers {
+            verdict: Ok(()),
+            seen: Arc::new(AtomicUsize::new(0)),
+        }
     }
 
     pub fn refuse(why: &str) -> Peers {
-        Peers { verdict: Err(why.to_string()), seen: Arc::new(AtomicUsize::new(0)) }
+        Peers {
+            verdict: Err(why.to_string()),
+            seen: Arc::new(AtomicUsize::new(0)),
+        }
     }
 }
 
 impl PeerCheck for Peers {
     fn inspect(&self, _conn: &Conn) -> Caller {
         self.seen.fetch_add(1, Ordering::SeqCst);
-        Caller { pid: Some(std::process::id()), role: Role::Cli, ..Caller::default() }
+        Caller {
+            pid: Some(std::process::id()),
+            role: Role::Cli,
+            ..Caller::default()
+        }
     }
 
     fn admit(&self, _caller: &Caller) -> Result<(), String> {
@@ -70,7 +83,10 @@ pub struct Hit {
 
 impl Hit {
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+        self.headers
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
     }
 }
 
@@ -102,7 +118,10 @@ impl FakeOrigin {
                     continue;
                 }
                 let mut parts = line.split_whitespace();
-                let (method, path) = (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string());
+                let (method, path) = (
+                    parts.next().unwrap_or("").to_string(),
+                    parts.next().unwrap_or("").to_string(),
+                );
                 let mut headers = Vec::new();
                 loop {
                     let mut h = String::new();
@@ -114,14 +133,26 @@ impl FakeOrigin {
                     let (k, v) = h.split_once(':').unwrap();
                     headers.push((k.trim().to_lowercase(), v.trim().to_string()));
                 }
-                let len: usize = headers.iter().find(|(k, _)| k == "content-length").map_or(0, |(_, v)| v.parse().unwrap());
+                let len: usize = headers
+                    .iter()
+                    .find(|(k, _)| k == "content-length")
+                    .map_or(0, |(_, v)| v.parse().unwrap());
                 let mut body = vec![0; len];
                 reader.read_exact(&mut body).unwrap();
-                let hit = Hit { method, path, headers, body };
+                let hit = Hit {
+                    method,
+                    path,
+                    headers,
+                    body,
+                };
                 log.lock().unwrap().push(hit.clone());
 
                 let answer = handler(&hit);
-                let mut out = format!("HTTP/1.1 {} X\r\nContent-Length: {}\r\nConnection: close\r\n", answer.status, answer.body.len());
+                let mut out = format!(
+                    "HTTP/1.1 {} X\r\nContent-Length: {}\r\nConnection: close\r\n",
+                    answer.status,
+                    answer.body.len()
+                );
                 for (k, v) in &answer.headers {
                     out.push_str(&format!("{k}: {v}\r\n"));
                 }

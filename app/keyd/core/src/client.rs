@@ -36,7 +36,9 @@ pub struct Client {
 
 impl fmt::Debug for Client {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Client").field("endpoint", &self.endpoint).finish_non_exhaustive()
+        f.debug_struct("Client")
+            .field("endpoint", &self.endpoint)
+            .finish_non_exhaustive()
     }
 }
 
@@ -80,7 +82,10 @@ pub struct RawResponse {
 
 impl RawResponse {
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
     }
 }
 
@@ -89,22 +94,37 @@ impl Client {
     pub fn at(data_dir: &Path) -> Self {
         let endpoint = paths::socket(data_dir);
         let target = endpoint.clone();
-        Client { endpoint, connect: Arc::new(move || platform::connect(&target)) }
+        Client {
+            endpoint,
+            connect: Arc::new(move || platform::connect(&target)),
+        }
     }
 
     pub fn has(&self, secret: &str) -> Result<bool, KeydError> {
         let (reply, _) = self.exchange(&json!({"op": "has", "secret": secret}), &[], OP_TIMEOUT)?;
-        reply.get("has").and_then(Value::as_bool).ok_or_else(|| KeydError::Broken("has: no answer".into()))
+        reply
+            .get("has")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| KeydError::Broken("has: no answer".into()))
     }
 
     pub fn store(&self, secret: &str, value: &str) -> Result<(), KeydError> {
-        self.exchange(&json!({"op": "store", "secret": secret, "value": value}), &[], OP_TIMEOUT).map(|_| ())
+        self.exchange(
+            &json!({"op": "store", "secret": secret, "value": value}),
+            &[],
+            OP_TIMEOUT,
+        )
+        .map(|_| ())
     }
 
     /// True when a value was there.
     pub fn delete(&self, secret: &str) -> Result<bool, KeydError> {
-        let (reply, _) = self.exchange(&json!({"op": "delete", "secret": secret}), &[], OP_TIMEOUT)?;
-        Ok(reply.get("existed").and_then(Value::as_bool).unwrap_or(false))
+        let (reply, _) =
+            self.exchange(&json!({"op": "delete", "secret": secret}), &[], OP_TIMEOUT)?;
+        Ok(reply
+            .get("existed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false))
     }
 
     /// One request to `secret`'s origin with keyd adding the key. `timeout`
@@ -137,11 +157,20 @@ impl Client {
             .and_then(Value::as_array)
             .map(|list| {
                 list.iter()
-                    .filter_map(|pair| Some((pair.get(0)?.as_str()?.to_string(), pair.get(1)?.as_str()?.to_string())))
+                    .filter_map(|pair| {
+                        Some((
+                            pair.get(0)?.as_str()?.to_string(),
+                            pair.get(1)?.as_str()?.to_string(),
+                        ))
+                    })
                     .collect()
             })
             .unwrap_or_default();
-        Ok(RawResponse { status, headers, body })
+        Ok(RawResponse {
+            status,
+            headers,
+            body,
+        })
     }
 
     /// keyd's `ping` reply (version, source hash, pid), or why there is none,
@@ -158,25 +187,44 @@ impl Client {
 
     /// Writes the header line and `body` straight from the caller's buffer,
     /// then reads the reply's header line and body.
-    fn exchange(&self, header: &Value, body: &[u8], timeout: Duration) -> Result<(Value, Vec<u8>), KeydError> {
+    fn exchange(
+        &self,
+        header: &Value,
+        body: &[u8],
+        timeout: Duration,
+    ) -> Result<(Value, Vec<u8>), KeydError> {
         let conn = (self.connect)().map_err(|e| match e {
             ConnectError::Absent(_) => KeydError::Absent,
-            ConnectError::Broken(d) => KeydError::Broken(format!("connecting to {}: {d}", self.endpoint.display())),
+            ConnectError::Broken(d) => {
+                KeydError::Broken(format!("connecting to {}: {d}", self.endpoint.display()))
+            }
         })?;
         self.over(conn, header, body, timeout)
     }
 
-    fn over(&self, conn: Conn, header: &Value, body: &[u8], timeout: Duration) -> Result<(Value, Vec<u8>), KeydError> {
+    fn over(
+        &self,
+        conn: Conn,
+        header: &Value,
+        body: &[u8],
+        timeout: Duration,
+    ) -> Result<(Value, Vec<u8>), KeydError> {
         conn.set_timeout(Some(timeout)).ok();
         let mut stream = BufReader::new(conn);
-        framing::write_frame(stream.get_mut(), header, body).map_err(|e| KeydError::Broken(format!("sending: {e}")))?;
+        framing::write_frame(stream.get_mut(), header, body)
+            .map_err(|e| KeydError::Broken(format!("sending: {e}")))?;
 
         let line = framing::read_line(&mut stream, MAX_REPLY_LINE)
             .map_err(|e| KeydError::Broken(format!("reading the reply: {e}")))?
             .ok_or_else(|| KeydError::Broken("the connection closed without a reply".into()))?;
-        let (reply, len) = framing::parse_header(&line).map_err(|e| KeydError::Broken(format!("the reply: {e}")))?;
+        let (reply, len) = framing::parse_header(&line)
+            .map_err(|e| KeydError::Broken(format!("the reply: {e}")))?;
         if let Some(kind) = reply.get("error").and_then(Value::as_str) {
-            let detail = reply.get("detail").and_then(Value::as_str).unwrap_or_default().to_string();
+            let detail = reply
+                .get("detail")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
             return Err(match kind {
                 "keychain" => KeydError::Keychain(detail),
                 "missing" => KeydError::Missing(detail),
@@ -187,7 +235,8 @@ impl Client {
                 other => KeydError::Broken(format!("{other}: {detail}")),
             });
         }
-        let out = framing::read_body(&mut stream, len).map_err(|e| KeydError::Broken(format!("reading the reply: {e}")))?;
+        let out = framing::read_body(&mut stream, len)
+            .map_err(|e| KeydError::Broken(format!("reading the reply: {e}")))?;
         Ok((reply, out))
     }
 }
@@ -247,46 +296,84 @@ mod tests {
                 framing::write_frame(stream.get_mut(), &reply, &out).ok();
             }
         });
-        let client = Client { endpoint: PathBuf::from("memory"), connect: Arc::new(move || Ok(connector.connect())) };
+        let client = Client {
+            endpoint: PathBuf::from("memory"),
+            connect: Arc::new(move || Ok(connector.connect())),
+        };
         (client, seen)
     }
 
     /// A client whose every connect fails with `error`.
     fn unreachable(error: ConnectError) -> Client {
-        Client { endpoint: PathBuf::from("/d/keyd.sock"), connect: Arc::new(move || Err(error.clone())) }
+        Client {
+            endpoint: PathBuf::from("/d/keyd.sock"),
+            connect: Arc::new(move || Err(error.clone())),
+        }
     }
 
     #[test]
     fn absent_is_absent_and_any_other_connect_failure_is_broken() {
-        assert_eq!(unreachable(ConnectError::Absent("ENOENT".into())).has("voyage").unwrap_err(), KeydError::Absent);
-        let err = unreachable(ConnectError::Broken("EPERM".into())).has("voyage").unwrap_err();
-        assert_eq!(err, KeydError::Broken("connecting to /d/keyd.sock: EPERM".into()));
+        assert_eq!(
+            unreachable(ConnectError::Absent("ENOENT".into()))
+                .has("voyage")
+                .unwrap_err(),
+            KeydError::Absent
+        );
+        let err = unreachable(ConnectError::Broken("EPERM".into()))
+            .has("voyage")
+            .unwrap_err();
+        assert_eq!(
+            err,
+            KeydError::Broken("connecting to /d/keyd.sock: EPERM".into())
+        );
     }
 
     #[test]
     fn ops_and_their_errors_come_back_by_kind() {
         let (broker, seen) = fake_keyd(|req, _| match req["op"].as_str().unwrap() {
             "has" => (json!({"has": true}), vec![]),
-            "store" => (json!({"error": "keychain", "detail": "OSStatus -128"}), vec![]),
+            "store" => (
+                json!({"error": "keychain", "detail": "OSStatus -128"}),
+                vec![],
+            ),
             "delete" => (json!({"existed": true}), vec![]),
             _ => (json!({"error": "nonsense"}), vec![]),
         });
         assert!(broker.has("voyage").unwrap());
-        assert_eq!(broker.store("voyage", "pa-x").unwrap_err(), KeydError::Keychain("OSStatus -128".into()));
+        assert_eq!(
+            broker.store("voyage", "pa-x").unwrap_err(),
+            KeydError::Keychain("OSStatus -128".into())
+        );
         assert!(broker.delete("voyage").unwrap());
-        assert!(matches!(broker.send("voyage", "GET", "/v1/x", &[], b"", OP_TIMEOUT), Err(KeydError::Broken(_))));
-        assert_eq!(seen.lock().unwrap()[1].0, json!({"op": "store", "secret": "voyage", "value": "pa-x"}));
+        assert!(matches!(
+            broker.send("voyage", "GET", "/v1/x", &[], b"", OP_TIMEOUT),
+            Err(KeydError::Broken(_))
+        ));
+        assert_eq!(
+            seen.lock().unwrap()[1].0,
+            json!({"op": "store", "secret": "voyage", "value": "pa-x"})
+        );
     }
 
     #[test]
     fn a_forward_carries_its_body_both_ways() {
         let (broker, seen) = fake_keyd(|_, body| {
             let back: Vec<u8> = body.iter().rev().copied().collect();
-            (json!({"status": 429, "headers": [["retry-after", "7"], ["content-type", "text/plain"]], "body_len": back.len()}), back)
+            (
+                json!({"status": 429, "headers": [["retry-after", "7"], ["content-type", "text/plain"]], "body_len": back.len()}),
+                back,
+            )
         });
         let body: Vec<u8> = (0..2_000_000u32).map(|i| (i % 253) as u8).collect();
         let answer = broker
-            .send("voyage", "POST", "/v1/x", &[("Content-Type", "application/json")], &body, Duration::from_secs(10))
+            .send(
+                "voyage",
+                "POST",
+                "/v1/x",
+                &[("Content-Type", "application/json")],
+                &body,
+                Duration::from_secs(10),
+            )
             .unwrap();
         assert_eq!(answer.status, 429);
         assert_eq!(answer.header("Retry-After"), Some("7"));
@@ -295,7 +382,10 @@ mod tests {
         let (header, sent) = &seen.lock().unwrap()[0];
         assert_eq!(header["op"], "forward");
         assert_eq!(header["path"], "/v1/x");
-        assert_eq!(header["headers"], json!([["Content-Type", "application/json"]]));
+        assert_eq!(
+            header["headers"],
+            json!([["Content-Type", "application/json"]])
+        );
         assert_eq!(header["body_len"], body.len());
         assert_eq!(sent, &body);
     }
@@ -308,24 +398,44 @@ mod tests {
             framing::read_line(&mut stream, framing::MAX_LINE).unwrap();
             stream.get_mut().write_all(reply).unwrap();
         });
-        Client { endpoint: PathBuf::from("memory"), connect: Arc::new(move || Ok(connector.connect())) }
+        Client {
+            endpoint: PathBuf::from("memory"),
+            connect: Arc::new(move || Ok(connector.connect())),
+        }
     }
 
     #[test]
     fn a_connection_that_drops_is_broken_not_absent() {
-        let err = answers_once(b"{\"status\":200,\"body_len\":10}\nabc").send("voyage", "POST", "/v1/x", &[], b"", Duration::from_secs(10)).unwrap_err();
+        let err = answers_once(b"{\"status\":200,\"body_len\":10}\nabc")
+            .send("voyage", "POST", "/v1/x", &[], b"", Duration::from_secs(10))
+            .unwrap_err();
         assert!(matches!(err, KeydError::Broken(_)), "{err:?}");
         let err = answers_once(b"").has("voyage").unwrap_err();
-        assert_eq!(err, KeydError::Broken("the connection closed without a reply".into()));
+        assert_eq!(
+            err,
+            KeydError::Broken("the connection closed without a reply".into())
+        );
     }
 
     #[test]
     fn a_reply_that_never_comes_times_out_as_broken() {
         let (listener, connector) = memory::listener();
         let held = std::thread::spawn(move || listener.accept().unwrap());
-        let client = Client { endpoint: PathBuf::from("memory"), connect: Arc::new(move || Ok(connector.connect())) };
+        let client = Client {
+            endpoint: PathBuf::from("memory"),
+            connect: Arc::new(move || Ok(connector.connect())),
+        };
         let started = std::time::Instant::now();
-        let err = client.send("voyage", "GET", "/v1/x", &[], b"", Duration::from_millis(100)).unwrap_err();
+        let err = client
+            .send(
+                "voyage",
+                "GET",
+                "/v1/x",
+                &[],
+                b"",
+                Duration::from_millis(100),
+            )
+            .unwrap_err();
         assert!(matches!(err, KeydError::Broken(_)), "{err:?}");
         assert!(started.elapsed() < Duration::from_secs(5));
         drop(held);
@@ -333,13 +443,22 @@ mod tests {
 
     #[test]
     fn ping_returns_keyd_reply_or_its_error() {
-        let reply = answers_once(b"{\"version\":\"0.1.0\",\"source_hash\":\"ab\",\"pid\":7}\n").ping().unwrap();
+        let reply = answers_once(b"{\"version\":\"0.1.0\",\"source_hash\":\"ab\",\"pid\":7}\n")
+            .ping()
+            .unwrap();
         assert_eq!(reply["pid"], 7);
 
-        let err = answers_once(b"{\"error\":\"caller\",\"detail\":\"outside the bundle\"}\n").ping().unwrap_err();
-        assert!(err.contains("caller") && err.contains("outside the bundle"), "{err}");
+        let err = answers_once(b"{\"error\":\"caller\",\"detail\":\"outside the bundle\"}\n")
+            .ping()
+            .unwrap_err();
+        assert!(
+            err.contains("caller") && err.contains("outside the bundle"),
+            "{err}"
+        );
 
-        let err = unreachable(ConnectError::Absent("No such file or directory".into())).ping().unwrap_err();
+        let err = unreachable(ConnectError::Absent("No such file or directory".into()))
+            .ping()
+            .unwrap_err();
         assert_eq!(err, "/d/keyd.sock: No such file or directory");
     }
 }

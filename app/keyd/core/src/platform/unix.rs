@@ -13,7 +13,12 @@ pub struct FileLock(#[allow(dead_code)] File);
 /// An exclusive `flock` on `path`, created owner-only if missing. Blocks
 /// until the holder lets go.
 pub fn lock(path: &Path) -> io::Result<FileLock> {
-    let file = OpenOptions::new().create(true).truncate(false).write(true).mode(0o600).open(path)?;
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(path)?;
     loop {
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
             return Ok(FileLock(file));
@@ -27,7 +32,11 @@ pub fn lock(path: &Path) -> io::Result<FileLock> {
 
 /// A new file only this user can read, failing if `path` exists.
 pub fn create_private(path: &Path) -> io::Result<File> {
-    OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
 }
 
 /// Flushes `dir`, so a rename inside it survives a crash.
@@ -43,9 +52,14 @@ pub fn set_executable(path: &Path) -> io::Result<()> {
 /// `dest`: overwriting a signed binary in place leaves the kernel's cached
 /// signature stale, and a reader never sees half a file.
 pub fn replace_file(dest: &Path, fill: impl FnOnce(&Path) -> io::Result<()>) -> Result<(), String> {
-    let dir = dest.parent().ok_or_else(|| format!("{} has no parent", dest.display()))?;
+    let dir = dest
+        .parent()
+        .ok_or_else(|| format!("{} has no parent", dest.display()))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
-    let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
     let done = fill(&tmp).and_then(|()| std::fs::rename(&tmp, dest));
     if let Err(e) = done {
@@ -110,7 +124,9 @@ mod tests {
     fn the_vault_file_is_owner_only() {
         let dir = scratch("vault-mode");
         let path = crate::paths::vault(&dir.0);
-        crate::vault::Vault::new(&path, crate::vault::MasterKey::from_bytes([4; 32])).store("voyage", "x").unwrap();
+        crate::vault::Vault::new(&path, crate::vault::MasterKey::from_bytes([4; 32]))
+            .store("voyage", "x")
+            .unwrap();
         assert_eq!(mode(&path), 0o600);
     }
 }

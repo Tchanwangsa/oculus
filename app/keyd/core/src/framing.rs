@@ -32,16 +32,24 @@ impl fmt::Display for FrameError {
 pub fn read_line(reader: &mut impl BufRead, max: usize) -> Result<Option<Vec<u8>>, FrameError> {
     let mut line = Vec::new();
     loop {
-        let buf = reader.fill_buf().map_err(|e| FrameError(format!("read: {e}")))?;
+        let buf = reader
+            .fill_buf()
+            .map_err(|e| FrameError(format!("read: {e}")))?;
         if buf.is_empty() {
-            return if line.is_empty() { Ok(None) } else { Err(FrameError("the stream ended mid-line".into())) };
+            return if line.is_empty() {
+                Ok(None)
+            } else {
+                Err(FrameError("the stream ended mid-line".into()))
+            };
         }
         let (take, done) = match buf.iter().position(|&b| b == b'\n') {
             Some(i) => (i + 1, true),
             None => (buf.len(), false),
         };
         if line.len() + take > max + 1 {
-            return Err(FrameError(format!("the header line is longer than {max} bytes")));
+            return Err(FrameError(format!(
+                "the header line is longer than {max} bytes"
+            )));
         }
         line.extend_from_slice(&buf[..take]);
         reader.consume(take);
@@ -55,13 +63,16 @@ pub fn read_line(reader: &mut impl BufRead, max: usize) -> Result<Option<Vec<u8>
 /// The header as a JSON object, and the body length it announces.
 pub fn parse_header(line: &[u8]) -> Result<(Value, u64), FrameError> {
     // serde's message is not echoed: it can quote the line, which may hold a value.
-    let header: Value = serde_json::from_slice(line).map_err(|_| FrameError("the header line is not JSON".into()))?;
+    let header: Value = serde_json::from_slice(line)
+        .map_err(|_| FrameError("the header line is not JSON".into()))?;
     if !header.is_object() {
         return Err(FrameError("the header line is not a JSON object".into()));
     }
     let body_len = match header.get("body_len") {
         None => 0,
-        Some(v) => v.as_u64().ok_or_else(|| FrameError("body_len is not a length".into()))?,
+        Some(v) => v
+            .as_u64()
+            .ok_or_else(|| FrameError("body_len is not a length".into()))?,
     };
     if body_len > MAX_BODY {
         return Err(FrameError(format!("body_len is over {MAX_BODY} bytes")));
@@ -71,7 +82,10 @@ pub fn parse_header(line: &[u8]) -> Result<(Value, u64), FrameError> {
 
 pub fn read_body(reader: &mut impl Read, len: u64) -> Result<Vec<u8>, FrameError> {
     let mut body = Vec::new();
-    reader.take(len).read_to_end(&mut body).map_err(|e| FrameError(format!("read: {e}")))?;
+    reader
+        .take(len)
+        .read_to_end(&mut body)
+        .map_err(|e| FrameError(format!("read: {e}")))?;
     if body.len() as u64 != len {
         return Err(FrameError("the stream ended inside the body".into()));
     }
@@ -99,8 +113,17 @@ mod tests {
 
     #[test]
     fn header_parsing_rejects_junk_without_quoting_it() {
-        for line in [&b"not json"[..], b"[1]", b"{\"body_len\":-1}", b"{\"body_len\":\"x\"}"] {
-            assert!(parse_header(line).is_err(), "{}", String::from_utf8_lossy(line));
+        for line in [
+            &b"not json"[..],
+            b"[1]",
+            b"{\"body_len\":-1}",
+            b"{\"body_len\":\"x\"}",
+        ] {
+            assert!(
+                parse_header(line).is_err(),
+                "{}",
+                String::from_utf8_lossy(line)
+            );
         }
         let err = parse_header(b"{\"op\":\"store\",\"value\":\"pa-SECRET\"").unwrap_err();
         assert!(!err.0.contains("pa-SECRET"));
@@ -120,7 +143,10 @@ mod tests {
         assert_eq!(read_body(&mut r, len).unwrap(), b"hello");
         let (second, len) = parse_header(&read_line(&mut r, MAX_LINE).unwrap().unwrap()).unwrap();
         assert_eq!((second["op"].as_str(), len), (Some("ping"), 0));
-        assert!(second.get("body_len").is_none(), "an empty body adds no body_len");
+        assert!(
+            second.get("body_len").is_none(),
+            "an empty body adds no body_len"
+        );
         assert_eq!(read_line(&mut r, MAX_LINE).unwrap(), None);
     }
 
@@ -129,6 +155,9 @@ mod tests {
         assert!(read_line(&mut BufReader::new(&b"{\"op\""[..]), MAX_LINE).is_err());
         assert!(read_body(&mut BufReader::new(&b"abc"[..]), 10).is_err());
         let long = vec![b'a'; 100];
-        assert!(read_line(&mut BufReader::new(&long[..]), 64).unwrap_err().0.contains("longer than 64"));
+        assert!(read_line(&mut BufReader::new(&long[..]), 64)
+            .unwrap_err()
+            .0
+            .contains("longer than 64"));
     }
 }

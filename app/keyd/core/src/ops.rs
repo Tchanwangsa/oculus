@@ -54,7 +54,10 @@ pub struct OpError {
 
 impl OpError {
     pub fn new(kind: &'static str, detail: impl Into<String>) -> Self {
-        OpError { kind, detail: detail.into() }
+        OpError {
+            kind,
+            detail: detail.into(),
+        }
     }
 
     pub fn to_json(&self) -> Value {
@@ -85,14 +88,23 @@ pub struct Reply {
 
 impl From<Value> for Reply {
     fn from(header: Value) -> Self {
-        Reply { header, body: Vec::new(), note: None }
+        Reply {
+            header,
+            body: Vec::new(),
+            note: None,
+        }
     }
 }
 
 impl State {
     /// `legacy` is where `import_once` reads old items: the OS secret store
     /// in production, never in tests.
-    pub fn new(build: Build, data_dir: PathBuf, keys: Box<dyn KeySource>, legacy: Box<dyn LegacySource>) -> Self {
+    pub fn new(
+        build: Build,
+        data_dir: PathBuf,
+        keys: Box<dyn KeySource>,
+        legacy: Box<dyn LegacySource>,
+    ) -> Self {
         State {
             build,
             data_dir,
@@ -123,14 +135,23 @@ impl State {
     }
 
     fn vault(&self) -> Result<Vault, OpError> {
-        Ok(Vault::new(crate::paths::vault(&self.data_dir), self.master()?))
+        Ok(Vault::new(
+            crate::paths::vault(&self.data_dir),
+            self.master()?,
+        ))
     }
 
     /// One request. `body` is the raw bytes after the header line; only
     /// `forward` takes any. No reply carries a secret value. `_caller` is who
     /// asked: no op checks its role yet, and `forward` is open to any
     /// admitted caller.
-    pub fn dispatch(&self, _caller: &Caller, op: &str, req: &Value, body: &[u8]) -> Result<Reply, OpError> {
+    pub fn dispatch(
+        &self,
+        _caller: &Caller,
+        op: &str,
+        req: &Value,
+        body: &[u8],
+    ) -> Result<Reply, OpError> {
         if !body.is_empty() && op != "forward" {
             return Err(OpError::new("request", format!("{op} takes no body")));
         }
@@ -180,7 +201,10 @@ impl State {
     /// prompts. Any status the origin answers is a reply, not an error.
     fn forward(&self, req: &Value, body: &[u8]) -> Result<Reply, OpError> {
         let name = secret_name(req)?;
-        let route = self.routes.get(name).ok_or_else(|| OpError::new("request", format!("{name} cannot be forwarded")))?;
+        let route = self
+            .routes
+            .get(name)
+            .ok_or_else(|| OpError::new("request", format!("{name} cannot be forwarded")))?;
         let call = Call::parse(req, route, body)?;
         let vault = self.vault()?;
         self.import_once(&vault, name)?;
@@ -189,10 +213,19 @@ impl State {
             .filter(|k| !k.is_empty())
             .ok_or_else(|| OpError::new("missing", format!("no {name} key is stored")))?;
         let answer = self.upstream.send(&route.origin, &call, &key, body)?;
-        let headers: Vec<[&str; 2]> = answer.headers.iter().map(|(k, v)| [k.as_str(), v.as_str()]).collect();
+        let headers: Vec<[&str; 2]> = answer
+            .headers
+            .iter()
+            .map(|(k, v)| [k.as_str(), v.as_str()])
+            .collect();
         Ok(Reply {
             header: json!({"status": answer.status, "headers": headers, "body_len": answer.body.len()}),
-            note: Some(format!("secret={name} status={} bytes_out={} bytes_in={}", answer.status, body.len(), answer.body.len())),
+            note: Some(format!(
+                "secret={name} status={} bytes_out={} bytes_in={}",
+                answer.status,
+                body.len(),
+                answer.body.len()
+            )),
             body: answer.body,
         })
     }
@@ -202,8 +235,13 @@ impl State {
     /// when keyd is absent. A value already in the vault wins, and is never
     /// read over. A refused read of the old item is a `keychain` error.
     fn import_once(&self, vault: &Vault, name: &str) -> Result<(), OpError> {
-        let Some(marker) = imported_marker(name) else { return Ok(()) };
-        let item = names::LEGACY.iter().find(|l| l.secret == name).ok_or_else(|| OpError::new("vault", format!("{name} has no old item")))?;
+        let Some(marker) = imported_marker(name) else {
+            return Ok(());
+        };
+        let item = names::LEGACY
+            .iter()
+            .find(|l| l.secret == name)
+            .ok_or_else(|| OpError::new("vault", format!("{name} has no old item")))?;
         let _one = self.importing.lock().unwrap_or_else(|p| p.into_inner());
         let entries = vault.load()?;
         if entries.contains(&marker) {
@@ -213,9 +251,11 @@ impl State {
         let old = if entries.contains(name) {
             None
         } else {
-            self.legacy.read(item.service, item.account).map_err(|e| match e {
-                KeyError::Refused(d) | KeyError::Platform(d) => OpError::new("keychain", d),
-            })?
+            self.legacy
+                .read(item.service, item.account)
+                .map_err(|e| match e {
+                    KeyError::Refused(d) | KeyError::Platform(d) => OpError::new("keychain", d),
+                })?
         };
         vault.update(|e| {
             // A store or delete that landed meanwhile has already decided.
@@ -234,11 +274,16 @@ impl State {
 }
 
 fn imported_marker(name: &str) -> Option<String> {
-    IMPORTED_ON_USE.contains(&name).then(|| names::imported(name))
+    IMPORTED_ON_USE
+        .contains(&name)
+        .then(|| names::imported(name))
 }
 
 fn secret_name(req: &Value) -> Result<&str, OpError> {
-    let name = req.get("secret").and_then(Value::as_str).ok_or_else(|| OpError::new("request", "missing \"secret\""))?;
+    let name = req
+        .get("secret")
+        .and_then(Value::as_str)
+        .ok_or_else(|| OpError::new("request", "missing \"secret\""))?;
     if !names::is_known(name) {
         return Err(OpError::new("request", format!("unknown secret {name:?}")));
     }
@@ -304,7 +349,12 @@ mod tests {
     }
 
     fn state_in(dir: &Scratch) -> State {
-        State::new(BUILD, dir.0.clone(), Box::new(StaticKey(key())), Box::new(NoLegacy))
+        State::new(
+            BUILD,
+            dir.0.clone(),
+            Box::new(StaticKey(key())),
+            Box::new(NoLegacy),
+        )
     }
 
     /// The reply's header, for ops that answer without a body.
@@ -348,21 +398,35 @@ mod tests {
     fn a_refused_master_key_is_a_keychain_error_and_is_retried() {
         let dir = Scratch::new("refused");
         let state = State::new(BUILD, dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
-        let err = state.dispatch(&Caller::default(), "has", &json!({"secret": "voyage"}), b"").unwrap_err();
+        let err = state
+            .dispatch(&Caller::default(), "has", &json!({"secret": "voyage"}), b"")
+            .unwrap_err();
         assert_eq!(err.kind, "keychain");
         assert_eq!(err.to_json()["error"], "keychain");
-        assert!(state.master.lock().unwrap().is_none(), "a refusal is not cached");
+        assert!(
+            state.master.lock().unwrap().is_none(),
+            "a refusal is not cached"
+        );
     }
 
     #[test]
     fn the_master_key_is_read_once_across_racing_connections() {
         let dir = Scratch::new("single-flight");
         let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let state = std::sync::Arc::new(State::new(BUILD, dir.0.clone(), Box::new(Counting(reads.clone())), Box::new(NoLegacy)));
+        let state = std::sync::Arc::new(State::new(
+            BUILD,
+            dir.0.clone(),
+            Box::new(Counting(reads.clone())),
+            Box::new(NoLegacy),
+        ));
         let threads: Vec<_> = (0..6)
             .map(|_| {
                 let s = state.clone();
-                std::thread::spawn(move || s.dispatch(&Caller::default(), "has", &json!({"secret": "groq"}), b"").unwrap().header)
+                std::thread::spawn(move || {
+                    s.dispatch(&Caller::default(), "has", &json!({"secret": "groq"}), b"")
+                        .unwrap()
+                        .header
+                })
             })
             .collect();
         for t in threads {
@@ -375,12 +439,29 @@ mod tests {
     fn store_has_delete_and_never_echo_a_value() {
         let dir = Scratch::new("ops");
         let state = state_in(&dir);
-        let stored = call(&state, "store", json!({"secret": "voyage", "value": "pa-SECRET"})).unwrap();
+        let stored = call(
+            &state,
+            "store",
+            json!({"secret": "voyage", "value": "pa-SECRET"}),
+        )
+        .unwrap();
         assert!(!stored.to_string().contains("pa-SECRET"));
-        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
-        assert_eq!(call(&state, "delete", json!({"secret": "voyage"})).unwrap()["existed"], true);
-        assert_eq!(call(&state, "delete", json!({"secret": "voyage"})).unwrap()["existed"], false);
-        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], false);
+        assert_eq!(
+            call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"],
+            true
+        );
+        assert_eq!(
+            call(&state, "delete", json!({"secret": "voyage"})).unwrap()["existed"],
+            true
+        );
+        assert_eq!(
+            call(&state, "delete", json!({"secret": "voyage"})).unwrap()["existed"],
+            false
+        );
+        assert_eq!(
+            call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"],
+            false
+        );
     }
 
     #[test]
@@ -396,7 +477,9 @@ mod tests {
             ("store", json!({"secret": "voyage", "value": 5}), b""),
             ("ping", json!({}), b"x"),
         ] {
-            let err = state.dispatch(&Caller::default(), op, &req, body).unwrap_err();
+            let err = state
+                .dispatch(&Caller::default(), op, &req, body)
+                .unwrap_err();
             assert_eq!(err.kind, "request", "{op} {req}");
         }
         assert!(!crate::paths::vault(&dir.0).exists(), "nothing was written");
@@ -420,11 +503,26 @@ mod tests {
         let v = Vault::new(crate::paths::vault(&dir.0), key());
         v.store(names::GROQ, "gsk-new").unwrap();
         let legacy = Items(HashMap::from([
-            (("com.tchan.oculus.voyage", "voyage"), Ok(Some("pa-old".to_string()))),
-            (("com.tchan.oculus.groq", "groq"), Ok(Some("gsk-old".to_string()))),
-            (("com.tchan.oculus.mineru", "mineru"), Ok(Some(String::new()))),
-            (("com.oculus.unimelb-sso", "username"), Ok(Some("student".to_string()))),
-            (("com.oculus.unimelb-sso", "password"), Err(KeyError::Refused("denied".into()))),
+            (
+                ("com.tchan.oculus.voyage", "voyage"),
+                Ok(Some("pa-old".to_string())),
+            ),
+            (
+                ("com.tchan.oculus.groq", "groq"),
+                Ok(Some("gsk-old".to_string())),
+            ),
+            (
+                ("com.tchan.oculus.mineru", "mineru"),
+                Ok(Some(String::new())),
+            ),
+            (
+                ("com.oculus.unimelb-sso", "username"),
+                Ok(Some("student".to_string())),
+            ),
+            (
+                ("com.oculus.unimelb-sso", "password"),
+                Err(KeyError::Refused("denied".into())),
+            ),
         ]));
 
         let m = migrate(&v, &legacy).unwrap();
@@ -435,13 +533,20 @@ mod tests {
         assert_eq!(m.failed[0].0, names::OKTA_PASSWORD);
 
         assert_eq!(v.get(names::VOYAGE).unwrap().as_deref(), Some("pa-old"));
-        assert_eq!(v.get(names::GROQ).unwrap().as_deref(), Some("gsk-new"), "the vault's value wins");
+        assert_eq!(
+            v.get(names::GROQ).unwrap().as_deref(),
+            Some("gsk-new"),
+            "the vault's value wins"
+        );
         assert!(!v.has(names::MINERU).unwrap());
 
         // Idempotent: a second run copies nothing.
         let again = migrate(&v, &legacy).unwrap();
         assert!(again.copied.is_empty());
-        assert_eq!(again.kept, [names::VOYAGE, names::GROQ, names::OKTA_USERNAME]);
+        assert_eq!(
+            again.kept,
+            [names::VOYAGE, names::GROQ, names::OKTA_USERNAME]
+        );
     }
 
     // ── forward ──────────────────────────────────────────────────────────────
@@ -449,7 +554,11 @@ mod tests {
     const KEY: &str = "pa-VAULT-KEY";
 
     fn forwarding(dir: &Scratch, origin: &FakeOrigin) -> State {
-        let state = state_in(dir).with_routes(Routes::compiled().with_origin("voyage", &origin.origin).unwrap());
+        let state = state_in(dir).with_routes(
+            Routes::compiled()
+                .with_origin("voyage", &origin.origin)
+                .unwrap(),
+        );
         call(&state, "store", json!({"secret": "voyage", "value": KEY})).unwrap();
         state
     }
@@ -464,16 +573,30 @@ mod tests {
     }
 
     fn header<'a>(reply: &'a Reply, name: &str) -> Option<&'a str> {
-        reply.header["headers"].as_array()?.iter().find(|h| h[0] == name).and_then(|h| h[1].as_str())
+        reply.header["headers"]
+            .as_array()?
+            .iter()
+            .find(|h| h[0] == name)
+            .and_then(|h| h[1].as_str())
     }
 
     fn answer(status: u16, headers: Vec<(&'static str, String)>, body: &[u8]) -> Answer {
-        Answer { status, headers, body: body.to_vec() }
+        Answer {
+            status,
+            headers,
+            body: body.to_vec(),
+        }
     }
 
     #[test]
     fn forward_adds_the_vault_key_and_passes_the_answer_through() {
-        let origin = FakeOrigin::start(|_| answer(200, vec![("Content-Type", "application/json".into())], b"{\"usage\":{\"total_tokens\":7}}"));
+        let origin = FakeOrigin::start(|_| {
+            answer(
+                200,
+                vec![("Content-Type", "application/json".into())],
+                b"{\"usage\":{\"total_tokens\":7}}",
+            )
+        });
         let dir = Scratch::new("fwd-ok");
         let state = forwarding(&dir, &origin);
 
@@ -484,13 +607,28 @@ mod tests {
         assert_eq!(header(&reply, "content-type"), Some("application/json"));
 
         let hit = &origin.hits()[0];
-        assert_eq!((hit.method.as_str(), hit.path.as_str()), ("POST", "/v1/multimodalembeddings"));
-        assert_eq!(hit.header("authorization"), Some(format!("Bearer {KEY}").as_str()));
+        assert_eq!(
+            (hit.method.as_str(), hit.path.as_str()),
+            ("POST", "/v1/multimodalembeddings")
+        );
+        assert_eq!(
+            hit.header("authorization"),
+            Some(format!("Bearer {KEY}").as_str())
+        );
         assert_eq!(hit.header("content-type"), Some("application/json"));
-        assert_eq!(hit.header("accept-encoding"), None, "no gzip, so the body is the origin's bytes");
+        assert_eq!(
+            hit.header("accept-encoding"),
+            None,
+            "no gzip, so the body is the origin's bytes"
+        );
         assert_eq!(hit.body, b"{\"inputs\":[]}");
 
-        let shown = format!("{} {} {:?}", reply.header, String::from_utf8_lossy(&reply.body), reply.note);
+        let shown = format!(
+            "{} {} {:?}",
+            reply.header,
+            String::from_utf8_lossy(&reply.body),
+            reply.note
+        );
         assert!(!shown.contains(KEY), "{shown}");
         assert!(reply.note.unwrap().contains("status=200"));
     }
@@ -505,7 +643,9 @@ mod tests {
             (400, b""),
         ];
         for (status, body) in bodies {
-            let origin = FakeOrigin::start(move |_| answer(status, vec![("Retry-After", "17".into())], body));
+            let origin = FakeOrigin::start(move |_| {
+                answer(status, vec![("Retry-After", "17".into())], body)
+            });
             let dir = Scratch::new("fwd-status");
             let reply = forward(&forwarding(&dir, &origin), b"{}").unwrap();
             assert_eq!(reply.header["status"], status);
@@ -516,11 +656,20 @@ mod tests {
 
     #[test]
     fn a_redirect_is_returned_not_followed() {
-        let origin = FakeOrigin::start(|_| answer(302, vec![("Location", "http://127.0.0.1:1/elsewhere".into())], b""));
+        let origin = FakeOrigin::start(|_| {
+            answer(
+                302,
+                vec![("Location", "http://127.0.0.1:1/elsewhere".into())],
+                b"",
+            )
+        });
         let dir = Scratch::new("fwd-redirect");
         let reply = forward(&forwarding(&dir, &origin), b"{}").unwrap();
         assert_eq!(reply.header["status"], 302);
-        assert_eq!(header(&reply, "location"), Some("http://127.0.0.1:1/elsewhere"));
+        assert_eq!(
+            header(&reply, "location"),
+            Some("http://127.0.0.1:1/elsewhere")
+        );
         assert_eq!(origin.hits().len(), 1);
     }
 
@@ -528,16 +677,28 @@ mod tests {
     fn no_stored_key_is_missing_and_nothing_is_sent() {
         let origin = FakeOrigin::start(|_| answer(200, vec![], b""));
         let dir = Scratch::new("fwd-missing");
-        let state = state_in(&dir).with_routes(Routes::compiled().with_origin("voyage", &origin.origin).unwrap());
+        let state = state_in(&dir).with_routes(
+            Routes::compiled()
+                .with_origin("voyage", &origin.origin)
+                .unwrap(),
+        );
         assert_eq!(forward(&state, b"{}").unwrap_err().kind, "missing");
         assert!(origin.hits().is_empty());
     }
 
     #[test]
     fn an_unreachable_origin_is_upstream_and_names_nothing_sent() {
-        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
         let dir = Scratch::new("fwd-upstream");
-        let state = state_in(&dir).with_routes(Routes::compiled().with_origin("voyage", &format!("http://127.0.0.1:{port}")).unwrap());
+        let state = state_in(&dir).with_routes(
+            Routes::compiled()
+                .with_origin("voyage", &format!("http://127.0.0.1:{port}"))
+                .unwrap(),
+        );
         call(&state, "store", json!({"secret": "voyage", "value": KEY})).unwrap();
         let err = forward(&state, b"{\"inputs\":\"BODY-TEXT\"}").unwrap_err();
         assert_eq!(err.kind, "upstream");
@@ -557,7 +718,9 @@ mod tests {
             json!({"secret": "mineru", "method": "POST", "path": "/api/v4/x"}),
             json!({"secret": "okta.password", "method": "POST", "path": "/v1/x"}),
         ] {
-            let err = state.dispatch(&Caller::default(), "forward", &req, b"").unwrap_err();
+            let err = state
+                .dispatch(&Caller::default(), "forward", &req, b"")
+                .unwrap_err();
             assert_eq!(err.kind, "request", "{req}");
         }
     }
@@ -565,7 +728,10 @@ mod tests {
     // ── Import on first use ──────────────────────────────────────────────────
 
     /// One old Voyage item, counting its reads.
-    struct OldVoyage(Result<Option<String>, KeyError>, std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    struct OldVoyage(
+        Result<Option<String>, KeyError>,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    );
 
     impl LegacySource for OldVoyage {
         fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
@@ -575,9 +741,17 @@ mod tests {
         }
     }
 
-    fn with_old(dir: &Scratch, old: Result<Option<String>, KeyError>) -> (State, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    fn with_old(
+        dir: &Scratch,
+        old: Result<Option<String>, KeyError>,
+    ) -> (State, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
         let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let state = State::new(BUILD, dir.0.clone(), Box::new(StaticKey(key())), Box::new(OldVoyage(old, reads.clone())));
+        let state = State::new(
+            BUILD,
+            dir.0.clone(),
+            Box::new(StaticKey(key())),
+            Box::new(OldVoyage(old, reads.clone())),
+        );
         (state, reads)
     }
 
@@ -585,50 +759,98 @@ mod tests {
     fn the_old_item_is_imported_once_and_a_delete_is_not_undone() {
         let dir = Scratch::new("import");
         let (state, reads) = with_old(&dir, Ok(Some("pa-old".into())));
-        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
-        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
+        assert_eq!(
+            call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"],
+            true
+        );
+        assert_eq!(
+            call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"],
+            true
+        );
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
         let v = Vault::new(crate::paths::vault(&dir.0), key());
         assert_eq!(v.get("voyage").unwrap().as_deref(), Some("pa-old"));
 
-        assert_eq!(call(&state, "delete", json!({"secret": "voyage"})).unwrap()["existed"], true);
-        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], false, "the old item stays gone");
+        assert_eq!(
+            call(&state, "delete", json!({"secret": "voyage"})).unwrap()["existed"],
+            true
+        );
+        assert_eq!(
+            call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"],
+            false,
+            "the old item stays gone"
+        );
 
         // A fresh keyd over the same vault agrees.
         let (again, reads) = with_old(&dir, Ok(Some("pa-old".into())));
-        assert_eq!(call(&again, "has", json!({"secret": "voyage"})).unwrap()["has"], false);
+        assert_eq!(
+            call(&again, "has", json!({"secret": "voyage"})).unwrap()["has"],
+            false
+        );
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
-        assert!(call(&again, "has", json!({"secret": "keyd.imported.voyage"})).is_err(), "the marker is no secret");
+        assert!(
+            call(&again, "has", json!({"secret": "keyd.imported.voyage"})).is_err(),
+            "the marker is no secret"
+        );
     }
 
     #[test]
     fn a_stored_key_outranks_the_old_item_and_skips_its_read() {
         let dir = Scratch::new("import-store");
         let (state, reads) = with_old(&dir, Ok(Some("pa-old".into())));
-        call(&state, "store", json!({"secret": "voyage", "value": "pa-new"})).unwrap();
-        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
+        call(
+            &state,
+            "store",
+            json!({"secret": "voyage", "value": "pa-new"}),
+        )
+        .unwrap();
+        assert_eq!(
+            call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"],
+            true
+        );
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
-        assert_eq!(Vault::new(crate::paths::vault(&dir.0), key()).get("voyage").unwrap().as_deref(), Some("pa-new"));
+        assert_eq!(
+            Vault::new(crate::paths::vault(&dir.0), key())
+                .get("voyage")
+                .unwrap()
+                .as_deref(),
+            Some("pa-new")
+        );
     }
 
     #[test]
     fn no_old_item_is_imported_as_absent_and_not_read_again() {
         let dir = Scratch::new("import-none");
         let (state, reads) = with_old(&dir, Ok(None));
-        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], false);
-        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], false);
+        assert_eq!(
+            call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"],
+            false
+        );
+        assert_eq!(
+            call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"],
+            false
+        );
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
     fn a_refused_old_item_is_a_keychain_error_and_is_tried_again() {
         let dir = Scratch::new("import-refused");
-        let (state, reads) = with_old(&dir, Err(KeyError::Refused("reading com.tchan.oculus.voyage/voyage: OSStatus -128".into())));
+        let (state, reads) = with_old(
+            &dir,
+            Err(KeyError::Refused(
+                "reading com.tchan.oculus.voyage/voyage: OSStatus -128".into(),
+            )),
+        );
         let err = call(&state, "has", json!({"secret": "voyage"})).unwrap_err();
         assert_eq!(err.kind, "keychain");
         assert!(err.detail.contains("-128"), "{}", err.detail);
         assert!(call(&state, "has", json!({"secret": "voyage"})).is_err());
-        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2, "a refusal is not recorded as imported");
+        assert_eq!(
+            reads.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "a refusal is not recorded as imported"
+        );
     }
 
     #[test]
@@ -636,16 +858,26 @@ mod tests {
         let origin = FakeOrigin::start(|_| answer(200, vec![], b"{}"));
         let dir = Scratch::new("import-forward");
         let (state, _) = with_old(&dir, Ok(Some("pa-old".into())));
-        let state = state.with_routes(Routes::compiled().with_origin("voyage", &origin.origin).unwrap());
+        let state = state.with_routes(
+            Routes::compiled()
+                .with_origin("voyage", &origin.origin)
+                .unwrap(),
+        );
         assert_eq!(forward(&state, b"{}").unwrap().header["status"], 200);
-        assert_eq!(origin.hits()[0].header("authorization"), Some("Bearer pa-old"));
+        assert_eq!(
+            origin.hits()[0].header("authorization"),
+            Some("Bearer pa-old")
+        );
     }
 
     #[test]
     fn other_names_are_never_imported() {
         let dir = Scratch::new("import-groq");
         let (state, reads) = with_old(&dir, Ok(Some("x".into())));
-        assert_eq!(call(&state, "has", json!({"secret": "groq"})).unwrap()["has"], false);
+        assert_eq!(
+            call(&state, "has", json!({"secret": "groq"})).unwrap()["has"],
+            false
+        );
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }

@@ -46,12 +46,21 @@ impl Drop for Busy<'_> {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 impl Server {
     pub fn new(state: State, peers: Box<dyn PeerCheck>, idle: Duration) -> Self {
-        Server { state, peers, idle, busy: AtomicUsize::new(0), last: AtomicU64::new(now_ms()) }
+        Server {
+            state,
+            peers,
+            idle,
+            busy: AtomicUsize::new(0),
+            last: AtomicU64::new(now_ms()),
+        }
     }
 
     fn touch(&self) {
@@ -100,7 +109,12 @@ impl Server {
                 Ok(None) => return,
                 Err(e) => {
                     log(&format!("caller={who} closed: {e}"));
-                    framing::write_frame(stream.get_mut(), &OpError::new("request", e.0).to_json(), &[]).ok();
+                    framing::write_frame(
+                        stream.get_mut(),
+                        &OpError::new("request", e.0).to_json(),
+                        &[],
+                    )
+                    .ok();
                     return;
                 }
             };
@@ -113,20 +127,28 @@ impl Server {
             let parsed = parse_request(&line);
             // Client text, so only a plain word reaches the log.
             let op = match &parsed {
-                Ok((op, _, _)) if !op.is_empty() && op.len() <= 32 && op.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') => op.clone(),
+                Ok((op, _, _))
+                    if !op.is_empty()
+                        && op.len() <= 32
+                        && op.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') =>
+                {
+                    op.clone()
+                }
                 _ => "?".to_string(),
             };
             let mut in_step = false;
             let reply = match (&verdict, parsed) {
                 (Err(why), _) => Err(OpError::new("caller", why.clone())),
                 (Ok(()), Err(e)) => Err(e),
-                (Ok(()), Ok((op, req, body_len))) => match framing::read_body(&mut stream, body_len) {
-                    Err(e) => Err(OpError::new("request", e.0)),
-                    Ok(body) => {
-                        in_step = true;
-                        self.state.dispatch(&caller, &op, &req, &body)
+                (Ok(()), Ok((op, req, body_len))) => {
+                    match framing::read_body(&mut stream, body_len) {
+                        Err(e) => Err(OpError::new("request", e.0)),
+                        Ok(body) => {
+                            in_step = true;
+                            self.state.dispatch(&caller, &op, &req, &body)
+                        }
                     }
-                },
+                }
             };
 
             let (reply, outcome) = match reply {
@@ -139,9 +161,15 @@ impl Server {
                 }
                 Err(e) => (Reply::from(e.to_json()), format!("error={}", e.kind)),
             };
-            let admitted = if verdict.is_ok() { "admitted" } else { "refused" };
+            let admitted = if verdict.is_ok() {
+                "admitted"
+            } else {
+                "refused"
+            };
             match &verdict {
-                Err(why) => log(&format!("op={op} caller={who} {admitted} ({why}) {outcome}")),
+                Err(why) => log(&format!(
+                    "op={op} caller={who} {admitted} ({why}) {outcome}"
+                )),
                 Ok(()) => log(&format!("op={op} caller={who} {admitted} {outcome}")),
             }
             if let Err(e) = framing::write_frame(stream.get_mut(), &reply.header, &reply.body) {
@@ -159,7 +187,11 @@ impl Server {
 /// The op name, the whole header, and the body length it announces.
 fn parse_request(line: &[u8]) -> Result<(String, Value, u64), OpError> {
     let (req, body_len) = framing::parse_header(line).map_err(|e| OpError::new("request", e.0))?;
-    let op = req.get("op").and_then(Value::as_str).ok_or_else(|| OpError::new("request", "missing \"op\""))?.to_string();
+    let op = req
+        .get("op")
+        .and_then(Value::as_str)
+        .ok_or_else(|| OpError::new("request", "missing \"op\""))?
+        .to_string();
     Ok((op, req, body_len))
 }
 
@@ -177,14 +209,24 @@ mod tests {
     type Served = (Scratch, Connector, std::thread::JoinHandle<()>);
 
     fn serve(peers: Peers, idle: Duration) -> Served {
-        serve_with(peers, idle, Box::new(StaticKey(MasterKey::from_bytes([3; 32]))))
+        serve_with(
+            peers,
+            idle,
+            Box::new(StaticKey(MasterKey::from_bytes([3; 32]))),
+        )
     }
 
     fn serve_with(peers: Peers, idle: Duration, keys: Box<dyn KeySource>) -> Served {
-        serve_state(peers, idle, |dir| State::new(BUILD, dir.to_path_buf(), keys, Box::new(NoLegacy)))
+        serve_state(peers, idle, |dir| {
+            State::new(BUILD, dir.to_path_buf(), keys, Box::new(NoLegacy))
+        })
     }
 
-    fn serve_state(peers: Peers, idle: Duration, state: impl FnOnce(&std::path::Path) -> State) -> Served {
+    fn serve_state(
+        peers: Peers,
+        idle: Duration,
+        state: impl FnOnce(&std::path::Path) -> State,
+    ) -> Served {
         let dir = Scratch::new("srv");
         let (listener, connector) = memory::listener();
         let state = state(&dir.0);
@@ -194,7 +236,10 @@ mod tests {
     }
 
     fn call(stream: &mut BufReader<Conn>, req: &Value) -> Value {
-        stream.get_mut().write_all(format!("{req}\n").as_bytes()).unwrap();
+        stream
+            .get_mut()
+            .write_all(format!("{req}\n").as_bytes())
+            .unwrap();
         let line = read_line(stream, MAX_LINE).unwrap().unwrap();
         serde_json::from_slice(&line).unwrap()
     }
@@ -203,11 +248,26 @@ mod tests {
     fn ops_run_in_turn_over_one_connection() {
         let (_dir, keyd, _h) = serve(Peers::admit(), Duration::from_secs(60));
         let mut s = BufReader::new(keyd.connect());
-        assert_eq!(call(&mut s, &json!({"op": "ping"}))["pid"], std::process::id());
-        assert_eq!(call(&mut s, &json!({"op": "store", "secret": "mineru", "value": "tok"}))["stored"], true);
-        assert_eq!(call(&mut s, &json!({"op": "has", "secret": "mineru"}))["has"], true);
+        assert_eq!(
+            call(&mut s, &json!({"op": "ping"}))["pid"],
+            std::process::id()
+        );
+        assert_eq!(
+            call(
+                &mut s,
+                &json!({"op": "store", "secret": "mineru", "value": "tok"})
+            )["stored"],
+            true
+        );
+        assert_eq!(
+            call(&mut s, &json!({"op": "has", "secret": "mineru"}))["has"],
+            true
+        );
         assert_eq!(call(&mut s, &json!({"op": "nope"}))["error"], "request");
-        assert_eq!(call(&mut s, &json!({"op": "delete", "secret": "mineru"}))["existed"], true);
+        assert_eq!(
+            call(&mut s, &json!({"op": "delete", "secret": "mineru"}))["existed"],
+            true
+        );
     }
 
     #[test]
@@ -215,10 +275,14 @@ mod tests {
         let (_dir, keyd, _h) = serve(Peers::admit(), Duration::from_secs(60));
         let mut s = BufReader::new(keyd.connect());
         // Header, body and the next request in one write: none of it may be lost.
-        s.get_mut().write_all(b"{\"op\":\"ping\",\"body_len\":5}\nhello{\"op\":\"ping\"}\n").unwrap();
-        let first: Value = serde_json::from_slice(&read_line(&mut s, MAX_LINE).unwrap().unwrap()).unwrap();
+        s.get_mut()
+            .write_all(b"{\"op\":\"ping\",\"body_len\":5}\nhello{\"op\":\"ping\"}\n")
+            .unwrap();
+        let first: Value =
+            serde_json::from_slice(&read_line(&mut s, MAX_LINE).unwrap().unwrap()).unwrap();
         assert_eq!(first["error"], "request", "ping takes no body");
-        let second: Value = serde_json::from_slice(&read_line(&mut s, MAX_LINE).unwrap().unwrap()).unwrap();
+        let second: Value =
+            serde_json::from_slice(&read_line(&mut s, MAX_LINE).unwrap().unwrap()).unwrap();
         assert_eq!(second["pid"], std::process::id());
     }
 
@@ -229,16 +293,26 @@ mod tests {
         let long = vec![b'a'; MAX_LINE + 10];
         // The server stops reading partway, so this write may fail; the reply still comes.
         s.get_mut().write_all(&long).ok();
-        let reply: Value = serde_json::from_slice(&read_line(&mut s, MAX_LINE).unwrap().unwrap()).unwrap();
+        let reply: Value =
+            serde_json::from_slice(&read_line(&mut s, MAX_LINE).unwrap().unwrap()).unwrap();
         assert_eq!(reply["error"], "request");
-        assert!(read_line(&mut s, MAX_LINE).unwrap().is_none(), "the connection is closed");
+        assert!(
+            read_line(&mut s, MAX_LINE).unwrap().is_none(),
+            "the connection is closed"
+        );
     }
 
     #[test]
     fn a_refused_caller_gets_one_error_and_no_op_runs() {
-        let (dir, keyd, _h) = serve(Peers::refuse("outside the install"), Duration::from_secs(60));
+        let (dir, keyd, _h) = serve(
+            Peers::refuse("outside the install"),
+            Duration::from_secs(60),
+        );
         let mut s = BufReader::new(keyd.connect());
-        let reply = call(&mut s, &json!({"op": "store", "secret": "groq", "value": "gsk"}));
+        let reply = call(
+            &mut s,
+            &json!({"op": "store", "secret": "groq", "value": "gsk"}),
+        );
         assert_eq!(reply["error"], "caller");
         assert_eq!(reply["detail"], "outside the install");
         assert!(!crate::paths::vault(&dir.0).exists(), "the op never ran");
@@ -248,7 +322,12 @@ mod tests {
     #[test]
     fn header_parsing_names_a_missing_op() {
         assert_eq!(parse_request(b"{}").unwrap_err().kind, "request");
-        assert_eq!(parse_request(b"{\"op\":\"ping\",\"body_len\":-1}").unwrap_err().kind, "request");
+        assert_eq!(
+            parse_request(b"{\"op\":\"ping\",\"body_len\":-1}")
+                .unwrap_err()
+                .kind,
+            "request"
+        );
         let (op, _, len) = parse_request(b"{\"op\":\"forward\",\"body_len\":3}").unwrap();
         assert_eq!((op.as_str(), len), ("forward", 3));
     }
@@ -274,10 +353,17 @@ mod tests {
 
     #[test]
     fn a_request_in_flight_holds_keyd_open_past_the_idle_window() {
-        let (_dir, keyd, handle) = serve_with(Peers::admit(), Duration::from_secs(1), Box::new(Slow));
+        let (_dir, keyd, handle) =
+            serve_with(Peers::admit(), Duration::from_secs(1), Box::new(Slow));
         let mut s = BufReader::new(keyd.connect());
-        assert_eq!(call(&mut s, &json!({"op": "has", "secret": "voyage"}))["has"], false);
-        assert!(!handle.is_finished(), "keyd answered, then idles from the reply");
+        assert_eq!(
+            call(&mut s, &json!({"op": "has", "secret": "voyage"}))["has"],
+            false
+        );
+        assert!(
+            !handle.is_finished(),
+            "keyd answered, then idles from the reply"
+        );
         handle.join().unwrap();
     }
 
@@ -285,18 +371,29 @@ mod tests {
     fn serve_forwarding(idle: Duration, origin: &FakeOrigin) -> Served {
         let origin = origin.origin.clone();
         serve_state(Peers::admit(), idle, move |dir| {
-            let state = State::new(BUILD, dir.to_path_buf(), Box::new(StaticKey(MasterKey::from_bytes([3; 32]))), Box::new(NoLegacy))
-                .with_routes(Routes::compiled().with_origin("voyage", &origin).unwrap());
-            Vault::new(crate::paths::vault(dir), MasterKey::from_bytes([3; 32])).store("voyage", "pa-KEY").unwrap();
+            let state = State::new(
+                BUILD,
+                dir.to_path_buf(),
+                Box::new(StaticKey(MasterKey::from_bytes([3; 32]))),
+                Box::new(NoLegacy),
+            )
+            .with_routes(Routes::compiled().with_origin("voyage", &origin).unwrap());
+            Vault::new(crate::paths::vault(dir), MasterKey::from_bytes([3; 32]))
+                .store("voyage", "pa-KEY")
+                .unwrap();
             state
         })
     }
 
     /// One request with a body; the reply's header and body.
     fn exchange(stream: &mut BufReader<Conn>, req: &Value, body: &[u8]) -> (Value, Vec<u8>) {
-        stream.get_mut().write_all(format!("{req}\n").as_bytes()).unwrap();
+        stream
+            .get_mut()
+            .write_all(format!("{req}\n").as_bytes())
+            .unwrap();
         stream.get_mut().write_all(body).unwrap();
-        let header: Value = serde_json::from_slice(&read_line(stream, MAX_LINE).unwrap().unwrap()).unwrap();
+        let header: Value =
+            serde_json::from_slice(&read_line(stream, MAX_LINE).unwrap().unwrap()).unwrap();
         let len = header.get("body_len").and_then(Value::as_u64).unwrap_or(0);
         (header, read_body(stream, len).unwrap())
     }
@@ -308,7 +405,11 @@ mod tests {
 
     #[test]
     fn a_forward_carries_bodies_both_ways_and_the_connection_goes_on() {
-        let origin = FakeOrigin::start(|hit| Answer { status: 200, headers: vec![], body: hit.body.iter().rev().copied().collect() });
+        let origin = FakeOrigin::start(|hit| Answer {
+            status: 200,
+            headers: vec![],
+            body: hit.body.iter().rev().copied().collect(),
+        });
         let (_dir, keyd, _h) = serve_forwarding(Duration::from_secs(60), &origin);
         let mut s = BufReader::new(keyd.connect());
         let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
@@ -317,20 +418,33 @@ mod tests {
         assert_eq!(body, big.iter().rev().copied().collect::<Vec<_>>());
         assert_eq!(origin.hits()[0].body, big);
         // Framing held: the next request on the same connection is answered.
-        assert_eq!(call(&mut s, &json!({"op": "has", "secret": "voyage"}))["has"], true);
+        assert_eq!(
+            call(&mut s, &json!({"op": "has", "secret": "voyage"}))["has"],
+            true
+        );
     }
 
     #[test]
     fn a_forward_waiting_on_its_origin_holds_keyd_open_past_the_idle_window() {
         let origin = FakeOrigin::start(|_| {
             std::thread::sleep(Duration::from_millis(2500));
-            Answer { status: 200, headers: vec![], body: b"late".to_vec() }
+            Answer {
+                status: 200,
+                headers: vec![],
+                body: b"late".to_vec(),
+            }
         });
         let (_dir, keyd, handle) = serve_forwarding(Duration::from_secs(1), &origin);
         let mut s = BufReader::new(keyd.connect());
         let (header, body) = exchange(&mut s, &forward_req(2), b"{}");
-        assert_eq!((header["status"].as_u64(), body.as_slice()), (Some(200), &b"late"[..]));
-        assert!(!handle.is_finished(), "keyd answered, then idles from the reply");
+        assert_eq!(
+            (header["status"].as_u64(), body.as_slice()),
+            (Some(200), &b"late"[..])
+        );
+        assert!(
+            !handle.is_finished(),
+            "keyd answered, then idles from the reply"
+        );
         handle.join().unwrap();
     }
 
@@ -342,20 +456,43 @@ mod tests {
         let dir = Scratch::new("srv-requeue");
         let (listener, keyd) = memory::listener();
         let listeners = vec![listener];
-        let state = || State::new(BUILD, dir.0.clone(), Box::new(StaticKey(MasterKey::from_bytes([3; 32]))), Box::new(NoLegacy));
-        let first = Arc::new(Server::new(state(), Box::new(Peers::admit()), Duration::ZERO));
+        let state = || {
+            State::new(
+                BUILD,
+                dir.0.clone(),
+                Box::new(StaticKey(MasterKey::from_bytes([3; 32]))),
+                Box::new(NoLegacy),
+            )
+        };
+        let first = Arc::new(Server::new(
+            state(),
+            Box::new(Peers::admit()),
+            Duration::ZERO,
+        ));
         first.run(&listeners);
 
         let mut s = BufReader::new(keyd.connect());
         s.get_mut().write_all(b"{\"op\":\"ping\"}\n").unwrap();
         // The keyd that exited never read it: no reply is waiting.
-        s.get_mut().set_timeout(Some(Duration::from_millis(300))).unwrap();
-        assert!(read_line(&mut s, MAX_LINE).is_err(), "nothing answered after the exit");
+        s.get_mut()
+            .set_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        assert!(
+            read_line(&mut s, MAX_LINE).is_err(),
+            "nothing answered after the exit"
+        );
 
-        let second = Arc::new(Server::new(state(), Box::new(Peers::admit()), Duration::from_secs(60)));
+        let second = Arc::new(Server::new(
+            state(),
+            Box::new(Peers::admit()),
+            Duration::from_secs(60),
+        ));
         std::thread::spawn(move || second.run(&listeners));
-        s.get_mut().set_timeout(Some(Duration::from_secs(10))).unwrap();
-        let reply: Value = serde_json::from_slice(&read_line(&mut s, MAX_LINE).unwrap().unwrap()).unwrap();
+        s.get_mut()
+            .set_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let reply: Value =
+            serde_json::from_slice(&read_line(&mut s, MAX_LINE).unwrap().unwrap()).unwrap();
         assert_eq!(reply["pid"], std::process::id());
     }
 
@@ -367,7 +504,10 @@ mod tests {
         let _quiet = keyd.connect();
         let started = std::time::Instant::now();
         while seen.load(Ordering::SeqCst) == 0 {
-            assert!(started.elapsed() < Duration::from_secs(5), "inspect never ran");
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "inspect never ran"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
     }

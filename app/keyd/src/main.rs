@@ -28,11 +28,18 @@ use keyd_core::vault::{KeySource, LegacySource};
 
 const IDLE: Duration = Duration::from_secs(60);
 
-const BUILD: Build = Build { version: env!("CARGO_PKG_VERSION"), source_hash: env!("KEYD_SOURCE_HASH") };
+const BUILD: Build = Build {
+    version: env!("CARGO_PKG_VERSION"),
+    source_hash: env!("KEYD_SOURCE_HASH"),
+};
 
 /// The `dev` feature admits any caller running as this user; a release
 /// admits only its own install.
-const POLICY: Policy = if cfg!(feature = "dev") { Policy::SameUser } else { Policy::Install };
+const POLICY: Policy = if cfg!(feature = "dev") {
+    Policy::SameUser
+} else {
+    Policy::Install
+};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -45,7 +52,11 @@ fn main() {
             }
         },
         Some("source-hash") => println!("{}", BUILD.source_hash),
-        Some("--version") => println!("oculus-keyd {} ({})", BUILD.version, &BUILD.source_hash[..12]),
+        Some("--version") => println!(
+            "oculus-keyd {} ({})",
+            BUILD.version,
+            &BUILD.source_hash[..12]
+        ),
         #[cfg(debug_assertions)]
         Some("serve-local") => match args.get(2) {
             Some(endpoint) => match Listener::bind(&PathBuf::from(endpoint)) {
@@ -67,12 +78,18 @@ fn usage() -> ! {
 }
 
 fn serve(listeners: Vec<Listener>) {
-    log(&format!("started, source {}, {POLICY:?} policy, {} listener(s)", &BUILD.source_hash[..12], listeners.len()));
+    log(&format!(
+        "started, source {}, {POLICY:?} policy, {} listener(s)",
+        &BUILD.source_hash[..12],
+        listeners.len()
+    ));
     let (keys, legacy) = key_sources();
     let state = State::new(BUILD, data_dir(), keys, legacy);
     #[cfg(debug_assertions)]
     let state = match std::env::var("OCULUS_KEYD_VOYAGE_ORIGIN") {
-        Ok(origin) => match keyd_core::forward::Routes::compiled().with_origin(keyd_core::names::VOYAGE, &origin) {
+        Ok(origin) => match keyd_core::forward::Routes::compiled()
+            .with_origin(keyd_core::names::VOYAGE, &origin)
+        {
             Ok(routes) => state.with_routes(routes),
             Err(e) => {
                 log(&format!("OCULUS_KEYD_VOYAGE_ORIGIN: {e}"));
@@ -112,7 +129,10 @@ fn key_sources() -> (Box<dyn KeySource>, Box<dyn LegacySource>) {
 
 fn idle() -> Duration {
     #[cfg(debug_assertions)]
-    if let Some(secs) = std::env::var("OCULUS_KEYD_IDLE_SECS").ok().and_then(|s| s.parse().ok()) {
+    if let Some(secs) = std::env::var("OCULUS_KEYD_IDLE_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
         return Duration::from_secs(secs);
     }
     IDLE

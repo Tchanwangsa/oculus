@@ -43,7 +43,8 @@ impl MasterKey {
 
     pub fn generate() -> Result<Self, KeyError> {
         let mut bytes = [0u8; 32];
-        getrandom::getrandom(&mut bytes).map_err(|e| KeyError::Platform(format!("getrandom: {e}")))?;
+        getrandom::getrandom(&mut bytes)
+            .map_err(|e| KeyError::Platform(format!("getrandom: {e}")))?;
         Ok(MasterKey(bytes))
     }
 
@@ -192,13 +193,18 @@ pub struct Vault {
 
 impl fmt::Debug for Vault {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Vault").field("path", &self.path).finish_non_exhaustive()
+        f.debug_struct("Vault")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
     }
 }
 
 impl Vault {
     pub fn new(path: impl Into<PathBuf>, key: MasterKey) -> Self {
-        Vault { path: path.into(), key }
+        Vault {
+            path: path.into(),
+            key,
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -210,7 +216,10 @@ impl Vault {
         match std::fs::read(&self.path) {
             Ok(bytes) => open_sealed(&self.key, &bytes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Entries::default()),
-            Err(e) => Err(VaultError::Io(format!("reading {}: {e}", self.path.display()))),
+            Err(e) => Err(VaultError::Io(format!(
+                "reading {}: {e}",
+                self.path.display()
+            ))),
         }
     }
 
@@ -247,13 +256,15 @@ impl Vault {
 
     fn lock(&self) -> Result<files::FileLock, VaultError> {
         if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| VaultError::Io(format!("creating {}: {e}", dir.display())))?;
+            std::fs::create_dir_all(dir)
+                .map_err(|e| VaultError::Io(format!("creating {}: {e}", dir.display())))?;
         }
         let mut name = self.path.clone().into_os_string();
         name.push(".lock");
         let lock_path = PathBuf::from(name);
         // Blocks until the holder closes its descriptor; released on drop.
-        files::lock(&lock_path).map_err(|e| VaultError::Io(format!("locking {}: {e}", lock_path.display())))
+        files::lock(&lock_path)
+            .map_err(|e| VaultError::Io(format!("locking {}: {e}", lock_path.display())))
     }
 
     /// Writes a temp file beside the vault and renames it over: a reader sees
@@ -263,7 +274,11 @@ impl Vault {
         let mut suffix = [0u8; 6];
         getrandom::getrandom(&mut suffix).map_err(|e| VaultError::Io(format!("getrandom: {e}")))?;
         let suffix: String = suffix.iter().map(|b| format!("{b:02x}")).collect();
-        let file_name = self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let file_name = self
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let tmp = dir.join(format!(".{file_name}.{}.{suffix}.tmp", std::process::id()));
 
         let written = (|| {
@@ -274,7 +289,10 @@ impl Vault {
         })();
         if let Err(e) = written {
             std::fs::remove_file(&tmp).ok();
-            return Err(VaultError::Io(format!("writing {}: {e}", self.path.display())));
+            return Err(VaultError::Io(format!(
+                "writing {}: {e}",
+                self.path.display()
+            )));
         }
         // The rename is durable once the directory is flushed.
         files::sync_dir(dir).ok();
@@ -287,11 +305,18 @@ fn cipher(key: &MasterKey) -> ChaCha20Poly1305 {
 }
 
 fn seal(key: &MasterKey, entries: &Entries) -> Result<Vec<u8>, VaultError> {
-    let plain = serde_json::to_vec(&entries.0).map_err(|e| VaultError::Io(format!("encoding: {e}")))?;
+    let plain =
+        serde_json::to_vec(&entries.0).map_err(|e| VaultError::Io(format!("encoding: {e}")))?;
     let mut nonce = [0u8; NONCE_LEN];
     getrandom::getrandom(&mut nonce).map_err(|e| VaultError::Io(format!("getrandom: {e}")))?;
     let sealed = cipher(key)
-        .encrypt(Nonce::from_slice(&nonce), Payload { msg: &plain, aad: &[VERSION] })
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: &plain,
+                aad: &[VERSION],
+            },
+        )
         .map_err(|_| VaultError::Io("encryption failed".to_string()))?;
     let mut out = Vec::with_capacity(1 + NONCE_LEN + sealed.len());
     out.push(VERSION);
@@ -302,14 +327,26 @@ fn seal(key: &MasterKey, entries: &Entries) -> Result<Vec<u8>, VaultError> {
 
 fn open_sealed(key: &MasterKey, bytes: &[u8]) -> Result<Entries, VaultError> {
     if bytes.len() < 1 + NONCE_LEN + TAG_LEN {
-        return Err(VaultError::Damaged(format!("{} bytes is shorter than any vault", bytes.len())));
+        return Err(VaultError::Damaged(format!(
+            "{} bytes is shorter than any vault",
+            bytes.len()
+        )));
     }
     if bytes[0] != VERSION {
-        return Err(VaultError::Damaged(format!("unknown format version {}", bytes[0])));
+        return Err(VaultError::Damaged(format!(
+            "unknown format version {}",
+            bytes[0]
+        )));
     }
     let (nonce, sealed) = bytes[1..].split_at(NONCE_LEN);
     let plain = cipher(key)
-        .decrypt(Nonce::from_slice(nonce), Payload { msg: sealed, aad: &[VERSION] })
+        .decrypt(
+            Nonce::from_slice(nonce),
+            Payload {
+                msg: sealed,
+                aad: &[VERSION],
+            },
+        )
         .map_err(|_| VaultError::Undecryptable)?;
     serde_json::from_slice::<BTreeMap<String, String>>(&plain)
         .map(Entries)
@@ -355,13 +392,20 @@ mod tests {
         let dir = Scratch::new("round-trip");
         let path = path_in(&dir.0);
         let v = Vault::new(&path, key(1));
-        assert!(v.load().unwrap().is_empty(), "a missing file is an empty vault");
+        assert!(
+            v.load().unwrap().is_empty(),
+            "a missing file is an empty vault"
+        );
         v.store(names::VOYAGE, "pa-123").unwrap();
-        v.store(names::OKTA_PASSWORD, "hunter2 ünïcode \"quoted\"\n").unwrap();
+        v.store(names::OKTA_PASSWORD, "hunter2 ünïcode \"quoted\"\n")
+            .unwrap();
 
         let again = Vault::new(&path, key(1));
         assert_eq!(again.get(names::VOYAGE).unwrap().as_deref(), Some("pa-123"));
-        assert_eq!(again.get(names::OKTA_PASSWORD).unwrap().as_deref(), Some("hunter2 ünïcode \"quoted\"\n"));
+        assert_eq!(
+            again.get(names::OKTA_PASSWORD).unwrap().as_deref(),
+            Some("hunter2 ünïcode \"quoted\"\n")
+        );
         assert!(again.has(names::VOYAGE).unwrap());
         assert!(!again.has(names::GROQ).unwrap());
 
@@ -375,15 +419,33 @@ mod tests {
     fn the_wrong_key_fails_and_never_overwrites() {
         let dir = Scratch::new("wrong-key");
         let path = path_in(&dir.0);
-        Vault::new(&path, key(1)).store(names::GROQ, "gsk-1").unwrap();
+        Vault::new(&path, key(1))
+            .store(names::GROQ, "gsk-1")
+            .unwrap();
         let before = std::fs::read(&path).unwrap();
 
         let wrong = Vault::new(&path, key(2));
         assert_eq!(wrong.load().unwrap_err(), VaultError::Undecryptable);
-        assert_eq!(wrong.has(names::GROQ).unwrap_err(), VaultError::Undecryptable);
-        assert_eq!(wrong.store(names::MINERU, "x").unwrap_err(), VaultError::Undecryptable);
-        assert_eq!(std::fs::read(&path).unwrap(), before, "a failed open must leave the file alone");
-        assert_eq!(Vault::new(&path, key(1)).get(names::GROQ).unwrap().as_deref(), Some("gsk-1"));
+        assert_eq!(
+            wrong.has(names::GROQ).unwrap_err(),
+            VaultError::Undecryptable
+        );
+        assert_eq!(
+            wrong.store(names::MINERU, "x").unwrap_err(),
+            VaultError::Undecryptable
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "a failed open must leave the file alone"
+        );
+        assert_eq!(
+            Vault::new(&path, key(1))
+                .get(names::GROQ)
+                .unwrap()
+                .as_deref(),
+            Some("gsk-1")
+        );
     }
 
     #[test]
@@ -396,7 +458,10 @@ mod tests {
 
         for len in [0, 1, 12, 1 + NONCE_LEN + TAG_LEN - 1] {
             std::fs::write(&path, &good[..len]).unwrap();
-            assert!(matches!(v.load(), Err(VaultError::Damaged(_))), "truncated to {len}");
+            assert!(
+                matches!(v.load(), Err(VaultError::Damaged(_))),
+                "truncated to {len}"
+            );
         }
         // Long enough to parse, short of the real ciphertext.
         std::fs::write(&path, &good[..good.len() - 1]).unwrap();
@@ -421,7 +486,15 @@ mod tests {
         // Sealed correctly, but not a map of strings.
         let plain = br#"{"voyage": 5}"#;
         let n = [7u8; NONCE_LEN];
-        let sealed = cipher(&key(3)).encrypt(Nonce::from_slice(&n), Payload { msg: plain, aad: &[VERSION] }).unwrap();
+        let sealed = cipher(&key(3))
+            .encrypt(
+                Nonce::from_slice(&n),
+                Payload {
+                    msg: plain,
+                    aad: &[VERSION],
+                },
+            )
+            .unwrap();
         let mut odd = vec![VERSION];
         odd.extend_from_slice(&n);
         odd.extend_from_slice(&sealed);
@@ -441,7 +514,10 @@ mod tests {
         v.store(names::VOYAGE, "new").unwrap();
         let mut old = Vec::new();
         held.read_to_end(&mut old).unwrap();
-        assert_eq!(open_sealed(&key(4), &old).unwrap().get(names::VOYAGE), Some("old"));
+        assert_eq!(
+            open_sealed(&key(4), &old).unwrap().get(names::VOYAGE),
+            Some("old")
+        );
         assert_eq!(v.get(names::VOYAGE).unwrap().as_deref(), Some("new"));
 
         let mut leftovers: Vec<String> = std::fs::read_dir(&dir.0)
@@ -449,7 +525,11 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         leftovers.sort();
-        assert_eq!(leftovers, ["vault.bin", "vault.bin.lock"], "no temp file left behind");
+        assert_eq!(
+            leftovers,
+            ["vault.bin", "vault.bin.lock"],
+            "no temp file left behind"
+        );
         // Its mode is the platform's to test (`platform/unix.rs`).
     }
 
@@ -487,7 +567,9 @@ mod tests {
             .map(|i| {
                 let path = path.clone();
                 std::thread::spawn(move || {
-                    Vault::new(path, key(7)).store(&format!("t{i}"), "v").unwrap();
+                    Vault::new(path, key(7))
+                        .store(&format!("t{i}"), "v")
+                        .unwrap();
                 })
             })
             .collect();

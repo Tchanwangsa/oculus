@@ -41,7 +41,10 @@ impl Keyd {
         let child = cmd.spawn().unwrap();
         let started = Instant::now();
         while !sock.exists() {
-            assert!(started.elapsed() < Duration::from_secs(10), "keyd never bound its socket");
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "keyd never bound its socket"
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
         Keyd { child, dir, sock }
@@ -73,14 +76,32 @@ fn the_binary_serves_or_refuses_by_its_build() {
         return;
     }
     assert_eq!(ping["source_hash"].as_str().unwrap().len(), 64);
-    let out = Command::new(env!("CARGO_BIN_EXE_oculus-keyd")).arg("source-hash").output().unwrap();
-    assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), ping["source_hash"]);
+    let out = Command::new(env!("CARGO_BIN_EXE_oculus-keyd"))
+        .arg("source-hash")
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap().trim(),
+        ping["source_hash"]
+    );
 
-    assert_eq!(keyd.call(json!({"op": "store", "secret": "voyage", "value": "pa-SECRET"}))["stored"], true);
-    assert_eq!(keyd.call(json!({"op": "has", "secret": "voyage"}))["has"], true);
+    assert_eq!(
+        keyd.call(json!({"op": "store", "secret": "voyage", "value": "pa-SECRET"}))["stored"],
+        true
+    );
+    assert_eq!(
+        keyd.call(json!({"op": "has", "secret": "voyage"}))["has"],
+        true
+    );
     let sealed = std::fs::read(keyd.dir.join("vault.bin")).unwrap();
-    assert!(!sealed.windows(9).any(|w| w == b"pa-SECRET"), "vault.bin is ciphertext");
-    assert_eq!(keyd.call(json!({"op": "delete", "secret": "voyage"}))["existed"], true);
+    assert!(
+        !sealed.windows(9).any(|w| w == b"pa-SECRET"),
+        "vault.bin is ciphertext"
+    );
+    assert_eq!(
+        keyd.call(json!({"op": "delete", "secret": "voyage"}))["existed"],
+        true
+    );
 }
 
 #[test]
@@ -92,7 +113,10 @@ fn the_binary_exits_when_idle_and_never_logs_a_value() {
         if let Some(status) = keyd.child.try_wait().unwrap() {
             break status;
         }
-        assert!(started.elapsed() < Duration::from_secs(10), "keyd did not exit when idle");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "keyd did not exit when idle"
+        );
         std::thread::sleep(Duration::from_millis(50));
     };
     assert!(status.success());
@@ -122,13 +146,22 @@ fn fake_origin() -> (String, std::thread::JoinHandle<String>) {
         }
         let len: usize = head
             .lines()
-            .find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap()))
+            .find_map(|l| {
+                l.to_lowercase()
+                    .strip_prefix("content-length:")
+                    .map(|v| v.trim().parse().unwrap())
+            })
             .unwrap_or(0);
         let mut body = vec![0; len];
         std::io::Read::read_exact(&mut reader, &mut body).unwrap();
         let answer = b"{\"detail\":\"slow down\"}";
         let mut w = &stream;
-        write!(w, "HTTP/1.1 429 X\r\nRetry-After: 9\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", answer.len()).unwrap();
+        write!(
+            w,
+            "HTTP/1.1 429 X\r\nRetry-After: 9\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            answer.len()
+        )
+        .unwrap();
         w.write_all(answer).unwrap();
         head
     });
@@ -142,7 +175,10 @@ fn the_binary_forwards_to_its_test_origin_and_never_logs_the_key() {
     }
     let (origin, seen) = fake_origin();
     let mut keyd = Keyd::start_with(60, Some(&origin));
-    assert_eq!(keyd.call(json!({"op": "store", "secret": "voyage", "value": "pa-SECRET"}))["stored"], true);
+    assert_eq!(
+        keyd.call(json!({"op": "store", "secret": "voyage", "value": "pa-SECRET"}))["stored"],
+        true
+    );
 
     let body = b"{\"inputs\":[\"BODY-TEXT\"]}";
     let stream = UnixStream::connect(&keyd.sock).unwrap();
@@ -155,22 +191,39 @@ fn the_binary_forwards_to_its_test_origin_and_never_logs_the_key() {
     reader.read_line(&mut line).unwrap();
     let reply: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(reply["status"], 429, "{reply}");
-    assert!(reply["headers"].as_array().unwrap().iter().any(|h| h[0] == "retry-after" && h[1] == "9"), "{reply}");
+    assert!(
+        reply["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|h| h[0] == "retry-after" && h[1] == "9"),
+        "{reply}"
+    );
     let mut answer = vec![0; reply["body_len"].as_u64().unwrap() as usize];
     std::io::Read::read_exact(&mut reader, &mut answer).unwrap();
     assert_eq!(answer, b"{\"detail\":\"slow down\"}");
     assert!(!line.contains("pa-SECRET"));
 
     let head = seen.join().unwrap();
-    assert!(head.starts_with("POST /v1/multimodalembeddings HTTP/1.1"), "{head}");
-    assert!(head.to_lowercase().contains("authorization: bearer pa-secret"), "{head}");
+    assert!(
+        head.starts_with("POST /v1/multimodalembeddings HTTP/1.1"),
+        "{head}"
+    );
+    assert!(
+        head.to_lowercase()
+            .contains("authorization: bearer pa-secret"),
+        "{head}"
+    );
 
     drop(stream);
     keyd.child.kill().ok();
     keyd.child.wait().ok();
     let mut log = String::new();
     std::io::Read::read_to_string(keyd.child.stderr.as_mut().unwrap(), &mut log).unwrap();
-    assert!(log.contains("op=forward") && log.contains("status=429"), "{log}");
+    assert!(
+        log.contains("op=forward") && log.contains("status=429"),
+        "{log}"
+    );
     for leak in ["pa-SECRET", "BODY-TEXT", "slow down", "application/json"] {
         assert!(!log.contains(leak), "{leak} in {log}");
     }

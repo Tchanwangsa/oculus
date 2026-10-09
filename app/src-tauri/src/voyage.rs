@@ -114,36 +114,54 @@ fn probe(key: &str) -> Result<Verdict, String> {
 #[tauri::command]
 pub fn voyage_set_api_key(key: String) -> Result<String, String> {
     let broker = Credentialed::at(&crate::paths::data_dir());
-    credentials::store_checked(&key, probe, |value| store_in(&broker, value, |v| KEY.write(v)))
+    credentials::store_checked(&key, probe, |value| {
+        store_in(&broker, value, |v| KEY.write(v))
+    })
 }
 
 #[tauri::command]
 pub fn voyage_has_api_key() -> Result<bool, String> {
-    has_in(&Credentialed::at(&crate::paths::data_dir()), || KEY.has(WHAT))
+    has_in(&Credentialed::at(&crate::paths::data_dir()), || {
+        KEY.has(WHAT)
+    })
 }
 
 #[tauri::command]
 pub fn voyage_delete_api_key() -> Result<(), String> {
-    delete_in(&Credentialed::at(&crate::paths::data_dir()), || KEY.delete())
+    delete_in(&Credentialed::at(&crate::paths::data_dir()), || {
+        KEY.delete()
+    })
 }
 
 /// Each `*_in` asks keyd and uses `keychain` only when keyd is absent.
-fn store_in(broker: &Credentialed, value: &str, keychain: impl FnOnce(&str) -> Result<(), String>) -> Result<(), String> {
+fn store_in(
+    broker: &Credentialed,
+    value: &str,
+    keychain: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
     match broker.store(SECRET, value) {
         Err(KeydError::Absent) => keychain(value),
         other => other.map_err(|e| e.to_string()),
     }
 }
 
-fn has_in(broker: &Credentialed, keychain: impl FnOnce() -> Result<bool, String>) -> Result<bool, String> {
+fn has_in(
+    broker: &Credentialed,
+    keychain: impl FnOnce() -> Result<bool, String>,
+) -> Result<bool, String> {
     match broker.has(SECRET) {
         Err(KeydError::Absent) => keychain(),
-        Err(KeydError::Keychain(e)) => Err(format!("The keychain refused to give out the {WHAT} ({e})")),
+        Err(KeydError::Keychain(e)) => {
+            Err(format!("The keychain refused to give out the {WHAT} ({e})"))
+        }
         other => other.map_err(|e| format!("Could not check the {WHAT}: {e}")),
     }
 }
 
-fn delete_in(broker: &Credentialed, keychain: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+fn delete_in(
+    broker: &Credentialed,
+    keychain: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
     match broker.delete(SECRET) {
         Err(KeydError::Absent) => keychain(),
         other => other.map(|_| ()).map_err(|e| e.to_string()),
@@ -238,9 +256,11 @@ mod tests {
         });
         let broker = Credentialed::at(&dir);
         assert!(has_in(&broker, || panic!("keychain read")).unwrap());
-        let stored = credentials::store_checked(" pa-new\n", |_| Ok(Verdict::Good), |v| {
-            store_in(&broker, v, |_| panic!("keychain write"))
-        });
+        let stored = credentials::store_checked(
+            " pa-new\n",
+            |_| Ok(Verdict::Good),
+            |v| store_in(&broker, v, |_| panic!("keychain write")),
+        );
         assert_eq!(stored.unwrap(), "ok");
         delete_in(&broker, || panic!("keychain delete")).unwrap();
         assert_eq!(keyd.ops(), ["has", "store", "delete"]);
@@ -252,9 +272,11 @@ mod tests {
         let dir = Scratch::new("voyage-keyd-probe");
         let keyd = FakeKeyd::start(&dir, |_, _| (json!({"stored": true}), vec![]));
         let broker = Credentialed::at(&dir);
-        let result = credentials::store_checked("pa-bad", |_| Err("refused".into()), |v| {
-            store_in(&broker, v, |_| panic!("keychain write"))
-        });
+        let result = credentials::store_checked(
+            "pa-bad",
+            |_| Err("refused".into()),
+            |v| store_in(&broker, v, |_| panic!("keychain write")),
+        );
         assert_eq!(result.unwrap_err(), "refused");
         assert!(keyd.requests().is_empty());
     }
@@ -271,19 +293,32 @@ mod tests {
         })
         .unwrap();
         assert!(wrote.get());
-        assert_eq!(delete_in(&broker, || Err("denied".into())).unwrap_err(), "denied");
+        assert_eq!(
+            delete_in(&broker, || Err("denied".into())).unwrap_err(),
+            "denied"
+        );
     }
 
     #[test]
     fn keyds_refusals_surface_and_never_fall_back() {
         let dir = Scratch::new("voyage-keyd-refused");
         let _keyd = FakeKeyd::start(&dir, |req, _| match req["op"].as_str().unwrap() {
-            "has" => (json!({"error": "keychain", "detail": "OSStatus -128"}), vec![]),
-            _ => (json!({"error": "vault", "detail": "vault.bin is damaged"}), vec![]),
+            "has" => (
+                json!({"error": "keychain", "detail": "OSStatus -128"}),
+                vec![],
+            ),
+            _ => (
+                json!({"error": "vault", "detail": "vault.bin is damaged"}),
+                vec![],
+            ),
         });
         let broker = Credentialed::at(&dir);
         let err = has_in(&broker, || panic!("keychain read")).unwrap_err();
-        assert!(err.starts_with("The keychain refused to give out the Voyage API key") && err.contains("-128"), "{err}");
+        assert!(
+            err.starts_with("The keychain refused to give out the Voyage API key")
+                && err.contains("-128"),
+            "{err}"
+        );
         let err = store_in(&broker, "pa-x", |_| panic!("keychain write")).unwrap_err();
         assert!(err.contains("damaged"), "{err}");
         assert!(delete_in(&broker, || panic!("keychain delete")).is_err());

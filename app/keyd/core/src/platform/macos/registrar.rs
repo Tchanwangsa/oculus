@@ -19,7 +19,10 @@ impl Registrar for Launchd {
     fn check(&self, data_dir: &Path) -> Result<(), String> {
         let socket = paths::socket(data_dir);
         if socket.as_os_str().len() >= SUN_PATH {
-            return Err(format!("the socket path is too long for a unix socket: {}", socket.display()));
+            return Err(format!(
+                "the socket path is too long for a unix socket: {}",
+                socket.display()
+            ));
         }
         Ok(())
     }
@@ -50,7 +53,11 @@ impl Registrar for Launchd {
 
     fn status(&self) -> Result<Registration, String> {
         let plist = plist_path()?;
-        Ok(Registration { program: program_from_plist(&plist), loaded: is_loaded(), path: plist })
+        Ok(Registration {
+            program: program_from_plist(&plist),
+            loaded: is_loaded(),
+            path: plist,
+        })
     }
 
     fn uninstall(&self) -> Result<Vec<PathBuf>, String> {
@@ -65,11 +72,15 @@ impl Registrar for Launchd {
 }
 
 fn home() -> Result<PathBuf, String> {
-    std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| "HOME is not set".to_string())
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "HOME is not set".to_string())
 }
 
 fn plist_path() -> Result<PathBuf, String> {
-    Ok(home()?.join("Library/LaunchAgents").join(format!("{LABEL}.plist")))
+    Ok(home()?
+        .join("Library/LaunchAgents")
+        .join(format!("{LABEL}.plist")))
 }
 
 fn log_path() -> Result<PathBuf, String> {
@@ -84,7 +95,10 @@ fn bundle_of(bin: &Path) -> Option<PathBuf> {
 }
 
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// No `KeepAlive`: launchd starts keyd per connection and keyd exits idle.
@@ -130,7 +144,12 @@ fn program_from_plist(path: &Path) -> Option<String> {
     let after = text.split("<key>ProgramArguments</key>").nth(1)?;
     let rest = &after[after.find("<string>")? + "<string>".len()..];
     let raw = rest[..rest.find("</string>")?].trim();
-    Some(raw.replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+    Some(
+        raw.replace("&quot;", "\"")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&"),
+    )
 }
 
 // ── launchctl ────────────────────────────────────────────────────────────────
@@ -174,7 +193,9 @@ fn bootout() -> Result<(), String> {
     let started = std::time::Instant::now();
     while is_loaded() {
         if started.elapsed() > std::time::Duration::from_secs(30) {
-            return Err(format!("launchd still has {LABEL} loaded 30 s after bootout"));
+            return Err(format!(
+                "launchd still has {LABEL} loaded 30 s after bootout"
+            ));
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
@@ -195,15 +216,23 @@ mod tests {
     #[test]
     fn the_plist_escapes_paths_and_round_trips_the_program() {
         let dir = scratch("plist");
-        let program = Path::new("/Users/a&b/Library/Application Support/com.tchan.oculus/bin/oculus-keyd");
-        let body = plist_body(program, Path::new("/x/<keyd>.sock"), Path::new("/x/\"log\""));
+        let program =
+            Path::new("/Users/a&b/Library/Application Support/com.tchan.oculus/bin/oculus-keyd");
+        let body = plist_body(
+            program,
+            Path::new("/x/<keyd>.sock"),
+            Path::new("/x/\"log\""),
+        );
         assert!(body.contains("/Users/a&amp;b/Library/Application Support/"));
         assert!(body.contains("/x/&lt;keyd&gt;.sock"));
         assert!(body.contains("/x/&quot;log&quot;"));
         assert!(!body.contains("a&b"));
         let p = dir.join("k.plist");
         std::fs::write(&p, &body).unwrap();
-        assert_eq!(program_from_plist(&p).as_deref(), Some(program.to_str().unwrap()));
+        assert_eq!(
+            program_from_plist(&p).as_deref(),
+            Some(program.to_str().unwrap())
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -211,8 +240,14 @@ mod tests {
     /// must not keep keyd resident.
     #[test]
     fn the_agent_is_socket_activated_and_not_kept_alive() {
-        let body = plist_body(Path::new("/d/bin/oculus-keyd"), Path::new("/d/keyd.sock"), Path::new("/l.log"));
-        assert!(body.contains("<string>/d/bin/oculus-keyd</string>\n        <string>serve</string>"));
+        let body = plist_body(
+            Path::new("/d/bin/oculus-keyd"),
+            Path::new("/d/keyd.sock"),
+            Path::new("/l.log"),
+        );
+        assert!(
+            body.contains("<string>/d/bin/oculus-keyd</string>\n        <string>serve</string>")
+        );
         assert!(body.contains("<key>Listeners</key>\n        <dict>\n            <key>SockPathName</key>\n            <string>/d/keyd.sock</string>"));
         assert!(body.contains("<integer>384</integer>"));
         assert!(body.contains(&format!("<string>{LABEL}</string>")));
@@ -225,7 +260,10 @@ mod tests {
         let dir = scratch("bundle");
         let macos = dir.join("Oculus.app/Contents/MacOS");
         std::fs::create_dir_all(&macos).unwrap();
-        assert_eq!(bundle_of(&macos.join(paths::BINARY)), Some(dir.join("Oculus.app")));
+        assert_eq!(
+            bundle_of(&macos.join(paths::BINARY)),
+            Some(dir.join("Oculus.app"))
+        );
         assert!(Launchd.runs_in_place(&macos.join(paths::BINARY)));
         assert_eq!(bundle_of(&dir.join("bin").join(paths::BINARY)), None);
         assert!(!Launchd.runs_in_place(&dir.join("bin").join(paths::BINARY)));
@@ -234,7 +272,11 @@ mod tests {
 
     #[test]
     fn a_data_dir_too_deep_for_a_socket_is_refused() {
-        assert!(Launchd.check(Path::new("/Users/x/Library/Application Support/com.tchan.oculus")).is_ok());
+        assert!(Launchd
+            .check(Path::new(
+                "/Users/x/Library/Application Support/com.tchan.oculus"
+            ))
+            .is_ok());
         let deep = PathBuf::from("/").join("d".repeat(SUN_PATH));
         assert!(Launchd.check(&deep).unwrap_err().contains("too long"));
     }

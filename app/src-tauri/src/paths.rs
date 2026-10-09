@@ -135,7 +135,11 @@ fn append_bounded_log(path: &std::path::Path, message: &str) {
     let stamp = crate::clock::now_secs();
     let line = format!("{}Z {message}\n", iso8601_utc(stamp));
 
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         f.write_all(line.as_bytes()).ok();
     }
 
@@ -165,7 +169,6 @@ pub fn keyd_socket_path(data_dir: &std::path::Path) -> PathBuf {
     keyd_core::paths::socket(data_dir)
 }
 
-
 pub fn db_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("oculus.db")
 }
@@ -191,13 +194,25 @@ pub fn db_write_paths(data_dir: &std::path::Path) -> Vec<PathBuf> {
 
 pub fn safe_dir(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
 pub fn safe_filename(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .replace("..", "_")
 }
@@ -268,7 +283,8 @@ pub fn write_course_bytes(
 /// PDF-route leftover that goes too. `library_rel` is data-dir-relative.
 pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
     let sheet = is_sheet(library_rel);
-    let Some(pdf_rel) = doc_pdf_rel(library_rel).or_else(|| sheet.then(|| format!("{library_rel}.pdf")))
+    let Some(pdf_rel) =
+        doc_pdf_rel(library_rel).or_else(|| sheet.then(|| format!("{library_rel}.pdf")))
     else {
         return;
     };
@@ -332,7 +348,6 @@ pub fn doc_pdf_rel(rel: &str) -> Option<String> {
         .any(|e| lower.ends_with(e))
         .then(|| format!("{rel}.pdf"))
 }
-
 
 /// The student's own files, which the scraper never writes to; downstream they
 /// are ordinary library files.
@@ -471,7 +486,10 @@ mod tests {
 
     #[test]
     fn path_components_are_sanitised() {
-        assert_eq!(safe_filename("Lecture 1: Intro.pdf"), "Lecture_1__Intro.pdf");
+        assert_eq!(
+            safe_filename("Lecture 1: Intro.pdf"),
+            "Lecture_1__Intro.pdf"
+        );
         // No traversal survives: dots collapse, separators become underscores.
         assert_eq!(safe_filename("../../etc/passwd"), "____etc_passwd");
         assert_eq!(safe_rel_path("files/a.pdf").unwrap(), "files/a.pdf");
@@ -511,9 +529,18 @@ mod tests {
     #[test]
     fn doc_pdf_resolution() {
         assert_eq!(doc_pdf_rel("files/a.pdf").as_deref(), Some("files/a.pdf"));
-        assert_eq!(doc_pdf_rel("files/SCAN.PDF").as_deref(), Some("files/SCAN.PDF"));
-        assert_eq!(doc_pdf_rel("files/deck.pptx").as_deref(), Some("files/deck.pptx.pdf"));
-        assert_eq!(doc_pdf_rel("files/notes.DOCX").as_deref(), Some("files/notes.DOCX.pdf"));
+        assert_eq!(
+            doc_pdf_rel("files/SCAN.PDF").as_deref(),
+            Some("files/SCAN.PDF")
+        );
+        assert_eq!(
+            doc_pdf_rel("files/deck.pptx").as_deref(),
+            Some("files/deck.pptx.pdf")
+        );
+        assert_eq!(
+            doc_pdf_rel("files/notes.DOCX").as_deref(),
+            Some("files/notes.DOCX.pdf")
+        );
         assert_eq!(doc_pdf_rel("files/marks.xlsx"), None);
         assert_eq!(doc_pdf_rel("files/legacy.XLS"), None);
         assert_eq!(doc_pdf_rel("pages/intro.md"), None);
@@ -531,7 +558,10 @@ mod tests {
 
     #[test]
     fn the_sql_list_is_pdf_plus_every_office_extension() {
-        assert_eq!(pdf_backed_sql_list(), "('pdf', 'pptx', 'docx', 'ppt', 'doc')");
+        assert_eq!(
+            pdf_backed_sql_list(),
+            "('pdf', 'pptx', 'docx', 'ppt', 'doc')"
+        );
     }
 
     #[test]
@@ -550,7 +580,13 @@ mod tests {
         let scratch = crate::test_support::Scratch::new("purge-sheet");
         let dir = scratch.join("courses/X/files");
         std::fs::create_dir_all(dir.join("m.xlsx_images")).unwrap();
-        for name in ["m.xlsx", "m.xlsx.md", "m.xlsx.pdf", "m.xlsx.pages.json", "m.xlsx.emb.json"] {
+        for name in [
+            "m.xlsx",
+            "m.xlsx.md",
+            "m.xlsx.pdf",
+            "m.xlsx.pages.json",
+            "m.xlsx.emb.json",
+        ] {
             std::fs::write(dir.join(name), b"x").unwrap();
         }
         purge_parse_artifacts(&scratch, "courses/X/files/m.xlsx");
@@ -588,9 +624,13 @@ mod tests {
     #[test]
     fn only_a_markdown_note_in_a_subjects_documents_folder_is_writable() {
         assert!(is_document_rel("courses/COMP30026/documents/week-3.md"));
-        assert!(is_document_rel("courses/COMP30026_2026_SM2/documents/Untitled-2.md"));
+        assert!(is_document_rel(
+            "courses/COMP30026_2026_SM2/documents/Untitled-2.md"
+        ));
         // Traversal, however it is spelled, never resolves to a document.
-        assert!(!is_document_rel("courses/COMP30026/documents/../../oculus.db"));
+        assert!(!is_document_rel(
+            "courses/COMP30026/documents/../../oculus.db"
+        ));
         assert!(!is_document_rel("courses/../documents/x.md"));
         // Exactly one level deep: a nested folder is not a place the app writes.
         assert!(!is_document_rel("courses/COMP30026/documents/drafts/x.md"));

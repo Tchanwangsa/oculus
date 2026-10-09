@@ -9,10 +9,15 @@ fn short(hash: &str) -> &str {
 }
 
 impl Ctx {
-    pub(crate) fn keyd_install(&self, from: Option<&std::path::Path>, if_changed: bool) -> Result<(), String> {
+    pub(crate) fn keyd_install(
+        &self,
+        from: Option<&std::path::Path>,
+        if_changed: bool,
+    ) -> Result<(), String> {
         let from = match from {
             Some(p) => p.to_path_buf(),
-            None => keyd::candidate().ok_or("no built oculus-keyd found — run `bun run keyd`, or pass --from")?,
+            None => keyd::candidate()
+                .ok_or("no built oculus-keyd found — run `bun run keyd`, or pass --from")?,
         };
         let installed = if if_changed {
             keyd::install_if_changed(&self.data_dir, &from)?
@@ -23,10 +28,20 @@ impl Ctx {
             return self.emit(&installed);
         }
         let Some(installed) = installed else {
-            println!("{}", paint("the installed keyd is this source — nothing to install", DIM));
+            println!(
+                "{}",
+                paint(
+                    "the installed keyd is this source — nothing to install",
+                    DIM
+                )
+            );
             return Ok(());
         };
-        println!("{} source {}", paint("installed", GREEN), short(&installed.source_hash));
+        println!(
+            "{} source {}",
+            paint("installed", GREEN),
+            short(&installed.source_hash)
+        );
         println!("  program  {}", installed.program.display());
         println!("  agent    {}", installed.plist.display());
         Ok(())
@@ -40,9 +55,19 @@ impl Ctx {
 
         match &s.program {
             Some(p) => println!("agent      {} → {p}", s.plist.display()),
-            None => println!("agent      {}", paint("not installed — run `oculus keyd install`", YELLOW)),
+            None => println!(
+                "agent      {}",
+                paint("not installed — run `oculus keyd install`", YELLOW)
+            ),
         }
-        println!("launchd    {}", if s.loaded { paint("loaded", GREEN) } else { paint("not loaded", YELLOW) });
+        println!(
+            "launchd    {}",
+            if s.loaded {
+                paint("loaded", GREEN)
+            } else {
+                paint("not loaded", YELLOW)
+            }
+        );
         match &s.installed_hash {
             Some(h) => println!("installed  source {}", short(h)),
             None => println!("installed  {}", paint("no stamp", DIM)),
@@ -52,13 +77,19 @@ impl Ctx {
                 let verdict = if s.installed_hash.as_deref() == Some(h.as_str()) {
                     paint("same as installed", DIM)
                 } else {
-                    paint("differs from installed — `oculus keyd install` takes it", YELLOW)
+                    paint(
+                        "differs from installed — `oculus keyd install` takes it",
+                        YELLOW,
+                    )
                 };
                 println!("available  source {} {verdict}", short(h));
                 println!("           {}", c.display());
             }
             (Some(c), None, Some(e)) => println!("available  {} {}", c.display(), paint(e, RED)),
-            _ => println!("available  {}", paint("no built keyd beside this binary", DIM)),
+            _ => println!(
+                "available  {}",
+                paint("no built keyd beside this binary", DIM)
+            ),
         }
         match (&s.ping, &s.ping_error) {
             (Some(p), _) => {
@@ -71,10 +102,15 @@ impl Ctx {
                     short(hash)
                 );
                 if s.installed_hash.as_deref().is_some_and(|h| h != hash) {
-                    println!("           {}", paint("the running keyd is not the installed one", YELLOW));
+                    println!(
+                        "           {}",
+                        paint("the running keyd is not the installed one", YELLOW)
+                    );
                 }
             }
-            (None, Some(e)) => println!("keyd       {}", paint(&format!("unreachable: {e}"), YELLOW)),
+            (None, Some(e)) => {
+                println!("keyd       {}", paint(&format!("unreachable: {e}"), YELLOW))
+            }
             _ => {}
         }
         match s.vault_bytes {

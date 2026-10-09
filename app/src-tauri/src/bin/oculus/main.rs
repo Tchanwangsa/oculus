@@ -57,7 +57,9 @@ fn main() {
             AuthAction::Ed { token } => ctx.auth_ed(token.as_deref()),
         },
         Some(Command::Keyd { action }) => match action {
-            KeydAction::Install { from, if_changed } => ctx.keyd_install(from.as_deref(), if_changed),
+            KeydAction::Install { from, if_changed } => {
+                ctx.keyd_install(from.as_deref(), if_changed)
+            }
             KeydAction::Status => ctx.keyd_status(),
             KeydAction::Uninstall => ctx.keyd_uninstall(),
         },

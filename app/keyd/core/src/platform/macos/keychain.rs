@@ -8,7 +8,9 @@ use core_foundation::data::CFData;
 use security_framework::item::{ItemAddOptions, ItemAddValue, ItemClass};
 use security_framework::passwords::{generic_password, PasswordOptions};
 
-use crate::vault::{KeyError, KeySource, LegacySource, MasterKey, MASTER_ACCOUNT, MASTER_LABEL, MASTER_SERVICE};
+use crate::vault::{
+    KeyError, KeySource, LegacySource, MasterKey, MASTER_ACCOUNT, MASTER_LABEL, MASTER_SERVICE,
+};
 
 // SecBase.h
 const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
@@ -32,11 +34,14 @@ impl KeySource for MasterItem {
             class: ItemClass::generic_password(),
             data: CFData::from_buffer(key.to_hex().as_bytes()),
         });
-        add.set_service(MASTER_SERVICE).set_account_name(MASTER_ACCOUNT).set_label(MASTER_LABEL);
+        add.set_service(MASTER_SERVICE)
+            .set_account_name(MASTER_ACCOUNT)
+            .set_label(MASTER_LABEL);
         match add.add() {
             Ok(()) => Ok(key),
-            Err(e) if e.code() == ERR_SEC_DUPLICATE_ITEM => read_master()?
-                .ok_or_else(|| KeyError::Platform("the master key exists but cannot be found".to_string())),
+            Err(e) if e.code() == ERR_SEC_DUPLICATE_ITEM => read_master()?.ok_or_else(|| {
+                KeyError::Platform("the master key exists but cannot be found".to_string())
+            }),
             Err(e) => Err(classify("adding the master key", e.code())),
         }
     }
@@ -45,9 +50,9 @@ impl KeySource for MasterItem {
 fn read_master() -> Result<Option<MasterKey>, KeyError> {
     match read_password(MASTER_SERVICE, MASTER_ACCOUNT)? {
         None => Ok(None),
-        Some(text) => MasterKey::from_hex(&text)
-            .map(Some)
-            .ok_or_else(|| KeyError::Platform("the master key item does not hold a 256-bit hex key".to_string())),
+        Some(text) => MasterKey::from_hex(&text).map(Some).ok_or_else(|| {
+            KeyError::Platform("the master key item does not hold a 256-bit hex key".to_string())
+        }),
     }
 }
 
@@ -74,9 +79,10 @@ fn read_password(service: &str, account: &str) -> Result<Option<String>, KeyErro
 fn classify(step: &str, code: i32) -> KeyError {
     let detail = format!("{step}: OSStatus {code}");
     match code {
-        ERR_SEC_USER_CANCELED | ERR_SEC_AUTH_FAILED | ERR_SEC_INTERACTION_NOT_ALLOWED | ERR_SEC_NO_ACCESS_FOR_ITEM => {
-            KeyError::Refused(detail)
-        }
+        ERR_SEC_USER_CANCELED
+        | ERR_SEC_AUTH_FAILED
+        | ERR_SEC_INTERACTION_NOT_ALLOWED
+        | ERR_SEC_NO_ACCESS_FOR_ITEM => KeyError::Refused(detail),
         _ => KeyError::Platform(detail),
     }
 }
@@ -88,7 +94,10 @@ mod tests {
     #[test]
     fn refusals_are_told_apart_from_failures() {
         for code in [-128, -25293, -25308, -25243] {
-            assert!(matches!(classify("x", code), KeyError::Refused(_)), "{code}");
+            assert!(
+                matches!(classify("x", code), KeyError::Refused(_)),
+                "{code}"
+            );
         }
         assert!(matches!(classify("x", -25291), KeyError::Platform(_)));
     }

@@ -91,8 +91,16 @@ impl Drop for Half {
 /// Two connected ends.
 pub(crate) fn pair() -> (Conn, Conn) {
     let (a, b) = (Arc::new(Pipe::default()), Arc::new(Pipe::default()));
-    let one = Half { rx: a.clone(), tx: b.clone(), timeout: Mutex::new(None) };
-    let other = Half { rx: b, tx: a, timeout: Mutex::new(None) };
+    let one = Half {
+        rx: a.clone(),
+        tx: b.clone(),
+        timeout: Mutex::new(None),
+    };
+    let other = Half {
+        rx: b,
+        tx: a,
+        timeout: Mutex::new(None),
+    };
     (Conn(Stream::Memory(one)), Conn(Stream::Memory(other)))
 }
 
@@ -138,7 +146,10 @@ impl Connector {
 
 pub(crate) fn listener() -> (Listener, Connector) {
     let (tx, rx) = channel();
-    (Listener(Accept::Memory(Acceptor(Mutex::new(rx)))), Connector(tx))
+    (
+        Listener(Accept::Memory(Acceptor(Mutex::new(rx)))),
+        Connector(tx),
+    )
 }
 
 #[cfg(test)]

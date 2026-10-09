@@ -218,7 +218,10 @@ impl Caller {
             (Some(id), Some(p)) => format!("{id} ({p})"),
             (Some(id), None) => id.clone(),
             (None, Some(p)) => p,
-            (None, None) => format!("pid {}", self.pid.map_or("?".to_string(), |p| p.to_string())),
+            (None, None) => format!(
+                "pid {}",
+                self.pid.map_or("?".to_string(), |p| p.to_string())
+            ),
         };
         format!("{} {who}", self.role.as_str())
     }

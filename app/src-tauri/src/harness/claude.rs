@@ -374,7 +374,9 @@ fn settings_json(library: &Path, cwd: &Path, oculus: Option<&Path>) -> String {
         .collect();
     // `oculus` reaches its keys only through keyd's socket; without this the
     // sandbox refuses the connect (EPERM).
-    let keyd = crate::paths::keyd_socket_path(library).display().to_string();
+    let keyd = crate::paths::keyd_socket_path(library)
+        .display()
+        .to_string();
     serde_json::json!({
         "permissions": { "allow": allow, "deny": deny },
         "sandbox": {

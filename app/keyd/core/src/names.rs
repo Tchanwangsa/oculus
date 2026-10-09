@@ -8,7 +8,14 @@ pub const OKTA_PASSWORD: &str = "okta.password";
 pub const OKTA_TOTP_SECRET: &str = "okta.totp_secret";
 
 /// Every name the vault accepts; anything else is refused before it is stored.
-pub const KNOWN: &[&str] = &[VOYAGE, MINERU, GROQ, OKTA_USERNAME, OKTA_PASSWORD, OKTA_TOTP_SECRET];
+pub const KNOWN: &[&str] = &[
+    VOYAGE,
+    MINERU,
+    GROQ,
+    OKTA_USERNAME,
+    OKTA_PASSWORD,
+    OKTA_TOTP_SECRET,
+];
 
 pub fn is_known(name: &str) -> bool {
     KNOWN.contains(&name)
@@ -34,12 +41,36 @@ pub struct Legacy {
 
 /// `voyage.rs`, `mineru.rs`, `groq.rs` and `okta.rs` in the app own these.
 pub const LEGACY: &[Legacy] = &[
-    Legacy { service: "com.tchan.oculus.voyage", account: "voyage", secret: VOYAGE },
-    Legacy { service: "com.tchan.oculus.mineru", account: "mineru", secret: MINERU },
-    Legacy { service: "com.tchan.oculus.groq", account: "groq", secret: GROQ },
-    Legacy { service: "com.oculus.unimelb-sso", account: "username", secret: OKTA_USERNAME },
-    Legacy { service: "com.oculus.unimelb-sso", account: "password", secret: OKTA_PASSWORD },
-    Legacy { service: "com.oculus.unimelb-sso", account: "totp_secret", secret: OKTA_TOTP_SECRET },
+    Legacy {
+        service: "com.tchan.oculus.voyage",
+        account: "voyage",
+        secret: VOYAGE,
+    },
+    Legacy {
+        service: "com.tchan.oculus.mineru",
+        account: "mineru",
+        secret: MINERU,
+    },
+    Legacy {
+        service: "com.tchan.oculus.groq",
+        account: "groq",
+        secret: GROQ,
+    },
+    Legacy {
+        service: "com.oculus.unimelb-sso",
+        account: "username",
+        secret: OKTA_USERNAME,
+    },
+    Legacy {
+        service: "com.oculus.unimelb-sso",
+        account: "password",
+        secret: OKTA_PASSWORD,
+    },
+    Legacy {
+        service: "com.oculus.unimelb-sso",
+        account: "totp_secret",
+        secret: OKTA_TOTP_SECRET,
+    },
 ];
 
 #[cfg(test)]

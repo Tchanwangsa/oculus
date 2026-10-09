@@ -13,7 +13,13 @@ fn main() {
     let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
 
     let mut files = Vec::new();
-    for top in ["Cargo.toml", "Cargo.lock", "build.rs", ".cargo/config.toml", "core/Cargo.toml"] {
+    for top in [
+        "Cargo.toml",
+        "Cargo.lock",
+        "build.rs",
+        ".cargo/config.toml",
+        "core/Cargo.toml",
+    ] {
         files.push(root.join(top));
     }
     for dir in ["src", "core/src"] {
@@ -22,14 +28,23 @@ fn main() {
     }
     let mut rel: Vec<(String, PathBuf)> = files
         .into_iter()
-        .map(|p| (p.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"), p))
+        .map(|p| {
+            (
+                p.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+                p,
+            )
+        })
         .collect();
     rel.sort();
 
     let mut hash = Sha256::new();
     for (name, path) in &rel {
         println!("cargo:rerun-if-changed={}", path.display());
-        let body = std::fs::read(path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+        let body =
+            std::fs::read(path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
         hash.update(name.as_bytes());
         hash.update([0]);
         hash.update((body.len() as u64).to_le_bytes());
@@ -40,7 +55,8 @@ fn main() {
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = std::fs::read_dir(dir).unwrap_or_else(|e| panic!("reading {}: {e}", dir.display()));
+    let entries =
+        std::fs::read_dir(dir).unwrap_or_else(|e| panic!("reading {}: {e}", dir.display()));
     for entry in entries {
         let path = entry.unwrap().path();
         if path.is_dir() {

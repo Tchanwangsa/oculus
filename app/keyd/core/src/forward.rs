@@ -32,7 +32,11 @@ pub struct Routes(Vec<Route>);
 
 impl Routes {
     pub fn compiled() -> Routes {
-        Routes(vec![Route { secret: names::VOYAGE, origin: "https://api.voyageai.com".to_string(), prefix: "/v1/" }])
+        Routes(vec![Route {
+            secret: names::VOYAGE,
+            origin: "https://api.voyageai.com".to_string(),
+            prefix: "/v1/",
+        }])
     }
 
     pub fn get(&self, secret: &str) -> Option<&Route> {
@@ -43,11 +47,17 @@ impl Routes {
     /// Debug builds only: a release keyd has no way to move an origin.
     #[cfg(debug_assertions)]
     pub fn with_origin(mut self, secret: &str, origin: &str) -> Result<Routes, String> {
-        let rest = origin.strip_prefix("http://127.0.0.1:").ok_or("a test origin must be http://127.0.0.1:<port>")?;
+        let rest = origin
+            .strip_prefix("http://127.0.0.1:")
+            .ok_or("a test origin must be http://127.0.0.1:<port>")?;
         if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
             return Err("a test origin must be http://127.0.0.1:<port>".to_string());
         }
-        let route = self.0.iter_mut().find(|r| r.secret == secret).ok_or_else(|| format!("{secret} has no route"))?;
+        let route = self
+            .0
+            .iter_mut()
+            .find(|r| r.secret == secret)
+            .ok_or_else(|| format!("{secret} has no route"))?;
         route.origin = origin.to_string();
         Ok(self)
     }
@@ -77,27 +87,47 @@ impl Call {
         if method == "GET" && !body.is_empty() {
             return Err(OpError::new("request", "a GET takes no body"));
         }
-        let path = req.get("path").and_then(Value::as_str).ok_or_else(|| OpError::new("request", "missing \"path\""))?;
+        let path = req
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| OpError::new("request", "missing \"path\""))?;
         check_path(path, route.prefix)?;
 
         let mut headers = Vec::new();
         if let Some(list) = req.get("headers") {
-            let list = list.as_array().ok_or_else(|| OpError::new("request", "headers must be a list of [name, value]"))?;
+            let list = list.as_array().ok_or_else(|| {
+                OpError::new("request", "headers must be a list of [name, value]")
+            })?;
             for pair in list {
                 let (name, value) = match pair.as_array().map(Vec::as_slice) {
                     Some([Value::String(n), Value::String(v)]) => (n, v),
-                    _ => return Err(OpError::new("request", "headers must be a list of [name, value]")),
+                    _ => {
+                        return Err(OpError::new(
+                            "request",
+                            "headers must be a list of [name, value]",
+                        ))
+                    }
                 };
                 if !CLIENT_HEADERS.iter().any(|h| h.eq_ignore_ascii_case(name)) {
-                    return Err(OpError::new("request", format!("header {} may not be set", printable(name))));
+                    return Err(OpError::new(
+                        "request",
+                        format!("header {} may not be set", printable(name)),
+                    ));
                 }
                 if value.bytes().any(|b| b.is_ascii_control()) || !value.is_ascii() {
-                    return Err(OpError::new("request", format!("header {name} has a control or non-ASCII character")));
+                    return Err(OpError::new(
+                        "request",
+                        format!("header {name} has a control or non-ASCII character"),
+                    ));
                 }
                 headers.push((name.clone(), value.clone()));
             }
         }
-        Ok(Call { method, path: path.to_string(), headers })
+        Ok(Call {
+            method,
+            path: path.to_string(),
+            headers,
+        })
     }
 }
 
@@ -128,7 +158,12 @@ fn check_path(path: &str, prefix: &str) -> Result<(), OpError> {
 
 /// Client text for an error detail: a short plain token, or a placeholder.
 fn printable(name: &str) -> String {
-    if !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+    if !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
         name.to_string()
     } else {
         "(unprintable)".to_string()
@@ -162,17 +197,29 @@ impl Upstream {
     /// An `upstream` error only when no answer arrived (DNS, connect, TLS, a
     /// reset). Its detail is the failure's kind and cause, never the URL, a
     /// header or the body.
-    pub fn send(&self, origin: &str, call: &Call, key: &str, body: &[u8]) -> Result<Answer, OpError> {
+    pub fn send(
+        &self,
+        origin: &str,
+        call: &Call,
+        key: &str,
+        body: &[u8],
+    ) -> Result<Answer, OpError> {
         let url = format!("{origin}{}", call.path);
         let mut request = self.agent.request(call.method, &url);
         for (name, value) in &call.headers {
             request = request.set(name, value);
         }
         request = request.set("Authorization", &format!("Bearer {key}"));
-        let sent = if call.method == "GET" { request.call() } else { request.send_bytes(body) };
+        let sent = if call.method == "GET" {
+            request.call()
+        } else {
+            request.send_bytes(body)
+        };
         let response = match sent {
             Ok(response) | Err(ureq::Error::Status(_, response)) => response,
-            Err(ureq::Error::Transport(t)) => return Err(OpError::new("upstream", transport_detail(&t))),
+            Err(ureq::Error::Transport(t)) => {
+                return Err(OpError::new("upstream", transport_detail(&t)))
+            }
         };
 
         let status = response.status();
@@ -195,9 +242,16 @@ impl Upstream {
             .read_to_end(&mut out)
             .map_err(|e| OpError::new("upstream", format!("reading the answer: {e}")))?;
         if out.len() as u64 > MAX_BODY {
-            return Err(OpError::new("upstream", format!("the answer is over {MAX_BODY} bytes")));
+            return Err(OpError::new(
+                "upstream",
+                format!("the answer is over {MAX_BODY} bytes"),
+            ));
         }
-        Ok(Answer { status, headers, body: out })
+        Ok(Answer {
+            status,
+            headers,
+            body: out,
+        })
     }
 }
 
@@ -230,7 +284,10 @@ mod tests {
     #[test]
     fn only_voyage_has_a_route_and_its_origin_is_fixed() {
         let routes = Routes::compiled();
-        assert_eq!(routes.get("voyage").unwrap().origin, "https://api.voyageai.com");
+        assert_eq!(
+            routes.get("voyage").unwrap().origin,
+            "https://api.voyageai.com"
+        );
         for name in ["mineru", "groq", "okta.password", "nope"] {
             assert!(routes.get(name).is_none(), "{name}");
         }
@@ -238,10 +295,21 @@ mod tests {
 
     #[test]
     fn a_test_origin_must_be_loopback_http_with_a_port() {
-        for bad in ["https://evil.example", "http://127.0.0.1:", "http://127.0.0.1:80/x", "http://localhost:80", "http://127.0.0.1:80@evil"] {
-            assert!(Routes::compiled().with_origin("voyage", bad).is_err(), "{bad}");
+        for bad in [
+            "https://evil.example",
+            "http://127.0.0.1:",
+            "http://127.0.0.1:80/x",
+            "http://localhost:80",
+            "http://127.0.0.1:80@evil",
+        ] {
+            assert!(
+                Routes::compiled().with_origin("voyage", bad).is_err(),
+                "{bad}"
+            );
         }
-        let moved = Routes::compiled().with_origin("voyage", "http://127.0.0.1:4321").unwrap();
+        let moved = Routes::compiled()
+            .with_origin("voyage", "http://127.0.0.1:4321")
+            .unwrap();
         assert_eq!(moved.get("voyage").unwrap().origin, "http://127.0.0.1:4321");
     }
 
@@ -254,7 +322,11 @@ mod tests {
         .unwrap();
         assert_eq!(c.method, "POST");
         assert_eq!(c.headers.len(), 2);
-        assert!(call(json!({"method": "GET", "path": "/v1/models?limit=5&x=y"}), b"").is_ok());
+        assert!(call(
+            json!({"method": "GET", "path": "/v1/models?limit=5&x=y"}),
+            b""
+        )
+        .is_ok());
     }
 
     #[test]
@@ -286,23 +358,60 @@ mod tests {
 
     #[test]
     fn methods_other_than_get_and_post_are_refused() {
-        for method in [json!("PUT"), json!("DELETE"), json!("get"), json!("CONNECT"), json!(5), Value::Null] {
-            assert!(call(json!({"method": method, "path": "/v1/x"}), b"").is_err(), "{method}");
+        for method in [
+            json!("PUT"),
+            json!("DELETE"),
+            json!("get"),
+            json!("CONNECT"),
+            json!(5),
+            Value::Null,
+        ] {
+            assert!(
+                call(json!({"method": method, "path": "/v1/x"}), b"").is_err(),
+                "{method}"
+            );
         }
-        assert!(call(json!({"method": "GET", "path": "/v1/x"}), b"body").is_err(), "a GET with a body");
+        assert!(
+            call(json!({"method": "GET", "path": "/v1/x"}), b"body").is_err(),
+            "a GET with a body"
+        );
     }
 
     #[test]
     fn any_header_but_content_type_and_accept_is_refused_without_echoing_its_value() {
-        for name in ["Authorization", "authorization", "Host", "Cookie", "X-Forwarded-For", "Content-Length", "Transfer-Encoding"] {
-            let err = call(json!({"method": "POST", "path": "/v1/x", "headers": [[name, "Bearer pa-SECRET"]]}), b"").unwrap_err();
+        for name in [
+            "Authorization",
+            "authorization",
+            "Host",
+            "Cookie",
+            "X-Forwarded-For",
+            "Content-Length",
+            "Transfer-Encoding",
+        ] {
+            let err = call(
+                json!({"method": "POST", "path": "/v1/x", "headers": [[name, "Bearer pa-SECRET"]]}),
+                b"",
+            )
+            .unwrap_err();
             assert_eq!(err.kind, "request", "{name}");
             assert!(!err.detail.contains("pa-SECRET"), "{}", err.detail);
         }
         let err = call(json!({"method": "POST", "path": "/v1/x", "headers": [["Content-Type", "a\r\nAuthorization: x"]]}), b"").unwrap_err();
         assert_eq!(err.kind, "request");
-        for shape in [json!("Content-Type"), json!([["Content-Type"]]), json!([["Accept", 1]]), json!({"Accept": "x"})] {
-            assert!(call(json!({"method": "POST", "path": "/v1/x", "headers": shape}), b"").is_err(), "{shape}");
+        for shape in [
+            json!("Content-Type"),
+            json!([["Content-Type"]]),
+            json!([["Accept", 1]]),
+            json!({"Accept": "x"}),
+        ] {
+            assert!(
+                call(
+                    json!({"method": "POST", "path": "/v1/x", "headers": shape}),
+                    b""
+                )
+                .is_err(),
+                "{shape}"
+            );
         }
     }
 }

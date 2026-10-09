@@ -15,7 +15,9 @@ const STAMP: &str = "oculus-keyd.stamp";
 
 /// The OS's per-user data dir plus the identifier: Tauri's `app_data_dir()`.
 pub fn data_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join(IDENTIFIER)
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(IDENTIFIER)
 }
 
 /// keyd's endpoint. Short on purpose: a macOS `sun_path` holds 104 bytes.
