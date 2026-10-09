@@ -90,7 +90,7 @@ impl Canvas {
         let Some(merged) = merged_cookie_header(&guard, &set) else {
             return;
         };
-        if let Err(e) = std::fs::write(&self.cookie_path, &merged) {
+        if let Err(e) = crate::paths::write_private(&self.cookie_path, &merged) {
             eprintln!("[oculus] cookie refresh write failed: {e}");
         }
         *guard = merged;

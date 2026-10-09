@@ -27,15 +27,26 @@ pub fn sso_cookie_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("sso-session.cookie")
 }
 
-/// Writes a session snapshot readable by this user only.
+/// Writes a session file readable by this user only. A new file is created
+/// 0600 and an existing one narrowed before the body lands, so the secret is
+/// never on disk world-readable.
 pub fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> {
-    std::fs::write(path, body)?;
+    use std::io::Write;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
-    Ok(())
+    file.write_all(body.as_bytes())
 }
 
 pub fn auth_flag_path(data_dir: &std::path::Path) -> PathBuf {
@@ -387,6 +398,23 @@ mod tests {
         assert!(!auth_flag_path(&dir).exists());
         assert!(sign_in_record_path(&dir).exists());
         assert!(!sign_out(&dir).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_writes_narrow_an_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = crate::test_support::Scratch::new("write-private");
+        let path = dir.join("ed-session.token");
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        write_private(&path, "fresh").unwrap();
+        assert_eq!(mode(&path), 0o600);
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&path, "tok").unwrap();
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "tok");
     }
 
     #[test]

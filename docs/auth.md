@@ -9,7 +9,7 @@ cookie.
 | --- | --- |
 | Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
 | Session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas.rs` |
-| Cookie (Canvas and Okta), auth-flag and keep-alive log paths; sign-out | `app/src-tauri/src/paths.rs` |
+| Cookie (Canvas and Okta), auth-flag and keep-alive log paths; private writes, sign-out | `app/src-tauri/src/paths.rs` |
 | Headless Okta sign-in, TOTP, stored credentials, the attempt guard | `app/src-tauri/src/okta.rs` |
 | LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
 | The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
@@ -30,8 +30,10 @@ Do not propose `Authorization: Bearer`. (The "New Access Token" button's text
 is on the page either way; only its `disabled` attribute tells you.)
 
 - Sign-in goes through the university's SAML IdP, so the first login happens
-  in a visible app WebView. The cookie is persisted to the data dir in
-  plaintext beside an auth-flag file meaning "we believe we have a session".
+  in a visible app WebView. The cookie is persisted to the data dir in a
+  plaintext file only this user can read (`paths::write_private`, like every
+  session file here), beside an auth-flag file meaning "we believe we have a
+  session".
 - The session has no cookie-side expiry: the server extends it on use, so
   periodic requests keep it alive. There is no remember-me cookie — once dead,
   it is rebuilt by [automated sign-in](#okta-sign-in-runs-headless-in-rust)
@@ -143,7 +145,8 @@ JWT. `app/src-tauri/src/ed.rs` mints it by walking the Canvas → Ed LTI 1.3
 launch (tool page → `oidc_login` → Canvas `/api/lti/authorize` → `launch` →
 one-shot `?_logintoken=` → `POST /api/login_token`). Tokens last about two
 weeks, are renewed with `POST /api/renew_token` on each sync, and a dead one
-is re-minted. `oculus auth ed <TOKEN>` is a manual override.
+is re-minted. The token file is private to this user, like the cookies.
+`oculus auth ed <TOKEN>` is a manual override.
 
 ## Echo360 has no stored credential
 
