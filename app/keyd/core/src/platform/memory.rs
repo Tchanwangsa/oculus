@@ -32,14 +32,19 @@ impl Pipe {
     }
 }
 
+/// Every timeout a connection's holder set, in order; `None` is "wait for ever".
+pub(crate) type Timeouts = Arc<Mutex<Vec<Option<Duration>>>>;
+
 pub(crate) struct Half {
     rx: Arc<Pipe>,
     tx: Arc<Pipe>,
     timeout: Mutex<Option<Duration>>,
+    set: Timeouts,
 }
 
 impl Half {
     pub(crate) fn set_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        self.set.lock().unwrap().push(timeout);
         *self.timeout.lock().unwrap() = timeout;
         Ok(())
     }
@@ -90,16 +95,23 @@ impl Drop for Half {
 
 /// Two connected ends.
 pub(crate) fn pair() -> (Conn, Conn) {
+    pair_logging(Timeouts::default())
+}
+
+/// Two connected ends, the first of which records its timeouts in `set`.
+fn pair_logging(set: Timeouts) -> (Conn, Conn) {
     let (a, b) = (Arc::new(Pipe::default()), Arc::new(Pipe::default()));
     let one = Half {
         rx: a.clone(),
         tx: b.clone(),
         timeout: Mutex::new(None),
+        set,
     };
     let other = Half {
         rx: b,
         tx: a,
         timeout: Mutex::new(None),
+        set: Timeouts::default(),
     };
     (Conn(Stream::Memory(one)), Conn(Stream::Memory(other)))
 }
@@ -132,15 +144,25 @@ impl Acceptor {
     }
 }
 
-/// Opens connections to its `Listener`.
+/// Opens connections to its `Listener`, and keeps the timeouts every client
+/// end of them was given.
 #[derive(Clone)]
-pub(crate) struct Connector(Sender<Conn>);
+pub(crate) struct Connector {
+    queue: Sender<Conn>,
+    timeouts: Timeouts,
+}
 
 impl Connector {
     pub(crate) fn connect(&self) -> Conn {
-        let (client, server) = pair();
-        self.0.send(server).expect("the listener is gone");
+        let (client, server) = pair_logging(self.timeouts.clone());
+        self.queue.send(server).expect("the listener is gone");
         client
+    }
+
+    /// The timeouts set on the clients' ends so far.
+    #[cfg(feature = "client")]
+    pub(crate) fn timeouts(&self) -> Timeouts {
+        self.timeouts.clone()
     }
 }
 
@@ -148,7 +170,10 @@ pub(crate) fn listener() -> (Listener, Connector) {
     let (tx, rx) = channel();
     (
         Listener(Accept::Memory(Acceptor(Mutex::new(rx)))),
-        Connector(tx),
+        Connector {
+            queue: tx,
+            timeouts: Timeouts::default(),
+        },
     )
 }
 

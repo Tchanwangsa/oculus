@@ -353,7 +353,19 @@ mod tests {
     where
         H: Fn(&Value, &[u8]) -> (Value, Vec<u8>) + Send + Sync + 'static,
     {
+        let (client, seen, _) = fake_keyd_timed(handler);
+        (client, seen)
+    }
+
+    /// `fake_keyd`, and every timeout the client set on its connections.
+    fn fake_keyd_timed<H>(
+        handler: H,
+    ) -> (Client, Arc<Mutex<Vec<(Value, Vec<u8>)>>>, memory::Timeouts)
+    where
+        H: Fn(&Value, &[u8]) -> (Value, Vec<u8>) + Send + Sync + 'static,
+    {
         let (listener, connector) = memory::listener();
+        let timeouts = connector.timeouts();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = seen.clone();
         std::thread::spawn(move || loop {
@@ -370,7 +382,7 @@ mod tests {
             endpoint: PathBuf::from("memory"),
             connect: Arc::new(move || Ok(connector.connect())),
         };
-        (client, seen)
+        (client, seen, timeouts)
     }
 
     /// A client whose every connect fails with `error`.
@@ -608,6 +620,48 @@ mod tests {
         assert!(matches!(broker.okta_resume(), Err(KeydError::Broken(_))));
         let absent = unreachable(ConnectError::Absent("ENOENT".into()));
         assert_eq!(absent.okta_resume().unwrap_err(), KeydError::Absent);
+    }
+
+    #[test]
+    fn ensure_signed_in_sets_no_socket_timeout_and_every_other_op_sets_one() {
+        let (broker, _, timeouts) = fake_keyd_timed(|req, _| match req["op"].as_str().unwrap() {
+            "has" => (json!({"has": true}), vec![]),
+            "okta_status" => (
+                json!({"username": null, "has_password": false, "has_totp": false}),
+                vec![],
+            ),
+            "ensure_signed_in" => (json!({"result": "signed_in"}), vec![]),
+            "forward" => (json!({"status": 200, "headers": [], "body_len": 0}), vec![]),
+            _ => (
+                json!({"stored": true, "existed": false, "saved": true}),
+                vec![],
+            ),
+        });
+        let set = || std::mem::take(&mut *timeouts.lock().unwrap());
+
+        // A sign-in can wait for a fresh TOTP window, or on another caller's
+        // attempt: it never applies a finite timeout.
+        broker.ensure_signed_in(Trigger::Manual).unwrap().unwrap();
+        assert_eq!(set(), [None]);
+
+        broker.has("voyage").unwrap();
+        broker.store("voyage", "pa-x").unwrap();
+        broker.delete("voyage").unwrap();
+        broker.okta_status().unwrap();
+        broker.okta_save("u", "p", "GEZD").unwrap();
+        broker.okta_forget().unwrap();
+        broker.okta_resume().unwrap();
+        assert_eq!(set(), [Some(OP_TIMEOUT); 7]);
+
+        // A forward keeps the caller's own timeout, or none.
+        let own = Duration::from_secs(300);
+        broker
+            .send("voyage", "GET", "/v1/x", &[], b"", Some(own))
+            .unwrap();
+        broker
+            .send("voyage", "GET", "/v1/x", &[], b"", None)
+            .unwrap();
+        assert_eq!(set(), [Some(own), None]);
     }
 
     #[test]
