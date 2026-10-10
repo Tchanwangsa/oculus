@@ -1,6 +1,7 @@
 //! `Canvas` against a stand-in oculus-keyd that speaks the wire, and a fake
 //! HTTP server for the hosts a redirect leaves Canvas for.
 
+mod calendar;
 mod download;
 mod expiry;
 mod redirects;

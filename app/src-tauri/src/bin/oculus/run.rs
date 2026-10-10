@@ -22,9 +22,7 @@ impl Ctx {
         };
         if refresh || rows.is_empty() {
             let engine = self.engine(false);
-            if !engine.canvas.has_session() {
-                return Err("not connected — run `oculus auth login`".to_string());
-            }
+            engine.canvas.check_keyd()?;
             let courses = engine.list_courses()?;
             if let Some(p) = &pool {
                 self.rt.block_on(store::upsert_subjects(p, &courses))?;
@@ -278,9 +276,7 @@ impl Ctx {
         // No in-scrape parse: `index_pdfs` below parses the same files serially, and
         // both at once would parse one PDF twice, concurrently.
         let engine = self.engine(false);
-        if !engine.canvas.has_session() {
-            return Err("not connected — run `oculus auth login`".to_string());
-        }
+        engine.canvas.check_keyd()?;
         let who = engine.canvas.whoami()?;
 
         let pool = self.db();

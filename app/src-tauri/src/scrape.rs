@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter};
 
+use crate::canvas::Canvas;
 use crate::sync::{
     Engine, FileEvent, FileFailed, FileStart, Progress, Reporter, Subject, SyncOptions,
 };
@@ -44,9 +45,10 @@ pub async fn scrape_content(
         return Err("No subjects selected.".to_string());
     }
 
-    if crate::files::proxy_cookie(&app).is_empty() {
-        app.emit("canvas-auth-expired", "not-authenticated").ok();
-        return Err("Not authenticated. Connect to Canvas first.".to_string());
+    // A missing session is not checked for: oculus-keyd signs in on demand, and
+    // a run that cannot says so through `canvas-auth-expired`.
+    if let Err(e) = Canvas::open(&crate::paths::data_dir()).check_keyd() {
+        return Err(e.to_string());
     }
 
     let data_dir = crate::paths::data_dir();
@@ -209,9 +211,9 @@ pub async fn canvas_download_video(
     subject_code: String,
     canvas_file_id: i64,
 ) -> Result<String, String> {
-    if crate::files::proxy_cookie(&app).is_empty() {
-        return Err("Not authenticated — connect to Canvas first.".to_string());
-    }
+    Canvas::open(&crate::paths::data_dir())
+        .check_keyd()
+        .map_err(|e| e.to_string())?;
     let flag = Arc::new(AtomicBool::new(false));
     {
         let mut running = cancels.0.lock().unwrap();
