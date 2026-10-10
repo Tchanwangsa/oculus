@@ -35,6 +35,9 @@ export const cliSidecar = () => join(binaries, `oculus-${hostTriple()}${exe}`);
 export function stageCli(binary) {
   const dest = cliSidecar();
   mkdirSync(binaries, { recursive: true });
+  // The build script watches the sidecar's mtime, so an identical copy would
+  // still recompile the crate.
+  if (existsSync(dest) && readFileSync(dest).equals(readFileSync(binary))) return;
   rmSync(dest, { force: true });
   copyFileSync(binary, dest);
   chmodSync(dest, 0o755);
