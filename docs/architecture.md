@@ -15,6 +15,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Data-dir and library path rules | `app/src-tauri/src/library/paths/` |
 | Parse seam and its two MinerU clients | `app/src-tauri/src/parse/mod.rs`, `app/src-tauri/src/parse/mineru/` |
 | Embed seam, Voyage client, page rasterizer | `app/src-tauri/src/embed/mod.rs`, `app/src-tauri/src/embed/voyage/`, `app/src-tauri/src/embed/raster/` |
+| hayro rendering shared by the viewer and the embedder, and its memory budget | `app/src-tauri/src/library/pdf_render/` |
 | Ingest and search over `pages` | `app/src-tauri/src/pages/retrieval/` |
 | Rate limiting both cloud clients share | `app/src-tauri/src/providers/ratelimit/` |
 | Shared parse/embed event payload and channels | `app/src-tauri/src/runtime/pipeline_events.rs` |

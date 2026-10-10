@@ -95,8 +95,8 @@ library files; the rest of the frontend has its own pages:
   never enumerates the backlog — that is the Index button's job. Queued rows
   are marked in `files.embed_status` and re-enqueued once at boot
   ([retrieval.md](./retrieval.md#ingest-follows-a-parse-through-one-queue)).
-- `embed_estimate` is its own command because it runs pdfium over the library,
-  one sweep at a time (pdfium is one session per process). The spend guard is
+- `embed_estimate` is its own command because it opens every outstanding PDF,
+  one sweep at a time. The spend guard is
   enforced in Rust (`UsageLedger::budget`), never on this page.
 
 ## Every surface shows parse state from one function

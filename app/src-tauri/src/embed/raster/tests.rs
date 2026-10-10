@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 
 use super::dpi::*;
-use super::pdfium::*;
+use super::workers::*;
 use super::*;
+use crate::library::pdf_render::budget::{self, Budget};
 use crate::test_support::Scratch;
 
-/// A real PDF built in memory: pdfium parses it for real.
-fn synthetic_pdf(pages: usize) -> (Scratch, PathBuf) {
+/// A real PDF built in memory, one line of text per page; `rotate` turns
+/// every page.
+fn synthetic_pdf(pages: usize, rotate: i64) -> (Scratch, PathBuf) {
     use lopdf::{dictionary, Document, Object};
 
     let mut document = Document::with_version("1.5");
@@ -42,6 +44,7 @@ fn synthetic_pdf(pages: usize) -> (Scratch, PathBuf) {
             "Contents" => content_id,
             // US Letter.
             "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Rotate" => rotate,
         });
         kids.push(page_id.into());
     }
@@ -65,21 +68,6 @@ fn synthetic_pdf(pages: usize) -> (Scratch, PathBuf) {
     let path = dir.join("synthetic.pdf");
     document.save(&path).unwrap();
     (dir, path)
-}
-
-/// The count `parse/` writes into the record.
-fn hayro_page_count(pdf: &Path) -> u32 {
-    let bytes = std::fs::read(pdf).unwrap();
-    hayro_syntax::Pdf::new(bytes).unwrap().pages().len() as u32
-}
-
-/// Tests needing libpdfium skip without it (`bun run pdfium`).
-fn library_present() -> bool {
-    let available = pdfium().is_ok();
-    if !available {
-        eprintln!("skipping: libpdfium not fetched (run `bun run pdfium` in app/)");
-    }
-    available
 }
 
 #[test]
@@ -138,10 +126,7 @@ fn an_ordinary_page_is_untouched_by_the_clamp() {
 
 #[test]
 fn renders_every_page_once_in_order() {
-    if !library_present() {
-        return;
-    }
-    let (_dir, pdf) = synthetic_pdf(3);
+    let (_dir, pdf) = synthetic_pdf(9, 0);
 
     let mut seen = Vec::new();
     let count = render_pages(&pdf, None, |page| {
@@ -151,20 +136,75 @@ fn renders_every_page_once_in_order() {
     })
     .unwrap();
 
-    assert_eq!(count, 3);
-    assert_eq!(
-        seen,
-        vec![(1, 1700, 2200), (2, 1700, 2200), (3, 1700, 2200)]
-    );
+    assert_eq!(count, 9);
+    let expected: Vec<_> = (1..=9).map(|page| (page, 1700, 2200)).collect();
+    assert_eq!(seen, expected);
+}
+
+#[test]
+fn a_rotated_page_renders_with_its_sides_swapped() {
+    let (_dir, pdf) = synthetic_pdf(1, 90);
+    let mut seen = Vec::new();
+    render_pages(&pdf, None, |page| {
+        seen.push((page.width, page.height));
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(seen, [(2200, 1700)]);
+    assert_eq!(page_sizes(&pdf).unwrap(), seen);
+}
+
+/// One worker or many, the pages and their bytes are the same.
+#[test]
+fn the_worker_count_changes_nothing_but_speed() {
+    let (_dir, pdf) = synthetic_pdf(7, 0);
+    let document = open(&pdf).unwrap();
+    let collect = |budget: &Budget| {
+        let mut pages = Vec::new();
+        render_document(&document, budget, None, |page| {
+            pages.push(page);
+            Ok(())
+        })
+        .unwrap();
+        pages
+    };
+    let serial = collect(&Budget::new(budget::BUDGET_BYTES, 1));
+    let parallel = collect(&Budget::new(budget::BUDGET_BYTES, 4));
+    assert_eq!(serial.len(), 7);
+    for (one, many) in serial.iter().zip(&parallel) {
+        assert_eq!(one.page_no, many.page_no);
+        assert_eq!(one.png, many.png, "page {}", one.page_no);
+    }
+}
+
+#[test]
+fn the_png_is_rgb_on_white_with_the_text_painted() {
+    let (_dir, pdf) = synthetic_pdf(1, 0);
+    let mut png = Vec::new();
+    render_pages(&pdf, None, |page| {
+        png = page.png;
+        Ok(())
+    })
+    .unwrap();
+    let image = image::load_from_memory(&png).unwrap();
+    assert_eq!(image.color(), image::ColorType::Rgb8);
+    let rgb = image.to_rgb8();
+    assert_eq!(rgb.get_pixel(1699, 2199).0, [255, 255, 255]);
+    let dark = rgb.pixels().filter(|px| px.0[0] < 128).count();
+    assert!(dark > 100, "the text paints: {dark} dark pixels");
+}
+
+#[test]
+fn rgba_becomes_rgb_in_place() {
+    let rgba = vec![1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255];
+    assert_eq!(into_rgb(rgba), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert!(into_rgb(Vec::new()).is_empty());
 }
 
 /// The estimator's sizes are the renderer's sizes.
 #[test]
 fn measured_sizes_are_the_sizes_that_get_rendered() {
-    if !library_present() {
-        return;
-    }
-    let (_dir, pdf) = synthetic_pdf(3);
+    let (_dir, pdf) = synthetic_pdf(3, 0);
 
     let measured = page_sizes(&pdf).unwrap();
     let mut rendered = Vec::new();
@@ -177,52 +217,16 @@ fn measured_sizes_are_the_sizes_that_get_rendered() {
     assert_eq!(measured, rendered);
 }
 
-/// The invariant [`SESSION`] exists for.
 #[test]
-fn two_threads_reading_the_same_document_both_get_the_truth() {
-    if !library_present() {
-        return;
-    }
-    let (_dir, pdf) = synthetic_pdf(6);
-    let expected = page_sizes(&pdf).unwrap();
-
-    let workers: Vec<_> = (0..4)
-        .map(|_| {
-            let path = pdf.clone();
-            std::thread::spawn(move || (0..12).map(|_| page_sizes(&path)).collect::<Vec<_>>())
-        })
-        .collect();
-
-    for worker in workers {
-        for attempt in worker.join().unwrap() {
-            assert_eq!(attempt.as_ref().map_err(|e| e.to_string()), Ok(&expected));
-        }
-    }
-}
-
-#[test]
-fn a_missing_file_is_measurable_as_an_error_not_a_panic() {
-    if !library_present() {
-        return;
-    }
-    assert!(page_sizes(Path::new("/nope/does-not-exist.pdf")).is_err());
-}
-
-#[test]
-fn page_count_agrees_with_hayro_on_a_well_formed_file() {
-    if !library_present() {
-        return;
-    }
-    let (_dir, pdf) = synthetic_pdf(4);
-    assert_eq!(page_count(&pdf).unwrap(), hayro_page_count(&pdf));
+fn page_count_is_the_parse_records_count() {
+    let (_dir, pdf) = synthetic_pdf(4, 0);
+    assert_eq!(page_count(&pdf).unwrap(), 4);
+    assert_eq!(crate::library::pdf_render::page_count(&pdf), Ok(4));
 }
 
 #[test]
 fn a_caller_can_stop_early() {
-    if !library_present() {
-        return;
-    }
-    let (_dir, pdf) = synthetic_pdf(5);
+    let (_dir, pdf) = synthetic_pdf(12, 0);
     let mut rendered = 0;
     let result = render_pages(&pdf, None, |_| {
         rendered += 1;
@@ -232,14 +236,11 @@ fn a_caller_can_stop_early() {
         Ok(())
     });
     assert!(result.is_err());
-    assert_eq!(rendered, 2, "rendering continued past the caller's error");
+    assert_eq!(rendered, 2, "pages were delivered past the caller's error");
 }
 
 #[test]
 fn a_malformed_file_is_an_error_not_a_panic() {
-    if !library_present() {
-        return;
-    }
     let dir = Scratch::new("raster-not-a");
     let pdf = dir.join("not-a.pdf");
     std::fs::write(&pdf, b"%PDF-1.7\nthis is not a pdf at all\n").unwrap();
@@ -251,23 +252,28 @@ fn a_malformed_file_is_an_error_not_a_panic() {
 
 #[test]
 fn a_missing_file_is_an_error_not_a_panic() {
-    if !library_present() {
-        return;
-    }
     let missing = Path::new("/nonexistent/oculus/raster/missing.pdf");
-    assert!(render_pages(missing, None, |_| Ok(())).is_err());
+    assert!(matches!(
+        render_pages(missing, None, |_| Ok(())),
+        Err(RasterError::Unreadable(_))
+    ));
     assert!(page_count(missing).is_err());
+    assert!(page_sizes(missing).is_err());
 }
 
 #[test]
 fn an_empty_file_is_an_error_not_a_panic() {
-    if !library_present() {
-        return;
-    }
     let dir = Scratch::new("raster-empty");
     let pdf = dir.join("empty.pdf");
     std::fs::write(&pdf, b"").unwrap();
     assert!(render_pages(&pdf, None, |_| Ok(())).is_err());
+
+    let pageless = dir.join("pageless.pdf");
+    crate::test_support::write_pdf(&pageless, 0);
+    assert!(matches!(
+        render_pages(&pageless, None, |_| Ok(())),
+        Err(RasterError::Empty)
+    ));
 }
 
 /// Off unless `OCULUS_RASTER_PDF` points at a real library PDF.
@@ -277,9 +283,6 @@ fn renders_a_real_library_pdf() {
         eprintln!("skipping: set OCULUS_RASTER_PDF to a real library PDF");
         return;
     };
-    if !library_present() {
-        return;
-    }
     let path = PathBuf::from(path);
     let mut first = None;
     let count = render_pages(&path, None, |page| {
@@ -291,14 +294,10 @@ fn renders_a_real_library_pdf() {
     .unwrap();
 
     assert!(count > 0);
-    let hayro_count = hayro_page_count(&path);
-    eprintln!("pages: pdfium {count}, hayro {hayro_count}");
-    assert_eq!(count, hayro_count);
-
     let first = first.expect("no page 1");
     assert!(first.png.len() > 1024, "page 1 PNG is suspiciously small");
     eprintln!(
-        "page 1: {} x {} ({} bytes)",
+        "{count} pages; page 1: {} x {} ({} bytes)",
         first.width,
         first.height,
         first.png.len()
