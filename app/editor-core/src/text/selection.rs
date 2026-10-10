@@ -56,6 +56,34 @@ impl SelectionRange {
         }
     }
 
+    /// The range CodeMirror holds as `from`, `to`, its direction and its
+    /// flags, taken verbatim: mapping can leave `from > to`, which
+    /// `range(anchor, head)` would reorder (so later mappings would differ).
+    /// `anchor`/`head` must be `from`/`to` in one order or the other.
+    pub fn raw(
+        (anchor, head): (usize, usize),
+        (from, to): (usize, usize),
+        goal_column: Option<f64>,
+        bidi_level: Option<u8>,
+        assoc: i8,
+    ) -> Option<Self> {
+        let inverted = if (anchor, head) == (from, to) {
+            false
+        } else if (anchor, head) == (to, from) {
+            true
+        } else {
+            return None;
+        };
+        Some(SelectionRange {
+            from,
+            to,
+            inverted,
+            assoc: assoc.signum(),
+            bidi_level: bidi_level.map(|l| l.min(6)),
+            goal_column,
+        })
+    }
+
     /// `range(anchor, head)` with no goal column, bidi level or assoc.
     pub fn new(anchor: usize, head: usize) -> Self {
         Self::range(anchor, head, None, None, 0)
@@ -235,6 +263,22 @@ impl Selection {
             }
         }
         Selection { ranges, main }
+    }
+
+    /// The selection of `ranges` as given, not sorted or merged, as
+    /// `EditorSelection.fromJSON` builds it (a history can hold selections
+    /// that `create` would merge).
+    pub fn verbatim(ranges: Vec<SelectionRange>, main: usize) -> Result<Self, SelectionError> {
+        if ranges.is_empty() {
+            return Err(SelectionError::Empty);
+        }
+        if main >= ranges.len() {
+            return Err(SelectionError::MainOutOfRange {
+                main,
+                ranges: ranges.len(),
+            });
+        }
+        Ok(Selection { ranges, main })
     }
 
     /// A one-range selection.

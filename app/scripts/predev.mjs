@@ -1,4 +1,4 @@
-// Dev preflight: dependencies, native binaries, debug CLI, keyd and generated docs.
+// Dev preflight: dependencies, native binaries, the editor core's wasm, debug CLI, keyd and generated docs.
 // OCULUS_CLI_WATCH=1 also starts the CLI watcher; OCULUS_SKIP_PREDEV skips it.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
@@ -38,6 +38,18 @@ if (!existsSync(modules) || mtime(modules) < mtime(join(app, "bun.lock"))) {
 //    macOS.
 for (const script of ["fetch-ffmpeg.mjs", "build-speech.mjs", "build-whisper.mjs"]) {
   execFileSync(process.execPath, [join(app, "scripts", script)], { cwd: app, stdio: "inherit" });
+}
+
+// The editor core's wasm for shadow mode (docs/editor-core.md). Without the wasm32
+// target or the pinned wasm-bindgen it skips with one line; a failed build
+// only leaves shadow mode off, so it never stops the app starting.
+try {
+  execFileSync(process.execPath, [join(app, "scripts", "build-editor-wasm.mjs"), "--optional"], {
+    cwd: app,
+    stdio: "inherit",
+  });
+} catch {
+  log("the editor core's wasm did not build — shadow mode stays off");
 }
 
 // The credential broker, built and signed every start as its helper app in

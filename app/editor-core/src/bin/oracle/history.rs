@@ -1,16 +1,19 @@
 //! `history`: a state with an undo history driven through a sequence of
-//! transactions and undo/redo commands, answered after every step.
+//! transactions and undo/redo commands, answered after every step. The
+//! history starts empty or restored from `historyField.toJSON`.
 //! `oracle/history.ts` runs the same steps on an `EditorState` with
 //! `history()`.
 
 use oculus_editor_core::text::{
-    History, HistoryEvent, Isolate, Popped, Selection, State, Text, Transaction,
+    History, HistoryConfig, HistoryEvent, Isolate, Popped, Selection, SelectionRange, State, Text,
+    Transaction,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::changes::{
-    SelectionSpec, Spec, change_set, desc_json, selection, selection_json, set_json,
+    SelectionSpec, Spec, change_set, desc_from_json, desc_json, selection, selection_json,
+    set_from_json, set_json,
 };
 use crate::text::fnv1a;
 
@@ -78,7 +81,90 @@ pub struct Step {
 pub struct Request {
     doc: String,
     selection: SelectionSpec,
+    /// `historyField.toJSON` to start from, instead of an empty history.
+    #[serde(default)]
+    history: Option<HistoryJson>,
+    /// `EditorSelection.toJSON` of a restored state, used instead of
+    /// `selection` (which is normalised; a restored one may not be).
+    #[serde(default)]
+    selection_json: Option<SelectionJson>,
     steps: Vec<Step>,
+}
+
+/// `EditorSelection.toJSON`.
+#[derive(Deserialize)]
+struct SelectionJson {
+    ranges: Vec<RangeJson>,
+    main: usize,
+}
+
+#[derive(Deserialize)]
+struct RangeJson {
+    anchor: usize,
+    head: usize,
+}
+
+/// `HistEvent.toJSON`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EventJson {
+    #[serde(default)]
+    changes: Option<Value>,
+    #[serde(default)]
+    mapped: Option<Vec<isize>>,
+    #[serde(default)]
+    start_selection: Option<SelectionJson>,
+    selections_after: Vec<SelectionJson>,
+}
+
+#[derive(Deserialize)]
+struct HistoryJson {
+    done: Vec<EventJson>,
+    undone: Vec<EventJson>,
+}
+
+/// `EditorSelection.fromJSON`: plain `range(anchor, head)`s, not merged.
+fn selection_from_json(s: &SelectionJson) -> Result<Selection, String> {
+    let ranges = s
+        .ranges
+        .iter()
+        .map(|r| SelectionRange::new(r.anchor, r.head))
+        .collect();
+    Selection::verbatim(ranges, s.main).map_err(|e| e.to_string())
+}
+
+fn event_from_json(e: &EventJson) -> Result<HistoryEvent, String> {
+    Ok(HistoryEvent {
+        changes: e.changes.as_ref().map(set_from_json).transpose()?,
+        mapped: e.mapped.as_deref().map(desc_from_json).transpose()?,
+        start_selection: e
+            .start_selection
+            .as_ref()
+            .map(selection_from_json)
+            .transpose()?,
+        selections_after: e
+            .selections_after
+            .iter()
+            .map(selection_from_json)
+            .collect::<Result<_, _>>()?,
+    })
+}
+
+/// `historyField.fromJSON`, refused unless it fits a document of `doc_len`.
+fn history_from_json(h: &HistoryJson, doc_len: usize) -> Result<History, String> {
+    let branch = |events: &[EventJson]| {
+        events
+            .iter()
+            .map(event_from_json)
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let history = History::from_events(
+        HistoryConfig::default(),
+        branch(&h.done)?,
+        branch(&h.undone)?,
+    );
+    history.check(doc_len).map_err(|e| e.to_string())?;
+    Ok(history)
 }
 
 fn event_json(e: &HistoryEvent) -> Value {
@@ -172,9 +258,16 @@ fn popped(p: Popped) -> Result<Next, String> {
 
 pub fn answer(r: Request) -> Result<Value, String> {
     let doc = Text::of(&r.doc);
-    let sel: Selection = selection(&r.selection)?;
+    let sel: Selection = match &r.selection_json {
+        Some(s) => selection_from_json(s)?,
+        None => selection(&r.selection)?,
+    };
     let mut state = State::with_selection(doc, sel).map_err(|e| e.to_string())?;
-    let mut history = History::default();
+    let mut history = match &r.history {
+        Some(h) => history_from_json(h, state.doc.len())?,
+        None => History::default(),
+    };
+    let seeded = r.history.is_some().then(|| history_json(&history));
     let mut answers = Vec::with_capacity(r.steps.len());
     for step in r.steps {
         let time = step.time;
@@ -240,5 +333,9 @@ pub fn answer(r: Request) -> Result<Value, String> {
         }
         answers.push(a);
     }
-    Ok(json!({ "steps": answers }))
+    let mut out = json!({ "steps": answers });
+    if let Some(seeded) = seeded {
+        out["seeded"] = seeded;
+    }
+    Ok(out)
 }

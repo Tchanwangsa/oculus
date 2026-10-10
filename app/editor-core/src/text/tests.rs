@@ -189,6 +189,38 @@ fn selection_normalises_like_codemirror() {
 }
 
 #[test]
+fn verbatim_selection_keeps_ranges_as_given() {
+    let r = SelectionRange::new;
+    // Out of order and overlapping, as `EditorSelection.fromJSON` keeps them.
+    let s = Selection::verbatim(vec![r(5, 8), r(2, 6)], 1).unwrap();
+    assert_eq!(s.ranges().len(), 2);
+    assert_eq!((s.main().anchor(), s.main_index()), (2, 1));
+    assert!(Selection::verbatim(vec![], 0).is_err());
+    assert!(Selection::verbatim(vec![r(0, 0)], 1).is_err());
+}
+
+#[test]
+fn raw_range_keeps_a_mapped_from_past_to() {
+    // "abcdefg" with 2..5 selected, all replaced by "xyz": the range maps to
+    // from 3, to 0, which `range(3, 0)` would reorder to 0..3.
+    let swallow = ChangeSet::of(&[ChangeSpec::replace(0, 7, "xyz")], 7).unwrap();
+    let mapped = SelectionRange::new(2, 5).map(swallow.desc(), -1);
+    assert_eq!((mapped.from(), mapped.to()), (3, 0));
+    let ends = (mapped.anchor(), mapped.head());
+    let raw = SelectionRange::raw(ends, (3, 0), None, None, mapped.assoc()).unwrap();
+    assert_eq!(raw, mapped);
+    // The two then map apart.
+    let insert = ChangeSet::of(&[ChangeSpec::insert(0, "Q")], 3).unwrap();
+    let next = |r: SelectionRange| {
+        let m = r.map(insert.desc(), -1);
+        (m.anchor(), m.head())
+    };
+    assert_eq!(next(raw), (4, 0));
+    assert_eq!(next(SelectionRange::new(3, 0)), (4, 1));
+    assert!(SelectionRange::raw((1, 2), (3, 0), None, None, 0).is_none());
+}
+
+#[test]
 fn replace_selection_with_two_cursors() {
     let doc = Text::of("ab cd");
     let sel = Selection::create(
@@ -255,6 +287,43 @@ fn history_groups_and_undoes() {
     assert_eq!(state.doc.to_string(), "abcd");
     assert_eq!(state.selection.main().head(), 4);
     assert_eq!(history.redo_depth(), 0);
+}
+
+/// A history restored mid-session (`from_events`) starts a new event on the
+/// next keystroke; resumed with its previous time and user event
+/// (`with_previous`) it joins the top one, as the live history did.
+#[test]
+fn resumed_history_groups_as_the_live_one() {
+    let mut time = 1000;
+    let (state, live) = type_text(
+        State::new(Text::empty()),
+        History::default(),
+        "ab",
+        &mut time,
+        10,
+    );
+    let events = || {
+        (
+            live.done().cloned().collect::<Vec<_>>(),
+            live.undone().cloned().collect::<Vec<_>>(),
+        )
+    };
+    let (done, undone) = events();
+    let restored = History::from_events(HistoryConfig::default(), done, undone);
+    let (done, undone) = events();
+    let resumed = History::from_events(HistoryConfig::default(), done, undone)
+        .with_previous(live.prev_time(), live.prev_user_event());
+    assert_eq!(resumed, live);
+    let depth_after = |h: History| {
+        let (_, h) = type_text(state.clone(), h, "c", &mut time.clone(), 10);
+        h.undo_depth()
+    };
+    assert_eq!(depth_after(live.clone()), 1);
+    assert_eq!(depth_after(resumed), 1);
+    assert_eq!(depth_after(restored), 2);
+    // An empty user event is none, on either side.
+    let blank = live.clone().with_previous(5, Some(""));
+    assert_eq!((blank.prev_time(), blank.prev_user_event()), (5, None));
 }
 
 #[test]
@@ -347,4 +416,197 @@ fn history_time_extremes_do_not_overflow() {
     let changes = state.changes(&[ChangeSpec::insert(1, "b")]).unwrap();
     let tr = Transaction::new(changes, i64::MIN).with_user_event("input.type");
     assert_eq!(history.update(&state, &tr).unwrap().undo_depth(), 1);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1000))]
+
+    /// `from_parts`/`from_sections` read back what `parts`/`sections` wrote.
+    #[test]
+    fn json_forms_round_trip(src in source(30), pa in picks()) {
+        let doc = Text::of(&src);
+        let a = set(&doc, &pa);
+        let back = ChangeSet::from_parts(&a.parts()).unwrap();
+        prop_assert_eq!(&back, &a);
+        prop_assert_eq!(back.apply(&doc).unwrap(), a.apply(&doc).unwrap());
+        let sections: Vec<_> = a.sections().collect();
+        prop_assert_eq!(ChangeDesc::from_sections(&sections).unwrap(), a.desc().clone());
+    }
+
+    /// A history rebuilt from its events checks out against the document
+    /// and undoes and redoes as the original does.
+    #[test]
+    fn restored_history_behaves_as_the_original(
+        src in source(20),
+        steps in prop::collection::vec((0u8..6, picks(), any::<usize>()), 1..25),
+    ) {
+        let (state, history) = random_history(&Text::of(&src), &steps);
+        let restored = History::from_events(
+            HistoryConfig::default(),
+            history.done().cloned().collect(),
+            history.undone().cloned().collect(),
+        );
+        prop_assert!(restored.check(state.doc.len()).is_ok());
+        prop_assert!(history.check(state.doc.len()).is_ok());
+        prop_assert_eq!(restored.prev_time(), 0);
+        prop_assert_eq!(restored.prev_user_event(), None);
+        let other_len = state.doc.len() + 1;
+        if history.done().any(|e| e.changes.is_some()) || history.undone().any(|e| e.changes.is_some()) {
+            prop_assert!(restored.check(other_len).is_err());
+        }
+        // Undo everything, then redo everything, on both.
+        let (mut a, mut b) = ((state.clone(), history), (state, restored));
+        for redo in [false, true] {
+            loop {
+                let pa = if redo { a.1.redo(&a.0, 0) } else { a.1.undo(&a.0, 0) }.unwrap();
+                let pb = if redo { b.1.redo(&b.0, 0) } else { b.1.undo(&b.0, 0) }.unwrap();
+                match (pa, pb) {
+                    (Some((ta, ha)), Some((tb, hb))) => {
+                        prop_assert_eq!(&ta.changes, &tb.changes);
+                        a = (a.0.apply(&ta).unwrap(), ha);
+                        b = (b.0.apply(&tb).unwrap(), hb);
+                        prop_assert_eq!(&a.0, &b.0);
+                        prop_assert!(b.1.check(b.0.doc.len()).is_ok());
+                    }
+                    (None, None) => break,
+                    _ => prop_assert!(false, "only one side could pop"),
+                }
+            }
+        }
+    }
+}
+
+/// A state and history after `steps`: edits (typed or not), selection
+/// changes, untracked edits, undos and redos, 100 ms apart.
+fn random_history(doc: &Text, steps: &[(u8, Picks, usize)]) -> (State, History) {
+    let mut state = State::new(doc.clone());
+    let mut history = History::default();
+    for (i, (kind, p, at)) in steps.iter().enumerate() {
+        let time = 1000 + 100 * i as i64;
+        let popped = match kind {
+            0 | 1 => {
+                let changes = set(&state.doc, p);
+                let end = changes.new_length();
+                let tr = Transaction::new(changes, time)
+                    .with_selection(Selection::single(at % (end + 1), at % (end + 1)))
+                    .with_user_event(if *kind == 0 {
+                        "input.type"
+                    } else {
+                        "input.paste"
+                    });
+                Some((tr, None))
+            }
+            2 => {
+                let b = bounds(&state.doc);
+                let pos = b[at % b.len()];
+                let tr = Transaction::new(ChangeSet::empty(state.doc.len()), time)
+                    .with_selection(Selection::single(pos, pos))
+                    .with_user_event("select");
+                Some((tr, None))
+            }
+            3 => {
+                let tr = Transaction::new(set(&state.doc, p), time).with_add_to_history(false);
+                Some((tr, None))
+            }
+            4 => history
+                .undo(&state, time)
+                .unwrap()
+                .map(|(t, h)| (t, Some(h))),
+            _ => history
+                .redo(&state, time)
+                .unwrap()
+                .map(|(t, h)| (t, Some(h))),
+        };
+        if let Some((tr, next)) = popped {
+            history = match next {
+                Some(next) => next,
+                None => history.update(&state, &tr).unwrap(),
+            };
+            state = state.apply(&tr).unwrap();
+        }
+    }
+    (state, history)
+}
+
+#[test]
+fn json_forms_keep_sections_as_given() {
+    use change::Part;
+    // Two kept runs side by side stay two, as `ChangeSet.fromJSON` keeps them.
+    let set = ChangeSet::from_parts(&[
+        Part::Keep(1),
+        Part::Keep(2),
+        Part::Replace(1, vec!["x".into(), "y".into()]),
+        Part::Replace(0, vec![]),
+    ])
+    .unwrap();
+    assert_eq!(
+        set.sections().collect::<Vec<_>>(),
+        [(1, -1), (2, -1), (1, 3), (0, 0)]
+    );
+    assert_eq!(set.apply(&Text::of("abcd")).unwrap().to_string(), "abcx\ny");
+    assert!(ChangeSet::from_parts(&[Part::Replace(0, vec!["a\nb".into()])]).is_err());
+    assert!(ChangeDesc::from_sections(&[(1, -2)]).is_err());
+    assert_eq!(
+        ChangeDesc::from_sections(&[(2, -1), (1, 0)])
+            .unwrap()
+            .new_length(),
+        2
+    );
+}
+
+#[test]
+fn check_refuses_inconsistent_events() {
+    let mut time = 1000;
+    let (_, history) = type_text(
+        State::new(Text::empty()),
+        History::default(),
+        "abc",
+        &mut time,
+        10,
+    );
+    let done: Vec<HistoryEvent> = history.done().cloned().collect();
+    let restore =
+        |done: Vec<HistoryEvent>| History::from_events(HistoryConfig::default(), done, vec![]);
+    assert!(restore(done.clone()).check(3).is_ok());
+    assert!(restore(done.clone()).check(2).is_err());
+    // A start selection past the document before the event.
+    let mut bad = done.clone();
+    bad[0].start_selection = Some(Selection::single(1, 1));
+    assert!(restore(bad).check(3).is_err());
+    // Changes without a start selection, which undo could not restore.
+    let mut bad = done.clone();
+    bad[0].start_selection = None;
+    assert!(restore(bad).check(3).is_err());
+    // A selection-only event above a change event.
+    let mut bad = done;
+    bad.push(HistoryEvent {
+        changes: None,
+        mapped: None,
+        start_selection: None,
+        selections_after: vec![Selection::single(0, 0)],
+    });
+    assert!(restore(bad).check(3).is_err());
+}
+
+#[test]
+fn unaligned_sections_are_refused_not_panicked() {
+    use change::Part;
+    // "ab" → "a" with a zero-length kept run left at the end, then a
+    // deletion of the rest: CodeMirror's compose throws on it.
+    let a =
+        ChangeSet::from_parts(&[Part::Keep(1), Part::Replace(1, vec![]), Part::Keep(0)]).unwrap();
+    let b = ChangeSet::from_parts(&[Part::Replace(1, vec![])]).unwrap();
+    assert!(matches!(a.try_compose(&b), Err(ChangeError::Malformed(_))));
+    assert!(a.desc().try_compose_desc(b.desc()).is_err());
+    // Merged as CodeMirror merges its own, it composes.
+    let merged = ChangeSet::from_parts(&[Part::Keep(1), Part::Replace(1, vec![])]).unwrap();
+    assert_eq!(
+        merged
+            .try_compose(&b)
+            .unwrap()
+            .apply(&Text::of("ab"))
+            .unwrap()
+            .to_string(),
+        ""
+    );
 }

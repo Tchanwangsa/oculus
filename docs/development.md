@@ -14,6 +14,7 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | The dev preflight | `app/scripts/predev.mjs` |
 | Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
 | Native binary fetcher (ffmpeg) | `app/scripts/fetch-ffmpeg.mjs` |
+| Builds the editor core's wasm for dev shadow mode | `app/scripts/build-editor-wasm.mjs` |
 | Compiles the on-device speech helper | `app/scripts/build-speech.mjs`, `app/src-tauri/speech/main.swift` |
 | Builds whisper.cpp's `whisper-cli` from a pinned release | `app/scripts/build-whisper.mjs` |
 | Builds, signs and (main checkout only) installs the dev `oculus-keyd` helper app | `app/scripts/build-keyd.mjs`, `app/scripts/keyd-build.mjs`, `app/keyd/.cargo/config.toml` |
@@ -44,6 +45,7 @@ bun run docs:cli      # rebuild the release CLI, regenerate docs/cli-reference.m
 bun run ffmpeg        # fetch ffmpeg into app/src-tauri/binaries/
 bun run speech        # compile the on-device speech helper there (macOS)
 bun run whisper       # build whisper.cpp's whisper-cli there (macOS, needs cmake)
+bun run editor-wasm   # the editor core's wasm for dev shadow mode (docs/editor-core.md)
 bun run keyd          # build and sign the dev oculus-keyd; install it from the main checkout
 bun run stage-keyd    # build and sign the release oculus-keyd the bundle ships, into binaries/
 ```
@@ -53,8 +55,12 @@ bun run stage-keyd    # build and sign the release oculus-keyd the bundle ships,
 It is bun's lifecycle hook for `dev`, and `beforeDevCommand` is
 `OCULUS_CLI_WATCH=1 bun run dev`, so every `tauri dev` runs it. In order it
 runs `bun install`, fetches ffmpeg, compiles the speech helper and
-`whisper-cli`, builds and signs the dev `oculus-keyd` helper app (failing
-like the CLI build does), builds the debug `oculus`, installs
+`whisper-cli`, builds the editor core's wasm for
+[shadow mode](./editor-core.md#shadow-mode-checks-the-rust-core-against-every-note-editor)
+(skipped with one line without the `wasm32-unknown-unknown` target or the
+pinned `wasm-bindgen` CLI, and never fatal), builds and signs the dev
+`oculus-keyd` helper app (failing like the CLI build does), builds the debug
+`oculus`, installs
 keyd only as
 [below](#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source),
 regenerates [cli-reference.md](./cli-reference.md) (written only when the help
@@ -159,11 +165,15 @@ CLI build, so the tests reuse its artifacts. sccache is installed because
 `app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
 
 A second job, on Linux because the crate is portable, checks
-`app/editor-core` ([editor.md](./editor.md#a-rust-editor-core-is-built-beside-the-editor-not-in-it)):
+`app/editor-core` ([editor-core.md](./editor-core.md)) and its wasm bridge:
 `cargo fmt --check`, clippy with `-D warnings` over every target and feature
-(so the `oracle` binary too), `cargo test --locked`, then the four oracles at a
-few thousand cases each, seeded with the run number so each run tries new
-cases. Replay a failure locally with the seed it prints.
+(so the `oracle` binary too) and over the bridge for `wasm32-unknown-unknown`,
+`cargo test --locked --workspace`, then installs the `wasm-bindgen` CLI at the
+pinned version (skipped when the cached `~/.cargo/bin` already has it), builds
+the wasm, and runs the oracles — four at a few thousand cases each, `shadow`
+at 300 — seeded with the run number so each run tries new cases. Replay a
+failure locally with the seed it prints. The first job's `bun run build` never
+builds the wasm, so it proves the frontend builds without it.
 
 `release.yml` is `workflow_dispatch` only. To cut a release, bump `version` in
 `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml` together, push,

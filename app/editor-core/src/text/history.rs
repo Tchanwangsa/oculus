@@ -12,6 +12,9 @@
 //! The history is a value beside the `State`: feed it every ordinary
 //! transaction with `update`; `undo`/`redo` return the transaction to apply
 //! together with the history after it (do not `update` with that transaction).
+//! `from_events` restores one as `historyField.fromJSON` does, `with_previous`
+//! resumes a live one, and `check` refuses a restored history that does not
+//! fit the document.
 
 use std::sync::Arc;
 
@@ -124,13 +127,45 @@ impl Default for History {
 
 impl History {
     pub fn new(config: HistoryConfig) -> Self {
+        Self::from_events(config, Vec::new(), Vec::new())
+    }
+
+    /// The history holding `done` and `undone` (oldest first), as
+    /// `historyField.fromJSON`: no previous time or user event, so the next
+    /// edit never joins the top event. Not checked; see `check`.
+    pub fn from_events(
+        config: HistoryConfig,
+        done: Vec<HistoryEvent>,
+        undone: Vec<HistoryEvent>,
+    ) -> Self {
         History {
-            done: Vec::new(),
-            undone: Vec::new(),
+            done: done.into_iter().map(Arc::new).collect(),
+            undone: undone.into_iter().map(Arc::new).collect(),
             prev_time: 0,
             prev_user_event: None,
             config,
         }
+    }
+
+    /// This history with the time and user event of the last recorded
+    /// transaction set, as a live `HistoryState` carries them (`from_events`
+    /// clears both), so that the next edit groups as it would have there.
+    /// An empty user event is none, as `Transaction::set_user_event` reads it.
+    pub fn with_previous(mut self, time: i64, user_event: Option<&str>) -> Self {
+        self.prev_time = time;
+        self.prev_user_event = user_event.filter(|e| !e.is_empty()).map(str::to_owned);
+        self
+    }
+
+    /// Refuses a history whose events do not fit a document of `doc_len`
+    /// (so that undoing, redoing or mapping them would fail), checked from
+    /// the top of each branch down: each event's changes apply to the
+    /// document after it, its mapping (if any) leads from the document of
+    /// the event below to the one before it, its selections fit their
+    /// documents, and only the bottom event may lack changes.
+    pub fn check(&self, doc_len: usize) -> Result<(), ChangeError> {
+        check_branch(&self.done, doc_len, "done")?;
+        check_branch(&self.undone, doc_len, "undone")
     }
 
     /// The undo branch, oldest first.
@@ -179,14 +214,14 @@ impl History {
             state = state.isolate();
         }
         if !tr.add_to_history {
-            return Ok(if tr.changes.is_empty() {
-                state
+            return if tr.changes.is_empty() {
+                Ok(state)
             } else {
                 state.add_mapping(tr.changes.desc())
-            });
+            };
         }
         if let Some(event) = HistoryEvent::from_transaction(tr, start, None)? {
-            state = state.add_changes(event, tr);
+            state = state.add_changes(event, tr)?;
         } else if tr.selection.is_some() {
             state = state.add_selection(start.selection.clone(), tr.time, tr.user_event());
         }
@@ -243,7 +278,9 @@ impl History {
         }
     }
 
-    fn add_changes(&self, event: HistoryEvent, tr: &Transaction) -> Self {
+    /// Refused when the top event does not fit `tr` (a history that failed
+    /// `check`, or a change splitting a surrogate pair the event inserted).
+    fn add_changes(&self, event: HistoryEvent, tr: &Transaction) -> Result<Self, ChangeError> {
         let time = tr.time;
         let user_event = tr.user_event();
         let mut done = self.done.clone();
@@ -265,7 +302,7 @@ impl History {
                 .changes
                 .as_ref()
                 .expect("joins checked it")
-                .compose(last.changes.as_ref().expect("joins checked it"));
+                .try_compose(last.changes.as_ref().expect("joins checked it"))?;
             let joined = HistoryEvent {
                 changes: Some(changes),
                 mapped: last.mapped.clone(),
@@ -278,7 +315,7 @@ impl History {
             let to = done.len();
             done = update_branch(&done, to, self.config.min_depth, event);
         }
-        self.with_branches(done, Vec::new(), time, user_event.map(str::to_owned))
+        Ok(self.with_branches(done, Vec::new(), time, user_event.map(str::to_owned)))
     }
 
     fn add_selection(&self, selection: Selection, time: i64, user_event: Option<&str>) -> Self {
@@ -302,13 +339,13 @@ impl History {
         )
     }
 
-    fn add_mapping(&self, mapping: &ChangeDesc) -> Self {
-        self.with_branches(
-            add_mapping_to_branch(&self.done, mapping),
-            add_mapping_to_branch(&self.undone, mapping),
+    fn add_mapping(&self, mapping: &ChangeDesc) -> Result<Self, ChangeError> {
+        Ok(self.with_branches(
+            add_mapping_to_branch(&self.done, mapping)?,
+            add_mapping_to_branch(&self.undone, mapping)?,
             self.prev_time,
             self.prev_user_event.clone(),
-        )
+        ))
     }
 
     fn pop(&self, side: Side, state: &State, only_selection: bool, time: i64) -> Popped {
@@ -345,7 +382,7 @@ impl History {
             };
             let mut rest: Branch = branch[..branch.len() - 1].to_vec();
             if let Some(mapped) = &event.mapped {
-                rest = add_mapping_to_branch(&rest, mapped);
+                rest = add_mapping_to_branch(&rest, mapped)?;
             }
             let tr = Transaction::new(changes.clone(), time)
                 .with_selection(event.start_selection.clone().expect("a change event"))
@@ -376,6 +413,58 @@ impl History {
         };
         Ok(Some((tr, history)))
     }
+}
+
+/// `History::check` for one branch, whose top event is over `doc_len`.
+fn check_branch(branch: &Branch, mut len: usize, name: &str) -> Result<(), ChangeError> {
+    let fail = |i: usize, what: String| Err(ChangeError::Malformed(format!("{name}[{i}]: {what}")));
+    let fits = |sel: &Selection, len: usize| sel.check(len).is_ok();
+    for (i, event) in branch.iter().enumerate().rev() {
+        if !event.selections_after.iter().all(|s| fits(s, len)) {
+            return fail(
+                i,
+                format!("a selection after it is outside a document of {len}"),
+            );
+        }
+        let Some(changes) = &event.changes else {
+            if i > 0 {
+                return fail(i, "only the bottom event may lack changes".into());
+            }
+            if event.mapped.is_some() || event.start_selection.is_some() {
+                return fail(i, "a mapping or start selection without changes".into());
+            }
+            continue;
+        };
+        if changes.length() != len {
+            return fail(
+                i,
+                format!(
+                    "changes of length {} over a document of {len}",
+                    changes.length()
+                ),
+            );
+        }
+        let before = changes.new_length();
+        match &event.start_selection {
+            Some(start) if fits(start, before) => {}
+            Some(_) => return fail(i, format!("start selection outside a document of {before}")),
+            None => return fail(i, "changes without a start selection".into()),
+        }
+        len = match &event.mapped {
+            Some(mapped) if mapped.new_length() == before => mapped.length(),
+            Some(mapped) => {
+                return fail(
+                    i,
+                    format!(
+                        "a mapping to length {} where the event starts at {before}",
+                        mapped.new_length()
+                    ),
+                );
+            }
+            None => before,
+        };
+    }
+    Ok(())
 }
 
 fn depth(branch: &Branch) -> usize {
@@ -468,17 +557,18 @@ fn pop_selection(branch: &Branch) -> Branch {
 
 /// Maps the branch over `mapping` from the top down. An event whose changes
 /// map away entirely is dropped, its selections carried down, and the
-/// mapping continues below it composed with what it stored.
-fn add_mapping_to_branch(branch: &Branch, mapping: &ChangeDesc) -> Branch {
+/// mapping continues below it composed with what it stored. Refused when an
+/// event does not fit the mapping (a history that failed `check`).
+fn add_mapping_to_branch(branch: &Branch, mapping: &ChangeDesc) -> Result<Branch, ChangeError> {
     let mut mapping = mapping.clone();
     let mut length = branch.len();
     let mut selections: Vec<Selection> = Vec::new();
     while length > 0 {
-        let event = map_event(&branch[length - 1], &mapping, selections);
+        let event = map_event(&branch[length - 1], &mapping, selections)?;
         if event.has_changes() {
             let mut out = branch[..length].to_vec();
             out[length - 1] = Arc::new(event);
-            return out;
+            return Ok(out);
         }
         length -= 1;
         selections = event.selections_after;
@@ -489,14 +579,18 @@ fn add_mapping_to_branch(branch: &Branch, mapping: &ChangeDesc) -> Branch {
             None => break,
         }
     }
-    if selections.is_empty() {
+    Ok(if selections.is_empty() {
         Vec::new()
     } else {
         vec![Arc::new(HistoryEvent::selection(selections))]
-    }
+    })
 }
 
-fn map_event(event: &HistoryEvent, mapping: &ChangeDesc, extra: Vec<Selection>) -> HistoryEvent {
+fn map_event(
+    event: &HistoryEvent,
+    mapping: &ChangeDesc,
+    extra: Vec<Selection>,
+) -> Result<HistoryEvent, ChangeError> {
     let mut selections: Vec<Selection> = event
         .selections_after
         .iter()
@@ -504,18 +598,18 @@ fn map_event(event: &HistoryEvent, mapping: &ChangeDesc, extra: Vec<Selection>) 
         .collect();
     selections.extend(extra);
     let Some(changes) = &event.changes else {
-        return HistoryEvent::selection(selections);
+        return Ok(HistoryEvent::selection(selections));
     };
-    let mapped_changes = changes.map(mapping, false);
-    let before = mapping.map_desc(changes.desc(), true);
+    let mapped_changes = changes.try_map(mapping, false)?;
+    let before = mapping.try_map_desc(changes.desc(), true)?;
     let full_mapping = match &event.mapped {
-        Some(mapped) => mapped.compose_desc(&before),
+        Some(mapped) => mapped.try_compose_desc(&before)?,
         None => before.clone(),
     };
-    HistoryEvent {
+    Ok(HistoryEvent {
         changes: Some(mapped_changes),
         mapped: Some(full_mapping),
         start_selection: event.start_selection.as_ref().map(|s| s.map(&before, -1)),
         selections_after: selections,
-    }
+    })
 }

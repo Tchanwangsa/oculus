@@ -9,7 +9,7 @@ pub mod selection;
 mod tests;
 pub mod transaction;
 
-pub use change::{Change, ChangeDesc, ChangeError, ChangeSet, ChangeSpec, MapMode, Touch};
+pub use change::{Change, ChangeDesc, ChangeError, ChangeSet, ChangeSpec, MapMode, Part, Touch};
 pub use history::{History, HistoryConfig, HistoryEvent, Popped};
 pub use rope::{Chunks, Iter, Line, Lines, PosError, Text};
 pub use selection::{Selection, SelectionError, SelectionRange};

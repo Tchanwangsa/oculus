@@ -9,8 +9,12 @@
 // redoSelection, sometimes run to exhaustion. After every step the document,
 // selection, depths and the whole history (both branches' events, prevTime,
 // prevUserEvent) are compared; long sequences compare digests of the document
-// and history between full comparisons every 20 steps and at the end. Then every corpus note is typed in character
-// by character with random undos, redos and cursor moves.
+// and history between full comparisons every 20 steps and at the end. Some
+// cases first run random steps unrecorded, then restore the state through
+// `toJSON`/`fromJSON` with `historyField`: the Rust history starts from that
+// JSON, its events are compared, and the steps run on from there. Then every
+// corpus note is typed in character by character with random undos, redos
+// and cursor moves.
 //
 //   bun editor-core/oracle/history.ts [cases] [seed] [only]     (from app/)
 
@@ -281,13 +285,30 @@ function nextTime(rng: Rng, time: number): number {
 }
 
 function randomCase(rng: Rng) {
-  const raw = rng.chance(0.05) ? source(rng, rng.logInt(100, 2000), 0.05) : source(rng, rng.int(30), 0.15);
+  let raw = rng.chance(0.05) ? source(rng, rng.logInt(100, 2000), 0.05) : source(rng, rng.int(30), 0.15);
   let state = EditorState.create({ doc: raw, extensions });
-  const selection = randomSelection(rng, state.doc);
+  let selection = randomSelection(rng, state.doc);
   state = state.update({ selection: cmSelection(selection) }).state;
   // A fresh state's history is empty; the selection above is not recorded.
   state = EditorState.create({ doc: state.doc, selection: state.selection, extensions });
   let time = rng.pick([0, 0, 1000, 1.7e12 + rng.int(1e9)]);
+  let restored: { history: unknown; selection: unknown; seeded: unknown } | null = null;
+  if (rng.chance(0.3)) {
+    // Unrecorded steps, then a round trip through JSON (as a stash restore).
+    for (let i = rng.pick([3, 8, 20, 60]); i > 0; i--) {
+      time = nextTime(rng, time);
+      try {
+        state = cmStep(state, randomStep(rng, state, time)).state;
+      } catch {
+        refused++; // see `run`
+      }
+    }
+    const json = JSON.parse(JSON.stringify(state.toJSON({ history: historyField })));
+    state = EditorState.fromJSON(json, { extensions }, { history: historyField });
+    raw = json.doc;
+    selection = selSpec(state.selection);
+    restored = { history: json.history, selection: json.selection, seeded: snapshot(state, true, true).hist };
+  }
   const steps: Record<string, unknown>[] = [];
   const expected: unknown[] = [];
   // Rarely long enough to trim a branch (`minDepth` 100 + 20) or fill an
@@ -341,8 +362,15 @@ function randomCase(rng: Rng) {
     const last = expected.length - 1;
     expected[last] = snapshot(state, (expected[last] as { ran: boolean }).ran, true);
   }
-  const request = { op: "history", doc: raw, selection, steps };
-  return { request, expected: { steps: expected } };
+  const request = {
+    op: "history",
+    doc: raw,
+    selection,
+    history: restored?.history,
+    selection_json: restored?.selection,
+    steps,
+  };
+  return { request, expected: { steps: expected, seeded: restored?.seeded } };
 }
 
 /** Types `source` in at the cursor one code point at a time, with random

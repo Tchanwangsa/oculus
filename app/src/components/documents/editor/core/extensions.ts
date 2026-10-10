@@ -23,6 +23,7 @@ import { mathShorthand } from "../math/tools/shorthand";
 import { mathCompletionSource, mathOptionPreview, mathTools } from "../math/tools/mathTools";
 import { mentionCompletionSource, mentionOptionClass, mentionOptionIcon } from "../chrome/mentions";
 import { rawMode } from "../chrome/rawMode";
+import { editorShadow } from "../shadow";
 import { noteHighlight, noteTheme } from "../theme";
 import { noteUndoRouting } from "./undoRouting";
 
@@ -61,6 +62,7 @@ export function noteExtensions(opts: {
 }): Extension {
   return [
     history(),
+    editorShadow(),
     noteUndoRouting(),
     drawSelection(),
     dropCursor(),
