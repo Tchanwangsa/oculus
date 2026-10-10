@@ -23,6 +23,31 @@
   white-space: pre-wrap;
 }
 
+/* In-place selection of rendered maths (`lib/markdown/mathSelection/`): the
+ * formula is positioned and isolated so its bands sit under its glyphs,
+ * neither of which moves anything; the bands are the note field's
+ * (`.cm-math-view-band`). */
+.katex[data-math-selecting] {
+  position: relative;
+  isolation: isolate;
+}
+.md-math-bands {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: -1;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.md-math-band {
+  position: absolute;
+  border-radius: 2px;
+  background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+}
+
 /* A pressed formula's read-only MathLive field (`mathSelect.ts`), in place of
  * KaTeX's drawing and tinted as the note editor's field is (`theme.ts`). */
 /* A step more specific than KaTeX's own `.katex-display > .katex > .katex-html`. */

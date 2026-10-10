@@ -1,11 +1,15 @@
 import type { MathfieldElement } from "mathlive";
 
+import { rustField } from "@/lib/maths/switch";
+import { NOT_MATHS_PRESS } from "./mathSelection/formula";
 import { mathAround } from "./selection";
 
 /**
- * Selecting inside a rendered formula (a chat reply, a markdown file). KaTeX's
- * output has no map from its glyphs back to the TeX, so a press on a formula
- * swaps it for a read-only MathLive field, the note editor's (`components/documents/editor/math/field/mathField/`):
+ * Selecting inside a rendered formula (a chat reply, a markdown file) with
+ * the Rust switch off (`lib/maths/switch.ts`; `mathSelection/` is the
+ * in-place path when it is on). KaTeX's output has no map from its glyphs
+ * back to the TeX, so a press on a formula swaps it for a read-only
+ * MathLive field, the note editor's (`components/documents/editor/math/field/mathField/`):
  * a drag selects by structure — a cell, a matrix, a run of atoms — through
  * the editor's own hit-test (`caretAt`), widening (`wholeStructures`) and
  * copy. Focus leaving the field, Esc or a press outside it puts the KaTeX
@@ -36,7 +40,7 @@ function load() {
  *  TeX MathLive reads cleanly. */
 function target(e: Event): { math: Element; tex: string; display: boolean } | null {
   const el = e.target instanceof Element ? e.target : null;
-  if (!el || el.closest("button, a, [role='button'], [contenteditable='true'], math-field")) return null;
+  if (!el || el.closest(NOT_MATHS_PRESS)) return null;
   const math = mathAround(el);
   const katex = math?.classList.contains("katex") ? math : math?.querySelector(".katex");
   const tex = katex?.querySelector('annotation[encoding="application/x-tex"]')?.textContent?.trim();
@@ -125,13 +129,13 @@ function open(e: PointerEvent, math: Element, tex: string, display: boolean, f: 
 /** Installed once, app-wide. */
 export function watchMathPress() {
   document.addEventListener("pointerover", (e) => {
-    if (!loading && target(e)) load();
+    if (!loading && !rustField() && target(e)) load();
   });
   document.addEventListener(
     "pointerdown",
     (e) => {
       if (openField && !(e.target instanceof Element && e.target.closest("math-field"))) openField();
-      if (e.button !== 0 || e.shiftKey || e.metaKey || e.ctrlKey || !field) return;
+      if (e.button !== 0 || e.shiftKey || e.metaKey || e.ctrlKey || !field || rustField()) return;
       const t = target(e);
       if (!t || !field.readsCleanly(t.tex, t.display)) return;
       // No native text selection from this press: the field takes it.

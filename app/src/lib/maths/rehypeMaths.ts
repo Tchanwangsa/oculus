@@ -12,6 +12,11 @@
  * similar span. Before the engine is ready a formula is a quiet placeholder
  * (`.md-math-pending`), and the components rendering it re-render on ready
  * (`useMathsReady`).
+ *
+ * With the Rust switch on (`switch.ts`) both renders carry the source map
+ * (`data-s`/`data-e`), which in-place selection reads
+ * (`lib/markdown/mathSelection/`). Its offsets index the TeX annotation's
+ * text, so line ends are made `\n` first, as the HTML parser makes them.
  */
 import type { Element, ElementContent, Root } from "hast";
 import { fromHtmlIsomorphic } from "hast-util-from-html-isomorphic";
@@ -20,20 +25,21 @@ import { SKIP, visitParents } from "unist-util-visit-parents";
 import type { VFile } from "vfile";
 import { mathsReady } from "./engine";
 import { renderToString } from "./render";
+import { rustField } from "./switch";
 
 const NO_CLASSES: readonly unknown[] = [];
 
 /** Where a failed formula is, for the file's message. */
 type Where = { ancestors: (Root | Element)[]; place: Element["position"] };
 
-function rendered(value: string, displayMode: boolean, file: VFile, where: Where): ElementContent[] {
+function rendered(value: string, displayMode: boolean, sourceMap: boolean, file: VFile, where: Where): ElementContent[] {
   if (!mathsReady()) {
     const className = displayMode ? ["md-math-pending", "md-math-pending-display"] : ["md-math-pending"];
     return [{ type: "element", tagName: "span", properties: { className }, children: [{ type: "text", value }] }];
   }
   let result: string;
   try {
-    result = renderToString(value, { displayMode, throwOnError: true });
+    result = renderToString(value, { displayMode, sourceMap, throwOnError: true });
   } catch (error) {
     const cause = error as Error;
     file.message("Could not render maths", {
@@ -43,7 +49,7 @@ function rendered(value: string, displayMode: boolean, file: VFile, where: Where
       source: "rehype-maths",
     });
     try {
-      result = renderToString(value, { displayMode, strict: "ignore", throwOnError: false });
+      result = renderToString(value, { displayMode, sourceMap, strict: "ignore", throwOnError: false });
     } catch {
       return [
         {
@@ -60,6 +66,7 @@ function rendered(value: string, displayMode: boolean, file: VFile, where: Where
 
 export default function rehypeMaths() {
   return (tree: Root, file: VFile) => {
+    const sourceMap = rustField();
     visitParents(tree, "element", (element, parents) => {
       const classes = Array.isArray(element.properties.className) ? element.properties.className : NO_CLASSES;
       const languageMath = classes.includes("language-math");
@@ -78,9 +85,10 @@ export default function rehypeMaths() {
       }
       if (!parent) return;
 
-      const value = toText(scope, { whitespace: "pre" });
+      const text = toText(scope, { whitespace: "pre" });
+      const value = sourceMap ? text.replace(/\r\n?/g, "\n") : text;
       const where = { ancestors: [...parents, element], place: element.position };
-      const result = rendered(value, displayMode, file, where);
+      const result = rendered(value, displayMode, sourceMap, file, where);
       parent.children.splice(parent.children.indexOf(scope), 1, ...result);
       return SKIP;
     });
