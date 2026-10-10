@@ -287,7 +287,6 @@ function start(rng: Rng, doc: string, actions: number): { driver: Driver; how: S
 }
 
 let failures = 0;
-let staleTrees = 0;
 const fail = (label: string, replay: string, message: string, details?: unknown) => {
   failures++;
   if (failures > 5) return;
@@ -303,17 +302,6 @@ function finish(label: string, replay: string, d: Driver) {
   if (reports.length) {
     const first = reports[0];
     reports.length = 0;
-    // CodeMirror's incremental tree disagreeing with a fresh Lezer parse of
-    // the same text, the shadow agreeing with the fresh one, is the app
-    // grammar's bug, not the shadow's: counted and shown, not failed.
-    if (first.kind === "tree" && (first.details as { shadowMatchesFreshLezerParse?: boolean }).shadowMatchesFreshLezerParse) {
-      if (++staleTrees <= 3) {
-        const { expected, actual } = first.details as { expected: string; actual: string };
-        console.error(`NOTE ${label}: CodeMirror's incremental tree has ${expected} where a fresh parse and the shadow have ${actual}`);
-        console.error(`  replay:   ${replay}`);
-      }
-      return;
-    }
     fail(label, replay, `${first.kind} reported`, first.details);
     return;
   }
@@ -377,8 +365,7 @@ if (args.only === null) {
 
 console.log(
   `shadow oracle: ${cases} random cases (${starts.fresh} fresh, ${starts.restored} restored, ${starts.late} late) + ${notes} corpus notes, ` +
-    `${steps} transactions, ${fullChecks} full checks (${treeChecks} with a tree), seed ${args.seed}, ${failures} mismatches` +
-    (staleTrees ? ` (and ${staleTrees} stale incremental Lezer trees)` : ""),
+    `${steps} transactions, ${fullChecks} full checks (${treeChecks} with a tree), seed ${args.seed}, ${failures} mismatches`,
 );
 if (cases === 0 || treeChecks === 0) {
   console.error("shadow oracle: nothing was checked");
