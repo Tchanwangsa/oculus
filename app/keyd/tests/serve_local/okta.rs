@@ -142,7 +142,7 @@ fn the_binary_saves_credentials_and_signs_in_for_the_cli_only() {
     // The sign-in's sessions are in the vault, not in files.
     assert_eq!(
         replies[8],
-        json!({"canvas": true, "sso": true, "ed": false, "authenticated": true, "signed_out": false})
+        json!({"canvas": true, "sso": true, "ed": false, "authenticated": true, "signed_out": false, "generation": 2})
     );
     assert!(!keyd.dir.join("canvas-session.cookie").exists());
     assert!(!keyd.dir.join("sso-session.cookie").exists());
