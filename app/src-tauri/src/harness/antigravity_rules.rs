@@ -700,6 +700,33 @@ mod tests {
         }
     }
 
+    /// `oculus` runs in agy's terminal sandbox and must reach keyd's socket:
+    /// no deny covers it, and the rules grant the CLI to run.
+    #[test]
+    fn no_rule_denies_keyds_socket_and_the_cli_may_run() {
+        let lib = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
+        let cli = OculusCli {
+            bin: PathBuf::from("/repo/target/release/oculus"),
+            launcher: None,
+        };
+        let r = rules_for(lib, Some(&cli), &[]);
+        let socket = keyd_core::paths::socket(lib);
+        for d in &r.deny {
+            let Some(path) = d
+                .strip_prefix("write_file(")
+                .or_else(|| d.strip_prefix("read_file("))
+                .and_then(|p| p.strip_suffix(')'))
+            else {
+                continue;
+            };
+            assert!(
+                !socket.starts_with(path),
+                "{d} covers keyd's socket {socket:?}"
+            );
+        }
+        assert!(r.allow.iter().any(|a| a == "command(oculus)"));
+    }
+
     #[test]
     fn sqlite3_is_denied_on_both_spellings_of_the_database() {
         let lib = scratch("spellings");

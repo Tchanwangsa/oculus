@@ -41,6 +41,39 @@ pub struct AntigravitySession {
     expecting: Arc<AtomicBool>,
 }
 
+/// `agy`'s argv after the binary.
+fn launch_args(base: &ThreadSpawn) -> Vec<String> {
+    let mut args: Vec<String> = [
+        // The `=` is load-bearing: see the module docs.
+        "--print=",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        // A message starting with `/` is text, not a slash command.
+        "--disable-slash-commands",
+        // Shell commands only; file tools answer to the rules. This sandbox
+        // lets `oculus` reach keyd's socket with no grant of its own. Never
+        // add `--dangerously-skip-permissions`: it lets file tools write
+        // outside the library (docs/harness.md).
+        "--sandbox",
+        // Claude's `acceptEdits`: workspace edits need no approval.
+        "--mode",
+        "accept-edits",
+        "--add-dir",
+    ]
+    .map(String::from)
+    .into();
+    args.push(base.library.display().to_string());
+    if let Some(m) = &base.model {
+        args.extend(["--model".into(), model_slug(m, base.effort.as_deref())]);
+    }
+    if let Some(id) = &base.resume {
+        args.extend(["--conversation".into(), id.clone()]);
+    }
+    args
+}
+
 impl AntigravitySession {
     pub fn spawn(cfg: AntigravitySpawn, sink: Sink) -> Result<Arc<Self>, String> {
         let base = cfg.base;
@@ -49,26 +82,7 @@ impl AntigravitySession {
         super::antigravity_rules::install(&base.library, cfg.approved.clone())
             .map_err(|e| format!("Antigravity was not started: {e}"))?;
         let mut cmd = Command::new(&base.bin);
-        // The `=` is load-bearing: see the module docs.
-        cmd.arg("--print=")
-            .args(["--input-format", "stream-json"])
-            .args(["--output-format", "stream-json"])
-            // A message starting with `/` is text, not a slash command.
-            .arg("--disable-slash-commands")
-            // Shell commands only; file tools answer to the rules. Never add
-            // `--dangerously-skip-permissions`: it lets file tools write
-            // outside the library (docs/harness.md).
-            .arg("--sandbox")
-            // Claude's `acceptEdits`: workspace edits need no approval.
-            .args(["--mode", "accept-edits"])
-            .arg("--add-dir")
-            .arg(&base.library);
-        if let Some(m) = &base.model {
-            cmd.args(["--model", &model_slug(m, base.effort.as_deref())]);
-        }
-        if let Some(id) = &base.resume {
-            cmd.args(["--conversation", id]);
-        }
+        cmd.args(launch_args(&base));
         cmd.current_dir(&base.cwd)
             .env_clear()
             .envs(base.env.iter().map(|(k, v)| (k, v)));
@@ -696,6 +710,43 @@ fn is_slug(w: &str) -> bool {
 mod tests {
     use super::*;
     use crate::harness::event::ToolKind;
+
+    fn spawn_base(model: Option<&str>, resume: Option<&str>) -> ThreadSpawn {
+        ThreadSpawn {
+            bin: "/usr/bin/agy".into(),
+            cwd: "/lib/agents".into(),
+            library: "/lib".into(),
+            resume: resume.map(String::from),
+            model: model.map(String::from),
+            effort: None,
+            env: Vec::new(),
+            raw_log: None,
+        }
+    }
+
+    /// Measured on agy 1.2.9: `--sandbox` alone lets `oculus` connect to
+    /// keyd's socket, so the launch adds no socket or network option, and
+    /// never turns the sandbox off.
+    #[test]
+    fn agy_runs_in_its_terminal_sandbox_and_nothing_wider() {
+        for base in [
+            spawn_base(None, None),
+            spawn_base(Some("gemini-3-pro"), Some("conv-1")),
+        ] {
+            let args = launch_args(&base);
+            assert_eq!(args.iter().filter(|a| *a == "--sandbox").count(), 1);
+            let mode = args.iter().position(|a| a == "--mode").unwrap();
+            assert_eq!(args[mode + 1], "accept-edits");
+            for a in &args {
+                assert!(
+                    !a.contains("dangerously") && !a.contains("sandbox-") && !a.contains("socket"),
+                    "unexpected option {a}"
+                );
+            }
+            let dir = args.iter().position(|a| a == "--add-dir").unwrap();
+            assert_eq!(args[dir + 1], "/lib");
+        }
+    }
 
     /// A real `agy` 1.2.9 session, recorded with the bridge's flags.
     #[test]

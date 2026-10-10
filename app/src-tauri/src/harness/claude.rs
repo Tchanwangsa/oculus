@@ -819,6 +819,15 @@ mod tests {
             &serde_json::json!(["/Users/x/Library/Application Support/com.tchan.oculus/keyd.sock"]),
             "keyd's socket, and no other"
         );
+        assert_eq!(
+            v.pointer("/sandbox/network/allowUnixSockets/0").unwrap(),
+            keyd_core::paths::socket(library).to_str().unwrap(),
+            "the path keyd's endpoint is bound at, not a copy of it"
+        );
+        assert!(
+            v.pointer("/sandbox/network/allowAllUnixSockets").is_none(),
+            "one socket is granted, not all of them"
+        );
 
         let deny: Vec<&str> = v
             .pointer("/permissions/deny")
@@ -869,6 +878,39 @@ mod tests {
             .filter_map(|r| r.as_str())
             .collect();
         assert_eq!(allow2, ["Bash(oculus:*)", "Bash(/opt/oculus/bin/oculus:*)"]);
+    }
+
+    /// The sandbox grant follows the library the thread runs over, and no
+    /// `Edit` deny (merged into `denyWrite`) covers the socket it grants.
+    #[test]
+    fn the_socket_grant_follows_the_library_and_no_deny_covers_it() {
+        for lib in [
+            "/Users/x/Library/Application Support/com.tchan.oculus",
+            "/d",
+        ] {
+            let library = Path::new(lib);
+            let v: serde_json::Value =
+                serde_json::from_str(&settings_json(library, &library.join("agents"), None))
+                    .unwrap();
+            let socket = keyd_core::paths::socket(library);
+            assert_eq!(
+                v.pointer("/sandbox/network/allowUnixSockets").unwrap(),
+                &serde_json::json!([socket.to_str().unwrap()])
+            );
+            for rule in v
+                .pointer("/permissions/deny")
+                .and_then(|d| d.as_array())
+                .unwrap()
+                .iter()
+                .filter_map(|r| r.as_str())
+                .filter_map(|r| r.strip_prefix("Edit(/").and_then(|r| r.strip_suffix(')')))
+            {
+                assert!(
+                    !crate::harness::protected::glob_covers(rule, socket.to_str().unwrap()),
+                    "Edit deny {rule} covers {socket:?}"
+                );
+            }
+        }
     }
 
     /// A question, its attachments, the answer, then a tool result that is

@@ -1736,6 +1736,42 @@ mod tests {
     use super::super::event::ToolKind;
     use super::*;
 
+    /// opencode has no OS sandbox, so `oculus` reaches keyd's socket with no
+    /// grant: the config sets none, denies nothing that covers the socket,
+    /// and lets the CLI run.
+    #[test]
+    fn the_opencode_config_adds_no_sandbox_and_denies_nothing_over_keyds_socket() {
+        let lib = "/Users/x/Library/Application Support/com.tchan.oculus";
+        let rendered = render_config(
+            Path::new(lib),
+            "p",
+            &OneOffPrompts {
+                naming: "n",
+                writer: "w",
+                lecture_end: "l",
+            },
+        );
+        let v: Value = serde_json::from_str(&rendered).expect("the template renders valid JSON");
+        assert!(v.get("sandbox").is_none());
+        assert_eq!(
+            v.pointer("/permission/bash/oculus *"),
+            Some(&json!("allow"))
+        );
+        let socket = keyd_core::paths::socket(std::path::Path::new(lib));
+        for (pattern, rule) in v
+            .pointer("/permission/edit")
+            .and_then(Value::as_object)
+            .unwrap()
+        {
+            if rule == "deny" && pattern.starts_with('/') {
+                assert!(
+                    !super::super::protected::glob_covers(pattern, socket.to_str().unwrap()),
+                    "{pattern} covers {socket:?}"
+                );
+            }
+        }
+    }
+
     /// Routes like [`OpencodeServer::dispatch`]: session-less events first,
     /// then the first session the stream names is ours and any other is not.
     fn replay(raw: &str) -> Vec<HarnessEvent> {

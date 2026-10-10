@@ -963,6 +963,35 @@ mod tests {
         );
     }
 
+    /// `oculus` reaches keyd's Unix socket from inside Codex's sandbox only
+    /// while the workspace-write policy has network access (measured: the
+    /// connect gets EPERM without it); Codex has no per-socket grant.
+    #[test]
+    fn every_thread_and_turn_keeps_the_sandbox_network_open() {
+        for (model, effort, instructions, ephemeral) in [
+            (Some("gpt-5.3-codex"), Some("high"), "brief", false),
+            (None, None, "", true),
+        ] {
+            let opts = CodexThreadOpts {
+                cwd: "/lib/agents".into(),
+                writable_files: Vec::new(),
+                model: model.map(String::from),
+                reasoning_effort: effort.map(String::from),
+                instructions: instructions.into(),
+                ephemeral,
+            };
+            let thread = CodexServer::thread_params(&opts);
+            assert_eq!(thread["sandbox"], "workspace-write");
+            assert_eq!(
+                thread["config"]["sandbox_workspace_write.network_access"],
+                true
+            );
+            let turn = CodexServer::turn_params("t", "hi", &opts);
+            assert_eq!(turn["sandboxPolicy"]["type"], "workspaceWrite");
+            assert_eq!(turn["sandboxPolicy"]["networkAccess"], true);
+        }
+    }
+
     /// Recorded (0.153.4): a finished `webSearch` has no `status`, and
     /// `item/started` leaves its query empty.
     #[test]

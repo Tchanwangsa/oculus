@@ -76,11 +76,6 @@ protected paths are one list in `protected.rs`.
   reads (without it `ls ../courses` is refused), `Edit` denies on protected
   paths so `--add-dir` doesn't pull them into `acceptEdits`, and
   `--permission-prompts none`, since an unanswered prompt under `-p` hangs.
-  `sandbox.network.allowUnixSockets` names `keyd.sock` and nothing else, so
-  `oculus search` reaches the Voyage key through `oculus-keyd`
-  ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key));
-  without it the connect fails with EPERM. Codex (`network_access`) and agy
-  reach the socket with no extra rule.
 - **Codex**: `workspace-write` with one root, `approvalPolicy: never`; any
   server request is declined.
 - **opencode has no sandbox** — a rule list its runner checks. File tools are
@@ -116,6 +111,26 @@ the Dock. `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT` are stripped because the CLI
 refuses to nest. The `oculus` binary's directory goes first on PATH, so a
 stale dev binary shows up as `unrecognized subcommand`
 ([development.md](./development.md)). Claude's auto-memory is off.
+
+**Each sandbox lets `oculus` reach `oculus-keyd` its own way.** `oculus search`
+and the other keyed commands connect to keyd's Unix socket from inside the
+agent's sandbox
+([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+The socket is `keyd_core::paths::socket(library)`, `keyd.sock` in the data
+dir: the path `Client::at` dials and keyd's launchd registration binds, and
+the harness takes its library from the same `paths::data_dir()` as the CLI.
+No deny list covers it. What each CLI needs was measured on the CLI itself:
+
+| CLI | What the connect needs | Where |
+| --- | --- | --- |
+| Claude | `sandbox.network.allowUnixSockets` naming that one socket, never `allowAllUnixSockets`; without it the connect fails with EPERM | `settings_json`, `claude.rs` |
+| Codex | the `workspace-write` policy's network access, since Codex has no per-socket grant; without it the connect is EPERM | `network_access` in thread config and `networkAccess` on every turn's `sandboxPolicy`, `codex.rs` |
+| Antigravity | nothing beyond `--sandbox`; its rules deny only writes to listed paths, and `command(oculus)` is allowed | `launch_args`, `antigravity_rules.rs` |
+| opencode | nothing: it has no sandbox, and `bash` allows `oculus *` | `OPENCODE.template.json` |
+
+Each bridge's tests pin its row, and that nothing it denies covers the socket.
+The app is not involved: once keyd is installed, launchd starts it on the first
+connect, so a chat agent's `oculus search` works with the app closed.
 
 ### Antigravity keeps its rules in the student's global settings
 
