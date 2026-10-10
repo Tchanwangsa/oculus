@@ -40,6 +40,12 @@ function read(recheck: boolean): Promise<SignInStatus[]> {
   return p;
 }
 
+/** The shared answer outside React (the first-run gate), filling the same
+ *  cache the hook reads. */
+export function loadSignInStatus(): Promise<SignInStatus[]> {
+  return read(false);
+}
+
 /** `unknown` (drawn as nothing) until the check lands, and for an error row or
  *  opencode's `signedIn: null`, neither of which says anything about the
  *  credential. */
