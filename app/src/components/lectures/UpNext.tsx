@@ -5,7 +5,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { useWindowEvent } from "@/hooks/useEvents";
+import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { getNextLecture, type Lecture } from "@/lib/db";
 import { fmtDurationSecs, fmtLectureDate } from "@/lib/lectures";
 import {
@@ -14,11 +14,11 @@ import {
   downloadLecture,
   isDownloading,
   useLectureDownloads,
-} from "@/stores/lectureDownloadStore";
+} from "@/stores/lectures/lectureDownloadStore";
 
 /**
  * Up Next: the card in the lecture player's frame once the playhead passes
- * the lecture's end (`upNextFrom` in `lib/lectureEnd.ts`). See docs/viewers.md.
+ * the lecture's end (`upNextFrom` in `lib/lectures/end.ts`). See docs/viewers.md.
  */
 
 /** Seconds the Play pill fills for after the file ends, before it plays. */
@@ -96,8 +96,6 @@ export function UpNextCard({
   const percent = useLectureDownloads((s) => s.progress[dlKey(next.id, 1)]?.percent ?? 0);
   const [failed, setFailed] = useState(false);
 
-  // ── Thumbnail ─────────────────────────────────────────────────────────────
-
   const [thumb, setThumb] = useState<string | null>(null);
   useEffect(() => {
     setThumb(null);
@@ -110,8 +108,6 @@ export function UpNextCard({
       stale = true;
     };
   }, [next.id, downloaded]);
-
-  // ── Countdown ─────────────────────────────────────────────────────────────
 
   const counting = ended && downloaded;
   const [left, setLeft] = useState(COUNTDOWN_S);

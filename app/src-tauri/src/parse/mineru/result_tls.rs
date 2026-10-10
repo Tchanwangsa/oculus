@@ -46,8 +46,6 @@ pub fn probe(accept_expired: bool) -> CertState {
     state(accept_expired)
 }
 
-// ── What the last handshake found ────────────────────────────────────────────
-
 const UNKNOWN: u8 = 0;
 const VALID: u8 = 1;
 const EXPIRED: u8 = 2;
@@ -83,8 +81,6 @@ fn record(seen: u8, not_after: u64) {
     NOT_AFTER.store(not_after, Ordering::Relaxed);
     SEEN.store(seen, Ordering::Relaxed);
 }
-
-// ── The verifier ─────────────────────────────────────────────────────────────
 
 fn webpki() -> Arc<WebPkiServerVerifier> {
     let roots = RootCertStore {

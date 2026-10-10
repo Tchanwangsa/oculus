@@ -1,0 +1,674 @@
+//! Who is on the other end of the socket, and whether keyd serves them.
+//!
+//! The uid comes from `getpeereid`. The code comes from the audit token
+//! (`LOCAL_PEERTOKEN`, which names a process instance, not a reusable pid)
+//! through `SecCodeCopyGuestWithAttributes`. Under `Policy::Install` keyd
+//! admits only executables inside the app its helper app is nested in
+//! (Oculus.app), and only while that app's seal, nested code included,
+//! verifies strictly; under `SameUser` (dev builds, which have no bundle)
+//! any same-user caller (docs/architecture.md).
+
+use std::ffi::c_void;
+use std::os::fd::{AsRawFd, RawFd};
+use std::path::{Path, PathBuf};
+use std::ptr;
+
+use core_foundation::base::TCFType;
+use core_foundation::data::CFData;
+use core_foundation::dictionary::CFDictionary;
+use core_foundation::string::CFString;
+use core_foundation::url::CFURL;
+use core_foundation_sys::base::{CFGetTypeID, CFRelease, CFTypeRef, OSStatus};
+use core_foundation_sys::dictionary::{CFDictionaryGetValue, CFDictionaryRef};
+use core_foundation_sys::string::{CFStringGetTypeID, CFStringRef};
+use core_foundation_sys::url::CFURLRef;
+
+use crate::platform::{Caller, Conn, PeerCheck, Policy, Role, Stream};
+
+type SecCodeRef = *const c_void;
+type SecStaticCodeRef = *const c_void;
+
+// SecCode.h / SecStaticCode.h
+const K_SEC_CS_DEFAULT_FLAGS: u32 = 0;
+const K_SEC_CS_SIGNING_INFORMATION: u32 = 1 << 1;
+const K_SEC_CS_CHECK_ALL_ARCHITECTURES: u32 = 1 << 0;
+const K_SEC_CS_CHECK_NESTED_CODE: u32 = 1 << 3;
+const K_SEC_CS_STRICT_VALIDATE: u32 = 1 << 4;
+
+// security-framework lacks the guest, static-code and signing-information calls.
+#[link(name = "Security", kind = "framework")]
+extern "C" {
+    static kSecGuestAttributeAudit: CFStringRef;
+    static kSecCodeInfoIdentifier: CFStringRef;
+
+    fn SecCodeCopyGuestWithAttributes(
+        host: SecCodeRef,
+        attributes: CFDictionaryRef,
+        flags: u32,
+        guest: *mut SecCodeRef,
+    ) -> OSStatus;
+    fn SecCodeCopyStaticCode(
+        code: SecCodeRef,
+        flags: u32,
+        static_code: *mut SecStaticCodeRef,
+    ) -> OSStatus;
+    fn SecCodeCopyPath(static_code: SecStaticCodeRef, flags: u32, path: *mut CFURLRef) -> OSStatus;
+    fn SecCodeCopySigningInformation(
+        code: SecStaticCodeRef,
+        flags: u32,
+        information: *mut CFDictionaryRef,
+    ) -> OSStatus;
+    fn SecCodeCheckValidity(code: SecCodeRef, flags: u32, requirement: *const c_void) -> OSStatus;
+    fn SecStaticCodeCreateWithPath(
+        path: CFURLRef,
+        flags: u32,
+        static_code: *mut SecStaticCodeRef,
+    ) -> OSStatus;
+    fn SecStaticCodeCheckValidity(
+        static_code: SecStaticCodeRef,
+        flags: u32,
+        requirement: *const c_void,
+    ) -> OSStatus;
+}
+
+pub(crate) struct Check {
+    pub(crate) policy: Policy,
+}
+
+impl PeerCheck for Check {
+    fn inspect(&self, conn: &Conn) -> Caller {
+        let fd = match &conn.0 {
+            Stream::Os(stream) => stream.as_raw_fd(),
+            #[cfg(test)]
+            Stream::Memory(_) => {
+                return Caller {
+                    problems: vec!["not a socket".into()],
+                    ..Caller::default()
+                }
+            }
+        };
+        let mut caller = inspect(fd);
+        caller.role = role(self.policy, caller.path.as_deref());
+        caller
+    }
+
+    fn admit(&self, caller: &Caller) -> Result<(), String> {
+        admit(self.policy, caller)
+    }
+}
+
+/// Under `Install`, the app is the bundle itself (as `SecCodeCopyPath`
+/// reports a main executable) and the CLI is `Contents/MacOS/oculus`. A dev
+/// build has no bundle, so its binaries are told apart by file name.
+fn role(policy: Policy, path: Option<&Path>) -> Role {
+    let Some(path) = path else {
+        return Role::Unknown;
+    };
+    match policy {
+        Policy::Install => match trust_root() {
+            Ok(bundle) => role_in_bundle(
+                &bundle,
+                &path.canonicalize().unwrap_or_else(|_| path.to_path_buf()),
+            ),
+            Err(_) => Role::Unknown,
+        },
+        Policy::SameUser => match path.file_name().and_then(|n| n.to_str()) {
+            Some("oculus") => Role::Cli,
+            Some("app") => Role::App,
+            _ => Role::Unknown,
+        },
+    }
+}
+
+fn role_in_bundle(bundle: &Path, path: &Path) -> Role {
+    if path == bundle {
+        Role::App
+    } else if path == bundle.join("Contents/MacOS/oculus") {
+        Role::Cli
+    } else {
+        Role::Unknown
+    }
+}
+
+fn inspect(fd: RawFd) -> Caller {
+    let mut c = Caller::default();
+
+    let (mut uid, mut gid) = (0 as libc::uid_t, 0 as libc::gid_t);
+    if unsafe { libc::getpeereid(fd, &mut uid, &mut gid) } == 0 {
+        c.uid = Some(uid);
+    } else {
+        c.problems
+            .push(format!("getpeereid: {}", std::io::Error::last_os_error()));
+    }
+
+    // audit_token_t is 8 x u32; val[5] is the pid.
+    let mut token = [0u32; 8];
+    let mut len = std::mem::size_of_val(&token) as libc::socklen_t;
+    let rc = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_LOCAL,
+            libc::LOCAL_PEERTOKEN,
+            token.as_mut_ptr() as *mut c_void,
+            &mut len,
+        )
+    };
+    if rc != 0 || len as usize != std::mem::size_of_val(&token) {
+        c.problems.push(format!(
+            "LOCAL_PEERTOKEN: {}",
+            std::io::Error::last_os_error()
+        ));
+        return c;
+    }
+    c.pid = Some(token[5]);
+    let token_bytes: Vec<u8> = token.iter().flat_map(|v| v.to_ne_bytes()).collect();
+
+    let attrs = unsafe {
+        CFDictionary::from_CFType_pairs(&[(
+            CFString::wrap_under_get_rule(kSecGuestAttributeAudit).as_CFType(),
+            CFData::from_buffer(&token_bytes).as_CFType(),
+        )])
+    };
+    let mut code: SecCodeRef = ptr::null();
+    let st = unsafe {
+        SecCodeCopyGuestWithAttributes(
+            ptr::null(),
+            attrs.as_concrete_TypeRef(),
+            K_SEC_CS_DEFAULT_FLAGS,
+            &mut code,
+        )
+    };
+    if st != 0 || code.is_null() {
+        c.problems
+            .push(format!("SecCodeCopyGuestWithAttributes: OSStatus {st}"));
+        return c;
+    }
+
+    let mut static_code: SecStaticCodeRef = ptr::null();
+    let st = unsafe { SecCodeCopyStaticCode(code, K_SEC_CS_DEFAULT_FLAGS, &mut static_code) };
+    if st != 0 || static_code.is_null() {
+        c.problems
+            .push(format!("SecCodeCopyStaticCode: OSStatus {st}"));
+    } else {
+        let mut url: CFURLRef = ptr::null();
+        let st = unsafe { SecCodeCopyPath(static_code, K_SEC_CS_DEFAULT_FLAGS, &mut url) };
+        if st != 0 || url.is_null() {
+            c.problems.push(format!("SecCodeCopyPath: OSStatus {st}"));
+        } else {
+            c.path = unsafe { CFURL::wrap_under_create_rule(url) }.to_path();
+        }
+
+        let mut info: CFDictionaryRef = ptr::null();
+        let st = unsafe {
+            SecCodeCopySigningInformation(static_code, K_SEC_CS_SIGNING_INFORMATION, &mut info)
+        };
+        if st != 0 || info.is_null() {
+            c.problems
+                .push(format!("SecCodeCopySigningInformation: OSStatus {st}"));
+        } else {
+            c.identifier = unsafe { dict_string(info, kSecCodeInfoIdentifier) };
+            unsafe { CFRelease(info as CFTypeRef) };
+        }
+        unsafe { CFRelease(static_code) };
+    }
+
+    let st = unsafe { SecCodeCheckValidity(code, K_SEC_CS_DEFAULT_FLAGS, ptr::null()) };
+    c.valid = st == 0;
+    if st != 0 {
+        c.problems
+            .push(format!("SecCodeCheckValidity: OSStatus {st}"));
+    }
+    unsafe { CFRelease(code) };
+    c
+}
+
+unsafe fn dict_string(dict: CFDictionaryRef, key: CFStringRef) -> Option<String> {
+    let v = CFDictionaryGetValue(dict, key as *const c_void) as CFTypeRef;
+    if v.is_null() || CFGetTypeID(v) != CFStringGetTypeID() {
+        return None;
+    }
+    Some(CFString::wrap_under_get_rule(v as CFStringRef).to_string())
+}
+
+/// `Ok` to serve the caller, or why not. Runs before any request is read.
+fn admit(policy: Policy, caller: &Caller) -> Result<(), String> {
+    let me = unsafe { libc::geteuid() };
+    match caller.uid {
+        Some(uid) if uid == me => {}
+        Some(uid) => return Err(format!("uid {uid} is not keyd's uid {me}")),
+        None => return Err("the caller's uid is unknown".to_string()),
+    }
+    if policy == Policy::SameUser {
+        return Ok(());
+    }
+
+    let bundle = trust_root()?;
+    let path = caller.path.as_ref().ok_or("the caller's path is unknown")?;
+    let path = path
+        .canonicalize()
+        .map_err(|e| format!("canonicalizing {}: {e}", path.display()))?;
+    if !in_bundle(&bundle, &path) {
+        return Err(format!(
+            "{} is outside {}",
+            path.display(),
+            bundle.display()
+        ));
+    }
+    if !caller.valid {
+        return Err("the caller's running code is not valid".to_string());
+    }
+    seal_check(&bundle)
+}
+
+/// The app whose executables keyd serves: the outermost `*.app` above keyd's
+/// own executable, which for the shipped helper is Oculus.app.
+fn trust_root() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let exe = exe
+        .canonicalize()
+        .map_err(|e| format!("canonicalizing {}: {e}", exe.display()))?;
+    super::outermost_app(&exe)
+        .ok_or_else(|| format!("keyd is not inside an app bundle ({})", exe.display()))
+}
+
+/// SecCodeCopyPath reports a main executable as the bundle itself, and any
+/// other executable or nested helper app by its own path under `Contents/`.
+fn in_bundle(bundle: &Path, caller: &Path) -> bool {
+    caller == bundle || caller.starts_with(bundle.join("Contents"))
+}
+
+/// Strict validation of the whole bundle on disk, nested code included.
+fn seal_check(bundle: &Path) -> Result<(), String> {
+    let url =
+        CFURL::from_path(bundle, true).ok_or_else(|| format!("no URL for {}", bundle.display()))?;
+    let mut sc: SecStaticCodeRef = ptr::null();
+    let st = unsafe {
+        SecStaticCodeCreateWithPath(url.as_concrete_TypeRef(), K_SEC_CS_DEFAULT_FLAGS, &mut sc)
+    };
+    if st != 0 || sc.is_null() {
+        return Err(format!("SecStaticCodeCreateWithPath: OSStatus {st}"));
+    }
+    let flags =
+        K_SEC_CS_STRICT_VALIDATE | K_SEC_CS_CHECK_ALL_ARCHITECTURES | K_SEC_CS_CHECK_NESTED_CODE;
+    let st = unsafe { SecStaticCodeCheckValidity(sc, flags, ptr::null()) };
+    unsafe { CFRelease(sc as CFTypeRef) };
+    if st != 0 {
+        return Err(format!("the bundle's seal does not verify: OSStatus {st}"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundle_membership_is_component_wise() {
+        let b = Path::new("/Applications/Oculus.app");
+        assert!(in_bundle(b, b));
+        assert!(in_bundle(
+            b,
+            Path::new("/Applications/Oculus.app/Contents/MacOS/oculus")
+        ));
+        assert!(!in_bundle(
+            b,
+            Path::new("/Applications/Oculus.app.evil/Contents/MacOS/x")
+        ));
+        assert!(!in_bundle(b, Path::new("/Applications/Oculus.appx")));
+        assert!(!in_bundle(
+            b,
+            Path::new("/Applications/Oculus.app/Resources/x")
+        ));
+    }
+
+    #[test]
+    fn another_uid_is_refused_under_either_policy() {
+        let me = unsafe { libc::geteuid() };
+        let other = Caller {
+            uid: Some(me + 1),
+            valid: true,
+            ..Caller::default()
+        };
+        let unknown = Caller {
+            uid: None,
+            valid: true,
+            ..Caller::default()
+        };
+        for policy in [Policy::SameUser, Policy::Install] {
+            assert!(admit(policy, &other).is_err());
+            assert!(admit(policy, &unknown).is_err());
+        }
+        assert!(admit(
+            Policy::SameUser,
+            &Caller {
+                uid: Some(me),
+                ..Caller::default()
+            }
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn outside_a_bundle_the_bundle_policy_admits_no_one() {
+        let me = unsafe { libc::geteuid() };
+        let exe = std::env::current_exe().unwrap();
+        let caller = Caller {
+            uid: Some(me),
+            path: Some(exe),
+            valid: true,
+            ..Caller::default()
+        };
+        let err = admit(Policy::Install, &caller).unwrap_err();
+        assert!(err.contains("not inside an app bundle"), "{err}");
+    }
+
+    #[test]
+    fn roles_come_from_the_bundle_or_in_dev_from_the_file_name() {
+        let b = Path::new("/Applications/Oculus.app");
+        assert_eq!(role_in_bundle(b, b), Role::App);
+        assert_eq!(
+            role_in_bundle(
+                b,
+                Path::new("/Applications/Oculus.app/Contents/MacOS/oculus")
+            ),
+            Role::Cli
+        );
+        assert_eq!(
+            role_in_bundle(
+                b,
+                Path::new("/Applications/Oculus.app/Contents/Helpers/Oculus Helper.app")
+            ),
+            Role::Unknown,
+            "keyd's own helper app is in the bundle but neither the app nor the CLI"
+        );
+        assert_eq!(
+            role_in_bundle(b, Path::new("/elsewhere/oculus")),
+            Role::Unknown
+        );
+
+        let dev = |p: &str| role(Policy::SameUser, Some(Path::new(p)));
+        assert_eq!(dev("/x/target/debug/oculus"), Role::Cli);
+        assert_eq!(dev("/x/target/debug/app"), Role::App);
+        assert_eq!(dev("/usr/bin/python3"), Role::Unknown);
+        assert_eq!(role(Policy::SameUser, None), Role::Unknown);
+        // The test binary is in no bundle, so the install policy knows no one.
+        assert_eq!(
+            role(Policy::Install, Some(Path::new("/Applications/Oculus.app"))),
+            Role::Unknown
+        );
+    }
+
+    /// The whole check over a real socket: this test process is the caller.
+    #[test]
+    fn a_connection_from_this_process_is_inspected_and_judged_by_policy() {
+        let dir = std::env::temp_dir().join(format!("keyd-peer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("k.sock");
+        let listener = crate::platform::Listener::bind(&sock).unwrap();
+        let _client = crate::platform::connect(&sock).unwrap();
+        let conn = listener.accept().unwrap();
+
+        let me = unsafe { libc::geteuid() };
+        let dev = Check {
+            policy: Policy::SameUser,
+        };
+        let caller = dev.inspect(&conn);
+        assert_eq!(caller.uid, Some(me), "{:?}", caller.problems);
+        assert_eq!(
+            caller.role,
+            Role::Unknown,
+            "a test binary is neither the app nor the CLI"
+        );
+        assert!(dev.admit(&caller).is_ok());
+        let err = Check {
+            policy: Policy::Install,
+        }
+        .admit(&caller)
+        .unwrap_err();
+        assert!(err.contains("not inside an app bundle"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    /// `<name>.app` in `dir`: a Mach-O copied from `executable`, a sealed
+    /// resource and an Info.plist, unsigned.
+    fn unsigned_bundle(dir: &Path, name: &str, executable: &str) -> PathBuf {
+        let bundle = dir.join(format!("{name}.app"));
+        std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        std::fs::create_dir_all(bundle.join("Contents/Resources")).unwrap();
+        std::fs::copy(executable, bundle.join("Contents/MacOS").join(name)).unwrap();
+        std::fs::write(bundle.join("Contents/Resources/data.txt"), "sealed").unwrap();
+        std::fs::write(
+            bundle.join("Contents/Info.plist"),
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>{name}</string>
+<key>CFBundleIdentifier</key><string>test.keyd.{name}</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>"#
+            ),
+        )
+        .unwrap();
+        bundle
+    }
+
+    /// Ad-hoc signs `bundle`, which seals any helper already signed inside it.
+    /// Panics if `codesign` fails.
+    fn sign(bundle: &Path) {
+        let out = Command::new("codesign")
+            .args(["-s", "-", "-f", "--timestamp=none"])
+            .arg(bundle)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "codesign: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn signed_bundle(dir: &Path, name: &str, executable: &str) -> PathBuf {
+        let bundle = unsigned_bundle(dir, name, executable);
+        sign(&bundle);
+        bundle
+    }
+
+    #[test]
+    fn the_seal_check_accepts_a_signed_bundle_and_refuses_one_changed_after_signing() {
+        let dir = std::env::temp_dir().join(format!("keyd-seal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bundle = signed_bundle(&dir, "Sealed", "/usr/bin/true");
+
+        assert_eq!(seal_check(&bundle), Ok(()));
+
+        let resource = bundle.join("Contents/Resources/data.txt");
+        std::fs::write(&resource, "edited").unwrap();
+        let err = seal_check(&bundle).unwrap_err();
+        assert!(err.contains("seal does not verify"), "{err}");
+
+        std::fs::write(&resource, "sealed").unwrap();
+        assert_eq!(seal_check(&bundle), Ok(()));
+        std::fs::write(bundle.join("Contents/Resources/added.txt"), "new").unwrap();
+        let err = seal_check(&bundle).unwrap_err();
+        assert!(err.contains("seal does not verify"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// keyd's helper is nested code of the app: the app's seal covers it, so
+    /// a helper edited after signing fails the check keyd makes on the app.
+    #[test]
+    fn the_seal_check_covers_a_nested_helper() {
+        let dir = std::env::temp_dir().join(format!("keyd-seal-nested-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let outer = unsigned_bundle(&dir, "Outer", "/usr/bin/true");
+        let helpers = outer.join("Contents/Helpers");
+        std::fs::create_dir_all(&helpers).unwrap();
+        let inner = signed_bundle(&helpers, "Inner", "/usr/bin/true");
+        sign(&outer);
+        assert_eq!(seal_check(&outer), Ok(()));
+
+        std::fs::write(inner.join("Contents/Resources/data.txt"), "edited").unwrap();
+        let err = seal_check(&outer).unwrap_err();
+        assert!(err.contains("seal does not verify"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The caller check against a real `tauri build` output:
+    /// `KEYD_REAL_BUNDLE=<…/Oculus.app> cargo test --all-features -- --ignored
+    /// a_built_app`. keyd's helper must find the app as its trust root, the
+    /// app and CLI must get their roles, and the seal must verify.
+    #[test]
+    #[ignore = "needs a built Oculus.app in KEYD_REAL_BUNDLE"]
+    fn a_built_app_admits_its_app_and_cli() {
+        let app = PathBuf::from(std::env::var_os("KEYD_REAL_BUNDLE").expect("KEYD_REAL_BUNDLE"))
+            .canonicalize()
+            .unwrap();
+        let helper = app
+            .join("Contents/Helpers")
+            .join(crate::paths::helper_app_name());
+        let keyd = crate::paths::helper_program(&helper);
+        assert!(keyd.is_file(), "{} is missing", keyd.display());
+        assert_eq!(super::super::outermost_app(&keyd), Some(app.clone()));
+        assert_eq!(role_in_bundle(&app, &app), Role::App);
+        assert_eq!(
+            role_in_bundle(&app, &app.join("Contents/MacOS/oculus")),
+            Role::Cli
+        );
+        assert_eq!(role_in_bundle(&app, &helper), Role::Unknown);
+        assert!(in_bundle(&app, &helper));
+        assert_eq!(seal_check(&app), Ok(()));
+    }
+
+    fn timed(label: &str, runs: usize, mut each: impl FnMut()) {
+        let mut times: Vec<Duration> = (0..runs)
+            .map(|_| {
+                let start = Instant::now();
+                each();
+                start.elapsed()
+            })
+            .collect();
+        times.sort();
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        eprintln!(
+            "{label}: {runs} runs, min {:.2} ms, median {:.2} ms, p95 {:.2} ms, max {:.2} ms",
+            ms(times[0]),
+            ms(times[runs / 2]),
+            ms(times[runs * 95 / 100]),
+            ms(times[runs - 1])
+        );
+    }
+
+    /// What the strict policy costs a connection: `cargo test -- --ignored
+    /// --nocapture what_the_caller_check_costs`. `seal_check` is the bundle
+    /// half of `admit`; `inspect` is the caller half, here over a socket
+    /// whose peer is a small C client built into a signed bundle (a copy of a
+    /// system arm64e binary would not run).
+    #[test]
+    #[ignore = "a timing measurement, run by hand"]
+    fn what_the_caller_check_costs_per_connection() {
+        // Short, because a socket path is limited to 104 bytes.
+        let dir = PathBuf::from(format!("/tmp/keyd-cost-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("client.c"),
+            r#"#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    struct sockaddr_un a;
+    int s = socket(AF_UNIX, SOCK_STREAM, 0);
+    memset(&a, 0, sizeof a);
+    a.sun_family = AF_UNIX;
+    strncpy(a.sun_path, argv[1], sizeof a.sun_path - 1);
+    if (connect(s, (struct sockaddr *)&a, sizeof a)) return 1;
+    pause();
+    return 0;
+}
+"#,
+        )
+        .unwrap();
+        let cc = Command::new("cc")
+            .arg("-o")
+            .arg(dir.join("client"))
+            .arg(dir.join("client.c"))
+            .status()
+            .unwrap();
+        assert!(cc.success());
+        let bundle = signed_bundle(&dir, "Cost", dir.join("client").to_str().unwrap());
+        timed("seal_check, one small executable", 200, || {
+            seal_check(&bundle).unwrap();
+        });
+        // A real, ad-hoc signed bundle for a size that means something:
+        // KEYD_COST_BUNDLE=/path/Oculus.app.
+        if let Some(real) = std::env::var_os("KEYD_COST_BUNDLE") {
+            let real = PathBuf::from(real);
+            timed("seal_check, KEYD_COST_BUNDLE", 50, || {
+                seal_check(&real).unwrap();
+            });
+        }
+
+        let sock = dir.join("k.sock");
+        let listeners = [crate::platform::Listener::bind(&sock).unwrap()];
+        let accept = || {
+            crate::platform::accept_any(&listeners, Duration::from_secs(10))
+                .unwrap()
+                .expect("the client never connected")
+        };
+        let client = || {
+            Command::new(bundle.join("Contents/MacOS/Cost"))
+                .arg(&sock)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap()
+        };
+        let fd_of = |conn: &Conn| match &conn.0 {
+            Stream::Os(stream) => stream.as_raw_fd(),
+            _ => unreachable!(),
+        };
+
+        // One long-lived peer, inspected over and over.
+        let mut peer = client();
+        let conn = accept();
+        let fd = fd_of(&conn);
+        let caller = inspect(fd);
+        assert!(caller.valid, "{:?}", caller.problems);
+        assert_eq!(
+            caller.path.as_deref(),
+            Some(bundle.canonicalize().unwrap().as_path())
+        );
+        timed("inspect, same peer", 200, || {
+            inspect(fd);
+        });
+        peer.kill().ok();
+        peer.wait().ok();
+
+        // A new process for every connection, as keyd sees real callers; the
+        // spawn and accept are outside the timed part.
+        let mut fresh = Vec::new();
+        for _ in 0..50 {
+            let mut peer = client();
+            let conn = accept();
+            let start = Instant::now();
+            let caller = inspect(fd_of(&conn));
+            fresh.push(start.elapsed());
+            assert!(caller.valid, "{:?}", caller.problems);
+            peer.kill().ok();
+            peer.wait().ok();
+        }
+        fresh.sort();
+        eprintln!(
+            "inspect, new peer each time: 50 runs, min {:.2} ms, median {:.2} ms, max {:.2} ms",
+            fresh[0].as_secs_f64() * 1000.0,
+            fresh[25].as_secs_f64() * 1000.0,
+            fresh[49].as_secs_f64() * 1000.0
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

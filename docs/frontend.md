@@ -17,27 +17,40 @@ library files; the rest of the frontend has its own pages:
 
 | Piece | Location |
 | --- | --- |
-| Entry, the event shim, the last-resort error overlay | `app/src/main.tsx`, `app/src/lib/tauriEvents.ts` |
-| Backend events → SQLite and stores | `app/src/hooks/useBackendEvents.ts`, `app/src/hooks/useEvents.ts`, `app/src/lib/parseStatusWriter.ts`, `app/src/lib/db.ts` |
-| Files tab: uploads and documents | `app/src/pages/subject/FilesPage.tsx`, `app/src/lib/uploads.ts`, `app/src/lib/documents.ts`, `app/src-tauri/src/files.rs` |
-| Tasks section (`/projects`, `/tasks`) | `app/src/components/projects/`, `app/src/pages/TasksPage.tsx`, `app/src/lib/projects.ts`, `app/src/stores/projectsStore.ts` |
-| Chat | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/harnessStore.ts` |
-| Settings → Parsing, Embeddings, Transcription: parser, embedding, index run, transcription (the language, the engine order and switches, a dialog per engine: Groq key, local Whisper models, on-device speech) | `app/src/pages/settings/ParsingPage.tsx`, `app/src/components/settings/ParserSection.tsx`, `app/src/components/settings/EmbeddingSection.tsx`, `app/src/stores/indexStore.ts`, `app/src/components/settings/TranscriptionSection.tsx`, `app/src/components/settings/GroqDialog.tsx`, `app/src/components/settings/LocalWhisper.tsx`, `app/src/components/settings/OnDeviceSpeech.tsx` |
-| Parser and embedding engine selection UI | `app/src/components/settings/EngineSelect.tsx` |
-| Parse state, pipeline ledger, recovery sweep | `app/src/lib/parseState.ts`, `app/src/stores/parseStore.ts`, `app/src/stores/pipelineStore.ts`, `app/src/hooks/useQualitySweep.ts` |
-| Scraped document metadata loaders | `app/src/hooks/useCourseFileData.ts`, `app/src/hooks/useModuleTocs.ts` |
-| Module videos downloaded on demand | `app/src/pages/subject/ModulesPage.tsx`, `app/src/stores/videoDownloadStore.ts` |
+| Entry, the event shim, the last-resort error overlay | `app/src/main.tsx`, `app/src/lib/platform/tauriEvents.ts` |
+| The first-run gate: onboarding or the shell ([onboarding.md](./onboarding.md)) | `app/src/App.tsx`, `app/src/hooks/shell/useOnboardingGate.ts` |
+| Backend events → SQLite and stores | `app/src/hooks/backend/useBackendEvents.ts`, `app/src/hooks/backend/useEvents.ts`, `app/src/lib/pipeline/parseStatusWriter.ts`, `app/src/lib/db/connection.ts` |
+| Files tab: uploads and documents | `app/src/pages/subject/files/FilesPage.tsx`, `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src-tauri/src/library/files/commands.rs` |
+| Tasks section (`/projects`, `/tasks`) | `app/src/components/projects/`, `app/src/pages/work/TasksPage.tsx`, `app/src/lib/planning/projects/`, `app/src/stores/planning/projectsStore.ts` |
+| Chat | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/chat/harnessStore.ts` |
+| Settings → Parsing, Embeddings, Transcription: parser, embedding, index run, transcription (the language, the engine order and switches, a dialog per engine: Groq key, local Whisper models, on-device speech) | `app/src/pages/settings/library/ParsingPage.tsx`, `app/src/components/settings/library/ParserSection.tsx`, `app/src/components/settings/library/EmbeddingSection.tsx`, `app/src/stores/sync/indexStore.ts`, `app/src/components/settings/transcription/TranscriptionSection.tsx`, `app/src/components/settings/transcription/GroqDialog.tsx`, `app/src/components/settings/transcription/LocalWhisper.tsx`, `app/src/components/settings/transcription/OnDeviceSpeech.tsx` |
+| Parser and embedding engine selection UI | `app/src/components/settings/shared/EngineSelect.tsx` |
+| Parse state, pipeline ledger, recovery sweep | `app/src/lib/pipeline/parseState.ts`, `app/src/stores/sync/parseStore.ts`, `app/src/stores/sync/pipelineStore.ts`, `app/src/hooks/sync/useQualitySweep.ts` |
+| Scraped document metadata loaders | `app/src/hooks/data/useCourseFileData.ts`, `app/src/hooks/data/useModuleTocs.ts` |
+| Module videos downloaded on demand | `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/stores/lectures/videoDownloadStore.ts` |
+
+## Source is grouped by feature, and tests mirror it
+
+- `app/src/{lib,hooks,stores,components,pages}/` hold grouped folders
+  (`lib/pipeline/`, `hooks/sync/`, `stores/shell/`, `components/projects/board/`),
+  never a flat pile; a file's folder names the feature it serves.
+- A file that outgrows itself keeps its import specifier: the entry stays
+  (`EmbeddingSection.tsx`, or `DocumentEditor/index.tsx`) and the extracted
+  pieces sit in a folder next to it (`embedding/`). Split rather than
+  adding banner comments to a long file.
+- Tests live under `app/tests/` at the same path as the file they cover and
+  import it through the `@/` alias (`tests/lib/ui/scrollFade.test.ts`).
 
 ## Backend events are the write path
 
 - **`useBackendEvents` (mounted once in `App.tsx`) turns Tauri events into
   SQLite writes and store updates**; pages read the DB and stores, never the
   scraper. The CLI writes the same scrape tables through
-  `app/src-tauri/src/store.rs`, so a table's shape moves both writers and the
+  `app/src-tauri/src/db/store/mod.rs`, so a table's shape moves both writers and the
   migration together. `harness-event` rows are written by Rust; the hook only
   feeds `harnessStore` ([harness.md](./harness.md)).
 - **Callers share one in-flight database load** (`getDb` in
-  `app/src/lib/db.ts`), including restored panes and StrictMode mounts; a
+  `app/src/lib/db/connection.ts`), including restored panes and StrictMode mounts; a
   failed load lets the next caller retry.
 - **Unread file counts preserve unchanged subject/category maps**, and badge
   subscribers read only their own subject's counts. A refresh with identical
@@ -47,14 +60,14 @@ library files; the rest of the frontend has its own pages:
   immediately. Scrape insertion and reset share that queue; only an update
   that found its row counts as persisted, so failed and early writes can retry.
 - **A page reloads on the hook's own window event** (e.g.
-  `FILE_SCRAPED_EVENT` in `app/src/lib/syncRunner.ts`), never on the Tauri
+  `FILE_SCRAPED_EVENT` in `app/src/lib/pipeline/syncRunner.ts`), never on the Tauri
   event, which races the upsert. Subscribe with `useTauriEvent` /
   `useWindowEvent`.
 - **Project writes refresh through `PROJECTS_UPDATED_EVENT`, not the store**,
   because the chat agent writes too (`oculus project` / `oculus task`);
   `useBackendEvents` fires the same event when a finished tool call names one.
 - **`getSubjects` derives, it doesn't read**: `last_synced_at` from the latest
-  *completed* `sync_runs` row, and `is_current` from `app/src/lib/terms.ts`
+  *completed* `sync_runs` row, and `is_current` from `app/src/lib/format/terms.ts`
   rather than the stored column. Terms sort by rank (`TERM_RANK_SQL`), never by
   name — `Su` > `Se` would file Summer last.
 - **Errors**: `errorElement` takes down one pane, `ErrorBoundary` the shell, and
@@ -68,7 +81,7 @@ library files; the rest of the frontend has its own pages:
   (reachable, unreachable, `version_mismatch`, not asked yet — never drawn as a
   failure) only under Local. Engine lists and refusals come from Rust. Saving a
   token checks it and lifts the parse latch. See [parsing.md](./parsing.md).
-- **`EngineSelect` and `CredentialField` share the settings controls** (`app/src/components/settings/EngineSelect.tsx`, `app/src/components/settings/CredentialField.tsx`); each section owns validation, switching and destructive confirmation.
+- **`EngineSelect` and `CredentialField` share the settings controls** (`app/src/components/settings/shared/EngineSelect.tsx`, `app/src/components/settings/shared/CredentialField.tsx`); each section owns validation, switching and destructive confirmation.
 - **Changing the embedding engine is destructive on purpose** — two models'
   vectors share a table and no geometry. `embed_set_engine` clears the
   `.emb.json` records, the vectors and every `embed_status` but `'queued'`
@@ -83,19 +96,19 @@ library files; the rest of the frontend has its own pages:
   never enumerates the backlog — that is the Index button's job. Queued rows
   are marked in `files.embed_status` and re-enqueued once at boot
   ([retrieval.md](./retrieval.md#ingest-follows-a-parse-through-one-queue)).
-- `embed_estimate` is its own command because it runs pdfium over the library,
-  one sweep at a time (pdfium is one session per process). The spend guard is
+- `embed_estimate` is its own command because it opens every outstanding PDF,
+  one sweep at a time. The spend guard is
   enforced in Rust (`UsageLedger::budget`), never on this page.
 
 ## Every surface shows parse state from one function
 
-- **`app/src/lib/parseState.ts` maps a status and the failure discriminants
+- **`app/src/lib/pipeline/parseState.ts` maps a status and the failure discriminants
   (`kind`, `retryable`, `latching`) to eight states**: `parsed`, `parsing`,
   `queued`, `skipped` (the user's choice — quiet, never a failure),
   `not parsed` (quiet — not a failure), `failed`, `can't parse`
   (`retryable: false`) and `on hold` (a latching cause that condemns the whole
   library). Unknown discriminants stay their own case.
-- **A file row shows the state as an icon** (`components/files/ParseState.tsx`),
+- **A file row shows the state as an icon** (`app/src/components/files/ParseState.tsx`),
   its title and a few words by failure `kind` on hover — never the backend's
   message, which can run to a TLS chain. Clicking `failed` or `can't parse`
   opens the file with its header's parse popover open: the whole message and,
@@ -180,21 +193,22 @@ library files; the rest of the frontend has its own pages:
 ## Uploads and documents are ordinary library files
 
 - **An upload gets its `files` row before its first parse kick**
-  (`app/src/lib/uploads.ts`), because the `parse-status` handler finds the row
+  (`app/src/lib/files/uploads.ts`), because the `parse-status` handler finds the row
   by path. Paths cross IPC, never bytes, and a taken name steps aside
   (`notes-2.pdf`) unless the bytes are identical.
 - **The drop target is the Files tab's root**, so the import state lives in the
-  tab (`app/src/hooks/useUploadImport.ts`) to survive switching to Uploads.
+  tab (`app/src/hooks/data/useUploadImport.ts`) to survive switching to Uploads.
   `useFileDrop` ignores a `visibility: hidden` element — how background panes
   hide.
-- **Delete is guarded by `is_upload_rel`** (`app/src-tauri/src/paths.rs`), not a
+- **Delete is guarded by `is_upload_rel`** (`app/src-tauri/src/library/paths/own_files.rs`), not a
   dialog. `deleteFileRow` deletes `pages` and `document_versions` by hand,
   since the cascade fires only with `foreign_keys` on. A parse in flight can land after a delete, so
   `store_upload` purges artifacts on a reused name whenever the bytes differ.
 - **The PDF/markdown toggle probes file metadata**, through
-  `course_file_has_content` in `app/src-tauri/src/files.rs`, without reading or
+  `course_file_has_content` in `app/src-tauri/src/library/files/commands.rs`, without reading or
   transferring the parsed text. `app/src/components/files/FileMarkdown.tsx`
-  renders the markdown and discards obsolete read responses.
+  renders the markdown (a parsed PDF's from its `.pages.json` record,
+  [viewers.md](./viewers.md)) and discards obsolete read responses.
 - **Scraped header metadata loads through `useCourseFileData`**: assignments,
   discussion threads and module TOCs supply a stable parser, while the hook
   owns parallel reads and cancellation of stale answers. Unchanged file rows
@@ -222,5 +236,5 @@ The editor a document opens in is [editor.md](./editor.md).
 
 ## Gotchas
 
-- **Import `app/src/lib/tauriEvents.ts` before `./App`** — it patches an
+- **Import `app/src/lib/platform/tauriEvents.ts` before `./App`** — it patches an
   `unlisten` that throws under StrictMode's remount and leaks the subscription.

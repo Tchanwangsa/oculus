@@ -1,5 +1,5 @@
 import { AppearanceSection } from "@/components/settings/AppearanceSection";
-import { Section } from "./section";
+import { Section } from "@/components/settings/shared/section";
 
 export default function SettingsAppearancePage() {
   return (

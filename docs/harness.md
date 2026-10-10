@@ -11,30 +11,31 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 
 | Piece | Location |
 | --- | --- |
-| Manager, queue, Tauri commands, `run_once`, per-thread `instructions` | `app/src-tauri/src/harness/mod.rs` |
-| The event enum and tool classification (`classify`) | `app/src-tauri/src/harness/event.rs` |
-| Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy --print=`) | `app/src-tauri/src/harness/claude.rs`, `app/src-tauri/src/harness/codex.rs`, `app/src-tauri/src/harness/opencode.rs`, `app/src-tauri/src/harness/antigravity.rs` |
-| Paths no agent may write; opencode's ruleset; agy's rules | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/antigravity_rules.rs` |
-| Finding, installing, updating and signing in the CLIs | `app/src-tauri/src/harness/discover.rs`, `app/src-tauri/src/harness/install.rs`, `app/src-tauri/src/harness/update.rs`, `app/src-tauri/src/harness/signin.rs` |
-| …their frontend | `app/src/hooks/useBridgeHealth.ts`, `app/src/hooks/useSignInStatus.ts`, `app/src/components/settings/InstallAgentDialog.tsx`, `app/src/components/settings/UpdateAgents.tsx`, `app/src/components/harness/SignInDialog.tsx`, `app/src/pages/settings/AgentsPage.tsx` |
+| Manager, queue, `run_once`, per-thread `instructions` | `app/src-tauri/src/harness/manager/` (`queue.rs`, `one_off.rs`, `instructions.rs`) |
+| Tauri commands (setup, models, turns, suggestions) | `app/src-tauri/src/harness/app/` |
+| The event enum and tool classification (`classify`) | `app/src-tauri/src/harness/event/mod.rs`, `app/src-tauri/src/harness/event/classify.rs` |
+| Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy --print=`) | `app/src-tauri/src/harness/providers/claude/`, `app/src-tauri/src/harness/providers/codex/`, `app/src-tauri/src/harness/providers/opencode/`, `app/src-tauri/src/harness/providers/antigravity/` |
+| Paths no agent may write; opencode's ruleset; agy's rules | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/rules.rs` |
+| Finding, installing, updating and signing in the CLIs | `app/src-tauri/src/harness/cli/discover/`, `app/src-tauri/src/harness/cli/install/`, `app/src-tauri/src/harness/cli/update/`, `app/src-tauri/src/harness/cli/signin/` |
+| …their frontend | `app/src/hooks/agents/useBridgeHealth.ts`, `app/src/hooks/agents/useSignInStatus.ts`, `app/src/components/settings/agents/InstallAgentDialog.tsx`, `app/src/components/settings/agents/UpdateAgents.tsx`, `app/src/components/harness/SignInDialog.tsx`, `app/src/pages/settings/integrations/AgentsPage.tsx` |
 | Process pipes, JSON lines and terminal turn failures shared by the bridges | `app/src-tauri/src/harness/child.rs` |
-| Thread and timeline rows | `app/src-tauri/src/harness/store.rs` |
-| The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents.rs` |
+| Thread and timeline rows | `app/src-tauri/src/harness/store/` |
+| The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents/mod.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
-| Provider table (`PROVIDERS`), types, commands | `app/src/lib/harness.ts` |
-| Live state and event folding | `app/src/stores/harnessStore.ts`, `app/src/hooks/useBackendEvents.ts` |
-| Page, thread list, recent list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` (recent list: `RecentThreads.tsx`) |
-| Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/draftStore.ts` |
-| Model picker and its catalogue hook | `app/src/components/harness/ModelPicker.tsx`, `app/src/hooks/useProviderModels.ts` |
-| Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/OpencodePage.tsx`, `app/src/components/settings/opencode/`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeCatalogue.ts` |
-| Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db.ts`, `app/src/pages/settings/JobsPage.tsx` |
-| One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends | `app/src-tauri/src/harness/mod.rs`, `app/src-tauri/src/harness/suggest.rs`, `app/src-tauri/src/lecture_end.rs` |
-| `@` menu and mention input | `app/src/components/harness/useMentionMenu.ts`, `app/src/components/harness/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
-| Send, queue and stop controls shared by both composers | `app/src/components/harness/SendControls.tsx` |
-| Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/useAttachments.ts`, `app/src/hooks/useFileDrop.ts` |
-| Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/attachments.ts`, `app/src/components/harness/PastedText.tsx`, `app/src/components/harness/PastedTextEditor.tsx` |
-| Library paths in rows and prose; copy as markdown | `app/src/lib/openFile.ts`, `app/src/lib/selectionMarkdown.ts` |
-| The lecture dock's chat | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx`, `lecture_grab_frames` in `app/src-tauri/src/chapters.rs` |
+| Provider table (`PROVIDERS`), types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/` |
+| Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
+| Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
+| Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
+| Model picker and its catalogue hook | `app/src/components/harness/composer/ModelPicker.tsx`, `app/src/hooks/agents/useProviderModels.ts` |
+| Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/integrations/OpencodePage.tsx`, `app/src/components/settings/agents/opencode/`, `app/src/components/settings/agents/OpencodeConnectDialog.tsx`, `app/src/lib/harness/opencodeCatalogue.ts` |
+| Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db/jobModels.ts`, `app/src/pages/settings/library/JobsPage.tsx` |
+| One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends | `app/src-tauri/src/harness/manager/one_off.rs`, `app/src-tauri/src/harness/app/suggest.rs`, `app/src-tauri/src/harness/suggest/`, `app/src-tauri/src/lectures/lecture_end/` |
+| `@` menu and mention input | `app/src/components/harness/mentions/useMentionMenu.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
+| Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
+| Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/agents/useAttachments.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
+| Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
+| Library paths in rows and prose; copy as markdown | `app/src/lib/files/openFile.ts`, `app/src/lib/markdown/selection.ts` |
+| The lecture dock's chat | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx`, `lecture_grab_frames` in `app/src-tauri/src/lectures/chapters/app.rs` |
 
 ## Four dialects become one event stream
 
@@ -42,7 +43,7 @@ Every bridge translates into `HarnessEvent` (session, user message, turn,
 text/reasoning deltas, tool started/output/finished, usage, rate limits,
 error, exited). `ThreadTitled`, `Queued`/`Unqueued`, `Rewound` and
 `TurnAnchor` have no provider behind them but ride the same path so they are
-persisted the same way. `classify` in `event.rs` is the one tool table.
+persisted the same way. `classify` in `event/classify.rs` is the one tool table.
 
 | CLI | Process shape | Resumed by |
 | --- | --- | --- |
@@ -56,7 +57,7 @@ persisted the same way. `classify` in `event.rs` is the one tool table.
   `harness-event` with the row id — a tool's finish never overtakes its start,
   and a reload loses nothing.
 - **Settings storage is shared.** Job selections, rate limits and Antigravity
-  approvals use `store::setting` / `store::set_setting`; each caller owns its
+  approvals use `db::store::setting` / `db::store::set_setting`; each caller owns its
   JSON shape and fallback policy.
 - **Account events have no thread.** Codex's `account/rateLimits/updated` is
   dispatched before the route lookup (`translate_account`) on thread 0, which
@@ -70,7 +71,7 @@ persisted the same way. `classify` in `event.rs` is the one tool table.
 
 A thread rooted at the library writes straight into `courses/` under
 `acceptEdits`. From `agents/`, each CLI refuses other writes its own way; the
-protected paths are one list in `protected.rs`.
+protected paths are one list in `protected.rs`: the library folders, the root files by pattern (the vault and its lock and temp files among them, so an agent cannot delete or truncate the sealed sessions) and the workspace folders. agy names the files instead.
 
 - **Claude**: its sandbox with the cwd as the only write root, `--add-dir` for
   reads (without it `ls ../courses` is refused), `Edit` denies on protected
@@ -89,10 +90,10 @@ protected paths are one list in `protected.rs`.
 **The database is the one hole, three files wide.** `oculus project`/`task`
 write the board ([projects.md](./projects.md)), and a sandbox that opens
 `oculus.db` but not `-wal` fails "attempt to write a readonly database". So
-`paths::db_write_paths` names `oculus.db`, `-wal`, `-shm`: `allowWrite` for
+`library::paths::db_write_paths` names `oculus.db`, `-wal`, `-shm`: `allowWrite` for
 Claude; `writableRoots` on the turn's `sandboxPolicy` plus
 `sandbox_workspace_write.writable_roots` in thread config for Codex. Files,
-not the folder — it holds the session cookie and Ed token.
+not the folder — it holds keyd's vault.
 
 **The CLI stays the only door.** Claude merges `Edit(...)` denies into its
 sandbox's `denyWrite`, so an `oculus.db*` deny would cancel the grant; instead
@@ -112,12 +113,32 @@ refuses to nest. The `oculus` binary's directory goes first on PATH, so a
 stale dev binary shows up as `unrecognized subcommand`
 ([development.md](./development.md)). Claude's auto-memory is off.
 
+**Each sandbox lets `oculus` reach `oculus-keyd` its own way.** `oculus search`
+and the other keyed commands connect to keyd's Unix socket from inside the
+agent's sandbox
+([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+The socket is `keyd_core::paths::socket(library)`, `keyd.sock` in the data
+dir: the path `Client::at` dials and keyd's launchd registration binds, and
+the harness takes its library from the same `paths::data_dir()` as the CLI.
+No deny list covers it. What each CLI needs was measured on the CLI itself:
+
+| CLI | What the connect needs | Where |
+| --- | --- | --- |
+| Claude | `sandbox.network.allowUnixSockets` naming that one socket, never `allowAllUnixSockets`; without it the connect fails with EPERM | `settings_json`, `claude.rs` |
+| Codex | the `workspace-write` policy's network access, since Codex has no per-socket grant; without it the connect is EPERM | `network_access` in thread config and `networkAccess` on every turn's `sandboxPolicy`, `codex.rs` |
+| Antigravity | nothing beyond `--sandbox`; its rules deny only writes to listed paths, and `command(oculus)` is allowed | `launch_args`, `antigravity_rules.rs` |
+| opencode | nothing: it has no sandbox, and `bash` allows `oculus *` | `OPENCODE.template.json` |
+
+Each bridge's tests pin its row, and that nothing it denies covers the socket.
+The app is not involved: once keyd is installed, launchd starts it on the first
+connect, so a chat agent's `oculus search` works with the app closed.
+
 ### Antigravity keeps its rules in the student's global settings
 
 `--sandbox` bounds shell commands only, and `--dangerously-skip-permissions`
 lets `write_to_file` write outside the library, so that flag is never passed.
 `agy` 1.2.9 reads rules only from `~/.gemini/antigravity-cli/settings.json`,
-so `antigravity_rules.rs` merges Oculus's block there before every spawn (or
+so `providers/antigravity/rules.rs` merges Oculus's block there before every spawn (or
 fails the spawn): writes on the three database files, the `oculus` binary's
 real directory (the sandbox can't read through the `~/.local/bin` symlink),
 read-only commands no flag turns into a write (`find`/`rg` are out — the
@@ -152,7 +173,7 @@ CLI puts the skill index in every turn, headless jobs included.
 
 ## Finding, installing, updating and signing in the CLIs
 
-A Dock-launched app has launchd's PATH, so `discover.rs` tries
+A Dock-launched app has launchd's PATH, so `cli/discover/` tries
 `OCULUS_{CLAUDE,CODEX,OPENCODE,ANTIGRAVITY}_BIN`, PATH, `well_known_dirs`, then
 a login shell. Provider and installer-tool discovery share that executable lookup order.
 Answers and the `--version` health probe are cached, failures
@@ -220,7 +241,7 @@ and selection callbacks have stable identities, so composer draft keystrokes
 do not rebuild model rows. Catalogue, provider, model and reasoning changes
 still update the picker.
 
-- **Metadata is parsed once per row object** in `app/src/lib/harness.ts`,
+- **Metadata is parsed once per row object** in `app/src/lib/harness/meta.ts`,
   shared by tool, error, permission and lecture-moment readers. `parseItemMeta`
   caches JSON by the immutable row object; a tool update replaces that object
   and gets a fresh parse. Malformed or non-object metadata draws an ordinary
@@ -233,7 +254,7 @@ still update the picker.
   only `courses/`, `lectures/` and `agents/` under the data dir show; any other
   path fails to load and the row falls back to its args.
 - **A citation opens the file at the cited spot.** One grammar
-  (`app/src/lib/citations.ts`) reads an inline code span, a link's href or a
+  (`app/src/lib/citations/`) reads an inline code span, a link's href or a
   bare path in prose: `courses/…`, `../courses/…`, `agents/…`, `lectures/…`,
   absolute, agent-cwd `./x`, plus `:97-120` / `#L97-L120` / `#page=12`. It is
   shape-only and decodes first (the data dir has a space); a course-relative
@@ -252,7 +273,7 @@ still update the picker.
   parent accepts only from its own frame.
 - **Codex web search** completes with no `status` — absent means it ran — and
   `ToolFinished`'s optional `title` fills in the query `item/started` lacked.
-- **Copy/drag out is markdown** (`selectionMarkdown.ts`).
+- **Copy/drag out is markdown** (`lib/markdown/selection.ts`).
 - **Maths**: the brief asks for `$…$`/`$$…$$`; `normalizeMath` rewrites
   `\(…\)`/`\[…\]`, which CommonMark eats before remark-math.
   The brief also bans a bare `|` in maths inside a table (the table splits the
@@ -265,7 +286,7 @@ still update the picker.
 
 **Names cost a turn outside the thread.** No CLI emits a title, so
 `Harness::name_thread` runs one on the `threadNaming` job's model;
-`store::claim_naming` flips `title_generated` atomically so only one turn pays
+`harness::store::claim_naming` flips `title_generated` atomically so only one turn pays
 and a failure never retries; `clean_title` rejects prose.
 
 ## One-off turns
@@ -310,7 +331,7 @@ message, because Claude's trims the leading space that says "new word".
 ## Each Chat tab owns its conversation, in its route
 
 `ChatPage` reads its thread from `/chat?t=<id>&n=<title>` (`chatHref` in
-`app/src/lib/harness.ts`), never from the store, so every tab shows its own and
+`app/src/lib/harness/route.ts`), never from the store, so every tab shows its own and
 back walks the threads that tab has shown (opening pushes; a rename or the
 composer becoming a thread replaces). `n` is there because `tabInfo` titles a
 tab from its path alone; it is written once the thread is known and again when
@@ -360,7 +381,7 @@ is skipped.
 
 ## Going back rewinds the agent too
 
-Edit, Retry and Rewind truncate at a row (`store::truncate_from`, announced as
+Edit, Retry and Rewind truncate at a row (`harness::store::truncate_from`, announced as
 `Rewound`); Edit/Retry then send (`harness_edit_resend`), Rewind returns the
 words to the composer (`harness_rewind`). No branching; idle threads only; not
 offered where `ProviderInfo.rewind` is false (Antigravity). The provider
@@ -442,7 +463,7 @@ provider-verified model (Meta's Muse Spark) fails once in the timeline.
 Chaptering, the lecture end, thread naming and document suggestions each
 name their agent, model and level in a Settings → Jobs row
 using `ModelPicker`. The registry is one
-`settings` value, `job_models`, read by `jobs.rs` and written by `db.ts`; both
+`settings` value, `job_models`, read by `jobs.rs` and written by `jobModels.ts`; both
 carry the defaults and must agree (a new job is a `Job` variant plus entries in
 `JOBS` and `DEFAULT_JOB_MODELS`). A bad value costs the configuration, not the
 run; CLI flags override for one run.
@@ -450,11 +471,11 @@ run; CLI flags override for one run.
 ## Memory
 
 Nothing carries between threads but `agents/` — `TASTE.md`, `memories/`,
-`memories/<CODE>/` (`app/src-tauri/src/agents.rs`) — and the app never reads it
+`memories/<CODE>/` (`app/src-tauri/src/agents/`) — and the app never reads it
 into a prompt. The contract is in the brief, not a skill, because nobody asks
 for a memory and a skill would never trigger; it says read first, then write
 on four triggers (a brief naming only a location left 9 memories over 51
-threads). `oculus memory` (`app/src-tauri/src/memory.rs`, [cli.md](./cli.md))
+threads). `oculus memory` (`app/src-tauri/src/agents/memory/`, [cli.md](./cli.md))
 writes file and index in one call, since the index line is the write an agent
 skips.
 
@@ -515,7 +536,7 @@ otherwise has none.
 No file is written. On send each card becomes a block in the message —
 `<pasted_text>`, a newline, the text, a newline, `</pasted_text>` —
 built by `withPastedText` and read back by `splitPastedText`
-(`app/src/lib/attachments.ts`), which round-trip exactly: a block opens at the
+(`app/src/lib/harness/attachments.ts`), which round-trip exactly: a block opens at the
 start or after a blank line and ends at the first closing tag alone on its
 line, and a text line that is exactly that tag is sent with a backslash in
 front. The question bubble lifts the blocks out as the same cards, in the
@@ -532,7 +553,7 @@ Tauri's handler sits in front of the webview, so a Finder drop never reaches
 React; `useFileDrop` hit-tests Tauri's events against element rects. The Chat
 page's conversation column and the lecture dock's Chat panel are the drop
 targets, not just the box: each passes its own ref as the composer's `dropRef`
-and draws `DropOverlay` (`app/src/components/ui/DropOverlay.tsx`) from
+and draws `DropOverlay` (`app/src/components/ui/layout/DropOverlay.tsx`) from
 `onDropping`.
 
 - **The position is in points despite the `PhysicalPosition` type.** wry
@@ -541,7 +562,7 @@ and draws `DropOverlay` (`app/src/components/ui/DropOverlay.tsx`) from
   (viewport width over `innerSize`/`scaleFactor`).
 - **Only a webview listener fires.** A drop is a window event only for
   `WebviewKind::WindowContent`; tauri's `unstable` feature (for
-  `Window::add_child`, `app/src-tauri/src/browser.rs`) makes the main webview
+  `Window::add_child`, `app/src-tauri/src/shell/browser/`) makes the main webview
   `WindowChild`, and `filter_target` never matches a `Window` listener to a
   `Webview` emit. The window listener subscribes fine and is never called.
 - **A hidden tab's composer sits at the same coordinates** (panes hide with
@@ -571,7 +592,7 @@ chapter list inline — rebuilt on every send and before any spawn.
 
 - Never pass `agy` `--dangerously-skip-permissions` — its file tools then write outside the library.
 - Never put an `Edit` deny on `oculus.db*` in Claude's settings — it cancels the write grant and every board write fails readonly.
-- Never grant the library folder instead of the three database files — it exposes the session cookie and Ed token.
+- Never grant the library folder instead of the three database files — it exposes keyd's vault.
 - Never let Settings make a billed call, or start opencode anywhere but its own page — see [No model is ever probed](#no-model-is-ever-probed).
 - Read opencode models from `/config/providers`, never `/api/model` — the latter lists the instance's providers, not the signed-in ones.
 - Every opencode call carries `?directory=<agents>` except `/auth/{id}` — unscoped, it binds to the server's launch cwd and another instance.
@@ -579,7 +600,7 @@ chapter list inline — rebuilt on every send and before any spawn.
 - Resend agent and model on every opencode prompt — creation values are decorative, and a bare prompt runs the stock `build` agent; check `oculus` is in `GET /agent` before creating a session.
 - `opencode serve --port 0` means "prefer 4096" — parse the real port from stdout.
 - opencode's `session.idle` arrives before the partial answer during an abort; a 30s drain watchdog fails a turn the server went silent on.
-- `opencode::sweep` kills strays at startup by `SERVE_ARGS` *and* `ppid == 1` — drop either and it kills a living app's or a hand-run server.
+- `providers::opencode::sweep` (`strays.rs`) kills strays at startup by `SERVE_ARGS` *and* `ppid == 1` — drop either and it kills a living app's or a hand-run server.
 - Codex: `thread/start` takes `sandbox` (string), `turn/start` takes `sandboxPolicy` (object); effort is thread config; a resumed thread replays stale usage first.
 - Claude: take tool inputs from the `assistant` line, not `input_json_delta`s; `content_block_start` can carry text the deltas don't repeat.
 - Don't cache sign-in status in Rust — a stale "signed out" after a sign-in is the wrong answer that matters.

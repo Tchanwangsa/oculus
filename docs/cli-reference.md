@@ -14,6 +14,7 @@ Usage: oculus [OPTIONS] [COMMAND]
 Commands:
   status      Session, library and parse status
   auth        Sign in to Canvas, or sign out
+  keyd        Install, inspect or remove oculus-keyd, the credential broker
   list        List subjects or lectures
   run         Scrape Canvas content or sync lectures
   index       Re-parse and re-embed PDFs already on record
@@ -37,8 +38,8 @@ Options:
           Print machine-readable JSON instead of formatted text
 
           Honoured by every command that prints: status, list, search, grep, read,
-          files, calendar, project and task. On failure the JSON is `{"error": "..."}`
-          on stderr and the exit code is 1.
+          files, calendar, project, task and keyd. On failure the JSON is `{"error":
+          "..."}` on stderr and the exit code is 1.
 
   -h, --help
           Print help (see a summary with '-h')
@@ -72,7 +73,6 @@ Commands:
   status    Whether the saved session still works
   setup     Store the credentials that let Oculus sign in without a browser
   auto      Sign in headlessly with the stored credentials, now
-  tick      One keep-alive cycle: roll the session forward, rebuild it if it died
   forget    Forget the stored sign-in credentials
   diagnose  Report what the Okta sign-in page looks like, when `auto` fails
   ed        Show the Ed Discussion session status, or set a token manually
@@ -140,26 +140,12 @@ Options:
 ```
 Sign in headlessly with the stored credentials, now
 
-A manual sign-in: it skips the wait between automatic attempts, and success resumes
-automatic sign-in after a lockout or a rejected password paused it.
+A manual sign-in: it skips the 10 min to 6 h wait between automatic attempts, but no two
+attempts start within a minute, and three failed manual attempts in a row wait like
+automatic ones. It cannot lift the pause a lockout or a rejected password leaves: fix
+the credentials in the app (Settings → Canvas) or run `oculus auth setup`.
 
 Usage: oculus auth auto
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-### `oculus auth tick`
-
-```
-One keep-alive cycle: roll the session forward, rebuild it if it died
-
-What the LaunchAgent runs every few hours. Prints nothing and always exits 0 — it
-reports into `session-keepalive.log` in the data dir, because launchd has nowhere to
-show a failure and a non-zero exit only makes launchd think the job crashed.
-
-Usage: oculus auth tick
 
 Options:
   -h, --help
@@ -204,6 +190,80 @@ Usage: oculus auth ed [TOKEN]
 Arguments:
   [TOKEN]
           An x-token JWT to save. Omit to check the current session
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus keyd`
+
+```
+Install, inspect or remove oculus-keyd, the credential broker
+
+Usage: oculus keyd <COMMAND>
+
+Commands:
+  install    Install oculus-keyd and load its LaunchAgent
+  status     Whether keyd is installed, loaded, current and answering
+  uninstall  Unload keyd and remove its LaunchAgent, helper app and stamp
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus keyd install`
+
+```
+Install oculus-keyd and load its LaunchAgent
+
+A keyd whose helper app is nested in the Oculus app is registered where it is; any other
+has its helper app copied to `bin/` in the data dir first, so the LaunchAgent never
+points into a build tree. Loading it prompts for nothing: keyd reads the keychain only
+when something first uses a stored key.
+
+Usage: oculus keyd install [OPTIONS]
+
+Options:
+      --from <PATH>
+          The signed keyd to install: its helper app, or the executable inside it.
+          Defaults to the one in this binary's app bundle, or, in a debug build, `bun
+          run keyd`'s output
+
+      --if-changed
+          Do nothing when the installed keyd was built from the same source and the
+          agent already runs it
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus keyd status`
+
+```
+Whether keyd is installed, loaded, current and answering
+
+Sends keyd a `ping`, which starts it if launchd has it loaded. Never reads or prints a
+stored key.
+
+Usage: oculus keyd status
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus keyd uninstall`
+
+```
+Unload keyd and remove its LaunchAgent, helper app and stamp
+
+The vault and the keychain's master key stay, so a reinstall finds every stored key
+again.
+
+Usage: oculus keyd uninstall
 
 Options:
   -h, --help
@@ -277,13 +337,17 @@ Options:
 ```
 Re-parse and re-embed PDFs already on record
 
-Usage: oculus index [SUBJECT_CODE]...
+Usage: oculus index [OPTIONS] [SUBJECT_CODE]...
 
 Arguments:
   [SUBJECT_CODE]...
           Subject codes to index. Omit for every subject
 
 Options:
+      --reparse
+          Parse again every PDF whose record predates the current parser version. Spends
+          MinerU allowance; embeddings are kept
+
   -h, --help
           Print help (see a summary with '-h')
 ```

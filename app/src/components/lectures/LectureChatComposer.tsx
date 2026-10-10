@@ -1,17 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { Camera, CameraSlash } from "@phosphor-icons/react";
 
-import { SendControls } from "@/components/harness/SendControls";
+import { SendControls } from "@/components/harness/composer/SendControls";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ModelPicker, type PickerProvider } from "@/components/harness/ModelPicker";
-import { AttachmentStrip } from "@/components/harness/AttachmentStrip";
-import { useAttachments } from "@/hooks/useAttachments";
-import { imageFiles } from "@/lib/attachments";
+import { ModelPicker, type PickerProvider } from "@/components/harness/composer/ModelPicker";
+import { AttachmentStrip } from "@/components/harness/attachments/AttachmentStrip";
+import { useAttachments } from "@/hooks/agents/useAttachments";
+import { imageFiles } from "@/lib/harness/attachments";
 import type { Provider } from "@/lib/harness";
-import { fmtClockSecs } from "@/lib/media";
+import { fmtClockSecs } from "@/lib/lectures/media";
 import { cn } from "@/lib/utils";
-import { useDraftStore } from "@/stores/draftStore";
+import { useDraftStore } from "@/stores/chat/draftStore";
 import { useTabActive } from "@/components/tabs/TabContext";
 
 /** The empty box's height; must stay the textarea's own line-height. */
@@ -71,7 +71,7 @@ function MomentChip({
 }
 
 /**
- * The dock's composer — a sibling of `components/harness/Composer.tsx`, not a
+ * The dock's composer — a sibling of `components/harness/composer/Composer.tsx`, not a
  * variant: the lecture fixes the subject and the agent already has the
  * recording folder (`docs/harness.md`), so there is no scope picker or `@` menu,
  * and it adds the moment instead. Attachments are shared outright
@@ -101,7 +101,7 @@ export function LectureChatComposer({
   dropRef,
   onDropping,
 }: {
-  /** Whose draft this box shows (`draftKey` in `stores/draftStore.ts`). */
+  /** Whose draft this box shows (`draftKey` in `stores/chat/draftStore.ts`). */
   draftKey: string;
   providers: PickerProvider[];
   provider: Provider;

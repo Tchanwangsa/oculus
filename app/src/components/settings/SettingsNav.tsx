@@ -8,7 +8,7 @@ import {
   SideNavGroupLabel,
   SideNavLink,
   SideNavSearch,
-} from "@/components/ui/SideNav";
+} from "@/components/ui/layout/SideNav";
 import {
   SETTINGS_GROUPS,
   SETTINGS_PAGES,
@@ -16,7 +16,7 @@ import {
   settingsPage,
   type SettingsEntry,
   type SettingsJump,
-} from "@/lib/settingsSearch";
+} from "@/lib/search/settings";
 import { cn } from "@/lib/utils";
 
 /**

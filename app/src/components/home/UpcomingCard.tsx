@@ -7,9 +7,9 @@ import {
   loadCalendar,
   subjectColors,
   type CalEvent,
-} from "@/lib/calendar";
-import { sameDay, startOfDay } from "@/lib/format";
-import { PROJECTS_UPDATED_EVENT } from "@/lib/projects";
+} from "@/lib/planning/calendar";
+import { sameDay, startOfDay } from "@/lib/format/format";
+import { PROJECTS_UPDATED_EVENT } from "@/lib/planning/projects";
 import { useHomeSection } from "./useHomeSection";
 
 /**

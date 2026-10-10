@@ -1,0 +1,41 @@
+//! Replace a file so a reader sees the old contents or the new, never a torn
+//! write.
+
+use std::fs;
+use std::io::Write;
+use std::path::Path;
+
+/// Write `body` to `tmp`, fsync, and rename it over `path`. `tmp` must be on
+/// the same filesystem; it is removed on any failure.
+pub fn write(path: &Path, tmp: &Path, body: &[u8]) -> Result<(), String> {
+    let staged = fs::File::create(tmp)
+        .map_err(|e| format!("create {}: {e}", tmp.display()))
+        .and_then(|mut file| {
+            file.write_all(body)
+                .and_then(|()| file.sync_all())
+                .map_err(|e| format!("write {}: {e}", tmp.display()))
+        });
+    if let Err(error) = staged {
+        fs::remove_file(tmp).ok();
+        return Err(error);
+    }
+    fs::rename(tmp, path).map_err(|e| {
+        fs::remove_file(tmp).ok();
+        format!("rename into {}: {e}", path.display())
+    })
+}
+
+/// Persist a JSON record through a unique sibling temporary file. Parents
+/// are created here so every ledger uses the same crash-safe write discipline.
+pub(crate) fn json(path: &Path, value: &impl serde::Serialize) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let temporary = path.with_extension(format!(
+        "json.tmp-{}-{}",
+        std::process::id(),
+        crate::runtime::clock::now_nanos()
+    ));
+    let body = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    write(path, &temporary, &body)
+}

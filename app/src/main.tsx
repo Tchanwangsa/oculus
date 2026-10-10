@@ -1,13 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 // Before ./App: the shim has to be in place ahead of the first `listen()`.
-import "./lib/tauriEvents";
+import "./lib/platform/tauriEvents";
 import "./index.css";
 import App from "./App";
 import { loadIconCatalogue } from "./components/subjects/SubjectIcon";
-import { useSubjectIconStore } from "./stores/subjectIconStore";
-import { watchMathSelection } from "./lib/selectionMarkdown";
-import { watchMathPress } from "./lib/mathSelect";
+import { useSubjectIconStore } from "./stores/planning/subjectIconStore";
+import { watchMathSelection } from "./lib/markdown/selection";
+import { watchMathPress } from "./lib/markdown/mathSelect";
 
 // A release webview has no console, so paint uncaught errors over the window.
 // Escape dismisses; a later error replaces the box rather than stacking.
@@ -28,11 +28,9 @@ function paint(label: string, err: unknown) {
   document.body.appendChild(box);
 }
 
-// Not faults: the ResizeObserver loop notice is the browser deferring delivery
-// a frame, and the `previousSibling` one is pdf.js's unguarded global
-// `selectionchange` handler. A bare identifier only, so our own
-// `p.node.previousSibling` still surfaces.
-const BENIGN = /^ResizeObserver loop|evaluating '\w+\.previousSibling'/;
+// Not a fault: the ResizeObserver loop notice is the browser deferring
+// delivery a frame.
+const BENIGN = /^ResizeObserver loop/;
 
 window.addEventListener("error", (ev) => {
   if (BENIGN.test(ev.message ?? "")) return;

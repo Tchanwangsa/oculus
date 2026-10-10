@@ -1,7 +1,8 @@
 # Architecture
 
 Two processes — a React frontend in a WebView and a Rust core — sharing one
-data directory. PDF parsing and page embedding are HTTP calls made in-process
+data directory, plus `oculus-keyd`, a small credential broker launchd starts
+on demand. PDF parsing and page embedding are HTTP calls made in-process
 from Rust, behind the seams in `app/src-tauri/src/parse/` and
 `app/src-tauri/src/embed/`.
 
@@ -10,26 +11,46 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Piece | Location |
 | --- | --- |
 | App entry, startup, command registry | `app/src-tauri/src/lib.rs` |
-| Schema migrations | `app/src-tauri/src/migrations.rs` |
-| Data-dir and library path rules | `app/src-tauri/src/paths.rs` |
+| Schema migrations | `app/src-tauri/src/db/migrations.rs` |
+| Data-dir and library path rules | `app/src-tauri/src/library/paths/` |
 | Parse seam and its two MinerU clients | `app/src-tauri/src/parse/mod.rs`, `app/src-tauri/src/parse/mineru/` |
-| Embed seam, Voyage client, page rasterizer | `app/src-tauri/src/embed/mod.rs`, `app/src-tauri/src/embed/voyage/`, `app/src-tauri/src/embed/raster.rs` |
-| Ingest and search over `pages` | `app/src-tauri/src/retrieval.rs` |
-| Rate limiting both cloud clients share | `app/src-tauri/src/ratelimit.rs` |
-| Shared parse/embed event payload and channels | `app/src-tauri/src/pipeline_events.rs` |
-| Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
-| Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
-| Credential storage (keychain only); provider probes | `app/src-tauri/src/credentials.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
-| Lecture video server | `app/src-tauri/src/media.rs` |
+| Embed seam, Voyage client, page rasterizer | `app/src-tauri/src/embed/mod.rs`, `app/src-tauri/src/embed/voyage/`, `app/src-tauri/src/embed/raster/` |
+| hayro rendering shared by the viewer and the embedder, and its memory budget | `app/src-tauri/src/library/pdf_render/` |
+| Ingest and search over `pages` | `app/src-tauri/src/pages/retrieval/` |
+| Rate limiting both cloud clients share | `app/src-tauri/src/providers/ratelimit/` |
+| Shared parse/embed event payload and channels | `app/src-tauri/src/runtime/pipeline_events.rs` |
+| Blocking-command adapter | `app/src-tauri/src/runtime/blocking.rs` |
+| Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/runtime/atomic_write.rs`, `app/src-tauri/src/runtime/clock.rs`, `app/src-tauri/src/test_support/` |
+| Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/auth/keyd/` |
+| Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/providers/credentials/`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/voyage.rs`, `app/src-tauri/src/providers/groq.rs`, `app/src-tauri/src/auth/okta/` |
+| Lecture video server | `app/src-tauri/src/lectures/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
-| Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/bundled.rs` |
-| In-app browser | `app/src-tauri/src/browser.rs`, `app/src-tauri/capabilities/default.json` |
+| Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/runtime/bundled.rs` |
+| PDF viewer's render, text and links | `app/src-tauri/src/library/pdf_view/` |
+| In-app browser | `app/src-tauri/src/shell/browser/`, `app/src-tauri/capabilities/default.json` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
-| Headless DB writes | `app/src-tauri/src/store.rs`, `app/src-tauri/src/projects.rs` |
-| App-usage ticker and its pinger | `app/src-tauri/src/usage.rs`, `app/src/hooks/useActivityPing.ts`, `app/src/lib/usageContext.ts` |
-| File-pipeline event payload and bound channels | `app/src-tauri/src/pipeline_events.rs` |
-| Frontend DB access and event folding | `app/src/lib/db.ts`, `app/src/hooks/useBackendEvents.ts` |
+| Headless DB writes | `app/src-tauri/src/db/store/`, `app/src-tauri/src/db/projects/` |
+| App-usage ticker and its pinger | `app/src-tauri/src/shell/usage/`, `app/src/hooks/backend/useActivityPing.ts`, `app/src/lib/activity/usageContext.ts` |
+| File-pipeline event payload and bound channels | `app/src-tauri/src/runtime/pipeline_events.rs` |
+| Frontend DB access and event folding | `app/src/lib/db/`, `app/src/hooks/backend/useBackendEvents.ts` |
 | The CLI over the same engine | `app/src-tauri/src/bin/oculus/` |
+
+## Code layout: domain directories, folder modules, tests beside the code
+
+- Rust loose files sit in group directories under `app/src-tauri/src/`:
+  `auth/`, `sources/`, `sync/`, `pages/`, `library/`, `db/`, `lectures/`,
+  `agents/`, `shell/`, `runtime/`, `providers/`; `harness/`, `parse/`,
+  `embed/` and `transcribe/` are their own groups.
+- The frontend groups the same way: `app/src/lib/` (`activity`, `citations`,
+  `db`, `files`, `format`, `harness`, `lectures`, `notes`, `pipeline`,
+  `planning`, `search`, `shell`, …), `app/src/hooks/` (`agents`, `backend`,
+  `data`, `lectures`, `shell`, `sync`, `ui`, …) and `app/src/stores/` (`chat`,
+  `documents`, `lectures`, `planning`, `shell`, `sync`).
+- A file that outgrows one concern becomes a folder module whose `mod.rs` (TS:
+  `index.ts`) only declares and re-exports.
+- No section-banner comments: a file that wants them is split instead.
+- Tests live beside the code in Rust (`tests.rs`) and mirror the tree under
+  `app/tests/` in TypeScript.
 
 ## Oculus starts no child process for parsing or embedding
 
@@ -43,44 +64,209 @@ its failure rules are in [parsing.md](./parsing.md).
 ## The frontend and Rust talk only through commands and events
 
 - Tauri commands go in; events come out. Scrape, parse and embed progress
-  arrive as events that `app/src/hooks/useBackendEvents.ts` folds into zustand
+  arrive as events that `app/src/hooks/backend/useBackendEvents.ts` folds into zustand
   stores. Parse and embed share the optional-field payload in
-  `pipeline_events`, while their channels keep separate success and error vocabularies.
+  `runtime::pipeline_events`, while their channels keep separate success and error vocabularies.
 - `parse::events` and `embed::events` bind the app handle once, first thing in
   `setup`, instead of threading it through the call path. The CLI never binds,
   so the same parse and embed code runs headless and its emits are no-ops.
 - Library text reads, bulk parse-artifact scans, upload import/conversion,
   Canvas calendar sync, Echo360's HTTP, downloads and ffmpeg, and video
-  transcription run through `blocking::run`, so synchronous I/O cannot hold
+  transcription run through `runtime::blocking::run`, so synchronous I/O cannot hold
   Tauri's command thread.
   Upload batches serialize their name allocation.
-- Credentials go keychain → in-process client. No key enters SQLite, the
-  WebView, a health response or a progress event. The local engine needs none.
+- Credentials go keychain → in-process client, except the Voyage, MinerU and
+  Groq keys and the Okta sign-in credentials while keyd is installed
+  ([below](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+  No key enters SQLite, the WebView, a health response or a progress event.
+  The local engines need none.
   A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
   sandbox, which fails right after the prompt is approved) is reported as
-  unreadable, never as a missing key (`Secret::fetch`, `Secret::has`). MinerU's
-  parse path is the exception: it still reads a refusal as no token
-  (`Secret::read`).
+  unreadable, never as a missing key (`Secret::fetch`, `Secret::has`).
+
+## `oculus-keyd` is the only process meant to read its key
+
+A separate binary from its own crate (`app/keyd/`), so its code signature only
+changes when its own source does and one keychain approval sticks
+([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
+The binary is `main.rs` over `oculus-keyd-core` (`app/keyd/core/`), which the
+app links too, for the client and the installer only. On macOS it runs as the
+helper app `Oculus Helper.app`, so the keychain prompt names "Oculus Helper"
+with the app's icon.
+
+- **Every OS call is in an adapter.** `app/keyd/core/src/platform/mod.rs`
+  is the contract: an endpoint and its `Conn`, activation, the peer check,
+  the secret store, the registrar, and the file helpers. `platform/macos/`
+  is the only adapter; `platform/unsupported.rs` builds everywhere else with
+  every seam refusing and `connect` finding keyd absent; off Unix that includes
+  the file helpers, so `lock` and `write_private` refuse too. The ops, `forward`,
+  the server loop and the client never name an OS
+  ([development.md](./development.md#keyds-os-code-lives-in-one-adapter)).
+- **Started by the OS, not the app.** On macOS the LaunchAgent
+  `com.tchan.oculus.keyd` owns `keyd.sock` (mode 0600) and starts keyd on the
+  first connect. Its `AssociatedBundleIdentifiers` names `com.tchan.oculus`,
+  so Login Items and the background-activity notice list it under Oculus
+  (`app/keyd/core/src/platform/macos/registrar.rs`). One thread accepts and decides to exit
+  (`app/keyd/core/src/server.rs`): it waits a tick for a client on any
+  listener, and only when none came does it exit after 60 s with no request
+  in flight, so a client that arrives then stays queued in launchd's socket
+  for the next keyd instead of being dropped. A client that connects and
+  sends nothing does not keep it alive.
+- **One keychain item.** The master key, `com.tchan.oculus.keyd` / `master`,
+  labelled "Oculus keys" because the access prompt quotes the label. keyd
+  creates it on the first op that needs the vault and never rewrites it; it
+  is never read at start or for `ping`, so installing keyd prompts for
+  nothing. Concurrent first requests wait on one read.
+- **`vault.bin`** holds the secrets as one ChaCha20-Poly1305-sealed JSON map
+  (`app/keyd/core/src/vault.rs`): a fresh nonce per write, replaced by rename,
+  read-modify-write under an exclusive lock. A file that fails to decrypt is never
+  overwritten.
+- **The wire format** is one JSON line, then `body_len` raw bytes if the
+  header names them; replies have the same shape. One module writes and reads
+  it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
+  hash, pid), `has`, `store`, `delete`, `forward`, the Okta ops `okta_save`,
+  `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`, and the
+  session ops `session_get`, `session_put`, `session_clear`, `session_status`,
+  `session_mark` and `sign_out` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
+  No op returns a key, a password, a seed or a token; the one reply that
+  carries a cookie is `session_get`, to the app. Only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
+  `request`, `caller`, `keychain` (the master key or an old item refused or
+  failed), `vault`, `record` (the sign-in attempt record, or a marker file, could
+  not be replaced), `missing` (a `canvas` one may carry the refused sign-in as
+  `signin`) and `upstream`.
+- **`forward` sends one request with the credential added; the credential
+  never leaves.** The request names a route (`secret`), `method` (GET or
+  POST), `path`, `headers`, and optionally `"stream": true`; keyd sends it to
+  the route's fixed origin and attaches the credential from the vault. Routes
+  are `app/keyd/core/src/forward/route.rs`; a name with no route (Okta's, a
+  `session.*` name) cannot be forwarded:
+
+  | Route | Origin | Under | Credential |
+  | --- | --- | --- | --- |
+  | `voyage` | `https://api.voyageai.com` | `/v1/` | `Authorization: Bearer` |
+  | `mineru` | `https://mineru.net` | `/api/v4/` | `Authorization: Bearer` |
+  | `groq` | `https://api.groq.com` | `/openai/v1/` | `Authorization: Bearer` |
+  | `canvas` | `https://canvas.lms.unimelb.edu.au` | `/` | `Cookie` (`session.canvas`) |
+  | `ed` | `https://edstem.org` | `/api/` | `x-token` (`session.ed`) |
+
+  The client may set only `Content-Type` and `Accept`, plus `Range`,
+  `If-None-Match` and `If-Modified-Since` on `canvas` and `ed`; `Cookie`,
+  `X-Token` and `Authorization` are refused on every route. A cloud path is
+  held to `[A-Za-z0-9-._~/?=&]` with no dot segment or `//`. A session path
+  (`forward/path.rs`) also admits `[ ] % : + ; ,`, because Canvas queries use
+  `include[]=` and encoded `next` URLs, but its path part is judged
+  percent-decoded: no escaped `/`, `\`, control or non-ASCII byte, no `%`
+  left over (so `%252e` fails), no `.` or `..` segment even with a `;param`,
+  and still under the prefix; a query may carry any escape but a control
+  character. The reply is `{"status", "headers", "body_len"}` and the origin's
+  body, byte for byte, whatever the status: redirects come back unfollowed
+  (so a cookie never reaches a second origin), and `upstream` means no answer arrived (DNS, connect,
+  TLS, reset). A route with no session is `missing` (on `canvas`, after keyd
+  has tried to sign in). ureq runs without gzip or proxy variables.
+  - **Cloud routes** have no timeout past ureq's 30 s connect: an embed or a
+    parse takes minutes. **Session routes** also fail a forward whose origin
+    sends nothing for 180 s (`SESSION_READ_TIMEOUT`, one read, not a total),
+    so a download of any size completes while a stalled one frees its thread.
+  - **A session reply never carries `set-cookie`, `authorization` or
+    `x-token`.** Canvas's `Set-Cookie` lines, on any status including a
+    redirect, are merged into `session.canvas` under the vault lock, except
+    those of a rejected answer
+    ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
+  - **`canvas` signs in again when its session is rejected** and sends the
+    request once more; `ed` never does. The reply may carry `signin`, the
+    sign-in that was refused
+    ([auth.md](./auth.md#a-rejected-canvas-request-signs-in-once-and-is-sent-once-more)).
+  - **`"stream": true`** replies `{"status", "headers"}` with no `body_len`,
+    then the body until keyd closes the connection after the origin's last
+    byte. There is no size cap and no keyd-side deadline, and neither the vault
+    nor `State` is locked while it flows. A failure partway just closes the
+    connection, so a client compares what it read with the `content-length`
+    header; `Client::send_stream` returns the body as a `Read`. A buffered
+    reply stays the default, capped at 256 MiB.
+  - The log line names the route, status and byte counts, never a path, header
+    or body.
+  The Okta sign-in (`okta/flow.rs`) is built to send the same request in
+  keyd and in the app, whose ureq also enables `cookies` and `gzip` through
+  feature unification: each request gets a new agent, so no cookie store
+  has anything to replay beside the flow's own `Cookie` header, and each asks
+  for `Accept-Encoding: identity`.
+- **The cloud keys' old keychain items are imported on first use.** The
+  first `has` or `forward` for `voyage`, `mineru` or `groq` copies that
+  name's old item (`com.tchan.oculus.voyage`, `.mineru`, `.groq`) into the
+  vault unless the vault already holds a key, then records
+  `keyd.imported.<name>` in the vault; `store` and `delete` record it too, so
+  a deleted key never comes back from the old item. An import leaves the old
+  item in the keychain, which the app reads when keyd is absent; `delete`
+  removes it too, best effort, and replies `legacy`: `removed`, `absent`,
+  `failed` or `refused`, with the vault delete standing either way. The Okta
+  items are imported the same way, by `okta_status` and the sign-in, and
+  `okta_save` marks them; `okta_forget` marks and removes them. Entries under
+  `keyd.` are bookkeeping no op can name (`app/keyd/core/src/names.rs`).
+- **The caller check runs before any request is read.** The peer's uid must
+  be keyd's. A bundled keyd then admits only executables inside the outermost
+  app bundle above it — Oculus.app, which its helper is nested in — while
+  that bundle's seal, nested code included, verifies strictly
+  (`app/keyd/core/src/platform/macos/peer.rs`); a copy of the helper outside
+  any app is its own outermost bundle and serves no app or CLI. A `dev` build
+  admits any same-user caller. The adapter also gives each caller a role — `app` (the
+  bundle itself), `cli` (its `Contents/MacOS/oculus`) or `unknown`; a dev
+  build goes by file name, `app` or `oculus` — which the log records beside
+  the signing identifier. Ops check the role, never a path, and in one place
+  (`State::dispatch`): every op but `ping` needs `app` or `cli`, because every
+  executable in the install (ffmpeg ships in it) passes the caller check;
+  `okta_resume` and `session_get` need `app`. `ping` answers whoever was
+  admitted, for diagnostics.
+- **keyd holds the Okta credentials and runs the sign-in.** The username,
+  password and TOTP seed are vault entries, written together by `okta_save`
+  (which validates) and removed together by `okta_forget`. `ensure_signed_in`
+  runs `keyd_core::okta::sign_in` (flow, attempt guard, log) once at a time
+  and answers with the outcome as a `LoginError`, never a cookie; the Canvas
+  and Okta sessions it mints are vault entries, beside Ed's, and keyd also
+  owns the authenticated and signed-out markers
+  ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-credentials-and-runs-the-sign-in)).
+- **Voyage, MinerU, Groq and the Okta sign-in go through it.** `credentials::Credentialed`
+  (`keyd_core::client::Client`, `app/keyd/core/src/client.rs`) is the client,
+  one connection per call. It treats a missing socket or a refused connect as keyd not
+  installed (`KeydError::Absent`), the only case in which a caller reads the
+  keychain itself; every other error surfaces. The Voyage and MinerU clients,
+  Groq transcription, the three keys' Settings commands
+  (`credentials::CloudKey`) and the Okta calls (`auth/okta/`) use it
+  ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key),
+  [parsing.md](./parsing.md#with-oculus-keyd-installed-no-oculus-process-holds-the-mineru-token),
+  [viewers.md](./viewers.md)). A request's timeout is the caller's own, and
+  Groq's upload has none, and neither has `ensure_signed_in`; a session route
+  takes `client::SESSION_TIMEOUT` (ten minutes per read), because a rejected
+  request waits for a sign-in.
+- `keyd::ensure_installed` runs at app startup, before the session is
+  restored (which asks keyd), and does nothing in a dev
+  build; a dev install is the preflight's ([cli.md](./cli.md)). A release
+  registers the keyd in its bundled helper,
+  `Contents/Helpers/Oculus Helper.app` (built without `dev`), in place, and
+  logs the failure when that file is missing or is not a keyd
+  ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
+- **One data dir.** `keyd_core::paths::data_dir` (the OS data dir plus
+  `com.tchan.oculus`) is the only definition; the app's `paths::data_dir`
+  and keyd's `main` both call it. Only a debug keyd reads an override.
 
 ## Scraping lives in Rust because hidden WebViews freeze
 
 macOS suspends an off-screen WKWebView's content process, which freezes
 anything running in it mid-run with nothing to catch. So the scrape engine is
-`app/src-tauri/src/sync.rs`, and the headless Okta sign-in
-(`app/src-tauri/src/okta.rs`) runs in Rust too. Never move background work into
+`app/src-tauri/src/sync/`, and the headless Okta sign-in
+(`app/keyd/core/src/okta/`) runs in Rust too, inside keyd. Never move background work into
 a WebView.
 
 ## Lecture video streams over localhost HTTP
 
 WebKit refuses `<video>` sources on custom URL schemes: an `asset://` URL
 fetches but the media element fails with error code 4 (macOS 26). So
-`app/src-tauri/src/media.rs` serves lecture video on an ephemeral localhost
+`app/src-tauri/src/lectures/media.rs` serves lecture video on an ephemeral localhost
 port with a per-launch token and Range support, scoped to `lectures/` and
-`courses/`. The frontend gets URLs from `mediaSrc()` in `app/src/lib/media.ts`.
+`courses/`. The frontend gets URLs from `mediaSrc()` in `app/src/lib/lectures/media/src.ts`.
 
 ## One data directory, resolved without a Tauri handle
 
-`paths::data_dir()` computes the directory Tauri would
+`library::paths::data_dir()` computes the directory Tauri would
 (`~/Library/Application Support/com.tchan.oculus`) with no `AppHandle`, and is
 the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
 
@@ -90,8 +276,8 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   `.emb.json`. Two subfolders are the student's own, never written by a sync:
   `uploads/` (copied in by `import_uploads`) and `documents/` (notes written in
   the app by `create_document`, with pasted images in `documents/assets/`),
-  both in `app/src-tauri/src/files.rs`. Rename and delete commands are scoped
-  to those shapes (`is_document_rel` in `app/src-tauri/src/paths.rs`), which is
+  both in `app/src-tauri/src/library/files/`. Rename and delete commands are scoped
+  to those shapes (`is_document_rel` in `app/src-tauri/src/library/paths/own_files.rs`), which is
   what makes deleting there safe.
 - `lectures/<uuid>/` — Echo360 media (`source1.mp4`, optionally
   `source2.mp4`) and `transcript.vtt`, plus regenerable `frames/` and
@@ -106,17 +292,21 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   spend guard from Settings → Embeddings, kept here rather than in `settings`
   because the reservation that enforces it already reads this file
   ([retrieval.md](./retrieval.md)).
-- The session cookie, auth flag, `session-keepalive.log`, and the sign-in
-  attempt record and its `okta-sign-in.log` ([auth.md](./auth.md)).
+- `canvas-session/`: the authenticated flag, the signed-out marker and the
+  sign-in attempt record, with `okta-sign-in.log` beside it
+  ([auth.md](./auth.md)). The sessions themselves are in the vault.
+- `vault.bin` and its `vault.bin.lock`, `keyd.sock` (launchd's), and `bin/`
+  with a dev-installed `Oculus Helper.app` and keyd's `oculus-keyd.stamp`
+  ([above](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
 
 ## The database has one schema owner and two writers
 
 Schema is the append-only, numbered migration list in
-`app/src-tauri/src/migrations.rs`; the highest `version` is the current schema.
+`app/src-tauri/src/db/migrations.rs`; the highest `version` is the current schema.
 An applied migration's SQL, comments and whitespace included, is frozen;
 editing it fails `Database.load` with a checksum mismatch.
 In the app the *frontend* writes the scrape tables, upserting through
-`app/src/lib/db.ts` as scrape events arrive. Headless, `store.rs` writes the
+`app/src/lib/db/` as scrape events arrive. Headless, `app/src-tauri/src/db/store/` writes the
 same rows with the same SQL, so a CLI sync looks like an app sync. The CLI
 never creates the database, so a fresh machine opens the app once first.
 
@@ -133,22 +323,22 @@ never creates the database, so a fresh machine opens the app once first.
 - `projects`, `project_tasks` and `local_events` hold the student's own rows,
   which nothing upstream has a copy of. Their `subject_id` is nullable and
   `ON DELETE SET NULL`, so dropping a course never takes the user's work with
-  it. Written by `app/src/lib/projects.ts` in the app and
-  `app/src-tauri/src/projects.rs` headless ([projects.md](./projects.md)).
+  it. Written by `app/src/lib/planning/projects/` in the app and
+  `app/src-tauri/src/db/projects/` headless ([projects.md](./projects.md)).
 - `document_versions` holds a note's checkpoints and snapshots, written only by
-  `app/src/lib/documentVersions.ts` ([editor.md](./editor.md#a-notes-versions-live-in-the-database-never-on-disk)).
+  `app/src/lib/notes/documentVersions.ts` ([editor.md](./editor.md#a-notes-versions-live-in-the-database-never-on-disk)).
 - `harness_threads`/`harness_items` are the chat timeline
   ([harness.md](./harness.md)).
 - `usage_hours` and `usage_context_hours` are written only by Rust, as the
   next section describes.
 - Parse and embed settings are the `parse` and `embed` rows of `settings`, read
-  by `parse_config` and `embed_config`. `store::edit_setting` preserves unknown
+  by `parse_config` and `embed_config`. `db::store::edit_setting` preserves unknown
   keys when changing either object; malformed records start from defaults.
 
 ## Rust counts app usage; the frontend only pings
 
 `usage_hours` holds open and active seconds per local hour, keyed
-`YYYY-MM-DD HH`. A ticker in `app/src-tauri/src/usage.rs`, started in `setup`,
+`YYYY-MM-DD HH`. A ticker in `app/src-tauri/src/shell/usage/`, started in `setup`,
 reads the main window every 30 s and adds 30 to the current hour's row:
 
 - **Open**: the window is visible and not minimized.
@@ -164,9 +354,9 @@ clock because `Instant` pauses through macOS sleep and a pre-sleep ping would
 look fresh on wake.
 
 Each ping carries a context, `{ kind, subjectId }` from `usageContext` in
-`app/src/lib/usageContext.ts`: what sort of page it came from (lecture, file,
+`app/src/lib/activity/usageContext.ts`: what sort of page it came from (lecture, file,
 document, course, chat, browser, planning, other) and the subject it belongs
-to. `useActivityPing` (`app/src/hooks/useActivityPing.ts`) sends the focused
+to. `useActivityPing` (`app/src/hooks/backend/useActivityPing.ts`) sends the focused
 pane's context with input, and pings at once, past the throttle, whenever
 navigation, a tab switch or a focus move between main page and side panel
 changes it within a few seconds of real input — a tab restoring at launch is
@@ -196,7 +386,7 @@ JavaScript.
   would hand every Tauri command to whatever page the user browsed to.
 - Back-list state, find matches and zoom live only in the page, and
   `with_webview` dispatches to the main thread and returns nothing. So
-  `browser.rs` *pushes* each answer as an event rather than returning it.
+  `shell::browser` *pushes* each answer as an event rather than returning it.
 - WebKit has no public favicon API, so Rust fetches the icon beside each page
   load and emits `browser-favicon`; the frontend owns the `browser_favicons`
   rows. Rust sees events, the frontend owns rows — the same split as history.
@@ -206,6 +396,7 @@ JavaScript.
 - Background work in a hidden WebView freezes silently — keep it in Rust ([above](#scraping-lives-in-rust-because-hidden-webviews-freeze)).
 - Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
 - A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
-- Reaching the data dir any way but `paths::data_dir()` lets the CLI and app diverge.
+- Reaching the data dir any way but `library::paths::data_dir()` (itself `keyd_core::paths::data_dir`) lets the CLI, the app and keyd diverge.
+- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.
 - A `subject_id` that cascades on user-owned tables deletes the student's work with a course.

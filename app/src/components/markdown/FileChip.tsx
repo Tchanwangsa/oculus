@@ -1,8 +1,8 @@
 import type { KeyboardEvent, MouseEvent } from "react";
-import { categoryIconFor } from "@/lib/fileTypes";
-import { fileTitle, pathFile } from "@/lib/openFile";
+import { categoryIconFor } from "@/lib/files/fileTypes";
+import { fileTitle, pathFile } from "@/lib/files/openFile";
 import { citationText, parsedSourceOf, type Citation } from "@/lib/citations";
-import { useCitedPage } from "@/hooks/useCitation";
+import { useCitedPage } from "@/hooks/agents/useCitation";
 import { cn } from "@/lib/utils";
 
 /** The chip's location suffix: a page, else a line range. */

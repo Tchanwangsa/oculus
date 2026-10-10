@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import Sidebar from "@/components/sidebar/Sidebar";
 import TopTabBar from "@/components/tabs/TopTabBar";
 import TabPane from "@/components/tabs/TabPane";
@@ -14,26 +13,29 @@ import {
   openExternal,
   stepZoom,
 } from "@/lib/browser";
-import { useActivityPing } from "@/hooks/useActivityPing";
-import { useBrowserTabs } from "@/hooks/useBrowserTabs";
-import { useTauriEvent, useWindowEvent } from "@/hooks/useEvents";
-import { routeEdit, routeSelectAll } from "@/lib/editRouting";
-import { routeFind } from "@/lib/find";
-import { containSelection } from "@/lib/selectScope";
-import { useNewTabClicks } from "@/lib/newTabClicks";
-import { useBrowserStore } from "@/stores/browserStore";
-import { activePane, useTabStore } from "@/stores/tabStore";
+import { useActivityPing } from "@/hooks/backend/useActivityPing";
+import { useBrowserTabs } from "@/hooks/shell/useBrowserTabs";
+import { useTauriEvent, useWindowEvent } from "@/hooks/backend/useEvents";
+import { routeEdit, routeSelectAll } from "@/lib/menu/editRouting";
+import { routeFind } from "@/lib/menu/find";
+import { containSelection } from "@/lib/ui/selectScope";
+import { useNewTabClicks } from "@/lib/shell/newTabClicks";
+import { useBrowserStore } from "@/stores/shell/browserStore";
+import { activePane, useTabStore } from "@/stores/shell/tabStore";
+import {
+  applyZoom,
+  DEFAULT_ZOOM,
+  storedZoom,
+  ZOOM_MAX,
+  ZOOM_MIN,
+} from "@/lib/ui/pageZoom";
 
 const SIDEBAR_KEY = "oculus-sidebar-collapsed";
-const ZOOM_KEY = "oculus-zoom";
-const DEFAULT_ZOOM = 1.15;
-const ZOOM_MIN = 0.7;
-const ZOOM_MAX = 1.8;
 
 /**
  * The shell, and the one place every tab is mounted. Not a route element: each
  * tab has its own router (`TabPane.tsx`), so the chrome here navigates through
- * `lib/tabRouters.ts`.
+ * `lib/shell/tabRouters.ts`.
  */
 export default function AppLayout() {
   const tabs = useTabStore((s) => s.tabs);
@@ -41,24 +43,13 @@ export default function AppLayout() {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     return localStorage.getItem(SIDEBAR_KEY) === "true";
   });
-  const [zoom, setZoom] = useState<number>(() => {
-    const stored = Number(localStorage.getItem(ZOOM_KEY));
-    return stored >= ZOOM_MIN && stored <= ZOOM_MAX ? stored : DEFAULT_ZOOM;
-  });
+  const [zoom, setZoom] = useState<number>(storedZoom);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_KEY, String(collapsed));
   }, [collapsed]);
 
-  // Page zoom, never CSS `zoom` (see docs/ui.md). The var is only for
-  // chrome that must stay at device size.
-  useEffect(() => {
-    localStorage.setItem(ZOOM_KEY, String(zoom));
-    document.documentElement.style.setProperty("--app-zoom", String(zoom));
-    getCurrentWebview()
-      .setZoom(zoom)
-      .catch(() => {});
-  }, [zoom]);
+  useEffect(() => applyZoom(zoom), [zoom]);
 
   const toggle = useCallback(() => setCollapsed((c) => !c), []);
 
@@ -116,7 +107,7 @@ export default function AppLayout() {
   }, []);
 
   // Menu events, not key presses: a browser page's native WebView takes every
-  // ⌘-key, so the app's webview never sees them (`app/src-tauri/src/menu.rs`).
+  // ⌘-key, so the app's webview never sees them (`app/src-tauri/src/shell/menu.rs`).
   useTauriEvent("menu-zoom-in", () => zoomBy(1));
   useTauriEvent("menu-zoom-out", () => zoomBy(-1));
   useTauriEvent("menu-zoom-reset", () => zoomBy(0));

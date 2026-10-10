@@ -11,9 +11,10 @@
     "test": "bun test tests scripts/*.test.mjs",
     "preview": "vite preview",
     "ffmpeg": "node scripts/fetch-ffmpeg.mjs",
-    "pdfium": "node scripts/fetch-pdfium.mjs",
     "speech": "node scripts/build-speech.mjs",
     "whisper": "node scripts/build-whisper.mjs",
+    "keyd": "node scripts/build-keyd.mjs",
+    "stage-keyd": "node scripts/stage-keyd.mjs",
     "tauri": "tauri",
     "cli": "bun scripts/build-cli.mjs",
     "cli:dev": "bun scripts/build-cli.mjs --debug",
@@ -46,7 +47,6 @@
     "katex": "0.16.47",
     "mathlive": "^0.111.0",
     "mermaid": "^12.0.0",
-    "pdfjs-dist": "5.4.296",
     "radix-ui": "^1.6.7",
     "react": "^19.1.0",
     "react-day-picker": "^10.0.1",
@@ -73,7 +73,6 @@
     "vite": "^7.0.4"
   },
   "patchedDependencies": {
-    "@codemirror/view@6.43.13": "patches/@codemirror%2Fview@6.43.13.patch",
-    "pdfjs-dist@5.4.296": "patches/pdfjs-dist@5.4.296.patch"
+    "@codemirror/view@6.43.13": "patches/@codemirror%2Fview@6.43.13.patch"
   }
 }

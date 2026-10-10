@@ -1,0 +1,37 @@
+[package]
+name = "oculus-keyd"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+# Standalone, and never a member of any workspace: a shared Cargo.lock bump
+# would relink keyd, change its cdhash and bring back the keychain prompt
+# (docs/development.md). `core` sits inside this root because cargo hashes a
+# path dependency outside it by absolute path, which would give each checkout
+# different bytes. Excluded, because it is a root of its own for its tests.
+[workspace]
+exclude = ["core"]
+
+[[bin]]
+name = "oculus-keyd"
+path = "src/main.rs"
+
+[features]
+# Admit any caller running as this user instead of requiring one inside
+# keyd's own install. `bun run keyd` builds with it; a bundled release must
+# not.
+dev = []
+
+[dependencies]
+# Everything but `main`: the ops, the server loop and the OS adapter.
+keyd_core = { package = "oculus-keyd-core", path = "core", features = ["server"] }
+
+[dev-dependencies]
+serde_json = "=1.0.151"
+# The scripted Canvas and Okta the binary-level test signs in against.
+keyd_core = { package = "oculus-keyd-core", path = "core", features = ["server", "test-support"] }
+
+[build-dependencies]
+sha2 = "=0.10.9"
+

@@ -8,28 +8,60 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 
 | Piece | Location |
 | --- | --- |
-| Canvas scrape engine (modules driver, link crawl, Office conversion) | `app/src-tauri/src/sync.rs` |
-| Canvas HTTP: cookie, retries, pagination | `app/src-tauri/src/canvas.rs` |
-| Ed Discussion: token, courses, threads, XML→md | `app/src-tauri/src/ed.rs` |
-| Echo360 core; its Tauri commands, session cache, downloads | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
-| Canvas HTML → Markdown | `app/src-tauri/src/md.rs` |
-| App-side entry: thread + `AppReporter`; on-demand module videos | `app/src-tauri/src/scrape.rs` |
-| Headless DB writes, subject list state | `app/src-tauri/src/store.rs`, `app/src-tauri/src/subjects.rs` |
-| Chronological term ranking | `app/src-tauri/src/terms.rs` |
-| Agent docs written into the library | `app/src-tauri/src/agents.rs` |
-| Frontend sync page, runner, options | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts`, `app/src/components/sync/SyncSettings.tsx` |
+| Canvas scrape engine (modules driver, link crawl, Office conversion) | `app/src-tauri/src/sync/` |
+| Canvas HTTP through keyd's `canvas` route: redirects, retries, pagination, streamed downloads | `app/src-tauri/src/sources/canvas/` |
+| Ed Discussion: courses, threads, XML→md; its requests through keyd's `ed` route | `app/src-tauri/src/sources/ed/` |
+| Echo360 core | `app/src-tauri/src/sources/echo360/` |
+| Echo360 Tauri commands, session cache, downloads | `app/src-tauri/src/lectures/commands.rs`, `app/src-tauri/src/lectures/mod.rs`, `app/src-tauri/src/lectures/downloads.rs` |
+| Canvas HTML → Markdown | `app/src-tauri/src/pages/md/` |
+| App-side entry: thread + `AppReporter`; on-demand module videos | `app/src-tauri/src/sync/scrape/` |
+| Headless DB writes, subject list state | `app/src-tauri/src/db/store/`, `app/src-tauri/src/sync/subjects.rs` |
+| Chronological term ranking | `app/src-tauri/src/sync/terms.rs` |
+| Agent docs written into the library | `app/src-tauri/src/agents/mod.rs` |
+| Frontend sync page, runner, options | `app/src/pages/tools/SyncPage.tsx`, `app/src/lib/pipeline/syncRunner.ts`, `app/src/components/sync/SyncSettings.tsx` |
 
 ## Scraping lives in Rust, never in a WebView
 
 The engine is plain Rust on a thread because a hidden WebView is suspended by
 macOS (see [architecture.md](./architecture.md)). Progress leaves through the
-`Reporter` trait in `app/src-tauri/src/sync.rs`: `app/src-tauri/src/scrape.rs`
+`Reporter` trait in `app/src-tauri/src/sync/mod.rs`: `app/src-tauri/src/sync/scrape/mod.rs`
 emits Tauri events, the CLI prints. A file announced as downloading
 (`scrape-file-start`) always ends in `scrape-file` or, when its download or
 save fails, `scrape-file-failed` (`{ subject_id, relative_path, error }`, a
-sentence that never carries the signed URL). `app/src-tauri/src/canvas.rs` is the
-entire Canvas HTTP surface — cookie, retry policy and Link-header pagination
-live only there, and both scraping and auth probing go through it.
+sentence that never carries the signed URL). `app/src-tauri/src/sources/canvas/` is the
+entire Canvas HTTP surface — redirects, retry policy and Link-header pagination
+live only there, and both scraping and auth probing go through it. It holds no
+cookie: every request to the Canvas host is a `forward` to keyd's `canvas`
+route, which attaches the session and keeps it current from `Set-Cookie`.
+
+## Redirects are followed here, not in keyd
+
+keyd never follows a redirect, so `Canvas::get` and `Canvas::download_to`
+follow up to five themselves. A `Location` on the Canvas host goes through
+keyd again; one anywhere else (a pre-signed S3 `public_url`, a file CDN) is
+fetched directly with no cookie, so the session never reaches a second host.
+A Link-header `next` is an absolute Canvas URL and is sent as its path and
+query, escapes such as `%5B` untouched. The Echo360 launch page and the Canvas
+legs of Ed's LTI walk use the same hop.
+
+## A dead Canvas session ends the run
+
+When Canvas rejects the cookie (a 401 that is not Canvas's own
+`"unauthorized"`, or a redirect to Okta or `/login`), keyd signs in again and
+retries once. A rejection that reaches the app therefore means that sign-in
+was refused or failed, and `Canvas` raises `CanvasError::Expired`, carrying the
+sign-in's `LoginError` when keyd named one. It keeps the first and fails every
+later request the same way without asking keyd again, so a run is one sign-in
+attempt, not one per file. `Engine::scrape` checks it after each course: it
+logs one error naming the course and the reason, calls
+`Reporter::canvas_expired` (the app emits `canvas-auth-expired`, which the sync
+page shows as "Canvas session expired during sync"; `oculus run` marks the run
+failed and exits with the same text) and returns without starting the next
+course. A Canvas outage is different: a 5xx or a failed connection is retried
+and then logged per course like any other failure (as is any Ed failure: Ed
+has its own token), and a probe reads it as `Unreachable`, never as an expired
+session. With keyd not installed every request fails with a plain "oculus-keyd
+is not running or not installed".
 
 ## The current term is ranked, not compared as text
 
@@ -37,7 +69,7 @@ live only there, and both scraping and auth probing go through it.
 current; `oculus run` syncs it by default, `oculus list` marks it, and a
 search with no named subject falls back to it. Canvas term names do not sort
 chronologically (`"2026 Summer Term"` > `"2026 Semester 2"` as strings), so
-`app/src-tauri/src/terms.rs` ranks within the year — summer, semester 1,
+`app/src-tauri/src/sync/terms.rs` ranks within the year — summer, semester 1,
 winter, semester 2 — and a month-named intensive (`"2026 June"`) takes the rank
 of the term it falls inside.
 
@@ -59,7 +91,7 @@ of the term it falls inside.
 ## A scrape scaffolds the agent docs
 
 `Engine::scrape` writes the central `agents/AGENTS.md` once per run, then links
-each subject's course folder after scraping it (`app/src-tauri/src/agents.rs`),
+each subject's course folder after scraping it (`app/src-tauri/src/agents/mod.rs`),
 so a subject enrolled mid-semester is usable by a coding agent from its first
 sync. The central copy is written first because the links are relative. A
 subject with no folder is skipped, and a failure is a warning, never a failed
@@ -72,9 +104,9 @@ cannot write it — see [cli.md](./cli.md).
   size); when the metadata call reports the same pair and the file is on disk,
   nothing is downloaded.
 - Bodies (pages, announcements, tasks, Ed threads) are always re-fetched;
-  the byte-compare in `paths::write_course_bytes` decides new/updated/unchanged.
+  the byte-compare in `library::paths::write_course_bytes` decides new/updated/unchanged.
 - An `updated` write purges the parse/embed artifacts
-  (`paths::purge_parse_artifacts`) and the file's pages, so the parse re-runs.
+  (`library::paths::purge_parse_artifacts`) and the file's pages, so the parse re-runs.
 - An `application/octet-stream` upload is judged by extension (`office_ext_of`, `is_video`; allowlists).
 - `MAX_FILE_BYTES` (100 MB) skips any larger file except a video, which a sync never downloads.
 
@@ -87,21 +119,23 @@ have nothing to do with Echo360 lectures.
 - `fetch_file` records a video without downloading it, and its module TOC line
   carries the Canvas id and the path it will land at:
   `- [title](../files/<name>.mp4) _(video <id>)_` (`file_toc_line`, parsed by
-  `app/src/lib/moduleToc.ts`). Locked videos skip like any file.
+  `app/src/lib/pipeline/moduleToc.ts`). Locked videos skip like any file.
 - Once downloaded, a sync reports it `unchanged` while the manifest pair
   matches. A copy Canvas has since changed is left as it is: only the
   student downloads a video, through the Modules page.
-- `canvas_download_video` (`app/src-tauri/src/scrape.rs`) streams it with
+- `canvas_download_video` (`app/src-tauri/src/sync/scrape/videos.rs`) streams it with
   `Canvas::download_to` into a `.part` sibling, renamed on success and removed
   on any failure or cancel, then reports a `scrape-file` like a synced file, so
   the frontend writes its `files` row. Progress is `canvas-video-progress`
   (`canvasFileId`, `percent`, `phase`); `canvas_cancel_video` sets the
   file's flag in `VideoCancels`, polled per chunk.
-- The cookie goes only to Canvas: `download_to` sets it for a Canvas URL, and
-  ureq strips `Cookie` on every redirect, so the signed file host a Canvas
-  download redirects to never sees it.
+- `download_to` streams a Canvas URL through keyd (`send_stream`) in 256 KiB
+  chunks, and fetches the signed file host a Canvas download redirects to
+  directly, with no cookie. A body shorter than its `content-length` is
+  refused, since keyd ends a stream early without an error when Canvas drops
+  the connection.
 - Videos never reach parse or embed: every pipeline gate is a PDF/Office or
-  spreadsheet allowlist (`paths::doc_pdf_rel`, `paths::is_sheet`,
+  spreadsheet allowlist (`library::paths::doc_pdf_rel`, `library::paths::is_sheet`,
   `isPdfBacked`, `isPipelineFile`, `PDF_BACKED_SQL_LIST`).
 
 ## Office documents are stored as themselves plus a derived PDF
@@ -109,13 +143,13 @@ have nothing to do with Echo360 lectures.
 Parsing and embedding are PDF-shaped, so `.pptx/.docx/.ppt/.doc` are kept
 intact and LibreOffice headless writes `deck.pptx.pdf` beside them
 (`office_to_pdf`). The derived PDF never gets a `files` row; the original is
-the library row, and `paths::doc_pdf_rel` resolves it for every consumer. The
+the library row, and `library::paths::doc_pdf_rel` resolves it for every consumer. The
 student's own uploads go through the same conversion
-(`app/src-tauri/src/files.rs`).
+(`app/src-tauri/src/library/files/`).
 
 Spreadsheets (`.xlsx/.xlsm/.xls/.ods/.csv`) are kept intact too, but become text,
 not a PDF: `marks.xlsx.md` beside them, written as they download
-(`crate::sheets`, see
+(`crate::pages::sheets`, see
 [parsing.md](./parsing.md#spreadsheets-are-converted-to-text-never-parsed)).
 One needs a spreadsheet type (or none) *and* a spreadsheet's extension
 (`is_sheet_type`): every later gate goes by the extension, and a `.csv` can
@@ -126,7 +160,7 @@ A `.csv` counts under a CSV, plain-text, Excel or missing type
 ## Ed threads are a custom XML dialect
 
 Ed returns threads as `<document>` XML, parsed with an HTML parser in
-`app/src-tauri/src/ed.rs`: `<link>` is renamed `edlink` (HTML-void), `<image>`
+`app/src-tauri/src/sources/ed/document.rs`: `<link>` is renamed `edlink` (HTML-void), `<image>`
 becomes `<img>`, and `<break/>` swallows following siblings, so every renderer
 emits its marker and still recurses. Ed course codes are staff-typed free text
 ("comp10002 2024s2"), matched to Canvas subjects by leading code + year +
@@ -138,9 +172,10 @@ The app's Echo360 commands run synchronous HTTP, file I/O and ffmpeg on
 blocking workers, leaving async runtime threads available for other commands.
 Workers share the course session cache and source-qualified cancellation flags.
 
-- Canvas mints an OAuth-signed form on the course's external-tool page;
-  POSTing it to Echo360 creates the session, and the CloudFront cookies that
-  come back are what the media CDN accepts.
+- Canvas mints an OAuth-signed form on the course's external-tool page, which
+  `echo360::connect` fetches through keyd; POSTing it to Echo360 (directly,
+  with Echo360's own in-process cookies) creates the session, and the
+  CloudFront cookies that come back are what the media CDN accepts.
 - A capture is one media id with the Presenter screen at `hd1.mp4` and the room
   camera at `hd2.mp4`. They land as `source1.mp4`/`source2.mp4`, trimmed
   identically with the fetched ffmpeg so the player runs them off one clock;
@@ -160,7 +195,7 @@ A scrape completes even when parsing is unavailable. Parsing is a separate,
 idempotent pass — one detached thread per PDF, blocking in `parse_pdf` on the
 seam in `app/src-tauri/src/parse/mod.rs` for as long as the engine takes
 ([parsing.md](./parsing.md)). A finished parse writes its page records via
-`store::upsert_pages` so `oculus grep` never waits on the vector index, and
+`db::store::upsert_pages` so `oculus grep` never waits on the vector index, and
 queues its embedding ([retrieval.md](./retrieval.md)). Hitting an
 already-parsed file with no page rows folds its `.pages.json` in.
 

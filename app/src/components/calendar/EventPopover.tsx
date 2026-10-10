@@ -18,10 +18,10 @@ import {
   CALENDAR_UPDATED_EVENT,
   fmtEventTime,
   type CalEvent,
-} from "@/lib/calendar";
+} from "@/lib/planning/calendar";
 import { deleteLocalEvent } from "@/lib/db";
-import { editEvent } from "@/stores/eventEditorStore";
-import { projectHref } from "@/components/projects/projectHref";
+import { editEvent } from "@/stores/planning/eventEditorStore";
+import { projectHref } from "@/components/projects/nav/projectHref";
 
 const KIND_LABEL: Record<CalEvent["kind"], string> = {
   class: "Class",

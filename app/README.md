@@ -28,12 +28,14 @@ job, or while debugging.
 ```sh
 bun run cli          # build src-tauri/target/release/oculus
 bun run cli:install  # build + symlink into ~/.local/bin
-bun run docs:cli     # regenerate ../docs/cli-reference.md from the binary's help
+bun run docs:cli     # rebuild the CLI, regenerate ../docs/cli-reference.md from its help
 ```
 
 `docs:cli` also runs as part of `bun run tauri build`, after the CLI has been
 staged — so a release bundle can never ship a CLI that the checked-in
-reference does not describe.
+reference does not describe. It always builds the CLI from the current sources
+(and never touches `binaries/`); `OCULUS_BIN=<path>` documents a binary you
+built yourself instead.
 
 ```sh
 oculus                          # session, sidecar and library status
@@ -144,11 +146,12 @@ Configuration is in `components.json`.
 - **Primitives**: `radix-ui` (unified package)
 - **Icons**: `@phosphor-icons/react` — shadcn generates lucide imports, so swap
   them to Phosphor after adding a new component
-- **Theme tokens**: `src/index.css`. The shadcn token names (`background`,
+- **Theme tokens**: `src/styles/colors.css` (dark values in `dark.css`;
+  `src/index.css` imports the stylesheets). The shadcn token names (`background`,
   `card`, `popover`, `secondary`, `accent`, `input`, `ring`, …) are mapped onto
   the project's own Linear-style grey + indigo palette, so stock shadcn
   components inherit the app's look with no per-component overrides.
-- **Dark mode**: a `.dark` class on `<html>`, driven by `src/lib/theme.ts`.
+- **Dark mode**: a `.dark` class on `<html>`, driven by `src/lib/ui/theme.ts`.
   `index.css` declares `@custom-variant dark (&:is(.dark *))` so `dark:`
   utilities follow that class rather than the OS setting.
 

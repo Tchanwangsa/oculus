@@ -2,8 +2,8 @@
 //! from the same arithmetic the run bills against, without sending anything:
 //!
 //! * Voyage bills pixels, capped per image (`batch::BILLED_PIXEL_CAP`,
-//!   `ledger::USD_PER_BILLION_PIXELS`); page boxes come from pdfium without
-//!   rasterising (`raster::page_sizes`).
+//!   `ledger::USD_PER_BILLION_PIXELS`); page boxes come from the renderer
+//!   without rasterising (`raster::page_sizes`).
 //! * Packing is deterministic: `batch::plan` is the run's own function.
 //! * The pace is the learned tier: tokens over TPM or requests over RPM,
 //!   whichever is slower.
@@ -35,7 +35,7 @@ pub struct EmbedEstimate {
     /// Files that would be embedded, and the pages inside them.
     pub files: u32,
     pub pages: u32,
-    /// Files pdfium could not open to measure; still counted in `files`.
+    /// Files the renderer could not open to measure; still counted in `files`.
     pub unreadable: u32,
     /// Billed (capped) pixels and the tokens they pace against.
     pub pixels: u64,
@@ -44,7 +44,6 @@ pub struct EmbedEstimate {
     pub requests: u32,
     pub kinds: Vec<Bucket>,
 
-    // ── Against the account ──────────────────────────────────────────────────
     /// Of `pixels`, how many fall past the free grant and are therefore billed.
     pub billable_pixels: u64,
     pub cost_usd: f64,
@@ -54,7 +53,6 @@ pub struct EmbedEstimate {
     /// `None` when the guard is off or the run fits inside it.
     pub stops_after_pages: Option<u32>,
 
-    // ── Against the clock ────────────────────────────────────────────────────
     /// Seconds at the learned tier, and at tier 1 — what a payment method buys.
     pub seconds: f64,
     pub seconds_tier1: f64,
@@ -173,8 +171,6 @@ fn seconds_for(tokens: u64, requests: u32, tpm: f64, rpm: f64) -> f64 {
     by_tokens.max(by_requests)
 }
 
-// ── The backlog ──────────────────────────────────────────────────────────────
-
 struct Outstanding {
     /// Relative to the app data dir, resolved to an Office document's PDF.
     pdf: PathBuf,
@@ -184,11 +180,11 @@ struct Outstanding {
 
 /// Parsed, PDF-backed files with no usable vectors in the current space.
 ///
-/// Must match `getUnembeddedPdfs` in `app/src/lib/retrieval.ts` (duplicated
+/// Must match `getUnembeddedPdfs` in `app/src/lib/pipeline/retrieval.ts` (duplicated
 /// because each side queries its own pool). Both count current-space page
 /// vectors, since `files.embed_status` does not record which space set it.
 async fn backlog(db_file: &Path) -> Result<Vec<Outstanding>, String> {
-    let db = crate::store::pool(db_file).await?;
+    let db = crate::db::store::pool(db_file).await?;
     let sql = format!(
         r#"SELECT f.relative_path, lower(f.file_type) AS kind FROM files f
            WHERE lower(f.file_type) IN {}
@@ -198,7 +194,7 @@ async fn backlog(db_file: &Path) -> Result<Vec<Outstanding>, String> {
                      AND p.embed_model = ?1 AND p.embed_dim = ?2)
                  < max((SELECT COUNT(*) FROM pages p2 WHERE p2.file_id = f.id), 1)
            ORDER BY f.relative_path ASC"#,
-        crate::paths::pdf_backed_sql_list()
+        crate::library::paths::pdf_backed_sql_list()
     );
     let rows = sqlx::query(&sql)
         .bind(EMBED_MODEL)
@@ -214,7 +210,7 @@ async fn backlog(db_file: &Path) -> Result<Vec<Outstanding>, String> {
             let relative: String = row.try_get("relative_path").ok()?;
             let kind: String = row.try_get("kind").unwrap_or_default();
             Some(Outstanding {
-                pdf: crate::paths::doc_pdf_rel(&relative)?.into(),
+                pdf: crate::library::paths::doc_pdf_rel(&relative)?.into(),
                 kind,
             })
         })

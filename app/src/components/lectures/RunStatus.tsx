@@ -3,7 +3,7 @@ import { CircleNotch } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { fmtClockSecs } from "@/lib/media";
+import { fmtClockSecs } from "@/lib/lectures/media";
 import { toolVerb, type ToolKind } from "@/lib/harness";
 import { useTabActive } from "@/components/tabs/TabContext";
 

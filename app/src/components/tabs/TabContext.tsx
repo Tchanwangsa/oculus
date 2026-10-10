@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { PaneSide } from "@/stores/tabStore";
+import type { PaneSide } from "@/stores/shell/tabStore";
 
 /**
  * Which pane a page renders in and whether its tab is in front. Every tab is

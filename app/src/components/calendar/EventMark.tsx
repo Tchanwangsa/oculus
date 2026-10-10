@@ -1,5 +1,5 @@
 import { CheckSquare, Flag, PushPin } from "@phosphor-icons/react";
-import type { CalKind } from "@/lib/calendar";
+import type { CalKind } from "@/lib/planning/calendar";
 
 /**
  * The mark leading every event in every view: flag for a deadline, pin for a

@@ -2,8 +2,8 @@ import { memo } from "react";
 import { CircleNotch } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { PanelEmpty } from "@/components/media/MediaDock";
-import { useTranscription, type TranscriptionRun } from "@/hooks/useTranscription";
-import { ENGINE_LABELS } from "@/lib/transcribe";
+import { useTranscription, type TranscriptionRun } from "@/hooks/lectures/useTranscription";
+import { ENGINE_LABELS } from "@/lib/lectures/transcribe";
 
 export interface TranscribeEmptyProps {
   /** The video to transcribe, as `transcribe` takes it; null until it is on
