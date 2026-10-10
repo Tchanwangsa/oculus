@@ -128,9 +128,16 @@ A `.csv` counts under a CSV, plain-text, Excel or missing type
 Ed returns threads as `<document>` XML, parsed with an HTML parser in
 `app/src-tauri/src/ed.rs`: `<link>` is renamed `edlink` (HTML-void), `<image>`
 becomes `<img>`, and `<break/>` swallows following siblings, so every renderer
-emits its marker and still recurses. Ed course codes are staff-typed free text
-("comp10002 2024s2"), matched to Canvas subjects by leading code + year +
-semester from `/api/user`. The token is in [auth.md](./auth.md).
+emits its marker and still recurses. The token is in [auth.md](./auth.md).
+
+- Ed course codes are staff-typed free text ("comp10002 2024s2", "CS 101"),
+  matched to Canvas subjects from `/api/user` on the subject token — the words
+  up to the first with a digit — then year, and a UniMelb `SM<n>` or a shared
+  season name. A tie that leaves is no match: the course's LTI launch, which
+  names the course exactly, decides instead.
+- The Ed tab is the external tool labelled "Ed Discussion", "Ed" or "EdStem".
+- The API base is `edstem.org/api` unless a launch lands on another Ed host,
+  which the profile then remembers (`ed_api`).
 
 ## Echo360 is an LTI launch with up to two streams
 

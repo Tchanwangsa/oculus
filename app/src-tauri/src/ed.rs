@@ -14,7 +14,21 @@ use ego_tree::NodeRef;
 use scraper::node::Node;
 use scraper::Html;
 
-const ED_BASE: &str = "https://edstem.org/api";
+const DEFAULT_API: &str = "https://edstem.org/api";
+
+/// Ed's API base: what the last LTI launch landed on (`institution.json`),
+/// else the default.
+fn api_base() -> String {
+    crate::institution::current()
+        .and_then(|i| i.ed_api)
+        .unwrap_or_else(|| DEFAULT_API.to_string())
+}
+
+/// The API on the host a launch landed on, when that is not the default's.
+fn api_for_landing(landed: &url::Url) -> Option<String> {
+    let host = landed.host_str()?;
+    (host != "edstem.org").then(|| format!("https://{host}/api"))
+}
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// A hard stop, not a target.
 const MAX_THREADS: usize = 1000;
@@ -25,7 +39,6 @@ struct EdCourse {
     code: String,
     year: String,
     session: String,
-    created_at: String,
 }
 
 pub struct Ed {
@@ -86,7 +99,7 @@ impl Ed {
         if token.is_empty() {
             return;
         }
-        let Ok(resp) = ureq::post(&format!("{ED_BASE}/renew_token"))
+        let Ok(resp) = ureq::post(&format!("{}/renew_token", api_base()))
             .timeout(TIMEOUT)
             .set("x-token", &token)
             .send_string("")
@@ -143,8 +156,11 @@ impl Ed {
     ) -> Result<i64, String> {
         let tool_path = find_ed_tool(canvas, canvas_course_id)?;
         let (login_token, destination) = walk_lti_chain(&canvas.cookie_header(), &tool_path)?;
+        if let Some(api) = api_for_landing(&destination) {
+            crate::institution::learn(|i| i.ed_api = Some(api));
+        }
 
-        let resp = ureq::post(&format!("{ED_BASE}/login_token"))
+        let resp = ureq::post(&format!("{}/login_token", api_base()))
             .timeout(TIMEOUT)
             .set("Content-Type", "application/json")
             .send_string(&serde_json::json!({ "login_token": login_token }).to_string())
@@ -187,7 +203,6 @@ impl Ed {
                             code: c["code"].as_str().unwrap_or("").to_string(),
                             year: c["year"].as_str().unwrap_or("").to_string(),
                             session: c["session"].as_str().unwrap_or("").to_string(),
-                            created_at: c["created_at"].as_str().unwrap_or("").to_string(),
                         })
                     })
                     .collect()
@@ -198,8 +213,9 @@ impl Ed {
     }
 
     /// The Ed course matching a Canvas course code. Ed codes are staff-typed
-    /// free text, so match on the leading subject token; year and semester
-    /// from the Canvas code break ties, then recency.
+    /// free text, so match on the subject token; year and term from the Canvas
+    /// code break ties. A tie they cannot break is `None`, and the caller's
+    /// LTI launch names the course exactly.
     pub fn course_for(&self, canvas_code: &str) -> Result<Option<i64>, String> {
         let want = code_token(canvas_code);
         if want.is_empty() {
@@ -208,26 +224,12 @@ impl Ed {
         let canvas_upper = canvas_code.to_uppercase();
         let courses = self.courses()?;
 
-        let mut best: Option<(i32, &EdCourse)> = None;
-        for c in courses.iter().filter(|c| code_token(&c.code) == want) {
-            let mut score = 0;
-            if !c.year.is_empty() && canvas_upper.contains(&c.year) {
-                score += 2;
-            }
-            if let Some(d) = c.session.chars().find(char::is_ascii_digit) {
-                if canvas_upper.contains(&format!("SM{d}")) {
-                    score += 1;
-                }
-            }
-            let better = match &best {
-                Some((s, b)) => score > *s || (score == *s && c.created_at > b.created_at),
-                None => true,
-            };
-            if better {
-                best = Some((score, c));
-            }
-        }
-        Ok(best.map(|(_, c)| c.id))
+        let scored: Vec<(i32, &EdCourse)> = courses
+            .iter()
+            .filter(|c| code_token(&c.code) == want)
+            .map(|c| (term_score(&canvas_upper, c), c))
+            .collect();
+        Ok(pick_course(&scored))
     }
 
     /// Every thread on a course's board, newest first (list entries only —
@@ -344,7 +346,7 @@ fn get_json(token: &str, path: &str) -> Result<serde_json::Value, String> {
     if token.is_empty() {
         return Err("No saved Ed token.".to_string());
     }
-    let url = format!("{ED_BASE}{path}");
+    let url = format!("{}{path}", api_base());
     let resp = ureq::get(&url)
         .timeout(TIMEOUT)
         .set("x-token", token)
@@ -372,15 +374,19 @@ fn find_ed_tool(canvas: &crate::canvas::Canvas, course_id: i64) -> Result<String
         .into_iter()
         .flatten()
         .find(|t| {
-            t["label"]
-                .as_str()
-                .is_some_and(|l| l.contains("Ed Discussion"))
+            t["label"].as_str().is_some_and(is_ed_label)
                 && t["html_url"]
                     .as_str()
                     .is_some_and(|u| u.contains("/external_tools/"))
         })
         .and_then(|t| t["html_url"].as_str().map(str::to_string))
         .ok_or_else(|| "course has no Ed Discussion tool".to_string())
+}
+
+/// "Ed Discussion" at most universities; plain "Ed" or "EdStem" at some.
+fn is_ed_label(label: &str) -> bool {
+    let l = label.trim().to_lowercase();
+    l.contains("ed discussion") || l == "ed" || l.contains("edstem")
 }
 
 const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
@@ -732,13 +738,51 @@ fn squeeze_item(s: &str) -> String {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// The leading subject code: `"comp10002 2024s2"` → `"COMP10002"`.
+/// The subject code: the words up to and including the first with a digit.
+/// `"comp10002 2024s2"` → `"COMP10002"`, `"CS 101-001"` → `"CS101"`.
 fn code_token(code: &str) -> String {
-    code.trim()
+    let mut out = String::new();
+    for word in code
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+    {
+        out.push_str(word);
+        if word.chars().any(|c| c.is_ascii_digit()) {
+            break;
+        }
+    }
+    out.to_uppercase()
+}
+
+const SEASONS: &[&str] = &["SUMMER", "WINTER", "SPRING", "AUTUMN", "FALL"];
+
+/// How well an Ed course's year and session fit an upper-cased Canvas code:
+/// the year counts double, then a UniMelb `SM<n>` or a shared season name.
+fn term_score(canvas_upper: &str, c: &EdCourse) -> i32 {
+    let mut score = 0;
+    if !c.year.is_empty() && canvas_upper.contains(&c.year) {
+        score += 2;
+    }
+    let session = c.session.to_uppercase();
+    let semester = session
         .chars()
-        .take_while(|c| c.is_ascii_alphanumeric())
-        .collect::<String>()
-        .to_uppercase()
+        .find(char::is_ascii_digit)
+        .is_some_and(|d| canvas_upper.contains(&format!("SM{d}")));
+    let season = SEASONS
+        .iter()
+        .any(|s| session.contains(s) && canvas_upper.contains(s));
+    if semester || season {
+        score += 1;
+    }
+    score
+}
+
+/// The best-scoring course, or `None` when two share the best score.
+fn pick_course(scored: &[(i32, &EdCourse)]) -> Option<i64> {
+    let best = scored.iter().map(|(s, _)| *s).max()?;
+    let mut top = scored.iter().filter(|(s, _)| *s == best);
+    let (_, first) = top.next()?;
+    top.next().is_none().then_some(first.id)
 }
 
 /// `"2026-08-07T15:42:01.522942+10:00"` → `"2026-08-07 15:42"` (already local).
@@ -760,6 +804,60 @@ mod tests {
         assert_eq!(code_token("SWEN20003_2025_S2"), "SWEN20003");
         assert_eq!(code_token("INFO30006"), "INFO30006");
         assert_eq!(code_token("  "), "");
+        assert_eq!(code_token("CS 101-001"), "CS101");
+        assert_eq!(code_token("MATH 221 (Fall 2026)"), "MATH221");
+    }
+
+    fn ed(id: i64, year: &str, session: &str) -> EdCourse {
+        EdCourse {
+            id,
+            code: "CS 101".into(),
+            year: year.into(),
+            session: session.into(),
+        }
+    }
+
+    #[test]
+    fn the_term_picks_the_offering_and_a_tie_picks_none() {
+        let (y25, y26s1, y26s2) = (
+            ed(1, "2025", "S2"),
+            ed(2, "2026", "S1"),
+            ed(3, "2026", "S2"),
+        );
+        let all = [&y25, &y26s1, &y26s2];
+        let pick = |canvas: &str| {
+            let upper = canvas.to_uppercase();
+            let scored: Vec<_> = all.iter().map(|c| (term_score(&upper, c), *c)).collect();
+            pick_course(&scored)
+        };
+        assert_eq!(pick("COMP30026_2026_SM2"), Some(3));
+        // The year narrows it to two; nothing tells those apart.
+        assert_eq!(pick("CS 101 2026"), None);
+
+        let (fall, spring) = (ed(4, "2026", "Fall"), ed(5, "2026", "Spring"));
+        let scored = [
+            (term_score("CS 101 FALL 2026", &fall), &fall),
+            (term_score("CS 101 FALL 2026", &spring), &spring),
+        ];
+        assert_eq!(pick_course(&scored), Some(4));
+    }
+
+    #[test]
+    fn the_api_follows_a_launch_off_the_default_host() {
+        let at = |u: &str| api_for_landing(&url::Url::parse(u).unwrap());
+        assert_eq!(at("https://edstem.org/au/courses/38809"), None);
+        assert_eq!(
+            at("https://us.edstem.org/courses/1").as_deref(),
+            Some("https://us.edstem.org/api")
+        );
+    }
+
+    #[test]
+    fn ed_tabs_go_by_several_names() {
+        assert!(is_ed_label("Ed Discussion"));
+        assert!(is_ed_label("ed"));
+        assert!(is_ed_label("EdStem forum"));
+        assert!(!is_ed_label("Education resources"));
     }
 
     #[test]
