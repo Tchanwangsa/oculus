@@ -19,7 +19,12 @@ const FORBIDDEN = [
   "launchctl",
   "LaunchAgents",
   "Library/Application Support",
+  "keyring::",
 ];
+
+// The one file allowed to name an otherwise forbidden word: the keychain
+// fallback `Secret`, which goes when keyd is always installed.
+const ALLOWED = new Map([["src-tauri/src/credentials/keychain.rs", ["keyring::"]]]);
 
 const platform = join(app, "keyd", "core", "src", "platform");
 
@@ -35,13 +40,21 @@ const scoped = [
   join(app, "keyd", "core", "src"),
   join(app, "src-tauri", "src", "credentials"),
   join(app, "src-tauri", "src", "credentials.rs"),
+  join(app, "src-tauri", "src", "okta.rs"),
   join(app, "src-tauri", "src", "keyd.rs"),
   join(app, "src-tauri", "src", "bin", "oculus", "keyd.rs"),
 ].flatMap(rustFiles);
 
 test("the scope covers keyd's main, core's logic and the app's keyd code", () => {
   const names = scoped.map((f) => relative(app, f));
-  for (const f of ["keyd/src/main.rs", "keyd/core/src/server.rs", "keyd/core/src/client.rs", "src-tauri/src/keyd.rs"]) {
+  for (const f of [
+    "keyd/src/main.rs",
+    "keyd/core/src/server.rs",
+    "keyd/core/src/client.rs",
+    "src-tauri/src/keyd.rs",
+    "src-tauri/src/okta.rs",
+    ...ALLOWED.keys(),
+  ]) {
     expect(names).toContain(f);
   }
   expect(names.some((f) => f.includes("/platform/"))).toBe(false);
@@ -50,11 +63,14 @@ test("the scope covers keyd's main, core's logic and the app's keyd code", () =>
 test("no OS call outside platform/", () => {
   const hits = [];
   for (const file of scoped) {
+    const allowed = ALLOWED.get(relative(app, file)) ?? [];
     readFileSync(file, "utf8")
       .split("\n")
       .forEach((line, i) => {
         for (const word of FORBIDDEN) {
-          if (line.includes(word)) hits.push(`${relative(app, file)}:${i + 1}: ${word}`);
+          if (line.includes(word) && !allowed.includes(word)) {
+            hits.push(`${relative(app, file)}:${i + 1}: ${word}`);
+          }
         }
       });
   }

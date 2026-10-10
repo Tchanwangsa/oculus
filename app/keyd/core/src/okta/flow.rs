@@ -17,6 +17,10 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 /// Stops a policy we did not anticipate from looping.
 const MAX_STEPS: usize = 12;
 
+/// An agent that lives for one request. The app enables ureq's `cookies`
+/// feature for Echo360, and an agent with it jars `Set-Cookie` and adds its
+/// own `Cookie` header beside the jar's; keyd has no such feature. A fresh
+/// agent has nothing to replay, so both builds send the same request.
 fn agent() -> ureq::Agent {
     // Redirects are walked by hand so cookies can be filed per host.
     ureq::AgentBuilder::new()
@@ -26,6 +30,14 @@ fn agent() -> ureq::Agent {
         .build()
 }
 
+/// `identity` is asked for by name: the `gzip` feature (also the app's alone)
+/// would otherwise add `Accept-Encoding: gzip`.
+fn request(method: &str, url: &str) -> ureq::Request {
+    agent()
+        .request(method, url)
+        .set("Accept-Encoding", "identity")
+}
+
 fn host_of(u: &url::Url) -> String {
     u.host_str().unwrap_or_default().to_string()
 }
@@ -33,12 +45,11 @@ fn host_of(u: &url::Url) -> String {
 /// Follow 3xx from `start`, filing cookies per host, until a non-redirect.
 /// Returns where it landed and the body.
 fn walk(jar: &mut Jar, start: &str, max: usize) -> Result<(url::Url, String), LoginError> {
-    let agent = agent();
     let mut url = url::Url::parse(start).map_err(|e| LoginError::Unexpected(e.to_string()))?;
 
     for _ in 0..max {
         let host = host_of(&url);
-        let mut req = agent.get(url.as_str());
+        let mut req = request("GET", url.as_str());
         let cookie = jar.header(&host);
         if !cookie.is_empty() {
             req = req.set("Cookie", &cookie);
@@ -151,8 +162,7 @@ fn idx(
     body: serde_json::Value,
 ) -> Result<serde_json::Value, LoginError> {
     let sso_host = env.sso_host();
-    let resp = agent()
-        .post(url)
+    let resp = request("POST", url)
         .set("Accept", IDX_MEDIA)
         .set("Content-Type", IDX_MEDIA)
         .set("Cookie", &jar.header(&sso_host))
@@ -535,7 +545,7 @@ pub(super) fn attempt_sign_in(env: &Env, creds: &Credentials) -> Result<String, 
 /// name it reports.
 fn verify(env: &Env, cookie: &str) -> Result<String, LoginError> {
     let url = format!("{}/api/v1/users/self", env.canvas_base);
-    let resp = agent().get(&url).set("Cookie", cookie).call();
+    let resp = request("GET", &url).set("Cookie", cookie).call();
     match resp {
         Ok(r) if r.status() == 200 => {
             let body = r.into_string().unwrap_or_default();
@@ -572,7 +582,6 @@ fn complete_saml(jar: &mut Jar, env: &Env, saml_url: &str) -> Result<String, Log
         .and_then(|u| u.host_str().map(str::to_string))
         .unwrap_or_default();
 
-    let agent = agent();
     let mut url = url::Url::parse(saml_url).map_err(|e| LoginError::Unexpected(e.to_string()))?;
     let mut form: Option<String> = None;
     let mut posted_assertion = false;
@@ -580,10 +589,9 @@ fn complete_saml(jar: &mut Jar, env: &Env, saml_url: &str) -> Result<String, Log
     for _ in 0..10 {
         let host = host_of(&url);
         let mut req = match form {
-            Some(_) => agent
-                .post(url.as_str())
+            Some(_) => request("POST", url.as_str())
                 .set("Content-Type", "application/x-www-form-urlencoded"),
-            None => agent.get(url.as_str()),
+            None => request("GET", url.as_str()),
         };
         let cookie = jar.header(&host);
         if !cookie.is_empty() {
@@ -919,5 +927,67 @@ mod tests {
         assert_eq!(action, "https://canvas.lms.unimelb.edu.au/login/saml");
         assert_eq!(fields.len(), 2);
         assert_eq!(fields[0], ("SAMLResponse".into(), "PHNhbWw+".into()));
+    }
+
+    use crate::test_support::{Answer, FakeOrigin, Hit};
+
+    /// `/start` redirects to `/next` setting two cookies; `/next` answers
+    /// plain text whatever `Accept-Encoding` asked for.
+    fn setting_origin() -> FakeOrigin {
+        FakeOrigin::start(|hit: &Hit| match hit.path.as_str() {
+            "/start" => Answer {
+                status: 302,
+                headers: vec![
+                    ("Location", "/next".to_string()),
+                    ("Set-Cookie", "a=1; Path=/; HttpOnly".to_string()),
+                    ("Set-Cookie", "b=2; Path=/other".to_string()),
+                ],
+                body: Vec::new(),
+            },
+            _ => Answer {
+                status: 200,
+                headers: Vec::new(),
+                body: b"landed".to_vec(),
+            },
+        })
+    }
+
+    fn cookie_headers(hit: &Hit) -> Vec<&str> {
+        hit.headers
+            .iter()
+            .filter(|(k, _)| k == "cookie")
+            .map(|(_, v)| v.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_set_cookie_is_replayed_only_by_the_jar_whatever_ureq_features_are_on() {
+        let origin = setting_origin();
+        let mut jar = Jar::default();
+        let (landed, body) = walk(&mut jar, &format!("{}/start", origin.origin), 5).unwrap();
+        assert_eq!(landed.path(), "/next");
+        assert_eq!(body, "landed");
+
+        let hits = origin.hits();
+        assert_eq!(hits.len(), 2);
+        assert!(cookie_headers(&hits[0]).is_empty());
+        // One header, the jar's. A ureq cookie store would add a second.
+        assert_eq!(cookie_headers(&hits[1]), ["a=1; b=2"]);
+
+        // A later walk with an empty jar carries nothing from the first.
+        walk(&mut Jar::default(), &format!("{}/next", origin.origin), 5).unwrap();
+        assert!(cookie_headers(&origin.hits()[2]).is_empty());
+    }
+
+    #[test]
+    fn every_request_asks_for_an_uncompressed_answer() {
+        let origin = setting_origin();
+        walk(&mut Jar::default(), &format!("{}/start", origin.origin), 5).unwrap();
+        let cookie = "canvas_session=x";
+        let url = format!("{}/next", origin.origin);
+        assert!(request("GET", &url).set("Cookie", cookie).call().is_ok());
+        for hit in origin.hits() {
+            assert_eq!(hit.header("accept-encoding"), Some("identity"));
+        }
     }
 }

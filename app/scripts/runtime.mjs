@@ -10,16 +10,17 @@ export const manifest = join(rust, "Cargo.toml");
 export const binaries = join(rust, "binaries");
 export const exe = process.platform === "win32" ? ".exe" : "";
 export const cliPath = (profile = "release") => join(rust, "target", profile, `oculus${exe}`);
-export const cliBuildArgs = (profile = "release") => [
+export const cliBuildArgs = (profile = "release", features = []) => [
   "build", ...(profile === "release" ? ["--release"] : []),
+  ...(features.length ? ["--features", features.join(",")] : []),
   "--manifest-path", manifest, "--bin", "oculus",
 ];
 
 /** Remove the previous binary so a build that produces none cannot pass on it. */
-export function buildCli(profile = "release") {
+export function buildCli(profile = "release", features = []) {
   const binary = cliPath(profile);
   rmSync(binary, { force: true });
-  execFileSync("cargo", cliBuildArgs(profile), { stdio: "inherit" });
+  execFileSync("cargo", cliBuildArgs(profile, features), { stdio: "inherit" });
   if (!existsSync(binary)) throw new Error(`cargo reported success but ${binary} is not there`);
   return binary;
 }

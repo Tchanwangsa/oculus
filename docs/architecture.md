@@ -77,7 +77,8 @@ app links too, for the client and the installer only.
   is the contract: an endpoint and its `Conn`, activation, the peer check,
   the secret store, the registrar, and the file helpers. `platform/macos/`
   is the only adapter; `platform/unsupported.rs` builds everywhere else with
-  every seam refusing and `connect` finding keyd absent. The ops, `forward`,
+  every seam refusing and `connect` finding keyd absent; off Unix that includes
+  the file helpers, so `lock` and `write_private` refuse too. The ops, `forward`,
   the server loop and the client never name an OS
   ([development.md](./development.md#keyds-os-code-lives-in-one-adapter)).
 - **Started by the OS, not the app.** On macOS the LaunchAgent
@@ -119,6 +120,11 @@ app links too, for the client and the installer only.
   `upstream` means no answer arrived (DNS, connect, TLS, reset). ureq runs
   without gzip or proxy variables, and its 30 s connect timeout is the only
   one. The log line names the status and byte counts, never a header or body.
+  The Okta sign-in (`okta/flow.rs`) is built to send the same request in
+  keyd and in the app, whose ureq also enables `cookies` and `gzip` through
+  feature unification: each request gets a new agent, so no cookie store
+  has anything to replay beside the flow's own `Cookie` header, and each asks
+  for `Accept-Encoding: identity`.
 - **The cloud keys' old keychain items are imported on first use.** The
   first `has` or `forward` for `voyage`, `mineru` or `groq` copies that
   name's old item (`com.tchan.oculus.voyage`, `.mineru`, `.groq`) into the

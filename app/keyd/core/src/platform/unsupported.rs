@@ -2,7 +2,8 @@
 //! error, `connect` finds keyd `Absent` (so a client goes its no-keyd way),
 //! and keyd's `main` exits saying so. It exists so core, keyd and the app
 //! still build, which is what proves no OS call has leaked out of
-//! `platform/`. On a Unix the file helpers are the POSIX ones (`unix.rs`).
+//! `platform/`. On a Unix the file helpers are the POSIX ones (`unix.rs`); off
+//! Unix they refuse too, `lock` and `write_private` included.
 
 use std::io::{self, Read, Write};
 use std::path::Path;

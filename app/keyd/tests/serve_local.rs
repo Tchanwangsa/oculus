@@ -11,6 +11,18 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+/// Long enough for a loaded machine building in parallel, short enough that a
+/// stuck keyd, origin or child fails the test instead of hanging the suite.
+const DEADLINE: Duration = Duration::from_secs(60);
+
+/// A connection whose reads and writes give up after `DEADLINE`.
+fn connect(sock: &std::path::Path) -> UnixStream {
+    let stream = UnixStream::connect(sock).unwrap();
+    stream.set_read_timeout(Some(DEADLINE)).unwrap();
+    stream.set_write_timeout(Some(DEADLINE)).unwrap();
+    stream
+}
+
 struct Keyd {
     child: Child,
     dir: PathBuf,
@@ -53,11 +65,7 @@ impl Keyd {
     }
 
     fn call(&self, req: Value) -> Value {
-        let stream = UnixStream::connect(&self.sock).unwrap();
-        (&stream).write_all(format!("{req}\n").as_bytes()).unwrap();
-        let mut line = String::new();
-        BufReader::new(&stream).read_line(&mut line).unwrap();
-        serde_json::from_str(&line).unwrap()
+        call_at(&self.sock, &req)
     }
 }
 
@@ -134,8 +142,26 @@ fn the_binary_exits_when_idle_and_never_logs_a_value() {
 fn fake_origin() -> (String, std::thread::JoinHandle<String>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    listener.set_nonblocking(true).unwrap();
     let handle = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        let started = Instant::now();
+        let stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        started.elapsed() < DEADLINE,
+                        "keyd never reached the origin"
+                    );
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(e) => panic!("origin accept: {e}"),
+            }
+        };
+        // macOS hands the accepted socket the listener's non-blocking mode.
+        stream.set_nonblocking(false).unwrap();
+        stream.set_read_timeout(Some(DEADLINE)).unwrap();
+        stream.set_write_timeout(Some(DEADLINE)).unwrap();
         let mut reader = BufReader::new(&stream);
         let mut head = String::new();
         loop {
@@ -183,7 +209,7 @@ fn the_binary_forwards_to_its_test_origin_and_never_logs_the_key() {
     );
 
     let body = b"{\"inputs\":[\"BODY-TEXT\"]}";
-    let stream = UnixStream::connect(&keyd.sock).unwrap();
+    let stream = connect(&keyd.sock);
     let req = json!({"op": "forward", "secret": "voyage", "method": "POST", "path": "/v1/multimodalembeddings",
                      "headers": [["Content-Type", "application/json"]], "body_len": body.len()});
     (&stream).write_all(format!("{req}\n").as_bytes()).unwrap();
@@ -233,7 +259,7 @@ fn the_binary_forwards_to_its_test_origin_and_never_logs_the_key() {
 
 /// One `forward` and its reply: header, then body.
 fn forward(keyd: &Keyd, req: Value, body: &[u8]) -> (Value, Vec<u8>) {
-    let stream = UnixStream::connect(&keyd.sock).unwrap();
+    let stream = connect(&keyd.sock);
     (&stream).write_all(format!("{req}\n").as_bytes()).unwrap();
     (&stream).write_all(body).unwrap();
     let mut reader = BufReader::new(&stream);
@@ -310,7 +336,7 @@ fn mineru_and_groq_forward_to_their_own_test_origins() {
 
 /// One request and its one-line reply, over the endpoint at `sock`.
 fn call_at(sock: &std::path::Path, req: &Value) -> Value {
-    let stream = UnixStream::connect(sock).unwrap();
+    let stream = connect(sock);
     (&stream).write_all(format!("{req}\n").as_bytes()).unwrap();
     let mut line = String::new();
     BufReader::new(&stream).read_line(&mut line).unwrap();
@@ -387,7 +413,10 @@ fn the_binary_saves_credentials_and_signs_in_for_the_cli_only() {
 
     let cli = keyd.dir.join("oculus");
     std::fs::copy(std::env::current_exe().unwrap(), &cli).unwrap();
-    let out = Command::new(&cli)
+    // Output goes to files, so a full pipe cannot stall the child while this
+    // side polls for its exit.
+    let (out_path, err_path) = (keyd.dir.join("cli.out"), keyd.dir.join("cli.err"));
+    let mut cli_child = Command::new(&cli)
         .args([
             "okta_calls_made_as_the_cli",
             "--exact",
@@ -395,14 +424,33 @@ fn the_binary_saves_credentials_and_signs_in_for_the_cli_only() {
             "--test-threads=1",
         ])
         .env("KEYD_TEST_CLI_SOCK", &keyd.sock)
-        .output()
+        .stdout(std::fs::File::create(&out_path).unwrap())
+        .stderr(std::fs::File::create(&err_path).unwrap())
+        .spawn()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let started = Instant::now();
+    while cli_child.try_wait().unwrap().is_none() {
+        if started.elapsed() > DEADLINE {
+            cli_child.kill().ok();
+            cli_child.wait().ok();
+            panic!(
+                "the CLI copy did not finish in {DEADLINE:?}: {}",
+                std::fs::read_to_string(&err_path).unwrap_or_default()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let stdout = std::fs::read_to_string(&out_path).unwrap_or_default();
     let replies: Vec<Value> = stdout
         .lines()
         .find_map(|l| l.split_once("REPLIES ").map(|(_, json)| json))
         .map(|l| serde_json::from_str(l).unwrap())
-        .unwrap_or_else(|| panic!("{stdout}\n{}", String::from_utf8_lossy(&out.stderr)));
+        .unwrap_or_else(|| {
+            panic!(
+                "{stdout}\n{}",
+                std::fs::read_to_string(&err_path).unwrap_or_default()
+            )
+        });
 
     assert_eq!(
         replies[0],

@@ -97,6 +97,8 @@ jobs:
       - name: Check and test keyd core
         working-directory: app/keyd/core
         run: cargo check --locked --all-features && cargo test --locked --all-features
+      # keyd's own tests (tests/serve_local.rs) bind a socket through the OS
+      # adapter, which `unsupported` refuses, so they run only in the macOS job.
       - name: Check keyd
         working-directory: app/keyd
         run: cargo check --locked

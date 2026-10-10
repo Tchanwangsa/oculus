@@ -28,12 +28,14 @@ job, or while debugging.
 ```sh
 bun run cli          # build src-tauri/target/release/oculus
 bun run cli:install  # build + symlink into ~/.local/bin
-bun run docs:cli     # regenerate ../docs/cli-reference.md from the binary's help
+bun run docs:cli     # rebuild the CLI, regenerate ../docs/cli-reference.md from its help
 ```
 
 `docs:cli` also runs as part of `bun run tauri build`, after the CLI has been
 staged — so a release bundle can never ship a CLI that the checked-in
-reference does not describe.
+reference does not describe. It always builds the CLI from the current sources
+(and never touches `binaries/`); `OCULUS_BIN=<path>` documents a binary you
+built yourself instead.
 
 ```sh
 oculus                          # session, sidecar and library status

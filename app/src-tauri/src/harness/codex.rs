@@ -888,15 +888,30 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_failed_request_write_does_not_leave_a_pending_reply() {
-        use std::io::{BufRead, BufReader};
+        use std::io::{BufRead, BufReader, Read};
 
-        // Close stdin but keep the process alive, so the request exercises a
-        // broken pipe rather than the early "server is not running" check.
+        // The child prints one line and exits, so its stdin's read end is
+        // gone and the write meets a broken pipe. `kill` and `reap` would
+        // mark the server dead and take the early "not running" path, so the
+        // exit is awaited through stdout's EOF instead. A child that held
+        // stdin open and slept could instead inherit a pipe end another
+        // thread's concurrent spawn leaked, and the write would succeed.
         let mut command = Command::new("sh");
-        command.args(["-c", "exec 0<&-; printf 'ready\\n'; exec sleep 10"]);
+        command.args(["-c", "printf 'ready\n'"]);
         let (proc, stdout) = ChildProc::spawn("codex", &mut command, true).unwrap();
-        let mut ready = String::new();
-        BufReader::new(stdout).read_line(&mut ready).unwrap();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut ready = String::new();
+            let first = reader.read_line(&mut ready).map(|_| ready);
+            let mut rest = Vec::new();
+            let _ = reader.read_to_end(&mut rest);
+            let _ = tx.send(first);
+        });
+        let ready = rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the child neither answered nor exited within 60s")
+            .unwrap();
         assert_eq!(ready.trim(), "ready");
         let server = CodexServer {
             proc,

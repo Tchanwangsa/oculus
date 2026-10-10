@@ -35,7 +35,7 @@ bun run predev        # the dev preflight, by hand
 bun run cli           # release `oculus`
 bun run cli:dev       # debug `oculus` — the one the dev app's agents run
 bun run cli:install   # release build, symlink into ~/.local/bin, then `oculus docs`
-bun run docs:cli      # regenerate docs/cli-reference.md from the binary's help
+bun run docs:cli      # rebuild the release CLI, regenerate docs/cli-reference.md from its help
 bun run pdfium        # fetch libpdfium into app/src-tauri/binaries/
 bun run ffmpeg        # fetch ffmpeg into app/src-tauri/binaries/
 bun run speech        # compile the on-device speech helper there (macOS)
@@ -118,9 +118,9 @@ PATH. Four pieces keep it current:
   `target/` is older than the sources beside it.
 
 `runtime.mjs` owns CLI paths, cargo arguments and the sidecar copy. The
-preflight, bundle staging, watcher and `bun run cli`/`cli:dev` **delete the
-binary before building**, so a build that leaves nothing behind fails loudly
-instead of passing on an old file. `oculus_cli` ranks every candidate it finds
+preflight, bundle staging, watcher, `bun run cli`/`cli:dev` and `docs:cli`
+**delete the binary before building**, so a build that leaves nothing behind
+fails loudly instead of passing on an old file. `oculus_cli` ranks every candidate it finds
 by mtime rather than trusting one, which covers the seconds when the dev path
 has no binary at all.
 
@@ -139,8 +139,9 @@ keyd core's tests with every feature and keyd's with and without `dev`, then
 `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
 reference fails. A second job, `keyd-linux`, checks and tests keyd core and
 checks keyd on Ubuntu, where only the unsupported adapter exists
-([below](#keyds-os-code-lives-in-one-adapter)). `stage-cli` comes before any cargo call because tauri-build
-refuses to compile until every `externalBin` exists, and it is what writes the
+([below](#keyds-os-code-lives-in-one-adapter)); keyd's own tests bind a socket
+through the macOS adapter, so they run only in the first job. `stage-cli`
+comes before any cargo call because tauri-build refuses to compile until every `externalBin` exists, and it is what writes the
 placeholder sidecar on a clean tree. The release profile is shared with that
 CLI build, so the tests reuse its artifacts. sccache is installed because
 `app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
@@ -222,7 +223,10 @@ socket, launchd's activation, the caller's audit token and signature, the
 keychain, the LaunchAgent, `flock` and file modes — sits under
 `app/keyd/core/src/platform/`, whose `mod.rs` states the contract and picks
 the adapter by `cfg(target_os)`. Everything else in core, keyd's `main`, and
-the app's `credentials.rs`, `keyd.rs` and `bin/oculus/keyd.rs` stay OS-free.
+the app's `credentials.rs`, `okta.rs`, `keyd.rs` and `bin/oculus/keyd.rs` stay
+OS-free, with one exception: `credentials/keychain.rs` is the legacy-keychain
+fallback (`Secret`, over the `keyring` crate) that runs while keyd is absent,
+and it goes with that fallback.
 
 - **The build step** is the adapter's too: `build-keyd.mjs` keeps one
   function per OS (`buildForMacos`, the reproducible build and the ad-hoc
@@ -232,10 +236,18 @@ the app's `credentials.rs`, `keyd.rs` and `bin/oculus/keyd.rs` stay OS-free.
   its socket, caller check, keychain errors and plist itself. The POSIX file
   helpers (`platform/unix.rs`) serve every Unix, so the vault works in
   Linux CI.
+- **The strict seal check is paid on every connection.** Under the install
+  policy `seal_check` re-verifies the whole bundle each time: 0.7 ms for a
+  bundle of one small executable, 32 ms for a signed 80 MB one (Apple silicon),
+  plus 0.2 ms to inspect the caller. `peer.rs`'s ignored test
+  `what_the_caller_check_costs_per_connection` measures it
+  (`cargo test --all-features -- --ignored --nocapture`);
+  `KEYD_COST_BUNDLE=<signed .app>` times a real bundle too.
 - **Enforced twice.** `keyd-seams.test.mjs` (in `bun run test`) fails on any
-  `std::os::unix`, `libc::`, framework, `extern "C"`, `launchctl` or
-  `Library/Application Support` outside `platform/` in those files, comments
-  included; the `keyd-linux` CI job builds core and keyd against the
+  `std::os::unix`, `libc::`, framework, `extern "C"`, `launchctl`,
+  `Library/Application Support` or `keyring::` outside `platform/` in those
+  files, comments included (`credentials/keychain.rs` alone is allowed
+  `keyring::`); the `keyd-linux` CI job builds core and keyd against the
   unsupported adapter.
 - **Adding an OS** is a `platform/<os>.rs` written to the contract, its
   build step in `build-keyd.mjs`, and a CI row. If anything outside
@@ -257,9 +269,20 @@ It rasterizes pages for embedding (`app/src-tauri/src/embed/raster.rs`) and has
 no crates.io source, so `app/scripts/fetch-pdfium.mjs` downloads a prebuilt one.
 Its release tag must match the revision `pdfium-render`'s feature flag binds
 against: a mismatch fails at *bind* time, not compile time, so bump both
-together. At runtime it is found beside the executable (`Contents/Frameworks/`
-in the bundle, an ancestor `binaries/` in dev); `OCULUS_PDFIUM_LIB` overrides
-the path.
+together. At runtime (`app/src-tauri/src/embed/raster/library.rs`) a release
+bundle finds it only in `Contents/Frameworks/` or beside the executable. The
+app and CLI run with library validation off, so any dylib they `dlopen` is
+trusted; an environment variable, a nearby folder or the system's search path
+must not be able to name one. Those sources exist only where a developer runs
+the build: `OCULUS_PDFIUM_LIB` (the dylib or its directory), an ancestor
+`binaries/`, the build tree's `src-tauri/binaries/` and a system pdfium are
+compiled under `cfg(any(debug_assertions, test, feature = "dev-pdfium"))`.
+That covers `tauri dev`, `cli:dev`, and `cargo test` in either profile;
+`bun run cli` builds the release CLI with `--features dev-pdfium`, so
+`cli:install` keeps finding the library from `~/.local/bin`. `stage-cli`,
+`docs:cli` and `tauri build` do not pass the feature, which makes them rebuild
+the release CLI (and `docs:cli` replaces `target/release/oculus`): run `bun run
+cli` again afterwards if you use that binary.
 
 ## A UI change is verified by screenshot, not by `tsc`
 
