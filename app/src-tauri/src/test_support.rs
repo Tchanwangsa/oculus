@@ -1,6 +1,7 @@
 //! Scaffolding the unit tests share: scratch directories, small real PDFs, and
 //! a fake HTTP server on loopback.
 
+use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -276,7 +277,15 @@ impl FakeKeyd {
                     let (header, len) = framing::parse_header(&line).unwrap();
                     let body = framing::read_body(&mut stream, len).unwrap();
                     let (reply, out) = handler(&header, &body);
+                    let streamed = header.get("stream") == Some(&Value::Bool(true));
                     hold(&log).push((header, body));
+                    // A streamed reply is its header, then the body until the
+                    // connection closes, as oculus-keyd sends it.
+                    if streamed {
+                        framing::write_frame(stream.get_mut(), &reply, b"").ok();
+                        stream.get_mut().write_all(&out).ok();
+                        break;
+                    }
                     framing::write_frame(stream.get_mut(), &reply, &out).ok();
                 }
             }

@@ -9,8 +9,8 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Piece | Location |
 | --- | --- |
 | Canvas scrape engine (modules driver, link crawl, Office conversion) | `app/src-tauri/src/sync.rs` |
-| Canvas HTTP: cookie, retries, pagination | `app/src-tauri/src/canvas.rs` |
-| Ed Discussion: token, courses, threads, XML→md | `app/src-tauri/src/ed.rs` |
+| Canvas HTTP through keyd's `canvas` route: redirects, retries, pagination, streamed downloads | `app/src-tauri/src/canvas/` |
+| Ed Discussion: courses, threads, XML→md; its requests through keyd's `ed` route | `app/src-tauri/src/ed.rs` |
 | Echo360 core; its Tauri commands, session cache, downloads | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
 | Canvas HTML → Markdown | `app/src-tauri/src/md.rs` |
 | App-side entry: thread + `AppReporter`; on-demand module videos | `app/src-tauri/src/scrape.rs` |
@@ -27,9 +27,21 @@ macOS (see [architecture.md](./architecture.md)). Progress leaves through the
 emits Tauri events, the CLI prints. A file announced as downloading
 (`scrape-file-start`) always ends in `scrape-file` or, when its download or
 save fails, `scrape-file-failed` (`{ subject_id, relative_path, error }`, a
-sentence that never carries the signed URL). `app/src-tauri/src/canvas.rs` is the
-entire Canvas HTTP surface — cookie, retry policy and Link-header pagination
-live only there, and both scraping and auth probing go through it.
+sentence that never carries the signed URL). `app/src-tauri/src/canvas/` is the
+entire Canvas HTTP surface — redirects, retry policy and Link-header pagination
+live only there, and both scraping and auth probing go through it. It holds no
+cookie: every request to the Canvas host is a `forward` to keyd's `canvas`
+route, which attaches the session and keeps it current from `Set-Cookie`.
+
+## Redirects are followed here, not in keyd
+
+keyd never follows a redirect, so `Canvas::get` and `Canvas::download_to`
+follow up to five themselves. A `Location` on the Canvas host goes through
+keyd again; one anywhere else (a pre-signed S3 `public_url`, a file CDN) is
+fetched directly with no cookie, so the session never reaches a second host.
+A Link-header `next` is an absolute Canvas URL and is sent as its path and
+query, escapes such as `%5B` untouched. The Echo360 launch page and the Canvas
+legs of Ed's LTI walk use the same hop.
 
 ## The current term is ranked, not compared as text
 
@@ -97,9 +109,11 @@ have nothing to do with Echo360 lectures.
   the frontend writes its `files` row. Progress is `canvas-video-progress`
   (`canvasFileId`, `percent`, `phase`); `canvas_cancel_video` sets the
   file's flag in `VideoCancels`, polled per chunk.
-- The cookie goes only to Canvas: `download_to` sets it for a Canvas URL, and
-  ureq strips `Cookie` on every redirect, so the signed file host a Canvas
-  download redirects to never sees it.
+- `download_to` streams a Canvas URL through keyd (`send_stream`) in 256 KiB
+  chunks, and fetches the signed file host a Canvas download redirects to
+  directly, with no cookie. A body shorter than its `content-length` is
+  refused, since keyd ends a stream early without an error when Canvas drops
+  the connection.
 - Videos never reach parse or embed: every pipeline gate is a PDF/Office or
   spreadsheet allowlist (`paths::doc_pdf_rel`, `paths::is_sheet`,
   `isPdfBacked`, `isPipelineFile`, `PDF_BACKED_SQL_LIST`).
