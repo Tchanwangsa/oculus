@@ -25,7 +25,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       SCCACHE_GHA_ENABLED: "true"
-      # Ad-hoc signature, hardened runtime and entitlements (tauri.conf.json
+      # Ad-hoc signature and hardened runtime (tauri.conf.json
       # sets the same; this variable is what a Developer ID certificate would
       # override). The bundle runs, but macOS quarantines a downloaded copy
       # until `xattr -dr com.apple.quarantine` clears it. A Developer ID
@@ -47,8 +47,9 @@ jobs:
         working-directory: app
         run: bun install --frozen-lockfile
 
-      # beforeBuildCommand fetches and builds the native sidecars and stages oculus-keyd
-      # (the release policy) and the CLI; tauri signs every sidecar with the bundle.
+      # beforeBuildCommand fetches and builds the native sidecars and stages
+      # oculus-keyd's signed helper app (the release policy) and the CLI; tauri
+      # signs every sidecar with the bundle and seals the helper as it is.
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

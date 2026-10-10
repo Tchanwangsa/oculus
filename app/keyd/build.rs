@@ -1,13 +1,16 @@
 //! Embeds `KEYD_SOURCE_HASH`: a sha256 over every input that decides keyd's
-//! bytes — keyd's and core's sources and manifests, keyd's Cargo.lock and
-//! its cargo config. Paths are hashed relative to this crate, so every
-//! checkout of the same commit agrees. The installer compares this, not the
-//! binary, because a toolchain change alters bytes without a source change
-//! (docs/development.md).
+//! signed helper app — keyd's and core's sources and manifests, keyd's
+//! Cargo.lock and its cargo config, the helper's Info.plist and its icon.
+//! Paths are hashed relative to this crate, so every checkout of the same
+//! commit agrees. The installer compares this, not the binary, because a
+//! toolchain change alters bytes without a source change (docs/development.md).
 
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
+
+/// The helper app's icon, the app's own (app/scripts/keyd-build.mjs copies it).
+const ICON: &str = "../src-tauri/icons/icon.icns";
 
 fn main() {
     let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -19,6 +22,8 @@ fn main() {
         "build.rs",
         ".cargo/config.toml",
         "core/Cargo.toml",
+        "bundle/Info.plist",
+        ICON,
     ] {
         files.push(root.join(top));
     }

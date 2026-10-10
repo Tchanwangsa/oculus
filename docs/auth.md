@@ -142,7 +142,7 @@ an org that offers only push or WebAuthn pauses automatic sign-in at the first
 attempt (`LoginError::UnsupportedFactor`).
 
 - The CLI is bundled into `Contents/MacOS/` beside the app, because keyd's
-  caller check admits only executables in its own bundle. It is listed under
+  caller check admits only executables in the app its helper is nested in. It is listed under
   `externalBin` in `tauri.conf.json` ("external" means prebuilt, not left out
   of the bundle), and `app/scripts/stage-cli.mjs` builds and stages it in
   `binaries/`. `tauri-build` validates every `externalBin`

@@ -90,7 +90,9 @@ A separate binary from its own crate (`app/keyd/`), so its code signature only
 changes when its own source does and one keychain approval sticks
 ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
 The binary is `main.rs` over `oculus-keyd-core` (`app/keyd/core/`), which the
-app links too, for the client and the installer only.
+app links too, for the client and the installer only. On macOS it runs as the
+helper app `Oculus Helper.app`, so the keychain prompt names "Oculus Helper"
+with the app's icon.
 
 - **Every OS call is in an adapter.** `app/keyd/core/src/platform/mod.rs`
   is the contract: an endpoint and its `Conn`, activation, the peer check,
@@ -102,7 +104,9 @@ app links too, for the client and the installer only.
   ([development.md](./development.md#keyds-os-code-lives-in-one-adapter)).
 - **Started by the OS, not the app.** On macOS the LaunchAgent
   `com.tchan.oculus.keyd` owns `keyd.sock` (mode 0600) and starts keyd on the
-  first connect. One thread accepts and decides to exit
+  first connect. Its `AssociatedBundleIdentifiers` names `com.tchan.oculus`,
+  so Login Items and the background-activity notice list it under Oculus
+  (`app/keyd/core/src/platform/macos/registrar.rs`). One thread accepts and decides to exit
   (`app/keyd/core/src/server.rs`): it waits a tick for a client on any
   listener, and only when none came does it exit after 60 s with no request
   in flight, so a client that arrives then stays queued in launchd's socket
@@ -199,10 +203,12 @@ app links too, for the client and the installer only.
   `okta_save` marks them; `okta_forget` marks and removes them. Entries under
   `keyd.` are bookkeeping no op can name (`app/keyd/core/src/names.rs`).
 - **The caller check runs before any request is read.** The peer's uid must
-  be keyd's. A bundled keyd then admits only executables inside its own app
-  bundle whose seal verifies strictly
-  (`app/keyd/core/src/platform/macos/peer.rs`); a `dev` build admits any
-  same-user caller. The adapter also gives each caller a role — `app` (the
+  be keyd's. A bundled keyd then admits only executables inside the outermost
+  app bundle above it — Oculus.app, which its helper is nested in — while
+  that bundle's seal, nested code included, verifies strictly
+  (`app/keyd/core/src/platform/macos/peer.rs`); a copy of the helper outside
+  any app is its own outermost bundle and serves no app or CLI. A `dev` build
+  admits any same-user caller. The adapter also gives each caller a role — `app` (the
   bundle itself), `cli` (its `Contents/MacOS/oculus`) or `unknown`; a dev
   build goes by file name, `app` or `oculus` — which the log records beside
   the signing identifier. Ops check the role, never a path, and in one place
@@ -234,9 +240,9 @@ app links too, for the client and the installer only.
 - `keyd::ensure_installed` runs at app startup, before the session is
   restored (which asks keyd), and does nothing in a dev
   build; a dev install is the preflight's ([cli.md](./cli.md)). A release
-  registers its bundled `Contents/MacOS/oculus-keyd` (an `externalBin` on
-  macOS, built without `dev`) in place, and logs the failure when that file is
-  missing or is not a keyd
+  registers the keyd in its bundled helper,
+  `Contents/Helpers/Oculus Helper.app` (built without `dev`), in place, and
+  logs the failure when that file is missing or is not a keyd
   ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
 - **One data dir.** `keyd_core::paths::data_dir` (the OS data dir plus
   `com.tchan.oculus`) is the only definition; the app's `paths::data_dir`
@@ -290,7 +296,7 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   sign-in attempt record, with `okta-sign-in.log` beside it
   ([auth.md](./auth.md)). The sessions themselves are in the vault.
 - `vault.bin` and its `vault.bin.lock`, `keyd.sock` (launchd's), and `bin/`
-  with a dev-installed `oculus-keyd` and its `oculus-keyd.stamp`
+  with a dev-installed `Oculus Helper.app` and keyd's `oculus-keyd.stamp`
   ([above](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
 
 ## The database has one schema owner and two writers

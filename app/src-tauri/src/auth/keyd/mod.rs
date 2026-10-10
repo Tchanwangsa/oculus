@@ -2,9 +2,9 @@
 //! in `app/keyd/`; see docs/architecture.md and docs/development.md).
 //!
 //! An install registers keyd with the OS through `keyd_core`'s registrar,
-//! pointing it at a fixed binary — `<data_dir>/bin/oculus-keyd` for a dev
-//! build, copied there, or a bundle's own keyd, which must run in place for
-//! its caller check — never at `target/` or a worktree. The source-hash stamp
+//! pointing it at a fixed binary inside keyd's helper app — the copy in
+//! `<data_dir>/bin/` for a dev build, or the helper nested in a bundle, which
+//! must run in place for its caller check — never at `target/` or a worktree. The source-hash stamp
 //! in `<data_dir>/bin/` records what the registration runs, so a rebuild with
 //! unchanged source never reinstalls. Nothing here is OS-specific: that is
 //! `keyd_core::platform`.

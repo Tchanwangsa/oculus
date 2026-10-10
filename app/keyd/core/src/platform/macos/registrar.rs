@@ -1,6 +1,8 @@
 //! The LaunchAgent `com.tchan.oculus.keyd`: launchd owns keyd's socket and
 //! starts keyd on the first connect. The plist names a fixed program, never
-//! a build tree, and has no `KeepAlive`: keyd exits when idle.
+//! a build tree, and has no `KeepAlive`: keyd exits when idle. It names the
+//! app as its owner (`AssociatedBundleIdentifiers`), so Login Items and the
+//! background-activity notice show it under Oculus.
 
 use std::path::{Path, PathBuf};
 
@@ -30,10 +32,13 @@ impl Registrar for Launchd {
         Ok(())
     }
 
-    /// A bundled keyd must run in place: its caller check admits only its own
-    /// bundle.
+    /// A keyd whose helper app is nested in another app must run in place:
+    /// its caller check admits only that app's executables. A helper on its
+    /// own (a dev build's) is copied.
     fn runs_in_place(&self, program: &Path) -> bool {
-        bundle_of(program).is_some()
+        paths::helper_of(program).is_some_and(|helper| {
+            super::outermost_app(&helper).is_some_and(|outer| outer != helper)
+        })
     }
 
     fn install(&self, program: &Path, data_dir: &Path) -> Result<PathBuf, String> {
@@ -119,13 +124,6 @@ fn log_path() -> Result<PathBuf, String> {
     Ok(home()?.join("Library/Logs/oculus-keyd.log"))
 }
 
-/// The `.app` that `bin` sits in, if any.
-fn bundle_of(bin: &Path) -> Option<PathBuf> {
-    bin.ancestors()
-        .find(|a| a.extension().is_some_and(|x| x == "app") && a.join("Contents").is_dir())
-        .map(Path::to_path_buf)
-}
-
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -138,6 +136,7 @@ fn xml_escape(s: &str) -> String {
 fn plist_body(program: &Path, socket: &Path, log: &Path) -> String {
     let [program, socket, log] = [program, socket, log].map(|p| xml_escape(&p.to_string_lossy()));
     let sockets_key = super::SOCKETS_KEY;
+    let owner = paths::IDENTIFIER;
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -164,6 +163,10 @@ fn plist_body(program: &Path, socket: &Path, log: &Path) -> String {
     <string>{log}</string>
     <key>ProcessType</key>
     <string>Interactive</string>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>{owner}</string>
+    </array>
 </dict>
 </plist>
 "#
@@ -198,8 +201,9 @@ mod tests {
     #[test]
     fn the_plist_escapes_paths_and_round_trips_the_program() {
         let dir = scratch("plist");
-        let program =
-            Path::new("/Users/a&b/Library/Application Support/com.tchan.oculus/bin/oculus-keyd");
+        let program = Path::new(
+            "/Users/a&b/Library/Application Support/com.tchan.oculus/bin/Oculus Helper.app/Contents/MacOS/Oculus Helper",
+        );
         let body = plist_body(
             program,
             Path::new("/x/<keyd>.sock"),
@@ -237,18 +241,39 @@ mod tests {
         assert!(!body.contains("RunAtLoad"));
     }
 
+    /// Login Items and the background-activity notice attribute the agent
+    /// to the app whose bundle identifier it names.
     #[test]
-    fn a_bundled_keyd_is_recognised_by_its_app() {
+    fn the_agent_names_the_app_as_its_owner() {
+        let body = plist_body(
+            Path::new("/d/bin/oculus-keyd"),
+            Path::new("/d/keyd.sock"),
+            Path::new("/l.log"),
+        );
+        assert!(body.contains(&format!(
+            "<key>AssociatedBundleIdentifiers</key>\n    <array>\n        <string>{}</string>\n    </array>",
+            paths::IDENTIFIER
+        )));
+    }
+
+    #[test]
+    fn only_a_helper_nested_in_an_app_runs_in_place() {
         let dir = scratch("bundle");
+        let nested = dir.join("Oculus.app/Contents/Helpers/Oculus Helper.app");
+        std::fs::create_dir_all(nested.join("Contents/MacOS")).unwrap();
+        assert!(Launchd.runs_in_place(&paths::helper_program(&nested)));
+
+        // The dev install and the build tree hold the helper on its own.
+        let alone = paths::installed_helper(&dir);
+        std::fs::create_dir_all(alone.join("Contents/MacOS")).unwrap();
+        assert!(!Launchd.runs_in_place(&paths::helper_program(&alone)));
+        assert!(!Launchd.runs_in_place(&dir.join("bin").join(paths::BINARY)));
+
+        // Not keyd's own executable, even inside the app.
         let macos = dir.join("Oculus.app/Contents/MacOS");
         std::fs::create_dir_all(&macos).unwrap();
-        assert_eq!(
-            bundle_of(&macos.join(paths::BINARY)),
-            Some(dir.join("Oculus.app"))
-        );
-        assert!(Launchd.runs_in_place(&macos.join(paths::BINARY)));
-        assert_eq!(bundle_of(&dir.join("bin").join(paths::BINARY)), None);
-        assert!(!Launchd.runs_in_place(&dir.join("bin").join(paths::BINARY)));
+        assert!(!Launchd.runs_in_place(&macos.join(paths::BINARY)));
+        assert!(!Launchd.runs_in_place(&nested.join("Contents/MacOS/other")));
         std::fs::remove_dir_all(&dir).ok();
     }
 
