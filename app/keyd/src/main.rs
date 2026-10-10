@@ -13,10 +13,12 @@
 //! and read OCULUS_KEYD_DATA_DIR, OCULUS_KEYD_TEST_KEY (64 hex characters, in
 //! place of the keychain; old keychain items are then never read either),
 //! OCULUS_KEYD_IDLE_SECS, and OCULUS_KEYD_VOYAGE_ORIGIN, OCULUS_KEYD_MINERU_ORIGIN
-//! and OCULUS_KEYD_GROQ_ORIGIN (each `http://127.0.0.1:<port>`, a fake of that
-//! service), and OCULUS_KEYD_CANVAS_ORIGIN and OCULUS_KEYD_SSO_ORIGIN (the
-//! sign-in's fake Canvas and Okta: `http://127.0.0.1:<port>` or
-//! `http://localhost:<port>`, on different hosts), and OCULUS_KEYD_NOW (Unix
+//! and OCULUS_KEYD_GROQ_ORIGIN and OCULUS_KEYD_ED_ORIGIN (each
+//! `http://127.0.0.1:<port>`, a fake of that service), and
+//! OCULUS_KEYD_CANVAS_ORIGIN and OCULUS_KEYD_SSO_ORIGIN (a fake Canvas, which
+//! is also where `forward`'s `canvas` route goes, and a fake Okta:
+//! `http://127.0.0.1:<port>` or `http://localhost:<port>`, on different
+//! hosts), and OCULUS_KEYD_NOW (Unix
 //! seconds the sign-in and its attempt guard see for good, so a test never
 //! waits on a TOTP window), and OCULUS_KEYD_TEST_ROLE (`app` or `cli`: the role
 //! every caller is given, so a test process need not be named `app` or
@@ -104,13 +106,15 @@ fn serve(listeners: Vec<Listener>) {
     server.run(&listeners);
 }
 
-/// The compiled routes, with any secret whose `OCULUS_KEYD_<NAME>_ORIGIN` is
-/// set pointed at that loopback origin instead.
+/// The compiled routes, with any whose `OCULUS_KEYD_<NAME>_ORIGIN` is set
+/// pointed at that loopback origin instead. The `canvas` route follows
+/// `OCULUS_KEYD_CANVAS_ORIGIN` with the sign-in (`with_test_origins`).
 #[cfg(debug_assertions)]
 fn test_routes() -> keyd_core::forward::Routes {
+    use keyd_core::forward::ED;
     use keyd_core::names::{GROQ, MINERU, VOYAGE};
     let mut routes = keyd_core::forward::Routes::compiled();
-    for secret in [VOYAGE, MINERU, GROQ] {
+    for secret in [VOYAGE, MINERU, GROQ, ED] {
         let var = format!("OCULUS_KEYD_{}_ORIGIN", secret.to_uppercase());
         if let Ok(origin) = std::env::var(&var) {
             routes = match routes.with_origin(secret, &origin) {

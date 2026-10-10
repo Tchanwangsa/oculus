@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use serde_json::{json, Value};
 
 use crate::clock::Clock;
-use crate::forward::{Call, Routes, Upstream};
+use crate::forward::{Routes, Upstream};
 use crate::names;
 use crate::platform::{Caller, Role};
 use crate::vault::{KeyError, KeySource, LegacySource, MasterKey, Vault, VaultError};
@@ -25,7 +25,11 @@ pub struct Build {
     pub source_hash: &'static str,
 }
 
+mod forward;
 mod okta;
+mod session;
+#[cfg(test)]
+mod testing;
 
 /// Secrets whose old keychain item keyd copies into the vault the first time
 /// an op touches them (`State::import_once`): the three cloud keys and the
@@ -58,6 +62,8 @@ pub struct State {
     flight: okta::Flight,
     /// The time the sign-in and its attempt guard see.
     clock: Clock,
+    /// Counts every change to a login session (`session::Generation`).
+    generation: crate::session::Generation,
 }
 
 /// An op's failure as it goes on the wire: `{"error": kind, "detail": …}`.
@@ -66,8 +72,9 @@ pub struct State {
 /// that is neither the app nor the CLI), `keychain` (the master key, or an old item
 /// being imported, was refused or failed), `vault`, `record` (`okta_resume`:
 /// the sign-in attempt record could not be replaced; a client reads it as
-/// `Broken`), `missing` (`forward` for a secret the vault does not hold), `upstream` (`forward` got no answer: DNS,
-/// connect, TLS or a reset).
+/// `Broken`), `missing` (`forward` for a key or session the vault does not hold),
+/// `upstream` (`forward` got no answer: DNS, connect, TLS, a reset, or a
+/// session route's origin stalled).
 #[derive(Debug)]
 pub struct OpError {
     pub kind: &'static str,
@@ -100,12 +107,24 @@ impl From<VaultError> for OpError {
 }
 
 /// A reply: the header line, the raw body after it, and what the log line
-/// may add (never a value, a header or a body).
+/// may add (never a value, a header or a body). A `stream` replaces the body:
+/// the server copies it to the client until it ends, then closes the
+/// connection.
 #[derive(Debug)]
 pub struct Reply {
     pub header: Value,
     pub body: Vec<u8>,
     pub note: Option<String>,
+    pub stream: Option<BodyStream>,
+}
+
+/// A body that is read as it is sent.
+pub struct BodyStream(pub Box<dyn std::io::Read + Send>);
+
+impl std::fmt::Debug for BodyStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BodyStream(..)")
+    }
 }
 
 impl From<Value> for Reply {
@@ -114,6 +133,7 @@ impl From<Value> for Reply {
             header,
             body: Vec::new(),
             note: None,
+            stream: None,
         }
     }
 }
@@ -140,7 +160,13 @@ impl State {
             sso_base: None,
             flight: okta::Flight::default(),
             clock: crate::clock::system(),
+            generation: crate::session::Generation::default(),
         }
+    }
+
+    /// How many times a login session has changed since keyd started.
+    pub fn session_generation(&self) -> u64 {
+        self.generation.get()
     }
 
     /// Moves the sign-in's clock. Debug builds only, like `with_origins`: a
@@ -158,12 +184,14 @@ impl State {
         self
     }
 
-    /// Points the sign-in at fake Canvas and Okta servers. Debug builds only,
-    /// like `with_routes`: a release keyd cannot move an origin.
+    /// Points the sign-in, and the `canvas` route, at fake Canvas and Okta
+    /// servers: Canvas is one origin to both. Debug builds only, like
+    /// `with_routes`: a release keyd cannot move an origin.
     #[cfg(debug_assertions)]
     pub fn with_origins(mut self, canvas: Option<&str>, sso: Option<&str>) -> Result<Self, String> {
         if let Some(origin) = canvas {
             self.canvas_base = test_origin(origin)?;
+            self.routes.set_origin(crate::forward::CANVAS, origin);
         }
         if let Some(origin) = sso {
             self.sso_base = Some(test_origin(origin)?);
@@ -213,7 +241,7 @@ impl State {
             }
             "store" => {
                 let name = secret_name(req)?;
-                refuse_okta(name, "saved with okta_save")?;
+                refuse_managed(name, true)?;
                 let value = req.get("value").and_then(Value::as_str).ok_or_else(|| OpError::new("request", "store needs a string \"value\""))?;
                 if value.is_empty() {
                     return Err(OpError::new("request", "store needs a non-empty value"));
@@ -230,7 +258,7 @@ impl State {
             }
             "delete" => {
                 let name = secret_name(req)?;
-                refuse_okta(name, "removed with okta_forget")?;
+                refuse_managed(name, false)?;
                 // Marked imported, so the old item still in the keychain never comes back.
                 let marker = imported_marker(name);
                 let existed = self.vault()?.update(|e| {
@@ -247,42 +275,12 @@ impl State {
             "okta_status" => self.okta_status(),
             "ensure_signed_in" => self.ensure_signed_in(caller, req),
             "okta_resume" => self.okta_resume(),
+            "session_get" => self.session_get(),
+            "session_put" => self.session_put(req),
+            "session_clear" => self.session_clear(req),
+            "session_status" => self.session_status(),
             _ => Err(OpError::new("request", format!("unknown op {op:?}"))),
         }
-    }
-
-    /// Sends one request to `secret`'s fixed origin with the key added. The
-    /// request is checked before the master key is read, so a bad one never
-    /// prompts. Any status the origin answers is a reply, not an error.
-    fn forward(&self, req: &Value, body: &[u8]) -> Result<Reply, OpError> {
-        let name = secret_name(req)?;
-        let route = self
-            .routes
-            .get(name)
-            .ok_or_else(|| OpError::new("request", format!("{name} cannot be forwarded")))?;
-        let call = Call::parse(req, route, body)?;
-        let vault = self.vault()?;
-        self.import_once(&vault, name)?;
-        let key = vault
-            .get(name)?
-            .filter(|k| !k.is_empty())
-            .ok_or_else(|| OpError::new("missing", format!("no {name} key is stored")))?;
-        let answer = self.upstream.send(&route.origin, &call, &key, body)?;
-        let headers: Vec<[&str; 2]> = answer
-            .headers
-            .iter()
-            .map(|(k, v)| [k.as_str(), v.as_str()])
-            .collect();
-        Ok(Reply {
-            header: json!({"status": answer.status, "headers": headers, "body_len": answer.body.len()}),
-            note: Some(format!(
-                "secret={name} status={} bytes_out={} bytes_in={}",
-                answer.status,
-                body.len(),
-                answer.body.len()
-            )),
-            body: answer.body,
-        })
     }
 
     /// Copies `name`'s old keychain item into the vault once, then marks it
@@ -331,11 +329,12 @@ impl State {
 /// The one place an op's caller is judged, so a new op cannot forget it.
 /// `ping` answers whoever the peer check admitted, for diagnostics; the rest
 /// are for the app and the CLI, except `okta_resume`, which lifts a lockout
-/// pause and so is for the app alone.
+/// pause, and `session_get`, the one reply that carries a cookie, so both are
+/// for the app alone.
 fn require_role(op: &str, role: Role) -> Result<(), OpError> {
     let (allowed, who) = match op {
         "ping" => return Ok(()),
-        "okta_resume" => (role == Role::App, "app"),
+        "okta_resume" | "session_get" => (role == Role::App, "app"),
         _ => (matches!(role, Role::App | Role::Cli), "app and CLI"),
     };
     if allowed {
@@ -353,16 +352,28 @@ fn imported_marker(name: &str) -> Option<String> {
         .then(|| names::imported(name))
 }
 
-/// The generic `store` and `delete` leave the Okta values to their own ops,
-/// which write the three together, validated.
-fn refuse_okta(name: &str, how: &str) -> Result<(), OpError> {
-    if names::OKTA.contains(&name) {
-        return Err(OpError::new(
-            "request",
-            format!("{name} is not written by this op; it is {how}"),
-        ));
-    }
-    Ok(())
+/// The generic `store` and `delete` leave the Okta values and the sessions to
+/// their own ops, which validate what they write.
+fn refuse_managed(name: &str, saving: bool) -> Result<(), OpError> {
+    let how = if names::OKTA.contains(&name) {
+        if saving {
+            "saved with okta_save"
+        } else {
+            "removed with okta_forget"
+        }
+    } else if names::SESSIONS.contains(&name) {
+        if saving {
+            "written with session_put"
+        } else {
+            "removed with session_clear"
+        }
+    } else {
+        return Ok(());
+    };
+    Err(OpError::new(
+        "request",
+        format!("{name} is not written by this op; it is {how}"),
+    ))
 }
 
 /// A fake service's origin: loopback `http` only, `127.0.0.1` or `localhost`
@@ -394,41 +405,10 @@ fn secret_name(req: &Value) -> Result<&str, OpError> {
 
 #[cfg(test)]
 mod tests {
+    use super::testing::{as_role, call, cli, key, state_in};
     use super::*;
     use crate::test_support::{Answer, FakeOrigin, OldItems, Reads, Scratch, BUILD};
     use crate::vault::{NoLegacy, StaticKey};
-
-    fn as_role(role: Role) -> Caller {
-        Caller {
-            role,
-            ..Caller::default()
-        }
-    }
-
-    fn cli() -> Caller {
-        as_role(Role::Cli)
-    }
-
-    fn key() -> MasterKey {
-        MasterKey::from_bytes([9; 32])
-    }
-
-    fn state_in(dir: &Scratch) -> State {
-        State::new(
-            BUILD,
-            dir.0.clone(),
-            Box::new(StaticKey(key())),
-            Box::new(NoLegacy),
-        )
-    }
-
-    /// The reply's header, for ops that answer without a body.
-    fn call(state: &State, op: &str, req: Value) -> Result<Value, OpError> {
-        state.dispatch(&cli(), op, &req, b"").map(|r| {
-            assert!(r.body.is_empty());
-            r.header
-        })
-    }
 
     struct Counting(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
@@ -547,6 +527,13 @@ mod tests {
             ("okta_status", json!({})),
             ("ensure_signed_in", json!({"trigger": "manual"})),
             ("okta_resume", json!({})),
+            ("session_get", json!({})),
+            (
+                "session_put",
+                json!({"kind": "canvas", "value": "canvas_session=x"}),
+            ),
+            ("session_clear", json!({})),
+            ("session_status", json!({})),
             ("a_future_op", json!({})),
         ]
     }
@@ -591,14 +578,15 @@ mod tests {
             let state = state_in(&dir);
             for (op, req) in every_op() {
                 // Whatever else the op says, it is not a refusal of the caller,
-                // except that lifting a lockout pause is the app's alone.
+                // except that lifting a lockout pause and reading a cookie
+                // back are the app's alone.
                 let refused = matches!(
                     state.dispatch(&as_role(role), op, &req, b""),
                     Err(OpError { kind: "caller", .. })
                 );
                 assert_eq!(
                     refused,
-                    role == Role::Cli && op == "okta_resume",
+                    role == Role::Cli && matches!(op, "okta_resume" | "session_get"),
                     "{role:?} {op}"
                 );
             }
@@ -612,7 +600,7 @@ mod tests {
         for (op, req, body) in [
             ("get", json!({"secret": "voyage"}), &b""[..]),
             ("has", json!({}), b""),
-            ("has", json!({"secret": "session.canvas"}), b""),
+            ("has", json!({"secret": "session.nope"}), b""),
             ("store", json!({"secret": "voyage"}), b""),
             ("store", json!({"secret": "voyage", "value": ""}), b""),
             ("store", json!({"secret": "voyage", "value": 5}), b""),

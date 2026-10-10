@@ -6,10 +6,10 @@
 //! (`main` then exits). So a client is never accepted and then dropped by
 //! the exit; one that arrives after the decision stays queued at the
 //! endpoint for the next keyd. A connection counts as busy from a complete
-//! header line until its reply is written, so a `forward` waiting on its
-//! origin holds keyd open, but a client that connects and stalls cannot. No
-//! read timeouts: a forwarded parse or embed takes minutes. The wire format
-//! is `framing`'s.
+//! header line until its reply (a streamed body too) is written, so a
+//! `forward` waiting on its origin holds keyd open, but a client that
+//! connects and stalls cannot. No read timeouts: a forwarded parse or embed
+//! takes minutes. The wire format is `framing`'s.
 
 use std::io::BufReader;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -176,11 +176,42 @@ impl Server {
                 log(&format!("op={op} caller={who} reply failed: {e}"));
                 return;
             }
+            // A streamed body is the rest of the connection: it ends the
+            // connection, and the client learns its length from the origin's
+            // headers.
+            if let Some(body) = reply.stream {
+                let (sent, why) = stream_body(body.0, stream.get_mut());
+                log(&format!("op={op} caller={who} streamed {sent} bytes{why}"));
+                return;
+            }
             // A refused caller, or a stream whose framing is lost, gets one reply.
             if !in_step {
                 return;
             }
         }
+    }
+}
+
+/// Copies `body` to `out` until either ends. A stream that fails partway
+/// just stops, so the client finds the body short; the log line says which
+/// end failed.
+fn stream_body(
+    mut body: Box<dyn std::io::Read + Send>,
+    out: &mut impl std::io::Write,
+) -> (u64, &'static str) {
+    let mut chunk = vec![0u8; 64 * 1024];
+    let mut sent = 0u64;
+    loop {
+        let n = match body.read(&mut chunk) {
+            Ok(0) => return (sent, ""),
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return (sent, ", the origin's body ended early"),
+        };
+        if out.write_all(&chunk[..n]).is_err() {
+            return (sent, ", the client went away");
+        }
+        sent += n as u64;
     }
 }
 
