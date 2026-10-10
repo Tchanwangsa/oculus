@@ -8,8 +8,13 @@
 //! Options are KaTeX JS's names and defaults (`strict` defaults to "warn",
 //! as in KaTeX JS; the fork's own default is "ignore"). `options.displayMode`
 //! wins over the top-level `display`. `oracle/render.ts` drives this.
+//!
+//! `oracle --prefixes` is the typing probe: it renders every char-boundary
+//! prefix of each request's `tex` with `throwOnError` forced on and answers
+//! `{"id":…, "prefixes":n, "panics":[{"len":bytes, "panic":"…"}]}`.
 
 use std::{
+    any::Any,
     collections::BTreeMap,
     io::{self, BufRead as _, Write as _},
     panic::{self, AssertUnwindSafe},
@@ -83,6 +88,13 @@ fn settings(request: &Request) -> Result<Settings, String> {
         .build())
 }
 
+fn panic_message(p: &(dyn Any + Send)) -> String {
+    p.downcast_ref::<String>()
+        .cloned()
+        .or_else(|| p.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+        .unwrap_or_else(|| "panic".to_owned())
+}
+
 fn answer(ctx: &KatexContext, line: &str) -> Value {
     let request: Request = match serde_json::from_str(line) {
         Ok(r) => r,
@@ -98,20 +110,47 @@ fn answer(ctx: &KatexContext, line: &str) -> Value {
     match rendered {
         Ok(Ok(html)) => json!({ "id": request.id, "html": html }),
         Ok(Err(e)) => json!({ "id": request.id, "error": e.to_string() }),
-        Err(p) => {
-            let message = p
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| p.downcast_ref::<&str>().map(|s| (*s).to_owned()))
-                .unwrap_or_else(|| "panic".to_owned());
-            json!({ "id": request.id, "panic": message })
+        Err(p) => json!({ "id": request.id, "panic": panic_message(p.as_ref()) }),
+    }
+}
+
+/// Every prefix the user passes through while typing `tex`, rendered as the
+/// editor's parse gate would; only the panics are kept.
+fn prefixes(ctx: &KatexContext, line: &str) -> Value {
+    let mut request: Request = match serde_json::from_str(line) {
+        Ok(r) => r,
+        Err(e) => return json!({ "id": null, "panic": format!("bad request: {e}") }),
+    };
+    request.options.throw_on_error = Some(true);
+    let tex = std::mem::take(&mut request.tex);
+    let ends = tex
+        .char_indices()
+        .map(|(i, _)| i)
+        .skip(1)
+        .chain(std::iter::once(tex.len()));
+    let mut count = 0;
+    let mut panics = Vec::new();
+    for end in ends {
+        count += 1;
+        // Fresh settings per render: the expander writes `\gdef`s into them.
+        let settings = match settings(&request) {
+            Ok(s) => s,
+            Err(e) => return json!({ "id": request.id, "panic": e }),
+        };
+        let prefix = &tex[..end];
+        if let Err(p) = panic::catch_unwind(AssertUnwindSafe(|| {
+            render_to_string(ctx, prefix, &settings)
+        })) {
+            panics.push(json!({ "len": end, "panic": panic_message(p.as_ref()) }));
         }
     }
+    json!({ "id": request.id, "prefixes": count, "panics": panics })
 }
 
 fn main() -> io::Result<()> {
     // A panic is reported as an answer; keep the default hook off stderr.
     panic::set_hook(Box::new(|_| {}));
+    let probe = std::env::args().any(|a| a == "--prefixes");
     let ctx = KatexContext::default();
     let stdin = io::stdin();
     let mut out = io::BufWriter::new(io::stdout().lock());
@@ -120,7 +159,12 @@ fn main() -> io::Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        writeln!(out, "{}", answer(&ctx, &line))?;
+        let reply = if probe {
+            prefixes(&ctx, &line)
+        } else {
+            answer(&ctx, &line)
+        };
+        writeln!(out, "{reply}")?;
         out.flush()?;
     }
     Ok(())

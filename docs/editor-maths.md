@@ -23,14 +23,17 @@ maths, a MathLive `<math-field>` stands in for the rendering — inline for
 centred, its rows too — with slots for a fraction's parts or a
 sum's limits, and `\` commands that become one symbol (MathLive's own
 command list, restyled in `index.css`). MathLive is a lazy chunk imported as
-a Live editor mounts; it reuses KaTeX's bundled fonts and has sounds and the
-virtual keyboard off. Once it has loaded, MathLive also draws the maths the
+a Live editor mounts; it reuses the KaTeX fonts in `app/src/styles/katex/`
+and has sounds and the virtual keyboard off. Once it has loaded, MathLive also draws the maths the
 field could open (`staticMath`: its static markup, with `mathlive/static.css`
 injected minus its `@font-face` rules), in the box the field takes
 (`.cm-math-ml` in `theme/math.ts`: the field's size, line height and padding,
 and `\text{}` in KaTeX_Main without kerning or ligatures, as the field
 sets it a span per letter), so entering maths moves neither it nor its line; while MathLive loads, if it
-fails, and for maths the field can't take, KaTeX draws it.
+fails, and for maths the field can't take, the maths engine draws it in
+KaTeX's markup ([viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface)).
+Until that engine has loaded, the rendering is the maths' source in muted
+text (`cm-math-pending`), and `mathsWatcher` redraws it once it is ready.
 
 A field mounts
 over a static copy of its maths, unseen, and replaces it once focus has
@@ -85,7 +88,8 @@ drops the empty argument — and → or Tab at the end of the text goes back
 to maths.
 
 Focus in the field counts as the editor's (`core/liveFocus.ts`). Maths
-that MathLive or KaTeX can't read cleanly, a multi-line block inside a quote
+that MathLive or the maths engine can't read cleanly (`readsCleanly`, false
+until both have loaded), a multi-line block inside a quote
 or list, and maths switched with the toolbox's TeX control (⌘⇧M) are typed
 as LaTeX source (TeX mode, as in Raw mode) until the caret leaves them.
 
@@ -157,7 +161,8 @@ completion, and macOS reserves Ctrl- and ⌘-Space) opens or closes it, and
 it stays open until Esc, its close button, or the caret leaving that maths
 (`mathToolsField` holds what is open and on which maths, mapped through
 edits). It is a CodeMirror tooltip centred under the maths (a block on the
-text column): a live KaTeX preview (the parse error in red), a Recent row
+text column): a live preview (the parse error in red; empty until the maths
+engine has loaded), a Recent row
 and a tab strip, each one row that scrolls sideways, and a palette three
 rows tall that scrolls, with a matrix-size grid (`math/tools/mathPalette.ts`). Beside
 the tabs, a switch rewrites the maths as inline `$…$` or a block on lines
@@ -180,7 +185,7 @@ In TeX and Raw mode maths
 is typed as LaTeX (Space is a space), and the toolbox's cells insert
 `snippet()`s whose `{}` slots are Tab fields; the snippet keymap is
 `Prec.highest`, above the note's Tab. Inside maths, `\` plus a letter
-opens completion with KaTeX previews, whatever the toolbox is doing; it is
+opens completion with rendered previews, whatever the toolbox is doing; it is
 the editor's one `autocompletion()` (`core/extensions.ts`), so other sources
 join its `override`. The caret between a lone `$$` pair (what a typed `$`
 and Σ insert) counts as empty inline maths (`emptyPair` in `math/mathContext.ts`):

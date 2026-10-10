@@ -1,9 +1,10 @@
 # Checks every push to master and every pull request on a fresh macOS checkout:
 # that the Rust is formatted, the frontend tests and bundle, the Rust tests
-# (the app's, keyd's and keyd core's), that keyd builds and signs as the bundle
-# ships it, and that the generated CLI reference matches the binary; and on
-# Linux, that keyd builds with no OS adapter and the editor core agrees with
-# CodeMirror and Lezer, natively and as the dev build's shadow mode runs it. See
+# (the app's, keyd's, keyd core's and the maths engine's), that keyd builds and
+# signs as the bundle ships it, and that the generated CLI reference matches the
+# binary; and on Linux, that keyd builds with no OS adapter and the editor core
+# agrees with CodeMirror and Lezer, natively and as the dev build's shadow mode
+# runs it. See
 # docs/development.md#ci-proves-a-fresh-checkout-builds-releases-are-cut-by-hand.
 name: CI
 
@@ -41,6 +42,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+          targets: wasm32-unknown-unknown
+      # scripts/build-math.mjs needs the CLI at math-core/Cargo.lock's wasm-bindgen.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
@@ -55,6 +61,8 @@ jobs:
           (cd src-tauri && cargo fmt --check)
           (cd keyd && cargo fmt --check)
           (cd keyd/core && cargo fmt --check)
+          # Only our crates: the vendored katex/ keeps upstream's formatting.
+          (cd math-core && cargo fmt --check -p oculus-math -p oracle)
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
@@ -82,6 +90,9 @@ jobs:
       - name: keyd tests, release policy and dev
         working-directory: app/keyd
         run: cargo test --locked && cargo test --locked --features dev
+      - name: Maths engine tests
+        working-directory: app/math-core
+        run: cargo test --locked
 
       - name: CLI reference matches the binary
         run: |

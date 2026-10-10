@@ -40,6 +40,8 @@ export const math: ThemeSpec = {
     borderRadius: "6px",
   },
   ".cm-math-error": { color: "var(--color-destructive)", fontFamily: mono, fontSize: "13px" },
+  // Its source while the maths engine loads (`MathWidget`).
+  ".cm-math-pending": { color: muted, fontFamily: mono, fontSize: "13px", whiteSpace: "pre-wrap" },
   // The MathLive field (`math/field/mathField`) at the static rendering's size and
   // line height, so opening it doesn't move the maths or its line. Rules
   // from out here beat its shadow `:host`.

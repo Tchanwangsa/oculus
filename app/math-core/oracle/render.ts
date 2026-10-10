@@ -1,10 +1,16 @@
 // Display oracle: renders the same formulas with KaTeX JS (the app's `katex`)
-// and with the Rust fork (`oracle` bin), under each app call site's options,
-// and diffs the answers. Run from app/:
+// and with the Rust fork, under each app call site's options (sets.ts), and
+// diffs the answers. Run from app/:
 //
-//   bun math-core/oracle/render.ts [--notes DIR] [--katex DIR] [--out FILE]
-//                                  [--only a,b,…] [--no-build] [--oracle BIN]
+//   bun math-core/oracle/render.ts [--engine native|wasm] [--notes DIR]
+//       [--katex DIR] [--out FILE] [--only a,b,…] [--no-build] [--oracle BIN]
+//       [--pkg DIR] [--prefixes]
 //
+// --engine native (default) runs the fork as the `oracle` bin; wasm runs the
+//          app's build in math-core/pkg (built first by scripts/build-math.mjs)
+//          and also checks its thrown errors' shape and that `parseError`
+//          agrees with `renderToString`.
+// --pkg    another wasm build directory (implies --no-build).
 // --notes  where the user's .md files live (default: the app's data dir).
 //          Read at run time only; formulas never leave the report file.
 // --katex  a KaTeX checkout at the commit the fork tracks, for its spec
@@ -14,19 +20,23 @@
 // --oracle another build of the `oracle` bin to compare (implies --no-build).
 // --out    the JSON report with every difference (default: $TMPDIR). It
 //          holds the user's formulas, so it must stay outside the repo.
+// --prefixes  the typing probe instead: the native bin renders every prefix
+//          of every formula as the parse gate (set b) would and reports the
+//          panics (report default: $TMPDIR/katex-prefix-report.json).
 //
 // Exit status 1 when any (formula, option set) pair differs, other than the
-// accepted divergences below (DIVERGENCES.md).
+// accepted divergences below (DIVERGENCES.md), when a wasm check fails, or
+// when the probe finds a panic.
 
-import katex from "katex";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { type Formula, type Source, corpus } from "./corpus";
+import { type Answer, type WasmChecks, probePrefixes, renderJs, renderNative, renderWasm } from "./engines";
+import { SETS, type Step } from "./sets";
 
 const HERE = import.meta.dir;
 const CORE = resolve(HERE, "..");
-
-// ── Arguments ───────────────────────────────────────────────────────────────
 
 const argv = process.argv.slice(2);
 function arg(name: string): string | undefined {
@@ -35,195 +45,16 @@ function arg(name: string): string | undefined {
 }
 const notesDir = arg("notes") ?? join(homedir(), "Library/Application Support/com.tchan.oculus");
 const katexDir = arg("katex");
-const outFile = arg("out") ?? join(tmpdir(), "katex-oracle-report.json");
+const probe = argv.includes("--prefixes");
+const outFile = arg("out") ?? join(tmpdir(), probe ? "katex-prefix-report.json" : "katex-oracle-report.json");
 const only = arg("only")?.split(",");
+const engine = probe ? "native" : (arg("engine") ?? "native");
+if (engine !== "native" && engine !== "wasm") throw new Error(`--engine ${engine}: native or wasm`);
 const oracleBin = arg("oracle");
-const build = !argv.includes("--no-build") && !oracleBin;
-
-// ── Corpus ──────────────────────────────────────────────────────────────────
-
-type Source = "fixture" | "notes" | "spec";
-interface Formula {
-  tex: string;
-  display: boolean;
-  source: Source;
-  /** fixtures.json's difference class. */
-  class?: string;
-}
-
-function walk(dir: string, out: string[] = []): string[] {
-  for (const name of readdirSync(dir)) {
-    const path = join(dir, name);
-    const st = statSync(path);
-    if (st.isDirectory()) walk(path, out);
-    else if (name.endsWith(".md")) out.push(path);
-  }
-  return out;
-}
-
-/** `$$…$$` (display) and pandoc-style `$…$` (inline: no space just inside
- *  either `$`, closing `$` not followed by a digit) outside code. */
-export function extractMaths(md: string): { tex: string; display: boolean }[] {
-  const found: { tex: string; display: boolean }[] = [];
-  // Fenced code blocks, then inline code spans, blanked out.
-  let text = md.replace(/^( {0,3})(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^\1?\2[`~]*[ \t]*$|(?![\s\S]))/gm, " ");
-  text = text.replace(/(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g, " ");
-  text = text.replace(/(?<!\\)\$\$([\s\S]+?)\$\$/g, (_, tex: string) => {
-    if (tex.trim()) found.push({ tex: tex.trim(), display: true });
-    return " ";
-  });
-  const inline = /(?<![\\$])\$(?![\s$])((?:[^$\\\n]|\\.)+?)(?<![\s\\])\$(?!\d)/g;
-  for (const m of text.matchAll(inline)) found.push({ tex: m[1], display: false });
-  return found;
-}
-
-function specInputs(): Formula[] {
-  const out: Formula[] = [];
-  const fixture = JSON.parse(readFileSync(join(CORE, "katex/tests/fixtures/upstream.json"), "utf8"));
-  for (const c of fixture.cases) out.push({ tex: c.expression, display: !!c.displayMode, source: "spec" });
-  if (!katexDir) return out;
-  const test = join(katexDir, "test");
-  for (const name of readdirSync(test).filter((n) => n.endsWith("-spec.ts"))) {
-    const src = readFileSync(join(test, name), "utf8");
-    for (const m of src.matchAll(/\br`((?:[^`\\]|\\[\s\S])*)`/g)) {
-      if (m[1].includes("${")) continue;
-      out.push({ tex: m[1], display: false, source: "spec" }, { tex: m[1], display: true, source: "spec" });
-    }
-  }
-  const ss = join(test, "screenshotter/ss_data.yaml");
-  if (existsSync(ss)) {
-    const data = Bun.YAML.parse(readFileSync(ss, "utf8")) as Record<string, string | { tex: string; display?: number }>;
-    for (const v of Object.values(data)) {
-      const tex = typeof v === "string" ? v : v.tex;
-      const display = typeof v === "string" ? false : !!v.display;
-      if (typeof tex === "string") out.push({ tex, display, source: "spec" });
-    }
-  }
-  return out;
-}
-
-function corpus(): Formula[] {
-  const seen = new Map<string, Formula>();
-  const add = (f: Formula) => {
-    const key = `${f.display ? "D" : "I"}${f.tex}`;
-    if (!seen.has(key)) seen.set(key, f);
-  };
-  const fixtures = JSON.parse(readFileSync(join(HERE, "fixtures.json"), "utf8")) as Formula[];
-  for (const f of fixtures) add({ ...f, source: "fixture" });
-  if (existsSync(notesDir)) {
-    for (const file of walk(notesDir)) {
-      for (const m of extractMaths(readFileSync(file, "utf8"))) add({ ...m, source: "notes" });
-    }
-  }
-  for (const f of specInputs()) add(f);
-  return [...seen.values()];
-}
-
-// ── Option sets: the app's call sites ───────────────────────────────────────
-
-/** widgets.ts's pre-pass: `\left[\begin{array}…\end{array}\right]` gets
- *  `\kern-0.5em` inside the brackets. A copy, kept in step by hand. */
-const LEFT_BEFORE = /\\left\s*(?:\\[a-zA-Z]+|\\.|[^\s\\])\s*$/;
-function hugArrays(source: string): string {
-  const BEGIN = "\\begin{array}";
-  const END = "\\end{array}";
-  if (!source.includes(BEGIN)) return source;
-  let out = "";
-  let done = 0;
-  for (let at = source.indexOf(BEGIN); at >= 0; at = source.indexOf(BEGIN, at + 1)) {
-    if (at < done || !LEFT_BEFORE.test(source.slice(0, at))) continue;
-    let depth = 0;
-    let end = -1;
-    for (let i = at; i < source.length; i++) {
-      if (source.startsWith(BEGIN, i)) depth++;
-      else if (source.startsWith(END, i) && --depth === 0) {
-        end = i + END.length;
-        break;
-      }
-    }
-    if (end < 0 || !/^\s*\\right/.test(source.slice(end))) continue;
-    out += `${source.slice(done, at)}\\kern-0.5em${source.slice(at, end)}\\kern-0.5em`;
-    done = end;
-  }
-  return out + source.slice(done);
-}
-
-type Options = Record<string, unknown>;
-interface Step {
-  tex: string;
-  options: Options;
-}
-interface OptionSet {
-  name: string;
-  where: string;
-  /** The renders the call site makes; a later one runs only if the previous threw. */
-  steps: (f: Formula) => Step[];
-}
-
-const SETS: OptionSet[] = [
-  {
-    name: "a",
-    where: "widgets.ts:86 (Live render)",
-    steps: (f) => [
-      { tex: hugArrays(f.tex), options: { displayMode: f.display, throwOnError: true, macros: { "\\arraystretch": "1.2" } } },
-    ],
-  },
-  {
-    name: "b",
-    where: "mathField.ts:323 (parse gate)",
-    steps: (f) => [{ tex: f.tex, options: { displayMode: f.display, throwOnError: true, strict: "ignore" } }],
-  },
-  {
-    name: "c",
-    where: "mathTools.ts:77 (palette preview)",
-    steps: (f) => [{ tex: f.tex, options: { throwOnError: false } }],
-  },
-  {
-    name: "d",
-    where: "mathTools.ts:589 (toolbox preview)",
-    steps: (f) => [{ tex: f.tex, options: { displayMode: f.display, throwOnError: true } }],
-  },
-  {
-    name: "e",
-    where: "rehype-katex (chat, files)",
-    steps: (f) => [
-      { tex: f.tex, options: { displayMode: f.display, throwOnError: true } },
-      { tex: f.tex, options: { displayMode: f.display, strict: "ignore", throwOnError: false } },
-    ],
-  },
-];
-
-// ── Engines ─────────────────────────────────────────────────────────────────
-
-type Answer = { html: string } | { error: string } | { panic: string };
-
-function renderJs(step: Step): Answer {
-  try {
-    // A fresh macros object per call: KaTeX writes `\gdef`s into it.
-    const options = { ...step.options };
-    if (options.macros) options.macros = { ...(options.macros as object) };
-    return { html: katex.renderToString(step.tex, options) };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-async function renderRust(steps: Step[]): Promise<Answer[]> {
-  const bin = oracleBin ?? join(CORE, "target/release/oracle");
-  const input = steps.map((s, id) => JSON.stringify({ id, tex: s.tex, options: s.options })).join("\n") + "\n";
-  const proc = Bun.spawn([bin], { stdin: new Blob([input]), stdout: "pipe", stderr: "ignore" });
-  const text = await new Response(proc.stdout).text();
-  if ((await proc.exited) !== 0) throw new Error(`oracle exited ${proc.exitCode}`);
-  const answers: Answer[] = new Array(steps.length);
-  for (const line of text.split("\n")) {
-    if (!line) continue;
-    const { id, ...rest } = JSON.parse(line);
-    answers[id] = rest as Answer;
-  }
-  return answers;
-}
-
-// ── Compare ─────────────────────────────────────────────────────────────────
+const pkgDir = arg("pkg");
+const build = !argv.includes("--no-build") && !(engine === "native" ? oracleBin : pkgDir);
+const bin = oracleBin ?? join(CORE, "target/release/oracle");
+const pkg = pkgDir ?? join(CORE, "pkg");
 
 type Verdict = "equal" | "accepted" | "html-differs" | "error-mismatch" | "error-text-differs" | "panic";
 
@@ -265,12 +96,36 @@ function signature(a: string, b: string): string {
   return `${cut(a)}  ≠  ${cut(b)}`;
 }
 
+function buildEngine() {
+  if (!build) return;
+  const cmd =
+    engine === "native"
+      ? ["cargo", "build", "--release", "--bin", "oracle"]
+      : ["node", join(CORE, "../scripts/build-math.mjs")];
+  const done = Bun.spawnSync(cmd, { cwd: CORE, stdout: "inherit", stderr: "inherit" });
+  if (done.exitCode !== 0) process.exit(2);
+}
+
+/** The typing probe: set b's options on every prefix, panics only. */
+async function prefixes(formulas: Formula[]) {
+  const gate = SETS.find((s) => s.name === "b")!;
+  const steps = formulas.map((f) => gate.steps(f)[0]);
+  const t0 = performance.now();
+  const { prefixes: count, panics } = await probePrefixes(steps, bin);
+  console.log(`prefixes: ${count} rendered in ${((performance.now() - t0) / 1000).toFixed(1)} s; ${panics.length} panics`);
+  const byMessage = new Map<string, number>();
+  for (const p of panics) byMessage.set(p.panic, (byMessage.get(p.panic) ?? 0) + 1);
+  for (const [message, n] of [...byMessage].sort((x, y) => y[1] - x[1])) console.log(`${String(n).padStart(6)}  ${message}`);
+  const report = panics.map((p) => ({ ...p, source: formulas[p.step].source, prefix: steps[p.step].tex.slice(0, p.len) }));
+  writeFileSync(outFile, JSON.stringify(report, null, 1));
+  console.log(`\nreport: ${outFile}`);
+  process.exit(panics.length ? 1 : 0);
+}
+
 async function main() {
-  if (build) {
-    const cargo = Bun.spawnSync(["cargo", "build", "--release", "--bin", "oracle"], { cwd: CORE, stdout: "inherit", stderr: "inherit" });
-    if (cargo.exitCode !== 0) process.exit(2);
-  }
-  const formulas = corpus();
+  buildEngine();
+  const formulas = corpus(notesDir, katexDir);
+  if (probe) return prefixes(formulas);
   const sets = SETS.filter((s) => !only || only.includes(s.name));
   const count = (s: Source) => formulas.filter((f) => f.source === s).length;
   console.log(
@@ -296,10 +151,17 @@ async function main() {
   const js = new Map(steps.map((s) => [keyOf(s), renderJs(s)]));
   const t1 = performance.now();
   console.warn = warn;
-  const rsList = await renderRust(steps);
+  let rsList: Answer[];
+  let checks: WasmChecks | undefined;
+  if (engine === "wasm") ({ answers: rsList, checks } = await renderWasm(steps, pkg));
+  else rsList = await renderNative(steps, bin);
   const t2 = performance.now();
   const rs = new Map(steps.map((s, i) => [keyOf(s), rsList[i]]));
-  console.log(`renders: ${steps.length} unique; KaTeX JS ${(t1 - t0).toFixed(0)} ms, fork (incl. spawn) ${(t2 - t1).toFixed(0)} ms`);
+  const label = engine === "wasm" ? "fork (wasm, incl. gate checks)" : "fork (incl. spawn)";
+  console.log(`renders: ${steps.length} unique; KaTeX JS ${(t1 - t0).toFixed(0)} ms, ${label} ${(t2 - t1).toFixed(0)} ms`);
+  if (checks) {
+    console.log(`wasm: ${checks.errorShape} badly shaped throws, ${checks.gate} parseError disagreements, ${checks.traps} traps`);
+  }
 
   const rows: Record<string, Record<Verdict, number>> = {};
   const fixtureClasses = new Map<string, Set<string>>(); // class → sets that differ
@@ -346,12 +208,12 @@ async function main() {
   });
 
   for (const [title, suffix] of [["all inputs", ""], ["notes only", "/notes"]]) {
-    console.log(`\n${title}\nset  call site                            equal  accepted  html-differs  error-mismatch  error-text-differs  panic`);
+    console.log(`\n${title}\nset  call site                                equal  accepted  html-differs  error-mismatch  error-text-differs  panic`);
     for (const set of sets) {
       const r = rows[set.name + suffix];
       if (!r) continue;
       console.log(
-        `${set.name.padEnd(4)} ${set.where.padEnd(36)} ${String(r.equal).padStart(5)}  ${String(r.accepted).padStart(8)}  ${String(r["html-differs"]).padStart(12)}  ${String(r["error-mismatch"]).padStart(14)}  ${String(r["error-text-differs"]).padStart(18)}  ${String(r.panic).padStart(5)}`,
+        `${set.name.padEnd(4)} ${set.where.padEnd(40)} ${String(r.equal).padStart(5)}  ${String(r.accepted).padStart(8)}  ${String(r["html-differs"]).padStart(12)}  ${String(r["error-mismatch"]).padStart(14)}  ${String(r["error-text-differs"]).padStart(18)}  ${String(r.panic).padStart(5)}`,
       );
     }
   }
@@ -373,7 +235,8 @@ async function main() {
 
   writeFileSync(outFile, JSON.stringify({ rows, classes: sorted.map(([sig, c]) => ({ sig, ...c, sets: [...c.sets] })), diffs }, null, 1));
   console.log(`\nreport: ${outFile}`);
-  process.exit(diffs.length ? 1 : 0);
+  const failed = diffs.length > 0 || (checks && (checks.errorShape || checks.gate || checks.traps));
+  process.exit(failed ? 1 : 0);
 }
 
 if (import.meta.main) await main();

@@ -1,0 +1,30 @@
+[package]
+name = "oculus-math"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The katex fork compiled to WebAssembly for the app: KaTeX JS's renderToString and a parse gate."
+readme = "../README.md"
+keywords = ["latex", "math", "katex", "wasm"]
+categories = ["mathematics", "wasm"]
+
+[lib]
+name = "oculus_math"
+crate-type = ["cdylib"]
+
+# No `wasm` feature on the fork: its DOM renderer and the wasm-bindgen derives
+# on Settings/ParseError are unused here (strings only).
+[dependencies]
+katex = { package = "katex-rs", path = "../katex" }
+
+# wasm-bindgen must equal the `wasm-bindgen` CLI's version exactly;
+# scripts/build-math.mjs checks the CLI against Cargo.lock.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.129"
+js-sys = "0.3.106"
+console_error_panic_hook = "0.1.7"
+
+[lints]
+workspace = true

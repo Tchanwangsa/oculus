@@ -1,9 +1,9 @@
 import { StateEffect, StateField, type EditorState, type Transaction } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import katex from "katex";
 
 import { liveFocused } from "@/components/documents/editor/core/liveFocus";
 import { ancestorAt } from "@/components/documents/editor/syntax/syntax";
+import { mathsReady, parseError } from "@/lib/maths";
 import { mathAt, mathContextOf, ownsLines, type MathContext } from "../../mathContext";
 import { fieldWrite } from "../mathFieldEdits";
 import { lib, loadState, mathLiveSettled, type LoadState } from "./loader";
@@ -89,20 +89,16 @@ function atBlockEdge(state: EditorState, v: VisualMath): boolean {
 const cleanCache = new Map<string, boolean>();
 
 /** MathLive reads it without errors and KaTeX renders it: only then does the
- *  field, whose output KaTeX must draw afterwards, get to edit it. */
+ *  field, whose output KaTeX must draw afterwards, get to edit it. False
+ *  until both MathLive and the maths engine have loaded. */
 export function readsCleanly(source: string, display: boolean): boolean {
-  if (!lib) return false;
+  if (!lib || !mathsReady()) return false;
   const key = `${display ? "D" : "I"}${source}`;
   let ok = cleanCache.get(key);
   if (ok === undefined) {
-    ok = lib.validateLatex(toField(source, display)).length === 0;
-    if (ok) {
-      try {
-        katex.renderToString(source, { displayMode: display, throwOnError: true, strict: "ignore" });
-      } catch {
-        ok = false;
-      }
-    }
+    ok =
+      lib.validateLatex(toField(source, display)).length === 0 &&
+      parseError(source, { displayMode: display, strict: "ignore" }) === undefined;
     if (cleanCache.size > 500) cleanCache.clear();
     cleanCache.set(key, ok);
   }

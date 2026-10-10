@@ -9,6 +9,7 @@ video's transcript, and a web page.
 | Piece | Location |
 | --- | --- |
 | Markdown, maths, mermaid, lightbox, PDF | `app/src/components/markdown/`, `app/src/components/ui/lightbox/Lightbox.tsx`, `app/src/components/files/pdf/`, `app/src/lib/pdf/pdfView.ts`, `app/src/lib/pdf/pdfFind.ts` |
+| The maths engine: loading, rendering, `rehypeMaths`; KaTeX's CSS and fonts | `app/src/lib/maths/`, `app/src/styles/katex/` |
 | A parsed PDF's faces: PDF, Markdown | `app/src/components/files/FileViewer.tsx`, `app/src/components/files/FileMarkdown.tsx`, `app/src/components/files/pdf/pdfMdLink.ts`, `app/src/lib/pdf/pdfBlocks.ts` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/lectures/media/`, `app/src/stores/lectures/playerPrefsStore.ts`, `app/src/hooks/lectures/useTranscriptDock.ts` |
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lectures/playback/`, `app/src/lib/lectures/playbackOwner.ts` |
@@ -25,11 +26,12 @@ video's transcript, and a web page.
 ## One markdown renderer serves every surface
 
 `app/src/lib/markdown/math.ts` owns delimiter detection and source normalization.
-Library file rendering always applies KaTeX so math fences and HTML math
+Library file rendering always runs `rehypeMaths` so math fences and HTML math
 classes work even when there are no dollar delimiters.
 
 - **`app/src/components/markdown/MdComponents.tsx`** renders Canvas bodies,
-  parsed PDFs, Ed threads and replies with KaTeX. `normalizeMath` rewrites
+  parsed PDFs, Ed threads and replies, with `rehypeMaths` only when `hasMath`
+  finds a delimiter. `normalizeMath` rewrites
   `\(…\)` / `\[…\]` to `$…$` / `$$…$$` because CommonMark eats the backslash
   first. An inline `<code>` holding only a citation (`app/src/lib/citations/`)
   renders as `FileChip`. `![alt](path)` naming a library picture or HTML
@@ -38,6 +40,18 @@ classes work even when there are no dollar delimiters.
   are deliberately *unlayered* — in `@layer base` they would lose to the
   utilities they override. **`InlineMd` flattens blocks** because chapter
   summaries sit inside buttons, and a `<p>` in a `<button>` closes it early.
+- **Maths is drawn by the maths engine**, a WebAssembly build of a Rust port
+  of KaTeX 0.18.5 (`app/math-core/`; [development.md](./development.md#the-maths-wasm-is-built-not-committed))
+  behind KaTeX's `renderToString` in `app/src/lib/maths/`, so the markup and
+  every class our code reads (`.katex`, `.katex-display`, the MathML's TeX
+  annotation that copy reads) are KaTeX's. `main.tsx` starts loading it at
+  boot without waiting. Until it is ready `rehypeMaths` writes a formula's
+  source as a placeholder (`.md-math-pending`), and each component that
+  renders markdown calls `useMathsReady` to redraw then; a `memo` one
+  (`Body` in `FileMarkdown.tsx`) must call it itself. A formula that traps
+  the engine (a few hundred levels of nesting) is a render error, and a spare
+  instance takes over (`engine.ts`). KaTeX's CSS and fonts are vendored in
+  `app/src/styles/katex/`, imported unlayered.
 - **A spreadsheet opens as its text** (`marks.xlsx.md`, a table per sheet),
   in-app like a PDF rather than in the system viewer (`lib/files/openFile.ts`), with no
   PDF ↔ Markdown toggle.
@@ -53,7 +67,7 @@ classes work even when there are no dollar delimiters.
   swaps it for a read-only MathLive field (`app/src/lib/markdown/mathSelect.ts`), so
   a drag selects by structure — a cell, a matrix, a run of atoms — and copies
   that part's LaTeX, through the editor's own hit-test, widening and copy
-  (`components/documents/editor/math/field/mathField/`); a press outside it, Esc or focus leaving puts the KaTeX
+  (`components/documents/editor/math/field/mathField/`); a press outside it, Esc or focus leaving puts the rendering
   back. MathLive loads as the pointer first reaches a formula.
 - **A ```mermaid fence is caught at `pre`** (`Mermaid.tsx`), and the original
   `<pre>` shows until it renders or if it never parses. Config and drawing are
@@ -165,7 +179,7 @@ classes work even when there are no dollar delimiters.
     matches the `.md`'s apart from the anchors. Two rehype passes
     (`blockAnchorPlugins`) give each top-level element, and each item of a
     top-level list, `data-page` and `data-block` from the chunk its source
-    starts in; the second runs after KaTeX, which replaces a display
+    starts in; the second runs after `rehypeMaths`, which replaces a display
     formula's node with one that has no source position. Without a record
     it renders the flat `.md`; a record without blocks anchors pages only.
   - **The faces share one reading position** (`PdfMdLink`, fresh per file):

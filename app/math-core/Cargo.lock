@@ -625,6 +625,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oculus-math"
+version = "0.3.0"
+dependencies = [
+ "console_error_panic_hook",
+ "js-sys",
+ "katex-rs",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

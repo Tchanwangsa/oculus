@@ -11,6 +11,18 @@
   border-radius: 4px;
 }
 
+/* A formula's source while the maths engine loads (`rehypeMaths`); the
+ * component re-renders it as maths once it is ready. */
+.md-math-pending {
+  color: var(--color-muted-foreground);
+}
+.md-math-pending-display {
+  display: block;
+  margin: 1em 0;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
 /* A pressed formula's read-only MathLive field (`mathSelect.ts`), in place of
  * KaTeX's drawing and tinted as the note editor's field is (`theme.ts`). */
 /* A step more specific than KaTeX's own `.katex-display > .katex > .katex-html`. */

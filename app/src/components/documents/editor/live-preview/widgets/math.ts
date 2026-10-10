@@ -1,8 +1,9 @@
-import type { EditorView } from "@codemirror/view";
-import katex from "katex";
+import { StateEffect } from "@codemirror/state";
+import { ViewPlugin, type EditorView } from "@codemirror/view";
 
-import "katex/dist/katex.min.css";
+import "@/styles/katex/katex.min.css";
 
+import { mathsReady, onMathsReady, renderToString } from "@/lib/maths";
 import { mathFieldFocused } from "../../core/liveFocus";
 import { MATH_ARRAYSTRETCH, mathLiveReady, noteMathPress, staticMath } from "../../math/field/mathField";
 import { ancestorAt } from "../../syntax/syntax";
@@ -44,7 +45,8 @@ function hugArrays(source: string): string {
 }
 
 /** KaTeX HTML for `source`, or null if it does not parse. Matrix rows get
- *  `MATH_ARRAYSTRETCH`, as the visual field draws them (`math/field/mathField`). */
+ *  `MATH_ARRAYSTRETCH`, as the visual field draws them (`math/field/mathField`).
+ *  Only once `mathsReady()`. */
 function renderMath(source: string, display: boolean): string | null {
   const key = `${display ? "D" : "I"}${source}`;
   const hit = katexCache.get(key);
@@ -53,7 +55,7 @@ function renderMath(source: string, display: boolean): string | null {
   try {
     // A fresh macro table each time: KaTeX writes the source's `\def`s into it.
     const macros = { "\\arraystretch": String(MATH_ARRAYSTRETCH) };
-    html = katex.renderToString(hugArrays(source), { displayMode: display, throwOnError: true, macros });
+    html = renderToString(hugArrays(source), { displayMode: display, throwOnError: true, macros });
   } catch {
     html = null;
   }
@@ -61,6 +63,23 @@ function renderMath(source: string, display: boolean): string | null {
   katexCache.set(key, html);
   return html;
 }
+
+/** The maths engine came up or went down (`lib/maths`): renderings redraw. */
+export const mathsSettled = StateEffect.define<null>();
+
+/** Tells each Live editor when the engine's readiness changes, so maths drawn
+ *  as a placeholder before it loaded is drawn again. */
+export const mathsWatcher = ViewPlugin.fromClass(
+  class {
+    readonly off: () => void;
+    constructor(view: EditorView) {
+      this.off = onMathsReady(() => view.dispatch({ effects: mathsSettled.of(null) }));
+    }
+    destroy() {
+      this.off();
+    }
+  },
+);
 
 /** The maths node a rendering starts at, and where its widget ends (a
  *  block's closing line end). */
@@ -87,6 +106,9 @@ export class MathWidget extends SourceWidget {
   /** Drawn by MathLive (`staticMath`) once it has loaded, else by KaTeX; a
    *  rebuild after it loads draws again. */
   readonly mathLive = mathLiveReady();
+  /** Drawn as a placeholder until the maths engine is ready; a rebuild after
+   *  it is (`mathsSettled`) draws again. */
+  readonly maths = mathsReady();
 
   constructor(
     readonly source: string,
@@ -108,7 +130,8 @@ export class MathWidget extends SourceWidget {
       other.display === this.display &&
       other.caret === this.caret &&
       other.block === this.block &&
-      other.mathLive === this.mathLive
+      other.mathLive === this.mathLive &&
+      other.maths === this.maths
     );
   }
 
@@ -118,9 +141,13 @@ export class MathWidget extends SourceWidget {
     dom.classList.toggle("cm-math-selected", this.selected);
     drawnMath.set(dom, this);
     const ml = this.mathLive ? staticMath(this.source, this.display) : null;
-    const html = ml || !this.source.trim() ? null : renderMath(this.source, this.display);
+    const pending = !ml && !this.maths && !!this.source.trim();
+    const html = ml || pending || !this.source.trim() ? null : renderMath(this.source, this.display);
     if (ml) {
       dom.append(ml);
+    } else if (pending) {
+      dom.classList.add("cm-math-pending");
+      dom.textContent = this.source;
     } else if (html) {
       dom.innerHTML = html;
     } else {

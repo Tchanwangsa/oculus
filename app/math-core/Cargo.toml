@@ -1,10 +1,11 @@
-# The maths engine: a vendored fork of katex-rs (`katex/`). Its own workspace,
+# The maths engine: a vendored fork of katex-rs (`katex/`), its wasm binding
+# (`wasm/`) and the display oracle (`oracle/`). Its own workspace,
 # never a dependency of `app/src-tauri`, so `tauri dev` never rebuilds it.
 # The settings below are katex-rs's workspace settings, which `katex/`
 # inherits; see katex/UPSTREAM.md.
 
 [workspace]
-members = ["katex", "oracle"]
+members = ["katex", "oracle", "wasm"]
 resolver = "3"
 
 [workspace.package]
@@ -59,6 +60,13 @@ unused_trait_names = "warn"
 [profile.release]
 opt-level = "z"
 lto = "fat"
+
+# The wasm build (scripts/build-math.mjs): one codegen unit and no unwinding
+# tables, for size; a panic traps.
+[profile.wasm]
+inherits = "release"
+codegen-units = 1
+panic = "abort"
 
 [profile.profiling]
 inherits = "release"

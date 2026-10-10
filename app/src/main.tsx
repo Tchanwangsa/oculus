@@ -8,6 +8,7 @@ import { loadIconCatalogue } from "./components/subjects/SubjectIcon";
 import { useSubjectIconStore } from "./stores/planning/subjectIconStore";
 import { watchMathSelection } from "./lib/markdown/selection";
 import { watchMathPress } from "./lib/markdown/mathSelect";
+import { loadMaths } from "./lib/maths";
 
 // A release webview has no console, so paint uncaught errors over the window.
 // Escape dismisses; a later error replaces the box rather than stacking.
@@ -43,6 +44,9 @@ window.addEventListener("keydown", (ev) => {
 
 watchMathSelection();
 watchMathPress();
+// Not awaited: surfaces that mount first draw maths as placeholders and
+// redraw when it is ready. A failed load is an unhandled rejection, painted.
+void loadMaths();
 
 function render() {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
