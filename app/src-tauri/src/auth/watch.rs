@@ -5,7 +5,7 @@
 use keyd_core::client::SessionStatus;
 
 use super::session;
-use crate::credentials::Credentialed;
+use crate::providers::credentials::Credentialed;
 
 /// Whether `now` shows a sign-in made since `before`: a Canvas session held
 /// and the app marked signed in, where one of those was not true before, or

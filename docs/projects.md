@@ -12,26 +12,26 @@ repair a bad row.
 
 | Piece | Location |
 | --- | --- |
-| Tables: `projects`, `project_tasks` (27), tags + `event_id` (33), nullable `project_id` (37) | `app/src-tauri/src/migrations.rs`, `UNFILED_TASKS_SQL` in `app/src-tauri/src/projects.rs` |
-| Frontend reads and writes (direct SQL) | `app/src/lib/projects.ts` |
-| Headless writes (CLI, and so the agent) | `app/src-tauri/src/projects.rs` |
-| `oculus project` / `oculus task` | `app/src-tauri/src/bin/oculus/planning.rs` |
-| One open project and its tasks | `app/src/stores/projectsStore.ts` |
-| Index, one project, one task, every task | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/TaskPage.tsx`, `app/src/pages/TasksPage.tsx` |
-| Index subject groups and collapsed preferences (shared with chat) | `app/src/lib/subjectGroups.ts`, `app/src/hooks/useCollapsedGroups.ts` |
-| A subject's Projects tab | `app/src/pages/subject/ProjectsPage.tsx` |
-| The Projects / Tasks strip and its sidebar item | `app/src/components/projects/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx` |
-| Overview, tags, pinned calendar event | `app/src/components/projects/ProjectOverview.tsx`, `app/src/components/projects/TagEditor.tsx`, `app/src/components/projects/EventLink.tsx` |
-| Board, table, timeline, and the shaping behind them | `app/src/components/projects/ProjectBoard.tsx`, `app/src/components/projects/ProjectTable.tsx`, `app/src/components/projects/ProjectTimeline.tsx`, `app/src/components/projects/taskTree.ts` |
-| The universal view: hook, filters, views, shared rules | `app/src/hooks/useTaskList.ts`, `app/src/components/projects/TaskFilters.tsx`, `app/src/components/projects/TasksBoard.tsx`, `app/src/components/projects/TasksTable.tsx`, `app/src/components/projects/universalTasks.ts` |
-| Card drag and board chrome | `app/src/hooks/useCardDrag.ts` (on `app/src/hooks/usePointerDrag.ts`), `app/src/components/projects/BoardParts.tsx` |
-| Subject chips, subtask expansion, status and progress marks | `app/src/components/projects/TaskMarks.tsx` |
-| A card's title | `app/src/components/projects/CardTitle.tsx` |
-| Filing a task; creating one | `app/src/components/projects/ProjectPicker.tsx`, `app/src/components/projects/NewTaskButton.tsx` |
-| Rename / archive / delete | `app/src/components/projects/ProjectMenu.tsx`, `app/src/components/projects/useProjectActions.ts` |
-| Routes and the breadcrumb trail | `app/src/components/projects/projectHref.ts`, `app/src/components/projects/taskHref.ts`, `app/src/components/projects/ProjectCrumbs.tsx` |
-| Date and time picking | `app/src/components/projects/DateTimeField.tsx` |
-| Overlap packing, shared with the calendar | `app/src/lib/lanes.ts` |
+| Tables: `projects`, `project_tasks` (27), tags + `event_id` (33), nullable `project_id` (37) | `app/src-tauri/src/db/migrations.rs`, `UNFILED_TASKS_SQL` in `app/src-tauri/src/db/projects/migration37.rs` |
+| Frontend reads and writes (direct SQL) | `app/src/lib/planning/projects/` (`reads.ts`, `taskWrites.ts`, `projectWrites.ts`, `columns.ts`, `rows.ts`, `events.ts`) |
+| Headless writes (CLI, and so the agent) | `app/src-tauri/src/db/projects/` (`tasks/`, `project_writes.rs`, `columns.rs`, `rows.rs`) |
+| `oculus project` / `oculus task` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs` |
+| One open project and its tasks | `app/src/stores/planning/projectsStore.ts` |
+| Index, one project, one task, every task | `app/src/pages/work/ProjectsIndexPage.tsx`, `app/src/pages/work/ProjectPage.tsx`, `app/src/pages/work/TaskPage.tsx`, `app/src/pages/work/TasksPage.tsx` |
+| Index subject groups and collapsed preferences (shared with chat) | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
+| A subject's Projects tab | `app/src/pages/work/ProjectsPage.tsx` |
+| The Projects / Tasks strip and its sidebar item | `app/src/components/projects/page/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx` |
+| Overview, tags, pinned calendar event | `app/src/components/projects/page/ProjectOverview.tsx`, `app/src/components/projects/fields/TagEditor.tsx`, `app/src/components/projects/page/EventLink.tsx` |
+| Board, table, timeline, and the shaping behind them | `app/src/components/projects/board/ProjectBoard.tsx`, `app/src/components/projects/lists/ProjectTable.tsx`, `app/src/components/projects/timeline/ProjectTimeline.tsx`, `app/src/components/projects/tasks/taskTree.ts` |
+| The universal view: hook, filters, views, shared rules | `app/src/hooks/data/useTaskList.ts`, `app/src/components/projects/tasks/TaskFilters.tsx`, `app/src/components/projects/board/TasksBoard.tsx`, `app/src/components/projects/lists/TasksTable.tsx`, `app/src/components/projects/tasks/universalTasks.ts` |
+| Card drag and board chrome | `app/src/hooks/gestures/useCardDrag.ts` (on `app/src/hooks/gestures/usePointerDrag.ts`), `app/src/components/projects/board/BoardParts.tsx` |
+| Subject chips, subtask expansion, status and progress marks | `app/src/components/projects/tasks/TaskMarks.tsx` |
+| A card's title | `app/src/components/projects/board/CardTitle.tsx` |
+| Filing a task; creating one | `app/src/components/projects/nav/ProjectPicker.tsx`, `app/src/components/projects/nav/NewTaskButton.tsx` |
+| Rename / archive / delete | `app/src/components/projects/lists/ProjectMenu.tsx`, `app/src/components/projects/lists/useProjectActions.ts` |
+| Routes and the breadcrumb trail | `app/src/components/projects/nav/projectHref.ts`, `app/src/components/projects/nav/taskHref.ts`, `app/src/components/projects/page/ProjectCrumbs.tsx` |
+| Date and time picking | `app/src/components/projects/fields/DateTimeField.tsx` |
+| Overlap packing, shared with the calendar | `app/src/lib/planning/lanes.ts` |
 | The agent's instructions | `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/HARNESS.template.md` |
 
 ## The schema assumes the student owns every row
@@ -56,7 +56,7 @@ repair a bad row.
   and writer reaches a board through `boardOf` / `board_of`, which returns the
   project's columns or the defaults.
 - **`event_id` is a pointer, not a foreign key.** It holds a `CalEvent.id` as
-  `app/src/lib/calendar.ts` mints it, so one column addresses three tables. A
+  `app/src/lib/planning/calendar/` mints it, so one column addresses three tables. A
   sync deletes and re-inserts a subject's `calendar_events` with the same ids,
   so an `ON DELETE SET NULL` would clear every pin on each sync. `EventLink`
   resolves it live, offers to clear a pin that stops resolving, and keeps
@@ -72,9 +72,9 @@ inline in the migration so its test runs the exact string the app runs.
 
 ## Two writers enforce the same rules
 
-The frontend writes over `getDb()` in `app/src/lib/projects.ts` (no Tauri
+The frontend writes over `getDb()` in `app/src/lib/planning/projects/` (no Tauri
 command — nothing here needs the network or a subprocess); headless,
-`app/src-tauri/src/projects.rs` writes the same rows with the same rules. Change
+`app/src-tauri/src/db/projects/` writes the same rows with the same rules. Change
 a table and both move with the migration. Neither creates the database.
 
 - **`moveTask` / `move_task` is the only writer of `column_id`, `position` and
@@ -97,16 +97,16 @@ a table and both move with the migration. Neither creates the database.
 
 ## Every write refreshes through one window event
 
-Each write in `app/src/lib/projects.ts` fires `PROJECTS_UPDATED_EVENT`, and
+Each write in `app/src/lib/planning/projects/` fires `PROJECTS_UPDATED_EVENT`, and
 components showing project data reload on it. The store's write wrappers
 deliberately do not re-read: a second refresh path doubled a drag's reads and
 could land out of order.
 
 The agent writes from a subprocess nothing in the webview notices, so
-`app/src/hooks/useBackendEvents.ts` watches the harness stream and fires the
+`app/src/hooks/backend/useBackendEvents.ts` watches the harness stream and fires the
 same event when a tool call whose **command text** contains `oculus project` /
 `oculus task` finishes. It matches text rather than the tool's kind because
-`is_oculus_cli` in `app/src-tauri/src/harness/event.rs` only checks the first
+`is_oculus_cli` in `app/src-tauri/src/harness/event/classify.rs` only checks the first
 words, and `cd … && oculus task add` classifies as plain Bash. A false
 positive costs one re-read; a false negative is a silently wrong board.
 
@@ -154,7 +154,7 @@ whose parent is missing rather than dropping it.
   swapping state, so both keep history, ⌘-click and tab restore. The sidebar
   has one item, **Tasks**, leading to `/projects`.
 - **`ProjectCrumbs`** starts at Projects and links the subject to its Projects
-  tab. Segments are buttons with `data-tab-href` (`app/src/lib/newTabClicks.ts`)
+  tab. Segments are buttons with `data-tab-href` (`app/src/lib/shell/newTabClicks.ts`)
   so ⌘-click opens a tab; it is a Fragment so it inherits each page's gap.
 - **The index** draws a subject group only once it has a project, plus
   Personal always; `NewProjectButton` is the door for a subject's first
@@ -195,7 +195,7 @@ click, not an anchor or button, because it contains controls; it carries
 ## The universal view
 
 `/tasks` shows every task, filed or not, as a four-column board or a flat
-table (`app/src/pages/TasksPage.tsx`), under the same strip as `/projects`.
+table (`app/src/pages/work/TasksPage.tsx`), under the same strip as `/projects`.
 
 - **It does not use `projectsStore`**, which holds one open project.
   `useTaskList` reads `getAllTasks` plus the project list (a column id means
@@ -237,16 +237,16 @@ table (`app/src/pages/TasksPage.tsx`), under the same strip as `/projects`.
 
 ## Boards share rendering while each view owns placement
 
-`BoardView` in `app/src/components/projects/BoardParts.tsx` composes columns,
+`BoardView` in `app/src/components/projects/board/BoardParts.tsx` composes columns,
 draggable cards and the lifted copy. Project and universal boards supply the
 card body, ordered rows and drop policy; parent/sibling placement stays in
-`app/src/components/projects/taskTree.ts`. Tables and timelines share the
-subtask disclosure control in `app/src/components/projects/TaskMarks.tsx`.
+`app/src/components/projects/tasks/taskTree.ts`. Tables and timelines share the
+subtask disclosure control in `app/src/components/projects/tasks/TaskMarks.tsx`.
 
-Project and task patches bind values through `app/src/lib/sqlPatch.ts`.
+Project and task patches bind values through `app/src/lib/planning/sqlPatch.ts`.
 `undefined` leaves a field alone, `null` clears it, and an empty patch neither
 updates timestamps nor announces a write. Domain validation and refresh events
-remain in `app/src/lib/projects.ts`.
+remain in `app/src/lib/planning/projects/`.
 
 ## Gotchas
 

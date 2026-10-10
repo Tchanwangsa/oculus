@@ -4,22 +4,25 @@
 //! learns whether it is signed in, and how it signs out (`docs/auth.md`).
 
 pub(crate) mod commands;
+mod cookies;
+pub mod keyd;
+pub mod legacy_agent;
+mod login_window;
+pub mod okta;
 mod session;
-mod snapshot;
 mod startup;
 mod tab;
 mod watch;
-mod window;
 
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::credentials::Credentialed;
+use crate::providers::credentials::Credentialed;
 
-pub use crate::canvas::SessionProbe as AuthProbe;
+pub use crate::sources::canvas::SessionProbe as AuthProbe;
+pub use cookies::{save_browser_session, save_session_cookie};
 pub(crate) use session::report;
-pub use snapshot::{save_browser_session, save_session_cookie};
 pub use startup::restore_session;
 pub use watch::{signed_in_since, SignInWatch};
 
@@ -47,7 +50,7 @@ pub fn is_authenticated_url(url: &url::Url) -> bool {
 /// Pings the Canvas API through oculus-keyd, which holds the session and
 /// writes back what Canvas rotates.
 pub fn saved_session_probe() -> AuthProbe {
-    let probe = crate::canvas::Canvas::open(&crate::paths::data_dir()).probe();
+    let probe = crate::sources::canvas::Canvas::open(&crate::library::paths::data_dir()).probe();
 
     match &probe {
         AuthProbe::Valid(name) => eprintln!("[oculus] session check: valid ({name})"),
@@ -78,7 +81,7 @@ pub fn session_established(app: &AppHandle, dir: &std::path::Path, via: Via) {
             app.emit("canvas-auth-cancelled", "cancelled").ok();
             return;
         }
-        crate::okta::resume_automatic_sign_in(dir);
+        crate::auth::okta::resume_automatic_sign_in(dir);
     }
     if let Some(state) = app.try_state::<AuthState>() {
         *state.0.lock().unwrap() = true;

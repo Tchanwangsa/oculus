@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use keyd_core::client::{KeydError, SessionKind as Kind, SessionStatus};
 
-use crate::credentials::Credentialed;
+use crate::providers::credentials::Credentialed;
 
 static ABSENT_LOGGED: AtomicBool = AtomicBool::new(false);
 

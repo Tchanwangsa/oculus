@@ -9,10 +9,10 @@ import {
 } from "@/components/ui/tooltip";
 import type { HeaderClaim } from "@/components/tabs/PaneHeader";
 import { useTabInfo } from "@/components/tabs/tabInfo";
-import { expandSide } from "@/lib/tabRouters";
-import { frontOf, type SidePanel } from "@/lib/sideStack";
+import { expandSide } from "@/lib/shell/tabRouters";
+import { frontOf, type SidePanel } from "@/lib/shell/sideStack";
 import { cn } from "@/lib/utils";
-import { HOME, useTabStore } from "@/stores/tabStore";
+import { HOME, useTabStore } from "@/stores/shell/tabStore";
 
 /** How many item icons the switcher stacks before a `+N`. */
 const STACKED = 3;

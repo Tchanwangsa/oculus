@@ -17,18 +17,18 @@ import {
   SideSlotProvider,
   type HeaderClaim,
 } from "@/components/tabs/PaneHeader";
-import { ResizeHandle } from "@/components/ui/ResizeHandle";
-import { PageFind } from "@/components/ui/PageFind";
-import { routerFor } from "@/lib/tabRouters";
-import { clampRatio, SIDE_RATIO, type SideItem } from "@/lib/sideStack";
-import { cancelRecentTab, recordRecentTab } from "@/stores/recentTabsStore";
+import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
+import { PageFind } from "@/components/ui/search/PageFind";
+import { routerFor } from "@/lib/shell/tabRouters";
+import { clampRatio, SIDE_RATIO, type SideItem } from "@/lib/shell/sideStack";
+import { cancelRecentTab, recordRecentTab } from "@/stores/shell/recentTabsStore";
 import {
   sideFront,
   useTabStore,
   type AppTab,
   type PaneSide,
   type PaneState,
-} from "@/stores/tabStore";
+} from "@/stores/shell/tabStore";
 import { cn } from "@/lib/utils";
 
 /**
@@ -126,7 +126,7 @@ const TabPane = memo(function TabPane({
             />
           </ResizeHandle>
           {/* Only the front item is mounted; the rest are a path and a
-              router (`lib/tabRouters.ts`). Focus is taken on the column, so
+              router (`lib/shell/tabRouters.ts`). Focus is taken on the column, so
               a click on the header focuses the side panel too. */}
           <div
             onPointerDownCapture={() => focusPane(tabId, "side")}
@@ -226,7 +226,7 @@ function Pane({
       <TabContext.Provider value={context}>
         <RouterProvider router={router} />
       </TabContext.Provider>
-      {/* ⌘F's fallback for whatever page the pane shows (`lib/find.ts`). */}
+      {/* ⌘F's fallback for whatever page the pane shows (`lib/menu/find.ts`). */}
       {claim ? (
         <BelowHeader claim={claim}>
           <PageFind rootRef={rootRef} page={id} />

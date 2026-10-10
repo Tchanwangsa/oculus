@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Manager};
 
-use super::{saved_session_probe, session, window, AuthProbe, AuthState};
-use crate::credentials::Credentialed;
+use super::{login_window, saved_session_probe, session, AuthProbe, AuthState};
+use crate::providers::credentials::Credentialed;
 
 /// Whether the app counts as signed in. The answer comes from oculus-keyd, so
 /// it runs off the main thread.
@@ -13,7 +13,10 @@ use crate::credentials::Credentialed;
 pub async fn get_auth_status(state: tauri::State<'_, AuthState>) -> Result<bool, String> {
     let memory = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || {
-        session::authenticated(&Credentialed::at(&crate::paths::data_dir()), &memory)
+        session::authenticated(
+            &Credentialed::at(&crate::library::paths::data_dir()),
+            &memory,
+        )
     })
     .await
     .map_err(|e| e.to_string())
@@ -38,7 +41,7 @@ pub async fn launch_canvas_auth(
     state: tauri::State<'_, AuthState>,
 ) -> Result<(), String> {
     let auth_flag = Arc::clone(&state.0);
-    window::open_canvas_window(app, auth_flag);
+    login_window::open_canvas_window(app, auth_flag);
     Ok(())
 }
 
@@ -55,12 +58,12 @@ pub async fn disconnect_canvas(
 
     // The jar first, or a Canvas tab saves the session straight back.
     let (cleared, done) = tokio::sync::oneshot::channel();
-    crate::browser::clear_sessions(&app, move || {
+    crate::shell::browser::clear_sessions(&app, move || {
         cleared.send(()).ok();
     });
     done.await.ok();
     tauri::async_runtime::spawn_blocking(|| {
-        session::sign_out(&Credentialed::at(&crate::paths::data_dir()))
+        session::sign_out(&Credentialed::at(&crate::library::paths::data_dir()))
     })
     .await
     .map_err(|e| e.to_string())??;

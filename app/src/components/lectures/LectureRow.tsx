@@ -1,8 +1,8 @@
 import { memo } from "react";
 import { CheckCircle, CircleNotch, Clock, DownloadSimple, Trash, X } from "@phosphor-icons/react";
-import { cancelLectureDownload, dlKey, isDownloading, useLectureDownloads } from "@/stores/lectureDownloadStore";
+import { cancelLectureDownload, dlKey, isDownloading, useLectureDownloads } from "@/stores/lectures/lectureDownloadStore";
 import { fmtDurationSecs, fmtLectureDate, lecturePagePath } from "@/lib/lectures";
-import { progressLabel } from "@/lib/lectureEnd";
+import { progressLabel } from "@/lib/lectures/end";
 import type { Lecture } from "@/lib/db";
 import { cn } from "@/lib/utils";
 

@@ -353,13 +353,17 @@ Options:
 ```
 Re-parse and re-embed PDFs already on record
 
-Usage: oculus index [SUBJECT_CODE]...
+Usage: oculus index [OPTIONS] [SUBJECT_CODE]...
 
 Arguments:
   [SUBJECT_CODE]...
           Subject codes to index. Omit for every subject
 
 Options:
+      --reparse
+          Parse again every PDF whose record predates the current parser version. Spends
+          MinerU allowance; embeddings are kept
+
   -h, --help
           Print help (see a summary with '-h')
 ```

@@ -1,0 +1,98 @@
+@theme {
+  /* Neutral ramp: equal R/G/B, so no hue competes with the indigo. */
+  --color-ink-50:  #ffffff;
+  --color-ink-100: #f9f9f9;
+  --color-ink-200: #f4f4f4;
+  --color-ink-300: #ececec;
+  --color-ink-400: #e0e0e0;
+  --color-ink-500: #b4b4b4;
+  --color-ink-600: #757575;
+  --color-ink-700: #4a4a4a;
+  --color-ink-800: #2b2b2b;
+  --color-ink-900: #0d0d0d;
+
+  /* Brand — muted indigo, behind both `primary` and `brand`. */
+  --color-indigo-300: #a5aded;
+  --color-indigo-400: #8b93e8;
+  --color-indigo-500: #6e79d6;
+  --color-indigo-600: #5e6ad2;
+  --color-indigo-700: #505bbd;
+  --color-indigo-800: #414a9b;
+
+  /* Semantic colour tokens, light theme defaults. */
+  --color-background:        #f9f9f9;
+  --color-foreground:        #0d0d0d;
+
+  /* The floating content pane, one step lighter than the ground. */
+  --color-card:              #ffffff;
+  --color-card-foreground:   #0d0d0d;
+
+  --color-popover:           #ffffff;
+  --color-popover-foreground:#0d0d0d;
+
+  --color-surface:           #f4f4f4;
+  --color-surface-raised:    #ececec;
+  --color-surface-overlay:   #e0e0e0;
+
+  --color-border:            #e5e5e5;
+  --color-border-subtle:     #efefef;
+
+  --color-input:             #dedede;
+  --color-ring:              #5e6ad2;
+
+  --color-muted:             #f4f4f4;
+  --color-muted-foreground:  #757575;
+
+  /* Solid fills — buttons, the active tab underline, today's date. */
+  --color-primary:           #5e6ad2;
+  --color-primary-hover:     #505bbd;
+  --color-primary-active:    #414a9b;
+  --color-primary-foreground:#ffffff;
+
+  /* The indigo as an accent, not a fill (links, selection, progress) — see
+     docs/ui.md. */
+  --color-brand:             #5e6ad2;
+  --color-brand-hover:       #505bbd;
+  --color-brand-muted:       #eef0fb;
+  --color-brand-foreground:  #ffffff;
+
+  --color-secondary:         #ececec;
+  --color-secondary-foreground: #0d0d0d;
+
+  /* shadcn's `accent` is the quiet hover surface, NOT the brand colour. */
+  --color-accent:            #ececec;
+  --color-accent-foreground: #0d0d0d;
+
+  --color-destructive:       #dc2626;
+  --color-destructive-foreground: #ffffff;
+
+  --color-success:           #16a34a;
+  --color-warning:           #b45309;
+
+  /* The sidebar shares the ground; the content card's border separates. */
+  --color-sidebar:           #f9f9f9;
+  --color-sidebar-border:    #e5e5e5;
+  --color-sidebar-item-hover:#ececec;
+  --color-sidebar-item-active:#e3e3e3;
+
+  /* Chart palette, validated for colour-vision separation on `card` — the slot
+     ORDER is part of that, don't reshuffle. `chart-other` is never a series. */
+  --color-chart-1: #5e6ad2;
+  --color-chart-2: #1baf7a;
+  --color-chart-3: #eda100;
+  --color-chart-4: #e87ba4;
+  --color-chart-5: #008300;
+  --color-chart-other: #a1a1a1;
+
+  /* Code highlighting in the note editor, read on `surface-raised`. Muted so
+     a block never outshouts the prose; no slot borrows the brand indigo. */
+  --color-syntax-keyword:  #b4405e;
+  --color-syntax-string:   #2a7350;
+  --color-syntax-comment:  #737373;
+  --color-syntax-number:   #9a540b;
+  --color-syntax-function: #6e4fb8;
+  --color-syntax-type:     #1b7183;
+  --color-syntax-property: #35609b;
+  --color-syntax-operator: #5c5c5c;
+  --color-syntax-meta:     #7e6129;
+}

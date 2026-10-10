@@ -146,11 +146,12 @@ Configuration is in `components.json`.
 - **Primitives**: `radix-ui` (unified package)
 - **Icons**: `@phosphor-icons/react` — shadcn generates lucide imports, so swap
   them to Phosphor after adding a new component
-- **Theme tokens**: `src/index.css`. The shadcn token names (`background`,
+- **Theme tokens**: `src/styles/colors.css` (dark values in `dark.css`;
+  `src/index.css` imports the stylesheets). The shadcn token names (`background`,
   `card`, `popover`, `secondary`, `accent`, `input`, `ring`, …) are mapped onto
   the project's own Linear-style grey + indigo palette, so stock shadcn
   components inherit the app's look with no per-component overrides.
-- **Dark mode**: a `.dark` class on `<html>`, driven by `src/lib/theme.ts`.
+- **Dark mode**: a `.dark` class on `<html>`, driven by `src/lib/ui/theme.ts`.
   `index.css` declares `@custom-variant dark (&:is(.dark *))` so `dark:`
   utilities follow that class rather than the OS setting.
 

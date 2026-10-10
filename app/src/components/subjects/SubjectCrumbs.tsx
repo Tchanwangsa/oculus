@@ -1,8 +1,8 @@
-import { navigateActive } from "@/lib/tabRouters";
+import { navigateActive } from "@/lib/shell/tabRouters";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { useSubjects } from "@/hooks/useSubjects";
+import { useSubjects } from "@/hooks/data/useSubjects";
 import { TrailMore, useInSidePanel, useTrailCollapsed } from "@/components/tabs/PaneHeader";
-import { displayCode } from "@/lib/format";
+import { displayCode } from "@/lib/format/format";
 
 /** A subject tab as a crumb: path segment under the subject, and its label. */
 export interface CrumbTab {
@@ -14,7 +14,7 @@ export const LECTURES_TAB: CrumbTab = { to: "lectures", label: "Lectures" };
 
 /**
  * The tab that lists a file of each category — the seam between Rust's
- * categories (`category_from_path` in `app/src-tauri/src/paths.rs`) and
+ * categories (`category_from_path` in `app/src-tauri/src/library/paths/categories.rs`) and
  * `SubjectLayout`'s tabs. `home`/`syllabus` are absent: they live on Overview,
  * where the subject crumb already points. Unmapped falls back to the subject.
  */
@@ -42,7 +42,7 @@ export const fileCrumbTab = (category: string | null): CrumbTab | null =>
  * Buttons with `data-tab-href`, not `Link`s: the click must go through
  * `navigateActive`, which runs the departure rule (a playing lecture) that
  * the pane's own router skips; ⌘-click opens a new tab
- * (`app/src/lib/newTabClicks.ts`). Resolves the subject from the id itself.
+ * (`app/src/lib/shell/newTabClicks.ts`). Resolves the subject from the id itself.
  * In the side panel the subject drops its icon (the switcher shows the
  * item's) and the tab folds behind `TrailMore` (`PaneHeader.tsx`).
  */

@@ -1,13 +1,13 @@
 import { memo, useCallback, useMemo, type ReactNode } from "react";
-import type { ViewTab } from "@/components/ui/ViewTabs";
-import { useTranscriptSearch } from "@/hooks/useTranscriptSearch";
+import type { ViewTab } from "@/components/ui/table/ViewTabs";
+import { useTranscriptSearch } from "@/hooks/lectures/useTranscriptSearch";
 import {
   reorderDockTabs,
   usePlayerPrefs,
   type Dock,
   type DockTab,
-} from "@/stores/playerPrefsStore";
-import type { Cue } from "@/lib/media";
+} from "@/stores/lectures/playerPrefsStore";
+import type { Cue } from "@/lib/lectures/media";
 import { MediaDock } from "@/components/media/MediaDock";
 import { TranscriptList } from "@/components/media/TranscriptList";
 import {

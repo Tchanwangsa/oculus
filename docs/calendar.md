@@ -8,17 +8,17 @@ database, so it works offline.
 
 | Piece | Location |
 | --- | --- |
-| Canvas calendar fetch + Tauri command | `app/src-tauri/src/calendar.rs` |
-| `calendar_events` (migration 19), `local_events` (22), `projects.event_id` (33) | `app/src-tauri/src/migrations.rs` |
-| Headless writes (CLI) | `app/src-tauri/src/store.rs` |
-| Frontend reads + writes | `app/src/lib/db.ts` |
-| Event model, `loadCalendar`, colours, date maths | `app/src/lib/calendar.ts` |
-| The task layer's read | `getAllOpenTasks` in `app/src/lib/projects.ts` |
-| New/edit event dialog | `app/src/components/calendar/EventDialog.tsx`, `app/src/stores/eventEditorStore.ts` |
-| Pinning a project to an event | `app/src/components/projects/EventLink.tsx` |
-| Page + views (week, month, agenda, card, mark, row) | `app/src/pages/CalendarPage.tsx`, `app/src/components/calendar/` |
-| Minute clock for "now" | `app/src/hooks/useNow.ts` |
-| Post-sync refresh (`CALENDAR_UPDATED_EVENT`) | `app/src/hooks/useBackendEvents.ts` |
+| Canvas calendar fetch + Tauri command | `app/src-tauri/src/sources/calendar/` |
+| `calendar_events` (migration 19), `local_events` (22), `projects.event_id` (33) | `app/src-tauri/src/db/migrations.rs` |
+| Headless writes (CLI) | `app/src-tauri/src/db/store/calendar.rs` |
+| Frontend reads + writes | `app/src/lib/db/calendar.ts`, `app/src/lib/db/localEvents.ts` |
+| Event model, `loadCalendar`, colours, date maths | `app/src/lib/planning/calendar/` |
+| The task layer's read | `getAllOpenTasks` in `app/src/lib/planning/projects/reads.ts` |
+| New/edit event dialog | `app/src/components/calendar/EventDialog.tsx`, `app/src/stores/planning/eventEditorStore.ts` |
+| Pinning a project to an event | `app/src/components/projects/page/EventLink.tsx` |
+| Page + views (week, month, agenda, card, mark, row) | `app/src/pages/tools/CalendarPage.tsx`, `app/src/components/calendar/` |
+| Minute clock for "now" | `app/src/hooks/ui/useNow.ts` |
+| Post-sync refresh (`CALENDAR_UPDATED_EVENT`) | `app/src/hooks/backend/useBackendEvents.ts` |
 
 ## Five layers, three owners
 
@@ -45,12 +45,12 @@ database, so it works offline.
 
 ## Canvas rows are replaced per subject after a sync
 
-- The app fetches through `blocking::run`, keeping synchronous Canvas HTTP
+- The app fetches through `runtime::blocking::run`, keeping synchronous Canvas HTTP
   off the async runtime.
 - Not a scrape phase: nothing is written under `courses/`. After
   `scrape-complete` the frontend calls `calendar_sync_events` per subject
   (`syncCalendar`), gated by the `calendar` sync option; the CLI calls
-  `calendar::fetch` then `store::replace_calendar_events` and always runs.
+  `sources::calendar::fetch` then `db::store::replace_calendar_events` and always runs.
 - Both writers delete the subject's rows and re-insert, so a moved or
   cancelled class disappears. That is safe only because the fetch is always a
   whole course's calendar (`all_events=true`) — never add a date window.
@@ -83,7 +83,7 @@ database, so it works offline.
 
 ## Deadlines, notes and tasks are instants
 
-`isInstant` and `isSelfImposed` in `app/src/lib/calendar.ts` are the one
+`isInstant` and `isSelfImposed` in `app/src/lib/planning/calendar/model.ts` are the one
 model: a deadline, note or task is a point in time, and a note or task is one
 *you* set, drawn in a quieter register. `app/src/components/calendar/EventMark.tsx`
 is the shared vocabulary — filled flag for a Canvas deadline, filled pin for a
@@ -92,7 +92,7 @@ task's date never reads as a submission cutoff.
 
 ## The week grid fits its hours and hides nothing
 
-In `app/src/components/calendar/WeekView.tsx`:
+In `app/src/components/calendar/WeekView.tsx`, with `hourRange` in `app/src/lib/planning/calendar/query.ts`:
 
 - `hourRange` covers the timed events in view plus an hour either side, a
   floor of 8am–6pm, and on the current week the current hour. An event past
@@ -123,4 +123,4 @@ In `app/src/components/calendar/WeekView.tsx`:
 - `MonthView` measures its chip capacity from the grid height; a constant clips the last chip with no "+N more".
 - The header's control group wraps rather than clipping under the page's `overflow-hidden`.
 - A wash mixed from `surface` is invisible — it is within a few percent of the background.
-- Times are stored as each source gives them (Canvas UTC ISO, Echo360 zone-less wall clock, task `due_at` in either ISO or SQLite format); read task times with `sqliteUtcToMs` in `app/src/lib/format.ts`, and never normalise on the way in.
+- Times are stored as each source gives them (Canvas UTC ISO, Echo360 zone-less wall clock, task `due_at` in either ISO or SQLite format); read task times with `sqliteUtcToMs` in `app/src/lib/format/format.ts`, and never normalise on the way in.

@@ -1,4 +1,4 @@
-//! Segments to WebVTT, in the shape `parseVtt` (`app/src/lib/lectures.ts`)
+//! Segments to WebVTT, in the shape `parseVtt` (`app/src/lib/lectures/media/vtt.ts`)
 //! reads: no cue identifiers (a bare number line would join the cue's text),
 //! one line of text per cue.
 

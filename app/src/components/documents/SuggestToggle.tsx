@@ -3,7 +3,7 @@ import { Sparkle } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useProviderModels } from "@/hooks/useProviderModels";
+import { useProviderModels } from "@/hooks/agents/useProviderModels";
 import { getJobModels, type JobSelection } from "@/lib/db";
 import { reasoningLabel } from "@/lib/harness";
 import { cn } from "@/lib/utils";

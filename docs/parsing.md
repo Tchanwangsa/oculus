@@ -11,25 +11,25 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 
 | Piece | Location |
 | --- | --- |
-| The seam: trait, artifact contract, `ParseError`, `PARSER_VERSION` | `app/src-tauri/src/parse/mod.rs` |
-| MinerU cloud protocol + its `Parser` | `app/src-tauri/src/parse/mineru/client.rs` |
-| Local MinerU server: its `Parser` and the probe | `app/src-tauri/src/parse/mineru/local.rs` |
-| Result content-list loading; page rendering (shared by both engines) | `app/src-tauri/src/parse/mineru/mod.rs`, `app/src-tauri/src/parse/mineru/render.rs` |
+| The seam: trait, artifact contract, `ParseError`, `PARSER_VERSION` | `app/src-tauri/src/parse/mod.rs`, `app/src-tauri/src/parse/parser.rs`, `app/src-tauri/src/parse/record.rs`, `app/src-tauri/src/parse/error.rs` |
+| MinerU cloud protocol + its `Parser` | `app/src-tauri/src/parse/mineru/client/` |
+| Local MinerU server: its `Parser` and the probe | `app/src-tauri/src/parse/mineru/local/` |
+| Result content-list loading; page rendering (shared by both engines) | `app/src-tauri/src/parse/mineru/mod.rs`, `app/src-tauri/src/parse/mineru/render/` |
 | Cloud submission queue (window, in-flight cap) | `app/src-tauri/src/parse/mineru/batch.rs` |
 | Cloud daily allowance + the two rate limiters | `app/src-tauri/src/parse/mineru/ledger.rs` |
-| Result-download TLS: the expired-certificate exception and its state | `app/src-tauri/src/parse/mineru/result_tls.rs`, `app/src/lib/resultCert.ts`, `app/src/components/sync/ResultCertWarning.tsx` |
-| Token bucket, semaphore, retry ladder (shared with Voyage) | `app/src-tauri/src/ratelimit.rs` |
-| The `parse-status` event and shared wire payload | `app/src-tauri/src/parse/events.rs`, `app/src-tauri/src/pipeline_events.rs` |
-| Call site; one thread per PDF; LibreOffice conversion | `app/src-tauri/src/sync.rs` |
-| Spreadsheets to text: conversion, page rows, startup reconcile | `app/src-tauri/src/sheets.rs` |
-| Skipping a file: the `parse_skip` command and its marks | `app/src-tauri/src/scrape.rs`, `app/src-tauri/src/parse/mod.rs` (`Skips`) |
-| Artifact purging | `app/src-tauri/src/paths.rs` |
-| MinerU token commands (through `oculus-keyd`, else the keychain) + the pre-store token probe | `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/credentials.rs` (`CloudKey`) |
+| Result-download TLS: the expired-certificate exception and its state | `app/src-tauri/src/parse/mineru/result_tls.rs`, `app/src/lib/pipeline/resultCert.ts`, `app/src/components/sync/ResultCertWarning.tsx` |
+| Token bucket, semaphore, retry ladder (shared with Voyage) | `app/src-tauri/src/providers/ratelimit/` |
+| The `parse-status` event and shared wire payload | `app/src-tauri/src/parse/events.rs`, `app/src-tauri/src/runtime/pipeline_events.rs` |
+| Call site; one thread per PDF; LibreOffice conversion | `app/src-tauri/src/sync/parse.rs`, `app/src-tauri/src/sync/phases/output.rs`, `app/src-tauri/src/sync/office.rs` |
+| Spreadsheets to text: conversion, page rows, startup reconcile | `app/src-tauri/src/pages/sheets/` |
+| Skipping a file: the `parse_skip` command and its marks | `app/src-tauri/src/sync/scrape/mod.rs`, `app/src-tauri/src/parse/skips.rs` (`Skips`) |
+| Artifact purging | `app/src-tauri/src/library/paths/course.rs` |
+| MinerU token commands (through `oculus-keyd`, else the keychain) + the pre-store token probe | `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/credentials/` (`CloudKey`) |
 | Engine selection, endpoint override, local probe | `app/src-tauri/src/parse/commands.rs` |
-| Failure vocabulary, rendered | `app/src/lib/parseState.ts` |
-| Live job state, per-file failures, the app-wide latch | `app/src/stores/parseStore.ts` |
-| Background recovery sweep | `app/src/hooks/useQualitySweep.ts` |
-| Settings UI (engine, token, expired-certificate switch, endpoint, server status) | `app/src/components/settings/ParserSection.tsx` |
+| Failure vocabulary, rendered | `app/src/lib/pipeline/parseState.ts` |
+| Live job state, per-file failures, the app-wide latch | `app/src/stores/sync/parseStore.ts` |
+| Background recovery sweep | `app/src/hooks/sync/useQualitySweep.ts` |
+| Settings UI (engine, token, expired-certificate switch, endpoint, server status) | `app/src/components/settings/library/ParserSection.tsx` |
 
 ## MinerU's result CDN and its expired certificate
 
@@ -84,7 +84,7 @@ must say so. `ParseError` keeps the answers distinguishable:
   an unreadable spreadsheet is `Document` with `parse::SHEET_UNREADABLE`.
 - **`NotReady` is retryable and non-latching on purpose**: a local server that
   is stopped or still loading must not mark any file permanently broken.
-- **`Offline` names its cause**: `ratelimit::transport_detail` keeps ureq's
+- **`Offline` names its cause**: `providers::ratelimit::transport_detail` keeps ureq's
   source chain ("certificate expired", "connection refused") and drops the URL,
   and the sentence shows it. Every failure is also printed to stderr as
   `[oculus] parse failed: <path>: <sentence>`, since the DB keeps only `error`.
@@ -98,7 +98,7 @@ must say so. `ParseError` keeps the answers distinguishable:
 Nothing above the client imposes a deadline — it could only abandon work that
 was still progressing.
 
-- **Cloud**: `POLL_DEADLINE` (60 min) in `mineru/client.rs` is the only one.
+- **Cloud**: `POLL_DEADLINE` (60 min) in `mineru/client/mod.rs` is the only one.
 - **Local**: a connect timeout and no read timeout. `/file_parse` is minutes of
   silence on this machine's CPU, not a hang; connecting is instant or the
   server is not running.
@@ -112,12 +112,12 @@ was still progressing.
   so its byte total is the sum. Only the cloud uploads; the local engine
   reports `processing` alone, and an absent `phase` means `processing`.
 
-**Concurrency belongs to each engine.** `sync.rs` spawns one detached thread
+**Concurrency belongs to each engine.** `sync/phases/output.rs` spawns one detached thread
 per PDF. Cloud threads park on the batcher's condvar until their window
 closes. The local client holds one permit (`PARSE_GATE`) because `mineru-api`
 reports `max_concurrent_requests: 1` — a second request would only queue
 inside that server on a socket of ours. It is taken before the first progress
-report, so a file waiting for it still reads as queued. A gate in `sync.rs`
+report, so a file waiting for it still reads as queued. A gate there
 would keep cloud files out of the window they are meant to share.
 
 **One parse per PDF.** A sync, the sweep and "Parse now" can ask for the same
@@ -126,20 +126,26 @@ second caller waits (no timeout) and then takes the already-parsed path, which
 emits `quality` without a second billed call.
 
 **Every parse ends in `quality`, `error` or `skipped`.** `parse_pdf_reporting` catches a
-panic on the parse thread (`lopdf`, rendering, writing) as `Io` "the parser
+panic on the parse thread (`hayro-syntax`, rendering, writing) as `Io` "the parser
 crashed on this file". The cloud client counts pages on the caller's thread
-before submitting, so a PDF that crashes `lopdf` fails alone rather than
-through its batch. `parse_file` reports its own refusals (not a parseable
+before submitting, so a PDF that crashes `hayro-syntax` fails alone rather than
+through its batch.
+
+**Pages are counted with `hayro-syntax`** (`client::page_count`, used by both
+engines), and the count must equal pdfium's, since `page_no` is the join key
+the embedder rasterises against. Like pdfium it opens a PDF encrypted with an
+empty user password; a real password fails as `Document` `encrypted-pdf`. It
+is not pdfium itself because an embed holds pdfium's one session for minutes. `parse_file` reports its own refusals (not a parseable
 file, not on disk) as `Io` too, so a sweep kick never vanishes.
 
 ## A skip ends a parse without failing it
 
 `parse_skip(relativePath, subjectId, skip)` marks the PDF in `parse::Skips`,
-keyed like `InFlight` (`sync::parse_key`), and emits `skipped` at once, so the
+keyed like `InFlight` (`sync::parse::parse_key`), and emits `skipped` at once, so the
 row settles whether or not a parse is running. `skip: false` clears the mark
 and emits nothing; the frontend then calls `parse_file`. The mark lives only in
 memory; across restarts the skip is the row's `files.parse_status = 'skipped'`,
-which the frontend writes, and which `oculus index` (`store::pdf_files`) and
+which the frontend writes, and which `oculus index` (`db::store::pdf_files`) and
 the background sweep both pass over.
 
 Every engine ends a marked file as `Cancelled`, without billed work where it
@@ -159,15 +165,15 @@ can and without artifacts always:
 
 ## `.pages.json` is the only evidence a parse finished
 
-The seam owns the contract, not the parsing: nothing in `parse/mod.rs` may
+The seam owns the contract, not the parsing: nothing in the `parse/` seam may
 assume the cloud. Beside each PDF:
 
 - `<stem>.md` — full-document markdown, derived from the record.
 - `<stem>.pages.json` — `{pdf, mode, parser_version, page_count, pages:
-  [{page_no, markdown}]}`, keyed by 1-based `page_no`: **the join key
-  retrieval rests on** ([retrieval.md](./retrieval.md)).
+  [{page_no, markdown, blocks?}]}`, keyed by 1-based `page_no`: **the join key
+  retrieval rests on** ([retrieval.md](./retrieval.md)). `blocks` is below.
 - `<stem>_images/` — its *name* is the link prefix written into the markdown,
-  so both are computed in `parse/mod.rs`, never by a backend.
+  so both are computed in `parse/record.rs`, never by a backend.
 
 **The record is written last, via temp+rename** (a temp name unique per
 write), so an interrupted parse cannot look finished. `parse_mode` reads only `mode`: `"quality"` means done,
@@ -179,20 +185,52 @@ missing one (`ParseOutput::restore_markdown`) before it emits `quality`, with
 no re-parse.
 
 `oculus index` reconciles `files.parse_status` with the disk
-(`store::reconcile_parse_status`): a record means `quality`; without one a
+(`db::store::reconcile_parse_status`): a record means `quality`; without one a
 stale `queued`/`running`/`quality` is cleared, but `error` and `skipped` stay.
 
 `PARSER_VERSION` moves only when the artifacts change shape. `parse_mode` does
 **not** check it, so a bump never re-parses the library; it is enforced by the
 `Health` handshake, which refuses a backend with another version, naming both.
+Older records keep reading: every field added since is optional.
+
+`oculus index --reparse` is the one way to bring old records up to date. A
+file whose record is `quality` but whose `parser_version` is missing or below
+`PARSER_VERSION` (`parse::is_outdated`, an untyped read like `parse_mode`) skips
+the already-parsed short-circuit and runs the ordinary parse path; every other
+file behaves as plain `index`. It spends MinerU allowance and **keeps the
+embeddings**: nothing is purged, the old record stands until the new one lands,
+`record_pages` rewrites `pages.markdown`, and `.emb.json` — keyed on page
+images and page count — stays current, so ingest skips the file. The app's
+parse path never re-parses on version.
+
+### `blocks`: where each rendered item sits
+
+Each page lists one block per **rendered** content-list item, in markdown
+order (after the header sort): `{kind, bbox, start, end}`.
+
+- `kind` is MinerU's raw `type` (`text`, `header`, `equation`, `image`,
+  `table`, `chart`, …); a `text_level` heading stays `text`.
+- `bbox` is `[x0, y0, x1, y1]` as **fractions of the page**, top-left origin,
+  y down: MinerU's content list gives 0–1000 integers, divided by 1000 and
+  clamped to [0, 1]. Multiply by the page size in points to place it.
+- `start..end` are **UTF-16 code-unit** offsets into that page's `markdown`
+  (the consumer is JS `String.slice`), covering exactly the item's text — the
+  `"\n\n"` between items is outside every block. An image or table and its
+  footnote are one item, so one block.
+- Items the renderer drops (boilerplate, footers, size-filtered crops,
+  empties) have no block; neither does a rendered item without four finite
+  numbers spanning a non-empty box — never a zero box. Blank pages, pages
+  `ParseOutput::new` gap-fills, spreadsheets and records written before
+  version 3 have none, and the key is omitted when empty.
+- Tracking blocks never changes the markdown; `render.rs`'s tests pin it.
 
 A result with no content list writes **nothing**. Changed bytes purge the
-artifacts (`paths::purge_parse_artifacts`) before re-parsing, or a stale
+artifacts (`library::paths::purge_parse_artifacts`) before re-parsing, or a stale
 record would serve old markdown forever.
 
 ## Both engines produce the same artifact, so switching costs nothing
 
-`render.rs` is shared: both engines hand it a MinerU content list. The local
+`mineru/render/` is shared: both engines hand it a MinerU content list. The local
 client's form fields (`backend=pipeline`, `lang_list=ch`, `formula_enable`,
 `return_content_list`) match the cloud client's hardcoded parameters — **pins,
 not settings**; changing the first two is a re-parse of everything.
@@ -235,14 +273,14 @@ MINERU_API_OUTPUT_ROOT="$HOME/.cache/mineru-api" \
   keeps running.
 - **Install directly, not in Docker**: a macOS container cannot reach MPS/MLX.
 
-`local::probe` returns `reachable` (`/health` said `healthy`), `unreachable`
+`mineru::local::probe` returns `reachable` (`/health` said `healthy`), `unreachable`
 (nothing answered, or it is still loading models) or `version_mismatch`
 (`/health` 404s but `/v1/health` answers: a MinerU 4); Settings prints Rust's
 sentence, which alone tells the `unreachable` causes apart.
 `parse_probe_local`'s optional URL tests the endpoint field before it is saved.
 
 The ignored test `a_real_mineru_answers_the_way_this_client_expects` in
-`mineru/local.rs` is the only check that the form fields match a real server.
+`mineru/local/tests.rs` is the only check that the form fields match a real server.
 
 ## The cloud engine batches because the API has no per-file endpoint
 
@@ -256,7 +294,7 @@ The window is **5 s or 20 files**, with **8 batches in flight**.
   window gathers only smaller files.
 - **Within a batch, the smallest file is `PUT` first.**
 - **Uploads and result downloads end on a stall, never a deadline**
-  (`TRANSFER_STALL`, 120 s without a byte, in `mineru/client.rs` and
+  (`TRANSFER_STALL`, 120 s without a byte, in `mineru/client/mod.rs` and
   `result_tls::agent`). ureq's overall `timeout` would fail a slow but moving
   `PUT` at its response read, after every byte had gone up.
 
@@ -313,7 +351,7 @@ signed upload PUT and the result download carry no token and always go direct.
 ## Spreadsheets are converted to text, never parsed
 
 A workbook (`.xlsx`, `.xlsm`, `.xls`, `.ods`) is read in-process by `calamine`
-(`app/src-tauri/src/sheets.rs`) and written beside the original as
+(`app/src-tauri/src/pages/sheets/`) and written beside the original as
 `marks.xlsx.md`: `# marks.xlsx`, then a `## <sheet>` section per worksheet
 holding its filled extent as a GFM table, first row as the header (`(empty)`
 for a blank sheet). No PDF, no MinerU call, no embedding: a sheet's text is
@@ -342,23 +380,23 @@ It has no formulas or merges, so it is only the table.
 
 - **Each worksheet is one `pages` row**, page 1 the first sheet, so
   `oculus read --pages`, `oculus grep` and the lexical index see it.
-  `sheets::record` replaces the file's rows outright (`store::replace_pages`),
+  `pages::sheets::record` replaces the file's rows outright (`db::store::replace_pages`),
   sets `parse_status = 'quality'` and clears the embed columns.
 - **It ends in the events a parse ends in** (`quality`, or `error` as a
   `Document` failure), so its File Activity row settles; nothing is queued,
   started or skippable. A failure deletes its text and pages, never falls
   back to LibreOffice.
 - **Three callers**: a sync converts at download, and again for unchanged
-  bytes whose `.md` is missing (`sheets::needs_conversion`); `parse_file`
+  bytes whose `.md` is missing (`pages::sheets::needs_conversion`); `parse_file`
   converts on request (an upload's kick, a Retry); app startup runs
-  `sheets::reconcile` over every sheet on record.
+  `pages::sheets::reconcile` over every sheet on record.
 - **A sync's conversion can beat the frontend's write of the `files` row**,
-  so `sheets::record` inserts a bare row when there is none and the frontend's
+  so `pages::sheets::record` inserts a bare row when there is none and the frontend's
   upsert fills in the rest.
 - **PDF-route files beside a sheet are swept**: a `.xlsx.pdf`,
   `.xlsx.pages.json`, `.xlsx.emb.json` or `.xlsx_images/` makes
   `needs_conversion` true, and the conversion deletes them
-  (`paths::purge_parse_artifacts`) before writing its text.
+  (`library::paths::purge_parse_artifacts`) before writing its text.
 
 ## Gotchas
 
@@ -369,5 +407,5 @@ It has no formulas or merges, so it is only the table.
 - Don't write `.pages.json` before the other artifacts — a crash then reads as a finished parse.
 - Don't remove `PARSE_GATE` — sockets park for minutes in a single-request server's queue.
 - `*.pptx.pdf` (LibreOffice-converted) has never been parsed in this library and has no fixture.
-- Golden fixtures live in gitignored `data/parse-fixtures/` (`shasum -a 256 -c MANIFEST.sha256`) and stay out of the repo; `render.rs`'s differential tests are in it.
-- Rust comments citing `sidecar/*.py` refer to commit `f875bb1`, where `render.rs`'s original lives.
+- Golden fixtures live in gitignored `data/parse-fixtures/` (`shasum -a 256 -c MANIFEST.sha256`) and stay out of the repo; `mineru/render/`'s differential tests are in it.
+- Rust comments citing `sidecar/*.py` refer to commit `f875bb1`, where `mineru/render/`'s original lives.
