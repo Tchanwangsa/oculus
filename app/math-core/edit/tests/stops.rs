@@ -140,7 +140,8 @@ const DISPLAY: &[(&str, &str)] = &[
         r"\begin{aligned}a&=b\\&=c\end{aligned}",
         r"|\begin{aligned}|a|&|=|b|\\|&|=|c|\end{aligned}|",
     ),
-    (r"a\\ b", r"|a|\\| b|"),
+    // A row starts after the spaces of the break before it.
+    (r"a\\ b", r"|a|\\ |b|"),
     // `\over` takes the whole row, so this `\\` is inside the numerator,
     // where a line break is one atom.
     (r"a\\b\over c", r"||a|\\|b|\over |c||"),

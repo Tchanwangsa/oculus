@@ -70,11 +70,12 @@ pub fn build(source: &str, nodes: &[AnyParseNode]) -> (Vec<Slot>, Vec<Stop>) {
         }
     }
     rows.push((start..source.len(), row));
+    let last = rows.len() - 1;
     for (n, (interior, atoms)) in rows.into_iter().enumerate() {
         let spec = SlotSpec {
             kind: SlotKind::Row(n),
             bounds: Bounds::Open,
-            interior,
+            interior: around_break(source, interior, n > 0, n < last),
             text: false,
             elements: Vec::new(),
         };
@@ -456,6 +457,25 @@ impl<'n> Builder<'_> {
     fn begingroup(&self, range: &Range<usize>) -> bool {
         self.src.command_at(range.start) == Some(r"\begingroup")
     }
+}
+
+/// A row's range without the whitespace next to its line breaks (`after`
+/// one, `before` one), as a cell's is: the caret at the start of a row on
+/// a line of its own (`a \\`, a newline, `b`) types after the newline,
+/// and joining two rows takes the break's spaces with it.
+fn around_break(source: &str, range: Range<usize>, after: bool, before: bool) -> Range<usize> {
+    let text = &source[range.clone()];
+    let start = if after {
+        range.start + text.len() - text.trim_start().len()
+    } else {
+        range.start
+    };
+    let end = if before {
+        range.start + text.trim_end().len()
+    } else {
+        range.end
+    };
+    start..end.max(start)
 }
 
 /// Whether `inner` lies inside `outer`.

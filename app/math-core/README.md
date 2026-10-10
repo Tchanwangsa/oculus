@@ -105,8 +105,11 @@ rules:
   run stays in the slot around it.
 - Stops in different slots can share an offset (`\frac ab`'s 7 ends the
   numerator and starts the denominator): `stop_at` takes an `Affinity`.
-- Rows split at a top-level `\\`. `\begin{matrix}\end{matrix}` has one
-  empty cell, before its `\end`. A `CD` diagram is one atom (edited as TeX).
+- Rows split at a top-level `\\`, each starting after the break's spaces
+  (a row on a line of its own types after the newline).
+  `\begin{matrix}\end{matrix}` has one empty cell, before its `\end`; an
+  empty cell's stop is against the token after it. A `CD` diagram is one
+  atom (edited as TeX).
 
 `utf16` converts offsets for the DOM and CodeMirror. `check` holds the
 invariants (sorted, on char boundaries, inside their slot, round trip
@@ -143,6 +146,32 @@ off a following letter, braces a bare argument before a second atom (`x^2`
 typed character or template gives the source back, except where braces or
 a control word's space went in with it. The rules for each key are on the
 functions in `edit/src/command/`.
+
+Matrices are typed as in MATLAB (`edit/src/command/grid/`, a port of the
+MathLive field's `mathMatrix.ts`). The grid at the caret is the cell of a
+`matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `Vmatrix` or
+`smallmatrix` it is directly in, or the body of a bracket group whose
+brackets draw one: a `\left…\right` pair, or an opening bracket atom
+(`(`, `[`, `\{`, `|`, `\|` and their control words) with its closer later
+in the slot, else through the slot's end. Space after a term ends the cell
+(into an empty next cell, else a new column taking what followed the
+caret; at most ten); a lone binary operator or relation rejoins the cell
+before (`[a + b]` is one cell); `;` goes to a new or empty next row;
+Backspace in an empty cell takes its column, else its row, when all
+empty; a matrix's closing key (`)`, `]`, `}`, `|` for `pmatrix`,
+`bmatrix`, `Bmatrix`, `vmatrix`) trims empty trailing rows and columns
+and puts the caret after it and its scripts. A group becomes its matrix
+at its first new cell or row (scripts on its closer stay, `[a b]^T`); a
+matrix left with one cell becomes its bracket group again, open (closed
+when scripts follow it, or by the closing key). Rows are padded to the
+widest first. Each edit is one change and its own undo step (`isolate`),
+and splices the source: cells and separators it does not touch keep
+their text, new `&`s and `\\`s copy the matrix's own, and a matrix that
+is a whole display formula goes one row per line (`\begin{env}`, `row
+\\` lines, `\end{env}`), as Enter's new rows do. Empty cells are stored
+empty; a one-column matrix's empty last row is kept with a `\\` after it
+(KaTeX drops it otherwise). `&` in any array cell is a raw `&` (a new
+cell), `\&` elsewhere. `space_free()` is false where Space is a grid key.
 
 `cargo test -p oculus-math-edit` runs a behaviour table per documented key
 (`tests/commands/`, in a marker notation described in its `harness.rs`) and

@@ -12,7 +12,7 @@ use core::ops::Range;
 use katex::types::ParseError;
 
 use crate::{
-    command::widen,
+    command::{takes_space, widen},
     parse::renders,
     slot::StopId,
     stops::{Affinity, Stops, stops},
@@ -269,13 +269,13 @@ impl Field {
     }
 
     /// Whether Space is the view's (the quick picks): in maths, with no
-    /// `\command` pending. In maths Space types nothing; in a text run it
-    /// is a space and in a `\command` it commits. A caret beside a
-    /// `\text{}` atom is in maths here, since the run's own end is a stop
-    /// of its own. A matrix Space (a new cell) is 3c's.
+    /// `\command` pending, where Space would not end a matrix cell. In a
+    /// text run it is a space and in a `\command` it commits. A caret
+    /// beside a `\text{}` atom is in maths here, since the run's own end
+    /// is a stop of its own.
     #[must_use]
     pub fn space_free(&self) -> bool {
-        self.mode() == Mode::Math
+        self.mode() == Mode::Math && !takes_space(self)
     }
 
     pub(crate) fn in_text(&self) -> bool {

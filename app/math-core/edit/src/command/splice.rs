@@ -4,7 +4,10 @@
 use core::ops::Range;
 
 use super::glue::glue;
-use crate::{field::Field, slot::Bounds, slot::SlotId};
+use crate::{
+    field::Field,
+    slot::{Bounds, Slot, SlotId, SlotKind},
+};
 
 /// The source after a splice, and where the inserted text landed in it.
 pub struct Spliced {
@@ -19,12 +22,17 @@ pub struct Spliced {
 ///
 /// A bare argument (`x^2`, `\frac ab`) is one token: if it would hold
 /// anything but a single letter or digit afterwards, its content gets
-/// braces (`x^{23}`), and emptied it becomes `{}`, never `x^`.
+/// braces (`x^{23}`), and emptied it becomes `{}`, never `x^`. A spaced
+/// cell keeps its spaces (`cell_space`).
 pub fn splice(field: &Field, slot: SlotId, range: Range<usize>, insert: &str) -> Spliced {
     let src = field.source();
     let slot = field.stops().slot(slot);
     if slot.bounds != Bounds::Bare {
-        return plain(src, range, insert);
+        let (range, lead, pad) = cell_space(src, slot, range, insert);
+        let mut spliced = plain(src, range, &format!("{lead}{insert}{pad}"));
+        spliced.at += lead.len();
+        spliced.end -= pad.len();
+        return spliced;
     }
     let interior = slot.interior.clone();
     let head = &src[interior.start..range.start];
@@ -46,6 +54,44 @@ pub fn splice(field: &Field, slot: SlotId, range: Range<usize>, insert: &str) ->
         at,
         end: at + insert.len(),
     }
+}
+
+/// An empty cell's caret sits against what follows it (`a & |& b`, or
+/// the next line in `a &`, newline, `\end`). Text typed there takes a
+/// space before the `&` or `\\` after it when the cell is spaced (`a & c &
+/// b`), and stays on the `&`'s line (`a & c`, newline). Deleting a cell's
+/// last atom takes those spaces back. A tight cell (`a&|&b`) stays tight.
+/// Returns the range to replace and the spaces to write before and after
+/// `insert`.
+fn cell_space(
+    src: &str,
+    slot: &Slot,
+    range: Range<usize>,
+    insert: &str,
+) -> (Range<usize>, &'static str, &'static str) {
+    let separator = |text: &str| text.starts_with('&') || text.starts_with(r"\\");
+    let before = &src[..range.start];
+    let after = &src[range.end..];
+    if !matches!(slot.kind, SlotKind::Cell { .. }) || !before.ends_with(char::is_whitespace) {
+        return (range, "", "");
+    }
+    if slot.is_empty() && !insert.is_empty() {
+        let line = before.trim_end();
+        if line.ends_with('&') && before[line.len()..].contains('\n') {
+            return (line.len()..line.len(), " ", "");
+        }
+        if separator(after) {
+            return (range, "", " ");
+        }
+    }
+    let emptied = insert.is_empty() && range == slot.interior && !slot.is_empty();
+    if emptied && after.starts_with(' ') && separator(&after[1..]) {
+        return (range.start..range.end + 1, "", "");
+    }
+    if emptied && before.ends_with("& ") && after.starts_with('\n') {
+        return (range.start - 1..range.end, "", "");
+    }
+    (range, "", "")
 }
 
 /// `range` replaced with `insert`, glued.

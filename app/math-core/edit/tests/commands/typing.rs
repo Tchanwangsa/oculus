@@ -57,6 +57,11 @@ fn braces() {
         ("{a|}b", &["t:}"], "{a}|b"),
         (r"\frac{a|}{b}", &["t:}"], r"\frac{a}{|b}"),
         ("a|", &["t:}"], "a|"),
+        // `]` in an optional argument would end it: it steps out at the
+        // end, else does nothing.
+        (r"\sqrt[3|]{x}", &["t:]"], r"\sqrt[3]{|x}"),
+        (r"\sqrt[|3]{x}", &["t:]"], r"\sqrt[|3]{x}"),
+        ("a|", &["t:]"], "a]|"),
     ];
     check_all(cases, false);
 }

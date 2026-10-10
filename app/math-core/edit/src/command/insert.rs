@@ -6,7 +6,7 @@ use core::ops::Range;
 use katex::{parser::parse_node::AnyParseNode, symbols::Atom, types::ErrorLocationProvider as _};
 
 use super::{
-    Command, compose,
+    Command, compose, grid,
     template::{place, selection_slot},
     text,
 };
@@ -40,23 +40,27 @@ pub fn insert(field: &Field, typed: &str) -> Outcome {
     outcome
 }
 
-/// One character typed in maths.
+/// One character typed in maths. Space, `;` and a matrix's closing
+/// bracket are grid keys first (`grid`).
 fn key(field: &Field, c: char) -> Outcome {
+    if let Some(outcome) = grid::key(field, c) {
+        return outcome;
+    }
     match c {
         '\\' => Outcome::moved(field.clone().with_pending(Some(String::new()))),
         '^' => script(field, SlotKind::Sup),
         '_' => script(field, SlotKind::Sub),
         '/' => fraction(field),
         '{' => super::template::template(field, "{#0}"),
-        '}' => close_group(field),
+        '}' => close_group(field, '}'),
+        ']' if in_optional_argument(field) => close_group(field, ']'),
         // A typed `~` means "similar to"; bare, TeX draws it as a space.
         '~' => symbol(field, r"\sim"),
         '#' => symbol(field, r"\#"),
         '%' => symbol(field, r"\%"),
         '$' => symbol(field, r"\$"),
-        // In an array cell `&` would start a new cell: 3c's (matrix keys).
-        '&' => symbol(field, r"\&"),
-        // Space is the view's (quick picks); maths ignores it anyway.
+        '&' => grid::ampersand(field),
+        // Space outside a grid is the view's (quick picks).
         c if c.is_whitespace() || c.is_control() => Outcome::none(field),
         c => symbol(field, c.encode_utf8(&mut [0; 4])),
     }
@@ -118,6 +122,14 @@ fn script(field: &Field, kind: SlotKind) -> Outcome {
         }
     }
     place(field, slot, offset..offset, &format!("{op}{{#?}}"), "")
+}
+
+/// Whether the selection is in a `[…]` argument (`\sqrt`'s index,
+/// `\xrightarrow`'s label below).
+fn in_optional_argument(field: &Field) -> bool {
+    let (slot, _) = selection_slot(field);
+    let s = field.stops().slot(slot);
+    s.bounds == Bounds::Delimited && field.source()[s.interior.end..].starts_with(']')
 }
 
 /// Whether atom `atom` of `slot` is a base's scripts.
@@ -216,15 +228,16 @@ fn family(field: &Field, range: Range<usize>) -> Option<Atom> {
 }
 
 /// `}` at the end of a braced slot steps out of it, as → would;
-/// elsewhere it does nothing (braces only come in pairs).
-fn close_group(field: &Field) -> Outcome {
+/// elsewhere it does nothing (braces only come in pairs). So does `]` in
+/// an optional argument (`\sqrt[3]`), where it would end the argument.
+fn close_group(field: &Field, bracket: char) -> Outcome {
     let stops = field.stops();
     let head = field.selection().head;
     let slot = stops.slot(stops.stop(head).slot);
     let closes = field.selection().is_caret()
         && slot.bounds == Bounds::Delimited
         && stops.at_slot_end(head)
-        && field.source()[slot.interior.end..].starts_with('}');
+        && field.source()[slot.interior.end..].starts_with(bracket);
     match stops.next(head) {
         Some(next) if closes => Outcome::moved(field.clone().select(Selection::caret(next))),
         _ => Outcome::none(field),

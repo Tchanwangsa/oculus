@@ -14,6 +14,7 @@
 
 mod deleting;
 mod harness;
+mod matrices;
 mod modes;
 mod moving;
 mod rows;

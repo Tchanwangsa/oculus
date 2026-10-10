@@ -15,7 +15,7 @@ use super::layout;
 use crate::{
     command::{Command, ends_with_word, mark_at},
     field::{Field, Mode, Outcome, Selection},
-    slot::{Bounds, StopId},
+    slot::{Bounds, SlotKind, StopId},
 };
 
 /// One broken command invariant, at a step of the run.
@@ -80,6 +80,10 @@ const TYPED: &[&str] = &[
     "'",
     "(",
     ")",
+    "[",
+    "]",
+    "|",
+    ";",
     "^",
     "_",
     "/",
@@ -114,6 +118,7 @@ const TEMPLATES: &[&str] = &[
     r"\text{#0}",
     r"\left(#0\right)",
     r"\begin{pmatrix}#?&#?\end{pmatrix}",
+    r"\begin{bmatrix}#0\end{bmatrix}",
     r"\alpha",
     r"\hat{#0}",
 ];
@@ -253,10 +258,15 @@ fn check_outcome(before: &Field, outcome: &Outcome, step: usize, failures: &mut 
 /// (which Backspace deletes with it), as `/` (whose fraction takes the
 /// term before it) or as a prime (which joins a script or macro output
 /// next to it into one atom); nor a combining mark or a character before
-/// one (Backspace takes the whole cluster).
+/// one (Backspace takes the whole cluster). Nor a grid key's edit (an
+/// undo step of its own: Backspace in the new cell takes a column or row,
+/// or steps back), `&` in an array cell (a new cell, which Backspace
+/// steps back out of), or a template leaving the caret in an array cell
+/// (Backspace in an empty matrix cell is the grid's).
 fn restores(field: &Field, command: &Command, outcome: &Outcome) -> bool {
     let selection = field.selection();
     if outcome.changes.is_empty()
+        || outcome.isolate
         || !selection.is_caret()
         || field.mode() == Mode::Command
         || outcome.field.pending().is_some()
@@ -265,7 +275,9 @@ fn restores(field: &Field, command: &Command, outcome: &Outcome) -> bool {
     }
     let stops = field.stops();
     let slot = stops.slot(stops.stop(selection.head).slot);
-    if slot.bounds == Bounds::Bare {
+    let raw_ampersand =
+        matches!(slot.kind, SlotKind::Cell { .. }) && *command == Command::Insert("&".to_owned());
+    if slot.bounds == Bounds::Bare || raw_ampersand {
         return false;
     }
     let offset = stops.offset(selection.head);
@@ -286,8 +298,9 @@ fn restores(field: &Field, command: &Command, outcome: &Outcome) -> bool {
     if glue_space || word_takes_space || mark_at(source, offset) {
         return false;
     }
+    let new_slot = new.stops().stop(new.selection().head).slot;
     match command {
-        Command::Template(_) => true,
+        Command::Template(_) => !matches!(new.stops().slot(new_slot).kind, SlotKind::Cell { .. }),
         Command::Insert(text) => {
             let mut chars = text.chars();
             chars.next().is_some_and(|c| !matches!(c, '/' | '\''))

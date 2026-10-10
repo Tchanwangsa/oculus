@@ -151,6 +151,20 @@ pub const EDIT_FORMULAS: &[&str] = &[
     "x_{a_{b_c}}",
     r"\left(\begin{matrix}a\end{matrix}\right)^2",
     r"\displaystyle\sum_{n=1}^\infty \frac1{n^2}",
+    r"\begin{bmatrix}a & b \\ c & d\end{bmatrix}",
+    "\\begin{bmatrix}\n1 & 2 \\\\\n3 & 4\n\\end{bmatrix}",
+    r"\begin{pmatrix}1 \\ 2 \\\end{pmatrix}",
+    r"\begin{bmatrix}a & & b \\ & c\end{bmatrix}^T",
+    r"\begin{vmatrix}a&b\\c&d\end{vmatrix}",
+    r"\begin{Bmatrix}{a} & \end{Bmatrix}",
+    r"\begin{smallmatrix}a & b\end{smallmatrix}",
+    r"\begin{Vmatrix}x\end{Vmatrix}",
+    "(a b",
+    "[1 -1]^T",
+    r"\left[a+b\right]",
+    r"f(x;y) = \{a, \lvert b\rvert\}",
+    r"\Vert x + \vert y",
+    "[0,1)",
 ];
 
 pub fn fixtures() -> Vec<(String, bool)> {

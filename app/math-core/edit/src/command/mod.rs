@@ -13,6 +13,7 @@
 mod command_mode;
 mod delete;
 mod glue;
+mod grid;
 mod insert;
 mod motion;
 mod rows;
@@ -31,6 +32,7 @@ use crate::{
 };
 
 pub use glue::ends_with_word;
+pub use grid::takes_space;
 pub use select::widen;
 pub use text::mark_at;
 

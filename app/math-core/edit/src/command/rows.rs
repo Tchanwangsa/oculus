@@ -1,16 +1,21 @@
 //! Enter: a new row in display maths, never a second empty one.
 
-use super::{Target, finish, splice::splice};
+use super::{
+    Target, finish,
+    grid::{array_row, top_break},
+    splice::splice,
+};
 use crate::{
     field::{Direction, Effect, Field, Outcome, Selection},
-    slot::{SlotId, SlotKind, SlotPath},
+    slot::{SlotKind, SlotPath},
 };
 
 /// Enter (or Shift+Enter). Inline maths: leave the field forward.
 /// Display: in an array cell (`aligned`, `cases`, a matrix), an empty
 /// row after the caret's row, the caret in its first cell; elsewhere the
 /// caret's top-level row splits at the caret (inside a structure, just
-/// after it), as a line break would. On an empty row nothing happens,
+/// after it), as a line break would, the new row on a line of its own
+/// (`grid::top_break`). On an empty row nothing happens,
 /// and from a row's end with an empty row after it the caret just goes
 /// there. A caret beside an array that is its row's only atom counts as
 /// in its first or last cell, so the row joins the array.
@@ -78,7 +83,11 @@ pub fn enter(field: &Field) -> Outcome {
     {
         return Outcome::none(field);
     }
-    let spliced = splice(field, line, offset..offset, r"\\");
+    // The break takes the spaces after the caret: the new row starts its
+    // line.
+    let rest = &field.source()[offset..];
+    let spaces = rest.len() - rest.trim_start().len();
+    let spliced = splice(field, line, offset..offset + spaces, &top_break(field));
     let path = SlotPath {
         row: row + 1,
         steps: Vec::new(),
@@ -91,50 +100,4 @@ pub fn enter(field: &Field) -> Outcome {
             offset: spliced.end,
         },
     )
-}
-
-/// A new row of empty cells after `cell`'s row, the caret in its first
-/// cell; the caret just goes to the next row when that one is empty, and
-/// an empty row adds nothing. KaTeX drops a last row of one empty cell,
-/// so a one-column array gets no new last row.
-fn array_row(field: &Field, cell: SlotId) -> Outcome {
-    let stops = field.stops();
-    let (Some((parent, atom)), SlotKind::Cell { row, .. }) =
-        (stops.owner(cell), stops.slot(cell).kind)
-    else {
-        return Outcome::none(field);
-    };
-    let cells = stops.atom_slots(parent, atom);
-    let in_row = |r: usize| -> Vec<SlotId> {
-        cells
-            .iter()
-            .copied()
-            .filter(|&c| matches!(stops.slot(c).kind, SlotKind::Cell { row, .. } if row == r))
-            .collect()
-    };
-    let empty = |cells: &[SlotId]| cells.iter().all(|&c| stops.slot(c).is_empty());
-    let current = in_row(row);
-    if empty(&current) {
-        return Outcome::none(field);
-    }
-    let next = in_row(row + 1);
-    if !next.is_empty() && empty(&next) {
-        let caret = stops.first_stop(next[0]);
-        return Outcome::moved(field.clone().select(Selection::caret(caret)));
-    }
-    let Some(&last) = current.last() else {
-        return Outcome::none(field);
-    };
-    let end = stops.slot(last).interior.end;
-    let insert = format!(r"\\{}", "&".repeat(current.len() - 1));
-    let spliced = splice(field, last, end..end, &insert);
-    let outcome = finish(field, spliced.source, &Target::Empty(spliced.at + 2));
-    let new = outcome.field.stops();
-    let landed = new.stop(outcome.field.selection().head).slot;
-    if outcome.changes.is_empty()
-        || !matches!(new.slot(landed).kind, SlotKind::Cell { row: r, col: 0 } if r == row + 1)
-    {
-        return Outcome::none(field);
-    }
-    outcome
 }

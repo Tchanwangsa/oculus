@@ -5,7 +5,7 @@
 use core::ops::Range;
 
 use super::{
-    Target, finish,
+    Target, finish, grid,
     splice::splice,
     template::selection_slot,
     text::{cluster_after, cluster_before},
@@ -117,7 +117,9 @@ fn word_and_group(field: &Field, slot: SlotId, atom: usize, back: bool) -> Optio
 }
 
 /// Backspace at a slot's start or Delete at its end. In a row: joins the
-/// row before (or after). In a cell: steps to the cell before (or after).
+/// row before (or after). In a cell: Backspace in an empty one takes its
+/// column or row when all empty (`grid`); else it steps to the cell
+/// before (Delete: after).
 /// An empty script goes alone, even beside another empty one (`\cos^{}`
 /// → `\cos`, `x_{}^{}` → `x^{}`), the caret just after its base. Else
 /// the structure the slot belongs to goes when all its slots are empty,
@@ -129,6 +131,9 @@ fn slot_edge(field: &Field, slot: SlotId, back: bool) -> Outcome {
     };
     let s = stops.slot(slot);
     if let SlotKind::Cell { row, col } = s.kind {
+        if back && let Some(outcome) = grid::backspace(field) {
+            return outcome;
+        }
         let head = field.selection().head;
         let first = row == 0 && col == 0;
         let last = stops.atom_slots(parent, atom).last() == Some(&slot);
