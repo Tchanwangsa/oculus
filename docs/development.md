@@ -112,7 +112,8 @@ Its floor is macOS 13.3, upstream's own. Like `apple-speech` it is a macOS-only
 
 ## The maths wasm is built, not committed
 
-`bun run math` compiles `app/math-core/wasm` (the katex fork's binding;
+`bun run math` compiles `app/math-core/wasm` (the binding of the katex fork
+and the maths field's edit model;
 [`app/math-core/README.md`](../app/math-core/README.md)) with cargo's `wasm`
 profile, runs `wasm-bindgen --target web` and then `wasm-opt -Oz` (the
 `binaryen` devDependency) into the gitignored `app/math-core/pkg/`. It skips

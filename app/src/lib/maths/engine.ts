@@ -94,20 +94,16 @@ function isTrap(e: unknown): e is Error {
   return e instanceof WebAssembly.RuntimeError || e instanceof RangeError;
 }
 
-/** Runs `fn` on the current instance. Throws before the engine is ready
- *  (callers check `mathsReady()`), and a `MathsTrap` when the instance traps,
- *  after swapping in the spare. */
-export function callMaths<T>(tex: string, fn: (glue: Glue) => T): T {
+/** Runs `fn` on the current instance. Throws before the engine is ready,
+ *  and a `MathsTrap` when the instance traps, after swapping in the spare.
+ *  An object the trapped instance made (a `MathField`) dies with it: `fn`
+ *  gets the glue, so its caller can tell which instance an object is of. */
+export function callEngine<T>(fn: (glue: Glue) => T): T {
   if (!current) throw new Error("The maths engine is not loaded yet");
-  const known = trapped.get(tex);
-  if (known) throw known;
   try {
     return fn(current);
   } catch (e) {
     if (!isTrap(e)) throw e;
-    const error = new MathsTrap(e);
-    if (trapped.size >= TRAPPED_MAX) trapped.clear();
-    trapped.set(tex, error);
     current = null;
     if (spare) {
       spare.initSync({ module: module! });
@@ -115,6 +111,23 @@ export function callMaths<T>(tex: string, fn: (glue: Glue) => T): T {
       spare = null;
     } else notify();
     void refill();
-    throw error;
+    throw new MathsTrap(e);
+  }
+}
+
+/** `callEngine` for a render of `tex` (callers check `mathsReady()`). A
+ *  formula that trapped throws its `MathsTrap` again without a call. */
+export function callMaths<T>(tex: string, fn: (glue: Glue) => T): T {
+  if (!current) throw new Error("The maths engine is not loaded yet");
+  const known = trapped.get(tex);
+  if (known) throw known;
+  try {
+    return callEngine(fn);
+  } catch (e) {
+    if (e instanceof MathsTrap) {
+      if (trapped.size >= TRAPPED_MAX) trapped.clear();
+      trapped.set(tex, e);
+    }
+    throw e;
   }
 }

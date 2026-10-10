@@ -1,8 +1,8 @@
-// Build the maths engine (math-core/wasm, the katex fork) to WebAssembly in
-// math-core/pkg: cargo → wasm-bindgen --target web → wasm-opt -Oz. Needs the
-// wasm32-unknown-unknown target and the wasm-bindgen CLI at Cargo.lock's
-// version; wasm-opt is the binaryen devDependency. Skipped while the .wasm is
-// newer than every input.
+// Build the maths engine (math-core/wasm: the katex fork and the edit model) to
+// WebAssembly in math-core/pkg: cargo → wasm-bindgen --target web → wasm-opt
+// -Oz. Needs the wasm32-unknown-unknown target and the wasm-bindgen CLI at
+// Cargo.lock's version; wasm-opt is the binaryen devDependency. Skipped while
+// the .wasm is newer than every input.
 import { execFileSync } from "node:child_process";
 import {
   copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
@@ -46,6 +46,7 @@ function newest(dir, skip = []) {
 
 const inputs = Math.max(
   newest(join(core, "katex"), ["tests", "benches"]),
+  newest(join(core, "edit"), ["tests"]),
   newest(join(core, "wasm")),
   mtime(join(core, "Cargo.toml")),
   mtime(join(core, "Cargo.lock")),

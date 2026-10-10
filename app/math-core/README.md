@@ -6,8 +6,8 @@ dependency of `app/src-tauri` (so `tauri dev` never rebuilds it).
 | Member | What it is |
 | --- | --- |
 | `katex/` | A vendored fork of katex-rs, a Rust port of KaTeX 0.18.5. Where it came from and what we changed: [`katex/UPSTREAM.md`](katex/UPSTREAM.md). |
-| `wasm/` | `oculus-math`, the fork's WebAssembly binding for the app: `renderToString` and `parseError` (below). |
-| `edit/` | `oculus-math-edit`, the visual maths field's edit model: caret stops and slots over the formula's source, the editing commands and the shortcuts ([below](#the-edit-model)). Pure Rust; nothing in the app uses it. |
+| `wasm/` | `oculus-math`, the WebAssembly binding for the app: the fork's `renderToString` and `parseError`, and the edit model's `MathField` (below). |
+| `edit/` | `oculus-math-edit`, the visual maths field's edit model: caret stops and slots over the formula's source, the editing commands and the shortcuts ([below](#the-edit-model)). Pure Rust; the app reaches it through `MathField` (no UI uses it yet). |
 | `oracle/` | The display oracle: `src/main.rs` (the `oracle` bin) renders JSON-lines requests with the fork; `render.ts` renders the same formulas with the app's `katex` and diffs the two (`corpus.ts` the inputs, `sets.ts` the call sites' options, `engines.ts` the renderers). |
 
 Where the fork still differs from KaTeX JS, and why that is accepted:
@@ -19,6 +19,8 @@ Where the fork still differs from KaTeX JS, and why that is accepted:
 cd app/math-core
 cargo test
 ```
+
+It runs the binding's boundary (`wasm/src/boundary/`) natively too.
 
 Format our crates with `cargo fmt -p oculus-math -p oculus-math-edit -p oracle` (CI checks it);
 never run `cargo fmt` over `katex/` (see `katex/UPSTREAM.md`). Lint the binding
@@ -35,9 +37,12 @@ bun run math        # node scripts/build-math.mjs
 (release plus one codegen unit and `panic = "abort"`), `wasm-bindgen --target
 web`, then `wasm-opt -Oz` (npm `binaryen`), into the gitignored `pkg/`:
 `oculus_math.js` (the glue), `oculus_math_bg.wasm` and their `.d.ts`. It
-skips while the `.wasm` is newer than every input. It needs the
-`wasm32-unknown-unknown` target and the `wasm-bindgen` CLI at exactly the
-version in `Cargo.lock`. `bun run build` and `bun run test` run it first.
+skips while the `.wasm` is newer than every input (`katex/`, `edit/` and
+`wasm/` less their tests, the Cargo files). The `.wasm` is 833 KB (348 KB
+gzipped; the edit model and its binding are 148 KB of it), the glue 21 KB.
+It needs the `wasm32-unknown-unknown` target and the `wasm-bindgen` CLI at
+exactly the version in `Cargo.lock`. `bun run build` and `bun run test` run
+it first.
 
 The module exports, after `initSync({ module })` or `await init()`:
 
@@ -52,10 +57,37 @@ The module exports, after `initSync({ module })` or `await init()`:
 - `parseError(tex, options?)` — the message `renderToString` would throw
   with `throwOnError` forced on, or `undefined`. It runs the whole render, so
   build-time errors count.
+- `MathField` — the edit model's `Field` ([below](#the-edit-model)). Its
+  offsets are **UTF-16 units** (a JS string's indices, as `data-s`/`data-e`);
+  stops and slots are ids, indices into `stops()` and `slots()`.
+  `MathField.open(source, display)` has the caret at the end, or throws a
+  `ParseError` when the source has no stops. It reads `source`, `display`,
+  `mode` (`"math"`, `"text"`, `"command"`), `pending` (the `\command` without
+  its backslash), `anchor`/`head` (stop ids), `selected` (`[from, to]`),
+  `spaceFree`, `stops()` (each stop's offset by stop id, a `Uint32Array`),
+  `stopSlots()` (each stop's slot id) and `slots()` (`FieldSlot`s: kind, row
+  and column, bounds, `text`, interior `from`/`to`, parent). Each step
+  returns a new `MathField` and leaves the receiver as it was: `caretAt(offset,
+  after)`, `select(anchor, head)` (widened), `withPending(name)` and
+  `run(command)`, whose result's `step` says what the command did: `changes`
+  in the old source, `isolate`, a shortcut's `rewrite` in the source after
+  `changes` (apply each in reverse order), `effect` (`"leaveLeft"`, …,
+  `"removeMaths"`). A command is named as `Command`'s variant: `{insert:
+  "x"}`, `{template: "\\frac{#0}{#?}"}`, `"backspace"`, `{left: {extend:
+  true}}`, `{up: xs}` (each stop's x by stop id, `NaN` unmeasured), … (the
+  `.d.ts`'s `FieldCommand`). `shortcuts()` is the shortcut table, `[keys,
+  LaTeX]` pairs. `wasm/src/boundary/` converts every offset (`edit/`'s
+  `utf16`) and carries commands, steps and slots as JSON; `wasm/src/field.rs`
+  only moves them across.
 
 A panic traps (`console_error_panic_hook` logs it first), and so does a stack
 overflow from deep nesting (a few hundred levels; KaTeX JS goes deeper). A
-trapped instance is unusable: instantiate the module again.
+trapped instance is unusable: instantiate the module again. Its `MathField`s
+die with it, and any call into it traps again, the `free()` that
+wasm-bindgen's finalizer makes for a collected object included. The app's
+facade (`app/src/lib/maths/field.ts`) reads each field out as plain data,
+opens it again on the new instance, and detaches a dead object from the
+glue before it is collected.
 
 ## Source mapping
 
@@ -113,13 +145,13 @@ rules:
   empty cell's stop is against the token after it. A `CD` diagram is one
   atom (edited as TeX).
 
-`utf16` converts offsets for the DOM and CodeMirror. `check` holds the
-invariants (sorted, on char boundaries, inside their slot, round trip
-through offsets, a letter typed at any maths stop outside a bare argument
-still renders), which `cargo test -p oculus-math-edit` runs over
-hand-written cases, the fork's source-location formulas,
-`oracle/fixtures.json`, every prefix of those, and random formulas
-(proptest). The corpus check runs them over the notes:
+`utf16` converts offsets for the DOM and CodeMirror, at the binding's
+boundary. `check` holds the invariants (sorted, on char boundaries, inside
+their slot, round trip through offsets, a letter typed at any maths stop
+outside a bare argument still renders), which `cargo test -p
+oculus-math-edit` runs over hand-written cases, the fork's source-location
+formulas, `oracle/fixtures.json`, every prefix of those, and random
+formulas (proptest). The corpus check runs them over the notes:
 
 ```sh
 cd app

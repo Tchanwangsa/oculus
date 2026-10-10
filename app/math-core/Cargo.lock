@@ -643,6 +643,9 @@ dependencies = [
  "console_error_panic_hook",
  "js-sys",
  "katex-rs",
+ "oculus-math-edit",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
 ]
 

@@ -1,6 +1,8 @@
 //! Byte ↔ UTF-16 offsets. The parse tree's locations are bytes of the
 //! formula; CodeMirror and the DOM count UTF-16 code units. Convert at the
-//! wasm boundary, nowhere else.
+//! wasm boundary (`oculus-math`'s `boundary`), nowhere else.
+
+use core::iter::repeat_n;
 
 /// The UTF-16 offset of byte `byte`; `None` off a char boundary or past
 /// the end.
@@ -25,11 +27,42 @@ pub fn byte_offset(source: &str, unit: usize) -> Option<usize> {
     (units == unit).then_some(source.len())
 }
 
+/// One source's UTF-16 offsets by byte, for converting many offsets
+/// (every stop of a formula) in one pass over it.
+#[derive(Clone, Debug)]
+pub struct Units(Vec<u32>);
+
+impl Units {
+    #[must_use]
+    pub fn new(source: &str) -> Self {
+        let mut table = Vec::with_capacity(source.len() + 1);
+        let mut units = 0;
+        for c in source.chars() {
+            table.extend(repeat_n(units, c.len_utf8()));
+            units += c.len_utf16() as u32;
+        }
+        table.push(units);
+        Self(table)
+    }
+
+    /// The UTF-16 offset of byte `byte`, which must be a char boundary of
+    /// the source (a byte inside a character gives that character's
+    /// start); past the end, the source's length.
+    #[must_use]
+    pub fn of(&self, byte: usize) -> u32 {
+        self.0
+            .get(byte)
+            .or_else(|| self.0.last())
+            .copied()
+            .unwrap_or(0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::non_ascii_literal)]
 
-    use super::{byte_offset, utf16_offset};
+    use super::{Units, byte_offset, utf16_offset};
 
     #[test]
     fn thai_in_text_round_trips() {
@@ -56,5 +89,15 @@ mod tests {
         assert_eq!(byte_offset(source, 3), Some(5));
         // Between the surrogates is no byte offset.
         assert_eq!(byte_offset(source, 2), None);
+    }
+
+    #[test]
+    fn the_table_agrees_with_utf16_offset() {
+        for source in [r"\text{ไทย}x", "a𝔸b", "", "x^2"] {
+            let units = Units::new(source);
+            for (byte, _) in source.char_indices().chain([(source.len(), ' ')]) {
+                assert_eq!(Some(units.of(byte) as usize), utf16_offset(source, byte));
+            }
+        }
     }
 }

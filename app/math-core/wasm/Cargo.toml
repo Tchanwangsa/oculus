@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "The katex fork compiled to WebAssembly for the app: KaTeX JS's renderToString and a parse gate."
+description = "The katex fork and the maths field's edit model compiled to WebAssembly for the app: KaTeX JS's renderToString, a parse gate and MathField."
 readme = "../README.md"
 keywords = ["latex", "math", "katex", "wasm"]
 categories = ["mathematics", "wasm"]
@@ -15,9 +15,14 @@ name = "oculus_math"
 crate-type = ["cdylib"]
 
 # No `wasm` feature on the fork: its DOM renderer and the wasm-bindgen derives
-# on Settings/ParseError are unused here (strings only).
+# on Settings/ParseError are unused here (strings only). serde carries the
+# field's commands, steps and slots as JSON (`src/boundary/`, native code that
+# `cargo test` covers).
 [dependencies]
 katex = { package = "katex-rs", path = "../katex" }
+oculus-math-edit = { path = "../edit" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 
 # wasm-bindgen must equal the `wasm-bindgen` CLI's version exactly;
 # scripts/build-math.mjs checks the CLI against Cargo.lock.
