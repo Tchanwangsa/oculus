@@ -106,7 +106,6 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   page("canvas", ["sign in", "login", "session", "authenticate", "connect", "disconnect"]),
   ...rows("canvas", "Canvas", [
     ["Sign in without the browser", ["okta", "password", "keychain", "authenticator"]],
-    ["Auto-refresh session", ["keep alive", "keepalive", "expired"]],
   ]),
 
   page("appearance"),

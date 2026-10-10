@@ -48,7 +48,6 @@ fn main() {
             AuthAction::Status => ctx.auth_status(),
             AuthAction::Setup => ctx.auth_setup(),
             AuthAction::Auto => ctx.auth_auto(),
-            AuthAction::Tick => ctx.auth_tick(),
             AuthAction::Forget => ctx.auth_forget(),
             AuthAction::Diagnose => {
                 print!("{}", app_lib::okta::diagnose());

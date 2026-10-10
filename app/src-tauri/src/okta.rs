@@ -270,9 +270,6 @@ fn run_sign_in(
 /// name.
 fn signed_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, String> {
     crate::auth::session_established(app, dir, crate::auth::Via::Headless);
-    // The headless path works on this account, so a re-authenticating
-    // LaunchAgent is worth installing.
-    crate::keepalive::ensure_installed();
     crate::canvas::Canvas::open(dir).whoami()
 }
 

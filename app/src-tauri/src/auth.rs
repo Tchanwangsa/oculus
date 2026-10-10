@@ -107,8 +107,8 @@ pub fn saved_sso_cookie_header() -> String {
         .unwrap_or_default()
 }
 
-/// Pings the Canvas API with the saved session cookie. Doubles as the
-/// keep-alive: the client writes back the rotated cookie.
+/// Pings the Canvas API with the saved session cookie; the client writes back
+/// the rotated cookie.
 pub fn saved_session_probe() -> AuthProbe {
     let probe = crate::canvas::Canvas::open(&crate::paths::data_dir()).probe();
 

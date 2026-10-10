@@ -15,7 +15,6 @@ pub mod embed;
 mod files;
 pub mod groq;
 pub mod harness;
-pub mod keepalive;
 pub mod keyd;
 #[cfg(target_os = "macos")]
 mod keys;
@@ -138,35 +137,9 @@ pub fn run() {
                 eprintln!("[oculus] no auth flag — fresh session");
             }
 
-            // The LaunchAgent plist holds the CLI's absolute path; re-point it
-            // if the bundle moved.
-            keepalive::repair_path();
-
             // The credential broker's LaunchAgent; a release reinstalls its
             // bundled keyd when it changed. Dev builds leave it to the preflight.
             keyd::ensure_installed();
-
-            // Canvas refreshes the session on each request, so a periodic ping
-            // holds it open while the app runs (the LaunchAgent covers closed).
-            let ka_handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(6 * 3600));
-                if !auth_flag_path().exists() {
-                    continue;
-                }
-                if let AuthProbe::Rejected(_) = saved_session_probe() {
-                    if okta::try_auto_recover(&ka_handle, okta::Trigger::KeepAlive) {
-                        eprintln!("[oculus] keep-alive: session renewed automatically");
-                        continue;
-                    }
-                    eprintln!("[oculus] keep-alive: session expired");
-                    std::fs::remove_file(auth_flag_path()).ok();
-                    if let Some(state) = ka_handle.try_state::<AuthState>() {
-                        *state.0.lock().unwrap() = false;
-                    }
-                    ka_handle.emit("canvas-auth-expired", "expired").ok();
-                }
-            });
 
             Ok(())
         })
@@ -194,9 +167,6 @@ pub fn run() {
             okta::okta_save_credentials,
             okta::okta_clear_credentials,
             okta::okta_sign_in,
-            keepalive::keepalive_status,
-            keepalive::keepalive_enable,
-            keepalive::keepalive_disable,
             subjects::sync_subjects,
             subjects::get_subjects,
             scrape::scrape_content,
