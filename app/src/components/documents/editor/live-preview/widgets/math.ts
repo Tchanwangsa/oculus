@@ -5,6 +5,8 @@ import "@/styles/katex/katex.min.css";
 
 import { mathsReady, onMathsReady, renderToString } from "@/lib/maths";
 import { mathFieldFocused } from "../../core/liveFocus";
+import { hugArrays } from "../../math/hugArrays";
+import { rustField } from "../../math/field/fieldEngine";
 import { MATH_ARRAYSTRETCH, mathLiveReady, noteMathPress, staticMath } from "../../math/field/mathField";
 import { ancestorAt } from "../../syntax/syntax";
 import { SourceWidget } from "./source";
@@ -12,37 +14,6 @@ import { SourceWidget } from "./source";
 /** Rendered KaTeX by display flag and source; a note re-renders often. */
 const katexCache = new Map<string, string | null>();
 const KATEX_CACHE_MAX = 500;
-
-/** `\left[ \begin{array}…\end{array} \right]` drawn like `bmatrix`: an
- *  array keeps `\arraycolsep` outside its first and last columns (matrices
- *  drop it), which reads as a gap inside the brackets. Render-time only, and
- *  the field draws it the same (`patchArrays` in `math/field/mathField`). */
-const LEFT_BEFORE = /\\left\s*(?:\\[a-zA-Z]+|\\.|[^\s\\])\s*$/;
-const BEGIN = "\\begin{array}";
-const END = "\\end{array}";
-
-function hugArrays(source: string): string {
-  if (!source.includes(BEGIN)) return source;
-  let out = "";
-  let done = 0;
-  for (let at = source.indexOf(BEGIN); at >= 0; at = source.indexOf(BEGIN, at + 1)) {
-    if (at < done || !LEFT_BEFORE.test(source.slice(0, at))) continue;
-    // The matching `\end{array}`, past any nested array.
-    let depth = 0;
-    let end = -1;
-    for (let i = at; i < source.length; i++) {
-      if (source.startsWith(BEGIN, i)) depth++;
-      else if (source.startsWith(END, i) && --depth === 0) {
-        end = i + END.length;
-        break;
-      }
-    }
-    if (end < 0 || !/^\s*\\right/.test(source.slice(end))) continue;
-    out += `${source.slice(done, at)}\\kern-0.5em${source.slice(at, end)}\\kern-0.5em`;
-    done = end;
-  }
-  return out + source.slice(done);
-}
 
 /** KaTeX HTML for `source`, or null if it does not parse. Matrix rows get
  *  `MATH_ARRAYSTRETCH`, as the visual field draws them (`math/field/mathField`).
@@ -104,8 +75,9 @@ const drawnMath = new WeakMap<HTMLElement, MathWidget>();
  */
 export class MathWidget extends SourceWidget {
   /** Drawn by MathLive (`staticMath`) once it has loaded, else by KaTeX; a
-   *  rebuild after it loads draws again. */
-  readonly mathLive = mathLiveReady();
+   *  rebuild after it loads draws again. The Rust field draws KaTeX, so
+   *  with it on (`rustField`) the rendering stays KaTeX's. */
+  readonly mathLive = mathLiveReady() && !rustField();
   /** Drawn as a placeholder until the maths engine is ready; a rebuild after
    *  it is (`mathsSettled`) draws again. */
   readonly maths = mathsReady();

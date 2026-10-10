@@ -1,3 +1,4 @@
+import { removeMaths as removeMathsFrom } from "../../fieldNote";
 import { modelOf, type MlAtom } from "../model";
 import type { FieldController } from "./field-controller";
 
@@ -45,18 +46,5 @@ export function deleteLineBackward(ctl: FieldController) {
 
 /** Backspace in an empty field takes the maths (a block's lines) away. */
 export function removeMaths(ctl: FieldController) {
-  const { view } = ctl;
-  const target = ctl.target();
-  if (!target) return;
-  const { doc } = view.state;
-  let from = target.start;
-  let to = target.end;
-  if (target.block) {
-    from = doc.lineAt(target.start).from;
-    to = doc.lineAt(target.end).to;
-    if (to < doc.length) to++;
-    else if (from > 0) from--;
-  }
-  view.dispatch({ changes: { from, to }, selection: { anchor: from }, userEvent: "delete" });
-  view.focus();
+  removeMathsFrom(ctl.view, ctl.target());
 }

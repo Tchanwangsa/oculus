@@ -18,11 +18,14 @@ export const focusedField = StateField.define<boolean>({
   },
 });
 
-/** The focused element is a maths field inside an editor. CodeMirror reports
- *  the change 10 ms after the event, so focus has settled by then. */
+/** The focused element is a maths field inside an editor: MathLive's
+ *  `<math-field>`, or the Rust field's input (`math/field/mathView`).
+ *  CodeMirror reports the change 10 ms after the event, so focus has
+ *  settled by then. */
 export function mathFieldFocused(): boolean {
   const active = document.activeElement;
-  return active instanceof HTMLElement && active.tagName === "MATH-FIELD" && active.closest(".cm-editor") != null;
+  if (!(active instanceof HTMLElement) || active.closest(".cm-editor") == null) return false;
+  return active.tagName === "MATH-FIELD" || active.classList.contains("cm-math-view-input");
 }
 
 export const trackFocus = EditorView.focusChangeEffect.of((_state, focusing) =>

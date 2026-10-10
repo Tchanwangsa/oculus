@@ -1,15 +1,16 @@
 # Maths in the note editor
 
-In Live mode a note's maths renders, edits in a MathLive visual field, and has
-a toolbox, quick picks and typed shorthands; in TeX and Raw mode it is typed as
-LaTeX. The delimiters and the rest of the editor are [editor.md](./editor.md).
+In Live mode a note's maths renders, edits in a visual field (MathLive's, or
+the Rust one behind a switch), and has a toolbox, quick picks and typed
+shorthands; in TeX and Raw mode it is typed as LaTeX. The delimiters and the rest of the editor are [editor.md](./editor.md).
 
 ## Where
 
 | Piece | Location |
 | --- | --- |
 | Delimiters, the maths under the caret | `app/src/components/documents/editor/math/mathSyntax.ts`, `app/src/components/documents/editor/math/mathContext.ts` |
-| The visual field and its writes | `app/src/components/documents/editor/math/field/mathField/`, `app/src/components/documents/editor/math/field/mathFieldEdits.ts` |
+| The visual field, its state and its writes | `app/src/components/documents/editor/math/field/mathField/`, `app/src/components/documents/editor/math/field/mathFieldEdits.ts`, `app/src/components/documents/editor/math/field/fieldNote.ts` |
+| The Rust visual field, its host in the note, the switch | `app/src/components/documents/editor/math/field/mathView/`, `app/src/components/documents/editor/math/field/rustField/`, `app/src/lib/maths/switch.ts` |
 | Rendered maths, atomic ranges, edge keys | `app/src/components/documents/editor/live-preview/widgets/`, `app/src/components/documents/editor/live-preview/livePreview/` |
 | Toolbox, palette, quick picks, usage | `app/src/components/documents/editor/math/tools/mathTools/`, `app/src/components/documents/editor/math/tools/mathPalette.ts`, `app/src/components/documents/editor/math/tools/mathUsage.ts` |
 | Shorthands | `app/src/components/documents/editor/math/tools/shorthand/` |
@@ -82,16 +83,81 @@ the structure the caret is in); Backspace in an empty field removes the
 maths, and in an empty script (`\cos^{}`) drops it with the caret just
 after its atom (`dropEmptyScript` — MathLive's own caret there lands at -2,
 which it counts from the field's end). Committing a bare `\text` (or `\textbf`, `\textit`, `\textrm`,
-`\mbox`) from the `\` list, or the toolbox's text cells, switches the
+`\textnormal`; KaTeX has no `\mbox`) from the `\` list, or the toolbox's text cells, switches the
 field to MathLive's text mode at the caret (`startText`) — MathLive alone
 drops the empty argument — and → or Tab at the end of the text goes back
 to maths.
 
 Focus in the field counts as the editor's (`core/liveFocus.ts`). Maths
-that MathLive or the maths engine can't read cleanly (`readsCleanly`, false
-until both have loaded), a multi-line block inside a quote
+the field can't read cleanly (`readsCleanly`: for MathLive's, MathLive or
+the maths engine can't, false until both have loaded), a multi-line block inside a quote
 or list, and maths switched with the toolbox's TeX control (⌘⇧M) are typed
 as LaTeX source (TeX mode, as in Raw mode) until the caret leaves them.
+
+## The Rust field opens instead of MathLive's when the switch is on
+
+`localStorage["oculus-math-engine"] = "rust"` (`rustField` in
+`app/src/lib/maths/switch.ts`, read each time a field opens, no Settings
+entry; it also picks how rendered markdown's maths is selected,
+[viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface)) makes `MathFieldWidget` open the Rust field (`RustFieldController`
+in `math/field/rustField/`) instead of MathLive's (`FieldController`).
+Both are a `VisualField` (`mathField/registry.ts`): mode (`math`, `text`,
+or `command` while a `\command` is typed), a selection-change
+subscription, `isEmpty`, `spaceFree`, `caretRect`, `insertTemplate`,
+`flush`, `leave`, `sync`, and the field's DOM, view and maths. The widget,
+the toolbox (`fieldKeys`, quick picks, palette inserts) and the note's undo
+routing use only that; nothing outside `mathField/controller/` touches
+MathLive's element. Leaving, removing the maths, pasting prose beside it
+and a block's blank lines on opening are shared (`fieldNote.ts`).
+
+`MathView` (`math/field/mathView/`) is the field itself, over the maths
+engine's edit model (`MathField` in `app/src/lib/maths/field.ts`). It
+draws the maths with the source map on (`renderToString` with
+`sourceMap: true`, as the Live rendering draws it: `math/hugArrays.ts`,
+`MATH_ARRAYSTRETCH`), and over it a caret, one selection band per row and,
+while a `\command` is pending, a popover of the palette's commands that
+start with it — all positioned from `lib/maths/geometry`. Keys, typing and
+IME input arrive on a focused, invisible textarea at the caret
+(`cm-math-view-input`, which `core/liveFocus.ts` counts as the editor's
+focus), so the OS candidate window opens there; each runs one model
+command, and the view redraws and hands the step to its host, never
+editing the source itself. A top-level row with nothing in it gets a
+zero-width `oc-empty-row` marker so the caret has a place. Its styles are
+the `.cm-math-view` rules in `theme/math.ts`.
+
+Where the Rust field differs from MathLive's:
+
+- **The model's source is the note's LaTeX**, so a step's changes are
+  written as they are (`writeStep` in `rustField/write.ts`), with no tidy,
+  `\displaylines` or block layout; only a block's edges are kept to one
+  line break once it spans lines. Each step is written as it happens:
+  `flush` does nothing. A shortcut's expansion comes as a second
+  transaction with `isolateHistory`, so ⌘Z after `sin` → `\sin` gives
+  back `sin`; a matrix edit is isolated the same way.
+- **Undo reloads the field** from the note (`sync`), the caret at the end
+  of what changed, compared from both ends with the common tail stopping
+  at the old caret (`caretAfterEdit`).
+- **The edit model owns every key** but the toolbox's, ⌘⇧M and undo
+  (`rustField/keys.ts`): Esc (leave, or revert a shortcut just expanded),
+  Enter (inline: leave; display: a row), Tab, Backspace in an empty field
+  (remove the maths) or an empty script, ⌘Backspace, the matrix keys and
+  shortcuts. Its steps' effects call the shared `leaveMaths` and
+  `removeMaths`.
+- **It opens without MathLive.** The visual state waits only for the maths
+  engine (`fieldLoad`), `readsCleanly` is whether the edit model opens on
+  the maths, and the rendering stays KaTeX's (`MathWidget.mathLive` is
+  false), which the field draws too, so entering maths doesn't change its
+  look. MathLive still loads for the read-only field of rendered markdown.
+- **Copy and cut write the selection's LaTeX** as `text/plain` and
+  `application/x-latex`, a display field's also as `BLOCK_MATH_TYPE`; cut
+  then deletes as Backspace does. WebKit enables Copy and Cut only for a
+  text selection, so the field cancels `beforecopy`/`beforecut` while it
+  has one. Pasted maths goes through the model, refused unless it renders.
+- **A `\command` being typed lives outside the source** until committed,
+  shown in the popover rather than MathLive's suggestion list.
+- **A formula the engine traps on drops to TeX mode** for the session
+  (`markFieldTrap`), so it never reopens to trap again; the same for maths
+  the field fails to open on.
 
 ## Rendered maths is one unit to the selection, the clipboard and the caret
 
@@ -201,7 +267,8 @@ At a line's start (container markup aside, or on the line it opens beside a
 block) it writes `\(\)` instead: `$$` there opens a display block in every
 Markdown reader, which would run to the next `$$` and take the text between.
 The parser takes an empty `\(\)` as inline maths (`parenMath`), and the
-field's first write turns it into `$…$` (`FieldController.flush`).
+field's first write turns it into `$…$` (`FieldController.flush`; the
+Rust field's `noteWrite`).
 A second `$` there — in the empty field (`fieldKey`) or in the note's source
 before MathLive is ready — turns the pair into an empty block with the caret
 on its line (`emptyPairToBlock`, which is `toggleShape`). A `$` stays a
@@ -231,7 +298,8 @@ bracket group it starts a cell (below). The full toolbox under the field
 drops the preview, its cells insert into the field (slots become MathLive
 placeholders) and its TeX control switches to TeX mode; there a Visual
 control switches back. Neither toolbox ever takes focus. The field says so
-on any empty line (`syncHint` in `mathField/controller/hint.ts`): an empty inline field
+on any empty line (`syncHint` in `mathField/controller/hint.ts`, and in
+`rustField/hint.ts` for the Rust field, which places it at once): an empty inline field
 shows "Space (␣) for math tools" in flow after it, inside its tint; an
 empty block, or one empty row of its lines, centres "Start typing or Space
 (␣) for math tools" on that line with the caret drawn just before it (the
@@ -252,16 +320,20 @@ since MathLive draws in a frame of its own and its hidden caret can lag.
 
 ## Matrices are typed as in MATLAB
 
-In the visual field `[a b; c d]` types a matrix
-(`math/field/mathMatrix.ts`, pure; `mathMatrixField.ts` reads MathLive's atoms and
-writes back). The caret's grid is the structure it is directly in: a cell of
-a `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `Vmatrix` or
-`smallmatrix` (not `array`, `cases`, `aligned`), or a bracket group whose
-delimiters match one (`(`, `[`, `\{`, `|`, `\|`; the right one typed or
-still MathLive's ghost), which is one cell and becomes that matrix at its
-first new cell or row. Maths mode only; `FieldController.key` runs these
-keys after the toolbox's, and `spaceFree` keeps the quick picks off a Space
-they take.
+In the visual field `[a b; c d]` types a matrix. MathLive's field does it
+in `math/field/mathMatrix.ts` (pure) and `mathMatrixField.ts` (MathLive's
+atoms read and written back); the Rust field's edit model in
+`app/math-core/edit/src/command/grid/`. The caret's grid is the structure
+it is directly in: a cell of a `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`,
+`vmatrix`, `Vmatrix` or `smallmatrix` (not `array`, `cases`, `aligned`),
+or a bracket group whose delimiters match one (`(`, `[`, `\{`, `|`, `\|`),
+which is one cell and becomes that matrix at its first new cell or row.
+The group's right bracket is typed or, in MathLive's field, still its
+ghost; in the Rust field it is a `\left…\right` pair or an opening
+bracket with whatever closes it later in the same slot. Maths mode only;
+MathLive's field runs these keys after the toolbox's (`onKey`), and
+`spaceFree` (the model's own, in the Rust field) keeps the quick picks off
+a Space they take.
 
 - **Space** after a term ends the cell: into the next cell when the caret is
   at the cell's end and that cell is empty, else into a new column (what
@@ -273,23 +345,32 @@ they take.
   later cells shift left. So `(a + b)` typed with spaces stays plain
   brackets, while `[1 -1]` is two cells.
 - **`;`** goes to the start of the next row: a new empty row, unless the
-  next row is already empty. In a bracket group the `;` is typed first and
-  written as its own undo step, so ⌘Z after the matrix appears gives back
-  `f(x;`; inside a matrix it is never typed.
+  next row is already empty. Inside a matrix it is never typed. In a
+  bracket group, MathLive's field types the `;` first as its own undo step
+  (⌘Z after the matrix appears gives back `f(x;`); the Rust field doesn't,
+  so ⌘Z gives back `f(x`.
 - **Backspace** at the start of an empty cell, in a grid of more than one,
   removes its column when all empty, else its row when all empty, else steps
   back to the end of the cell before. One cell left turns back into its
-  bracket group, ghost and all, so `)` still closes it.
-- **The closing bracket** (`)`, `]`, `}`, `|`) typed in a matrix's cell drops
-  trailing empty rows and columns and puts the caret after the matrix; one
-  cell left becomes a closed bracket group.
+  bracket group: in MathLive's field ghost and all, so `)` still closes it;
+  in the Rust field left open, the closer the user's to type, unless
+  scripts follow it (`^T`), which keep their closer.
+- **The closing bracket** typed in a matrix's cell drops trailing empty
+  rows and columns and puts the caret after the matrix; one cell left
+  becomes a closed bracket group. MathLive's field takes `)`, `]`, `}`
+  and `|`; the Rust field only a matrix's own closer: `)` for `pmatrix`,
+  `]` `bmatrix`, `}` `Bmatrix`, `|` `vmatrix` (none for `matrix`,
+  `smallmatrix` or `Vmatrix`).
 
 Rows are padded to the widest before any edit, so `[a b; c d e f g]` comes
-out with empty cells after `b`; a row stops at MathLive's ten columns. New
-cells are placeholders, which Tab reaches and the note never stores. Each
-edit replaces the whole structure (its scripts kept, `^T`) and is one undo
-step: pending keystrokes are written first, then the edit with
-`isolateHistory` (`flush(true)`).
+out with empty cells after `b`; a row stops at ten columns. Each edit is
+one undo step. In MathLive's field new cells are placeholders, which Tab
+reaches and the note never stores, and each edit replaces the whole
+structure (its scripts kept, `^T`): pending keystrokes are written first,
+then the edit with `isolateHistory` (`flush(true)`). In the Rust field new
+cells are empty cells in the source (Tab reaches them too), and the edit
+rewrites only the matrix's content, keeping the text of every cell and
+separator it didn't touch, as a step marked `isolate`.
 
 ## Typed shorthands expand inside maths
 
@@ -299,6 +380,23 @@ The rule tables are in
 `sin ` → `\sin `, `\left…\right` around a closed group holding a tall
 construct. Never inside `\text{}`-like arguments. The typed character lands
 first and the rewrite is its own history event, so ⌘Z gives back what was
-typed. The visual field gets the Greek, power and operator rules as MathLive
+typed. MathLive's field gets the Greek, power and operator rules as MathLive
 inline shortcuts, over MathLive's defaults minus the ones that turn letter
 runs into units or words (`PRUNED` in `mathField/shortcuts.ts`).
+
+The Rust field's shortcuts are its edit model's
+(`app/math-core/edit/src/shortcut/`, the table in `table.rs`: those
+MathLive defaults less `PRUNED`, plus the note's shorthands). Only one key
+typed in maths takes part — never text mode, a pending `\command`, an IME
+string, a template, a paste, or a name argument (`\mathbb{RR}`,
+`\operatorname{sinc}`). A letter key expands only when the whole run of
+letters before the caret is the key (`sin` and `x+sin` expand, `xsin` and
+`card` stay; `2pi` is `2\pi`); a key starting with a symbol matches the
+keys just typed. A power (`sr`, `cb`, `rd`, `invs`) takes one atom as its
+base: one letter of the run (`xsr` is `x^2`), else the operand before it.
+`!=` after an operand stays a factorial and `=` (`n!=`). A longer key
+re-expands from before its first key (`sin` then `h` is `\sinh`). The key
+lands as typed, then the expansion is a second write, its own undo step,
+so ⌘Z gives back the typed keys; Esc right after an expansion does the
+same without leaving the field, and the keys typed next that lead to a
+longer shortcut stay as typed (`sin`, Esc, `h` is `sinh`).

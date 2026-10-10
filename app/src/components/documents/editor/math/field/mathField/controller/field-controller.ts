@@ -1,9 +1,9 @@
 import { isolateHistory } from "@codemirror/commands";
-import { EditorSelection, Transaction, type ChangeSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import type { MathfieldElement } from "mathlive";
 
 import { mathFieldFocused, setFocused } from "@/components/documents/editor/core/liveFocus";
+import { dropBlankLines, leaveMaths, type Direction } from "../../fieldNote";
 import {
   FIELD_INPUT,
   caretAfterChange,
@@ -16,7 +16,7 @@ import { caretAt, type Box } from "../geometry";
 import { takePress } from "../keys";
 import { lib } from "../loader";
 import { atomsOf, modelOf } from "../model";
-import { fields } from "../registry";
+import { fields, type VisualField } from "../registry";
 import { centredRows } from "../rows";
 import { fromField, layoutBlock, tidy, toField } from "../serialize";
 import { shortcuts } from "../shortcuts";
@@ -30,14 +30,15 @@ import { historyInput } from "./history";
 import { moveOut, onKey } from "./keyboard";
 import { press, pressBeside, selectionChanged } from "./pointer";
 
-export type Direction = "forward" | "backward" | "upward" | "downward";
+export type { Direction };
 
 /**
- * The open `<math-field>` and the note's maths it edits. State lives here;
- * the keys, pointer, clipboard, history, grid, deletion, command-mode and
- * hint behaviour are the sibling modules, each taking the controller.
+ * The open `<math-field>` and the note's maths it edits: the MathLive
+ * engine's `VisualField`. State lives here; the keys, pointer, clipboard,
+ * history, grid, deletion, command-mode and hint behaviour are the sibling
+ * modules, each taking the controller. Only these touch `mf`.
  */
-export class FieldController {
+export class FieldController implements VisualField {
   readonly dom: HTMLElement;
   readonly mf: MathfieldElement;
   /** The LaTeX (trimmed, as the widget sees it) last written or loaded, so
@@ -160,18 +161,8 @@ export class FieldController {
     if (this.block) this.dropBlankLines();
   }
 
-  /** Blank lines in a block's LaTeX (an older note's, another editor's) go
-   *  as the field opens on it, the LaTeX itself untouched and outside the
-   *  history; the field's own writes never add them (`squeezeBlankLines`). */
   private dropBlankLines() {
-    const target = this.target();
-    const current = target ? this.view.state.sliceDoc(target.from, target.to) : "";
-    if (!target || !current.includes("\n") || !current.trim()) return;
-    const tidied = `\n${squeezeBlankLines(current.trim())}\n`;
-    const change = minimalChange(current, tidied, target.from);
-    if (!change) return;
-    this.shown = tidied.trim();
-    this.view.dispatch({ changes: change, annotations: [fieldWrite.of(this.id), Transaction.addToHistory.of(false)] });
+    dropBlankLines(this.view, this.target(), this.id, (latex) => (this.shown = latex));
   }
 
   /** The field in flow, in place of its static stand-in. */
@@ -258,43 +249,29 @@ export class FieldController {
     });
   }
 
-  /** Back to the note, the caret just outside the maths on that side. A block
-   *  at the very start or end of the note gets a line to land on. */
+  /** Back to the note, the caret just outside the maths on that side
+   *  (`leaveMaths`), pending keystrokes written first. */
   leave(dir: Direction) {
     this.flush();
-    const { view } = this;
-    const target = this.target();
-    if (!target) {
-      view.focus();
-      return;
-    }
-    const { doc } = view.state;
-    const ahead = dir === "forward" || dir === "downward";
-    let changes: ChangeSpec | undefined;
-    let anchor: number;
-    if (target.block) {
-      const first = doc.lineAt(target.start);
-      const last = doc.lineAt(target.end);
-      if (ahead) {
-        if (last.to < doc.length) anchor = last.to + 1;
-        else {
-          changes = { from: doc.length, insert: "\n" };
-          anchor = doc.length + 1;
-        }
-      } else if (first.from > 0) anchor = first.from - 1;
-      else {
-        changes = { from: 0, insert: "\n" };
-        anchor = 0;
-      }
-    } else {
-      anchor = ahead ? target.end : target.start;
-      if (dir === "upward" || dir === "downward") {
-        const moved = view.moveVertically(EditorSelection.cursor(anchor), ahead).head;
-        if (moved < target.start || moved > target.end) anchor = moved;
-      }
-    }
-    view.dispatch({ changes, selection: { anchor }, scrollIntoView: true, userEvent: changes ? "input" : "select" });
-    view.focus();
+    leaveMaths(this.view, this.target(), dir);
+  }
+
+  /** MathLive's command mode (`\lam…`) is `"command"`. */
+  mode(): "math" | "text" | "command" {
+    const mode = this.mf.mode;
+    return mode === "latex" ? "command" : mode === "text" ? "text" : "math";
+  }
+
+  /** MathLive reports moves from inside its own updates, and late ones
+   *  from before the listener was added: only a selection other than the
+   *  one at subscribing counts. */
+  onSelectionChange(listener: () => void): () => void {
+    const at = JSON.stringify(this.mf.selection);
+    const moved = () => {
+      if (JSON.stringify(this.mf.selection) !== at) listener();
+    };
+    this.mf.addEventListener("selection-change", moved);
+    return () => this.mf.removeEventListener("selection-change", moved);
   }
 
   /** Space is free for the toolbox: MathLive ignores it in maths, but types

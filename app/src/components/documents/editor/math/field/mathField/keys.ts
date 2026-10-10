@@ -3,16 +3,15 @@ import { keymap, type Command } from "@codemirror/view";
 
 import { ancestorAt } from "@/components/documents/editor/syntax/syntax";
 import { mathContextOf, ownsLines } from "../../mathContext";
-import { readsCleanly, visualMathField, visualOf, type VisualMath } from "./visual-state";
+import { fieldLoad, readsCleanly, visualOf, type VisualMath } from "./visual-state";
 
 /** ←/Backspace from just after inline maths, →/Delete from just before it,
  *  open the field at that end instead of stepping over the rendered maths. */
 function enterInline(back: boolean): Command {
   return (view) => {
     const { state } = view;
-    const v = state.field(visualMathField, false);
     const { ranges, main } = state.selection;
-    if (!v || v.lib !== "ready" || ranges.length !== 1 || !main.empty) return false;
+    if (fieldLoad(state) !== "ready" || ranges.length !== 1 || !main.empty) return false;
     const node = ancestorAt(
       state,
       main.head,
@@ -53,9 +52,8 @@ function enterBlock(dir: "up" | "down" | "left" | "right", deleting = false): Co
   const back = dir === "up" || dir === "left";
   return (view) => {
     const { state } = view;
-    const v = state.field(visualMathField, false);
     const { ranges, main } = state.selection;
-    if (!v || v.lib !== "ready" || ranges.length !== 1 || !main.empty) return false;
+    if (fieldLoad(state) !== "ready" || ranges.length !== 1 || !main.empty) return false;
     const ln = state.doc.lineAt(main.head);
     if (dir === "left" || dir === "right") {
       if (main.head !== (back ? ln.from : ln.to) || (deleting && !ln.length)) return false;

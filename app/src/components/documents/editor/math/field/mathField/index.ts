@@ -9,28 +9,33 @@ import { loader } from "./loader";
 import { visualMath, visualMathField } from "./visual-state";
 
 /**
- * Visual maths in Live mode: while the caret is in a maths node, a MathLive
- * `<math-field>` stands in for it and is where it is edited — slots for a
- * fraction's parts, `\` commands that become one symbol. Each edit in the
- * field rewrites only the LaTeX between the delimiters; opening it writes
- * nothing. Maths MathLive or KaTeX can't read cleanly, and maths switched to
- * TeX from the toolbox, are typed as LaTeX source (`tools/mathTools`).
- * MathLive is imported on first use (`loader.ts`). It also draws the maths
- * the field isn't on (`staticMath`), so opening the field doesn't move it;
- * until it arrives, if it fails, or for LaTeX it can't read, maths renders
- * as KaTeX. Rendered markdown's read-only field (`lib/markdown/mathSelect.ts`)
- * reuses the loader, hit-test, widening and copy helpers exported here.
+ * Visual maths in Live mode: while the caret is in a maths node, a visual
+ * field stands in for it and is where it is edited — slots for a
+ * fraction's parts, `\` commands that become one symbol. It is MathLive's
+ * `<math-field>` (`FieldController`), or the Rust field
+ * (`math/field/rustField`) when `fieldEngine.ts`'s switch is on; both are
+ * `VisualField`s to the rest of the editor. Each edit in the field rewrites
+ * only the LaTeX between the delimiters; opening it writes nothing. Maths
+ * the field can't read cleanly, and maths switched to TeX from the
+ * toolbox, are typed as LaTeX source (`tools/mathTools`). MathLive is
+ * imported on first use (`loader.ts`). It also draws the maths the field
+ * isn't on (`staticMath`), so opening the field doesn't move it; until it
+ * arrives, if it fails, for LaTeX it can't read, and with the Rust field,
+ * maths renders as KaTeX. Rendered markdown's read-only field
+ * (`lib/markdown/mathSelect.ts`) reuses the loader, hit-test, widening and
+ * copy helpers exported here.
  */
 
 export { MATH_ARRAYSTRETCH, MATH_LINE_GAP, loadMathLive, mathLiveReady } from "./loader";
 export { caretAt, wholeStructures, type Box } from "./geometry";
 export { noteMathPress } from "./keys";
 export { modelOf, type MlAtom, type MlModel } from "./model";
-export { activeMathField, fieldKeys } from "./registry";
+export { activeMathField, fieldKeys, type VisualField } from "./registry";
 export { centredRows } from "./rows";
 export { fromField, layoutBlock, tidy, toField } from "./serialize";
 export { staticMath } from "./static";
 export {
+  fieldLoad,
   readsCleanly,
   setMathMode,
   touchedMath,

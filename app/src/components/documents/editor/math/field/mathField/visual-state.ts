@@ -3,8 +3,9 @@ import type { EditorView } from "@codemirror/view";
 
 import { liveFocused } from "@/components/documents/editor/core/liveFocus";
 import { ancestorAt } from "@/components/documents/editor/syntax/syntax";
-import { mathsReady, parseError } from "@/lib/maths";
+import { MathField, mathsReady, parseError } from "@/lib/maths";
 import { mathAt, mathContextOf, ownsLines, type MathContext } from "../../mathContext";
+import { fieldTrapped, rustField } from "../fieldEngine";
 import { fieldWrite } from "../mathFieldEdits";
 import { lib, loadState, mathLiveSettled, type LoadState } from "./loader";
 import { toField } from "./serialize";
@@ -88,21 +89,49 @@ function atBlockEdge(state: EditorState, v: VisualMath): boolean {
 
 const cleanCache = new Map<string, boolean>();
 
-/** MathLive reads it without errors and KaTeX renders it: only then does the
- *  field, whose output KaTeX must draw afterwards, get to edit it. False
- *  until both MathLive and the maths engine have loaded. */
+/** Whether the Rust field's edit model opens on it (it parses, and the
+ *  engine doesn't trap). */
+function opensInRust(source: string, display: boolean): boolean {
+  try {
+    MathField.open(source, display).free();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The field can edit it: for the Rust field, its edit model opens on it;
+ *  for MathLive's, MathLive reads it without errors and KaTeX renders it
+ *  (the field's output KaTeX must draw afterwards). False until the maths
+ *  engine (and for MathLive's field, MathLive) has loaded. */
 export function readsCleanly(source: string, display: boolean): boolean {
-  if (!lib || !mathsReady()) return false;
-  const key = `${display ? "D" : "I"}${source}`;
+  const rust = rustField();
+  if (!mathsReady() || (!rust && !lib) || (rust && fieldTrapped(source, display))) return false;
+  const key = `${rust ? "R" : "M"}${display ? "D" : "I"}${source}`;
   let ok = cleanCache.get(key);
   if (ok === undefined) {
-    ok =
-      lib.validateLatex(toField(source, display)).length === 0 &&
-      parseError(source, { displayMode: display, strict: "ignore" }) === undefined;
+    ok = rust
+      ? opensInRust(source, display)
+      : lib!.validateLatex(toField(source, display)).length === 0 &&
+        parseError(source, { displayMode: display, strict: "ignore" }) === undefined;
     if (cleanCache.size > 500) cleanCache.clear();
     cleanCache.set(key, ok);
   }
   return ok;
+}
+
+/** Whether the field's engine has loaded: the Rust field needs only the
+ *  maths engine, MathLive's field MathLive's own import (`lib`, which the
+ *  state holds). */
+function engineLoad(lib: LoadState): LoadState {
+  if (!rustField()) return lib;
+  return mathsReady() ? "ready" : "loading";
+}
+
+/** Where the open-able field's engine stands, or null outside Live mode. */
+export function fieldLoad(state: EditorState): LoadState | null {
+  const v = state.field(visualMathField, false);
+  return v ? engineLoad(v.lib) : null;
 }
 
 const sameVisual = (a: ActiveMath | null, b: ActiveMath | null) =>
@@ -129,7 +158,7 @@ export const visualMathField = StateField.define<VisualState>({
     const here = targetAt(tr.state);
     if (tex != null && here?.start !== tex) tex = null;
     let active: ActiveMath | null = null;
-    if (lib === "ready" && liveFocused(tr.state)) {
+    if (engineLoad(lib) === "ready" && liveFocused(tr.state)) {
       const target = here ?? (prev.active && tr.docChanged ? carried(prev.active, tr) : null);
       if (target && target.start !== tex) {
         const same = prev.active != null && tr.changes.mapPos(prev.active.start, -1) === target.start;
@@ -154,14 +183,15 @@ export function visualMath(state: EditorState): ActiveMath | null {
 /**
  * How Live mode draws maths the selection touches but the field isn't on:
  * rendered when the field could take it (the caret on its edge, a selection
- * running past it) or while MathLive loads, else as source. A caret inside
- * it before MathLive arrives gets the source, since typing would otherwise
- * land beside the rendering.
+ * running past it) or while the field's engine loads, else as source. A
+ * caret inside it before the engine arrives gets the source, since typing
+ * would otherwise land beside the rendering.
  */
 export function touchedMath(state: EditorState, start: number, from: number, to: number, display: boolean): "render" | "source" {
   const v = state.field(visualMathField, false);
-  if (!v || v.lib === "failed" || v.tex === start) return "source";
-  if (v.lib === "loading") return targetAt(state)?.start === start ? "source" : "render";
+  const load = v && engineLoad(v.lib);
+  if (!v || load === "failed" || v.tex === start) return "source";
+  if (load === "loading") return targetAt(state)?.start === start ? "source" : "render";
   return readsCleanly(state.sliceDoc(from, to).trim(), display) ? "render" : "source";
 }
 
@@ -169,7 +199,7 @@ export function touchedMath(state: EditorState, start: number, from: number, to:
  *  "visual" for maths switched to TeX that the field can take, else null. */
 export function visualToggle(state: EditorState): "tex" | "visual" | null {
   const v = state.field(visualMathField, false);
-  if (!v || v.lib !== "ready") return null;
+  if (!v || engineLoad(v.lib) !== "ready") return null;
   if (v.active) return "tex";
   const here = targetAt(state);
   if (!here || v.tex !== here.start) return null;

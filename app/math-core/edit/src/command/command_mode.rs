@@ -11,7 +11,7 @@
 //! pending, so the view can show it as wrong. Right after `\`, a
 //! non-letter makes a control symbol (`\,`, `\{`, `\ `, `\\`) when that
 //! renders, else the command is dropped and the character typed. A text
-//! command (`\text`, `\textbf`, `\mbox`, …) leaves the caret in its text
+//! command (`\text`, `\textbf`, `\textit`, …) leaves the caret in its text
 //! run: text mode.
 
 use super::{Command, compose, template::template};

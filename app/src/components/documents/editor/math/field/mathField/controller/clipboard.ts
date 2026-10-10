@@ -1,26 +1,12 @@
+import { BLOCK_MATH_TYPE } from "@/lib/markdown/math";
+import { mathOnly, pasteBeside } from "../../fieldNote";
 import { fromField, layoutBlock, tidy } from "../serialize";
 import type { FieldController } from "./field-controller";
 
-/** Clipboard type of a block field's copy: the block's source, `$$` lines
- *  included, for a paste outside maths (`live-preview/livePreview/edges.ts`). */
-export const BLOCK_MATH_TYPE = "application/x-oculus-math-block";
-
-/** Pasted text that is all maths: one delimited `$…$`, `$$…$$`, `\(…\)` or
- *  `\[…\]`, or LaTeX with no delimiters in it. */
-function mathOnly(text: string): boolean {
-  const t = text.trim();
-  if (!/\$|(?<!\\)\\[([]/.test(t)) return true;
-  return (
-    /^\$\$(?:(?!\$\$)[\s\S])*\$\$$/.test(t) ||
-    /^\$[^$]+\$$/.test(t) ||
-    /^\\\[(?:(?!\\\])[\s\S])*\\\]$/.test(t) ||
-    /^\\\((?:(?!\\\))[\s\S])*\\\)$/.test(t)
-  );
-}
+export { BLOCK_MATH_TYPE };
 
 /** Maths pasted here goes in at the caret (MathLive drops `$` delimiters);
- *  markdown with prose around maths can't live inside maths, so it goes
- *  into the note just after this maths. */
+ *  markdown with prose around maths goes beside it (`pasteBeside`). */
 export function paste(ctl: FieldController, e: ClipboardEvent) {
   const data = e.clipboardData;
   const text = data?.getData("text/plain") ?? "";
@@ -28,18 +14,7 @@ export function paste(ctl: FieldController, e: ClipboardEvent) {
   e.preventDefault();
   e.stopPropagation();
   ctl.flush();
-  const { view } = ctl;
-  const target = ctl.target();
-  if (!target) return;
-  const at = target.block ? view.state.doc.lineAt(target.end).to : target.end;
-  const insert = target.block ? `\n${text.replace(/^\n+/, "")}` : text;
-  view.dispatch({
-    changes: { from: at, insert },
-    selection: { anchor: at + insert.length },
-    scrollIntoView: true,
-    userEvent: "input.paste",
-  });
-  view.focus();
+  pasteBeside(ctl.view, ctl.target(), text);
 }
 
 /** Copied LaTeX as the note would hold it, without the `\displaylines`
