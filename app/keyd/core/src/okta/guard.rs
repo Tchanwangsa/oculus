@@ -23,6 +23,8 @@ mod tests;
 
 pub(super) use record::{with_record, AttemptRecord};
 pub use trigger::Trigger;
+#[cfg(test)]
+use trigger::ALL;
 
 /// The least time between the start of one attempt and the next, whoever asks.
 pub(super) const MIN_SPACING: u64 = 60;

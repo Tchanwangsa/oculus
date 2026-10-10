@@ -85,8 +85,8 @@ fn a_lockout_pauses_automatic_sign_in_until_a_manual_success() {
 
 #[test]
 fn no_two_attempts_of_any_trigger_start_within_a_minute() {
-    for first in [Trigger::Manual, Trigger::Startup, Trigger::Browser] {
-        for second in [Trigger::Manual, Trigger::Startup, Trigger::Browser] {
+    for first in ALL {
+        for second in ALL {
             let mut r = AttemptRecord::default();
             attempt(&mut r, first, T, ok());
             let Err(LoginError::Waiting(secs)) = admit(&mut r, second, APP, T + 59) else {
@@ -98,6 +98,53 @@ fn no_two_attempts_of_any_trigger_start_within_a_minute() {
             assert!(admit(&mut r, Trigger::Manual, APP, T + 60).is_ok());
         }
     }
+}
+
+#[test]
+fn a_forward_attempt_is_automatic_in_every_rule() {
+    // The back-off after a failure.
+    let mut r = AttemptRecord::default();
+    attempt(&mut r, Trigger::Forward, T, bad_totp());
+    assert!(matches!(
+        admit(&mut r, Trigger::Forward, APP, T + 599),
+        Err(LoginError::Waiting(1))
+    ));
+    assert!(admit(&mut r, Trigger::Forward, CLI, T + 600).is_ok());
+
+    // A success is waited out too.
+    let mut r = AttemptRecord::default();
+    attempt(&mut r, Trigger::Forward, T, ok());
+    assert!(matches!(
+        admit(&mut r, Trigger::Forward, APP, T + 59),
+        Err(LoginError::Waiting(541))
+    ));
+
+    // A pause stops it for either role, and a manual attempt from the app lifts it.
+    let mut r = AttemptRecord::default();
+    attempt(
+        &mut r,
+        Trigger::Forward,
+        T,
+        Err(LoginError::Locked("Too many attempts".into())),
+    );
+    for role in [APP, CLI] {
+        assert!(matches!(
+            admit(&mut r, Trigger::Forward, role, T + 7 * 3600),
+            Err(LoginError::Paused(_))
+        ));
+    }
+    attempt(&mut r, Trigger::Manual, T + 7 * 3600, ok());
+    assert!(admit(&mut r, Trigger::Forward, CLI, T + 8 * 3600).is_ok());
+
+    // A damaged record refuses it.
+    let mut r = AttemptRecord {
+        damaged: Some("is damaged".into()),
+        ..AttemptRecord::default()
+    };
+    assert!(matches!(
+        admit(&mut r, Trigger::Forward, APP, T),
+        Err(LoginError::Paused(_))
+    ));
 }
 
 #[test]
