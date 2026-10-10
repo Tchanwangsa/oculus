@@ -23,7 +23,10 @@ use crate::parser::parse_node::{
 };
 use crate::spacing_data::Measurement;
 use crate::style::{DISPLAY, SCRIPT, Style, TEXT};
-use crate::types::{BreakToken, CssProperty, ParseError, ParseErrorKind, Token};
+use crate::types::{
+    BreakToken, CssProperty, ErrorLocationProvider as _, ParseError, ParseErrorKind,
+    SourceLocation, Token,
+};
 use crate::utils::{push_and_get_mut, push_and_get_ref};
 use crate::{ClassList, KatexContext, build_html, build_mathml, units};
 use alloc::borrow::Cow;
@@ -178,17 +181,33 @@ pub fn parse_array(
             Some(&BreakToken::DoubleBackslash)
         };
         let cell = parser.parse_expression(false, break_token)?;
+        // With source mapping on, a cell spans its content; an empty one is
+        // the empty range just before its terminator (`&`, `\\`, `\end`),
+        // where typed content would go.
+        let cell_loc = if parser.settings.source_map {
+            cell.iter()
+                .fold(None, |span, node| SourceLocation::cover(span, node.loc()))
+                .or_else(|| {
+                    parser
+                        .next_token
+                        .as_ref()
+                        .and_then(|token| token.loc.as_ref())
+                        .map(SourceLocation::start_point)
+                })
+        } else {
+            None
+        };
         parser.gullet.end_group()?;
         parser.gullet.begin_group();
 
         let cell = ParseNode::Styling(ParseNodeStyling {
             reset_font: true,
             mode: parser.mode,
-            loc: None,
+            loc: cell_loc.clone(),
             style,
             body: vec![ParseNode::OrdGroup(ParseNodeOrdGroup {
                 mode: parser.mode,
-                loc: None,
+                loc: cell_loc,
                 body: cell,
                 semisimple: None,
             })],

@@ -87,6 +87,22 @@ export async function renderWasm(steps: Step[], pkg: string): Promise<{ answers:
   return { answers, checks };
 }
 
+/** `step` with the fork's source mapping on (the binding's `sourceMap`,
+ *  not a KaTeX option). */
+export function withSourceMap(step: Step): Step {
+  return { tex: step.tex, options: { ...step.options, sourceMap: true } };
+}
+
+/** The fork's answers, from the native bin or the wasm build. */
+export async function renderFork(
+  steps: Step[],
+  engine: "native" | "wasm",
+  where: { bin: string; pkg: string },
+): Promise<{ answers: Answer[]; checks?: WasmChecks }> {
+  if (engine === "wasm") return renderWasm(steps, where.pkg);
+  return { answers: await renderNative(steps, where.bin) };
+}
+
 /** The native bin's typing probe: each formula's every prefix, panics only. */
 export async function probePrefixes(
   steps: Step[],

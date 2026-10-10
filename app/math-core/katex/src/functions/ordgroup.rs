@@ -9,6 +9,7 @@ use crate::dom_tree::HtmlDomNode;
 use crate::mathml_tree::MathDomNode;
 use crate::options::Options;
 use crate::parser::parse_node::{AnyParseNode, NodeType, ParseNodeOrdGroup};
+use crate::source_map;
 use crate::types::{ParseError, ParseErrorKind};
 use crate::{KatexContext, build_html, build_mathml, make_fragment};
 
@@ -57,13 +58,20 @@ fn html_builder(
         Ok(make_fragment(body).into())
     } else {
         // Use makeSpan with "mord" class
-        let body = build_html::build_expression(
+        let mut body = build_html::build_expression(
             ctx,
             &group.body,
             options,
             build_html::GroupType::True,
             (None, None),
         )?;
+        // An explicit empty group (`{}`, `\frac{}{}`'s parts, an empty cell)
+        // is a slot the edit field draws.
+        if group.body.is_empty()
+            && let Some(placeholder) = source_map::placeholder(ctx, options, group.loc.as_ref())?
+        {
+            body.push(placeholder.into());
+        }
         let span = make_span("mord", body, Some(options), None);
         Ok(span.into())
     }

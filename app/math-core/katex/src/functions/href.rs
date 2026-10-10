@@ -50,7 +50,11 @@ pub fn define_href(ctx: &mut crate::KatexContext) {
 
             // Check trust settings
             if !context.parser.settings.is_trusted(&mut trust_ctx) {
-                return Ok(context.parser.format_unsupported_cmd("\\href").into());
+                let loc = context.loc();
+                return Ok(context
+                    .parser
+                    .format_unsupported_cmd("\\href", loc.as_ref())
+                    .into());
             }
 
             Ok(AnyParseNode::Href(ParseNodeHref {
@@ -95,7 +99,11 @@ pub fn define_href(ctx: &mut crate::KatexContext) {
 
             // Check trust settings
             if !context.parser.settings.is_trusted(&mut trust_ctx) {
-                return Ok(context.parser.format_unsupported_cmd("\\url").into());
+                let loc = context.loc();
+                return Ok(context
+                    .parser
+                    .format_unsupported_cmd("\\url", loc.as_ref())
+                    .into());
             }
 
             // Process URL characters, replacing ~ with \textasciitilde

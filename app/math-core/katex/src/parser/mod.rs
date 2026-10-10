@@ -13,10 +13,14 @@ use crate::{
     parser::parse_node::{AnyParseNode, NodeType, ParseNode, ParseNodeSize},
     style::TEXT,
     symbols::{Group, NonAtom},
-    types::{ArgType, BreakToken, ErrorLocationProvider, Mode, ParseErrorKind, Spec, Token},
+    types::{
+        ArgType, BreakToken, ErrorLocationProvider, Mode, ParseErrorKind, SourceLocation, Spec,
+        Token,
+    },
     unicode::{UNICODE_SYMBOLS, get_accent_mapping, supported_codepoint},
 };
 
+mod node_locs;
 pub mod parse_node;
 use crate::spacing_data::MeasurementOwned;
 use crate::unicode::is_unicode_subscript;
@@ -402,7 +406,7 @@ impl<'a> Parser<'a> {
         }
 
         // Try to parse the input and ensure groups are closed even on error.
-        let body = match self.parse_expression(false, None) {
+        let mut body = match self.parse_expression(false, None) {
             Ok(b) => b,
             Err(e) => {
                 self.gullet.end_groups();
@@ -424,6 +428,12 @@ impl<'a> Parser<'a> {
 
         // Close any leftover groups
         self.gullet.end_groups();
+
+        if self.settings.source_map {
+            for node in &mut body {
+                node.cover_children();
+            }
+        }
 
         // Wrap result in OrdGroup to match KaTeX's top-level structure
         Ok(body)
@@ -678,6 +688,10 @@ impl<'a> Parser<'a> {
 
         let mut superscript = None;
         let mut subscript = None;
+        // With source mapping on: the first script token, where a SupSub
+        // without a base starts.
+        let source_map = self.settings.source_map;
+        let mut script_start: Option<SourceLocation> = None;
 
         // 2) Handle superscripts/subscripts chain: ^, _, ', and Unicode sub/sup
         // In text mode, raw ^/_ should error (like KaTeX); we implement minimal
@@ -685,6 +699,12 @@ impl<'a> Parser<'a> {
         loop {
             self.consume_spaces()?; // math mode ignores spaces, but safe in both
             let token = self.fetch()?;
+            if source_map
+                && script_start.is_none()
+                && matches!(token.text.as_str(), "^" | "_" | "'")
+            {
+                script_start.clone_from(&token.loc);
+            }
             match token.text.as_str() {
                 text if matches!(text, "\\limits" | "\\nolimits") => {
                     // Handle \limits and \nolimits
@@ -730,8 +750,18 @@ impl<'a> Parser<'a> {
                         ));
                     }
                     let mut n = 1;
+                    // Each prime's own location, with source mapping on.
+                    let mut prime_locs = Vec::new();
+                    if source_map {
+                        prime_locs.push(token.loc.clone());
+                    }
                     self.consume();
-                    while self.fetch()?.text == "'" {
+                    while let next = self.fetch()?
+                        && next.text == "'"
+                    {
+                        if source_map {
+                            prime_locs.push(next.loc.clone());
+                        }
                         n += 1;
                         self.consume();
                     }
@@ -744,32 +774,47 @@ impl<'a> Parser<'a> {
                         n,
                     )
                     .collect::<Vec<ParseNode>>();
+                    for (prime, loc) in primes.iter_mut().zip(prime_locs) {
+                        *prime.loc_mut() = loc;
+                    }
                     if self.fetch()?.text == "^" {
                         primes.push(self.handle_sup_subscript("superscript")?);
                     }
-                    superscript = Some(ParseNode::OrdGroup(parse_node::ParseNodeOrdGroup {
+                    let mut primes = ParseNode::OrdGroup(parse_node::ParseNodeOrdGroup {
                         mode: self.mode,
                         loc: None,
                         body: primes,
                         semisimple: None,
-                    }));
+                    });
+                    if source_map {
+                        primes.cover_children();
+                    }
+                    superscript = Some(primes);
                 }
                 text => {
                     if let Some(ch) = text.chars().next()
                         && let Some(&mapped) = U_SUBS_AND_SUPS.get(&ch)
                     {
                         let is_sub = is_unicode_subscript(ch);
-                        let mut subsup_tokens = vec![Token::new(mapped, None)];
+                        // With source mapping on, each mapped token keeps the
+                        // location of the character it stands for.
+                        let first_loc = if source_map { token.loc.clone() } else { None };
+                        if source_map && script_start.is_none() {
+                            script_start.clone_from(&first_loc);
+                        }
+                        let mut subsup_tokens = vec![Token::new(mapped, first_loc)];
                         self.consume();
                         loop {
-                            let Some(c) = self.fetch()?.text.as_str().chars().next() else {
+                            let next = self.fetch()?;
+                            let Some(c) = next.text.as_str().chars().next() else {
                                 break;
                             };
 
                             if let Some(&mapped) = U_SUBS_AND_SUPS.get(&c)
                                 && is_sub == is_unicode_subscript(c)
                             {
-                                subsup_tokens.push(Token::new(mapped, None));
+                                let loc = if source_map { next.loc.clone() } else { None };
+                                subsup_tokens.push(Token::new(mapped, loc));
                                 self.consume();
                             } else {
                                 break;
@@ -777,21 +822,19 @@ impl<'a> Parser<'a> {
                         }
                         subsup_tokens.reverse();
                         let body = self.subparse(subsup_tokens)?;
+                        let mut group = ParseNode::OrdGroup(parse_node::ParseNodeOrdGroup {
+                            mode: Mode::Math,
+                            loc: None,
+                            body,
+                            semisimple: None,
+                        });
+                        if source_map {
+                            group.cover_children();
+                        }
                         if is_sub {
-                            subscript = Some(ParseNode::OrdGroup(parse_node::ParseNodeOrdGroup {
-                                mode: Mode::Math,
-                                loc: None,
-                                body,
-                                semisimple: None,
-                            }));
+                            subscript = Some(group);
                         } else {
-                            superscript =
-                                Some(ParseNode::OrdGroup(parse_node::ParseNodeOrdGroup {
-                                    mode: Mode::Math,
-                                    loc: None,
-                                    body,
-                                    semisimple: None,
-                                }));
+                            superscript = Some(group);
                         }
                     } else {
                         // If it wasn't ^, _, or ', stop parsing
@@ -803,12 +846,24 @@ impl<'a> Parser<'a> {
         }
 
         if superscript.is_some() || subscript.is_some() {
+            // From the base (or the first script token when there is none)
+            // to the end of the last script.
+            let loc = if source_map {
+                [base_opt.as_ref(), superscript.as_ref(), subscript.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .fold(script_start, |span, node| {
+                        SourceLocation::cover(span, node.loc())
+                    })
+            } else {
+                None
+            };
             return Ok(Some(ParseNode::SupSub(parse_node::ParseNodeSupSub {
                 base: base_opt.map(Box::new),
                 sup: superscript.map(Box::new),
                 sub: subscript.map(Box::new),
                 mode: self.mode,
-                loc: None,
+                loc,
             })));
         }
 
@@ -851,8 +906,15 @@ impl<'a> Parser<'a> {
             ));
         };
 
-        let numer_node = wrap_ordgroup(numer_body, self.mode);
-        let denom_node = wrap_ordgroup(denom_body, self.mode);
+        let mut numer_node = wrap_ordgroup(numer_body, self.mode);
+        let mut denom_node = wrap_ordgroup(denom_body, self.mode);
+        if self.settings.source_map {
+            // An empty side sits against the operator: the numerator just
+            // before it, the denominator just after it.
+            let infix_loc = infix_node.loc();
+            numer_node.cover_children_or(infix_loc.map(SourceLocation::start_point));
+            denom_node.cover_children_or(infix_loc.map(SourceLocation::end_point));
+        }
 
         let node = if func_name == r"\\abovefrac" {
             self.call_function(
@@ -1015,7 +1077,7 @@ impl<'a> Parser<'a> {
         Ok(Some(ParseNode::ColorToken(
             parse_node::ParseNodeColorToken {
                 mode: self.mode,
-                loc: None,
+                loc: self.mapped_loc(tok.loc.as_ref()),
                 color: TokenText::from(text),
             },
         )))
@@ -1111,7 +1173,7 @@ impl<'a> Parser<'a> {
         }
         Ok(Some(ParseNodeSize {
             mode: self.mode,
-            loc: None,
+            loc: self.mapped_loc(res.loc.as_ref()),
             value: data,
             is_blank,
         }))
@@ -1148,7 +1210,7 @@ impl<'a> Parser<'a> {
         }
         Ok(Some(ParseNode::Url(parse_node::ParseNodeUrl {
             mode: self.mode,
-            loc: None,
+            loc: self.mapped_loc(tok.loc.as_ref()),
             url,
         })))
     }
@@ -1204,7 +1266,7 @@ impl<'a> Parser<'a> {
                     Ok(Some(ParseNode::Styling(parse_node::ParseNodeStyling {
                         reset_font: true,
                         mode: group.mode(),
-                        loc: None,
+                        loc: self.mapped_loc(group.loc()),
                         style: TEXT,
                         body: vec![group],
                     })))
@@ -1214,7 +1276,7 @@ impl<'a> Parser<'a> {
                 if let Some(t) = token {
                     Ok(Some(ParseNode::Raw(parse_node::ParseNodeRaw {
                         mode: Mode::Text,
-                        loc: None,
+                        loc: self.mapped_loc(t.loc.as_ref()),
                         string: t.text,
                     })))
                 } else {
@@ -1293,7 +1355,10 @@ impl<'a> Parser<'a> {
                         &first_token,
                     ));
                 }
-                result = Some(self.format_unsupported_cmd(text).into());
+                result = Some(
+                    self.format_unsupported_cmd(text, first_token.loc.as_ref())
+                        .into(),
+                );
                 self.consume();
             }
 
@@ -1302,28 +1367,60 @@ impl<'a> Parser<'a> {
     }
 
     /// Convert textual input of an unsupported command into a color node
-    /// containing a text node
+    /// containing a text node. `loc` is the command's source; with source
+    /// mapping on, each character takes its own range of it when the source
+    /// spells `text` out, else the whole of it.
     #[must_use]
-    pub fn format_unsupported_cmd(&self, text: &str) -> parse_node::ParseNodeColor {
+    pub fn format_unsupported_cmd(
+        &self,
+        text: &str,
+        loc: Option<&SourceLocation>,
+    ) -> parse_node::ParseNodeColor {
+        let loc = self.mapped_loc(loc);
+        let spelled = loc
+            .as_ref()
+            .filter(|loc| loc.input.get(loc.start..loc.end) == Some(text));
         let mut textord_array: Vec<AnyParseNode> = Vec::with_capacity(text.chars().count());
-        for ch in text.chars() {
+        for (offset, ch) in text.char_indices() {
+            let char_loc = spelled.map_or_else(
+                || loc.clone(),
+                |loc| {
+                    let start = loc.start + offset;
+                    Some(SourceLocation::new(
+                        loc.input_arc(),
+                        start,
+                        start + ch.len_utf8(),
+                    ))
+                },
+            );
             textord_array.push(AnyParseNode::TextOrd(parse_node::ParseNodeTextOrd {
                 mode: Mode::Text,
-                loc: None,
+                loc: char_loc,
                 text: TokenText::from(ch.to_string()),
             }));
         }
         let text_node = AnyParseNode::Text(parse_node::ParseNodeText {
             mode: self.mode,
-            loc: None,
+            loc: loc.clone(),
             body: textord_array,
             font: None,
         });
         parse_node::ParseNodeColor {
             mode: self.mode,
-            loc: None,
+            loc,
             color: self.settings.error_color.clone(),
             body: vec![text_node],
+        }
+    }
+
+    /// `loc` when source mapping is on; `None` otherwise, so display output
+    /// and error messages keep the locations they always had.
+    #[must_use]
+    pub fn mapped_loc(&self, loc: Option<&SourceLocation>) -> Option<SourceLocation> {
+        if self.settings.source_map {
+            loc.cloned()
+        } else {
+            None
         }
     }
 
@@ -1655,11 +1752,23 @@ impl<'a> Parser<'a> {
         if let Some(func) = func
             && let Some(handler) = func.handler
         {
+            // With source mapping on, the node covers the whole invocation:
+            // the control word through its last argument.
+            let invocation = if self.settings.source_map {
+                args.iter()
+                    .chain(opt_args.iter().flatten())
+                    .fold(token.and_then(|t| t.loc.clone()), |span, arg| {
+                        SourceLocation::cover(span, arg.loc())
+                    })
+            } else {
+                None
+            };
             let context = FunctionContext {
                 func_name: name,
                 parser: self,
                 token,
                 break_on_token_text,
+                invocation,
             };
             return handler(context, args, opt_args);
         }

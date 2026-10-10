@@ -17,7 +17,7 @@ use crate::parser::parse_node::{
     ParseNodeLeftRightRight, ParseNodeMiddle, check_symbol_node_type,
 };
 use crate::types::Mode;
-use crate::types::{ArgType, ParseError, ParseErrorKind};
+use crate::types::{ArgType, ParseError, ParseErrorKind, SourceLocation};
 use crate::units::make_em;
 use crate::{ClassList, KatexContext, build_html, build_mathml};
 
@@ -153,6 +153,14 @@ pub fn define_leftright(ctx: &mut KatexContext) {
                 return Err(ParseError::new(ParseErrorKind::ExpectedRightAfterLeft));
             };
 
+            // With source mapping on, the node runs through `\right`'s
+            // delimiter.
+            let loc = if parser.settings.source_map {
+                SourceLocation::cover(loc, right_node.loc.as_ref())
+            } else {
+                loc
+            };
+
             Ok(ParseNode::LeftRight(ParseNodeLeftRight {
                 mode: parser.mode,
                 loc,
@@ -216,10 +224,9 @@ pub fn define_middle(ctx: &mut KatexContext) {
             let delim_text = check_delimiter(args.first(), &context)?;
             if context.parser.leftright_depth == 0.0 {
                 return Err(match args.first() {
-                    Some(delim) => ParseError::with_token(
-                        ParseErrorKind::MiddleWithoutPrecedingLeft,
-                        delim,
-                    ),
+                    Some(delim) => {
+                        ParseError::with_token(ParseErrorKind::MiddleWithoutPrecedingLeft, delim)
+                    }
                     None => ParseError::new(ParseErrorKind::MiddleWithoutPrecedingLeft),
                 });
             }

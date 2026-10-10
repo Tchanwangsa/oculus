@@ -32,6 +32,7 @@ pub mod options;
 pub mod parse_tree;
 /// Core parsing logic for LaTeX mathematical expressions.
 pub mod parser;
+pub mod source_map;
 pub mod spacing_data;
 pub mod stretchy;
 pub mod style;

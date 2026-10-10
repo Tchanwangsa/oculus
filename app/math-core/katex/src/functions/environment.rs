@@ -10,7 +10,7 @@ use crate::KatexContext;
 use crate::define_environment::EnvContext;
 use crate::define_function::{FunctionDefSpec, FunctionPropSpec};
 use crate::parser::parse_node::{AnyParseNode, NodeType, ParseNode, ParseNodeEnvironment};
-use crate::types::{ArgType, Mode, ParseError, ParseErrorKind};
+use crate::types::{ArgType, Mode, ParseError, ParseErrorKind, SourceLocation};
 
 /// Environment delimiters. HTML/MathML rendering is defined in the
 /// corresponding defineEnvironment definitions.
@@ -25,6 +25,8 @@ pub fn define_environment(ctx: &mut KatexContext) {
         },
         handler: Some(|context, args, _opt_args| {
             let func_name = context.func_name;
+            // `\begin{name}` or `\end{name}`; read only with source mapping on.
+            let loc = context.loc();
             let parser = context.parser;
             let ParseNode::OrdGroup(name_group) = &args[0] else {
                 return Err(ParseError::new(ParseErrorKind::InvalidEnvironmentName {
@@ -48,7 +50,7 @@ pub fn define_environment(ctx: &mut KatexContext) {
             if func_name != "\\begin" {
                 let env = ParseNodeEnvironment {
                     mode: parser.mode,
-                    loc: None,
+                    loc: parser.mapped_loc(loc.as_ref()),
                     name: env_name.clone(),
                     // right_delim: None,
                     // size: None,
@@ -75,7 +77,7 @@ pub fn define_environment(ctx: &mut KatexContext) {
                 parser,
                 env_name: env_name.clone(),
             };
-            let result = (env_spec.handler)(env_context, args, opt_args)?;
+            let mut result = (env_spec.handler)(env_context, args, opt_args)?;
             parser.expect("\\end", false)?;
             let end_name_token = parser.next_token.clone();
             let Some(ParseNode::Environment(end_node)) = parser.parse_function(None, None)? else {
@@ -90,6 +92,13 @@ pub fn define_environment(ctx: &mut KatexContext) {
                     begin: env_name,
                     end: end_node.name,
                 }));
+            }
+            // With source mapping on, the environment's node (and a
+            // delimiter wrapper's array) runs from `\begin` through `\end{…}`.
+            if parser.settings.source_map
+                && let Some(span) = SourceLocation::cover(loc, end_node.loc.as_ref())
+            {
+                result.widen_wrappers(&span);
             }
             Ok(result)
         }),

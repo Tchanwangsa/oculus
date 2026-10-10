@@ -7,7 +7,7 @@ use crate::context::KatexContext;
 use crate::define_function::{FunctionDefSpec, FunctionPropSpec};
 use crate::parser::parse_node::{NodeType, ParseNode, ParseNodeStyling};
 use crate::style::TEXT;
-use crate::types::{BreakToken, Mode, ParseError, ParseErrorKind};
+use crate::types::{BreakToken, Mode, ParseError, ParseErrorKind, SourceLocation};
 
 /// Register all math mode switching functions
 pub fn define_math(ctx: &mut KatexContext) {
@@ -45,12 +45,19 @@ fn define_math_open(ctx: &mut KatexContext) {
                     found: token.text.to_owned_string(),
                 }));
             }
+            // With source mapping on, the node runs through the closing token.
+            let close_loc = token.loc.clone();
+            let loc = if context.parser.settings.source_map {
+                SourceLocation::cover(context.loc(), close_loc.as_ref())
+            } else {
+                context.loc()
+            };
             context.parser.consume();
             context.parser.switch_mode(outer_mode);
             Ok(ParseNode::Styling(ParseNodeStyling {
                 reset_font: true,
                 mode: context.parser.mode,
-                loc: context.loc(),
+                loc,
                 style: TEXT,
                 body,
             }))

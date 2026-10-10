@@ -6,7 +6,7 @@ use crate::{
         Parser,
         parse_node::{ParseNode, ParseNodeTag},
     },
-    types::{ParseErrorKind, Token},
+    types::{ParseErrorKind, SourceLocation, Token},
 };
 
 /// Parses an expression using a Parser, then returns the parsed result.
@@ -29,11 +29,23 @@ pub fn parse_tree(
         if !settings.display_mode {
             return Err(ParseError::new(ParseErrorKind::TagNotAllowedInInlineMode));
         }
+        let mut tag = parser.subparse(vec![Token::new("\\df@tag", None)])?;
+        // With source mapping on, the wrapper is the whole formula.
+        let loc = settings.source_map.then(|| {
+            let input = parser.gullet.input_arc();
+            let len = input.len();
+            SourceLocation::new(input, 0, len)
+        });
+        if settings.source_map {
+            for node in &mut tag {
+                node.cover_children();
+            }
+        }
         let tree = vec![ParseNode::Tag(ParseNodeTag {
             mode: Mode::Text,
-            loc: None,
+            loc,
             body: tree,
-            tag: parser.subparse(vec![Token::new("\\df@tag", None)])?,
+            tag,
         })];
 
         return Ok(tree);

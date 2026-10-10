@@ -9,6 +9,7 @@ use crate::dom_tree::HtmlDomNode;
 use crate::mathml_tree::MathDomNode;
 use crate::options::{FontShape, FontWeight, Options};
 use crate::parser::parse_node::{NodeType, ParseNode, ParseNodeText};
+use crate::source_map;
 use crate::types::{ArgType, Mode, ParseError, ParseErrorKind};
 use crate::{ClassList, build_html, build_mathml};
 use phf::phf_map;
@@ -124,13 +125,19 @@ fn html_builder(
     };
 
     let new_options = options_with_font(group, options);
-    let inner = build_html::build_expression(
+    let mut inner = build_html::build_expression(
         ctx,
         &group.body,
         &new_options,
         build_html::GroupType::True,
         (None, None),
     )?;
+    // An empty `\text{}` is a slot the edit field draws.
+    if group.body.is_empty()
+        && let Some(placeholder) = source_map::placeholder(ctx, &new_options, group.loc.as_ref())?
+    {
+        inner.push(placeholder.into());
+    }
     Ok(make_span(
         ClassList::Const(&["mord", "text"]),
         inner,

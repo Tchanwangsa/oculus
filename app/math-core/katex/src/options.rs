@@ -5,12 +5,14 @@
 //! objects are immutable and provide methods for creating new Options with
 //! different properties when recursing through the parsing process.
 
+use crate::source_map::SourceInput;
 use crate::style::TEXT;
 use crate::{
     font_metrics::{FONT_METRICS, FontMetrics},
     style::Style,
 };
 use alloc::borrow::Cow;
+use alloc::sync::Arc;
 use bon::bon;
 use core::cmp;
 use core::ptr;
@@ -130,6 +132,9 @@ pub struct Options {
     pub max_size: f64,
     /// Minimum rule thickness
     pub min_rule_thickness: f64,
+    /// The formula's input when source mapping is on
+    /// (`Settings::source_map`; see `source_map`), else `None`
+    pub source_map: Option<Arc<SourceInput>>,
 }
 
 #[bon]
@@ -148,6 +153,7 @@ impl Options {
         font_shape: Option<FontShape>,
         max_size: f64,
         min_rule_thickness: f64,
+        source_map: Option<Arc<SourceInput>>,
     ) -> Self {
         let size = size.unwrap_or(Self::BASESIZE);
         let multiplier_idx = cmp::min(size, SIZE_MULTIPLIERS.len());
@@ -165,6 +171,7 @@ impl Options {
             size_multiplier,
             max_size,
             min_rule_thickness,
+            source_map,
         }
     }
 }
@@ -184,6 +191,7 @@ impl Default for Options {
             size_multiplier: SIZE_MULTIPLIERS[Self::BASESIZE - 1],
             max_size: 1000.0,
             min_rule_thickness: 0.04,
+            source_map: None,
         }
     }
 }

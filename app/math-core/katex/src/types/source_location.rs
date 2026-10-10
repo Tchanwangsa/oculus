@@ -233,6 +233,40 @@ impl SourceLocation {
             _ => None,
         }
     }
+
+    /// The smallest range holding both locations when they point into the
+    /// same input; otherwise `first` (or `second` when `first` is `None`).
+    /// Unlike [`Self::range`], the order of the two does not matter and a
+    /// location in another input never discards the one already held.
+    #[must_use]
+    pub fn cover(first: Option<Self>, second: Option<&Self>) -> Option<Self> {
+        match (first, second) {
+            (None, second) => second.cloned(),
+            (Some(first), None) => Some(first),
+            (Some(first), Some(second)) => {
+                if !Arc::ptr_eq(&first.input, &second.input) {
+                    return Some(first);
+                }
+                Some(Self {
+                    start: first.start.min(second.start),
+                    end: first.end.max(second.end),
+                    input: first.input,
+                })
+            }
+        }
+    }
+
+    /// An empty location at this one's start.
+    #[must_use]
+    pub fn start_point(&self) -> Self {
+        Self::new(Arc::clone(&self.input), self.start, self.start)
+    }
+
+    /// An empty location at this one's end.
+    #[must_use]
+    pub fn end_point(&self) -> Self {
+        Self::new(Arc::clone(&self.input), self.end, self.end)
+    }
 }
 
 /// Trait for creating a `SourceLocation` range from two references.

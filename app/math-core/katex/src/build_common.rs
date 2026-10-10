@@ -12,6 +12,7 @@ use crate::font_metrics_data::CharacterMetrics;
 use crate::namespace::AttrMap;
 use crate::options::{FontShape, FontWeight, Options};
 use crate::parser::parse_node::AnyParseNode;
+use crate::source_map;
 use crate::spacing_data::Measurement;
 use crate::symbols::{Font, Mode, is_ligature};
 use crate::tree::DocumentFragment;
@@ -722,20 +723,39 @@ fn can_combine_symbols(prev: &SymbolNode, next: &SymbolNode) -> bool {
 
 /// Push a node into the vector, merging it into the previous symbol when
 /// possible.
+///
+/// With source mapping on, glyphs from different nodes stay apart so each
+/// keeps its own range (unless `next` is a combining mark on `prev`). The
+/// pair is still laid out as the merged run: the earlier glyph drops its
+/// italic correction, and `SymbolNode::joins_prev` keeps glue and line breaks
+/// out from between them.
 #[inline]
 pub fn push_combine_chars(chars: &mut Vec<HtmlDomNode>, node: HtmlDomNode) {
     match node {
-        HtmlDomNode::Symbol(next_sym) => {
+        HtmlDomNode::Symbol(mut next_sym) => {
             if let Some(HtmlDomNode::Symbol(prev_sym)) = chars.last_mut()
                 && can_combine_symbols(prev_sym, &next_sym)
             {
-                prev_sym.height = prev_sym.height.max(next_sym.height);
-                prev_sym.depth = prev_sym.depth.max(next_sym.depth);
-                prev_sym.italic = next_sym.italic;
-                prev_sym.text.push_str(&next_sym.text);
-            } else {
-                chars.push(HtmlDomNode::Symbol(next_sym));
+                if prev_sym.source == next_sym.source
+                    || source_map::continues_cluster(
+                        prev_sym.source,
+                        next_sym.source,
+                        &next_sym.text,
+                    )
+                {
+                    prev_sym.height = prev_sym.height.max(next_sym.height);
+                    prev_sym.depth = prev_sym.depth.max(next_sym.depth);
+                    prev_sym.italic = next_sym.italic;
+                    prev_sym.text.push_str(&next_sym.text);
+                    if let (Some(prev), Some(next)) = (&mut prev_sym.source, next_sym.source) {
+                        prev.end = next.end;
+                    }
+                    return;
+                }
+                prev_sym.italic = 0.0;
+                next_sym.joins_prev = true;
             }
+            chars.push(HtmlDomNode::Symbol(next_sym));
         }
         other => chars.push(other),
     }

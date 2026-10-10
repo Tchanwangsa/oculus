@@ -6,8 +6,9 @@
 //!      `{"id":…, "panic":"…"}` when the fork panics.
 //!
 //! Options are KaTeX JS's names and defaults (`strict` defaults to "warn",
-//! as in KaTeX JS; the fork's own default is "ignore"). `options.displayMode`
-//! wins over the top-level `display`. `oracle/render.ts` drives this.
+//! as in KaTeX JS; the fork's own default is "ignore"), plus the binding's
+//! `sourceMap`. `options.displayMode` wins over the top-level `display`.
+//! `oracle/render.ts` drives this.
 //!
 //! `oracle --prefixes` is the typing probe: it renders every char-boundary
 //! prefix of each request's `tex` with `throwOnError` forced on and answers
@@ -48,6 +49,7 @@ struct Options {
     strict: Option<Value>,
     macros: Option<BTreeMap<String, String>>,
     output: Option<String>,
+    source_map: Option<bool>,
 }
 
 fn strict(value: Option<&Value>) -> Result<StrictSetting, String> {
@@ -85,6 +87,7 @@ fn settings(request: &Request) -> Result<Settings, String> {
         .strict(strict(options.strict.as_ref())?)
         .output(output(options.output.as_deref())?)
         .macros(macros)
+        .source_map(options.source_map.unwrap_or(false))
         .build())
 }
 

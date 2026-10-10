@@ -7,6 +7,7 @@ use crate::build_common::{make_span, push_combine_chars};
 use crate::dom_tree::{DomSpan, HtmlDomNode};
 use crate::options::Options;
 use crate::parser::parse_node::AnyParseNode;
+use crate::source_map;
 use crate::spacing_data::{SPACINGS, TIGHT_SPACINGS};
 use crate::types::ClassList;
 use crate::types::{CssProperty, ParseError, ParseErrorKind};
@@ -835,6 +836,11 @@ pub fn build_expression(
         ctx,
         &mut groups,
         &move |ctx: &KatexContext, node: &mut HtmlDomNode, prev: &mut HtmlDomNode| {
+            if let HtmlDomNode::Symbol(symbol) = node
+                && symbol.joins_prev
+            {
+                return Ok(None);
+            }
             let prev_type = get_type_of_dom_tree(prev, None);
             let type_opt = get_type_of_dom_tree(node, None);
             if let (Some(prev_type), Some(type_val)) = (prev_type, type_opt) {
@@ -899,6 +905,8 @@ pub fn build_expression(
 ///   - Scales height and depth by the size multiplier ratio
 ///   - Returns the wrapped node with adjusted dimensions
 /// - Returns the built node directly if no size adjustment is needed
+/// - With source mapping on, gives the result the node's source range
+///   (`source_map::tag`)
 ///
 /// # Error Handling
 /// Returns `ParseError` if:
@@ -924,7 +932,7 @@ pub fn build_group(
         }));
     };
 
-    if let Some(base_options) = base_options
+    let mut group_node = if let Some(base_options) = base_options
         && options.size != base_options.size
     {
         let mut group_node = make_span(
@@ -936,10 +944,15 @@ pub fn build_group(
         let multiplier = options.size_multiplier / base_options.size_multiplier;
         group_node.height *= multiplier;
         group_node.depth *= multiplier;
-        Ok(group_node.into())
+        group_node.into()
     } else {
-        Ok(group_node)
+        group_node
+    };
+
+    if let Some(range) = source_map::node_range(options, group) {
+        source_map::tag(&mut group_node, range);
     }
+    Ok(group_node)
 }
 
 /// Combine an array of HTML DOM nodes into an unbreakable HTML node of class
@@ -1064,6 +1077,11 @@ pub fn build_html(
                     nobreak = true;
                 }
                 parts.push(next);
+            }
+            if let Some(HtmlDomNode::Symbol(next)) = iter.peek()
+                && next.joins_prev
+            {
+                nobreak = true;
             }
             // Don't allow break if \nobreak among the post-operator glue.
             if !nobreak {

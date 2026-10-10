@@ -34,6 +34,10 @@ pub struct MacroExpander<'a> {
     lexer: Lexer<'a>,
     macros: Namespace<'a, MacroDefinition>,
     stack: Vec<Token>, // tokens in REVERSE order
+    /// With source mapping on, the span of the tokens popped since the macro
+    /// being expanded was: its name through its arguments, once they are
+    /// consumed (nested expansions fold theirs in).
+    consumed: Option<SourceLocation>,
     mode: Mode,
     /// No global object in Rust; pass context reference around
     ctx: &'a KatexContext,
@@ -55,6 +59,7 @@ impl<'a> MacroExpander<'a> {
             macros,
             mode,
             stack: Vec::new(),
+            consumed: None,
 
             ctx,
         }
@@ -64,6 +69,13 @@ impl<'a> MacroExpander<'a> {
     /// etc.).
     pub fn feed(&mut self, input: &str) {
         self.lexer = Lexer::new(Arc::from(input), self.settings);
+    }
+
+    /// The input the lexer reads, shared: what tokens lexed from the formula
+    /// point into.
+    #[must_use]
+    pub fn input_arc(&self) -> Arc<str> {
+        self.lexer.input_arc()
     }
 
     /// Switches between text and math modes
@@ -171,6 +183,12 @@ impl<'a> MacroExpander<'a> {
 
     /// Expand the next token only once if possible
     fn expand_once_internal(&mut self, expandable_only: bool) -> Result<Option<isize>, ParseError> {
+        let source_map = self.settings.source_map;
+        let outer_consumed = if source_map {
+            self.consumed.take()
+        } else {
+            None
+        };
         let top_token = self.pop_token()?;
         let name = top_token.text.as_str();
         let expansion = if top_token.noexpand == Some(true) {
@@ -179,8 +197,10 @@ impl<'a> MacroExpander<'a> {
             self.get_expansion(name)
         };
 
-        let expansion = match expansion {
-            Some(exp) if !(expandable_only && exp.unexpandable == Some(true)) => exp,
+        let (expansion, is_body) = match expansion {
+            Some((exp, is_body)) if !(expandable_only && exp.unexpandable == Some(true)) => {
+                (exp, is_body)
+            }
             _ => {
                 if expandable_only
                     && expansion.is_none()
@@ -194,6 +214,10 @@ impl<'a> MacroExpander<'a> {
                         &top_token,
                     ));
                 }
+                if source_map {
+                    // The name goes back unconsumed.
+                    self.consumed = outer_consumed;
+                }
                 self.push_token(top_token);
                 return Ok(None);
             }
@@ -203,6 +227,24 @@ impl<'a> MacroExpander<'a> {
         let mut tokens = expansion.tokens;
         let args =
             self.consume_args_with_delims(expansion.num_args, expansion.delimiters.as_ref())?;
+        let consumed = if source_map {
+            let consumed = self.consumed.take();
+            self.consumed = SourceLocation::cover(outer_consumed, consumed.as_ref());
+            consumed
+        } else {
+            None
+        };
+        if source_map && let Some(name_loc) = &top_token.loc {
+            // Body tokens take the invocation's span (name through last
+            // argument), not offsets into the body; pasted arguments keep
+            // theirs, as do passed-through tokens unless from the name's body.
+            let invocation = SourceLocation::cover(Some(name_loc.clone()), consumed.as_ref());
+            for token in &mut tokens {
+                if is_body || token.loc.as_ref() == Some(name_loc) {
+                    token.loc.clone_from(&invocation);
+                }
+            }
+        }
         if expansion.num_args > 0 {
             // Paste arguments in place of placeholders
             let mut i = (tokens.len() as isize) - 1;
@@ -273,8 +315,9 @@ impl<'a> MacroExpander<'a> {
         Ok(output)
     }
 
-    /// Compute expansion for a name
-    fn get_expansion(&mut self, name: &str) -> Option<MacroExpansion> {
+    /// Compute expansion for a name, and whether it is a macro body (text or
+    /// a definition's tokens) rather than tokens a built-in passed through.
+    fn get_expansion(&mut self, name: &str) -> Option<(MacroExpansion, bool)> {
         // If single character has a catcode other than 13 (active), don't
         // expand it
         if name.chars().count() == 1
@@ -289,20 +332,20 @@ impl<'a> MacroExpander<'a> {
 
         match definition {
             MacroDefinition::Function(f) => match f(self as &mut dyn MacroContextInterface) {
-                Ok(MacroExpansionResult::String(s)) => Some(self.string_to_expansion(&s)),
-                Ok(MacroExpansionResult::Expansion(e)) => Some(e),
-                Ok(MacroExpansionResult::Empty) => Some(MacroExpansion::default()),
+                Ok(MacroExpansionResult::String(s)) => Some((self.string_to_expansion(&s), true)),
+                Ok(MacroExpansionResult::Expansion(e)) => Some((e, false)),
+                Ok(MacroExpansionResult::Empty) => Some((MacroExpansion::default(), false)),
                 Err(_) => None,
             },
             MacroDefinition::StaticFunction(f) => match f(self as &mut dyn MacroContextInterface) {
-                Ok(MacroExpansionResult::String(s)) => Some(self.string_to_expansion(&s)),
-                Ok(MacroExpansionResult::Expansion(e)) => Some(e),
-                Ok(MacroExpansionResult::Empty) => Some(MacroExpansion::default()),
+                Ok(MacroExpansionResult::String(s)) => Some((self.string_to_expansion(&s), true)),
+                Ok(MacroExpansionResult::Expansion(e)) => Some((e, false)),
+                Ok(MacroExpansionResult::Empty) => Some((MacroExpansion::default(), false)),
                 Err(_) => None,
             },
-            MacroDefinition::StaticStr(s) => Some(self.string_to_expansion(s)),
-            MacroDefinition::String(s) => Some(self.string_to_expansion(&s)),
-            MacroDefinition::Expansion(e) => Some(e),
+            MacroDefinition::StaticStr(s) => Some((self.string_to_expansion(s), true)),
+            MacroDefinition::String(s) => Some((self.string_to_expansion(&s), true)),
+            MacroDefinition::Expansion(e) => Some((e, true)),
         }
     }
 
@@ -363,10 +406,14 @@ impl<'a> MacroContextInterface<'a> for MacroExpander<'a> {
 
     fn pop_token(&mut self) -> Result<Token, ParseError> {
         // No lookahead clone is needed when the token is immediately consumed.
-        match self.stack.pop() {
-            Some(token) => Ok(token),
-            None => self.lexer.lex(),
+        let token = match self.stack.pop() {
+            Some(token) => token,
+            None => self.lexer.lex()?,
+        };
+        if self.settings.source_map {
+            self.consumed = SourceLocation::cover(self.consumed.take(), token.loc.as_ref());
         }
+        Ok(token)
     }
 
     fn consume_spaces(&mut self) -> Result<(), ParseError> {

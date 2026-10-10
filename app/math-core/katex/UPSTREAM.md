@@ -88,3 +88,59 @@ for each (its `class`).
 - Tests: `tests/errors_spec.rs` expects the delimiter's text, as KaTeX's
   `errors-spec.ts` does; two `katex-error` snapshots carry the new title and
   style.
+
+### Source mapping
+
+Not in KaTeX: `Settings::source_map`, for the app's edit field. Off, the
+output is unchanged (the display oracle runs with it off); on, the HTML maps
+back to the source. `../oracle/render.ts --source-map` and
+`tests/source_map.rs` check it.
+
+- `src/source_map.rs` (new): `SourceInput` (the formula's input; a location
+  in any other text, such as an unretargeted macro body, is not mapped),
+  UTF-16 conversion, `tag`, the placeholder, `continues_cluster`.
+- `Options::source_map` holds the `SourceInput` when the setting is on
+  (`build_tree.rs` finds the parser's own input `Arc` in the tree).
+- `build_html::build_group` tags each built node with its range (after the
+  sizing wrapper): `data-s`/`data-e` attributes on spans, anchors and SVGs,
+  `SymbolNode::source` on glyphs (written as a span around the glyph), and
+  each unmapped child of a fragment. An element a builder passed up from its
+  child takes the outer node's range.
+- `build_common::push_combine_chars` merges glyphs only within one node's
+  range, or a combining mark onto its base. A pair kept apart only for its
+  ranges lays out as the merged run would: the earlier glyph drops its italic
+  correction, and `SymbolNode::joins_prev` keeps inter-atom glue
+  (`build_expression`) and line breaks (`build_html`) out from between them.
+- `SymbolNode` has a hand-written `Debug` that omits the new fields when
+  unset, so the spec tests' debug snapshots stand.
+- `functions/ordgroup.rs` and `functions/text.rs`: an explicit empty group
+  (`{}`, an empty cell) or `\text{}` draws the placeholder: AMS `\square`
+  (real metrics) with class `oc-placeholder` and a zero-width range just
+  inside its braces.
+- Parse-tree locations, every change gated on the setting: each node's
+  `loc` lies in the formula's own input and holds its children's.
+  `parser/node_locs.rs` (new) adds `AnyParseNode::loc_mut`,
+  `children`/`children_mut` and the widening helpers; `Parser::parse` ends
+  with `cover_children` over the tree; `SourceLocation::cover` joins two
+  ranges in either order.
+  - A function node spans its invocation, the control word through its last
+    argument (`FunctionContext::invocation`, what `context.loc()` returns);
+    `\left…\right` runs through `\right`'s delimiter, `\begin…\end{…}`
+    through `\end{…}` (a matrix's delimiter wrapper and its array both),
+    text-mode `$…$` through the closing `$`, an infix `\over` from
+    numerator to denominator.
+  - Macro body tokens (text bodies and `\def`/`\newcommand` definitions)
+    take the invocation's span (`MacroExpander::consumed`); pasted arguments
+    and tokens a built-in passes through keep theirs, except those from the
+    macro name's own body.
+  - Nodes the parser built without one get a location: primes, Unicode
+    scripts, SupSub (from its base, or its first script token), infix sides,
+    colour/size/URL/raw arguments, `\hbox`'s wrapper, unsupported commands
+    (`format_unsupported_cmd` takes the command's location;
+    `functions/includegraphics.rs` uses it instead of its own copy), array
+    and CD cells, CD arrows and labels, and `\tag`'s wrapper (the whole
+    formula). An empty side, cell or label is the empty range where its
+    content would go. `aligned`'s inserted `{}` has none.
+  - A control word keeps KaTeX's span, its trailing spaces included.
+  - `tests/source_locs.rs` checks nesting, the input, missing locations and
+    that only locations change.

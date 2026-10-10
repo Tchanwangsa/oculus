@@ -181,6 +181,11 @@ pub struct Settings {
     /// CSS color value used for rendering mathematical expressions.
     #[cfg_attr(feature = "wasm", wasm_bindgen(getter_with_clone))]
     pub color: Option<String>,
+    /// Map the HTML back to the source: `data-s`/`data-e` (UTF-16 offsets)
+    /// on each node's element, no glyph merging across nodes, and empty
+    /// groups drawn as placeholders. Off for display; the edit field turns
+    /// it on.
+    pub source_map: bool,
 }
 
 #[bon]
@@ -213,6 +218,7 @@ impl Settings {
     /// - `max_size`: `f64::INFINITY`
     /// - `max_expand`: `1000`
     /// - `global_group`: `false`
+    /// - `source_map`: `false`
     #[must_use]
     #[builder]
     pub fn new(
@@ -249,6 +255,8 @@ impl Settings {
         size_multiplier: Option<f64>,
         /// Color for mathematical content.
         color: Option<String>,
+        /// Map the HTML back to the source (edit mode).
+        source_map: Option<bool>,
     ) -> Self {
         Self {
             display_mode: display_mode.unwrap_or(false),
@@ -267,6 +275,7 @@ impl Settings {
             global_group: global_group.unwrap_or(false),
             size_multiplier: size_multiplier.unwrap_or(1.0),
             color,
+            source_map: source_map.unwrap_or(false),
         }
     }
 

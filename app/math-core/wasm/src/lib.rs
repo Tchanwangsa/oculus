@@ -5,7 +5,8 @@
 //! `renderToString`, plus `parseError`, the editor's parse gate.
 //!
 //! Options are read by hand, with KaTeX JS's names and defaults (`strict`
-//! is "warn", not the fork's "ignore"), and only those the app passes.
+//! is "warn", not the fork's "ignore"), and only those the app passes, plus
+//! our `sourceMap` for the edit field.
 //! Unknown keys are ignored; a known key of the wrong type throws a
 //! `TypeError`. `settings` mirrors the display oracle's, so its parity holds.
 //! No DOM `render`: the app only sets `innerHTML`, and web-sys stays out.
@@ -40,6 +41,12 @@ export interface MathOptions {
   macros?: Record<string, string>;
   /** Default "htmlAndMathml". */
   output?: "htmlAndMathml" | "html" | "mathml";
+  /** Not KaTeX's. Default false. True maps the HTML to the source for the
+   *  edit field: each node's element gets `data-s`/`data-e`, its range as
+   *  UTF-16 offsets into `tex`; glyphs of different nodes are not merged;
+   *  an empty group draws an `oc-placeholder` glyph with a zero-width
+   *  range. Display output must leave it off. */
+  sourceMap?: boolean;
 }
 "#;
 
@@ -149,6 +156,7 @@ fn settings(options: Option<Object>) -> Result<Settings, JsValue> {
         .strict(strict(options)?)
         .output(output(options)?)
         .macros(macros(options)?)
+        .source_map(bool_option(options, "sourceMap")?.unwrap_or(false))
         .build())
 }
 

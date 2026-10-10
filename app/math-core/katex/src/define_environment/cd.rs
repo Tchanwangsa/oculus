@@ -25,7 +25,10 @@ use crate::{
     },
     style::DISPLAY,
     symbols::Atom,
-    types::{BreakToken, Mode, ParseError, ParseErrorKind, TokenText},
+    types::{
+        BreakToken, ErrorLocationProvider as _, Mode, ParseError, ParseErrorKind, SourceLocation,
+        TokenText,
+    },
     utils::push_and_get_mut,
 };
 use phf::phf_map;
@@ -159,16 +162,25 @@ pub fn parse_cd(parser: &mut Parser) -> Result<AnyParseNode, ParseError> {
 
     let mut body = vec![Vec::new()];
     let mut row = &mut body[0];
+    let source_map = parser.settings.source_map;
 
     // Process parsed rows into cells and arrows
     for (i, row_nodes) in parsed_rows.iter().enumerate() {
         // Start a new row
         let mut cell = new_cell();
+        // Where the current cell's content would start: after the last arrow.
+        let mut cell_start: Option<SourceLocation> = None;
         let mut j = 0;
         while j < row_nodes.len() {
             let node = &row_nodes[j];
             if is_start_of_arrow(node) {
                 // Parse arrow
+                let arrow_start = node.loc().cloned();
+                if source_map {
+                    // An empty cell is the empty range where its content
+                    // would go, just before the arrow.
+                    cell.cover_children_or(arrow_start.as_ref().map(SourceLocation::start_point));
+                }
                 row.push(cell);
 
                 // Get arrow character
@@ -204,6 +216,9 @@ pub fn parse_cd(parser: &mut Parser) -> Result<AnyParseNode, ParseError> {
                 } else if "<>AV".contains(arrow_char) {
                     // Parse labels
                     for label in labels.iter_mut().take(2) {
+                        // Just after the arrow character or the first label's
+                        // closing one: where an empty label's content goes.
+                        let label_start = row_nodes[j].loc().map(SourceLocation::end_point);
                         let mut in_label = true;
                         let mut k = j + 1;
                         while k < row_nodes.len() {
@@ -227,6 +242,9 @@ pub fn parse_cd(parser: &mut Parser) -> Result<AnyParseNode, ParseError> {
                                 arrow: arrow_char.to_owned(),
                             }));
                         }
+                        if source_map {
+                            label.cover_children_or(label_start);
+                        }
                     }
                 } else {
                     return Err(ParseError::new(ParseErrorKind::InvalidCdArrowSpecifier {
@@ -235,7 +253,7 @@ pub fn parse_cd(parser: &mut Parser) -> Result<AnyParseNode, ParseError> {
                 }
 
                 // Create arrow
-                let arrow = cd_arrow(
+                let mut arrow = cd_arrow(
                     arrow_char,
                     &labels
                         .iter()
@@ -244,11 +262,23 @@ pub fn parse_cd(parser: &mut Parser) -> Result<AnyParseNode, ParseError> {
                     parser,
                 )?;
 
-                // Wrap arrow in styling
+                // Wrap arrow in styling. With source mapping on, the wrapper,
+                // the arrow and its made-up pieces (a vertical arrow's
+                // delimiter) span `@` through the arrow's last character.
+                let loc = if source_map {
+                    SourceLocation::cover(arrow_start, row_nodes[j].loc())
+                } else {
+                    None
+                };
+                if let Some(loc) = &loc {
+                    arrow.cover_children();
+                    *arrow.loc_mut() = SourceLocation::cover(Some(loc.clone()), arrow.loc());
+                    arrow.fill_missing_locs(loc);
+                }
                 let wrapped_arrow = ParseNode::Styling(ParseNodeStyling {
                     reset_font: true,
                     mode: Mode::Math,
-                    loc: None,
+                    loc,
                     style: DISPLAY,
                     body: vec![ParseNode::from(arrow)],
                 });
@@ -256,6 +286,7 @@ pub fn parse_cd(parser: &mut Parser) -> Result<AnyParseNode, ParseError> {
 
                 // Create new empty cell
                 cell = new_cell();
+                cell_start = row_nodes[j].loc().map(SourceLocation::end_point);
             } else {
                 // If not an arrow, add to cell
                 if let ParseNode::Styling(styling) = &mut cell {
@@ -268,6 +299,9 @@ pub fn parse_cd(parser: &mut Parser) -> Result<AnyParseNode, ParseError> {
 
         if i % 2 == 0 {
             // Even rows: cell, arrow, cell, arrow, ... cell
+            if source_map {
+                cell.cover_children_or(cell_start);
+            }
             row.push(cell);
         } else {
             // Odd rows: vert arrow, empty cell, ... vert arrow

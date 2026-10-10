@@ -24,12 +24,19 @@ pub struct FunctionContext<'name, 'parser, 'token> {
     pub token: Option<&'parser Token>,
     /// Optional break token
     pub break_on_token_text: Option<&'parser BreakToken>,
+    /// With source mapping on, the span of the whole invocation (the token
+    /// through its last argument); `None` otherwise.
+    pub invocation: Option<SourceLocation>,
 }
 
 impl FunctionContext<'_, '_, '_> {
-    /// Get the SourceLocation of the current token, if available.
+    /// The location a handler gives its node: the whole invocation with
+    /// source mapping on, else the control word's token, if available.
     #[must_use]
     pub fn loc(&self) -> Option<SourceLocation> {
+        if self.invocation.is_some() {
+            return self.invocation.clone();
+        }
         let t = self.token?;
         t.loc().cloned()
     }

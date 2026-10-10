@@ -9,14 +9,9 @@ use crate::define_function::{FunctionDefSpec, FunctionPropSpec};
 use crate::dom_tree::{HtmlDomNode, Img};
 use crate::mathml_tree::{MathDomNode, MathNode, MathNodeType};
 use crate::options::Options;
-use crate::parser::parse_node::{
-    AnyParseNode, NodeType, ParseNode, ParseNodeColor, ParseNodeIncludegraphics, ParseNodeText,
-    ParseNodeTextOrd,
-};
+use crate::parser::parse_node::{NodeType, ParseNode, ParseNodeIncludegraphics};
 use crate::spacing_data::MeasurementOwned;
-use crate::types::{
-    ArgType, CssProperty, CssStyle, Mode, ParseError, ParseErrorKind, TokenText, TrustContext,
-};
+use crate::types::{ArgType, CssProperty, CssStyle, ParseError, ParseErrorKind, TrustContext};
 use crate::units::{make_em, valid_unit};
 
 /// Check if a string matches the pattern for a plain number (no unit)
@@ -238,31 +233,6 @@ fn size_data(str_val: &str) -> Result<MeasurementOwned, ParseError> {
     }
 }
 
-/// Convert textual input of an unsupported command into a color node containing
-/// a text node Based on the format_unsupported_cmd function in parser/mod.rs
-fn format_unsupported_cmd(text: &str, mode: Mode, error_color: &str) -> ParseNode {
-    let mut textord_array: Vec<AnyParseNode> = Vec::with_capacity(text.chars().count());
-    for ch in text.chars() {
-        textord_array.push(AnyParseNode::TextOrd(ParseNodeTextOrd {
-            mode: Mode::Text,
-            loc: None,
-            text: TokenText::from(ch.to_string()),
-        }));
-    }
-    let text_node = AnyParseNode::Text(ParseNodeText {
-        mode,
-        loc: None,
-        body: textord_array,
-        font: None,
-    });
-    ParseNode::Color(ParseNodeColor {
-        mode,
-        loc: None,
-        color: error_color.to_owned(),
-        body: vec![text_node],
-    })
-}
-
 /// Register the \includegraphics function in the KaTeX context.
 pub fn define_includegraphics(ctx: &mut KatexContext) {
     ctx.define_function(FunctionDefSpec {
@@ -364,11 +334,11 @@ pub fn define_includegraphics(ctx: &mut KatexContext) {
 
                 // Check if the command is trusted
                 if !context.parser.settings.is_trusted(&mut trust_ctx) {
-                    return Ok(format_unsupported_cmd(
-                        "\\includegraphics",
-                        context.parser.mode,
-                        &context.parser.settings.error_color,
-                    ));
+                    let loc = context.loc();
+                    return Ok(context
+                        .parser
+                        .format_unsupported_cmd("\\includegraphics", loc.as_ref())
+                        .into());
                 }
 
                 Ok(ParseNode::Includegraphics(ParseNodeIncludegraphics {

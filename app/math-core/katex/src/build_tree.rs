@@ -10,12 +10,15 @@ use crate::context::KatexContext;
 use crate::dom_tree::DomSpan;
 use crate::options::{FontShape, FontWeight, Options};
 use crate::parser::parse_node::AnyParseNode;
+use crate::source_map::SourceInput;
 use crate::style;
 use crate::types::{OutputFormat, ParseError, Settings};
 use alloc::borrow::Cow;
+use alloc::sync::Arc;
 
-/// Creates Options from Settings for building
-fn options_from_settings(settings: &Settings) -> Options {
+/// Creates Options from Settings for building `tree`, parsed from
+/// `expression`
+fn options_from_settings(settings: &Settings, tree: &[AnyParseNode], expression: &str) -> Options {
     let style = if settings.display_mode {
         style::DISPLAY
     } else {
@@ -35,6 +38,9 @@ fn options_from_settings(settings: &Settings) -> Options {
         size_multiplier: settings.size_multiplier,
         max_size: settings.max_size,
         min_rule_thickness: settings.min_rule_thickness,
+        source_map: settings
+            .source_map
+            .then(|| Arc::new(SourceInput::find(tree, expression))),
     }
 }
 
@@ -74,7 +80,7 @@ pub fn build_tree(
     expression: &str,
     settings: &Settings,
 ) -> Result<DomSpan, ParseError> {
-    let options = options_from_settings(settings);
+    let options = options_from_settings(settings, tree, expression);
 
     let katex_node = match settings.output {
         OutputFormat::Mathml => {
@@ -121,10 +127,10 @@ pub fn build_tree(
 pub fn build_html_tree(
     ctx: &KatexContext,
     tree: &[AnyParseNode],
-    _expression: &str,
+    expression: &str,
     settings: &Settings,
 ) -> Result<DomSpan, ParseError> {
-    let options = options_from_settings(settings);
+    let options = options_from_settings(settings, tree, expression);
     let html_node = build_html(ctx, tree, &options)?;
     let katex_node = make_span("katex", vec![html_node], None, None);
     Ok(display_wrap(katex_node, settings))

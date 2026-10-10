@@ -114,9 +114,10 @@ pub fn define_html(ctx: &mut crate::KatexContext) {
             };
 
             if !context.parser.settings.is_trusted(&mut trust_context) {
+                let loc = context.loc();
                 return Ok(context
                     .parser
-                    .format_unsupported_cmd(context.func_name)
+                    .format_unsupported_cmd(context.func_name, loc.as_ref())
                     .into());
             }
 

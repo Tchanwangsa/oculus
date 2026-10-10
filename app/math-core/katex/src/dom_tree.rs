@@ -20,6 +20,7 @@ use web_sys;
 
 use crate::mathml_tree::MathNode;
 use crate::options::Options;
+use crate::source_map::SourceRange;
 use crate::svg_geometry::PATH_MAP;
 use crate::tree::{DocumentFragment, VirtualNode};
 use crate::types::ClassList;
@@ -267,7 +268,7 @@ impl Img {
 }
 
 /// Symbol node containing information about a single symbol
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SymbolNode {
     /// Text ordinals may coalesce even when empty font classes were elided.
     pub is_text_ord: bool,
@@ -289,6 +290,39 @@ pub struct SymbolNode {
     pub classes: ClassList,
     /// Inline CSS style object
     pub style: CssStyle,
+    /// The source range of the node it was built from, with source mapping
+    /// on (`crate::source_map`): written as `data-s`/`data-e` on a span
+    /// around the glyph.
+    pub source: Option<SourceRange>,
+    /// Kept apart from the previous glyph only for its source range
+    /// (`build_common::push_combine_chars`): no glue or line break goes
+    /// between the two.
+    pub joins_prev: bool,
+}
+
+// By hand so that `source` and `joins_prev` show only when set, keeping the
+// spec tests' debug snapshots as they are with source mapping off.
+impl fmt::Debug for SymbolNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("SymbolNode");
+        s.field("is_text_ord", &self.is_text_ord)
+            .field("text", &self.text)
+            .field("height", &self.height)
+            .field("depth", &self.depth)
+            .field("italic", &self.italic)
+            .field("skew", &self.skew)
+            .field("width", &self.width)
+            .field("max_font_size", &self.max_font_size)
+            .field("classes", &self.classes)
+            .field("style", &self.style);
+        if let Some(source) = &self.source {
+            s.field("source", source);
+        }
+        if self.joins_prev {
+            s.field("joins_prev", &self.joins_prev);
+        }
+        s.finish()
+    }
 }
 
 impl From<SymbolNode> for HtmlDomNode {
@@ -359,6 +393,8 @@ impl SymbolNode {
             max_font_size: max_font_size.unwrap_or_default(),
             classes,
             style: style.unwrap_or_default(),
+            source: None,
+            joins_prev: false,
         }
     }
 }
@@ -718,12 +754,22 @@ fn symbol_node_style_str(italic: f64, style: &CssStyle) -> String {
 /// Implement VirtualNode for Symbol
 impl VirtualNode for SymbolNode {
     fn write_markup(&self, fmt: &mut fmt::Formatter<'_>) -> Result<(), ParseError> {
-        let needs_span = self.italic > 0.0 || !self.classes.is_empty() || !self.style.is_empty();
+        let needs_span = self.italic > 0.0
+            || !self.classes.is_empty()
+            || !self.style.is_empty()
+            || self.source.is_some();
 
         if needs_span {
             map_fmt(fmt.write_str("<span"))?;
             map_fmt(write_node_class(fmt, &self.classes))?;
             map_fmt(write_symbol_style(fmt, self.italic, &self.style))?;
+            if let Some(source) = &self.source {
+                map_fmt(write!(
+                    fmt,
+                    " data-s=\"{}\" data-e=\"{}\"",
+                    source.start, source.end
+                ))?;
+            }
             map_fmt(fmt.write_char('>'))?;
             map_fmt(escape_into(fmt, &self.text))?;
             map_fmt(fmt.write_str("</span>"))?;
@@ -738,7 +784,10 @@ impl VirtualNode for SymbolNode {
     fn to_node(&self, ctx: &WebContext) -> web_sys::Node {
         use wasm_bindgen::JsCast as _;
 
-        let needs_span = self.italic > 0.0 || !self.classes.is_empty() || !self.style.is_empty();
+        let needs_span = self.italic > 0.0
+            || !self.classes.is_empty()
+            || !self.style.is_empty()
+            || self.source.is_some();
 
         if needs_span {
             let element = create_element(ctx, "span");
@@ -753,6 +802,11 @@ impl VirtualNode for SymbolNode {
             let styles = symbol_node_style_str(self.italic, &self.style);
             if !styles.is_empty() {
                 set_attribute(&element, "style", &styles);
+            }
+
+            if let Some(source) = &self.source {
+                set_attribute(&element, "data-s", &source.start.to_string());
+                set_attribute(&element, "data-e", &source.end.to_string());
             }
 
             // Add text content

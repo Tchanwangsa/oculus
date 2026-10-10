@@ -364,6 +364,12 @@ impl<'a> Lexer<'a> {
         ))
     }
 
+    /// The input being lexed, shared.
+    #[must_use]
+    pub fn input_arc(&self) -> Arc<str> {
+        Arc::clone(&self.input)
+    }
+
     /// Returns the current byte position in the input string where the lexer
     /// will next read.
     #[must_use]
