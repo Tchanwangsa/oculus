@@ -258,8 +258,7 @@ impl Canvas {
         Ok(out)
     }
 
-    /// Ping Canvas and classify the answer — also the keep-alive, since Canvas
-    /// rolls the session forward on use. `Unreachable` is distinct from
+    /// Ping Canvas and classify the answer. `Unreachable` is distinct from
     /// `Rejected` so a flat network never forces a fresh SSO login.
     pub fn probe(&self) -> SessionProbe {
         if !self.has_session() {

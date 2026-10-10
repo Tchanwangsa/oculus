@@ -9,17 +9,16 @@ cookie.
 | --- | --- |
 | Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
 | Session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas.rs` |
-| Cookie (Canvas and Okta), auth-flag and keep-alive log paths; private writes, sign-out | `app/src-tauri/src/paths.rs` |
+| Cookie (Canvas and Okta) and auth-flag paths; private writes, sign-out | `app/src-tauri/src/paths.rs` |
 | The app's Okta commands and calls: each goes to keyd, or to the keychain and an in-process sign-in when keyd is absent | `app/src-tauri/src/okta.rs` |
 | The sign-in flow, TOTP and the attempt guard — one implementation, run by keyd and by the in-process fallback | `app/keyd/core/src/okta/` |
 | keyd's Okta ops: the vault entries, the old-item import, one sign-in at a time; the role check every op passes | `app/keyd/core/src/ops/okta.rs`, `app/keyd/core/src/ops.rs` |
-| LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
-| The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
 | Staging the CLI into the bundle | `app/scripts/stage-cli.mjs` |
-| In-app keep-alive loop + startup probe | `app/src-tauri/src/lib.rs` |
+| Startup probe | `app/src-tauri/src/lib.rs` |
+| Removing a leftover keep-alive agent at startup | `app/src-tauri/src/legacy_agent.rs`, `app/keyd/core/src/platform/macos/registrar.rs` |
 | Ed token minting via LTI | `app/src-tauri/src/ed.rs` |
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
-| Frontend auth state | `app/src/hooks/useAuth.ts`, `app/src/hooks/useKeepalive.ts` |
+| Frontend auth state | `app/src/hooks/useAuth.ts` |
 | Handing the session to the in-app browser | `app/src-tauri/src/browser.rs` |
 | Keychain entry lifecycle (the fallback for the Okta credentials and for MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/credentials/keychain.rs` (`Secret`), `app/src-tauri/src/credentials.rs` |
 | The `oculus-keyd` client, which the Voyage, MinerU and Groq keys and the Okta credentials and sign-in go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/credentials.rs` (`CloudKey`) |
@@ -37,10 +36,9 @@ is on the page either way; only its `disabled` attribute tells you.)
   plaintext file only this user can read (`paths::write_private`, like every
   session file here), beside an auth-flag file meaning "we believe we have a
   session".
-- The session has no cookie-side expiry: the server extends it on use, so
-  periodic requests keep it alive. There is no remember-me cookie — once dead,
-  it is rebuilt by [automated sign-in](#okta-sign-in-runs-headless-in-rust)
-  or by hand.
+- The session has no cookie-side expiry: the server extends it on use. There
+  is no remember-me cookie — once dead, it is rebuilt by
+  [automated sign-in](#okta-sign-in-runs-headless-in-rust) or by hand.
 - On launch with the flag present, the app starts connected while a thread
   probes the cookie: `Valid` confirms, `Rejected` clears the flag (keeping the
   Okta snapshot) and emits `canvas-auth-expired`, `Unreachable` stays connected.
@@ -97,31 +95,37 @@ only); the app writes the record itself only when keyd is absent. The headless
 sign-in has already updated the guard. The CLI has no app to update, so
 `oculus auth auto` sets only the flag (`paths::mark_authenticated`).
 
-## Keep-alive runs in two layers
+## A dead session is rebuilt when something needs it
 
-- **App open** — a thread in `app/src-tauri/src/lib.rs` re-probes every 6
-  hours and emits `canvas-auth-expired` on rejection.
-- **App closed** — `app/src-tauri/src/keepalive.rs` installs a LaunchAgent
-  that runs `oculus auth tick`, which shares the app's probe, cookie merge and
-  sign-in (which goes through keyd when it is installed). Every outcome is a line in `session-keepalive.log` and exit 0,
-  because launchd has no console and a non-zero exit reads as a crashed job.
-- The tick re-authenticates only on `Rejected`; on `Unreachable` it logs and
-  waits rather than spending an Okta attempt on a dead network. After a
-  sign-out it logs and does nothing.
-- The agent installs itself only after a headless sign-in has succeeded
-  (`keepalive::ensure_installed`), not when credentials are stored: an org
-  that offers only push or WebAuthn would fail every six hours forever.
-  Turning it off writes a `keepalive-disabled` marker so the next sign-in
-  does not reinstall it.
-- The CLI is bundled into `Contents/MacOS/` beside the app. It is listed under
+Nothing pings Canvas on a timer and no LaunchAgent signs in for the app.
+Three things start an automatic sign-in, each through the
+[attempt guard](#every-sign-in-attempt-goes-through-one-guard):
+
+- **A request that comes back 401.** When a Canvas or Ed request that goes
+  through keyd gets a 401, keyd re-signs in once and retries the request. The
+  sign-in is the one that runs for every caller: single flight (a second
+  request waits for the first's outcome), then the guard's 10 min / 1 h / 6 h
+  back-off, 60 s spacing and lockout pause. A refused sign-in is the request's
+  error, never a second attempt.
+- **The app's startup probe**, when the saved session is rejected.
+- **A browser tab** that lands on Okta's entry for a SAML app.
+
+A sign-in only works for an account whose factors are a password and TOTP;
+an org that offers only push or WebAuthn pauses automatic sign-in at the first
+attempt (`LoginError::UnsupportedFactor`).
+
+- The CLI is bundled into `Contents/MacOS/` beside the app, because keyd's
+  caller check admits only executables in its own bundle. It is listed under
   `externalBin` in `tauri.conf.json` ("external" means prebuilt, not left out
   of the bundle), and `app/scripts/stage-cli.mjs` builds and stages it in
   `binaries/`. `tauri-build` validates every `externalBin`
   path even while building `oculus` itself, so the script writes an empty
   placeholder for that build and removes it on failure.
-- The plist stores the CLI path absolutely; `keepalive::repair_path` re-points
-  it on startup when the bundle has moved.
-- Neither layer beats an absolute session cap or a forced IdP re-auth.
+- Startup removes the session keep-alive LaunchAgent
+  (`com.tchan.oculus.session-keepalive`) and its data-dir files, if an earlier
+  version installed them (`app/src-tauri/src/legacy_agent.rs`). The unload goes
+  through the platform registrar's `retire`, which refuses keyd's own label.
+- No sign-in beats an absolute session cap or a forced IdP re-auth.
 
 ## Okta sign-in runs headless in Rust
 
@@ -137,7 +141,7 @@ without a browser, in keyd or in-process. The IdP is Okta Identity Engine at `ss
   keyd absent, the keychain. Okta Verify push
   and WebAuthn need a human; `LoginError::UnsupportedFactor` names the factors
   Okta did offer.
-- Both probe sites in `lib.rs` call `okta::try_auto_recover` before declaring
+- The startup probe in `lib.rs` calls `okta::try_auto_recover` before declaring
   a session expired, and `useAuth().connect()` tries it before opening the
   login window. Credentials come from Settings → Canvas or `oculus auth setup`.
 - A credential read that is refused (keyd's master key, or an old keychain
@@ -151,8 +155,8 @@ without a browser, in keyd or in-process. The IdP is Okta Identity Engine at `ss
 ## With keyd installed, keyd holds the credentials and runs the sign-in
 
 `okta.rs` in the app only routes. Saving, forgetting, the Settings status and
-every sign-in (Settings, the probes, the browser, `oculus auth auto`,
-`oculus auth tick`) are requests to `oculus-keyd` through
+every sign-in (Settings, the startup probe, the browser, `oculus auth auto`,
+a 401 on a forwarded request) are requests to `oculus-keyd` through
 `credentials::Credentialed` (ops `okta_save`, `okta_forget`, `okta_status`,
 `ensure_signed_in`, and `okta_resume` for the guard). Neither process reads the password or the seed back: no
 op returns one, and `oculus auth setup` prints the code from the seed just
@@ -197,8 +201,8 @@ typed.
 
 ## Every sign-in attempt goes through one guard
 
-The startup probe, the in-app 6 h thread, the browser, `oculus auth tick` and
-`oculus auth auto` each sign in on their own, in two processes, and Okta locks
+The startup probe, the browser, a 401 retry in keyd and `oculus auth auto`
+each sign in on their own, in two processes, and Okta locks
 the account after too many attempts. So
 `keyd_core::okta::sign_in` checks one record, `canvas-session/sign-in.json`,
 before each attempt, and logs every attempt with its caller to

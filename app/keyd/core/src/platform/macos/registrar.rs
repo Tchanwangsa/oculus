@@ -55,7 +55,7 @@ impl Registrar for Launchd {
         let plist = plist_path()?;
         Ok(Registration {
             program: program_from_plist(&plist),
-            loaded: is_loaded(),
+            loaded: is_loaded(LABEL),
             path: plist,
         })
     }
@@ -69,6 +69,33 @@ impl Registrar for Launchd {
             Err(e) => Err(format!("removing {}: {e}", plist.display())),
         }
     }
+
+    fn retire(&self, label: &str) -> Result<Vec<PathBuf>, String> {
+        retire_in(&agents_dir()?, label, bootout_label)
+    }
+}
+
+/// Unloads `label` with `unload`, then removes its plist from `agents`.
+/// Nothing loaded and no plist is `Ok` with nothing removed. keyd's own label
+/// and anything that is not a plain label are refused before a thing is touched.
+fn retire_in(
+    agents: &Path,
+    label: &str,
+    unload: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<Vec<PathBuf>, String> {
+    if label == LABEL {
+        return Err(format!("{label} is keyd's own registration"));
+    }
+    if label.is_empty() || label.contains(['/', '\\']) || label.starts_with('.') {
+        return Err(format!("{label:?} is not a launchd label"));
+    }
+    unload(label)?;
+    let plist = agents.join(format!("{label}.plist"));
+    match std::fs::remove_file(&plist) {
+        Ok(()) => Ok(vec![plist]),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("removing {}: {e}", plist.display())),
+    }
 }
 
 fn home() -> Result<PathBuf, String> {
@@ -77,10 +104,12 @@ fn home() -> Result<PathBuf, String> {
         .ok_or_else(|| "HOME is not set".to_string())
 }
 
+fn agents_dir() -> Result<PathBuf, String> {
+    Ok(home()?.join("Library/LaunchAgents"))
+}
+
 fn plist_path() -> Result<PathBuf, String> {
-    Ok(home()?
-        .join("Library/LaunchAgents")
-        .join(format!("{LABEL}.plist")))
+    Ok(agents_dir()?.join(format!("{LABEL}.plist")))
 }
 
 fn log_path() -> Result<PathBuf, String> {
@@ -158,8 +187,8 @@ fn gui_domain() -> String {
     format!("gui/{}", unsafe { libc::getuid() })
 }
 
-fn service() -> String {
-    format!("{}/{LABEL}", gui_domain())
+fn service(label: &str) -> String {
+    format!("{}/{label}", gui_domain())
 }
 
 fn launchctl(args: &[&str]) -> Result<std::process::Output, String> {
@@ -177,24 +206,28 @@ fn launchctl(args: &[&str]) -> Result<std::process::Output, String> {
     Err(msg)
 }
 
-fn is_loaded() -> bool {
-    launchctl(&["print", &service()]).is_ok()
+fn is_loaded(label: &str) -> bool {
+    launchctl(&["print", &service(label)]).is_ok()
 }
 
 /// `bootout` returns before launchd has let go of the job, and a `bootstrap`
 /// that comes too soon fails and leaves it unloaded. So wait for `print` to
 /// stop finding the label.
 fn bootout() -> Result<(), String> {
-    if !is_loaded() {
+    bootout_label(LABEL)
+}
+
+fn bootout_label(label: &str) -> Result<(), String> {
+    if !is_loaded(label) {
         return Ok(());
     }
     // An error here is usually "not loaded" racing the check above; the wait decides.
-    let _ = launchctl(&["bootout", &service()]);
+    let _ = launchctl(&["bootout", &service(label)]);
     let started = std::time::Instant::now();
-    while is_loaded() {
+    while is_loaded(label) {
         if started.elapsed() > std::time::Duration::from_secs(30) {
             return Err(format!(
-                "launchd still has {LABEL} loaded 30 s after bootout"
+                "launchd still has {label} loaded 30 s after bootout"
             ));
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -267,6 +300,64 @@ mod tests {
         assert!(Launchd.runs_in_place(&macos.join(paths::BINARY)));
         assert_eq!(bundle_of(&dir.join("bin").join(paths::BINARY)), None);
         assert!(!Launchd.runs_in_place(&dir.join("bin").join(paths::BINARY)));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn retiring_removes_the_plist_after_unloading_and_is_idempotent() {
+        let dir = scratch("retire");
+        let plist = dir.join("com.example.retired.plist");
+        std::fs::write(&plist, "x").unwrap();
+        let other = dir.join("com.example.other.plist");
+        std::fs::write(&other, "x").unwrap();
+
+        let unloaded = std::cell::RefCell::new(Vec::new());
+        let unload = |label: &str| {
+            unloaded.borrow_mut().push(label.to_string());
+            Ok(())
+        };
+        assert_eq!(
+            retire_in(&dir, "com.example.retired", unload).unwrap(),
+            vec![plist.clone()]
+        );
+        assert!(!plist.exists());
+        assert!(other.exists(), "only the named agent goes");
+
+        // Nothing installed any more: still unloads (it may be loaded without
+        // a file), removes nothing, and says nothing.
+        assert!(retire_in(&dir, "com.example.retired", unload)
+            .unwrap()
+            .is_empty());
+        assert_eq!(*unloaded.borrow(), ["com.example.retired"; 2]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_job_that_will_not_unload_keeps_its_plist() {
+        let dir = scratch("retire-stuck");
+        let plist = dir.join("com.example.stuck.plist");
+        std::fs::write(&plist, "x").unwrap();
+        let err = retire_in(&dir, "com.example.stuck", |_| Err("still loaded".into())).unwrap_err();
+        assert_eq!(err, "still loaded");
+        assert!(plist.exists(), "retried at the next start");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn retiring_never_touches_keyds_own_registration() {
+        let dir = scratch("retire-own");
+        let own = dir.join(format!("{LABEL}.plist"));
+        std::fs::write(&own, "x").unwrap();
+        let touched = std::cell::Cell::new(false);
+        for label in [LABEL, "", "../com.tchan.oculus.keyd", "a/b", ".hidden"] {
+            let got = retire_in(&dir, label, |_| {
+                touched.set(true);
+                Ok(())
+            });
+            assert!(got.is_err(), "{label:?}");
+        }
+        assert!(own.exists());
+        assert!(!touched.get(), "refused before anything is unloaded");
         std::fs::remove_dir_all(&dir).ok();
     }
 

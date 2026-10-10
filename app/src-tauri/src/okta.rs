@@ -270,9 +270,6 @@ fn run_sign_in(
 /// name.
 fn signed_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, String> {
     crate::auth::session_established(app, dir, crate::auth::Via::Headless);
-    // The headless path works on this account, so a re-authenticating
-    // LaunchAgent is worth installing.
-    crate::keepalive::ensure_installed();
     crate::canvas::Canvas::open(dir).whoami()
 }
 
@@ -305,10 +302,9 @@ mod tests {
     use keyd_core::okta::outcome_to_wire;
     use serde_json::{json, Value};
 
-    const TRIGGERS: [(Trigger, &str); 4] = [
+    const TRIGGERS: [(Trigger, &str); 3] = [
         (Trigger::Manual, "manual"),
         (Trigger::Startup, "startup"),
-        (Trigger::KeepAlive, "keep-alive"),
         (Trigger::Browser, "browser"),
     ];
 
@@ -516,7 +512,7 @@ mod tests {
             let dir = Scratch::new("okta-no-second-route");
             let keyd = FakeKeyd::start(&dir, move |_, _| keyd_error(kind, "OSStatus -128"));
             let before = entries(&dir);
-            let got = sign_in_in(&Credentialed::at(&dir), Trigger::KeepAlive, || {
+            let got = sign_in_in(&Credentialed::at(&dir), Trigger::Startup, || {
                 panic!("in-process")
             })
             .unwrap_err();

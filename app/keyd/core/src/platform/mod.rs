@@ -9,7 +9,8 @@
 //! 3. PeerCheck: `inspect` (same user, which executable, its `Role`) and
 //!    `admit`, both before a byte of the request is read.
 //! 4, 5. `master_key()` and `legacy_items()`: the OS secret store.
-//! 6. `registrar()`: installs, reports and removes what starts keyd.
+//! 6. `registrar()`: installs, reports and removes what starts keyd, and
+//!    retires a registration an earlier Oculus made.
 //! 7. Paths are `crate::paths`; 8. the build step is the adapter's part of
 //!    `app/scripts/build-keyd.mjs`. `files` holds the file helpers.
 
@@ -292,6 +293,10 @@ pub trait Registrar: Sync {
     fn status(&self) -> Result<Registration, String>;
     /// Unloads keyd and removes the registration; returns what it removed.
     fn uninstall(&self) -> Result<Vec<PathBuf>, String>;
+    /// Unloads and removes the registration named `label`, one an earlier
+    /// Oculus made for something else; returns what it removed, nothing when
+    /// there is none. Refuses keyd's own label.
+    fn retire(&self, label: &str) -> Result<Vec<PathBuf>, String>;
 }
 
 #[cfg(feature = "client")]

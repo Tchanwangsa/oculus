@@ -92,24 +92,9 @@ pub fn mark_authenticated(data_dir: &std::path::Path) {
     std::fs::remove_file(signed_out_path(data_dir)).ok();
 }
 
-/// Where the LaunchAgent keep-alive logs; shown in Settings → Canvas.
-pub fn keepalive_log_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("session-keepalive.log")
-}
-
-/// Append one timestamped line to the keep-alive log.
-pub fn append_keepalive_log(data_dir: &std::path::Path, message: &str) {
-    append_bounded_log(&keepalive_log_path(data_dir), message);
-}
-
 /// The attempt record every process checks before an automatic sign-in.
 pub fn sign_in_record_path(data_dir: &std::path::Path) -> PathBuf {
     keyd_core::paths::sign_in_record(data_dir)
-}
-
-/// Append one timestamped line, keeping the file bounded.
-fn append_bounded_log(path: &std::path::Path, message: &str) {
-    keyd_core::paths::append_bounded_log(path, message, crate::clock::now_secs());
 }
 
 /// `YYYY-MM-DDTHH:MM:SS` from a Unix timestamp, without a date crate.

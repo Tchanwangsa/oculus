@@ -130,13 +130,6 @@ pub(crate) enum AuthAction {
     /// pause a lockout or a rejected password leaves: fix the credentials in
     /// the app (Settings → Canvas) or run `oculus auth setup`.
     Auto,
-    /// One keep-alive cycle: roll the session forward, rebuild it if it died
-    ///
-    /// What the LaunchAgent runs every few hours. Prints nothing and always
-    /// exits 0 — it reports into `session-keepalive.log` in the data dir,
-    /// because launchd has nowhere to show a failure and a non-zero exit only
-    /// makes launchd think the job crashed.
-    Tick,
     /// Forget the stored sign-in credentials
     Forget,
     /// Report what the Okta sign-in page looks like, when `auto` fails

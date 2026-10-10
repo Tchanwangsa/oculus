@@ -1,7 +1,7 @@
 # The `oculus` CLI
 
 A second binary in `app/src-tauri` that drives the same engine as the app with
-no window: terminal syncs, the keep-alive job, and the tool surface a coding
+no window: terminal syncs and the tool surface a coding
 agent queries and plans through. Flags are in
 [cli-reference.md](./cli-reference.md); this page is how the CLI fits.
 
@@ -55,10 +55,6 @@ migrations, so on a fresh machine the app must open once first; until then
   skips the back-off between automatic attempts but not the minute between any
   two, and it cannot lift a lockout or rejected-password pause (the app's
   Connect or a new `auth setup` does).
-- `auth tick` is one keep-alive cycle, run by the LaunchAgent. Its sign-in is
-  automatic, so the guard can skip it. keyd runs it when installed. It prints nothing, logs to
-  `session-keepalive.log`, and always exits 0, because launchd reads a
-  non-zero exit as a crashed job.
 - `run -s` scrapes, then parses and embeds each written PDF one file at a time,
   then replaces each subject's `calendar_events` — always, since there are no
   sync options to gate it ([calendar.md](./calendar.md)).
@@ -220,5 +216,4 @@ pull document that `AGENTS.md` says when to open.
 
 - An empty `search` result would read as "no answer" — keep failing loudly with the next command to run.
 - Ripgrep over `courses/` misses PDF text — use `oculus grep`.
-- `auth tick` exiting non-zero reads as a crash to launchd.
 - A stale `oculus` documents and runs the wrong build — `bun run cli` deletes the binary before building ([development.md](./development.md#the-dev-cli-is-built-by-the-preflight-not-by-tauri-dev)).

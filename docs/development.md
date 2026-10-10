@@ -135,9 +135,8 @@ has no binary at all.
 `tauri build` runs `stage-keyd`, `stage-cli` then `docs:cli` from
 `beforeBuildCommand`: the CLI ships inside the bundle because keyd admits only
 executables inside its own bundle, and gives `Contents/MacOS/oculus` the `cli`
-role ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)),
-and because the keep-alive LaunchAgent runs it ([auth.md](./auth.md)); the
-reference is regenerated at the one moment a current release binary is
+role ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key));
+the reference is regenerated at the one moment a current release binary is
 guaranteed to exist.
 
 ## CI proves a fresh checkout builds; releases are cut by hand
@@ -187,8 +186,7 @@ the draft is a manual step on GitHub.
   tauri-action reads) removes both.
 - The installed app and `tauri dev` share the identifier `com.tchan.oculus`, so
   they open the same library, database and keychain items. Never run both at
-  once: each re-points the keep-alive LaunchAgent at its own `oculus` at
-  startup.
+  once: they write the same database and session files.
 
 ## `oculus-keyd` is built apart so its signature only changes with its source
 

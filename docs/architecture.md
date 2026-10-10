@@ -217,7 +217,7 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   spend guard from Settings → Embeddings, kept here rather than in `settings`
   because the reservation that enforces it already reads this file
   ([retrieval.md](./retrieval.md)).
-- The session cookie, auth flag, `session-keepalive.log`, and the sign-in
+- The session cookie, auth flag, and the sign-in
   attempt record and its `okta-sign-in.log` ([auth.md](./auth.md)).
 - `vault.bin` and its `vault.bin.lock`, `keyd.sock` (launchd's), and `bin/`
   with a dev-installed `oculus-keyd` and its `oculus-keyd.stamp`
