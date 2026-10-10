@@ -62,7 +62,7 @@ jobs:
           (cd keyd && cargo fmt --check)
           (cd keyd/core && cargo fmt --check)
           # Only our crates: the vendored katex/ keeps upstream's formatting.
-          (cd math-core && cargo fmt --check -p oculus-math -p oracle)
+          (cd math-core && cargo fmt --check -p oculus-math -p oculus-math-edit -p oracle)
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile

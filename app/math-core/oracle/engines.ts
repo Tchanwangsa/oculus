@@ -123,3 +123,25 @@ export async function probePrefixes(
   }
   return { prefixes, panics };
 }
+
+/** One formula's answer from the bin's `--stops` check. */
+export type StopsAnswer =
+  | { stops: number; slots: number; between: number; failures: { kind: string; offset: number }[]; parseNs: number }
+  | { error: string; parseNs: number }
+  | { panic: string };
+
+/** The native bin's edit-field check: each formula's stops and their
+ *  invariants (oculus_math_edit::check), with a parse timing. */
+export async function checkStops(formulas: { tex: string; display: boolean }[], bin: string): Promise<StopsAnswer[]> {
+  const input = formulas.map((f, id) => JSON.stringify({ id, tex: f.tex, display: f.display })).join("\n") + "\n";
+  const proc = Bun.spawn([bin, "--stops"], { stdin: new Blob([input]), stdout: "pipe", stderr: "ignore" });
+  const text = await new Response(proc.stdout).text();
+  if ((await proc.exited) !== 0) throw new Error(`oracle exited ${proc.exitCode}`);
+  const answers: StopsAnswer[] = new Array(formulas.length);
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const { id, ...rest } = JSON.parse(line);
+    answers[id] = rest as StopsAnswer;
+  }
+  return answers;
+}

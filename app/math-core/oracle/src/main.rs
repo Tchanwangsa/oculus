@@ -13,12 +13,21 @@
 //! `oracle --prefixes` is the typing probe: it renders every char-boundary
 //! prefix of each request's `tex` with `throwOnError` forced on and answers
 //! `{"id":…, "prefixes":n, "panics":[{"len":bytes, "panic":"…"}]}`.
+//!
+//! `oracle --stops` is the edit field's corpus check: it runs
+//! `oculus_math_edit::check` on each request's `tex` (options other than
+//! the display mode are the field's own) and answers `{"id":…, "stops":n,
+//! "slots":n, "between":n, "failures":[{"kind":"…", "offset":bytes}],
+//! "parseNs":n}`, or `{"id":…, "error":"…", "parseNs":n}` for a formula
+//! that does not render. `parseNs` is the mean of a few timed parses.
 
 use std::{
     any::Any,
     collections::BTreeMap,
+    hint::black_box,
     io::{self, BufRead as _, Write as _},
     panic::{self, AssertUnwindSafe},
+    time::Instant,
 };
 
 use katex::{
@@ -28,6 +37,7 @@ use katex::{
     render_to_string,
     types::{OutputFormat, Settings, StrictMode, StrictSetting},
 };
+use oculus_math_edit::check::{Failure, check};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -150,10 +160,50 @@ fn prefixes(ctx: &KatexContext, line: &str) -> Value {
     json!({ "id": request.id, "prefixes": count, "panics": panics })
 }
 
+/// How many times `--stops` parses each formula for its timing.
+const TIMED_PARSES: u32 = 5;
+
+fn failure(failure: &Failure) -> Value {
+    json!({ "kind": failure.kind(), "offset": failure.offset() })
+}
+
+/// The edit field's stops for one request, checked; see the module header.
+fn stops(line: &str) -> Value {
+    let request: Request = match serde_json::from_str(line) {
+        Ok(r) => r,
+        Err(e) => return json!({ "id": null, "panic": format!("bad request: {e}") }),
+    };
+    let display = request.options.display_mode.unwrap_or(request.display);
+    let tex = request.tex.as_str();
+    let checked = panic::catch_unwind(|| {
+        let start = Instant::now();
+        for _ in 0..TIMED_PARSES {
+            drop(black_box(oculus_math_edit::parse(black_box(tex), display)));
+        }
+        let parse_ns = start.elapsed().as_nanos() / u128::from(TIMED_PARSES);
+        (check(tex, display), parse_ns)
+    });
+    match checked {
+        Ok((Ok(report), parse_ns)) => json!({
+            "id": request.id,
+            "stops": report.stops,
+            "slots": report.slots,
+            "between": report.between,
+            "failures": report.failures.iter().map(failure).collect::<Vec<_>>(),
+            "parseNs": parse_ns,
+        }),
+        Ok((Err(e), parse_ns)) => {
+            json!({ "id": request.id, "error": e.to_string(), "parseNs": parse_ns })
+        }
+        Err(p) => json!({ "id": request.id, "panic": panic_message(p.as_ref()) }),
+    }
+}
+
 fn main() -> io::Result<()> {
     // A panic is reported as an answer; keep the default hook off stderr.
     panic::set_hook(Box::new(|_| {}));
     let probe = std::env::args().any(|a| a == "--prefixes");
+    let stop_check = std::env::args().any(|a| a == "--stops");
     let ctx = KatexContext::default();
     let stdin = io::stdin();
     let mut out = io::BufWriter::new(io::stdout().lock());
@@ -164,6 +214,8 @@ fn main() -> io::Result<()> {
         }
         let reply = if probe {
             prefixes(&ctx, &line)
+        } else if stop_check {
+            stops(&line)
         } else {
             answer(&ctx, &line)
         };

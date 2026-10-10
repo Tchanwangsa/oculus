@@ -4,7 +4,7 @@
 //
 //   bun math-core/oracle/render.ts [--engine native|wasm] [--notes DIR]
 //       [--katex DIR] [--out FILE] [--only a,b,…] [--no-build] [--oracle BIN]
-//       [--pkg DIR] [--prefixes] [--source-map]
+//       [--pkg DIR] [--prefixes] [--source-map] [--stops]
 //
 // --engine native (default) runs the fork as the `oracle` bin; wasm runs the
 //          app's build in math-core/pkg (built first by scripts/build-math.mjs)
@@ -29,6 +29,10 @@
 //          fork (either engine) renders every formula as the parse gate (set
 //          b) would, with `sourceMap` off and on, and counts the failures per
 //          check and kind (report default: $TMPDIR/katex-sourcemap-report.json).
+// --stops  the edit field's corpus check instead: the native bin lays out
+//          every formula's caret stops (oculus_math_edit) and checks their
+//          invariants, and times the parse (report default:
+//          $TMPDIR/katex-stops-report.json).
 //
 // Exit status 1 when any (formula, option set) pair differs, other than the
 // accepted divergences below (DIVERGENCES.md), when a wasm check fails, when
@@ -41,6 +45,7 @@ import { type Formula, type Source, corpus } from "./corpus";
 import {
   type Answer,
   type WasmChecks,
+  checkStops,
   probePrefixes,
   renderFork,
   renderJs,
@@ -63,10 +68,17 @@ const KATEX_CHECKOUT = join(CORE, "target/katex");
 const katexDir = arg("katex") ?? (existsSync(join(KATEX_CHECKOUT, "test")) ? KATEX_CHECKOUT : undefined);
 const probe = argv.includes("--prefixes");
 const sourceMap = argv.includes("--source-map");
-const reportName = probe ? "katex-prefix-report.json" : sourceMap ? "katex-sourcemap-report.json" : "katex-oracle-report.json";
+const stopCheck = argv.includes("--stops");
+const reportName = probe
+  ? "katex-prefix-report.json"
+  : stopCheck
+    ? "katex-stops-report.json"
+    : sourceMap
+      ? "katex-sourcemap-report.json"
+      : "katex-oracle-report.json";
 const outFile = arg("out") ?? join(tmpdir(), reportName);
 const only = arg("only")?.split(",");
-const engineArg = probe ? "native" : (arg("engine") ?? "native");
+const engineArg = probe || stopCheck ? "native" : (arg("engine") ?? "native");
 if (engineArg !== "native" && engineArg !== "wasm") throw new Error(`--engine ${engineArg}: native or wasm`);
 const engine: "native" | "wasm" = engineArg;
 const oracleBin = arg("oracle");
@@ -206,10 +218,91 @@ async function sourceMapChecks(formulas: Formula[]) {
   process.exit(failed ? 1 : 0);
 }
 
+/** The edit field's corpus check: counts only, and the first few failing
+ *  formulas cut short (the notes are the user's). */
+async function stops(formulas: Formula[]) {
+  const t0 = performance.now();
+  const answers = await checkStops(formulas, bin);
+  const count = (s: Source) => formulas.filter((f) => f.source === s).length;
+  console.log(
+    `stops: ${formulas.length} formulas (${count("notes")} notes, ${count("spec")} spec, ${count("fixture")} fixtures) checked in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
+  );
+  const failing: { tex: string; source: Source; failures: { kind: string; offset: number }[] }[] = [];
+  for (const [title, keep] of [
+    ["all inputs", (_: Formula) => true],
+    ["notes only", (f: Formula) => f.source === "notes"],
+  ] as const) {
+    let rendered = 0;
+    let unrendered = 0;
+    let panics = 0;
+    let stopCount = 0;
+    let slots = 0;
+    let between = 0;
+    const kinds = new Map<string, number>();
+    const errors = new Map<string, number>();
+    formulas.forEach((f, i) => {
+      if (!keep(f)) return;
+      const a = answers[i];
+      if ("panic" in a) panics++;
+      else if ("error" in a) {
+        unrendered++;
+        // The message's kind, without the name, position and context it quotes.
+        const kind = a.error.replace(/^KaTeX parse error: /, "").split(/:| at position| '|\\/)[0].trim();
+        errors.set(kind, (errors.get(kind) ?? 0) + 1);
+      } else {
+        rendered++;
+        stopCount += a.stops;
+        slots += a.slots;
+        between += a.between;
+        for (const kind of new Set(a.failures.map((x) => x.kind))) kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
+      }
+    });
+    console.log(`\n${title}: ${rendered} with stops (${stopCount} stops, ${slots} slots, ${between} stops between two others at one offset)`);
+    console.log(`  ${unrendered} do not render (no stops: TeX mode), ${panics} panics`);
+    const byKind = [...errors].sort((x, y) => y[1] - x[1]).map(([k, n]) => `${n} ${k}`);
+    if (byKind.length) console.log(`    by error: ${byKind.slice(0, 8).join("; ")}`);
+    console.log(`  failing formulas by kind: ${kinds.size ? [...kinds].map(([k, n]) => `${n} ${k}`).join(", ") : "none"}`);
+  }
+  formulas.forEach((f, i) => {
+    const a = answers[i];
+    if ("panic" in a) failing.push({ tex: f.tex, source: f.source, failures: [{ kind: `panic: ${a.panic}`, offset: 0 }] });
+    else if ("failures" in a && a.failures.length) failing.push({ tex: f.tex, source: f.source, failures: a.failures });
+  });
+  if (failing.length) {
+    console.log("\nfirst failing formulas (fixtures and spec first):");
+    const rank = (s: Source) => (s === "notes" ? 1 : 0);
+    const shown = [...failing].sort((x, y) => rank(x.source) - rank(y.source) || x.tex.length - y.tex.length).slice(0, 5);
+    for (const f of shown) {
+      const tex = f.tex.length > 60 ? `${f.tex.slice(0, 60)}…` : f.tex;
+      console.log(`  [${f.source}] ${tex}  ${f.failures.map((x) => `${x.kind} @${x.offset}`).slice(0, 3).join("; ")}`);
+    }
+  }
+
+  const timing = (title: string, keep: (f: Formula) => boolean) => {
+    const ns = formulas.flatMap((f, i) => (keep(f) && "parseNs" in answers[i] ? [answers[i].parseNs as number] : []));
+    if (!ns.length) return;
+    ns.sort((x, y) => x - y);
+    const mean = ns.reduce((x, y) => x + y, 0) / ns.length;
+    const at = (q: number) => ns[Math.min(ns.length - 1, Math.floor(q * ns.length))];
+    const us = (n: number) => `${(n / 1000).toFixed(1)} µs`;
+    console.log(`  ${title.padEnd(10)} ${String(ns.length).padStart(5)} formulas  mean ${us(mean)}  p50 ${us(at(0.5))}  p99 ${us(at(0.99))}  max ${us(ns[ns.length - 1])}`);
+  };
+  console.log("\nparse with source mapping (release build, mean of 5 per formula):");
+  timing("all", () => true);
+  timing("fixtures", (f) => f.source === "fixture");
+  timing("notes", (f) => f.source === "notes");
+  timing("spec", (f) => f.source === "spec");
+
+  writeFileSync(outFile, JSON.stringify(failing, null, 1));
+  console.log(`\nreport: ${outFile}`);
+  process.exit(failing.length ? 1 : 0);
+}
+
 async function main() {
   buildEngine();
   const formulas = corpus(notesDir, katexDir);
   if (probe) return prefixes(formulas);
+  if (stopCheck) return stops(formulas);
   if (sourceMap) return sourceMapChecks(formulas);
   const sets = SETS.filter((s) => !only || only.includes(s.name));
   const count = (s: Source) => formulas.filter((f) => f.source === s).length;

@@ -7,6 +7,7 @@ dependency of `app/src-tauri` (so `tauri dev` never rebuilds it).
 | --- | --- |
 | `katex/` | A vendored fork of katex-rs, a Rust port of KaTeX 0.18.5. Where it came from and what we changed: [`katex/UPSTREAM.md`](katex/UPSTREAM.md). |
 | `wasm/` | `oculus-math`, the fork's WebAssembly binding for the app: `renderToString` and `parseError` (below). |
+| `edit/` | `oculus-math-edit`, the visual maths field's edit model: caret stops and slots over the formula's source ([below](#the-edit-model)). Pure Rust; nothing in the app uses it. |
 | `oracle/` | The display oracle: `src/main.rs` (the `oracle` bin) renders JSON-lines requests with the fork; `render.ts` renders the same formulas with the app's `katex` and diffs the two (`corpus.ts` the inputs, `sets.ts` the call sites' options, `engines.ts` the renderers). |
 
 Where the fork still differs from KaTeX JS, and why that is accepted:
@@ -19,7 +20,7 @@ cd app/math-core
 cargo test
 ```
 
-Format our crates with `cargo fmt -p oculus-math -p oracle` (CI checks it);
+Format our crates with `cargo fmt -p oculus-math -p oculus-math-edit -p oracle` (CI checks it);
 never run `cargo fmt` over `katex/` (see `katex/UPSTREAM.md`). Lint the binding
 with `cargo clippy --no-deps --target wasm32-unknown-unknown -p oculus-math`.
 
@@ -80,6 +81,48 @@ to the formula:
 
 `katex/src/source_map.rs` holds the mapping; `katex/tests/source_map.rs` and
 the oracle's `--source-map` check it.
+
+## The edit model
+
+`edit/` (`oculus-math-edit`) says where the field's caret can be. The field
+edits the formula's LaTeX itself, so a caret is a byte offset of the source
+in a **slot**: an ordered run of sibling atoms (a row, a group's content, a
+script, a numerator, a cell, a `\text{}` run). `stops(source, display)`
+parses with source mapping on and returns every **stop** in ←/→ order,
+which is source order; unparseable source returns the parse error instead
+(the field edits it as TeX). The rules:
+
+- A stop sits before a slot's first atom and after each atom; a text slot
+  has one between every character too, never inside a cluster (`วั`). An
+  empty slot (`{}`, `\frac{}{}`, an empty cell) has exactly one.
+- A one-token argument (`\frac ab`, `x^2`) is a `Bare` slot: typing a
+  second atom into it must add braces first.
+- A macro's output (`\dots`, `\iff`) maps to its invocation and is one
+  atom; arguments pasted into it (`\bra{x}`, `\boxed{x}`) are a slot.
+- A base's scripts (`_1^2`) are one atom after the base, holding a slot
+  each; a style switch (`\color{red}`, `\displaystyle`) is an atom and its
+  run stays in the slot around it.
+- Stops in different slots can share an offset (`\frac ab`'s 7 ends the
+  numerator and starts the denominator): `stop_at` takes an `Affinity`.
+- Rows split at a top-level `\\`. `\begin{matrix}\end{matrix}` has one
+  empty cell, before its `\end`.
+
+`utf16` converts offsets for the DOM and CodeMirror. `check` holds the
+invariants (sorted, on char boundaries, inside their slot, round trip
+through offsets, a letter typed at any maths stop outside a bare argument
+still renders), which `cargo test -p oculus-math-edit` runs over
+hand-written cases, the fork's source-location formulas,
+`oracle/fixtures.json`, every prefix of those, and random formulas
+(proptest). The corpus check runs them over the notes:
+
+```sh
+cd app
+bun math-core/oracle/render.ts --stops
+```
+
+It prints counts only (formulas, stops, failures by kind, errors by kind)
+and the parse time per formula (mean, p50, p99), and fails on any broken
+invariant.
 
 ## The oracle
 
@@ -155,6 +198,8 @@ The bin's protocol, one JSON object per line:
 in:  {"id": 1, "tex": "x^2", "display": false, "options": {"throwOnError": true, "strict": "ignore", "macros": {"\\foo": "x"}, "output": "htmlAndMathml"}}
 out: {"id": 1, "html": "<span class=\"katex\">…"}   or   {"id": 1, "error": "KaTeX parse error: …"}   or   {"id": 1, "panic": "…"}
 out with --prefixes: {"id": 1, "prefixes": 3, "panics": [{"len": 2, "panic": "…"}]}
+out with --stops:    {"id": 1, "stops": 4, "slots": 2, "between": 0, "failures": [{"kind": "…", "offset": 3}], "parseNs": 5600}
+                  or {"id": 1, "error": "KaTeX parse error: …", "parseNs": 900}
 ```
 
 Options take KaTeX JS's names and defaults (`strict` defaults to `"warn"`),
