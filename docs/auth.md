@@ -94,8 +94,8 @@ auth flag (which also removes the signed-out marker), the in-memory state and
 `canvas-auth-success`. A sign-in by a person (window or tab) also clears the
 attempt guard's failures, pause and wait, by asking keyd (`okta_resume`, app
 only); the app writes the record itself only when keyd is absent. The headless
-sign-in has already updated the guard. The CLI has no app to update, so `oculus auth auto` sets only the flag
-(`paths::mark_authenticated`).
+sign-in has already updated the guard. The CLI has no app to update, so
+`oculus auth auto` sets only the flag (`paths::mark_authenticated`).
 
 ## Keep-alive runs in two layers
 
@@ -125,8 +125,8 @@ sign-in has already updated the guard. The CLI has no app to update, so `oculus 
 
 ## Okta sign-in runs headless in Rust
 
-`app/src-tauri/src/okta.rs` rebuilds a dead session without a browser. The
-IdP is Okta Identity Engine at `sso.unimelb.edu.au`, a JSON state machine at
+`keyd_core::okta::sign_in` (`app/keyd/core/src/okta/`) rebuilds a dead session
+without a browser, in keyd or in-process. The IdP is Okta Identity Engine at `sso.unimelb.edu.au`, a JSON state machine at
 `/idp/idx/*`: introspect the login page's state token, answer each
 *remediation*, then replay the SAML app URL and POST the assertion to Canvas.
 
