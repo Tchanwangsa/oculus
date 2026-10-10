@@ -59,7 +59,13 @@ pub fn absorb(
     set_cookies: &[String],
 ) -> Result<bool, VaultError> {
     let changed = vault.update(|e| {
-        let Some(merged) = merge_set_cookie(e.get(kind.secret()).unwrap_or(""), set_cookies) else {
+        let held = e.get(kind.secret()).unwrap_or("");
+        // A rotation never makes a session: one cleared since the request
+        // was sent (a sign-out) stays cleared.
+        if held.is_empty() {
+            return false;
+        }
+        let Some(merged) = merge_set_cookie(held, set_cookies) else {
             return false;
         };
         if merged.len() > MAX_VALUE {
@@ -107,6 +113,18 @@ mod tests {
         assert_eq!(removed, [Kind::Canvas]);
         assert_eq!(held(&vault).unwrap(), [Kind::Ed]);
         assert_eq!(generation.get(), 3);
+    }
+
+    #[test]
+    fn absorb_does_not_bring_back_a_session_that_was_cleared() {
+        let dir = Scratch::new("session-absorb-cleared");
+        let (vault, generation) = (vault(&dir), Generation::default());
+        put(&vault, &generation, Kind::Canvas, "canvas_session=OLD").unwrap();
+        clear(&vault, &generation, &[Kind::Canvas]).unwrap();
+        let set = lines(&["canvas_session=ROTATED; path=/; httponly"]);
+        assert!(!absorb(&vault, &generation, Kind::Canvas, &set).unwrap());
+        assert_eq!(get(&vault, Kind::Canvas).unwrap(), None);
+        assert_eq!(generation.get(), 2, "nothing changed");
     }
 
     #[test]

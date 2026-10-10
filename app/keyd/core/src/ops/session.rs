@@ -108,15 +108,20 @@ impl State {
     /// automatic sign-in down until a session is established again. The attempt
     /// record stays: forgetting a lockout pause would let automatic sign-in
     /// resume. `{"had": bool}` says whether there was anything to drop.
+    ///
+    /// It waits for a sign-in already running (`Flight::exclusively`): that
+    /// one would otherwise save a session and lift the marker after this.
     pub(super) fn sign_out(&self) -> Result<Reply, OpError> {
-        let vault = self.vault()?;
-        self.import_sessions(&vault)?;
-        let cleared = store::clear(&vault, &self.generation, &Kind::ALL)?;
-        let flagged = markers::clear_authenticated(&self.data_dir)
-            .map_err(|e| OpError::new("record", format!("the authenticated flag: {e}")))?;
-        markers::mark_signed_out(&self.data_dir)
-            .map_err(|e| OpError::new("record", format!("the signed-out marker: {e}")))?;
-        Ok(json!({"had": flagged || !cleared.is_empty()}).into())
+        self.flight.exclusively(|| {
+            let vault = self.vault()?;
+            self.import_sessions(&vault)?;
+            let cleared = store::clear(&vault, &self.generation, &Kind::ALL)?;
+            let flagged = markers::clear_authenticated(&self.data_dir)
+                .map_err(|e| OpError::new("record", format!("the authenticated flag: {e}")))?;
+            markers::mark_signed_out(&self.data_dir)
+                .map_err(|e| OpError::new("record", format!("the signed-out marker: {e}")))?;
+            Ok(json!({"had": flagged || !cleared.is_empty()}).into())
+        })
     }
 }
 
