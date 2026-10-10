@@ -1,7 +1,9 @@
 //! The client side of `oculus-keyd`: `has`, `store`, `delete` and `forward`
-//! for the cloud keys, `okta_*` and `ensure_signed_in` for the Okta sign-in,
-//! one connection per call, and the `ping` that `oculus keyd status` sends.
-//! The app re-exports it as `credentials::Credentialed`.
+//! (buffered with `send`, streamed with `send_stream`), `okta_*` and
+//! `ensure_signed_in` for the Okta sign-in, `session_*` for the login
+//! sessions (`session`), one connection per call, and the `ping` that
+//! `oculus keyd status` sends. The app re-exports it as
+//! `credentials::Credentialed`.
 //!
 //! `KeydError::Absent` (nothing at the endpoint, or nothing listening on it)
 //! means keyd is not installed, and is the only error a caller may answer by
@@ -29,6 +31,17 @@ pub const OP_TIMEOUT: Duration = Duration::from_secs(60);
 /// For `ping`, a probe: it does no work, so a reply this late means keyd is
 /// wedged. launchd's cold start is about a second and a half.
 const PING_TIMEOUT: Duration = Duration::from_secs(10);
+
+mod session;
+mod stream;
+
+#[cfg(all(test, feature = "server"))]
+mod against_session;
+
+pub use session::{SessionCookies, SessionStatus};
+pub use stream::{StreamBody, StreamedResponse};
+
+pub use crate::session::Kind as SessionKind;
 
 type Connect = dyn Fn() -> Result<Conn, ConnectError> + Send + Sync;
 
@@ -196,46 +209,24 @@ impl Client {
             .ok_or_else(|| KeydError::Broken("ensure_signed_in: no outcome".into()))
     }
 
-    /// One request to `secret`'s origin with keyd adding the key. `timeout`
-    /// bounds each read and write, as the caller's own HTTP timeout did;
-    /// `None` waits for ever, for a caller that has no timeout of its own.
+    /// One request to `route`'s origin (`voyage`, `mineru`, `groq`, `canvas`
+    /// or `ed`) with keyd adding the credential, and the whole answer
+    /// buffered. `timeout` bounds each read and write, as the caller's own
+    /// HTTP timeout did; `None` waits for ever, for a caller that has no
+    /// timeout of its own. An answer of any status is `Ok`; a redirect is
+    /// returned, never followed.
     pub fn send(
         &self,
-        secret: &str,
+        route: &str,
         method: &str,
         path: &str,
         headers: &[(&str, &str)],
         body: &[u8],
         timeout: Option<Duration>,
     ) -> Result<RawResponse, KeydError> {
-        let header = json!({
-            "op": "forward",
-            "secret": secret,
-            "method": method,
-            "path": path,
-            "headers": headers.iter().map(|(k, v)| [*k, *v]).collect::<Vec<_>>(),
-            "body_len": body.len(),
-        });
+        let header = forward_header(route, method, path, headers, body.len(), false);
         let (reply, body) = self.exchange(&header, body, timeout)?;
-        let status = reply
-            .get("status")
-            .and_then(Value::as_u64)
-            .and_then(|s| u16::try_from(s).ok())
-            .ok_or_else(|| KeydError::Broken("forward: no status".into()))?;
-        let headers = reply
-            .get("headers")
-            .and_then(Value::as_array)
-            .map(|list| {
-                list.iter()
-                    .filter_map(|pair| {
-                        Some((
-                            pair.get(0)?.as_str()?.to_string(),
-                            pair.get(1)?.as_str()?.to_string(),
-                        ))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let (status, headers) = forward_head(&reply)?;
         Ok(RawResponse {
             status,
             headers,
@@ -255,6 +246,16 @@ impl Client {
         }
     }
 
+    /// Opens a connection to keyd; `Absent` when nothing is there.
+    fn connect(&self) -> Result<Conn, KeydError> {
+        (self.connect)().map_err(|e| match e {
+            ConnectError::Absent(_) => KeydError::Absent,
+            ConnectError::Broken(d) => {
+                KeydError::Broken(format!("connecting to {}: {d}", self.endpoint.display()))
+            }
+        })
+    }
+
     /// Writes the header line and `body` straight from the caller's buffer,
     /// then reads the reply's header line and body.
     fn exchange(
@@ -263,12 +264,7 @@ impl Client {
         body: &[u8],
         timeout: Option<Duration>,
     ) -> Result<(Value, Vec<u8>), KeydError> {
-        let conn = (self.connect)().map_err(|e| match e {
-            ConnectError::Absent(_) => KeydError::Absent,
-            ConnectError::Broken(d) => {
-                KeydError::Broken(format!("connecting to {}: {d}", self.endpoint.display()))
-            }
-        })?;
+        let conn = self.connect()?;
         self.over(conn, header, body, timeout)
     }
 
@@ -279,6 +275,22 @@ impl Client {
         body: &[u8],
         timeout: Option<Duration>,
     ) -> Result<(Value, Vec<u8>), KeydError> {
+        let (reply, len, mut stream) = self.request(conn, header, body, timeout)?;
+        let out = framing::read_body(&mut stream, len)
+            .map_err(|e| KeydError::Broken(format!("reading the reply: {e}")))?;
+        Ok((reply, out))
+    }
+
+    /// Sends the request and reads the reply's header line, turning keyd's
+    /// error replies into `KeydError`. The reader is left at the first byte
+    /// after the line, `len` being the body it announced.
+    fn request(
+        &self,
+        conn: Conn,
+        header: &Value,
+        body: &[u8],
+        timeout: Option<Duration>,
+    ) -> Result<(Value, u64, BufReader<Conn>), KeydError> {
         conn.set_timeout(timeout).ok();
         let mut stream = BufReader::new(conn);
         framing::write_frame(stream.get_mut(), header, body)
@@ -305,10 +317,55 @@ impl Client {
                 other => KeydError::Broken(format!("{other}: {detail}")),
             });
         }
-        let out = framing::read_body(&mut stream, len)
-            .map_err(|e| KeydError::Broken(format!("reading the reply: {e}")))?;
-        Ok((reply, out))
+        Ok((reply, len, stream))
     }
+}
+
+/// A `forward` request's header line.
+fn forward_header(
+    route: &str,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body_len: usize,
+    stream: bool,
+) -> Value {
+    let mut header = json!({
+        "op": "forward",
+        "secret": route,
+        "method": method,
+        "path": path,
+        "headers": headers.iter().map(|(k, v)| [*k, *v]).collect::<Vec<_>>(),
+        "body_len": body_len,
+    });
+    if stream {
+        header["stream"] = json!(true);
+    }
+    header
+}
+
+/// A `forward` reply's status and headers.
+fn forward_head(reply: &Value) -> Result<(u16, Vec<(String, String)>), KeydError> {
+    let status = reply
+        .get("status")
+        .and_then(Value::as_u64)
+        .and_then(|s| u16::try_from(s).ok())
+        .ok_or_else(|| KeydError::Broken("forward: no status".into()))?;
+    let headers = reply
+        .get("headers")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|pair| {
+                    Some((
+                        pair.get(0)?.as_str()?.to_string(),
+                        pair.get(1)?.as_str()?.to_string(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok((status, headers))
 }
 
 impl KeydError {
