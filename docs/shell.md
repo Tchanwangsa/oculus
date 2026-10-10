@@ -8,7 +8,7 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Piece | Location |
 | --- | --- |
 | Route table | `app/src/routes.tsx` |
-| Shell: sidebar rail, tab strip, floating card, zoom | `app/src/layouts/AppLayout.tsx`, `app/src/components/sidebar/`, `app/src/components/tabs/TopTabBar.tsx` |
+| Shell: sidebar rail, tab strip, floating card, zoom | `app/src/layouts/AppLayout.tsx`, `app/src/lib/ui/pageZoom.ts`, `app/src/components/sidebar/`, `app/src/components/tabs/TopTabBar.tsx` |
 | Tabs, side panels, per-pane routers, titles from paths | `app/src/stores/shell/tabStore.ts`, `app/src/lib/shell/sideStack.ts`, `app/src/components/tabs/TabPane.tsx`, `app/src/components/tabs/SidePanelHeader.tsx`, `app/src/components/tabs/PaneHeader.tsx`, `app/src/lib/shell/tabRouters.ts`, `app/src/components/tabs/tabInfo.tsx` |
 | Window shortcuts (all menu items) | `app/src-tauri/src/shell/menu.rs` |
 | ⌘-click → a new tab, app-wide | `app/src/lib/shell/newTabClicks.ts` |
@@ -151,8 +151,9 @@ section names.
   router has no `window.history` index, so `track` in `app/src/lib/shell/tabRouters.ts`
   keeps each router's location keys and a cursor for `canBack`/`canForward`;
   on a browser tab they read Rust's snapshot (`can_back`/`can_forward`).
-- **Zoom is the webview's page zoom** (`setZoom` in `AppLayout`); on a browser
-  tab ⌘=/⌘−/⌘0 zoom the page. `--app-zoom` exists for the traffic-light gap,
+- **Zoom is the webview's page zoom** (`applyZoom` in
+  `app/src/lib/ui/pageZoom.ts`, applied at boot by `App` and changed by
+  `AppLayout`); on a browser tab ⌘=/⌘−/⌘0 zoom the page. `--app-zoom` exists for the traffic-light gap,
   whose height is `trafficLightPosition` in `app/src-tauri/tauri.conf.json` —
   tied to the strip's height and `DEFAULT_ZOOM`, so move one and re-measure all
   three.

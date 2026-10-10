@@ -5,6 +5,7 @@ export * from "./types";
 export * from "./subjects";
 export * from "./syncOptions";
 export * from "./jobModels";
+export * from "./onboarding";
 export * from "./sync";
 export * from "./settings";
 export * from "./files";
