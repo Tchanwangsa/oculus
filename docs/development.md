@@ -136,6 +136,13 @@ placeholder sidecar on a clean tree. The release profile is shared with that
 CLI build, so the tests reuse its artifacts. sccache is installed because
 `app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
 
+A second job, on Linux because the crate is portable, checks
+`app/editor-core` ([editor.md](./editor.md#a-rust-editor-core-is-built-beside-the-editor-not-in-it)):
+`cargo fmt --check`, clippy with `-D warnings` over every target and feature
+(so the `oracle` binary too), `cargo test --locked`, then the four oracles at a
+few thousand cases each, seeded with the run number so each run tries new
+cases. Replay a failure locally with the seed it prints.
+
 `release.yml` is `workflow_dispatch` only. To cut a release, bump `version` in
 `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml` together, push,
 then run **Release** from the Actions tab. `tauri-apps/tauri-action` runs

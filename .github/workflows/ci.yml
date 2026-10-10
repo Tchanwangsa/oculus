@@ -1,6 +1,7 @@
 # Checks every push to master and every pull request on a fresh macOS checkout:
 # that the Rust is formatted, the frontend tests and bundle, the Rust tests,
-# and that the generated CLI reference matches the binary. See docs/development.md#ci-and-releases.
+# and that the generated CLI reference matches the binary; and, beside it, the
+# editor core against CodeMirror and Lezer. See docs/development.md#ci-and-releases.
 name: CI
 
 on:
@@ -70,3 +71,46 @@ jobs:
         run: |
           bun run docs:cli
           git diff --exit-code -- ../docs/cli-reference.md
+
+  editor-core:
+    name: Editor core (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app/editor-core
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: app/package.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/editor-core -> target
+
+      - name: Rust is formatted
+        run: cargo fmt --check
+      - name: Clippy, oracle binary included
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Unit, property and spec tests
+        run: cargo test --locked
+
+      # The oracles import the app's own CodeMirror, Lezer and noteLanguage.
+      - name: Install frontend dependencies
+        working-directory: app
+        run: bun install --frozen-lockfile
+      # A new seed each run widens coverage; a failure prints the seed to replay.
+      - name: Oracles agree with CodeMirror and Lezer
+        working-directory: app
+        env:
+          SEED: ${{ github.run_number }}
+        run: |
+          bun editor-core/oracle/text.ts 2000 "$SEED"
+          bun editor-core/oracle/changes.ts 5000 "$SEED"
+          bun editor-core/oracle/history.ts 1000 "$SEED"
+          bun editor-core/oracle/markdown.ts 5000 "$SEED"
