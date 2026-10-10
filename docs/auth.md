@@ -8,7 +8,7 @@ cookie.
 | Piece | Location |
 | --- | --- |
 | Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
-| Session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas.rs` |
+| Canvas requests through keyd's `canvas` route; session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas/` |
 | Cookie (Canvas and Okta) and auth-flag paths; private writes, sign-out | `app/src-tauri/src/paths.rs` |
 | The app's Okta commands and calls: each goes to keyd; only the credential calls fall back to the keychain when keyd is absent | `app/src-tauri/src/okta.rs` |
 | The sign-in flow, TOTP and the attempt guard; it runs only inside keyd | `app/keyd/core/src/okta/` |
@@ -45,7 +45,8 @@ is on the page either way; only its `disabled` attribute tells you.)
   [automated sign-in](#okta-sign-in-runs-headless-in-rust) or by hand.
 - On launch with the flag present, the app starts connected while a thread
   probes the cookie: `Valid` confirms, `Rejected` clears the flag (keeping the
-  Okta snapshot) and emits `canvas-auth-expired`, `Unreachable` stays connected.
+  Okta snapshot) and emits `canvas-auth-expired`, `Unreachable` (no answer, a
+  Canvas 5xx, or keyd not running) stays connected.
 - Signing out (Settings or `oculus auth logout`, both `paths::sign_out`)
   deletes the Canvas, Okta and Ed snapshots and the flag, and writes
   `canvas-session/signed-out`. The Okta one goes too, or the in-app browser
@@ -367,13 +368,18 @@ JWT. `app/src-tauri/src/ed.rs` mints it by walking the Canvas → Ed LTI 1.3
 launch (tool page → `oidc_login` → Canvas `/api/lti/authorize` → `launch` →
 one-shot `?_logintoken=` → `POST /api/login_token`). Tokens last about two
 weeks, are renewed with `POST /api/renew_token` on each sync, and a dead one
-is re-minted. The token file is private to this user, like the cookies.
-`oculus auth ed <TOKEN>` is a manual override.
+is re-minted. The token lives in keyd's vault (`session.ed`) and is attached by
+keyd's `ed` route; `ed.rs` never reads it back, except that a renewal's body
+carries the new token, which it hands to `session_put`. The Canvas legs of the
+walk go through the `canvas` route, the other hosts' cookies are jarred in the
+process, and `POST /api/login_token`, which has no session to attach, is a
+direct request. `oculus auth ed <TOKEN>` is a manual override: the token is
+checked against `/api/user` directly, and only a good one is stored.
 
 ## Echo360 has no stored credential
 
-Each session is minted on demand from the Canvas cookie by POSTing the
-course's LTI external-tool form (see
+Each session is minted on demand from the Canvas session (the tool page comes
+through keyd's `canvas` route) by POSTing the course's LTI external-tool form (see
 [sync.md](./sync.md#echo360-is-an-lti-launch-with-up-to-two-streams)), and
 `app/src-tauri/src/lectures.rs` caches it per course.
 
@@ -391,4 +397,4 @@ course's LTI external-tool form (see
 - `setCookies:completionHandler:` must get a real block — nil segfaults the app seconds later from a WebKit-only stack.
 - WebKit drops an API-set cookie that would replace an HttpOnly one a server set, with no error. Once Canvas hands the browser an anonymous `canvas_session`, re-seeding does nothing until the old cookie is deleted — so seeding deletes same-named cookies first.
 - `/login/session_token` answers 403 to a cookie session; it wants an access token, which is disabled here.
-- Ed's LTI redirect walk jars cookies per host; the Canvas cookie must never reach edstem.org.
+- Ed's LTI redirect walk jars cookies per host, and Canvas's legs go through keyd, which attaches the cookie only to Canvas; it must never reach edstem.org.

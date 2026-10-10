@@ -32,7 +32,7 @@ pub const KIND_CLASS: &str = "class";
 pub const KIND_DUE: &str = "due";
 
 /// Every dated item for one course, sorted by start. Either half failing still
-/// yields the other.
+/// yields the other, unless the Canvas session is gone.
 pub fn fetch(canvas: &Canvas, course_id: i64) -> Result<Vec<CalendarEvent>, String> {
     let sections = my_section_codes(canvas, course_id);
     let mut out = Vec::new();
@@ -44,6 +44,11 @@ pub fn fetch(canvas: &Canvas, course_id: i64) -> Result<Vec<CalendarEvent>, Stri
     match fetch_due(canvas, course_id) {
         Ok(due) => out.extend(due),
         Err(e) => eprintln!("[oculus] calendar: course {course_id} due dates: {e}"),
+    }
+
+    // A dead session is not an empty calendar: the caller would store nothing.
+    if let Some(expired) = canvas.expired() {
+        return Err(expired.to_string());
     }
 
     out.sort_by(|a, b| a.start_at.cmp(&b.start_at));
@@ -273,9 +278,7 @@ fn markdown_of(html: Option<&str>) -> Option<String> {
 pub async fn calendar_sync_events(canvas_course_id: i64) -> Result<Vec<CalendarEvent>, String> {
     crate::blocking::run(move || {
         let canvas = Canvas::open(&crate::paths::data_dir());
-        if !canvas.has_session() {
-            return Err("Not signed in to Canvas.".to_string());
-        }
+        canvas.check_keyd()?;
         fetch(&canvas, canvas_course_id)
     })
     .await
