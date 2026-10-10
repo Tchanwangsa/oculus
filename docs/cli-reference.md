@@ -73,7 +73,6 @@ Commands:
   status    Whether the saved session still works
   setup     Store the credentials that let Oculus sign in without a browser
   auto      Sign in headlessly with the stored credentials, now
-  tick      One keep-alive cycle: roll the session forward, rebuild it if it died
   forget    Forget the stored sign-in credentials
   diagnose  Report what the Okta sign-in page looks like, when `auto` fails
   ed        Show the Ed Discussion session status, or set a token manually
@@ -147,22 +146,6 @@ automatic ones. It cannot lift the pause a lockout or a rejected password leaves
 the credentials in the app (Settings → Canvas) or run `oculus auth setup`.
 
 Usage: oculus auth auto
-
-Options:
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-### `oculus auth tick`
-
-```
-One keep-alive cycle: roll the session forward, rebuild it if it died
-
-What the LaunchAgent runs every few hours. Prints nothing and always exits 0 — it
-reports into `session-keepalive.log` in the data dir, because launchd has nowhere to
-show a failure and a non-zero exit only makes launchd think the job crashed.
-
-Usage: oculus auth tick
 
 Options:
   -h, --help
