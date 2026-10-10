@@ -40,7 +40,7 @@ impl OktaStatus {
 /// An outcome as keyd's reply: `{"result":"signed_in"}` or
 /// `{"result":"error","code":…}` with the variant's payload beside it
 /// (`detail`, `wait_secs` or `factors`). The session cookie a success holds
-/// stays in keyd: it is in the cookie files, never in a reply.
+/// stays in keyd: it is in the vault, never in a reply.
 pub fn outcome_to_wire(outcome: &Result<String, LoginError>) -> Value {
     match outcome {
         Ok(_) => json!({"result": "signed_in"}),

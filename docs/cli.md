@@ -16,7 +16,7 @@ agent queries and plans through. Flags are in
 | `transcribe` | `app/src-tauri/src/bin/oculus/transcribe.rs`, `app/src-tauri/src/transcribe/` |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/docs.rs`, `app/src-tauri/src/agents.rs` |
 | The memory store | `app/src-tauri/src/memory.rs` |
-| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/keyd.rs`, `app/src-tauri/src/keyd.rs`; the LaunchAgent itself in `app/keyd/core/src/platform/macos/registrar.rs` |
+| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/keyd.rs`, `app/src-tauri/src/keyd/`; the LaunchAgent itself in `app/keyd/core/src/platform/macos/registrar.rs` |
 | Headless writes to the scrape tables | `app/src-tauri/src/store.rs` |
 | Repo copy of the reference | `app/scripts/gen-cli-docs.mjs` |
 
@@ -38,14 +38,16 @@ agent queries and plans through. Flags are in
 `lecture candidates` only decodes a recording on disk, so re-running it is the
 whole story ([chapters.md](./chapters.md)). `--json` is the only global flag.
 
-## The CLI shares the app's cookie and database, but never creates the database
+## The CLI shares the app's session and database, but never creates the database
 
 A CLI sync shows up in the app and vice versa. Schema belongs to the app's
 migrations, so on a fresh machine the app must open once first; until then
 `run` scrapes to disk and says so.
 
 - `auth login` launches the app for the SAML browser step, because a push or
-  biometric challenge needs a human. `auth setup` stores what `auth auto` needs
+  biometric challenge needs a human, and waits for keyd to report the sign-in
+  ([auth.md](./auth.md#every-sign-in-ends-in-one-place)). `auth logout` is keyd's
+  `sign_out`; `auth ed <TOKEN>` stores a checked token in keyd. `auth setup` stores what `auth auto` needs
   to sign in headlessly, in keyd's vault (the keychain when keyd is absent),
   then prints the code for the setup key just typed — nothing reads a stored
   password or key back; `auth forget` clears it

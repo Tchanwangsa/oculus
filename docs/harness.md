@@ -70,7 +70,7 @@ persisted the same way. `classify` in `event.rs` is the one tool table.
 
 A thread rooted at the library writes straight into `courses/` under
 `acceptEdits`. From `agents/`, each CLI refuses other writes its own way; the
-protected paths are one list in `protected.rs`.
+protected paths are one list in `protected.rs`: the library folders, the root files by pattern (the vault and its lock and temp files among them, so an agent cannot delete or truncate the sealed sessions) and the workspace folders. agy names the files instead.
 
 - **Claude**: its sandbox with the cwd as the only write root, `--add-dir` for
   reads (without it `ls ../courses` is refused), `Edit` denies on protected
@@ -92,7 +92,7 @@ write the board ([projects.md](./projects.md)), and a sandbox that opens
 `paths::db_write_paths` names `oculus.db`, `-wal`, `-shm`: `allowWrite` for
 Claude; `writableRoots` on the turn's `sandboxPolicy` plus
 `sandbox_workspace_write.writable_roots` in thread config for Codex. Files,
-not the folder — it holds the session cookie and Ed token.
+not the folder — it holds keyd's vault.
 
 **The CLI stays the only door.** Claude merges `Edit(...)` denies into its
 sandbox's `denyWrite`, so an `oculus.db*` deny would cancel the grant; instead
@@ -591,7 +591,7 @@ chapter list inline — rebuilt on every send and before any spawn.
 
 - Never pass `agy` `--dangerously-skip-permissions` — its file tools then write outside the library.
 - Never put an `Edit` deny on `oculus.db*` in Claude's settings — it cancels the write grant and every board write fails readonly.
-- Never grant the library folder instead of the three database files — it exposes the session cookie and Ed token.
+- Never grant the library folder instead of the three database files — it exposes keyd's vault.
 - Never let Settings make a billed call, or start opencode anywhere but its own page — see [No model is ever probed](#no-model-is-ever-probed).
 - Read opencode models from `/config/providers`, never `/api/model` — the latter lists the instance's providers, not the signed-in ones.
 - Every opencode call carries `?directory=<agents>` except `/auth/{id}` — unscoped, it binds to the server's launch cwd and another instance.

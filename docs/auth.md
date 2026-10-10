@@ -7,14 +7,13 @@ cookie.
 
 | Piece | Location |
 | --- | --- |
-| Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
+| The app's side of the sign-in: login window, hand-over from a login window or browser tab, startup restore, sign-out, the CLI's sign-in watch | `app/src-tauri/src/auth/` |
 | Canvas requests through keyd's `canvas` route; session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas/` |
-| Cookie (Canvas and Okta) and auth-flag paths; private writes, sign-out | `app/src-tauri/src/paths.rs` |
-| The app's Okta commands and calls: each goes to keyd; only the credential calls fall back to the keychain when keyd is absent | `app/src-tauri/src/okta.rs` |
+| The app's Okta commands and calls: each goes to keyd; only the credential calls fall back to the keychain when keyd is absent | `app/src-tauri/src/okta/` |
 | The sign-in flow, TOTP and the attempt guard; it runs only inside keyd | `app/keyd/core/src/okta/` |
 | keyd's Okta ops: the vault entries, the old-item import, one sign-in at a time; the role check every op passes | `app/keyd/core/src/ops/okta.rs`, `app/keyd/core/src/ops.rs` |
 | Staging the CLI into the bundle | `app/scripts/stage-cli.mjs` |
-| Startup probe | `app/src-tauri/src/lib.rs` |
+| Startup probe | `app/src-tauri/src/auth/startup.rs` |
 | Removing a leftover keep-alive agent at startup | `app/src-tauri/src/legacy_agent.rs`, `app/keyd/core/src/platform/macos/registrar.rs` |
 | Ed token minting via LTI | `app/src-tauri/src/ed.rs` |
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
@@ -34,29 +33,33 @@ Do not propose `Authorization: Bearer`. (The "New Access Token" button's text
 is on the page either way; only its `disabled` attribute tells you.)
 
 - Sign-in goes through the university's SAML IdP, so the first login happens
-  in a visible app WebView. The headless sign-in saves the cookie in keyd's
-  vault ([below](#with-keyd-installed-keyd-holds-the-login-sessions)); the
-  login window and browser tabs still write it to the data dir in a plaintext
-  file only this user can read (`paths::write_private`). Beside it is an
-  auth-flag file meaning "we believe we have a session", which keyd also
-  writes.
+  in a visible app WebView. The session lives in keyd's vault
+  ([below](#with-keyd-installed-keyd-holds-the-login-sessions)): the headless
+  sign-in stores it there itself, and the login window and browser tabs read
+  their webview's Canvas and Okta cookies and hand them to keyd with
+  `session_put` (`auth::save_session_cookie`), skipping any host with no
+  cookie yet and logging a refused put. An authenticated flag, which keyd owns,
+  means "we believe we have a session".
 - The session has no cookie-side expiry: the server extends it on use. There
   is no remember-me cookie — once dead, it is rebuilt by
   [automated sign-in](#okta-sign-in-runs-headless-in-rust) or by hand.
-- On launch with the flag present, the app starts connected while a thread
-  probes the cookie: `Valid` confirms, `Rejected` clears the flag (keeping the
-  Okta snapshot) and emits `canvas-auth-expired`, `Unreachable` (no answer, a
-  Canvas 5xx, or keyd not running) stays connected.
-- Signing out (Settings or `oculus auth logout`, both `paths::sign_out`)
-  deletes the Canvas, Okta and Ed snapshots and the flag, and writes
+- On launch a thread asks keyd for the flag; with it present the app starts
+  connected while the thread probes the session: `Valid` confirms, `Rejected`
+  clears the flag through `session_mark(false)` (keeping the Okta session) and
+  emits `canvas-auth-expired`, `Unreachable` (no answer, a Canvas 5xx, or keyd
+  not running) stays connected. A keyd that cannot be asked reads as not
+  signed in, logged once. `get_auth_status` is the flag or this run's
+  in-memory state, read off the main thread.
+- Signing out (Settings or `oculus auth logout`) is keyd's `sign_out`: it
+  deletes the Canvas, Okta and Ed sessions and the flag, and writes
   `canvas-session/signed-out`. The Okta one goes too, or the in-app browser
   would pass through SSO and re-save a Canvas session. The
   [attempt record](#every-sign-in-attempt-goes-through-one-guard) stays, so a
-  lockout pause outlives a sign-out.
+  lockout pause outlives a sign-out. With keyd absent there is nothing to
+  drop.
 - The marker keeps every automatic sign-in off (`LoginError::SignedOut`)
-  until a session is established again: marking the app authenticated
-  removes it (`session::markers::mark_authenticated`; keyd's `session_mark`
-  and every sign-in of its own do it).
+  until a session is established again: `session_mark(true)` removes it, and
+  so does every sign-in keyd runs.
 - Settings' sign-out first deletes every cookie WebKit would send to Canvas
   or Okta (`browser::clear_sessions`), or a tab still signed in would save the
   session straight back. `oculus auth logout` cannot reach a running app's
@@ -65,42 +68,56 @@ is on the page either way; only its `disabled` attribute tells you.)
 ## The in-app browser is seeded with the same sessions
 
 `canvas_session` is HttpOnly and session-scoped, so WebKit keeps it in memory
-only and the on-disk snapshot is the sole surviving copy. Okta's cookies for
-`sso.unimelb.edu.au` are snapshotted beside it (`sso-session.cookie`, written
-by a headless sign-in and by the browser), so a page that redirects to SSO
-passes straight through.
+only and keyd's copy is the one that survives a restart. Okta's cookies for
+`sso.unimelb.edu.au` are kept beside it (written by a headless sign-in and by
+the browser), so a page that redirects to SSO passes straight through.
 
-- `browser::seed_sessions` writes both into WebKit's shared jar through
+- `browser::seed_sessions` asks keyd for both (`session_get`, app only) on a
+  thread of its own, because the first call after an update can wait on the
+  keychain prompt, then writes them into WebKit's shared jar through
   `WKHTTPCookieStore` (Tauri has no cookie setter) at startup and before any
   `*.unimelb.edu.au` tab, navigation or reload, re-scoping every bare
-  `name=value` pair to its host. The load waits for the write to land.
-- Canvas cookies always replace the jar's; Okta's only fill gaps, unless the
-  snapshot changed since it was last seeded — while the app runs, the
-  browser's own Okta session is the freshest.
+  `name=value` pair to its host. The load waits for the write to land. With
+  keyd absent, or holding no session, it seeds nothing and the load goes on.
+- Canvas cookies always replace the jar's; Okta's only fill gaps, unless keyd's
+  header differs from the last one seeded this run (compared by hash) — while
+  the app runs, the browser's own Okta session is the freshest.
 - A page that lands on Okta's entry for any SAML app (`/app/…/sso/saml`, the
   sign-in form when Okta has no session) asks `/api/v1/sessions/me` with the
   browser's Okta cookies. On a 404 it runs the
   [headless sign-in](#okta-sign-in-runs-headless-in-rust), seeds the Okta
   session it saved and reloads the page, subject to the
   [attempt guard](#every-sign-in-attempt-goes-through-one-guard).
-- A signed-in Canvas page (`auth::is_authenticated_url`) re-snapshots both,
-  deduped by name, so the scraper inherits the fresher cookie. A signed-out
-  page never does: it would save Canvas's anonymous cookie over the good one.
+- A signed-in Canvas page (`auth::is_authenticated_url`) hands both cookie
+  sets to keyd, deduped by name, so the scraper inherits the fresher cookie. A
+  signed-out page never does: it would store Canvas's anonymous cookie over the
+  good one. The jar is read on the page-load callback and the keyd calls run on
+  another thread.
 - If the app is not connected when that happens, someone signed in by hand in
-  the tab. `auth::confirm_browser_sign_in` checks the saved cookie with Canvas
-  and, if Canvas accepts it, connects the app.
+  the tab. `auth::tab::confirm_browser_sign_in` checks the stored session with
+  Canvas and, if Canvas accepts it, connects the app.
 
 ## Every sign-in ends in one place
 
-The login window, a browser tab and the headless flow each save their cookies
-their own way, then call `auth::session_established`. It sets the
-auth flag (which also removes the signed-out marker), the in-memory state and
-`canvas-auth-success`. A sign-in by a person (window or tab) also clears the
-attempt guard's failures, pause and wait, by asking keyd (`okta_resume`, app
-only); the app writes the record itself only when keyd is absent. The headless
+The login window, a browser tab and the headless flow each store their session
+their own way, then call `auth::session_established`. For a person's sign-in
+(window or tab) it sets the flag with `session_mark(true)`, which also removes
+the signed-out marker; if keyd cannot record that, the app is not signed in
+and the UI gets `canvas-auth-cancelled`. It then sets the in-memory state and
+emits `canvas-auth-success`. A sign-in by a person also clears the attempt
+guard's failures, pause and wait, by asking keyd (`okta_resume`, app only);
+the app writes the record itself only when keyd is absent. The headless
 sign-in has already updated the guard, and keyd has already set the flag, for
-every trigger. The CLI has no app to update, so `oculus auth auto` sets only
-the flag (`paths::mark_authenticated`).
+every trigger, so `oculus auth auto` sets nothing. The login window reports
+success only once the Canvas session was stored.
+
+`oculus auth login` opens the app and waits for a sign-in it did not make
+itself. The signal is keyd's `session_status`: a sign-in is new when Canvas is
+held and the flag is on, and either was not true at the start or `generation`
+differs from the last reading (`auth::signed_in_since`). `generation` restarts
+when keyd does, so a restart that lands on the same number is caught by the
+flag flipping on. A Canvas cookie rotating also changes `generation`, so the
+command confirms with Canvas before reporting success.
 
 ## A dead session is rebuilt when something needs it
 
@@ -151,7 +168,7 @@ without a browser, inside keyd. The IdP is Okta Identity Engine at `sso.unimelb.
   Verify push
   and WebAuthn need a human; `LoginError::UnsupportedFactor` names the factors
   Okta did offer.
-- The startup probe in `lib.rs` calls `okta::try_auto_recover` before declaring
+- The startup probe in `auth/startup.rs` calls `okta::try_auto_recover` before declaring
   a session expired, and `useAuth().connect()` tries it before opening the
   login window. Credentials come from Settings → Canvas or `oculus auth setup`.
 - A credential read that is refused (keyd's master key, or an old keychain
@@ -164,7 +181,7 @@ without a browser, inside keyd. The IdP is Okta Identity Engine at `sso.unimelb.
 
 ## With keyd installed, keyd holds the credentials and runs the sign-in
 
-`okta.rs` in the app only routes. Saving, forgetting, the Settings status and
+`okta/` in the app only routes. Saving, forgetting, the Settings status and
 every sign-in a client starts (Settings, the startup probe, the browser,
 `oculus auth auto`) are requests to `oculus-keyd` through
 `credentials::Credentialed` (ops `okta_save`, `okta_forget`, `okta_status`,
@@ -234,7 +251,8 @@ rotation, and read by `forward`, `session_get` and `session_status`.
   whole session, as a browser sign-in snapshot or a pasted Ed token does.
   `session_clear {kinds?}` (app or CLI; every kind by default) removes sessions
   and does not touch the markers or `sign-in.json`. `session_status` reports
-  `canvas`, `sso`, `ed`, `authenticated` and `signed_out` as booleans.
+  `canvas`, `sso`, `ed`, `authenticated` and `signed_out` as booleans, and
+  `generation` as a number.
 - **The generic ops never write a session.** `store` and `delete` refuse
   `session.*` as they refuse `okta.*`; `has` reports presence.
 - **A value is at most 24 KiB of printable ASCII.** It rides in the request's
@@ -250,8 +268,8 @@ rotation, and read by `forward`, `session_get` and `session_status`.
   sign-in's jar (`okta/jar.rs`) applies the same rule per host. Ed's
   `Set-Cookie` is ignored.
 - **A generation counter** in keyd's memory counts every put, clear and
-  absorbed change (`State::session_generation`); it restarts at 0 when keyd exits
-  idle.
+  absorbed change (`State::session_generation`); `session_status` reports it,
+  and it restarts at 0 when keyd exits idle.
 - **Keyd owns the two markers**, in `canvas-session/`: `authenticated` ("a
   session Canvas accepted is held"; the startup probe reads it) and
   `signed-out` (every automatic sign-in stands down). Every sign-in keyd runs
@@ -385,7 +403,8 @@ through keyd's `canvas` route) by POSTing the course's LTI external-tool form (s
 
 ## Gotchas
 
-- Every path that establishes a session must end in `auth::session_established` (the CLI: `paths::mark_authenticated`) — the startup probe reads the flag first, and without it a valid cookie opens disconnected.
+- Every sign-in by a person must end in `auth::session_established` (`session_mark(true)`), and keyd's own sign-ins mark themselves — the startup probe reads the flag first, and without it a valid session opens disconnected.
+- keyd calls (`session_get`, `session_status`, `session_put`) can wait on the keychain prompt for 60 s: never from the main thread or a WebKit callback.
 - Holding a `canvas_session` is not success: Canvas issues an anonymous one before auth, so `complete_saml` accepts one only after posting an assertion and `sign_in` verifies it against `/api/v1/users/self` before writing it.
 - Answer `currentAuthenticator`'s challenge before reading the chooser — OIE offers `select-authenticator-authenticate` beside every challenge, and taking it loops forever.
 - The login page names `stateToken` several times; the first is a fragment introspect rejects as "session has expired", so `state_token_candidates` tries every plausible one.

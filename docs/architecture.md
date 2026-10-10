@@ -20,8 +20,8 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Shared parse/embed event payload and channels | `app/src-tauri/src/pipeline_events.rs` |
 | Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
 | Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
-| Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/keyd.rs` |
-| Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/credentials.rs`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
+| Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/keyd/` |
+| Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/credentials.rs`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta/` |
 | Lecture video server | `app/src-tauri/src/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/bundled.rs` |
@@ -205,7 +205,7 @@ app links too, for the client and the installer only.
   installed (`KeydError::Absent`), the only case in which a caller reads the
   keychain itself; every other error surfaces. The Voyage and MinerU clients,
   Groq transcription, the three keys' Settings commands
-  (`credentials::CloudKey`) and the Okta calls (`okta.rs`) use it
+  (`credentials::CloudKey`) and the Okta calls (`okta/`) use it
   ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key),
   [parsing.md](./parsing.md#with-oculus-keyd-installed-no-oculus-process-holds-the-mineru-token),
   [viewers.md](./viewers.md)). A request's timeout is the caller's own, and
@@ -266,8 +266,9 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   spend guard from Settings → Embeddings, kept here rather than in `settings`
   because the reservation that enforces it already reads this file
   ([retrieval.md](./retrieval.md)).
-- The session cookie, auth flag, and the sign-in
-  attempt record and its `okta-sign-in.log` ([auth.md](./auth.md)).
+- `canvas-session/`: the authenticated flag, the signed-out marker and the
+  sign-in attempt record, with `okta-sign-in.log` beside it
+  ([auth.md](./auth.md)). The sessions themselves are in the vault.
 - `vault.bin` and its `vault.bin.lock`, `keyd.sock` (launchd's), and `bin/`
   with a dev-installed `oculus-keyd` and its `oculus-keyd.stamp`
   ([above](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
