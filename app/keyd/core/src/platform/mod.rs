@@ -48,7 +48,7 @@ pub use caller::peer_check;
 pub use caller::{Caller, PeerCheck, Policy, Role};
 #[cfg(test)]
 pub(crate) use endpoint::Accept;
-#[cfg(any(test, feature = "server"))]
+#[cfg(any(test, all(feature = "server", target_os = "macos")))]
 pub(crate) use endpoint::Stream;
 pub use endpoint::{accept_any, activated, connect, Conn, ConnectError, Listener};
 #[cfg(feature = "client")]
