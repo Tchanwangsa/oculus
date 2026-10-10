@@ -39,3 +39,8 @@ pub(super) fn call(state: &State, op: &str, req: Value) -> Result<Value, OpError
         r.header
     })
 }
+
+/// An op with no arguments, as the CLI, replying with its header.
+pub(super) fn op_as(state: &State, op: &str) -> Value {
+    call(state, op, serde_json::json!({"op": op})).unwrap()
+}

@@ -184,9 +184,11 @@ typed.
   failures, pause and wait.
 - **The vault holds `okta.username`, `okta.password` and `okta.totp_secret`.**
   The first `okta_status` or sign-in copies the old keychain items in, one
-  keychain prompt each, once; the items stay in the keychain, and a save or a
-  forget marks all three imported, so an old item is never copied back over
-  either.
+  keychain prompt each, once; the items stay in the keychain after an import,
+  and a save or a forget marks all three imported, so an old item is never
+  copied back over either. `okta_forget` also deletes the three old items
+  (best effort), so the keychain fallback cannot sign in with a forgotten
+  login; it replies `legacy`: `removed`, `absent`, `failed` or `refused`.
 - **The app and the CLI only.** keyd's caller check admits any executable
   in the install, so every op but `ping` (not just the Okta ones) also
   requires the `app` or `cli` role; ffmpeg, which ships in the bundle, is

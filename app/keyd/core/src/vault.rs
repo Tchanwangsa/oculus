@@ -106,11 +106,15 @@ impl KeySource for StaticKey {
     }
 }
 
-/// Reads one item that predates the vault (`names::LEGACY`): the OS secret
-/// store in production (`platform::legacy_items`), a map in tests.
-/// `Ok(None)` only when no such item exists.
+/// Reads and deletes the items that predate the vault (`names::LEGACY`): the
+/// OS secret store in production (`platform::legacy_items`), a map in tests.
 pub trait LegacySource: Send + Sync {
+    /// `Ok(None)` only when no such item exists.
     fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError>;
+
+    /// Deletes one item: `Ok(true)` when it was there, `Ok(false)` when no
+    /// such item exists.
+    fn remove(&self, service: &str, account: &str) -> Result<bool, KeyError>;
 }
 
 /// No old items: for a keyd whose master key is not the store's either.
@@ -121,6 +125,10 @@ pub struct NoLegacy;
 impl LegacySource for NoLegacy {
     fn read(&self, _service: &str, _account: &str) -> Result<Option<String>, KeyError> {
         Ok(None)
+    }
+
+    fn remove(&self, _service: &str, _account: &str) -> Result<bool, KeyError> {
+        Ok(false)
     }
 }
 

@@ -1,12 +1,13 @@
-//! The login keychain: the master key's one item, and plain reads of the
-//! items that predate the vault (for import on use).
+//! The login keychain: the master key's one item, and plain reads and
+//! deletes of the items that predate the vault (import on use, and removal
+//! when the key is deleted).
 //!
 //! The master key is added with `SecItemAdd` and never updated: if another
 //! writer got there first, its key is the one read back and used.
 
 use core_foundation::data::CFData;
 use security_framework::item::{ItemAddOptions, ItemAddValue, ItemClass};
-use security_framework::passwords::{generic_password, PasswordOptions};
+use security_framework::passwords::{delete_generic_password, generic_password, PasswordOptions};
 
 use crate::vault::{
     KeyError, KeySource, LegacySource, MasterKey, MASTER_ACCOUNT, MASTER_LABEL, MASTER_SERVICE,
@@ -56,12 +57,20 @@ fn read_master() -> Result<Option<MasterKey>, KeyError> {
     }
 }
 
-/// The old per-service items, read as they are.
+/// The old per-service items, read and deleted as they are.
 pub(crate) struct LegacyKeychain;
 
 impl LegacySource for LegacyKeychain {
     fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
         read_password(service, account)
+    }
+
+    fn remove(&self, service: &str, account: &str) -> Result<bool, KeyError> {
+        match delete_generic_password(service, account) {
+            Ok(()) => Ok(true),
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(false),
+            Err(e) => Err(classify(&format!("deleting {service}/{account}"), e.code())),
+        }
     }
 }
 

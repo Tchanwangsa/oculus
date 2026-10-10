@@ -118,26 +118,78 @@ impl PeerCheck for Peers {
 #[cfg(feature = "server")]
 pub type Reads = Arc<AtomicUsize>;
 
-/// Old keychain items by (service, account), counting every read. It can only
-/// read: keyd never writes or deletes an old item.
+/// The (service, account) pairs a test keyd has deleted from the old items.
 #[cfg(feature = "server")]
-pub struct OldItems(
-    pub  Vec<(
+pub type Removed = Arc<Mutex<Vec<(String, String)>>>;
+
+/// Old keychain items by (service, account), counting every read and
+/// recording every removal. A removed item is gone for later calls.
+#[cfg(feature = "server")]
+pub struct OldItems {
+    items: Vec<(
         (&'static str, &'static str),
         Result<Option<String>, KeyError>,
     )>,
-    pub Reads,
-);
+    reads: Reads,
+    removed: Removed,
+    removal_fails: Option<KeyError>,
+}
+
+#[cfg(feature = "server")]
+impl OldItems {
+    pub fn new(
+        items: Vec<(
+            (&'static str, &'static str),
+            Result<Option<String>, KeyError>,
+        )>,
+        reads: Reads,
+    ) -> Self {
+        OldItems {
+            items,
+            reads,
+            removed: Removed::default(),
+            removal_fails: None,
+        }
+    }
+
+    /// Every removal answers `error`, and removes nothing.
+    pub fn failing_removal(mut self, error: KeyError) -> Self {
+        self.removal_fails = Some(error);
+        self
+    }
+
+    /// A handle on the removals, usable after the keyd owns the items.
+    pub fn removed(&self) -> Removed {
+        self.removed.clone()
+    }
+}
 
 #[cfg(feature = "server")]
 impl LegacySource for OldItems {
     fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
-        self.1.fetch_add(1, Ordering::SeqCst);
-        self.0
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.items
             .iter()
             .find(|((s, a), _)| *s == service && *a == account)
             .map(|(_, r)| r.clone())
             .unwrap_or(Ok(None))
+    }
+
+    fn remove(&self, service: &str, account: &str) -> Result<bool, KeyError> {
+        if let Some(error) = &self.removal_fails {
+            return Err(error.clone());
+        }
+        let held = self
+            .items
+            .iter()
+            .any(|((s, a), r)| *s == service && *a == account && matches!(r, Ok(Some(_))));
+        let mut gone = self.removed.lock().unwrap_or_else(|p| p.into_inner());
+        let pair = (service.to_string(), account.to_string());
+        let there = held && !gone.contains(&pair);
+        if there {
+            gone.push(pair);
+        }
+        Ok(there)
     }
 }
 

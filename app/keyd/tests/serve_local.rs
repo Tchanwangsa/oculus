@@ -553,7 +553,7 @@ fn the_binary_saves_credentials_and_signs_in_for_the_cli_only() {
     );
     assert_eq!(replies[4], json!({"result": "signed_in"}));
     assert_eq!(replies[5]["code"], "waiting", "{}", replies[5]);
-    assert_eq!(replies[6], json!({"existed": true}));
+    assert_eq!(replies[6], json!({"existed": true, "legacy": "absent"}));
     assert_eq!(
         replies[7],
         json!({"username": null, "has_password": false, "has_totp": false})

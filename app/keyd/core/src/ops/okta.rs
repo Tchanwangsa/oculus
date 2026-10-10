@@ -194,8 +194,10 @@ impl State {
         Ok(json!({"saved": true}).into())
     }
 
-    /// Removes all three values; `{"existed": bool}` says whether any was
-    /// there. Their markers are set, so nothing is imported afterwards.
+    /// Removes all three values and their old keychain items;
+    /// `{"existed": bool, "legacy": …}` says whether any value was there and
+    /// what became of the old items (`legacy::Removal`). Their markers are
+    /// set, so nothing is imported afterwards.
     pub(super) fn okta_forget(&self) -> Result<Reply, OpError> {
         let existed = self.vault()?.update(|e| {
             let mut any = false;
@@ -205,7 +207,11 @@ impl State {
             }
             any
         })?;
-        Ok(json!({"existed": existed}).into())
+        let legacy = self.remove_legacy(names::OKTA);
+        Ok(Reply {
+            note: Some(format!("legacy={}", legacy.as_str())),
+            ..json!({"existed": existed, "legacy": legacy.as_str()}).into()
+        })
     }
 
     /// What is on file: the username, and whether a password and a seed are.
@@ -683,8 +689,8 @@ mod tests {
         let state = state(&dir, &fake);
         save_good(&state);
         let forget = || op(&state, &cli(), "okta_forget", json!({})).unwrap();
-        assert_eq!(forget(), json!({"existed": true}));
-        assert_eq!(forget(), json!({"existed": false}));
+        assert_eq!(forget(), json!({"existed": true, "legacy": "absent"}));
+        assert_eq!(forget(), json!({"existed": false, "legacy": "absent"}));
         for name in names::OKTA {
             assert_eq!(stored(&dir, name), None);
             assert!(marked(&dir, name), "{name} keeps its marker");
@@ -697,7 +703,7 @@ mod tests {
         save_good(&state);
         vault_of(&dir).remove(names::OKTA_USERNAME).unwrap();
         vault_of(&dir).remove(names::OKTA_PASSWORD).unwrap();
-        assert_eq!(forget(), json!({"existed": true}));
+        assert_eq!(forget(), json!({"existed": true, "legacy": "absent"}));
     }
 
     // ── The generic ops leave Okta alone ─────────────────────────────────────
@@ -758,7 +764,7 @@ mod tests {
 
     fn old_items(password: Result<Option<String>, KeyError>) -> (Box<OldItems>, Reads) {
         let reads = Reads::default();
-        let items = OldItems(
+        let items = OldItems::new(
             vec![
                 ((SERVICE, "username"), Ok(Some(USERNAME.to_string()))),
                 ((SERVICE, "password"), password),

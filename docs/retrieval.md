@@ -181,8 +181,8 @@ the direct path, because keyd talks only to Voyage's fixed origin.
   damaged vault is `Broker` (kind `credential_broker`, latching).
 - The Settings commands (`voyage_has_api_key`, `_set_`, `_delete_`) also go
   through keyd when it is there. The probe still runs in the app with the key
-  just typed; only the store goes to keyd. Deleting through keyd leaves the
-  old keychain item, which only the direct path reads.
+  just typed; only the store goes to keyd. Deleting through keyd also
+  deletes the old keychain item, which only the direct path reads.
 
 ## Ingest follows a parse, through one queue
 

@@ -93,6 +93,10 @@ mod server {
         fn read(&self, _service: &str, _account: &str) -> Result<Option<String>, KeyError> {
             Err(KeyError::Platform(super::unsupported().to_string()))
         }
+
+        fn remove(&self, _service: &str, _account: &str) -> Result<bool, KeyError> {
+            Err(KeyError::Platform(super::unsupported().to_string()))
+        }
     }
 }
 

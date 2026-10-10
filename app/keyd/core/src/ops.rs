@@ -26,6 +26,7 @@ pub struct Build {
 }
 
 mod forward;
+mod legacy;
 mod okta;
 mod session;
 #[cfg(test)]
@@ -267,7 +268,12 @@ impl State {
                     }
                     e.remove(name)
                 })?;
-                Ok(json!({"existed": existed}).into())
+                // The old keychain item goes too, so it cannot come back via the app's fallback.
+                let legacy = self.remove_legacy(&[name]);
+                Ok(Reply {
+                    note: Some(format!("legacy={}", legacy.as_str())),
+                    ..json!({"existed": existed, "legacy": legacy.as_str()}).into()
+                })
             }
             "forward" => self.forward(req, body),
             "okta_save" => self.okta_save(req),
@@ -801,7 +807,7 @@ mod tests {
             BUILD,
             dir.0.clone(),
             Box::new(StaticKey(key())),
-            Box::new(OldItems(items, reads.clone())),
+            Box::new(OldItems::new(items, reads.clone())),
         );
         (state, reads)
     }

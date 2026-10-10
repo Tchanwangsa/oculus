@@ -166,9 +166,12 @@ app links too, for the client and the installer only.
   name's old item (`com.tchan.oculus.voyage`, `.mineru`, `.groq`) into the
   vault unless the vault already holds a key, then records
   `keyd.imported.<name>` in the vault; `store` and `delete` record it too, so
-  a deleted key never comes back from the old item, which stays in the
-  keychain. The Okta items are imported the same way, by `okta_status` and the
-  sign-in, and `okta_save` and `okta_forget` mark them. Entries under
+  a deleted key never comes back from the old item. An import leaves the old
+  item in the keychain, which the app reads when keyd is absent; `delete`
+  removes it too, best effort, and replies `legacy`: `removed`, `absent`,
+  `failed` or `refused`, with the vault delete standing either way. The Okta
+  items are imported the same way, by `okta_status` and the sign-in, and
+  `okta_save` marks them; `okta_forget` marks and removes them. Entries under
   `keyd.` are bookkeeping no op can name (`app/keyd/core/src/names.rs`).
 - **The caller check runs before any request is read.** The peer's uid must
   be keyd's. A bundled keyd then admits only executables inside its own app
