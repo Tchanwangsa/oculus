@@ -346,6 +346,76 @@ fn mineru_and_groq_forward_to_their_own_test_origins() {
     );
 }
 
+#[test]
+fn the_binary_attaches_the_canvas_cookie_and_ed_token_and_streams_a_body() {
+    if !cfg!(feature = "dev") {
+        return;
+    }
+    let (canvas, canvas_seen) = fake_origin();
+    let (ed, ed_seen) = fake_origin();
+    let mut keyd = Keyd::start_with(
+        60,
+        &[
+            ("OCULUS_KEYD_CANVAS_ORIGIN", &canvas),
+            ("OCULUS_KEYD_ED_ORIGIN", &ed),
+        ],
+    );
+    let put = |kind: &str, value: &str| {
+        keyd.call(json!({"op": "session_put", "kind": kind, "value": value}))["stored"].clone()
+    };
+    assert_eq!(put("canvas", "canvas_session=SECRET-COOKIE"), true);
+    assert_eq!(put("ed", "SECRET-TOKEN"), true);
+
+    let (reply, answer) = forward(
+        &keyd,
+        json!({"op": "forward", "secret": "canvas", "method": "GET",
+               "path": "/api/v1/courses?include[]=term"}),
+        b"",
+    );
+    assert_eq!(reply["status"], 429, "{reply}");
+    assert_eq!(answer, b"{\"detail\":\"slow down\"}");
+    let head = canvas_seen.join().unwrap().to_lowercase();
+    assert!(
+        head.starts_with("get /api/v1/courses?include[]=term http/1.1"),
+        "{head}"
+    );
+    assert!(
+        head.contains("cookie: canvas_session=secret-cookie"),
+        "{head}"
+    );
+
+    // Streamed: no body_len, and the body runs to the end of the connection.
+    let stream = connect(&keyd.sock);
+    let req = json!({"op": "forward", "secret": "ed", "method": "GET",
+                     "path": "/api/threads/77?view=1", "stream": true});
+    (&stream).write_all(format!("{req}\n").as_bytes()).unwrap();
+    let mut reader = BufReader::new(&stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let reply: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(reply["status"], 429, "{reply}");
+    assert!(reply.get("body_len").is_none(), "{reply}");
+    let mut body = Vec::new();
+    std::io::Read::read_to_end(&mut reader, &mut body).unwrap();
+    assert_eq!(body, b"{\"detail\":\"slow down\"}");
+    let head = ed_seen.join().unwrap().to_lowercase();
+    assert!(head.contains("x-token: secret-token"), "{head}");
+    assert!(!head.contains("cookie:"), "{head}");
+
+    drop(stream);
+    keyd.child.kill().ok();
+    keyd.child.wait().ok();
+    let mut log = String::new();
+    std::io::Read::read_to_string(keyd.child.stderr.as_mut().unwrap(), &mut log).unwrap();
+    assert!(
+        log.contains("secret=canvas") && log.contains("secret=ed") && log.contains("streamed"),
+        "{log}"
+    );
+    for leak in ["SECRET", "include[]", "threads/77", "slow down"] {
+        assert!(!log.contains(leak), "{leak} in {log}");
+    }
+}
+
 // ── The Okta ops ─────────────────────────────────────────────────────────────
 
 /// One request and its one-line reply, over the endpoint at `sock`.

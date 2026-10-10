@@ -39,6 +39,18 @@ pub fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
+/// `(year, month, day)` to days since 1970-01-01: the inverse of
+/// `civil_from_days` (Hinnant's `days_from_civil`).
+pub fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year.rem_euclid(400);
+    let shifted_month = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
 /// `YYYY-MM-DDTHH:MM:SS` from a Unix timestamp.
 pub fn iso8601_utc(secs: u64) -> String {
     let (days, rem) = (secs / 86_400, secs % 86_400);
@@ -57,6 +69,16 @@ mod tests {
         assert_eq!(civil_from_days(0), (1970, 1, 1));
         assert_eq!(civil_from_days(-1), (1969, 12, 31));
         assert_eq!(civil_from_days(19_617), (2023, 9, 17));
+    }
+
+    #[test]
+    fn the_calendar_maps_both_ways() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(1969, 12, 31), -1);
+        for days in [-800_000, -1, 0, 59, 60, 19_617, 19_782, 2_932_896] {
+            let (y, m, d) = civil_from_days(days);
+            assert_eq!(days_from_civil(y, m, d), days);
+        }
     }
 
     #[test]

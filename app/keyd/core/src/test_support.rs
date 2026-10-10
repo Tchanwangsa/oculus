@@ -6,7 +6,7 @@
 pub mod okta_fake;
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -172,6 +172,43 @@ pub struct FakeOrigin {
     hits: Arc<Mutex<Vec<Hit>>>,
 }
 
+/// Reads one request off `stream`; `None` when the peer sent nothing.
+fn read_hit(stream: &TcpStream) -> Option<Hit> {
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    if reader.read_line(&mut line).unwrap_or(0) == 0 {
+        return None;
+    }
+    let mut parts = line.split_whitespace();
+    let (method, path) = (
+        parts.next().unwrap_or("").to_string(),
+        parts.next().unwrap_or("").to_string(),
+    );
+    let mut headers = Vec::new();
+    loop {
+        let mut h = String::new();
+        reader.read_line(&mut h).unwrap();
+        let h = h.trim_end();
+        if h.is_empty() {
+            break;
+        }
+        let (k, v) = h.split_once(':').unwrap();
+        headers.push((k.trim().to_lowercase(), v.trim().to_string()));
+    }
+    let len: usize = headers
+        .iter()
+        .find(|(k, _)| k == "content-length")
+        .map_or(0, |(_, v)| v.parse().unwrap());
+    let mut body = vec![0; len];
+    reader.read_exact(&mut body).unwrap();
+    Some(Hit {
+        method,
+        path,
+        headers,
+        body,
+    })
+}
+
 impl FakeOrigin {
     pub fn start(handler: impl Fn(&Hit) -> Answer + Send + 'static) -> FakeOrigin {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -181,38 +218,8 @@ impl FakeOrigin {
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else { continue };
-                let mut reader = BufReader::new(&stream);
-                let mut line = String::new();
-                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                let Some(hit) = read_hit(&stream) else {
                     continue;
-                }
-                let mut parts = line.split_whitespace();
-                let (method, path) = (
-                    parts.next().unwrap_or("").to_string(),
-                    parts.next().unwrap_or("").to_string(),
-                );
-                let mut headers = Vec::new();
-                loop {
-                    let mut h = String::new();
-                    reader.read_line(&mut h).unwrap();
-                    let h = h.trim_end();
-                    if h.is_empty() {
-                        break;
-                    }
-                    let (k, v) = h.split_once(':').unwrap();
-                    headers.push((k.trim().to_lowercase(), v.trim().to_string()));
-                }
-                let len: usize = headers
-                    .iter()
-                    .find(|(k, _)| k == "content-length")
-                    .map_or(0, |(_, v)| v.parse().unwrap());
-                let mut body = vec![0; len];
-                reader.read_exact(&mut body).unwrap();
-                let hit = Hit {
-                    method,
-                    path,
-                    headers,
-                    body,
                 };
                 log.lock().unwrap().push(hit.clone());
 
@@ -229,6 +236,30 @@ impl FakeOrigin {
                 let mut w = &stream;
                 w.write_all(out.as_bytes()).ok();
                 w.write_all(&answer.body).ok();
+            }
+        });
+        FakeOrigin { origin, hits }
+    }
+
+    /// An origin whose `handler` writes the whole response itself (the status
+    /// line, headers and body, at whatever pace and for however long it
+    /// likes), and the connection closes when it returns. Each connection
+    /// gets a thread, so one slow answer holds up no other.
+    pub fn start_raw(handler: impl Fn(&Hit, &mut TcpStream) + Send + Sync + 'static) -> FakeOrigin {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let hits = Arc::new(Mutex::new(Vec::new()));
+        let log = hits.clone();
+        let handler = Arc::new(handler);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let (log, handler) = (log.clone(), handler.clone());
+                std::thread::spawn(move || {
+                    let Some(hit) = read_hit(&stream) else { return };
+                    log.lock().unwrap().push(hit.clone());
+                    handler(&hit, &mut stream);
+                });
             }
         });
         FakeOrigin { origin, hits }

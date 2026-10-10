@@ -258,9 +258,9 @@ is built to give the same bytes for the same source:
 - **`--features dev`** is what `bun run keyd` builds: it admits any same-user
   caller, because a dev keyd has no bundle to check callers against. Test
   hooks (`serve-local`, a data-dir override, an injected key that also turns
-  off reading old keychain items, a loopback origin for Voyage, MinerU or
-  Groq through `OCULUS_KEYD_<NAME>_ORIGIN`, loopback origins for the sign-in's
-  Canvas and Okta, a fixed sign-in clock `OCULUS_KEYD_NOW`, and the role every
+  off reading old keychain items, a loopback origin for Voyage, MinerU, Groq
+  or Ed through `OCULUS_KEYD_<NAME>_ORIGIN`, loopback origins for Canvas (the
+  sign-in's and `forward`'s `canvas` route's) and Okta, a fixed sign-in clock `OCULUS_KEYD_NOW`, and the role every
   caller gets, `OCULUS_KEYD_TEST_ROLE`) exist only in debug builds. Every op
   but `ping` needs the `app` or `cli` role, so a test process that is neither
   sets `OCULUS_KEYD_TEST_ROLE`.

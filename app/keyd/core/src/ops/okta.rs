@@ -262,6 +262,7 @@ impl State {
             header: outcome_to_wire(&outcome),
             body: Vec::new(),
             note: Some(note),
+            stream: None,
         })
     }
 }

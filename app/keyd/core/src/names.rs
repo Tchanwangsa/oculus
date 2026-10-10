@@ -6,10 +6,18 @@ pub const GROQ: &str = "groq";
 pub const OKTA_USERNAME: &str = "okta.username";
 pub const OKTA_PASSWORD: &str = "okta.password";
 pub const OKTA_TOTP_SECRET: &str = "okta.totp_secret";
+pub const SESSION_CANVAS: &str = "session.canvas";
+pub const SESSION_SSO: &str = "session.sso";
+pub const SESSION_ED: &str = "session.ed";
 
 /// The Okta sign-in's three values. They are written only by `okta_save` and
 /// `okta_forget`, never by the generic `store` and `delete`.
 pub const OKTA: &[&str] = &[OKTA_USERNAME, OKTA_PASSWORD, OKTA_TOTP_SECRET];
+
+/// The login sessions: Canvas's and Okta's cookie headers and Ed's `x-token`.
+/// They are written only by the `session_*` ops and by `forward` absorbing a
+/// `Set-Cookie`, never by the generic `store` and `delete`.
+pub const SESSIONS: &[&str] = &[SESSION_CANVAS, SESSION_SSO, SESSION_ED];
 
 /// Every name the vault accepts; anything else is refused before it is stored.
 pub const KNOWN: &[&str] = &[
@@ -19,6 +27,9 @@ pub const KNOWN: &[&str] = &[
     OKTA_USERNAME,
     OKTA_PASSWORD,
     OKTA_TOTP_SECRET,
+    SESSION_CANVAS,
+    SESSION_SSO,
+    SESSION_ED,
 ];
 
 pub fn is_known(name: &str) -> bool {
@@ -92,13 +103,23 @@ mod tests {
     }
 
     #[test]
+    fn the_session_names_are_the_session_prefix() {
+        let by_prefix: Vec<&str> = KNOWN
+            .iter()
+            .copied()
+            .filter(|n| n.starts_with("session."))
+            .collect();
+        assert_eq!(by_prefix, SESSIONS);
+    }
+
+    #[test]
     fn every_legacy_item_lands_on_a_known_name_once() {
         let mut seen: Vec<&str> = LEGACY.iter().map(|l| l.secret).collect();
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), LEGACY.len());
         assert!(LEGACY.iter().all(|l| is_known(l.secret)));
-        assert!(!is_known("session.canvas"));
+        assert!(LEGACY.iter().all(|l| !SESSIONS.contains(&l.secret)));
     }
 
     #[test]

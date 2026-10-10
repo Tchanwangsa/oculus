@@ -2,23 +2,29 @@
 
 use std::collections::BTreeMap;
 
+use crate::session::cookie::parse_set_cookie;
+
 /// Cookies kept per host: Okta's `sid` must never reach Canvas, nor Canvas's
 /// session Okta.
 #[derive(Default)]
 pub(super) struct Jar(BTreeMap<String, BTreeMap<String, String>>);
 
 impl Jar {
+    /// Applies each `Set-Cookie` by the shared rule (`session::cookie`). The
+    /// jar alone drops the quotes around a value and keeps its cookies sorted
+    /// by name, which the sign-in's replayed headers have always been.
     pub(super) fn absorb(&mut self, host: &str, resp: &ureq::Response) {
+        let now = crate::clock::now_secs();
         let jar = self.0.entry(host.to_string()).or_default();
         for raw in resp.all("set-cookie") {
-            let Some((k, v)) = raw.split(';').next().unwrap_or("").split_once('=') else {
+            let Some(cookie) = parse_set_cookie(raw, now) else {
                 continue;
             };
-            let (k, v) = (k.trim(), v.trim().trim_matches('"'));
-            if v.is_empty() {
-                jar.remove(k);
+            let value = cookie.value.trim_matches('"');
+            if cookie.remove || value.is_empty() {
+                jar.remove(cookie.name);
             } else {
-                jar.insert(k.to_string(), v.to_string());
+                jar.insert(cookie.name.to_string(), value.to_string());
             }
         }
     }
