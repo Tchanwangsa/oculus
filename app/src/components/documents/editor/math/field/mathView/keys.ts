@@ -36,20 +36,15 @@ function commandFor(view: MathView, e: KeyboardEvent): FieldCommand | null {
   return null;
 }
 
-/** A key in the textarea: the host's first (`onKey`), then the pending
- *  command's list (`popoverKey`), then the model's. An IME's keys are its
- *  own. */
+/** A key in the textarea: the open list's first (`popoverKey`), then the
+ *  host's (`onKey`), then the model's. An IME's keys are its own. */
 export function keyDown(view: MathView, e: KeyboardEvent) {
   if (view.dead || e.isComposing || view.composing || e.keyCode === 229) return;
   const stop = () => {
     e.preventDefault();
     e.stopPropagation();
   };
-  if (view.host.onKey?.(e, view)) {
-    stop();
-    return;
-  }
-  if (popoverKey(view, e)) {
+  if (popoverKey(view, e) || view.host.onKey?.(e, view)) {
     stop();
     return;
   }

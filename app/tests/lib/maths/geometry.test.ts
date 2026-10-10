@@ -167,4 +167,43 @@ describe("bands", () => {
   test("an empty range has none", () => {
     expect(bands(fracLayout, 4, 4)).toEqual([]);
   });
+
+  describe("an array whose rows are all selected", () => {
+    // `\frac12(…) = \begin{cases}…\end{cases}` as WebKit lays it out:
+    // KaTeX draws the array column by column, inside an element for the
+    // `cases` (its brace) and one for the array (its padding).
+    const tex = "\\frac{1}{\\sqrt2}(|0\\rangle+(-1)^{s_i}|1\\rangle) = \\begin{cases}|+\\rangle & s_i = 0 \\text{ (no CNOT)}\\\\ |-\\rangle & s_i=1\\end{cases}";
+    const slots = MathField.open(tex, true).slots;
+    const layout: Layout = {
+      items: [
+        item(0, 16, box(116.66, 2.91, 143.32, 48.23)),
+        item(16, 17, box(143.32, 14.38, 149.91, 34.38)),
+        item(46, 47, box(255.18, 14, 261.77, 34)),
+        item(48, 49, box(266.47, 14, 279.65, 34)),
+        item(50, 131, box(284.38, -0.36, 475.34, 50.64)),
+        item(50, 131, box(298.02, 1, 475.3, 49.78)),
+        item(63, 73, box(298.02, 3.08, 322.5, 23.08)),
+        item(103, 113, box(298.02, 27.47, 322.5, 47.47)),
+        item(75, 100, box(339.44, 3.08, 473.3, 24.63)),
+        item(115, 120, box(339.44, 27.47, 383.42, 49.02)),
+      ],
+    };
+
+    test("gives a band per row, the atoms before it and its brace one beside them", () => {
+      expect(bands(layout, 0, tex.length, slots)).toEqual([
+        box(116.66, -0.36, 298.02, 50.64),
+        box(298.02, 3.08, 473.3, 24.63),
+        box(298.02, 27.47, 383.42, 49.02),
+      ]);
+    });
+
+    test("never one box over the whole formula", () => {
+      const whole = bands(layout, 0, tex.length, slots);
+      expect(whole.some((b) => b.left <= 116.66 && b.right >= 473.3)).toBe(false);
+    });
+
+    test("part of a cell is one band over just those atoms", () => {
+      expect(bands(layout, 75, 100, slots)).toEqual([box(339.44, 3.08, 473.3, 24.63)]);
+    });
+  });
 });

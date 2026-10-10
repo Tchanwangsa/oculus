@@ -10,14 +10,9 @@ export const math: ThemeSpec = {
   // A block's top-level `\\` lines, spaced as the field spaces its rows.
   ".cm-math-display .katex-html > .katex-newline": { height: `${MATH_LINE_GAP}em` },
   // Rendered maths selects as one unit (`MathWidget`): no native highlight on
-  // KaTeX's glyphs, which CodeMirror hides only inside a line. A selected
-  // block fills opaquely over the card, so the selection layer under it
-  // can't double its tint.
+  // KaTeX's glyphs, which CodeMirror hides only inside a line; a covered
+  // rendering draws bands over its atoms instead (`.md-math-band`).
   ".cm-content .cm-math::selection, .cm-content .cm-math ::selection": { backgroundColor: "transparent" },
-  ".cm-math-display.cm-math-selected": {
-    backgroundColor: `color-mix(in srgb, ${brand} 22%, var(--color-card))`,
-    borderRadius: "6px",
-  },
   ".cm-math-error": { color: "var(--color-destructive)", fontFamily: mono, fontSize: "13px" },
   // Its source while the maths engine loads (`MathWidget`).
   ".cm-math-pending": { color: muted, fontFamily: mono, fontSize: "13px", whiteSpace: "pre-wrap" },
@@ -146,6 +141,9 @@ export const math: ThemeSpec = {
   // The `\name` being typed in command mode, typed into the rendering as
   // the TeX source it is (`mathView/pending.ts`).
   ".cm-math-view .katex [data-pending]": { fontFamily: mono, color: brand },
+  // Sized on the outermost only, so the inner glyphs don't shrink again:
+  // 0.8em brings the monospace x-height down to the maths' own.
+  ".cm-math-view .katex [data-pending]:not([data-pending] *)": { fontSize: "0.8em" },
   // The palette's options for the pending `\command`, in the popover look:
   // a box around a scroller of rows (`mathView/popover/`).
   ".cm-math-view-popover": {
@@ -189,4 +187,23 @@ export const math: ThemeSpec = {
   },
   ".cm-math-view-popover-preview": { minWidth: "28px", fontSize: "13px", textAlign: "center" },
   ".cm-math-view-popover-name": { fontFamily: mono, color: muted },
+  // A pick's 1–9 key, and the picks' row on to the full toolbox.
+  ".cm-math-view-popover-key": {
+    marginLeft: "auto",
+    paddingLeft: "12px",
+    color: muted,
+    fontSize: "11px",
+    fontVariantNumeric: "tabular-nums",
+  },
+  ".cm-math-view-popover-more": {
+    display: "flex",
+    alignItems: "center",
+    marginTop: "4px",
+    padding: "4px 8px 2px",
+    borderTop: "1px solid var(--color-border)",
+    color: muted,
+    cursor: "pointer",
+  },
+  ".cm-math-view-popover-more:hover": { color: "var(--color-foreground)" },
+  ".cm-math-view-popover-more[hidden]": { display: "none" },
 };

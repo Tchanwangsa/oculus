@@ -3,10 +3,12 @@ import { ViewPlugin, type EditorView } from "@codemirror/view";
 
 import "@/styles/katex/katex.min.css";
 
-import { mathsReady, onMathsReady, renderToString } from "@/lib/maths";
+import { MathField, mathsReady, onMathsReady } from "@/lib/maths";
+import { formulaOf } from "@/lib/markdown/mathSelection/formula";
+import { WholeBands } from "@/lib/markdown/mathSelection/whole";
 import { mathFieldFocused } from "../../core/liveFocus";
-import { hugArrays } from "../../math/hugArrays";
-import { MATH_ARRAYSTRETCH, noteMathPress } from "../../math/field/mathField";
+import { noteMathPress } from "../../math/field/mathField";
+import { fieldHtml } from "../../math/field/mathView/render";
 import { ancestorAt } from "../../syntax/syntax";
 import { SourceWidget } from "./source";
 
@@ -14,18 +16,16 @@ import { SourceWidget } from "./source";
 const katexCache = new Map<string, string | null>();
 const KATEX_CACHE_MAX = 500;
 
-/** KaTeX HTML for `source`, or null if it does not parse. Matrix rows get
- *  `MATH_ARRAYSTRETCH`, as the visual field draws them (`math/field/mathView`).
- *  Only once `mathsReady()`. */
+/** KaTeX HTML for `source` as the visual field draws it (`fieldHtml`: the
+ *  source map on, matrix rows `MATH_ARRAYSTRETCH`), or null if it does not
+ *  render. Only once `mathsReady()`. */
 function renderMath(source: string, display: boolean): string | null {
   const key = `${display ? "D" : "I"}${source}`;
   const hit = katexCache.get(key);
   if (hit !== undefined) return hit;
   let html: string | null;
   try {
-    // A fresh macro table each time: KaTeX writes the source's `\def`s into it.
-    const macros = { "\\arraystretch": String(MATH_ARRAYSTRETCH) };
-    html = renderToString(hugArrays(source), { displayMode: display, throwOnError: true, macros });
+    html = fieldHtml(source, display);
   } catch {
     html = null;
   }
@@ -62,11 +62,38 @@ function mathSpan(view: EditorView, start: number, block: boolean): { from: numb
 /** The widget each rendering was drawn or last updated from. */
 const drawnMath = new WeakMap<HTMLElement, MathWidget>();
 
+/** The bands over each rendering a selection covers. */
+const covered = new WeakMap<HTMLElement, WholeBands>();
+
+/** Bands over the whole rendering while a selection covers it, as over a
+ *  chat formula a text selection takes (`WholeBands`); the note's own
+ *  highlight skips it (`selectionGaps`). */
+function showCovered(dom: HTMLElement, w: MathWidget, on: boolean) {
+  const bands = covered.get(dom);
+  if (!on || !w.rendered()) {
+    bands?.close();
+    covered.delete(dom);
+    return;
+  }
+  if (bands) return;
+  const formula = formulaOf(dom.querySelector(".katex-display") ?? dom.querySelector(".katex") ?? dom);
+  if (!formula) return;
+  let slots: MathField["slots"] = [];
+  try {
+    const field = MathField.open(w.source, w.display);
+    slots = field.slots;
+    field.free();
+  } catch {
+    // The rendering's atoms still get bands, a line each.
+  }
+  covered.set(dom, new WholeBands(formula, slots));
+}
+
 /**
  * Rendered maths, one unit to the selection: its range is atomic in Live mode
- * (`live-preview/livePreview`), so the selection layer highlights inline maths like a
- * word. A block (`block`, drawn by the block layer) is marked `selected`
- * while a selection covers it and fills whole. It has a caret spot before
+ * (`live-preview/livePreview`), and while a selection covers it (`selected`)
+ * it draws bands over its atoms, which the note's highlight leaves out. A
+ * block (`block`) is drawn by the block layer. It has a caret spot before
  * and after it: a press in its padding above or below the formula rests the
  * caret there, drawn beside the formula's first or last row (`coordsAt`).
  * Any other press opens the visual field where it landed; Shift with a press
@@ -104,7 +131,6 @@ export class MathWidget extends SourceWidget {
   toDOM(view: EditorView) {
     const dom = document.createElement(this.display ? "div" : "span");
     dom.className = this.display ? "cm-math cm-math-display" : "cm-math";
-    dom.classList.toggle("cm-math-selected", this.selected);
     drawnMath.set(dom, this);
     const pending = !this.maths && !!this.source.trim();
     const html = pending || !this.source.trim() ? null : renderMath(this.source, this.display);
@@ -136,14 +162,25 @@ export class MathWidget extends SourceWidget {
       noteMathPress(e.clientX, e.clientY, dom);
     });
     this.reveal(dom, view);
+    showCovered(dom, this, this.selected);
     return dom;
+  }
+
+  /** Drawn as maths, not as its source (pending, or LaTeX that doesn't
+   *  render). */
+  rendered(): boolean {
+    return this.maths && !!this.source.trim() && renderMath(this.source, this.display) != null;
+  }
+
+  destroy(dom: HTMLElement) {
+    showCovered(dom, this, false);
   }
 
   /** Only the highlight changed: keep the rendering. */
   updateDOM(dom: HTMLElement) {
     const old = drawnMath.get(dom);
     if (!old || !old.sameMath(this)) return false;
-    dom.classList.toggle("cm-math-selected", this.selected);
+    showCovered(dom, this, this.selected);
     drawnMath.set(dom, this);
     return true;
   }

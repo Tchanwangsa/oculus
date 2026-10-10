@@ -1,6 +1,7 @@
 import "@/styles/katex/katex.min.css";
 
 import { MathField, MathsTrap, type FieldCommand, type FieldMode, type Step } from "@/lib/maths";
+import type { MathEntry } from "../../tools/mathPalette";
 import {
   frameOrigin,
   framePoint,
@@ -16,7 +17,7 @@ import { compositionEnd, compositionStart, beforeInput, inputEvent } from "./inp
 import { keyDown } from "./keys";
 import { drawPending, pendingHtml } from "./pending";
 import { mouseDown, pointerDown } from "./pointer";
-import { createPopover, drawPopover } from "./popover";
+import { closePicks, createPopover, drawPopover, openPicks } from "./popover";
 import { fieldHtml, markEmptyRows } from "./render";
 import { drawBands } from "./selection";
 
@@ -33,6 +34,16 @@ export interface MathViewHost {
   /** A key the host takes before the view (true when taken), as the
    *  toolbox and the note's undo do. */
   onKey?(e: KeyboardEvent, view: MathView): boolean;
+  /** The entries the list offers before a letter is typed: after Space
+   *  (`openList`) or a bare `\`. */
+  picks?(): readonly MathEntry[];
+  /** A row of the list was accepted: insert it (`run` a template, which
+   *  drops a pending `\name`) and count it as used. Without this the view
+   *  inserts it. */
+  onPick?(entry: MathEntry, view: MathView): void;
+  /** Space with no row highlighted in the picks, or their "All maths
+   *  tools" row: the full toolbox. */
+  onMoreTools?(view: MathView): void;
 }
 
 const EMPTY: Measured = { x: new Float64Array(), top: new Float64Array(), bottom: new Float64Array() };
@@ -203,12 +214,17 @@ export class MathView {
     this.input.focus({ preventScroll: true });
   }
 
+  /** Opens the list of picks at the caret (Space in maths). */
+  openList() {
+    if (!this.dead) openPicks(this);
+  }
+
   hasFocus(): boolean {
     return document.activeElement === this.input;
   }
 
   /** The caret's viewport rect (the selection's head while one is drawn),
-   *  for the quick picks to hang from; null before it is laid out. */
+   *  for what hangs from it; null before it is laid out. */
   caretRect(): Box | null {
     this.#ensureLayout();
     const id = this.#field.head;
@@ -236,7 +252,10 @@ export class MathView {
   #show(field: MathField): MathsTrap | null {
     const old = this.#field;
     this.#field = field;
-    if (old !== field) old.free();
+    if (old !== field) {
+      old.free();
+      closePicks(this);
+    }
     const drawn = field.pending == null ? field.source : `${field.source}\u0000${field.head}\u0000${field.pending}`;
     if (this.#drawn !== drawn) {
       let html: string;

@@ -114,8 +114,8 @@ export const edgePaste = EditorState.transactionFilter.of((tr) => {
 export const fieldLatexPaste = EditorView.domEventHandlers({
   paste(e, view) {
     const data = e.clipboardData;
-    const latex = data?.getData("text/plain").trim();
-    if (!latex || !data?.types.includes("application/x-latex") || view.state.readOnly) return false;
+    const latex = data?.getData("application/x-latex").trim();
+    if (!data || !latex || view.state.readOnly) return false;
     const inMaths = (pos: number) => {
       const node = ancestorAt(view.state, pos, (n) => n.name === "InlineMath" || n.name === "BlockMath");
       return node != null && node.from < pos && pos < node.to;

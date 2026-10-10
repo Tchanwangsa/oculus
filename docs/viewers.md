@@ -61,18 +61,27 @@ classes work even when there are no dollar delimiters.
   in its rendered markdown copies or drags out as markdown, maths as TeX
   (`app/src/lib/markdown/selection.ts`, shared with the chat timeline).
   Rendered maths is one unit to a selection from the prose around it, as in
-  the note editor: an end inside a formula copies the whole formula, and
-  `watchMathSelection` paints it as one fill (`data-math-selected` in
-  `app/src/styles/math.css`) instead of KaTeX's per-glyph highlight. A press on a formula
+  the note editor: an end inside a formula copies the whole formula (inline
+  as `$…$`, display as `$$` lines, `formulaMarkdown`), and
+  `watchMathSelection` (`mathSelection/whole.ts`) paints bands over all its
+  atoms, as a press-and-drag over all of it would, instead of KaTeX's
+  per-glyph highlight; nothing boxes the whole formula. A press on a formula
   selects by structure — a cell, a matrix, a run of atoms — and copies that
-  part's LaTeX (a display formula's also as `BLOCK_MATH_TYPE` `$$` lines). A
-  press outside it, Esc or focus moving ends it. It selects in place
+  part's LaTeX wrapped by its shape (`copied` in `mathSelection/clipboard.ts`,
+  shared with the note's field): within one line as `$…$`, over more than
+  one line (two of a display's rows, or an array whose rows it holds, which
+  the model takes whole with its environment) or a whole display formula as
+  `$$` lines, one row each, also as `BLOCK_MATH_TYPE`; the bare TeX goes as
+  `application/x-latex`. A press outside it, Esc or focus moving ends it. It selects in place
   (`app/src/lib/markdown/mathSelection/`): `rehypeMaths` renders every
   formula with the source map, and the press runs the note field's edit model
   (`MathField`) read-only over the drawing: the geometry finds the stop under
   the pointer, a drag selects to it (the model widening over whole
-  structures), and one band per row is drawn under the glyphs in a zero-size
-  layer inside `.katex`, so no glyph moves. A band reaches past the
+  structures), and bands are drawn under the glyphs in a zero-size layer
+  inside `.katex`, so no glyph moves. A band covers the selected atoms of
+  one line (`bands` in `lib/maths/geometry`): a display's row, or a row of
+  an array whose rows are all selected, its delimiter and the atoms beside
+  it banded apart, so a whole `cases` reads as its rows, not one box. A band reaches past the
   formula's box, so closing clears the bands first and drops the layer two
   frames later: gone in the same paint as `.katex`'s stacking, WebKit
   repaints only that box and leaves the bands' edges on screen. The press's `mousedown` is

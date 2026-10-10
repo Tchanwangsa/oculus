@@ -2,19 +2,22 @@ import { copied } from "./clipboard";
 import { fieldOf, formulaAt } from "./formula";
 import { Session } from "./session";
 
+export { watchMathSelection } from "./whole";
+
 /**
  * Selecting inside a rendered formula (a chat reply, a markdown file) in
  * place. `rehypeMaths` draws the maths with the source map,
  * and a press runs the note field's edit model (`MathField`) read-only over
  * that drawing: the geometry (`lib/maths/geometry`) finds the stop under
  * the pointer, a drag selects from the press to it, the model widening the
- * selection over whole structures, and one band per row is drawn under the
- * glyphs. Nothing is swapped in and no glyph moves.
+ * selection over whole structures, and bands over the selected atoms are
+ * drawn under the glyphs. Nothing is swapped in and no glyph moves.
  *
  * A press with no drag selects nothing (no caret is drawn) and closes on
  * release; Shift extends from the last press. A press elsewhere, Esc,
  * focus moving or a text selection starting closes it. Copy writes the
- * selected TeX (`clipboard.ts`), Select All takes the model's select-all.
+ * selected TeX wrapped by its shape (`clipboard.ts`), Select All takes the
+ * model's select-all.
  * Maths the model cannot open selects as text does, whole
  * (`selection.ts`).
  */
@@ -127,7 +130,7 @@ export function watchMathSelect() {
     (e) => {
       const session = owned();
       if (!session || !e.clipboardData) return;
-      const entries = copied(session.field.source, session.field.selected, session.formula.display);
+      const entries = copied(session.field, session.formula.display);
       if (!entries.length) return;
       for (const [type, data] of entries) e.clipboardData.setData(type, data);
       e.preventDefault();

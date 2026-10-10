@@ -6,7 +6,7 @@
  * bands; the rest is pure over the layout.
  */
 export { area, holds, union, type Box } from "./box";
-export { bands } from "./bands";
+export { bands, type BandSlot } from "./bands";
 export { stopAt } from "./hit";
 export { framePoint, frameOrigin, readLayout, type Layout, type MappedBox } from "./layout";
 export { measure, type Measured } from "./measure";

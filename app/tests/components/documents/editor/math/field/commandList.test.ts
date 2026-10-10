@@ -6,12 +6,13 @@ import { noteMarkdown } from "@/components/documents/editor/core/language";
 import { focusedField, setFocused } from "@/components/documents/editor/core/liveFocus";
 import { visualMath, visualMathField } from "@/components/documents/editor/math/field/mathField";
 import { pendingHtml } from "@/components/documents/editor/math/field/mathView/pending";
-import { listKey } from "@/components/documents/editor/math/field/mathView/popover/keys";
+import { listKey, moved } from "@/components/documents/editor/math/field/mathView/popover/keys";
 import { fieldHtml } from "@/components/documents/editor/math/field/mathView/render";
-import { commandOptions } from "@/components/documents/editor/math/field/mathView/popover/options";
+import { commandOptions, entryOptions } from "@/components/documents/editor/math/field/mathView/popover/options";
 import { GAP, placeList } from "@/components/documents/editor/math/field/mathView/popover/place";
 import { mathCompletionSource } from "@/components/documents/editor/math/tools/mathTools/completion";
 import { fieldTemplate } from "@/components/documents/editor/math/tools/mathPalette";
+import { FIELD_PICKS, fieldPicks } from "@/components/documents/editor/math/tools/mathUsage";
 import { MathField, type FieldCommand } from "@/lib/maths";
 
 const key = (k: string, mods: Partial<Record<"shiftKey" | "metaKey" | "ctrlKey" | "altKey", boolean>> = {}) => ({
@@ -47,21 +48,48 @@ describe("the \\command list's options", () => {
   });
 });
 
-describe("the \\command list's keys", () => {
-  test("↑/↓ move, Space, Tab and Enter accept", () => {
-    expect(listKey(key("ArrowDown"), 3)).toEqual({ move: 1 });
-    expect(listKey(key("ArrowUp"), 3)).toEqual({ move: -1 });
-    for (const k of [" ", "Tab", "Enter"]) expect(listKey(key(k), 3)).toBe("accept");
+describe("the list's keys", () => {
+  test("the command list: ↑/↓ move, Space, Tab and Enter accept the highlighted row", () => {
+    expect(listKey(key("ArrowDown"), "command", 3, 0)).toEqual({ move: 1 });
+    expect(listKey(key("ArrowUp"), "command", 3, 0)).toEqual({ move: -1 });
+    for (const k of [" ", "Tab", "Enter"]) expect(listKey(key(k), "command", 3, 2)).toEqual({ accept: 2 });
   });
 
-  test("an empty list, modifiers and other keys go to the model", () => {
-    expect(listKey(key("Enter"), 0)).toBeNull();
-    expect(listKey(key("ArrowDown"), 0)).toBeNull();
-    expect(listKey(key("Tab", { shiftKey: true }), 3)).toBeNull();
-    expect(listKey(key("Enter", { metaKey: true }), 3)).toBeNull();
-    expect(listKey(key("Escape"), 3)).toBeNull();
-    expect(listKey(key("Backspace"), 3)).toBeNull();
-    expect(listKey(key("a"), 3)).toBeNull();
+  test("the command list: an empty list, modifiers and other keys go to the model", () => {
+    expect(listKey(key("Enter"), "command", 0, 0)).toBeNull();
+    expect(listKey(key("ArrowDown"), "command", 0, 0)).toBeNull();
+    expect(listKey(key("Tab", { shiftKey: true }), "command", 3, 0)).toBeNull();
+    expect(listKey(key("Enter", { metaKey: true }), "command", 3, 0)).toBeNull();
+    expect(listKey(key("Backspace"), "command", 3, 0)).toBeNull();
+    expect(listKey(key("a"), "command", 3, 0)).toBeNull();
+  });
+
+  test("Esc closes a bare \\'s list; after letters it is the model's", () => {
+    expect(listKey(key("Escape"), "command", 3, 0, true)).toBe("close");
+    expect(listKey(key("Escape"), "command", 3, 0, false)).toBeNull();
+  });
+
+  test("the picks: no row at first, ↑/↓ start one, then Space, Tab and Enter accept it", () => {
+    expect(moved(-1, 1, 5)).toBe(0);
+    expect(moved(-1, -1, 5)).toBe(4);
+    expect(moved(4, 1, 5)).toBe(0);
+    expect(listKey(key("ArrowDown"), "picks", 5, -1)).toEqual({ move: 1 });
+    for (const k of [" ", "Tab", "Enter"]) expect(listKey(key(k), "picks", 5, 1)).toEqual({ accept: 1 });
+  });
+
+  test("the picks: Space with none highlighted opens the toolbox; Tab and Enter go on", () => {
+    expect(listKey(key(" "), "picks", 5, -1)).toBe("more");
+    expect(listKey(key("Tab"), "picks", 5, -1)).toBe("dismiss");
+    expect(listKey(key("Enter"), "picks", 5, -1)).toBe("dismiss");
+  });
+
+  test("the picks: 1–9 accept a row, Esc closes, other keys close and go on", () => {
+    expect(listKey(key("3"), "picks", 5, -1)).toEqual({ accept: 2 });
+    expect(listKey(key("7"), "picks", 5, -1)).toBe("dismiss");
+    expect(listKey(key("Escape"), "picks", 5, -1)).toBe("close");
+    expect(listKey(key("x"), "picks", 5, -1)).toBe("dismiss");
+    expect(listKey(key("z", { metaKey: true }), "picks", 5, -1)).toBe("dismiss");
+    expect(listKey(key("Shift", { shiftKey: true }), "picks", 5, -1)).toBeNull();
   });
 });
 
@@ -112,6 +140,29 @@ describe("accepting an option in the field", () => {
     expect(caret(root)).toBe("x\\sqrt[".length);
     expect(caret(run(root, "tab"))).toBe("x\\sqrt[]{".length);
     expect(caret(run(root, { right: { extend: false } }))).toBe("x\\sqrt[]{".length);
+  });
+
+  test("a bare \\ lists the field's picks, and Space accepts the first", () => {
+    const options = entryOptions(fieldPicks(null));
+    expect(options.map((o) => o.template)).toEqual(fieldPicks(null).map((e) => e.template));
+    expect(options.length).toBe(FIELD_PICKS);
+    const action = listKey(key(" "), "command", options.length, 0, true);
+    expect(action).toEqual({ accept: 0 });
+    const bare = typed(MathField.open("", false), "\\");
+    expect(bare.pending).toBe("");
+    const done = run(bare, { template: fieldTemplate(options[0].template) });
+    expect(done.source).toBe(options[0].template.replace(/#\{\}/g, ""));
+    expect(done.pending).toBeUndefined();
+  });
+
+  test("\\, Esc then Space is a control space; \\sin then Esc cancels as before", () => {
+    expect(listKey(key("Escape"), "command", 3, 0, true)).toBe("close");
+    expect(run(typed(MathField.open("", false), "\\"), { insert: " " }).source).toBe("\\ ");
+    const sin = typed(MathField.open("", false), "\\sin");
+    expect(listKey(key("Escape"), "command", 3, 0, false)).toBeNull();
+    const cancelled = run(sin, "escape");
+    expect(cancelled.pending).toBeUndefined();
+    expect(cancelled.source).toBe("");
   });
 
   test("the plain root and a text command", () => {

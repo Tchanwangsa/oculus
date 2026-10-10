@@ -25,9 +25,11 @@ export interface VisualField {
   onSelectionChange(listener: () => void): () => void;
   /** Nothing typed in the field (a bare `$$` inline pair, a fresh block). */
   isEmpty(): boolean;
-  /** Space is free for the toolbox's quick picks here. */
+  /** Space is free to open the field's list of picks here. */
   spaceFree(): boolean;
-  /** The caret's viewport rect, for the quick picks to hang from. */
+  /** Opens the field's list of picks at its caret. */
+  openList(): void;
+  /** The caret's viewport rect: what the note keeps in view. */
   caretRect(): Box | null;
   /** A palette entry: `#{}`/`${}` slots become empty slots, the first
    *  taking the selection. */
@@ -45,9 +47,12 @@ export interface VisualField {
 export const fields = new WeakMap<EditorView, VisualField>();
 
 /** Keys the toolbox (`tools/mathTools`) takes in the field ahead of the field's
- *  own: Space for its quick picks, its shortcut, keys while it is open. A
+ *  own: Space for the field's picks, its shortcut, keys while it is open. A
  *  handler returns true when it took the key. */
 export const fieldKeys = Facet.define<(view: EditorView, e: KeyboardEvent, field: VisualField) => boolean>();
+
+/** Opens the full toolbox from the field (its picks' Space or "All maths tools" row). */
+export const fieldTools = Facet.define<(view: EditorView) => void>();
 
 export function activeMathField(view: EditorView): VisualField | null {
   return fields.get(view) ?? null;

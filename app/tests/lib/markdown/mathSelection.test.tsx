@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import type { Element, Root, RootContent } from "hast";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 import { fileMarkdownPlugins } from "@/components/files/FileMarkdown";
 import { BLOCK_MATH_TYPE } from "@/lib/markdown/math";
-import { copied } from "@/lib/markdown/mathSelection/clipboard";
+import { copied, copiesAsBlock } from "@/lib/markdown/mathSelection/clipboard";
+import { formulaMarkdown } from "@/lib/markdown/selection";
 import { dropLayer } from "@/lib/markdown/mathSelection/session";
 import { MathField, rehypeMaths } from "@/lib/maths";
 
@@ -79,24 +82,62 @@ describe("rehypeMaths", () => {
   });
 });
 
+/** The user's formula: a fraction, then a two-row `cases`. */
+const CASES = "\\frac{1}{\\sqrt2}(|0\\rangle+(-1)^{s_i}|1\\rangle) = \\begin{cases}|+\\rangle & s_i = 0 \\text{ (no CNOT)}\\\\ |-\\rangle & s_i=1\\end{cases}";
+
+/** `tex`'s model with the selection dragged from the stop at offset
+ *  `from` to the one at `to` (the first stop there). */
+function dragged(tex: string, display: boolean, from: number, to: number): MathField {
+  const f = MathField.open(tex, display);
+  const stop = (offset: number) => [...f.stops].indexOf(offset);
+  return f.select(stop(from), stop(to));
+}
+
 describe("copied", () => {
-  test("an inline selection copies its TeX, trimmed, as text and LaTeX", () => {
-    expect(copied("\\frac{a+x}{b}", [6, 8], false)).toEqual([
-      ["text/plain", "a+"],
-      ["application/x-latex", "a+"],
+  test("part of one row copies as inline $…$, never as a block", () => {
+    const from = CASES.indexOf("s_i = 0");
+    const sel = dragged(CASES, true, from, CASES.indexOf("\\\\ |-"));
+    expect(copied(sel, true)).toEqual([
+      ["text/plain", "$s_i = 0 \\text{ (no CNOT)}$"],
+      ["application/x-latex", "s_i = 0 \\text{ (no CNOT)}"],
     ]);
   });
 
-  test("a display selection also copies its $$ lines, one row per line", () => {
+  test("a whole inline formula on one row copies as $…$", () => {
+    const tex = "\\frac{a+x}{b}";
+    expect(copied(dragged(tex, false, 0, tex.length), false)[0]).toEqual(["text/plain", "$\\frac{a+x}{b}$"]);
+  });
+
+  test("a drag across an environment's rows takes it whole, as a block", () => {
+    const sel = dragged(CASES, true, CASES.indexOf("0 \\text"), CASES.indexOf("=1"));
+    const env = CASES.slice(CASES.indexOf("\\begin{cases}"));
+    expect(CASES.slice(...sel.selected).trim()).toBe(env);
+    const block = "$$\n\\begin{cases}\n|+\\rangle & s_i = 0 \\text{ (no CNOT)} \\\\\n|-\\rangle & s_i=1\n\\end{cases}\n$$";
+    expect(copied(sel, true)).toEqual([
+      ["text/plain", block],
+      ["application/x-latex", env],
+      [BLOCK_MATH_TYPE, block],
+    ]);
+  });
+
+  test("a whole display formula copies as $$ lines, one row each", () => {
     const tex = "\na \\\\ b \\\\ c\n";
-    const out = copied(tex, [0, tex.length], true);
-    expect(out[0]).toEqual(["text/plain", "a \\\\ b \\\\ c"]);
+    const f = MathField.open(tex, true).run("selectAll").field;
+    const out = copied(f, true);
+    expect(out[0]).toEqual(["text/plain", "$$\na \\\\\nb \\\\\nc\n$$"]);
     expect(out[2]).toEqual([BLOCK_MATH_TYPE, "$$\na \\\\\nb \\\\\nc\n$$"]);
+    expect(copiesAsBlock(MathField.open("x^2", true).run("selectAll").field, true)).toBe(true);
+  });
+
+  test("two of a display's top-level rows copy as a block", () => {
+    const tex = "a \\\\ b \\\\ c";
+    expect(copiesAsBlock(dragged(tex, true, 0, tex.indexOf("b") + 1), true)).toBe(true);
+    expect(copiesAsBlock(dragged(tex, true, tex.indexOf("b"), tex.indexOf("b") + 1), true)).toBe(false);
   });
 
   test("an empty or blank range copies nothing", () => {
-    expect(copied("x + y", [1, 1], false)).toEqual([]);
-    expect(copied("x + y", [1, 2], false)).toEqual([]);
+    expect(copied({ source: "x + y", selected: [1, 1], slots: [] }, false)).toEqual([]);
+    expect(copied({ source: "x + y", selected: [1, 2], slots: [] }, false)).toEqual([]);
   });
 
   test("the model widens a drag into a numerator over the whole fraction", () => {
@@ -105,7 +146,12 @@ describe("copied", () => {
     const stop = (offset: number, slot: number) =>
       [...f.stops].findIndex((o, id) => o === offset && f.stopSlots[id] === slot);
     const sel = f.select(stop(2, 0), stop(9, 1));
-    expect(copied(tex, sel.selected, false)[0]).toEqual(["text/plain", "\\frac{a+x}{b}"]);
+    expect(copied(sel, false)[0]).toEqual(["text/plain", "$\\frac{a+x}{b}$"]);
+  });
+
+  test("a text selection writes each formula it takes whole by its shape", () => {
+    expect(formulaMarkdown("x^2", false)).toBe("$x^2$");
+    expect(formulaMarkdown("a \\\\ b", true)).toBe("$$\na \\\\\nb\n$$");
   });
 });
 
@@ -140,5 +186,18 @@ describe("closing a selection", () => {
     f.tick();
     f.tick();
     expect(f.log).toEqual(["bands cleared", "layer removed"]);
+  });
+});
+
+describe("a selected formula", () => {
+  test("gets bands, never a box: no whole-formula class or attribute is drawn or styled", () => {
+    const src = join(import.meta.dir, "../../../src");
+    const files = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        const path = join(dir, name);
+        return statSync(path).isDirectory() ? files(path) : /\.(tsx?|css)$/.test(name) ? [path] : [];
+      });
+    const boxed = files(src).filter((f) => /data-math-selected|cm-math-selected/.test(readFileSync(f, "utf8")));
+    expect(boxed).toEqual([]);
   });
 });

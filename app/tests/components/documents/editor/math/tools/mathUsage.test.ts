@@ -7,7 +7,7 @@ const store = new Map<string, string>();
   removeItem: (k: string) => void store.delete(k),
 };
 
-const { entryForCommand, popularEntries, quickPicks, readRecents, recordCommand, recordUse } = await import(
+const { FIELD_PICKS, entryForCommand, fieldPicks, popularEntries, readRecents, recordCommand, recordUse } = await import(
   "@/components/documents/editor/math/tools/mathUsage"
 );
 
@@ -43,22 +43,30 @@ describe("maths toolbox usage", () => {
     expect(cells(list)).toBe(24);
   });
 
-  test("quick picks are the subject's most recent, padded from Popular", () => {
+  test("the field's picks are the subject's most recent, padded from Popular", () => {
     const popular = popularEntries().map((e) => e.template);
-    expect(quickPicks(1).map((e) => e.template)).toEqual(popular.slice(0, 5));
+    expect(fieldPicks(1).map((e) => e.template)).toEqual(popular.slice(0, FIELD_PICKS));
     recordCommand("\\theta", 1);
     recordCommand("\\omega", 1);
     recordCommand("\\theta", 1);
     recordCommand("\\nabla", 2);
-    const picks = quickPicks(1).map((e) => e.template);
+    const picks = fieldPicks(1).map((e) => e.template);
     expect(picks.slice(0, 2)).toEqual(["\\theta", "\\omega"]);
-    expect(picks).toHaveLength(5);
-    expect(new Set(picks).size).toBe(5);
+    expect(picks).toHaveLength(FIELD_PICKS);
+    expect(new Set(picks).size).toBe(FIELD_PICKS);
     // Another subject's recents only reach this one as Popular padding.
     expect(picks.indexOf("\\nabla")).not.toBeLessThan(2);
-    expect(quickPicks(2).map((e) => e.template).slice(0, 1)).toEqual(["\\nabla"]);
+    expect(fieldPicks(2).map((e) => e.template).slice(0, 1)).toEqual(["\\nabla"]);
     for (const name of ["\\alpha", "\\beta", "\\gamma", "\\delta", "\\epsilon", "\\zeta"]) recordCommand(name, null);
-    expect(quickPicks(null).map((e) => e.template)).toEqual(["\\zeta", "\\epsilon", "\\delta", "\\gamma", "\\beta"]);
+    // A subject keeps its last five.
+    expect(fieldPicks(null).map((e) => e.template).slice(0, 6)).toEqual([
+      "\\zeta",
+      "\\epsilon",
+      "\\delta",
+      "\\gamma",
+      "\\beta",
+      popularEntries().map((e) => e.template).find((t) => !["\\zeta", "\\epsilon", "\\delta", "\\gamma", "\\beta"].includes(t)) ?? "",
+    ]);
   });
 
   test("the usage map is capped and survives a broken store", () => {

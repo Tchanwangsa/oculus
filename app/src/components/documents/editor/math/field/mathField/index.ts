@@ -22,7 +22,7 @@ import { visualMath, visualMathField } from "./visual-state";
 
 export { MATH_ARRAYSTRETCH, MATH_LINE_GAP } from "./layout";
 export { noteMathPress } from "./keys";
-export { activeMathField, fieldKeys, type VisualField } from "./registry";
+export { activeMathField, fieldKeys, fieldTools, type VisualField } from "./registry";
 export { layoutBlock } from "./serialize";
 export {
   fieldReady,

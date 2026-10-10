@@ -3,12 +3,12 @@ import type { EditorView } from "@codemirror/view";
 import { mathFieldFocused, setFocused } from "@/components/documents/editor/core/liveFocus";
 import { noteHost } from "@/components/documents/editor/core/host";
 import type { Step } from "@/lib/maths";
-import { fieldTemplate } from "../../tools/mathPalette";
-import { recordCommand } from "../../tools/mathUsage";
+import { fieldTemplate, type MathEntry } from "../../tools/mathPalette";
+import { fieldPicks, recordCommand, recordUse } from "../../tools/mathUsage";
 import type { Box } from "@/lib/maths/geometry";
 import { dropBlankLines, leaveMaths, removeMaths, type Direction } from "../fieldNote";
 import { focusNote, keepVisible } from "../noteScroll";
-import { fields, type VisualField } from "../mathField/registry";
+import { fields, fieldTools, type VisualField } from "../mathField/registry";
 import { markFieldTrap } from "../mathField/trapped";
 import { setMathMode, type ActiveMath } from "../mathField/visual-state";
 import { MathView } from "../mathView";
@@ -40,6 +40,8 @@ export class RustFieldController implements VisualField {
   /** The maths' LaTeX as last written or loaded (`writeStep`). */
   readonly text: FieldText;
   readonly hint: HTMLElement;
+  /** The list's row being inserted, which counts as used once written. */
+  private picked: MathEntry | null = null;
   dead = false;
   private listeners = new Set<() => void>();
 
@@ -59,6 +61,11 @@ export class RustFieldController implements VisualField {
       onSelectionChange: () => this.selectionChanged(),
       onTrap: (_error, view) => this.trapped(view),
       onKey: (e) => hostKey(this, e),
+      picks: () => fieldPicks(this.subject()),
+      onPick: (entry) => this.pick(entry),
+      onMoreTools: () => {
+        for (const open of this.view.state.facet(fieldTools)) open(this.view);
+      },
     });
     this.dom = this.mv.dom;
     this.hint = document.createElement("span");
@@ -134,6 +141,22 @@ export class RustFieldController implements VisualField {
     this.mv.run({ template: fieldTemplate(template) });
   }
 
+  openList() {
+    this.mv.openList();
+  }
+
+  /** A row of the field's list goes in as a template, and counts as used
+   *  as itself rather than as the command it names. */
+  private pick(entry: MathEntry) {
+    this.picked = entry;
+    this.mv.run({ template: fieldTemplate(entry.template) });
+    this.picked = null;
+  }
+
+  private subject(): number | null {
+    return this.view.state.facet(noteHost).subjectId;
+  }
+
   /** Steps are written as they happen: nothing waits. */
   flush() {}
 
@@ -171,7 +194,9 @@ export class RustFieldController implements VisualField {
     // A step from command mode may have committed the `\command`.
     const committed = this.mv.pendingBefore !== undefined;
     writeStep(this.view, this.text, step);
-    if (committed) this.countCommands(step);
+    if (this.picked) {
+      if (step.changes.length) recordUse(this.picked, this.subject());
+    } else if (committed) this.countCommands(step);
     if (step.effect === "removeMaths") removeMaths(this.view, this.target());
     else if (step.effect) this.leave(LEAVE[step.effect]);
     // A new row or typing at the window's edge keeps the caret on screen.
@@ -179,10 +204,10 @@ export class RustFieldController implements VisualField {
   }
 
   /** A `\command` committed from command mode counts toward the toolbox's
-   *  Recent row, Popular tab and quick picks (`mathUsage.ts`). */
+   *  Recent row, Popular tab and the field's picks (`mathUsage.ts`). */
   private countCommands(step: Step) {
     const names = step.changes.flatMap((c) => c.insert.match(/\\[a-zA-Z]+/g) ?? []);
-    const subject = this.view.state.facet(noteHost).subjectId;
+    const subject = this.subject();
     for (const name of new Set(names)) recordCommand(name, subject);
   }
 

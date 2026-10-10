@@ -301,7 +301,7 @@ impl Field {
         }
     }
 
-    /// Whether Space is the view's (the quick picks): in maths, with no
+    /// Whether Space is the view's (its list of picks): in maths, with no
     /// `\command` pending, where Space would not end a matrix cell. In a
     /// text run it is a space and in a `\command` it commits. A caret
     /// beside a `\text{}` atom is in maths here, since the run's own end
