@@ -101,25 +101,61 @@ app links too, for the client and the installer only.
 - **The wire format** is one JSON line, then `body_len` raw bytes if the
   header names them; replies have the same shape. One module writes and reads
   it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
-  hash, pid), `has`, `store`, `delete`, `forward`, and the Okta ops `okta_save`,
-  `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`. No op returns a key, a
-  password or a seed, and only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
+  hash, pid), `has`, `store`, `delete`, `forward`, the Okta ops `okta_save`,
+  `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`, and the
+  session ops `session_get`, `session_put`, `session_clear` and
+  `session_status` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
+  No op returns a key, a password, a seed or a token; the one reply that
+  carries a cookie is `session_get`, to the app. Only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
   `request`, `caller`, `keychain` (the master key or an old item refused or
   failed), `vault`, `record` (the sign-in attempt record could not be replaced),
   `missing` and `upstream`.
-- **`forward` sends one request with the key added; the key never leaves.**
-  The request names a `secret`, `method` (GET or POST), `path` and `headers`;
-  keyd sends it to that secret's fixed origin (`app/keyd/core/src/forward.rs`:
-  `voyage` → `https://api.voyageai.com` under `/v1/`, `mineru` →
-  `https://mineru.net` under `/api/v4/`, `groq` → `https://api.groq.com`
-  under `/openai/v1/`; Okta's names have no route) with
-  `Authorization: Bearer <key>`. The path is held to plain characters with no
-  `%`, dot segment or `//`, and only `Content-Type` and `Accept` may be set.
-  The reply is `{"status", "headers", "body_len"}` and the origin's body,
-  byte for byte, whatever the status: redirects come back unfollowed, and
-  `upstream` means no answer arrived (DNS, connect, TLS, reset). ureq runs
-  without gzip or proxy variables, and its 30 s connect timeout is the only
-  one. The log line names the status and byte counts, never a header or body.
+- **`forward` sends one request with the credential added; the credential
+  never leaves.** The request names a route (`secret`), `method` (GET or
+  POST), `path`, `headers`, and optionally `"stream": true`; keyd sends it to
+  the route's fixed origin and attaches the credential from the vault. Routes
+  are `app/keyd/core/src/forward/route.rs`; a name with no route (Okta's, a
+  `session.*` name) cannot be forwarded:
+
+  | Route | Origin | Under | Credential |
+  | --- | --- | --- | --- |
+  | `voyage` | `https://api.voyageai.com` | `/v1/` | `Authorization: Bearer` |
+  | `mineru` | `https://mineru.net` | `/api/v4/` | `Authorization: Bearer` |
+  | `groq` | `https://api.groq.com` | `/openai/v1/` | `Authorization: Bearer` |
+  | `canvas` | `https://canvas.lms.unimelb.edu.au` | `/` | `Cookie` (`session.canvas`) |
+  | `ed` | `https://edstem.org` | `/api/` | `x-token` (`session.ed`) |
+
+  The client may set only `Content-Type` and `Accept`, plus `Range`,
+  `If-None-Match` and `If-Modified-Since` on `canvas` and `ed`; `Cookie`,
+  `X-Token` and `Authorization` are refused on every route. A cloud path is
+  held to `[A-Za-z0-9-._~/?=&]` with no dot segment or `//`. A session path
+  (`forward/path.rs`) also admits `[ ] % : + ; ,`, because Canvas queries use
+  `include[]=` and encoded `next` URLs, but its path part is judged
+  percent-decoded: no escaped `/`, `\`, control or non-ASCII byte, no `%`
+  left over (so `%252e` fails), no `.` or `..` segment even with a `;param`,
+  and still under the prefix; a query may carry any escape but a control
+  character. The reply is `{"status", "headers", "body_len"}` and the origin's
+  body, byte for byte, whatever the status: redirects come back unfollowed
+  (so a cookie never reaches a second origin), and `upstream` means no answer arrived (DNS, connect,
+  TLS, reset). A route with no session is `missing`. ureq runs without gzip or
+  proxy variables.
+  - **Cloud routes** have no timeout past ureq's 30 s connect: an embed or a
+    parse takes minutes. **Session routes** also fail a forward whose origin
+    sends nothing for 180 s (`SESSION_READ_TIMEOUT`, one read, not a total),
+    so a download of any size completes while a stalled one frees its thread.
+  - **A session reply never carries `set-cookie`, `authorization` or
+    `x-token`.** Canvas's `Set-Cookie` lines, on any status including a
+    redirect, are merged into `session.canvas` under the vault lock
+    ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
+  - **`"stream": true`** replies `{"status", "headers"}` with no `body_len`,
+    then the body until keyd closes the connection after the origin's last
+    byte. There is no size cap and no keyd-side deadline, and neither the vault
+    nor `State` is locked while it flows. A failure partway just closes the
+    connection, so a client compares what it read with the `content-length`
+    header; `Client::send_stream` returns the body as a `Read`. A buffered
+    reply stays the default, capped at 256 MiB.
+  - The log line names the route, status and byte counts, never a path, header
+    or body.
   The Okta sign-in (`okta/flow.rs`) is built to send the same request in
   keyd and in the app, whose ureq also enables `cookies` and `gzip` through
   feature unification: each request gets a new agent, so no cookie store
@@ -143,14 +179,16 @@ app links too, for the client and the installer only.
   build goes by file name, `app` or `oculus` — which the log records beside
   the signing identifier. Ops check the role, never a path, and in one place
   (`State::dispatch`): every op but `ping` needs `app` or `cli`, because every
-  executable in the install (ffmpeg ships in it) passes the caller check.
-  `ping` answers whoever was admitted, for diagnostics.
+  executable in the install (ffmpeg ships in it) passes the caller check;
+  `okta_resume` and `session_get` need `app`. `ping` answers whoever was
+  admitted, for diagnostics.
 - **keyd holds the Okta credentials and runs the sign-in.** The username,
   password and TOTP seed are vault entries, written together by `okta_save`
   (which validates) and removed together by `okta_forget`. `ensure_signed_in`
   runs `keyd_core::okta::sign_in` (flow, attempt guard, log) once at a time
   and answers with the outcome as a `LoginError`, never a cookie; the Canvas
-  and Okta cookie files it writes are in the data dir
+  and Okta cookie files it writes are in the data dir, and the vault holds a
+  Canvas, Okta and Ed session beside them
   ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-credentials-and-runs-the-sign-in)).
 - **Voyage, MinerU, Groq and the Okta sign-in go through it.** `credentials::Credentialed`
   (`keyd_core::client::Client`, `app/keyd/core/src/client.rs`) is the client,

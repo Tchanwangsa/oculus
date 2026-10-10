@@ -22,6 +22,8 @@ cookie.
 | Frontend auth state | `app/src/hooks/useAuth.ts`, `app/src/hooks/useKeepalive.ts` |
 | Handing the session to the in-app browser | `app/src-tauri/src/browser.rs` |
 | Keychain entry lifecycle (the fallback for the Okta credentials and for MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/credentials/keychain.rs` (`Secret`), `app/src-tauri/src/credentials.rs` |
+| keyd's login sessions: the vault entries, the cookie rule shared with the sign-in's jar, the `session_*` ops | `app/keyd/core/src/session/`, `app/keyd/core/src/ops/session.rs` |
+| The `canvas` and `ed` routes of `forward` (cookie and `x-token` attached by keyd), its path rules and streaming | `app/keyd/core/src/forward/`, `app/keyd/core/src/ops/forward.rs` ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)) |
 | The `oculus-keyd` client, which the Voyage, MinerU and Groq keys and the Okta credentials and sign-in go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/credentials.rs` (`CloudKey`) |
 | Credential entry UI | `app/src/components/settings/AutoSignIn.tsx` |
 
@@ -193,7 +195,49 @@ typed.
 - **The session files are still written by keyd into the data dir** —
   `canvas-session.cookie` and `sso-session.cookie`, the same files at the same
   paths as the in-process route — and the app and CLI read them from there. No
-  reply carries a cookie, a password or a seed.
+  reply carries a password or a seed, and none a cookie but `session_get`'s
+  ([next](#with-keyd-installed-keyd-holds-the-login-sessions)).
+
+## With keyd installed, keyd holds the login sessions
+
+The vault holds three more entries: `session.canvas` and `session.sso`, each a
+`name=value; …` cookie header, and `session.ed`, Ed's `x-token`. The flow and
+the app still also write the cookie files and `ed-session.token`; the vault
+entries are filled by `session_put` and by Canvas's own `Set-Cookie`
+rotation, and read by `forward`, `session_get` and `session_status`.
+
+- **A session is used through `forward`, never read out.** The `canvas` route
+  sends `Cookie: <session.canvas>` and the `ed` route `x-token:
+  <session.ed>`; a client cannot set `Cookie`, `X-Token` or `Authorization`
+  itself, and neither route's reply carries `set-cookie`, `authorization` or
+  `x-token`. With no session stored, `forward` answers `missing`.
+  The routes, paths and streaming are in
+  [architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key).
+- **Cookies leave keyd only through `session_get`, to the app.** It returns
+  `{"canvas", "sso"}` (a string or null each, never Ed's token) so the app can
+  seed the in-app browser's cookie store; any other role gets `caller`.
+  `session_put {kind, value}` (`canvas`, `sso` or `ed`; app or CLI) replaces a
+  whole session, as a browser sign-in snapshot or a pasted Ed token does.
+  `session_clear {kinds?}` (app or CLI; every kind by default) removes sessions
+  and does not touch the signed-out marker, the authenticated flag or
+  `sign-in.json`. `session_status` reports three booleans.
+- **The generic ops never write a session.** `store` and `delete` refuse
+  `session.*` as they refuse `okta.*`; `has` reports presence.
+- **A value is at most 24 KiB of printable ASCII.** It rides in the request's
+  header line (64 KiB, JSON-escaped); the client checks before sending and
+  keyd checks again.
+- **Canvas's `Set-Cookie` keeps the session current.** Every answer from the
+  `canvas` route, a redirect included, is merged into `session.canvas` by
+  `session::cookie::merge_set_cookie`, under the vault's lock. Only the leading
+  `name=value` is read: a rotated cookie keeps its place, a new one goes last,
+  and one with an empty value, a `Max-Age` of 0 or less, or (without
+  `Max-Age`) an `Expires` in the past is removed. A cleared session is not
+  recreated by a late answer, and a merge past the size limit is dropped. The
+  sign-in's jar (`okta/jar.rs`) applies the same rule per host. Ed's
+  `Set-Cookie` is ignored.
+- **A generation counter** in keyd's memory counts every put, clear and
+  absorbed change (`State::session_generation`); it restarts at 0 when keyd exits
+  idle.
 
 ## Every sign-in attempt goes through one guard
 
