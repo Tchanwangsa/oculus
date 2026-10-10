@@ -21,6 +21,7 @@ mod keys;
 pub mod lecture_end;
 pub(crate) mod lecture_jobs;
 mod lectures;
+mod legacy_agent;
 pub mod md;
 mod media;
 pub mod memory;
@@ -136,6 +137,9 @@ pub fn run() {
             } else {
                 eprintln!("[oculus] no auth flag — fresh session");
             }
+
+            // The session keep-alive agent an earlier version installed.
+            legacy_agent::retire_in_background();
 
             // The credential broker's LaunchAgent; a release reinstalls its
             // bundled keyd when it changed. Dev builds leave it to the preflight.
