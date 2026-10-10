@@ -24,7 +24,7 @@ fn value(key: &str) -> Option<&'static str> {
 fn the_helper_is_named_for_the_prompt_and_runs_keyd() {
     assert_eq!(value("CFBundleName"), Some(paths::HELPER));
     assert_eq!(value("CFBundleDisplayName"), Some(paths::HELPER));
-    assert_eq!(value("CFBundleExecutable"), Some(paths::BINARY));
+    assert_eq!(value("CFBundleExecutable"), Some(paths::HELPER));
     assert_eq!(value("CFBundlePackageType"), Some("APPL"));
     assert_eq!(value("CFBundleIconFile"), Some("icon.icns"));
 }

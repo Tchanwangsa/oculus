@@ -202,7 +202,7 @@ mod tests {
     fn the_plist_escapes_paths_and_round_trips_the_program() {
         let dir = scratch("plist");
         let program = Path::new(
-            "/Users/a&b/Library/Application Support/com.tchan.oculus/bin/Oculus Helper.app/Contents/MacOS/oculus-keyd",
+            "/Users/a&b/Library/Application Support/com.tchan.oculus/bin/Oculus Helper.app/Contents/MacOS/Oculus Helper",
         );
         let body = plist_body(
             program,

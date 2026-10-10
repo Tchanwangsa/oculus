@@ -213,8 +213,10 @@ is built to give the same bytes for the same source:
   onto that file's list. Cargo reads that file only when run from
   `app/keyd`, so build from there.
 - **It runs as a helper app, `Oculus Helper.app`,** so a keychain prompt
-  names "Oculus Helper" with the Oculus icon rather than a bare executable:
-  `Contents/MacOS/oculus-keyd`, `Contents/Info.plist` (from
+  and the background-activity notice name "Oculus Helper" with the Oculus
+  icon rather than a bare executable: `Contents/MacOS/Oculus Helper` (cargo's
+  `oculus-keyd`, renamed, because the notice reads the executable's name, not
+  the bundle's), `Contents/Info.plist` (from
   `app/keyd/bundle/Info.plist`: bundle identifier `com.tchan.oculus.keyd`,
   `LSBackgroundOnly`, since keyd draws nothing and launchd, not
   LaunchServices, starts it) and `Contents/Resources/icon.icns` (the app's
