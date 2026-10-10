@@ -18,7 +18,7 @@ cookie.
 | Ed token minting via LTI | `app/src-tauri/src/ed.rs` |
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
 | Frontend auth state | `app/src/hooks/useAuth.ts` |
-| Handing the session to the in-app browser | `app/src-tauri/src/browser.rs` |
+| Handing the session to the in-app browser | `app/src-tauri/src/browser/` |
 | Keychain entry lifecycle (the fallback for the Okta credentials and for MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/credentials/keychain.rs` (`Secret`), `app/src-tauri/src/credentials.rs` |
 | keyd's login sessions: the vault entries, the cookie rule shared with the sign-in's jar, the two markers, the `session_*` ops and `sign_out`, the one-time import of the old session files | `app/keyd/core/src/session/`, `app/keyd/core/src/ops/session.rs`, `app/keyd/core/src/ops/legacy.rs` |
 | The `canvas` and `ed` routes of `forward` (cookie and `x-token` attached by keyd), its path rules and streaming; the Canvas route's sign-in on a rejected request | `app/keyd/core/src/forward/`, `app/keyd/core/src/ops/forward.rs` ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)) |

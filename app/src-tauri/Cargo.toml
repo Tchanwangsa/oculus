@@ -29,7 +29,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # `unstable` is what enables multiwebview (`Window::add_child`) — every
-# in-app browser tab is a child WebView of the main window, see src/browser.rs.
+# in-app browser tab is a child WebView of the main window, see src/browser/.
 tauri = { version = "2", features = ["protocol-asset", "devtools", "unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
@@ -61,7 +61,7 @@ half = "2"
 keyring = { version = "3", features = ["apple-native"] }
 
 # `sync` is the browser's: a WKWebView snapshot answers on a completion
-# block, and the command awaits a oneshot for it (see src/browser.rs). `time`
+# block, and the command awaits a oneshot for it (see src/browser/). `time`
 # is the usage ticker's interval (src/usage.rs).
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 # Local time for the usage table's hour keys; already built for pdfium-render.
@@ -90,7 +90,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 calamine = "0.36"
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
-# `seed_canvas_session` in src/browser.rs) — Tauri exposes no cookie setter, so
+# `seed_sessions` in src/browser/) — Tauri exposes no cookie setter, so
 # that goes through WKHTTPCookieStore directly. These are the same crates wry
 # already builds on.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -102,5 +102,5 @@ objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NS
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSResponder", "NSWindow"] }
 # `WKWebView` and the two `WKFind*` types are the browser toolbar's: the
 # back/forward list and find-in-page have no Tauri API, so they are read
-# and driven on the WKWebView directly (see `src/browser.rs`).
+# and driven on the WKWebView directly (see `src/browser/`).
 objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "WKWebsiteDataStore", "WKWebView", "WKNavigation", "WKFindConfiguration", "WKFindResult"] }

@@ -1,5 +1,5 @@
 //! The application menu, which exists for the window-level shortcuts. While a
-//! browser tab's native page holds focus (`browser.rs`) the app's webview sees
+//! browser tab's native page holds focus (`browser/`) the app's webview sees
 //! no keys, so ⌘-shortcuts must be menu items to work everywhere. Built by hand
 //! so ⌘W closes the tab (Close Window moves to ⇧⌘W).
 //!

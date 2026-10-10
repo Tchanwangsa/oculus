@@ -561,7 +561,7 @@ and draws `DropOverlay` (`app/src/components/ui/DropOverlay.tsx`) from
   (viewport width over `innerSize`/`scaleFactor`).
 - **Only a webview listener fires.** A drop is a window event only for
   `WebviewKind::WindowContent`; tauri's `unstable` feature (for
-  `Window::add_child`, `app/src-tauri/src/browser.rs`) makes the main webview
+  `Window::add_child`, `app/src-tauri/src/browser/`) makes the main webview
   `WindowChild`, and `filter_target` never matches a `Window` listener to a
   `Webview` emit. The window listener subscribes fine and is never called.
 - **A hidden tab's composer sits at the same coordinates** (panes hide with

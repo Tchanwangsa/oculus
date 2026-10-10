@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 /**
  * The in-app browser. Every tab is a native WebView Rust owns
- * (`app/src-tauri/src/browser.rs`), mirrored into the tab strip; a
+ * (`app/src-tauri/src/browser/`), mirrored into the tab strip; a
  * `/browse/:id` route leaves an empty slot and reports where it is. Placement
  * is per page — Rust never hides one page to show another, so this side
  * decides which slots show what.
@@ -50,7 +50,7 @@ export interface Viewport {
 
 const BROWSE_PREFIX = "/browse/";
 
-/** The range `browser.rs` clamps to, repeated so the toolbar can disable
+/** The range `browser/` clamps to, repeated so the toolbar can disable
  *  its buttons at the ends. */
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 3;

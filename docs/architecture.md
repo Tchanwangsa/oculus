@@ -25,7 +25,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Lecture video server | `app/src-tauri/src/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/bundled.rs` |
-| In-app browser | `app/src-tauri/src/browser.rs`, `app/src-tauri/capabilities/default.json` |
+| In-app browser | `app/src-tauri/src/browser/`, `app/src-tauri/capabilities/default.json` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes | `app/src-tauri/src/store.rs`, `app/src-tauri/src/projects.rs` |
 | App-usage ticker and its pinger | `app/src-tauri/src/usage.rs`, `app/src/hooks/useActivityPing.ts`, `app/src/lib/usageContext.ts` |
@@ -360,7 +360,7 @@ JavaScript.
   would hand every Tauri command to whatever page the user browsed to.
 - Back-list state, find matches and zoom live only in the page, and
   `with_webview` dispatches to the main thread and returns nothing. So
-  `browser.rs` *pushes* each answer as an event rather than returning it.
+  `browser/` *pushes* each answer as an event rather than returning it.
 - WebKit has no public favicon API, so Rust fetches the icon beside each page
   load and emits `browser-favicon`; the frontend owns the `browser_favicons`
   rows. Rust sees events, the frontend owns rows — the same split as history.
