@@ -44,7 +44,8 @@ fn get_or_auth(cache: &Echo360Cache, course_id: i64) -> Result<Session, String> 
             }
         }
     }
-    let session = echo360::connect(&crate::auth::saved_cookie_header(), course_id)?;
+    let canvas = crate::canvas::Canvas::open(&crate::paths::data_dir());
+    let session = echo360::connect(&canvas, course_id)?;
     cache.0.lock().unwrap().insert(
         course_id,
         CachedSession {
@@ -64,7 +65,10 @@ pub async fn echo360_sync_lectures(
 ) -> Result<Vec<LectureData>, String> {
     let cache = cache.inner().clone();
     crate::blocking::run(move || {
-        let session = get_or_auth(&cache, canvas_course_id)?;
+        let session = match get_or_auth(&cache, canvas_course_id) {
+            Err(e) if e == echo360::NO_TOOL => return Ok(Vec::new()),
+            other => other?,
+        };
         echo360::syllabus(&session)
     })
     .await
@@ -129,7 +133,7 @@ pub async fn echo360_download_video(
             emit(100, "trimming");
             let ffmpeg = echo360::find_ffmpeg(app.path().resource_dir().ok())
                 .ok_or("ffmpeg not found — run `bun run ffmpeg` in app/")?;
-            if !echo360::trim_video(&ffmpeg, &raw, &final_) {
+            if !echo360::trim_video(&ffmpeg, &raw, &final_, echo360::lead_in_secs()) {
                 return Err("ffmpeg trim failed".to_string());
             }
             std::fs::remove_file(&raw).ok();

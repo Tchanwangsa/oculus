@@ -141,10 +141,20 @@ Workers share the course session cache and source-qualified cancellation flags.
 - Canvas mints an OAuth-signed form on the course's external-tool page;
   POSTing it to Echo360 creates the session, and the CloudFront cookies that
   come back are what the media CDN accepts.
+- The tool is found per course: tabs labelled Echo360, "lecture recording" or
+  "lecture capture" first, then the profile's `echo360_tool` (UniMelb's, since
+  its tab can be hidden). The first page with an `action="https://echo360…"`
+  form is the launch. A course with none answers `echo360::NO_TOOL`, which
+  `echo360_sync_lectures` turns into no lectures rather than an error.
+- The launch lands on the university's Echo360 region (`echo360.org`,
+  `echo360.net.au`, …); `Session::base` keeps it for the syllabus,
+  transcripts and downloads.
 - A capture is one media id with the Presenter screen at `hd1.mp4` and the room
   camera at `hd2.mp4`. They land as `source1.mp4`/`source2.mp4`, trimmed
-  identically with the fetched ffmpeg so the player runs them off one clock;
-  VTT captions are aligned to the trimmed timeline.
+  identically so the player runs them off one clock. The trim is the
+  university's intro bumper, `echo360_lead_in_secs` in the profile (UniMelb's
+  is 14 s); with none the download is the file and ffmpeg is not run. VTT
+  captions are aligned to the trimmed timeline.
 - A sync fetches only source 1; the camera downloads per lecture from the
   player. Its existence is probed — the syllabus here carries no
   `secondaryFiles`, so each lecture asks for `hd2.mp4`, which 500s if absent

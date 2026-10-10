@@ -1,19 +1,22 @@
 //! Echo360 lecture capture, independent of Tauri. Access is an LTI launch:
 //! POSTing Canvas's OAuth-signed tool form to Echo360 mints the session and the
-//! CloudFront cookies the media CDN accepts.
+//! CloudFront cookies the media CDN accepts. The course's own tabs name the
+//! tool, and the launch lands on the university's Echo360 region
+//! (`echo360.org`, `echo360.net.au`, …), which every later call uses.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-const LTI_TOOL_PATH: &str = "/external_tools/701";
-
-/// Echo360 pads every recording with a fixed lead-in before the lecture starts.
-pub const TRIM_SECS: f64 = 14.0;
+/// `connect`'s answer for a course with no Echo360 tool — no lectures, not a
+/// failure.
+pub const NO_TOOL: &str = "this course has no Echo360 tool";
 
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 const MIN_VIDEO_BYTES: u64 = 1_000_000;
 
 pub struct Session {
+    /// `https://host` of the Echo360 region the launch landed on.
+    pub base: String,
     pub jwt: String,
     play_session: String,
     cf_key_pair_id: String,
@@ -39,6 +42,7 @@ impl Session {
 
     pub fn clone_fields(&self) -> Session {
         Session {
+            base: self.base.clone(),
             jwt: self.jwt.clone(),
             play_session: self.play_session.clone(),
             cf_key_pair_id: self.cf_key_pair_id.clone(),
@@ -67,30 +71,39 @@ pub type SourceNum = u8;
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
-pub fn connect(canvas_cookie: &str, course_id: i64) -> Result<Session, String> {
-    if canvas_cookie.is_empty() {
+/// Launch the course's Echo360 tool. The tabs labelled for lecture capture
+/// come first, then the profile's fallback tool (a tab can be hidden); the
+/// first launch page carrying an Echo360 form wins. [`NO_TOOL`] when none
+/// does.
+pub fn connect(canvas: &crate::canvas::Canvas, course_id: i64) -> Result<Session, String> {
+    if !canvas.has_session() {
         return Err("Canvas session not found — connect Canvas first".to_string());
     }
 
-    let lti_url = format!(
-        "{}/courses/{course_id}{LTI_TOOL_PATH}",
-        crate::institution::canvas_base()?
-    );
+    let mut candidates =
+        tool_candidates(&canvas.get_json(&format!("/api/v1/courses/{course_id}/tabs"))?);
+    if let Some(tool) = crate::institution::current().and_then(|i| i.echo360_tool) {
+        let path = format!("/courses/{course_id}{tool}");
+        if !candidates.contains(&path) {
+            candidates.push(path);
+        }
+    }
 
-    eprintln!("[oculus] echo360 auth: fetching LTI page for course {course_id}");
-    let html = ureq::get(&lti_url)
-        .set("Cookie", canvas_cookie)
-        .set("User-Agent", UA)
-        .call()
-        .map_err(|e| format!("Canvas LTI page fetch failed: {e}"))?
-        .into_string()
-        .map_err(|e| e.to_string())?;
-
-    let (action, fields) = parse_lti_form(&html).ok_or_else(|| {
-        "Could not parse the Echo360 LTI form — the course may not use Echo360, \
-         or the Canvas session has lapsed"
-            .to_string()
-    })?;
+    let mut launch = None;
+    for path in &candidates {
+        eprintln!("[oculus] echo360 auth: trying {path}");
+        let res = canvas.get(path)?;
+        if !res.ok() {
+            continue;
+        }
+        if let Some(form) = parse_lti_form(&String::from_utf8_lossy(&res.body)) {
+            launch = Some((format!("{}{path}", canvas.base()?), form));
+            break;
+        }
+    }
+    let Some((lti_url, (action, fields))) = launch else {
+        return Err(NO_TOOL.to_string());
+    };
 
     let body = url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(&fields)
@@ -107,8 +120,12 @@ pub fn connect(canvas_cookie: &str, course_id: i64) -> Result<Session, String> {
         .map_err(|e| format!("Echo360 LTI POST failed: {e}"))?;
 
     let section_id = extract_section_id(resp.get_url())?;
+    let base = url::Url::parse(resp.get_url())
+        .map(|u| u.origin().ascii_serialization())
+        .map_err(|e| format!("Echo360 landed somewhere unreadable: {e}"))?;
 
     let mut s = Session {
+        base,
         jwt: String::new(),
         play_session: String::new(),
         cf_key_pair_id: String::new(),
@@ -134,8 +151,33 @@ pub fn connect(canvas_cookie: &str, course_id: i64) -> Result<Session, String> {
         );
     }
 
-    eprintln!("[oculus] echo360 auth done: section={}", s.section_id);
+    eprintln!(
+        "[oculus] echo360 auth done: {} section={}",
+        s.base, s.section_id
+    );
     Ok(s)
+}
+
+/// Course tabs that launch an external tool and are labelled for lecture
+/// capture, as Canvas-relative paths.
+fn tool_candidates(tabs: &serde_json::Value) -> Vec<String> {
+    tabs.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|t| {
+            let label = t["label"].as_str().unwrap_or("").to_lowercase();
+            label.contains("echo")
+                || label.contains("lecture recording")
+                || label.contains("lecture capture")
+        })
+        .filter_map(|t| t["html_url"].as_str())
+        .filter(|u| u.contains("/external_tools/"))
+        .map(|u| match url::Url::parse(u) {
+            // `html_url` is usually relative; an absolute one keeps its path.
+            Ok(abs) => abs.path().to_string(),
+            Err(_) => u.to_string(),
+        })
+        .collect()
 }
 
 fn parse_lti_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
@@ -197,10 +239,8 @@ fn extract_section_id(path: &str) -> Result<String, String> {
 /// Every past lesson with a finished recording — one still processing has a
 /// media id but its download 404s.
 pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
-    let url = format!(
-        "https://echo360.net.au/section/{}/syllabus",
-        session.section_id
-    );
+    let lead_in = lead_in_secs();
+    let url = format!("{}/section/{}/syllabus", session.base, session.section_id);
     let raw = ureq::get(&url)
         .set("Cookie", &session.cookie_header())
         .call()
@@ -252,7 +292,7 @@ pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
             title: inner["name"].as_str().unwrap_or("").to_string(),
             date: inner["timing"]["start"].as_str().unwrap_or("").to_string(),
             // Post-trim, to match the file on disk.
-            duration_seconds: (raw_dur - TRIM_SECS as i64).max(0),
+            duration_seconds: (raw_dur - lead_in as i64).max(0),
             has_second_source,
         });
     }
@@ -319,7 +359,8 @@ fn duration_between(start: &str, end: &str) -> i64 {
 
 pub fn transcript(session: &Session, lesson_id: &str, media_id: &str) -> Result<String, String> {
     let url = format!(
-        "https://echo360.net.au/api/ui/echoplayer/lessons/{lesson_id}/medias/{media_id}/transcript-file?format=vtt"
+        "{}/api/ui/echoplayer/lessons/{lesson_id}/medias/{media_id}/transcript-file?format=vtt",
+        session.base
     );
     let mut vtt = String::new();
     ureq::get(&url)
@@ -343,7 +384,8 @@ pub fn download_url(
     source: SourceNum,
 ) -> Result<String, String> {
     let url = format!(
-        "https://echo360.net.au/media/download/{media_id}/hd{source}.mp4?lessonId={lesson_id}"
+        "{}/media/download/{media_id}/hd{source}.mp4?lessonId={lesson_id}",
+        session.base
     );
     let agent = ureq::AgentBuilder::new().redirects(0).build();
     match agent
@@ -454,13 +496,23 @@ pub fn find_ffmpeg(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
     candidates.into_iter().find(|p| is_runnable(p))
 }
 
-/// Drop the lead-in with a stream copy (no re-encode).
-pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path) -> bool {
+/// Seconds of intro the university puts on every recording
+/// (`institution::echo360_lead_in`); 0 for most.
+pub fn lead_in_secs() -> u32 {
+    crate::institution::echo360_lead_in()
+}
+
+/// Drop `lead_in` seconds with a stream copy (no re-encode); with none, the
+/// download is the file.
+pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path, lead_in: u32) -> bool {
+    if lead_in == 0 {
+        return std::fs::rename(raw, out).is_ok();
+    }
     std::process::Command::new(ffmpeg)
         .args([
             "-y",
             "-ss",
-            &TRIM_SECS.to_string(),
+            &lead_in.to_string(),
             "-i",
             raw.to_str().unwrap_or(""),
             "-c",
@@ -541,6 +593,35 @@ mod tests {
                 ("lti_version".to_string(), "LTI-1p0".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn candidates_are_the_tabs_labelled_for_lecture_capture() {
+        let tabs = serde_json::json!([
+            {"label": "Home", "html_url": "/courses/9"},
+            {"label": "Lecture Recordings", "html_url": "/courses/9/external_tools/701"},
+            {"label": "Echo360", "html_url": "https://canvas.foo.edu/courses/9/external_tools/55"},
+            {"label": "Ed Discussion", "html_url": "/courses/9/external_tools/12"},
+            {"label": "Echo360 help", "html_url": "/courses/9/pages/echo"},
+        ]);
+        assert_eq!(
+            tool_candidates(&tabs),
+            [
+                "/courses/9/external_tools/701",
+                "/courses/9/external_tools/55"
+            ]
+        );
+    }
+
+    #[test]
+    fn without_a_lead_in_the_download_is_the_file() {
+        let dir = crate::test_support::Scratch::new("echo-trim");
+        let (raw, out) = (dir.join("raw.mp4"), dir.join("source1.mp4"));
+        std::fs::write(&raw, b"video").unwrap();
+        // No ffmpeg is run, so a missing one cannot fail it.
+        assert!(trim_video(Path::new("/nonexistent/ffmpeg"), &raw, &out, 0));
+        assert_eq!(std::fs::read(&out).unwrap(), b"video");
+        assert!(!raw.exists());
     }
 
     #[test]

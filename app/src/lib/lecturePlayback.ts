@@ -172,8 +172,8 @@ function stopTickers() {
 
 // ── Follower sync ────────────────────────────────────────────────────────────
 
-/** Both files are trimmed alike (`echo360::TRIM_SECS`), so in sync means the
- *  same `currentTime` — no offset. */
+/** Both files are trimmed alike (`echo360::trim_video`, by the university's
+ *  lead-in), so in sync means the same `currentTime` — no offset. */
 function syncFollowers() {
   const lead = leaderVideo();
   if (!lead) return;
