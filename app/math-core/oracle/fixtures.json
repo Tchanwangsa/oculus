@@ -42,5 +42,10 @@
   {"class": "error-position", "tex": "(\\middle|x)", "display": false},
   {"class": "error-position", "tex": "\\bigl x", "display": false},
   {"class": "error-position", "tex": "1 \\over 2 \\over 3", "display": false},
-  {"class": "error-position", "tex": "\\begin{array}{c}a}\\end{array}", "display": false}
+  {"class": "error-position", "tex": "\\begin{array}{c}a}\\end{array}", "display": false},
+  {"class": "macro-error", "tex": "\\dots\\bra{", "display": false},
+  {"class": "macro-error", "tex": "\\dots\\dots\\bra{", "display": false},
+  {"class": "macro-error", "tex": "\\char\"g", "display": false},
+  {"class": "macro-error", "tex": "\\tag{1}\\tag{2}", "display": true},
+  {"class": "macro-error", "tex": "\\renewcommand\\foo{x}", "display": false}
 ]

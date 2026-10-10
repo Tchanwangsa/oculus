@@ -1994,6 +1994,9 @@ pub struct ParseNodeLeftRight {
     pub right: String,
     /// Optional color for the right delimiter
     pub right_color: Option<String>,
+    /// With source mapping on, where the body is written: after `\left`'s
+    /// delimiter, up to `\right`. An empty body draws its placeholder there.
+    pub body_loc: Option<SourceLocation>,
 }
 
 /// Represents right delimiters in left-right pairs.

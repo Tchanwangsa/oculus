@@ -361,3 +361,49 @@ fn unparseable_source_has_no_stops() {
         assert!(stops(source, false).is_err(), "{source:?}");
     }
 }
+
+/// The `data-s` of every placeholder the fork draws for `source`.
+fn placeholders(source: &str) -> Vec<usize> {
+    let settings = katex::Settings::builder()
+        .output(katex::types::OutputFormat::Html)
+        .source_map(true)
+        .build();
+    let html = katex::render_to_string(&katex::KatexContext::default(), source, &settings)
+        .unwrap_or_else(|err| panic!("{source:?}: {err}"));
+    html.match_indices("oc-placeholder")
+        .map(|(at, _)| {
+            let rest = &html[at..];
+            let value = &rest[rest.find("data-s=\"").unwrap() + 8..];
+            value[..value.find('"').unwrap()].parse().unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn placeholders_sit_at_their_empty_slots_stop() {
+    for source in [
+        r"\frac{}{}",
+        "x^{}",
+        r"\text{}",
+        r"\sqrt[]{}",
+        r"\sqrt[ ]{x}",
+        r"\xrightarrow[]{}",
+        r"\left(\right)",
+        r"\left( \right)",
+        r"\left\langle \right.",
+        r"\left.\right.",
+        r"\frac{\left(\right)}{\sqrt[]{a}}",
+    ] {
+        let stops = parsed(source, false);
+        let mut empty: Vec<usize> = stops
+            .slots()
+            .iter()
+            .filter(|slot| slot.is_empty() && !matches!(slot.kind, SlotKind::Row(_)))
+            .map(|slot| stops.offset(slot.stops[0]))
+            .collect();
+        let mut drawn = placeholders(source);
+        empty.sort_unstable();
+        drawn.sort_unstable();
+        assert_eq!(drawn, empty, "{source:?}");
+    }
+}

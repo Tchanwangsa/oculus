@@ -110,6 +110,9 @@ fn check_tree(expr: &str, nodes: &[AnyParseNode]) {
 
 fn strip_locs(node: &mut AnyParseNode) {
     *node.loc_mut() = None;
+    if let AnyParseNode::LeftRight(lr) = node {
+        lr.body_loc = None;
+    }
     for child in node.children_mut() {
         strip_locs(child);
     }
@@ -193,6 +196,7 @@ const FORMULAS: &[&str] = &[
     r"\begin{bmatrix*}[r]a\end{bmatrix*}",
     r"\begin{equation}a\end{equation}",
     r"\left.\right.",
+    r"\left( \right)",
     r"\sqrt[]{}",
     "a_{}^{}",
     "x^{y^{z}}",
@@ -327,6 +331,14 @@ fn functions_cover_their_invocation() {
         panic!()
     };
     assert_eq!(span(&lr.body[1]), r"\middle|");
+    // Its body runs from `\left`'s delimiter to `\right`.
+    assert_eq!(lr.body_loc.as_ref().map(text), Some(r"a\middle|b"));
+    for (expr, body) in [(r"\left(\right)", ""), (r"\left\langle  x \right.", "x ")] {
+        let AnyParseNode::LeftRight(lr) = only(expr) else {
+            panic!()
+        };
+        assert_eq!(lr.body_loc.as_ref().map(text), Some(body), "{expr:?}");
+    }
 
     let tag = only(r"\tag{1} x");
     assert_eq!(span(&tag), r"\tag{1} x");

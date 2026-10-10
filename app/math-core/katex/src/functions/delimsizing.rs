@@ -3,6 +3,8 @@
 //! This module handles delimiter sizing commands in mathematical expressions,
 //! migrated from KaTeX's delimsizing.js.
 
+use alloc::sync::Arc;
+
 use crate::build_common::make_span;
 use crate::build_html::DomType;
 use crate::build_mathml::{make_row, make_text};
@@ -16,6 +18,7 @@ use crate::parser::parse_node::{
     AnyParseNode, NodeType, ParseNode, ParseNodeDelimsizing, ParseNodeLeftRight,
     ParseNodeLeftRightRight, ParseNodeMiddle, check_symbol_node_type,
 };
+use crate::source_map;
 use crate::types::Mode;
 use crate::types::{ArgType, ParseError, ParseErrorKind, SourceLocation};
 use crate::units::make_em;
@@ -154,11 +157,20 @@ pub fn define_leftright(ctx: &mut KatexContext) {
             };
 
             // With source mapping on, the node runs through `\right`'s
-            // delimiter.
-            let loc = if parser.settings.source_map {
-                SourceLocation::cover(loc, right_node.loc.as_ref())
+            // delimiter, and its body from `\left`'s delimiter to `\right`.
+            let (loc, body_loc) = if parser.settings.source_map {
+                let body_loc = loc
+                    .as_ref()
+                    .zip(right_node.loc.as_ref())
+                    .map(|(left, right)| {
+                        SourceLocation::new(Arc::clone(&left.input), left.end, right.start)
+                    });
+                (
+                    SourceLocation::cover(loc, right_node.loc.as_ref()),
+                    body_loc,
+                )
             } else {
-                loc
+                (loc, None)
             };
 
             Ok(ParseNode::LeftRight(ParseNodeLeftRight {
@@ -168,6 +180,7 @@ pub fn define_leftright(ctx: &mut KatexContext) {
                 left: delim_text,
                 right: right_node.delim.clone(),
                 right_color: right_node.color,
+                body_loc,
             }))
         }),
         html_builder: Some(leftright_html_builder),
@@ -324,13 +337,19 @@ fn leftright_html_builder(
     };
 
     // Build the inner expression
-    let inner = build_html::build_expression(
+    let mut inner = build_html::build_expression(
         ctx,
         &group.body,
         options,
         build_html::GroupType::True,
         (Some(DomType::Mopen), Some(DomType::Mclose)),
     )?;
+    // An empty body is a slot the edit field draws.
+    if group.body.is_empty()
+        && let Some(placeholder) = source_map::placeholder(ctx, options, group.body_loc.as_ref())?
+    {
+        inner.push(placeholder.into());
+    }
 
     let mut inner_height: f64 = 0.0;
     let mut inner_depth: f64 = 0.0;

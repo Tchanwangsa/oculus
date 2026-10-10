@@ -1292,6 +1292,7 @@ pub fn define_array(ctx: &mut KatexContext) {
                     left,
                     right,
                     right_color: None,
+                    body_loc: None,
                 }))
             } else {
                 Ok(ParseNode::Array(res))
@@ -1443,6 +1444,7 @@ pub fn define_array(ctx: &mut KatexContext) {
                 left,
                 right,
                 right_color: None,
+                body_loc: None,
             }))
         },
         html_builder: Some(html_builder),

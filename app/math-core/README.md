@@ -73,11 +73,13 @@ to the formula:
   combining mark onto its base (Thai vowels). The split glyphs lay out as the
   merged run would: same italic corrections, no glue or line break between.
 - An explicit empty group (`{}`, `\frac{}{}`'s parts, `x^{}`, `\sqrt{}`, an
-  empty cell) and `\text{}` draw a placeholder: `<span class="mord amsrm
+  empty cell), an empty optional argument (`\sqrt[]`), `\text{}` and an
+  empty `\left…\right` body draw a placeholder: `<span class="mord amsrm
   oc-placeholder">□</span>` (AMS `\square`, so layouts build around real
-  metrics) with a zero-width range just inside the braces. Styling it is the
-  view's. A group the parser makes up (`aligned`'s spacing `{}`) has no
-  location and no placeholder.
+  metrics) with a zero-width range just inside the braces or brackets (after
+  `\left`'s delimiter), where the edit model's stop for that slot is. Styling
+  it is the view's. A group the parser makes up (`aligned`'s spacing `{}`)
+  has no location and no placeholder.
 
 `katex/src/source_map.rs` holds the mapping; `katex/tests/source_map.rs` and
 the oracle's `--source-map` check it.
@@ -238,7 +240,7 @@ git clone https://github.com/KaTeX/KaTeX target/katex
 git -C target/katex checkout 49904aa2b6c5d82ba0c5a1bc3a4d9b3353a1401c
 ```
 
-With it the corpus is 4,732 formulas; without it, 4,101. The
+With it the corpus is 4,732 formulas; without it, 4,106. The
 run fails on any difference `DIVERGENCES.md` doesn't accept. The wasm engine
 also fails on a thrown error that isn't KaTeX's `ParseError` shape, on
 `parseError` disagreeing with `renderToString`, and on a trap.

@@ -374,7 +374,7 @@ pub const BUILTIN_MACROS: phf::Map<&str, MacroDefinition> = phf_map! {
             } else {
                 return Err(ParseError::new(ParseErrorKind::InvalidBaseDigit {
                     base,
-                    digit: token.text.to_owned_string(),
+                    digit: text.to_owned_string(),
                 }));
             }
 

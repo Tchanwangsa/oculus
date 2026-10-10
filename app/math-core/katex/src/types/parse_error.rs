@@ -170,7 +170,7 @@ pub enum ParseErrorKind {
     MarkupWriteFailure,
     #[error(r"\newcommand{{{name}}} attempting to redefine {name}; use \renewcommand")]
     NewcommandRedefinition { name: String },
-    #[error(r"\renewcommand{{{name}}} when {name} does not yet exist; use \newcommand")]
+    #[error(r"\renewcommand{{{name}}} when command {name} does not yet exist; use \newcommand")]
     RenewcommandNonexistent { name: String },
     #[error("Invalid number of arguments in \\newcommand")]
     InvalidNewcommandArgumentCount,

@@ -342,6 +342,14 @@ fn empty_slots_draw_placeholders() {
         ("x^{}", vec![3]),
         ("\\sqrt{}", vec![6]),
         ("\\text{}", vec![6]),
+        // Optional arguments: just inside the brackets.
+        ("\\sqrt[]{}", vec![6, 8]),
+        ("\\sqrt[ ]{x}", vec![6]),
+        ("\\xrightarrow[]{}", vec![13, 15]),
+        // `\left…\right`'s body: after `\left`'s delimiter.
+        ("\\left(\\right)", vec![6]),
+        ("\\left\\langle \\right.", vec![13]),
+        ("\\left( \\right)", vec![6]),
     ] {
         let m = check(tex);
         let mut got: Vec<usize> = m

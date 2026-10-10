@@ -596,3 +596,32 @@ fn unicode_accents() {
         },
     );
 }
+
+#[test]
+fn macro_function_errors() {
+    it(
+        "reports a function macro's error, not an undefined name",
+        || {
+            for (expr, message) in [
+                (
+                    r"\dots\bra{",
+                    "Unexpected end of input in a macro argument, expected '}'",
+                ),
+                (
+                    r"\dots\dots\bra{",
+                    "Unexpected end of input in a macro argument, expected '}'",
+                ),
+                (r#"\char"g"#, "Invalid base-16 digit g"),
+                (r"\tag{1}\tag{2}", r"Multiple \tag"),
+                (
+                    r"\renewcommand\foo{x}",
+                    r"\renewcommand{\foo} when command \foo does not yet exist; use \newcommand",
+                ),
+            ] {
+                let error = expect!(expr).parse_error(&strict_settings())?;
+                assert_eq!(error.kind.to_string(), message, "{expr}");
+            }
+            Ok(())
+        },
+    );
+}

@@ -99,19 +99,18 @@ impl SourceInput {
     }
 
     /// Where the caret sits in an empty slot `loc` covers: just inside its
-    /// braces when it has them (`{}`, `\text{}`'s argument), else its start.
-    /// A zero-width range.
+    /// braces or brackets when it has them (`{}`, `\text{}`'s argument,
+    /// `\sqrt[]`'s index), else its start. A zero-width range.
     #[must_use]
     pub fn slot(&self, loc: &SourceLocation) -> Option<SourceRange> {
         self.range(loc)?;
         let text = self.input.get(loc.start..loc.end)?;
-        let at = if let Some(open) = text.rfind('{')
-            && text.ends_with('}')
-        {
-            loc.start + open + 1
-        } else {
-            loc.start
+        let open = match text.chars().next_back() {
+            Some('}') => text.rfind('{'),
+            Some(']') => text.rfind('['),
+            _ => None,
         };
+        let at = open.map_or(loc.start, |open| loc.start + open + 1);
         let at = self.units(at)?;
         Some(SourceRange { start: at, end: at })
     }

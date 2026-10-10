@@ -85,9 +85,15 @@ for each (its `class`).
   do (infix operators, `\middle`, invalid units and delimiters, `Expected & or
   \\ or \cr or \end`, and an argument's end-of-input token). `\middle` checks
   its delimiter before the `\left` depth, as KaTeX does.
+- **Macro errors** (`macro-error`): a function macro's error is the parse's
+  (`MacroExpander::get_expansion`), as in KaTeX, not a reason to leave the
+  macro unexpanded: `\dots\bra{` fails on `\bra`'s argument, not with
+  `Undefined control sequence: \dots`, and `\dots\dots\bra{` fails too.
+  `\char`'s invalid-digit error names the digit, not the `"`
+  (`macros/builtins.rs`), and `\renewcommand`'s says `when command`.
 - Tests: `tests/errors_spec.rs` expects the delimiter's text, as KaTeX's
-  `errors-spec.ts` does; two `katex-error` snapshots carry the new title and
-  style.
+  `errors-spec.ts` does, and checks the macro errors above; two
+  `katex-error` snapshots carry the new title and style.
 
 ### Source mapping
 
@@ -114,9 +120,10 @@ back to the source. `../oracle/render.ts --source-map` and
 - `SymbolNode` has a hand-written `Debug` that omits the new fields when
   unset, so the spec tests' debug snapshots stand.
 - `functions/ordgroup.rs` and `functions/text.rs`: an explicit empty group
-  (`{}`, an empty cell) or `\text{}` draws the placeholder: AMS `\square`
-  (real metrics) with class `oc-placeholder` and a zero-width range just
-  inside its braces.
+  (`{}`, an empty cell, `\sqrt[]`'s index) or `\text{}` draws the
+  placeholder: AMS `\square` (real metrics) with class `oc-placeholder` and a
+  zero-width range just inside its braces or brackets. So does an empty
+  `\left…\right` body (`functions/delimsizing.rs`), at its `body_loc`.
 - Parse-tree locations, every change gated on the setting: each node's
   `loc` lies in the formula's own input and holds its children's.
   `parser/node_locs.rs` (new) adds `AnyParseNode::loc_mut`,
@@ -125,10 +132,11 @@ back to the source. `../oracle/render.ts --source-map` and
   ranges in either order.
   - A function node spans its invocation, the control word through its last
     argument (`FunctionContext::invocation`, what `context.loc()` returns);
-    `\left…\right` runs through `\right`'s delimiter, `\begin…\end{…}`
-    through `\end{…}` (a matrix's delimiter wrapper and its array both),
-    text-mode `$…$` through the closing `$`, an infix `\over` from
-    numerator to denominator.
+    `\left…\right` runs through `\right`'s delimiter (and its
+    `body_loc`, new, from `\left`'s delimiter to `\right`),
+    `\begin…\end{…}` through `\end{…}` (a matrix's delimiter wrapper and
+    its array both), text-mode `$…$` through the closing `$`, an infix
+    `\over` from numerator to denominator.
   - Macro body tokens (text bodies and `\def`/`\newcommand` definitions)
     take the invocation's span (`MacroExpander::consumed`); pasted arguments
     and tokens a built-in passes through keep theirs, except those from the

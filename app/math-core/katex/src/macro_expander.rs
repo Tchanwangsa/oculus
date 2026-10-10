@@ -194,7 +194,7 @@ impl<'a> MacroExpander<'a> {
         let expansion = if top_token.noexpand == Some(true) {
             None
         } else {
-            self.get_expansion(name)
+            self.get_expansion(name)?
         };
 
         let (expansion, is_body) = match expansion {
@@ -317,7 +317,8 @@ impl<'a> MacroExpander<'a> {
 
     /// Compute expansion for a name, and whether it is a macro body (text or
     /// a definition's tokens) rather than tokens a built-in passed through.
-    fn get_expansion(&mut self, name: &str) -> Option<(MacroExpansion, bool)> {
+    /// A function macro's error is the parse's, as in KaTeX.
+    fn get_expansion(&mut self, name: &str) -> Result<Option<(MacroExpansion, bool)>, ParseError> {
         // If single character has a catcode other than 13 (active), don't
         // expand it
         if name.chars().count() == 1
@@ -325,28 +326,30 @@ impl<'a> MacroExpander<'a> {
             && let Some(catcode) = self.lexer.get_catcode(ch)
             && catcode != 13
         {
-            return None;
+            return Ok(None);
         }
 
-        let definition = self.macros.get(name)?.clone();
+        let Some(definition) = self.macros.get(name).cloned() else {
+            return Ok(None);
+        };
 
-        match definition {
-            MacroDefinition::Function(f) => match f(self as &mut dyn MacroContextInterface) {
-                Ok(MacroExpansionResult::String(s)) => Some((self.string_to_expansion(&s), true)),
-                Ok(MacroExpansionResult::Expansion(e)) => Some((e, false)),
-                Ok(MacroExpansionResult::Empty) => Some((MacroExpansion::default(), false)),
-                Err(_) => None,
+        Ok(Some(match definition {
+            MacroDefinition::Function(f) => match f(self as &mut dyn MacroContextInterface)? {
+                MacroExpansionResult::String(s) => (self.string_to_expansion(&s), true),
+                MacroExpansionResult::Expansion(e) => (e, false),
+                MacroExpansionResult::Empty => (MacroExpansion::default(), false),
             },
-            MacroDefinition::StaticFunction(f) => match f(self as &mut dyn MacroContextInterface) {
-                Ok(MacroExpansionResult::String(s)) => Some((self.string_to_expansion(&s), true)),
-                Ok(MacroExpansionResult::Expansion(e)) => Some((e, false)),
-                Ok(MacroExpansionResult::Empty) => Some((MacroExpansion::default(), false)),
-                Err(_) => None,
-            },
-            MacroDefinition::StaticStr(s) => Some((self.string_to_expansion(s), true)),
-            MacroDefinition::String(s) => Some((self.string_to_expansion(&s), true)),
-            MacroDefinition::Expansion(e) => Some((e, true)),
-        }
+            MacroDefinition::StaticFunction(f) => {
+                match f(self as &mut dyn MacroContextInterface)? {
+                    MacroExpansionResult::String(s) => (self.string_to_expansion(&s), true),
+                    MacroExpansionResult::Expansion(e) => (e, false),
+                    MacroExpansionResult::Empty => (MacroExpansion::default(), false),
+                }
+            }
+            MacroDefinition::StaticStr(s) => (self.string_to_expansion(s), true),
+            MacroDefinition::String(s) => (self.string_to_expansion(&s), true),
+            MacroDefinition::Expansion(e) => (e, true),
+        }))
     }
 
     fn string_to_expansion(&self, expansion: &str) -> MacroExpansion {
