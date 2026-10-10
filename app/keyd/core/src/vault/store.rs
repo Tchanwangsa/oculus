@@ -101,9 +101,7 @@ impl Vault {
             std::fs::create_dir_all(dir)
                 .map_err(|e| VaultError::Io(format!("creating {}: {e}", dir.display())))?;
         }
-        let mut name = self.path.clone().into_os_string();
-        name.push(".lock");
-        let lock_path = PathBuf::from(name);
+        let lock_path = crate::paths::vault_lock(&self.path);
         // Blocks until the holder closes its descriptor; released on drop.
         files::lock(&lock_path)
             .map_err(|e| VaultError::Io(format!("locking {}: {e}", lock_path.display())))
