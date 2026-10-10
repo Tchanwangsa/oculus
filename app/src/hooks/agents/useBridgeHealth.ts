@@ -31,6 +31,12 @@ function read(mode: "cached" | "refresh" | "recheck"): Promise<BridgeHealth[]> {
   return p;
 }
 
+/** The shared answer outside React (the first-run gate), filling the same
+ *  cache the hook reads. */
+export function loadBridgeHealth(): Promise<BridgeHealth[]> {
+  return read("cached");
+}
+
 /** Re-read Rust's answer without dropping its cache, for after an update
  *  dropped one provider's version. */
 export async function refreshBridgeHealth(): Promise<void> {
