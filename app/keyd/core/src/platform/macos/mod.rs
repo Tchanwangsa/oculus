@@ -176,12 +176,20 @@ mod tests {
             Err(ConnectError::Absent(_))
         ));
 
-        // A socket file launchd left behind with nothing loaded refuses the connect.
+        // A socket file launchd left behind with nothing loaded refuses the
+        // connect. A test thread that forks between the bind and the listener's
+        // close-on-exec flag lets a child inherit the listening descriptor and
+        // keep the socket answering until it exits, so the refusal is waited for.
         drop(UnixListener::bind(&sock).unwrap());
-        assert!(matches!(
-            platform::connect(&sock),
-            Err(ConnectError::Absent(_))
-        ));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let stale = loop {
+            let attempt = platform::connect(&sock).err();
+            if attempt.is_some() || std::time::Instant::now() > deadline {
+                break attempt;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert!(matches!(stale, Some(ConnectError::Absent(_))), "{stale:?}");
 
         // A directory where the socket should be is no keyd and no absence either.
         std::fs::remove_file(&sock).unwrap();

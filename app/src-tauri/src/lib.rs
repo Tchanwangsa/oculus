@@ -72,15 +72,19 @@ pub fn run() {
             // Open and active time per hour, from the window and the frontend's pings.
             shell::usage::start(app.handle());
 
-            // Session restore: replay the stored session with a server-side ping.
-            auth::restore_session(app.handle());
+            // The credential broker's LaunchAgent: a release reinstalls its
+            // bundled keyd when it changed. Dev builds leave it to the
+            // preflight. Before the session is restored, which asks keyd: on
+            // the first launch after an update there is none to ask until now.
+            let restore = app.handle().clone();
+            std::thread::spawn(move || {
+                auth::keyd::ensure_installed();
+                // Replay the stored session with a server-side ping.
+                auth::restore_session(&restore);
+            });
 
             // The session keep-alive agent an earlier version installed.
             auth::legacy_agent::retire_in_background();
-
-            // The credential broker's LaunchAgent; a release reinstalls its
-            // bundled keyd when it changed. Dev builds leave it to the preflight.
-            auth::keyd::ensure_installed();
 
             Ok(())
         })

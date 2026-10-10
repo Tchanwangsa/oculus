@@ -94,6 +94,27 @@ impl Flight {
         finish.outcome = Some(outcome.clone());
         outcome
     }
+
+    /// Runs `work` with no sign-in running and none able to start: it waits
+    /// for the one running to finish, so a sign-in that began before cannot
+    /// save a session or lift a marker after `work` has cleared them. A
+    /// caller that arrives meanwhile waits too, and is told `SignedOut`.
+    pub(super) fn exclusively<T>(&self, work: impl FnOnce() -> T) -> T {
+        let mut s = self.lock();
+        while s.running {
+            s = self.done.wait(s).unwrap_or_else(|p| p.into_inner());
+        }
+        s.running = true;
+        drop(s);
+
+        let mut finish = Finish {
+            flight: self,
+            outcome: None,
+        };
+        let result = work();
+        finish.outcome = Some(Err(LoginError::SignedOut));
+        result
+    }
 }
 
 /// The vault as the sign-in's credential store.

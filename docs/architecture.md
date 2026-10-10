@@ -223,14 +223,15 @@ app links too, for the client and the installer only.
   installed (`KeydError::Absent`), the only case in which a caller reads the
   keychain itself; every other error surfaces. The Voyage and MinerU clients,
   Groq transcription, the three keys' Settings commands
-  (`credentials::CloudKey`) and the Okta calls (`okta/`) use it
+  (`credentials::CloudKey`) and the Okta calls (`auth/okta/`) use it
   ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key),
   [parsing.md](./parsing.md#with-oculus-keyd-installed-no-oculus-process-holds-the-mineru-token),
   [viewers.md](./viewers.md)). A request's timeout is the caller's own, and
   Groq's upload has none, and neither has `ensure_signed_in`; a session route
   takes `client::SESSION_TIMEOUT` (ten minutes per read), because a rejected
   request waits for a sign-in.
-- `keyd::ensure_installed` runs at app startup and does nothing in a dev
+- `keyd::ensure_installed` runs at app startup, before the session is
+  restored (which asks keyd), and does nothing in a dev
   build; a dev install is the preflight's ([cli.md](./cli.md)). A release
   registers its bundled `Contents/MacOS/oculus-keyd` (an `externalBin` on
   macOS, built without `dev`) in place, and logs the failure when that file is

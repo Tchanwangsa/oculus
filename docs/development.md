@@ -135,8 +135,10 @@ has no binary at all.
 `tauri build` runs `stage-keyd`, `stage-cli` then `docs:cli` from
 `beforeBuildCommand`: the CLI ships inside the bundle because keyd admits only
 executables inside its own bundle, and gives `Contents/MacOS/oculus` the `cli`
-role ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key));
-the reference is regenerated at the one moment a current release binary is
+role ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+The `oculus` that lands in the bundle is the crate's own `[[bin]]` from
+`tauri build`'s cargo run, which Tauri copies over the staged sidecar; the
+sidecar only has to exist for tauri-build's `externalBin` check. The reference is regenerated at the one moment a current release binary is
 guaranteed to exist.
 
 ## CI proves a fresh checkout builds; releases are cut by hand
@@ -284,8 +286,9 @@ socket, launchd's activation, the caller's audit token and signature, the
 keychain, the LaunchAgent, `flock` and file modes — sits under
 `app/keyd/core/src/platform/`, whose `mod.rs` states the contract and picks
 the adapter by `cfg(target_os)`. Everything else in core, keyd's `main`, and
-the app's `credentials.rs`, `okta/`, `keyd/` and `bin/oculus/keyd.rs` stay
-OS-free, with one exception: `credentials/keychain.rs` is the legacy-keychain
+the app's `providers/credentials/`, `auth/okta/`, `auth/keyd/` and
+`bin/oculus/commands/keyd.rs` stay
+OS-free, with one exception: `providers/credentials/keychain.rs` is the legacy-keychain
 fallback (`Secret`, over the `keyring` crate) that runs while keyd is absent,
 and it goes with that fallback.
 

@@ -181,7 +181,7 @@ without a browser, inside keyd. The IdP is Okta Identity Engine at `sso.unimelb.
 
 ## With keyd installed, keyd holds the credentials and runs the sign-in
 
-`okta/` in the app only routes. Saving, forgetting, the Settings status and
+`auth/okta/` in the app only routes. Saving, forgetting, the Settings status and
 every sign-in a client starts (Settings, the startup probe, the browser,
 `oculus auth auto`) are requests to `oculus-keyd` through
 `credentials::Credentialed` (ops `okta_save`, `okta_forget`, `okta_status`,
@@ -278,7 +278,9 @@ rotation, and read by `forward`, `session_get` and `session_status`.
   a tab or the CLI: `true` sets the flag and lifts `signed-out`, `false` only
   clears the flag. `sign_out {}` (app or CLI) clears all three sessions and the
   flag, writes `signed-out` and keeps `sign-in.json`, so a lockout pause
-  outlives it; it replies `{"had": bool}`.
+  outlives it; it replies `{"had": bool}`. It waits for a sign-in already
+  running, which would otherwise save a session and lift `signed-out` after it;
+  a sign-in requested meanwhile gets `signed_out`.
 - **The old session files are imported once.** The first session op,
   `canvas` or `ed` forward or sign-in after keyd starts moves
   `canvas-session.cookie`, `sso-session.cookie` and `ed-session.token` into the
