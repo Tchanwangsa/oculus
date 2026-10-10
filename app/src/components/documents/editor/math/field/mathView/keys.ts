@@ -1,5 +1,6 @@
 import type { FieldCommand } from "@/lib/maths";
 import type { MathView } from "./index";
+import { popoverKey } from "./popover";
 
 /** The model command for a key, or null to leave the key alone (the
  *  host's ⌘Z, the system's ⌘C, typing, which arrives as `beforeinput`). */
@@ -35,8 +36,9 @@ function commandFor(view: MathView, e: KeyboardEvent): FieldCommand | null {
   return null;
 }
 
-/** A key in the textarea: the host's first (`onKey`), then the model's.
- *  An IME's keys are its own. */
+/** A key in the textarea: the host's first (`onKey`), then the pending
+ *  command's list (`popoverKey`), then the model's. An IME's keys are its
+ *  own. */
 export function keyDown(view: MathView, e: KeyboardEvent) {
   if (view.dead || e.isComposing || view.composing || e.keyCode === 229) return;
   const stop = () => {
@@ -44,6 +46,10 @@ export function keyDown(view: MathView, e: KeyboardEvent) {
     e.stopPropagation();
   };
   if (view.host.onKey?.(e, view)) {
+    stop();
+    return;
+  }
+  if (popoverKey(view, e)) {
     stop();
     return;
   }

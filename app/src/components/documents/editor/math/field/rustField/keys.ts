@@ -24,7 +24,6 @@ export function hostKey(ctl: RustFieldController, e: KeyboardEvent): boolean {
     history(ctl, e.shiftKey || key === "y");
     return true;
   }
-  ctl.pendingAtKey = ctl.mv.field.pending;
   return false;
 }
 

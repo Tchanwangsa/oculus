@@ -1,12 +1,14 @@
 import { area, union, type Box } from "./box";
+import { fontAscent } from "./font";
 
 /** One source-mapped element of a rendering (`sourceMap: true`). */
 export interface MappedBox {
   /** Its UTF-16 range of the source (`data-s`/`data-e`). */
   from: number;
   to: number;
-  /** Its own border box: an inline span's is its font's line, the height a
-   *  caret beside it takes. */
+  /** Its own border box. An inline span's is its font face's ascent and
+   *  descent, which differ between KaTeX's faces (KaTeX_AMS's `□` is 1.43em,
+   *  KaTeX_Math 0.94em), so a caret is sized from `baseline` and `size`. */
   box: Box;
   /** Its box with everything drawn inside it: a fraction's both parts, a
    *  matrix's delimiters. */
@@ -14,6 +16,10 @@ export interface MappedBox {
   /** An empty slot's marker (`oc-placeholder`, `oc-empty-row`), with a
    *  zero-width range. */
   placeholder: boolean;
+  /** The y of the baseline it sits on, and its font size in px (a script's,
+   *  an index's is smaller): where a caret beside it is drawn. */
+  baseline: number;
+  size: number;
 }
 
 /** A rendering's mapped elements in document order, in `frame`'s
@@ -32,6 +38,22 @@ function undrawn(el: Element): boolean {
   if (el.namespaceURI === "http://www.w3.org/2000/svg") return true;
   for (const c of el.classList) if (UNDRAWN.has(c)) return true;
   return false;
+}
+
+/** An element's baseline, `box` being its own box in the frame. An inline
+ *  span's sits its font's ascent below its top; any other box's is that of
+ *  its first inline descendant on its own line (a vlist's rows are not),
+ *  else its bottom edge, an empty inline-block's (`oc-empty-row`). */
+function baselineOf(el: Element, style: CSSStyleDeclaration, box: Box, o: { x: number; y: number }): number {
+  if (style.display === "inline") return box.top + fontAscent(style);
+  for (const child of el.children) {
+    if (undrawn(child) || child.classList.contains("vlist-t")) continue;
+    const cs = getComputedStyle(child);
+    if (cs.position === "absolute") continue;
+    const r = child.getBoundingClientRect();
+    return baselineOf(child, cs, { left: r.left - o.x, top: r.top - o.y, right: r.right - o.x, bottom: r.bottom - o.y }, o);
+  }
+  return box.bottom;
 }
 
 /** The viewport position of `frame`'s (0, 0): its padding box's corner, moved
@@ -67,7 +89,9 @@ export function readLayout(root: Element, frame: Element = root): Layout {
       const from = Number(s);
       const to = Number(el.getAttribute("data-e") ?? s);
       const placeholder = el.classList.contains("oc-placeholder") || el.classList.contains("oc-empty-row");
-      items.push({ from, to, box: own, ink: own, placeholder });
+      const style = getComputedStyle(el);
+      const baseline = baselineOf(el, style, own, o);
+      items.push({ from, to, box: own, ink: own, placeholder, baseline, size: parseFloat(style.fontSize) });
     }
     for (const child of el.children) {
       const c = walk(child);

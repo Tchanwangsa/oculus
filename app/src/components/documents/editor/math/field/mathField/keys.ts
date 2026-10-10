@@ -1,8 +1,10 @@
 import { EditorSelection, Prec, type EditorState } from "@codemirror/state";
-import { keymap, type Command } from "@codemirror/view";
+import { keymap, type Command, type EditorView } from "@codemirror/view";
 
 import { ancestorAt } from "@/components/documents/editor/syntax/syntax";
 import { mathContextOf, ownsLines } from "../../mathContext";
+import { keepVisible } from "../noteScroll";
+import { fields } from "./registry";
 import { fieldReady, readsCleanly, visualOf, type VisualMath } from "./visual-state";
 
 /** ←/Backspace from just after inline maths, →/Delete from just before it,
@@ -22,7 +24,7 @@ function enterInline(back: boolean): Command {
     const ctx = mathContextOf(node);
     const target = ctx && visualOf(state, ctx);
     if (!target || !readsCleanly(state.sliceDoc(target.from, target.to).trim(), target.display)) return false;
-    view.dispatch({ selection: { anchor: back ? target.to : target.from }, scrollIntoView: true });
+    enter(view, back ? target.to : target.from);
     return true;
   };
 }
@@ -67,9 +69,16 @@ function enterBlock(dir: "up" | "down" | "left" | "right", deleting = false): Co
       dir === "left" ? state.doc.lineAt(target.end).to
       : dir === "right" ? target.start
       : back ? target.to : target.from;
-    view.dispatch({ selection: { anchor }, scrollIntoView: true });
+    enter(view, anchor);
     return true;
   };
+}
+
+/** The caret into the maths at `anchor`: the field opens there, and the
+ *  page moves only if the field's caret would be off screen. */
+function enter(view: EditorView, anchor: number) {
+  view.dispatch({ selection: { anchor } });
+  keepVisible(view, () => fields.get(view)?.caretRect() ?? view.coordsAtPos(anchor));
 }
 
 export const entryKeys = Prec.highest(

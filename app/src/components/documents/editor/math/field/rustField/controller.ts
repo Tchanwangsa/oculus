@@ -3,9 +3,11 @@ import type { EditorView } from "@codemirror/view";
 import { mathFieldFocused, setFocused } from "@/components/documents/editor/core/liveFocus";
 import { noteHost } from "@/components/documents/editor/core/host";
 import type { Step } from "@/lib/maths";
+import { fieldTemplate } from "../../tools/mathPalette";
 import { recordCommand } from "../../tools/mathUsage";
 import type { Box } from "@/lib/maths/geometry";
 import { dropBlankLines, leaveMaths, removeMaths, type Direction } from "../fieldNote";
+import { focusNote, keepVisible } from "../noteScroll";
 import { fields, type VisualField } from "../mathField/registry";
 import { markFieldTrap } from "../mathField/trapped";
 import { setMathMode, type ActiveMath } from "../mathField/visual-state";
@@ -37,9 +39,6 @@ export class RustFieldController implements VisualField {
   readonly mv: MathView;
   /** The maths' LaTeX as last written or loaded (`writeStep`). */
   readonly text: FieldText;
-  /** The `\command` pending when the last key went down, so a step that
-   *  commits it counts the command as used. */
-  pendingAtKey: string | undefined;
   readonly hint: HTMLElement;
   dead = false;
   private listeners = new Set<() => void>();
@@ -131,10 +130,8 @@ export class RustFieldController implements VisualField {
   }
 
   insertTemplate(template: string) {
-    let n = 0;
-    const latex = template.replace(/[#$]\{[^{}]*\}/g, () => (n++ === 0 ? "#0" : "#?"));
     this.mv.focus();
-    this.mv.run({ template: latex });
+    this.mv.run({ template: fieldTemplate(template) });
   }
 
   /** Steps are written as they happen: nothing waits. */
@@ -171,12 +168,14 @@ export class RustFieldController implements VisualField {
   /** One step from the view: written into the note (`writeStep`), then
    *  its effect. */
   private step(step: Step) {
-    const committed = this.pendingAtKey !== undefined;
-    this.pendingAtKey = undefined;
+    // A step from command mode may have committed the `\command`.
+    const committed = this.mv.pendingBefore !== undefined;
     writeStep(this.view, this.text, step);
     if (committed) this.countCommands(step);
     if (step.effect === "removeMaths") removeMaths(this.view, this.target());
     else if (step.effect) this.leave(LEAVE[step.effect]);
+    // A new row or typing at the window's edge keeps the caret on screen.
+    else keepVisible(this.view, () => (this.dead ? null : this.mv.caretRect()));
   }
 
   /** A `\command` committed from command mode counts toward the toolbox's
@@ -232,7 +231,7 @@ export class RustFieldController implements VisualField {
     // the note takes the keyboard back rather than the page.
     if (focused) {
       window.setTimeout(() => {
-        if (this.view.dom.isConnected && !mathFieldFocused() && !this.view.hasFocus) this.view.focus();
+        if (this.view.dom.isConnected && !mathFieldFocused() && !this.view.hasFocus) focusNote(this.view);
       }, 0);
     }
   }

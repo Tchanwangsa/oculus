@@ -14,8 +14,9 @@ import {
 import { drawCaret, restartBlink } from "./caret";
 import { compositionEnd, compositionStart, beforeInput, inputEvent } from "./input";
 import { keyDown } from "./keys";
+import { drawPending, pendingHtml } from "./pending";
 import { mouseDown, pointerDown } from "./pointer";
-import { drawPopover } from "./popover";
+import { createPopover, drawPopover } from "./popover";
 import { fieldHtml, markEmptyRows } from "./render";
 import { drawBands } from "./selection";
 
@@ -39,7 +40,7 @@ const EMPTY: Measured = { x: new Float64Array(), top: new Float64Array(), bottom
 /**
  * The visual maths field over the Rust edit model (`MathField`), without
  * CodeMirror: the rendered maths with the source map on, a caret, one
- * selection band per row, the pending `\command`'s popover, and a focused
+ * selection band per row, the pending `\command` and its options, and a focused
  * hidden textarea at the caret that takes keys, typing and IME input (so
  * the OS candidate window sits at the caret). It never edits the source
  * itself: each key runs a model command, the view redraws from the step's
@@ -59,6 +60,7 @@ export class MathView {
   readonly input: HTMLTextAreaElement;
   /** An IME's text while it composes, drawn at the caret. */
   readonly preedit: HTMLElement;
+  /** The pending command's options (`popover/`). */
   readonly popover: HTMLElement;
   layout: Layout = { items: [] };
   measured: Measured = EMPTY;
@@ -69,8 +71,12 @@ export class MathView {
   composed: string | null = null;
   /** Trapped or destroyed: no more input. */
   dead = false;
+  /** The `\command` pending before the last `run`, so the host can tell a
+   *  step that committed one. */
+  pendingBefore: string | undefined;
   #field: MathField;
-  /** The source `rendered` holds, so a move alone never re-renders. */
+  /** The source and pending `\name` `rendered` holds, so a move alone
+   *  never re-renders. */
   #drawn: string | null = null;
   #resize: ResizeObserver;
 
@@ -100,8 +106,7 @@ export class MathView {
     this.input.setAttribute("autocorrect", "off");
     this.input.spellcheck = false;
     this.input.setAttribute("aria-label", "Maths");
-    this.popover = el("span", "cm-math-view-popover");
-    this.popover.hidden = true;
+    this.popover = createPopover(this);
     this.frame.append(this.bandLayer, this.rendered, this.caret, this.preedit, this.input);
     this.dom.append(this.frame, this.popover);
 
@@ -138,6 +143,7 @@ export class MathView {
    *  redraws; null when the view is dead or the engine trapped. */
   run(command: FieldCommand): Step | null {
     if (this.dead) return null;
+    this.pendingBefore = this.#field.pending;
     let step: Step;
     try {
       step = this.#field.run(command);
@@ -231,17 +237,18 @@ export class MathView {
     const old = this.#field;
     this.#field = field;
     if (old !== field) old.free();
-    if (this.#drawn !== field.source) {
+    const drawn = field.pending == null ? field.source : `${field.source}\u0000${field.head}\u0000${field.pending}`;
+    if (this.#drawn !== drawn) {
       let html: string;
       try {
-        html = fieldHtml(field.source, this.display);
+        html = (field.pending != null && pendingHtml(field, this.display)) || fieldHtml(field.source, this.display);
       } catch (e) {
         if (e instanceof MathsTrap) return e;
         throw e;
       }
       this.rendered.innerHTML = html;
       markEmptyRows(this.rendered, field);
-      this.#drawn = field.source;
+      this.#drawn = drawn;
       this.layout = { items: [] };
     }
     this.measured = EMPTY;
@@ -267,6 +274,7 @@ export class MathView {
   #draw() {
     drawBands(this);
     drawCaret(this);
+    drawPending(this);
     drawPopover(this);
   }
 

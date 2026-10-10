@@ -28,10 +28,17 @@ class Note implements NoteView {
     });
     this.dispatch({ effects: setFocused.of(true) });
   }
+  /** Every spec dispatched, and how many measures were asked for. */
+  specs: TransactionSpec[] = [];
+  measures = 0;
   dispatch(spec: TransactionSpec) {
+    this.specs.push(spec);
     this.state = this.state.update(spec).state;
   }
   focus() {}
+  requestMeasure() {
+    this.measures++;
+  }
   get doc() {
     return this.state.doc.toString();
   }
@@ -166,6 +173,23 @@ describe("the Rust field's writes", () => {
     leaveMaths(note as unknown as EditorView, writableTarget(note, f.text), "forward");
     expect(note.state.selection.main.head).toBe(6);
     expect(visualMath(note.state)).toBeNull();
+  });
+
+  test("leaving never has CodeMirror scroll: the caret is kept in view on the next measure", () => {
+    for (const [doc, at, dir, head] of [
+      ["Top\n\n$$\nx\n$$\n\nEnd", 8, "backward", 4],
+      ["Top\n\n$$\nx\n$$\n\nEnd", 8, "forward", 13],
+      ["$$\nx\n$$\nEnd", 3, "backward", 0],
+      ["A $x$ b", 3, "backward", 2],
+    ] as const) {
+      const note = new Note(doc, at);
+      const f = new Field(note);
+      note.specs = [];
+      leaveMaths(note as unknown as EditorView, writableTarget(note, f.text), dir);
+      expect(note.state.selection.main.head).toBe(head);
+      expect(note.specs.some((s) => s.scrollIntoView)).toBe(false);
+      expect(note.measures).toBe(1);
+    }
   });
 
   test("Backspace in an empty field removes the maths", () => {
