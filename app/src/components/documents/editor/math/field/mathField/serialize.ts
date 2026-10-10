@@ -1,14 +1,3 @@
-/** LaTeX as the note keeps it: placeholders already gone, `\operatorname`
- *  without MathLive's inner `\mathrm`, and nothing that would end inline
- *  maths early (`x\ $` reads as an escaped space before the `$`). */
-export function tidy(latex: string, inline: boolean): string {
-  const out = latex
-    .replace(/\\operatorname(\*?)\{\\mathrm\{([^{}]*)\}\}/g, "\\operatorname$1{$2}")
-    .trimStart()
-    .replace(/(?<!\\)\s+$/, "");
-  return inline && /\\\s$/.test(out) ? `${out}{}` : out;
-}
-
 /** `body` split at its own top-level `\\` (row gaps kept), or null when its
  *  braces or environments don't balance. */
 function splitRows(body: string): { rows: string[]; seps: string[] } | null {
@@ -65,19 +54,4 @@ export function layoutBlock(latex: string): string {
   if (env) return env.rows.length < 2 ? latex : `${env.open}\n${join(env.rows, env.seps)}\n${env.close}`;
   const top = splitRows(latex);
   return top && top.rows.length > 1 ? join(top.rows, top.seps) : latex;
-}
-
-export const WHOLE_ENV = /^\\begin\{([a-zA-Z]+\*?)\}[\s\S]*\\end\{\1\}$/;
-
-/** Display LaTeX as the field holds it: top-level `\\` lines, which KaTeX
- *  draws but MathLive rejects bare, go inside MathLive's `\displaylines`.
- *  `fromField` takes the wrapper off again, so the note keeps bare lines. */
-export function toField(source: string, display: boolean): string {
-  if (!display || WHOLE_ENV.test(source)) return source;
-  const top = splitRows(source);
-  return top && top.rows.length > 1 ? `\\displaylines{${source}}` : source;
-}
-
-export function fromField(latex: string): string {
-  return latex.startsWith("\\displaylines{") && latex.endsWith("}") ? latex.slice(14, -1).trim() : latex;
 }

@@ -1,7 +1,7 @@
 import type { EditorState } from "@codemirror/state";
 import { repositionTooltips, type EditorView, type Rect, type TooltipView, type ViewUpdate } from "@codemirror/view";
-import katex from "katex";
 
+import { mathsReady, renderToString } from "@/lib/maths";
 import { syncScrollFade } from "@/lib/ui/scrollFade";
 import { activeMathField, setMathMode, visualToggle } from "../../field/mathField";
 import { MATH_TABS, matrixTemplate, type MathEntry, type MatrixKind } from "../mathPalette";
@@ -185,6 +185,11 @@ export class MathToolsView implements TooltipView {
     const source = state.sliceDoc(math.from, math.to).trim();
     const key = `${math.display ? "D" : "I"}${math.nodeFrom}:${source}`;
     if (key === this.shown) return;
+    // No preview until the maths engine is ready; the next update tries again.
+    if (source && !mathsReady()) {
+      this.preview.replaceChildren();
+      return;
+    }
     this.shown = key;
     this.error.textContent = "";
     this.preview.classList.remove("cm-math-preview-stale", "cm-math-preview-empty");
@@ -195,7 +200,7 @@ export class MathToolsView implements TooltipView {
       return;
     }
     try {
-      const html = katex.renderToString(source, { displayMode: math.display, throwOnError: true });
+      const html = renderToString(source, { displayMode: math.display, throwOnError: true });
       this.preview.innerHTML = html;
       this.good = { nodeFrom: math.nodeFrom, html };
     } catch (e) {

@@ -2,7 +2,7 @@ import { EditorSelection, EditorState, Prec } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
 import { continuation, mathAt } from "../../math/mathContext";
-import { BLOCK_MATH_TYPE } from "../../math/field/mathField";
+import { BLOCK_MATH_TYPE } from "@/lib/markdown/math";
 import { emptyPairToBlock, offerShapeSwitch } from "../../math/tools/mathTools";
 import { ancestorAt } from "../../syntax/syntax";
 import { mathBlockAt } from "./math-blocks";

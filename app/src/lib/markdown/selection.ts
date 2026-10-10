@@ -308,9 +308,9 @@ export function elementMarkdown(el: Element): string {
 }
 
 /** The selection under `target` as markdown, or "" — a selection inside a
- *  field (an open formula's too, `mathSelect.ts`) belongs to the field. */
+ *  field belongs to the field. */
 function markdownFor(target: EventTarget | null): string {
-  if (target instanceof Element && target.closest("input, textarea, [contenteditable='true'], math-field")) {
+  if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) {
     return "";
   }
   return selectionMarkdown(window.getSelection());

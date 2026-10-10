@@ -16,6 +16,7 @@ import {
   CodeHeaderWidget,
   ImageWidget,
   MathWidget,
+  mathsSettled,
 } from "../widgets";
 import { mathAtoms, mathIn } from "./math-blocks";
 import {
@@ -261,7 +262,7 @@ export const inlinePlugin = ViewPlugin.fromClass(
         u.selectionSet ||
         u.viewportChanged ||
         u.focusChanged ||
-        u.transactions.some((tr) => tr.effects.some((e) => e.is(setFocused))) ||
+        u.transactions.some((tr) => tr.effects.some((e) => e.is(setFocused) || e.is(mathsSettled))) ||
         findRevealed(u.state) !== findRevealed(u.startState) ||
         u.state.field(visualMathField) !== u.startState.field(visualMathField, false) ||
         syntaxTree(u.state) !== syntaxTree(u.startState) ||

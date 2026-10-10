@@ -27,7 +27,7 @@ student document; its lightweight header controls live in
 whole editor by row id: image attachments belong to one note, while a
 rename keeps its editor. **Live** mode renders markdown in place —
 headings, marks, links, lists and checkboxes, quotes, rules, code, pictures,
-KaTeX maths and mermaid diagrams — and shows a construct's source while the selection touches
+maths and mermaid diagrams — and shows a construct's source while the selection touches
 it (a heading, quote or list marker while the caret is on its line); maths
 is edited in a visual field instead
 ([editor-maths.md](./editor-maths.md)). **Raw**

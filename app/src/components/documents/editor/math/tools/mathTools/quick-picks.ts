@@ -1,6 +1,6 @@
 import type { EditorView, Rect, TooltipView, ViewUpdate } from "@codemirror/view";
 
-import { activeMathField, type FieldController } from "../../field/mathField";
+import { activeMathField, type VisualField } from "../../field/mathField";
 import type { MathEntry } from "../mathPalette";
 import { quickPicks } from "../mathUsage";
 import { button, cellButton, el, syncHidden } from "./dom";
@@ -21,13 +21,11 @@ export class QuickPicksView implements TooltipView {
   dom = el("div", "cm-math-tools cm-math-quick");
   overlap = true;
   offset = { x: -4, y: 4 };
-  private field: FieldController | null;
-  /** The field's selection the strip opened at. */
-  private at: string;
-  /** MathLive reports moves from inside its own updates, and late ones from
-   *  before the strip opened; close after them, on a real move. */
-  private moved = (e: Event) => {
-    if (e.type === "selection-change" && this.selection() === this.at) return;
+  private field: VisualField | null;
+  private unsubscribe: (() => void) | null = null;
+  /** A caret move in the field, or a press on it: close, after the field's
+   *  own update. */
+  private moved = () => {
     queueMicrotask(() => {
       if (mathToolsOpen(this.view.state) === "quick") this.view.dispatch({ effects: openMathTools.of(null) });
     });
@@ -48,13 +46,8 @@ export class QuickPicksView implements TooltipView {
     expand.innerHTML = EXPAND_ICON;
     this.dom.append(expand);
     this.field = activeMathField(view);
-    this.at = this.selection();
-    this.field?.mf.addEventListener("selection-change", this.moved);
+    this.unsubscribe = this.field?.onSelectionChange(this.moved) ?? null;
     this.field?.dom.addEventListener("pointerdown", this.moved);
-  }
-
-  private selection(): string {
-    return JSON.stringify(this.field?.mf.selection ?? null);
   }
 
   mount() {
@@ -78,7 +71,7 @@ export class QuickPicksView implements TooltipView {
   }
 
   destroy() {
-    this.field?.mf.removeEventListener("selection-change", this.moved);
+    this.unsubscribe?.();
     this.field?.dom.removeEventListener("pointerdown", this.moved);
   }
 }

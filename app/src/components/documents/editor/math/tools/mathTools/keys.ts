@@ -1,6 +1,6 @@
 import { keymap, type EditorView } from "@codemirror/view";
 
-import { setMathMode, visualToggle, type FieldController } from "../../field/mathField";
+import { setMathMode, visualToggle, type VisualField } from "../../field/mathField";
 import { quickPicks } from "../mathUsage";
 import { subjectOf } from "./insert";
 import { pastedField, pastedMath } from "./paste-shape";
@@ -19,18 +19,18 @@ const toolsShortcut = (e: KeyboardEvent) => (e.metaKey || e.ctrlKey) && e.shiftK
  * insert one and Esc closes them, and any other key closes them and goes on
  * to the field. Esc closes the popover before it leaves the field.
  */
-export function fieldKey(view: EditorView, e: KeyboardEvent, field: FieldController): boolean {
+export function fieldKey(view: EditorView, e: KeyboardEvent, field: VisualField): boolean {
   const open = mathToolsOpen(view.state);
   if (toolsShortcut(e)) return toggleMathTools(view);
   const close = () => view.dispatch({ effects: openMathTools.of(null) });
   const plain = !e.metaKey && !e.ctrlKey && !e.altKey;
   // A `\command` being typed keeps its keys, Esc included.
-  if (field.mf.mode === "latex") {
+  if (field.mode() === "command") {
     if (open === "quick") close();
     return false;
   }
   // `$` in an empty inline field: `$$`, a block.
-  if (e.key === "$" && plain && !field.display && field.mf.mode === "math" && field.isEmpty()) {
+  if (e.key === "$" && plain && !field.display && field.mode() === "math" && field.isEmpty()) {
     if (open) close();
     return emptyPairToBlock(view);
   }

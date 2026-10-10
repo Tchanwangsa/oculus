@@ -24,6 +24,7 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | That the configs, `beforeBuildCommand` and CI agree on the sidecars and keyd's helper | `app/scripts/bundle-config.test.mjs` |
 | keyd's release policy against a signed bundle | `app/keyd/tests/bundle.rs` |
 | Keeps keyd's OS calls inside its adapters | `app/scripts/keyd-seams.test.mjs` |
+| Builds the maths engine to WebAssembly | `app/scripts/build-math.mjs`, `app/math-core/` |
 | Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
 | How an agent thread finds `oculus` | `app/src-tauri/src/harness/cli/discover/` |
@@ -48,14 +49,15 @@ bun run whisper       # build whisper.cpp's whisper-cli there (macOS, needs cmak
 bun run editor-wasm   # the editor core's wasm for dev shadow mode (docs/editor-core.md)
 bun run keyd          # build and sign the dev oculus-keyd; install it from the main checkout
 bun run stage-keyd    # build and sign the release oculus-keyd the bundle ships, into binaries/
+bun run math          # build the maths wasm into app/math-core/pkg/
 ```
 
 ## `predev` is the whole preflight, and it is idempotent
 
 It is bun's lifecycle hook for `dev`, and `beforeDevCommand` is
 `OCULUS_CLI_WATCH=1 bun run dev`, so every `tauri dev` runs it. In order it
-runs `bun install`, fetches ffmpeg, compiles the speech helper and
-`whisper-cli`, builds the editor core's wasm for
+runs `bun install`, fetches ffmpeg, compiles the speech helper,
+`whisper-cli` and the maths wasm, builds the editor core's wasm for
 [shadow mode](./editor-core.md#shadow-mode-checks-the-rust-core-against-every-note-editor)
 (skipped with one line without the `wasm32-unknown-unknown` target or the
 pinned `wasm-bindgen` CLI, and never fatal), builds and signs the dev
@@ -108,6 +110,23 @@ libraries and frameworks; the script checks `otool -L` and fails otherwise.
 Its floor is macOS 13.3, upstream's own. Like `apple-speech` it is a macOS-only
 `externalBin` through `tauri.macos.conf.json`.
 
+## The maths wasm is built, not committed
+
+`bun run math` compiles `app/math-core/wasm` (the binding of the katex fork
+and the maths field's edit model;
+[`app/math-core/README.md`](../app/math-core/README.md)) with cargo's `wasm`
+profile, runs `wasm-bindgen --target web` and then `wasm-opt -Oz` (the
+`binaryen` devDependency) into the gitignored `app/math-core/pkg/`. It skips
+while the `.wasm` is newer than every input. It needs
+`rustup target add wasm32-unknown-unknown` and the `wasm-bindgen` CLI at
+exactly the version in `app/math-core/Cargo.lock` (`cargo install
+wasm-bindgen-cli --version <it> --locked`), and fails with that command
+otherwise. `bun run build` and `bun run test` run it first, so
+`beforeBuildCommand` builds it too. A plain `bun test` doesn't: its preload
+(`app/tests/preload.ts`, set in `app/bunfig.toml`) loads the engine before
+any test renders maths, and fails asking for `bun run math` while `pkg/` is
+missing.
+
 ## The dev CLI is built by the preflight, not by `tauri dev`
 
 `tauri dev` issues a bare `cargo run`, which builds the `app` bin and no other.
@@ -148,11 +167,14 @@ guaranteed to exist.
 ## CI proves a fresh checkout builds; releases are cut by hand
 
 `ci.yml` runs on every push to `master` and every pull request, on a macOS
-runner with nothing cached but crates: `cargo fmt --check` (the app, keyd
-and keyd core), `bun run test`, `bun run build`, the ffmpeg fetch, the
+runner with nothing cached but crates: `cargo fmt --check` (the app, keyd,
+keyd core and `app/math-core`'s own crates), `bun run test`, `bun run build`
+(both build the maths wasm, so the runner gets the wasm target and the locked
+`wasm-bindgen`), the ffmpeg fetch, the
 speech helper and `whisper-cli`, `stage-keyd` (a real release build and signature
 of keyd, as the bundle carries it), `stage-cli`, `cargo test --release --locked`,
-keyd core's tests with every feature and keyd's with and without `dev`, then
+keyd core's tests with every feature and keyd's with and without `dev`, the
+maths engine's `cargo test --locked`, then
 `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
 reference fails. A second job, `keyd-linux`, checks and tests keyd core and
 checks keyd on Ubuntu, where only the unsupported adapter exists
@@ -173,13 +195,13 @@ pinned version (skipped when the cached `~/.cargo/bin` already has it), builds
 the wasm, and runs the oracles — four at a few thousand cases each, `shadow`
 at 300 — seeded with the run number so each run tries new cases. Replay a
 failure locally with the seed it prints. The first job's `bun run build` never
-builds the wasm, so it proves the frontend builds without it.
+builds the editor core's wasm, so it proves the frontend builds without it.
 
 `release.yml` is `workflow_dispatch` only. To cut a release, bump `version` in
 `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml` together, push,
 then run **Release** from the Actions tab. `tauri-apps/tauri-action` runs
 `tauri build` (so `beforeBuildCommand` fetches natives, compiles the speech
-helper and stages keyd and the CLI),
+helper, builds the maths wasm and stages keyd and the CLI),
 creates tag `v<version>` on that commit, and attaches the `.dmg` and `.app` to
 a draft prerelease; the same files are kept as workflow artifacts. Publishing
 the draft is a manual step on GitHub.

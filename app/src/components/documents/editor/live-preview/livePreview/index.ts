@@ -2,6 +2,7 @@ import type { Extension } from "@codemirror/state";
 
 import { focusedField, trackFocus } from "../../core/liveFocus";
 import { mathField } from "../../math/field/mathField";
+import { mathsWatcher } from "../widgets";
 import { blockField } from "./blocks";
 import { dollarTyping, edgePaste, edgeTyping, fieldLatexPaste } from "./edges";
 import { inlinePlugin } from "./inline";
@@ -43,5 +44,6 @@ export function livePreview(): Extension {
     edgePaste,
     fieldLatexPaste,
     inlinePlugin,
+    mathsWatcher,
   ];
 }
