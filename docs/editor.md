@@ -73,7 +73,11 @@ last updated (`modified_at` or the session's last save) and a word count.
   line below it, since GFM reads a line straight under a table as a row.
   **Leading YAML frontmatter** parses as `Frontmatter`
   (`app/src/components/documents/editor/syntax/frontmatter.ts`) and draws as a
-  Properties card, revealing its source when touched.
+  Properties card, revealing its source when touched. Only a `---` first line
+  opens it, and its closing fence is found by looking up to 64 KiB ahead,
+  which Lezer's fragment reuse cannot see: `noteLanguage`'s parser runs its
+  fragments through `frontmatterFragments`, which drops the one from 0 when a
+  change in that window could make or unmake the block.
 - **Toolbar buttons and shortcuts are plain CodeMirror commands**
   (`app/src/components/documents/editor/commands/`) that rewrite markdown
   and unwrap when already applied, so they work in both modes. An inline mark
