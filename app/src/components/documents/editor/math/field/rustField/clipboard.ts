@@ -1,5 +1,5 @@
 import { mathOnly, pasteBeside } from "../fieldNote";
-import { BLOCK_MATH_TYPE } from "@/lib/markdown/math";
+import { copied } from "@/lib/markdown/mathSelection/clipboard";
 import type { RustFieldController } from "./controller";
 
 /** The selection's LaTeX, or "" with none. */
@@ -9,20 +9,19 @@ function selected(ctl: RustFieldController): string {
 }
 
 /**
- * Copy and cut write the selection's LaTeX as `text/plain` and as
+ * Copy and cut write what a chat formula's selection writes (`copied`):
+ * the LaTeX wrapped by its shape as `text/plain`, bare as
  * `application/x-latex` (the note's paste reads that as LaTeX copied from a
- * field, `fieldLatexPaste`), and a display field's also as its `$$` lines
- * (`BLOCK_MATH_TYPE`). Cut then deletes it as Backspace does.
+ * field, `fieldLatexPaste`), and a block's `$$` lines (`BLOCK_MATH_TYPE`).
+ * Cut then deletes it as Backspace does.
  */
 export function copy(ctl: RustFieldController, e: ClipboardEvent, cut: boolean) {
-  const latex = selected(ctl).trim();
+  const entries = copied(ctl.mv.field, ctl.display);
   const data = e.clipboardData;
-  if (!latex || !data) return;
+  if (!entries.length || !data) return;
   e.preventDefault();
   e.stopPropagation();
-  data.setData("text/plain", latex);
-  data.setData("application/x-latex", latex);
-  if (ctl.display) data.setData(BLOCK_MATH_TYPE, `$$\n${latex}\n$$`);
+  for (const [type, value] of entries) data.setData(type, value);
   if (cut) ctl.mv.run("backspace");
 }
 

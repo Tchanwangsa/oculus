@@ -2,9 +2,6 @@ import { type MathField, MathsTrap } from "@/lib/maths";
 import { bands, framePoint, measure, paintBands, readLayout, stopAt, type Layout, type Measured } from "@/lib/maths/geometry";
 import type { Formula } from "./formula";
 
-/** A field's top-level rows: a display's lines, each its own band. */
-const topRows = (field: MathField) => field.slots.filter((s) => s.parent == null);
-
 /** Marks the formula a selection is drawn in (`styles/math.css`). */
 const SELECTING = "data-math-selecting";
 
@@ -29,11 +26,22 @@ export function dropLayer(
   );
 }
 
+/** A band layer in `root` (a formula's `.katex`): an absolutely positioned
+ *  zero-size span whose own corner is the frame every box is read in, so
+ *  an inline formula broken over lines still lines up. `dropLayer` takes
+ *  it off. */
+export function openLayer(root: Element): HTMLElement {
+  const layer = document.createElement("span");
+  layer.className = "md-math-bands";
+  layer.setAttribute("aria-hidden", "true");
+  root.setAttribute(SELECTING, "");
+  root.append(layer);
+  return layer;
+}
+
 /**
- * A selection in one rendered formula: its edit model and the band layer,
- * an absolutely positioned zero-size span inside the formula's `.katex`,
- * whose own corner is the frame every box is read in, so an inline formula
- * broken over lines still lines up. Nothing in the formula's flow changes.
+ * A selection in one rendered formula: its edit model and its band layer
+ * (`openLayer`). Nothing in the formula's flow changes.
  */
 export class Session {
   readonly layer: HTMLElement;
@@ -51,11 +59,7 @@ export class Session {
     readonly base: MathField,
   ) {
     this.field = base;
-    this.layer = document.createElement("span");
-    this.layer.className = "md-math-bands";
-    this.layer.setAttribute("aria-hidden", "true");
-    formula.root.setAttribute(SELECTING, "");
-    formula.root.append(this.layer);
+    this.layer = openLayer(formula.root);
     this.#relayout();
     // Fonts arriving or the column resizing move the glyphs.
     this.#resize = new ResizeObserver(() => this.redraw());
@@ -123,6 +127,6 @@ export class Session {
 
   #draw() {
     const [from, to] = this.field.selected;
-    paintBands(this.layer, bands(this.#layout, from, to, topRows(this.base)), "md-math-band");
+    paintBands(this.layer, bands(this.#layout, from, to, this.base.slots), "md-math-band");
   }
 }

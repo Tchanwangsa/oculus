@@ -13,6 +13,8 @@ export interface CommandOption {
   name: string;
   /** The palette template (`\sqrt[#{}]{#{}}`). */
   template: string;
+  /** The palette entry, which counts as used once accepted. */
+  entry: MathEntry;
   /** The template with its fields dropped, as the row reads it. */
   label: string;
   /** Rendered preview HTML, or null when it does not render. */
@@ -33,6 +35,7 @@ function optionOf(name: string, entry: MathEntry): CommandOption {
   return {
     name,
     template: entry.template,
+    entry,
     label: labelOf(entry.template),
     preview: () => {
       if (html !== undefined) return html;
@@ -80,11 +83,16 @@ function allOptions(): CommandOption[] {
 
 /** What the list offers for the pending `name` (no backslash): the
  *  templates of the command typed exactly, then those of commands it
- *  starts. Nothing right after `\`, where Space types `\ `. */
+ *  starts. Nothing for an empty name: a bare `\` offers the picks. */
 export function commandOptions(name: string): CommandOption[] {
   if (!name) return [];
   const typed = `\\${name}`;
   const exact = allOptions().filter((c) => c.name === typed);
   const longer = allOptions().filter((c) => c.name !== typed && c.name.startsWith(typed));
   return [...exact, ...longer].slice(0, MAX_OPTIONS);
+}
+
+/** Entries as options, in their order: the field's picks (`fieldPicks`). */
+export function entryOptions(entries: readonly MathEntry[]): CommandOption[] {
+  return entries.map((entry) => optionOf(commandOf(entry.template) ?? entry.template, entry));
 }

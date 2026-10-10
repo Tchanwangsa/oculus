@@ -6,8 +6,7 @@ import "./index.css";
 import App from "./App";
 import { loadIconCatalogue } from "./components/subjects/SubjectIcon";
 import { useSubjectIconStore } from "./stores/planning/subjectIconStore";
-import { watchMathSelection } from "./lib/markdown/selection";
-import { watchMathSelect } from "./lib/markdown/mathSelection";
+import { watchMathSelect, watchMathSelection } from "./lib/markdown/mathSelection";
 import { loadMaths } from "./lib/maths";
 
 // A release webview has no console, so paint uncaught errors over the window.

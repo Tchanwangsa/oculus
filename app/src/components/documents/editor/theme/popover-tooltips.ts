@@ -156,30 +156,16 @@ export const popoverTooltips: ThemeSpec = {
   ".cm-math-cell-wide": { gridColumn: "span 2" },
   ".cm-math-cell:hover": { backgroundColor: "var(--color-accent)" },
   ".cm-math-cell .katex": { cursor: "pointer" },
-  // The visual field's quick picks: one row of palette cells, each with its
-  // number key in the corner, and the expand button.
+  // The chip under pasted maths: one row, its switch and close button.
   // After `.cm-math-tools`, which it overrides; `-hidden` still beats it.
-  ".cm-math-quick": {
+  ".cm-math-pasted": {
     width: "auto",
     display: "flex",
     alignItems: "center",
     gap: "2px",
     padding: "4px",
   },
-  ".cm-math-quick .cm-math-cell": { position: "relative", flex: "none", width: "36px" },
-  ".cm-math-quick .cm-math-cell-wide": { width: "74px" },
-  ".cm-math-quick-key": {
-    position: "absolute",
-    top: "1px",
-    left: "3px",
-    color: muted,
-    fontFamily: "var(--font-sans)",
-    fontSize: "9px",
-    lineHeight: "1",
-    fontVariantNumeric: "tabular-nums",
-    pointerEvents: "none",
-  },
-  ".cm-math-quick .cm-math-close": { marginLeft: "2px" },
+  ".cm-math-pasted .cm-math-close": { marginLeft: "2px" },
   ".cm-math-matrix": { display: "flex", alignItems: "flex-start", gap: "12px", marginBottom: "8px" },
   ".cm-math-matrix-grid": { display: "grid", gridTemplateColumns: "repeat(6, 14px)", gap: "2px" },
   ".cm-math-matrix-cell": {

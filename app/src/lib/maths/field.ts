@@ -67,7 +67,7 @@ export class MathField {
   readonly head: number;
   /** The selection's range of `source`: what copy takes. */
   readonly selected: readonly [number, number];
-  /** Whether Space is the view's (the quick picks). */
+  /** Whether Space is the view's (its list of picks). */
   readonly spaceFree: boolean;
   /** Each stop's offset, by stop id: ←/→ order, never decreasing; stops of
    *  different slots can share one (`\frac ab`'s 7). */

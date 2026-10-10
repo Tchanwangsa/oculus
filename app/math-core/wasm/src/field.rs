@@ -164,7 +164,7 @@ impl MathField {
         boundary::selected(&self.field).to_vec()
     }
 
-    /// Whether Space is the view's (the quick picks).
+    /// Whether Space is the view's (its list of picks).
     #[wasm_bindgen(getter, js_name = spaceFree)]
     pub fn space_free(&self) -> bool {
         self.field.space_free()

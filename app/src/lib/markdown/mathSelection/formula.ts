@@ -22,7 +22,12 @@ export function formulaAt(target: EventTarget | null): Formula | null {
   const el = target instanceof Element ? target : null;
   if (!el || el.closest(NOT_MATHS_PRESS)) return null;
   const math = mathAround(el);
-  if (!math) return null;
+  return math ? formulaOf(math) : null;
+}
+
+/** A rendered formula (its `.katex` or `.katex-display`) as drawn with the
+ *  source map; null without it. */
+export function formulaOf(math: Element): Formula | null {
   const root = math.classList.contains("katex") ? math : math.querySelector(".katex");
   const html = root?.querySelector(":scope > .katex-html");
   const tex = root?.querySelector('annotation[encoding="application/x-tex"]')?.textContent;

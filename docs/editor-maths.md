@@ -1,7 +1,7 @@
 # Maths in the note editor
 
 In Live mode a note's maths renders, edits in a visual field, and has a
-toolbox, quick picks and typed shorthands; in TeX and Raw mode it is typed as
+toolbox, a list of picks and typed shorthands; in TeX and Raw mode it is typed as
 LaTeX. The delimiters and the rest of the editor are [editor.md](./editor.md).
 One Rust engine (`app/math-core`, the katex fork and the field's edit model,
 compiled to WebAssembly) draws and edits it all; its layout is
@@ -16,7 +16,7 @@ compiled to WebAssembly) draws and edits it all; its layout is
 | The field itself, its host in the note | `app/src/components/documents/editor/math/field/mathView/`, `app/src/components/documents/editor/math/field/rustField/` |
 | The engine's facade, the geometry the field measures with | `app/src/lib/maths/` |
 | Rendered maths, atomic ranges, edge keys | `app/src/components/documents/editor/live-preview/widgets/`, `app/src/components/documents/editor/live-preview/livePreview/` |
-| Toolbox, palette, quick picks, usage | `app/src/components/documents/editor/math/tools/mathTools/`, `app/src/components/documents/editor/math/tools/mathPalette.ts`, `app/src/components/documents/editor/math/tools/mathUsage.ts` |
+| Toolbox, palette, usage | `app/src/components/documents/editor/math/tools/mathTools/`, `app/src/components/documents/editor/math/tools/mathPalette.ts`, `app/src/components/documents/editor/math/tools/mathUsage.ts` |
 | Shorthands | `app/src/components/documents/editor/math/tools/shorthand/`, `app/math-core/edit/src/shortcut/` |
 | Typing matrices | `app/math-core/edit/src/command/grid/` |
 
@@ -28,7 +28,7 @@ maths centred, its rows too — with slots for a fraction's parts or a sum's
 limits, and `\` commands that become one symbol. `MathFieldWidget`
 (`math/field/mathField/widget.ts`) opens it as a `RustFieldController`
 (`math/field/rustField/`), which hosts a `MathView` (`math/field/mathView/`).
-The widget, the toolbox (`fieldKeys`, quick picks, palette inserts) and the
+The widget, the toolbox (`fieldKeys`, `fieldTools`, palette inserts) and the
 note's undo routing know it only as a `VisualField`
 (`mathField/registry.ts`): mode (`math`, `text`, or `command` while a
 `\command` is typed), a selection-change subscription, `isEmpty`,
@@ -47,8 +47,9 @@ the field draws too, so entering maths moves neither it nor its line.
 `MathView` is the field over the edit model (`MathField` in
 `app/src/lib/maths/field.ts`). It draws the maths with the source map on
 (`renderToString` with `sourceMap: true`, as the Live rendering draws it:
-`math/hugArrays.ts`, `MATH_ARRAYSTRETCH`), and over it a caret, one selection
-band per row and, while a `\command` is pending, the list of its options
+`math/hugArrays.ts`, `MATH_ARRAYSTRETCH`), and over it a caret, selection
+bands over the selected atoms (a band per line, an array's rows each their
+own, `bands` in `lib/maths/geometry`) and, while a `\command` is pending, the list of its options
 (below) — all positioned from `lib/maths/geometry`. Keys,
 typing and IME input arrive on a focused, invisible textarea at the caret
 (`cm-math-view-input`, which `core/liveFocus.ts` counts as the editor's
@@ -127,26 +128,35 @@ draws it in the rendering, as the model would type it at the caret
 (`mathView/pending.ts`: `\texttt{\textbackslash name}` inserted as a
 template, display only), so the maths after it moves aside; its elements
 carry no source range, every other keeps its own, and it shows monospace in
-the brand colour, the caret after it.
+the brand colour at 0.8em (the maths' x-height), the caret after it.
 
-While a `\command` is pending, one list hangs from the start of that `\name`
-(`mathView/popover/`): every palette and completion template whose command
+The field has one list (`mathView/popover/`), which a pending `\command` and
+Space open. While a `\command` is pending it hangs from the start of that
+`\name`. Right after `\` it holds the field's picks (`fieldPicks`, below);
+once letters are typed, every palette and completion template whose command
 starts with the name, one row per template (`\sqrt` offers `\sqrt{}` and
 `\sqrt[]{}`), the command typed exactly first, its bare form before its
-templates, then common commands and shorter names. Right after `\`, and for a
-name nothing starts with, there is no list. It sits under the caret, flips
+templates, then common commands and shorter names. For a name nothing starts
+with there is no list. Wherever it opens, it sits under the caret, flips
 above when it would pass the bottom of what is visible (the window, the
 note's scroller, any clipping ancestor) and there is more room above, and
 slides sideways to stay inside them (`placeList`). The first row is
 highlighted; ↑/↓ move the highlight and Space, Tab or Enter accept it, as a
 click on a row does: the template goes in for the typed name (its first slot
 taking the selection), the caret in its first empty slot — the index for
-`\sqrt[]{}`, from which Tab or → reach the radicand. With no list, those keys
-are the model's: Space, Tab or Enter commit the name as typed. Esc and
-Backspace stay the model's either way.
+`\sqrt[]{}`, from which Tab or → reach the radicand. So `\` then Space
+inserts the first pick. Esc right after a bare `\` closes the list and keeps
+the `\` pending with none, so Space then types a control space `\ `; typing a
+letter brings the list back. With no list, Space, Tab or Enter commit the
+name as typed, and `\,` and the other non-letters make their control symbols
+as before. Esc once letters are typed, and Backspace, stay the model's.
 
-Copy and cut write the selection's LaTeX as `text/plain` and
-`application/x-latex`, a display field's also as `BLOCK_MATH_TYPE`; cut then
+Copy and cut write the selection's LaTeX wrapped by its shape as
+`text/plain` — within one line `$…$`; over more than one line (two rows, or
+an array whose rows it holds, taken whole with its environment) or the
+whole of a display formula `$$` lines, one row each, also as
+`BLOCK_MATH_TYPE` — and bare as `application/x-latex` (`copied` in
+`lib/markdown/mathSelection/clipboard.ts`, as chat and files copy); cut then
 deletes as Backspace does. WebKit enables Copy and Cut only for a text
 selection, so the field cancels `beforecopy`/`beforecut` while it has one.
 Pasted maths goes through the model, refused unless it renders.
@@ -164,11 +174,14 @@ The rendering is `MathWidget` in
 `app/src/components/documents/editor/live-preview/widgets/math.ts`, with the
 atomic ranges and edge keys in `live-preview/livePreview/`. Once the maths
 engine has loaded, every rendering's range is atomic, so a drag or Shift+arrow
-covers maths whole and Shift-click extends the selection over it; inline maths
-highlights like a word, and a block a selection covers fills as one
-(`cm-math-selected`) — native selection never paints the rendering, and a
-selection taking a whole block keeps it rendered rather than opening the
-field. Copy and cut always write the note's source (`$$…$$` lines), since
+covers maths whole and Shift-click extends the selection over it. A
+rendering a selection covers draws bands over its atoms, as chat does
+(`WholeBands`, `mathSelection/whole.ts`; the rendering is `fieldHtml`, the
+field's own, source map on), and the note's highlight leaves it out: the
+selection layer is `core/selectionLayer.ts`, `drawSelection`'s with the
+rendered maths cut out (`selectionGaps`, a block with its line break).
+Native selection never paints the rendering, and a selection taking a
+whole block keeps it rendered rather than opening the field. Copy and cut always write the note's source (`$$…$$` lines), since
 a rendering passes clipboard events to CodeMirror. A rendered block takes
 its column's width (`contain: inline-size` on `.cm-math-display`, as on the
 field's block) and scrolls a too-wide formula, rather than widening the
@@ -197,8 +210,9 @@ Pasted into
 the field, maths goes in at the caret and markdown with prose around maths
 lands in the note just after that maths; LaTeX copied from a field pastes
 outside maths in the shape it was copied
-from: a block's copy carries its `$$` lines (`BLOCK_MATH_TYPE`) and goes in
-on lines of its own (inline in a table row), inline maths as `$…$`. A
+from (`fieldLatexPaste`, reading the bare `application/x-latex`): a block's
+copy carries its `$$` lines (`BLOCK_MATH_TYPE`) and goes in on lines of its
+own (inline in a table row), the rest as `$…$`. A
 chip under the pasted maths (`PastedView`, `offerShapeSwitch`) offers
 "Convert to block" or "Convert to inline" (`shapeChange`, the toolbox's own
 switch) and a close button; a switch keeps it up for the way back, and it
@@ -236,12 +250,12 @@ The first tab, Popular and selected by default, holds the most used
 entries and pads with `POPULAR_DEFAULTS` while history is thin; it is
 rebuilt only when the toolbox opens or a tab is picked, so cells never
 move under the pointer; a palette click inserts and leaves it open.
-Palette clicks, quick picks, accepted completions and `\commands` typed
-out — in TeX (a non-letter typed after the name) or in the visual field
-(a step out of its command mode: a commit or an accepted option) — all
-count, a typed command as its palette entry (`math/tools/mathUsage.ts`, `localStorage`); the Recent row and Popular
-are across all notes, while each subject keeps its own recents for the
-quick picks.
+Palette clicks, accepted completions, rows accepted from the field's list
+(as themselves) and `\commands` typed out — in TeX (a non-letter typed after
+the name) or committed in the visual field — all count, a typed command as
+its palette entry (`math/tools/mathUsage.ts`, `localStorage`); the Recent row
+and Popular are across all notes, while each subject keeps its own last five
+to lead the field's picks.
 
 In TeX and Raw mode maths
 is typed as LaTeX (Space is a space), and the toolbox's cells insert
@@ -275,22 +289,20 @@ selection; Raw mode never pairs. Inline maths left empty (`$$`, `$ $`,
 caret outside it (`dropEmptyInline` in `math/field/mathField/index.ts`); a caret still inside
 (TeX mode, the window losing focus) keeps it.
 
-## In the visual field, Space opens quick picks at the caret
+## In the visual field, Space opens the picks at the caret
 
-The strip is `QuickPicksView` and `fieldKey` in `mathTools/` (`quick-picks.ts`,
-`keys.ts`), reached through `fieldKeys` ahead of the field's own keys
-(`rustField/keys.ts`). Space opens a strip hanging from the field's
-caret like a completion list, flipped above near the window's bottom and
-hung leftward from the caret when it would pass the editor's clipped
-right edge (`clipRight`): the five entries last used in the note's
-subject, most recent first, padded from Popular while the subject has
-little history (`quickPicks`), numbered, and a ⌄ button.
-1–5 or a click inserts one and closes the strip; Space again or ⌄ opens
-the full toolbox; Esc closes the strip and a second Esc leaves the field;
-any other key, or a caret move in the field, closes it and goes on as
-usual. Space inside `\text{}`, beside a text atom and in a `\command`
-being typed is the field's (`spaceFree` is false there), and after a term in
-a matrix or bracket group it starts a cell (below). The full toolbox under
+`fieldKey` in `mathTools/keys.ts`, reached through `fieldKeys` after the
+field's open list and ahead of its own keys (`rustField/keys.ts`), opens the
+field's list (above) on Space as its picks: the subject's five last used,
+most recent first, then Popular, twenty in all (`fieldPicks`), the first
+nine numbered, with an "All maths tools" row under them. No row is
+highlighted at first: ↑/↓ start the highlight, then Space, Tab, Enter or a
+click accept it (it counts as used); 1–9 accept that row. Space with none
+highlighted, or that row, opens the full toolbox (`fieldTools`); Esc
+closes the list and a second Esc leaves the field; Tab, Enter and any other
+key close it and go on as usual, as does a caret move in the field. Space
+inside `\text{}`, beside a text atom and in a `\command` being typed is the
+field's (`spaceFree` is false there), and after a term in a matrix or bracket group it starts a cell (below). The full toolbox under
 the field drops the preview, its cells insert into the field (`insertTemplate`:
 slots become empty slots, the first taking the selection) and its TeX control
 switches to TeX mode; there a Visual control switches back. Neither toolbox
@@ -323,14 +335,14 @@ or a bracket group whose delimiters match one (`(`, `[`, `\{`, `|`, `\|`),
 which is one cell and becomes that matrix at its first new cell or row.
 The group's right bracket is a `\left…\right` pair or an opening
 bracket with whatever closes it later in the same slot. Maths mode only;
-`spaceFree` (the model's own) keeps the quick picks off a Space the grid
+`spaceFree` (the model's own) keeps the picks off a Space the grid
 takes.
 
 - **Space** after a term ends the cell: into the next cell when the caret is
   at the cell's end and that cell is empty, else into a new column (what
   followed the caret moves into it). In an empty cell, at a cell's start and
   after an operator, relation, punctuation, opening or `\sin`-like operator
-  it opens the quick picks as anywhere else. A cell holding only a binary
+  it opens the picks as anywhere else. A cell holding only a binary
   operator or relation rejoins the cell before it on Space (MATLAB's
   `[a + b]`): its column goes when nothing else is in it, else the row's
   later cells shift left. So `(a + b)` typed with spaces stays plain

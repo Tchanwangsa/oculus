@@ -60,7 +60,7 @@ fn key(field: &Field, c: char) -> Outcome {
         '%' => symbol(field, r"\%"),
         '$' => symbol(field, r"\$"),
         '&' => grid::ampersand(field),
-        // Space outside a grid is the view's (quick picks).
+        // Space outside a grid is the view's (its list of picks).
         c if c.is_whitespace() || c.is_control() => Outcome::none(field),
         c => symbol(field, c.encode_utf8(&mut [0; 4])),
     }

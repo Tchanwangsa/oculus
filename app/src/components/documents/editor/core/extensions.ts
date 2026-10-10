@@ -4,7 +4,6 @@ import { indentUnit } from "@codemirror/language";
 import { Compartment, Prec, type Extension } from "@codemirror/state";
 import {
   EditorView,
-  drawSelection,
   dropCursor,
   keymap,
   placeholder,
@@ -18,6 +17,7 @@ import { noteKeymap } from "../commands";
 import { findExtension } from "../chrome/find";
 import { hostCompartment, linkAt, noteHost, type NoteHost } from "./host";
 import { noteMarkdown } from "./language";
+import { noteSelection } from "./selectionLayer";
 import { livePreview } from "../live-preview/livePreview";
 import { mathShorthand } from "../math/tools/shorthand";
 import { mathCompletionSource, mathOptionPreview, mathTools } from "../math/tools/mathTools";
@@ -64,7 +64,7 @@ export function noteExtensions(opts: {
     history(),
     editorShadow(),
     noteUndoRouting(),
-    drawSelection(),
+    noteSelection(),
     dropCursor(),
     indentUnit.of("  "),
     EditorView.lineWrapping,
