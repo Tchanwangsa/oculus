@@ -43,6 +43,25 @@ A Link-header `next` is an absolute Canvas URL and is sent as its path and
 query, escapes such as `%5B` untouched. The Echo360 launch page and the Canvas
 legs of Ed's LTI walk use the same hop.
 
+## A dead Canvas session ends the run
+
+When Canvas rejects the cookie (a 401 that is not Canvas's own
+`"unauthorized"`, or a redirect to Okta or `/login`), keyd signs in again and
+retries once. A rejection that reaches the app therefore means that sign-in
+was refused or failed, and `Canvas` raises `CanvasError::Expired`, carrying the
+sign-in's `LoginError` when keyd named one. It keeps the first and fails every
+later request the same way without asking keyd again, so a run is one sign-in
+attempt, not one per file. `Engine::scrape` checks it after each course: it
+logs one error naming the course and the reason, calls
+`Reporter::canvas_expired` (the app emits `canvas-auth-expired`, which the sync
+page shows as "Canvas session expired during sync"; `oculus run` marks the run
+failed and exits with the same text) and returns without starting the next
+course. A Canvas outage is different: a 5xx or a failed connection is retried
+and then logged per course like any other failure (as is any Ed failure: Ed
+has its own token), and a probe reads it as `Unreachable`, never as an expired
+session. With keyd not installed every request fails with a plain "oculus-keyd
+is not running or not installed".
+
 ## The current term is ranked, not compared as text
 
 `list_courses` marks the newest term that still has available courses as

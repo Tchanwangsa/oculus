@@ -119,6 +119,9 @@ pub trait Reporter: Send + Sync {
     fn cancelled(&self) -> bool {
         false
     }
+    /// The run stopped because Canvas rejected the session and oculus-keyd
+    /// could not sign in again; `message` says why.
+    fn canvas_expired(&self, _message: &str) {}
 }
 
 /// Discards everything.
@@ -249,6 +252,12 @@ impl Engine {
         }
     }
 
+    /// Whether the run should end at the next boundary: cancelled, or Canvas
+    /// no longer accepts the session.
+    fn stopped(&self) -> bool {
+        self.reporter.cancelled() || self.canvas.expired().is_some()
+    }
+
     /// Best-effort; a lost manifest only costs re-downloads, never data.
     fn save_manifest(&self) {
         if let Ok(json) = serde_json::to_string(&*self.manifest.borrow()) {
@@ -318,7 +327,9 @@ impl Engine {
 
     // ── Run ──────────────────────────────────────────────────────────────────
 
-    /// A subject that fails is logged and skipped. Returns how many subjects
+    /// A subject that fails is logged and skipped, except that a Canvas
+    /// session that is gone ends the run with one message, since every
+    /// request after it would fail the same way. Returns how many subjects
     /// were attempted.
     pub fn scrape(&self, subjects: &[Subject]) -> usize {
         let total = subjects.len();
@@ -333,7 +344,15 @@ impl Engine {
             if self.reporter.cancelled() {
                 return i;
             }
-            if let Err(e) = self.scrape_course(c, i, total) {
+            let result = self.scrape_course(c, i, total);
+            if let Some(expired) = self.canvas.expired() {
+                let message = format!("Sync stopped at {}: {expired}", c.code);
+                self.reporter.log("error", "", &message);
+                self.reporter.canvas_expired(&message);
+                self.save_manifest();
+                return i + 1;
+            }
+            if let Err(e) = result {
                 self.reporter.log("error", &c.code, &e);
             }
             // Idempotent; gives a newly scraped subject its agent scaffold.
@@ -367,14 +386,14 @@ impl Engine {
         let mut crawl = LinkCrawl::default();
 
         phase("home");
-        if self.reporter.cancelled() {
+        if self.stopped() {
             return Ok(());
         }
         self.scrape_home(c, &mut crawl)?;
 
         if self.options.announcements {
             phase("announcements");
-            if self.reporter.cancelled() {
+            if self.stopped() {
                 return Ok(());
             }
             self.scrape_announcements(c, &mut crawl)?;
@@ -384,7 +403,7 @@ impl Engine {
         // fall back to Canvas links.
         let tasks = if self.options.assignments {
             phase("assignments");
-            if self.reporter.cancelled() {
+            if self.stopped() {
                 return Ok(());
             }
             self.scrape_assignments(c, &mut crawl).unwrap_or_else(|e| {
@@ -398,20 +417,20 @@ impl Engine {
 
         if self.options.modules {
             phase("modules");
-            if self.reporter.cancelled() {
+            if self.stopped() {
                 return Ok(());
             }
             self.scrape_modules(c, &tasks, &mut crawl)?;
         }
 
-        if self.reporter.cancelled() {
+        if self.stopped() {
             return Ok(());
         }
         self.crawl_links(c, &mut crawl);
 
         if self.options.ed {
             phase("ed");
-            if self.reporter.cancelled() {
+            if self.stopped() {
                 return Ok(());
             }
             if let Err(e) = self.scrape_ed(c) {

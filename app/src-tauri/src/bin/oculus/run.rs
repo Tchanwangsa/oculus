@@ -347,6 +347,8 @@ impl Ctx {
 
         let started = std::time::Instant::now();
         let done = engine.scrape(&targets);
+        // The run stopped at the first dead session; the reporter has said so.
+        let expired = engine.canvas.expired().map(|e| e.to_string());
 
         let written = sink.lock().unwrap().clone();
         if let Some(p) = &pool {
@@ -368,7 +370,14 @@ impl Ctx {
                     }
                 }
                 if let Some(id) = run_id {
-                    store::finish_run(p, id, "completed", done, None).await.ok();
+                    let status = if expired.is_some() {
+                        "failed"
+                    } else {
+                        "completed"
+                    };
+                    store::finish_run(p, id, status, done, expired.as_deref())
+                        .await
+                        .ok();
                     store::add_log(
                         p,
                         "info",
@@ -379,6 +388,10 @@ impl Ctx {
                     .ok();
                 }
             });
+        }
+
+        if let Some(why) = expired {
+            return Err(why);
         }
 
         println!();

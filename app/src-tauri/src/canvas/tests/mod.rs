@@ -6,6 +6,7 @@ mod download;
 mod expiry;
 mod redirects;
 mod requests;
+mod run;
 
 use keyd_core::okta::{outcome_to_wire, LoginError};
 use serde_json::{json, Value};

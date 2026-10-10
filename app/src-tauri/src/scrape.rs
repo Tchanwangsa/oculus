@@ -126,6 +126,10 @@ impl Reporter for AppReporter {
     fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
+
+    fn canvas_expired(&self, message: &str) {
+        self.app.emit("canvas-auth-expired", message).ok();
+    }
 }
 
 /// Parse one already-downloaded PDF (a no-op if already parsed), or convert a
