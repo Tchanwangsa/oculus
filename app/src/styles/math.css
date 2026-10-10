@@ -25,7 +25,7 @@
 
 /* In-place selection of rendered maths (`lib/markdown/mathSelection/`): the
  * formula is positioned and isolated so its bands sit under its glyphs,
- * neither of which moves anything; the bands are the note field's
+ * neither of which moves anything; the bands take the note field's tint
  * (`.cm-math-view-band`). */
 .katex[data-math-selecting] {
   position: relative;

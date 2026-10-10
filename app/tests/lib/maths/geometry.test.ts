@@ -4,14 +4,18 @@ import { bands, measure, stopAt, type Box, type Layout, type MappedBox } from "@
 
 const box = (left: number, top: number, right: number, bottom: number): Box => ({ left, top, right, bottom });
 
-/** A mapped element; its ink is its box unless given. */
-const item = (from: number, to: number, b: Box, ink: Box = b, placeholder = false): MappedBox => ({
-  from,
-  to,
-  box: b,
-  ink,
-  placeholder,
-});
+/** A mapped element; its ink is its box unless given. Its font size is its
+ *  box's height and its baseline three quarters down, so a caret beside it
+ *  (0.75em above the baseline, 0.25em below) spans its box exactly. */
+const item = (
+  from: number,
+  to: number,
+  b: Box,
+  ink: Box = b,
+  placeholder = false,
+  size = b.bottom - b.top,
+  baseline = b.top + 0.75 * size,
+): MappedBox => ({ from, to, box: b, ink, placeholder, baseline, size });
 
 /** `\frac{a+x}{b}` laid out by hand: the numerator's glyphs on top, the
  *  denominator under them, the fraction's own inline box on the baseline. */
@@ -35,7 +39,7 @@ describe("measure", () => {
   const field = MathField.open(FRAC, false);
   const m = measure(fracLayout, field);
 
-  test("a stop sits after the atom ending at it, sized by that atom's line", () => {
+  test("a stop sits after the atom ending at it, sized by that atom's font", () => {
     const afterX = stopOf(field, 9, 1);
     expect([m.x[afterX], m.top[afterX], m.bottom[afterX]]).toEqual([25, 0, 12]);
   });
@@ -72,6 +76,34 @@ describe("measure", () => {
     const mm = measure(layout, f);
     const inNumer = stopOf(f, 6, 1);
     expect([mm.x[inNumer], mm.top[inNumer], mm.bottom[inNumer]]).toEqual([4, 0, 12]);
+  });
+
+  test("a caret is one em of its font on its baseline, never its box's height", () => {
+    // `b^{}`: the script's `□` (KaTeX_AMS) has a box far taller than its
+    // 12px font; the caret fits the script, not the base's line.
+    const f = MathField.open("b^{}", false);
+    const layout: Layout = {
+      items: [
+        item(0, 4, box(0, 1, 17, 21), box(0, -2, 17, 21), false, 16, 16),
+        item(0, 1, box(0, 4, 7, 20), box(0, 4, 7, 20), false, 16, 16),
+        item(3, 3, box(8, -2, 17, 15), box(8, -2, 17, 15), true, 12, 8),
+      ],
+    };
+    const mm = measure(layout, f);
+    const inSup = stopOf(f, 3, 1);
+    expect([mm.x[inSup], mm.top[inSup], mm.bottom[inSup]]).toEqual([8, -1, 11]);
+    const end = stopOf(f, 4, 0);
+    expect([mm.top[end], mm.bottom[end]]).toEqual([4, 20]);
+  });
+
+  test("an empty slot with no marker takes the enclosing element's font, not its ink", () => {
+    const f = MathField.open("\\frac{}{b}", false);
+    const layout: Layout = {
+      items: [item(0, 10, box(0, 10, 20, 22), box(0, 0, 20, 30)), item(8, 9, box(6, 18, 12, 30))],
+    };
+    const mm = measure(layout, f);
+    const inNumer = stopOf(f, 6, 1);
+    expect([mm.x[inNumer], mm.top[inNumer], mm.bottom[inNumer]]).toEqual([10, 10, 22]);
   });
 
   test("nothing mapped is NaN", () => {

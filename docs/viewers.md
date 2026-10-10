@@ -72,7 +72,10 @@ classes work even when there are no dollar delimiters.
   (`MathField`) read-only over the drawing: the geometry finds the stop under
   the pointer, a drag selects to it (the model widening over whole
   structures), and one band per row is drawn under the glyphs in a zero-size
-  layer inside `.katex`, so no glyph moves. The press's `mousedown` is
+  layer inside `.katex`, so no glyph moves. A band reaches past the
+  formula's box, so closing clears the bands first and drops the layer two
+  frames later: gone in the same paint as `.katex`'s stacking, WebKit
+  repaints only that box and leaves the bands' edges on screen. The press's `mousedown` is
   cancelled (no text selection, focus is blurred), never its `pointerdown`. A
   press with no drag selects nothing; ⌘A widens in the formula
   (`lib/menu/editRouting.ts`); copy is taken in the capture phase, after

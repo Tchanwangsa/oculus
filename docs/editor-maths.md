@@ -12,7 +12,7 @@ compiled to WebAssembly) draws and edits it all; its layout is
 | Piece | Location |
 | --- | --- |
 | Delimiters, the maths under the caret | `app/src/components/documents/editor/math/mathSyntax.ts`, `app/src/components/documents/editor/math/mathContext.ts` |
-| The field's state in the note, its writes, its widget | `app/src/components/documents/editor/math/field/mathField/`, `app/src/components/documents/editor/math/field/mathFieldEdits.ts`, `app/src/components/documents/editor/math/field/fieldNote.ts` |
+| The field's state in the note, its writes, its widget, how it scrolls the note | `app/src/components/documents/editor/math/field/mathField/`, `app/src/components/documents/editor/math/field/mathFieldEdits.ts`, `app/src/components/documents/editor/math/field/fieldNote.ts`, `app/src/components/documents/editor/math/field/noteScroll.ts` |
 | The field itself, its host in the note | `app/src/components/documents/editor/math/field/mathView/`, `app/src/components/documents/editor/math/field/rustField/` |
 | The engine's facade, the geometry the field measures with | `app/src/lib/maths/` |
 | Rendered maths, atomic ranges, edge keys | `app/src/components/documents/editor/live-preview/widgets/`, `app/src/components/documents/editor/live-preview/livePreview/` |
@@ -48,15 +48,25 @@ the field draws too, so entering maths moves neither it nor its line.
 `app/src/lib/maths/field.ts`). It draws the maths with the source map on
 (`renderToString` with `sourceMap: true`, as the Live rendering draws it:
 `math/hugArrays.ts`, `MATH_ARRAYSTRETCH`), and over it a caret, one selection
-band per row and, while a `\command` is pending, a popover of the palette's
-commands that start with it — all positioned from `lib/maths/geometry`. Keys,
+band per row and, while a `\command` is pending, the list of its options
+(below) — all positioned from `lib/maths/geometry`. Keys,
 typing and IME input arrive on a focused, invisible textarea at the caret
 (`cm-math-view-input`, which `core/liveFocus.ts` counts as the editor's
 focus), so the OS candidate window opens there; each runs one model command,
 and the view redraws and hands the step to its host, never editing the source
-itself. A top-level row with nothing in it gets a zero-width `oc-empty-row`
-marker so the caret has a place. Its styles are the `.cm-math-view` rules in
-`theme/math.ts`. The controller focuses it and places the caret once the
+itself. A caret stop sits beside the atom it touches, or at an empty slot's
+`□`, and is drawn one em of that element's font tall, 0.75em above its
+baseline and 0.25em below, so in a script or a root's index it is the
+script's size. The baseline is the element's top plus its font face's
+ascent, measured once per face and size (`lib/maths/geometry/font.ts`): an
+inline box is as tall as its face's ascent and descent, which KaTeX's faces
+differ in, so no box's height sizes the caret. A top-level row with nothing
+in it gets a zero-size `oc-empty-row` marker on its baseline so the caret has
+a place. Its styles are the `.cm-math-view` rules in `theme/math.ts`; the
+field takes the rendering's box exactly (an inline field's 2px of tint each
+side are taken back by a negative margin, a block's padding is the
+rendering's at the note's font size), so opening or closing maths moves
+neither it nor the text around it. The controller focuses it and places the caret once the
 widget is in the document.
 
 The model's source is the note's LaTeX, so a step's changes are written as
@@ -75,6 +85,16 @@ close it when the step moves the caret out of that maths. A field writes
 only to the maths it opened on, and only while that LaTeX is still what it
 last wrote or loaded.
 
+The note scrolls only to keep a caret on screen, and then only as far as
+the nearer edge of the scroller's visible band, under the sticky toolbar
+(`scrollMargins`): after each key in the field, its own caret (a new row,
+typing at the window's bottom); after entering, the field's caret; after
+leaving, the note's caret beside the maths (`noteScroll.ts`). CodeMirror's
+`scrollIntoView` isn't used for these, since it measures a position inside
+the field as the whole widget. Focus going back to the note holds every
+scroller still (`focusNote`): WebKit 26 scrolls to the note's selection on
+focus despite `preventScroll`, centring a line just off screen.
+
 The note's selection stays inside the maths while the field is open; a
 selection extended from there to past the maths (Shift-click) starts at the
 maths' edge, so it holds exactly what is highlighted. A press on the
@@ -89,11 +109,12 @@ block's rows select as one run; ←/→, Backspace/Delete at inline maths and
 ↑/↓ from the line beside a block enter it at that end.
 
 The edit model owns every key but the toolbox's, ⌘⇧M and undo
-(`rustField/keys.ts`): Esc (once any toolbox is closed: leave, or revert a
-shortcut just expanded), an arrow past the field's edge and Enter in inline
-maths leave it; Enter or Shift+Enter in display maths adds a row, never a
-second empty one (on an empty row Enter does nothing); Tab goes out of a text
-run, else to the next empty slot, else types `\qquad`; ⌘Backspace deletes the
+(`rustField/keys.ts`) and the pending `\command` list's (below): Esc (once
+any toolbox is closed: leave, or revert a shortcut just expanded), an
+arrow past the field's edge and Enter in inline maths leave it; Enter or
+Shift+Enter in display maths adds a row, never a second empty one (on an
+empty row Enter does nothing); Tab goes out of a text run, else to the next
+empty slot, else types `\qquad`; ⌘Backspace deletes the
 caret's line up to the caret (a block's row, or a cell of an environment's
 rows, through the structure the caret is in); Backspace in an empty field
 removes the maths, and in an empty script (`\cos^{}`) drops it. The steps'
@@ -101,8 +122,28 @@ effects call the shared `leaveMaths` and `removeMaths`. Committing a bare
 `\text` (or `\textbf`, `\textit`, `\textrm`, `\textnormal`; KaTeX has no
 `\mbox`) from the `\` list, or the toolbox's text cells, leaves the caret in
 the text (mode `text`); → or Tab at the end of the text goes back to maths. A
-`\command` being typed lives outside the source until committed, shown in the
-popover.
+`\command` being typed lives outside the source until committed. The view
+draws it in the rendering, as the model would type it at the caret
+(`mathView/pending.ts`: `\texttt{\textbackslash name}` inserted as a
+template, display only), so the maths after it moves aside; its elements
+carry no source range, every other keeps its own, and it shows monospace in
+the brand colour, the caret after it.
+
+While a `\command` is pending, one list hangs from the start of that `\name`
+(`mathView/popover/`): every palette and completion template whose command
+starts with the name, one row per template (`\sqrt` offers `\sqrt{}` and
+`\sqrt[]{}`), the command typed exactly first, its bare form before its
+templates, then common commands and shorter names. Right after `\`, and for a
+name nothing starts with, there is no list. It sits under the caret, flips
+above when it would pass the bottom of what is visible (the window, the
+note's scroller, any clipping ancestor) and there is more room above, and
+slides sideways to stay inside them (`placeList`). The first row is
+highlighted; ↑/↓ move the highlight and Space, Tab or Enter accept it, as a
+click on a row does: the template goes in for the typed name (its first slot
+taking the selection), the caret in its first empty slot — the index for
+`\sqrt[]{}`, from which Tab or → reach the radicand. With no list, those keys
+are the model's: Space, Tab or Enter commit the name as typed. Esc and
+Backspace stay the model's either way.
 
 Copy and cut write the selection's LaTeX as `text/plain` and
 `application/x-latex`, a display field's also as `BLOCK_MATH_TYPE`; cut then
@@ -197,8 +238,8 @@ rebuilt only when the toolbox opens or a tab is picked, so cells never
 move under the pointer; a palette click inserts and leaves it open.
 Palette clicks, quick picks, accepted completions and `\commands` typed
 out — in TeX (a non-letter typed after the name) or in the visual field
-(the model committing its command mode) — all count, a typed command as its
-palette entry (`math/tools/mathUsage.ts`, `localStorage`); the Recent row and Popular
+(a step out of its command mode: a commit or an accepted option) — all
+count, a typed command as its palette entry (`math/tools/mathUsage.ts`, `localStorage`); the Recent row and Popular
 are across all notes, while each subject keeps its own recents for the
 quick picks.
 
@@ -208,7 +249,9 @@ is typed as LaTeX (Space is a space), and the toolbox's cells insert
 `Prec.highest`, above the note's Tab. Inside maths, `\` plus a letter
 opens completion with rendered previews, whatever the toolbox is doing; it is
 the editor's one `autocompletion()` (`core/extensions.ts`), so other sources
-join its `override`. The caret between a lone `$$` pair (what a typed `$`
+join its `override`. It never opens over maths a visual field is open on
+(`visualMath`): the field's writes are typing transactions, and the field
+has its own list. The caret between a lone `$$` pair (what a typed `$`
 and Σ insert) counts as empty inline maths (`emptyPair` in `math/mathContext.ts`):
 mid-line `$$` never parses, and alone on a line it parses as an unclosed
 block opener, which `mathAt` reads as no maths.
@@ -246,7 +289,7 @@ little history (`quickPicks`), numbered, and a ⌄ button.
 the full toolbox; Esc closes the strip and a second Esc leaves the field;
 any other key, or a caret move in the field, closes it and goes on as
 usual. Space inside `\text{}`, beside a text atom and in a `\command`
-being typed is the model's (`spaceFree` is false there), and after a term in
+being typed is the field's (`spaceFree` is false there), and after a term in
 a matrix or bracket group it starts a cell (below). The full toolbox under
 the field drops the preview, its cells insert into the field (`insertTemplate`:
 slots become empty slots, the first taking the selection) and its TeX control

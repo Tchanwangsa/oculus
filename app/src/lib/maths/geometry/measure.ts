@@ -12,9 +12,17 @@ export interface Measured {
 
 const blank = (s: string) => s.trim() === "";
 
-/** The caret's height beside an element: its own line (a script's is
- *  smaller), or its ink when its own box has none. */
-const height = (item: MappedBox): Box => (item.box.bottom > item.box.top ? item.box : item.ink);
+/** Ems of the caret above and below its baseline: a parenthesis' height
+ *  and depth, so it is one em of the font it stands in at any size. */
+const CARET_ASCENT = 0.75;
+const CARET_DESCENT = 0.25;
+
+/** The caret's top and bottom beside an element, from its baseline and font
+ *  size, never its box, whose height is its font face's. */
+const line = (item: MappedBox): [number, number] => [
+  item.baseline - CARET_ASCENT * item.size,
+  item.baseline + CARET_DESCENT * item.size,
+];
 
 /** Its own box for x, or its ink when its own box has no width. */
 const edges = (item: MappedBox): Box => (item.box.right > item.box.left ? item.box : item.ink);
@@ -48,27 +56,28 @@ export function measure(layout: Layout, field: FieldShape): Measured {
         if (!after || item.from < after.from || (item.from === after.from && item.to > after.to)) after = item;
       }
     }
-    const [x, line] =
-      before ? [edges(before).right, height(before)]
-      : after ? [edges(after).left, height(after)]
-      : marker ? [marker.box.left, height(marker)]
+    const at: [number, MappedBox | null] =
+      before ? [edges(before).right, before]
+      : after ? [edges(after).left, after]
+      : marker ? [marker.box.left, marker]
       : fallback(layout, slot);
-    out.x[id] = x;
-    out.top[id] = line ? line.top : NaN;
-    out.bottom[id] = line ? line.bottom : NaN;
+    const [top, bottom] = at[1] ? line(at[1]) : [NaN, NaN];
+    out.x[id] = at[0];
+    out.top[id] = top;
+    out.bottom[id] = bottom;
   }
   return out;
 }
 
 /** An empty slot the renderer draws no marker for (such as `\mathop{}`'s
- *  argument, an `aligned` cell after a `&`, an empty row): the middle of
- *  the smallest element around it. */
-function fallback(layout: Layout, slot: { from: number; to: number }): [number, Box | null] {
+ *  argument, an `aligned` cell after a `&`, an empty row): the middle of the smallest
+ *  element around it, on that element's baseline and at its size. */
+function fallback(layout: Layout, slot: { from: number; to: number }): [number, MappedBox | null] {
   let around: MappedBox | null = null;
   for (const item of layout.items) {
     if (item.placeholder || item.from > slot.from || item.to < slot.to) continue;
     if (!around || item.to - item.from < around.to - around.from) around = item;
   }
   if (!around) return [NaN, null];
-  return [(around.ink.left + around.ink.right) / 2, height(around)];
+  return [(around.ink.left + around.ink.right) / 2, around];
 }

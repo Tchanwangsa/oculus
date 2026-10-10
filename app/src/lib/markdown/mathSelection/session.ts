@@ -9,6 +9,27 @@ const topRows = (field: MathField) => field.slots.filter((s) => s.parent == null
 const SELECTING = "data-math-selecting";
 
 /**
+ * Takes a closed selection's bands off the formula: the bands at once, the
+ * layer and the formula's stacking (`SELECTING`) two frames later. A band
+ * reaches past the formula's box, and when both go in one paint WebKit
+ * repaints only that box, leaving the bands' edges above and below it on
+ * screen. A selection reopened on the formula meanwhile keeps its stacking.
+ */
+export function dropLayer(
+  layer: Pick<Element, "replaceChildren" | "remove">,
+  root: Pick<Element, "querySelector" | "removeAttribute">,
+  frame: (run: () => void) => void = requestAnimationFrame,
+) {
+  layer.replaceChildren();
+  frame(() =>
+    frame(() => {
+      layer.remove();
+      if (!root.querySelector(":scope > .md-math-bands")) root.removeAttribute(SELECTING);
+    }),
+  );
+}
+
+/**
  * A selection in one rendered formula: its edit model and the band layer,
  * an absolutely positioned zero-size span inside the formula's `.katex`,
  * whose own corner is the frame every box is read in, so an inline formula
@@ -76,8 +97,7 @@ export class Session {
 
   close() {
     this.#resize.disconnect();
-    this.layer.remove();
-    this.formula.root.removeAttribute(SELECTING);
+    dropLayer(this.layer, this.formula.root);
     if (this.field !== this.base) this.field.free();
     this.field = this.base;
   }

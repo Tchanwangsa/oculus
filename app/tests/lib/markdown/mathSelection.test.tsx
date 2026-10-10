@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import { fileMarkdownPlugins } from "@/components/files/FileMarkdown";
 import { BLOCK_MATH_TYPE } from "@/lib/markdown/math";
 import { copied } from "@/lib/markdown/mathSelection/clipboard";
+import { dropLayer } from "@/lib/markdown/mathSelection/session";
 import { MathField, rehypeMaths } from "@/lib/maths";
 
 const render = (text: string) =>
@@ -105,5 +106,39 @@ describe("copied", () => {
       [...f.stops].findIndex((o, id) => o === offset && f.stopSlots[id] === slot);
     const sel = f.select(stop(2, 0), stop(9, 1));
     expect(copied(tex, sel.selected, false)[0]).toEqual(["text/plain", "\\frac{a+x}{b}"]);
+  });
+});
+
+describe("closing a selection", () => {
+  /** A band layer and its formula, recording what close does to them. */
+  function fakes(reopened = false) {
+    const log: string[] = [];
+    const layer = { replaceChildren: () => log.push("bands cleared"), remove: () => log.push("layer removed") };
+    const root = {
+      querySelector: () => (reopened ? {} : null),
+      removeAttribute: (name: string) => log.push(`${name} removed`),
+    };
+    const frames: (() => void)[] = [];
+    const frame = (run: () => void) => frames.push(run);
+    const tick = () => frames.splice(0).forEach((run) => run());
+    return { log, layer, root, frame, tick };
+  }
+
+  test("clears the bands at once and drops the layer two frames later", () => {
+    const f = fakes();
+    dropLayer(f.layer, f.root as never, f.frame);
+    expect(f.log).toEqual(["bands cleared"]);
+    f.tick();
+    expect(f.log).toEqual(["bands cleared"]);
+    f.tick();
+    expect(f.log).toEqual(["bands cleared", "layer removed", "data-math-selecting removed"]);
+  });
+
+  test("a selection reopened on the formula meanwhile keeps its stacking", () => {
+    const f = fakes(true);
+    dropLayer(f.layer, f.root as never, f.frame);
+    f.tick();
+    f.tick();
+    expect(f.log).toEqual(["bands cleared", "layer removed"]);
   });
 });

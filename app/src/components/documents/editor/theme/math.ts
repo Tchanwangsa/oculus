@@ -70,7 +70,8 @@ export const math: ThemeSpec = {
   ".cm-math-hint[hidden]": { display: "none" },
   // The field (`math/field/mathView`): KaTeX's rendering at its own size in
   // a tint, one line box tall, so opening it doesn't move the maths or its
-  // line.
+  // line. The margin takes back the padding's advance: the tint reaches 2px
+  // past the maths without moving the text beside it.
   ".cm-math-view": {
     display: "inline-block",
     position: "relative",
@@ -78,15 +79,17 @@ export const math: ThemeSpec = {
     fontSize: "1.21em",
     lineHeight: "1.2",
     padding: "0 2px",
+    margin: "0 -2px",
     borderRadius: "4px",
     backgroundColor: `color-mix(in srgb, ${brand} 7%, transparent)`,
     cursor: "text",
   },
   ".cm-math-view .katex": { fontSize: "1em" },
   // A block spans the column, its maths centred and scrolling sideways when
-  // too wide, as `.cm-math-display` draws it; `contain` stops a too-wide
-  // formula widening the whole note.
-  ".cm-math-view-block": { display: "block", padding: "0.4em 0", contain: "inline-size" },
+  // too wide, as `.cm-math-display` draws it, with its padding at the note's
+  // font size (the view's is 1.21×); `contain` stops a too-wide formula
+  // widening the whole note.
+  ".cm-math-view-block": { display: "block", padding: "calc(0.4em / 1.21) 0", margin: "0", contain: "inline-size" },
   ".cm-math-view-block .katex-display": { margin: "0" },
   ".cm-math-view-block .katex-html > .katex-newline": { height: `${MATH_LINE_GAP}em` },
   // The overlays' frame, stacking them over the bands but under nothing else.
@@ -137,17 +140,20 @@ export const math: ThemeSpec = {
   },
   ".cm-math-view-preedit[hidden]": { display: "none" },
   ".cm-math-view .oc-placeholder": { color: brand, opacity: "0.5" },
-  ".cm-math-view .oc-empty-row": { display: "inline-block", width: "0", height: "1em", verticalAlign: "-0.25em" },
-  // The pending `\command` and the palette's commands that start with it,
-  // in the popover look.
+  // Zero-size on the baseline, where the caret's geometry reads it
+  // (`lib/maths/geometry/layout.ts`).
+  ".cm-math-view .oc-empty-row": { display: "inline-block", width: "0", height: "0" },
+  // The `\name` being typed in command mode, typed into the rendering as
+  // the TeX source it is (`mathView/pending.ts`).
+  ".cm-math-view .katex [data-pending]": { fontFamily: mono, color: brand },
+  // The palette's options for the pending `\command`, in the popover look:
+  // a box around a scroller of rows (`mathView/popover/`).
   ".cm-math-view-popover": {
     position: "absolute",
     zIndex: "20",
     display: "flex",
     flexDirection: "column",
     minWidth: "160px",
-    maxHeight: "240px",
-    overflow: "hidden",
     padding: "4px",
     backgroundColor: "var(--color-popover)",
     color: "var(--color-popover-foreground)",
@@ -164,13 +170,22 @@ export const math: ThemeSpec = {
     WebkitUserSelect: "none",
   },
   ".cm-math-view-popover[hidden]": { display: "none" },
-  ".cm-math-view-popover-typed": { padding: "2px 8px", fontFamily: mono, color: brand },
+  ".cm-math-view-popover-list": {
+    display: "flex",
+    flexDirection: "column",
+    maxHeight: "232px",
+    overflowY: "auto",
+  },
   ".cm-math-view-popover-row": {
     display: "flex",
     alignItems: "center",
     gap: "8px",
     padding: "2px 8px",
     borderRadius: "8px",
+  },
+  ".cm-math-view-popover-row[aria-selected=true]": {
+    backgroundColor: "var(--color-accent)",
+    color: "var(--color-foreground)",
   },
   ".cm-math-view-popover-preview": { minWidth: "28px", fontSize: "13px", textAlign: "center" },
   ".cm-math-view-popover-name": { fontFamily: mono, color: muted },

@@ -1,6 +1,7 @@
 import { EditorSelection, Transaction, type ChangeSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
+import { focusNote, keepPosVisible } from "./noteScroll";
 import type { ActiveMath } from "./mathField/visual-state";
 import { fieldWrite, minimalChange, squeezeBlankLines } from "./mathFieldEdits";
 
@@ -14,10 +15,11 @@ import { fieldWrite, minimalChange, squeezeBlankLines } from "./mathFieldEdits";
 export type Direction = "forward" | "backward" | "upward" | "downward";
 
 /** Back to the note, the caret just outside the maths on that side. A block
- *  at the very start or end of the note gets a line to land on. */
+ *  at the very start or end of the note gets a line to land on. The page
+ *  stays put unless that caret is off screen (`keepPosVisible`). */
 export function leaveMaths(view: EditorView, target: ActiveMath | null, dir: Direction) {
   if (!target) {
-    view.focus();
+    focusNote(view);
     return;
   }
   const { doc } = view.state;
@@ -45,8 +47,9 @@ export function leaveMaths(view: EditorView, target: ActiveMath | null, dir: Dir
       if (moved < target.start || moved > target.end) anchor = moved;
     }
   }
-  view.dispatch({ changes, selection: { anchor }, scrollIntoView: true, userEvent: changes ? "input" : "select" });
-  view.focus();
+  view.dispatch({ changes, selection: { anchor }, userEvent: changes ? "input" : "select" });
+  focusNote(view);
+  keepPosVisible(view, anchor);
 }
 
 /** Backspace in an empty field takes the maths (a block's lines) away. */
@@ -62,7 +65,7 @@ export function removeMaths(view: EditorView, target: ActiveMath | null) {
     else if (from > 0) from--;
   }
   view.dispatch({ changes: { from, to }, selection: { anchor: from }, userEvent: "delete" });
-  view.focus();
+  focusNote(view);
 }
 
 /** Pasted text that is all maths: one delimited `$…$`, `$$…$$`, `\(…\)` or
@@ -90,7 +93,7 @@ export function pasteBeside(view: EditorView, target: ActiveMath | null, text: s
     scrollIntoView: true,
     userEvent: "input.paste",
   });
-  view.focus();
+  focusNote(view);
 }
 
 /** Blank lines in a block's LaTeX (an older note's, another editor's) go
