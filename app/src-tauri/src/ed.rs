@@ -1,20 +1,31 @@
 //! Ed Discussion access: token auth, course mapping, thread fetching, and the
 //! `<document>` XML → Markdown converter.
 //!
-//! Ed authenticates API calls with an `x-token` JWT, minted from the Canvas
-//! session by walking the LTI 1.3 launch ([`Ed::connect_via_canvas`]);
-//! `renew_token` extends it and a dead one is re-minted on the next sync.
-//! `oculus auth ed <TOKEN>` is a manual override. See `docs/auth.md`.
+//! Ed authenticates API calls with an `x-token` JWT that oculus-keyd holds and
+//! attaches to its `ed` route; this module never reads it back. The token is
+//! minted from the Canvas session by walking the LTI 1.3 launch
+//! ([`Ed::connect_via_canvas`]); `renew_token` extends it and a dead one is
+//! re-minted on the next sync. `oculus auth ed <TOKEN>` is a manual override.
+//! See `docs/auth.md`.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
+
+use keyd_core::client::{SessionKind, SESSION_TIMEOUT};
+
+use crate::credentials::{Credentialed, KeydError};
 
 use ego_tree::NodeRef;
 use scraper::node::Node;
 use scraper::Html;
 
+/// Ed's API origin, for the two requests that do not go through oculus-keyd:
+/// the one-shot `login_token` exchange (it has no session yet) and checking a
+/// token a person just pasted.
 const ED_BASE: &str = "https://edstem.org/api";
+/// The path prefix oculus-keyd's `ed` route takes.
+const ED_API: &str = "/api";
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// A hard stop, not a target.
 const MAX_THREADS: usize = 1000;
@@ -29,45 +40,48 @@ struct EdCourse {
 }
 
 pub struct Ed {
-    token: Mutex<String>,
-    token_path: PathBuf,
+    keyd: Credentialed,
     /// `/api/user` enrolments, fetched once per process.
     courses: Mutex<Option<Vec<EdCourse>>>,
 }
 
+/// Why an Ed request has no answer, in words for the log and the CLI.
+fn keyd_failure(error: KeydError) -> String {
+    match error {
+        KeydError::Absent => "oculus-keyd is not running or not installed, and Ed is reached \
+                              only through it (`oculus keyd status`)."
+            .to_string(),
+        KeydError::Missing(_) | KeydError::NoSession(..) => {
+            "No saved Ed token — run `oculus auth ed <TOKEN>`, or sync a course with an Ed \
+             Discussion tool."
+                .to_string()
+        }
+        other => other.to_string(),
+    }
+}
+
 impl Ed {
-    /// Load the persisted token; without one, [`Ed::has_session`] is false.
+    /// A client of the oculus-keyd serving `data_dir`.
     pub fn open(data_dir: &Path) -> Self {
-        let token_path = crate::paths::ed_token_path(data_dir);
-        let token = std::fs::read_to_string(&token_path).unwrap_or_default();
         Ed {
-            token: Mutex::new(token.trim().to_string()),
-            token_path,
+            keyd: Credentialed::at(data_dir),
             courses: Mutex::new(None),
         }
     }
 
+    /// Whether oculus-keyd holds an Ed token right now.
     pub fn has_session(&self) -> bool {
-        !self.token.lock().unwrap().is_empty()
+        self.keyd.session_status().is_ok_and(|s| s.ed)
     }
 
-    /// Validate a pasted token against `/api/user`, persist it, return the name.
+    /// Validate a pasted token against `/api/user`, hand it to oculus-keyd,
+    /// return the name. The check is a direct request: the token is not
+    /// stored yet, and a bad paste must not replace a working session.
     pub fn set_token(data_dir: &Path, token: &str) -> Result<String, String> {
-        let token = token.trim();
-        let user = get_json(token, "/user")?;
-        let name = user["user"]["name"]
-            .as_str()
-            .unwrap_or("Ed user")
-            .to_string();
-        crate::paths::write_private(&crate::paths::ed_token_path(data_dir), token)
-            .map_err(|e| e.to_string())?;
-        Ok(name)
+        store_token(&Credentialed::at(data_dir), ED_BASE, token)
     }
 
     pub fn whoami(&self) -> Result<String, String> {
-        if !self.has_session() {
-            return Err("No saved Ed token.".to_string());
-        }
         let user = self.get("/user")?;
         Ok(user["user"]["name"]
             .as_str()
@@ -75,38 +89,47 @@ impl Ed {
             .to_string())
     }
 
+    /// GET `/api{path}` with oculus-keyd attaching the token.
     fn get(&self, path: &str) -> Result<serde_json::Value, String> {
-        let token = self.token.lock().unwrap().clone();
-        get_json(&token, path)
+        let reply = self
+            .keyd
+            .send(
+                "ed",
+                "GET",
+                &format!("{ED_API}{path}"),
+                &[],
+                b"",
+                SESSION_TIMEOUT,
+            )
+            .map_err(keyd_failure)?;
+        json_reply(reply.status, &reply.body, path)
     }
 
-    /// Extend the session and persist the fresh token. Best-effort.
+    /// Extend the session and keep the fresh token. Best-effort.
     fn renew(&self) {
-        let token = self.token.lock().unwrap().clone();
-        if token.is_empty() {
-            return;
-        }
-        let Ok(resp) = ureq::post(&format!("{ED_BASE}/renew_token"))
-            .timeout(TIMEOUT)
-            .set("x-token", &token)
-            .send_string("")
-        else {
+        let Ok(reply) = self.keyd.send(
+            "ed",
+            "POST",
+            &format!("{ED_API}/renew_token"),
+            &[],
+            b"",
+            SESSION_TIMEOUT,
+        ) else {
             return;
         };
-        let Some(new) = resp
-            .into_string()
+        if !(200..300).contains(&reply.status) {
+            return;
+        }
+        // The token is in the body, so this is the one place it reaches us.
+        let Some(new) = serde_json::from_slice::<serde_json::Value>(&reply.body)
             .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
             .and_then(|v| v["token"].as_str().map(str::to_string))
             .filter(|t| !t.is_empty())
         else {
             return;
         };
-        if new != token {
-            if let Err(e) = crate::paths::write_private(&self.token_path, &new) {
-                eprintln!("[oculus] ed token write failed: {e}");
-            }
-            *self.token.lock().unwrap() = new;
+        if let Err(e) = self.keyd.session_put(SessionKind::Ed, &new) {
+            eprintln!("[oculus] ed token was not saved: {e}");
         }
     }
 
@@ -142,26 +165,12 @@ impl Ed {
         canvas_course_id: i64,
     ) -> Result<i64, String> {
         let tool_path = find_ed_tool(canvas, canvas_course_id)?;
-        let (login_token, destination) = walk_lti_chain(&canvas.cookie_header(), &tool_path)?;
+        let (login_token, destination) = walk_lti_chain(canvas, &tool_path)?;
 
-        let resp = ureq::post(&format!("{ED_BASE}/login_token"))
-            .timeout(TIMEOUT)
-            .set("Content-Type", "application/json")
-            .send_string(&serde_json::json!({ "login_token": login_token }).to_string())
-            .map_err(|e| format!("login_token exchange failed: {e}"))?;
-        let body: serde_json::Value = resp
-            .into_string()
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .ok_or("login_token exchange returned no JSON")?;
-        let token = body["token"]
-            .as_str()
-            .filter(|t| !t.is_empty())
-            .ok_or("login_token exchange returned no token")?
-            .to_string();
-
-        crate::paths::write_private(&self.token_path, &token).map_err(|e| e.to_string())?;
-        *self.token.lock().unwrap() = token;
+        let token = exchange_login_token(ED_BASE, &login_token)?;
+        self.keyd
+            .session_put(SessionKind::Ed, &token)
+            .map_err(keyd_failure)?;
         // The old session's enrolment list must not outlive it.
         *self.courses.lock().unwrap() = None;
 
@@ -340,27 +349,69 @@ impl Ed {
     }
 }
 
-fn get_json(token: &str, path: &str) -> Result<serde_json::Value, String> {
-    if token.is_empty() {
-        return Err("No saved Ed token.".to_string());
+/// An Ed API answer as JSON.
+fn json_reply(status: u16, body: &[u8], path: &str) -> Result<serde_json::Value, String> {
+    if (200..300).contains(&status) {
+        return serde_json::from_slice(body).map_err(|e| format!("bad JSON: {e}"));
     }
-    let url = format!("{ED_BASE}{path}");
-    let resp = ureq::get(&url)
+    Err(status_error(status, path))
+}
+
+fn status_error(status: u16, path: &str) -> String {
+    match status {
+        401 => "Ed rejected the token (401) — run `oculus auth ed <TOKEN>` with a fresh one"
+            .to_string(),
+        code => format!("HTTP {code} for {path}"),
+    }
+}
+
+/// Check `token` against `base`/user directly, then give it to oculus-keyd.
+fn store_token(keyd: &Credentialed, base: &str, token: &str) -> Result<String, String> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Err("The Ed token is empty.".to_string());
+    }
+    let url = format!("{base}/user");
+    let user: serde_json::Value = match ureq::get(&url)
         .timeout(TIMEOUT)
         .set("x-token", token)
-        .call();
-    match resp {
+        .call()
+    {
         Ok(r) => r
             .into_string()
             .map_err(|e| format!("unreadable response: {e}"))
-            .and_then(|s| serde_json::from_str(&s).map_err(|e| format!("bad JSON: {e}"))),
-        Err(ureq::Error::Status(401, _)) => Err(
-            "Ed rejected the token (401) — run `oculus auth ed <TOKEN>` with a fresh one"
-                .to_string(),
-        ),
-        Err(ureq::Error::Status(code, _)) => Err(format!("HTTP {code} for {path}")),
-        Err(e) => Err(e.to_string()),
-    }
+            .and_then(|s| serde_json::from_str(&s).map_err(|e| format!("bad JSON: {e}")))?,
+        Err(ureq::Error::Status(code, _)) => return Err(status_error(code, "/user")),
+        Err(e) => return Err(e.to_string()),
+    };
+    let name = user["user"]["name"]
+        .as_str()
+        .unwrap_or("Ed user")
+        .to_string();
+    keyd.session_put(SessionKind::Ed, token)
+        .map_err(keyd_failure)?;
+    Ok(name)
+}
+
+/// Ed's one unauthenticated request: the one-shot `_logintoken` from the LTI
+/// launch for the x-token. It has no session to attach, so it is not sent
+/// through oculus-keyd.
+fn exchange_login_token(base: &str, login_token: &str) -> Result<String, String> {
+    let resp = ureq::post(&format!("{base}/login_token"))
+        .timeout(TIMEOUT)
+        .set("Content-Type", "application/json")
+        .send_string(&serde_json::json!({ "login_token": login_token }).to_string())
+        .map_err(|e| format!("login_token exchange failed: {e}"))?;
+    let body: serde_json::Value = resp
+        .into_string()
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .ok_or("login_token exchange returned no JSON")?;
+    body["token"]
+        .as_str()
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "login_token exchange returned no token".to_string())
 }
 
 // ── LTI chain ────────────────────────────────────────────────────────────────
@@ -392,72 +443,99 @@ fn ed_course_in_url(u: &url::Url) -> Option<i64> {
     segments.next()?.parse().ok()
 }
 
-/// Follow redirects and auto-submit forms until a redirect carries
-/// `_logintoken`; returns it and the Ed course URL. Cookies are jarred per
-/// host, so the Canvas session only goes to Canvas.
-fn walk_lti_chain(canvas_cookie: &str, tool_path: &str) -> Result<(String, url::Url), String> {
-    let mut jar: HashMap<String, HashMap<String, String>> = HashMap::new();
-    let canvas_host = url::Url::parse(crate::paths::CANVAS_BASE)
-        .ok()
-        .and_then(|u| u.host_str().map(str::to_string))
-        .ok_or("bad CANVAS_BASE")?;
-    jar.insert(
-        canvas_host,
-        canvas_cookie
-            .split(';')
-            .filter_map(|p| p.trim().split_once('='))
-            .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-            .collect(),
-    );
+/// One leg of the launch: what the host answered.
+struct Leg {
+    status: u16,
+    location: Option<String>,
+    body: String,
+}
 
+/// Follow redirects and auto-submit forms until a redirect carries
+/// `_logintoken`; returns it and the Ed course URL. Canvas legs go through
+/// oculus-keyd, which attaches the session; the other hosts' cookies are
+/// jarred here per host and never go anywhere else.
+fn walk_lti_chain(
+    canvas: &crate::canvas::Canvas,
+    tool_path: &str,
+) -> Result<(String, url::Url), String> {
+    let mut jar: HashMap<String, HashMap<String, String>> = HashMap::new();
     let agent = ureq::AgentBuilder::new().redirects(0).build();
-    let mut url = url::Url::parse(crate::paths::CANVAS_BASE)
-        .and_then(|b| b.join(tool_path))
-        .map_err(|e| format!("bad tool path: {e}"))?;
+    let mut url = crate::canvas::resolve(tool_path)?;
     let mut form: Option<String> = None;
 
     for _ in 0..12 {
-        let host = url.host_str().unwrap_or("").to_string();
-        let mut req = match &form {
-            Some(_) => agent
-                .post(url.as_str())
-                .set("Content-Type", "application/x-www-form-urlencoded"),
-            None => agent.get(url.as_str()),
-        }
-        .timeout(TIMEOUT)
-        .set("User-Agent", UA);
-        if let Some(cookies) = jar.get(&host).filter(|c| !c.is_empty()) {
-            let header = cookies
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect::<Vec<_>>()
-                .join("; ");
-            req = req.set("Cookie", &header);
-        }
-
-        let resp = match match form.take() {
-            Some(body) => req.send_string(&body),
-            None => req.call(),
-        } {
-            Ok(r) => r,
-            // 4xx/5xx mid-chain is an answer about the launch, not transport.
-            Err(ureq::Error::Status(code, _)) => {
-                return Err(format!("LTI launch got HTTP {code} at {url}"));
+        let sent = form.take();
+        let leg = if crate::canvas::is_canvas(&url) {
+            let hop = match &sent {
+                Some(body) => canvas.hop(
+                    "POST",
+                    &url,
+                    &[("content-type", "application/x-www-form-urlencoded")],
+                    body.as_bytes(),
+                ),
+                None => canvas.hop("GET", &url, &[], b""),
+            }?;
+            Leg {
+                status: hop.status,
+                location: hop.header("location").map(str::to_string),
+                body: String::from_utf8_lossy(&hop.body).into_owned(),
             }
-            Err(e) => return Err(format!("LTI launch failed at {url}: {e}")),
+        } else {
+            let host = url.host_str().unwrap_or("").to_string();
+            let mut req = match &sent {
+                Some(_) => agent
+                    .post(url.as_str())
+                    .set("Content-Type", "application/x-www-form-urlencoded"),
+                None => agent.get(url.as_str()),
+            }
+            .timeout(TIMEOUT)
+            .set("User-Agent", UA);
+            if let Some(cookies) = jar.get(&host).filter(|c| !c.is_empty()) {
+                let header = cookies
+                    .iter()
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                req = req.set("Cookie", &header);
+            }
+            let resp = match match sent {
+                Some(body) => req.send_string(&body),
+                None => req.call(),
+            } {
+                Ok(r) => r,
+                // 4xx/5xx mid-chain is an answer about the launch, not transport.
+                Err(ureq::Error::Status(code, _)) => {
+                    return Err(format!("LTI launch got HTTP {code} at {url}"));
+                }
+                Err(e) => return Err(format!("LTI launch failed at {url}: {e}")),
+            };
+            let host_jar = jar.entry(host).or_default();
+            for sc in resp.all("set-cookie") {
+                if let Some((k, v)) = sc.split(';').next().and_then(|f| f.split_once('=')) {
+                    host_jar.insert(k.trim().to_string(), v.trim().to_string());
+                }
+            }
+            let status = resp.status();
+            let location = resp.header("Location").map(str::to_string);
+            let body = if (300..400).contains(&status) {
+                String::new()
+            } else {
+                resp.into_string().map_err(|e| e.to_string())?
+            };
+            Leg {
+                status,
+                location,
+                body,
+            }
         };
-
-        let host_jar = jar.entry(host).or_default();
-        for sc in resp.all("set-cookie") {
-            if let Some((k, v)) = sc.split(';').next().and_then(|f| f.split_once('=')) {
-                host_jar.insert(k.trim().to_string(), v.trim().to_string());
-            }
+        if leg.status >= 400 {
+            return Err(format!("LTI launch got HTTP {} at {url}", leg.status));
         }
 
-        if (300..400).contains(&resp.status()) {
-            let loc = resp.header("Location").ok_or("redirect without Location")?;
+        if (300..400).contains(&leg.status) {
+            let loc = leg.location.ok_or("redirect without Location")?;
             let next = url
-                .join(loc)
+                .join(&loc)
                 .map_err(|e| format!("bad redirect target: {e}"))?;
             if let Some((_, token)) = next.query_pairs().find(|(k, _)| k == "_logintoken") {
                 let token = token.into_owned();
@@ -467,8 +545,7 @@ fn walk_lti_chain(canvas_cookie: &str, tool_path: &str) -> Result<(String, url::
             continue;
         }
 
-        let html = resp.into_string().map_err(|e| e.to_string())?;
-        let (action, fields) = parse_lti_form(&html)
+        let (action, fields) = parse_lti_form(&leg.body)
             .ok_or_else(|| format!("no LTI form at {url} — the Canvas session may have lapsed"))?;
         url = url
             .join(&action)
@@ -752,6 +829,199 @@ fn fmt_ts(iso: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::test_support::{FakeKeyd, FakeServer, Reply, Scratch};
+    use serde_json::json;
+
+    /// An oculus-keyd that answers Ed's `/api/user` and records the rest.
+    fn keyd_for_ed(dir: &Scratch) -> FakeKeyd {
+        FakeKeyd::start(dir, |header, _| match header["op"].as_str().unwrap() {
+            "forward" => match header["path"].as_str().unwrap() {
+                "/api/user" => (
+                    json!({"status": 200, "headers": []}),
+                    br#"{"user":{"name":"Ada"},"courses":[]}"#.to_vec(),
+                ),
+                "/api/renew_token" => (
+                    json!({"status": 200, "headers": []}),
+                    br#"{"token":"RENEWED"}"#.to_vec(),
+                ),
+                _ => (json!({"status": 401, "headers": []}), b"{}".to_vec()),
+            },
+            "session_status" => (
+                json!({"canvas": false, "sso": false, "ed": true,
+                       "authenticated": false, "signed_out": false}),
+                vec![],
+            ),
+            _ => (json!({}), vec![]),
+        })
+    }
+
+    fn session_puts(keyd: &FakeKeyd) -> Vec<(String, String)> {
+        keyd.requests()
+            .into_iter()
+            .filter(|(h, _)| h["op"] == "session_put")
+            .map(|(h, _)| {
+                (
+                    h["kind"].as_str().unwrap().to_string(),
+                    h["value"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn requests_go_to_the_ed_route_and_carry_no_token() {
+        let dir = Scratch::new("ed-route");
+        let keyd = keyd_for_ed(&dir);
+        let ed = Ed::open(&dir);
+        assert_eq!(ed.whoami().unwrap(), "Ada");
+        let (header, _) = &keyd.requests()[0];
+        assert_eq!(header["secret"], "ed");
+        assert_eq!(header["method"], "GET");
+        assert_eq!(header["path"], "/api/user");
+        assert_eq!(header["headers"], json!([]));
+        assert!(!header.to_string().contains("x-token"));
+    }
+
+    #[test]
+    fn has_session_is_what_keyd_reports() {
+        let dir = Scratch::new("ed-status");
+        let _keyd = keyd_for_ed(&dir);
+        assert!(Ed::open(&dir).has_session());
+        assert!(!Ed::open(&Scratch::new("ed-no-keyd")).has_session());
+    }
+
+    #[test]
+    fn renew_hands_the_fresh_token_to_keyd() {
+        let dir = Scratch::new("ed-renew");
+        let keyd = keyd_for_ed(&dir);
+        Ed::open(&dir).renew();
+        let (header, _) = &keyd.requests()[0];
+        assert_eq!(header["method"], "POST");
+        assert_eq!(header["path"], "/api/renew_token");
+        assert_eq!(session_puts(&keyd), [("ed".into(), "RENEWED".into())]);
+    }
+
+    #[test]
+    fn a_rejected_token_points_at_the_manual_override() {
+        let dir = Scratch::new("ed-401");
+        let _keyd = FakeKeyd::start(&dir, |_, _| {
+            (json!({"status": 401, "headers": []}), b"{}".to_vec())
+        });
+        let err = Ed::open(&dir).whoami().unwrap_err();
+        assert!(err.contains("oculus auth ed <TOKEN>"), "{err}");
+    }
+
+    #[test]
+    fn no_token_and_no_keyd_are_told_apart() {
+        let dir = Scratch::new("ed-missing");
+        let _keyd = FakeKeyd::start(&dir, |_, _| {
+            (
+                json!({"error": "missing", "detail": "no ed session is stored"}),
+                vec![],
+            )
+        });
+        let err = Ed::open(&dir).whoami().unwrap_err();
+        assert!(err.starts_with("No saved Ed token"), "{err}");
+
+        let err = Ed::open(&Scratch::new("ed-absent")).whoami().unwrap_err();
+        assert!(err.contains("not running or not installed"), "{err}");
+    }
+
+    #[test]
+    fn a_pasted_token_is_checked_directly_and_then_given_to_keyd() {
+        let ed = FakeServer::start(|hit| {
+            if hit.header("x-token") == Some("good") {
+                Reply::json(json!({"user": {"name": "Ada"}}))
+            } else {
+                Reply::status(401, json!({}))
+            }
+        });
+        let dir = Scratch::new("ed-set");
+        let keyd = keyd_for_ed(&dir);
+        let broker = Credentialed::at(&dir);
+
+        let err = store_token(&broker, &ed.origin(), "bad").unwrap_err();
+        assert!(err.contains("oculus auth ed <TOKEN>"), "{err}");
+        assert!(
+            session_puts(&keyd).is_empty(),
+            "a bad paste is never stored"
+        );
+
+        assert_eq!(
+            store_token(&broker, &ed.origin(), " good\n").unwrap(),
+            "Ada"
+        );
+        assert_eq!(session_puts(&keyd), [("ed".into(), "good".into())]);
+        assert!(keyd.requests().iter().all(|(h, _)| h["op"] != "forward"));
+    }
+
+    #[test]
+    fn the_login_token_exchange_is_direct_and_never_touches_keyd() {
+        let ed = FakeServer::start(|_| Reply::json(json!({"token": "MINTED"})));
+        let dir = Scratch::new("ed-login");
+        let keyd = keyd_for_ed(&dir);
+        assert_eq!(
+            exchange_login_token(&ed.origin(), "once").unwrap(),
+            "MINTED"
+        );
+        let hits = ed.hits();
+        assert_eq!(hits[0].method, "POST");
+        assert_eq!(hits[0].url, "/login_token");
+        assert_eq!(hits[0].json(), json!({"login_token": "once"}));
+        assert!(keyd.requests().is_empty());
+    }
+
+    #[test]
+    fn the_launch_reaches_canvas_through_keyd_and_other_hosts_without_its_cookie() {
+        let lti = FakeServer::start(|hit| {
+            Reply::from((302, Vec::new())).with_header(
+                "Location",
+                &format!("{}/au/courses/38809?_logintoken=LT", hit.origin),
+            )
+        });
+        let form = format!(
+            r#"<form action="{}/lti/launch"><input name="id_token" value="jwt"/></form>"#,
+            lti.origin()
+        );
+        let dir = Scratch::new("ed-lti");
+        let keyd = FakeKeyd::start(&dir, move |_, _| {
+            (
+                json!({"status": 200, "headers": []}),
+                form.clone().into_bytes(),
+            )
+        });
+        let canvas = crate::canvas::Canvas::open(&dir);
+
+        let (token, destination) = walk_lti_chain(&canvas, "/courses/5/external_tools/9").unwrap();
+
+        assert_eq!(token, "LT");
+        assert_eq!(ed_course_in_url(&destination), Some(38809));
+        let requests = keyd.requests();
+        assert_eq!(requests.len(), 1, "only the Canvas leg used keyd");
+        assert_eq!(requests[0].0["secret"], "canvas");
+        assert_eq!(requests[0].0["path"], "/courses/5/external_tools/9");
+        let hits = lti.hits();
+        assert_eq!(hits[0].method, "POST");
+        assert_eq!(hits[0].body, b"id_token=jwt");
+        assert!(hits[0].header("cookie").is_none());
+    }
+
+    #[test]
+    fn a_dead_canvas_session_ends_the_launch_with_the_reason() {
+        let dir = Scratch::new("ed-lti-dead");
+        let _keyd = FakeKeyd::start(&dir, |_, _| {
+            (
+                json!({"error": "missing", "detail": "no canvas session is stored",
+                       "signin": {"result": "error", "code": "signed_out"}}),
+                vec![],
+            )
+        });
+        let canvas = crate::canvas::Canvas::open(&dir);
+        let err = walk_lti_chain(&canvas, "/courses/5/external_tools/9").unwrap_err();
+        assert!(err.contains("Signed out"), "{err}");
+        assert!(canvas.expired().is_some());
+    }
 
     #[test]
     fn subject_tokens_ignore_staff_typed_suffixes() {

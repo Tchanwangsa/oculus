@@ -3,6 +3,8 @@
 //! syntax; opencode's copy is static in `templates/OPENCODE.template.json`,
 //! held to these by the test below.
 
+use std::path::{Path, PathBuf};
+
 /// Library folders an agent reads but never writes.
 pub const LIBRARY_DIRS: [&str; 3] = ["courses", "lectures", "canvas-session"];
 
@@ -10,9 +12,36 @@ pub const LIBRARY_DIRS: [&str; 3] = ["courses", "lectures", "canvas-session"];
 /// and the links scanning CLIs find them through (`crate::agents`).
 pub const WORKSPACE_DIRS: [&str; 3] = ["skills", ".claude", ".agents"];
 
-/// Library-root files, by suffix; agy's rules name the files instead. Never
-/// `oculus.db*`: see `claude.rs`.
-pub const ROOT_FILE_GLOBS: [&str; 4] = ["*.cookie", "*.token", "*.json", "*.log"];
+/// Library-root files, by pattern; agy's rules name the files instead
+/// (`named_root_files`). Never `oculus.db*`: see `claude.rs`.
+///
+/// The sessions live in keyd's sealed vault, so the first two cover only the
+/// files an earlier version kept, until keyd imports them. The last two are
+/// the vault, its lock, and the temp file each write goes through: encrypted,
+/// but an agent that deleted or truncated them would sign the student out of
+/// everything.
+pub const ROOT_FILE_GLOBS: [&str; 6] = [
+    "*.cookie",
+    "*.token",
+    "*.json",
+    "*.log",
+    "vault.bin*",
+    ".vault.bin.*",
+];
+
+/// The files `ROOT_FILE_GLOBS` cover that can be named, for rules that take
+/// no patterns. Their names come from keyd's `paths`, not from a copy here.
+pub fn named_root_files(library: &Path) -> Vec<PathBuf> {
+    use keyd_core::paths;
+    let vault = paths::vault(library);
+    vec![
+        paths::cookie(library),
+        paths::sso_cookie(library),
+        paths::ed_token(library),
+        paths::vault_lock(&vault),
+        vault,
+    ]
+}
 
 /// Whether the rule pattern `glob` (`*` within a path segment, `**` across
 /// segments) covers `path`: the check that no deny list reaches keyd's socket.
@@ -37,6 +66,28 @@ pub(super) fn glob_covers(glob: &str, path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_file_agy_names_is_covered_by_a_root_glob_and_the_vault_is_among_them() {
+        let lib = Path::new("/l");
+        let named = named_root_files(lib);
+        for file in &named {
+            let path = file.to_str().unwrap();
+            assert!(
+                ROOT_FILE_GLOBS
+                    .iter()
+                    .any(|g| glob_covers(&format!("/l/{g}"), path)),
+                "no root glob covers {path}"
+            );
+        }
+        for want in ["/l/vault.bin", "/l/vault.bin.lock"] {
+            assert!(named.contains(&PathBuf::from(want)), "{want}");
+        }
+        // The temp file a vault write goes through (`vault/store.rs`).
+        assert!(ROOT_FILE_GLOBS
+            .iter()
+            .any(|g| glob_covers(&format!("/l/{g}"), "/l/.vault.bin.4242.a1b2c3d4e5f6.tmp")));
+    }
 
     #[test]
     fn a_glob_covers_by_segment() {

@@ -840,10 +840,21 @@ mod tests {
             "Edit(//Users/x/Library/Application Support/com.tchan.oculus/courses/**)",
             "Edit(//Users/x/Library/Application Support/com.tchan.oculus/agents/skills/**)",
             "Edit(//Users/x/Library/Application Support/com.tchan.oculus/agents/.claude/**)",
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/*.cookie)",
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/vault.bin*)",
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/.vault.bin.*)",
             "Bash(sqlite3:*)",
         ] {
             assert!(deny.contains(&rule), "missing {rule} in {deny:?}");
         }
+        let writable = v
+            .pointer("/sandbox/filesystem/allowWrite")
+            .unwrap()
+            .to_string();
+        assert!(
+            !writable.contains("vault"),
+            "the vault is never writable: {writable}"
+        );
 
         // An `Edit(...)` deny merges into `denyWrite` and cancels `allowWrite`.
         assert!(

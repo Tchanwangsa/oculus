@@ -40,8 +40,8 @@ const scoped = [
   join(app, "keyd", "core", "src"),
   join(app, "src-tauri", "src", "credentials"),
   join(app, "src-tauri", "src", "credentials.rs"),
-  join(app, "src-tauri", "src", "okta.rs"),
-  join(app, "src-tauri", "src", "keyd.rs"),
+  join(app, "src-tauri", "src", "okta"),
+  join(app, "src-tauri", "src", "keyd"),
   join(app, "src-tauri", "src", "bin", "oculus", "keyd.rs"),
 ].flatMap(rustFiles);
 
@@ -51,8 +51,8 @@ test("the scope covers keyd's main, core's logic and the app's keyd code", () =>
     "keyd/src/main.rs",
     "keyd/core/src/server.rs",
     "keyd/core/src/client.rs",
-    "src-tauri/src/keyd.rs",
-    "src-tauri/src/okta.rs",
+    "src-tauri/src/keyd/mod.rs",
+    "src-tauri/src/okta/mod.rs",
     ...ALLOWED.keys(),
   ]) {
     expect(names).toContain(f);

@@ -22,7 +22,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::value::RawValue;
 use serde_json::Value;
 
-use super::protected::{LIBRARY_DIRS, WORKSPACE_DIRS};
+use super::protected::{named_root_files, LIBRARY_DIRS, WORKSPACE_DIRS};
 
 /// The `settings` row holding the student's approvals, a JSON array of rules.
 pub const SETTINGS_KEY: &str = "antigravity_allowed_rules";
@@ -142,14 +142,11 @@ pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]
         .map(|p| format!("write_file({p})"))
         .collect();
     // `ROOT_FILE_GLOBS` as the files they cover.
-    deny.push(format!(
-        "write_file({})",
-        crate::paths::cookie_path(library).display()
-    ));
-    deny.push(format!(
-        "write_file({})",
-        crate::paths::ed_token_path(library).display()
-    ));
+    deny.extend(
+        named_root_files(library)
+            .iter()
+            .map(|p| format!("write_file({})", p.display())),
+    );
     deny.push(format!("write_file({})", state_path(library).display()));
     // `sqlite3` on *this* database only: the rules are global, and a blanket
     // deny would ban it from the student's own sessions. A speed bump in front
@@ -689,6 +686,10 @@ mod tests {
             "write_file(/lib/courses)",
             "write_file(/lib/agents/skills)",
             "write_file(/lib/canvas-session.cookie)",
+            "write_file(/lib/sso-session.cookie)",
+            "write_file(/lib/ed-session.token)",
+            "write_file(/lib/vault.bin)",
+            "write_file(/lib/vault.bin.lock)",
             "write_file(/lib/antigravity-rules.json)",
             "command(sqlite3 /lib/oculus.db)",
         ] {

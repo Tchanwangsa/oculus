@@ -29,7 +29,7 @@ import { useFindTarget } from "@/lib/find";
 
 /**
  * The `/browse/:id` route: a toolbar over an empty slot that Rust parks the
- * tab's native WKWebView over (`app/src-tauri/src/browser.rs`).
+ * tab's native WKWebView over (`app/src-tauri/src/browser/`).
  *
  * A native view cannot sit under the DOM, so anything drawn over the slot must
  * hide the page: a portalled popover, the suggestion list, the tab going to the

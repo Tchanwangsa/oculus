@@ -44,7 +44,10 @@ fn get_or_auth(cache: &Echo360Cache, course_id: i64) -> Result<Session, String> 
             }
         }
     }
-    let session = echo360::connect(&crate::auth::saved_cookie_header(), course_id)?;
+    let session = echo360::connect(
+        &crate::canvas::Canvas::open(&crate::paths::data_dir()),
+        course_id,
+    )?;
     cache.0.lock().unwrap().insert(
         course_id,
         CachedSession {

@@ -19,7 +19,7 @@ video's transcript, and a web page.
 | Settings → Transcription: the language, the engine list and each engine's dialog | `app/src/components/settings/TranscriptionSection.tsx`, `app/src/components/settings/GroqDialog.tsx`, `app/src/components/settings/OnDeviceSpeech.tsx`, `app/src/components/settings/LocalWhisper.tsx` |
 | The on-device speech helper | `app/src-tauri/speech/main.swift`, `app/scripts/build-speech.mjs`, `app/src-tauri/src/transcribe/apple.rs` |
 | Local Whisper: the engine, its model files | `app/src-tauri/src/transcribe/whisper.rs`, `app/src-tauri/src/transcribe/whisper_models.rs`, `app/scripts/build-whisper.mjs` |
-| In-app browser | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/lib/browserHistory.ts`, `app/src-tauri/src/browser.rs` |
+| In-app browser | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/lib/browserHistory.ts`, `app/src-tauri/src/browser/` |
 
 ## One markdown renderer serves every surface
 
@@ -430,7 +430,7 @@ recording on a large model takes minutes.
 ## The in-app browser is a native page per tab, owned by Rust
 
 A browser tab is `/browse/<id>`, naming a WKWebView that
-`app/src-tauri/src/browser.rs` parks over an empty slot in `BrowserPage` (Canvas
+`app/src-tauri/src/browser/` parks over an empty slot in `BrowserPage` (Canvas
 refuses iframes).
 
 - **Rust owns the tab list** and pushes `browser-state` on every change;

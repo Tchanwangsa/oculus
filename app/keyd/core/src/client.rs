@@ -636,8 +636,6 @@ mod tests {
         assert_eq!(err, "/d/keyd.sock: No such file or directory");
     }
 
-    // ── The Okta ops against a stand-in keyd ─────────────────────────────────
-
     #[test]
     fn the_okta_ops_send_their_requests_and_read_the_answers() {
         let (broker, seen) = fake_keyd(|req, _| match req["op"].as_str().unwrap() {

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { shallow } from "zustand/shallow";
 import type { BrowserSnapshot, BrowserTab } from "@/lib/browser";
 
-/** A mirror of Rust's browser tab list (`app/src-tauri/src/browser.rs`),
+/** A mirror of Rust's browser tab list (`app/src-tauri/src/browser/`),
  *  fed by `useBrowserTabs`. Icons are keyed by **host** and arrive on their
  *  own event, so snapshots don't re-carry base64 on every load edge. */
 interface BrowserState {

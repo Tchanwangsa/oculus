@@ -1,8 +1,9 @@
 //! `oculus` — the Oculus command line.
 //!
-//! Same engine the app runs, without the window: it reads the session cookie
-//! and the database the app already maintains, so a CLI sync and an in-app sync
-//! are the same operation and either can follow the other.
+//! Same engine the app runs, without the window: it reaches Canvas through
+//! oculus-keyd and reads the database the app already maintains, so a CLI
+//! sync and an in-app sync are the same operation and either can follow the
+//! other.
 
 use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
@@ -29,6 +30,7 @@ mod output;
 mod planning;
 mod query;
 mod run;
+mod status;
 mod transcribe;
 
 use args::*;

@@ -1,7 +1,7 @@
 //! App data locations, resolved without a Tauri `AppHandle`.
 //!
 //! One definition of the app's data directory, computed from the bundle
-//! identifier as Tauri does, so the CLI and the app agree on where the cookie,
+//! identifier as Tauri does, so the CLI and the app agree on where the vault,
 //! the database and `courses/` live.
 
 use std::path::PathBuf;
@@ -17,79 +17,6 @@ pub use keyd_core::paths::CANVAS_BASE;
 /// `keyd_core`, so `oculus-keyd` agrees.
 pub fn data_dir() -> PathBuf {
     keyd_core::paths::data_dir()
-}
-
-// The session files the headless sign-in writes are named in `keyd_core::paths`,
-// which keyd shares; these keep the app's call sites as they were.
-
-pub fn cookie_path(data_dir: &std::path::Path) -> PathBuf {
-    keyd_core::paths::cookie(data_dir)
-}
-
-/// Okta's cookies for `sso.unimelb.edu.au`, the same bare `name=value; …`
-/// header as the Canvas one. Only the in-app browser replays it.
-pub fn sso_cookie_path(data_dir: &std::path::Path) -> PathBuf {
-    keyd_core::paths::sso_cookie(data_dir)
-}
-
-/// Writes a session file readable by this user only, narrowing an existing
-/// one before the body lands.
-pub fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> {
-    keyd_core::paths::write_private(path, body)
-}
-
-/// Ed's `x-token`, minted from the Canvas session (`ed.rs`).
-pub fn ed_token_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("ed-session.token")
-}
-
-pub fn auth_flag_path(data_dir: &std::path::Path) -> PathBuf {
-    keyd_core::paths::authenticated(data_dir)
-}
-
-/// Present from a sign-out until the next session (`mark_authenticated`).
-/// While it is, automatic sign-ins stand down (`okta::sign_in`).
-pub fn signed_out_path(data_dir: &std::path::Path) -> PathBuf {
-    keyd_core::paths::signed_out(data_dir)
-}
-
-/// Drops the saved Canvas, Okta and Ed sessions and the auth flag, and marks
-/// the app signed out; returns whether there was anything to drop. The attempt
-/// record beside the flag stays: forgetting a lockout pause would let
-/// automatic sign-in resume.
-pub fn sign_out(data_dir: &std::path::Path) -> std::io::Result<bool> {
-    let mut had = false;
-    for path in [
-        cookie_path(data_dir),
-        sso_cookie_path(data_dir),
-        ed_token_path(data_dir),
-        auth_flag_path(data_dir),
-    ] {
-        match std::fs::remove_file(&path) {
-            Ok(()) => had = true,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
-        }
-    }
-    let marker = signed_out_path(data_dir);
-    if let Some(parent) = marker.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&marker, b"1")?;
-    Ok(had)
-}
-
-/// Record that we hold a session Canvas has accepted.
-///
-/// The app's startup probe ignores the cookie without this flag, so every path
-/// that establishes a session must write it, the CLI included.
-pub fn mark_authenticated(data_dir: &std::path::Path) {
-    keyd_core::session::markers::mark_authenticated(data_dir);
-}
-
-/// The attempt record every process checks before an automatic sign-in.
-pub fn sign_in_record_path(data_dir: &std::path::Path) -> PathBuf {
-    keyd_core::paths::sign_in_record(data_dir)
 }
 
 /// `YYYY-MM-DDTHH:MM:SS` from a Unix timestamp, without a date crate.
@@ -109,7 +36,7 @@ pub fn db_path(data_dir: &std::path::Path) -> PathBuf {
 /// The harness sandboxes' one exception to "nothing outside `agents/` is
 /// writable", so `oculus project`/`task` can write: SQLite needs the `-wal` and
 /// `-shm` files too, or it reports a readonly database. Files, not the
-/// directory, which also holds the session cookie and the Ed token.
+/// directory, which also holds the credential vault.
 pub fn db_write_paths(data_dir: &std::path::Path) -> Vec<PathBuf> {
     let db = db_path(data_dir);
     let sidecar = |suffix: &str| {
@@ -120,9 +47,8 @@ pub fn db_write_paths(data_dir: &std::path::Path) -> Vec<PathBuf> {
     vec![db.clone(), sidecar("-wal"), sidecar("-shm")]
 }
 
-// ── Course artifact paths ────────────────────────────────────────────────────
-// Canvas titles become filenames, so every component is sanitised.
-
+/// Canvas titles become filenames, so every component of a course artifact
+/// path is sanitised.
 pub fn safe_dir(s: &str) -> String {
     s.chars()
         .map(|c| {
@@ -359,45 +285,6 @@ pub fn category_from_path(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sign_out_keeps_the_attempt_record() {
-        let dir = crate::test_support::Scratch::new("sign-out");
-        mark_authenticated(&dir);
-        write_private(&cookie_path(&dir), "canvas_session=a").unwrap();
-        write_private(&sso_cookie_path(&dir), "idx=b").unwrap();
-        write_private(&ed_token_path(&dir), "jwt").unwrap();
-        std::fs::write(sign_in_record_path(&dir), r#"{"paused":"locked"}"#).unwrap();
-
-        assert!(sign_out(&dir).unwrap());
-        assert!(!cookie_path(&dir).exists());
-        assert!(!sso_cookie_path(&dir).exists());
-        assert!(!ed_token_path(&dir).exists());
-        assert!(!auth_flag_path(&dir).exists());
-        assert!(sign_in_record_path(&dir).exists());
-        assert!(signed_out_path(&dir).exists());
-        assert!(!sign_out(&dir).unwrap());
-
-        mark_authenticated(&dir);
-        assert!(!signed_out_path(&dir).exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn private_writes_narrow_an_existing_file() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let dir = crate::test_support::Scratch::new("write-private");
-        let path = dir.join("ed-session.token");
-        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-        write_private(&path, "fresh").unwrap();
-        assert_eq!(mode(&path), 0o600);
-
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        write_private(&path, "tok").unwrap();
-        assert_eq!(mode(&path), 0o600);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "tok");
-    }
 
     #[test]
     fn identifier_matches_tauri_conf() {

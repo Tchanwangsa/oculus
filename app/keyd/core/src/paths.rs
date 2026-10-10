@@ -34,6 +34,13 @@ pub fn vault(data_dir: &Path) -> PathBuf {
     data_dir.join("vault.bin")
 }
 
+/// The lock the vault is read and replaced under, beside it.
+pub fn vault_lock(vault_file: &Path) -> PathBuf {
+    let mut name = vault_file.as_os_str().to_owned();
+    name.push(".lock");
+    PathBuf::from(name)
+}
+
 /// Where the Canvas session's files sit: the sign-in's attempt record and
 /// its signed-out marker, and the app's authenticated flag.
 pub fn session_dir(data_dir: &Path) -> PathBuf {
@@ -145,6 +152,7 @@ mod tests {
         let d = Path::new("/d");
         assert_eq!(socket(d), Path::new("/d/keyd.sock"));
         assert_eq!(vault(d), Path::new("/d/vault.bin"));
+        assert_eq!(vault_lock(&vault(d)), Path::new("/d/vault.bin.lock"));
         assert_eq!(installed_bin(d), Path::new("/d/bin/oculus-keyd"));
         assert_eq!(stamp(d), Path::new("/d/bin/oculus-keyd.stamp"));
         assert!(data_dir().ends_with(IDENTIFIER));

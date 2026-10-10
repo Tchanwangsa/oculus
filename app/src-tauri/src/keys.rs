@@ -4,7 +4,7 @@
 //! `performKeyEquivalent:` for those, so WebKit's own implementation (page
 //! first, then re-send to the menu if the page doesn't handle the key) never
 //! runs. A local key-down monitor calls that implementation itself when a
-//! browser page (`browser.rs`) is first responder. The app's own webview is
+//! browser page (`browser/`) is first responder. The app's own webview is
 //! left alone, and so are the `RESERVED` chrome keys.
 
 use std::sync::atomic::{AtomicUsize, Ordering};

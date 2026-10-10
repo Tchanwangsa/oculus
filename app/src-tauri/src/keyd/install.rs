@@ -1,87 +1,11 @@
-//! Installs and inspects `oculus-keyd`, the credential broker (its own crate
-//! in `app/keyd/`; see docs/architecture.md and docs/development.md).
-//!
-//! An install registers keyd with the OS through `keyd_core`'s registrar,
-//! pointing it at a fixed binary — `<data_dir>/bin/oculus-keyd` for a dev
-//! build, copied there, or a bundle's own keyd, which must run in place for
-//! its caller check — never at `target/` or a worktree. The source-hash stamp
-//! in `<data_dir>/bin/` records what the registration runs, so a rebuild with
-//! unchanged source never reinstalls. Nothing here is OS-specific: that is
-//! `keyd_core::platform`.
+//! Installing, reinstalling and removing keyd's registration.
 
 use std::path::{Path, PathBuf};
 
-use keyd_core::client::Client;
-use keyd_core::paths::{self, BINARY};
+use keyd_core::paths;
 use keyd_core::platform::{self, files};
 
-/// What `<bin> source-hash` prints. Running it also proves the file is a keyd
-/// that starts.
-pub fn source_hash_of(bin: &Path) -> Result<String, String> {
-    let out = std::process::Command::new(bin)
-        .arg("source-hash")
-        .output()
-        .map_err(|e| format!("running {}: {e}", bin.display()))?;
-    let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if !out.status.success() || hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(format!(
-            "{} is not an oculus-keyd (source-hash gave {:?})",
-            bin.display(),
-            hash
-        ));
-    }
-    Ok(hash)
-}
-
-pub fn installed_stamp(data_dir: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(paths::stamp(data_dir)).ok()?;
-    Some(text.trim().to_string()).filter(|s| !s.is_empty())
-}
-
-/// The keyd beside an executable: where a bundle puts it.
-fn sibling_of(exe: &Path) -> Option<PathBuf> {
-    exe.parent().map(|dir| dir.join(BINARY))
-}
-
-/// The keyd this build of the app or CLI would install: the one beside it in
-/// the bundle, else (debug builds) the signed output of `bun run keyd` in the
-/// checkout it was built from.
-pub fn candidate() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
-    let sibling = sibling_of(&exe)?;
-    if sibling.is_file() {
-        return Some(sibling);
-    }
-    if cfg!(debug_assertions) {
-        let built = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../keyd/target/signed")
-            .join(BINARY);
-        return built.canonicalize().ok().filter(|p| p.is_file());
-    }
-    None
-}
-
-/// Why `exe` has no keyd to install, when a release build should: its bundle
-/// ships keyd beside it, so a missing file is a broken install, and without it
-/// every credential call quietly falls back to the keychain. A debug build
-/// has none until `bun run keyd` runs, which is no fault.
-fn missing_bundled(exe: &Path, debug_build: bool) -> Option<String> {
-    let sibling = sibling_of(exe)?;
-    if debug_build || sibling.is_file() {
-        return None;
-    }
-    Some(format!(
-        "the bundled {BINARY} is missing ({}) — this Oculus install is broken, \
-         and credentials fall back to the keychain; reinstall Oculus",
-        sibling.display()
-    ))
-}
-
-/// Why this build has no keyd to install, when that is a broken install.
-pub fn no_candidate_reason() -> Option<String> {
-    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
-    missing_bundled(&exe, cfg!(debug_assertions))
-}
+use super::candidate::{installed_stamp, missing_bundled, sibling_of, source_hash_of};
 
 #[derive(Debug, serde::Serialize)]
 pub struct Installed {
@@ -215,60 +139,6 @@ fn ensure_bundled_beside(
         Some(bundled) => install_if_changed(data_dir, &bundled),
         None => Ok(None),
     }
-}
-
-// ── Status ───────────────────────────────────────────────────────────────────
-
-#[derive(Debug, serde::Serialize)]
-pub struct Status {
-    pub plist: PathBuf,
-    /// The binary the registration runs, when one is installed.
-    pub program: Option<String>,
-    pub loaded: bool,
-    pub installed_hash: Option<String>,
-    /// What this build would install, and its source hash or why it has none.
-    pub candidate: Option<PathBuf>,
-    pub candidate_hash: Option<String>,
-    pub candidate_error: Option<String>,
-    pub socket: PathBuf,
-    /// keyd's `ping` reply: version, source hash, pid.
-    pub ping: Option<serde_json::Value>,
-    pub ping_error: Option<String>,
-    pub vault: PathBuf,
-    pub vault_bytes: Option<u64>,
-}
-
-/// Never reads a secret: `ping` is the one op it sends, and keyd answers it
-/// without opening the vault or the keychain.
-pub fn status(data_dir: &Path) -> Result<Status, String> {
-    let registration = platform::registrar().status()?;
-    let candidate = candidate();
-    let (candidate_hash, candidate_error) = match &candidate {
-        Some(c) => match source_hash_of(c) {
-            Ok(h) => (Some(h), None),
-            Err(e) => (None, Some(e)),
-        },
-        None => (None, no_candidate_reason()),
-    };
-    let (ping, ping_error) = match Client::at(data_dir).ping() {
-        Ok(v) => (Some(v), None),
-        Err(e) => (None, Some(e)),
-    };
-    let vault = paths::vault(data_dir);
-    Ok(Status {
-        loaded: registration.loaded,
-        plist: registration.path,
-        program: registration.program,
-        installed_hash: installed_stamp(data_dir),
-        candidate,
-        candidate_hash,
-        candidate_error,
-        vault_bytes: std::fs::metadata(&vault).ok().map(|m| m.len()),
-        vault,
-        socket: paths::socket(data_dir),
-        ping,
-        ping_error,
-    })
 }
 
 #[cfg(test)]
