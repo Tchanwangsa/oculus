@@ -10,8 +10,8 @@ source. This file is only the rules; the reasons behind them live in `docs/`.
 - `cd app && bun run tauri dev` runs the app. Its preflight also builds the
   `oculus` CLI, because `tauri dev` alone doesn't; `bun run cli:dev` does it by
   hand.
-- `bun run pdfium` / `bun run ffmpeg` fetch native binaries into the
-  gitignored `app/src-tauri/binaries/`.
+- `bun run ffmpeg` fetches the native ffmpeg into the gitignored
+  `app/src-tauri/binaries/`.
 - Checks: `bun run build` (tsc + bundle), `cargo check` / `cargo test` in
   `app/src-tauri`.
 - Run `cargo fmt` in `app/src-tauri` before committing Rust; CI fails on

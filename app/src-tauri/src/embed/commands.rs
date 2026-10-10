@@ -201,7 +201,7 @@ pub fn embed_blocked() -> Option<String> {
 
 /// What the outstanding run would cost and how long it would take. Separate
 /// from `embed_settings` because it opens every outstanding PDF; blocking
-/// because pdfium is synchronous.
+/// because reading them is synchronous.
 #[tauri::command]
 pub async fn embed_estimate() -> Result<EmbedEstimate, String> {
     let database = db_path();

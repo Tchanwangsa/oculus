@@ -14,8 +14,7 @@ pub const MAX_TOKENS_PER_REQUEST: u64 = 320_000;
 /// error.
 pub const MAX_TOKENS_PER_INPUT: u64 = 32_000;
 
-/// Pixels in one image; `run_document` renders oversized pages at a lower DPI
-/// to stay under it.
+/// Pixels in one image, the API's limit; `refuse_oversized` enforces it.
 pub const MAX_PIXELS_PER_IMAGE: u64 = 16_000_000;
 
 /// Bytes in one image.
@@ -29,6 +28,11 @@ pub const PIXELS_PER_TOKEN: u64 = 560;
 /// costs `tokens_for` the cap; an uncapped estimate would be ~2x wrong. This
 /// affects only the estimate — rendering still happens at `RENDER_DPI`.
 pub const BILLED_PIXEL_CAP: u64 = 2_000_000;
+
+/// The most pixels a page is rendered at; past it the page drops DPI. Pixels
+/// over [`BILLED_PIXEL_CAP`] are downscaled away, and a 16M-pixel layered page
+/// can take ~1 GB to render; every standard page (16:9 at 4.0M) stays at 200 DPI.
+pub const MAX_RENDER_PIXELS: u64 = 4_200_000;
 
 /// What one page costs after the downscale, rounded up: the ledger reserves
 /// from this and must never come in under what is billed.

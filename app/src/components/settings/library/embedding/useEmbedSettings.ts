@@ -21,9 +21,9 @@ export function useEmbedSettings() {
   const runResult = useIndexStore((state) => state.result);
   const runError = useIndexStore((state) => state.error);
 
-  // One sweep at a time: pdfium is a single process-wide session (`embed/raster/`),
-  // so concurrent calls just queue. A request during a sweep is remembered and
-  // re-run after, so a changed spend limit is never quoted with a stale cut-off.
+  // One sweep at a time: each opens every outstanding PDF, so a second would
+  // only repeat the work. A request during a sweep is remembered and re-run
+  // after, so a changed spend limit is never quoted with a stale cut-off.
   const sweeping = useRef(false);
   const resweep = useRef(false);
   const loadEstimate = useCallback(() => {

@@ -1,7 +1,6 @@
 use super::send::ATTEMPTS;
 use super::wire::{decode_embedding, decode_response};
 use super::*;
-use crate::embed::raster;
 use crate::embed::raster::RenderedPage;
 use crate::embed::voyage::batch;
 use crate::embed::voyage::batch::Limits;
@@ -68,15 +67,6 @@ fn ok_response(count: usize) -> Reply {
 /// Landscape A4, 842 x 595 pt: over the billed-pixel cap at `RENDER_DPI`.
 fn write_a4_pdf(path: &Path, pages: usize) {
     write_pdf_sized(path, pages, 842, 595);
-}
-
-/// End-to-end tests skip without libpdfium (`bun run pdfium`).
-fn renderer_present() -> bool {
-    let available = raster::available().is_ok();
-    if !available {
-        eprintln!("skipping: libpdfium not fetched (run `bun run pdfium` in app/)");
-    }
-    available
 }
 
 #[test]
@@ -434,9 +424,6 @@ fn an_error_never_carries_the_key_a_url_or_the_server_body() {
 
 #[test]
 fn a_document_embeds_every_page_and_reports_real_progress() {
-    if !renderer_present() {
-        return;
-    }
     let fake = FakeServer::start(|hit| {
         let inputs = hit.json()["inputs"].as_array().map(Vec::len).unwrap_or(0);
         ok_response(inputs)
@@ -472,9 +459,6 @@ fn a_document_embeds_every_page_and_reports_real_progress() {
 
 #[test]
 fn a_document_that_could_not_embed_every_page_writes_nothing() {
-    if !renderer_present() {
-        return;
-    }
     // The second request fails; the first one's vectors must still not
     // become a record.
     let fake = FakeServer::start(|hit| {
@@ -505,9 +489,6 @@ fn a_document_that_could_not_embed_every_page_writes_nothing() {
 
 #[test]
 fn a_free_tier_account_shrinks_its_requests_instead_of_retrying_forever() {
-    if !renderer_present() {
-        return;
-    }
     // Like the live server: anything over the account's TPM is refused
     // outright, with no `Retry-After`.
     let fake = FakeServer::start(|hit| {
@@ -569,15 +550,12 @@ fn a_single_page_is_never_too_big_to_shrink_to() {
 
 #[test]
 fn a_page_count_the_two_counters_disagree_on_is_a_document_error() {
-    if !renderer_present() {
-        return;
-    }
     let fake = FakeServer::start(|_| ok_response(1));
     let scratch = Scratch::new("voyage-count");
     let pdf = scratch.join("deck.pdf");
     write_pdf(&pdf, 3);
 
-    // The parse record says four pages; pdfium finds three.
+    // The parse record says four pages; the file has three.
     let error = client(&fake, &scratch).embed(&pdf, 4, &|_| {}).unwrap_err();
     assert_eq!(error.kind(), "document");
     assert!(
@@ -589,9 +567,6 @@ fn a_page_count_the_two_counters_disagree_on_is_a_document_error() {
 
 #[test]
 fn a_latching_failure_stops_the_document_rather_than_embedding_the_rest_of_it() {
-    if !renderer_present() {
-        return;
-    }
     let fake = FakeServer::start(|_| {
         Reply::status(401, json!({ "detail": "Provided API key is invalid." }))
     });
@@ -610,18 +585,14 @@ fn a_latching_failure_stops_the_document_rather_than_embedding_the_rest_of_it() 
 }
 
 #[test]
-fn health_refuses_the_run_when_the_renderer_is_missing() {
+fn health_names_the_space_and_is_ready_with_a_key() {
     let fake = FakeServer::start(|_| ok_response(1));
     let scratch = Scratch::new("voyage-health");
     let health = client(&fake, &scratch).health();
     assert_eq!(health.model, EMBED_MODEL);
     assert_eq!(health.dim, EMBED_DIM);
-    assert_eq!(health.ready, raster::available().is_ok());
-    if health.ready {
-        health.check().unwrap();
-    } else {
-        assert_eq!(health.check().unwrap_err().kind(), "not_ready");
-    }
+    assert!(health.ready);
+    health.check().unwrap();
 }
 
 #[test]
@@ -639,9 +610,6 @@ fn a_missing_key_is_refused_before_a_client_exists() {
 fn a_real_call_against_voyage() {
     if std::env::var_os("OCULUS_VOYAGE_LIVE").is_none() {
         eprintln!("skipping: set OCULUS_VOYAGE_LIVE=1 to spend real quota");
-        return;
-    }
-    if !renderer_present() {
         return;
     }
     let client = match VoyageCloud::from_config() {

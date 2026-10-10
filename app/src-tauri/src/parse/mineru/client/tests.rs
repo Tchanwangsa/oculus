@@ -340,22 +340,6 @@ fn page_count_refuses_junk_and_pageless_files() {
     );
 }
 
-/// The count must match pdfium's, which rasterises the pages the embedder
-/// files under the same `page_no`. Point it at a library PDF (read-only);
-/// an encrypted one with an empty user password is the case worth trying.
-#[test]
-fn page_count_agrees_with_pdfium_on_a_real_pdf() {
-    let Some(path) = std::env::var_os("OCULUS_PARSE_PDF") else {
-        eprintln!("skipping: set OCULUS_PARSE_PDF to a real library PDF");
-        return;
-    };
-    let path = std::path::PathBuf::from(path);
-    let ours = archive::page_count(&path);
-    let theirs = crate::embed::raster::page_count(&path);
-    eprintln!("pages: ours {ours:?}, pdfium {theirs:?}");
-    assert_eq!(ours.unwrap(), theirs.unwrap());
-}
-
 /// Submit → upload → poll → download → collect, with the two tasks of one
 /// document completing in the wrong order.
 #[test]

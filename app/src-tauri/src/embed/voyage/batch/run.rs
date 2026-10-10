@@ -1,6 +1,6 @@
 //! Running one document: render, pack, dispatch, and gather the pages.
 
-use super::{refuse_oversized, Limits, RequestRun, MAX_PIXELS_PER_IMAGE};
+use super::{refuse_oversized, Limits, RequestRun, MAX_RENDER_PIXELS};
 use crate::embed::raster;
 use crate::embed::raster::{RasterError, RenderedPage};
 use crate::embed::{EmbedError, EmbedPage, Progress, Wait};
@@ -158,9 +158,9 @@ pub fn run_document(
     // here and the sentinel discarded.
     let mut stop: Option<EmbedError> = None;
 
-    // A page over the pixel ceiling renders at a lower DPI
+    // A page over the render ceiling renders at a lower DPI
     // (`raster::dpi_for_page`); `refuse_oversized` catches the rest.
-    let rendered = raster::render_pages(pdf, Some(MAX_PIXELS_PER_IMAGE), |page| {
+    let rendered = raster::render_pages(pdf, Some(MAX_RENDER_PIXELS), |page| {
         if let Some(error) = run.failure() {
             stop = Some(error);
             return Err(halt(page.page_no));
@@ -235,8 +235,8 @@ pub fn run_document(
         return Err(error);
     }
 
-    // The boundary guard: pdfium must agree with the parse record's page count
-    // (`page_no` is the join key), and every page must have embedded.
+    // The boundary guard: the renderer must agree with the parse record's page
+    // count (`page_no` is the join key), and every page must have embedded.
     if rendered_pages != expected_pages {
         return Err(EmbedError::Document {
             code: "page-count-mismatch".into(),
@@ -342,12 +342,12 @@ fn halt(page_no: u32) -> RasterError {
     }
 }
 
-/// Reconcile the renderer's vocabulary into the seam's. A missing libpdfium
-/// is `NotReady`, and `VoyageCloud::health` catches it before the run starts.
+/// Reconcile the renderer's vocabulary into the seam's. A render thread that
+/// would not start says nothing about the document: `NotReady`, retryable.
 impl From<RasterError> for EmbedError {
     fn from(error: RasterError) -> Self {
         match error {
-            RasterError::Library(_) => EmbedError::NotReady {
+            RasterError::Worker(_) => EmbedError::NotReady {
                 backend: "page renderer".into(),
             },
             RasterError::Unreadable(_) => EmbedError::Document {
@@ -359,7 +359,7 @@ impl From<RasterError> for EmbedError {
             RasterError::Empty => EmbedError::Document {
                 code: "empty-pdf".into(),
             },
-            // The message is a pdfium string; only the page number travels.
+            // The message is the renderer's; only the page number travels.
             RasterError::Page { page_no, .. } => EmbedError::Document {
                 code: format!("page-render-failed-p{page_no}"),
             },
