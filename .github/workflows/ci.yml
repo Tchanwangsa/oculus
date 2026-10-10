@@ -57,8 +57,8 @@ jobs:
       - name: Type-check and bundle the frontend
         run: bun run build
 
-      - name: Fetch ffmpeg and pdfium, build the speech helper and whisper-cli
-        run: bun run ffmpeg && bun run pdfium && bun run speech && bun run whisper
+      - name: Fetch ffmpeg, build the speech helper and whisper-cli
+        run: bun run ffmpeg && bun run speech && bun run whisper
       # tauri-build refuses to compile anything until every externalBin exists,
       # and stage-cli is what bootstraps the oculus sidecar on a fresh checkout.
       - name: Build and stage the oculus CLI

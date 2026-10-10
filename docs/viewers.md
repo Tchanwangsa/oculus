@@ -93,8 +93,10 @@ classes work even when there are no dollar delimiters.
     fills the width, a wider one fits whole, capped at 125%. The old rasters
     stretch at once and pages redraw 400 ms after the last change.
   - **Only pages near the view are drawn**: within a view's height of it,
-    each gets a raster at its CSS size × `devicePixelRatio` (capped to Rust's
-    40M-pixel limit), a text layer and links; the rest are empty boxes. A
+    each gets a raster at its CSS size × `devicePixelRatio`, a text layer and
+    links; the rest are empty boxes. The raster is capped at Rust's 16M-pixel
+    limit and CSS-scaled past it, since one layered page that size can take
+    ~1 GB to render. A
     render for a size since replaced is dropped, and queued renders run
     newest first.
   - **The text layer is one transparent span per line**, `<br>` between
@@ -134,10 +136,16 @@ classes work even when there are no dollar delimiters.
     half of itself) beside a fixed "/ total". Focused, it holds only the first
     page: digits only, Enter jumps, a range is never typed.
   - **Rust's half is `app/src-tauri/src/library/pdf_view/`, on the pure-Rust
-    renderer hayro.** A path must sit under `courses/`, `lectures/` or
-    `agents/` in the data directory. The four most recent documents stay
-    open, keyed by path and modification time. Renders and text extraction
-    share half the cores, and each hayro call runs under `catch_unwind`, so a
+    renderer hayro**, opened and rendered through
+    `app/src-tauri/src/library/pdf_render/`, which the embedder shares. A path
+    must sit under `courses/`, `lectures/` or `agents/` in the data directory.
+    The four most recent documents stay open, keyed by path and modification
+    time. Renders and text extraction share half the cores, each on its own
+    big-stack thread so a deeply nested page cannot overflow a stack and abort
+    the app; a render also reserves from the process-wide render budget, ahead
+    of the embedder's
+    ([retrieval.md](./retrieval.md#rendering-has-two-guards-that-look-removable)).
+    Each hayro call runs under `catch_unwind`, so a
     PDF that crashes hayro fails only that call. A raster is exactly the size
     asked for, opaque on white. Lines come in reading order from PdfCraft's
     layout: baseline segments, blocks, columns left to right, inferred word

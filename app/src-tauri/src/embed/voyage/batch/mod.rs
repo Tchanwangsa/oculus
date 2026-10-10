@@ -21,8 +21,8 @@ mod tests;
 pub use limits::Limits;
 pub use plan::{
     billed_pixels, plan, raw_pixels, refuse_oversized, tokens_for, BILLED_PIXEL_CAP,
-    MAX_BYTES_PER_IMAGE, MAX_INPUTS_PER_REQUEST, MAX_PIXELS_PER_IMAGE, MAX_TOKENS_PER_INPUT,
-    MAX_TOKENS_PER_REQUEST, PIXELS_PER_TOKEN,
+    MAX_BYTES_PER_IMAGE, MAX_INPUTS_PER_REQUEST, MAX_PIXELS_PER_IMAGE, MAX_RENDER_PIXELS,
+    MAX_TOKENS_PER_INPUT, MAX_TOKENS_PER_REQUEST, PIXELS_PER_TOKEN,
 };
 pub use request::RequestRun;
 pub use run::run_document;

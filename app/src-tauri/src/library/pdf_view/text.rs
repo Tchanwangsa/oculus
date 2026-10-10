@@ -88,7 +88,7 @@ impl GlyphCollector {
         }
         // Text no reader sees: zero-scale glyphs (LaTeXiT and Keynote embed
         // equation source that way) and glyphs parked off the page (Beamer
-        // overlays). Thresholds match the pdfium comparison in app/pdf-bench.
+        // overlays). Thresholds match the reference-text comparison in app/pdf-bench.
         if !(bounds.area() > 1e-4) || bounds.intersect(self.page).area() <= 0.0 {
             return;
         }

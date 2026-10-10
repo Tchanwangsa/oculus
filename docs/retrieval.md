@@ -10,7 +10,9 @@ over the same pages sits beside it.
 | Piece | Location |
 | --- | --- |
 | The embed seam (trait, `.emb.json`, `EmbedError`, config, handshake) | `app/src-tauri/src/embed/mod.rs` |
-| Page rasterizer (pdfium) and its process-wide session lock | `app/src-tauri/src/embed/raster/` |
+| Page rasterizer, parallel within a document | `app/src-tauri/src/embed/raster/` |
+| hayro rendering shared with the PDF viewer, and its memory budget | `app/src-tauri/src/library/pdf_render/` |
+| Measuring the rasterizer's memory and speed over the library | `app/src-tauri/examples/render_memory.rs` |
 | Voyage client — the `Embedder` | `app/src-tauri/src/embed/voyage/client/` |
 | Allowance, spend guard, throttle, tier detection | `app/src-tauri/src/embed/voyage/ledger/` |
 | Request packing and per-image ceilings | `app/src-tauri/src/embed/voyage/batch/` |
@@ -62,9 +64,10 @@ worker, and uses the already-read parse page count to check cached coverage.
 `.emb.json` beside each PDF records that it is indexed (`{pdf, model, dim,
 dtype, instruction, page_count, pages}`), written temp-then-rename.
 
-Embedding and parsing meet **only** on `(file, page_no)` via `.pages.json`, so
-the Voyage client checks pdfium's page count against the parse record's before
-billing a pixel — pdfium and `hayro-syntax` can disagree on a damaged xref.
+Embedding and parsing meet **only** on `(file, page_no)` via `.pages.json`.
+Both count pages with the same function (`pdf_render::page_count`), and the
+Voyage client still checks the renderer's count against the parse record's
+before billing a pixel, since the file can change after its parse.
 
 ## One space, or the ranking is noise
 
@@ -144,24 +147,34 @@ discipline as `mineru-usage.json`.
   of the free grant (default 100; `0` disables it) and binds paid accounts too.
 - **`EmbedError::BudgetReached` is not `QuotaExhausted`**: an allowance heals
   and is worth retrying, a user's setting is not.
-- **`embed_estimate` sends nothing.** pdfium reads page boxes
+- **`embed_estimate` sends nothing.** hayro reads page boxes
   (`raster::page_sizes`, no rasterising) and `voyage::batch::plan` packs them at the
   ceiling in force — the function the run uses — so the predicted request count
   is the real one. It takes seconds of file I/O, hence a separate command.
 
 ## Rendering has two guards that look removable
 
-- **One pdfium session at a time.** `embed/raster/mod.rs` holds a process-wide lock from
-  `load_pdf_from_file` to the last page; `thread_safe` only serialises single
-  FFI calls. Concurrent sessions tear document state and report `Encrypted` on
-  unencrypted files, because `FPDF_GetLastError()` is process-global.
-- **A page over Voyage's 16M-pixel limit is rendered smaller, not refused.**
-  `dpi_for_page` (`raster/dpi.rs`) clamps DPI only for such pages (posters, A0 sheets);
-  since Voyage bills at 2M px anyway, the vector is the one the model would
-  have made. Every other page renders byte-identically at 200 DPI. The ceiling
-  comes in from `voyage/batch/limits.rs`; `batch::refuse_oversized` remains the floor
-  for byte and token ceilings no DPI fixes. Skipping the page instead would
-  write a short record and leave it unsearchable.
+- **Every render reserves memory from one budget**
+  (`library/pdf_render/budget.rs`), shared with the PDF viewer: an estimate of
+  16 MB + 16 bytes per pixel against 640 MB, at most half the cores (capped at
+  4) at once. The embedder renders a document's pages on all but one of those
+  slots and within three quarters of the bytes, and waits while a viewer
+  render is queued, so a page in view never sits behind an index run. A
+  render past 8M pixels (only a zoomed-in viewer page) runs alone. Pages still
+  reach the client in order. Most pages peak near 5 bytes per pixel, but a
+  layered design export can reach 65, which the estimate cannot see; the
+  render ceiling below and the viewer's 16M-pixel cap bound what one such
+  page can take (~1 GB at the viewer's cap).
+- **A page over 4.2M pixels is rendered smaller, not refused.**
+  `dpi_for_page` (`raster/dpi.rs`) clamps DPI only for such pages (posters,
+  design exports, A0 sheets) to `batch::MAX_RENDER_PIXELS`
+  (`voyage/batch/plan.rs`). Voyage downscales every image to 2M px before it
+  embeds, so pixels past that buy nothing, while a layered 16M-pixel page
+  takes ~1 GB to render. A4, US Letter and 16:9 slides (4.0M) stay at exactly
+  200 DPI; in the library 520 of 3,631 pages are larger.
+  `batch::refuse_oversized` remains the floor for the API's 16M-pixel, byte
+  and token ceilings. Skipping the page instead would write a short record and
+  leave it unsearchable.
 
 ## Ingest follows a parse, through one queue
 
@@ -236,6 +249,6 @@ correctness.
 - `output_encoding: "base64"` (f32 little-endian) is not `output_dtype`, which rejects `base64`.
 - Voyage returns vectors already L2-normalised, so the dot product is the cosine — no renormalising.
 - Don't drop the `embed_model`/`embed_dim` filter from a scan — mixed spaces rank as noise, silently.
-- Don't remove `embed/raster/`'s session lock — concurrent pdfium sessions misreport files as encrypted.
+- Don't render a PDF page outside `library/pdf_render` — a render that skips the budget can take the process past a gigabyte.
 - FTS5 is required to open the database at all (migration 35); `fts_tests` asserts the bundled `libsqlite3-sys` still enables it.
 - The Voyage key lives only in the keychain, and no `EmbedError` carries response text — an error body can echo the base64 page image.

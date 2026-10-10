@@ -13,7 +13,7 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | Shared cached native download and installation | `app/scripts/native-binary.mjs` |
 | The dev preflight | `app/scripts/predev.mjs` |
 | Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
-| Native binary fetchers | `app/scripts/fetch-pdfium.mjs`, `app/scripts/fetch-ffmpeg.mjs` |
+| Native binary fetcher (ffmpeg) | `app/scripts/fetch-ffmpeg.mjs` |
 | Compiles the on-device speech helper | `app/scripts/build-speech.mjs`, `app/src-tauri/speech/main.swift` |
 | Builds whisper.cpp's `whisper-cli` from a pinned release | `app/scripts/build-whisper.mjs` |
 | Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
@@ -34,7 +34,6 @@ bun run cli           # release `oculus`
 bun run cli:dev       # debug `oculus` — the one the dev app's agents run
 bun run cli:install   # release build, symlink into ~/.local/bin, then `oculus docs`
 bun run docs:cli      # regenerate docs/cli-reference.md from the binary's help
-bun run pdfium        # fetch libpdfium into app/src-tauri/binaries/
 bun run ffmpeg        # fetch ffmpeg into app/src-tauri/binaries/
 bun run speech        # compile the on-device speech helper there (macOS)
 bun run whisper       # build whisper.cpp's whisper-cli there (macOS, needs cmake)
@@ -44,7 +43,7 @@ bun run whisper       # build whisper.cpp's whisper-cli there (macOS, needs cmak
 
 It is bun's lifecycle hook for `dev`, and `beforeDevCommand` is
 `OCULUS_CLI_WATCH=1 bun run dev`, so every `tauri dev` runs it. In order it
-runs `bun install`, fetches ffmpeg and pdfium, compiles the speech helper and
+runs `bun install`, fetches ffmpeg, compiles the speech helper and
 `whisper-cli`, builds the debug `oculus`,
 regenerates [cli-reference.md](./cli-reference.md) (written only when the help
 changed), and runs `oculus docs` to refresh the library's agent docs. The last
@@ -52,11 +51,11 @@ two are non-fatal: a machine whose app has never run has no library to fill.
 `OCULUS_SKIP_PREDEV=1` skips it all for a vite-only session.
 
 The scripts share target detection and artifact paths through `app/scripts/runtime.mjs`;
-both native fetchers reject failed HTTP responses and truncated downloads before
-installing anything. Pdfium extracts into a private temporary directory per run.
+the ffmpeg fetcher rejects failed HTTP responses and truncated downloads before
+installing anything.
 
 `cargo test` and `bun run cli` go through neither Tauri nor `predev`, so on a
-fresh checkout run `bun run pdfium`, `bun run ffmpeg` and (on macOS)
+fresh checkout run `bun run ffmpeg` and (on macOS)
 `bun run speech` and `bun run whisper` yourself.
 
 ## The speech helper is compiled, not fetched
@@ -128,7 +127,7 @@ current release binary is guaranteed to exist.
 
 `ci.yml` runs on every push to `master` and every pull request, on a macOS
 runner with nothing cached but crates: `cargo fmt --check`, `bun run test`,
-`bun run build`, the two native fetches, the speech helper and `whisper-cli`,
+`bun run build`, the ffmpeg fetch, the speech helper and `whisper-cli`,
 `stage-cli`, `cargo test --release --locked`, then `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
 reference fails. `stage-cli` comes before any cargo call because tauri-build
 refuses to compile until every `externalBin` exists, and it is what writes the
@@ -175,16 +174,6 @@ exception: it is `include_str!`'d into the app, so it changes with the Rust
 rebuild. Which files are overwritten versus merged is in
 [cli.md](./cli.md#oculus-docs-writes-the-agents-folder).
 
-## `libpdfium` is pinned to `pdfium-render`'s Chromium revision
-
-It rasterizes pages for embedding (`app/src-tauri/src/embed/raster/`) and has
-no crates.io source, so `app/scripts/fetch-pdfium.mjs` downloads a prebuilt one.
-Its release tag must match the revision `pdfium-render`'s feature flag binds
-against: a mismatch fails at *bind* time, not compile time, so bump both
-together. At runtime it is found beside the executable (`Contents/Frameworks/`
-in the bundle, an ancestor `binaries/` in dev); `OCULUS_PDFIUM_LIB` overrides
-the path.
-
 ## A UI change is verified by screenshot, not by `tsc`
 
 - Frontend type-check and bundle: `cd app && bun run build`; editor, shared
@@ -209,6 +198,5 @@ variable.
 - `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
 - Anything under `app/src-tauri/` changing, templates included, rebuilds and relaunches the dev app.
 - A dev rebuild SIGTERMs the app past Tauri's Exit event, so agent subprocesses can outlive it ([harness.md](./harness.md)).
-- A pdfium from the wrong Chromium revision builds fine and fails at bind time.
 - Deleting `~/Library/Application Support/com.tchan.oculus` is a full reset, sign-in included.
 - `data/`, `*.db` and `app/src-tauri/binaries/` are gitignored — never commit them.

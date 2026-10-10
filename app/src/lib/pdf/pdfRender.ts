@@ -5,9 +5,10 @@ import { invoke } from "@tauri-apps/api/core";
  * a queue that keeps two renders in flight, newest request first.
  */
 
-/** Rust refuses a raster past these (`pdf_render`'s "too-large"). */
+/** Rust refuses a raster past these (`pdf_render`'s "too-large"). Past them
+ *  the canvas is CSS-scaled: a 16M-pixel page can take ~1 GB to render. */
 const MAX_SIDE = 8192;
-const MAX_PIXELS = 40_000_000;
+const MAX_PIXELS = 16_000_000;
 
 /** A raster size for a page of `width`×`height` device pixels, scaled down to
  *  the limits above. */
