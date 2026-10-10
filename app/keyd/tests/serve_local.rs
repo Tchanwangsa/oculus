@@ -35,8 +35,19 @@ impl Keyd {
     }
 
     /// `origins` sets each `(variable, origin)`, e.g. a fake Voyage under
-    /// `OCULUS_KEYD_VOYAGE_ORIGIN`.
+    /// `OCULUS_KEYD_VOYAGE_ORIGIN`. This process is the CLI to the daemon, as
+    /// every op but `ping` needs a role.
     fn start_with(idle_secs: u64, origins: &[(&str, &str)]) -> Keyd {
+        Keyd::spawn(idle_secs, origins, Some("cli"))
+    }
+
+    /// Like `start_with`, but no role is forced: a caller has the role its
+    /// executable's name gives it, and this process has none.
+    fn start_by_name(idle_secs: u64, origins: &[(&str, &str)]) -> Keyd {
+        Keyd::spawn(idle_secs, origins, None)
+    }
+
+    fn spawn(idle_secs: u64, origins: &[(&str, &str)], role: Option<&str>) -> Keyd {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let dir = std::env::temp_dir().join(format!("keyd-bin-{}-{n}", std::process::id()));
@@ -49,6 +60,9 @@ impl Keyd {
             .env("OCULUS_KEYD_TEST_KEY", "11".repeat(32))
             .env("OCULUS_KEYD_IDLE_SECS", idle_secs.to_string())
             .stderr(Stdio::piped());
+        if let Some(role) = role {
+            cmd.env("OCULUS_KEYD_TEST_ROLE", role);
+        }
         for (var, origin) in origins {
             cmd.env(var, origin);
         }
@@ -384,15 +398,17 @@ fn the_binary_saves_credentials_and_signs_in_for_the_cli_only() {
         return;
     }
     use keyd_core::test_support::okta_fake::{
-        current_code, script, COOKIE, PASSWORD, SEED, USERNAME,
+        code_from_t0, script, COOKIE, PASSWORD, SEED, T0, USERNAME,
     };
     use keyd_core::test_support::FakeOrigin;
 
-    let fake = FakeOrigin::start(script(current_code));
+    let fake = FakeOrigin::start(script(code_from_t0));
+    let now = T0.to_string();
     let port = fake.origin.rsplit(':').next().unwrap().to_string();
-    let mut keyd = Keyd::start_with(
+    let mut keyd = Keyd::start_by_name(
         60,
         &[
+            ("OCULUS_KEYD_NOW", &now),
             (
                 "OCULUS_KEYD_CANVAS_ORIGIN",
                 &format!("http://127.0.0.1:{port}"),
