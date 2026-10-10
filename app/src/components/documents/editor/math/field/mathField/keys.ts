@@ -43,13 +43,10 @@ function blockBeside(state: EditorState, pos: number, up: boolean): VisualMath |
   return target && readsCleanly(state.sliceDoc(target.from, target.to).trim(), true) ? target : null;
 }
 
-/** Up to a display block from the line beside it. ↑/↓ off the edge line go
- *  into the field, since block widgets don't hold the caret and vertical
- *  motion would step over them. ← at a line's start or → at its end, and
- *  Backspace/Delete (`deleting`) from a line with text, which would join it
- *  onto the `$$`, stop at the block's edge, beside its rendering, where
- *  Enter or typing adds a line; the same key again enters the field
- *  (`intoMathBlock` in `live-preview/livePreview/math-blocks.ts`). */
+/** Into a display block's field from the line beside it, at the near
+ *  end: ↑/↓ off the edge line, since vertical motion would step over the
+ *  widget; ← at a line's start or → at its end; Backspace/Delete
+ *  (`deleting`) from a line with text, which would join it onto the `$$`. */
 function enterBlock(dir: "up" | "down" | "left" | "right", deleting = false): Command {
   const back = dir === "up" || dir === "left";
   return (view) => {
@@ -65,11 +62,7 @@ function enterBlock(dir: "up" | "down" | "left" | "right", deleting = false): Co
     }
     const target = blockBeside(state, main.head, back);
     if (!target) return false;
-    const anchor =
-      dir === "left" ? state.doc.lineAt(target.end).to
-      : dir === "right" ? target.start
-      : back ? target.to : target.from;
-    enter(view, anchor);
+    enter(view, back ? target.to : target.from);
     return true;
   };
 }

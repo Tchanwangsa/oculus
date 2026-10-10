@@ -5,7 +5,8 @@ import type { EditorView } from "@codemirror/view";
 
 import { noteMarkdown } from "@/components/documents/editor/core/language";
 import { focusedField, setFocused } from "@/components/documents/editor/core/liveFocus";
-import { leaveMaths, removeMaths } from "@/components/documents/editor/math/field/fieldNote";
+import { leaveMaths, newlineBeside, removeMaths } from "@/components/documents/editor/math/field/fieldNote";
+import { enterSide } from "@/components/documents/editor/math/field/rustField/keys";
 import { readsCleanly, visualMath, visualMathField } from "@/components/documents/editor/math/field/mathField";
 import {
   caretAfterEdit,
@@ -179,7 +180,6 @@ describe("the Rust field's writes", () => {
     for (const [doc, at, dir, head] of [
       ["Top\n\n$$\nx\n$$\n\nEnd", 8, "backward", 4],
       ["Top\n\n$$\nx\n$$\n\nEnd", 8, "forward", 13],
-      ["$$\nx\n$$\nEnd", 3, "backward", 0],
       ["A $x$ b", 3, "backward", 2],
     ] as const) {
       const note = new Note(doc, at);
@@ -225,6 +225,141 @@ describe("the Rust field's writes", () => {
     note.dispatch({ changes: { from: 5, insert: "q" }, selection: { anchor: 7 } });
     f.type("x");
     expect(note.doc).toBe("See $qy$ here.");
+  });
+});
+
+describe("a display block's edges", () => {
+  // "Top\n" is 4; the block's `$$` lines run 4..11; "End" starts at 12.
+  const doc = "Top\n$$\nx\n$$\nEnd";
+
+  test("a caret at either edge opens the field, as inside the block", () => {
+    for (const at of [4, 11]) {
+      const v = visualMath(new Note(doc, at).state);
+      expect(v?.block).toBe(true);
+      expect([v?.start, v?.end]).toEqual([4, 11]);
+    }
+  });
+
+  test("the lines beside it stay text", () => {
+    expect(visualMath(new Note(doc, 3).state)).toBeNull();
+    expect(visualMath(new Note(doc, 12).state)).toBeNull();
+  });
+
+  test("a selection taking the whole block, or running across it, keeps it rendered", () => {
+    for (const [anchor, head] of [[4, 11], [2, 14], [11, 4]]) {
+      const note = new Note(doc, 0);
+      note.dispatch({ selection: { anchor, head } });
+      expect(visualMath(note.state)).toBeNull();
+    }
+  });
+
+  test("leaving past the note's start or end edits nothing and keeps the field", () => {
+    for (const [doc, at, dir] of [
+      ["$$\nx\n$$", 3, "backward"],
+      ["$$\nx\n$$", 3, "upward"],
+      ["$$\nx\n$$", 3, "forward"],
+      ["$$\nx\n$$", 3, "downward"],
+      ["$$\nx\n$$\nEnd", 3, "backward"],
+      ["Top\n$$\nx\n$$", 7, "forward"],
+    ] as const) {
+      const note = new Note(doc, at);
+      const f = new Field(note);
+      note.specs = [];
+      leaveMaths(note as unknown as EditorView, writableTarget(note, f.text), dir);
+      expect(note.doc).toBe(doc);
+      expect(note.specs).toEqual([]);
+      expect(visualMath(note.state)?.id).toBe(f.text.id);
+    }
+  });
+
+  test("leaving towards a touching block opens its field at the near end", () => {
+    const touching = "$$\na\n$$\n$$\nb\n$$";
+    for (const dir of ["downward", "forward"] as const) {
+      const note = new Note(touching, 3);
+      leaveMaths(note as unknown as EditorView, writableTarget(note, new Field(note).text), dir);
+      expect(note.doc).toBe(touching);
+      expect(note.state.selection.main.head).toBe(8);
+      expect(visualMath(note.state)?.start).toBe(8);
+    }
+    for (const dir of ["upward", "backward"] as const) {
+      const note = new Note(touching, 11);
+      leaveMaths(note as unknown as EditorView, writableTarget(note, new Field(note).text), dir);
+      expect(note.doc).toBe(touching);
+      expect(note.state.selection.main.head).toBe(7);
+      expect(visualMath(note.state)?.start).toBe(0);
+    }
+  });
+});
+
+describe("Enter in a field", () => {
+  const key = (shiftKey = false) => ({ key: "Enter", shiftKey, metaKey: false, ctrlKey: false, altKey: false });
+  const at = (stop: number) => ({ anchor: stop, head: stop });
+
+  test("in a block makes a line outside it: after, or before from its very start", () => {
+    expect(enterSide(key(), true, "math", at(3))).toBe("after");
+    expect(enterSide(key(), true, "text", at(1))).toBe("after");
+    expect(enterSide(key(), true, "math", at(0))).toBe("before");
+    expect(enterSide(key(), true, "math", { anchor: 0, head: 2 })).toBe("after");
+  });
+
+  test("Shift+Enter, inline maths and a `\\command` being typed are the model's", () => {
+    expect(enterSide(key(true), true, "math", at(3))).toBeNull();
+    expect(enterSide(key(), false, "math", at(3))).toBeNull();
+    expect(enterSide(key(true), false, "math", at(3))).toBeNull();
+    expect(enterSide(key(), true, "command", at(3))).toBeNull();
+  });
+
+  test("Shift+Enter (the model's Enter) adds a row, an environment's in one", () => {
+    const note = new Note("Top\n$$\nx\n$$\nEnd", 7);
+    new Field(note).run("enter");
+    expect(note.doc).toBe("Top\n$$\nx \\\\\n$$\nEnd");
+    const m = new Note("Top\n$$\n\\begin{cases}a & b\\end{cases}\n$$\nEnd", 22);
+    const mf = new Field(m);
+    mf.field = mf.field.caretAt(mf.field.source.indexOf("a") + 1, false);
+    mf.run("enter");
+    expect(m.doc).toBe("Top\n$$\n\\begin{cases}\na & b \\\\\n&\n\\end{cases}\n$$\nEnd");
+  });
+
+  const enter = (doc: string, at: number, before: boolean) => {
+    const note = new Note(doc, at);
+    const f = new Field(note);
+    note.specs = [];
+    newlineBeside(note as unknown as EditorView, writableTarget(note, f.text), before);
+    return note;
+  };
+
+  test("mid-block and at its end, the line goes after the block, the caret on it", () => {
+    for (const caret of [7, 8]) {
+      const note = enter("Top\n$$\nx+y\n$$\nEnd", caret, false);
+      expect(note.doc).toBe("Top\n$$\nx+y\n$$\n\nEnd");
+      expect(note.state.selection.main.head).toBe(14);
+      expect(visualMath(note.state)).toBeNull();
+      expect(note.measures).toBe(1);
+      expect(note.specs.some((s) => s.scrollIntoView)).toBe(false);
+    }
+  });
+
+  test("from its very start, the line goes before it, so a note starting with a block gets text above", () => {
+    const note = enter("$$\nx\n$$", 3, true);
+    expect(note.doc).toBe("\n$$\nx\n$$");
+    expect(note.state.selection.main.head).toBe(0);
+    expect(visualMath(note.state)).toBeNull();
+  });
+
+  test("between stacked blocks, a line goes between them", () => {
+    const note = enter("$$\na\n$$\n$$\nb\n$$", 3, false);
+    expect(note.doc).toBe("$$\na\n$$\n\n$$\nb\n$$");
+    expect(note.state.selection.main.head).toBe(8);
+    expect(visualMath(note.state)).toBeNull();
+  });
+
+  test("is an undo step of its own", () => {
+    const note = new Note("Top\n$$\nx\n$$\nEnd", 7);
+    const f = new Field(note);
+    f.type("y");
+    newlineBeside(note as unknown as EditorView, writableTarget(note, f.text), false);
+    note.undo();
+    expect(note.doc).toBe("Top\n$$\nxy\n$$\nEnd");
   });
 });
 

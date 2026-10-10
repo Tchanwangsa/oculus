@@ -90,7 +90,7 @@ export function squeezeBlankLines(latex: string): string {
 }
 
 /** A block's LaTeX without empty rows at its end (`\\` lines past the last
- *  formula, what Enter on the last row leaves), its trailing whitespace kept;
+ *  formula, what Shift+Enter on the last row leaves), its trailing whitespace kept;
  *  unchanged when nothing else would be left. */
 export function withoutEndRows(latex: string): string {
   const body = latex.trimEnd();

@@ -44,7 +44,8 @@ export function visualOf(state: EditorState, ctx: MathContext): VisualMath | nul
 }
 
 /** The maths holding the one selection range: inline maths with the caret
- *  between its delimiters, a block anywhere on its lines but its edges. */
+ *  between its delimiters, a block anywhere on its lines, its edges too (a
+ *  block has no caret position of its own beside it). */
 function targetAt(state: EditorState): VisualMath | null {
   const { ranges, main } = state.selection;
   if (ranges.length !== 1) return null;
@@ -55,7 +56,7 @@ function targetAt(state: EditorState): VisualMath | null {
   }
   if (!ctx || main.from < ctx.start || main.to > ctx.end) return null;
   const v = visualOf(state, ctx);
-  return v && atBlockEdge(state, v) ? null : v;
+  return v && takesBlock(state, v) ? null : v;
 }
 
 /** Typing passes through text the parser may briefly read differently; an
@@ -76,12 +77,12 @@ function carried(prev: ActiveMath, tr: Transaction): ActiveMath | null {
   return ranges.length === 1 && main.from >= next.start && main.to <= next.end ? next : null;
 }
 
-/** A caret resting just before or after a block, or a selection taking the
- *  whole block: the rendering keeps it (`MathWidget` in `live-preview/widgets/math.ts`) rather
- *  than the field taking it, as inline maths keeps a caret on its edge. */
-function atBlockEdge(state: EditorState, v: VisualMath): boolean {
+/** A selection taking the whole block, edge to edge: the rendering keeps it
+ *  (`MathWidget` in `live-preview/widgets/math.ts`) rather than the field
+ *  taking it. */
+function takesBlock(state: EditorState, v: VisualMath): boolean {
   const { main } = state.selection;
-  return v.block && (main.from === v.start || main.to === state.doc.lineAt(v.end).to);
+  return v.block && !main.empty && main.from === v.start && main.to === state.doc.lineAt(v.end).to;
 }
 
 const cleanCache = new Map<string, boolean>();

@@ -93,11 +93,9 @@ function showCovered(dom: HTMLElement, w: MathWidget, on: boolean) {
  * Rendered maths, one unit to the selection: its range is atomic in Live mode
  * (`live-preview/livePreview`), and while a selection covers it (`selected`)
  * it draws bands over its atoms, which the note's highlight leaves out. A
- * block (`block`) is drawn by the block layer. It has a caret spot before
- * and after it: a press in its padding above or below the formula rests the
- * caret there, drawn beside the formula's first or last row (`coordsAt`).
- * Any other press opens the visual field where it landed; Shift with a press
- * extends the selection over the maths.
+ * block (`block`) is drawn by the block layer. A press opens the visual
+ * field where it landed (a block's padding: its first or last row); Shift
+ * with a press extends the selection over the maths.
  */
 export class MathWidget extends SourceWidget {
   /** Drawn as a placeholder until the maths engine is ready; a rebuild after
@@ -144,16 +142,16 @@ export class MathWidget extends SourceWidget {
       dom.classList.add("cm-math-error");
       dom.textContent = this.source.trim() ? this.source : "Empty equation";
     }
-    // Before `reveal`'s handler, which it pre-empts for Shift and a block's
-    // edges; otherwise the field that replaces this rendering puts its caret
-    // where the press landed.
+    // Before `reveal`'s handler, which it pre-empts for Shift; otherwise the
+    // field that replaces this rendering puts its caret where the press
+    // landed.
     dom.addEventListener("mousedown", (ev) => {
       const e = ev as MouseEvent;
       if (e.button !== 0) return;
       // Out of an open maths field before the press removes it: focused after,
       // the note has WebKit scroll to the removed field's DOM selection.
       if (mathFieldFocused()) view.focus();
-      if (this.pressAround(e, dom, view)) {
+      if (this.shiftPress(e, dom, view)) {
         e.preventDefault();
         e.stopImmediatePropagation();
         view.focus();
@@ -185,36 +183,15 @@ export class MathWidget extends SourceWidget {
     return true;
   }
 
-  /** Shift-press: the selection runs on over the maths. A block's padding
-   *  above or below the formula: the caret before or after it. Returns
-   *  whether it moved the selection. */
-  private pressAround(e: MouseEvent, dom: HTMLElement, view: EditorView): boolean {
-    const span = mathSpan(view, view.posAtDOM(dom), this.block);
+  /** Shift-press: the selection runs on over the maths. Returns whether it
+   *  moved the selection. */
+  private shiftPress(e: MouseEvent, dom: HTMLElement, view: EditorView): boolean {
+    const span = e.shiftKey ? mathSpan(view, view.posAtDOM(dom), this.block) : null;
     if (!span) return false;
-    if (e.shiftKey) {
-      let { anchor } = view.state.selection.main;
-      if (anchor > span.from && anchor < span.to) anchor = span.from;
-      view.dispatch({ selection: { anchor, head: anchor >= span.to ? span.from : span.to } });
-      return true;
-    }
-    if (!this.block) return false;
-    const ink = dom.querySelector(".katex-display")?.getBoundingClientRect();
-    if (!ink || (e.clientY >= ink.top && e.clientY <= ink.bottom)) return false;
-    view.dispatch({ selection: { anchor: e.clientY < ink.top ? span.from : span.to } });
+    let { anchor } = view.state.selection.main;
+    if (anchor > span.from && anchor < span.to) anchor = span.from;
+    view.dispatch({ selection: { anchor, head: anchor >= span.to ? span.from : span.to } });
     return true;
-  }
-
-  /** A caret at a block's start or end, one text line tall beside the first
-   *  or last row, not the block's full height at its edge. */
-  coordsAt(dom: HTMLElement, pos: number) {
-    if (!this.block) return null;
-    const rows = mathRows(dom);
-    const row = pos === 0 ? rows[0] : rows[rows.length - 1];
-    if (!row) return null;
-    const height = parseFloat(getComputedStyle(dom).lineHeight) || row.bottom - row.top;
-    const x = pos === 0 ? row.left : row.right;
-    const top = (row.top + row.bottom) / 2 - height / 2;
-    return { left: x, right: x, top, bottom: top + height };
   }
 
   ignoreEvent(e: Event) {
@@ -225,29 +202,4 @@ export class MathWidget extends SourceWidget {
   get estimatedHeight() {
     return this.display ? 56 : -1;
   }
-}
-
-type Row = { left: number; right: number; top: number; bottom: number };
-
-/** The boxes of a display rendering's rows (its top-level `\\` lines). */
-function mathRows(dom: HTMLElement): Row[] {
-  // The runs between `.katex-newline`s.
-  const rows: Row[] = [];
-  let row: Row | null = null;
-  for (const el of dom.querySelectorAll(".katex-display .katex-html > *")) {
-    if (el.classList.contains("katex-newline")) {
-      row = null;
-      continue;
-    }
-    const r = el.getBoundingClientRect();
-    if (!r.width) continue;
-    if (!row) rows.push((row = { left: r.left, right: r.right, top: r.top, bottom: r.bottom }));
-    else {
-      row.left = Math.min(row.left, r.left);
-      row.right = Math.max(row.right, r.right);
-      row.top = Math.min(row.top, r.top);
-      row.bottom = Math.max(row.bottom, r.bottom);
-    }
-  }
-  return rows;
 }

@@ -231,3 +231,17 @@ describe("the pending \\name in the rendering", () => {
     expect(pendingHtml(MathField.open("a", false), false)).toBeNull();
   });
 });
+
+describe("Enter with the list open", () => {
+  const enter = (shiftKey = false) => ({ key: "Enter", shiftKey, metaKey: false, ctrlKey: false, altKey: false });
+
+  test("accepts the highlighted row before the field's Enter", () => {
+    expect(listKey(enter(), "command", 3, 0)).toEqual({ accept: 0 });
+    expect(listKey(enter(), "picks", 3, 1)).toEqual({ accept: 1 });
+  });
+
+  test("goes on to the field with nothing highlighted, or with Shift", () => {
+    expect(listKey(enter(true), "command", 3, 0)).toBeNull();
+    expect(listKey(enter(), "picks", 3, -1)).toBe("dismiss");
+  });
+});
