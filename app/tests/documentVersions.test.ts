@@ -10,6 +10,10 @@ import {
   versionTitle,
   type DocumentVersion,
 } from "../src/lib/documentVersions";
+import { pinDisplayLocale } from "../src/lib/locale";
+
+// The expected strings are Australian English.
+pinDisplayLocale("en-AU");
 
 // Titles are local time; pin the zone so 03:02 UTC reads as 2:02 pm (AEDT).
 // Test files share a process, so put it back after.

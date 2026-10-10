@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { Lecture, SourceNum } from "@/lib/db";
 import type { ToolKind } from "@/lib/harness";
+import { displayLocale } from "@/lib/locale";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -15,7 +16,7 @@ export function fmtDurationSecs(secs: number): string {
 
 export function fmtLectureDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString("en-AU", {
+  return d.toLocaleDateString(displayLocale, {
     weekday: "short",
     day: "numeric",
     month: "short",

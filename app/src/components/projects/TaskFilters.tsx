@@ -74,7 +74,7 @@ export function matchesFilter(
 }
 
 /** Parsed, not string-compared: `due_at` may be ISO or SQLite's format (see
- *  `TasksTable`'s `dueCmp`). "This week" is the calendar's Monday-first week,
+ *  `TasksTable`'s `dueCmp`). "This week" is the calendar's week (`startOfWeek`),
  *  not a rolling seven days. */
 function matchesDue(dueAt: string | null, due: DueFilter, now: number): boolean {
   if (due === "any") return true;

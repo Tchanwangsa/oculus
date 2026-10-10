@@ -114,6 +114,16 @@ In `app/src/components/calendar/WeekView.tsx`:
 - Past hours carry a wash mixed from `muted-foreground`, finished events turn
   `chart-other`, and today gets a time line — all from `useNow`.
 
+## Dates and weeks follow the system locale
+
+Every date is formatted in `displayLocale` (`app/src/lib/locale.ts`): the
+system locale, never a fixed one, unless a test pins one with
+`pinDisplayLocale` so its expected strings hold anywhere. Weeks start on the
+locale's first day:
+`WEEK_START` in `app/src/lib/calendar.ts` reads `Intl.Locale`'s week info
+(Monday when the engine has none), and `startOfWeek`, `monthGrid` and the
+month view's day names all follow it.
+
 ## Gotchas
 
 - Never add a date window to the Canvas fetch — the write deletes the subject's rows, so a window would erase everything outside it.

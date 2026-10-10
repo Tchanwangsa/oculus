@@ -22,6 +22,7 @@ import {
 import { deleteLocalEvent } from "@/lib/db";
 import { editEvent } from "@/stores/eventEditorStore";
 import { projectHref } from "@/components/projects/projectHref";
+import { displayLocale } from "@/lib/locale";
 
 const KIND_LABEL: Record<CalEvent["kind"], string> = {
   class: "Class",
@@ -91,7 +92,7 @@ export function EventPopover({
           </p>
 
           <p className="mt-1 text-[11px] text-muted-foreground">
-            {event.start.toLocaleDateString("en-AU", {
+            {event.start.toLocaleDateString(displayLocale, {
               weekday: "long",
               day: "numeric",
               month: "long",

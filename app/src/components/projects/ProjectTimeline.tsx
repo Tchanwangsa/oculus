@@ -14,6 +14,7 @@ import { fmtClock, sqliteUtcToMs, startOfDay } from "@/lib/format";
 import type { DbProject, DbProjectTask } from "@/lib/projects";
 import { SubtaskToggle, TaskGlyph } from "./TaskMarks";
 import { columnOf, type TaskNode } from "./taskTree";
+import { displayLocale } from "@/lib/locale";
 
 /**
  * The roadmap: one row per top-level task on a horizontal time axis.
@@ -134,7 +135,7 @@ function ticksFor(zoom: TimelineZoom, start: Date, end: Date, now: Date): Tick[]
       out.push({
         at: d,
         end: addMonths(d, 1),
-        label: d.toLocaleDateString("en-AU", { month: "short" }),
+        label: d.toLocaleDateString(displayLocale, { month: "short" }),
         major: d.getMonth() === 0,
         today: false,
       });
@@ -148,7 +149,7 @@ function ticksFor(zoom: TimelineZoom, start: Date, end: Date, now: Date): Tick[]
       end: addDays(d, step),
       label:
         zoom === "week"
-          ? d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })
+          ? d.toLocaleDateString(displayLocale, { day: "numeric", month: "short" })
           : String(d.getDate()),
       major: zoom === "week" ? false : d.getDate() === 1,
       today:

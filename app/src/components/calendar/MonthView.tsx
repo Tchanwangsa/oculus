@@ -8,6 +8,7 @@ import {
   isPast,
   isSelfImposed,
   monthGrid,
+  weekDays,
   type CalEvent,
 } from "@/lib/calendar";
 import { sameDay, startOfDay } from "@/lib/format";
@@ -18,8 +19,12 @@ import {
 } from "@/components/ui/popover";
 import { EventMark } from "./EventMark";
 import { EventPopover } from "./EventPopover";
+import { displayLocale } from "@/lib/locale";
 
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+/** Short day names in the locale's week order (`WEEK_START`). */
+const WEEKDAYS = weekDays(new Date()).map((d) =>
+  d.toLocaleDateString(displayLocale, { weekday: "short" }),
+);
 
 /** A cell's fixed furniture (px): `pt-1`, the 20px date line, and `gap-0.5`. */
 const CELL_HEADER_PX = 26;
@@ -227,7 +232,7 @@ function MoreLink({
       </PopoverTrigger>
       <PopoverContent side="right" align="start" className="w-64 p-0">
         <p className="px-3 pt-2.5 pb-1.5 font-display text-[13px] font-semibold text-foreground">
-          {day.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "short" })}
+          {day.toLocaleDateString(displayLocale, { weekday: "long", day: "numeric", month: "short" })}
         </p>
         <div className="px-1 pb-2">
           {events.map((e) => (

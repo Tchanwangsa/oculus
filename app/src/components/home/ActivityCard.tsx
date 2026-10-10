@@ -49,6 +49,7 @@ import {
   type UsageDay,
 } from "@/lib/usage";
 import { useHomeSection } from "./useHomeSection";
+import { displayLocale } from "@/lib/locale";
 
 /** The pings land in `usage_hours` with no event, so the card polls. */
 const EVENTS: string[] = [];
@@ -460,7 +461,7 @@ function plural(n: number, word: string): string {
 
 /** "6 Oct". */
 function shortDate(d: Date): string {
-  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return d.toLocaleDateString(displayLocale, { day: "numeric", month: "short" });
 }
 
 /** "7 Sep – 6 Oct". */
@@ -470,7 +471,7 @@ function rangeLine(range: ChartDay[]): string {
 
 /** "Tue 6 Oct" over each series with time that day: its mark, label and time. */
 function DayCard({ day, series, values }: { day: ChartDay; series: Series[]; values: number[] }) {
-  const date = day.date.toLocaleDateString("en-AU", {
+  const date = day.date.toLocaleDateString(displayLocale, {
     weekday: "short",
     day: "numeric",
     month: "short",

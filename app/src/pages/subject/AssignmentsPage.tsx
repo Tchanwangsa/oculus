@@ -11,6 +11,7 @@ import { humanizeSlug } from "@/lib/format";
 import type { DbFile } from "@/lib/db";
 import { useCourseFileData } from "@/hooks/useCourseFileData";
 import { ListCard } from "@/components/ui/PageParts";
+import { displayLocale } from "@/lib/locale";
 
 interface TaskDoc {
   file: DbFile;
@@ -72,7 +73,7 @@ function parseTaskDoc(md: string, file: DbFile): TaskDoc {
 }
 
 function fmtDue(d: Date): string {
-  return d.toLocaleString("en-AU", {
+  return d.toLocaleString(displayLocale, {
     weekday: "short",
     day: "numeric",
     month: "short",

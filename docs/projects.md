@@ -215,7 +215,7 @@ table (`app/src/pages/TasksPage.tsx`), under the same strip as `/projects`.
   - The status set decides which columns the board draws, and is never empty.
   - Due compares through `sqliteUtcToMs`: `due_at` is ISO from the UI and
     `YYYY-MM-DD HH:MM:SS` from the CLI, and string order differs. *This week*
-    is the calendar's Monday-first `startOfWeek`.
+    is the calendar's `startOfWeek` ([calendar.md](./calendar.md)).
   - Only status and view persist (`oculus-tasks-status`, `oculus-tasks-view`).
   - Under a filter the counter reads `N shown` rather than `done/total`.
 - **There is no manual order here.** `position` is a slot inside one project's

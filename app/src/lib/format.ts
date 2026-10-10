@@ -1,3 +1,5 @@
+import { displayLocale } from "@/lib/locale";
+
 /** "2026-07-14-welcome-to-comp30022-it-project" → "Welcome to COMP30022 IT
  *  Project". Only for slugged .md names. */
 export function humanizeSlug(raw: string): string {
@@ -103,7 +105,7 @@ export function sameDay(a: Date, b: Date): boolean {
 
 /** "12 Aug". */
 export function fmtShortDate(d: Date): string {
-  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return d.toLocaleDateString(displayLocale, { day: "numeric", month: "short" });
 }
 
 /** "Sat 16 Aug — Today", "Fri 15 Aug — Yesterday", else "Thu 14 Aug" (+ year). */
