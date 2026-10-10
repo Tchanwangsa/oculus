@@ -463,6 +463,12 @@ pub const SHEET_UNREADABLE: &str = "sheet-unreadable";
 pub enum ParseError {
     /// No token is stored. Nothing will parse until one is.
     MissingCredentials,
+    /// A token may be stored, but the keychain refused to hand it over (a
+    /// denied prompt, or a sandboxed process). Holds the keychain's own error.
+    UnreadableCredentials(String),
+    /// `oculus-keyd`, which holds the token, refused this process or could not
+    /// use its vault. Latching: every request goes through it.
+    Broker(String),
     /// The backend refused the token. Latching: every other file would too.
     RejectedCredentials { code: Option<String>, expired: bool },
     /// The daily allowance is spent; repairs itself at the next reset.
@@ -487,10 +493,12 @@ pub enum ParseError {
 impl ParseError {
     /// The frozen discriminant the failure UI branches on (`Display` may be
     /// reworded). `app/src/lib/parseState.ts` matches `/credential|token/i`
-    /// against it, so both credential variants keep that word.
+    /// against it, so every credential variant keeps that word.
     pub fn kind(&self) -> &'static str {
         match self {
             ParseError::MissingCredentials => "missing_credentials",
+            ParseError::UnreadableCredentials(_) => "unreadable_credentials",
+            ParseError::Broker(_) => "credential_broker",
             ParseError::RejectedCredentials { .. } => "rejected_credentials",
             ParseError::QuotaExhausted => "quota_exhausted",
             ParseError::Offline(_) => "offline",
@@ -510,7 +518,9 @@ impl ParseError {
             ParseError::Offline(_)
             | ParseError::Io(_)
             | ParseError::QuotaExhausted
-            | ParseError::NotReady { .. } => true,
+            | ParseError::NotReady { .. }
+            | ParseError::UnreadableCredentials(_)
+            | ParseError::Broker(_) => true,
             ParseError::MissingCredentials
             | ParseError::RejectedCredentials { .. }
             | ParseError::TooLarge { .. }
@@ -525,6 +535,8 @@ impl ParseError {
         matches!(
             self,
             ParseError::MissingCredentials
+                | ParseError::UnreadableCredentials(_)
+                | ParseError::Broker(_)
                 | ParseError::RejectedCredentials { .. }
                 | ParseError::QuotaExhausted
                 | ParseError::VersionMismatch { .. }
@@ -543,6 +555,16 @@ impl fmt::Display for ParseError {
                     "No MinerU API token is saved — add one in Settings to parse PDFs."
                 )
             }
+            ParseError::UnreadableCredentials(detail) => write!(
+                f,
+                "The keychain refused to give out the MinerU API token ({detail}). The token \
+                 is not missing — macOS denied this process access to it."
+            ),
+            ParseError::Broker(detail) => write!(
+                f,
+                "oculus-keyd, which holds the MinerU token, could not send this request: \
+                 {detail}"
+            ),
             ParseError::RejectedCredentials { code, expired } => {
                 let code = code
                     .as_deref()
@@ -666,18 +688,23 @@ impl Engine {
 /// Where a backend's token comes from, if it needs one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CredentialSource {
-    /// The macOS keychain, via `crate::mineru`; the token never enters SQLite
-    /// or the WebView.
+    /// `oculus-keyd` when it is installed and the API root is MinerU's own,
+    /// else the macOS keychain via `crate::mineru` (`MinerUCloud::with_config`).
+    /// The token never enters SQLite or the WebView.
     Keychain,
     /// Loopback to a server on this machine: nothing to authenticate.
     None,
 }
 
 impl CredentialSource {
-    pub fn token(self) -> Option<String> {
+    /// The keychain's token, for the path that runs with keyd absent. A
+    /// refusal is `UnreadableCredentials`, never "no token".
+    pub fn token(self) -> Result<Option<String>, ParseError> {
         match self {
-            CredentialSource::Keychain => crate::mineru::stored_api_key(),
-            CredentialSource::None => None,
+            CredentialSource::Keychain => {
+                crate::mineru::fetch_api_key().map_err(ParseError::UnreadableCredentials)
+            }
+            CredentialSource::None => Ok(None),
         }
     }
 }
@@ -1058,6 +1085,42 @@ mod tests {
         assert!(!error.retryable());
         assert!(!error.latching());
         assert!(error.to_string().starts_with("Skipped"), "{error}");
+    }
+
+    #[test]
+    fn credential_failures_keep_the_word_the_failure_ui_matches_on() {
+        for error in [
+            ParseError::MissingCredentials,
+            ParseError::RejectedCredentials {
+                code: None,
+                expired: false,
+            },
+        ] {
+            assert!(error.kind().contains("credential"), "{}", error.kind());
+            assert!(!error.retryable());
+            assert!(error.latching());
+        }
+        // Retrying asks the keychain again, and that prompt can be allowed.
+        let unreadable = ParseError::UnreadableCredentials("denied".into());
+        assert_eq!(unreadable.kind(), "unreadable_credentials");
+        assert!(unreadable.retryable());
+        assert!(unreadable.latching());
+        let shown = unreadable.to_string();
+        assert!(!shown.contains("No MinerU API token"), "{shown}");
+        assert!(
+            shown.contains("MinerU") && shown.contains("denied"),
+            "{shown}"
+        );
+        let broker = ParseError::Broker("caller refused".into());
+        assert_eq!(broker.kind(), "credential_broker");
+        assert!(broker.retryable());
+        assert!(broker.latching());
+        let shown = broker.to_string();
+        assert!(!shown.contains("keychain refused"), "{shown}");
+        assert!(
+            shown.contains("MinerU token") && shown.contains("caller refused"),
+            "{shown}"
+        );
     }
 
     #[test]

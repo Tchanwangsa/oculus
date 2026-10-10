@@ -8,6 +8,12 @@
 //! * **Failures are scoped**: only credentials, quota and a dead poll channel
 //!   condemn the batch. See `Scope`.
 //! * **Progress is counted**: per-task page counts are summed, never inferred.
+//!
+//! The two API calls go through `oculus-keyd` when it is installed and the
+//! API root is MinerU's own, so this process never holds the token; otherwise
+//! straight to the API root with the keychain's token (`with_config`). Both
+//! routes hand `api_json` the same `RawResponse`. The signed upload PUT and
+//! the result download carry no token and always go direct.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -20,9 +26,10 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use url::Url;
 
+use crate::credentials::{Credentialed, KeydError, RawResponse};
 use crate::parse::{
-    check_size, parse_config, Health, ParseError, ParseOutput, ParsePage, Parser, Phase, Progress,
-    Skips, PARSER_VERSION,
+    check_size, parse_config, CredentialSource, Health, ParseConfig, ParseError, ParseOutput,
+    ParsePage, Parser, Phase, Progress, Skips, CLOUD_BASE_URL, PARSER_VERSION,
 };
 use crate::ratelimit::{hold, nap, transport_detail, Retry, TokenBucket};
 
@@ -35,6 +42,9 @@ use super::{render, result_tls, WorkDir};
 
 /// The `backend` stamped into every record this client writes.
 pub const BACKEND: &str = "mineru-cloud";
+
+/// `CLOUD_BASE_URL`'s path, which keyd's `forward` is given in place of a URL.
+const CLOUD_PATH: &str = "/api/v4";
 
 /// Attempts per API call. A 429 deliberately does not consume one.
 const ATTEMPTS: u32 = 4;
@@ -344,10 +354,49 @@ fn scope_of(error: &ParseError) -> Scope {
 
 // ── The client ───────────────────────────────────────────────────────────────
 
+/// How an API call gets its token.
+#[derive(Clone)]
+enum Auth {
+    /// This process holds the token: keyd is absent, or the API root is not
+    /// MinerU's.
+    Direct(Arc<String>),
+    /// keyd adds it; the token never enters this process.
+    Keyd(Arc<Credentialed>),
+}
+
+/// An API call that got no answer. `Transport` backs off and retries like a
+/// dropped connection; `Fatal` ends the call.
+enum Unanswered {
+    Transport(String),
+    Fatal(ParseError),
+}
+
+impl Unanswered {
+    /// keyd's refusals in the seam's vocabulary. `upstream` and a broken
+    /// socket are a failure to reach MinerU, so they back off and retry.
+    fn from_keyd(error: KeydError) -> Self {
+        match error {
+            KeydError::Missing(_) | KeydError::NoSession(..) => {
+                Unanswered::Fatal(ParseError::MissingCredentials)
+            }
+            KeydError::Keychain(detail) => {
+                Unanswered::Fatal(ParseError::UnreadableCredentials(detail))
+            }
+            KeydError::Upstream(detail) | KeydError::Broken(detail) => {
+                Unanswered::Transport(detail)
+            }
+            KeydError::Absent => Unanswered::Transport("oculus-keyd stopped listening".into()),
+            other @ (KeydError::Request(_) | KeydError::Caller(_) | KeydError::Vault(_)) => {
+                Unanswered::Fatal(ParseError::Broker(other.to_string()))
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct MinerUCloud {
     base_url: Arc<String>,
-    token: Arc<String>,
+    auth: Auth,
     ledger: Arc<UsageLedger>,
     submit: Arc<TokenBucket>,
     poll: Arc<TokenBucket>,
@@ -358,10 +407,42 @@ pub struct MinerUCloud {
 
 impl MinerUCloud {
     /// The client the app uses: engine and API root from the settings row,
-    /// token from the keychain.
+    /// token through keyd or from the keychain (`with_config_in`).
     pub fn from_config() -> Result<Self, ParseError> {
-        let config = parse_config();
-        let token = config.credentials.token().unwrap_or_default();
+        Self::with_config(&parse_config())
+    }
+
+    pub fn with_config(config: &ParseConfig) -> Result<Self, ParseError> {
+        Self::with_config_in(config, &crate::paths::data_dir(), || {
+            config.credentials.token()
+        })
+    }
+
+    /// keyd when it is installed and `config` names MinerU's own API root, so
+    /// keyd's fixed origin is the one meant; otherwise the token from
+    /// `direct_token`. Only an absent keyd falls back. keyd's `has` keeps the
+    /// early "no token saved" check.
+    fn with_config_in(
+        config: &ParseConfig,
+        data_dir: &Path,
+        direct_token: impl FnOnce() -> Result<Option<String>, ParseError>,
+    ) -> Result<Self, ParseError> {
+        let cloud_root = config.base_url.trim_end_matches('/') == CLOUD_BASE_URL;
+        if config.credentials == CredentialSource::Keychain && cloud_root {
+            let broker = Credentialed::at(data_dir);
+            match broker.has(crate::mineru::SECRET) {
+                Ok(true) => return Ok(Self::through_keyd(broker)),
+                Ok(false) => return Err(ParseError::MissingCredentials),
+                Err(KeydError::Absent) => {}
+                Err(error) => {
+                    return Err(match Unanswered::from_keyd(error) {
+                        Unanswered::Fatal(error) => error,
+                        Unanswered::Transport(detail) => ParseError::Broker(detail),
+                    })
+                }
+            }
+        }
+        let token = direct_token()?.unwrap_or_default();
         Self::new(&config.base_url, &token)
     }
 
@@ -371,15 +452,26 @@ impl MinerUCloud {
         if token.is_empty() {
             return Err(ParseError::MissingCredentials);
         }
-        Ok(Self {
+        Ok(Self::with_auth(
+            base_url,
+            Auth::Direct(Arc::new(token.to_string())),
+        ))
+    }
+
+    fn through_keyd(broker: Credentialed) -> Self {
+        Self::with_auth(CLOUD_BASE_URL, Auth::Keyd(Arc::new(broker)))
+    }
+
+    fn with_auth(base_url: &str, auth: Auth) -> Self {
+        Self {
             base_url: Arc::new(base_url.trim_end_matches('/').to_string()),
-            token: Arc::new(token.to_string()),
+            auth,
             ledger: UsageLedger::shared(),
             submit: submit_bucket(),
             poll: poll_bucket(),
             pages_per_task: MAX_PAGES_PER_TASK,
             time_scale: 1.0,
-        })
+        }
     }
 
     pub fn with_ledger(mut self, ledger: Arc<UsageLedger>) -> Self {
@@ -404,16 +496,80 @@ impl MinerUCloud {
     }
 
     /// Which batch this client's documents may travel in: same token, same API
-    /// root. Hashed so nothing printable holds the token.
+    /// root. Hashed so nothing printable holds the token. Through keyd the
+    /// token is keyd's, so every such client shares one route identity.
     pub fn batch_key(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.base_url.hash(&mut hasher);
-        self.token.hash(&mut hasher);
+        match &self.auth {
+            Auth::Direct(token) => token.hash(&mut hasher),
+            Auth::Keyd(_) => "keyd".hash(&mut hasher),
+        }
         hasher.finish()
     }
 
     // ── Protocol ─────────────────────────────────────────────────────────────
+
+    /// One request by this client's route. A status is an answer, whatever
+    /// it is; `api_json` reads it.
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&[u8]>,
+    ) -> Result<RawResponse, Unanswered> {
+        let mut headers = vec![("Accept", "application/json")];
+        if body.is_some() {
+            headers.push(("Content-Type", "application/json"));
+        }
+        match &self.auth {
+            Auth::Keyd(broker) => broker
+                .send(
+                    crate::mineru::SECRET,
+                    method,
+                    &format!("{CLOUD_PATH}{path}"),
+                    &headers,
+                    body.unwrap_or_default(),
+                    Some(API_TIMEOUT),
+                )
+                .map_err(Unanswered::from_keyd),
+            Auth::Direct(token) => {
+                let mut request = ureq::request(method, &format!("{}{}", self.base_url, path))
+                    .timeout(API_TIMEOUT)
+                    .set("Authorization", &format!("Bearer {token}"));
+                for (name, value) in &headers {
+                    request = request.set(name, value);
+                }
+                let sent = match body {
+                    Some(body) => request.send_bytes(body),
+                    None => request.call(),
+                };
+                let response = match sent {
+                    Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+                    Err(ureq::Error::Transport(transport)) => {
+                        return Err(Unanswered::Transport(transport_detail(&transport)))
+                    }
+                };
+                let status = response.status();
+                let headers = response
+                    .headers_names()
+                    .into_iter()
+                    .filter_map(|name| {
+                        let value = response.header(&name)?.to_string();
+                        Some((name, value))
+                    })
+                    .collect();
+                let body = response.into_string().unwrap_or_default().into_bytes();
+                Ok(RawResponse {
+                    status,
+                    headers,
+                    body,
+                    signin: None,
+                })
+            }
+        }
+    }
 
     /// One API call, with the shared retry policy. A 429 sleeps `Retry-After`
     /// (clamped to 1..60s) **without consuming an attempt** — per-minute
@@ -425,29 +581,25 @@ impl MinerUCloud {
         body: Option<Value>,
         bucket: &TokenBucket,
     ) -> Result<Value, ParseError> {
-        let url = format!("{}{}", self.base_url, path);
+        // `ureq`'s `json` feature is off, so the body is encoded here.
+        let encoded = body.map(|value| serde_json::to_vec(&value).unwrap_or_default());
         let mut retry = Retry::new(ATTEMPTS, self.time_scale);
 
         while retry.attempts_left() {
             bucket.acquire();
-            let request = ureq::request(method, &url)
-                .timeout(API_TIMEOUT)
-                .set("Authorization", &format!("Bearer {}", self.token))
-                .set("Accept", "application/json");
-            // `ureq`'s `json` feature is off, so the body is encoded here.
-            let sent = match &body {
-                Some(value) => {
-                    let encoded = serde_json::to_vec(value).unwrap_or_default();
-                    request
-                        .set("Content-Type", "application/json")
-                        .send_bytes(&encoded)
+            let response = match self.request(method, path, encoded.as_deref()) {
+                Ok(response) => response,
+                Err(Unanswered::Fatal(error)) => return Err(error),
+                Err(Unanswered::Transport(detail)) => {
+                    if retry.back_off() {
+                        continue;
+                    }
+                    return Err(ParseError::Offline(detail));
                 }
-                None => request.call(),
             };
 
-            let response = match sent {
-                Ok(response) => response,
-                Err(ureq::Error::Status(429, response)) => {
+            match response.status {
+                429 => {
                     let wait = response
                         .header("Retry-After")
                         .and_then(|value| value.trim().parse::<f64>().ok())
@@ -456,12 +608,8 @@ impl MinerUCloud {
                     nap(Duration::from_secs_f64(wait), self.time_scale);
                     continue;
                 }
-                Err(ureq::Error::Status(401 | 403, response)) => {
-                    return Err(auth_error(
-                        response.into_string().unwrap_or_default().as_str(),
-                    ))
-                }
-                Err(ureq::Error::Status(status, _)) => {
+                401 | 403 => return Err(auth_error(&String::from_utf8_lossy(&response.body))),
+                status if status >= 400 => {
                     if status >= 500 && retry.back_off() {
                         continue;
                     }
@@ -469,16 +617,10 @@ impl MinerUCloud {
                         code: format!("http-{status}"),
                     });
                 }
-                Err(ureq::Error::Transport(transport)) => {
-                    if retry.back_off() {
-                        continue;
-                    }
-                    return Err(ParseError::Offline(transport_detail(&transport)));
-                }
-            };
+                _ => {}
+            }
 
-            let body_text = response.into_string().unwrap_or_default();
-            let payload = match serde_json::from_str::<Value>(&body_text).ok() {
+            let payload = match serde_json::from_slice::<Value>(&response.body).ok() {
                 Some(payload) => payload,
                 None if retry.back_off() => continue,
                 None => return Err(ParseError::Offline("unreadable response".into())),
@@ -793,10 +935,15 @@ impl MinerUCloud {
             .get("batch_id")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        if batch_id.is_empty() {
-            return Err(ParseError::Document {
-                code: "missing-batch-id".into(),
-            });
+        // It goes into the poll's path, and keyd refuses a path with anything
+        // else in it. Only this batch's documents fail; the next batch runs.
+        if !is_batch_id(batch_id) {
+            for task in &live {
+                failures[task.document].get_or_insert(ParseError::Document {
+                    code: "batch-id".into(),
+                });
+            }
+            return Ok(());
         }
 
         // Smallest file first: extraction starts only once every PUT is in,
@@ -1151,7 +1298,8 @@ impl Parser for MinerUCloud {
         ))
     }
 
-    /// Ready whenever it has a token, which `new` guarantees. Quota is not
+    /// Ready whenever it has a token, which construction checked (keyd's
+    /// `has`, or the keychain's token). Quota is not
     /// readiness: it surfaces as `QuotaExhausted` on the call that hits it.
     fn health(&self) -> Health {
         Health {
@@ -1177,6 +1325,16 @@ fn auth_error(body: &str) -> ParseError {
         });
     let expired = code.as_deref() == Some("A0211");
     ParseError::RejectedCredentials { code, expired }
+}
+
+/// A batch id that can sit in a path as it is: non-empty, unreserved
+/// characters only.
+fn is_batch_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._~-".contains(&b))
 }
 
 /// Clip a network-supplied `code` to something that can only be a code.
@@ -1322,7 +1480,7 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    use crate::test_support::{write_pdf, FakeServer, Reply, Scratch};
+    use crate::test_support::{write_pdf, FakeKeyd, FakeServer, Reply, Scratch};
 
     fn zip_of(entries: &[(&str, Vec<u8>)]) -> Vec<u8> {
         let mut buffer = std::io::Cursor::new(Vec::new());
@@ -1995,6 +2153,369 @@ mod tests {
         let usage = book.snapshot();
         assert_eq!(usage.files, 1);
         assert_eq!(usage.pages, 5);
+    }
+
+    #[test]
+    fn a_batch_id_that_cannot_sit_in_a_path_fails_only_its_own_batch() {
+        let scratch = Scratch::new("cloud-batch-id");
+        // One page per task: `first` fills the first batch, `second` the next.
+        let first = scratch.join("first.pdf");
+        write_pdf(&first, MAX_FILES_PER_BATCH);
+        let second = scratch.join("second.pdf");
+        write_pdf(&second, 1);
+        let zip = zip_of(&[("r/x_content_list.json", content_list(0, 1))]);
+        let submitted = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = submitted.clone();
+        let fake = FakeServer::start(move |hit| {
+            let origin = hit.origin.clone();
+            if hit.method == "POST" {
+                let files = hit.json()["files"].as_array().unwrap().clone();
+                if files.len() == MAX_FILES_PER_BATCH {
+                    return Reply::json(json!({ "code": 0, "data": {
+                        "batch_id": "b/../admin",
+                        "file_urls": (0..files.len()).map(|i| format!("{origin}/upload/{i}")).collect::<Vec<_>>(),
+                    }}));
+                }
+                *hold(&seen) = files
+                    .iter()
+                    .map(|file| file["data_id"].as_str().unwrap().to_string())
+                    .collect();
+                return Reply::json(json!({ "code": 0, "data": {
+                    "batch_id": "b-2",
+                    "file_urls": [format!("{origin}/upload/0")],
+                }}));
+            }
+            if hit.method == "PUT" {
+                return Reply::bytes(Vec::new());
+            }
+            if hit.url.starts_with("/result/") {
+                return Reply::bytes(zip.clone());
+            }
+            let results: Vec<Value> = hold(&seen)
+                .iter()
+                .map(|id| json!({ "data_id": id, "state": "done", "full_zip_url": format!("{origin}/result/0.zip") }))
+                .collect();
+            Reply::json(json!({ "code": 0, "data": { "extract_result": results }}))
+        });
+        let client = client(&fake, ledger(&scratch)).with_pages_per_task(1);
+        let documents: Vec<Arc<CloudDocument>> = [&first, &second]
+            .iter()
+            .map(|pdf| CloudDocument::new(pdf, &scratch.join("images"), "images"))
+            .collect();
+        let results = client.extract_documents(&documents);
+
+        match &results[0] {
+            Err(error @ ParseError::Document { code }) => {
+                assert_eq!(code, "batch-id");
+                assert!(!error.latching());
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(results[1].is_ok(), "{:?}", results[1]);
+        let hits = fake.hits();
+        assert!(
+            hits.iter().all(|hit| !hit.url.contains("admin")),
+            "the bad id was never polled"
+        );
+        assert_eq!(hits.iter().filter(|hit| hit.method == "PUT").count(), 1);
+        assert!(!hold(&submitted).is_empty());
+    }
+
+    #[test]
+    fn a_batch_id_is_unreserved_characters_only() {
+        for good in ["b-1", "1e2c4f.7_~", "AB12"] {
+            assert!(is_batch_id(good), "{good}");
+        }
+        for bad in [
+            "",
+            "a/b",
+            "..%2f",
+            "a b",
+            "a?x=1",
+            "a&b",
+            "ü",
+            &"a".repeat(129),
+        ] {
+            assert!(!is_batch_id(bad), "{bad}");
+        }
+    }
+
+    // ── Through oculus-keyd ──────────────────────────────────────────────────
+
+    fn cloud() -> ParseConfig {
+        ParseConfig {
+            engine: crate::parse::Engine::Cloud,
+            base_url: CLOUD_BASE_URL.to_string(),
+            credentials: CredentialSource::Keychain,
+            accept_expired_result_cert: true,
+        }
+    }
+
+    /// A keyd holding a token that answers the `n`th `forward` with `answer(n)`.
+    fn keyd_with<F>(scratch: &Scratch, answer: F) -> FakeKeyd
+    where
+        F: Fn(usize) -> (Value, Vec<u8>) + Send + 'static,
+    {
+        let forwards = std::sync::atomic::AtomicUsize::new(0);
+        FakeKeyd::start(scratch, move |req, _| match req["op"].as_str().unwrap() {
+            "has" => (json!({ "has": true }), vec![]),
+            "forward" => answer(forwards.fetch_add(1, AtomicOrdering::SeqCst)),
+            op => (
+                json!({ "error": "request", "detail": format!("unexpected {op}") }),
+                vec![],
+            ),
+        })
+    }
+
+    fn forwarded(status: u16, headers: Value, body: &Value) -> (Value, Vec<u8>) {
+        let body = body.to_string().into_bytes();
+        (
+            json!({ "status": status, "headers": headers, "body_len": body.len() }),
+            body,
+        )
+    }
+
+    fn keyd_client(scratch: &Scratch) -> MinerUCloud {
+        let Ok(client) = MinerUCloud::with_config_in(&cloud(), scratch, || {
+            panic!("the keychain must not be read while keyd is installed")
+        }) else {
+            panic!("no client through keyd");
+        };
+        client
+            .with_ledger(ledger(scratch))
+            .with_buckets(
+                Arc::new(TokenBucket::new(60_000.0)),
+                Arc::new(TokenBucket::new(60_000.0)),
+            )
+            .with_time_scale(0.005)
+    }
+
+    fn config_error(config: &ParseConfig, scratch: &Scratch) -> ParseError {
+        match MinerUCloud::with_config_in(config, scratch, || {
+            Ok(Some("test-only-token".to_string()))
+        }) {
+            Ok(_) => panic!("expected an error"),
+            Err(error) => error,
+        }
+    }
+
+    fn poll(client: &MinerUCloud) -> Result<Value, ParseError> {
+        client.api_json(
+            "GET",
+            "/extract-results/batch/b-1",
+            None,
+            &client.poll.clone(),
+        )
+    }
+
+    #[test]
+    fn the_keyd_path_is_the_cloud_roots_path() {
+        assert!(CLOUD_BASE_URL.ends_with(CLOUD_PATH));
+        assert_eq!(
+            &CLOUD_BASE_URL[..CLOUD_BASE_URL.len() - CLOUD_PATH.len()],
+            "https://mineru.net"
+        );
+    }
+
+    #[test]
+    fn through_keyd_both_calls_are_forwarded_without_the_token() {
+        let scratch = Scratch::new("mk-ok");
+        let keyd = keyd_with(&scratch, |_| {
+            forwarded(200, json!([]), &json!({ "code": 0, "data": { "n": 1 } }))
+        });
+        let client = keyd_client(&scratch);
+        assert_eq!(poll(&client).unwrap()["n"], 1);
+        client
+            .api_json(
+                "POST",
+                "/file-urls/batch",
+                Some(json!({ "files": [] })),
+                &client.submit.clone(),
+            )
+            .unwrap();
+
+        assert_eq!(keyd.ops(), ["has", "forward", "forward"]);
+        let requests = keyd.requests();
+        let (get, body) = &requests[1];
+        assert_eq!(get["secret"], "mineru");
+        assert_eq!(get["method"], "GET");
+        assert_eq!(get["path"], "/api/v4/extract-results/batch/b-1");
+        assert_eq!(get["headers"], json!([["Accept", "application/json"]]));
+        assert!(body.is_empty());
+        let (post, body) = &requests[2];
+        assert_eq!(post["method"], "POST");
+        assert_eq!(post["path"], "/api/v4/file-urls/batch");
+        assert_eq!(
+            post["headers"],
+            json!([
+                ["Accept", "application/json"],
+                ["Content-Type", "application/json"]
+            ])
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(body).unwrap(),
+            json!({ "files": [] })
+        );
+        for (header, _) in &requests {
+            assert!(
+                !header.to_string().to_lowercase().contains("authorization"),
+                "{header}"
+            );
+        }
+    }
+
+    #[test]
+    fn through_keyd_a_429_is_waited_out_without_spending_an_attempt() {
+        let scratch = Scratch::new("mk-429");
+        let keyd = keyd_with(&scratch, |n| {
+            if n < 6 {
+                forwarded(
+                    429,
+                    json!([["retry-after", "1"]]),
+                    &json!({ "msg": "slow" }),
+                )
+            } else {
+                forwarded(200, json!([]), &json!({ "code": 0, "data": {} }))
+            }
+        });
+        poll(&keyd_client(&scratch)).unwrap();
+        assert_eq!(keyd.ops().len(), 1 + 7);
+    }
+
+    #[test]
+    fn through_keyd_a_refused_token_reads_as_it_does_direct() {
+        let scratch = Scratch::new("mk-401");
+        let keyd = keyd_with(&scratch, |_| {
+            forwarded(401, json!([]), &json!({ "msgCode": "A0211" }))
+        });
+        let error = poll(&keyd_client(&scratch)).unwrap_err();
+        assert!(
+            matches!(error, ParseError::RejectedCredentials { expired: true, .. }),
+            "{error:?}"
+        );
+        assert_eq!(
+            keyd.ops(),
+            ["has", "forward"],
+            "a rejected token is not retried"
+        );
+    }
+
+    #[test]
+    fn keyd_without_a_token_is_missing_before_and_during_a_request() {
+        let scratch = Scratch::new("mk-none");
+        let _keyd = FakeKeyd::start(&scratch, |_, _| (json!({ "has": false }), vec![]));
+        assert!(matches!(
+            config_error(&cloud(), &scratch),
+            ParseError::MissingCredentials
+        ));
+
+        // Deleted between the check and the request.
+        let scratch = Scratch::new("mk-gone");
+        let _keyd = keyd_with(&scratch, |_| {
+            (
+                json!({ "error": "missing", "detail": "no mineru key is stored" }),
+                vec![],
+            )
+        });
+        let error = poll(&keyd_client(&scratch)).unwrap_err();
+        assert_eq!(error.kind(), "missing_credentials");
+        assert!(error.latching());
+    }
+
+    #[test]
+    fn keyd_reaching_no_origin_backs_off_then_reads_as_offline() {
+        let scratch = Scratch::new("mk-upstream");
+        let keyd = keyd_with(&scratch, |_| {
+            (
+                json!({ "error": "upstream", "detail": "Dns Failed: no such host" }),
+                vec![],
+            )
+        });
+        let error = poll(&keyd_client(&scratch)).unwrap_err();
+        assert_eq!(error.kind(), "offline");
+        assert!(error.to_string().contains("Dns Failed"), "{error}");
+        assert_eq!(keyd.ops().len(), 1 + ATTEMPTS as usize);
+    }
+
+    #[test]
+    fn keyds_own_refusals_surface_by_kind() {
+        for (wire, kind) in [
+            ("keychain", "unreadable_credentials"),
+            ("caller", "credential_broker"),
+            ("vault", "credential_broker"),
+        ] {
+            // Asked whether a token is saved.
+            let scratch = Scratch::new("mk-refused");
+            let _keyd = FakeKeyd::start(&scratch, move |_, _| {
+                (json!({ "error": wire, "detail": "refused" }), vec![])
+            });
+            let error = config_error(&cloud(), &scratch);
+            assert_eq!(error.kind(), kind, "{wire}");
+            assert!(error.latching(), "{wire}");
+
+            // Asked to send a request.
+            let scratch = Scratch::new("mk-refused-send");
+            let keyd = keyd_with(&scratch, move |_| {
+                (json!({ "error": wire, "detail": "refused" }), vec![])
+            });
+            let error = poll(&keyd_client(&scratch)).unwrap_err();
+            assert_eq!(error.kind(), kind, "{wire}");
+            assert_eq!(keyd.ops().len(), 2, "{wire} is not retried");
+        }
+    }
+
+    #[test]
+    fn without_keyd_or_off_minerus_root_the_token_is_read_directly() {
+        // No socket: the keychain's token.
+        let scratch = Scratch::new("mk-absent");
+        let Ok(client) = MinerUCloud::with_config_in(&cloud(), &scratch, || {
+            Ok(Some("test-only-token".to_string()))
+        }) else {
+            panic!("a direct client");
+        };
+        assert!(matches!(&client.auth, Auth::Direct(token) if token.as_str() == "test-only-token"));
+        assert!(matches!(
+            MinerUCloud::with_config_in(&cloud(), &scratch, || Ok(None)).err(),
+            Some(ParseError::MissingCredentials)
+        ));
+        let refused = MinerUCloud::with_config_in(&cloud(), &scratch, || {
+            Err(ParseError::UnreadableCredentials("denied".into()))
+        });
+        assert_eq!(refused.err().unwrap().kind(), "unreadable_credentials");
+
+        // A hand-edited `engineUrl` never goes through keyd, even when it is there.
+        let scratch = Scratch::new("mk-elsewhere");
+        let keyd = keyd_with(&scratch, |_| forwarded(500, json!([]), &json!({})));
+        let fake = FakeServer::start(|_| Reply::json(json!({ "code": 0, "data": {} })));
+        let config = ParseConfig {
+            base_url: format!("{}/api/v4", fake.origin()),
+            ..cloud()
+        };
+        let Ok(client) = MinerUCloud::with_config_in(&config, &scratch, || {
+            Ok(Some("test-only-token".to_string()))
+        }) else {
+            panic!("a direct client");
+        };
+        poll(&client.with_ledger(ledger(&scratch))).unwrap();
+        assert!(keyd.requests().is_empty());
+        assert_eq!(
+            fake.hits()[0].header("authorization"),
+            Some("Bearer test-only-token")
+        );
+    }
+
+    #[test]
+    fn clients_through_keyd_share_a_batch_and_direct_ones_go_by_token() {
+        let scratch = Scratch::new("mk-batch");
+        let _keyd = keyd_with(&scratch, |_| forwarded(500, json!([]), &json!({})));
+        assert_eq!(
+            keyd_client(&scratch).batch_key(),
+            keyd_client(&scratch).batch_key()
+        );
+        let direct = |token: &str| MinerUCloud::new(CLOUD_BASE_URL, token).unwrap().batch_key();
+        assert_eq!(direct("a"), direct("a"));
+        assert_ne!(direct("a"), direct("b"));
+        assert_ne!(direct("a"), keyd_client(&scratch).batch_key());
     }
 
     // ── The result archive ───────────────────────────────────────────────────

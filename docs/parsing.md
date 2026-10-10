@@ -24,7 +24,7 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 | Spreadsheets to text: conversion, page rows, startup reconcile | `app/src-tauri/src/sheets.rs` |
 | Skipping a file: the `parse_skip` command and its marks | `app/src-tauri/src/scrape.rs`, `app/src-tauri/src/parse/mod.rs` (`Skips`) |
 | Artifact purging | `app/src-tauri/src/paths.rs` |
-| MinerU keychain commands + the pre-store token probe | `app/src-tauri/src/mineru.rs` |
+| MinerU token commands (through `oculus-keyd`, else the keychain) + the pre-store token probe | `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/credentials.rs` (`CloudKey`) |
 | Engine selection, endpoint override, local probe | `app/src-tauri/src/parse/commands.rs` |
 | Failure vocabulary, rendered | `app/src/lib/parseState.ts` |
 | Live job state, per-file failures, the app-wide latch | `app/src/stores/parseStore.ts` |
@@ -53,6 +53,8 @@ must say so. `ParseError` keeps the answers distinguishable:
 | Variant | `kind()` | Retryable | Latching |
 | --- | --- | --- | --- |
 | `MissingCredentials` | `missing_credentials` | no | yes |
+| `UnreadableCredentials` | `unreadable_credentials` | yes | yes |
+| `Broker` | `credential_broker` | yes | yes |
 | `RejectedCredentials` | `rejected_credentials` | no | yes |
 | `QuotaExhausted` | `quota_exhausted` | yes, later | yes |
 | `Offline` | `offline` | yes | no |
@@ -65,7 +67,12 @@ must say so. `ParseError` keeps the answers distinguishable:
 
 - **`kind()` is a frozen vocabulary**; `Display` is prose and may change.
   `parseState.ts` matches `/credential|token/i` on `kind` to decide whether to
-  point at Settings, which is why both credential variants carry that word.
+  point at Settings, which is why every credential variant carries that word.
+- **`UnreadableCredentials` is not a missing token**: the keychain refused to
+  hand one over (a denied prompt, or `oculus` inside an agent sandbox), so
+  retrying can work once the prompt is allowed. `Broker` is `oculus-keyd`
+  refusing this process or failing to use its vault
+  ([below](#with-oculus-keyd-installed-no-oculus-process-holds-the-mineru-token)).
 - **`latching` separates "this file is broken" from "parsing is down for
   everything"**. Both discriminants are optional — a failure from a previous
   session is only `error` in the DB — and unknown is never coerced into either.
@@ -270,12 +277,38 @@ Reservations are taken before the network call and **never given back** — a
 rollback drifts the count optimistic, toward server-side rejections. MinerU's
 `-60018` latches the ledger until the day rolls over (assumed UTC+8).
 
-**The token lives only in the keychain** — never SQLite, the WebView, a payload
-or a log. `mineru_set_api_key` checks it first by GETting a non-existent task:
+**The token lives in `oculus-keyd`'s vault, or in the keychain without keyd**
+— never SQLite, the WebView, a payload or a log. `mineru_set_api_key` checks it
+first, in the app with the token just typed, by GETting a non-existent task:
 401/403 is a refusal (`A0202` invalid, `A0211` expired), anything else passed,
-and an unreachable MinerU stores it as `unverified`. The client keeps no
-rejection latch; `parseStore`'s session-scoped `ParseLatch` does, and saving a
-token lifts it.
+and an unreachable MinerU stores it as `unverified`. Only then is it stored,
+through keyd when keyd is installed. The client keeps no rejection latch;
+`parseStore`'s session-scoped `ParseLatch` does, and saving a token lifts it.
+`parse_settings` reports a refused check as `credentials_error`, which Settings
+shows in place of "no token".
+
+## With `oculus-keyd` installed, no Oculus process holds the MinerU token
+
+`MinerUCloud::with_config` picks the route once per client, as Voyage's does
+([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key)).
+If the API root is MinerU's own (`https://mineru.net/api/v4`) and keyd answers
+`has mineru`, the two token-bearing calls (the batch submit and the poll) are
+keyd `forward`s under `/api/v4/`. Only an absent keyd means the direct path
+with the keychain's token, and a hand-edited `engineUrl` always takes it. The
+signed upload PUT and the result download carry no token and always go direct.
+
+- Both routes hand `api_json` the same status, headers and body, so the 429
+  wait, the auth codes, the `-60018` latch and the retry ladder read one way.
+- keyd's errors map onto `ParseError`: `missing` is `MissingCredentials`,
+  `keychain` is `UnreadableCredentials`, `upstream` or a dropped socket backs
+  off and ends `Offline`, and a refused caller, request or damaged vault is
+  `Broker`.
+- The batch id MinerU returns goes into the poll's path, and keyd refuses any
+  path with characters outside a plain set. So on either route an id that is
+  empty or holds anything but `[A-Za-z0-9._~-]` fails that batch's documents
+  as `Document` with code `batch-id`; later batches still run.
+- Every client through keyd shares one batch key, so documents still travel
+  together.
 
 ## Spreadsheets are converted to text, never parsed
 

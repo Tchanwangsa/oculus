@@ -269,7 +269,8 @@ local Whisper, then on-device speech until the user drags them into another.
 An `Engine` turns one audio file into timed segments; the pipeline owns
 everything else. `engines()` in `app/src-tauri/src/transcribe/mod.rs` lists
 the configured ones in that order before any decoding: Groq when it is on and
-the keychain has its key, whisper.cpp when it is on, a model is downloaded
+its key is saved (keyd's `has groq`, or the keychain when keyd is absent),
+whisper.cpp when it is on, a model is downloaded
 and `whisper-cli` is found, Apple's on-device recogniser on macOS when it is
 on and its helper is found. With none, the run fails at once and says to set
 one up in Settings → Transcription.
@@ -333,8 +334,17 @@ unless it is `auto` (`app/src-tauri/src/transcribe/groq.rs`).
   `RateLimited` and says when to retry: `retry-after`, else Groq's own "try
   again in", else the reset header.
 - **Saving the key lists Groq's models, which is free** — Settings never
-  transcribes ([harness.md](./harness.md#no-model-is-ever-probed)). The key is
-  keychain-only, in `app/src-tauri/src/groq.rs`, shaped like `voyage.rs`.
+  transcribes ([harness.md](./harness.md#no-model-is-ever-probed)). The probe
+  runs in the app with the key just typed; the key is then stored through
+  `oculus-keyd` when it is installed, else in the keychain
+  (`app/src-tauri/src/groq.rs`, shaped like `voyage.rs`).
+- **With keyd installed, the upload goes through it**
+  (`app/src-tauri/src/transcribe/groq.rs`): a `forward` of the multipart body
+  to `/openai/v1/audio/transcriptions` with no timeout, keyd adding the key
+  ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+  Both routes hand back the same status, headers and body, so the 429, 401
+  and 413 messages read one way; keyd's own refusals say oculus-keyd could
+  not send the request.
 
 ### On-device speech: a Swift helper
 

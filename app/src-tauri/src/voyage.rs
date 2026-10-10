@@ -1,13 +1,22 @@
 //! Voyage AI credential storage.
 //!
-//! The key lives only in the macOS keychain, never in SQLite or the WebView.
-//! Same shape as `mineru.rs`: three commands, an `"ok"`/`"unverified"` answer.
+//! With `oculus-keyd` installed the key lives in its vault, and these commands
+//! go through keyd; without it, in the macOS keychain (`credentials::CloudKey`).
+//! Never in SQLite or the WebView. Same shape as `mineru.rs` and `groq.rs`:
+//! three commands, an `"ok"`/`"unverified"` answer.
 
 use std::time::Duration;
 
-use crate::credentials::{Secret, Verdict};
+use crate::credentials::{CloudKey, Secret, Verdict};
 
-const KEY: Secret = Secret::new("com.tchan.oculus.voyage", "voyage");
+/// The name keyd stores the key under.
+pub(crate) const SECRET: &str = "voyage";
+
+pub(crate) static KEY: CloudKey = CloudKey {
+    secret: SECRET,
+    what: "Voyage API key",
+    keychain: Secret::new("com.tchan.oculus.voyage", "voyage"),
+};
 
 /// The cheapest authenticated call Voyage has: Voyage has no free
 /// authenticated GET, so the probe embeds a two-letter string (one text token).
@@ -101,15 +110,16 @@ fn probe(key: &str) -> Result<Verdict, String> {
 
 /// Store a key, but only one Voyage has not refused. Returns `"ok"` when it
 /// was checked against Voyage and `"unverified"` when Voyage was unreachable
-/// or rate-limited and the key was stored on trust.
+/// or rate-limited and the key was stored on trust. The probe runs here with
+/// the key just typed; only the store goes through keyd.
 #[tauri::command]
 pub fn voyage_set_api_key(key: String) -> Result<String, String> {
-    KEY.store_checked(&key, probe)
+    KEY.set(&key, probe)
 }
 
 #[tauri::command]
 pub fn voyage_has_api_key() -> Result<bool, String> {
-    KEY.has("Voyage API key")
+    KEY.has()
 }
 
 #[tauri::command]

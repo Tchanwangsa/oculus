@@ -21,6 +21,8 @@ interface ParseSettings {
   /** The version *this app* writes, for the handshake below. */
   parser_version: number;
   credentials_ready: boolean;
+  /** The keychain or oculus-keyd refused to say whether a token is saved. */
+  credentials_error: string | null;
   /** Download results through MinerU's expired CDN certificate. */
   accept_expired_result_cert: boolean;
   engines: EngineOption[];
@@ -200,6 +202,7 @@ export function ParserSection() {
       const verdict = await invoke<string>("mineru_set_api_key", { key: token.trim() });
       setToken("");
       setHasToken(true);
+      setSettings((prev) => (prev ? { ...prev, credentials_ready: true, credentials_error: null } : prev));
       // An accepted token lifts the latch; the sweep resumes outstanding files.
       clearLatch();
       setTokenNote(
@@ -235,6 +238,7 @@ export function ParserSection() {
       await invoke("mineru_delete_api_key");
       setHasToken(false);
       setToken("");
+      setSettings((prev) => (prev ? { ...prev, credentials_ready: false, credentials_error: null } : prev));
     } catch (cause) {
       console.error("MinerU token removal failed", cause);
       setTokenNote({ kind: "error", text: String(cause) });
@@ -273,6 +277,12 @@ export function ParserSection() {
           </p>
         ))}
 
+        {isCloud && settings?.credentials_error ? (
+          <p className="text-[11px] leading-relaxed text-destructive" data-selectable>
+            {settings.credentials_error}
+          </p>
+        ) : null}
+
         {/* Cloud only: a local server needs no credential. */}
         {isCloud ? (
           <CredentialField
@@ -299,7 +309,8 @@ export function ParserSection() {
                 or can be mentioned in chat.
               </p>
             ) : null}
-            {hasToken === null ? (
+            {/* The refusal itself is shown above, from the settings answer. */}
+            {hasToken === null && !settings?.credentials_error ? (
               <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
                 {tokenCheckError
                   ? `Could not check whether a token is saved: ${tokenCheckError}`

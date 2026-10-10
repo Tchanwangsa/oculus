@@ -1,6 +1,6 @@
 // Paths and cargo invocation shared by the development and bundle scripts.
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,16 +10,17 @@ export const manifest = join(rust, "Cargo.toml");
 export const binaries = join(rust, "binaries");
 export const exe = process.platform === "win32" ? ".exe" : "";
 export const cliPath = (profile = "release") => join(rust, "target", profile, `oculus${exe}`);
-export const cliBuildArgs = (profile = "release") => [
+export const cliBuildArgs = (profile = "release", features = []) => [
   "build", ...(profile === "release" ? ["--release"] : []),
+  ...(features.length ? ["--features", features.join(",")] : []),
   "--manifest-path", manifest, "--bin", "oculus",
 ];
 
 /** Remove the previous binary so a build that produces none cannot pass on it. */
-export function buildCli(profile = "release") {
+export function buildCli(profile = "release", features = []) {
   const binary = cliPath(profile);
   rmSync(binary, { force: true });
-  execFileSync("cargo", cliBuildArgs(profile), { stdio: "inherit" });
+  execFileSync("cargo", cliBuildArgs(profile, features), { stdio: "inherit" });
   if (!existsSync(binary)) throw new Error(`cargo reported success but ${binary} is not there`);
   return binary;
 }
@@ -38,6 +39,26 @@ export function stageCli(binary) {
   rmSync(dest, { force: true });
   copyFileSync(binary, dest);
   chmodSync(dest, 0o755);
+}
+
+/** The `externalBin` copy of keyd under `dir` (`binaries/` unless a script is pointed elsewhere). */
+export const keydSidecar = (dir = binaries) => join(dir, `oculus-keyd-${hostTriple()}${exe}`);
+
+/**
+ * Copy a signed keyd over its sidecar, unless the sidecar already holds the
+ * same bytes: a reproducible build then leaves the file alone, so tauri-build
+ * (which reruns when a sidecar changes) has nothing to redo.
+ */
+export function stageKeyd(binary, dir = binaries) {
+  const dest = keydSidecar(dir);
+  mkdirSync(dir, { recursive: true });
+  if (existsSync(dest) && readFileSync(dest).equals(readFileSync(binary))) return dest;
+  // A new file, never an overwrite: a signed binary rewritten in place leaves
+  // the kernel's cached signature stale.
+  rmSync(dest, { force: true });
+  copyFileSync(binary, dest);
+  chmodSync(dest, 0o755);
+  return dest;
 }
 
 /** Tauri sidecars must use rustc's exact host triple. */

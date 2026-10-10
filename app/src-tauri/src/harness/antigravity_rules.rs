@@ -150,10 +150,6 @@ pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]
         "write_file({})",
         crate::paths::ed_token_path(library).display()
     ));
-    deny.push(format!(
-        "write_file({})",
-        crate::paths::keepalive_log_path(library).display()
-    ));
     deny.push(format!("write_file({})", state_path(library).display()));
     // `sqlite3` on *this* database only: the rules are global, and a blanket
     // deny would ban it from the student's own sessions. A speed bump in front
@@ -702,6 +698,33 @@ mod tests {
                 r.deny
             );
         }
+    }
+
+    /// `oculus` runs in agy's terminal sandbox and must reach keyd's socket:
+    /// no deny covers it, and the rules grant the CLI to run.
+    #[test]
+    fn no_rule_denies_keyds_socket_and_the_cli_may_run() {
+        let lib = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
+        let cli = OculusCli {
+            bin: PathBuf::from("/repo/target/release/oculus"),
+            launcher: None,
+        };
+        let r = rules_for(lib, Some(&cli), &[]);
+        let socket = keyd_core::paths::socket(lib);
+        for d in &r.deny {
+            let Some(path) = d
+                .strip_prefix("write_file(")
+                .or_else(|| d.strip_prefix("read_file("))
+                .and_then(|p| p.strip_suffix(')'))
+            else {
+                continue;
+            };
+            assert!(
+                !socket.starts_with(path),
+                "{d} covers keyd's socket {socket:?}"
+            );
+        }
+        assert!(r.allow.iter().any(|a| a == "command(oculus)"));
     }
 
     #[test]

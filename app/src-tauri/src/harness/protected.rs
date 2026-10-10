@@ -14,9 +14,37 @@ pub const WORKSPACE_DIRS: [&str; 3] = ["skills", ".claude", ".agents"];
 /// `oculus.db*`: see `claude.rs`.
 pub const ROOT_FILE_GLOBS: [&str; 4] = ["*.cookie", "*.token", "*.json", "*.log"];
 
+/// Whether the rule pattern `glob` (`*` within a path segment, `**` across
+/// segments) covers `path`: the check that no deny list reaches keyd's socket.
+#[cfg(test)]
+pub(super) fn glob_covers(glob: &str, path: &str) -> bool {
+    let mut re = String::from("^");
+    let mut chars = glob.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '*' if chars.peek() == Some(&'*') => {
+                chars.next();
+                re.push_str(".*");
+            }
+            '*' => re.push_str("[^/]*"),
+            c => re.push_str(&regex::escape(&c.to_string())),
+        }
+    }
+    re.push('$');
+    regex::Regex::new(&re).unwrap().is_match(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_glob_covers_by_segment() {
+        assert!(glob_covers("/l/*.json", "/l/a.json"));
+        assert!(!glob_covers("/l/*.json", "/l/sub/a.json"));
+        assert!(glob_covers("/l/courses/**", "/l/courses/x/y"));
+        assert!(!glob_covers("/l/*.cookie", "/l/keyd.sock"));
+    }
 
     /// opencode's denies are relative to `agents/` unless they name the library.
     #[test]

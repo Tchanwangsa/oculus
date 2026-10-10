@@ -1,4 +1,4 @@
-// Stage the CLI as a Tauri sidecar for the keep-alive LaunchAgent.
+// Stage the CLI as a Tauri sidecar, so the bundle carries it: keyd admits only executables in its own bundle.
 import { chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { binaries, buildCli, cliPath, cliSidecar, stageCli } from "./runtime.mjs";
 

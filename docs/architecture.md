@@ -1,7 +1,8 @@
 # Architecture
 
 Two processes — a React frontend in a WebView and a Rust core — sharing one
-data directory. PDF parsing and page embedding are HTTP calls made in-process
+data directory, plus `oculus-keyd`, a small credential broker launchd starts
+on demand. PDF parsing and page embedding are HTTP calls made in-process
 from Rust, behind the seams in `app/src-tauri/src/parse/` and
 `app/src-tauri/src/embed/`.
 
@@ -19,7 +20,8 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Shared parse/embed event payload and channels | `app/src-tauri/src/pipeline_events.rs` |
 | Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
 | Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
-| Credential storage (keychain only); provider probes | `app/src-tauri/src/credentials.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
+| Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/keyd.rs` |
+| Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/credentials.rs`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
 | Lecture video server | `app/src-tauri/src/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/bundled.rs` |
@@ -54,20 +56,178 @@ its failure rules are in [parsing.md](./parsing.md).
   transcription run through `blocking::run`, so synchronous I/O cannot hold
   Tauri's command thread.
   Upload batches serialize their name allocation.
-- Credentials go keychain → in-process client. No key enters SQLite, the
-  WebView, a health response or a progress event. The local engine needs none.
+- Credentials go keychain → in-process client, except the Voyage, MinerU and
+  Groq keys and the Okta sign-in credentials while keyd is installed
+  ([below](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+  No key enters SQLite, the WebView, a health response or a progress event.
+  The local engines need none.
   A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
   sandbox, which fails right after the prompt is approved) is reported as
-  unreadable, never as a missing key (`Secret::fetch`, `Secret::has`). MinerU's
-  parse path is the exception: it still reads a refusal as no token
-  (`Secret::read`).
+  unreadable, never as a missing key (`Secret::fetch`, `Secret::has`).
+
+## `oculus-keyd` is the only process meant to read its key
+
+A separate binary from its own crate (`app/keyd/`), so its code signature only
+changes when its own source does and one keychain approval sticks
+([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
+The binary is `main.rs` over `oculus-keyd-core` (`app/keyd/core/`), which the
+app links too, for the client and the installer only.
+
+- **Every OS call is in an adapter.** `app/keyd/core/src/platform/mod.rs`
+  is the contract: an endpoint and its `Conn`, activation, the peer check,
+  the secret store, the registrar, and the file helpers. `platform/macos/`
+  is the only adapter; `platform/unsupported.rs` builds everywhere else with
+  every seam refusing and `connect` finding keyd absent; off Unix that includes
+  the file helpers, so `lock` and `write_private` refuse too. The ops, `forward`,
+  the server loop and the client never name an OS
+  ([development.md](./development.md#keyds-os-code-lives-in-one-adapter)).
+- **Started by the OS, not the app.** On macOS the LaunchAgent
+  `com.tchan.oculus.keyd` owns `keyd.sock` (mode 0600) and starts keyd on the
+  first connect. One thread accepts and decides to exit
+  (`app/keyd/core/src/server.rs`): it waits a tick for a client on any
+  listener, and only when none came does it exit after 60 s with no request
+  in flight, so a client that arrives then stays queued in launchd's socket
+  for the next keyd instead of being dropped. A client that connects and
+  sends nothing does not keep it alive.
+- **One keychain item.** The master key, `com.tchan.oculus.keyd` / `master`,
+  labelled "Oculus keys" because the access prompt quotes the label. keyd
+  creates it on the first op that needs the vault and never rewrites it; it
+  is never read at start or for `ping`, so installing keyd prompts for
+  nothing. Concurrent first requests wait on one read.
+- **`vault.bin`** holds the secrets as one ChaCha20-Poly1305-sealed JSON map
+  (`app/keyd/core/src/vault.rs`): a fresh nonce per write, replaced by rename,
+  read-modify-write under an exclusive lock. A file that fails to decrypt is never
+  overwritten.
+- **The wire format** is one JSON line, then `body_len` raw bytes if the
+  header names them; replies have the same shape. One module writes and reads
+  it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
+  hash, pid), `has`, `store`, `delete`, `forward`, the Okta ops `okta_save`,
+  `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`, and the
+  session ops `session_get`, `session_put`, `session_clear`, `session_status`,
+  `session_mark` and `sign_out` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
+  No op returns a key, a password, a seed or a token; the one reply that
+  carries a cookie is `session_get`, to the app. Only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
+  `request`, `caller`, `keychain` (the master key or an old item refused or
+  failed), `vault`, `record` (the sign-in attempt record, or a marker file, could
+  not be replaced), `missing` (a `canvas` one may carry the refused sign-in as
+  `signin`) and `upstream`.
+- **`forward` sends one request with the credential added; the credential
+  never leaves.** The request names a route (`secret`), `method` (GET or
+  POST), `path`, `headers`, and optionally `"stream": true`; keyd sends it to
+  the route's fixed origin and attaches the credential from the vault. Routes
+  are `app/keyd/core/src/forward/route.rs`; a name with no route (Okta's, a
+  `session.*` name) cannot be forwarded:
+
+  | Route | Origin | Under | Credential |
+  | --- | --- | --- | --- |
+  | `voyage` | `https://api.voyageai.com` | `/v1/` | `Authorization: Bearer` |
+  | `mineru` | `https://mineru.net` | `/api/v4/` | `Authorization: Bearer` |
+  | `groq` | `https://api.groq.com` | `/openai/v1/` | `Authorization: Bearer` |
+  | `canvas` | `https://canvas.lms.unimelb.edu.au` | `/` | `Cookie` (`session.canvas`) |
+  | `ed` | `https://edstem.org` | `/api/` | `x-token` (`session.ed`) |
+
+  The client may set only `Content-Type` and `Accept`, plus `Range`,
+  `If-None-Match` and `If-Modified-Since` on `canvas` and `ed`; `Cookie`,
+  `X-Token` and `Authorization` are refused on every route. A cloud path is
+  held to `[A-Za-z0-9-._~/?=&]` with no dot segment or `//`. A session path
+  (`forward/path.rs`) also admits `[ ] % : + ; ,`, because Canvas queries use
+  `include[]=` and encoded `next` URLs, but its path part is judged
+  percent-decoded: no escaped `/`, `\`, control or non-ASCII byte, no `%`
+  left over (so `%252e` fails), no `.` or `..` segment even with a `;param`,
+  and still under the prefix; a query may carry any escape but a control
+  character. The reply is `{"status", "headers", "body_len"}` and the origin's
+  body, byte for byte, whatever the status: redirects come back unfollowed
+  (so a cookie never reaches a second origin), and `upstream` means no answer arrived (DNS, connect,
+  TLS, reset). A route with no session is `missing` (on `canvas`, after keyd
+  has tried to sign in). ureq runs without gzip or proxy variables.
+  - **Cloud routes** have no timeout past ureq's 30 s connect: an embed or a
+    parse takes minutes. **Session routes** also fail a forward whose origin
+    sends nothing for 180 s (`SESSION_READ_TIMEOUT`, one read, not a total),
+    so a download of any size completes while a stalled one frees its thread.
+  - **A session reply never carries `set-cookie`, `authorization` or
+    `x-token`.** Canvas's `Set-Cookie` lines, on any status including a
+    redirect, are merged into `session.canvas` under the vault lock, except
+    those of a rejected answer
+    ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
+  - **`canvas` signs in again when its session is rejected** and sends the
+    request once more; `ed` never does. The reply may carry `signin`, the
+    sign-in that was refused
+    ([auth.md](./auth.md#a-rejected-canvas-request-signs-in-once-and-is-sent-once-more)).
+  - **`"stream": true`** replies `{"status", "headers"}` with no `body_len`,
+    then the body until keyd closes the connection after the origin's last
+    byte. There is no size cap and no keyd-side deadline, and neither the vault
+    nor `State` is locked while it flows. A failure partway just closes the
+    connection, so a client compares what it read with the `content-length`
+    header; `Client::send_stream` returns the body as a `Read`. A buffered
+    reply stays the default, capped at 256 MiB.
+  - The log line names the route, status and byte counts, never a path, header
+    or body.
+  The Okta sign-in (`okta/flow.rs`) is built to send the same request in
+  keyd and in the app, whose ureq also enables `cookies` and `gzip` through
+  feature unification: each request gets a new agent, so no cookie store
+  has anything to replay beside the flow's own `Cookie` header, and each asks
+  for `Accept-Encoding: identity`.
+- **The cloud keys' old keychain items are imported on first use.** The
+  first `has` or `forward` for `voyage`, `mineru` or `groq` copies that
+  name's old item (`com.tchan.oculus.voyage`, `.mineru`, `.groq`) into the
+  vault unless the vault already holds a key, then records
+  `keyd.imported.<name>` in the vault; `store` and `delete` record it too, so
+  a deleted key never comes back from the old item. An import leaves the old
+  item in the keychain, which the app reads when keyd is absent; `delete`
+  removes it too, best effort, and replies `legacy`: `removed`, `absent`,
+  `failed` or `refused`, with the vault delete standing either way. The Okta
+  items are imported the same way, by `okta_status` and the sign-in, and
+  `okta_save` marks them; `okta_forget` marks and removes them. Entries under
+  `keyd.` are bookkeeping no op can name (`app/keyd/core/src/names.rs`).
+- **The caller check runs before any request is read.** The peer's uid must
+  be keyd's. A bundled keyd then admits only executables inside its own app
+  bundle whose seal verifies strictly
+  (`app/keyd/core/src/platform/macos/peer.rs`); a `dev` build admits any
+  same-user caller. The adapter also gives each caller a role — `app` (the
+  bundle itself), `cli` (its `Contents/MacOS/oculus`) or `unknown`; a dev
+  build goes by file name, `app` or `oculus` — which the log records beside
+  the signing identifier. Ops check the role, never a path, and in one place
+  (`State::dispatch`): every op but `ping` needs `app` or `cli`, because every
+  executable in the install (ffmpeg ships in it) passes the caller check;
+  `okta_resume` and `session_get` need `app`. `ping` answers whoever was
+  admitted, for diagnostics.
+- **keyd holds the Okta credentials and runs the sign-in.** The username,
+  password and TOTP seed are vault entries, written together by `okta_save`
+  (which validates) and removed together by `okta_forget`. `ensure_signed_in`
+  runs `keyd_core::okta::sign_in` (flow, attempt guard, log) once at a time
+  and answers with the outcome as a `LoginError`, never a cookie; the Canvas
+  and Okta sessions it mints are vault entries, beside Ed's, and keyd also
+  owns the authenticated and signed-out markers
+  ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-credentials-and-runs-the-sign-in)).
+- **Voyage, MinerU, Groq and the Okta sign-in go through it.** `credentials::Credentialed`
+  (`keyd_core::client::Client`, `app/keyd/core/src/client.rs`) is the client,
+  one connection per call. It treats a missing socket or a refused connect as keyd not
+  installed (`KeydError::Absent`), the only case in which a caller reads the
+  keychain itself; every other error surfaces. The Voyage and MinerU clients,
+  Groq transcription, the three keys' Settings commands
+  (`credentials::CloudKey`) and the Okta calls (`okta.rs`) use it
+  ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key),
+  [parsing.md](./parsing.md#with-oculus-keyd-installed-no-oculus-process-holds-the-mineru-token),
+  [viewers.md](./viewers.md)). A request's timeout is the caller's own, and
+  Groq's upload has none, and neither has `ensure_signed_in`; a session route
+  takes `client::SESSION_TIMEOUT` (ten minutes per read), because a rejected
+  request waits for a sign-in.
+- `keyd::ensure_installed` runs at app startup and does nothing in a dev
+  build; a dev install is the preflight's ([cli.md](./cli.md)). A release
+  registers its bundled `Contents/MacOS/oculus-keyd` (an `externalBin` on
+  macOS, built without `dev`) in place, and logs the failure when that file is
+  missing or is not a keyd
+  ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
+- **One data dir.** `keyd_core::paths::data_dir` (the OS data dir plus
+  `com.tchan.oculus`) is the only definition; the app's `paths::data_dir`
+  and keyd's `main` both call it. Only a debug keyd reads an override.
 
 ## Scraping lives in Rust because hidden WebViews freeze
 
 macOS suspends an off-screen WKWebView's content process, which freezes
 anything running in it mid-run with nothing to catch. So the scrape engine is
 `app/src-tauri/src/sync.rs`, and the headless Okta sign-in
-(`app/src-tauri/src/okta.rs`) runs in Rust too. Never move background work into
+(`app/keyd/core/src/okta/`) runs in Rust too, inside keyd. Never move background work into
 a WebView.
 
 ## Lecture video streams over localhost HTTP
@@ -106,8 +266,11 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   spend guard from Settings → Embeddings, kept here rather than in `settings`
   because the reservation that enforces it already reads this file
   ([retrieval.md](./retrieval.md)).
-- The session cookie, auth flag, `session-keepalive.log`, and the sign-in
+- The session cookie, auth flag, and the sign-in
   attempt record and its `okta-sign-in.log` ([auth.md](./auth.md)).
+- `vault.bin` and its `vault.bin.lock`, `keyd.sock` (launchd's), and `bin/`
+  with a dev-installed `oculus-keyd` and its `oculus-keyd.stamp`
+  ([above](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
 
 ## The database has one schema owner and two writers
 
@@ -206,6 +369,7 @@ JavaScript.
 - Background work in a hidden WebView freezes silently — keep it in Rust ([above](#scraping-lives-in-rust-because-hidden-webviews-freeze)).
 - Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
 - A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
-- Reaching the data dir any way but `paths::data_dir()` lets the CLI and app diverge.
+- Reaching the data dir any way but `paths::data_dir()` (itself `keyd_core::paths::data_dir`) lets the CLI, the app and keyd diverge.
+- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.
 - A `subject_id` that cascades on user-owned tables deletes the student's work with a course.

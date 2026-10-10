@@ -12,9 +12,9 @@ the root `CLAUDE.md` holds only the rules.
 
 | Page | What it covers |
 | --- | --- |
-| [architecture.md](./architecture.md) | The two processes, how they talk, the data directory, `oculus.db` |
+| [architecture.md](./architecture.md) | The two processes and the credential broker, how they talk, the data directory, `oculus.db` |
 | [sync.md](./sync.md) | The scrape engine: Canvas modules, Ed threads, Echo360 lectures, HTML→md |
-| [auth.md](./auth.md) | Canvas session cookie, keep-alive, Okta sign-in and its attempt guard, Ed `x-token`, Echo360 LTI |
+| [auth.md](./auth.md) | Canvas session cookie, sign-in on demand, Okta sign-in and its attempt guard, Ed `x-token`, Echo360 LTI |
 | [parsing.md](./parsing.md) | PDFs to markdown: the parser seam, the two MinerU engines, failures |
 | [retrieval.md](./retrieval.md) | Page-image embeddings, the `pages` table, query flow |
 | [harness.md](./harness.md) | Chat as a CLI agent: the four bridges, containment, the timeline |
@@ -38,6 +38,7 @@ the root `CLAUDE.md` holds only the rules.
 | `app/src/` | React 19 frontend (Vite, Tailwind v4, shadcn/ui) |
 | `app/src-tauri/src/` | Rust: Tauri commands, scrape engine, parsing, embedding, retrieval, the harness |
 | `app/src-tauri/src/bin/oculus/` | The headless CLI over the same engine |
+| `app/keyd/` | `oculus-keyd`, the credential broker, and `core/`, its OS-free logic and OS adapters — a separate cargo root |
 | `app/src-tauri/templates/` | The agent-facing docs and skills written into the library |
 | `app/scripts/` | Dev preflight, native-binary fetchers, CLI staging and reference generation |
 | `docs/` | These pages |

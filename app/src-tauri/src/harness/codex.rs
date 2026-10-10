@@ -888,15 +888,30 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_failed_request_write_does_not_leave_a_pending_reply() {
-        use std::io::{BufRead, BufReader};
+        use std::io::{BufRead, BufReader, Read};
 
-        // Close stdin but keep the process alive, so the request exercises a
-        // broken pipe rather than the early "server is not running" check.
+        // The child prints one line and exits, so its stdin's read end is
+        // gone and the write meets a broken pipe. `kill` and `reap` would
+        // mark the server dead and take the early "not running" path, so the
+        // exit is awaited through stdout's EOF instead. A child that held
+        // stdin open and slept could instead inherit a pipe end another
+        // thread's concurrent spawn leaked, and the write would succeed.
         let mut command = Command::new("sh");
-        command.args(["-c", "exec 0<&-; printf 'ready\\n'; exec sleep 10"]);
+        command.args(["-c", "printf 'ready\n'"]);
         let (proc, stdout) = ChildProc::spawn("codex", &mut command, true).unwrap();
-        let mut ready = String::new();
-        BufReader::new(stdout).read_line(&mut ready).unwrap();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut ready = String::new();
+            let first = reader.read_line(&mut ready).map(|_| ready);
+            let mut rest = Vec::new();
+            let _ = reader.read_to_end(&mut rest);
+            let _ = tx.send(first);
+        });
+        let ready = rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the child neither answered nor exited within 60s")
+            .unwrap();
         assert_eq!(ready.trim(), "ready");
         let server = CodexServer {
             proc,
@@ -946,6 +961,35 @@ mod tests {
             turn["approvalPolicy"], "never",
             "a prompt has nowhere to go"
         );
+    }
+
+    /// `oculus` reaches keyd's Unix socket from inside Codex's sandbox only
+    /// while the workspace-write policy has network access (measured: the
+    /// connect gets EPERM without it); Codex has no per-socket grant.
+    #[test]
+    fn every_thread_and_turn_keeps_the_sandbox_network_open() {
+        for (model, effort, instructions, ephemeral) in [
+            (Some("gpt-5.3-codex"), Some("high"), "brief", false),
+            (None, None, "", true),
+        ] {
+            let opts = CodexThreadOpts {
+                cwd: "/lib/agents".into(),
+                writable_files: Vec::new(),
+                model: model.map(String::from),
+                reasoning_effort: effort.map(String::from),
+                instructions: instructions.into(),
+                ephemeral,
+            };
+            let thread = CodexServer::thread_params(&opts);
+            assert_eq!(thread["sandbox"], "workspace-write");
+            assert_eq!(
+                thread["config"]["sandbox_workspace_write.network_access"],
+                true
+            );
+            let turn = CodexServer::turn_params("t", "hi", &opts);
+            assert_eq!(turn["sandboxPolicy"]["type"], "workspaceWrite");
+            assert_eq!(turn["sandboxPolicy"]["networkAccess"], true);
+        }
     }
 
     /// Recorded (0.153.4): a finished `webSearch` has no `status`, and

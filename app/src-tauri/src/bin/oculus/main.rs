@@ -22,6 +22,7 @@ use tokio::runtime::Runtime;
 mod args;
 mod auth;
 mod docs;
+mod keyd;
 mod lecture;
 mod memory;
 mod output;
@@ -47,13 +48,19 @@ fn main() {
             AuthAction::Status => ctx.auth_status(),
             AuthAction::Setup => ctx.auth_setup(),
             AuthAction::Auto => ctx.auth_auto(),
-            AuthAction::Tick => ctx.auth_tick(),
             AuthAction::Forget => ctx.auth_forget(),
             AuthAction::Diagnose => {
                 print!("{}", app_lib::okta::diagnose());
                 Ok(())
             }
             AuthAction::Ed { token } => ctx.auth_ed(token.as_deref()),
+        },
+        Some(Command::Keyd { action }) => match action {
+            KeydAction::Install { from, if_changed } => {
+                ctx.keyd_install(from.as_deref(), if_changed)
+            }
+            KeydAction::Status => ctx.keyd_status(),
+            KeydAction::Uninstall => ctx.keyd_uninstall(),
         },
         Some(Command::List(args)) => ctx.list(args),
         Some(Command::Run(args)) => ctx.run(args),

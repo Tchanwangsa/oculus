@@ -1,7 +1,7 @@
 # The `oculus` CLI
 
 A second binary in `app/src-tauri` that drives the same engine as the app with
-no window: terminal syncs, the keep-alive job, and the tool surface a coding
+no window: terminal syncs and the tool surface a coding
 agent queries and plans through. Flags are in
 [cli-reference.md](./cli-reference.md); this page is how the CLI fits.
 
@@ -16,6 +16,7 @@ agent queries and plans through. Flags are in
 | `transcribe` | `app/src-tauri/src/bin/oculus/transcribe.rs`, `app/src-tauri/src/transcribe/` |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/docs.rs`, `app/src-tauri/src/agents.rs` |
 | The memory store | `app/src-tauri/src/memory.rs` |
+| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/keyd.rs`, `app/src-tauri/src/keyd.rs`; the LaunchAgent itself in `app/keyd/core/src/platform/macos/registrar.rs` |
 | Headless writes to the scrape tables | `app/src-tauri/src/store.rs` |
 | Repo copy of the reference | `app/scripts/gen-cli-docs.mjs` |
 
@@ -30,6 +31,8 @@ agent queries and plans through. Flags are in
 | `lecture chapters`, `lecture end` | Derived rows, regenerable from the recording | They spend model quota, so an existing result is kept unless `--force` |
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |
+| `keyd install`, `keyd uninstall` | The LaunchAgent `com.tchan.oculus.keyd`, `bin/oculus-keyd` and its stamp in the data dir; install also (re)loads the agent | Never touches `vault.bin` or the keychain, so uninstalling loses no key ([below](#keyd-install-never-points-the-agent-at-a-build-tree)) |
+| `keyd status` | Nothing | Pings keyd, which starts it; prints no secret |
 | `agent` | Nothing recorded | One turn through the app's own bridges; `--subject` appends the picker's scope ([harness.md](./harness.md)) |
 
 `lecture candidates` only decodes a recording on disk, so re-running it is the
@@ -43,19 +46,42 @@ migrations, so on a fresh machine the app must open once first; until then
 
 - `auth login` launches the app for the SAML browser step, because a push or
   biometric challenge needs a human. `auth setup` stores what `auth auto` needs
-  to sign in headlessly; `auth forget` clears it ([auth.md](./auth.md)).
-  `auth auto` is a manual sign-in, so it skips the
-  [attempt guard](./auth.md#every-sign-in-attempt-goes-through-one-guard)'s
-  wait and lifts its pause.
-- `auth tick` is one keep-alive cycle, run by the LaunchAgent. Its sign-in is
-  automatic, so the guard can skip it. It prints nothing, logs to
-  `session-keepalive.log`, and always exits 0, because launchd reads a
-  non-zero exit as a crashed job.
+  to sign in headlessly, in keyd's vault (the keychain when keyd is absent),
+  then prints the code for the setup key just typed — nothing reads a stored
+  password or key back; `auth forget` clears it
+  ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-credentials-and-runs-the-sign-in)).
+  `auth auto` is a manual sign-in under the
+  [attempt guard](./auth.md#every-sign-in-attempt-goes-through-one-guard): it
+  skips the back-off between automatic attempts but not the minute between any
+  two, and it cannot lift a lockout or rejected-password pause (the app's
+  Connect or a new `auth setup` does).
 - `run -s` scrapes, then parses and embeds each written PDF one file at a time,
   then replaces each subject's `calendar_events` — always, since there are no
   sync options to gate it ([calendar.md](./calendar.md)).
 - Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`);
   lecture ids match on a unique prefix as `oculus list -l` prints them.
+
+## `keyd install` never points the agent at a build tree
+
+The LaunchAgent's program is fixed: a keyd inside an app bundle is registered
+in place, since its caller check needs its bundle, and any other is copied to
+`bin/oculus-keyd` in the data dir through a temp file and a rename. Without
+`--from` it takes the keyd beside the CLI in the bundle, or in a debug CLI the
+output of `bun run keyd` in the checkout it was built from
+([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
+
+- `launchctl bootout` returns before launchd lets go of the job, and a
+  `bootstrap` too soon after fails and leaves keyd unloaded. Install and
+  uninstall wait until `launchctl print` stops finding the label.
+- The stamp is written last, so a failed load is retried by the next
+  preflight.
+- `--if-changed` installs nothing when the stamp already holds the
+  candidate's source hash and the agent already runs the program it would
+  register: the preflight's call, and the app's own check at startup.
+- `status` compares the installed stamp, the stamp of the keyd this CLI would
+  install, and the source hash the running keyd reports. A release CLI with no
+  keyd beside it reports a broken install there, and `install` says so instead
+  of asking for `bun run keyd`.
 
 ## `run` and `index` take minutes per file, and that is not a hang
 
@@ -190,5 +216,4 @@ pull document that `AGENTS.md` says when to open.
 
 - An empty `search` result would read as "no answer" — keep failing loudly with the next command to run.
 - Ripgrep over `courses/` misses PDF text — use `oculus grep`.
-- `auth tick` exiting non-zero reads as a crash to launchd.
 - A stale `oculus` documents and runs the wrong build — `bun run cli` deletes the binary before building ([development.md](./development.md#the-dev-cli-is-built-by-the-preflight-not-by-tauri-dev)).

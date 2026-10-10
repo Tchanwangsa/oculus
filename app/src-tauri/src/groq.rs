@@ -1,13 +1,22 @@
 //! Groq credential storage, for video transcription (`transcribe/groq.rs`).
 //!
-//! The key lives only in the macOS keychain, never in SQLite or the WebView.
-//! Same shape as `voyage.rs`: three commands, an `"ok"`/`"unverified"` answer.
+//! With `oculus-keyd` installed the key lives in its vault, and these commands
+//! go through keyd; without it, in the macOS keychain (`credentials::CloudKey`).
+//! Never in SQLite or the WebView. Same shape as `voyage.rs`: three commands,
+//! an `"ok"`/`"unverified"` answer.
 
 use std::time::Duration;
 
-use crate::credentials::{Secret, Verdict};
+use crate::credentials::{CloudKey, Secret, Verdict};
 
-const KEY: Secret = Secret::new("com.tchan.oculus.groq", "groq");
+/// The name keyd stores the key under.
+pub(crate) const SECRET: &str = "groq";
+
+pub(crate) static KEY: CloudKey = CloudKey {
+    secret: SECRET,
+    what: "Groq API key",
+    keychain: Secret::new("com.tchan.oculus.groq", "groq"),
+};
 
 /// Listing models is authenticated and free. Settings may never make a billed
 /// call, so the probe must not transcribe anything.
@@ -94,15 +103,16 @@ fn probe(key: &str) -> Result<Verdict, String> {
 
 /// Store a key, but only one Groq has not refused. Returns `"ok"` when it
 /// was checked against Groq and `"unverified"` when Groq was unreachable
-/// or rate-limited and the key was stored on trust.
+/// or rate-limited and the key was stored on trust. The probe runs here with
+/// the key just typed; only the store goes through keyd.
 #[tauri::command]
 pub fn groq_set_api_key(key: String) -> Result<String, String> {
-    KEY.store_checked(&key, probe)
+    KEY.set(&key, probe)
 }
 
 #[tauri::command]
 pub fn groq_has_api_key() -> Result<bool, String> {
-    KEY.has("Groq API key")
+    KEY.has()
 }
 
 #[tauri::command]

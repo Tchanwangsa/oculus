@@ -182,19 +182,42 @@ fn order_from(stored: Option<&serde_json::Value>) -> Vec<&'static str> {
     order
 }
 
-/// Groq as Settings has it. `key` is read only when Groq is on, so a
-/// switched-off engine never touches the keychain.
+const NO_GROQ_KEY: &str = "No Groq API key — add one in Settings → Transcription";
+
+/// Groq as Settings has it: through keyd when it is installed (in
+/// `data_dir`), else with the keychain's key from `key`. Nothing is asked
+/// while Groq is off, so a switched-off engine never touches keyd or the
+/// keychain.
 fn groq_engine(
     settings: &Settings,
+    data_dir: &Path,
     key: impl FnOnce() -> Result<Option<String>, String>,
 ) -> Result<groq::Groq, String> {
     if !settings.groq {
         return Err("Groq is turned off in Settings → Transcription".into());
     }
-    let key = key()
-        .map_err(|e| format!("The keychain refused to give out the Groq API key ({e})"))?
-        .ok_or("No Groq API key — add one in Settings → Transcription")?;
-    Ok(groq::Groq::new(key, settings.language.groq()))
+    let broker = crate::credentials::Credentialed::at(data_dir);
+    let auth = match broker.has(crate::groq::SECRET) {
+        Ok(true) => groq::Auth::Keyd(broker),
+        Ok(false) => return Err(NO_GROQ_KEY.into()),
+        Err(crate::credentials::KeydError::Absent) => {
+            let key = key()
+                .map_err(|e| format!("The keychain refused to give out the Groq API key ({e})"))?
+                .ok_or(NO_GROQ_KEY)?;
+            groq::Auth::Direct(key)
+        }
+        Err(crate::credentials::KeydError::Keychain(e)) => {
+            return Err(format!(
+                "The keychain refused to give out the Groq API key ({e})"
+            ))
+        }
+        Err(e) => {
+            return Err(format!(
+                "oculus-keyd, which holds the Groq API key, could not check it: {e}"
+            ))
+        }
+    };
+    Ok(groq::Groq::new(auth, settings.language.groq()))
 }
 
 /// The configured engines in the order set in Settings, or `only` that one.
@@ -219,8 +242,12 @@ fn engines(
         .filter(|&&name| only.is_none_or(|only| only == name))
     {
         let engine: Result<Box<dyn Engine>, String> = match name {
-            "groq" => groq_engine(&settings, crate::groq::fetch_api_key)
-                .map(|e| Box::new(e) as Box<dyn Engine>),
+            "groq" => groq_engine(
+                &settings,
+                &crate::paths::data_dir(),
+                crate::groq::fetch_api_key,
+            )
+            .map(|e| Box::new(e) as Box<dyn Engine>),
             "whisper" => whisper::Whisper::configured(&settings, resource_dir.clone(), ffmpeg)
                 .map(|e| Box::new(e) as Box<dyn Engine>),
             _ => apple::Apple::configured(&settings, resource_dir.clone())
@@ -1024,29 +1051,66 @@ mod tests {
 
     #[test]
     fn groq_switched_off_is_unconfigured_without_reading_the_key() {
+        // keyd is absent here: nothing listens in this scratch dir.
+        let dir = crate::test_support::Scratch::new("groq-engine");
         let off = settings(r#"{"groq":{"enabled":false}}"#);
-        let refused = groq_engine(&off, || panic!("the key was read"))
+        let refused = groq_engine(&off, &dir, || panic!("the key was read"))
             .err()
             .unwrap();
         assert_eq!(refused, "Groq is turned off in Settings → Transcription");
 
         let on = settings(r#"{"language":"auto"}"#);
-        assert!(groq_engine(&on, || Ok(None))
+        assert!(groq_engine(&on, &dir, || Ok(None))
             .err()
             .unwrap()
             .contains("Settings → Transcription"));
-        let refused = groq_engine(&on, || Err("denied".into())).err().unwrap();
+        let refused = groq_engine(&on, &dir, || Err("denied".into()))
+            .err()
+            .unwrap();
         assert!(
             refused.contains("keychain") && refused.contains("denied"),
             "{refused}"
         );
         assert_eq!(
-            groq_engine(&on, || Ok(Some("gsk_test".into())))
+            groq_engine(&on, &dir, || Ok(Some("gsk_test".into())))
                 .ok()
                 .unwrap()
                 .name(),
             "groq"
         );
+    }
+
+    #[test]
+    fn with_keyd_installed_groq_asks_keyd_and_never_the_keychain() {
+        use crate::test_support::{FakeKeyd, Scratch};
+        use serde_json::json;
+        let on = settings(r#"{"language":"auto"}"#);
+        let answers = [
+            (json!({"has": true}), None),
+            (json!({"has": false}), Some("No Groq API key")),
+            (
+                json!({"error": "keychain", "detail": "OSStatus -128"}),
+                Some("The keychain refused to give out the Groq API key (OSStatus -128)"),
+            ),
+            (
+                json!({"error": "caller", "detail": "outside the bundle"}),
+                Some("oculus-keyd, which holds the Groq API key"),
+            ),
+        ];
+        for (reply, refused) in answers {
+            let dir = Scratch::new("groq-engine-keyd");
+            let keyd = FakeKeyd::start(&dir, move |_, _| (reply.clone(), vec![]));
+            let engine = groq_engine(&on, &dir, || panic!("the keychain was read"));
+            match refused {
+                None => assert_eq!(engine.ok().unwrap().name(), "groq"),
+                Some(start) => {
+                    let message = engine.err().unwrap();
+                    assert!(message.starts_with(start), "{message}");
+                }
+            }
+            assert_eq!(keyd.ops(), ["has"]);
+            assert_eq!(keyd.requests()[0].0["secret"], "groq");
+        }
     }
 
     #[test]

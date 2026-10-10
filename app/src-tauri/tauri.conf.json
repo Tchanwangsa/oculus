@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "OCULUS_CLI_WATCH=1 bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run ffmpeg && bun run pdfium && bun run speech && bun run whisper && bun run stage-cli && bun run docs:cli && bun run build",
+    "beforeBuildCommand": "bun run ffmpeg && bun run pdfium && bun run speech && bun run whisper && bun run stage-keyd && bun run stage-cli && bun run docs:cli && bun run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -47,7 +47,10 @@
     "macOS": {
       "frameworks": [
         "binaries/libpdfium.dylib"
-      ]
+      ],
+      "signingIdentity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "Entitlements.plist"
     },
     "icon": [
       "icons/32x32.png",

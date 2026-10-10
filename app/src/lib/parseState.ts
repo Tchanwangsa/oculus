@@ -60,6 +60,8 @@ export function summaryOf(kind: string | undefined): string {
     case "quota_exhausted": return "Daily quota used up. Resumes on its own.";
     case "missing_credentials": return "No MinerU token saved.";
     case "rejected_credentials": return "MinerU rejected the token.";
+    case "unreadable_credentials": return "The keychain refused the MinerU token.";
+    case "credential_broker": return "oculus-keyd couldn't send the request.";
     case "version_mismatch": return "Parser version mismatch.";
     default: return "";
   }

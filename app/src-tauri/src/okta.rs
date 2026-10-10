@@ -1,159 +1,26 @@
-//! Headless University of Melbourne SSO sign-in.
+//! The app's half of the headless University of Melbourne SSO sign-in.
 //!
-//! Canvas authenticates through Okta Identity Engine at `sso.unimelb.edu.au`,
-//! whose widget is a thin client over a JSON state machine at `/idp/idx/*`. So
-//! the flow runs in Rust with no webview (see `docs/architecture.md`):
-//! introspect the login page's state token, answer each *remediation*, then
-//! replay the SAML app URL and POST the `SAMLResponse` to Canvas.
+//! The flow itself (Okta's IDX state machine, the SAML round trip, the
+//! attempt guard) is `keyd_core::okta`, and runs only inside `oculus-keyd`:
+//! the session it mints goes into keyd's vault, where only keyd can use it.
+//! With keyd absent the sign-in fails with `LoginError::Broker`, and only the
+//! credential calls (status, save, forget) fall back to the keychain. Any
+//! other keyd error surfaces and starts no second route, so a refusal can
+//! never become a second attempt against Okta.
 //!
-//! Only password and TOTP (Google Authenticator) are answerable; push needs a
-//! human. The TOTP seed is shown once, at enrolment, so using this means
-//! re-enrolling the factor and copying its setup key.
-//!
-//! Password and seed share the macOS keychain, so to anything running as this
-//! user the second factor is not a second factor — the same deliberate trade
-//! as a password manager holding TOTP.
+//! Password and seed are kept together, so to anything running as this user
+//! the second factor is not a second factor — the same deliberate trade as a
+//! password manager holding TOTP.
 
-use std::collections::BTreeMap;
+use crate::credentials::{Credentialed, KeydError};
+pub use keyd_core::okta::{totp_now, LoginError, Trigger, SSO_HOST};
+use keyd_core::okta::{validate_credentials, CredentialStore, Credentials, Env, NoSessions};
 
-// ── SHA-1 / HMAC / TOTP ──────────────────────────────────────────────────────
-//
-// Pinned by the RFC 4226/6238 test vectors in `mod tests`. SHA-1 is broken for
-// collisions; HMAC-SHA1 is not, and is what authenticator apps implement.
-
-fn sha1(msg: &[u8]) -> [u8; 20] {
-    let mut h: [u32; 5] = [
-        0x6745_2301,
-        0xEFCD_AB89,
-        0x98BA_DCFE,
-        0x1032_5476,
-        0xC3D2_E1F0,
-    ];
-    let bit_len = (msg.len() as u64).wrapping_mul(8);
-
-    let mut data = msg.to_vec();
-    data.push(0x80);
-    while data.len() % 64 != 56 {
-        data.push(0);
-    }
-    data.extend_from_slice(&bit_len.to_be_bytes());
-
-    for chunk in data.chunks_exact(64) {
-        let mut w = [0u32; 80];
-        for (i, word) in chunk.chunks_exact(4).enumerate() {
-            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
-        }
-        for i in 16..80 {
-            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-        }
-
-        let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
-        for (i, wi) in w.iter().enumerate() {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | (!b & d), 0x5A82_7999u32),
-                20..=39 => (b ^ c ^ d, 0x6ED9_EBA1),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1B_BCDC),
-                _ => (b ^ c ^ d, 0xCA62_C1D6),
-            };
-            let tmp = a
-                .rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(*wi);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = tmp;
-        }
-        h[0] = h[0].wrapping_add(a);
-        h[1] = h[1].wrapping_add(b);
-        h[2] = h[2].wrapping_add(c);
-        h[3] = h[3].wrapping_add(d);
-        h[4] = h[4].wrapping_add(e);
-    }
-
-    let mut out = [0u8; 20];
-    for (i, word) in h.iter().enumerate() {
-        out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
-    }
-    out
+fn broker() -> Credentialed {
+    Credentialed::at(&crate::paths::data_dir())
 }
 
-fn hmac_sha1(key: &[u8], msg: &[u8]) -> [u8; 20] {
-    const BLOCK: usize = 64;
-    let mut k = if key.len() > BLOCK {
-        sha1(key).to_vec()
-    } else {
-        key.to_vec()
-    };
-    k.resize(BLOCK, 0);
-
-    let mut inner = Vec::with_capacity(BLOCK + msg.len());
-    inner.extend(k.iter().map(|b| b ^ 0x36));
-    inner.extend_from_slice(msg);
-    let inner = sha1(&inner);
-
-    let mut outer = Vec::with_capacity(BLOCK + 20);
-    outer.extend(k.iter().map(|b| b ^ 0x5c));
-    outer.extend_from_slice(&inner);
-    sha1(&outer)
-}
-
-/// RFC 4648 base32. Tolerates the spaces and lowercase Okta shows the key in.
-pub fn base32_decode(s: &str) -> Result<Vec<u8>, String> {
-    let mut bits: u32 = 0;
-    let mut nbits: u32 = 0;
-    let mut out = Vec::new();
-    for ch in s.chars() {
-        if ch == '=' || ch.is_whitespace() || ch == '-' {
-            continue;
-        }
-        let v = match ch.to_ascii_uppercase() {
-            c @ 'A'..='Z' => c as u32 - 'A' as u32,
-            c @ '2'..='7' => c as u32 - '2' as u32 + 26,
-            other => return Err(format!("'{other}' is not a base32 character")),
-        };
-        bits = (bits << 5) | v;
-        nbits += 5;
-        if nbits >= 8 {
-            nbits -= 8;
-            out.push((bits >> nbits) as u8);
-        }
-    }
-    if out.is_empty() {
-        return Err("secret is empty".to_string());
-    }
-    Ok(out)
-}
-
-/// RFC 6238 TOTP: 6 digits, 30-second step, SHA-1.
-pub fn totp_at(secret: &[u8], unix_seconds: u64, step: u64, digits: u32) -> String {
-    let counter = unix_seconds / step;
-    let mac = hmac_sha1(secret, &counter.to_be_bytes());
-    // Dynamic truncation: the low nibble of the last byte picks the offset.
-    let off = (mac[19] & 0x0f) as usize;
-    let bin = ((mac[off] as u32 & 0x7f) << 24)
-        | ((mac[off + 1] as u32) << 16)
-        | ((mac[off + 2] as u32) << 8)
-        | (mac[off + 3] as u32);
-    let code = bin % 10u32.pow(digits);
-    format!("{code:0width$}", width = digits as usize)
-}
-
-/// The code an authenticator app would be showing right now.
-pub fn totp_now(secret_b32: &str) -> Result<String, String> {
-    let secret = base32_decode(secret_b32)?;
-    Ok(totp_at(&secret, crate::clock::now_secs(), 30, 6))
-}
-
-/// Seconds until the current code rolls over.
-pub fn totp_seconds_remaining() -> u64 {
-    30 - (crate::clock::now_secs() % 30)
-}
-
-// ── Stored credentials ───────────────────────────────────────────────────────
+// ── The keychain fallback ────────────────────────────────────────────────────
 
 const KEYCHAIN_SERVICE: &str = "com.oculus.unimelb-sso";
 
@@ -174,26 +41,20 @@ fn erase(account: &str) -> Result<(), String> {
     secret(account).delete()
 }
 
-/// Never logged, never written outside the keychain, never sent anywhere but
-/// `sso.unimelb.edu.au`.
-pub struct Credentials {
-    pub username: String,
-    pub password: String,
-    pub totp_secret: String,
-}
+/// The keychain, as the sign-in's credential store.
+struct Keychain;
 
-impl Credentials {
-    /// `Ok(None)` when any piece is missing; a refused keychain read is
-    /// `UnreadableCredentials`, never "not set up".
-    pub fn load() -> Result<Option<Credentials>, LoginError> {
-        let get = |account| read(account).map_err(LoginError::UnreadableCredentials);
-        let Some(username) = get("username")? else {
+impl CredentialStore for Keychain {
+    /// `Ok(None)` when any piece is missing; a refused read is `Err`, never
+    /// "not set up".
+    fn load(&self) -> Result<Option<Credentials>, String> {
+        let Some(username) = read("username")? else {
             return Ok(None);
         };
-        let Some(password) = get("password")? else {
+        let Some(password) = read("password")? else {
             return Ok(None);
         };
-        let Some(totp_secret) = get("totp_secret")? else {
+        let Some(totp_secret) = read("totp_secret")? else {
             return Ok(None);
         };
         Ok(Some(Credentials {
@@ -202,18 +63,22 @@ impl Credentials {
             totp_secret,
         }))
     }
+
+    fn clear_password(&self) -> Result<(), String> {
+        clear_password()
+    }
 }
 
-/// Which pieces are on file, for the settings UI; values never leave the
-/// keychain.
-#[derive(serde::Serialize)]
+/// Which pieces are on file, for the settings UI; values never leave keyd or
+/// the keychain.
+#[derive(Debug, serde::Serialize)]
 pub struct CredentialStatus {
     pub username: Option<String>,
     pub has_password: bool,
     pub has_totp: bool,
 }
 
-pub fn credential_status() -> Result<CredentialStatus, String> {
+fn keychain_status() -> Result<CredentialStatus, String> {
     let unreadable = |e| LoginError::UnreadableCredentials(e).to_string();
     Ok(CredentialStatus {
         username: read("username").map_err(unreadable)?,
@@ -222,28 +87,20 @@ pub fn credential_status() -> Result<CredentialStatus, String> {
     })
 }
 
-/// Validates the TOTP seed first: an undecodable one would otherwise surface
-/// mid sign-in as an indistinguishable "wrong code".
-pub fn store_credentials(username: &str, password: &str, totp_secret: &str) -> Result<(), String> {
-    let username = username.trim();
-    let secret = totp_secret.trim().replace(' ', "");
-    if username.is_empty() {
-        return Err("Username is required.".to_string());
+/// Validates with `keyd_core::okta::validate_credentials`, the check keyd
+/// applies too, then saves all three. A new save lifts the attempt guard.
+fn keychain_store(username: &str, password: &str, totp_secret: &str) -> Result<(), String> {
+    let creds = validate_credentials(username, password, totp_secret)?;
+    write("username", &creds.username)?;
+    write("password", &creds.password)?;
+    write("totp_secret", &creds.totp_secret)?;
+    if let Err(why) = keyd_core::okta::resume_automatic_sign_in(&crate::paths::data_dir()) {
+        eprintln!("[oculus] the attempt guard was not cleared: {why}");
     }
-    if password.is_empty() {
-        return Err("Password is required.".to_string());
-    }
-    base32_decode(&secret).map_err(|e| format!("That does not look like a TOTP setup key: {e}"))?;
-
-    write("username", username)?;
-    write("password", password)?;
-    write("totp_secret", &secret)?;
     Ok(())
 }
 
-/// Forget everything. Called on explicit disconnect, and on a rejected
-/// password so a stale secret is not replayed until Okta locks the account.
-pub fn clear_credentials() -> Result<(), String> {
+fn keychain_forget() -> Result<(), String> {
     erase("username")?;
     erase("password")?;
     erase("totp_secret")?;
@@ -252,989 +109,126 @@ pub fn clear_credentials() -> Result<(), String> {
 
 /// Drop only the password, keeping username and seed — the response to
 /// `LoginError::BadPassword`.
-pub fn clear_password() -> Result<(), String> {
+fn clear_password() -> Result<(), String> {
     erase("password")
 }
 
-// ── HTTP plumbing ────────────────────────────────────────────────────────────
+// ── Saved credentials, through keyd ──────────────────────────────────────────
 
-pub const SSO_HOST: &str = "sso.unimelb.edu.au";
-const IDX_MEDIA: &str = "application/ion+json; okta-version=1.0.0";
-/// Hygiene, not a known requirement: every leg here impersonates a browser.
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
-const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
-/// Stops a policy we did not anticipate from looping.
-const MAX_STEPS: usize = 12;
+// Each `*_in` asks `broker` and runs its fallback only when keyd is absent.
 
-/// Cookies kept per host: Okta's `sid` must never reach Canvas, nor Canvas's
-/// session Okta.
-#[derive(Default)]
-struct Jar(BTreeMap<String, BTreeMap<String, String>>);
+pub fn credential_status() -> Result<CredentialStatus, String> {
+    credential_status_in(&broker(), keychain_status)
+}
 
-impl Jar {
-    fn absorb(&mut self, host: &str, resp: &ureq::Response) {
-        let jar = self.0.entry(host.to_string()).or_default();
-        for raw in resp.all("set-cookie") {
-            let Some((k, v)) = raw.split(';').next().unwrap_or("").split_once('=') else {
-                continue;
-            };
-            let (k, v) = (k.trim(), v.trim().trim_matches('"'));
-            if v.is_empty() {
-                jar.remove(k);
-            } else {
-                jar.insert(k.to_string(), v.to_string());
-            }
-        }
-    }
-
-    fn header(&self, host: &str) -> String {
-        self.0
-            .get(host)
-            .map(|m| {
-                m.iter()
-                    .map(|(k, v)| format!("{k}={v}"))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            })
-            .unwrap_or_default()
-    }
-
-    fn has(&self, host: &str, name: &str) -> bool {
-        self.0.get(host).is_some_and(|m| m.contains_key(name))
+fn credential_status_in(
+    broker: &Credentialed,
+    keychain: impl FnOnce() -> Result<CredentialStatus, String>,
+) -> Result<CredentialStatus, String> {
+    match broker.okta_status() {
+        Ok(status) => Ok(CredentialStatus {
+            username: status.username,
+            has_password: status.has_password,
+            has_totp: status.has_totp,
+        }),
+        Err(KeydError::Absent) => keychain(),
+        Err(KeydError::Keychain(e)) => Err(LoginError::UnreadableCredentials(e).to_string()),
+        Err(e) => Err(format!(
+            "Could not check the saved sign-in credentials: {e}"
+        )),
     }
 }
 
-/// Why an automated sign-in stopped. Callers act on the variant: a bad
-/// password clears the stored one, a network failure keeps the session.
-#[derive(Debug)]
-pub enum LoginError {
-    /// No credentials on file — automated sign-in was never set up.
-    NotConfigured,
-    /// The user signed out; only a sign-in they start lifts it.
-    SignedOut,
-    /// The keychain refused the read (a denied prompt, a sandboxed process);
-    /// the credentials may well be on file. Carries the keychain's error.
-    UnreadableCredentials(String),
-    BadPassword(String),
-    BadTotp(String),
-    /// Okta offered only factors we cannot answer; carries their labels.
-    UnsupportedFactor(Vec<String>),
-    Locked(String),
-    Network(String),
-    /// The state machine went somewhere this code does not model; carries the
-    /// remediation names.
-    Unexpected(String),
-    /// The attempt guard held an automatic sign-in back; carries seconds until
-    /// the next one is allowed.
-    Waiting(u64),
-    /// Automatic sign-in stopped after a failure retrying cannot fix; carries
-    /// that failure. A manual sign-in or newly saved credentials resume it.
-    Paused(String),
-}
-
-impl std::fmt::Display for LoginError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LoginError::NotConfigured => write!(
-                f,
-                "Automated sign-in is not set up — save your username, password and \
-                 authenticator setup key first."
-            ),
-            LoginError::SignedOut => write!(
-                f,
-                "Signed out, so automatic sign-in is off until you sign in from Settings → \
-                 Canvas or run `oculus auth auto`."
-            ),
-            LoginError::UnreadableCredentials(m) => write!(
-                f,
-                "The keychain refused to give out the saved sign-in credentials ({m}). They \
-                 are not missing — macOS denied this process access to them."
-            ),
-            LoginError::BadPassword(m) => write!(f, "Okta rejected the password: {m}"),
-            LoginError::BadTotp(m) => write!(
-                f,
-                "Okta rejected the authenticator code: {m}. If this keeps happening the \
-                 stored setup key is for a factor that has since been re-enrolled, or this \
-                 Mac's clock has drifted."
-            ),
-            LoginError::UnsupportedFactor(opts) => write!(
-                f,
-                "Okta asked for a factor this app cannot answer. It offered: {}. \
-                 Automated sign-in needs Google Authenticator (TOTP) enrolled.",
-                if opts.is_empty() {
-                    "nothing recognisable".to_string()
-                } else {
-                    opts.join(", ")
-                }
-            ),
-            LoginError::Locked(m) => write!(f, "The account is locked or blocked: {m}"),
-            LoginError::Network(m) => write!(f, "Could not reach the sign-in service: {m}"),
-            LoginError::Unexpected(m) => write!(f, "Unexpected sign-in step: {m}"),
-            LoginError::Waiting(secs) => write!(
-                f,
-                "Holding off automatic sign-in for {} more min after the last attempt.",
-                secs.div_ceil(60)
-            ),
-            LoginError::Paused(m) => write!(
-                f,
-                "Automatic sign-in is paused after: {m}. Sign in from Settings → Canvas \
-                 or run `oculus auth auto` to resume it."
-            ),
-        }
-    }
-}
-
-fn agent() -> ureq::Agent {
-    // Redirects are walked by hand so cookies can be filed per host.
-    ureq::AgentBuilder::new()
-        .redirects(0)
-        .timeout(TIMEOUT)
-        .user_agent(USER_AGENT)
-        .build()
-}
-
-fn host_of(u: &url::Url) -> String {
-    u.host_str().unwrap_or_default().to_string()
-}
-
-/// Follow 3xx from `start`, filing cookies per host, until a non-redirect.
-/// Returns where it landed and the body.
-fn walk(jar: &mut Jar, start: &str, max: usize) -> Result<(url::Url, String), LoginError> {
-    let agent = agent();
-    let mut url = url::Url::parse(start).map_err(|e| LoginError::Unexpected(e.to_string()))?;
-
-    for _ in 0..max {
-        let host = host_of(&url);
-        let mut req = agent.get(url.as_str());
-        let cookie = jar.header(&host);
-        if !cookie.is_empty() {
-            req = req.set("Cookie", &cookie);
-        }
-        let resp = match req.call() {
-            Ok(r) => r,
-            Err(ureq::Error::Status(_, r)) => r,
-            Err(e) => return Err(LoginError::Network(e.to_string())),
-        };
-        jar.absorb(&host, &resp);
-
-        if (300..400).contains(&resp.status()) {
-            let loc = resp
-                .header("Location")
-                .ok_or_else(|| LoginError::Unexpected("redirect without Location".into()))?;
-            url = url
-                .join(loc)
-                .map_err(|e| LoginError::Unexpected(format!("bad redirect target: {e}")))?;
-            continue;
-        }
-        let body = resp.into_string().unwrap_or_default();
-        return Ok((url, body));
-    }
-    Err(LoginError::Unexpected(
-        "redirect loop during sign-in".into(),
-    ))
-}
-
-/// Start the SAML flow and pull the IDX state token out of the login page.
-fn bootstrap(jar: &mut Jar) -> Result<(String, String), LoginError> {
-    let start = format!("{}/login/saml", crate::paths::CANVAS_BASE);
-    let (landed, body) = walk(jar, &start, 10)?;
-
-    if host_of(&landed) != SSO_HOST {
-        return Err(LoginError::Unexpected(format!(
-            "SAML start landed on {landed} instead of {SSO_HOST}"
-        )));
-    }
-    let token = extract_state_token(&body).ok_or_else(|| {
-        LoginError::Unexpected(
-            "no state token on the Okta login page — the sign-in widget may have changed".into(),
-        )
-    })?;
-    Ok((token, landed.to_string()))
-}
-
-fn extract_state_token(html: &str) -> Option<String> {
-    state_token_candidates(html).into_iter().next()
-}
-
-/// Every `stateToken`-shaped value on the page. Inline script mentions the
-/// name before the config assigns it, so each candidate must be a quoted
-/// value of plausible shape, not just the first mention.
-fn state_token_candidates(html: &str) -> Vec<String> {
-    const KEY: &str = "stateToken";
-    let mut out: Vec<String> = Vec::new();
-    let mut from = 0;
-
-    while let Some(i) = html[from..].find(KEY) {
-        let at = from + i + KEY.len();
-        from = at;
-        let tail = &html[at..];
-
-        // Step over the separator: `":"`, `: '`, `= "`, `='`.
-        let sep: String = tail
-            .chars()
-            .take_while(|c| matches!(c, '"' | '\'' | ':' | '=' | ' ' | '\t' | '\n' | '\r'))
-            .collect();
-        // The separator must end on the quote that opens the value.
-        let Some(quote) = sep.chars().rev().find(|c| *c == '"' || *c == '\'') else {
-            continue;
-        };
-        let rest = &tail[sep.len()..];
-        let Some(end) = rest.find(quote) else {
-            continue;
-        };
-
-        let raw = unescape_js(&rest[..end]);
-        if looks_like_state_token(&raw) && !out.contains(&raw) {
-            out.push(raw);
-        }
-    }
-    out
-}
-
-/// Okta embeds the token in a JS string literal and escapes `-` as `\x2D`,
-/// so a raw grab yields a token the API rejects as malformed.
-fn unescape_js(s: &str) -> String {
-    s.replace("\\x2D", "-")
-        .replace("\\x2d", "-")
-        .replace("\\u002D", "-")
-        .replace("\\u002d", "-")
-        .replace("\\x2F", "/")
-        .replace("\\/", "/")
-}
-
-fn looks_like_state_token(s: &str) -> bool {
-    s.len() >= 20
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '~'))
-}
-
-/// One IDX call. A non-2xx body is parsed, not thrown: Okta explains its
-/// 400/401s there.
-fn idx(jar: &mut Jar, url: &str, body: serde_json::Value) -> Result<serde_json::Value, LoginError> {
-    let resp = agent()
-        .post(url)
-        .set("Accept", IDX_MEDIA)
-        .set("Content-Type", IDX_MEDIA)
-        .set("Cookie", &jar.header(SSO_HOST))
-        .send_string(&body.to_string());
-
-    let resp = match resp {
-        Ok(r) => r,
-        Err(ureq::Error::Status(_, r)) => r,
-        Err(e) => return Err(LoginError::Network(e.to_string())),
-    };
-    jar.absorb(SSO_HOST, &resp);
-    let text = resp
-        .into_string()
-        .map_err(|e| LoginError::Network(e.to_string()))?;
-    serde_json::from_str(&text)
-        .map_err(|e| LoginError::Unexpected(format!("unreadable IDX response: {e}")))
-}
-
-// ── Remediation helpers ──────────────────────────────────────────────────────
-
-fn remediations(state: &serde_json::Value) -> Vec<&serde_json::Value> {
-    state["remediation"]["value"]
-        .as_array()
-        .map(|a| a.iter().collect())
-        .unwrap_or_default()
-}
-
-fn remediation<'a>(state: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
-    remediations(state)
-        .into_iter()
-        .find(|r| r["name"].as_str() == Some(name))
-}
-
-fn remediation_names(state: &serde_json::Value) -> Vec<String> {
-    remediations(state)
-        .iter()
-        .filter_map(|r| r["name"].as_str().map(str::to_string))
-        .collect()
-}
-
-/// The `id` + `methodType` an authenticator option is selected by, read out of
-/// the nested form Okta describes each option with.
-fn option_fields(option: &serde_json::Value) -> (Option<String>, Option<String>) {
-    let mut id = None;
-    let mut method = None;
-    if let Some(fields) = option["value"]["form"]["value"].as_array() {
-        for f in fields {
-            match f["name"].as_str() {
-                Some("id") => id = f["value"].as_str().map(str::to_string),
-                Some("methodType") => method = f["value"].as_str().map(str::to_string),
-                _ => {}
-            }
-        }
-    }
-    (id, method)
-}
-
-fn authenticator_options(rem: &serde_json::Value) -> Vec<&serde_json::Value> {
-    rem["value"]
-        .as_array()
-        .and_then(|fields| {
-            fields
-                .iter()
-                .find(|f| f["name"].as_str() == Some("authenticator"))
-        })
-        .and_then(|f| f["options"].as_array())
-        .map(|o| o.iter().collect())
-        .unwrap_or_default()
-}
-
-fn option_labels(rem: &serde_json::Value) -> Vec<String> {
-    authenticator_options(rem)
-        .iter()
-        .filter_map(|o| o["label"].as_str().map(str::to_string))
-        .collect()
-}
-
-/// Which factor we are looking for at this point in the flow.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Factor {
-    Password,
-    Totp,
-}
-
-/// Build the `authenticator` payload that selects `want`. TOTP is matched by
-/// label first: Okta Verify also advertises `methodType: otp`, with a
-/// different seed.
-fn select_payload(rem: &serde_json::Value, want: Factor) -> Option<serde_json::Value> {
-    let options = authenticator_options(rem);
-    let pick = |pred: &dyn Fn(&str, &str) -> bool| -> Option<serde_json::Value> {
-        options.iter().find_map(|o| {
-            let (id, method) = option_fields(o);
-            let (id, method) = (id?, method.unwrap_or_default());
-            let label = o["label"].as_str().unwrap_or("");
-            pred(&label.to_ascii_lowercase(), &method).then(|| match want {
-                Factor::Password => serde_json::json!({ "id": id }),
-                Factor::Totp => serde_json::json!({ "id": id, "methodType": "otp" }),
-            })
-        })
-    };
-
-    match want {
-        Factor::Password => pick(&|_, m| m == "password"),
-        Factor::Totp => pick(&|l, m| m == "otp" && l.contains("google"))
-            .or_else(|| pick(&|l, m| m == "otp" && !l.contains("okta verify")))
-            .or_else(|| pick(&|_, m| m == "otp")),
-    }
-}
-
-/// Whatever an IDX response says about itself, for diagnostics. Okta reports
-/// some failures as `messages`, others as a bare `errorSummary`.
-fn summarise(state: &serde_json::Value) -> String {
-    if let Some(messages) = state["messages"]["value"].as_array() {
-        let joined: Vec<&str> = messages
-            .iter()
-            .filter_map(|m| m["message"].as_str())
-            .collect();
-        if !joined.is_empty() {
-            return joined.join(" ");
-        }
-    }
-    state["errorSummary"]
-        .as_str()
-        .map(str::to_string)
-        .unwrap_or_else(|| "nothing intelligible".to_string())
-}
-
-/// Which factor the pending challenge is for, or `None` when it is one we
-/// cannot answer and the caller should switch via the chooser. Falls back on
-/// flow position when Okta names no `currentAuthenticator`.
-fn challenged_factor(state: &serde_json::Value, password_done: bool) -> Option<Factor> {
-    let current = ["currentAuthenticator", "currentAuthenticatorEnrollment"]
-        .iter()
-        .map(|k| &state[*k])
-        .find(|v| !v.is_null())
-        .map(|v| v.get("value").unwrap_or(v));
-
-    let Some(cur) = current else {
-        return Some(if password_done {
-            Factor::Totp
-        } else {
-            Factor::Password
-        });
-    };
-
-    let key = cur["key"].as_str().unwrap_or("");
-    let methods: Vec<&str> = cur["methods"]
-        .as_array()
-        .map(|a| a.iter().filter_map(|m| m["type"].as_str()).collect())
-        .unwrap_or_default();
-
-    if key == "okta_password" || methods.contains(&"password") {
-        // Re-offered after it was accepted: Okta is moving on.
-        return (!password_done).then_some(Factor::Password);
-    }
-    if key == "google_otp" {
-        return Some(Factor::Totp);
-    }
-    // Okta Verify advertises `totp` too, but its seed is not the one we hold.
-    if key != "okta_verify" && methods.iter().any(|m| *m == "otp" || *m == "totp") {
-        return Some(Factor::Totp);
-    }
-    None
-}
-
-/// Turn an error carried in an IDX response into the right `LoginError`.
-fn check_messages(state: &serde_json::Value, answering: Option<Factor>) -> Result<(), LoginError> {
-    let Some(messages) = state["messages"]["value"].as_array() else {
-        return Ok(());
-    };
-    let errors: Vec<String> = messages
-        .iter()
-        .filter(|m| m["class"].as_str() != Some("INFO"))
-        .filter_map(|m| m["message"].as_str().map(str::to_string))
-        .collect();
-    if errors.is_empty() {
-        return Ok(());
-    }
-    let text = errors.join(" ");
-    let lower = text.to_ascii_lowercase();
-
-    if lower.contains("locked") || lower.contains("suspended") || lower.contains("too many") {
-        return Err(LoginError::Locked(text));
-    }
-    Err(match answering {
-        Some(Factor::Totp) => LoginError::BadTotp(text),
-        Some(Factor::Password) => LoginError::BadPassword(text),
-        // Before a factor is answered, the only credential in play is the
-        // username/password pair on the identify form.
-        None => LoginError::BadPassword(text),
+/// Saves all three. keyd validates; its message for bad input is passed on
+/// as written.
+pub fn store_credentials(username: &str, password: &str, totp_secret: &str) -> Result<(), String> {
+    store_credentials_in(&broker(), username, password, totp_secret, || {
+        keychain_store(username, password, totp_secret)
     })
 }
 
-// ── Attempt guard ────────────────────────────────────────────────────────────
-//
-// The app's startup probe, its keep-alive thread, the browser and the CLI's
-// `auth tick` each sign in on their own, and Okta locks the account after too
-// many attempts. So every attempt goes through one record on disk.
-
-/// Who asked for a sign-in. Only `Manual` skips the guard: a person is
-/// waiting on the answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Trigger {
-    Manual,
-    Startup,
-    KeepAlive,
-    Browser,
-}
-
-impl Trigger {
-    fn as_str(self) -> &'static str {
-        match self {
-            Trigger::Manual => "manual",
-            Trigger::Startup => "app startup",
-            Trigger::KeepAlive => "keep-alive",
-            Trigger::Browser => "browser",
-        }
+fn store_credentials_in(
+    broker: &Credentialed,
+    username: &str,
+    password: &str,
+    totp_secret: &str,
+    keychain: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    match broker.okta_save(username, password, totp_secret) {
+        Err(KeydError::Absent) => keychain(),
+        Err(KeydError::Request(message)) => Err(message),
+        other => other.map_err(|e| e.to_string()),
     }
 }
 
-#[derive(Default, serde::Serialize, serde::Deserialize)]
-struct AttemptRecord {
-    /// Unix seconds when the last attempt started.
-    last: u64,
-    /// Failed attempts since the last success; sets the wait.
-    failures: u32,
-    /// Why automatic sign-in is paused, if it is.
-    paused: Option<String>,
+/// Forget everything. Called on explicit disconnect.
+pub fn clear_credentials() -> Result<(), String> {
+    clear_credentials_in(&broker(), keychain_forget)
 }
 
-/// How long automatic sign-in waits after an attempt.
-fn wait_after(failures: u32) -> u64 {
-    match failures {
-        0 | 1 => 600,
-        2 => 3600,
-        _ => 6 * 3600,
+fn clear_credentials_in(
+    broker: &Credentialed,
+    keychain: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    match broker.okta_forget() {
+        Err(KeydError::Absent) => keychain(),
+        other => other.map(|_| ()).map_err(|e| e.to_string()),
     }
 }
 
-/// Whether an attempt may start at `now`, recording it if so.
-fn admit(r: &mut AttemptRecord, trigger: Trigger, now: u64) -> Result<(), LoginError> {
-    if trigger != Trigger::Manual {
-        if let Some(why) = &r.paused {
-            return Err(LoginError::Paused(why.clone()));
-        }
-        let ready = r.last.saturating_add(wait_after(r.failures));
-        if now < ready {
-            return Err(LoginError::Waiting(ready - now));
-        }
-    }
-    r.last = now;
-    Ok(())
+// ── The sign-in ──────────────────────────────────────────────────────────────
+
+/// Headless sign-in behind the attempt guard. keyd runs it, saves the session
+/// in its vault and takes the caller's role from the connection. With keyd
+/// absent there is no sign-in: a session only keyd can use must not be minted
+/// without it.
+pub fn sign_in(data_dir: &std::path::Path, trigger: Trigger) -> Result<(), LoginError> {
+    sign_in_in(&Credentialed::at(data_dir), trigger)
 }
 
-/// Fold an attempt's outcome into the record.
-fn settle(r: &mut AttemptRecord, result: &Result<String, LoginError>) {
-    match result {
-        Ok(_) => {
-            r.failures = 0;
-            r.paused = None;
-        }
-        // Okta gave no verdict, so it does not count against the account.
-        Err(LoginError::Network(_)) => {}
-        Err(
-            e @ (LoginError::Locked(_)
-            | LoginError::BadPassword(_)
-            | LoginError::UnsupportedFactor(_)),
-        ) => {
-            r.failures += 1;
-            r.paused = Some(e.to_string());
-        }
-        Err(_) => r.failures += 1,
+fn sign_in_in(broker: &Credentialed, trigger: Trigger) -> Result<(), LoginError> {
+    match broker.ensure_signed_in(trigger) {
+        Ok(outcome) => outcome,
+        Err(KeydError::Absent) => Err(LoginError::Broker(
+            "oculus-keyd is not running or not installed, and the Canvas session is kept and \
+             used only through it"
+                .to_string(),
+        )),
+        Err(KeydError::Keychain(e)) => Err(LoginError::UnreadableCredentials(e)),
+        Err(e) => Err(LoginError::Broker(e.to_string())),
     }
 }
 
-/// Runs `f` on the record under an exclusive file lock, so two processes
-/// cannot both decide to sign in. An unreadable record acts as a blank one.
-fn with_record<T>(data_dir: &std::path::Path, f: impl FnOnce(&mut AttemptRecord) -> T) -> T {
-    use std::io::{Read, Seek, Write};
-
-    let path = crate::paths::sign_in_record_path(data_dir);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    let Ok(mut file) = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&path)
-    else {
-        return f(&mut AttemptRecord::default());
-    };
-    file.lock().ok();
-    let mut text = String::new();
-    file.read_to_string(&mut text).ok();
-    let mut record: AttemptRecord = serde_json::from_str(&text).unwrap_or_default();
-    let out = f(&mut record);
-    if let Ok(body) = serde_json::to_string(&record) {
-        file.set_len(0).ok();
-        file.rewind().ok();
-        file.write_all(body.as_bytes()).ok();
-    }
-    out
-}
-
-/// Headless sign-in behind the attempt guard. Automatic attempts wait 10 min
-/// after any attempt, then 1 h and 6 h as failures repeat, and stop on a
-/// failure retrying cannot fix. Each attempt is a line in `okta-sign-in.log`.
-pub fn sign_in(data_dir: &std::path::Path, trigger: Trigger) -> Result<String, LoginError> {
-    if trigger != Trigger::Manual && crate::paths::signed_out_path(data_dir).exists() {
-        return Err(LoginError::SignedOut);
-    }
-    let creds = Credentials::load()?.ok_or(LoginError::NotConfigured)?;
-    let now = crate::clock::now_secs();
-    with_record(data_dir, |r| admit(r, trigger, now))?;
-
-    let result = attempt_sign_in(data_dir, &creds);
-    with_record(data_dir, |r| settle(r, &result));
-    let outcome = match &result {
-        Ok(_) => "signed in".to_string(),
-        Err(e) => format!("failed — {e}"),
-    };
-    crate::paths::append_sign_in_log(data_dir, &format!("{}: {outcome}", trigger.as_str()));
-    if let Err(LoginError::BadPassword(_)) = &result {
-        // Replaying a wrong password unattended locks the account.
-        clear_password().ok();
-    }
-    result
-}
-
-/// Clears the wait and any pause: newly saved credentials, or a sign-in a
-/// person finished in the window, deserve an immediate automatic try.
+/// Clears the attempt guard's failures, pause and wait after a person signed
+/// in themselves. keyd does it, so the app never writes the record; only an
+/// absent keyd lets this process reset it. A failure is logged: the sign-in
+/// itself succeeded.
 pub fn resume_automatic_sign_in(data_dir: &std::path::Path) {
-    with_record(data_dir, |r| *r = AttemptRecord::default());
+    resume_in(&Credentialed::at(data_dir), || {
+        keyd_core::okta::resume_automatic_sign_in(data_dir)
+    });
 }
 
-// ── The flow ─────────────────────────────────────────────────────────────────
-
-/// Sign in headlessly and persist the resulting Canvas session cookie,
-/// returning the cookie header. Driven by whichever remediations Okta offers,
-/// since factor order is a policy setting. Only `sign_in` calls this.
-fn attempt_sign_in(data_dir: &std::path::Path, creds: &Credentials) -> Result<String, LoginError> {
-    let mut jar = Jar::default();
-
-    let (state_token, saml_url) = bootstrap(&mut jar)?;
-    let idx_base = format!("https://{SSO_HOST}/idp/idx");
-
-    // Introspect takes `stateToken`, but some configurations accept only
-    // `stateHandle` here, so retry with that.
-    let introspect = format!("{idx_base}/introspect");
-    let mut state = idx(
-        &mut jar,
-        &introspect,
-        serde_json::json!({ "stateToken": state_token }),
-    )?;
-    if state["stateHandle"].as_str().is_none() {
-        state = idx(
-            &mut jar,
-            &introspect,
-            serde_json::json!({ "stateHandle": state_token }),
-        )?;
-    }
-    if state["stateHandle"].as_str().is_none() {
-        return Err(LoginError::Unexpected(format!(
-            "Okta would not open a sign-in transaction — it said: {}",
-            summarise(&state)
-        )));
-    }
-
-    let mut password_done = false;
-    let mut identified = false;
-    let mut switched_to: Option<Factor> = None;
-
-    for _ in 0..MAX_STEPS {
-        if state.get("successWithInteractionCode").is_some() || state.get("success").is_some() {
-            break;
-        }
-        let Some(handle) = state["stateHandle"].as_str().map(str::to_string) else {
-            return Err(LoginError::Unexpected(
-                "IDX response carried no stateHandle — the session expired mid sign-in".into(),
-            ));
-        };
-        let names = remediation_names(&state);
-
-        // Username, and on some policies the password with it.
-        if !identified {
-            if let Some(rem) = remediation(&state, "identify") {
-                let href = rem["href"]
-                    .as_str()
-                    .unwrap_or(&format!("{idx_base}/identify"))
-                    .to_string();
-                let takes_password = rem["value"]
-                    .as_array()
-                    .is_some_and(|f| f.iter().any(|x| x["name"].as_str() == Some("credentials")));
-
-                let mut body = serde_json::json!({
-                    "stateHandle": handle,
-                    "identifier": creds.username,
-                });
-                if takes_password {
-                    body["credentials"] = serde_json::json!({ "passcode": creds.password });
-                }
-                state = idx(&mut jar, &href, body)?;
-                check_messages(&state, takes_password.then_some(Factor::Password))?;
-                identified = true;
-                password_done |= takes_password;
-                continue;
-            }
-        }
-
-        // Answer the challenge BEFORE considering the chooser: OIE offers
-        // `select-authenticator-authenticate` alongside every challenge, and
-        // taking it re-picks the same authenticator forever.
-        if let Some(rem) = remediation(&state, "challenge-authenticator") {
-            if let Some(kind) = challenged_factor(&state, password_done) {
-                let passcode = match kind {
-                    Factor::Password => creds.password.clone(),
-                    Factor::Totp => {
-                        wait_for_fresh_code();
-                        totp_now(&creds.totp_secret).map_err(LoginError::Unexpected)?
-                    }
-                };
-                let href = rem["href"]
-                    .as_str()
-                    .unwrap_or(&format!("{idx_base}/challenge/answer"))
-                    .to_string();
-                state = idx(
-                    &mut jar,
-                    &href,
-                    serde_json::json!({ "stateHandle": handle, "credentials": { "passcode": passcode } }),
-                )?;
-                check_messages(&state, Some(kind))?;
-                if kind == Factor::Password {
-                    password_done = true;
-                }
-                continue;
-            }
-            // Challenged for push or a security key: fall through to the
-            // chooser and switch to something answerable.
-        }
-
-        // Pick the next factor: password first, then TOTP.
-        if let Some(rem) = remediation(&state, "select-authenticator-authenticate") {
-            let want = if password_done {
-                Factor::Totp
-            } else {
-                Factor::Password
-            };
-            // Selecting the same factor twice means the answer never landed.
-            if switched_to == Some(want) {
-                return Err(LoginError::Unexpected(format!(
-                    "Okta re-offered the factor chooser after {want:?} was already selected"
-                )));
-            }
-            let payload = select_payload(rem, want)
-                .ok_or_else(|| LoginError::UnsupportedFactor(option_labels(rem)))?;
-            let href = rem["href"]
-                .as_str()
-                .unwrap_or(&format!("{idx_base}/challenge"))
-                .to_string();
-            state = idx(
-                &mut jar,
-                &href,
-                serde_json::json!({ "stateHandle": handle, "authenticator": payload }),
-            )?;
-            check_messages(&state, None)?;
-            switched_to = Some(want);
-            continue;
-        }
-
-        return Err(LoginError::UnsupportedFactor(if names.is_empty() {
-            option_labels(&state)
-        } else {
-            names
-        }));
-    }
-
-    if state.get("success").is_none() && state.get("successWithInteractionCode").is_none() {
-        return Err(LoginError::Unexpected(format!(
-            "sign-in did not complete in {MAX_STEPS} steps (last offered: {})",
-            remediation_names(&state).join(", ")
-        )));
-    }
-
-    // The success href is what actually sets Okta's session cookie.
-    if let Some(href) = state
-        .pointer("/success/href")
-        .or_else(|| state.pointer("/successWithInteractionCode/href"))
-        .and_then(|v| v.as_str())
-    {
-        walk(&mut jar, href, 10).ok();
-    }
-
-    let cookie = complete_saml(&mut jar, &saml_url)?;
-
-    // Prove the cookie authenticates before overwriting one that may still
-    // be good.
-    let name = verify(&cookie)?;
-
-    let path = crate::paths::cookie_path(data_dir);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    crate::paths::write_private(&path, &cookie)
-        .map_err(|e| LoginError::Unexpected(format!("could not save the session cookie: {e}")))?;
-    // Okta's session too, so an in-app browser page that redirects to SSO
-    // passes straight through (`browser::seed_sessions`).
-    let sso = jar.header(SSO_HOST);
-    if !sso.is_empty() {
-        crate::paths::write_private(&crate::paths::sso_cookie_path(data_dir), &sso).ok();
-    }
-    eprintln!("[oculus] automated sign-in succeeded — Canvas accepted the session as {name}");
-    Ok(cookie)
-}
-
-/// Confirm Canvas accepts the freshly minted cookie, returning the account
-/// name it reports.
-fn verify(cookie: &str) -> Result<String, LoginError> {
-    let url = format!("{}/api/v1/users/self", crate::paths::CANVAS_BASE);
-    let resp = agent().get(&url).set("Cookie", cookie).call();
-    match resp {
-        Ok(r) if r.status() == 200 => {
-            let body = r.into_string().unwrap_or_default();
-            let v: serde_json::Value = serde_json::from_str(&body)
-                .map_err(|e| LoginError::Unexpected(format!("unreadable Canvas reply: {e}")))?;
-            Ok(v["name"]
-                .as_str()
-                .or_else(|| v["short_name"].as_str())
-                .unwrap_or("Canvas user")
-                .to_string())
-        }
-        Ok(r) | Err(ureq::Error::Status(_, r)) => Err(LoginError::Unexpected(format!(
-            "the SAML round trip finished but Canvas rejected the session (HTTP {}) — the assertion was not accepted",
-            r.status()
-        ))),
-        Err(e) => Err(LoginError::Network(e.to_string())),
+fn resume_in(broker: &Credentialed, in_process: impl FnOnce() -> Result<(), String>) {
+    let outcome = match broker.okta_resume() {
+        Err(KeydError::Absent) => in_process(),
+        other => other.map_err(|e| e.to_string()),
+    };
+    if let Err(why) = outcome {
+        eprintln!("[oculus] the attempt guard was not cleared: {why}");
     }
 }
 
-/// Okta rejects a replayed code and repeated failures trip the lockout, so
-/// never spend one that is about to expire.
-fn wait_for_fresh_code() {
-    let left = totp_seconds_remaining();
-    if left < 3 {
-        std::thread::sleep(std::time::Duration::from_secs(left + 1));
-    }
-}
-
-/// With an Okta session, replay the SAML app URL and POST the auto-submit
-/// assertion form to Canvas for a `canvas_session` cookie.
-fn complete_saml(jar: &mut Jar, saml_url: &str) -> Result<String, LoginError> {
-    let canvas_host = url::Url::parse(crate::paths::CANVAS_BASE)
-        .ok()
-        .and_then(|u| u.host_str().map(str::to_string))
-        .unwrap_or_default();
-
-    let agent = agent();
-    let mut url = url::Url::parse(saml_url).map_err(|e| LoginError::Unexpected(e.to_string()))?;
-    let mut form: Option<String> = None;
-    let mut posted_assertion = false;
-
-    for _ in 0..10 {
-        let host = host_of(&url);
-        let mut req = match form {
-            Some(_) => agent
-                .post(url.as_str())
-                .set("Content-Type", "application/x-www-form-urlencoded"),
-            None => agent.get(url.as_str()),
-        };
-        let cookie = jar.header(&host);
-        if !cookie.is_empty() {
-            req = req.set("Cookie", &cookie);
-        }
-
-        let resp = match form.take() {
-            Some(body) => req.send_string(&body),
-            None => req.call(),
-        };
-        let resp = match resp {
-            Ok(r) => r,
-            Err(ureq::Error::Status(_, r)) => r,
-            Err(e) => return Err(LoginError::Network(e.to_string())),
-        };
-        jar.absorb(&host, &resp);
-
-        if (300..400).contains(&resp.status()) {
-            let loc = resp
-                .header("Location")
-                .ok_or_else(|| LoginError::Unexpected("redirect without Location".into()))?;
-            url = url
-                .join(loc)
-                .map_err(|e| LoginError::Unexpected(format!("bad redirect target: {e}")))?;
-            continue;
-        }
-
-        // Only after the assertion is posted: Canvas hands an anonymous
-        // `canvas_session` to every first visitor.
-        if posted_assertion && jar.has(&canvas_host, "canvas_session") {
-            return Ok(jar.header(&canvas_host));
-        }
-
-        let body = resp.into_string().unwrap_or_default();
-        let (action, fields) = parse_saml_form(&body)
-            .ok_or_else(|| LoginError::Unexpected(format!("no SAML assertion form at {url}")))?;
-        url = url
-            .join(&action)
-            .map_err(|e| LoginError::Unexpected(format!("bad form action: {e}")))?;
-        form = Some(
-            url::form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(&fields)
-                .finish(),
-        );
-        posted_assertion = true;
-    }
-    Err(LoginError::Unexpected(
-        "the SAML assertion never reached Canvas".into(),
-    ))
-}
-
-/// The form carrying a `SAMLResponse` field; Okta's pages carry others too.
-fn parse_saml_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
-    let doc = scraper::Html::parse_document(html);
-    let form_sel = scraper::Selector::parse("form").ok()?;
-    let input_sel = scraper::Selector::parse("input").ok()?;
-
-    for form in doc.select(&form_sel) {
-        let fields: Vec<(String, String)> = form
-            .select(&input_sel)
-            .filter_map(|i| {
-                Some((
-                    i.value().attr("name")?.to_string(),
-                    i.value().attr("value").unwrap_or("").to_string(),
-                ))
-            })
-            .collect();
-        if fields.iter().any(|(k, _)| k == "SAMLResponse") {
-            return Some((form.value().attr("action")?.to_string(), fields));
-        }
-    }
-    None
-}
-
-// ── Diagnosis ────────────────────────────────────────────────────────────────
-
-/// What the sign-in page looks like from here, for when the flow fails.
-/// Reports shapes and lengths, never values: a state token is a live
-/// credential.
+/// What the sign-in page looks like from here, for when the flow fails. It
+/// only reads the page, so it keeps no session.
 pub fn diagnose() -> String {
-    let mut out = String::new();
-    let mut jar = Jar::default();
-
-    let start = format!("{}/login/saml", crate::paths::CANVAS_BASE);
-    let (landed, body) = match walk(&mut jar, &start, 10) {
-        Ok(v) => v,
-        Err(e) => return format!("could not reach the sign-in page: {e}\n"),
-    };
-
-    out.push_str(&format!("landed on   {landed}\n"));
-    out.push_str(&format!("page size   {} bytes\n", body.len()));
-    out.push_str(&format!(
-        "okta cookies {}\n",
-        jar.0.get(SSO_HOST).map(|m| m.len()).unwrap_or(0)
-    ));
-
-    let markers = [
-        "stateToken",
-        "interactionHandle",
-        "interaction_code",
-        "okta-signin-widget",
-        "signin-container",
-        "OktaUtil",
-    ];
-    let seen: Vec<&str> = markers
-        .iter()
-        .copied()
-        .filter(|m| body.contains(m))
-        .collect();
-    out.push_str(&format!(
-        "markers     {}\n",
-        if seen.is_empty() {
-            "none".to_string()
-        } else {
-            seen.join(", ")
-        }
-    ));
-
-    let candidates = state_token_candidates(&body);
-    if candidates.is_empty() {
-        out.push_str("state token none matched the expected shape\n");
-    } else {
-        for (i, c) in candidates.iter().enumerate() {
-            out.push_str(&format!(
-                "state token #{i}  {} chars, starts {:?}\n",
-                c.len(),
-                &c[..c.len().min(6)]
-            ));
-        }
-    }
-
-    // Try the handshake itself — its answer is the actual diagnosis.
-    let Some(token) = candidates.first() else {
-        return out;
-    };
-    let introspect = format!("https://{SSO_HOST}/idp/idx/introspect");
-    for field in ["stateToken", "stateHandle"] {
-        match idx(&mut jar, &introspect, serde_json::json!({ field: token })) {
-            Ok(state) => {
-                let names = remediation_names(&state);
-                out.push_str(&format!(
-                    "introspect  {field}: {}\n",
-                    if state["stateHandle"].as_str().is_some() {
-                        format!("ok — offers [{}]", names.join(", "))
-                    } else {
-                        format!("refused — {}", summarise(&state))
-                    }
-                ));
-            }
-            Err(e) => out.push_str(&format!("introspect  {field}: {e}\n")),
-        }
-    }
-    out
+    let env = Env::new(
+        &crate::paths::data_dir(),
+        crate::paths::CANVAS_BASE,
+        &Keychain,
+        &NoSessions,
+    );
+    keyd_core::okta::diagnose(&env)
 }
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
@@ -1250,9 +244,7 @@ pub fn okta_save_credentials(
     password: String,
     totp_secret: String,
 ) -> Result<(), String> {
-    store_credentials(&username, &password, &totp_secret)?;
-    resume_automatic_sign_in(&crate::paths::data_dir());
-    Ok(())
+    store_credentials(&username, &password, &totp_secret)
 }
 
 #[tauri::command]
@@ -1279,9 +271,6 @@ fn run_sign_in(
 /// name.
 fn signed_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, String> {
     crate::auth::session_established(app, dir, crate::auth::Via::Headless);
-    // The headless path works on this account, so a re-authenticating
-    // LaunchAgent is worth installing.
-    crate::keepalive::ensure_installed();
     crate::canvas::Canvas::open(dir).whoami()
 }
 
@@ -1293,7 +282,7 @@ pub fn try_auto_recover(app: &tauri::AppHandle, trigger: Trigger) -> bool {
     let outcome = match sign_in(&dir, trigger) {
         Err(LoginError::NotConfigured | LoginError::SignedOut) => return false,
         Err(e) => Err(e.to_string()),
-        Ok(_) => signed_in(app, &dir),
+        Ok(()) => signed_in(app, &dir),
     };
     match outcome {
         Ok(name) => {
@@ -1310,293 +299,286 @@ pub fn try_auto_recover(app: &tauri::AppHandle, trigger: Trigger) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{FakeKeyd, Scratch};
+    use keyd_core::okta::outcome_to_wire;
+    use serde_json::{json, Value};
 
-    #[test]
-    fn automatic_attempts_back_off_and_manual_ones_do_not() {
-        let mut r = AttemptRecord::default();
-        assert!(admit(&mut r, Trigger::Startup, 1_000_000).is_ok());
-        settle(&mut r, &Err(LoginError::BadTotp(String::new())));
-        assert!(matches!(
-            admit(&mut r, Trigger::Browser, 1_000_599),
-            Err(LoginError::Waiting(1))
-        ));
-        assert!(admit(&mut r, Trigger::KeepAlive, 1_000_600).is_ok());
-        settle(&mut r, &Err(LoginError::Unexpected(String::new())));
-        // Two failures in a row: an hour.
-        assert!(matches!(
-            admit(&mut r, Trigger::KeepAlive, 1_003_000),
-            Err(LoginError::Waiting(_))
-        ));
-        assert!(admit(&mut r, Trigger::Manual, 1_003_000).is_ok());
-        settle(&mut r, &Err(LoginError::BadTotp(String::new())));
-        assert_eq!(wait_after(r.failures), 6 * 3600);
-        settle(&mut r, &Ok(String::new()));
-        assert_eq!(r.failures, 0);
+    const TRIGGERS: [(Trigger, &str); 4] = [
+        (Trigger::Manual, "manual"),
+        (Trigger::Startup, "startup"),
+        (Trigger::Browser, "browser"),
+        (Trigger::Forward, "forward"),
+    ];
+
+    /// Every `LoginError` variant, as a sign-in can end in it.
+    fn every_login_error() -> Vec<LoginError> {
+        vec![
+            LoginError::NotConfigured,
+            LoginError::SignedOut,
+            LoginError::UnreadableCredentials("OSStatus -128".into()),
+            LoginError::BadPassword("Password is incorrect".into()),
+            LoginError::BadTotp("Invalid code".into()),
+            LoginError::UnsupportedFactor(vec!["Okta Verify".into(), "Security Key".into()]),
+            LoginError::Locked("Too many attempts".into()),
+            LoginError::Network("dns error".into()),
+            LoginError::Unexpected("identify, enroll-authenticator".into()),
+            LoginError::Broker("oculus-keyd refused this program (no role)".into()),
+            LoginError::Waiting(125),
+            LoginError::Paused("Okta rejected the password: x".into()),
+        ]
+    }
+
+    fn entries(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn keyd_error(kind: &str, detail: &str) -> (Value, Vec<u8>) {
+        (json!({"error": kind, "detail": detail}), vec![])
     }
 
     #[test]
-    fn a_network_failure_waits_without_counting() {
-        let mut r = AttemptRecord::default();
-        admit(&mut r, Trigger::Startup, 5_000).unwrap();
-        settle(&mut r, &Err(LoginError::Network(String::new())));
-        assert_eq!(r.failures, 0);
-        assert!(matches!(
-            admit(&mut r, Trigger::Startup, 5_100),
-            Err(LoginError::Waiting(500))
-        ));
+    fn the_status_is_keyds_and_keeps_the_json_shape_settings_reads() {
+        let dir = Scratch::new("okta-status");
+        let keyd = FakeKeyd::start(&dir, |_, _| {
+            (
+                json!({"username": "s1234567", "has_password": true, "has_totp": false}),
+                vec![],
+            )
+        });
+        let status = credential_status_in(&Credentialed::at(&dir), || panic!("keychain")).unwrap();
+        assert_eq!(
+            serde_json::to_value(status).unwrap(),
+            json!({"username": "s1234567", "has_password": true, "has_totp": false})
+        );
+        assert_eq!(keyd.requests()[0].0, json!({"op": "okta_status"}));
+        assert_eq!(keyd.ops(), ["okta_status"]);
     }
 
     #[test]
-    fn a_lockout_pauses_automatic_sign_in_until_a_manual_success() {
-        let mut r = AttemptRecord::default();
-        admit(&mut r, Trigger::KeepAlive, 10_000).unwrap();
-        settle(&mut r, &Err(LoginError::Locked("Too many attempts".into())));
-        assert!(matches!(
-            admit(&mut r, Trigger::KeepAlive, 1_000_000),
-            Err(LoginError::Paused(_))
-        ));
-        assert!(admit(&mut r, Trigger::Manual, 1_000_000).is_ok());
-        settle(&mut r, &Ok(String::new()));
-        assert!(r.paused.is_none());
-        assert!(admit(&mut r, Trigger::KeepAlive, 1_000_600).is_ok());
+    fn an_unreadable_status_names_the_keychain_and_any_other_refusal_says_it_could_not_check() {
+        for (kind, detail) in [
+            ("keychain", "OSStatus -128"),
+            ("vault", "vault.bin is damaged"),
+            ("caller", "no role"),
+        ] {
+            let dir = Scratch::new("okta-status-err");
+            let keyd = FakeKeyd::start(&dir, move |_, _| keyd_error(kind, detail));
+            let err =
+                credential_status_in(&Credentialed::at(&dir), || panic!("keychain")).unwrap_err();
+            assert!(err.contains(detail), "{err}");
+            if kind == "keychain" {
+                assert_eq!(
+                    err,
+                    LoginError::UnreadableCredentials(detail.into()).to_string()
+                );
+            } else {
+                assert!(
+                    err.starts_with("Could not check the saved sign-in"),
+                    "{err}"
+                );
+            }
+            assert_eq!(keyd.requests().len(), 1);
+        }
     }
 
-    /// RFC 4226 appendix D, the canonical HOTP vectors.
     #[test]
-    fn matches_the_rfc_4226_hotp_vectors() {
-        let secret = b"12345678901234567890";
-        let expected = [
-            "755224", "287082", "359152", "969429", "338314", "254676", "287922", "162583",
-            "399871", "520489",
-        ];
-        for (counter, want) in expected.iter().enumerate() {
-            // TOTP with step 1 at time == counter is exactly HOTP(counter).
-            assert_eq!(
-                &totp_at(secret, counter as u64, 1, 6),
-                want,
-                "counter {counter}"
+    fn a_save_sends_the_values_as_typed_and_keyd_does_the_validating() {
+        let dir = Scratch::new("okta-save");
+        let keyd = FakeKeyd::start(&dir, |_, _| (json!({"saved": true}), vec![]));
+        store_credentials_in(
+            &Credentialed::at(&dir),
+            " s1234567 ",
+            "pw",
+            "GEZD GEZD",
+            || panic!("keychain"),
+        )
+        .unwrap();
+        assert_eq!(
+            keyd.requests()[0].0,
+            json!({
+                "op": "okta_save",
+                "username": " s1234567 ",
+                "password": "pw",
+                "totp_secret": "GEZD GEZD",
+            })
+        );
+        assert_eq!(keyd.requests().len(), 1);
+    }
+
+    #[test]
+    fn keyds_validation_message_reaches_the_caller_as_written() {
+        for message in [
+            "Username is required.",
+            "Password is required.",
+            "That does not look like a TOTP setup key: it may only contain the letters A–Z and the digits 2–7.",
+        ] {
+            let dir = Scratch::new("okta-save-invalid");
+            let keyd = FakeKeyd::start(&dir, move |_, _| keyd_error("request", message));
+            let err =
+                store_credentials_in(&Credentialed::at(&dir), "", "", "1", || panic!("keychain"))
+                    .unwrap_err();
+            assert_eq!(err, message);
+            assert_eq!(keyd.requests().len(), 1, "the app sent it without a check");
+        }
+    }
+
+    #[test]
+    fn forget_asks_keyd_once_and_a_refusal_surfaces() {
+        let dir = Scratch::new("okta-forget");
+        let keyd = FakeKeyd::start(&dir, |_, _| (json!({"existed": true}), vec![]));
+        clear_credentials_in(&Credentialed::at(&dir), || panic!("keychain")).unwrap();
+        assert_eq!(keyd.requests()[0].0, json!({"op": "okta_forget"}));
+
+        let dir = Scratch::new("okta-forget-refused");
+        let keyd = FakeKeyd::start(&dir, |_, _| keyd_error("vault", "vault.bin is damaged"));
+        let err = clear_credentials_in(&Credentialed::at(&dir), || panic!("keychain")).unwrap_err();
+        assert!(err.contains("damaged"), "{err}");
+        assert_eq!(keyd.requests().len(), 1);
+    }
+
+    #[test]
+    fn a_save_or_forget_keyd_refuses_never_reaches_the_keychain() {
+        for kind in ["keychain", "caller", "upstream", "vault"] {
+            let dir = Scratch::new("okta-write-refused");
+            let keyd = FakeKeyd::start(&dir, move |_, _| keyd_error(kind, "refused"));
+            let broker = Credentialed::at(&dir);
+            let err =
+                store_credentials_in(&broker, "u", "p", "GEZD", || panic!("keychain")).unwrap_err();
+            assert!(err.contains("refused"), "{kind}: {err}");
+            clear_credentials_in(&broker, || panic!("keychain")).unwrap_err();
+            assert_eq!(keyd.ops(), ["okta_save", "okta_forget"], "{kind}");
+        }
+    }
+
+    #[test]
+    fn the_sign_in_sends_the_trigger_and_returns_keyds_outcome() {
+        let dir = Scratch::new("okta-sign-in");
+        let keyd = FakeKeyd::start(&dir, |_, _| (outcome_to_wire(&Ok(String::new())), vec![]));
+        let broker = Credentialed::at(&dir);
+        for (trigger, _) in TRIGGERS {
+            sign_in_in(&broker, trigger).unwrap();
+        }
+        let sent: Vec<Value> = keyd.requests().into_iter().map(|(h, _)| h).collect();
+        let want: Vec<Value> = TRIGGERS
+            .iter()
+            .map(|(_, name)| json!({"op": "ensure_signed_in", "trigger": name}))
+            .collect();
+        assert_eq!(sent, want);
+    }
+
+    #[test]
+    fn every_login_error_keyd_reports_comes_back_the_same() {
+        for error in every_login_error() {
+            let dir = Scratch::new("okta-outcome");
+            let wire = outcome_to_wire(&Err(error.clone()));
+            let keyd = FakeKeyd::start(&dir, move |_, _| (wire.clone(), vec![]));
+            let got = sign_in_in(&Credentialed::at(&dir), Trigger::Manual).unwrap_err();
+            assert_eq!(got, error);
+            assert_eq!(got.to_string(), error.to_string());
+            assert_eq!(keyd.requests().len(), 1);
+        }
+    }
+
+    #[test]
+    fn a_keyd_failure_is_surfaced_and_never_becomes_a_second_attempt() {
+        for (kind, want) in [
+            (
+                "keychain",
+                LoginError::UnreadableCredentials("OSStatus -128".into()),
+            ),
+            (
+                "caller",
+                LoginError::Broker(KeydError::Caller("OSStatus -128".into()).to_string()),
+            ),
+            (
+                "vault",
+                LoginError::Broker(KeydError::Vault("OSStatus -128".into()).to_string()),
+            ),
+            (
+                "upstream",
+                LoginError::Broker(KeydError::Upstream("OSStatus -128".into()).to_string()),
+            ),
+            (
+                "teapot",
+                LoginError::Broker(KeydError::Broken("teapot: OSStatus -128".into()).to_string()),
+            ),
+        ] {
+            let dir = Scratch::new("okta-no-second-route");
+            let keyd = FakeKeyd::start(&dir, move |_, _| keyd_error(kind, "OSStatus -128"));
+            let before = entries(&dir);
+            let got = sign_in_in(&Credentialed::at(&dir), Trigger::Startup).unwrap_err();
+            assert_eq!(got, want, "{kind}");
+            assert!(!got.to_string().contains("Unexpected"), "{kind}: {got}");
+            assert_eq!(keyd.requests().len(), 1, "{kind}: exactly one request");
+            assert_eq!(entries(&dir), before, "{kind}: nothing written");
+        }
+    }
+
+    #[test]
+    fn a_resume_goes_to_keyd_and_only_an_absent_keyd_resets_the_record_here() {
+        let dir = Scratch::new("okta-resume");
+        let keyd = FakeKeyd::start(&dir, |_, _| (json!({"resumed": true}), vec![]));
+        resume_in(&Credentialed::at(&dir), || panic!("in-process"));
+        assert_eq!(keyd.requests()[0].0, json!({"op": "okta_resume"}));
+        assert_eq!(keyd.requests().len(), 1);
+
+        for kind in ["caller", "record", "vault", "keychain"] {
+            let dir = Scratch::new("okta-resume-refused");
+            let keyd = FakeKeyd::start(&dir, move |_, _| keyd_error(kind, "refused"));
+            resume_in(&Credentialed::at(&dir), || panic!("in-process {kind}"));
+            assert_eq!(keyd.requests().len(), 1, "{kind}");
+            assert!(
+                !keyd_core::paths::sign_in_record(&dir).exists(),
+                "{kind}: the app wrote the record"
             );
         }
-    }
 
-    /// RFC 6238 appendix B, the SHA-1 rows.
-    #[test]
-    fn matches_the_rfc_6238_totp_vectors() {
-        let secret = b"12345678901234567890";
-        for (time, want) in [
-            (59u64, "94287082"),
-            (1_111_111_109, "07081804"),
-            (1_111_111_111, "14050471"),
-            (1_234_567_890, "89005924"),
-            (2_000_000_000, "69279037"),
-        ] {
-            assert_eq!(totp_at(secret, time, 30, 8), want, "t={time}");
-        }
-    }
-
-    #[test]
-    fn decodes_base32_the_way_authenticator_apps_write_it() {
-        assert_eq!(
-            base32_decode("GEZDGNBVGY3TQOJQ").unwrap(),
-            b"12345678901234567890"[..10].to_vec()
-        );
-        // Okta shows the setup key in spaced, lowercase groups.
-        assert_eq!(
-            base32_decode("gezd gnbv gy3t qojq").unwrap(),
-            base32_decode("GEZDGNBVGY3TQOJQ").unwrap()
-        );
-        assert!(base32_decode("not-valid-1890").is_err());
-        assert!(base32_decode("").is_err());
-    }
-
-    /// A real token is ~40+ chars; the JS literal escapes `-` as `\x2D`.
-    const REAL_TOKEN: &str = "02.id.7Kx9pQ2mNvL4tR8wZ1yB3cD5fG6hJ0kM-aS-eU";
-
-    #[test]
-    fn unescapes_the_state_token_okta_embeds() {
-        let html = format!(
-            r#"<script>var config = {{"stateToken":"{}"}};</script>"#,
-            REAL_TOKEN.replace('-', r"\x2D")
-        );
-        assert_eq!(extract_state_token(&html).unwrap(), REAL_TOKEN);
-    }
-
-    /// Inline script names `stateToken` before the config assigns it.
-    #[test]
-    fn skips_mentions_that_are_not_the_value() {
-        let html = format!(
-            r#"<script>
-                 if (stateToken) {{ render(stateToken); }}
-                 var x = {{"stateToken":""}};
-                 var config = {{"stateToken":"{REAL_TOKEN}"}};
-               </script>"#
-        );
-        assert_eq!(extract_state_token(&html).unwrap(), REAL_TOKEN);
-        assert_eq!(state_token_candidates(&html), vec![REAL_TOKEN.to_string()]);
-    }
-
-    #[test]
-    fn accepts_the_single_quoted_assignment_form() {
-        let html = format!("<script>var stateToken = '{REAL_TOKEN}';</script>");
-        assert_eq!(extract_state_token(&html).unwrap(), REAL_TOKEN);
-    }
-
-    #[test]
-    fn no_state_token_is_not_a_panic() {
-        assert!(extract_state_token("<html><body>maintenance</body></html>").is_none());
-    }
-
-    fn select_rem(options: serde_json::Value) -> serde_json::Value {
-        serde_json::json!({
-            "name": "select-authenticator-authenticate",
-            "href": "https://sso.unimelb.edu.au/idp/idx/challenge",
-            "value": [{ "name": "authenticator", "type": "object", "options": options }]
-        })
-    }
-
-    fn option(label: &str, id: &str, method: &str) -> serde_json::Value {
-        serde_json::json!({
-            "label": label,
-            "value": { "form": { "value": [
-                { "name": "id", "value": id },
-                { "name": "methodType", "value": method }
-            ]}}
-        })
-    }
-
-    #[test]
-    fn picks_password_then_google_authenticator() {
-        let rem = select_rem(serde_json::json!([
-            option("Password", "aut_pw", "password"),
-            option("Okta Verify", "aut_ov", "otp"),
-            option("Google Authenticator", "aut_ga", "otp"),
-        ]));
-
-        assert_eq!(
-            select_payload(&rem, Factor::Password).unwrap()["id"],
-            "aut_pw"
-        );
-
-        // Google Authenticator wins over Okta Verify's TOTP (different seed).
-        let totp = select_payload(&rem, Factor::Totp).unwrap();
-        assert_eq!(totp["id"], "aut_ga");
-        assert_eq!(totp["methodType"], "otp");
-    }
-
-    #[test]
-    fn a_push_only_account_reports_what_it_was_offered() {
-        let rem = select_rem(serde_json::json!([
-            option("Get a push notification", "aut_push", "push"),
-            option("Security Key or Biometric", "aut_wa", "webauthn"),
-        ]));
-        assert!(select_payload(&rem, Factor::Totp).is_none());
-        assert_eq!(
-            option_labels(&rem),
-            vec!["Get a push notification", "Security Key or Biometric"]
-        );
-    }
-
-    fn challenge_state(key: &str, methods: &[&str]) -> serde_json::Value {
-        serde_json::json!({
-            "currentAuthenticator": { "value": {
-                "key": key,
-                "methods": methods.iter().map(|m| serde_json::json!({"type": m})).collect::<Vec<_>>()
-            }}
-        })
-    }
-
-    /// Answered on what Okta says it is challenging, not on flow position.
-    #[test]
-    fn answers_the_factor_okta_says_it_is_challenging() {
-        let pw = challenge_state("okta_password", &["password"]);
-        assert_eq!(challenged_factor(&pw, false), Some(Factor::Password));
-        // Already answered — do not resend it, move on to the second factor.
-        assert_eq!(challenged_factor(&pw, true), None);
-
-        let ga = challenge_state("google_otp", &["otp"]);
-        assert_eq!(challenged_factor(&ga, true), Some(Factor::Totp));
-    }
-
-    #[test]
-    fn a_push_challenge_is_not_answerable() {
-        let push = challenge_state("okta_verify", &["push"]);
-        assert_eq!(challenged_factor(&push, true), None);
-        // Okta Verify also advertises totp, but its seed is not ours.
-        let ov_totp = challenge_state("okta_verify", &["totp", "push"]);
-        assert_eq!(challenged_factor(&ov_totp, true), None);
-        let key = challenge_state("webauthn", &["webauthn"]);
-        assert_eq!(challenged_factor(&key, true), None);
-    }
-
-    /// When Okta describes no authenticator, fall back on flow position.
-    #[test]
-    fn an_undescribed_challenge_falls_back_to_flow_position() {
-        let bare = serde_json::json!({});
-        assert_eq!(challenged_factor(&bare, false), Some(Factor::Password));
-        assert_eq!(challenged_factor(&bare, true), Some(Factor::Totp));
-    }
-
-    #[test]
-    fn a_wrong_code_is_a_totp_error_not_a_password_error() {
-        let state = serde_json::json!({
-            "messages": { "value": [{ "class": "ERROR", "message": "Invalid code. Try again." }] }
+        let dir = Scratch::new("okta-resume-absent");
+        let ran = std::cell::Cell::new(false);
+        resume_in(&Credentialed::at(&dir), || {
+            ran.set(true);
+            Ok(())
         });
-        assert!(matches!(
-            check_messages(&state, Some(Factor::Totp)),
-            Err(LoginError::BadTotp(_))
-        ));
-        assert!(matches!(
-            check_messages(&state, Some(Factor::Password)),
-            Err(LoginError::BadPassword(_))
-        ));
+        assert!(ran.get());
     }
 
     #[test]
-    fn a_lockout_outranks_the_factor_it_was_reported_on() {
-        let state = serde_json::json!({
-            "messages": { "value": [{ "class": "ERROR", "message": "Your account is locked." }] }
-        });
-        assert!(matches!(
-            check_messages(&state, Some(Factor::Totp)),
-            Err(LoginError::Locked(_))
-        ));
-    }
-
-    #[test]
-    fn informational_messages_are_not_failures() {
-        let state = serde_json::json!({
-            "messages": { "value": [{ "class": "INFO", "message": "Verify with your password" }] }
-        });
-        assert!(check_messages(&state, None).is_ok());
-    }
-
-    #[test]
-    fn finds_the_assertion_form_among_decoys() {
-        let html = r#"
-            <form action="/search"><input name="q" value=""/></form>
-            <form method="post" action="https://canvas.lms.unimelb.edu.au/login/saml">
-              <input type="hidden" name="SAMLResponse" value="PHNhbWw+"/>
-              <input type="hidden" name="RelayState" value="rs123"/>
-            </form>"#;
-        let (action, fields) = parse_saml_form(html).unwrap();
-        assert_eq!(action, "https://canvas.lms.unimelb.edu.au/login/saml");
-        assert_eq!(fields.len(), 2);
-        assert_eq!(fields[0], ("SAMLResponse".into(), "PHNhbWw+".into()));
-    }
-
-    #[test]
-    fn cookies_are_filed_per_host() {
-        let mut jar = Jar::default();
-        jar.0
-            .entry("a.example".into())
-            .or_default()
-            .insert("sid".into(), "1".into());
-        jar.0
-            .entry("b.example".into())
-            .or_default()
-            .insert("other".into(), "2".into());
-        assert_eq!(jar.header("a.example"), "sid=1");
-        assert!(!jar.has("b.example", "sid"));
-        assert_eq!(jar.header("nowhere.example"), "");
+    fn only_an_absent_keyd_runs_the_credential_fallbacks_and_never_a_sign_in() {
+        let dir = Scratch::new("okta-absent");
+        let broker = Credentialed::at(&dir);
+        let status = credential_status_in(&broker, || {
+            Ok(CredentialStatus {
+                username: Some("fallback".into()),
+                has_password: false,
+                has_totp: false,
+            })
+        })
+        .unwrap();
+        assert_eq!(status.username.as_deref(), Some("fallback"));
+        let ran = std::cell::Cell::new(0);
+        store_credentials_in(&broker, "u", "p", "GEZD", || {
+            ran.set(ran.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+        clear_credentials_in(&broker, || {
+            ran.set(ran.get() + 1);
+            Err("denied".into())
+        })
+        .unwrap_err();
+        assert_eq!(ran.get(), 2);
+        // No sign-in without keyd: the session would be one only keyd can use.
+        let Err(LoginError::Broker(why)) = sign_in_in(&broker, Trigger::Manual) else {
+            panic!("a sign-in with keyd absent is a broker error");
+        };
+        assert!(why.starts_with("oculus-keyd is not running"), "{why}");
+        assert!(LoginError::Broker(why)
+            .to_string()
+            .contains("only through it"));
     }
 }

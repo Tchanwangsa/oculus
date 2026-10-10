@@ -380,6 +380,9 @@ pub enum EmbedError {
     /// A key may be stored, but the keychain refused to hand it over (a denied
     /// prompt, or a sandboxed process). Holds the keychain's own error.
     UnreadableCredentials(String),
+    /// `oculus-keyd`, which holds the key, refused this process or could not
+    /// use its vault. Latching: every request goes through it.
+    Broker(String),
     /// The backend refused the key. Latching: every file would hit it.
     RejectedCredentials { code: Option<String>, expired: bool },
     /// Throttled per minute. On the free tier this is the steady state of a
@@ -415,11 +418,12 @@ pub enum EmbedError {
 impl EmbedError {
     /// The frozen discriminant the failure UI branches on (`Display` prose may
     /// change). `app/src/lib/parseState.ts` matches `/credential|token/i`, so
-    /// both credential kinds keep that word.
+    /// the credential kinds keep that word.
     pub fn kind(&self) -> &'static str {
         match self {
             EmbedError::MissingCredentials => "missing_credentials",
             EmbedError::UnreadableCredentials(_) => "unreadable_credentials",
+            EmbedError::Broker(_) => "credential_broker",
             EmbedError::RejectedCredentials { .. } => "rejected_credentials",
             EmbedError::RateLimited { .. } => "rate_limited",
             EmbedError::QuotaExhausted => "quota_exhausted",
@@ -441,7 +445,8 @@ impl EmbedError {
             | EmbedError::Io(_)
             | EmbedError::QuotaExhausted
             | EmbedError::NotReady { .. }
-            | EmbedError::UnreadableCredentials(_) => true,
+            | EmbedError::UnreadableCredentials(_)
+            | EmbedError::Broker(_) => true,
             EmbedError::MissingCredentials
             | EmbedError::RejectedCredentials { .. }
             | EmbedError::Document { .. }
@@ -458,6 +463,7 @@ impl EmbedError {
             self,
             EmbedError::MissingCredentials
                 | EmbedError::UnreadableCredentials(_)
+                | EmbedError::Broker(_)
                 | EmbedError::RejectedCredentials { .. }
                 | EmbedError::QuotaExhausted
                 | EmbedError::BudgetReached { .. }
@@ -481,6 +487,11 @@ impl fmt::Display for EmbedError {
                 f,
                 "The keychain refused to give out the Voyage API key ({detail}). The key is \
                  not missing — macOS denied this process access to it."
+            ),
+            EmbedError::Broker(detail) => write!(
+                f,
+                "oculus-keyd, which holds the Voyage API key, could not send this request: \
+                 {detail}"
             ),
             EmbedError::RejectedCredentials { code, expired } => {
                 let code = code
@@ -587,8 +598,9 @@ impl Engine {
 /// Where a backend's key comes from, if it needs one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CredentialSource {
-    /// The macOS keychain, via `crate::voyage`; the key never enters SQLite or
-    /// the WebView.
+    /// `oculus-keyd` when it is installed and the API root is Voyage's own,
+    /// else the macOS keychain via `crate::voyage` (`VoyageCloud::with_config`).
+    /// The key never enters SQLite or the WebView.
     Keychain,
     /// Loopback to a process on this machine: nothing to authenticate.
     None,
@@ -970,6 +982,10 @@ mod tests {
             !unreadable.to_string().contains("No Voyage API key"),
             "{unreadable}"
         );
+        let broker = EmbedError::Broker("caller refused".into());
+        assert!(broker.kind().contains("credential"), "{}", broker.kind());
+        assert!(broker.latching());
+        assert!(!broker.to_string().contains("keychain refused"), "{broker}");
         let shown = EmbedError::RejectedCredentials {
             code: Some("401".into()),
             expired: true,

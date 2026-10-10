@@ -251,11 +251,10 @@ impl Ctx {
         let secret = read_secret("Authenticator setup key: ")?;
 
         app_lib::okta::store_credentials(&username, &password, &secret)?;
-        app_lib::okta::resume_automatic_sign_in(&self.data_dir);
         let code = app_lib::okta::totp_now(&secret)?;
 
         println!();
-        println!("{} to the macOS keychain", paint("saved", GREEN));
+        println!("{}", paint("saved", GREEN));
         println!(
             "This Mac's code right now is {} — confirm it matches your phone",
             paint(&code, GREEN)
@@ -279,59 +278,6 @@ impl Ctx {
             )),
             Err(e) => Err(e.to_string()),
         }
-    }
-
-    /// One keep-alive cycle, for the LaunchAgent.
-    ///
-    /// Every outcome is a log line and `Ok(())`: launchd would only record a
-    /// non-zero exit as a crashed job.
-    pub(crate) fn auth_tick(&self) -> Result<(), String> {
-        use app_lib::canvas::SessionProbe;
-
-        let log = |m: &str| app_lib::paths::append_keepalive_log(&self.data_dir, m);
-
-        if app_lib::paths::signed_out_path(&self.data_dir).exists() {
-            log("skipped — signed out");
-            return Ok(());
-        }
-
-        // The probe is the keep-alive: Canvas extends the session on use.
-        match app_lib::canvas::Canvas::open(&self.data_dir).probe() {
-            SessionProbe::Valid(name) => {
-                app_lib::paths::mark_authenticated(&self.data_dir);
-                log(&format!("session extended ({name})"));
-                return Ok(());
-            }
-            // The network is down; re-authenticating would waste an Okta attempt.
-            SessionProbe::Unreachable(why) => {
-                log(&format!("skipped — {why}"));
-                return Ok(());
-            }
-            SessionProbe::Rejected(why) => log(&format!("session rejected — {why}")),
-        }
-
-        match app_lib::okta::sign_in(&self.data_dir, app_lib::okta::Trigger::KeepAlive) {
-            Ok(_) => match app_lib::canvas::Canvas::open(&self.data_dir).whoami() {
-                Ok(name) => {
-                    app_lib::paths::mark_authenticated(&self.data_dir);
-                    log(&format!("session rebuilt ({name})"));
-                }
-                // Leave the flag alone rather than assert an unverified session.
-                Err(e) => log(&format!("signed in but could not verify: {e}")),
-            },
-            Err(e @ app_lib::okta::LoginError::BadPassword(_)) => {
-                log(&format!(
-                    "{e} — stored password discarded, run `oculus auth setup`"
-                ));
-            }
-            Err(
-                e @ (app_lib::okta::LoginError::Waiting(_) | app_lib::okta::LoginError::Paused(_)),
-            ) => {
-                log(&format!("automated sign-in skipped: {e}"));
-            }
-            Err(e) => log(&format!("automated sign-in failed: {e}")),
-        }
-        Ok(())
     }
 
     pub(crate) fn auth_forget(&self) -> Result<(), String> {
