@@ -8,7 +8,7 @@ import { MathWidget, mathsWatcher } from "../widgets";
 import { blockField } from "./blocks";
 import { dollarTyping, edgePaste, edgeTyping, fieldLatexPaste } from "./edges";
 import { inlinePlugin } from "./inline";
-import { mathBlockField, mathBlockKeys } from "./math-blocks";
+import { mathBlockField } from "./math-blocks";
 import { tableField, tableKeys } from "./tables";
 
 /**
@@ -50,7 +50,6 @@ export function livePreview(): Extension {
   return [
     focusedField,
     trackFocus,
-    mathBlockKeys,
     mathField(),
     blockField,
     tableField,

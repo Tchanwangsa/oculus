@@ -1,4 +1,5 @@
-import { EditorSelection, Transaction, type ChangeSpec } from "@codemirror/state";
+import { isolateHistory } from "@codemirror/commands";
+import { EditorSelection, Transaction } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
 import { focusNote, keepPosVisible } from "./noteScroll";
@@ -7,16 +8,18 @@ import { fieldWrite, minimalChange, squeezeBlankLines } from "./mathFieldEdits";
 
 /**
  * What the visual field (`rustField`) does to the note around its maths:
- * leave it, remove it, paste prose beside it, tidy a block's blank lines as
- * it opens. `target` is the maths
+ * leave it, add a line beside a block, remove it, paste prose beside it,
+ * tidy a block's blank lines as it opens. `target` is the maths
  * the field may write to (`writableSpan`), null when it can't.
  */
 
 export type Direction = "forward" | "backward" | "upward" | "downward";
 
-/** Back to the note, the caret just outside the maths on that side. A block
- *  at the very start or end of the note gets a line to land on. The page
- *  stays put unless that caret is off screen (`keepPosVisible`). */
+/** Back to the note, the caret just outside the maths on that side, never
+ *  editing it: from a block onto the line before or after, which opens a
+ *  touching block's field at its near end (its edge is in it); with nothing
+ *  past the note's start or end, the field stays. The page stays put unless
+ *  that caret is off screen (`keepPosVisible`). */
 export function leaveMaths(view: EditorView, target: ActiveMath | null, dir: Direction) {
   if (!target) {
     focusNote(view);
@@ -24,22 +27,12 @@ export function leaveMaths(view: EditorView, target: ActiveMath | null, dir: Dir
   }
   const { doc } = view.state;
   const ahead = dir === "forward" || dir === "downward";
-  let changes: ChangeSpec | undefined;
   let anchor: number;
   if (target.block) {
     const first = doc.lineAt(target.start);
     const last = doc.lineAt(target.end);
-    if (ahead) {
-      if (last.to < doc.length) anchor = last.to + 1;
-      else {
-        changes = { from: doc.length, insert: "\n" };
-        anchor = doc.length + 1;
-      }
-    } else if (first.from > 0) anchor = first.from - 1;
-    else {
-      changes = { from: 0, insert: "\n" };
-      anchor = 0;
-    }
+    if (ahead ? last.to >= doc.length : first.from === 0) return;
+    anchor = ahead ? last.to + 1 : first.from - 1;
   } else {
     anchor = ahead ? target.end : target.start;
     if (dir === "upward" || dir === "downward") {
@@ -47,7 +40,25 @@ export function leaveMaths(view: EditorView, target: ActiveMath | null, dir: Dir
       if (moved < target.start || moved > target.end) anchor = moved;
     }
   }
-  view.dispatch({ changes, selection: { anchor }, userEvent: changes ? "input" : "select" });
+  view.dispatch({ selection: { anchor }, userEvent: "select" });
+  focusNote(view);
+  keepPosVisible(view, anchor);
+}
+
+/** Enter in a block's field: an empty line after the block (`before`: the
+ *  field's caret at its very start, before it), the note's caret on it, as
+ *  Enter makes a line in text. An undo step of its own. */
+export function newlineBeside(view: EditorView, target: ActiveMath | null, before: boolean) {
+  if (!target?.block) return;
+  const { doc } = view.state;
+  const at = before ? doc.lineAt(target.start).from : doc.lineAt(target.end).to;
+  const anchor = before ? at : at + 1;
+  view.dispatch({
+    changes: { from: at, insert: "\n" },
+    selection: { anchor },
+    annotations: isolateHistory.of("full"),
+    userEvent: "input",
+  });
   focusNote(view);
   keepPosVisible(view, anchor);
 }

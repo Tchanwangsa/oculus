@@ -33,15 +33,13 @@ export function placeCaret(ctl: RustFieldController) {
   else if (target && sel.head <= target.from) mv.select(0, 0);
 }
 
-/** A press in a block's padding, above or below its maths: the caret rests
- *  before or after the block, as on its rendering. */
+/** A press in a block's padding, above or below its maths: the field's
+ *  caret goes to its start or end. */
 export function pressBeside(ctl: RustFieldController, e: MouseEvent) {
   if (e.button !== 0 || e.target !== ctl.dom || !ctl.block) return;
   e.preventDefault();
-  const target = ctl.target();
-  if (!target) return;
   const above = e.clientY < ctl.mv.frame.getBoundingClientRect().top;
-  const anchor = above ? target.start : ctl.view.state.doc.lineAt(target.end).to;
-  ctl.view.dispatch({ selection: { anchor }, userEvent: "select.pointer" });
-  ctl.view.focus();
+  const end = above ? 0 : ctl.mv.field.stops.length - 1;
+  ctl.mv.select(end, end);
+  ctl.mv.focus();
 }

@@ -15,7 +15,7 @@ compiled to WebAssembly) draws and edits it all; its layout is
 | The field's state in the note, its writes, its widget, how it scrolls the note | `app/src/components/documents/editor/math/field/mathField/`, `app/src/components/documents/editor/math/field/mathFieldEdits.ts`, `app/src/components/documents/editor/math/field/fieldNote.ts`, `app/src/components/documents/editor/math/field/noteScroll.ts` |
 | The field itself, its host in the note | `app/src/components/documents/editor/math/field/mathView/`, `app/src/components/documents/editor/math/field/rustField/` |
 | The engine's facade, the geometry the field measures with | `app/src/lib/maths/` |
-| Rendered maths, atomic ranges, edge keys | `app/src/components/documents/editor/live-preview/widgets/`, `app/src/components/documents/editor/live-preview/livePreview/` |
+| Rendered maths, its atomic ranges | `app/src/components/documents/editor/live-preview/widgets/`, `app/src/components/documents/editor/live-preview/livePreview/` |
 | Toolbox, palette, usage | `app/src/components/documents/editor/math/tools/mathTools/`, `app/src/components/documents/editor/math/tools/mathPalette.ts`, `app/src/components/documents/editor/math/tools/mathUsage.ts` |
 | Shorthands | `app/src/components/documents/editor/math/tools/shorthand/`, `app/math-core/edit/src/shortcut/` |
 | Typing matrices | `app/math-core/edit/src/command/grid/` |
@@ -106,15 +106,23 @@ nearest gap, and in a block the row whose vertical band holds the press, else
 the nearest, bounds that search. A selection whose ends sit at different
 depths — dragged from beside a matrix into a cell, or across two cells — is
 widened by the model to take each structure it reaches into whole, while a
-block's rows select as one run; ←/→, Backspace/Delete at inline maths and
-↑/↓ from the line beside a block enter it at that end.
+block's rows select as one run; ←/→ and Backspace/Delete at inline maths,
+and those and ↑/↓ from the line beside a block (below), enter it at that
+end.
 
-The edit model owns every key but the toolbox's, ⌘⇧M and undo
-(`rustField/keys.ts`) and the pending `\command` list's (below): Esc (once
-any toolbox is closed: leave, or revert a shortcut just expanded), an
-arrow past the field's edge and Enter in inline maths leave it; Enter or
-Shift+Enter in display maths adds a row, never a second empty one (on an
-empty row Enter does nothing); Tab goes out of a text run, else to the next
+The edit model owns every key but the toolbox's, ⌘⇧M, undo and Enter in a
+block (`rustField/keys.ts`) and the pending `\command` list's (below): Esc
+(once any toolbox is closed: leave, or revert a shortcut just expanded), an
+arrow past the field's edge and Enter or Shift+Enter in inline maths leave
+it; Shift+Enter in a block adds a row (a matrix's or an environment's when
+the caret is in one), never a second empty one (on an empty row it does
+nothing). Enter in a block makes a line outside it, as Enter does in text:
+an empty line after the block with the note's caret on it, or before it
+when the field's caret is at its very start, so a note starting with a
+block can get text above it — its own undo step, the page scrolled only if
+that line is off screen (`enterSide`, `newlineBeside` in `fieldNote.ts`);
+with a `\command` being typed it commits it, and an open list's Enter
+accepts its row first; Tab goes out of a text run, else to the next
 empty slot, else types `\qquad`; ⌘Backspace deletes the
 caret's line up to the caret (a block's row, or a cell of an environment's
 rows, through the structure the caret is in); Backspace in an empty field
@@ -172,7 +180,7 @@ reopens to trap again; the same for maths the field fails to open on.
 
 The rendering is `MathWidget` in
 `app/src/components/documents/editor/live-preview/widgets/math.ts`, with the
-atomic ranges and edge keys in `live-preview/livePreview/`. Once the maths
+atomic ranges in `live-preview/livePreview/`. Once the maths
 engine has loaded, every rendering's range is atomic, so a drag or Shift+arrow
 covers maths whole and Shift-click extends the selection over it. A
 rendering a selection covers draws bands over its atoms, as chat does
@@ -187,24 +195,24 @@ its column's width (`contain: inline-size` on `.cm-math-display`, as on the
 field's block) and scrolls a too-wide formula, rather than widening the
 note.
 
-A block has a caret
-spot before and after it, drawn one line tall beside its first or last
-row: a press in its padding above or below the formula (or above or below
-the shaded field) rests the caret there; a press anywhere across the
-formula's rows opens the field in the row under the pointer — the row
-whose vertical band holds it, else the nearest — at that row's nearest
-gap, so a press far to the right of a row ends that row. From
-the spot before a block →/↓/Delete enter the field at its start, from the
-spot after it ←/↑/Backspace at its end; Shift+arrow selects the block;
-Enter adds a line there, typed or pasted text goes on its own line, and
-Backspace before a block (Delete after it) removes an empty line beyond or
-steps onto a line with text rather than joining it to a `$$`. From the line
-beside a block, ← at its start or → at its end (and Backspace/Delete from a
-line with text) stop at those spots first, so two blocks that touch still
-take a line between them; ↑/↓ go straight into the field (`enterBlock` in
-`math/field/mathField/keys.ts`). The browser has no text position at either spot and types
-at the nearest one it has, the next line or past a touching block, so input
-there goes to the editor's caret instead (`typedAt` in `livePreview/edges.ts`).
+A block has no caret position of its own beside it: a caret at either
+edge of its lines — however it gets there: an arrow, a click, Home/End, an
+undo, a paste, leaving another field — is in the block, and its field opens
+with its caret at that end (`targetAt` in
+`math/field/mathField/visual-state.ts`, `placeCaret` in `rustField/mount.ts`);
+only a selection taking the whole block, or running across it, keeps it
+rendered. A press anywhere on the rendering opens the field in the row
+under the pointer — the row whose vertical band holds it, else the nearest
+— at that row's nearest gap, so a press far to the right of a row ends that
+row, and a press in the padding above or below the formula its first or
+last row; in the open field's padding, the field's start or end
+(`pressBeside`). From the line beside a block, ↑/↓, ← at its start, → at its
+end, and Backspace/Delete from a line with text (which would join it to a
+`$$`) go straight into the field at the near end (`enterBlock` in
+`math/field/mathField/keys.ts`). Leaving a field never edits the note
+(`leaveMaths`): the caret goes to the line before or after the block, into
+a touching block's field at its near end, and with nothing past the note's
+start or end the field stays; Enter in the field adds a line (above).
 
 Pasted into
 the field, maths goes in at the caret and markdown with prose around maths
@@ -276,7 +284,7 @@ In Live mode a typed `$` writes `$$` with the caret between, which is an
 empty inline field, ready to type in (`dollarTyping` in `livePreview/edges.ts`,
 `Prec.high` so the shorthand handler doesn't type into the pair first).
 At a line's start (container markup aside, or on the line it opens beside a
-block) it writes `\(\)` instead: `$$` there opens a display block in every
+table) it writes `\(\)` instead: `$$` there opens a display block in every
 Markdown reader, which would run to the next `$$` and take the text between.
 The parser takes an empty `\(\)` as inline maths (`parenMath`), and the
 field's first write turns it into `$…$` (`noteWrite`).
@@ -320,7 +328,7 @@ the opening `$$` and before the closing one is a single newline: an empty
 last row is kept as a trailing `\\`, not a blank line, while the field is
 on the block; once it leaves, empty rows at the block's end go
 (`dropEndRows`, `withoutEndRows`), so the rendering has no blank row under
-the formula for the caret beside it to rest on. Blank lines already in a
+the formula. Blank lines already in a
 block go when the field opens on it (`dropBlankLines`). Both cleanups stay
 outside the history. The empty-line hint (12px, one tight line) sits at the height of the empty
 row's caret, clamped inside the field's box.

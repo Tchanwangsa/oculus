@@ -46,10 +46,9 @@ const fieldSelection = EditorState.transactionFilter.of((tr) => {
   return sel ? [tr, { selection: sel, sequential: true }] : tr;
 });
 
-/** A block the field leaves loses empty rows at its end (Enter past its last
- *  line), which would draw as a blank line under the formula, where the
- *  caret beside the block then rests. Outside the history, after the update
- *  that closed the field. */
+/** A block the field leaves loses empty rows at its end (Shift+Enter past
+ *  its last line), which would draw as a blank line under the formula.
+ *  Outside the history, after the update that closed the field. */
 const dropEndRows = EditorView.updateListener.of((u) => {
   const left = visualMath(u.startState);
   if (!left?.block || visualMath(u.state)?.id === left.id) return;
