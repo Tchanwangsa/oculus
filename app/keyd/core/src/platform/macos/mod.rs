@@ -2,15 +2,16 @@
 //! 0600) and hands to keyd on the first connect (`activated`); the peer check
 //! reads the caller's audit token and code signature (`peer.rs`); the secret
 //! store is the login keychain (`keychain.rs`); the registrar writes and
-//! loads a LaunchAgent (`registrar.rs`). Its build step is the reproducible,
-//! ad-hoc signed build in `app/scripts/build-keyd.mjs`.
+//! loads a LaunchAgent (`registrar.rs`). keyd runs as the helper app
+//! `Oculus Helper.app`; its build step is the reproducible, ad-hoc signed
+//! helper in `app/scripts/keyd-build.mjs`.
 
 use std::ffi::{c_char, c_int, CString};
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::ConnectError;
@@ -29,6 +30,17 @@ pub(crate) type Listener = UnixListener;
 
 /// The plist's `Sockets` key that names keyd's listener.
 const SOCKETS_KEY: &str = "Listeners";
+
+/// The outermost app bundle `path` is in (`path` itself counts). keyd's
+/// helper app sits inside Oculus.app, so for a bundled keyd this is
+/// Oculus.app; for a copy installed on its own it is the helper itself.
+#[cfg_attr(not(any(feature = "server", feature = "client")), allow(dead_code))]
+fn outermost_app(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .filter(|a| a.extension().is_some_and(|x| x == "app") && a.join("Contents").is_dir())
+        .last()
+        .map(Path::to_path_buf)
+}
 
 pub(crate) fn set_timeout(stream: &UnixStream, timeout: Option<Duration>) -> io::Result<()> {
     stream.set_read_timeout(timeout)?;
@@ -165,6 +177,28 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn the_outermost_app_is_the_one_a_helper_is_nested_in() {
+        let dir = scratch("outermost");
+        let outer = dir.join("Oculus.app");
+        let helper = outer.join("Contents/Helpers/Oculus Helper.app");
+        std::fs::create_dir_all(helper.join("Contents/MacOS")).unwrap();
+        let keyd = helper.join("Contents/MacOS/oculus-keyd");
+        assert_eq!(outermost_app(&keyd), Some(outer.clone()));
+        assert_eq!(outermost_app(&outer), Some(outer.clone()));
+
+        let alone = dir.join("bin/Oculus Helper.app");
+        std::fs::create_dir_all(alone.join("Contents/MacOS")).unwrap();
+        assert_eq!(
+            outermost_app(&alone.join("Contents/MacOS/oculus-keyd")),
+            Some(alone)
+        );
+        // A directory named like a bundle, with no Contents, is not one.
+        std::fs::create_dir_all(dir.join("Fake.app/x")).unwrap();
+        assert_eq!(outermost_app(&dir.join("Fake.app/x/y")), None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

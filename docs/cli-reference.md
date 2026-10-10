@@ -206,7 +206,7 @@ Usage: oculus keyd <COMMAND>
 Commands:
   install    Install oculus-keyd and load its LaunchAgent
   status     Whether keyd is installed, loaded, current and answering
-  uninstall  Unload keyd and remove its LaunchAgent, binary and stamp
+  uninstall  Unload keyd and remove its LaunchAgent, helper app and stamp
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -219,17 +219,18 @@ Options:
 ```
 Install oculus-keyd and load its LaunchAgent
 
-A keyd inside an app bundle is registered where it is; any other is copied to `bin/` in
-the data dir first, so the LaunchAgent never points into a build tree. Loading it
-prompts for nothing: keyd reads the keychain only when something first uses a stored
-key.
+A keyd whose helper app is nested in the Oculus app is registered where it is; any other
+has its helper app copied to `bin/` in the data dir first, so the LaunchAgent never
+points into a build tree. Loading it prompts for nothing: keyd reads the keychain only
+when something first uses a stored key.
 
 Usage: oculus keyd install [OPTIONS]
 
 Options:
       --from <PATH>
-          The signed keyd to install. Defaults to the one beside this binary in the app
-          bundle, or, in a debug build, `bun run keyd`'s output
+          The signed keyd to install: its helper app, or the executable inside it.
+          Defaults to the one in this binary's app bundle, or, in a debug build, `bun
+          run keyd`'s output
 
       --if-changed
           Do nothing when the installed keyd was built from the same source and the
@@ -257,7 +258,7 @@ Options:
 ### `oculus keyd uninstall`
 
 ```
-Unload keyd and remove its LaunchAgent, binary and stamp
+Unload keyd and remove its LaunchAgent, helper app and stamp
 
 The vault and the keychain's master key stay, so a reinstall finds every stored key
 again.

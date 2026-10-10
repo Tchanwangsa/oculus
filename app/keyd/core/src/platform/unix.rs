@@ -1,5 +1,5 @@
 //! The file helpers on any POSIX system: the vault's lock and owner-only
-//! files, the durable rename an install uses. Shared by every Unix adapter.
+//! files, the durable renames an install uses. Shared by every Unix adapter.
 
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -90,6 +90,62 @@ pub fn replace_file(dest: &Path, fill: impl FnOnce(&Path) -> io::Result<()>) -> 
     Ok(())
 }
 
+/// Builds a directory through `fill` beside `dest`, then puts it in place of
+/// whatever `dest` was in one step, so a reader sees the old tree or the new
+/// one and never a mix; the old tree is then removed.
+pub fn replace_dir(dest: &Path, fill: impl FnOnce(&Path) -> io::Result<()>) -> Result<(), String> {
+    let dir = dest
+        .parent()
+        .ok_or_else(|| format!("{} has no parent", dest.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    std::fs::remove_dir_all(&tmp).ok();
+    let done = std::fs::create_dir(&tmp)
+        .and_then(|()| fill(&tmp))
+        .and_then(|()| put_in_place(&tmp, dest));
+    // After a swap `tmp` holds the old tree; after a failure, the partial one.
+    std::fs::remove_dir_all(&tmp).ok();
+    done.map_err(|e| format!("writing {}: {e}", dest.display()))
+}
+
+/// Moves `from` to `to`, leaving whatever was at `to` at `from`.
+fn put_in_place(from: &Path, to: &Path) -> io::Result<()> {
+    if std::fs::symlink_metadata(to).is_err() {
+        return std::fs::rename(from, to);
+    }
+    swap(from, to)
+}
+
+#[cfg(target_vendor = "apple")]
+fn swap(a: &Path, b: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let a = CString::new(a.as_os_str().as_bytes()).map_err(io::Error::other)?;
+    let b = CString::new(b.as_os_str().as_bytes()).map_err(io::Error::other)?;
+    if unsafe { libc::renamex_np(a.as_ptr(), b.as_ptr(), libc::RENAME_SWAP) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Without an atomic swap: the old tree steps aside first, so `b` is briefly
+/// absent but never half-written.
+#[cfg(not(target_vendor = "apple"))]
+fn swap(a: &Path, b: &Path) -> io::Result<()> {
+    let aside = a.with_extension("old");
+    std::fs::rename(b, &aside)?;
+    if let Err(e) = std::fs::rename(a, b) {
+        std::fs::rename(&aside, b).ok();
+        return Err(e);
+    }
+    std::fs::rename(&aside, a)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +178,37 @@ mod tests {
         assert!(replace_file(&dest, |_| Err(io::Error::other("no"))).is_err());
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "b\n");
         assert_eq!(std::fs::read_dir(dir.0.join("sub")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn replace_dir_swaps_whole_trees_and_leaves_nothing_behind() {
+        let dir = scratch("replace-dir");
+        let dest = dir.0.join("bin/Helper.app");
+        let tree = |body: &'static str| {
+            move |tmp: &Path| {
+                std::fs::create_dir_all(tmp.join("Contents"))?;
+                std::fs::write(tmp.join("Contents/file"), body)
+            }
+        };
+        replace_dir(&dest, tree("a")).unwrap();
+        std::fs::write(dest.join("Contents/stale"), "only in the old tree").unwrap();
+        replace_dir(&dest, tree("b")).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dest.join("Contents/file")).unwrap(),
+            "b"
+        );
+        assert!(!dest.join("Contents/stale").exists());
+
+        let err = replace_dir(&dest, |tmp| {
+            std::fs::write(tmp.join("half"), "x")?;
+            Err(io::Error::other("no"))
+        });
+        assert!(err.is_err());
+        assert_eq!(
+            std::fs::read_to_string(dest.join("Contents/file")).unwrap(),
+            "b"
+        );
+        assert_eq!(std::fs::read_dir(dir.0.join("bin")).unwrap().count(), 1);
     }
 
     #[test]

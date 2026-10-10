@@ -190,4 +190,11 @@ pub mod files {
     ) -> Result<(), String> {
         Err(super::unsupported().to_string())
     }
+
+    pub fn replace_dir(
+        _dest: &Path,
+        _fill: impl FnOnce(&Path) -> io::Result<()>,
+    ) -> Result<(), String> {
+        Err(super::unsupported().to_string())
+    }
 }

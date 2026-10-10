@@ -4,7 +4,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { buildKeyd, installFromMainCheckout } from "./keyd-build.mjs";
-import { app, buildCli, cliPath, stageCli, stageKeyd } from "./runtime.mjs";
+import { app, buildCli, cliPath, stageCli } from "./runtime.mjs";
 
 const cli = cliPath("debug");
 
@@ -40,15 +40,12 @@ for (const script of ["fetch-ffmpeg.mjs", "build-speech.mjs", "build-whisper.mjs
   execFileSync(process.execPath, [join(app, "scripts", script)], { cwd: app, stdio: "inherit" });
 }
 
-// The credential broker, built and signed every start. It comes before the CLI
-// because tauri-build, which every cargo build of the app runs, needs its
-// sidecar to exist, and copies the sidecar to `target/<profile>/oculus-keyd`:
-// that copy is the keyd the app and CLI offer to install, so the sidecar has
-// to be this dev build, not a release one left by `tauri build`.
+// The credential broker, built and signed every start as its helper app in
+// `keyd/target/signed/`, which is the keyd a debug app and CLI offer to
+// install. Installing it needs the CLI, so that comes after.
 let keyd = null;
 try {
   keyd = buildKeyd("dev");
-  if (keyd) stageKeyd(keyd.binary);
 } catch (e) {
   console.error(`[predev] oculus-keyd did not build: ${e.message}`);
   process.exit(1);
@@ -82,7 +79,7 @@ stageCli(cli);
 // Install runs the CLI built above.
 if (keyd) {
   try {
-    installFromMainCheckout(keyd.binary);
+    installFromMainCheckout(keyd.helper);
   } catch (e) {
     console.error(`[predev] oculus-keyd did not install: ${e.message}`);
     process.exit(1);

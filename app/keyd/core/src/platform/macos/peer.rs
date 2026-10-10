@@ -3,9 +3,10 @@
 //! The uid comes from `getpeereid`. The code comes from the audit token
 //! (`LOCAL_PEERTOKEN`, which names a process instance, not a reusable pid)
 //! through `SecCodeCopyGuestWithAttributes`. Under `Policy::Install` keyd
-//! admits only executables inside its own app bundle, and only while that
-//! bundle's seal verifies strictly; under `SameUser` (dev builds, which have
-//! no bundle) any same-user caller (docs/architecture.md).
+//! admits only executables inside the app its helper app is nested in
+//! (Oculus.app), and only while that app's seal, nested code included,
+//! verifies strictly; under `SameUser` (dev builds, which have no bundle)
+//! any same-user caller (docs/architecture.md).
 
 use std::ffi::c_void;
 use std::os::fd::{AsRawFd, RawFd};
@@ -104,7 +105,7 @@ fn role(policy: Policy, path: Option<&Path>) -> Role {
         return Role::Unknown;
     };
     match policy {
-        Policy::Install => match my_bundle() {
+        Policy::Install => match trust_root() {
             Ok(bundle) => role_in_bundle(
                 &bundle,
                 &path.canonicalize().unwrap_or_else(|_| path.to_path_buf()),
@@ -241,7 +242,7 @@ fn admit(policy: Policy, caller: &Caller) -> Result<(), String> {
         return Ok(());
     }
 
-    let bundle = my_bundle()?;
+    let bundle = trust_root()?;
     let path = caller.path.as_ref().ok_or("the caller's path is unknown")?;
     let path = path
         .canonicalize()
@@ -259,20 +260,19 @@ fn admit(policy: Policy, caller: &Caller) -> Result<(), String> {
     seal_check(&bundle)
 }
 
-/// The nearest `*.app` above keyd's own executable.
-fn my_bundle() -> Result<PathBuf, String> {
+/// The app whose executables keyd serves: the outermost `*.app` above keyd's
+/// own executable, which for the shipped helper is Oculus.app.
+fn trust_root() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
     let exe = exe
         .canonicalize()
         .map_err(|e| format!("canonicalizing {}: {e}", exe.display()))?;
-    exe.ancestors()
-        .find(|a| a.extension().is_some_and(|x| x == "app") && a.join("Contents").is_dir())
-        .map(Path::to_path_buf)
+    super::outermost_app(&exe)
         .ok_or_else(|| format!("keyd is not inside an app bundle ({})", exe.display()))
 }
 
 /// SecCodeCopyPath reports a main executable as the bundle itself, and any
-/// helper by its own path under `Contents/`.
+/// other executable or nested helper app by its own path under `Contents/`.
 fn in_bundle(bundle: &Path, caller: &Path) -> bool {
     caller == bundle || caller.starts_with(bundle.join("Contents"))
 }
@@ -376,9 +376,10 @@ mod tests {
         assert_eq!(
             role_in_bundle(
                 b,
-                Path::new("/Applications/Oculus.app/Contents/MacOS/oculus-keyd")
+                Path::new("/Applications/Oculus.app/Contents/Helpers/Oculus Helper.app")
             ),
-            Role::Unknown
+            Role::Unknown,
+            "keyd's own helper app is in the bundle but neither the app nor the CLI"
         );
         assert_eq!(
             role_in_bundle(b, Path::new("/elsewhere/oculus")),
@@ -432,8 +433,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     /// `<name>.app` in `dir`: a Mach-O copied from `executable`, a sealed
-    /// resource and an Info.plist, ad-hoc signed. Panics if `codesign` fails.
-    fn signed_bundle(dir: &Path, name: &str, executable: &str) -> PathBuf {
+    /// resource and an Info.plist, unsigned.
+    fn unsigned_bundle(dir: &Path, name: &str, executable: &str) -> PathBuf {
         let bundle = dir.join(format!("{name}.app"));
         std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
         std::fs::create_dir_all(bundle.join("Contents/Resources")).unwrap();
@@ -451,9 +452,15 @@ mod tests {
             ),
         )
         .unwrap();
+        bundle
+    }
+
+    /// Ad-hoc signs `bundle`, which seals any helper already signed inside it.
+    /// Panics if `codesign` fails.
+    fn sign(bundle: &Path) {
         let out = Command::new("codesign")
             .args(["-s", "-", "-f", "--timestamp=none"])
-            .arg(&bundle)
+            .arg(bundle)
             .output()
             .unwrap();
         assert!(
@@ -461,6 +468,11 @@ mod tests {
             "codesign: {}",
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+
+    fn signed_bundle(dir: &Path, name: &str, executable: &str) -> PathBuf {
+        let bundle = unsigned_bundle(dir, name, executable);
+        sign(&bundle);
         bundle
     }
 
@@ -483,6 +495,52 @@ mod tests {
         let err = seal_check(&bundle).unwrap_err();
         assert!(err.contains("seal does not verify"), "{err}");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// keyd's helper is nested code of the app: the app's seal covers it, so
+    /// a helper edited after signing fails the check keyd makes on the app.
+    #[test]
+    fn the_seal_check_covers_a_nested_helper() {
+        let dir = std::env::temp_dir().join(format!("keyd-seal-nested-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let outer = unsigned_bundle(&dir, "Outer", "/usr/bin/true");
+        let helpers = outer.join("Contents/Helpers");
+        std::fs::create_dir_all(&helpers).unwrap();
+        let inner = signed_bundle(&helpers, "Inner", "/usr/bin/true");
+        sign(&outer);
+        assert_eq!(seal_check(&outer), Ok(()));
+
+        std::fs::write(inner.join("Contents/Resources/data.txt"), "edited").unwrap();
+        let err = seal_check(&outer).unwrap_err();
+        assert!(err.contains("seal does not verify"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The caller check against a real `tauri build` output:
+    /// `KEYD_REAL_BUNDLE=<…/Oculus.app> cargo test --all-features -- --ignored
+    /// a_built_app`. keyd's helper must find the app as its trust root, the
+    /// app and CLI must get their roles, and the seal must verify.
+    #[test]
+    #[ignore = "needs a built Oculus.app in KEYD_REAL_BUNDLE"]
+    fn a_built_app_admits_its_app_and_cli() {
+        let app = PathBuf::from(std::env::var_os("KEYD_REAL_BUNDLE").expect("KEYD_REAL_BUNDLE"))
+            .canonicalize()
+            .unwrap();
+        let helper = app
+            .join("Contents/Helpers")
+            .join(crate::paths::helper_app_name());
+        let keyd = crate::paths::helper_program(&helper);
+        assert!(keyd.is_file(), "{} is missing", keyd.display());
+        assert_eq!(super::super::outermost_app(&keyd), Some(app.clone()));
+        assert_eq!(role_in_bundle(&app, &app), Role::App);
+        assert_eq!(
+            role_in_bundle(&app, &app.join("Contents/MacOS/oculus")),
+            Role::Cli
+        );
+        assert_eq!(role_in_bundle(&app, &helper), Role::Unknown);
+        assert!(in_bundle(&app, &helper));
+        assert_eq!(seal_check(&app), Ok(()));
     }
 
     fn timed(label: &str, runs: usize, mut each: impl FnMut()) {

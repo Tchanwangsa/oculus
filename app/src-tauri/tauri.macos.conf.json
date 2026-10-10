@@ -4,8 +4,12 @@
       "binaries/ffmpeg",
       "binaries/oculus",
       "binaries/apple-speech",
-      "binaries/whisper-cli",
-      "binaries/oculus-keyd"
-    ]
+      "binaries/whisper-cli"
+    ],
+    "macOS": {
+      "files": {
+        "Helpers/Oculus Helper.app": "binaries/Oculus Helper.app"
+      }
+    }
   }
 }
