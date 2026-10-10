@@ -397,10 +397,11 @@ fn ed_course_in_url(u: &url::Url) -> Option<i64> {
 /// host, so the Canvas session only goes to Canvas.
 fn walk_lti_chain(canvas_cookie: &str, tool_path: &str) -> Result<(String, url::Url), String> {
     let mut jar: HashMap<String, HashMap<String, String>> = HashMap::new();
-    let canvas_host = url::Url::parse(crate::paths::CANVAS_BASE)
+    let canvas_base = crate::institution::canvas_base()?;
+    let canvas_host = url::Url::parse(&canvas_base)
         .ok()
         .and_then(|u| u.host_str().map(str::to_string))
-        .ok_or("bad CANVAS_BASE")?;
+        .ok_or("bad Canvas address")?;
     jar.insert(
         canvas_host,
         canvas_cookie
@@ -411,7 +412,7 @@ fn walk_lti_chain(canvas_cookie: &str, tool_path: &str) -> Result<(String, url::
     );
 
     let agent = ureq::AgentBuilder::new().redirects(0).build();
-    let mut url = url::Url::parse(crate::paths::CANVAS_BASE)
+    let mut url = url::Url::parse(&canvas_base)
         .and_then(|b| b.join(tool_path))
         .map_err(|e| format!("bad tool path: {e}"))?;
     let mut form: Option<String> = None;

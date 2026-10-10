@@ -106,8 +106,12 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   spend guard from Settings → Embeddings, kept here rather than in `settings`
   because the reservation that enforces it already reads this file
   ([retrieval.md](./retrieval.md)).
+- `institution.json` — which university: its Canvas address, how it signs
+  in, and what launches learned ([auth.md](./auth.md#one-institution-profile-says-which-university)).
 - The session cookie, auth flag, `session-keepalive.log`, and the sign-in
   attempt record and its `okta-sign-in.log` ([auth.md](./auth.md)).
+- `start-over` — present only between Start over and the next launch, which
+  empties the directory but for the two usage files ([auth.md](./auth.md#one-institution-profile-says-which-university)).
 
 ## The database has one schema owner and two writers
 

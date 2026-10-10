@@ -22,32 +22,39 @@ fn cookie_file_path() -> std::path::PathBuf {
 pub use crate::canvas::SessionProbe as AuthProbe;
 
 pub fn is_authenticated_url(url: &url::Url) -> bool {
-    url.host_str() == Some("canvas.lms.unimelb.edu.au") && {
-        let p = url.path();
-        // `/?login_success=1` is the success signal: the JS redirect to the
-        // dashboard after it fires no nav event.
-        p == "/"
-            || p.starts_with("/dashboard")
-            || p.starts_with("/courses")
-            || p.starts_with("/calendar")
-            || p.starts_with("/inbox")
-    }
+    url.host_str()
+        .is_some_and(|h| crate::institution::canvas_host().as_deref() == Some(h))
+        && {
+            let p = url.path();
+            // `/?login_success=1` is the success signal: the JS redirect to the
+            // dashboard after it fires no nav event.
+            p == "/"
+                || p.starts_with("/dashboard")
+                || p.starts_with("/courses")
+                || p.starts_with("/calendar")
+                || p.starts_with("/inbox")
+        }
 }
 
 // ── Cookie snapshot / replay ────────────────────────────────────────────────
 
-/// Reads the Canvas and Okta cookies from a live webview (HttpOnly included)
+/// Reads the Canvas and SSO cookies from a live webview (HttpOnly included)
 /// and writes each host's joined `name=value; ...` header to disk. Call it only
 /// once Canvas has signed the webview in: before that the jar holds the
 /// anonymous `canvas_session` Canvas hands every visitor.
 pub fn save_session_cookie(app: &AppHandle) {
     let dir = crate::paths::data_dir();
-    snapshot_cookies(app, crate::canvas::CANVAS_BASE, &cookie_file_path());
-    snapshot_cookies(
-        app,
-        &format!("https://{}", crate::okta::SSO_HOST),
-        &crate::paths::sso_cookie_path(&dir),
-    );
+    let Ok(canvas) = crate::institution::canvas_base() else {
+        return;
+    };
+    snapshot_cookies(app, &canvas, &cookie_file_path());
+    if let Some(sso) = crate::institution::sso_host() {
+        snapshot_cookies(
+            app,
+            &format!("https://{sso}"),
+            &crate::paths::sso_cookie_path(&dir),
+        );
+    }
 }
 
 /// Scoped with `cookies_for_url`: every webview shares one jar
@@ -100,7 +107,7 @@ pub fn saved_cookie_header() -> String {
     std::fs::read_to_string(cookie_file_path()).unwrap_or_default()
 }
 
-/// The persisted Okta header, or empty: written by a headless sign-in or a
+/// The persisted SSO header, or empty: written by a headless sign-in or a
 /// signed-in browser page, read only by the in-app browser.
 pub fn saved_sso_cookie_header() -> String {
     std::fs::read_to_string(crate::paths::sso_cookie_path(&crate::paths::data_dir()))
@@ -172,15 +179,20 @@ pub fn confirm_browser_sign_in(app: &AppHandle) {
 
 // ── Login window (interactive only) ──────────────────────────────────────────
 
-/// Opens the visible Canvas SAML login window. On success it writes the auth
-/// flag, snapshots the session cookie, then hides itself.
-pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
+/// Opens the visible Canvas sign-in window at the profile's login path, which
+/// hands off to whatever IdP the university uses. On success it writes the
+/// auth flag, snapshots the session cookie, then hides itself.
+pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) -> Result<(), String> {
+    let inst = crate::institution::current()
+        .ok_or_else(|| crate::institution::NOT_CONFIGURED.to_string())?;
+    let url: url::Url = format!("{}{}", inst.canvas, inst.login_path)
+        .parse()
+        .map_err(|e| format!("bad Canvas address: {e}"))?;
+
     if let Some(existing) = app.get_webview_window("canvas-auth") {
         existing.close().ok();
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
-
-    let url = "https://canvas.lms.unimelb.edu.au/login/saml";
 
     let session_dir = canvas_session_dir();
     let dir = crate::paths::data_dir();
@@ -192,47 +204,43 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
     let resolved = Arc::new(AtomicBool::new(false));
     let resolved_nav = Arc::clone(&resolved);
 
-    let result = WebviewWindowBuilder::new(
-        &app,
-        "canvas-auth",
-        WebviewUrl::External(url.parse().unwrap()),
-    )
-    .title("Sign in to Canvas — Oculus")
-    .inner_size(900.0, 700.0)
-    .center()
-    .visible(true)
-    .data_directory(session_dir)
-    .on_navigation(move |url| {
-        eprintln!("[oculus] nav: {url}");
-        if is_authenticated_url(&url) {
-            let was_resolved = resolved_nav.swap(true, Ordering::SeqCst);
-            if !was_resolved {
-                // Now, so closing the window meanwhile is not a cancel.
-                *auth_flag_nav.lock().unwrap() = true;
+    let result = WebviewWindowBuilder::new(&app, "canvas-auth", WebviewUrl::External(url))
+        .title("Sign in to Canvas — Oculus")
+        .inner_size(900.0, 700.0)
+        .center()
+        .visible(true)
+        .data_directory(session_dir)
+        .on_navigation(move |url| {
+            eprintln!("[oculus] nav: {url}");
+            if is_authenticated_url(&url) {
+                let was_resolved = resolved_nav.swap(true, Ordering::SeqCst);
+                if !was_resolved {
+                    // Now, so closing the window meanwhile is not a cancel.
+                    *auth_flag_nav.lock().unwrap() = true;
 
-                // Give Canvas a moment to set the session cookie first.
-                let app_delayed = app_nav.clone();
-                let dir = dir.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                    save_session_cookie(&app_delayed);
-                    session_established(&app_delayed, &dir, Via::Window);
-                    if let Some(w) = app_delayed.get_webview_window("canvas-auth") {
-                        w.hide().ok();
-                    }
-                    eprintln!("[oculus] auth success");
-                });
+                    // Give Canvas a moment to set the session cookie first.
+                    let app_delayed = app_nav.clone();
+                    let dir = dir.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        save_session_cookie(&app_delayed);
+                        session_established(&app_delayed, &dir, Via::Window);
+                        if let Some(w) = app_delayed.get_webview_window("canvas-auth") {
+                            w.hide().ok();
+                        }
+                        eprintln!("[oculus] auth success");
+                    });
+                }
             }
-        }
-        true
-    })
-    .build();
+            true
+        })
+        .build();
 
     let win = match result {
         Ok(w) => w,
         Err(e) => {
             eprintln!("[oculus] failed to open canvas window: {e}");
-            return;
+            return Err(format!("could not open the sign-in window: {e}"));
         }
     };
 
@@ -243,6 +251,7 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
             }
         }
     });
+    Ok(())
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────────
@@ -276,16 +285,16 @@ pub async fn launch_canvas_auth(
     state: tauri::State<'_, AuthState>,
 ) -> Result<(), String> {
     let auth_flag = Arc::clone(&state.0);
-    open_canvas_window(app, auth_flag);
-    Ok(())
+    open_canvas_window(app, auth_flag)
 }
 
-#[tauri::command]
-pub async fn disconnect_canvas(
-    app: AppHandle,
-    state: tauri::State<'_, AuthState>,
-) -> Result<(), String> {
-    *state.0.lock().unwrap() = false;
+/// Sign the app out: close the login window, empty WebKit's jar of the
+/// Canvas and SSO cookies, drop the saved sessions, and tell every
+/// `useAuth` (`canvas-signed-out`).
+pub async fn end_session(app: &AppHandle) -> Result<(), String> {
+    if let Some(state) = app.try_state::<AuthState>() {
+        *state.0.lock().unwrap() = false;
+    }
 
     if let Some(win) = app.get_webview_window("canvas-auth") {
         win.close().map_err(|e| e.to_string())?;
@@ -293,10 +302,16 @@ pub async fn disconnect_canvas(
 
     // The jar first, or a Canvas tab saves the session straight back.
     let (cleared, done) = tokio::sync::oneshot::channel();
-    crate::browser::clear_sessions(&app, move || {
+    crate::browser::clear_sessions(app, move || {
         cleared.send(()).ok();
     });
     done.await.ok();
     crate::paths::sign_out(&crate::paths::data_dir()).map_err(|e| e.to_string())?;
+    app.emit("canvas-signed-out", "signed-out").ok();
     Ok(())
+}
+
+#[tauri::command]
+pub async fn disconnect_canvas(app: AppHandle) -> Result<(), String> {
+    end_session(&app).await
 }

@@ -15,6 +15,7 @@ pub mod embed;
 mod files;
 pub mod groq;
 pub mod harness;
+pub mod institution;
 pub mod keepalive;
 #[cfg(target_os = "macos")]
 mod keys;
@@ -36,7 +37,7 @@ mod ratelimit;
 pub mod retrieval;
 mod scrape;
 pub mod sheets;
-mod storage;
+pub mod storage;
 pub mod store;
 mod subjects;
 pub mod sync;
@@ -57,6 +58,8 @@ use subjects::SubjectsState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before anything opens a file in the data dir (`storage::storage_start_over`).
+    storage::finish_start_over(&paths::data_dir());
     tauri::Builder::default()
         // ⌘T / ⌘W reach the app as menu events, not key events — see menu.rs.
         .menu(menu::build)
@@ -185,6 +188,8 @@ pub fn run() {
             auth::check_canvas_session,
             auth::launch_canvas_auth,
             auth::disconnect_canvas,
+            institution::institution_get,
+            institution::institution_configure,
             okta::okta_credential_status,
             okta::okta_save_credentials,
             okta::okta_clear_credentials,
@@ -290,6 +295,7 @@ pub fn run() {
             chapters::app::lecture_thumbnail,
             lecture_end::app::lecture_find_end,
             storage::storage_report,
+            storage::storage_start_over,
             usage::usage_activity,
             browser::browser_open_url,
             browser::browser_state,

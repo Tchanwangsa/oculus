@@ -1,15 +1,16 @@
 # Auth & sessions
 
 Three services, three credentials — all derived from one Canvas session
-cookie.
+cookie, at whichever university the institution profile names.
 
 ## Where
 
 | Piece | Location |
 | --- | --- |
+| Institution profile: the Canvas address, sign-in detection, the UniMelb migration | `app/src-tauri/src/institution.rs` |
 | Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
 | Session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas.rs` |
-| Cookie (Canvas and Okta), auth-flag and keep-alive log paths; private writes, sign-out | `app/src-tauri/src/paths.rs` |
+| Cookie (Canvas and SSO), auth-flag and keep-alive log paths; private writes, sign-out | `app/src-tauri/src/paths.rs` |
 | Headless Okta sign-in, TOTP, stored credentials, the attempt guard | `app/src-tauri/src/okta.rs` |
 | LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
 | The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
@@ -21,16 +22,54 @@ cookie.
 | Handing the session to the in-app browser | `app/src-tauri/src/browser.rs` |
 | Keychain entry lifecycle (also used by MinerU, Voyage and Groq) | `app/src-tauri/src/credentials.rs` |
 | Credential entry UI | `app/src/components/settings/AutoSignIn.tsx` |
+| Canvas address UI, the profile on the frontend | `app/src/components/settings/CanvasAddress.tsx`, `app/src/stores/institutionStore.ts` |
+| Start over | `app/src-tauri/src/storage.rs`, `app/src/components/settings/StartOver.tsx` |
+
+## One institution profile says which university
+
+`institution.json` in the data dir holds the Canvas address (`https://host`),
+the path the sign-in window opens, the IdP type (`okta` or `other`) and its
+host, and what launches have learned: the Echo360 tool fallback and lead-in,
+Ed's API base, course-code prefixes that are never subjects. It is a file, not
+a `settings` row, because synchronous code and `oculus auth tick` need the
+Canvas host without a database pool; reads are cached on the file's mtime, so
+the CLI and the app see each other's writes.
+
+- **The student types one thing**, their Canvas address, in Settings → Canvas
+  or `oculus auth canvas <address>`. `institution::configure` keeps only the
+  origin, proves it is Canvas (an anonymous `/api/v1/users/self` answers 401
+  `{"status":"unauthenticated"}`), and walks the sign-in redirects with no
+  session: `/login` first, then `/login/saml`, stopping at the first that
+  reaches Okta's widget. Where the walk leaves Canvas is the SSO host.
+- **An install older than the profile is UniMelb's.** A missing file beside a
+  cookie, an auth flag, an attempt record or a non-empty `courses/` gets the
+  UniMelb profile written (`institution::unimelb`). A fresh install has none of
+  those (the database alone is no evidence — the app creates it before anyone
+  signs in), so Canvas stays unset until the student enters an address.
+- **The address cannot change under a library.** Subject rows are keyed by
+  Canvas course id, which another Canvas reuses, so a new address is refused
+  while `subjects` has rows. Start over (Settings → Storage) signs out,
+  forgets the Okta credentials and the keep-alive agent, leaves a `start-over`
+  marker and restarts; the next launch empties the data dir before any thread
+  or database handle exists, keeping only the two cloud usage files. The
+  frontend clears its library-scoped `localStorage` keys first.
+- Saving a different address signs out (`auth::end_session`, while the old
+  hosts are still the profile's, so the browser jar loses the old session) and
+  clears the Okta credentials, which belong to the old IdP.
+
 
 ## Canvas authenticates by session cookie only
 
-UniMelb Canvas has disabled self-service access tokens — only an admin can
-issue one — so every request carries a snapshotted `canvas_session` cookie.
-Do not propose `Authorization: Bearer`. (The "New Access Token" button's text
-is on the page either way; only its `disabled` attribute tells you.)
+Universities commonly disable students' self-service access tokens (UniMelb
+does — only an admin can issue one), so every request carries a snapshotted
+`canvas_session` cookie, everywhere. Do not propose `Authorization: Bearer`.
+(The "New Access Token" button's text is on the page either way; only its
+`disabled` attribute tells you.)
 
-- Sign-in goes through the university's SAML IdP, so the first login happens
-  in a visible app WebView. The cookie is persisted to the data dir in a
+- Sign-in goes through whatever the university uses — SAML, CAS, OIDC or
+  Canvas's own form — so the first login happens in a visible app WebView
+  opened at the profile's login path. It waits only for a signed-in Canvas
+  URL on the profile's host, so it is the same for every IdP. The cookie is persisted to the data dir in a
   plaintext file only this user can read (`paths::write_private`, like every
   session file here), beside an auth-flag file meaning "we believe we have a
   session".
@@ -40,39 +79,44 @@ is on the page either way; only its `disabled` attribute tells you.)
   or by hand.
 - On launch with the flag present, the app starts connected while a thread
   probes the cookie: `Valid` confirms, `Rejected` clears the flag (keeping the
-  Okta snapshot) and emits `canvas-auth-expired`, `Unreachable` stays connected.
+  SSO snapshot) and emits `canvas-auth-expired`, `Unreachable` stays connected.
 - Signing out (Settings or `oculus auth logout`, both `paths::sign_out`)
-  deletes the Canvas, Okta and Ed snapshots and the flag, and writes
-  `canvas-session/signed-out`. The Okta one goes too, or the in-app browser
-  would pass through SSO and re-save a Canvas session. The
+  deletes the Canvas, SSO and Ed snapshots and the flag, and writes
+  `canvas-session/signed-out`. The SSO one goes too, or the in-app browser
+  would pass through SSO and re-save a Canvas session. The app's sign-out
+  (`auth::end_session`) emits `canvas-signed-out` for every `useAuth`. The
   [attempt record](#every-sign-in-attempt-goes-through-one-guard) stays, so a
   lockout pause outlives a sign-out.
 - The marker keeps every automatic sign-in off (`LoginError::SignedOut`)
   until a session is established again: `paths::mark_authenticated` removes
   it.
 - Settings' sign-out first deletes every cookie WebKit would send to Canvas
-  or Okta (`browser::clear_sessions`), or a tab still signed in would save the
-  session straight back. `oculus auth logout` cannot reach a running app's
+  or the SSO host (`browser::clear_sessions`), or a tab still signed in would
+  save the session straight back. `oculus auth logout` cannot reach a running app's
   jar, so a Canvas tab open there can still re-save the cookie.
 
 ## The in-app browser is seeded with the same sessions
 
 `canvas_session` is HttpOnly and session-scoped, so WebKit keeps it in memory
-only and the on-disk snapshot is the sole surviving copy. Okta's cookies for
-`sso.unimelb.edu.au` are snapshotted beside it (`sso-session.cookie`, written
-by a headless sign-in and by the browser), so a page that redirects to SSO
-passes straight through.
+only and the on-disk snapshot is the sole surviving copy. The SSO host's
+cookies are snapshotted beside it (`sso-session.cookie`, written by a headless
+sign-in and by the browser), so a page that redirects to SSO passes straight
+through.
 
 - `browser::seed_sessions` writes both into WebKit's shared jar through
   `WKHTTPCookieStore` (Tauri has no cookie setter) at startup and before any
-  `*.unimelb.edu.au` tab, navigation or reload, re-scoping every bare
+  tab, navigation or reload on the university's hosts, re-scoping every bare
   `name=value` pair to its host. The load waits for the write to land.
-- Canvas cookies always replace the jar's; Okta's only fill gaps, unless the
-  snapshot changed since it was last seeded — while the app runs, the
-  browser's own Okta session is the freshest.
-- A page that lands on Okta's entry for any SAML app (`/app/…/sso/saml`, the
-  sign-in form when Okta has no session) asks `/api/v1/sessions/me` with the
-  browser's Okta cookies. On a 404 it runs the
+- The university's hosts are the Canvas host, the SSO host, and the domain
+  they share when it is the university's own (`institution_domain`:
+  `unimelb.edu.au`, never a public suffix like `edu.au` or a shared host like
+  `instructure.com`).
+- Canvas cookies always replace the jar's; the SSO host's only fill gaps,
+  unless the snapshot changed since it was last seeded — while the app runs,
+  the browser's own SSO session is the freshest.
+- At an Okta university, a page that lands on Okta's entry for any SAML app
+  (`/app/…/sso/saml`, the sign-in form when Okta has no session) asks
+  `/api/v1/sessions/me` with the browser's Okta cookies. On a 404 it runs the
   [headless sign-in](#okta-sign-in-runs-headless-in-rust), seeds the Okta
   session it saved and reloads the page, subject to the
   [attempt guard](#every-sign-in-attempt-goes-through-one-guard).
@@ -121,11 +165,17 @@ guard. The CLI has no app to update, so `oculus auth auto` sets only the flag
 
 ## Okta sign-in runs headless in Rust
 
-`app/src-tauri/src/okta.rs` rebuilds a dead session without a browser. The
-IdP is Okta Identity Engine at `sso.unimelb.edu.au`, a JSON state machine at
-`/idp/idx/*`: introspect the login page's state token, answer each
-*remediation*, then replay the SAML app URL and POST the assertion to Canvas.
+`app/src-tauri/src/okta.rs` rebuilds a dead session without a browser, at a
+university whose profile says Okta. Okta Identity Engine is a JSON state
+machine at `/idp/idx/*` on the profile's SSO host: introspect the login page's
+state token, answer each *remediation*, then replay the SAML app URL and POST
+the assertion to Canvas.
 
+- Anywhere else `okta::sign_in` returns `LoginError::NotOkta` before it reads
+  the keychain or the attempt record, `try_auto_recover` treats it like "never
+  set up", and Settings → Canvas does not offer automatic sign-in. Those
+  students sign in in the window when a session dies; the keep-alive probe
+  still rolls it forward.
 - The loop dispatches on remediation **names**, not a fixed order, because
   factor order is an Okta policy setting.
 - It answers **password** (macOS keychain) and **TOTP** (generated in-tree
@@ -193,3 +243,5 @@ course's LTI external-tool form (see
 - WebKit drops an API-set cookie that would replace an HttpOnly one a server set, with no error. Once Canvas hands the browser an anonymous `canvas_session`, re-seeding does nothing until the old cookie is deleted — so seeding deletes same-named cookies first.
 - `/login/session_token` answers 403 to a cookie session; it wants an access token, which is disabled here.
 - Ed's LTI redirect walk jars cookies per host; the Canvas cookie must never reach edstem.org.
+- UniMelb's `/login` is a portal page, not its IdP — detection tries `/login/saml` after it, and UniMelb's profile keeps `/login/saml` as its login path.
+- The keychain service `com.oculus.unimelb-sso` is an identifier: renaming it orphans every saved password and setup key.

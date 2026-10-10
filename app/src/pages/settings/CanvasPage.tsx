@@ -12,6 +12,8 @@ import { useAuth, type AuthStatus } from "@/hooks/useAuth";
 import { useKeepalive } from "@/hooks/useKeepalive";
 import { useSyncStore } from "@/stores/syncStore";
 import { AutoSignIn } from "@/components/settings/AutoSignIn";
+import { CanvasAddress } from "@/components/settings/CanvasAddress";
+import { useInstitution } from "@/stores/institutionStore";
 import { Section } from "./section";
 
 const AUTH_TEXT: Record<AuthStatus, string> = {
@@ -29,10 +31,18 @@ export default function SettingsCanvasPage() {
   } = useAuth();
   const scraping = useSyncStore((s) => s.scraping);
   const { status: ka, busy: kaBusy, error: kaError, toggle: kaToggle } = useKeepalive();
+  const institution = useInstitution();
+  const configured = !!institution?.canvas;
 
   return (
-    <Section title="Canvas" description="canvas.lms.unimelb.edu.au">
+    <Section
+      title="Canvas"
+      description="Your university's Canvas, and the session Oculus syncs with."
+    >
       <div>
+        <CanvasAddress />
+
+        {configured && (
         <div className="flex items-center justify-between gap-4 py-2">
           <div className="flex items-center gap-2">
             <span
@@ -90,10 +100,11 @@ export default function SettingsCanvasPage() {
             )}
           </div>
         </div>
+        )}
 
-        <AutoSignIn />
+        {institution?.okta && <AutoSignIn />}
 
-        {ka?.supported && (
+        {configured && ka?.supported && (
           <div className="flex items-center justify-between gap-3 py-2">
             <Label
               htmlFor="keepalive"
@@ -106,8 +117,10 @@ export default function SettingsCanvasPage() {
                 </TooltipTrigger>
                 <TooltipContent className="max-w-[220px]">
                   Refreshes the Canvas session every {ka.interval_hours}h in the
-                  background so it doesn't expire while Oculus is closed, and
-                  signs back in automatically if it has already lapsed.
+                  background so it doesn't expire while Oculus is closed
+                  {institution?.okta
+                    ? ", and signs back in automatically if it has already lapsed."
+                    : "."}
                   {ka.enabled && ka.last_run ? ` Last run: ${ka.last_run}` : ""}
                 </TooltipContent>
               </Tooltip>

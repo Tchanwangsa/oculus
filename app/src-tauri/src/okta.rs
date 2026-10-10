@@ -1,8 +1,8 @@
-//! Headless University of Melbourne SSO sign-in.
+//! Headless sign-in for universities whose Canvas signs in through Okta.
 //!
-//! Canvas authenticates through Okta Identity Engine at `sso.unimelb.edu.au`,
-//! whose widget is a thin client over a JSON state machine at `/idp/idx/*`. So
-//! the flow runs in Rust with no webview (see `docs/architecture.md`):
+//! Okta Identity Engine's widget is a thin client over a JSON state machine at
+//! `/idp/idx/*` on the university's Okta host (`institution::sso_host`). So the
+//! flow runs in Rust with no webview (see `docs/architecture.md`):
 //! introspect the login page's state token, answer each *remediation*, then
 //! replay the SAML app URL and POST the `SAMLResponse` to Canvas.
 //!
@@ -155,6 +155,8 @@ pub fn totp_seconds_remaining() -> u64 {
 
 // ── Stored credentials ───────────────────────────────────────────────────────
 
+/// A stable identifier, not a description: renaming it would orphan every
+/// saved password and setup key.
 const KEYCHAIN_SERVICE: &str = "com.oculus.unimelb-sso";
 
 fn secret(account: &str) -> crate::credentials::Secret<'_> {
@@ -175,7 +177,7 @@ fn erase(account: &str) -> Result<(), String> {
 }
 
 /// Never logged, never written outside the keychain, never sent anywhere but
-/// `sso.unimelb.edu.au`.
+/// the university's Okta host.
 pub struct Credentials {
     pub username: String,
     pub password: String,
@@ -258,7 +260,34 @@ pub fn clear_password() -> Result<(), String> {
 
 // ── HTTP plumbing ────────────────────────────────────────────────────────────
 
-pub const SSO_HOST: &str = "sso.unimelb.edu.au";
+/// The university's Canvas and the Okta tenant in front of it, read once per
+/// sign-in from the institution profile.
+struct Site {
+    canvas: String,
+    login_path: String,
+    sso: String,
+}
+
+impl Site {
+    fn load(data_dir: &std::path::Path) -> Result<Site, LoginError> {
+        let inst = crate::institution::load(data_dir).ok_or(LoginError::NotConfigured)?;
+        match (inst.idp, inst.sso_host) {
+            (crate::institution::Idp::Okta, Some(sso)) => Ok(Site {
+                canvas: inst.canvas,
+                login_path: inst.login_path,
+                sso,
+            }),
+            _ => Err(LoginError::NotOkta(inst.canvas)),
+        }
+    }
+
+    fn canvas_host(&self) -> String {
+        url::Url::parse(&self.canvas)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .unwrap_or_default()
+    }
+}
 const IDX_MEDIA: &str = "application/ion+json; okta-version=1.0.0";
 /// Hygiene, not a known requirement: every leg here impersonates a browser.
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
@@ -310,6 +339,9 @@ impl Jar {
 pub enum LoginError {
     /// No credentials on file — automated sign-in was never set up.
     NotConfigured,
+    /// The university's Canvas does not sign in through Okta; carries the
+    /// Canvas address.
+    NotOkta(String),
     /// The user signed out; only a sign-in they start lifts it.
     SignedOut,
     /// The keychain refused the read (a denied prompt, a sandboxed process);
@@ -339,6 +371,11 @@ impl std::fmt::Display for LoginError {
                 f,
                 "Automated sign-in is not set up — save your username, password and \
                  authenticator setup key first."
+            ),
+            LoginError::NotOkta(canvas) => write!(
+                f,
+                "Automatic sign-in works only with Okta, and {canvas} signs in another way. \
+                 Sign in from Settings → Canvas in the app."
             ),
             LoginError::SignedOut => write!(
                 f,
@@ -435,13 +472,15 @@ fn walk(jar: &mut Jar, start: &str, max: usize) -> Result<(url::Url, String), Lo
 }
 
 /// Start the SAML flow and pull the IDX state token out of the login page.
-fn bootstrap(jar: &mut Jar) -> Result<(String, String), LoginError> {
-    let start = format!("{}/login/saml", crate::paths::CANVAS_BASE);
+fn bootstrap(jar: &mut Jar, site: &Site) -> Result<(String, String), LoginError> {
+    let start = format!("{}{}", site.canvas, site.login_path);
     let (landed, body) = walk(jar, &start, 10)?;
 
-    if host_of(&landed) != SSO_HOST {
+    if host_of(&landed) != site.sso {
         return Err(LoginError::Unexpected(format!(
-            "SAML start landed on {landed} instead of {SSO_HOST}"
+            "sign-in landed on {landed} instead of {} — save the Canvas address again \
+             in Settings → Canvas to re-detect the sign-in page",
+            site.sso
         )));
     }
     let token = extract_state_token(&body).ok_or_else(|| {
@@ -508,14 +547,17 @@ fn looks_like_state_token(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '~'))
 }
 
-/// One IDX call. A non-2xx body is parsed, not thrown: Okta explains its
-/// 400/401s there.
+/// One IDX call, to the Okta host `url` names. A non-2xx body is parsed, not
+/// thrown: Okta explains its 400/401s there.
 fn idx(jar: &mut Jar, url: &str, body: serde_json::Value) -> Result<serde_json::Value, LoginError> {
+    let host = url::Url::parse(url)
+        .map(|u| host_of(&u))
+        .map_err(|e| LoginError::Unexpected(format!("bad IDX URL {url}: {e}")))?;
     let resp = agent()
         .post(url)
         .set("Accept", IDX_MEDIA)
         .set("Content-Type", IDX_MEDIA)
-        .set("Cookie", &jar.header(SSO_HOST))
+        .set("Cookie", &jar.header(&host))
         .send_string(&body.to_string());
 
     let resp = match resp {
@@ -523,7 +565,7 @@ fn idx(jar: &mut Jar, url: &str, body: serde_json::Value) -> Result<serde_json::
         Err(ureq::Error::Status(_, r)) => r,
         Err(e) => return Err(LoginError::Network(e.to_string())),
     };
-    jar.absorb(SSO_HOST, &resp);
+    jar.absorb(&host, &resp);
     let text = resp
         .into_string()
         .map_err(|e| LoginError::Network(e.to_string()))?;
@@ -826,11 +868,14 @@ pub fn sign_in(data_dir: &std::path::Path, trigger: Trigger) -> Result<String, L
     if trigger != Trigger::Manual && crate::paths::signed_out_path(data_dir).exists() {
         return Err(LoginError::SignedOut);
     }
+    // Before the keychain and the attempt record: a university without Okta
+    // has nothing to try and nothing to count.
+    let site = Site::load(data_dir)?;
     let creds = Credentials::load()?.ok_or(LoginError::NotConfigured)?;
     let now = crate::clock::now_secs();
     with_record(data_dir, |r| admit(r, trigger, now))?;
 
-    let result = attempt_sign_in(data_dir, &creds);
+    let result = attempt_sign_in(data_dir, &site, &creds);
     with_record(data_dir, |r| settle(r, &result));
     let outcome = match &result {
         Ok(_) => "signed in".to_string(),
@@ -855,11 +900,15 @@ pub fn resume_automatic_sign_in(data_dir: &std::path::Path) {
 /// Sign in headlessly and persist the resulting Canvas session cookie,
 /// returning the cookie header. Driven by whichever remediations Okta offers,
 /// since factor order is a policy setting. Only `sign_in` calls this.
-fn attempt_sign_in(data_dir: &std::path::Path, creds: &Credentials) -> Result<String, LoginError> {
+fn attempt_sign_in(
+    data_dir: &std::path::Path,
+    site: &Site,
+    creds: &Credentials,
+) -> Result<String, LoginError> {
     let mut jar = Jar::default();
 
-    let (state_token, saml_url) = bootstrap(&mut jar)?;
-    let idx_base = format!("https://{SSO_HOST}/idp/idx");
+    let (state_token, saml_url) = bootstrap(&mut jar, site)?;
+    let idx_base = format!("https://{}/idp/idx", site.sso);
 
     // Introspect takes `stateToken`, but some configurations accept only
     // `stateHandle` here, so retry with that.
@@ -1007,11 +1056,11 @@ fn attempt_sign_in(data_dir: &std::path::Path, creds: &Credentials) -> Result<St
         walk(&mut jar, href, 10).ok();
     }
 
-    let cookie = complete_saml(&mut jar, &saml_url)?;
+    let cookie = complete_saml(&mut jar, site, &saml_url)?;
 
     // Prove the cookie authenticates before overwriting one that may still
     // be good.
-    let name = verify(&cookie)?;
+    let name = verify(site, &cookie)?;
 
     let path = crate::paths::cookie_path(data_dir);
     if let Some(parent) = path.parent() {
@@ -1021,7 +1070,7 @@ fn attempt_sign_in(data_dir: &std::path::Path, creds: &Credentials) -> Result<St
         .map_err(|e| LoginError::Unexpected(format!("could not save the session cookie: {e}")))?;
     // Okta's session too, so an in-app browser page that redirects to SSO
     // passes straight through (`browser::seed_sessions`).
-    let sso = jar.header(SSO_HOST);
+    let sso = jar.header(&site.sso);
     if !sso.is_empty() {
         crate::paths::write_private(&crate::paths::sso_cookie_path(data_dir), &sso).ok();
     }
@@ -1031,8 +1080,8 @@ fn attempt_sign_in(data_dir: &std::path::Path, creds: &Credentials) -> Result<St
 
 /// Confirm Canvas accepts the freshly minted cookie, returning the account
 /// name it reports.
-fn verify(cookie: &str) -> Result<String, LoginError> {
-    let url = format!("{}/api/v1/users/self", crate::paths::CANVAS_BASE);
+fn verify(site: &Site, cookie: &str) -> Result<String, LoginError> {
+    let url = format!("{}/api/v1/users/self", site.canvas);
     let resp = agent().get(&url).set("Cookie", cookie).call();
     match resp {
         Ok(r) if r.status() == 200 => {
@@ -1064,11 +1113,8 @@ fn wait_for_fresh_code() {
 
 /// With an Okta session, replay the SAML app URL and POST the auto-submit
 /// assertion form to Canvas for a `canvas_session` cookie.
-fn complete_saml(jar: &mut Jar, saml_url: &str) -> Result<String, LoginError> {
-    let canvas_host = url::Url::parse(crate::paths::CANVAS_BASE)
-        .ok()
-        .and_then(|u| u.host_str().map(str::to_string))
-        .unwrap_or_default();
+fn complete_saml(jar: &mut Jar, site: &Site, saml_url: &str) -> Result<String, LoginError> {
+    let canvas_host = site.canvas_host();
 
     let agent = agent();
     let mut url = url::Url::parse(saml_url).map_err(|e| LoginError::Unexpected(e.to_string()))?;
@@ -1156,16 +1202,35 @@ fn parse_saml_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
     None
 }
 
+// ── Detection ────────────────────────────────────────────────────────────────
+
+/// Follow `start`'s redirects with no session and report where they land and
+/// whether that page is Okta's sign-in widget, for `institution::configure`.
+pub(crate) fn probe_sign_in_page(start: &str) -> Result<(url::Url, bool), String> {
+    let mut jar = Jar::default();
+    let (landed, body) = walk(&mut jar, start, 10).map_err(|e| e.to_string())?;
+    Ok((landed, is_okta_page(&body)))
+}
+
+fn is_okta_page(html: &str) -> bool {
+    html.contains("okta-signin-widget")
+        || (html.contains("OktaUtil") && !state_token_candidates(html).is_empty())
+}
+
 // ── Diagnosis ────────────────────────────────────────────────────────────────
 
 /// What the sign-in page looks like from here, for when the flow fails.
 /// Reports shapes and lengths, never values: a state token is a live
 /// credential.
-pub fn diagnose() -> String {
+pub fn diagnose(data_dir: &std::path::Path) -> String {
     let mut out = String::new();
     let mut jar = Jar::default();
+    let site = match Site::load(data_dir) {
+        Ok(site) => site,
+        Err(e) => return format!("{e}\n"),
+    };
 
-    let start = format!("{}/login/saml", crate::paths::CANVAS_BASE);
+    let start = format!("{}{}", site.canvas, site.login_path);
     let (landed, body) = match walk(&mut jar, &start, 10) {
         Ok(v) => v,
         Err(e) => return format!("could not reach the sign-in page: {e}\n"),
@@ -1175,7 +1240,7 @@ pub fn diagnose() -> String {
     out.push_str(&format!("page size   {} bytes\n", body.len()));
     out.push_str(&format!(
         "okta cookies {}\n",
-        jar.0.get(SSO_HOST).map(|m| m.len()).unwrap_or(0)
+        jar.0.get(&site.sso).map(|m| m.len()).unwrap_or(0)
     ));
 
     let markers = [
@@ -1217,7 +1282,7 @@ pub fn diagnose() -> String {
     let Some(token) = candidates.first() else {
         return out;
     };
-    let introspect = format!("https://{SSO_HOST}/idp/idx/introspect");
+    let introspect = format!("https://{}/idp/idx/introspect", site.sso);
     for field in ["stateToken", "stateHandle"] {
         match idx(&mut jar, &introspect, serde_json::json!({ field: token })) {
             Ok(state) => {
@@ -1287,11 +1352,14 @@ fn signed_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, St
 
 /// Called when a probe finds the session dead: rebuild it silently if
 /// automated sign-in is set up. `false` means ask the user; every reason but
-/// "never set up" and "signed out" is logged, a keychain refusal included.
+/// "never set up", "not Okta" and "signed out" is logged, a keychain refusal
+/// included.
 pub fn try_auto_recover(app: &tauri::AppHandle, trigger: Trigger) -> bool {
     let dir = crate::paths::data_dir();
     let outcome = match sign_in(&dir, trigger) {
-        Err(LoginError::NotConfigured | LoginError::SignedOut) => return false,
+        Err(LoginError::NotConfigured | LoginError::NotOkta(_) | LoginError::SignedOut) => {
+            return false
+        }
         Err(e) => Err(e.to_string()),
         Ok(_) => signed_in(app, &dir),
     };

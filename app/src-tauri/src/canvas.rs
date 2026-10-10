@@ -6,8 +6,6 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-pub use crate::paths::CANVAS_BASE;
-
 /// A finished response. 4xx/5xx are values (a locked module is a 403 to
 /// skip); `Err` means the request never completed, after retries.
 pub struct Res {
@@ -35,6 +33,9 @@ const RETRIES: u32 = 2;
 pub const CANCELLED: &str = "cancelled";
 
 pub struct Canvas {
+    /// `https://host` from the institution profile; empty without one, and
+    /// then there is no session either.
+    base: String,
     cookie: Mutex<String>,
     cookie_path: PathBuf,
 }
@@ -55,11 +56,20 @@ fn display_name(v: &serde_json::Value) -> String {
 }
 
 impl Canvas {
-    /// Load the persisted session cookie; check [`Canvas::has_session`].
+    /// Load the profile's Canvas and the persisted session cookie; check
+    /// [`Canvas::has_session`].
     pub fn open(data_dir: &Path) -> Self {
+        let base = crate::institution::load(data_dir)
+            .map(|i| i.canvas)
+            .unwrap_or_default();
         let cookie_path = crate::paths::cookie_path(data_dir);
-        let cookie = std::fs::read_to_string(&cookie_path).unwrap_or_default();
+        let cookie = if base.is_empty() {
+            String::new()
+        } else {
+            std::fs::read_to_string(&cookie_path).unwrap_or_default()
+        };
         Canvas {
+            base,
             cookie: Mutex::new(cookie.trim().to_string()),
             cookie_path,
         }
@@ -67,6 +77,29 @@ impl Canvas {
 
     pub fn has_session(&self) -> bool {
         !self.cookie.lock().unwrap().is_empty()
+    }
+
+    /// `https://host` of this Canvas, or the "no Canvas address" error.
+    pub fn base(&self) -> Result<&str, String> {
+        if self.base.is_empty() {
+            Err(crate::institution::NOT_CONFIGURED.to_string())
+        } else {
+            Ok(&self.base)
+        }
+    }
+
+    /// An absolute URL as is, a Canvas-relative path against [`Canvas::base`].
+    fn resolve(&self, url_or_path: &str) -> Result<String, String> {
+        if url_or_path.starts_with("http") {
+            Ok(url_or_path.to_string())
+        } else {
+            Ok(format!("{}{url_or_path}", self.base()?))
+        }
+    }
+
+    /// Only Canvas gets the cookie.
+    fn is_canvas_url(&self, url: &str) -> bool {
+        !self.base.is_empty() && url.starts_with(&format!("{}/", self.base))
     }
 
     fn cookie(&self) -> String {
@@ -103,12 +136,8 @@ impl Canvas {
     /// GET an absolute URL or a Canvas-relative path. Only Canvas gets the
     /// cookie — a `public_url` is a pre-signed S3 link on another host.
     pub fn get(&self, url_or_path: &str) -> Result<Res, String> {
-        let url = if url_or_path.starts_with("http") {
-            url_or_path.to_string()
-        } else {
-            format!("{CANVAS_BASE}{url_or_path}")
-        };
-        let is_canvas = url.starts_with(&format!("{CANVAS_BASE}/"));
+        let url = self.resolve(url_or_path)?;
+        let is_canvas = self.is_canvas_url(&url);
 
         let mut last = String::new();
         for attempt in 0..=RETRIES {
@@ -159,12 +188,8 @@ impl Canvas {
         on_progress: &dyn Fn(u8),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<u64, String> {
-        let url = if url_or_path.starts_with("http") {
-            url_or_path.to_string()
-        } else {
-            format!("{CANVAS_BASE}{url_or_path}")
-        };
-        let canvas_host = |u: &str| u.starts_with(&format!("{CANVAS_BASE}/"));
+        let url = self.resolve(url_or_path)?;
+        let canvas_host = |u: &str| self.is_canvas_url(u);
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(std::time::Duration::from_secs(30))
             .timeout_read(TIMEOUT)
@@ -435,6 +460,7 @@ mod tests {
 
     fn signed_out() -> Canvas {
         Canvas {
+            base: String::new(),
             cookie: Mutex::new(String::new()),
             cookie_path: PathBuf::new(),
         }

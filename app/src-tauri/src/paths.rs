@@ -9,8 +9,6 @@ use std::path::PathBuf;
 /// `identifier` in tauri.conf.json; a test holds them together.
 pub const IDENTIFIER: &str = "com.tchan.oculus";
 
-pub const CANVAS_BASE: &str = "https://canvas.lms.unimelb.edu.au";
-
 /// Tauri's `app.path().app_data_dir()`, reachable without an `AppHandle`; the
 /// one way every module and the CLI find the data directory.
 pub fn data_dir() -> PathBuf {
@@ -23,8 +21,9 @@ pub fn cookie_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("canvas-session.cookie")
 }
 
-/// Okta's cookies for `sso.unimelb.edu.au`, the same bare `name=value; …`
-/// header as the Canvas one. Only the in-app browser replays it.
+/// The SSO host's cookies (`institution::sso_host`), the same bare
+/// `name=value; …` header as the Canvas one. Only the in-app browser replays
+/// it.
 pub fn sso_cookie_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("sso-session.cookie")
 }

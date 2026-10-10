@@ -105,6 +105,16 @@ pub(crate) struct IndexArgs {
 
 #[derive(Subcommand)]
 pub(crate) enum AuthAction {
+    /// Show or set your university's Canvas address
+    ///
+    /// Everything else is detected from it: how the university signs in, and
+    /// whether automatic sign-in (Okta only) is possible. The address cannot
+    /// change while a library exists — Start over in Settings → Storage first.
+    Canvas {
+        /// The address you open Canvas at, e.g. canvas.youruni.edu or
+        /// youruni.instructure.com. Omit to show the current one.
+        address: Option<String>,
+    },
     /// Open the app's Canvas sign-in window and wait for the session
     Login,
     /// Forget the saved session

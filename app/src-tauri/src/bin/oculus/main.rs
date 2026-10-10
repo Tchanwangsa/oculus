@@ -36,12 +36,14 @@ use query::*;
 
 fn main() {
     restore_sigpipe();
+    app_lib::storage::finish_start_over(&paths::data_dir());
     let cli = Cli::parse();
     let ctx = Ctx::new(cli.json);
 
     let result = match cli.command {
         None | Some(Command::Status) => ctx.status(),
         Some(Command::Auth { action }) => match action {
+            AuthAction::Canvas { address } => ctx.auth_canvas(address.as_deref()),
             AuthAction::Login => ctx.login(),
             AuthAction::Logout => ctx.logout(),
             AuthAction::Status => ctx.auth_status(),
@@ -50,7 +52,7 @@ fn main() {
             AuthAction::Tick => ctx.auth_tick(),
             AuthAction::Forget => ctx.auth_forget(),
             AuthAction::Diagnose => {
-                print!("{}", app_lib::okta::diagnose());
+                print!("{}", app_lib::okta::diagnose(&paths::data_dir()));
                 Ok(())
             }
             AuthAction::Ed { token } => ctx.auth_ed(token.as_deref()),

@@ -12,9 +12,9 @@
 //!   `with_webview` returns nothing, so answers are pushed as events.
 //!
 //! `canvas_session` is HttpOnly and session-scoped, so WebKit loses it on quit;
-//! `seed_sessions` restores it and Okta's session from their snapshots before
-//! any `*.unimelb.edu.au` load, and each signed-in Canvas page re-snapshots
-//! both (see `docs/auth.md`).
+//! `seed_sessions` restores it and the SSO session from their snapshots before
+//! any load on the university's hosts, and each signed-in Canvas page
+//! re-snapshots both (see `docs/auth.md`).
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -34,8 +34,6 @@ pub const MAIN: &str = "main";
 /// Page webviews are `browse-<tab id>`. Not in any capability: they hold
 /// remote content and must reach no Tauri command.
 pub const LABEL_PREFIX: &str = "browse-";
-
-pub const CANVAS_HOST: &str = "canvas.lms.unimelb.edu.au";
 
 /// WKWebView's default UA has no `Version/… Safari/…` suffix, and UA-sniffing
 /// sites (google.com) serve their no-JavaScript fallback to it. Keep the
@@ -111,8 +109,9 @@ struct Inner {
     next_id: u32,
     /// Absent until the page is first placed; a page is hidden until then.
     viewports: HashMap<u32, Viewport>,
-    /// Placed and not hidden since. A UniMelb page is created only once its
-    /// cookies are seeded, which can be after its slot mounted.
+    /// Placed and not hidden since. A page on the university's hosts is
+    /// created only once its cookies are seeded, which can be after its slot
+    /// mounted.
     shown: HashSet<u32>,
     /// One favicon attempt per host per run, found or not; the frontend
     /// persists what was found.
@@ -142,22 +141,36 @@ fn broadcast(app: &AppHandle) {
 
 // ── Cookie seeding ──────────────────────────────────────────────────────
 
-/// UniMelb's Okta sign-on fronts every service under this domain, so a page
-/// here loads only after the saved sessions are in WebKit's jar.
+/// A page on the university's hosts loads only after the saved sessions are
+/// in WebKit's jar: Canvas, the SSO host, and anything in the domain they
+/// share (the university's single sign-on fronts its other services too).
 fn wants_sessions(url: &url::Url) -> bool {
+    let Some(canvas) = crate::institution::canvas_host() else {
+        return false;
+    };
+    let sso = crate::institution::sso_host();
     url.host_str()
-        .is_some_and(|h| h == "unimelb.edu.au" || h.ends_with(".unimelb.edu.au"))
+        .is_some_and(|h| on_university_hosts(h, &canvas, sso.as_deref()))
 }
 
-/// The Okta snapshot's mtime when it was last seeded. While the app runs the
-/// browser's own Okta cookies are the freshest, so they are replaced only by a
+fn on_university_hosts(host: &str, canvas: &str, sso: Option<&str>) -> bool {
+    host == canvas
+        || sso == Some(host)
+        || crate::institution::institution_domain(canvas, sso).is_some_and(|d| sent_to(&d, host))
+}
+
+/// The SSO snapshot's mtime when it was last seeded. While the app runs the
+/// browser's own SSO cookies are the freshest, so they are replaced only by a
 /// snapshot written since (a headless sign-in); otherwise a seed fills gaps.
 static SSO_SEEDED: Mutex<Option<std::time::SystemTime>> = Mutex::new(None);
 
 /// Each saved session as (host, bare `name=value; …` header, whether it
 /// replaces the jar's same-named cookies). The scraper keeps Canvas's fresh,
 /// so it always replaces.
-fn saved_sessions() -> Vec<(&'static str, String, bool)> {
+fn saved_sessions() -> Vec<(String, String, bool)> {
+    let Some(canvas) = crate::institution::canvas_host() else {
+        return Vec::new();
+    };
     let sso_path = crate::paths::sso_cookie_path(&crate::paths::data_dir());
     let modified = std::fs::metadata(&sso_path).and_then(|m| m.modified()).ok();
     let replace_sso = {
@@ -166,20 +179,15 @@ fn saved_sessions() -> Vec<(&'static str, String, bool)> {
         *seeded = modified;
         changed
     };
-    [
-        (CANVAS_HOST, crate::auth::saved_cookie_header(), true),
-        (
-            crate::okta::SSO_HOST,
-            crate::auth::saved_sso_cookie_header(),
-            replace_sso,
-        ),
-    ]
-    .into_iter()
-    .filter(|(_, header, _)| !header.trim().is_empty())
-    .collect()
+    let sso = crate::institution::sso_host()
+        .map(|host| (host, crate::auth::saved_sso_cookie_header(), replace_sso));
+    std::iter::once((canvas, crate::auth::saved_cookie_header(), true))
+        .chain(sso)
+        .filter(|(_, header, _)| !header.trim().is_empty())
+        .collect()
 }
 
-/// Copies the saved Canvas and Okta sessions into WebKit's shared jar, each
+/// Copies the saved Canvas and SSO sessions into WebKit's shared jar, each
 /// scoped to its host, then runs `then` on the main thread. Loads go in
 /// `then`: `setCookies` is async, and a request sent before it lands meets
 /// Canvas anonymous.
@@ -292,7 +300,7 @@ pub fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
             let finish = finish.clone();
             let done = RcBlock::new(move || {
                 if let Some(finish) = finish.take() {
-                    eprintln!("[oculus] browser: seeded {count} UniMelb cookies into WebKit");
+                    eprintln!("[oculus] browser: seeded {count} session cookies into WebKit");
                     finish();
                 }
             });
@@ -325,16 +333,19 @@ pub fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
     }
 }
 
-/// Okta's entry point for a SAML app (Canvas, DiBS, …). It renders the
+/// Okta's entry point for a SAML app (Canvas, a library, …). It renders the
 /// sign-in form when there is no Okta session, an auto-posting form when
-/// there is one.
+/// there is one. Only an Okta university has one.
 fn is_sso_app_entry(url: &url::Url) -> bool {
-    url.host_str() == Some(crate::okta::SSO_HOST)
+    crate::institution::is_okta()
+        && url
+            .host_str()
+            .is_some_and(|h| crate::institution::sso_host().as_deref() == Some(h))
         && url.path().starts_with("/app/")
         && url.path().ends_with("/sso/saml")
 }
 
-/// A page reached Okta's sign-in for a UniMelb app: if the browser holds no
+/// A page reached Okta's sign-in for a university app: if the browser holds no
 /// live Okta session, sign in headlessly (which saves Okta's cookies), seed
 /// them and reload. Asks Okta, not the page, whether a session exists.
 fn recover_sso(app: &AppHandle, id: u32) {
@@ -343,7 +354,10 @@ fn recover_sso(app: &AppHandle, id: u32) {
     };
     let app = app.clone();
     std::thread::spawn(move || {
-        let Ok(sso) = format!("https://{}", crate::okta::SSO_HOST).parse::<url::Url>() else {
+        let Some(sso_host) = crate::institution::sso_host() else {
+            return;
+        };
+        let Ok(sso) = format!("https://{sso_host}").parse::<url::Url>() else {
             return;
         };
         let header = webview
@@ -356,7 +370,7 @@ fn recover_sso(app: &AppHandle, id: u32) {
                     .join("; ")
             })
             .unwrap_or_default();
-        let me = format!("https://{}/api/v1/sessions/me", crate::okta::SSO_HOST);
+        let me = format!("https://{sso_host}/api/v1/sessions/me");
         let mut probe = ureq::get(&me)
             .timeout(Duration::from_secs(20))
             .set("Accept", "application/json");
@@ -393,7 +407,7 @@ fn sent_to(domain: &str, host: &str) -> bool {
     host == domain || host.ends_with(&format!(".{domain}"))
 }
 
-/// Deletes every cookie WebKit's shared jar would send to Canvas or Okta, then
+/// Deletes every cookie WebKit's shared jar would send to Canvas or SSO, then
 /// runs `then`. Sign-out calls it: otherwise a browser tab is still signed in
 /// and a Canvas page saves the session straight back to disk. `then` is
 /// dropped uncalled when the main thread cannot be reached.
@@ -409,6 +423,10 @@ pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
     use objc2_web_kit::WKWebsiteDataStore;
 
     let then: Box<dyn FnOnce() + Send> = Box::new(then);
+    let hosts: Vec<String> = crate::institution::canvas_host()
+        .into_iter()
+        .chain(crate::institution::sso_host())
+        .collect();
     let result = app.run_on_main_thread(move || {
         let Some(mtm) = MainThreadMarker::new() else {
             return;
@@ -422,7 +440,7 @@ pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
                 .iter()
                 .filter(|c| {
                     let domain = c.domain().to_string();
-                    sent_to(&domain, CANVAS_HOST) || sent_to(&domain, crate::okta::SSO_HOST)
+                    hosts.iter().any(|host| sent_to(&domain, host))
                 })
                 .collect();
             let count = ours.len();
@@ -431,7 +449,7 @@ pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
                 Rc::new(move || {
                     if let Some(then) = then.take() {
                         eprintln!(
-                            "[oculus] browser: cleared {count} Canvas and Okta cookies from WebKit"
+                            "[oculus] browser: cleared {count} Canvas and SSO cookies from WebKit"
                         );
                         then();
                     }
@@ -1339,11 +1357,33 @@ mod tests {
 
     #[test]
     fn sign_out_clears_what_cookies_for_url_would_send() {
-        assert!(sent_to("canvas.lms.unimelb.edu.au", CANVAS_HOST));
-        assert!(sent_to(".unimelb.edu.au", CANVAS_HOST));
-        assert!(sent_to(".sso.unimelb.edu.au", crate::okta::SSO_HOST));
-        assert!(!sent_to("library.unimelb.edu.au", CANVAS_HOST));
-        assert!(!sent_to("lms.unimelb.edu.au.evil.com", CANVAS_HOST));
-        assert!(!sent_to("edstem.org", crate::okta::SSO_HOST));
+        let (canvas, sso) = ("canvas.lms.unimelb.edu.au", "sso.unimelb.edu.au");
+        assert!(sent_to("canvas.lms.unimelb.edu.au", canvas));
+        assert!(sent_to(".unimelb.edu.au", canvas));
+        assert!(sent_to(".sso.unimelb.edu.au", sso));
+        assert!(!sent_to("library.unimelb.edu.au", canvas));
+        assert!(!sent_to("lms.unimelb.edu.au.evil.com", canvas));
+        assert!(!sent_to("edstem.org", sso));
+    }
+
+    #[test]
+    fn sessions_are_seeded_only_on_the_universitys_hosts() {
+        let unimelb =
+            |h| on_university_hosts(h, "canvas.lms.unimelb.edu.au", Some("sso.unimelb.edu.au"));
+        assert!(unimelb("canvas.lms.unimelb.edu.au"));
+        assert!(unimelb("library.unimelb.edu.au"));
+        assert!(!unimelb("unimelb.edu.au.evil.com"));
+        assert!(!unimelb("monash.edu.au"));
+
+        // A hosted Canvas shares nothing with its IdP but the two hosts.
+        let rmit = |h| on_university_hosts(h, "rmit.instructure.com", Some("myapps.rmit.edu.au"));
+        assert!(rmit("rmit.instructure.com"));
+        assert!(rmit("myapps.rmit.edu.au"));
+        assert!(!rmit("other.instructure.com"));
+        assert!(!rmit("www.rmit.edu.au"));
+
+        let native = |h| on_university_hosts(h, "canvas.foo.edu", None);
+        assert!(native("canvas.foo.edu"));
+        assert!(!native("www.foo.edu"));
     }
 }

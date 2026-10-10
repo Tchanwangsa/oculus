@@ -74,7 +74,7 @@ pub fn connect(canvas_cookie: &str, course_id: i64) -> Result<Session, String> {
 
     let lti_url = format!(
         "{}/courses/{course_id}{LTI_TOOL_PATH}",
-        crate::paths::CANVAS_BASE
+        crate::institution::canvas_base()?
     );
 
     eprintln!("[oculus] echo360 auth: fetching LTI page for course {course_id}");

@@ -67,6 +67,7 @@ Sign in to Canvas, or sign out
 Usage: oculus auth <COMMAND>
 
 Commands:
+  canvas    Show or set your university's Canvas address
   login     Open the app's Canvas sign-in window and wait for the session
   logout    Forget the saved session
   status    Whether the saved session still works
@@ -77,6 +78,27 @@ Commands:
   diagnose  Report what the Okta sign-in page looks like, when `auto` fails
   ed        Show the Ed Discussion session status, or set a token manually
   help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus auth canvas`
+
+```
+Show or set your university's Canvas address
+
+Everything else is detected from it: how the university signs in, and whether automatic
+sign-in (Okta only) is possible. The address cannot change while a library exists —
+Start over in Settings → Storage first.
+
+Usage: oculus auth canvas [ADDRESS]
+
+Arguments:
+  [ADDRESS]
+          The address you open Canvas at, e.g. canvas.youruni.edu or
+          youruni.instructure.com. Omit to show the current one
 
 Options:
   -h, --help
