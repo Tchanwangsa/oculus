@@ -73,6 +73,7 @@ fn the_session_ops_round_trip_and_only_the_app_reads_a_cookie_back() {
             ed: false,
             authenticated: false,
             signed_out: false,
+            generation: 0,
         }
     );
     cli.session_put(SessionKind::Canvas, COOKIE).unwrap();
@@ -80,6 +81,9 @@ fn the_session_ops_round_trip_and_only_the_app_reads_a_cookie_back() {
     cli.session_put(SessionKind::Ed, TOKEN).unwrap();
     let status = cli.session_status().unwrap();
     assert!(SessionKind::ALL.into_iter().all(|k| status.has(k)));
+    // Each `serve` is its own keyd, with its own count: the CLI's keyd saw two puts.
+    assert_eq!(status.generation, 2, "each put is a change");
+    assert_eq!(cli.session_status().unwrap().generation, 2, "a read is not");
 
     let cookies = app.session_get().unwrap();
     assert_eq!(cookies.canvas.as_deref(), Some(COOKIE));

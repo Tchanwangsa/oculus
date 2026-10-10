@@ -29,6 +29,8 @@ impl fmt::Debug for SessionCookies {
 /// Which sessions keyd holds, and the two markers beside them: `authenticated`
 /// (the app believes it is signed in, which its startup probe reads) and
 /// `signed_out` (automatic sign-in is off until a session is established).
+/// `generation` counts the changes to a session since this keyd started; it
+/// restarts from zero when keyd does, so compare it only with `==`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionStatus {
     pub canvas: bool,
@@ -36,6 +38,7 @@ pub struct SessionStatus {
     pub ed: bool,
     pub authenticated: bool,
     pub signed_out: bool,
+    pub generation: u64,
 }
 
 impl SessionStatus {
@@ -116,6 +119,7 @@ impl Client {
                     ed,
                     authenticated,
                     signed_out,
+                    generation: reply.get("generation").and_then(Value::as_u64).unwrap_or(0),
                 })
             }
             _ => Err(KeydError::Broken("session_status: no answer".into())),

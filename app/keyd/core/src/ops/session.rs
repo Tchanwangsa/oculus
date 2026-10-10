@@ -67,7 +67,9 @@ impl State {
 
     /// Which sessions are held, and whether the app believes it is signed in
     /// (`authenticated`) or was signed out and not since (`signed_out`):
-    /// booleans, never a value.
+    /// booleans, never a value. `generation` counts the changes to a session
+    /// since keyd started (`session::Generation`), so a caller can tell that
+    /// something replaced one.
     pub(super) fn session_status(&self) -> Result<Reply, OpError> {
         let vault = self.vault()?;
         self.import_sessions(&vault)?;
@@ -78,6 +80,7 @@ impl State {
             "ed": held.contains(&Kind::Ed),
             "authenticated": markers::is_authenticated(&self.data_dir),
             "signed_out": markers::is_signed_out(&self.data_dir),
+            "generation": self.generation.get(),
         })
         .into())
     }
@@ -143,7 +146,7 @@ mod tests {
         let none = call(&state, "session_status", json!({})).unwrap();
         assert_eq!(
             none,
-            json!({"canvas": false, "sso": false, "ed": false, "authenticated": false, "signed_out": false})
+            json!({"canvas": false, "sso": false, "ed": false, "authenticated": false, "signed_out": false, "generation": 0})
         );
 
         put(&state, "canvas", CANVAS).unwrap();
@@ -152,7 +155,7 @@ mod tests {
         let status = call(&state, "session_status", json!({})).unwrap();
         assert_eq!(
             status,
-            json!({"canvas": true, "sso": true, "ed": true, "authenticated": false, "signed_out": false})
+            json!({"canvas": true, "sso": true, "ed": true, "authenticated": false, "signed_out": false, "generation": 3})
         );
 
         let app = as_role(Role::App);
@@ -385,9 +388,21 @@ mod tests {
         );
         let status = call(&state, "session_status", json!({})).unwrap();
         assert_eq!(
-            status,
-            json!({"canvas": false, "sso": false, "ed": false, "authenticated": false, "signed_out": true})
+            (
+                status["canvas"].clone(),
+                status["sso"].clone(),
+                status["ed"].clone()
+            ),
+            (json!(false), json!(false), json!(false))
         );
+        assert_eq!(
+            (
+                status["authenticated"].clone(),
+                status["signed_out"].clone()
+            ),
+            (json!(false), json!(true))
+        );
+        assert_eq!(status["generation"], before + 1);
         assert_eq!(
             std::fs::read_to_string(crate::paths::sign_in_record(&dir.0)).unwrap(),
             r#"{"paused":"locked"}"#
