@@ -106,22 +106,21 @@ pub fn uninstall(data_dir: &Path) -> Result<Vec<PathBuf>, String> {
 /// checkout only, and an app built in a worktree must not take keyd over.
 /// A release reinstalls its bundled keyd when the stamp or the registered
 /// program differs from it, and logs why when it cannot (`oculus keyd status`
-/// reports a missing bundled keyd as well).
+/// reports a missing bundled keyd as well). Runs on the calling thread, which
+/// may wait on launchd.
 pub fn ensure_installed() {
     if cfg!(debug_assertions) {
         return;
     }
-    std::thread::spawn(
-        || match ensure_bundled(&crate::library::paths::data_dir()) {
-            Ok(Some(i)) => eprintln!(
-                "[oculus] keyd installed from {} ({})",
-                i.program.display(),
-                &i.source_hash[..12]
-            ),
-            Ok(None) => {}
-            Err(e) => eprintln!("[oculus] could not install keyd: {e}"),
-        },
-    );
+    match ensure_bundled(&crate::library::paths::data_dir()) {
+        Ok(Some(i)) => eprintln!(
+            "[oculus] keyd installed from {} ({})",
+            i.program.display(),
+            &i.source_hash[..12]
+        ),
+        Ok(None) => {}
+        Err(e) => eprintln!("[oculus] could not install keyd: {e}"),
+    }
 }
 
 fn ensure_bundled(data_dir: &Path) -> Result<Option<Installed>, String> {
