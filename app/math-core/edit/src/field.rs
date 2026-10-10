@@ -1,19 +1,22 @@
 //! The field's state between commands, and what a command returns.
 //!
-//! A [`Field`] is one formula's source, its stops, a selection and the
-//! pending `\command`; [`Field::run`] applies a [`crate::Command`] and
-//! returns an [`Outcome`]: the text changes against the old source, the
-//! field after them, and what the view has to do. Nothing here owns undo:
+//! A [`Field`] is one formula's source, its stops, a selection, the
+//! pending `\command` and the shortcut run being typed; [`Field::run`]
+//! applies a [`crate::Command`] and returns an [`Outcome`]: the text
+//! changes against the old source, a shortcut's rewrite after them, the
+//! field after both, and what the view has to do. Nothing here owns undo:
 //! the note's history does, and after an undo the view builds a new field
 //! and places the caret with [`Field::caret_at`].
 
 use core::ops::Range;
+use std::sync::Arc;
 
 use katex::types::ParseError;
 
 use crate::{
     command::{takes_space, widen},
     parse::renders,
+    shortcut::Run,
     slot::StopId,
     stops::{Affinity, Stops, stops},
 };
@@ -91,6 +94,9 @@ pub struct Field {
     stops: Stops,
     selection: Selection,
     pending: Option<String>,
+    /// The shortcut keys typed just before (`crate::shortcut`); every
+    /// command but a typed key or Esc after an expansion drops it.
+    shortcut: Option<Arc<Run>>,
 }
 
 /// What a command did.
@@ -103,6 +109,11 @@ pub struct Outcome {
     pub field: Field,
     /// The change is an undo step of its own.
     pub isolate: bool,
+    /// A shortcut's expansion, applied after `changes` as an undo step of
+    /// its own: sorted, in bytes of the source after `changes` (one
+    /// change). The typed key lands with `changes`, joining the typing
+    /// run, and `field` is the field after both.
+    pub rewrite: Option<Vec<Change>>,
     pub effect: Option<Effect>,
 }
 
@@ -114,6 +125,7 @@ impl Outcome {
             changes: Vec::new(),
             field: field.clone(),
             isolate: false,
+            rewrite: None,
             effect: None,
         }
     }
@@ -134,6 +146,7 @@ impl Outcome {
             changes: Vec::new(),
             field,
             isolate: false,
+            rewrite: None,
             effect: None,
         }
     }
@@ -162,6 +175,7 @@ impl Field {
             stops,
             selection: Selection::caret(last),
             pending: None,
+            shortcut: None,
         })
     }
 
@@ -174,9 +188,11 @@ impl Field {
     }
 
     /// The same field with `selection`, widened so both ends share a slot
-    /// (see [`crate::widen`]). Out-of-range stops go to the last.
+    /// (see [`crate::widen`]). Out-of-range stops go to the last. A moved
+    /// caret ends the shortcut run.
     #[must_use]
     pub fn select(mut self, selection: Selection) -> Self {
+        self.shortcut = None;
         let last = StopId(self.stops.stops().len() - 1);
         let clamp = |id: StopId| if id > last { last } else { id };
         let (anchor, head) = widen(
@@ -194,6 +210,7 @@ impl Field {
     #[must_use]
     pub fn with_pending(mut self, pending: Option<String>) -> Self {
         self.pending = pending;
+        self.shortcut = None;
         self
     }
 
@@ -209,11 +226,27 @@ impl Field {
             stops,
             selection: Selection::caret(StopId(0)),
             pending: None,
+            shortcut: None,
         })
     }
 
     pub(crate) const fn set_selection(&mut self, selection: Selection) {
         self.selection = selection;
+    }
+
+    pub(crate) fn shortcut(&self) -> Option<&Run> {
+        self.shortcut.as_deref()
+    }
+
+    pub(crate) fn set_shortcut(&mut self, run: Option<Run>) {
+        self.shortcut = run.map(Arc::new);
+    }
+
+    /// The same field with no shortcut run (a snapshot a run keeps).
+    pub(crate) fn without_shortcut(&self) -> Self {
+        let mut field = self.clone();
+        field.shortcut = None;
+        field
     }
 
     #[must_use]

@@ -9,6 +9,9 @@
 //! Deleting what was just inserted gives the source back, except where an
 //! insertion braced a bare argument, or a deletion drops the space after a
 //! control word that it can no longer tell from a typed one (`glue`).
+//!
+//! [`Field::run`] gives a typed key and Esc to `crate::shortcut` first;
+//! the commands here call [`Field::run_plain`], which never expands one.
 
 mod command_mode;
 mod delete;
@@ -27,13 +30,16 @@ use core::{cmp::Reverse, ops::Range};
 
 use crate::{
     field::{Change, Field, Outcome, Selection},
+    shortcut,
     slot::{SlotPath, StopId},
     stops::{Affinity, Stops},
 };
 
 pub use glue::ends_with_word;
 pub use grid::takes_space;
+pub use insert::family;
 pub use select::widen;
+pub use template::{place_shortcut, selection_slot};
 pub use text::mark_at;
 
 /// One key or input the field handles.
@@ -86,9 +92,20 @@ pub enum Command {
 }
 
 impl Field {
-    /// Applies `command`.
+    /// Applies `command`. A key typed in maths may expand a shortcut
+    /// (the outcome's `rewrite`), and Esc right after one reverts it.
     #[must_use]
     pub fn run(&self, command: &Command) -> Outcome {
+        if let Some(outcome) = shortcut::run(self, command) {
+            return outcome;
+        }
+        let mut outcome = self.run_plain(command);
+        outcome.field.set_shortcut(None);
+        outcome
+    }
+
+    /// Applies `command` with no shortcut: the commands themselves.
+    pub(crate) fn run_plain(&self, command: &Command) -> Outcome {
         if self.pending().is_some() {
             if let Some(outcome) = command_mode::run(self, command) {
                 return outcome;
@@ -134,6 +151,10 @@ pub enum Target {
     /// (text typed at a row's end after an infix `\over` lands in its
     /// denominator, and so does the caret).
     After(Range<usize>),
+    /// The empty slot whose content starts at `offset`, else the stop at
+    /// `offset` in the innermost slot around it: a shortcut's placeholder
+    /// that is not a whole argument (`\lim_{#0\to#?}`).
+    Hole(usize),
 }
 
 /// The field after replacing its source with `source` (from a command's
@@ -162,13 +183,16 @@ pub fn finish(field: &Field, source: String, target: &Target) -> Outcome {
         changes: vec![diff(field.source(), new.source())],
         field: new,
         isolate: false,
+        rewrite: None,
         effect: None,
     }
 }
 
 /// The outcome of a run of commands as one: the field after the last,
-/// with the changes from the first field's source.
+/// with the changes from the first field's source. The runs composed are
+/// `run_plain`'s, so there is never a shortcut's rewrite to fold in.
 pub fn compose(field: &Field, last: Outcome) -> Outcome {
+    debug_assert!(last.rewrite.is_none(), "a composed run expanded a shortcut");
     let changes = if last.field.source() == field.source() {
         Vec::new()
     } else {
@@ -214,22 +238,28 @@ fn resolve(stops: &Stops, target: &Target) -> Option<StopId> {
                 },
             )
         }
-        Target::Empty(offset) => {
-            let first = stops.stop_at(*offset, Affinity::Before);
-            (first.0..stops.stops().len())
-                .map(StopId)
-                .take_while(|&id| stops.offset(id) == *offset)
-                .find(|&id| {
-                    let slot = stops.slot(stops.stop(id).slot);
-                    slot.is_empty() && slot.interior.start == *offset
-                })?
+        Target::Empty(offset) => empty_at(stops, *offset)?,
+        Target::Hole(offset) => {
+            empty_at(stops, *offset).or_else(|| resolve(stops, &Target::After(*offset..*offset)))?
         }
     })
 }
 
+/// The stop of the empty slot whose content starts at `offset`.
+fn empty_at(stops: &Stops, offset: usize) -> Option<StopId> {
+    let first = stops.stop_at(offset, Affinity::Before);
+    (first.0..stops.stops().len())
+        .map(StopId)
+        .take_while(|&id| stops.offset(id) == offset)
+        .find(|&id| {
+            let slot = stops.slot(stops.stop(id).slot);
+            slot.is_empty() && slot.interior.start == offset
+        })
+}
+
 /// The one change that turns `old` into `new`: what lies between their
 /// common prefix and suffix, on char boundaries.
-fn diff(old: &str, new: &str) -> Change {
+pub fn diff(old: &str, new: &str) -> Change {
     let prefix: usize = old
         .chars()
         .zip(new.chars())

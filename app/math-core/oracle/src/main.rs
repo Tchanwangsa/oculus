@@ -24,7 +24,7 @@
 //! `oracle --commands` is the edit field's command run: it applies a fixed
 //! pseudo-random sequence of editing commands (seeded by the formula's
 //! text; `oculus_math_edit::check::commands`) to each request's `tex` and
-//! answers `{"id":…, "steps":n, "edits":n, "restores":n,
+//! answers `{"id":…, "steps":n, "edits":n, "restores":n, "reverts":n,
 //! "failures":[{"kind":"…", "step":n}]}`, `{"id":…, "error":"…"}` for a
 //! formula that does not parse, or `{"id":…, "panic":"…"}`.
 
@@ -228,6 +228,7 @@ fn command_run(line: &str) -> Value {
             "steps": report.steps,
             "edits": report.edits,
             "restores": report.restores,
+            "reverts": report.reverts,
             "failures": report
                 .failures
                 .iter()

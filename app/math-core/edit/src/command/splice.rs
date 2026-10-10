@@ -85,11 +85,15 @@ fn cell_space(
         }
     }
     let emptied = insert.is_empty() && range == slot.interior && !slot.is_empty();
+    // A control word's range takes the whitespace after it (`\sim`,
+    // newline): that is the cell's spacing, not the atom.
+    let end = range.start + src[range.clone()].trim_end().len();
+    let after = &src[end..];
     if emptied && after.starts_with(' ') && separator(&after[1..]) {
-        return (range.start..range.end + 1, "", "");
+        return (range.start..end + 1, "", "");
     }
     if emptied && before.ends_with("& ") && after.starts_with('\n') {
-        return (range.start - 1..range.end, "", "");
+        return (range.start - 1..end, "", "");
     }
     (range, "", "")
 }

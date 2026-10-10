@@ -31,7 +31,7 @@ pub fn insert(field: &Field, typed: &str) -> Outcome {
     }
     let mut outcome = Outcome::none(field);
     for c in typed.chars() {
-        let next = outcome.field.run(&Command::Insert(c.to_string()));
+        let next = outcome.field.run_plain(&Command::Insert(c.to_string()));
         outcome = Outcome {
             effect: next.effect,
             ..compose(field, next)
@@ -210,7 +210,7 @@ fn numerator_start(field: &Field, slot: SlotId, offset: usize) -> Option<usize> 
 
 /// The class of the symbol at exactly `range`, when it is a plain symbol
 /// (`+`, `=`, `(`, `\le`).
-fn family(field: &Field, range: Range<usize>) -> Option<Atom> {
+pub fn family(field: &Field, range: Range<usize>) -> Option<Atom> {
     let nodes = parse(field.source(), field.display()).ok()?;
     let mut stack: Vec<&AnyParseNode> = nodes.iter().collect();
     while let Some(node) = stack.pop() {

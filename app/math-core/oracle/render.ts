@@ -330,6 +330,7 @@ async function commands(formulas: Formula[]) {
     let steps = 0;
     let edits = 0;
     let restores = 0;
+    let reverts = 0;
     const kinds = new Map<string, number>();
     formulas.forEach((f, i) => {
       if (!keep(f)) return;
@@ -341,10 +342,11 @@ async function commands(formulas: Formula[]) {
         steps += a.steps;
         edits += a.edits;
         restores += a.restores;
+        reverts += a.reverts;
         for (const kind of new Set(a.failures.map((x) => x.kind))) kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
       }
     });
-    console.log(`\n${title}: ${ran} formulas run (${steps} commands, ${edits} edits, ${restores} insertions undone by Backspace)`);
+    console.log(`\n${title}: ${ran} formulas run (${steps} picks, ${edits} edits, ${restores} insertions undone by Backspace, ${reverts} shortcuts by Esc)`);
     console.log(`  ${unparsed} do not parse (no field), ${panics} panics`);
     console.log(`  failing formulas by kind: ${kinds.size ? [...kinds].map(([k, n]) => `${n} ${k}`).join(", ") : "none"}`);
   }

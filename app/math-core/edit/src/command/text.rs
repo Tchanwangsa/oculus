@@ -21,14 +21,15 @@ pub fn insert(field: &Field, typed: &str) -> Outcome {
 
 /// Text-mode LaTeX for `typed`, written after `before`. The commands
 /// that end in a letter take `{}` so a space after them is not
-/// swallowed; a space right after a control word or a control space is
-/// `\ ` for the same reason; line breaks and tabs become spaces.
+/// swallowed; a space after a control word (and any spaces after it,
+/// which TeX skips too) or after a control space is `\ ` for the same
+/// reason; line breaks and tabs become spaces.
 fn escape(typed: &str, before: &str) -> String {
     let mut out = String::new();
     for c in typed.chars() {
         let space_eaten = |out: &str| {
             let tail = if out.is_empty() { before } else { out };
-            ends_with_word(tail) || control_space(tail)
+            ends_with_word(tail.trim_end_matches([' ', '\t', '\n', '\r'])) || control_space(tail)
         };
         match c {
             ' ' | '\n' | '\t' | '\r' if space_eaten(&out) => out.push_str(r"\ "),
@@ -102,6 +103,7 @@ mod tests {
         assert_eq!(escape("$%#&_", ""), r"\$\%\#\&\_");
         // A space a control word or a control space would swallow.
         assert_eq!(escape(" ", r"\LaTeX"), r"\ ");
+        assert_eq!(escape(" ", r"\LaTeX "), r"\ ");
         assert_eq!(escape("  ", r"a\ "), r"\ \ ");
         assert_eq!(escape(" ", r"a\\ "), " ");
         assert_eq!(escape("a b", ""), "a b");

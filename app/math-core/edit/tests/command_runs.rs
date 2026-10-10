@@ -1,7 +1,8 @@
 //! The command invariants (`oculus_math_edit::check::commands`) over
 //! random command sequences on the corpus formulas: every command keeps
 //! the source rendering, the stops valid, the selection on them and its
-//! change exact, and Backspace undoes a typed character or template.
+//! change exact, Backspace undoes a typed character or template, and Esc
+//! undoes a shortcut's expansion.
 #![allow(
     clippy::non_ascii_literal,
     clippy::unwrap_used,
@@ -11,7 +12,7 @@
 
 mod common;
 
-use std::sync::LazyLock;
+use std::{env, sync::LazyLock};
 
 use oculus_math_edit::check::commands::{Report, picks, run, seed};
 use proptest::{collection::vec, prelude::*};
@@ -33,6 +34,7 @@ fn failures(source: &str, display: bool, report: &Report) -> String {
 #[test]
 fn a_fixed_run_on_every_formula_keeps_the_invariants() {
     let mut restores = 0;
+    let mut reverts = 0;
     let empty = [(String::new(), false), (String::new(), true)];
     for (source, display) in CORPUS.iter().chain(&empty) {
         let Ok(report) = run(source, *display, picks(seed(source), 60)) else {
@@ -44,13 +46,24 @@ fn a_fixed_run_on_every_formula_keeps_the_invariants() {
             failures(source, *display, &report)
         );
         restores += report.restores;
+        reverts += report.reverts;
     }
     assert!(restores > 500, "only {restores} insertions were undone");
+    assert!(reverts > 100, "only {reverts} expansions were reverted");
+}
+
+/// 10,000 random sequences, or `PROPTEST_CASES` (`PROPTEST_CASES=100000`
+/// for the 10⁵ run).
+fn cases() -> u32 {
+    env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|cases| cases.parse().ok())
+        .unwrap_or(10_000)
 }
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 10_000,
+        cases: cases(),
         failure_persistence: None,
         ..ProptestConfig::default()
     })]

@@ -610,8 +610,18 @@ fn spaced_empty_cells_stay_spaced() {
             &["t:c"],
             r"\begin{bmatrix}a&c|&b\end{bmatrix}",
         ),
+        // A control word's range takes the space after it; deleting it
+        // still gives the cell's spacing back.
+        (
+            r"\begin{bmatrix}a & |& b\end{bmatrix}",
+            &["t:~", "bs"],
+            r"\begin{bmatrix}a & |& b\end{bmatrix}",
+        ),
     ];
     check_all(cases, false);
+    // A cell on a line of its own keeps its line.
+    let block = "\\begin{Bmatrix}\n{a} & \\\\\n&\n|\\end{Bmatrix}";
+    check_all(&[(block, &["t:~", "bs"], block)], true);
 }
 
 /// New separators follow the matrix's own: a tight `&`, its `\\`.

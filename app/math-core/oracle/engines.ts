@@ -148,7 +148,7 @@ export async function checkStops(formulas: { tex: string; display: boolean }[], 
 
 /** One formula's answer from the bin's `--commands` run. */
 export type CommandsAnswer =
-  | { steps: number; edits: number; restores: number; failures: { kind: string; step: number }[] }
+  | { steps: number; edits: number; restores: number; reverts: number; failures: { kind: string; step: number }[] }
   | { error: string }
   | { panic: string };
 

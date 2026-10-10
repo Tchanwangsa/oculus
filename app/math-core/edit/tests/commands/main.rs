@@ -18,4 +18,5 @@ mod matrices;
 mod modes;
 mod moving;
 mod rows;
+mod shortcuts;
 mod typing;

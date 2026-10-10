@@ -37,12 +37,30 @@ pub fn place(
     template: &str,
     fill: &str,
 ) -> Outcome {
+    place_with(field, slot, range, template, fill, Target::Empty)
+}
+
+/// A shortcut's expansion in place of `range` of `slot`: as [`place`]
+/// with nothing selected, except that the first placeholder may lie
+/// inside a slot (`\lim_{#0\to#?}`), and the caret then goes there.
+pub fn place_shortcut(field: &Field, slot: SlotId, range: Range<usize>, value: &str) -> Outcome {
+    place_with(field, slot, range, value, "", Target::Hole)
+}
+
+fn place_with(
+    field: &Field,
+    slot: SlotId,
+    range: Range<usize>,
+    template: &str,
+    fill: &str,
+    hole: fn(usize) -> Target,
+) -> Outcome {
     let (text, holes) = expand(template, fill);
     let spliced = splice(field, slot, range, &text);
     let target = holes
         .first()
-        .map_or(Target::After(spliced.at..spliced.end), |hole| {
-            Target::Empty(spliced.at + hole)
+        .map_or(Target::After(spliced.at..spliced.end), |offset| {
+            hole(spliced.at + offset)
         });
     finish(field, spliced.source, &target)
 }

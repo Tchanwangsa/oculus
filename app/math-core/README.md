@@ -7,7 +7,7 @@ dependency of `app/src-tauri` (so `tauri dev` never rebuilds it).
 | --- | --- |
 | `katex/` | A vendored fork of katex-rs, a Rust port of KaTeX 0.18.5. Where it came from and what we changed: [`katex/UPSTREAM.md`](katex/UPSTREAM.md). |
 | `wasm/` | `oculus-math`, the fork's WebAssembly binding for the app: `renderToString` and `parseError` (below). |
-| `edit/` | `oculus-math-edit`, the visual maths field's edit model: caret stops and slots over the formula's source, and the editing commands ([below](#the-edit-model)). Pure Rust; nothing in the app uses it. |
+| `edit/` | `oculus-math-edit`, the visual maths field's edit model: caret stops and slots over the formula's source, the editing commands and the shortcuts ([below](#the-edit-model)). Pure Rust; nothing in the app uses it. |
 | `oracle/` | The display oracle: `src/main.rs` (the `oracle` bin) renders JSON-lines requests with the fork; `render.ts` renders the same formulas with the app's `katex` and diffs the two (`corpus.ts` the inputs, `sets.ts` the call sites' options, `engines.ts` the renderers). |
 
 Where the fork still differs from KaTeX JS, and why that is accepted:
@@ -131,14 +131,16 @@ invariant.
 **Commands.** A `Field` is one formula being edited: its source, stops, a
 selection (anchor and head as stop indices, so a caret names one stop where
 several share an offset; `caret_at(offset, affinity)` places it after an
-outside change such as undo) and the pending `\command` (typed after `\`,
-kept outside the source and drawn by the view). `Field::run(&Command)` takes
+outside change such as undo), the pending `\command` (typed after `\`,
+kept outside the source and drawn by the view) and the shortcut keys just
+typed. `Field::run(&Command)` takes
 typed text, a template (`#0` takes the selection, `#?` is an empty slot),
 pasted LaTeX, Backspace, Delete, ⌘Backspace, ←/→ (Shift extends), ↑/↓ (the
 view passes each stop's x), Home/End, select all, Tab, Shift+Tab, Enter and
-Esc, and returns an `Outcome`: the change in bytes of the old source, the
-new field, an `isolate` flag (its own undo step) and an effect for the view
-(`Leave(direction)`, `RemoveMaths`). `mode()` (maths, text, command) and
+Esc, and returns an `Outcome`: the change in bytes of the old source, an
+`isolate` flag (that change is its own undo step), a shortcut's `rewrite`
+(below), the new field and an effect for the view (`Leave(direction)`,
+`RemoveMaths`). `mode()` (maths, text, command) and
 `space_free()` answer the view's questions. Every command keeps the source
 rendering (an edit that would break it does nothing), spaces a control word
 off a following letter, braces a bare argument before a second atom (`x^2`
@@ -173,19 +175,43 @@ empty; a one-column matrix's empty last row is kept with a `\\` after it
 (KaTeX drops it otherwise). `&` in any array cell is a raw `&` (a new
 cell), `\&` elsewhere. `space_free()` is false where Space is a grid key.
 
+**Shortcuts** (`edit/src/shortcut/`) expand typed keys: `sin` → `\sin`,
+`->` → `\to`, `@a` → `\alpha`, `xsr` → `x^2`, `sqrt` → `\sqrt{}` with the
+caret in it. The table (`table.rs`, exported as `SHORTCUTS`) is MathLive
+0.111.0's defaults less the note field's pruned ones, plus the note's
+shorthands. Only one character typed in maths takes part: never in text,
+in a pending `\command`, in a font's or `\operatorname`'s argument, nor
+from an IME's string, a template or a paste. A letter key expands only
+when the whole run of single-letter atoms before the caret is the key
+(`xsin` and `card` stay; `2pi` is `2\pi`, `sintheta` is `\sin\theta`); a
+power (`sr`, `cb`, `rd`, `invs`) takes the letter or operand before it as
+its base. A key starting with a symbol matches the keys just typed,
+whatever they built on the way (`^^` is `\wedge`); `!=` after an operand
+stays a factorial. A longer key expands again from the field before its
+first key (`sin`, then `h`, is `\sinh`; `<=`, then `>`, `\iff`). The
+typed key lands as `changes` (joining the typing run) and the expansion is
+the outcome's `rewrite`: one change in bytes of the source after
+`changes`, its own undo step. Esc right after an expansion puts the keys
+back as typed (one change, `isolate`); the keys typed next that still lead
+to a longer shortcut then stay as typed (`sin`, Esc, `h` is `sinh`). Any
+other command ends the run.
+
 `cargo test -p oculus-math-edit` runs a behaviour table per documented key
 (`tests/commands/`, in a marker notation described in its `harness.rs`) and
-the command invariants (`check::commands`) over a fixed run on every test
-formula and 10,000 random command sequences (proptest). The corpus run
-applies a fixed pseudo-random sequence of 60 commands to every note formula:
+the command invariants (`check::commands`; among them, Esc after any
+expansion gives back exactly what typing its keys alone would) over a fixed
+run on every test formula and 10,000 random command sequences (proptest;
+`PROPTEST_CASES=100000` runs 10⁵). A pick of a run is a command, a
+shortcut's keys (then Esc, for half of them) or a click. The corpus run
+applies a fixed pseudo-random sequence of 60 picks to every note formula:
 
 ```sh
 cd app
 bun math-core/oracle/render.ts --commands
 ```
 
-It prints counts only (formulas, commands, edits, insertions undone, failures
-by kind) and fails on any broken invariant or panic.
+It prints counts only (formulas, picks, edits, insertions undone, shortcuts
+reverted, failures by kind) and fails on any broken invariant or panic.
 
 ## The oracle
 
@@ -263,7 +289,7 @@ out: {"id": 1, "html": "<span class=\"katex\">…"}   or   {"id": 1, "error": "K
 out with --prefixes: {"id": 1, "prefixes": 3, "panics": [{"len": 2, "panic": "…"}]}
 out with --stops:    {"id": 1, "stops": 4, "slots": 2, "between": 0, "failures": [{"kind": "…", "offset": 3}], "parseNs": 5600}
                   or {"id": 1, "error": "KaTeX parse error: …", "parseNs": 900}
-out with --commands: {"id": 1, "steps": 60, "edits": 25, "restores": 9, "failures": [{"kind": "…", "step": 12}]}
+out with --commands: {"id": 1, "steps": 60, "edits": 25, "restores": 9, "reverts": 2, "failures": [{"kind": "…", "step": 12}]}
                   or {"id": 1, "error": "KaTeX parse error: …"}
 ```
 

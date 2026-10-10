@@ -143,11 +143,17 @@ pub fn press(marked_in: &str, display: bool, keys: &[&str]) -> String {
     marked(&current)
 }
 
-/// The outcome's change turns the old source into the new one.
+/// The outcome's change, then a shortcut's rewrite, turn the old source
+/// into the new one.
 fn check_change(before: &Field, outcome: &Outcome) {
     let mut source = before.source().to_owned();
-    for change in outcome.changes.iter().rev() {
-        source.replace_range(change.from..change.to, &change.insert);
+    for changes in [Some(&outcome.changes), outcome.rewrite.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        for change in changes.iter().rev() {
+            source.replace_range(change.from..change.to, &change.insert);
+        }
     }
     assert_eq!(
         source,

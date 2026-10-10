@@ -293,8 +293,9 @@ step: pending keystrokes are written first, then the edit with
 
 ## Typed shorthands expand inside maths
 
-The rule tables are at the top of
-`app/src/components/documents/editor/math/tools/shorthand/rules.ts`: `a/` → `\frac{a}{}`, `sr` → `^2`, `@a` → `\alpha`, `->` → `\to`,
+The rule tables are in
+`app/src/components/documents/editor/math/tools/shorthand/tables.ts`
+(the rules that apply them in `rules.ts`): `a/` → `\frac{a}{}`, `sr` → `^2`, `@a` → `\alpha`, `->` → `\to`,
 `sin ` → `\sin `, `\left…\right` around a closed group holding a tall
 construct. Never inside `\text{}`-like arguments. The typed character lands
 first and the rewrite is its own history event, so ⌘Z gives back what was

@@ -58,7 +58,7 @@ fn typed(field: &Field, text: &str) -> Outcome {
                 Outcome::moved(current.clone().with_pending(Some(longer)))
             }
             Some(name) => commit(current, name, Some(c)),
-            None => current.run(&Command::Insert(c.to_string())),
+            None => current.run_plain(&Command::Insert(c.to_string())),
         };
         outcome = Outcome {
             effect: next.effect,
@@ -95,7 +95,7 @@ fn commit(field: &Field, name: &str, then: Option<char>) -> Outcome {
     }
     match then {
         Some(c) if c != ' ' => {
-            let next = inserted.field.run(&Command::Insert(c.to_string()));
+            let next = inserted.field.run_plain(&Command::Insert(c.to_string()));
             Outcome {
                 effect: next.effect,
                 ..compose(field, next)
@@ -118,7 +118,7 @@ fn symbol(field: &Field, base: &Field, then: Option<char>) -> Outcome {
             return inserted;
         }
     }
-    let next = base.run(&Command::Insert(c.to_string()));
+    let next = base.run_plain(&Command::Insert(c.to_string()));
     Outcome {
         effect: next.effect,
         ..compose(field, next)

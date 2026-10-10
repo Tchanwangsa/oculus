@@ -18,6 +18,19 @@ fn text_mode_types_every_character_literally() {
         (r"\text{|}", &["ime:สวัสดี"], r"\text{สวัสดี|}"),
         (r"\text{a|}", &["t:/^"], r"\text{a/\textasciicircum{}|}"),
         (r"\text{\LaTeX|}", &["t:x"], r"\text{\LaTeX x|}"),
+        // TeX skips every space after a control word: a typed one is `\ `.
+        (r"\text{\LaTeX |a}", &["space"], r"\text{\LaTeX \ |a}"),
+        (r"\text{\LaTeX |a}", &["space", "bs"], r"\text{\LaTeX |a}"),
+        (
+            r"\text{\begingroup |a\endgroup}",
+            &["space"],
+            r"\text{\begingroup \ |a\endgroup}",
+        ),
+        (
+            r"\text{\begingroup |a\endgroup}",
+            &["space", "bs"],
+            r"\text{\begingroup |a\endgroup}",
+        ),
     ];
     check_all(cases, false);
 }
