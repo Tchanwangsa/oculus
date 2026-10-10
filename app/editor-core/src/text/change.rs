@@ -10,7 +10,9 @@
 //!
 //! `compose`, `map` and `map_pos` panic on mismatched lengths or out-of-range
 //! positions, where CodeMirror throws (or, mapping over a longer set, hangs);
-//! `try_compose`/`try_map` return those as errors instead.
+//! the `try_` variants return those as errors instead. So does a set read
+//! from JSON whose sections do not line up (a zero-length kept section at the
+//! end, which CodeMirror's own sets never hold and its walks throw on).
 
 use std::fmt;
 use std::ops::Deref;
@@ -44,7 +46,7 @@ pub enum Touch {
     Cover,
 }
 
-/// A refused `ChangeSet::of` spec or `apply`.
+/// A refused `ChangeSet::of` spec, `apply`, JSON form or restored history.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChangeError {
     /// A spec range that is reversed or past the document end.
@@ -55,6 +57,9 @@ pub enum ChangeError {
     LengthMismatch { expected: usize, got: usize },
     /// A section boundary the document refuses (inside a surrogate pair).
     Pos(PosError),
+    /// A JSON form or restored history that CodeMirror could not have
+    /// produced; the message says what is wrong.
+    Malformed(String),
 }
 
 impl fmt::Display for ChangeError {
@@ -73,6 +78,7 @@ impl fmt::Display for ChangeError {
                 )
             }
             ChangeError::Pos(e) => e.fmt(f),
+            ChangeError::Malformed(what) => f.write_str(what),
         }
     }
 }
@@ -151,6 +157,19 @@ impl Deref for ChangeSet {
 }
 
 impl ChangeDesc {
+    /// The desc of CodeMirror's `ChangeDesc.fromJSON`: the sections as given,
+    /// not merged. An `ins` below -1 is refused.
+    pub fn from_sections(sections: &[(usize, isize)]) -> Result<ChangeDesc, ChangeError> {
+        if let Some(&(len, ins)) = sections.iter().find(|&&(_, ins)| ins < KEEP) {
+            return Err(ChangeError::Malformed(format!(
+                "change section ({len}, {ins}) inserts a negative length"
+            )));
+        }
+        Ok(ChangeDesc {
+            sections: sections.to_vec(),
+        })
+    }
+
     /// The sections as CodeMirror's `ChangeDesc.toJSON`: flat `len, ins`
     /// pairs with `-1` for kept sections.
     pub fn sections(&self) -> impl Iterator<Item = (usize, isize)> + '_ {
@@ -218,16 +237,20 @@ impl ChangeDesc {
     /// # Panics
     /// If `other.length()` is not this change's `new_length()`.
     pub fn compose_desc(&self, other: &ChangeDesc) -> ChangeDesc {
-        check_lengths(self.new_length(), other.length()).unwrap_or_else(|e| panic!("{e}"));
-        if self.is_empty() {
+        self.try_compose_desc(other)
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// `compose_desc`, refusing mismatched lengths.
+    pub fn try_compose_desc(&self, other: &ChangeDesc) -> Result<ChangeDesc, ChangeError> {
+        check_lengths(self.new_length(), other.length())?;
+        Ok(if self.is_empty() {
             other.clone()
         } else if other.is_empty() {
             self.clone()
         } else {
-            compose_sets(Side::desc(self), Side::desc(other))
-                .expect("descriptions hold no text to split")
-                .0
-        }
+            compose_sets(Side::desc(self), Side::desc(other))?.0
+        })
     }
 
     /// This change moved over `other` (both on the same document), so it
@@ -237,12 +260,22 @@ impl ChangeDesc {
     /// # Panics
     /// If the two have different lengths.
     pub fn map_desc(&self, other: &ChangeDesc, before: bool) -> ChangeDesc {
-        check_lengths(self.length(), other.length()).unwrap_or_else(|e| panic!("{e}"));
-        if other.is_empty() {
+        self.try_map_desc(other, before)
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// `map_desc`, refusing mismatched lengths.
+    pub fn try_map_desc(
+        &self,
+        other: &ChangeDesc,
+        before: bool,
+    ) -> Result<ChangeDesc, ChangeError> {
+        check_lengths(self.length(), other.length())?;
+        Ok(if other.is_empty() {
             self.clone()
         } else {
-            map_sets(Side::desc(self), other, before).0
-        }
+            map_sets(Side::desc(self), other, before)?.0
+        })
     }
 
     /// `pos` mapped through the change, `Simple` mode. `assoc < 0` keeps it
@@ -426,6 +459,36 @@ impl ChangeSet {
         Ok(b.total.expect("a forced flush sets the total"))
     }
 
+    /// The set of CodeMirror's `ChangeSet.fromJSON`, the inverse of `parts`:
+    /// the sections as given, not merged. A line holding a line break is
+    /// refused, since a `Text` cannot keep it inside one line.
+    pub fn from_parts(parts: &[Part]) -> Result<ChangeSet, ChangeError> {
+        let mut sections = Vec::with_capacity(parts.len());
+        let mut inserted = Vec::new();
+        for (i, part) in parts.iter().enumerate() {
+            match part {
+                Part::Keep(len) => sections.push((*len, KEEP)),
+                Part::Replace(len, lines) => {
+                    if let Some(line) = lines.iter().find(|l| l.contains(['\n', '\r'])) {
+                        return Err(ChangeError::Malformed(format!(
+                            "inserted line {line:?} holds a line break"
+                        )));
+                    }
+                    let text = Text::of(&lines.join("\n"));
+                    sections.push((*len, text.len() as isize));
+                    if !text.is_empty() {
+                        inserted.resize(i, Text::empty());
+                        inserted.push(text);
+                    }
+                }
+            }
+        }
+        Ok(ChangeSet {
+            desc: ChangeDesc { sections },
+            inserted,
+        })
+    }
+
     /// The description of this change, without its text.
     pub fn desc(&self) -> &ChangeDesc {
         &self.desc
@@ -508,12 +571,12 @@ impl ChangeSet {
 
     /// `map`, refusing mismatched lengths.
     pub fn try_map(&self, other: &ChangeDesc, before: bool) -> Result<ChangeSet, ChangeError> {
-        check_lengths(self.length(), other.length())?;
-        Ok(if other.is_empty() {
-            self.clone()
+        if other.is_empty() {
+            check_lengths(self.length(), other.length())?;
+            Ok(self.clone())
         } else {
-            self.map_desc(other, before)
-        })
+            self.try_map_desc(other, before)
+        }
     }
 
     /// `map` without the shortcut for an empty `other`: the sections are
@@ -522,12 +585,18 @@ impl ChangeSet {
     /// # Panics
     /// If the two have different lengths.
     pub fn map_desc(&self, other: &ChangeDesc, before: bool) -> ChangeSet {
-        check_lengths(self.length(), other.length()).unwrap_or_else(|e| panic!("{e}"));
-        let (desc, inserted) = map_sets(Side::set(self), other, before);
-        ChangeSet {
+        self.try_map_desc(other, before)
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// `ChangeSet::map_desc`, refusing mismatched lengths.
+    pub fn try_map_desc(&self, other: &ChangeDesc, before: bool) -> Result<ChangeSet, ChangeError> {
+        check_lengths(self.length(), other.length())?;
+        let (desc, inserted) = map_sets(Side::set(self), other, before)?;
+        Ok(ChangeSet {
             desc,
             inserted: inserted.expect("a set maps to a set"),
-        }
+        })
     }
 
     /// The changes with their inserted text; adjacent changes are joined
@@ -813,10 +882,16 @@ fn built(sections: Vec<(usize, isize)>, insert: Option<Vec<Text>>) -> Built {
     (ChangeDesc { sections }, insert)
 }
 
+/// Where CodeMirror throws "Mismatched change set lengths" mid-walk: lengths
+/// that agree in total but sections that do not line up.
+fn misaligned() -> ChangeError {
+    ChangeError::Malformed("mismatched change set lengths: the sections do not line up".into())
+}
+
 /// `set_a` moved to apply after `set_b` (both on the same document); see
 /// CodeMirror's `mapSet`. `inserted` is the section index of the change in A
 /// whose text is already placed, for changes processed piece by piece.
-fn map_sets(set_a: Side<'_>, set_b: &ChangeDesc, before: bool) -> Built {
+fn map_sets(set_a: Side<'_>, set_b: &ChangeDesc, before: bool) -> Result<Built, ChangeError> {
     let mut sections = Vec::new();
     let mut insert = set_a.inserted.map(|_| Vec::new());
     let mut a = SectionIter::new(set_a);
@@ -826,7 +901,7 @@ fn map_sets(set_a: Side<'_>, set_b: &ChangeDesc, before: bool) -> Built {
     let mut inserted = 0usize;
     loop {
         if (a.done() && b.len > 0) || (b.done() && a.len > 0) {
-            panic!("mismatched change set lengths");
+            return Err(misaligned());
         } else if a.ins == KEEP && b.ins == KEEP {
             // Move across ranges skipped by both sets.
             let len = a.len.min(b.len);
@@ -886,16 +961,16 @@ fn map_sets(set_a: Side<'_>, set_b: &ChangeDesc, before: bool) -> Built {
             inserted = a.i;
             a.forward(a.len - left);
         } else if a.done() && b.done() {
-            return built(sections, insert);
+            return Ok(built(sections, insert));
         } else {
-            panic!("mismatched change set lengths");
+            return Err(misaligned());
         }
     }
 }
 
 /// `set_a` followed by `set_b`; see CodeMirror's `composeSets`. `open` glues
 /// the pieces of one change that spans several iterations into one section.
-fn compose_sets(set_a: Side<'_>, set_b: Side<'_>) -> Result<Built, PosError> {
+fn compose_sets(set_a: Side<'_>, set_b: Side<'_>) -> Result<Built, ChangeError> {
     let mut sections = Vec::new();
     let mut insert = set_a.inserted.and(set_b.inserted).map(|_| Vec::new());
     let mut a = SectionIter::new(set_a);
@@ -916,7 +991,7 @@ fn compose_sets(set_a: Side<'_>, set_b: Side<'_>) -> Result<Built, PosError> {
             }
             b.next();
         } else if a.done() || b.done() {
-            panic!("mismatched change set lengths");
+            return Err(misaligned());
         } else {
             let len = a.len2().min(b.len);
             let section_len = sections.len();

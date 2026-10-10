@@ -42,6 +42,18 @@ fn node_names_are_lezers() {
 }
 
 #[test]
+fn triples_are_the_pre_order_nodes() {
+    let tree = parse_str("a *b* 😀");
+    let triples = tree.triples();
+    assert_eq!(triples.len(), tree.len() * 3);
+    for (node, t) in tree.iter().zip(triples.chunks(3)) {
+        assert_eq!(NodeType::ALL[t[0] as usize], node.kind());
+        assert_eq!((t[1] as usize, t[2] as usize), (node.from(), node.to()));
+    }
+    assert_eq!(&triples[..3], &[NodeType::Document as u32, 0, 8]);
+}
+
+#[test]
 fn resolve_inner_side_bias() {
     let tree = parse_str("a *b* c");
     assert_eq!(tree.resolve_inner(2, -1).name(), "Paragraph");

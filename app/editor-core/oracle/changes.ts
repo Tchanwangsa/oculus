@@ -6,13 +6,24 @@
 // set and desc), mapPos at every position in every mode and assoc,
 // iterChanges/iterGaps/iterChangedRanges, touchesRange, and random selections:
 // normalised, mapped through `a`, `extend`/`asSingle`/`addRange`/
-// `replaceRange`, and `changeByRange` with three recipes.
+// `replaceRange`, and `changeByRange` with three recipes. Change sets and
+// descs are also read back from their `toJSON` (CodeMirror's own, and raw
+// JSON with unmerged sections that `fromJSON` keeps as given), and raw sets
+// composed and mapped, refused exactly where CodeMirror throws.
 //
 //   bun editor-core/oracle/changes.ts [cases] [seed] [only]     (from app/)
 
-import { ChangeSet, EditorSelection, EditorState, MapMode, type SelectionRange, type Text } from "@codemirror/state";
+import {
+  ChangeDesc,
+  ChangeSet,
+  EditorSelection,
+  EditorState,
+  MapMode,
+  type SelectionRange,
+  type Text,
+} from "@codemirror/state";
 
-import { boundary, source, textOf } from "./docs";
+import { SPLIT, boundary, source, textOf } from "./docs";
 import { Checker, type Rng, buildOracle, caseRng, parseArgs } from "./driver";
 
 const args = parseArgs(20000);
@@ -122,6 +133,63 @@ function randomRange(rng: Rng, doc: Text): RangeSpec {
   return [anchor, head, rng.chance(0.2) ? 5 : null, rng.chance(0.1) ? rng.int(3) : null, rng.chance(0.3) ? rng.pick([-1, 1]) : 0];
 }
 
+/** Raw `ChangeSet.toJSON` over `doc`, cut at code-point boundaries:
+ * keeps, deletions and replacements, sometimes empty or side by side. */
+function rawSetJson(rng: Rng, doc: Text): unknown[] {
+  const cuts = [...new Set(Array.from({ length: rng.int(6) }, () => boundary(rng, doc)))].sort((x, y) => x - y);
+  const out: unknown[] = [];
+  let pos = 0;
+  for (const cut of [...cuts, doc.length]) {
+    if (rng.chance(0.15)) out.push(rng.chance(0.5) ? 0 : [0, ...source(rng, rng.logInt(1, 6), 0.3).split(SPLIT)]);
+    const len = cut - pos;
+    if (len === 0 && cut !== doc.length) continue;
+    const r = rng.next();
+    if (r < 0.5) out.push(len);
+    else if (r < 0.65) out.push([len]);
+    else out.push([len, ...source(rng, rng.logInt(1, 10), 0.3).split(SPLIT)]);
+    pos = cut;
+  }
+  return out;
+}
+
+/** What src/bin/oracle/changes.rs answers for a set read back from JSON,
+ * with the document it applies to. */
+function jsonSet([json, on]: [unknown, string]) {
+  const set = ChangeSet.fromJSON(json);
+  const doc = textOf(on);
+  return [set.toJSON(), set.length, set.newLength, set.desc.toJSON(), set.apply(doc).toString(), set.invert(doc).toJSON()];
+}
+
+/** `f()`, or "throw" where CodeMirror throws. */
+function attempt(f: () => unknown): unknown {
+  try {
+    return f();
+  } catch {
+    return "throw";
+  }
+}
+
+/** What src/bin/oracle/changes.rs answers for raw sets `a` and `c` on one
+ * document and `b` on `a`'s result. */
+function rawOps(j: { a: unknown; b: unknown; c: unknown }) {
+  const [a, b, c] = [ChangeSet.fromJSON(j.a), ChangeSet.fromJSON(j.b), ChangeSet.fromJSON(j.c)];
+  return [
+    attempt(() => a.compose(b).toJSON()),
+    attempt(() => a.map(c).toJSON()),
+    attempt(() => a.map(c, true).toJSON()),
+    attempt(() => a.desc.composeDesc(b.desc).toJSON()),
+    attempt(() => a.desc.mapDesc(c.desc, true).toJSON()),
+  ];
+}
+
+/** What src/bin/oracle/changes.rs answers for a desc read back from JSON. */
+function jsonDesc(json: unknown) {
+  const desc = ChangeDesc.fromJSON(json);
+  const mapped =
+    desc.length <= 60 ? Array.from({ length: desc.length + 1 }, (_, pos) => [desc.mapPos(pos, -1), desc.mapPos(pos, 1)]) : [];
+  return [desc.toJSON(), desc.length, desc.newLength, mapped];
+}
+
 const changesJson = (set: ChangeSet, individual: boolean) => {
   const out: unknown[] = [];
   set.iterChanges((fa, ta, fb, tb, text) => out.push([fa, ta, fb, tb, text.toString()]), individual);
@@ -157,6 +225,29 @@ function makeCase(rng: Rng) {
 
   const inverted = a.invert(doc);
   const composed = a.compose(b);
+  // Through JSON text, as a request carries them.
+  const rawSet = JSON.parse(JSON.stringify(rawSetJson(rng, doc)));
+  const rawSets = {
+    a: rawSet,
+    b: JSON.parse(JSON.stringify(rawSetJson(rng, ChangeSet.fromJSON(rawSet).apply(doc)))),
+    c: JSON.parse(JSON.stringify(rawSetJson(rng, doc))),
+  };
+  const [docS, appliedS] = [doc.toString(), applied.toString()];
+  const jsonSets: [unknown, string][] = [
+    [a.toJSON(), docS],
+    [b.toJSON(), appliedS],
+    [c.toJSON(), docS],
+    [inverted.toJSON(), appliedS],
+    [composed.toJSON(), docS],
+    [a.map(c).toJSON(), c.apply(doc).toString()],
+    [rawSet, docS],
+  ];
+  const jsonDescs = [
+    a.desc.toJSON(),
+    a.invertedDesc.toJSON(),
+    a.desc.mapDesc(c.desc, true).toJSON(),
+    ChangeSet.fromJSON(rawSet).desc.toJSON(),
+  ];
   const expected = {
     a: a.toJSON(),
     b: b.toJSON(),
@@ -205,6 +296,9 @@ function makeCase(rng: Rng) {
         RECIPES.map((recipe) => byRange(doc, sel, recipe)),
       ];
     }),
+    json_sets: jsonSets.map(jsonSet),
+    json_descs: jsonDescs.map(jsonDesc),
+    raw_ops: rawOps(rawSets),
   };
   const request = {
     op: "changes",
@@ -216,6 +310,9 @@ function makeCase(rng: Rng) {
     ranges,
     selections,
     selection_ops: selectionOps,
+    json_sets: jsonSets,
+    json_descs: jsonDescs,
+    raw_sets: rawSets,
   };
   return { request, expected };
 }

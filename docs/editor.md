@@ -16,7 +16,7 @@ maths is [editor-maths.md](./editor-maths.md).
 | Find and replace | `app/src/components/documents/editor/chrome/find.ts`, `app/src/components/documents/editor/chrome/useEditorFind.ts` |
 | A note's versions and its History panel | `app/src/lib/notes/documentVersions.ts`, `app/src/components/documents/HistoryPanel/` |
 | The note editor as a form field (task body, a chat paste) | `app/src/components/documents/NoteField.tsx` |
-| The Rust editor core, not yet used by the app | `app/editor-core/` |
+| The Rust editor core, and its shadow of every note editor in dev builds ([editor-core.md](./editor-core.md)) | `app/editor-core/`, `app/src/components/documents/editor/shadow/` |
 
 ## The note editor is CodeMirror 6 over the file's exact text
 
@@ -228,28 +228,6 @@ hears the doc on every change, for a caller whose buttons read the text and
 cannot wait on the blur (the chat's pasted text editor,
 [harness.md](./harness.md#pasted-text-is-a-card-sent-inline));
 `scrollClassName` replaces the text scroller's 420px bound.
-
-## A Rust editor core is built beside the editor, not in it
-
-`app/editor-core/` is a standalone crate (`oculus-editor-core`) that ports
-CodeMirror's text model — a rope counted in UTF-16 units, `ChangeSet`,
-selections, transactions and `history()` — and the note grammar's
-`@lezer/markdown` parser, incremental like Lezer's fragment reuse. Neither
-`app/src-tauri` nor the frontend depends on it, so `tauri dev` never builds it.
-
-The target is the app's behaviour, not a spec: oracle scripts in
-`app/editor-core/oracle/` drive the real `@codemirror/state`,
-`@codemirror/commands` and the app's own `noteLanguage` beside the crate's
-`oracle` binary with the same seeded random operations and diff the answers;
-`text`, `history` and `markdown` also run every note in the data directory. Where Lezer and the
-CommonMark/GFM spec disagree, Lezer wins; each case is listed in
-`app/editor-core/DIVERGENCES.md`. Timings against Lezer are in
-`app/editor-core/BENCHMARKS.md`.
-
-From `app/editor-core`: `cargo test`, `cargo bench`. From `app/`:
-`bun editor-core/oracle/<text|changes|history|markdown>.ts [cases] [seed]
-[only]` — a failure prints its seed and case index, which replay it alone.
-Run one oracle at a time: a large `history.ts` count holds gigabytes.
 
 ## Gotchas
 

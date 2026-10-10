@@ -7,6 +7,10 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+# One Cargo.lock and one target/ for the core and its WebAssembly bridge.
+[workspace]
+members = [".", "wasm"]
+
 # The oracle binary speaks JSON lines to the bun driver in oracle/. It is behind
 # a feature so `cargo test` and the library itself stay dependency-free.
 [[bin]]
@@ -28,3 +32,10 @@ criterion = { version = "0.8", default-features = false, features = ["cargo_benc
 [[bench]]
 name = "markdown"
 harness = false
+
+# The WebAssembly build (`app/scripts/build-editor-wasm.mjs`). Its own profile,
+# so `release` (which `bench` inherits and the oracle builds with) is untouched.
+[profile.wasm]
+inherits = "release"
+lto = true
+codegen-units = 1

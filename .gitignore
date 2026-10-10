@@ -23,6 +23,9 @@ data/
 # ffmpeg sidecar (fetched by app/scripts/fetch-ffmpeg.mjs)
 app/src-tauri/binaries/
 
+# The editor core's WebAssembly build (app/scripts/build-editor-wasm.mjs)
+app/src/components/documents/editor/shadow/pkg/
+
 # A local MinerU's spill. `mineru-api` writes one folder per request — markdown,
 # both content lists, every extracted image — under ./output, relative to
 # wherever it was started. It sweeps its own after 24h, but only while it keeps

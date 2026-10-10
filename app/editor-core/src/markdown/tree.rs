@@ -88,6 +88,16 @@ impl Tree {
         (0..self.nodes.len() as u32).map(move |index| Node { tree: self, index })
     }
 
+    /// Every node in pre-order as three numbers, `type id, from, to`, the
+    /// root first: the flat form a tree crosses into JavaScript in.
+    pub fn triples(&self) -> Vec<u32> {
+        let mut out = Vec::with_capacity(self.nodes.len() * 3);
+        for n in &self.nodes {
+            out.extend([n.kind as u32, n.from, n.to]);
+        }
+        out
+    }
+
     /// The innermost node holding `pos`, entered from `side` (negative: the
     /// node may end at `pos`; positive: it may start there; zero: strictly
     /// inside). Zero-length nodes are never returned unless they are the root.
