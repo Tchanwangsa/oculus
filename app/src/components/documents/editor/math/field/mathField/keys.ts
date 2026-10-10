@@ -95,7 +95,7 @@ export function noteMathPress(x: number, y: number, rendered: HTMLElement) {
   const ml = rendered.querySelector(".ML__latex");
   const ink = ml
     ? [ml.getBoundingClientRect()]
-    : [...rendered.querySelectorAll(".katex-html > .base")].map((b) => b.getBoundingClientRect());
+    : [...rendered.querySelectorAll(".katex-html > .katex-base")].map((b) => b.getBoundingClientRect());
   const r = ink.length ? ink : [rendered.getBoundingClientRect()];
   const left = Math.min(...r.map((b) => b.left));
   const top = Math.min(...r.map((b) => b.top));

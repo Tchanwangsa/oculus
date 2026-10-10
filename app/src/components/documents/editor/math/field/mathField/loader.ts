@@ -64,7 +64,7 @@ function configure(m: MathLive) {
 /** Row stretch for arrays and matrices, in KaTeX (`live-preview/widgets/math.ts`) and here. */
 export const MATH_ARRAYSTRETCH = 1.2;
 /** Space between a display block's top-level `\\` lines, in em: KaTeX's
- *  `.newline` (`theme/math.ts`) and the field's root `lines` table. */
+ *  `.katex-newline` (`theme/math.ts`) and the field's root `lines` table. */
 export const MATH_LINE_GAP = 0.5;
 
 /**

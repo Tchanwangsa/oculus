@@ -29,7 +29,7 @@ export const math: ThemeSpec = {
   // KaTeX, while MathLive loads or for maths it can't read.
   ".cm-math-display .katex-display": { margin: "0" },
   // A block's top-level `\\` lines, spaced as the field spaces its rows.
-  ".cm-math-display .katex-html > .newline": { height: `${MATH_LINE_GAP}em` },
+  ".cm-math-display .katex-html > .katex-newline": { height: `${MATH_LINE_GAP}em` },
   // Rendered maths selects as one unit (`MathWidget`): no native highlight on
   // KaTeX's glyphs, which CodeMirror hides only inside a line. A selected
   // block fills opaquely over the card, so the selection layer under it

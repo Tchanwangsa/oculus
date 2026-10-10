@@ -1,0 +1,67 @@
+---
+source: crates/katex/tests/katex_spec.rs
+assertion_line: 467
+expression: "format!(\"{:#?}\", parsed)"
+---
+[
+    Sqrt(
+        ParseNodeSqrt {
+            mode: Math,
+            loc: None,
+            body: OrdGroup(
+                ParseNodeOrdGroup {
+                    mode: Math,
+                    loc: None,
+                    body: [
+                        MathOrd(
+                            ParseNodeMathOrd {
+                                mode: Math,
+                                loc: None,
+                                text: Owned(
+                                    "x",
+                                ),
+                            },
+                        ),
+                    ],
+                    semisimple: None,
+                },
+            ),
+            index: Some(
+                OrdGroup(
+                    ParseNodeOrdGroup {
+                        mode: Math,
+                        loc: None,
+                        body: [
+                            Font(
+                                ParseNodeFont {
+                                    mode: Math,
+                                    loc: None,
+                                    font: "mathtt",
+                                    body: OrdGroup(
+                                        ParseNodeOrdGroup {
+                                            mode: Math,
+                                            loc: None,
+                                            body: [
+                                                TextOrd(
+                                                    ParseNodeTextOrd {
+                                                        mode: Math,
+                                                        loc: None,
+                                                        text: Owned(
+                                                            "3",
+                                                        ),
+                                                    },
+                                                ),
+                                            ],
+                                            semisimple: None,
+                                        },
+                                    ),
+                                },
+                            ),
+                        ],
+                        semisimple: None,
+                    },
+                ),
+            ),
+        },
+    ),
+]

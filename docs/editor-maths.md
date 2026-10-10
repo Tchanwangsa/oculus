@@ -138,7 +138,7 @@ other edit.
 Both of MathLive's
 drawings and the KaTeX fallback lay out alike: array and matrix rows
 take `MATH_ARRAYSTRETCH` and a block's top-level `\\` lines
-`MATH_LINE_GAP` (KaTeX's `.newline` in `theme/math.ts`, MathLive's root
+`MATH_LINE_GAP` (KaTeX's `.katex-newline` in `theme/math.ts`, MathLive's root
 `lines` table); MathLive's `array` is centred on the axis as KaTeX draws it
 (it hangs from its first row there); and an `array` that is all a
 `\left…\right` holds drops its outer column padding in both, so

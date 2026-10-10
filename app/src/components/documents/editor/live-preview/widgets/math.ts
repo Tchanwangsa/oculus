@@ -220,11 +220,11 @@ function mathRows(dom: HTMLElement): Row[] {
     const lines = dom.querySelectorAll(ML_LINES);
     return lines.length ? [...lines].map(rect) : [rect(ml)];
   }
-  // KaTeX: the runs between `.newline`s.
+  // KaTeX: the runs between `.katex-newline`s.
   const rows: Row[] = [];
   let row: Row | null = null;
   for (const el of dom.querySelectorAll(".katex-display .katex-html > *")) {
-    if (el.classList.contains("newline")) {
+    if (el.classList.contains("katex-newline")) {
       row = null;
       continue;
     }

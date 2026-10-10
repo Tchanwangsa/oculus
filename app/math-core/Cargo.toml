@@ -1,0 +1,70 @@
+# The maths engine: a vendored fork of katex-rs (`katex/`). Its own workspace,
+# never a dependency of `app/src-tauri`, so `tauri dev` never rebuilds it.
+# The settings below are katex-rs's workspace settings, which `katex/`
+# inherits; see katex/UPSTREAM.md.
+
+[workspace]
+members = ["katex", "oracle"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+publish = false
+license = "MIT"
+version = "0.3.0"
+repository = "https://github.com/katex-rs/katex-rs"
+
+[workspace.lints.clippy]
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+absolute_paths = "warn"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+clone_on_ref_ptr = "warn"
+default_numeric_fallback = "allow"
+doc_markdown = "allow"
+expect_used = "warn"
+float_cmp = "allow"
+get_unwrap = "warn"
+if_then_some_else_none = "warn"
+impl_trait_in_params = "warn"
+indexing_slicing = "allow"
+map_with_unused_argument_over_ranges = "warn"
+missing_asserts_for_indexing = "warn"
+missing_errors_doc = "allow"
+needless_raw_strings = "warn"
+non_ascii_literal = "warn"
+panic = "warn"
+pointer_format = "warn"
+pub_use = "allow"
+rc_buffer = "warn"
+ref_patterns = "warn"
+return_and_then = "warn"
+separated_literal_suffix = "warn"
+single_call_fn = "allow"
+str_to_string = "warn"
+string_slice = "allow"
+struct_excessive_bools = "allow"
+too_many_lines = "allow"
+undocumented_unsafe_blocks = "warn"
+unimplemented = "warn"
+unreadable_literal = "allow"
+unwrap_in_result = "warn"
+unwrap_used = "warn"
+unused_trait_names = "warn"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+lto = false
+
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3
