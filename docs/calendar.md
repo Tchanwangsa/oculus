@@ -62,8 +62,8 @@ database, so it works offline.
   kept. The query asks for the course and its sections, then dedupes by id,
   because Canvas nests section occurrences inconsistently.
 - A subject with any `class` rows suppresses its `lecture` layer, or a class
-  and its recording draw twice. Most UniMelb subjects publish nothing, so the
-  recordings are the timetable.
+  and its recording draw twice. Many subjects (most at UniMelb) publish
+  nothing, so the recordings are the timetable.
 
 ## What Oculus owns lives outside the Canvas table
 

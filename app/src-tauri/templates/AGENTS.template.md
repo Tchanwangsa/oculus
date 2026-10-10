@@ -1,8 +1,11 @@
 # Oculus course directory
 
-This file describes a course folder in an Oculus library — one University of
-Melbourne subject, synced from Canvas, Ed Discussion and Echo360. The folder
-is named for the subject: `COMP30026_2026_SM2` is COMP30026, semester 2, 2026.
+This file describes a course folder in an Oculus library — one subject at the
+student's university, synced from Canvas, and from Ed Discussion and Echo360
+where the university uses them. The folder is named for the subject's Canvas
+course code: at the University of Melbourne `COMP30026_2026_SM2` is COMP30026,
+semester 2, 2026; elsewhere it is whatever code Canvas gives, such as
+`CS_101_Fall_2026` for "CS 101 Fall 2026".
 `syllabus.md` and `home.md` name it in full. If you are reading this from the
 library's own `agents/` folder instead — where the in-app chat runs you —
 the course folders are at `../courses/<CODE>/`, and everything below is about
@@ -132,8 +135,9 @@ the turn carries on without the answer. So:
   are all refused. Five files means five calls, which is cheaper than one
   refusal.
 - **No shell variables.** `$CODE`, `$f`, `${x}` — write the value out. The
-  subject code is eight characters; expanding it saves nothing and costs the
-  command.
+  subject code is short; expanding it saves nothing and costs the command. A
+  code with spaces is quoted (`-s "CS 101"`) or written with `_` or `-`
+  instead — the CLI matches them alike.
 - **No newline inside an argument.** A long `--brief` or task title is one
   line. If it genuinely needs paragraphs, write the file first and pass the
   path.

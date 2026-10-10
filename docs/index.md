@@ -1,8 +1,8 @@
 # Oculus docs
 
-Oculus is a Tauri 2 desktop app that scrapes a student's UniMelb coursework —
-Canvas pages and files, Ed Discussion threads, Echo360 lecture recordings —
-into a local library, parses every PDF to markdown, embeds each page as an
+Oculus is a Tauri 2 desktop app that scrapes a student's coursework from any
+university's Canvas — pages and files, and Ed Discussion threads and Echo360
+lecture recordings where the university uses them — into a local library, parses every PDF to markdown, embeds each page as an
 image, and retrieves the right pages for a question. Chat is a coding agent the
 student already has (Claude Code, Codex, opencode or Antigravity), run inside
 the library with the `oculus` CLI as its tool surface. These pages are the map;
