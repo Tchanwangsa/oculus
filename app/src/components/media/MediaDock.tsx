@@ -1,10 +1,10 @@
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import { DotsSixVertical, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { useScrollFade } from "@/hooks/useScrollFade";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ViewTabs, type ViewTab } from "@/components/ui/ViewTabs";
-import { isVertical, type Dock } from "@/stores/playerPrefsStore";
+import { ViewTabs, type ViewTab } from "@/components/ui/table/ViewTabs";
+import { isVertical, type Dock } from "@/stores/lectures/playerPrefsStore";
 
 /** Border on the panel's inner edge — the side that faces the video. */
 const INNER_BORDER: Record<Dock, string> = {

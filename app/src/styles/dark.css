@@ -1,0 +1,85 @@
+.dark {
+  --color-ink-50:  #171717;
+  --color-ink-100: #1e1e1e;
+  --color-ink-200: #212121;
+  --color-ink-300: #2a2a2a;
+  --color-ink-400: #3d3d3d;
+  --color-ink-500: #6e6e6e;
+  --color-ink-600: #a1a1a1;
+  --color-ink-700: #c9c9c9;
+  --color-ink-800: #e0e0e0;
+  --color-ink-900: #ececec;
+
+  --color-background:        #171717;
+  --color-foreground:        #ececec;
+
+  --color-card:              #212121;
+  --color-card-foreground:   #ececec;
+
+  --color-popover:           #2a2a2a;
+  --color-popover-foreground:#ececec;
+
+  --color-surface:           #262626;
+  --color-surface-raised:    #2f2f2f;
+  --color-surface-overlay:   #3a3a3a;
+
+  --color-border:            #333333;
+  --color-border-subtle:     #272727;
+
+  --color-input:             #3d3d3d;
+  --color-ring:              #8b93e8;
+
+  --color-muted:             #262626;
+  --color-muted-foreground:  #a1a1a1;
+
+  --color-primary:           #8b93e8;
+  --color-primary-hover:     #a5aded;
+  --color-primary-active:    #6e79d6;
+  --color-primary-foreground:#131316;
+
+  --color-brand:             #8b93e8;
+  --color-brand-hover:       #a5aded;
+  --color-brand-muted:       #23243a;
+  --color-brand-foreground:  #131316;
+
+  --color-secondary:         #2f2f2f;
+  --color-secondary-foreground: #ececec;
+
+  --color-accent:            #2f2f2f;
+  --color-accent-foreground: #ececec;
+
+  --color-destructive:       #ef4444;
+  --color-destructive-foreground: #ffffff;
+
+  --color-success:           #22c55e;
+  --color-warning:           #f59e0b;
+
+  --color-sidebar:           #171717;
+  --color-sidebar-border:    #333333;
+  --color-sidebar-item-hover:#262626;
+  --color-sidebar-item-active:#2f2f2f;
+
+  /* Re-stepped and validated for the dark card, not a lightness flip. */
+  --color-chart-1: #7b85e0;
+  --color-chart-2: #199e70;
+  --color-chart-3: #c98500;
+  --color-chart-4: #d55181;
+  --color-chart-5: #008300;
+  --color-chart-other: #6e6e6e;
+
+  --color-syntax-keyword:  #f07a95;
+  --color-syntax-string:   #93c99f;
+  --color-syntax-comment:  #909090;
+  --color-syntax-number:   #e0a35e;
+  --color-syntax-function: #b9a4f2;
+  --color-syntax-type:     #6cc4d4;
+  --color-syntax-property: #8fb6f0;
+  --color-syntax-operator: #b0b0b0;
+  --color-syntax-meta:     #d0b06e;
+
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.45), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 0.5), 0 4px 8px -4px rgb(0 0 0 / 0.35);
+  --shadow-panel: 0 0 0 1px rgb(255 255 255 / 0.03), 0 8px 24px -14px rgb(0 0 0 / 0.6);
+}

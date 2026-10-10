@@ -9,15 +9,15 @@ agent queries and plans through. Flags are in
 
 | Piece | Location |
 | --- | --- |
-| The binary (`main.rs` dispatches, `args.rs` is the clap tree) | `app/src-tauri/src/bin/oculus/` |
-| Query commands, category filter, file lookup | `app/src-tauri/src/bin/oculus/query.rs` |
-| `project` and `task` | `app/src-tauri/src/bin/oculus/planning.rs`, `app/src-tauri/src/projects.rs` |
-| `lecture` | `app/src-tauri/src/bin/oculus/lecture.rs` |
-| `transcribe` | `app/src-tauri/src/bin/oculus/transcribe.rs`, `app/src-tauri/src/transcribe/` |
-| `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/docs.rs`, `app/src-tauri/src/agents.rs` |
-| The memory store | `app/src-tauri/src/memory.rs` |
-| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/keyd.rs`, `app/src-tauri/src/keyd/`; the LaunchAgent itself in `app/keyd/core/src/platform/macos/registrar.rs` |
-| Headless writes to the scrape tables | `app/src-tauri/src/store.rs` |
+| The binary (`main.rs` dispatches, `args/` is the clap tree, `commands/` the handlers) | `app/src-tauri/src/bin/oculus/` |
+| Query commands, category filter, file lookup | `app/src-tauri/src/bin/oculus/commands/query/` (`subjects.rs` for scope and `filter_categories`, `files.rs`), `app/src-tauri/src/bin/oculus/args/query.rs` |
+| `project` and `task` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs`, `app/src-tauri/src/db/projects/` |
+| `lecture` | `app/src-tauri/src/bin/oculus/commands/lecture.rs`, `app/src-tauri/src/bin/oculus/args/lecture.rs` |
+| `transcribe` | `app/src-tauri/src/bin/oculus/commands/transcribe.rs`, `app/src-tauri/src/transcribe/` |
+| `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/commands/docs.rs`, `app/src-tauri/src/agents/` (`docs.rs`, `links.rs`) |
+| The memory store | `app/src-tauri/src/agents/memory/`, `app/src-tauri/src/bin/oculus/commands/memory.rs` |
+| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/commands/keyd.rs`, `app/src-tauri/src/auth/keyd/`; the LaunchAgent itself in `app/keyd/core/src/platform/macos/registrar.rs` |
+| Headless writes to the scrape tables | `app/src-tauri/src/db/store/` |
 | Repo copy of the reference | `app/scripts/gen-cli-docs.mjs` |
 
 ## What a command writes decides how careful it is
@@ -96,6 +96,9 @@ rewriting itself in place is how a long run is told from a stuck one.
 - `index` re-embeds any file whose vectors came from another model, dim or
   instruction, or cover too few pages (`embed::is_embedded`). There is no
   migration between embedding spaces.
+- `index --reparse` also parses again every file whose record predates
+  `PARSER_VERSION`. It spends MinerU allowance and keeps the embeddings
+  ([parsing.md](./parsing.md#pagesjson-is-the-only-evidence-a-parse-finished)).
 - `index` obeys the spend guard Settings sets, because both processes read
   `voyage-usage.json`. Past it the client returns `BudgetReached`, which names
   the setting; waiting will not clear it.
@@ -118,19 +121,19 @@ rewriting itself in place is how a long run is told from a stuck one.
   for "nothing indexed" and "indexed by a retired model" — because a caller
   given an empty result concludes the library has no answer. `status` prints
   the same split as `index` and `stale` lines. It takes a *set* of subject ids,
-  since a prefix can match one course in two terms (`retrieval::search_in`).
+  since a prefix can match one course in two terms (`pages::retrieval::search_in`).
 - `grep` covers both halves of the library: markdown on disk, and PDF page
   text that exists only in `pages`. Ripgrep over `courses/` misses every slide
   deck. It scans in subject-then-path order and stops at its limit, so a
   truncated result is biased; `-c` narrows before the limit applies.
 - `-c/--category` is one filter (`filter_categories`) behind `grep` and
-  `files`, validated against `paths::CATEGORIES`. An unknown word is refused
+  `files`, validated against `library::paths::CATEGORIES`. An unknown word is refused
   with the real list; a real category a subject lacks returns nothing.
 - `read` uses the page numbers `search` reports and the viewer shows — all
   three key `pages.markdown` on `(file_id, page_no)`. An Office document's
-  pages are its derived PDF's (`paths::doc_pdf_rel`); a spreadsheet's are its
+  pages are its derived PDF's (`library::paths::doc_pdf_rel`); a spreadsheet's are its
   sheets, and with no rows yet `read` prints its `.md` from disk.
-- Read commands share subject-ID resolution in `query.rs`: an omitted scope
+- Read commands share subject-ID resolution in `commands/query/subjects.rs`: an omitted scope
   means every subject, while a prefix keeps every matching term and an unknown
   code fails before querying files.
 - File lookup is tiered, not fuzzy: exact path, exact filename,
@@ -167,7 +170,7 @@ are in [projects.md](./projects.md); the CLI-shaped parts:
 
 It fills `agents/` in the data directory so an agent in a course folder needs
 no explanation of Oculus. Everything but the CLI reference is written by
-`app/src-tauri/src/agents.rs`, which every sync also calls ([sync.md](./sync.md)).
+`app/src-tauri/src/agents/`, which every sync also calls ([sync.md](./sync.md)).
 
 ```
 <data>/agents/

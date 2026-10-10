@@ -10,17 +10,17 @@ maths is [editor-maths.md](./editor-maths.md).
 
 | Piece | Location |
 | --- | --- |
-| The view, title and mode; header controls | `app/src/components/documents/DocumentEditor.tsx`, `app/src/components/documents/DocumentControls.tsx` |
+| The view, title and mode; header controls | `app/src/components/documents/DocumentEditor/`, `app/src/components/documents/DocumentControls.tsx` |
 | Extensions: live preview, Raw mode, code, tables, widgets, commands | `app/src/components/documents/editor/` |
-| One session per note | `app/src/lib/documentSessions.ts` |
-| Find and replace | `app/src/components/documents/editor/find.ts`, `app/src/components/documents/editor/useEditorFind.ts` |
-| A note's versions and its History panel | `app/src/lib/documentVersions.ts`, `app/src/components/documents/HistoryPanel.tsx` |
+| One session per note | `app/src/lib/notes/documentSessions.ts` |
+| Find and replace | `app/src/components/documents/editor/chrome/find.ts`, `app/src/components/documents/editor/chrome/useEditorFind.ts` |
+| A note's versions and its History panel | `app/src/lib/notes/documentVersions.ts`, `app/src/components/documents/HistoryPanel/` |
 | The note editor as a form field (task body, a chat paste) | `app/src/components/documents/NoteField.tsx` |
 
 ## The note editor is CodeMirror 6 over the file's exact text
 
 It lives in `app/src/components/documents/editor/`; nothing is re-serialised.
-`DocumentEditor.tsx` owns the view, title and mode and loads only for a
+`DocumentEditor/` owns the view, title and mode and loads only for a
 student document; its lightweight header controls live in
 `app/src/components/documents/DocumentControls.tsx`. `FilePage` keys the
 whole editor by row id: image attachments belong to one note, while a
@@ -31,13 +31,13 @@ it (a heading, quote or list marker while the caret is on its line); maths
 is edited in a visual field instead
 ([editor-maths.md](./editor-maths.md)). **Raw**
 is the same view with those decorations swapped out by a `Compartment`
-for `rawMode.ts`: monospace source with line numbers, markdown and
+for `chrome/rawMode.ts`: monospace source with line numbers, markdown and
 frontmatter YAML coloured with the `--color-syntax-*` tokens.
 Under the title, `DocumentMeta` shows subject, created (`first_seen_at`),
 last updated (`modified_at` or the session's last save) and a word count.
 
 - **Fenced code is parsed in its own language**
-  (`app/src/components/documents/editor/codeLanguages.ts`): the info string's
+  (`app/src/components/documents/editor/syntax/codeLanguages.ts`): the info string's
   first word picks a `@codemirror/language-data` grammar, loaded lazily on
   first use; an untagged fence is guessed with highlight.js, which scores only
   the languages of a small subset whose pattern matches the sample. The guess
@@ -47,13 +47,13 @@ last updated (`modified_at` or the session's last save) and a word count.
   header row (the label, which reveals the fence to retag it, and Copy) until
   the selection touches the block. Colours are the `--color-syntax-*` tokens.
   A ```mermaid fence that owns its lines draws as a diagram (`MermaidWidget`
-  in `widgets.ts`, through `mermaidRender.ts`, shared with `Mermaid.tsx`);
+  in `live-preview/widgets/media.ts`, through `mermaidRender.ts`, shared with `Mermaid.tsx`);
   while the selection touches it, the source shows with the diagram under it,
   redrawn in place as it is typed and kept at its last good drawing while the
   source does not parse.
 - **A pipe table is a grid whose cells edit in place**
-  (`app/src/components/documents/editor/table.ts`): its DOM and input handlers
-  use `app/src/components/documents/editor/tableModel.ts` for source-preserving
+  (`app/src/components/documents/editor/live-preview/table/`): its DOM and input handlers
+  use `app/src/components/documents/editor/live-preview/tableModel.ts` for source-preserving
   edits. A cell writes back only its own source range, Tab/Enter move between
   cells, and the frame scrolls sideways.
   A drag across cells (or Shift with a click or ↑/↓) selects a block, which
@@ -65,20 +65,20 @@ last updated (`modified_at` or the session's last save) and a word count.
   header row never moves (a body row may be short of cells).
   Rows are split from the line text, since lezer emits no node for an empty
   cell. In Live mode it never shows its source: its range is atomic, and
-  `tableKeys` (`livePreview.ts`) hands the caret in — ↑/← from the line under
+  `tableKeys` (`live-preview/livePreview/tables.ts`) hands the caret in — ↑/← from the line under
   it into the last row, ↓/→ from the line over it into the header, Backspace
   and Delete likewise (deleting an empty line in between when no text would
   end up against the table). Arrows at the grid's edges, and Esc, hand it back.
   Text typed or pasted at a table's edge goes on its own line, after a blank
   line below it, since GFM reads a line straight under a table as a row.
   **Leading YAML frontmatter** parses as `Frontmatter`
-  (`app/src/components/documents/editor/frontmatter.ts`) and draws as a
+  (`app/src/components/documents/editor/syntax/frontmatter.ts`) and draws as a
   Properties card, revealing its source when touched.
 - **Toolbar buttons and shortcuts are plain CodeMirror commands**
-  (`app/src/components/documents/editor/commands.ts`) that rewrite markdown
+  (`app/src/components/documents/editor/commands/`) that rewrite markdown
   and unwrap when already applied, so they work in both modes. An inline mark
   (bold, italic, strike, code, link) comes off only the selected text: the
-  span splits around it (`unwrapWithin` in `inlineMarks.ts`, one table of
+  span splits around it (`unwrapWithin` in `commands/inlineMarks.ts`, one table of
   mark kinds), widening to a nested mark's edge rather than crossing it; a
   caret or a full selection drops the whole span. Whitespace at the selection's
   ends is ignored throughout (`trimmed`): ` **a** ` selected is the span `a`. Applying a mark across spans
@@ -90,15 +90,15 @@ last updated (`modified_at` or the session's last save) and a word count.
   link — library files through `libraryLinkTarget` and `openFileSmart`, web
   URLs in the in-app browser; a plain click edits it. Maths is `$…$` (pandoc's
   spacing rule), `\(…\)` (empty included), and `$$` / `\[` blocks on their own lines
-  (`app/src/components/documents/editor/mathSyntax.ts`).
+  (`app/src/components/documents/editor/math/mathSyntax.ts`).
 
 Editor commands, links, maths and completions share `ancestorAt` in
-`app/src/components/documents/editor/syntax.ts`; each caller chooses its caret
+`app/src/components/documents/editor/syntax/syntax.ts`; each caller chooses its caret
 bias and eligibility rules at a construct's boundary.
 
 ## Every editor of a note shares one session
 
-Sessions (`app/src/lib/documentSessions.ts`) are keyed by row id, because
+Sessions (`app/src/lib/notes/documentSessions.ts`) are keyed by row id, because
 tabs stay mounted, a note can be open in a page and its side panel at once, and Fast
 Refresh remounts editors. The session holds the text, the text on disk, the
 600 ms debounce and the one write in flight; writes loop until disk matches,
@@ -120,7 +120,7 @@ leftover out of `list_documents`.
 
 ## Find and replace is the editor's own
 
-Find and replace in either mode is `find.ts`: a literal, case-insensitive
+Find and replace in either mode is `chrome/find.ts`: a literal, case-insensitive
 query, matches marked in the viewport, a step selects the next match, and
 replacing goes through the note's history (Replace All is one undo step). A
 match the find selected counts as touched in Live mode even while the find
@@ -138,7 +138,7 @@ selected.
 ## A note's versions live in the database, never on disk
 
 - **`document_versions` holds the whole text per row**
-  (`app/src/lib/documentVersions.ts`), keyed by the file's row id so a rename
+  (`app/src/lib/notes/documentVersions.ts`), keyed by the file's row id so a rename
   keeps its history, and outside `documents/` so listing, search and agents
   never see them. **Checkpoints** are the student's "Save version" (numbered
   v1, v2… per note, optional label) and never pruned. **Snapshots** are the
@@ -155,7 +155,7 @@ selected.
   deleted or renamed outside the app gets a new row (or none) from
   `reconcileDocuments`, so its history goes with the old row.
 - **History docks inside the editor**
-  (`app/src/components/documents/HistoryPanel.tsx`), not as a side panel
+  (`app/src/components/documents/HistoryPanel/`), not as a side panel
   item, because Replace current goes through that editor's view and the note
   stays beside the version. The header's Save version (⇧⌘S, focused pane
   only; ⌘S stays a flush) flushes first so the checkpoint matches the file.
@@ -168,18 +168,18 @@ selected.
 
 - **A pasted, dropped or picked picture is written beside its note** in
   `documents/assets/`, on arrival, and linked relatively; `FileViewer` and the
-  editor both resolve it with `libraryImageSrc` (`app/src/lib/libraryLinks.ts`).
+  editor both resolve it with `libraryImageSrc` (`app/src/lib/files/libraryLinks.ts`).
   `is_document_rel` demands a `.md` one level down, so nothing can edit
   `assets/`.
 - **`@` mentions a library file**
-  (`app/src/components/documents/editor/mentions.ts`): at a word start,
+  (`app/src/components/documents/editor/chrome/mentions.ts`): at a word start,
   outside maths, code and frontmatter, the query after it (the chat's caps)
   searches every file, parsed or not, of the host's subject — or of the whole
   library when the host has none, each row then naming its subject — leaving
   out the note itself (`searchNoteLinkFiles`); an empty query lists recently
   opened files. It is a source in the one `autocompletion()`. Accepting writes
   the backticked library path the chat composer sends,
-  `` `courses/<code>/files/week-3.pdf` `` (`mentionSyntax.ts`). The subject
+  `` `courses/<code>/files/week-3.pdf` `` (`syntax/mentionSyntax.ts`). The subject
   and note path reach the editor through `NoteHost`; an editor with no file
   passes a null path. `@` lists files only. A `[words](path)` link is the
   writer's own and stays a link; an older `[title](../<path>)` still opens
@@ -187,14 +187,14 @@ selected.
 - **A citation in inline code draws as the chat's chip**: in Live mode, an
   inline code span holding only a citation (`inlineCodeCitation`, the same
   `parseCitation` test chat applies) is replaced by `CitationWidget`
-  (`widgets.ts`), which mounts `CitationCode` — and so `FileChip` — in a React
+  (`live-preview/widgets/citation.ts`), which mounts `CitationCode` — and so `FileChip` — in a React
   root of its own, under a `TooltipProvider` for the picture lightbox. A
   click opens the file (⌘ in a new tab) without moving the caret; the source
   shows while the selection touches the span. Raw mode shows the text.
 
 ## AI suggestions are ghost text at the caret
 
-They come from `app/src/components/documents/editor/aiSuggest.ts` and are off
+They come from `app/src/components/documents/editor/chrome/aiSuggest.ts` and are off
 by default
 (`document_suggestions_enabled`; the topbar's `SuggestToggle`, shared by
 every note through `documentPrefsStore`). 500 ms after an edit, with one
@@ -232,11 +232,11 @@ cannot wait on the blur (the chat's pasted text editor,
 
 - **CodeMirror block decorations come from a `StateField`** — it throws for
   block widgets from a view plugin
-  (`app/src/components/documents/editor/livePreview.ts`). Reveal-on-caret
+  (`app/src/components/documents/editor/live-preview/livePreview/`). Reveal-on-caret
   decorations rebuild on selection and focus changes, not only edits.
 - **An editable widget must patch itself in `updateDOM`** — every edit rebuilds
   the field, and fresh widget DOM drops the caret in a focused table cell
-  (`app/src/components/documents/editor/table.ts`).
+  (`app/src/components/documents/editor/live-preview/table/`).
 - **`@codemirror/view` is patched** (`app/patches/`) — its scroller search took
   any box whose `scrollHeight` beat `clientHeight`, and under page zoom the
   editor's `overflow: visible` wrappers round a pixel over, so drag-select never

@@ -1,58 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { useNow } from "@/hooks/useNow";
+import { useNow } from "@/hooks/ui/useNow";
 import {
-  durationMinutes,
-  fmtEventTime,
   groupEventsByDay,
   hourRange,
   isInstant,
-  isPast,
-  isSelfImposed,
   minutesFromMidnight,
-  shortLocation,
   weekDays,
   type CalEvent,
-  type CalKind,
-} from "@/lib/calendar";
-import { sameDay, startOfDay } from "@/lib/format";
-import { packLanes } from "@/lib/lanes";
+} from "@/lib/planning/calendar";
+import { sameDay, startOfDay } from "@/lib/format/format";
+import { packLanes } from "@/lib/planning/lanes";
 import { EventMark } from "./EventMark";
-import { EventPopover } from "./EventPopover";
-
-/** `Extract`, so a renamed {@link CalKind} breaks here too. */
-type StripKind = Extract<CalKind, "due" | "note" | "task">;
-
-const STRIP_LABEL: Record<StripKind, string> = {
-  due: "Due",
-  note: "Notes",
-  task: "Tasks",
-};
-
-const HOUR_PX = 46;
-const GUTTER = "3.25rem";
-/** Narrowest the week draws (gutter + 7×96px); below it the view scrolls
- *  sideways, since a narrower column cannot hold even a truncated title. */
-const MIN_GRID_PX = 724;
-const FULL_DAY_KEY = "calendar-full-day";
-/** Deadline marker height, and its inset from the grid's edges. */
-const MARKER_PX = 16;
-const MARKER_INSET = 2;
-/** The shortest a class block is drawn, however little time it covers. */
-const BLOCK_MIN_PX = 16;
-
-/** Subject-hue tint for an instant's pill: self-imposed items (notes, tasks)
- *  and past ones are washed out beside a real deadline. */
-function tintPct(e: CalEvent, gone: boolean, full: number): number {
-  const base = isSelfImposed(e) ? full * 0.6 : full;
-  return Math.round(gone ? base * 0.6 : base);
-}
-
-/** A class's span in epoch ms, for {@link packLanes}. */
-function classSpan(e: CalEvent) {
-  const start = e.start.getTime();
-  return { start, end: start + durationMinutes(e) * 60_000 };
-}
+import { ClassBlock } from "@/components/calendar/week/ClassBlock";
+import {
+  FULL_DAY_KEY,
+  GUTTER,
+  HOUR_PX,
+  MIN_GRID_PX,
+  STRIP_LABEL,
+  classSpan,
+  type StripKind,
+} from "@/components/calendar/week/constants";
+import { InstantMarker } from "@/components/calendar/week/InstantMarker";
+import { NowLine } from "@/components/calendar/week/NowLine";
+import { PastWash } from "@/components/calendar/week/PastWash";
+import { StripPill } from "@/components/calendar/week/StripPill";
 
 /**
  * The timetable: a Monday-first hour grid of classes, with deadlines in a strip
@@ -203,43 +176,9 @@ export function WeekView({
                   key={d.toISOString()}
                   className="min-w-0 border-l border-border-subtle px-1 py-1 space-y-0.5"
                 >
-                  {(stripDueByDay.get(startOfDay(d).getTime()) ?? []).map((e) => {
-                      const gone = isPast(e, today);
-                      const tone = gone
-                        ? "var(--color-chart-other)"
-                        : (colors.get(e.subjectId) ?? "");
-                      return (
-                        <EventPopover key={e.id} event={e} color={colors.get(e.subjectId) ?? ""}>
-                          <button
-                            type="button"
-                            className="flex w-full min-w-0 items-center gap-1 rounded-[4px] border-l-2 px-1.5 py-0.5 text-left transition-colors hover:brightness-95 dark:hover:brightness-125"
-                            style={{
-                              borderLeftColor: tone,
-                              backgroundColor: `color-mix(in srgb, ${tone} ${tintPct(
-                                e,
-                                gone,
-                                20,
-                              )}%, var(--color-card))`,
-                            }}
-                          >
-                            <EventMark kind={e.kind} color={tone} size={9} />
-                            {!e.allDay && (
-                              <span className="shrink-0 text-[9.5px] tabular-nums leading-4 text-muted-foreground">
-                                {fmtEventTime(e)}
-                              </span>
-                            )}
-                            <span
-                              className={cn(
-                                "truncate text-[10.5px] font-medium leading-4",
-                                gone ? "text-muted-foreground" : "text-foreground",
-                              )}
-                            >
-                              {e.title}
-                            </span>
-                          </button>
-                        </EventPopover>
-                      );
-                    })}
+                  {(stripDueByDay.get(startOfDay(d).getTime()) ?? []).map((e) => (
+                    <StripPill key={e.id} event={e} today={today} colors={colors} />
+                  ))}
                 </div>
               ))}
             </div>
@@ -292,169 +231,37 @@ export function WeekView({
                       <NowLine fromHour={fromHour} toHour={toHour} />
                     )}
 
-                    {laid.map(({ item: event, lane, of }) => {
-                      // Clamped into the grid like the markers: Canvas publishes
-                      // 11:59pm–11:59pm "classes" that would hang off the bottom.
-                      // A block with real length is shortened, not moved.
-                      const exact =
-                        ((minutesFromMidnight(event.start) - fromHour * 60) / 60) * HOUR_PX;
-                      const wanted = Math.max(
-                        BLOCK_MIN_PX,
-                        (durationMinutes(event) / 60) * HOUR_PX - 2,
-                      );
-                      const height = Math.max(
-                        BLOCK_MIN_PX,
-                        Math.min(wanted, gridHeight - exact),
-                      );
-                      const top = Math.max(0, Math.min(exact, gridHeight - height));
-                      const color = colors.get(event.subjectId) ?? "";
-                      // A finished class loses its subject colour.
-                      const gone = isPast(event, today);
-                      const tone = gone ? "var(--color-chart-other)" : color;
-                      return (
-                        <EventPopover key={event.id} event={event} color={color}>
-                          <button
-                            type="button"
-                            className="absolute overflow-hidden rounded-[4px] border-l-2 px-1.5 py-0.5 text-left transition-colors hover:brightness-95 dark:hover:brightness-125"
-                            style={{
-                              top,
-                              height,
-                              left: `calc(${(lane / of) * 100}% + 2px)`,
-                              width: `calc(${100 / of}% - 4px)`,
-                              borderLeftColor: tone,
-                              backgroundColor: `color-mix(in srgb, ${tone} ${gone ? 12 : 18}%, var(--color-card))`,
-                            }}
-                          >
-                            <span
-                              className={cn(
-                                "block truncate text-[10.5px] font-medium leading-4",
-                                gone ? "text-muted-foreground" : "text-foreground",
-                              )}
-                            >
-                              {event.title}
-                            </span>
-                            {height > 30 && (
-                              <span className="block truncate text-[10px] leading-3.5 text-muted-foreground">
-                                {fmtEventTime(event)}
-                                {event.location ? ` · ${shortLocation(event.location)}` : ""}
-                              </span>
-                            )}
-                          </button>
-                        </EventPopover>
-                      );
-                    })}
+                    {laid.map(({ item: event, lane, of }) => (
+                      <ClassBlock
+                        key={event.id}
+                        event={event}
+                        lane={lane}
+                        of={of}
+                        fromHour={fromHour}
+                        gridHeight={gridHeight}
+                        today={today}
+                        colors={colors}
+                      />
+                    ))}
 
                     {/* Instants land at their own time, over the classes. */}
                     {(eventsByDay.get(startOfDay(day).getTime()) ?? [])
                       .filter(placeable)
-                      .map((e) => {
-                        const gone = isPast(e, today);
-                        const tone = gone
-                          ? "var(--color-chart-other)"
-                          : (colors.get(e.subjectId) ?? "");
-                        // Centred on the minute, then pulled back inside the grid
-                        // (11:59pm would hang half off) — by at most half its height,
-                        // so it stays on the right hour.
-                        const exact =
-                          ((minutesFromMidnight(e.start) - fromHour * 60) / 60) * HOUR_PX;
-                        const top = Math.min(
-                          Math.max(exact - MARKER_PX / 2, MARKER_INSET),
-                          Math.max(
-                            MARKER_INSET,
-                            gridHeight - MARKER_PX - MARKER_INSET,
-                          ),
-                        );
-                        return (
-                          <EventPopover
-                            key={e.id}
-                            event={e}
-                            color={colors.get(e.subjectId) ?? ""}
-                          >
-                            <button
-                              type="button"
-                              className="absolute z-20 flex min-w-0 items-center gap-1 overflow-hidden rounded-[3px] border-l-2 px-1 text-left shadow-xs transition-colors hover:brightness-95 dark:hover:brightness-125"
-                              style={{
-                                top,
-                                height: MARKER_PX,
-                                left: 2,
-                                right: 2,
-                                borderLeftColor: tone,
-                                backgroundColor: `color-mix(in srgb, ${tone} ${tintPct(
-                                  e,
-                                  gone,
-                                  38,
-                                )}%, var(--color-card))`,
-                              }}
-                            >
-                              <EventMark kind={e.kind} color={tone} size={9} />
-                              <span
-                                className={cn(
-                                  "truncate text-[10px] font-medium leading-4",
-                                  gone ? "text-muted-foreground" : "text-foreground",
-                                )}
-                              >
-                                {e.title}
-                              </span>
-                            </button>
-                          </EventPopover>
-                        );
-                      })}
+                      .map((e) => (
+                        <InstantMarker
+                          key={e.id}
+                          event={e}
+                          fromHour={fromHour}
+                          gridHeight={gridHeight}
+                          today={today}
+                          colors={colors}
+                        />
+                      ))}
                   </div>
                 );
               })}
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * Grey over elapsed time. Mixed from muted-foreground, since `surface` is too
- * close to the page background to read in both themes.
- */
-function PastWash({
-  day,
-  now,
-  fromHour,
-  gridHeight,
-}: {
-  day: Date;
-  now: Date;
-  fromHour: number;
-  gridHeight: number;
-}) {
-  let height = 0;
-  if (sameDay(day, now)) {
-    const elapsed = (minutesFromMidnight(now) - fromHour * 60) / 60;
-    height = Math.min(gridHeight, Math.max(0, elapsed * HOUR_PX));
-  } else if (day.getTime() < startOfDay(now).getTime()) {
-    height = gridHeight;
-  }
-  if (height <= 0) return null;
-  return (
-    <div
-      className="pointer-events-none absolute inset-x-0 top-0"
-      style={{
-        height,
-        backgroundColor:
-          "color-mix(in srgb, var(--color-muted-foreground) 9%, transparent)",
-      }}
-    />
-  );
-}
-
-/** The current time across today's column, only while inside the grid's hours. */
-function NowLine({ fromHour, toHour }: { fromHour: number; toHour: number }) {
-  const now = new Date();
-  const mins = minutesFromMidnight(now);
-  if (mins < fromHour * 60 || mins > toHour * 60) return null;
-  const top = ((mins - fromHour * 60) / 60) * HOUR_PX;
-  return (
-    <div
-      className="pointer-events-none absolute inset-x-0 z-10 border-t border-destructive"
-      style={{ top }}
-    >
-      <span className="absolute -left-1 -top-[3px] block h-1.5 w-1.5 rounded-full bg-destructive" />
     </div>
   );
 }

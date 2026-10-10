@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Warning } from "@phosphor-icons/react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useTauriEvent } from "@/hooks/useEvents";
-import { expiryDate, resultCertState, type ResultCertState } from "@/lib/resultCert";
+import { useTauriEvent } from "@/hooks/backend/useEvents";
+import { expiryDate, resultCertState, type ResultCertState } from "@/lib/pipeline/resultCert";
 
 /**
  * A warning icon while parse results download through MinerU's expired CDN

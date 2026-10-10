@@ -2,21 +2,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Chat, FileText, FileVideo, Play, type Icon } from "@phosphor-icons/react";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { useScrollFade } from "@/hooks/useScrollFade";
-import { lectureLabel } from "@/lib/calendar";
-import { isVideoFile } from "@/lib/fileTypes";
-import { displayCode, fmtAgo, sqliteUtcToMs } from "@/lib/format";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
+import { lectureLabel } from "@/lib/planning/calendar";
+import { isVideoFile } from "@/lib/files/fileTypes";
+import { displayCode, fmtAgo, sqliteUtcToMs } from "@/lib/format/format";
 import { chatHref } from "@/lib/harness";
-import { loadRecent, type RecentItem } from "@/lib/home";
+import { loadRecent, type RecentItem } from "@/lib/activity/home";
 import { LECTURES_CHANGED_EVENT, lecturePagePath } from "@/lib/lectures";
 import {
   FILE_ACCESSED_EVENT,
   filePageHref,
   fileTitle,
   openFileSmart,
-} from "@/lib/openFile";
-import { openBeside } from "@/lib/tabRouters";
-import { useHarnessStore } from "@/stores/harnessStore";
+} from "@/lib/files/openFile";
+import { openBeside } from "@/lib/shell/tabRouters";
+import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { useHomeSection } from "./useHomeSection";
 
 /**
@@ -110,7 +110,7 @@ function Card({
   /** Watched fraction, lectures only. */
   let watched: number | null = null;
   let open = () => {};
-  /* ⌘-click target (`lib/newTabClicks.ts`); threads have no page of their own. */
+  /* ⌘-click target (`lib/shell/newTabClicks.ts`); threads have no page of their own. */
   let tabHref: string | null = null;
 
   if (item.kind === "lecture") {

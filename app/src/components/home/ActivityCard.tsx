@@ -1,42 +1,13 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  ArrowDown,
-  ArrowUp,
-  BookOpen,
-  ChartBar,
-  Chat,
-  DotsThree,
-  FileText,
-  Flame,
-  Globe,
-  House,
-  Sun,
-  Timer,
-  VideoCamera,
-  type Icon,
-} from "@phosphor-icons/react";
-import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { useTabActive } from "@/components/tabs/TabContext";
-import { PillTabs } from "@/components/ui/PillTabs";
+import { useMemo, useState } from "react";
+import { ChartBar, Flame, Sun, Timer } from "@phosphor-icons/react";
+import { PillTabs } from "@/components/ui/table/PillTabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useStoredState } from "@/hooks/useStoredState";
-import { useSubjects } from "@/hooks/useSubjects";
-import { CALENDAR_UPDATED_EVENT, loadCalendar, subjectColors } from "@/lib/calendar";
-import type { Subject } from "@/lib/db";
-import { displayCode } from "@/lib/format";
-import { PROJECTS_UPDATED_EVENT } from "@/lib/projects";
+import { useStoredState } from "@/hooks/ui/useStoredState";
 import { cn } from "@/lib/utils";
 import {
-  CHART_DAYS,
-  NO_SUBJECT_SERIES,
-  OTHER_SUBJECTS,
   bestStreak,
-  chartDays,
-  dayKey,
   fmtUsage,
   hourStep,
-  loadUsageContext,
-  loadUsageDays,
   perDayUsed,
   percentChange,
   rangeTotals,
@@ -44,80 +15,24 @@ import {
   stackByType,
   usageStreak,
   type ChartDay,
-  type TypeGroup,
-  type UsageContextRow,
-  type UsageDay,
-} from "@/lib/usage";
-import { useHomeSection } from "./useHomeSection";
-
-/** The pings land in `usage_hours` with no event, so the card polls. */
-const EVENTS: string[] = [];
-const POLL_MS = 5 * 60_000;
-
-/** Subject colours come from the calendar's rows, which change on sync and on
- *  task writes — the same events `UpcomingCard` re-reads on. */
-const COLOR_EVENTS = [CALENDAR_UPDATED_EVENT, PROJECTS_UPDATED_EVENT];
-
-type View = "time" | "subject" | "type";
-
-const VIEW_TABS: ReadonlyArray<{ value: View; label: string }> = [
-  { value: "time", label: "Time" },
-  { value: "subject", label: "Subject" },
-  { value: "type", label: "Type" },
-];
-
-const VIEW_KEY = "oculus-home-activity-view";
-
-const readView = (raw: string | null): View =>
-  VIEW_TABS.some((t) => t.value === raw) ? (raw as View) : "time";
-
-/** Active time is the brand; the rest of the open time a tint of it, stacked
- *  above, so a bar's full height is the time the window was open. Tints mix
- *  with the card, not `transparent`, so a gridline never shows through a bar. */
-const ACTIVE_FILL = "var(--color-brand)";
-const IDLE_FILL = "color-mix(in srgb, var(--color-brand) 28%, var(--color-card))";
-
-/** Plot height in px; bars are sized in px against it, less the 2px gap a
- *  stacked bar spends between its segments. */
-const PLOT_PX = 144;
-
-/** What the 30-day figures compare against. */
-const PRIOR = `prior ${CHART_DAYS} days`;
-
-/** A date label under every seventh bar, counted back from today's. */
-const LABEL_EVERY = 7;
-
-const OTHER_FILL = "var(--color-chart-other)";
-
-/** The Type view's series, in `TYPE_GROUPS` order: chart colours in sequence,
- *  the catch-all grey. */
-const TYPE_SERIES: Record<TypeGroup, { label: string; icon: Icon; color: string }> = {
-  lectures: { label: "Lectures", icon: VideoCamera, color: "var(--color-chart-1)" },
-  files: { label: "Files & notes", icon: FileText, color: "var(--color-chart-2)" },
-  course: { label: "Course pages", icon: BookOpen, color: "var(--color-chart-3)" },
-  chat: { label: "Chat", icon: Chat, color: "var(--color-chart-4)" },
-  browser: { label: "Browser", icon: Globe, color: "var(--color-chart-5)" },
-  // Pages outside the kinds above: Home, planning, settings, sync.
-  other: { label: "General", icon: House, color: OTHER_FILL },
-};
-
-/** One stacked series as the legend and the hover card draw it. */
-interface Series {
-  key: string;
-  label: string;
-  color: string;
-  /** The legend's mark in place of a plain swatch. */
-  legendMark?: ReactNode;
-  /** The hover card's mark before the label. */
-  mark: ReactNode;
-}
-
-/** A bar segment, bottom first. */
-interface Segment {
-  key: string;
-  seconds: number;
-  color: string;
-}
+} from "@/lib/activity/usage";
+import { Change, Stat } from "@/components/home/activity/ActivityStats";
+import {
+  ACTIVE_FILL,
+  IDLE_FILL,
+  LABEL_EVERY,
+  PLOT_PX,
+  PRIOR,
+  VIEW_KEY,
+  VIEW_TABS,
+  readView,
+} from "@/components/home/activity/constants";
+import { DayCard } from "@/components/home/activity/DayCard";
+import { plural, rangeLine, shortDate } from "@/components/home/activity/format";
+import { subjectSeries, typeSeries } from "@/components/home/activity/series";
+import { Swatch } from "@/components/home/activity/Swatch";
+import type { Segment, Series } from "@/components/home/activity/types";
+import { useActivityData } from "@/components/home/activity/useActivityData";
 
 /**
  * App use over the last 30 days: a row of stat cards from `usage_hours`, then
@@ -127,53 +42,9 @@ interface Segment {
  * Hovering a day opens a card over its bar with that day's figures.
  */
 export function ActivityCard({ now }: { now: Date }) {
-  const [days, setDays] = useState<Map<string, UsageDay> | null>(null);
-  const [context, setContext] = useState<UsageContextRow[] | null>(null);
   const [hovered, setHovered] = useState<ChartDay | null>(null);
   const [view, setView] = useStoredState(VIEW_KEY, readView);
-  const [colors, setColors] = useState<Map<number, string>>(new Map());
-  const { subjects } = useSubjects();
-  const active = useTabActive();
-
-  // Keyed on the date, so the minute tick of `now` doesn't rebuild the range.
-  const today = dayKey(now);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const range = useMemo(() => chartDays(now), [today]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const prior = useMemo(() => chartDays(now, 1), [today]);
-
-  const reload = useCallback(() => {
-    loadUsageDays(new Date())
-      .then(setDays)
-      .catch((e) => {
-        console.error(e);
-        setDays(new Map());
-      });
-    loadUsageContext(new Date())
-      .then(setContext)
-      .catch((e) => {
-        console.error(e);
-        setContext([]);
-      });
-  }, []);
-
-  useHomeSection(reload, EVENTS);
-
-  // Only the Subject view needs the calendar, so the read waits for it.
-  const reloadColors = useCallback(() => {
-    if (view !== "subject") return;
-    loadCalendar()
-      .then((events) => setColors(subjectColors(events)))
-      .catch(console.error);
-  }, [view]);
-
-  useHomeSection(reloadColors, COLOR_EVENTS);
-
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(reload, POLL_MS);
-    return () => clearInterval(id);
-  }, [active, reload]);
+  const { days, context, colors, subjects, today, range, prior } = useActivityData(now, view);
 
   const totals = days && rangeTotals(days, range);
   const priorTotals = days && rangeTotals(days, prior);
@@ -402,158 +273,4 @@ export function ActivityCard({ now }: { now: Date }) {
       </section>
     </div>
   );
-}
-
-/** One active-time figure under its icon and label, with a comparison or a
- *  note below; blank until the first read lands, so the row holds its height. */
-function Stat({
-  icon: Glyph,
-  label,
-  value,
-  detail,
-}: {
-  icon: Icon;
-  label: string;
-  value: string | null | undefined;
-  detail: ReactNode;
-}) {
-  return (
-    <div className="rounded-lg border border-border px-3.5 py-3">
-      <p className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-        <Glyph className="size-3.5" />
-        {label}
-      </p>
-      <p className="mt-1 h-6 text-[20px] font-semibold leading-6 tabular-nums text-foreground">
-        {value}
-      </p>
-      <div className="mt-0.5 h-4 truncate text-[11px] leading-4 tabular-nums text-muted-foreground">
-        {detail}
-      </div>
-    </div>
-  );
-}
-
-/** "↑ 12% vs prior 30 days"; "No data" with nothing earlier to compare. */
-function Change({ pct, against }: { pct: number | null; against: string }) {
-  if (pct === null) return <>No data</>;
-  const Arrow = pct > 0 ? ArrowUp : pct < 0 ? ArrowDown : null;
-  return (
-    <span className="flex min-w-0 items-center gap-1">
-      <span
-        className={cn(
-          "flex shrink-0 items-center gap-0.5 font-medium",
-          pct > 0 && "text-success",
-          pct < 0 && "text-destructive",
-        )}
-      >
-        {Arrow && <Arrow weight="bold" className="size-3" />}
-        {Math.abs(pct)}%
-      </span>
-      <span className="truncate">vs {against}</span>
-    </span>
-  );
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-
-/** "6 Oct". */
-function shortDate(d: Date): string {
-  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
-}
-
-/** "7 Sep – 6 Oct". */
-function rangeLine(range: ChartDay[]): string {
-  return `${shortDate(range[0].date)} – ${shortDate(range[range.length - 1].date)}`;
-}
-
-/** "Tue 6 Oct" over each series with time that day: its mark, label and time. */
-function DayCard({ day, series, values }: { day: ChartDay; series: Series[]; values: number[] }) {
-  const date = day.date.toLocaleDateString("en-AU", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
-  const rows = series
-    .map((s, i) => ({ s, seconds: values[i] ?? 0 }))
-    .filter((r) => r.seconds > 0);
-  return (
-    <div className="min-w-32">
-      <p className="font-medium">{date}</p>
-      {rows.length === 0 ? (
-        <p className="mt-0.5 opacity-70">No activity</p>
-      ) : (
-        <div className="mt-1 space-y-0.5">
-          {rows.map(({ s, seconds }) => (
-            <div key={s.key} className="flex items-center gap-1.5">
-              {s.mark}
-              <span className="min-w-0 flex-1 truncate">{s.label}</span>
-              <span className="pl-2 tabular-nums">{fmtUsage(seconds)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Swatch({ color }: { color: string }) {
-  return <span className="size-2.5 shrink-0 rounded-[2px]" style={{ background: color }} />;
-}
-
-/** A type group's series: its icon in its colour stands in for the swatch. */
-function typeSeries(key: string): Series {
-  const t = TYPE_SERIES[key as TypeGroup];
-  return {
-    key,
-    label: t.label,
-    color: t.color,
-    legendMark: <t.icon weight="fill" className="size-3 shrink-0" style={{ color: t.color }} />,
-    mark: <t.icon weight="fill" className="size-3.5" style={{ color: t.color }} />,
-  };
-}
-
-/**
- * A subject's series: its code, in the calendar's colour for it, and its glyph
- * in the hover card. A subject with no calendar rows takes a chart colour by
- * id, which stays the same from day to day.
- */
-function subjectSeries(
-  key: string,
-  byId: Map<number, Subject>,
-  colors: Map<number, string>,
-): Series {
-  if (key === NO_SUBJECT_SERIES || key === OTHER_SUBJECTS) {
-    const none = key === NO_SUBJECT_SERIES;
-    const Glyph = none ? House : DotsThree;
-    // Folded subjects take a tint of the grey, so the two never read as one.
-    const color = none ? OTHER_FILL : `color-mix(in srgb, ${OTHER_FILL} 50%, var(--color-card))`;
-    return {
-      key,
-      // Time on pages outside any subject: Home, chat, the browser, planning.
-      label: none ? "General" : "Other subjects",
-      color,
-      mark: (
-        <>
-          <Swatch color={color} />
-          <Glyph className="size-3" />
-        </>
-      ),
-    };
-  }
-  const id = Number(key);
-  const subject = byId.get(id);
-  const color = colors.get(id) ?? `var(--color-chart-${(id % 5) + 1})`;
-  return {
-    key,
-    label: subject ? displayCode(subject.code) : "Unknown subject",
-    color,
-    mark: (
-      <>
-        <Swatch color={color} />
-        {subject && <SubjectIcon code={subject.code} size={12} />}
-      </>
-    ),
-  };
 }

@@ -15,18 +15,18 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { PARSE_TONE_CLASS, parseStateOf, type ParseState } from "@/lib/parseState";
-import { isPdfBacked } from "@/lib/fileTypes";
-import { navigateActive } from "@/lib/tabRouters";
-import { openFileParseDetails } from "@/lib/openFile";
-import { parseFile, parseSkipped } from "@/lib/courseFiles";
-import { useParseStore } from "@/stores/parseStore";
-import { usePipelineStore } from "@/stores/pipelineStore";
+import { PARSE_TONE_CLASS, parseStateOf, type ParseState } from "@/lib/pipeline/parseState";
+import { isPdfBacked } from "@/lib/files/fileTypes";
+import { navigateActive } from "@/lib/shell/tabRouters";
+import { openFileParseDetails } from "@/lib/files/openFile";
+import { parseFile, parseSkipped } from "@/lib/files/courseFiles";
+import { useParseStore } from "@/stores/sync/parseStore";
+import { usePipelineStore } from "@/stores/sync/pipelineStore";
 import type { DbFile } from "@/lib/db";
 
 /**
  * The two renderings of a file's parse state (vocabulary in
- * `app/src/lib/parseState.ts`). Only PDF-backed files have one; everything
+ * `app/src/lib/pipeline/parseState.ts`). Only PDF-backed files have one; everything
  * here is `null` for anything else.
  */
 
@@ -204,7 +204,7 @@ export function MarkdownUnavailable({
         <Button
           variant="ghost"
           size="xs"
-          /* Opt out of the row's ⌘-click (`lib/newTabClicks.ts`). */
+          /* Opt out of the row's ⌘-click (`lib/shell/newTabClicks.ts`). */
           data-tab-skip
           className={cn(
             "shrink-0 text-[11px] font-normal",

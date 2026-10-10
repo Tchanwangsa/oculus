@@ -4,11 +4,11 @@ import { BookmarkSimple, CircleNotch, ClockCounterClockwise } from "@phosphor-ic
 import { useTabActive, useTabId } from "@/components/tabs/TabContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PillTabs } from "@/components/ui/PillTabs";
+import { PillTabs } from "@/components/ui/table/PillTabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import type { DocumentVersion } from "@/lib/documentVersions";
+import type { DocumentVersion } from "@/lib/notes/documentVersions";
 import { cn } from "@/lib/utils";
-import { useActivePaneId } from "@/stores/tabStore";
+import { useActivePaneId } from "@/stores/shell/tabStore";
 import { SuggestToggle } from "./SuggestToggle";
 
 export type EditorMode = "live" | "raw";

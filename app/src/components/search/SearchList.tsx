@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * The result list for ⌘K (`app/src/components/palette/CommandPalette.tsx`) and
- * the new-tab page (`app/src/pages/NewTabPage.tsx`). Items and picking live in
- * `app/src/lib/search.ts`; nothing here reads the library or navigates.
+ * the new-tab page (`app/src/pages/start/NewTabPage.tsx`). Items and picking live in
+ * `app/src/lib/search/index.ts`; nothing here reads the library or navigates.
  */
 
 export function SearchGlyph({ spec, size = 15 }: { spec: IconSpec; size?: number }) {

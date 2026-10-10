@@ -1,11 +1,11 @@
 import { useEffect } from "react";
-import { applyTheme, getStoredTheme, watchSystemTheme } from "@/lib/theme";
+import { applyTheme, getStoredTheme, watchSystemTheme } from "@/lib/ui/theme";
 import { getDb, reconcileStaleSyncRuns } from "@/lib/db";
-import { useBackendEvents } from "@/hooks/useBackendEvents";
-import { useQualitySweep } from "@/hooks/useQualitySweep";
-import { watchNewFiles } from "@/stores/newFilesStore";
-import { watchLectureDownloads } from "@/stores/lectureDownloadStore";
-import { restoreIndexQueue } from "@/stores/indexStore";
+import { useBackendEvents } from "@/hooks/backend/useBackendEvents";
+import { useQualitySweep } from "@/hooks/sync/useQualitySweep";
+import { watchNewFiles } from "@/stores/sync/newFilesStore";
+import { watchLectureDownloads } from "@/stores/lectures/lectureDownloadStore";
+import { restoreIndexQueue } from "@/stores/sync/indexStore";
 import AppLayout from "@/layouts/AppLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 

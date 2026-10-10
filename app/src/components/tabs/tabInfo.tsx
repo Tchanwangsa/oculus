@@ -14,12 +14,12 @@ import {
   ListChecks,
 } from "@phosphor-icons/react";
 import { browseId, hostOf, type BrowserTab } from "@/lib/browser";
-import { faviconFor } from "@/hooks/useBrowserTabs";
-import { useSubjects } from "@/hooks/useSubjects";
-import { useBrowserStore } from "@/stores/browserStore";
+import { faviconFor } from "@/hooks/shell/useBrowserTabs";
+import { useSubjects } from "@/hooks/data/useSubjects";
+import { useBrowserStore } from "@/stores/shell/browserStore";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { displayCode, humanizeSlug } from "@/lib/format";
-import { SETTINGS_PAGES } from "@/lib/settingsSearch";
+import { displayCode, humanizeSlug } from "@/lib/format/format";
+import { SETTINGS_PAGES } from "@/lib/search/settings";
 import type { Subject } from "@/lib/db";
 
 const SECTION_LABELS: Record<string, string> = {

@@ -24,7 +24,7 @@ const FORBIDDEN = [
 
 // The one file allowed to name an otherwise forbidden word: the keychain
 // fallback `Secret`, which goes when keyd is always installed.
-const ALLOWED = new Map([["src-tauri/src/credentials/keychain.rs", ["keyring::"]]]);
+const ALLOWED = new Map([["src-tauri/src/providers/credentials/keychain.rs", ["keyring::"]]]);
 
 const platform = join(app, "keyd", "core", "src", "platform");
 
@@ -38,11 +38,10 @@ function rustFiles(path) {
 const scoped = [
   join(app, "keyd", "src"),
   join(app, "keyd", "core", "src"),
-  join(app, "src-tauri", "src", "credentials"),
-  join(app, "src-tauri", "src", "credentials.rs"),
-  join(app, "src-tauri", "src", "okta"),
-  join(app, "src-tauri", "src", "keyd"),
-  join(app, "src-tauri", "src", "bin", "oculus", "keyd.rs"),
+  join(app, "src-tauri", "src", "providers", "credentials"),
+  join(app, "src-tauri", "src", "auth", "okta"),
+  join(app, "src-tauri", "src", "auth", "keyd"),
+  join(app, "src-tauri", "src", "bin", "oculus", "commands", "keyd.rs"),
 ].flatMap(rustFiles);
 
 test("the scope covers keyd's main, core's logic and the app's keyd code", () => {
@@ -51,8 +50,8 @@ test("the scope covers keyd's main, core's logic and the app's keyd code", () =>
     "keyd/src/main.rs",
     "keyd/core/src/server.rs",
     "keyd/core/src/client.rs",
-    "src-tauri/src/keyd/mod.rs",
-    "src-tauri/src/okta/mod.rs",
+    "src-tauri/src/auth/keyd/mod.rs",
+    "src-tauri/src/auth/okta/mod.rs",
     ...ALLOWED.keys(),
   ]) {
     expect(names).toContain(f);

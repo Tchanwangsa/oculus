@@ -141,9 +141,7 @@ impl AgentPrinter {
     }
 }
 
-pub(crate) use app_lib::chapters::hms as clock;
-
-// ── Terminal reporter ────────────────────────────────────────────────────────
+pub(crate) use app_lib::lectures::chapters::hms as clock;
 
 /// One line per artifact, remembered for one database write at the end.
 
@@ -232,8 +230,6 @@ pub(crate) fn human_bytes(n: u64) -> String {
         format!("{n} B")
     }
 }
-
-// ── Colour ───────────────────────────────────────────────────────────────────
 
 pub(crate) const DIM: &str = "\x1b[2m";
 pub(crate) const BOLD: &str = "\x1b[1m";

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { useNow } from "@/hooks/useNow";
+import { useNow } from "@/hooks/ui/useNow";
 import {
   fmtEventTime,
   groupEventsByDay,
@@ -9,8 +9,8 @@ import {
   isSelfImposed,
   monthGrid,
   type CalEvent,
-} from "@/lib/calendar";
-import { sameDay, startOfDay } from "@/lib/format";
+} from "@/lib/planning/calendar";
+import { sameDay, startOfDay } from "@/lib/format/format";
 import {
   Popover,
   PopoverContent,

@@ -6,7 +6,7 @@
 use tauri::AppHandle;
 
 use super::{EmbedError, Progress};
-use crate::pipeline_events::{Channel, Status};
+use crate::runtime::pipeline_events::{Channel, Status};
 
 static CHANNEL: Channel = Channel::new("embed-status");
 

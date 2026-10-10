@@ -8,22 +8,22 @@ cookie.
 | Piece | Location |
 | --- | --- |
 | The app's side of the sign-in: login window, hand-over from a login window or browser tab, startup restore, sign-out, the CLI's sign-in watch | `app/src-tauri/src/auth/` |
-| Canvas requests through keyd's `canvas` route; session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas/` |
-| The app's Okta commands and calls: each goes to keyd; only the credential calls fall back to the keychain when keyd is absent | `app/src-tauri/src/okta/` |
+| Canvas requests through keyd's `canvas` route; session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/sources/canvas/` |
+| The app's Okta commands and calls: each goes to keyd; only the credential calls fall back to the keychain when keyd is absent | `app/src-tauri/src/auth/okta/` |
 | The sign-in flow, TOTP and the attempt guard; it runs only inside keyd | `app/keyd/core/src/okta/` |
 | keyd's Okta ops: the vault entries, the old-item import, one sign-in at a time; the role check every op passes | `app/keyd/core/src/ops/okta.rs`, `app/keyd/core/src/ops.rs` |
 | Staging the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Startup probe | `app/src-tauri/src/auth/startup.rs` |
-| Removing a leftover keep-alive agent at startup | `app/src-tauri/src/legacy_agent.rs`, `app/keyd/core/src/platform/macos/registrar.rs` |
-| Ed token minting via LTI | `app/src-tauri/src/ed.rs` |
-| Echo360 session via LTI, per-course cache | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
-| Frontend auth state | `app/src/hooks/useAuth.ts` |
-| Handing the session to the in-app browser | `app/src-tauri/src/browser/` |
-| Keychain entry lifecycle (the fallback for the Okta credentials and for MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/credentials/keychain.rs` (`Secret`), `app/src-tauri/src/credentials.rs` |
+| Removing a leftover keep-alive agent at startup | `app/src-tauri/src/auth/legacy_agent.rs`, `app/keyd/core/src/platform/macos/registrar.rs` |
+| Ed token minting via LTI | `app/src-tauri/src/sources/ed/lti.rs` |
+| Echo360 session via LTI, per-course cache | `app/src-tauri/src/sources/echo360/auth.rs`, `app/src-tauri/src/lectures/mod.rs` |
+| Frontend auth state | `app/src/hooks/sync/useAuth.ts` |
+| Handing the session to the in-app browser | `app/src-tauri/src/shell/browser/seed.rs` |
+| Keychain entry lifecycle (the fallback for the Okta credentials and for MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/providers/credentials/keychain.rs` (`Secret`), `app/src-tauri/src/providers/credentials/mod.rs` |
 | keyd's login sessions: the vault entries, the cookie rule shared with the sign-in's jar, the two markers, the `session_*` ops and `sign_out`, the one-time import of the old session files | `app/keyd/core/src/session/`, `app/keyd/core/src/ops/session.rs`, `app/keyd/core/src/ops/legacy.rs` |
 | The `canvas` and `ed` routes of `forward` (cookie and `x-token` attached by keyd), its path rules and streaming; the Canvas route's sign-in on a rejected request | `app/keyd/core/src/forward/`, `app/keyd/core/src/ops/forward.rs` ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)) |
-| The `oculus-keyd` client, which the Voyage, MinerU and Groq keys and the Okta credentials and sign-in go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/credentials.rs` (`CloudKey`) |
-| Credential entry UI | `app/src/components/settings/AutoSignIn.tsx` |
+| The `oculus-keyd` client, which the Voyage, MinerU and Groq keys and the Okta credentials and sign-in go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/providers/credentials/mod.rs` (`CloudKey`) |
+| Credential entry UI | `app/src/components/settings/web/AutoSignIn.tsx` |
 
 ## Canvas authenticates by session cookie only
 
@@ -61,7 +61,7 @@ is on the page either way; only its `disabled` attribute tells you.)
   until a session is established again: `session_mark(true)` removes it, and
   so does every sign-in keyd runs.
 - Settings' sign-out first deletes every cookie WebKit would send to Canvas
-  or Okta (`browser::clear_sessions`), or a tab still signed in would save the
+  or Okta (`shell::browser::clear_sessions`), or a tab still signed in would save the
   session straight back. `oculus auth logout` cannot reach a running app's
   jar, so a Canvas tab open there can still re-save the cookie.
 
@@ -72,7 +72,7 @@ only and keyd's copy is the one that survives a restart. Okta's cookies for
 `sso.unimelb.edu.au` are kept beside it (written by a headless sign-in and by
 the browser), so a page that redirects to SSO passes straight through.
 
-- `browser::seed_sessions` asks keyd for both (`session_get`, app only) on a
+- `shell::browser::seed_sessions` asks keyd for both (`session_get`, app only) on a
   thread of its own, because the first call after an update can wait on the
   keychain prompt, then writes them into WebKit's shared jar through
   `WKHTTPCookieStore` (Tauri has no cookie setter) at startup and before any
@@ -150,7 +150,7 @@ attempt (`LoginError::UnsupportedFactor`).
   placeholder for that build and removes it on failure.
 - Startup removes the session keep-alive LaunchAgent
   (`com.tchan.oculus.session-keepalive`) and its data-dir files, if an earlier
-  version installed them (`app/src-tauri/src/legacy_agent.rs`). The unload goes
+  version installed them (`app/src-tauri/src/auth/legacy_agent.rs`). The unload goes
   through the platform registrar's `retire`, which refuses keyd's own label.
 - No sign-in beats an absolute session cap or a forced IdP re-auth.
 
@@ -168,7 +168,7 @@ without a browser, inside keyd. The IdP is Okta Identity Engine at `sso.unimelb.
   Verify push
   and WebAuthn need a human; `LoginError::UnsupportedFactor` names the factors
   Okta did offer.
-- The startup probe in `auth/startup.rs` calls `okta::try_auto_recover` before declaring
+- The startup probe in `auth/startup.rs` calls `auth::okta::try_auto_recover` before declaring
   a session expired, and `useAuth().connect()` tries it before opening the
   login window. Credentials come from Settings → Canvas or `oculus auth setup`.
 - A credential read that is refused (keyd's master key, or an old keychain
@@ -382,7 +382,7 @@ password; a record that does not say counts as one), `manual_failures` and
 ## Ed mints its `x-token` from Canvas
 
 Ed has no third-party OAuth; every API call carries the web app's `x-token`
-JWT. `app/src-tauri/src/ed.rs` mints it by walking the Canvas → Ed LTI 1.3
+JWT. `app/src-tauri/src/sources/ed/lti.rs` mints it by walking the Canvas → Ed LTI 1.3
 launch (tool page → `oidc_login` → Canvas `/api/lti/authorize` → `launch` →
 one-shot `?_logintoken=` → `POST /api/login_token`). Tokens last about two
 weeks, are renewed with `POST /api/renew_token` on each sync, and a dead one
@@ -399,7 +399,7 @@ checked against `/api/user` directly, and only a good one is stored.
 Each session is minted on demand from the Canvas session (the tool page comes
 through keyd's `canvas` route) by POSTing the course's LTI external-tool form (see
 [sync.md](./sync.md#echo360-is-an-lti-launch-with-up-to-two-streams)), and
-`app/src-tauri/src/lectures.rs` caches it per course.
+`app/src-tauri/src/lectures/mod.rs` caches it per course.
 
 ## Gotchas
 

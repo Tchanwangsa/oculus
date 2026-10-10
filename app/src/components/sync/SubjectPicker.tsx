@@ -7,8 +7,8 @@ import {
   CircleNotch,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { useScrollFade } from "@/hooks/useScrollFade";
-import { compareTermsNewestFirst } from "@/lib/terms";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
+import { compareTermsNewestFirst } from "@/lib/format/terms";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,

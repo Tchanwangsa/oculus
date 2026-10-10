@@ -13,27 +13,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  ArrowLineDown,
-  ArrowLineUp,
-  MagnifyingGlass,
-  X,
-} from "@phosphor-icons/react";
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
-import { useScrollFade } from "@/hooks/useScrollFade";
-
-/** A one-line cue at the panel's default width; two-liners are measured. */
-const ESTIMATED_ROW = 26;
-
-/** The dock's slide, matching the panel's `duration-200`; the reopen-scroll waits it out. */
-const SLIDE_MS = 200;
-
-/** How long the list has to sit untouched before it re-syncs to playback. */
-const IDLE_RESYNC_MS = 8000;
-
-/** The countdown ring's stroke, in px. */
-const RING_STROKE = 1.5;
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
+import { BackToLivePill } from "@/components/media/follow/BackToLivePill";
+import {
+  ESTIMATED_ROW,
+  IDLE_RESYNC_MS,
+  SLIDE_MS,
+} from "@/components/media/follow/constants";
+import { useBackToLiveRing } from "@/components/media/follow/useBackToLiveRing";
 
 export interface FollowListProps {
   count: number;
@@ -99,8 +88,6 @@ export function FollowList({
   const softResumeRef = useRef(false);
   /** Pending re-sync, pushed back by every scroll so it measures idle time. */
   const idleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const pillRef = useRef<HTMLButtonElement>(null);
-  const ringRef = useRef<SVGRectElement>(null);
   const ringAnimRef = useRef<Animation | null>(null);
 
   const virtualizer = useVirtualizer({
@@ -129,8 +116,6 @@ export function FollowList({
     },
     [virtualizer],
   );
-
-  // ── Follow the playing row ───────────────────────────────────────────────
 
   // Keyed on the row index, never `timeupdate`: re-issuing a smooth scroll
   // retargets it before it lands, so it creeps forever.
@@ -202,8 +187,6 @@ export function FollowList({
     [],
   );
 
-  // ── Which way is live ────────────────────────────────────────────────────
-
   // Which way the pill points, measured from the viewport's middle against the
   // virtualizer's cache — the row is usually off screen and has no node.
   const [liveAbove, setLiveAbove] = useState(false);
@@ -219,8 +202,6 @@ export function FollowList({
   // Playback moves the row even while nobody scrolls.
   useEffect(readDirection, [readDirection]);
 
-  // ── Nudge, unfollow, re-sync ─────────────────────────────────────────────
-
   /** Any part of the playing row is on screen, so nothing needs to move. */
   const rowInFrame = useCallback(() => {
     const list = listRef.current;
@@ -232,36 +213,8 @@ export function FollowList({
     return rel + size > 0 && rel < list.clientHeight;
   }, [followIdx, virtualizer, estimateSize]);
 
-  // Sized from the pill's rendered box. It is faded, not unmounted, so it
-  // measures while hidden.
-  const [pill, setPill] = useState({ w: 0, h: 0 });
-  useEffect(() => {
-    const el = pillRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const r = el.getBoundingClientRect();
-      setPill((p) => (p.w === r.width && p.h === r.height ? p : { w: r.width, h: r.height }));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // A stadium's perimeter by hand: `<rect>.getTotalLength()` is SVG2.
-  const ringW = Math.max(0, pill.w - RING_STROKE);
-  const ringH = Math.max(0, pill.h - RING_STROKE);
-  const ringLen = 2 * Math.max(0, ringW - ringH) + Math.PI * ringH;
-
-  // Web Animations, not state: it restarts on every scroll.
-  const startRing = useCallback(() => {
-    ringAnimRef.current?.cancel();
-    const el = ringRef.current;
-    if (!el || ringLen <= 0) return;
-    // Offset eats the outline over the idle window: full → bare.
-    ringAnimRef.current = el.animate(
-      [{ strokeDashoffset: 0 }, { strokeDashoffset: ringLen }],
-      { duration: IDLE_RESYNC_MS, easing: "linear", fill: "forwards" },
-    );
-  }, [ringLen]);
+  const { pillRef, ringRef, pill, ringW, ringH, ringLen, startRing } =
+    useBackToLiveRing(ringAnimRef);
 
   // A hand-scroll is a glance: every scroll pushes the re-sync deadline back.
   const armResync = useCallback(() => {
@@ -291,8 +244,6 @@ export function FollowList({
     }
     armResync();
   }, [virtualizer, armResync]);
-
-  // ── Edges ────────────────────────────────────────────────────────────────
 
   // Fades only over content they are actually hiding. The virtualizer's sized
   // wrapper is the first child, so measuring, filtering or a dock resize all
@@ -346,139 +297,17 @@ export function FollowList({
         </div>
       )}
 
-      {/* Scrolled away from the playing row — offer the way back. */}
-      <div
-        className={cn(
-          "pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center transition-opacity will-change-[opacity] duration-200",
-          showBackToLive ? "opacity-100" : "opacity-0",
-        )}
-      >
-        <button
-          ref={pillRef}
-          onClick={onBackToLive}
-          tabIndex={showBackToLive ? 0 : -1}
-          aria-hidden={!showBackToLive}
-          className={cn(
-            "pointer-events-auto relative h-6 pl-2 pr-2.5 rounded-full flex items-center gap-1",
-            "bg-brand text-brand-foreground text-[11px] font-medium",
-            "shadow-md shadow-black/15 hover:bg-brand-hover transition-colors",
-            !showBackToLive && "pointer-events-none",
-          )}
-        >
-          {/* Drains over the idle window before the list re-syncs itself. */}
-          {pill.w > 0 && (
-            <svg
-              aria-hidden
-              viewBox={`0 0 ${pill.w} ${pill.h}`}
-              className="pointer-events-none absolute inset-0 h-full w-full text-brand-foreground/70"
-            >
-              <rect
-                ref={ringRef}
-                x={RING_STROKE / 2}
-                y={RING_STROKE / 2}
-                width={ringW}
-                height={ringH}
-                rx={ringH / 2}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={RING_STROKE}
-                strokeDasharray={ringLen}
-              />
-            </svg>
-          )}
-          {liveAbove ? (
-            <ArrowLineUp size={11} weight="bold" />
-          ) : (
-            <ArrowLineDown size={11} weight="bold" />
-          )}
-          Back to live
-        </button>
-      </div>
+      <BackToLivePill
+        show={showBackToLive}
+        liveAbove={liveAbove}
+        onBackToLive={onBackToLive}
+        pillRef={pillRef}
+        ringRef={ringRef}
+        pill={pill}
+        ringW={ringW}
+        ringH={ringH}
+        ringLen={ringLen}
+      />
     </div>
   );
-}
-
-/** The search row over a `FollowList`. Escape clears and blurs; `count` shows
- *  whenever given, so the caller decides what counts as searching. */
-export function SearchField({
-  value,
-  onChange,
-  placeholder,
-  count,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  /** Matches to show beside the clear button; `undefined` when not searching. */
-  count?: number;
-}) {
-  const searching = count !== undefined;
-  return (
-    <div className="px-1.5 pt-1.5 shrink-0">
-      <div className="relative">
-        <MagnifyingGlass
-          size={12}
-          className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-        />
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              onChange("");
-              e.currentTarget.blur();
-            }
-          }}
-          placeholder={placeholder}
-          spellCheck={false}
-          className={cn(
-            "w-full h-6 pl-6 rounded-full bg-surface text-[11px] text-foreground",
-            "placeholder:text-muted-foreground focus:outline-none",
-            "focus:ring-1 focus:ring-brand/40 transition-shadow",
-            searching ? "pr-14" : "pr-2",
-          )}
-        />
-        {searching && (
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-            <span className="text-[10px] tabular-nums text-muted-foreground">
-              {count}
-            </span>
-            <button
-              onClick={() => onChange("")}
-              aria-label="Clear search"
-              className="p-0.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            >
-              <X size={10} weight="bold" />
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** The matched run, marked. Split by hand, not regex: the needle is typed text. */
-export function Highlight({ text, needle }: { text: string; needle: string }) {
-  if (!needle) return <>{text}</>;
-  const hay = text.toLowerCase();
-  const parts: ReactNode[] = [];
-  let at = 0;
-  for (;;) {
-    const hit = hay.indexOf(needle, at);
-    if (hit < 0) {
-      parts.push(text.slice(at));
-      break;
-    }
-    if (hit > at) parts.push(text.slice(at, hit));
-    parts.push(
-      <mark
-        key={hit}
-        className="bg-brand/20 text-brand rounded-[2px] px-px"
-      >
-        {text.slice(hit, hit + needle.length)}
-      </mark>,
-    );
-    at = hit + needle.length;
-  }
-  return <>{parts}</>;
 }

@@ -57,10 +57,10 @@ fn attachments_dir(data_dir: &Path) -> PathBuf {
 
 /// `20260918-034512-8f3a1b7c.png` — sortable, unique, nothing of the caller's.
 fn filename(ext: &str) -> String {
-    let now = crate::clock::now_nanos();
+    let now = crate::runtime::clock::now_nanos();
     let secs = (now / 1_000_000_000) as u64;
     // `20260918-034512`, UTC.
-    let stamp = crate::paths::iso8601_utc(secs)
+    let stamp = crate::library::paths::iso8601_utc(secs)
         .replace(['-', ':'], "")
         .replace('T', "-");
     // Sub-second nanos: unique within a second without a random crate.
@@ -70,7 +70,7 @@ fn filename(ext: &str) -> String {
 
 /// Write one picture into `dir`, returning its name. `dir` is an argument
 /// because a note keeps its pictures beside itself under `courses/`
-/// (`attach_document_image` in `crate::files`).
+/// (`attach_document_image` in `crate::library::files`).
 pub(crate) fn write_image(dir: &Path, bytes: &[u8]) -> Result<String, String> {
     if bytes.is_empty() {
         return Err("that file is empty".into());
@@ -121,8 +121,8 @@ fn attachment_ref(name: &str) -> String {
 #[tauri::command]
 pub async fn harness_attach_image(data: String) -> Result<String, String> {
     let bytes = decode(&data)?;
-    crate::blocking::run(move || {
-        let dir = attachments_dir(&crate::paths::data_dir());
+    crate::runtime::blocking::run(move || {
+        let dir = attachments_dir(&crate::library::paths::data_dir());
         write_image(&dir, &bytes).map(|name| attachment_ref(&name))
     })
     .await
@@ -131,9 +131,9 @@ pub async fn harness_attach_image(data: String) -> Result<String, String> {
 /// A picture dropped onto the composer from Finder, by path.
 #[tauri::command]
 pub async fn harness_attach_file(path: String) -> Result<String, String> {
-    crate::blocking::run(move || {
+    crate::runtime::blocking::run(move || {
         let bytes = read_dropped(&path)?;
-        let dir = attachments_dir(&crate::paths::data_dir());
+        let dir = attachments_dir(&crate::library::paths::data_dir());
         write_image(&dir, &bytes).map(|name| attachment_ref(&name))
     })
     .await

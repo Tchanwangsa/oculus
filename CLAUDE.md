@@ -48,6 +48,8 @@ source. This file is only the rules; the reasons behind them live in `docs/`.
   history. Removing or replacing a feature means removing every mention of it
   (`write-docs`). If a doc contradicts the code, trust the code and fix the
   doc. No per-directory `CLAUDE.md`.
+- No banner comments (`// ── x ──`, `// --- x ---`). A file that needs section
+  dividers is several files: split it into a folder module, one file per section.
 - Comments say what the code does and why — never its history (that goes in
   the commit). A "why" is three lines at most; a module header fifteen; longer
   belongs in `docs/`. State a fact once and point to it elsewhere.

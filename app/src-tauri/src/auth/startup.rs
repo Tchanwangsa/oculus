@@ -3,7 +3,7 @@
 use tauri::{Emitter, Manager};
 
 use super::{saved_session_probe, session, AuthProbe, AuthState};
-use crate::credentials::Credentialed;
+use crate::providers::credentials::Credentialed;
 
 /// If oculus-keyd says the app was signed in, replay the stored session with
 /// a server-side ping. Rejected → try auto-recover, else clear the flag;
@@ -12,7 +12,7 @@ use crate::credentials::Credentialed;
 pub fn restore_session(app: &tauri::AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
-        let keyd = Credentialed::at(&crate::paths::data_dir());
+        let keyd = Credentialed::at(&crate::library::paths::data_dir());
         if !session::signed_in(&keyd) {
             eprintln!("[oculus] no auth flag — fresh session");
             return;
@@ -28,7 +28,7 @@ pub fn restore_session(app: &tauri::AppHandle) {
             }
             AuthProbe::Rejected(_) => {
                 // `try_auto_recover` emits its own success event.
-                if !crate::okta::try_auto_recover(&app, crate::okta::Trigger::Startup) {
+                if !crate::auth::okta::try_auto_recover(&app, crate::auth::okta::Trigger::Startup) {
                     eprintln!("[oculus] session rejected — reset to disconnected");
                     session::mark_session_dead(&keyd);
                     *mem.lock().unwrap() = false;
