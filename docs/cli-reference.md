@@ -141,8 +141,10 @@ Options:
 ```
 Sign in headlessly with the stored credentials, now
 
-A manual sign-in: it skips the wait between automatic attempts, and success resumes
-automatic sign-in after a lockout or a rejected password paused it.
+A manual sign-in: it skips the 10 min to 6 h wait between automatic attempts, but no two
+attempts start within a minute, and three failed manual attempts in a row wait like
+automatic ones. It cannot lift the pause a lockout or a rejected password leaves: fix
+the credentials in the app (Settings → Canvas) or run `oculus auth setup`.
 
 Usage: oculus auth auto
 
