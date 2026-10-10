@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c90334c5979b7116d3d000aa88b7e9194633f14bfbb296ce7969c845758d0add # shrinks to parts = ["`", "-->", "\n\n", "1. ", "-->", "  ", " ", "*", "  ", "![", "1. ", "\\[", " ", " ", "![", "[ ] ", "*", "http://b.c/d", "a", "-->", "[ ] ", "    ", "`", "a@b.co", "`"], steps = [[(9067, 19617, 654844675275325227), (59984, 37105, 1978251744692133264), (8130, 33444, 5872285811435867687)], [(2030, 21794, 3984378833394540939)], [(0, 0, 0)], [(0, 0, 0)]]
+cc db85e1d55f09e0a89d112699217c05acca9c8965b6e91c1ff76b2bbfa63d5245 # shrinks to src = "\\[\n```\n[ ] www.a.com\n-->1. *\n# h\n- li\n|-|-|\n- li\n===\n|-|-|", steps = [[(11189, 24958, 11392068946482965667), (63790, 61773, 1137022646652981281), (14981, 1072, 3266351673028974662)], [(44150, 34704, 4902501100061784676)], [(33945, 28590, 351385259768738553)], [(0, 0, 0)], [(0, 0, 0)]]
+cc f13f3b5ccc42d85206353b19ad72872606b197b6d8a6995431c5b93148574daf # shrinks to src = "---\na: b\n\n\\[\nword #\n>\n't'\n- - -\n-->\n\\[\n===\n  - y\n===\n#    \n  \n===\n  - y\n\n>\n```", steps = [[(52293, 3638, 15268776232802868196)], [(52149, 13034, 688333434855550754), (49100, 1196, 7828725684947964969), (1711, 57427, 5385056978094949989)], [(2007, 64362, 17498066658272948093)]]
+cc 2ff7dd6151e6cedf956cc90e33744184b192a36a38c21f165c07b6a3b0d97c45 # shrinks to src = "---\na: b\n    http://b.c/d\npara *x\n<script>\n\\[\n- li\n> q\n  - y\n    \n$$\n&amp;-->`\n-|-\n&amp;- \n\\[\n  \n$$---", steps = [[(45062, 40530, 16599715195533949158)]]
+cc ef1af4d9b545b7de3250f6bbcc9038742b141246d260df4d6c8248a9891c1afe # shrinks to src = "---\na: b\n> q\n\\[\n\n\n```\n>\n| x |\n[r]: /u\na|b\n</div>\n$$\na|b\n---\n\npara\n$$\n```\n-|-\n-|-\na|b\n===\n```\n", steps = [[(41600, 6100, 14481814828699843279)]]
