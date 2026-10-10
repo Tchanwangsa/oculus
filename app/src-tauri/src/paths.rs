@@ -199,6 +199,18 @@ pub fn safe_dir(s: &str) -> String {
         .collect()
 }
 
+/// A subject code for comparing: upper-case, with space, `-` and `_` alike,
+/// so `"cs 101"` meets the `CS_101` folder `safe_dir` made of `"CS 101"`.
+pub fn fold_code(s: &str) -> String {
+    s.trim()
+        .chars()
+        .map(|c| match c {
+            ' ' | '-' => '_',
+            c => c.to_ascii_uppercase(),
+        })
+        .collect()
+}
+
 pub fn safe_filename(s: &str) -> String {
     s.chars()
         .map(|c| {

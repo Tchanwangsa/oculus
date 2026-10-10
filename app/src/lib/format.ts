@@ -16,9 +16,11 @@ export function humanizeSlug(raw: string): string {
     .join(" ");
 }
 
-/** "MULT20015_2026_SM2" → "MULT20015" — the term suffix lives in the badge. */
+/** "MULT20015_2026_SM2" → "MULT20015" — the term suffix lives in the badge.
+ *  Cut only where an underscore meets a year, so "CS_101" and "CS 101" stay
+ *  whole. */
 export function displayCode(code: string): string {
-  return code.split("_")[0] || code;
+  return /^(.+?)_(?:19|20)\d{2}(?:_|$)/.exec(code)?.[1] ?? code;
 }
 
 /** Strips the "(MULT20015_2026_SM2)" Canvas appends to its course names. */

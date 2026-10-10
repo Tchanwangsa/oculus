@@ -39,7 +39,7 @@ pub fn bucket_dir(data_dir: &Path, code: Option<&str>) -> PathBuf {
 /// sandbox. A bare code matches the folder it prefixes; a bucket without a
 /// course folder still resolves, so an unsynced subject keeps its memories.
 pub fn resolve_subject(data_dir: &Path, code: &str) -> Result<String, String> {
-    let wanted = code.trim().to_ascii_uppercase();
+    let wanted = crate::paths::fold_code(code);
     if wanted.is_empty() {
         return Err("a subject code cannot be empty".into());
     }
@@ -64,7 +64,7 @@ pub fn resolve_subject(data_dir: &Path, code: &str) -> Result<String, String> {
     names.sort();
     let hit: Vec<&String> = names
         .iter()
-        .filter(|n| n.to_ascii_uppercase().starts_with(&wanted))
+        .filter(|n| crate::paths::fold_code(n).starts_with(&wanted))
         .collect();
     match hit.len() {
         1 => Ok(hit[0].clone()),
@@ -948,6 +948,16 @@ mod tests {
         let file = std::fs::read_to_string(&ok.path).unwrap();
         assert!(file.contains("**Why:** npm writes"));
         assert!(file.contains("**How to apply:** Reach for bun"));
+    }
+
+    #[test]
+    fn a_spaced_code_finds_its_folder() {
+        let root = Scratch::new("memory-spaced-code");
+        std::fs::create_dir_all(root.join("courses/CS_101_Fall_2026")).unwrap();
+        assert_eq!(
+            resolve_subject(&root, "cs 101").unwrap(),
+            "CS_101_Fall_2026"
+        );
     }
 
     /// A subject code resolves on disk, not in the database.

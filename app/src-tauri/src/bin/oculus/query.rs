@@ -763,6 +763,14 @@ mod query_tests {
     use super::*;
 
     #[test]
+    fn codes_with_spaces_match_however_they_are_typed() {
+        assert!(matches_code("MULT20015_2026_SM2", "mult20015"));
+        assert!(matches_code("CS 101 Fall 2026", "cs-101"));
+        assert!(matches_code("CS 101", "CS_101"));
+        assert!(!matches_code("CS 1010", "CS 101"));
+    }
+
+    #[test]
     fn query_scopes_include_every_term_and_never_hide_an_unknown_code() {
         let subjects: Vec<store::SubjectRow> = [
             "COMP10001_2026_SM1",
@@ -947,9 +955,10 @@ mod query_tests {
 
 // ── Subject filtering ────────────────────────────────────────────────────────
 
-/// `MULT20015` matches `MULT20015_2026_SM2`.
+/// `MULT20015` matches `MULT20015_2026_SM2`, and `cs-101` matches
+/// `CS 101 Fall 2026` (`paths::fold_code`).
 pub(crate) fn matches_code(code: &str, wanted: &str) -> bool {
-    let (code, wanted) = (code.to_uppercase(), wanted.to_uppercase());
+    let (code, wanted) = (paths::fold_code(code), paths::fold_code(wanted));
     code == wanted || code.starts_with(&format!("{wanted}_"))
 }
 

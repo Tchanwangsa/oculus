@@ -54,8 +54,10 @@ migrations, so on a fresh machine the app must open once first; until then
 - `run -s` scrapes, then parses and embeds each written PDF one file at a time,
   then replaces each subject's `calendar_events` — always, since there are no
   sync options to gate it ([calendar.md](./calendar.md)).
-- Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`);
-  lecture ids match on a unique prefix as `oculus list -l` prints them.
+- Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`),
+  with space, `-` and `_` alike (`paths::fold_code`), so `cs-101` finds
+  `CS 101 Fall 2026` and its `CS_101_Fall_2026` folder; lecture ids match on a
+  unique prefix as `oculus list -l` prints them.
 
 ## `run` and `index` take minutes per file, and that is not a hang
 

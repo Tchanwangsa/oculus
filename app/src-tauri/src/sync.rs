@@ -274,7 +274,10 @@ impl Engine {
     /// Academic courses only — the term filter drops sandboxes and training
     /// shells.
     pub fn list_courses(&self) -> Result<Vec<Course>, String> {
-        const NON_SUBJECT_PREFIXES: &[&str] = &["MPMP"];
+        // Codes the university uses for shells that are not subjects.
+        let excluded = crate::institution::current()
+            .map(|i| i.exclude_code_prefixes)
+            .unwrap_or_default();
 
         let all = self
             .canvas
@@ -288,7 +291,7 @@ impl Engine {
                 let code = c["course_code"].as_str().unwrap_or("");
                 term.is_some_and(|t| t != "Default Term")
                     && (state == "available" || state == "completed")
-                    && !NON_SUBJECT_PREFIXES.iter().any(|p| code.starts_with(p))
+                    && !excluded.iter().any(|p| code.starts_with(p.as_str()))
             })
             .collect();
 
