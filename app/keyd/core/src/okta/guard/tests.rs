@@ -32,13 +32,13 @@ fn automatic_attempts_back_off_and_manual_ones_skip_the_backoff() {
     ));
     attempt(
         &mut r,
-        Trigger::KeepAlive,
+        Trigger::Startup,
         T + 600,
         Err(LoginError::Unexpected(String::new())),
     );
     // Two failures in a row: an hour.
     assert!(matches!(
-        admit(&mut r, Trigger::KeepAlive, APP, T + 3000),
+        admit(&mut r, Trigger::Startup, APP, T + 3000),
         Err(LoginError::Waiting(_))
     ));
     attempt(&mut r, Trigger::Manual, T + 3000, bad_totp());
@@ -68,35 +68,25 @@ fn a_lockout_pauses_automatic_sign_in_until_a_manual_success() {
     let mut r = AttemptRecord::default();
     attempt(
         &mut r,
-        Trigger::KeepAlive,
+        Trigger::Startup,
         10_000,
         Err(LoginError::Locked("Too many attempts".into())),
     );
     assert!(matches!(
-        admit(&mut r, Trigger::KeepAlive, APP, T),
+        admit(&mut r, Trigger::Startup, APP, T),
         Err(LoginError::Paused(_))
     ));
     attempt(&mut r, Trigger::Manual, T, ok());
     assert!(r.paused.is_none());
-    assert!(admit(&mut r, Trigger::KeepAlive, APP, T + 600).is_ok());
+    assert!(admit(&mut r, Trigger::Startup, APP, T + 600).is_ok());
 }
 
 // (a) Spacing.
 
 #[test]
 fn no_two_attempts_of_any_trigger_start_within_a_minute() {
-    for first in [
-        Trigger::Manual,
-        Trigger::Startup,
-        Trigger::KeepAlive,
-        Trigger::Browser,
-    ] {
-        for second in [
-            Trigger::Manual,
-            Trigger::Startup,
-            Trigger::KeepAlive,
-            Trigger::Browser,
-        ] {
+    for first in [Trigger::Manual, Trigger::Startup, Trigger::Browser] {
+        for second in [Trigger::Manual, Trigger::Startup, Trigger::Browser] {
             let mut r = AttemptRecord::default();
             attempt(&mut r, first, T, ok());
             let Err(LoginError::Waiting(secs)) = admit(&mut r, second, APP, T + 59) else {
@@ -289,11 +279,11 @@ fn an_admitted_attempt_is_written_down_and_the_next_automatic_one_waits() {
     assert_eq!(on_disk(&dir)["last"], 1_000);
 
     assert!(matches!(
-        admit_as(&dir, Trigger::KeepAlive, APP, 1_000 + 599),
+        admit_as(&dir, Trigger::Startup, APP, 1_000 + 599),
         Err(LoginError::Waiting(1))
     ));
     assert_eq!(on_disk(&dir)["last"], 1_000, "a refusal is not an attempt");
-    assert!(admit_as(&dir, Trigger::KeepAlive, APP, 1_000 + 600).is_ok());
+    assert!(admit_as(&dir, Trigger::Startup, APP, 1_000 + 600).is_ok());
     assert_eq!(on_disk(&dir)["last"], 1_600);
 }
 
@@ -348,23 +338,23 @@ fn a_record_from_before_these_rules_is_judged_by_them() {
 #[test]
 fn a_lockout_on_disk_pauses_automatic_attempts_until_a_manual_success() {
     let dir = Scratch::new("guard-lockout");
-    admit_as(&dir, Trigger::KeepAlive, APP, 10_000).unwrap();
+    admit_as(&dir, Trigger::Startup, APP, 10_000).unwrap();
     settle_recorded(
         &dir.0,
-        Trigger::KeepAlive,
+        Trigger::Startup,
         &Err(LoginError::Locked("Too many attempts".into())),
     );
     assert_eq!(on_disk(&dir)["failures"], 1);
     assert!(on_disk(&dir)["paused"].is_string());
 
     assert!(matches!(
-        admit_as(&dir, Trigger::KeepAlive, APP, 1_000_000),
+        admit_as(&dir, Trigger::Startup, APP, 1_000_000),
         Err(LoginError::Paused(_))
     ));
     admit_as(&dir, Trigger::Manual, APP, 1_000_000).unwrap();
     settle_recorded(&dir.0, Trigger::Manual, &ok());
     assert!(on_disk(&dir)["paused"].is_null());
-    assert!(admit_as(&dir, Trigger::KeepAlive, APP, 1_000_600).is_ok());
+    assert!(admit_as(&dir, Trigger::Startup, APP, 1_000_600).is_ok());
 
     resume_automatic_sign_in(&dir.0).unwrap();
     assert_eq!(on_disk(&dir)["failures"], 0);
@@ -377,7 +367,7 @@ fn an_attempt_is_refused_when_the_record_cannot_be_opened_unless_the_app_asked_b
     std::fs::create_dir_all(paths::sign_in_record(&dir.0)).unwrap();
 
     assert!(with_record(&dir.0, |_| ()).is_err());
-    for trigger in [Trigger::Startup, Trigger::KeepAlive, Trigger::Browser] {
+    for trigger in [Trigger::Startup, Trigger::Browser] {
         let Err(LoginError::Paused(why)) = admit_as(&dir, trigger, APP, 1_000) else {
             panic!("{trigger:?} was admitted without a record");
         };
@@ -422,7 +412,7 @@ fn a_damaged_record_pauses_every_automatic_attempt_and_is_left_alone() {
     for bytes in DAMAGED {
         let dir = Scratch::new("guard-damaged");
         write_record(&dir, bytes);
-        for trigger in [Trigger::Startup, Trigger::KeepAlive, Trigger::Browser] {
+        for trigger in [Trigger::Startup, Trigger::Browser] {
             let Err(LoginError::Paused(why)) = admit_as(&dir, trigger, APP, T) else {
                 panic!("{trigger:?} ran on {:?}", String::from_utf8_lossy(bytes));
             };
@@ -479,7 +469,7 @@ fn a_failed_manual_attempt_on_a_damaged_record_records_its_failure_and_pause() {
     assert_eq!(on_disk(&dir)["failures"], 1);
     assert!(on_disk(&dir)["paused"].is_string());
     assert!(matches!(
-        admit_as(&dir, Trigger::KeepAlive, APP, 9_000_000),
+        admit_as(&dir, Trigger::Startup, APP, 9_000_000),
         Err(LoginError::Paused(_))
     ));
 }
@@ -501,7 +491,7 @@ fn a_damaged_record_cannot_be_used_to_hammer_in_parallel() {
     let threads: Vec<_> = (0..8)
         .map(|_| {
             let path = path.clone();
-            std::thread::spawn(move || admit_recorded(&path, Trigger::KeepAlive, APP, 5_000))
+            std::thread::spawn(move || admit_recorded(&path, Trigger::Startup, APP, 5_000))
         })
         .collect();
     for t in threads {
@@ -549,7 +539,7 @@ fn a_save_interrupted_before_the_rename_leaves_the_record_as_it_was() {
     assert_eq!(record_bytes(&dir), before);
 
     // The next reader sees the old record, pause and all.
-    let Err(LoginError::Paused(why)) = admit_as(&dir, Trigger::KeepAlive, APP, 9_000_000) else {
+    let Err(LoginError::Paused(why)) = admit_as(&dir, Trigger::Startup, APP, 9_000_000) else {
         panic!("the pause was forgotten");
     };
     assert_eq!(why, "locked");

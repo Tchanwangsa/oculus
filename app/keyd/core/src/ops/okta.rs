@@ -242,7 +242,7 @@ impl State {
             .ok_or_else(|| {
                 OpError::new(
                     "request",
-                    "ensure_signed_in needs a \"trigger\": manual, startup, keep-alive or browser",
+                    "ensure_signed_in needs a \"trigger\": manual, startup or browser",
                 )
             })?;
         let outcome = self.flight.run(|| {
@@ -938,12 +938,7 @@ mod tests {
             let err = op(&state, &cli(), "ensure_signed_in", req).unwrap_err();
             assert_eq!(err.kind, "request");
         }
-        for t in [
-            Trigger::Manual,
-            Trigger::Startup,
-            Trigger::KeepAlive,
-            Trigger::Browser,
-        ] {
+        for t in [Trigger::Manual, Trigger::Startup, Trigger::Browser] {
             assert_eq!(Trigger::from_wire_name(t.wire_name()), Some(t));
         }
         assert_eq!(requests(&fake), 0);
@@ -1044,7 +1039,7 @@ mod tests {
         )
         .unwrap();
 
-        for trigger in ["manual", "startup", "keep-alive", "browser"] {
+        for trigger in ["manual", "startup", "browser"] {
             let Err(LoginError::Paused(_)) = ensure_as(&state, Role::Cli, trigger).unwrap() else {
                 panic!("the CLI's {trigger} request was not paused");
             };
@@ -1092,7 +1087,7 @@ mod tests {
         std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
         std::fs::write(&marker, b"1").unwrap();
         assert!(matches!(
-            ensure(&state, "keep-alive").unwrap(),
+            ensure(&state, "startup").unwrap(),
             Err(LoginError::SignedOut)
         ));
         assert_eq!(requests(&fake), 0);
@@ -1168,7 +1163,7 @@ mod tests {
         };
         let first = spawn("startup");
         wait_for_a_request(&fake);
-        let waiters = [spawn("browser"), spawn("keep-alive")];
+        let waiters = [spawn("browser"), spawn("startup")];
         let first = first.join().unwrap();
         let first_error = first.clone().unwrap_err();
         assert!(

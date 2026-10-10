@@ -173,7 +173,7 @@ fn an_automatic_sign_in_goes_nowhere_when_the_attempt_record_is_out_of_reach() {
 
     let result = sign_in(
         &env(&dir, &fake.origin, &store),
-        Trigger::KeepAlive,
+        Trigger::Startup,
         Role::App,
     );
     assert!(matches!(result, Err(LoginError::Paused(_))), "{result:?}");
@@ -262,7 +262,7 @@ fn a_signed_out_app_or_missing_credentials_stop_before_any_request() {
     std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
     std::fs::write(&marker, b"1").unwrap();
     assert!(matches!(
-        sign_in(&env, Trigger::KeepAlive, Role::App),
+        sign_in(&env, Trigger::Startup, Role::App),
         Err(LoginError::SignedOut)
     ));
 

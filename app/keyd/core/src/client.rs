@@ -577,7 +577,7 @@ mod tests {
         );
         broker.okta_save("s1234567", "pw", "GEZD").unwrap();
         assert!(broker.okta_forget().unwrap());
-        let outcome = broker.ensure_signed_in(Trigger::KeepAlive).unwrap();
+        let outcome = broker.ensure_signed_in(Trigger::Startup).unwrap();
         assert_eq!(outcome, Err(LoginError::Waiting(125)));
         assert_eq!(
             outcome.unwrap_err().to_string(),
@@ -594,7 +594,7 @@ mod tests {
         assert_eq!(sent[2], &json!({"op": "okta_forget"}));
         assert_eq!(
             sent[3],
-            &json!({"op": "ensure_signed_in", "trigger": "keep-alive"})
+            &json!({"op": "ensure_signed_in", "trigger": "startup"})
         );
     }
 

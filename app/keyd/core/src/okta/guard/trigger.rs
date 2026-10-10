@@ -5,7 +5,6 @@
 pub enum Trigger {
     Manual,
     Startup,
-    KeepAlive,
     Browser,
 }
 
@@ -15,20 +14,14 @@ impl Trigger {
         match self {
             Trigger::Manual => "manual",
             Trigger::Startup => "startup",
-            Trigger::KeepAlive => "keep-alive",
             Trigger::Browser => "browser",
         }
     }
 
     pub fn from_wire_name(name: &str) -> Option<Trigger> {
-        [
-            Trigger::Manual,
-            Trigger::Startup,
-            Trigger::KeepAlive,
-            Trigger::Browser,
-        ]
-        .into_iter()
-        .find(|t| t.wire_name() == name)
+        [Trigger::Manual, Trigger::Startup, Trigger::Browser]
+            .into_iter()
+            .find(|t| t.wire_name() == name)
     }
 
     /// The label in `okta-sign-in.log`.
@@ -36,7 +29,6 @@ impl Trigger {
         match self {
             Trigger::Manual => "manual",
             Trigger::Startup => "app startup",
-            Trigger::KeepAlive => "keep-alive",
             Trigger::Browser => "browser",
         }
     }

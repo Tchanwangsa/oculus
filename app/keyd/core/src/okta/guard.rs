@@ -1,8 +1,8 @@
-//! The attempt guard. The app's startup probe, its keep-alive thread, the
-//! browser and the CLI's `auth tick` each sign in on their own, and Okta locks
-//! the account after too many attempts. So every attempt goes through one
-//! record on disk (`record.rs`), and an attempt that cannot reach it or cannot
-//! read it does not run, unless the app asked for it by hand.
+//! The attempt guard. The app's startup probe, the browser and the CLI's
+//! `auth auto` each sign in on their own, and Okta locks the account after too
+//! many attempts. So every attempt goes through one record on disk
+//! (`record.rs`), and an attempt that cannot reach it or cannot read it does
+//! not run, unless the app asked for it by hand.
 //!
 //! The rules, in `admit`: no two attempts start within `MIN_SPACING`;
 //! automatic ones also wait out the back-off and stop at a pause; a manual one
