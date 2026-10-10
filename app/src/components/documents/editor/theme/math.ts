@@ -89,8 +89,9 @@ export const math: ThemeSpec = {
   ".cm-math-field-block": { position: "relative", padding: "0.4em 0", contain: "inline-size" },
   ".cm-math-field-block math-field": { display: "block", width: "100%", boxSizing: "border-box" },
   ".cm-math-field-block math-field::part(content)": { justifyContent: "safe center" },
-  // The empty-line hint (`FieldController.syncHint`): in flow after an
-  // inline field, inside its tint; in a block centred, at the line's `top`.
+  // The empty-line hint (`syncHint`, in either field's folder): in flow
+  // after an inline field, inside its tint; in a block centred, at the
+  // line's `top`.
   ".cm-math-hint": {
     padding: "0 2px",
     borderRadius: "4px",
@@ -101,7 +102,7 @@ export const math: ThemeSpec = {
     userSelect: "none",
     WebkitUserSelect: "none",
   },
-  ".cm-math-field-block .cm-math-hint": {
+  ".cm-math-field-block .cm-math-hint, .cm-math-view-block .cm-math-hint": {
     position: "absolute",
     left: "50%",
     transform: "translate(-50%, -50%)",
@@ -115,10 +116,16 @@ export const math: ThemeSpec = {
     overflow: "hidden",
     textOverflow: "ellipsis",
   },
+  // The Rust field holds the hint inside its tint, at the note's text size.
+  ".cm-math-view:not(.cm-math-view-block) > .cm-math-hint": {
+    fontSize: "calc(1em / 1.21)",
+    backgroundColor: "transparent",
+  },
   // On a block's empty line the caret is drawn just before the centred
-  // hint; MathLive's own would sit under it.
+  // hint; the field's own would sit under it.
   ".cm-math-field.cm-math-field-empty math-field": { "--caret-color": "transparent" },
-  ".cm-math-field-block .cm-math-hint::before": {
+  ".cm-math-view-empty .cm-math-view-caret": { display: "none" },
+  ".cm-math-field-block .cm-math-hint::before, .cm-math-view-block .cm-math-hint::before": {
     content: '""',
     display: "inline-block",
     width: "0",
@@ -130,6 +137,112 @@ export const math: ThemeSpec = {
   },
   "@keyframes cm-math-blink": { "50%": { visibility: "hidden" } },
   ".cm-math-hint[hidden]": { display: "none" },
+  // The Rust field (`math/field/mathView`): KaTeX's rendering at its own
+  // size in the MathLive field's tint, one line box tall, so opening it
+  // doesn't move the maths or its line.
+  ".cm-math-view": {
+    display: "inline-block",
+    position: "relative",
+    verticalAlign: "baseline",
+    fontSize: "1.21em",
+    lineHeight: "1.2",
+    padding: "0 2px",
+    borderRadius: "4px",
+    backgroundColor: `color-mix(in srgb, ${brand} 7%, transparent)`,
+    cursor: "text",
+  },
+  ".cm-math-view .katex": { fontSize: "1em" },
+  // A block spans the column, its maths centred and scrolling sideways when
+  // too wide, as `.cm-math-display` draws it; `contain` stops a too-wide
+  // formula widening the whole note.
+  ".cm-math-view-block": { display: "block", padding: "0.4em 0", contain: "inline-size" },
+  ".cm-math-view-block .katex-display": { margin: "0" },
+  ".cm-math-view-block .katex-html > .katex-newline": { height: `${MATH_LINE_GAP}em` },
+  // The overlays' frame, stacking them over the bands but under nothing else.
+  ".cm-math-view-frame": { position: "relative", display: "inline-block", isolation: "isolate" },
+  ".cm-math-view-block .cm-math-view-frame": { display: "block", overflowX: "auto", overflowY: "hidden" },
+  ".cm-math-view-bands": { position: "absolute", inset: "0", zIndex: "-1", pointerEvents: "none" },
+  ".cm-math-view-band": {
+    position: "absolute",
+    borderRadius: "2px",
+    backgroundColor: `color-mix(in srgb, ${brand} 22%, transparent)`,
+  },
+  ".cm-math-view-caret": {
+    position: "absolute",
+    width: "0",
+    marginLeft: "-0.75px",
+    borderLeft: `1.5px solid ${brand}`,
+    pointerEvents: "none",
+    visibility: "hidden",
+  },
+  ".cm-math-view-focused .cm-math-view-caret": { visibility: "visible" },
+  ".cm-math-view-focused .cm-math-view-caret.cm-math-view-blink": { animation: "cm-math-blink 1.2s steps(1) infinite" },
+  ".cm-math-view-caret[hidden]": { display: "none" },
+  // Focused, empty and invisible at the caret, where the IME's window opens.
+  ".cm-math-view-input": {
+    position: "absolute",
+    width: "1px",
+    padding: "0",
+    border: "0",
+    margin: "0",
+    opacity: "0",
+    resize: "none",
+    overflow: "hidden",
+    whiteSpace: "pre",
+    fontSize: "inherit",
+    caretColor: "transparent",
+    outline: "none",
+    pointerEvents: "none",
+  },
+  // An IME's text while it composes, over the maths at the caret.
+  ".cm-math-view-preedit": {
+    position: "absolute",
+    whiteSpace: "pre",
+    fontFamily: "KaTeX_Main",
+    backgroundColor: "var(--color-card)",
+    textDecoration: "underline",
+    textDecorationColor: brand,
+    pointerEvents: "none",
+  },
+  ".cm-math-view-preedit[hidden]": { display: "none" },
+  ".cm-math-view .oc-placeholder": { color: brand, opacity: "0.5" },
+  ".cm-math-view .oc-empty-row": { display: "inline-block", width: "0", height: "1em", verticalAlign: "-0.25em" },
+  // The pending `\command` and the palette's commands that start with it,
+  // as MathLive's suggestion list was styled (`styles/math.css`).
+  ".cm-math-view-popover": {
+    position: "absolute",
+    zIndex: "20",
+    display: "flex",
+    flexDirection: "column",
+    minWidth: "160px",
+    maxHeight: "240px",
+    overflow: "hidden",
+    padding: "4px",
+    backgroundColor: "var(--color-popover)",
+    color: "var(--color-popover-foreground)",
+    border: "1px solid var(--color-border)",
+    borderRadius: "12px",
+    boxShadow: "var(--shadow-lg)",
+    fontFamily: "var(--font-sans)",
+    fontSize: "12px",
+    lineHeight: "1.5",
+    textAlign: "left",
+    whiteSpace: "nowrap",
+    cursor: "default",
+    userSelect: "none",
+    WebkitUserSelect: "none",
+  },
+  ".cm-math-view-popover[hidden]": { display: "none" },
+  ".cm-math-view-popover-typed": { padding: "2px 8px", fontFamily: mono, color: brand },
+  ".cm-math-view-popover-row": {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "2px 8px",
+    borderRadius: "8px",
+  },
+  ".cm-math-view-popover-preview": { minWidth: "28px", fontSize: "13px", textAlign: "center" },
+  ".cm-math-view-popover-name": { fontFamily: mono, color: muted },
   // Until it renders, the field lies unseen over its static stand-in, still
   // focusable (`FieldController.mount`).
   ".cm-math-field-mounting": { position: "relative" },

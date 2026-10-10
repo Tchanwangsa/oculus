@@ -73,7 +73,7 @@ export const MATH_LINE_GAP = 0.5;
  * as in LaTeX and KaTeX (MathLive hangs it from its first row, which pads a
  * `\left[ \begin{array}…\right]` above), drops its outer column padding
  * when it is all a `\left…\right` holds, as KaTeX's rendering does
- * (`hugArrays` in `live-preview/widgets/math.ts`), and the root `lines` table
+ * (`hugArrays` in `math/hugArrays.ts`), and the root `lines` table
  * (`\displaylines`) takes `MATH_LINE_GAP` between rows while other arrays
  * take `MATH_ARRAYSTRETCH`. The class is reached through a throwaway field.
  */
