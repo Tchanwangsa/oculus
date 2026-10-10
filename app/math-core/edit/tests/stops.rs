@@ -124,6 +124,14 @@ const INLINE: &[(&str, &str)] = &[
         r"\begin{pmatrix}a\\\end{pmatrix}",
         r"|\begin{pmatrix}|a|\\\end{pmatrix}|",
     ),
+    // A cell that is one braced group (as parsed files write them).
+    (
+        r"\begin{array}{c}{a+b}\\{c}\end{array}",
+        r"|\begin{array}{c}|{|a|+|b|}|\\|{|c|}|\end{array}|",
+    ),
+    // KaTeX unwraps a one-atom group argument; its braces stay a slot.
+    (r"\hat{{}}", r"|\hat{|{|}|}|"),
+    (r"\phantom{\sum\limits x}", r"|\phantom{|\sum\limits |x|}|"),
 ];
 
 /// `(source, source with its stops marked)`, display maths.
@@ -138,6 +146,11 @@ const DISPLAY: &[(&str, &str)] = &[
     (r"a\\b\over c", r"||a|\\|b|\over |c||"),
     (r"\tag{1} x", r"|\tag{|1|}| x|"),
     (r"x\tag*{a}", r"|x|\tag*{|a|}|"),
+    // A CD diagram's cells are arrow syntax too: edited as TeX.
+    (
+        r"\begin{CD}A @>f>> B\end{CD}",
+        r"|\begin{CD}A @>f>> B\end{CD}|",
+    ),
 ];
 
 #[test]
@@ -181,6 +194,12 @@ fn bare_arguments_are_marked_bare() {
         stops.slot(slot_of(&stops, SlotKind::Denom)).bounds,
         Bounds::Open
     );
+    // KaTeX unwraps `{x}` to `x`; the braces are still there.
+    let stops = parsed(r"\hat{x}", false);
+    assert_eq!(
+        stops.slot(slot_of(&stops, SlotKind::Body)).bounds,
+        Bounds::Delimited
+    );
 }
 
 #[test]
@@ -194,6 +213,9 @@ fn text_slots_are_text() {
     assert!(stops.slot(slot_of(&stops, SlotKind::Body)).text);
     let stops = parsed(r"\tag{1} x", true);
     assert!(stops.slot(slot_of(&stops, SlotKind::Tag)).text);
+    // Thai typed in maths is a text-mode node, but its slot is maths.
+    let stops = parsed("x_{ก}", false);
+    assert!(!stops.slot(slot_of(&stops, SlotKind::Sub)).text);
 }
 
 #[test]

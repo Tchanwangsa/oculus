@@ -145,3 +145,25 @@ export async function checkStops(formulas: { tex: string; display: boolean }[], 
   }
   return answers;
 }
+
+/** One formula's answer from the bin's `--commands` run. */
+export type CommandsAnswer =
+  | { steps: number; edits: number; restores: number; failures: { kind: string; step: number }[] }
+  | { error: string }
+  | { panic: string };
+
+/** The native bin's edit-command run: a fixed pseudo-random command
+ *  sequence on each formula, checked (oculus_math_edit::check::commands). */
+export async function runCommands(formulas: { tex: string; display: boolean }[], bin: string): Promise<CommandsAnswer[]> {
+  const input = formulas.map((f, id) => JSON.stringify({ id, tex: f.tex, display: f.display })).join("\n") + "\n";
+  const proc = Bun.spawn([bin, "--commands"], { stdin: new Blob([input]), stdout: "pipe", stderr: "ignore" });
+  const text = await new Response(proc.stdout).text();
+  if ((await proc.exited) !== 0) throw new Error(`oracle exited ${proc.exitCode}`);
+  const answers: CommandsAnswer[] = new Array(formulas.length);
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const { id, ...rest } = JSON.parse(line);
+    answers[id] = rest as CommandsAnswer;
+  }
+  return answers;
+}

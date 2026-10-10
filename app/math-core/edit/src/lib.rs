@@ -12,16 +12,28 @@
 //! byte offset of the source; [`utf16`] converts for the DOM and
 //! CodeMirror. Pure Rust, with no DOM.
 //!
+//! [`Field`] holds a formula being edited (source, stops, selection, a
+//! pending `\command`) and [`Field::run`] applies a [`Command`]: typing,
+//! templates, deleting, moving, selecting, Tab, Enter, Esc. Each returns
+//! an [`Outcome`] with the text change for the note and the field after
+//! it; the note's history owns undo.
+//!
 //! The rules for the tricky shapes (bare arguments, shared offsets,
-//! macros, arrays, text, empty slots) are on the types and in `build/`.
+//! macros, arrays, text, empty slots) are on the types and in `build/`;
+//! the editing rules are in `command/`.
 
+mod atoms;
 mod build;
 pub mod check;
+mod command;
+mod field;
 mod parse;
 mod slot;
 mod stops;
 pub mod utf16;
 
-pub use parse::parse;
+pub use command::{Command, widen};
+pub use field::{Change, Direction, Effect, Field, Mode, Outcome, Selection};
+pub use parse::{parse, renders};
 pub use slot::{Bounds, Slot, SlotId, SlotKind, SlotPath, Stop, StopId};
 pub use stops::{Affinity, Stops, stops};

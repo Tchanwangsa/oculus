@@ -21,6 +21,9 @@ pub(super) fn slots<'n>(
 ) -> Option<Vec<SlotSpec<'n>>> {
     use AnyParseNode as N;
     match node {
+        // A `CD` diagram's cells are its arrows' syntax as much as its
+        // content, and an edit in one reshapes the rest: edited as TeX.
+        N::Array(_) if src.text(range.clone()).starts_with(r"\begin{CD}") => None,
         N::Array(array) => cells(src, array, range),
         N::OrdGroup(group) => {
             let interior = if src.wrapped(&range, '{', '}') {
@@ -232,6 +235,15 @@ pub(super) fn argument<'n>(
     if range == owner || !within(&range, &owner) {
         return command_argument(src, owner, &node.children(), kind);
     }
+    // KaTeX unwraps a one-atom group argument (`\hat{x}`'s base is the
+    // `x`, `\hat{{}}`'s the inner `{}`): its braces are still in the
+    // source, around the node, which is then an atom of the argument.
+    let braced = src.0[..range.start].ends_with('{')
+        && src.0[range.end..].starts_with('}')
+        && within(&(range.start - 1..range.end + 1), &owner);
+    if braced {
+        return Some(spec(kind, Bounds::Delimited, range, Some(node), vec![node]));
+    }
     if let AnyParseNode::OrdGroup(group) = node
         && (src.wrapped(&range, '{', '}') || src.wrapped(&range, '[', ']'))
     {
@@ -316,8 +328,11 @@ fn inside<'n>(
             stack.extend(node.children().into_iter().rev());
         }
     }
-    let mut covered: Vec<Range<usize>> =
-        elements.iter().filter_map(|node| src.range(node)).collect();
+    let mut covered: Vec<Range<usize>> = elements
+        .iter()
+        .filter_map(|node| src.range(node))
+        .map(|range| range.start..src.limits_end(range.end))
+        .collect();
     covered.sort_by_key(|range| range.start);
     if src.uncovered(interior.clone(), &covered) {
         return None;

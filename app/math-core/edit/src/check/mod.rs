@@ -1,5 +1,8 @@
 //! The invariants every formula's stops keep, run by this crate's tests
-//! and by the oracle's `--stops` corpus check.
+//! and by the oracle's `--stops` corpus check; [`commands`] has the ones
+//! every editing command keeps (the oracle's `--commands`).
+
+pub mod commands;
 
 use std::collections::BTreeSet;
 
@@ -77,6 +80,30 @@ pub struct Report {
 pub fn check(source: &str, display: bool) -> Result<Report, ParseError> {
     renders(source, display)?;
     let stops = stops(source, display)?;
+    let mut report = layout(source, &stops);
+    let mut inserts = BTreeSet::new();
+    for stop in stops.stops() {
+        let slot = stops.slot(stop.slot);
+        if !slot.text && slot.bounds != Bounds::Bare {
+            inserts.insert(stop.offset);
+        }
+    }
+    let failures = &mut report.failures;
+    for offset in inserts {
+        if source.is_char_boundary(offset)
+            && renders(&insert_letter(source, offset), display).is_err()
+        {
+            failures.push(Failure::Unparseable(offset));
+        }
+    }
+    Ok(report)
+}
+
+/// The stop layout's own invariants (all of [`check`]'s but the typed
+/// letter): offsets never decrease, sit on char boundaries and inside
+/// their slot, map back to their stop, and every slot has one.
+#[must_use]
+pub fn layout(source: &str, stops: &Stops) -> Report {
     let mut report = Report {
         stops: stops.stops().len(),
         slots: stops.slots().len(),
@@ -84,7 +111,6 @@ pub fn check(source: &str, display: bool) -> Result<Report, ParseError> {
     };
     let failures = &mut report.failures;
     let mut previous = 0;
-    let mut inserts = BTreeSet::new();
     for (i, stop) in stops.stops().iter().enumerate() {
         let id = StopId(i);
         let offset = stop.offset;
@@ -99,7 +125,7 @@ pub fn check(source: &str, display: bool) -> Result<Report, ParseError> {
         if offset < slot.interior.start || slot.interior.end < offset {
             failures.push(Failure::OutsideSlot(offset));
         }
-        match round_trip(&stops, id) {
+        match round_trip(stops, id) {
             Some(back) if back == id => {}
             Some(_) => failures.push(Failure::RoundTrip(offset)),
             None => report.between += 1,
@@ -107,23 +133,13 @@ pub fn check(source: &str, display: bool) -> Result<Report, ParseError> {
         if stops.stop_in(stop.slot, offset) != Some(id) {
             failures.push(Failure::RoundTrip(offset));
         }
-        if !slot.text && slot.bounds != Bounds::Bare {
-            inserts.insert(offset);
-        }
     }
     for slot in stops.slots() {
         if slot.stops.is_empty() {
             failures.push(Failure::NoStop(slot.interior.start));
         }
     }
-    for offset in inserts {
-        if source.is_char_boundary(offset)
-            && renders(&insert_letter(source, offset), display).is_err()
-        {
-            failures.push(Failure::Unparseable(offset));
-        }
-    }
-    Ok(report)
+    report
 }
 
 /// The stop found from `id`'s offset with the affinity its place among

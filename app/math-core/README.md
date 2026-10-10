@@ -7,7 +7,7 @@ dependency of `app/src-tauri` (so `tauri dev` never rebuilds it).
 | --- | --- |
 | `katex/` | A vendored fork of katex-rs, a Rust port of KaTeX 0.18.5. Where it came from and what we changed: [`katex/UPSTREAM.md`](katex/UPSTREAM.md). |
 | `wasm/` | `oculus-math`, the fork's WebAssembly binding for the app: `renderToString` and `parseError` (below). |
-| `edit/` | `oculus-math-edit`, the visual maths field's edit model: caret stops and slots over the formula's source ([below](#the-edit-model)). Pure Rust; nothing in the app uses it. |
+| `edit/` | `oculus-math-edit`, the visual maths field's edit model: caret stops and slots over the formula's source, and the editing commands ([below](#the-edit-model)). Pure Rust; nothing in the app uses it. |
 | `oracle/` | The display oracle: `src/main.rs` (the `oracle` bin) renders JSON-lines requests with the fork; `render.ts` renders the same formulas with the app's `katex` and diffs the two (`corpus.ts` the inputs, `sets.ts` the call sites' options, `engines.ts` the renderers). |
 
 Where the fork still differs from KaTeX JS, and why that is accepted:
@@ -84,13 +84,14 @@ the oracle's `--source-map` check it.
 
 ## The edit model
 
-`edit/` (`oculus-math-edit`) says where the field's caret can be. The field
-edits the formula's LaTeX itself, so a caret is a byte offset of the source
-in a **slot**: an ordered run of sibling atoms (a row, a group's content, a
-script, a numerator, a cell, a `\text{}` run). `stops(source, display)`
-parses with source mapping on and returns every **stop** in ←/→ order,
-which is source order; unparseable source returns the parse error instead
-(the field edits it as TeX). The rules:
+`edit/` (`oculus-math-edit`) says where the field's caret can be and what
+each key does to the source. The field edits the formula's LaTeX itself, so
+a caret is a byte offset of the source in a **slot**: an ordered run of
+sibling atoms (a row, a group's content, a script, a numerator, a cell, a
+`\text{}` run). `stops(source, display)` parses with source mapping on and
+returns every **stop** in ←/→ order, which is source order; unparseable
+source returns the parse error instead (the field edits it as TeX). The
+rules:
 
 - A stop sits before a slot's first atom and after each atom; a text slot
   has one between every character too, never inside a cluster (`วั`). An
@@ -105,7 +106,7 @@ which is source order; unparseable source returns the parse error instead
 - Stops in different slots can share an offset (`\frac ab`'s 7 ends the
   numerator and starts the denominator): `stop_at` takes an `Affinity`.
 - Rows split at a top-level `\\`. `\begin{matrix}\end{matrix}` has one
-  empty cell, before its `\end`.
+  empty cell, before its `\end`. A `CD` diagram is one atom (edited as TeX).
 
 `utf16` converts offsets for the DOM and CodeMirror. `check` holds the
 invariants (sorted, on char boundaries, inside their slot, round trip
@@ -123,6 +124,39 @@ bun math-core/oracle/render.ts --stops
 It prints counts only (formulas, stops, failures by kind, errors by kind)
 and the parse time per formula (mean, p50, p99), and fails on any broken
 invariant.
+
+**Commands.** A `Field` is one formula being edited: its source, stops, a
+selection (anchor and head as stop indices, so a caret names one stop where
+several share an offset; `caret_at(offset, affinity)` places it after an
+outside change such as undo) and the pending `\command` (typed after `\`,
+kept outside the source and drawn by the view). `Field::run(&Command)` takes
+typed text, a template (`#0` takes the selection, `#?` is an empty slot),
+pasted LaTeX, Backspace, Delete, ⌘Backspace, ←/→ (Shift extends), ↑/↓ (the
+view passes each stop's x), Home/End, select all, Tab, Shift+Tab, Enter and
+Esc, and returns an `Outcome`: the change in bytes of the old source, the
+new field, an `isolate` flag (its own undo step) and an effect for the view
+(`Leave(direction)`, `RemoveMaths`). `mode()` (maths, text, command) and
+`space_free()` answer the view's questions. Every command keeps the source
+rendering (an edit that would break it does nothing), spaces a control word
+off a following letter, braces a bare argument before a second atom (`x^2`
+→ `x^{23}`) and leaves `{}` when one is emptied; Backspace right after a
+typed character or template gives the source back, except where braces or
+a control word's space went in with it. The rules for each key are on the
+functions in `edit/src/command/`.
+
+`cargo test -p oculus-math-edit` runs a behaviour table per documented key
+(`tests/commands/`, in a marker notation described in its `harness.rs`) and
+the command invariants (`check::commands`) over a fixed run on every test
+formula and 10,000 random command sequences (proptest). The corpus run
+applies a fixed pseudo-random sequence of 60 commands to every note formula:
+
+```sh
+cd app
+bun math-core/oracle/render.ts --commands
+```
+
+It prints counts only (formulas, commands, edits, insertions undone, failures
+by kind) and fails on any broken invariant or panic.
 
 ## The oracle
 
@@ -200,6 +234,8 @@ out: {"id": 1, "html": "<span class=\"katex\">…"}   or   {"id": 1, "error": "K
 out with --prefixes: {"id": 1, "prefixes": 3, "panics": [{"len": 2, "panic": "…"}]}
 out with --stops:    {"id": 1, "stops": 4, "slots": 2, "between": 0, "failures": [{"kind": "…", "offset": 3}], "parseNs": 5600}
                   or {"id": 1, "error": "KaTeX parse error: …", "parseNs": 900}
+out with --commands: {"id": 1, "steps": 60, "edits": 25, "restores": 9, "failures": [{"kind": "…", "step": 12}]}
+                  or {"id": 1, "error": "KaTeX parse error: …"}
 ```
 
 Options take KaTeX JS's names and defaults (`strict` defaults to `"warn"`),

@@ -20,6 +20,13 @@
 //! "slots":n, "between":n, "failures":[{"kind":"…", "offset":bytes}],
 //! "parseNs":n}`, or `{"id":…, "error":"…", "parseNs":n}` for a formula
 //! that does not render. `parseNs` is the mean of a few timed parses.
+//!
+//! `oracle --commands` is the edit field's command run: it applies a fixed
+//! pseudo-random sequence of editing commands (seeded by the formula's
+//! text; `oculus_math_edit::check::commands`) to each request's `tex` and
+//! answers `{"id":…, "steps":n, "edits":n, "restores":n,
+//! "failures":[{"kind":"…", "step":n}]}`, `{"id":…, "error":"…"}` for a
+//! formula that does not parse, or `{"id":…, "panic":"…"}`.
 
 use std::{
     any::Any,
@@ -37,7 +44,10 @@ use katex::{
     render_to_string,
     types::{OutputFormat, Settings, StrictMode, StrictSetting},
 };
-use oculus_math_edit::check::{Failure, check};
+use oculus_math_edit::check::{
+    Failure, check,
+    commands::{self, picks, seed},
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -199,11 +209,42 @@ fn stops(line: &str) -> Value {
     }
 }
 
+/// Commands in each formula's `--commands` run.
+const COMMANDS_PER_FORMULA: usize = 60;
+
+/// One formula's command run; see the module header.
+fn command_run(line: &str) -> Value {
+    let request: Request = match serde_json::from_str(line) {
+        Ok(r) => r,
+        Err(e) => return json!({ "id": null, "panic": format!("bad request: {e}") }),
+    };
+    let display = request.options.display_mode.unwrap_or(request.display);
+    let tex = request.tex.as_str();
+    let ran =
+        panic::catch_unwind(|| commands::run(tex, display, picks(seed(tex), COMMANDS_PER_FORMULA)));
+    match ran {
+        Ok(Ok(report)) => json!({
+            "id": request.id,
+            "steps": report.steps,
+            "edits": report.edits,
+            "restores": report.restores,
+            "failures": report
+                .failures
+                .iter()
+                .map(|f| json!({ "kind": f.kind(), "step": f.step() }))
+                .collect::<Vec<_>>(),
+        }),
+        Ok(Err(e)) => json!({ "id": request.id, "error": e.to_string() }),
+        Err(p) => json!({ "id": request.id, "panic": panic_message(p.as_ref()) }),
+    }
+}
+
 fn main() -> io::Result<()> {
     // A panic is reported as an answer; keep the default hook off stderr.
     panic::set_hook(Box::new(|_| {}));
     let probe = std::env::args().any(|a| a == "--prefixes");
     let stop_check = std::env::args().any(|a| a == "--stops");
+    let command_check = std::env::args().any(|a| a == "--commands");
     let ctx = KatexContext::default();
     let stdin = io::stdin();
     let mut out = io::BufWriter::new(io::stdout().lock());
@@ -216,6 +257,8 @@ fn main() -> io::Result<()> {
             prefixes(&ctx, &line)
         } else if stop_check {
             stops(&line)
+        } else if command_check {
+            command_run(&line)
         } else {
             answer(&ctx, &line)
         };

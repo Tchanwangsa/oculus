@@ -52,6 +52,18 @@ impl<'a> Source<'a> {
         }
     }
 
+    /// Where an operator's `\limits`/`\nolimits` after `end` ends: they
+    /// make no node of their own but must stay with their operator.
+    pub fn limits_end(self, mut end: usize) -> usize {
+        loop {
+            let at = end + self.0[end..].len() - self.0[end..].trim_start().len();
+            match self.command_at(at) {
+                Some(r"\limits" | r"\nolimits") => end = self.token_end(at),
+                _ => return end,
+            }
+        }
+    }
+
     /// The interiors of the top-level `{…}` groups in `range`, in order.
     /// Escaped braces and `%` comments are skipped; an unclosed group ends
     /// the scan.

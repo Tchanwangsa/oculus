@@ -242,24 +242,12 @@ impl<'n> Builder<'_> {
                     last.item = Item::Opaque;
                 }
                 _ => {
-                    atom.range.end = self.limits_end(atom.range.end);
+                    atom.range.end = self.src.limits_end(atom.range.end);
                     out.push(atom);
                 }
             }
         }
         out
-    }
-
-    /// Where an operator's `\limits`/`\nolimits` after `end` ends: they
-    /// make no node of their own but must stay with their operator.
-    fn limits_end(&self, mut end: usize) -> usize {
-        loop {
-            let at = end + self.src.0[end..].len() - self.src.0[end..].trim_start().len();
-            match self.src.command_at(at) {
-                Some(r"\limits" | r"\nolimits") => end = self.src.token_end(at),
-                _ => return end,
-            }
-        }
     }
 
     fn flatten(&self, node: &'n AnyParseNode, out: &mut Vec<Atom<'n>>) {
@@ -442,7 +430,8 @@ impl<'n> Builder<'_> {
 
     /// The child a wrapper shares its range with: `\dfrac`'s Styling over
     /// its Genfrac, `\boldsymbol`'s Mclass over its Font, a matrix's
-    /// LeftRight over its Array.
+    /// LeftRight over its Array, an array cell's group over the one group
+    /// it holds (`&{}&`).
     fn wrapped_child(
         &self,
         node: &'n AnyParseNode,
@@ -452,6 +441,7 @@ impl<'n> Builder<'_> {
             AnyParseNode::Styling(styling) => &styling.body,
             AnyParseNode::Mclass(mclass) => &mclass.body,
             AnyParseNode::LeftRight(left_right) => &left_right.body,
+            AnyParseNode::OrdGroup(group) => &group.body,
             _ => return None,
         };
         match children.as_slice() {
@@ -474,13 +464,17 @@ const fn within(inner: &Range<usize>, outer: &Range<usize>) -> bool {
 }
 
 /// Whether a run is text: its atoms are text-mode, or, when it is empty,
-/// the node holding it is.
+/// the node holding it is. A non-ASCII character is no evidence either
+/// way: KaTeX gives Thai typed in maths a text-mode node, which must not
+/// make `x_{ก}` a text run.
 fn is_text(container: Option<&AnyParseNode>, elements: &[&AnyParseNode]) -> bool {
-    elements.first().map_or_else(
+    let unicode =
+        |node: &AnyParseNode| matches!(node, AnyParseNode::TextOrd(ord) if !ord.text.is_ascii());
+    elements.iter().find(|node| !unicode(node)).map_or_else(
         || {
             container.is_some_and(|node| {
                 matches!(node, AnyParseNode::Text(_) | AnyParseNode::Hbox(_))
-                    || node.mode() == Mode::Text
+                    || node.mode() == Mode::Text && !unicode(node)
             })
         },
         |first| first.mode() == Mode::Text,
