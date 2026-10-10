@@ -1,6 +1,6 @@
-//! The `session_*` ops: the Canvas cookie, the Okta cookie and Ed's token,
-//! which keyd holds. A session is used through `forward`; these hand one
-//! over, drop it, or report it present.
+//! The `session_*` ops and `sign_out`: the Canvas cookie, the Okta cookie and
+//! Ed's token, which keyd holds. A session is used through `forward`; these
+//! hand one over, drop it, report it present, or set the markers beside it.
 
 use std::fmt;
 
@@ -26,12 +26,16 @@ impl fmt::Debug for SessionCookies {
     }
 }
 
-/// Which sessions keyd holds.
+/// Which sessions keyd holds, and the two markers beside them: `authenticated`
+/// (the app believes it is signed in, which its startup probe reads) and
+/// `signed_out` (automatic sign-in is off until a session is established).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionStatus {
     pub canvas: bool,
     pub sso: bool,
     pub ed: bool,
+    pub authenticated: bool,
+    pub signed_out: bool,
 }
 
 impl SessionStatus {
@@ -74,7 +78,8 @@ impl Client {
     }
 
     /// Drops `kinds` (`Kind::ALL` for every session); the ones that were held
-    /// come back. It leaves the sign-in markers and the attempt record alone.
+    /// come back. It leaves the markers and the attempt record alone: a
+    /// sign-out is `sign_out`.
     pub fn session_clear(&self, kinds: &[Kind]) -> Result<Vec<Kind>, KeydError> {
         let wire: Vec<&str> = kinds.iter().map(|k| k.wire()).collect();
         let (reply, _) = self.exchange(
@@ -93,13 +98,51 @@ impl Client {
             .unwrap_or_default())
     }
 
-    /// Which sessions keyd holds, never a value.
+    /// Which sessions keyd holds and the two markers, never a value.
     pub fn session_status(&self) -> Result<SessionStatus, KeydError> {
         let (reply, _) = self.exchange(&json!({"op": "session_status"}), &[], Some(OP_TIMEOUT))?;
         let flag = |field: &str| reply.get(field).and_then(Value::as_bool);
-        match (flag("canvas"), flag("sso"), flag("ed")) {
-            (Some(canvas), Some(sso), Some(ed)) => Ok(SessionStatus { canvas, sso, ed }),
+        match (
+            flag("canvas"),
+            flag("sso"),
+            flag("ed"),
+            flag("authenticated"),
+            flag("signed_out"),
+        ) {
+            (Some(canvas), Some(sso), Some(ed), Some(authenticated), Some(signed_out)) => {
+                Ok(SessionStatus {
+                    canvas,
+                    sso,
+                    ed,
+                    authenticated,
+                    signed_out,
+                })
+            }
             _ => Err(KeydError::Broken("session_status: no answer".into())),
         }
+    }
+
+    /// A person signed in (`true`: sets the authenticated flag and lifts the
+    /// signed-out marker) or the app found its session dead (`false`: clears
+    /// the flag). Call it after `session_put`ting the cookies a browser or
+    /// login window signed in with; keyd's own sign-ins mark it themselves.
+    pub fn session_mark(&self, authenticated: bool) -> Result<(), KeydError> {
+        self.exchange(
+            &json!({"op": "session_mark", "authenticated": authenticated}),
+            &[],
+            Some(OP_TIMEOUT),
+        )
+        .map(|_| ())
+    }
+
+    /// Drops every session and the authenticated flag, and stands automatic
+    /// sign-in down until a session is established again. The attempt record
+    /// stays. True when there was anything to drop.
+    pub fn sign_out(&self) -> Result<bool, KeydError> {
+        let (reply, _) = self.exchange(&json!({"op": "sign_out"}), &[], Some(OP_TIMEOUT))?;
+        reply
+            .get("had")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| KeydError::Broken("sign_out: no answer".into()))
     }
 }

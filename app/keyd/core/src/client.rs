@@ -7,9 +7,10 @@
 //!
 //! `KeydError::Absent` (nothing at the endpoint, or nothing listening on it)
 //! means keyd is not installed, and is the only error a caller may answer by
-//! going to the keychain (or, for the sign-in, running it in-process) itself.
-//! Every other error surfaces. A sign-in that keyd ran and that failed is not
-//! an error here: it is `Ok(Err(LoginError))`, as in-process.
+//! going to the keychain itself. Every other error surfaces, and a login
+//! session has no such fallback: it is only ever used through keyd. A sign-in
+//! that keyd ran and that failed is not an error here: it is
+//! `Ok(Err(LoginError))`.
 
 use std::fmt;
 use std::io::BufReader;
@@ -20,7 +21,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::framing::{self, MAX_REPLY_LINE};
-use crate::okta::{outcome_from_wire, LoginError, OktaStatus, Trigger};
+use crate::okta::{outcome_from_wire, refused_signin_from_wire, LoginError, OktaStatus, Trigger};
 use crate::paths;
 use crate::platform::{self, Conn, ConnectError};
 
@@ -31,6 +32,13 @@ pub const OP_TIMEOUT: Duration = Duration::from_secs(60);
 /// For `ping`, a probe: it does no work, so a reply this late means keyd is
 /// wedged. launchd's cold start is about a second and a half.
 const PING_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// For a request through a session route (`canvas`, `ed`). The timeout bounds
+/// each read, and a rejected Canvas request goes quiet while keyd signs in:
+/// up to a dozen Okta steps of 45 s each, a wait for a fresh TOTP window, and
+/// possibly another caller's attempt ahead of it. Ten minutes covers the
+/// worst of that; keyd's own stall detector (180 s) bounds a download.
+pub const SESSION_TIMEOUT: Option<Duration> = Some(Duration::from_secs(600));
 
 mod session;
 mod stream;
@@ -66,6 +74,9 @@ pub enum KeydError {
     Absent,
     Keychain(String),
     Missing(String),
+    /// A session route had no session, and keyd's attempt to make one was
+    /// refused or failed. Carries keyd's description and the sign-in's error.
+    NoSession(String, LoginError),
     Upstream(String),
     Request(String),
     Caller(String),
@@ -79,6 +90,12 @@ impl fmt::Display for KeydError {
             KeydError::Absent => f.write_str("oculus-keyd is not installed"),
             KeydError::Keychain(d) => write!(f, "the keychain refused oculus-keyd ({d})"),
             KeydError::Missing(d) => write!(f, "oculus-keyd holds no such key ({d})"),
+            KeydError::NoSession(d, why) => {
+                write!(
+                    f,
+                    "oculus-keyd has no session to use ({d}) and could not sign in: {why}"
+                )
+            }
             KeydError::Upstream(d) => write!(f, "oculus-keyd got no answer ({d})"),
             KeydError::Request(d) => write!(f, "oculus-keyd refused the request ({d})"),
             KeydError::Caller(d) => write!(f, "oculus-keyd refused this program ({d})"),
@@ -89,12 +106,15 @@ impl fmt::Display for KeydError {
 }
 
 /// What the origin answered through `forward`, whatever the status. Header
-/// names are lowercase.
+/// names are lowercase. `signin` is set when the session route's request was
+/// rejected, keyd tried to sign in and could not: the answer is the
+/// rejection, and this says why there is no new session.
 #[derive(Debug, Clone)]
 pub struct RawResponse {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+    pub signin: Option<LoginError>,
 }
 
 impl RawResponse {
@@ -195,10 +215,10 @@ impl Client {
 
     /// Has keyd sign in to Canvas through Okta, or wait for the sign-in it is
     /// already running and share its outcome. The inner result is the
-    /// sign-in's own: success (the cookies are in the data dir, never in the
-    /// reply), or the `LoginError` an in-process `okta::sign_in` would give. There is no socket timeout: the flow takes
-    /// seconds, can wait for a fresh TOTP window, and the attempt it waits on
-    /// may be another caller's.
+    /// sign-in's own: success (the sessions are in keyd's vault, never in the
+    /// reply), or the `LoginError` it ended in. There is no socket timeout: the
+    /// flow takes seconds, can wait for a fresh TOTP window, and the attempt it
+    /// waits on may be another caller's.
     pub fn ensure_signed_in(&self, trigger: Trigger) -> Result<Result<(), LoginError>, KeydError> {
         let (reply, _) = self.exchange(
             &json!({"op": "ensure_signed_in", "trigger": trigger.wire_name()}),
@@ -213,8 +233,9 @@ impl Client {
     /// or `ed`) with keyd adding the credential, and the whole answer
     /// buffered. `timeout` bounds each read and write, as the caller's own
     /// HTTP timeout did; `None` waits for ever, for a caller that has no
-    /// timeout of its own. An answer of any status is `Ok`; a redirect is
-    /// returned, never followed.
+    /// timeout of its own. A session route takes `SESSION_TIMEOUT`, because a
+    /// `canvas` request that is rejected waits while keyd signs in. An answer
+    /// of any status is `Ok`; a redirect is returned, never followed.
     pub fn send(
         &self,
         route: &str,
@@ -226,11 +247,12 @@ impl Client {
     ) -> Result<RawResponse, KeydError> {
         let header = forward_header(route, method, path, headers, body.len(), false);
         let (reply, body) = self.exchange(&header, body, timeout)?;
-        let (status, headers) = forward_head(&reply)?;
+        let (status, headers, signin) = forward_head(&reply)?;
         Ok(RawResponse {
             status,
             headers,
             body,
+            signin,
         })
     }
 
@@ -309,7 +331,10 @@ impl Client {
                 .to_string();
             return Err(match kind {
                 "keychain" => KeydError::Keychain(detail),
-                "missing" => KeydError::Missing(detail),
+                "missing" => match refused_signin_from_wire(&reply) {
+                    Some(why) => KeydError::NoSession(detail, why),
+                    None => KeydError::Missing(detail),
+                },
                 "upstream" => KeydError::Upstream(detail),
                 "request" => KeydError::Request(detail),
                 "caller" => KeydError::Caller(detail),
@@ -344,8 +369,10 @@ fn forward_header(
     header
 }
 
-/// A `forward` reply's status and headers.
-fn forward_head(reply: &Value) -> Result<(u16, Vec<(String, String)>), KeydError> {
+/// A `forward` reply's status, headers and refused sign-in, if any.
+fn forward_head(
+    reply: &Value,
+) -> Result<(u16, Vec<(String, String)>, Option<LoginError>), KeydError> {
     let status = reply
         .get("status")
         .and_then(Value::as_u64)
@@ -365,7 +392,7 @@ fn forward_head(reply: &Value) -> Result<(u16, Vec<(String, String)>), KeydError
                 .collect()
         })
         .unwrap_or_default();
-    Ok((status, headers))
+    Ok((status, headers, refused_signin_from_wire(reply)))
 }
 
 impl KeydError {
@@ -374,7 +401,7 @@ impl KeydError {
         match self {
             KeydError::Absent => "absent",
             KeydError::Keychain(_) => "keychain",
-            KeydError::Missing(_) => "missing",
+            KeydError::Missing(_) | KeydError::NoSession(..) => "missing",
             KeydError::Upstream(_) => "upstream",
             KeydError::Request(_) => "request",
             KeydError::Caller(_) => "caller",
@@ -386,6 +413,7 @@ impl KeydError {
     fn detail(&self) -> &str {
         match self {
             KeydError::Absent => "",
+            KeydError::NoSession(d, _) => d,
             KeydError::Keychain(d)
             | KeydError::Missing(d)
             | KeydError::Upstream(d)
@@ -853,10 +881,11 @@ mod against_keyd {
         assert!(status.has_password && status.has_totp);
 
         assert_eq!(keyd.ensure_signed_in(Trigger::Startup).unwrap(), Ok(()));
-        assert_eq!(
-            std::fs::read_to_string(paths::cookie(&dir.0)).unwrap(),
-            COOKIE
-        );
+        let cookies = keyd.session_get().unwrap();
+        assert_eq!(cookies.canvas.as_deref(), Some(COOKIE));
+        assert_eq!(cookies.sso.as_deref(), Some("JSESSIONID=js1; sid=sess1"));
+        assert!(keyd.session_status().unwrap().authenticated);
+        assert!(!paths::cookie(&dir.0).exists(), "no cookie file");
         // The guard's wait comes back as the same variant and text an
         // in-process sign-in would give.
         let Err(waiting @ LoginError::Waiting(secs)) =

@@ -40,15 +40,27 @@ pub fn session_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("canvas-session")
 }
 
-/// The Canvas session cookie, a bare `name=value; …` header.
+/// The Canvas session cookie as an earlier version kept it, a bare
+/// `name=value; …` header. keyd imports it once (`ops/legacy.rs`).
 pub fn cookie(data_dir: &Path) -> PathBuf {
     data_dir.join("canvas-session.cookie")
 }
 
-/// Okta's cookies for the SSO host, the same bare header as the Canvas one.
-/// Only the in-app browser replays it.
+/// Okta's cookies for the SSO host as an earlier version kept them, the same
+/// bare header as the Canvas one.
 pub fn sso_cookie(data_dir: &Path) -> PathBuf {
     data_dir.join("sso-session.cookie")
+}
+
+/// Ed's `x-token`, as an earlier version kept it. keyd imports it once.
+pub fn ed_token(data_dir: &Path) -> PathBuf {
+    data_dir.join("ed-session.token")
+}
+
+/// Present while a session Canvas has accepted is believed held. The app's
+/// startup probe ignores the stored session without it.
+pub fn authenticated(data_dir: &Path) -> PathBuf {
+    session_dir(data_dir).join("authenticated")
 }
 
 /// Present from a sign-out until the next session. While it is, automatic

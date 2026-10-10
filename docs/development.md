@@ -201,8 +201,8 @@ is built to give the same bytes for the same source:
   (`oculus-keyd-core`), which sits inside keyd's root (and is excluded from
   it) because cargo hashes a path dependency outside the root by its absolute
   path, which gives each checkout different bytes. The app links core with
-  only its `client` feature (the client, the registrar and the Okta sign-in
-  flow, which runs in-process while keyd is absent); keyd links it
+  only its `client` feature (the client, the registrar and the Okta types the
+  client returns); keyd links it
   with `server` (the vault, the ops, `forward`, the server loop). So an app
   edit never touches keyd, and a core edit is a keyd source change.
 - **Reproducible flags.** `-Wl,-S` in `app/keyd/.cargo/config.toml` keeps the

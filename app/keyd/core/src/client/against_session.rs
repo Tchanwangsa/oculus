@@ -70,7 +70,9 @@ fn the_session_ops_round_trip_and_only_the_app_reads_a_cookie_back() {
         SessionStatus {
             canvas: false,
             sso: false,
-            ed: false
+            ed: false,
+            authenticated: false,
+            signed_out: false,
         }
     );
     cli.session_put(SessionKind::Canvas, COOKIE).unwrap();
@@ -165,9 +167,10 @@ fn forward_attaches_each_session_and_the_client_never_sees_one() {
     let dir = Scratch::new("client-session-forward");
     let cli = serve(Role::Cli, routes(&canvas, &ed), &dir);
 
+    // Canvas tries to sign in, and there is nothing to sign in with.
     assert!(matches!(
         cli.send("canvas", "GET", "/api/v1/courses", &[], b"", WAIT),
-        Err(KeydError::Missing(_))
+        Err(KeydError::NoSession(_, LoginError::NotConfigured))
     ));
     assert!(matches!(
         cli.send("ed", "GET", "/api/threads/1", &[], b"", WAIT),
@@ -296,7 +299,7 @@ fn a_stream_with_a_refusal_or_no_session_is_an_error_not_a_body() {
     let cli = serve(Role::Cli, routes(&canvas, &ed), &dir);
     assert!(matches!(
         cli.send_stream("canvas", "GET", "/files/1", &[], b"", WAIT),
-        Err(KeydError::Missing(_))
+        Err(KeydError::NoSession(_, LoginError::NotConfigured))
     ));
     assert!(matches!(
         cli.send_stream("canvas", "GET", "/api/%2e%2e/x", &[], b"", WAIT),
@@ -407,4 +410,108 @@ fn a_redirect_off_origin_is_returned_and_nothing_follows_it() {
         .unwrap();
     assert_eq!(got.status, 302);
     assert!(elsewhere.hits().is_empty());
+}
+
+#[test]
+fn a_rejected_request_whose_sign_in_is_refused_carries_the_reason_to_the_client() {
+    let canvas = FakeOrigin::start(|_| Answer {
+        status: 401,
+        headers: vec![("Set-Cookie", "canvas_session=anon; Path=/".into())],
+        body: b"{\"status\":\"unauthenticated\"}".to_vec(),
+    });
+    let ed = FakeOrigin::start(|_| ok(b""));
+    let dir = Scratch::new("client-signin-refused");
+    let cli = serve(Role::Cli, routes(&canvas, &ed), &dir);
+    cli.session_put(SessionKind::Canvas, COOKIE).unwrap();
+    cli.sign_out().unwrap();
+    cli.session_put(SessionKind::Canvas, COOKIE).unwrap();
+
+    let got = cli
+        .send(
+            "canvas",
+            "GET",
+            "/api/v1/courses",
+            &[],
+            b"",
+            SESSION_TIMEOUT,
+        )
+        .unwrap();
+    assert_eq!(got.status, 401);
+    assert_eq!(got.signin, Some(LoginError::SignedOut));
+    assert_eq!(got.body, b"{\"status\":\"unauthenticated\"}");
+    assert!(got.header("set-cookie").is_none());
+    assert!(!format!("{got:?}").contains("SECRET"));
+
+    let mut got = cli
+        .send_stream("canvas", "GET", "/files/1", &[], b"", SESSION_TIMEOUT)
+        .unwrap();
+    assert_eq!(
+        (got.status, got.signin.clone()),
+        (401, Some(LoginError::SignedOut))
+    );
+    let mut body = Vec::new();
+    got.body.read_to_end(&mut body).unwrap();
+    assert_eq!(body, b"{\"status\":\"unauthenticated\"}");
+
+    // With no session at all it is an error that names the reason.
+    cli.session_clear(&SessionKind::ALL).unwrap();
+    let err = cli
+        .send(
+            "canvas",
+            "GET",
+            "/api/v1/courses",
+            &[],
+            b"",
+            SESSION_TIMEOUT,
+        )
+        .unwrap_err();
+    let KeydError::NoSession(detail, LoginError::SignedOut) = &err else {
+        panic!("{err:?}");
+    };
+    assert!(detail.contains("canvas"), "{detail}");
+    assert!(err.to_string().contains("could not sign in"), "{err}");
+    assert_eq!(err.kind(), "missing");
+
+    // Ed has no sign-in to refuse.
+    assert!(matches!(
+        cli.send("ed", "GET", "/api/user", &[], b"", SESSION_TIMEOUT),
+        Err(KeydError::Missing(_))
+    ));
+}
+
+#[test]
+fn the_markers_round_trip_through_session_mark_sign_out_and_session_status() {
+    let (canvas, ed) = (
+        FakeOrigin::start(|_| ok(b"")),
+        FakeOrigin::start(|_| ok(b"")),
+    );
+    let dir = Scratch::new("client-markers");
+    let app = serve(Role::App, routes(&canvas, &ed), &dir);
+    let cli = serve(Role::Cli, routes(&canvas, &ed), &dir);
+
+    let flags = |c: &Client| {
+        let s = c.session_status().unwrap();
+        (s.authenticated, s.signed_out)
+    };
+    assert_eq!(flags(&app), (false, false));
+    cli.session_put(SessionKind::Canvas, COOKIE).unwrap();
+    cli.session_mark(true).unwrap();
+    assert_eq!(flags(&app), (true, false));
+    cli.session_mark(false).unwrap();
+    assert_eq!(flags(&cli), (false, false));
+
+    app.session_mark(true).unwrap();
+    std::fs::write(crate::paths::sign_in_record(&dir.0), "{\"x\":1}").unwrap();
+    assert!(cli.sign_out().unwrap());
+    assert_eq!(flags(&cli), (false, true));
+    assert!(!cli.session_status().unwrap().canvas);
+    assert!(
+        crate::paths::sign_in_record(&dir.0).exists(),
+        "a sign-out keeps the attempt record"
+    );
+    assert!(!cli.sign_out().unwrap(), "nothing left to drop");
+
+    // A person signing in lifts the marker.
+    app.session_mark(true).unwrap();
+    assert_eq!(flags(&app), (true, false));
 }

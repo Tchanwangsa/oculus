@@ -97,6 +97,14 @@ pub fn outcome_from_wire(v: &Value) -> Option<Result<(), LoginError>> {
     }
 }
 
+/// The sign-in a `forward` reply (or a `missing` error) reports as refused or
+/// failed, in its `signin` field, which is an `outcome_to_wire` error. `None`
+/// when there is no field, it is not an error outcome, or a newer keyd's code
+/// is not known here.
+pub fn refused_signin_from_wire(reply: &Value) -> Option<LoginError> {
+    outcome_from_wire(reply.get("signin")?)?.err()
+}
+
 impl LoginError {
     /// The variant's wire name.
     pub fn code(&self) -> &'static str {
@@ -155,6 +163,25 @@ mod tests {
         let wire = outcome_to_wire(&Ok(cookie.clone()));
         assert_eq!(outcome_from_wire(&wire), Some(Ok(())));
         assert!(!wire.to_string().contains(&cookie));
+    }
+
+    #[test]
+    fn a_refused_sign_in_rides_in_a_replys_signin_field_and_only_an_error_does() {
+        for e in every_variant() {
+            let reply =
+                json!({"status": 401, "headers": [], "signin": outcome_to_wire(&Err(e.clone()))});
+            assert_eq!(refused_signin_from_wire(&reply), Some(e));
+        }
+        let none = [
+            json!({"status": 401}),
+            json!({"signin": null}),
+            json!({"signin": outcome_to_wire(&Ok(String::new()))}),
+            json!({"signin": {"result": "error", "code": "teapot"}}),
+            json!({"signin": "waiting"}),
+        ];
+        for reply in none {
+            assert_eq!(refused_signin_from_wire(&reply), None, "{reply}");
+        }
     }
 
     #[test]

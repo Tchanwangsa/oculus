@@ -6,6 +6,7 @@
 //! the vault side (`store`) is keyd's.
 
 pub mod cookie;
+pub mod markers;
 #[cfg(feature = "server")]
 pub mod store;
 

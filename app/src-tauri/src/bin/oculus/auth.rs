@@ -265,11 +265,7 @@ impl Ctx {
 
     /// Run the headless sign-in and report precisely why it failed.
     pub(crate) fn auth_auto(&self) -> Result<(), String> {
-        match app_lib::okta::sign_in(
-            &self.data_dir,
-            app_lib::okta::Trigger::Manual,
-            app_lib::okta::Role::Cli,
-        ) {
+        match app_lib::okta::sign_in(&self.data_dir, app_lib::okta::Trigger::Manual) {
             Ok(_) => {
                 let name = app_lib::canvas::Canvas::open(&self.data_dir).whoami()?;
                 // Without the flag the app treats this as never signed in.

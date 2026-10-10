@@ -376,7 +376,9 @@ impl Unanswered {
     /// socket are a failure to reach MinerU, so they back off and retry.
     fn from_keyd(error: KeydError) -> Self {
         match error {
-            KeydError::Missing(_) => Unanswered::Fatal(ParseError::MissingCredentials),
+            KeydError::Missing(_) | KeydError::NoSession(..) => {
+                Unanswered::Fatal(ParseError::MissingCredentials)
+            }
             KeydError::Keychain(detail) => {
                 Unanswered::Fatal(ParseError::UnreadableCredentials(detail))
             }
@@ -563,6 +565,7 @@ impl MinerUCloud {
                     status,
                     headers,
                     body,
+                    signin: None,
                 })
             }
         }

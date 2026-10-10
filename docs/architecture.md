@@ -103,13 +103,14 @@ app links too, for the client and the installer only.
   it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
   hash, pid), `has`, `store`, `delete`, `forward`, the Okta ops `okta_save`,
   `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`, and the
-  session ops `session_get`, `session_put`, `session_clear` and
-  `session_status` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
+  session ops `session_get`, `session_put`, `session_clear`, `session_status`,
+  `session_mark` and `sign_out` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
   No op returns a key, a password, a seed or a token; the one reply that
   carries a cookie is `session_get`, to the app. Only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
   `request`, `caller`, `keychain` (the master key or an old item refused or
-  failed), `vault`, `record` (the sign-in attempt record could not be replaced),
-  `missing` and `upstream`.
+  failed), `vault`, `record` (the sign-in attempt record, or a marker file, could
+  not be replaced), `missing` (a `canvas` one may carry the refused sign-in as
+  `signin`) and `upstream`.
 - **`forward` sends one request with the credential added; the credential
   never leaves.** The request names a route (`secret`), `method` (GET or
   POST), `path`, `headers`, and optionally `"stream": true`; keyd sends it to
@@ -137,16 +138,21 @@ app links too, for the client and the installer only.
   character. The reply is `{"status", "headers", "body_len"}` and the origin's
   body, byte for byte, whatever the status: redirects come back unfollowed
   (so a cookie never reaches a second origin), and `upstream` means no answer arrived (DNS, connect,
-  TLS, reset). A route with no session is `missing`. ureq runs without gzip or
-  proxy variables.
+  TLS, reset). A route with no session is `missing` (on `canvas`, after keyd
+  has tried to sign in). ureq runs without gzip or proxy variables.
   - **Cloud routes** have no timeout past ureq's 30 s connect: an embed or a
     parse takes minutes. **Session routes** also fail a forward whose origin
     sends nothing for 180 s (`SESSION_READ_TIMEOUT`, one read, not a total),
     so a download of any size completes while a stalled one frees its thread.
   - **A session reply never carries `set-cookie`, `authorization` or
     `x-token`.** Canvas's `Set-Cookie` lines, on any status including a
-    redirect, are merged into `session.canvas` under the vault lock
+    redirect, are merged into `session.canvas` under the vault lock, except
+    those of a rejected answer
     ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
+  - **`canvas` signs in again when its session is rejected** and sends the
+    request once more; `ed` never does. The reply may carry `signin`, the
+    sign-in that was refused
+    ([auth.md](./auth.md#a-rejected-canvas-request-signs-in-once-and-is-sent-once-more)).
   - **`"stream": true`** replies `{"status", "headers"}` with no `body_len`,
     then the body until keyd closes the connection after the origin's last
     byte. There is no size cap and no keyd-side deadline, and neither the vault
@@ -190,8 +196,8 @@ app links too, for the client and the installer only.
   (which validates) and removed together by `okta_forget`. `ensure_signed_in`
   runs `keyd_core::okta::sign_in` (flow, attempt guard, log) once at a time
   and answers with the outcome as a `LoginError`, never a cookie; the Canvas
-  and Okta cookie files it writes are in the data dir, and the vault holds a
-  Canvas, Okta and Ed session beside them
+  and Okta sessions it mints are vault entries, beside Ed's, and keyd also
+  owns the authenticated and signed-out markers
   ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-credentials-and-runs-the-sign-in)).
 - **Voyage, MinerU, Groq and the Okta sign-in go through it.** `credentials::Credentialed`
   (`keyd_core::client::Client`, `app/keyd/core/src/client.rs`) is the client,
@@ -203,7 +209,9 @@ app links too, for the client and the installer only.
   ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key),
   [parsing.md](./parsing.md#with-oculus-keyd-installed-no-oculus-process-holds-the-mineru-token),
   [viewers.md](./viewers.md)). A request's timeout is the caller's own, and
-  Groq's upload has none, and neither has `ensure_signed_in`.
+  Groq's upload has none, and neither has `ensure_signed_in`; a session route
+  takes `client::SESSION_TIMEOUT` (ten minutes per read), because a rejected
+  request waits for a sign-in.
 - `keyd::ensure_installed` runs at app startup and does nothing in a dev
   build; a dev install is the preflight's ([cli.md](./cli.md)). A release
   registers its bundled `Contents/MacOS/oculus-keyd` (an `externalBin` on
@@ -219,7 +227,7 @@ app links too, for the client and the installer only.
 macOS suspends an off-screen WKWebView's content process, which freezes
 anything running in it mid-run with nothing to catch. So the scrape engine is
 `app/src-tauri/src/sync.rs`, and the headless Okta sign-in
-(`app/keyd/core/src/okta/`) runs in Rust too, in keyd or in-process. Never move background work into
+(`app/keyd/core/src/okta/`) runs in Rust too, inside keyd. Never move background work into
 a WebView.
 
 ## Lecture video streams over localhost HTTP

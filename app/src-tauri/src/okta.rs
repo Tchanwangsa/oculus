@@ -1,11 +1,12 @@
 //! The app's half of the headless University of Melbourne SSO sign-in.
 //!
 //! The flow itself (Okta's IDX state machine, the SAML round trip, the
-//! attempt guard) is `keyd_core::okta`. With `oculus-keyd` installed every
-//! call here goes through it and the credentials live in its vault; only when
-//! the client says `KeydError::Absent` do the keychain and an in-process run
-//! of the flow answer. Any other keyd error surfaces and starts no second
-//! route, so a refusal can never become a second attempt against Okta.
+//! attempt guard) is `keyd_core::okta`, and runs only inside `oculus-keyd`:
+//! the session it mints goes into keyd's vault, where only keyd can use it.
+//! With keyd absent the sign-in fails with `LoginError::Broker`, and only the
+//! credential calls (status, save, forget) fall back to the keychain. Any
+//! other keyd error surfaces and starts no second route, so a refusal can
+//! never become a second attempt against Okta.
 //!
 //! Password and seed are kept together, so to anything running as this user
 //! the second factor is not a second factor — the same deliberate trade as a
@@ -13,8 +14,7 @@
 
 use crate::credentials::{Credentialed, KeydError};
 pub use keyd_core::okta::{totp_now, LoginError, Trigger, SSO_HOST};
-use keyd_core::okta::{validate_credentials, CredentialStore, Credentials, Env};
-pub use keyd_core::platform::Role;
+use keyd_core::okta::{validate_credentials, CredentialStore, Credentials, Env, NoSessions};
 
 fn broker() -> Credentialed {
     Credentialed::at(&crate::paths::data_dir())
@@ -178,28 +178,22 @@ fn clear_credentials_in(
 
 // ── The sign-in ──────────────────────────────────────────────────────────────
 
-fn env(data_dir: &std::path::Path) -> Env<'static> {
-    Env::new(data_dir, crate::paths::CANVAS_BASE, &Keychain)
+/// Headless sign-in behind the attempt guard. keyd runs it, saves the session
+/// in its vault and takes the caller's role from the connection. With keyd
+/// absent there is no sign-in: a session only keyd can use must not be minted
+/// without it.
+pub fn sign_in(data_dir: &std::path::Path, trigger: Trigger) -> Result<(), LoginError> {
+    sign_in_in(&Credentialed::at(data_dir), trigger)
 }
 
-/// Headless sign-in behind the attempt guard. keyd runs it and writes the
-/// session files, taking `role` from the caller's identity; with keyd absent
-/// it runs here with the keychain's credentials and the `role` the caller
-/// states (`keyd_core::okta::sign_in`).
-pub fn sign_in(data_dir: &std::path::Path, trigger: Trigger, role: Role) -> Result<(), LoginError> {
-    sign_in_in(&Credentialed::at(data_dir), trigger, || {
-        keyd_core::okta::sign_in(&env(data_dir), trigger, role).map(|_| ())
-    })
-}
-
-fn sign_in_in(
-    broker: &Credentialed,
-    trigger: Trigger,
-    in_process: impl FnOnce() -> Result<(), LoginError>,
-) -> Result<(), LoginError> {
+fn sign_in_in(broker: &Credentialed, trigger: Trigger) -> Result<(), LoginError> {
     match broker.ensure_signed_in(trigger) {
         Ok(outcome) => outcome,
-        Err(KeydError::Absent) => in_process(),
+        Err(KeydError::Absent) => Err(LoginError::Broker(
+            "oculus-keyd is not running or not installed, and the Canvas session is kept and \
+             used only through it"
+                .to_string(),
+        )),
         Err(KeydError::Keychain(e)) => Err(LoginError::UnreadableCredentials(e)),
         Err(e) => Err(LoginError::Broker(e.to_string())),
     }
@@ -225,9 +219,16 @@ fn resume_in(broker: &Credentialed, in_process: impl FnOnce() -> Result<(), Stri
     }
 }
 
-/// What the sign-in page looks like from here, for when the flow fails.
+/// What the sign-in page looks like from here, for when the flow fails. It
+/// only reads the page, so it keeps no session.
 pub fn diagnose() -> String {
-    keyd_core::okta::diagnose(&env(&crate::paths::data_dir()))
+    let env = Env::new(
+        &crate::paths::data_dir(),
+        crate::paths::CANVAS_BASE,
+        &Keychain,
+        &NoSessions,
+    );
+    keyd_core::okta::diagnose(&env)
 }
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
@@ -262,7 +263,7 @@ fn run_sign_in(
     dir: &std::path::Path,
     trigger: Trigger,
 ) -> Result<String, String> {
-    sign_in(dir, trigger, Role::App).map_err(|e| e.to_string())?;
+    sign_in(dir, trigger).map_err(|e| e.to_string())?;
     signed_in(app, dir)
 }
 
@@ -278,7 +279,7 @@ fn signed_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, St
 /// "never set up" and "signed out" is logged, a keychain refusal included.
 pub fn try_auto_recover(app: &tauri::AppHandle, trigger: Trigger) -> bool {
     let dir = crate::paths::data_dir();
-    let outcome = match sign_in(&dir, trigger, Role::App) {
+    let outcome = match sign_in(&dir, trigger) {
         Err(LoginError::NotConfigured | LoginError::SignedOut) => return false,
         Err(e) => Err(e.to_string()),
         Ok(()) => signed_in(app, &dir),
@@ -302,10 +303,11 @@ mod tests {
     use keyd_core::okta::outcome_to_wire;
     use serde_json::{json, Value};
 
-    const TRIGGERS: [(Trigger, &str); 3] = [
+    const TRIGGERS: [(Trigger, &str); 4] = [
         (Trigger::Manual, "manual"),
         (Trigger::Startup, "startup"),
         (Trigger::Browser, "browser"),
+        (Trigger::Forward, "forward"),
     ];
 
     /// Every `LoginError` variant, as a sign-in can end in it.
@@ -459,7 +461,7 @@ mod tests {
         let keyd = FakeKeyd::start(&dir, |_, _| (outcome_to_wire(&Ok(String::new())), vec![]));
         let broker = Credentialed::at(&dir);
         for (trigger, _) in TRIGGERS {
-            sign_in_in(&broker, trigger, || panic!("in-process")).unwrap();
+            sign_in_in(&broker, trigger).unwrap();
         }
         let sent: Vec<Value> = keyd.requests().into_iter().map(|(h, _)| h).collect();
         let want: Vec<Value> = TRIGGERS
@@ -475,10 +477,7 @@ mod tests {
             let dir = Scratch::new("okta-outcome");
             let wire = outcome_to_wire(&Err(error.clone()));
             let keyd = FakeKeyd::start(&dir, move |_, _| (wire.clone(), vec![]));
-            let got = sign_in_in(&Credentialed::at(&dir), Trigger::Manual, || {
-                panic!("in-process")
-            })
-            .unwrap_err();
+            let got = sign_in_in(&Credentialed::at(&dir), Trigger::Manual).unwrap_err();
             assert_eq!(got, error);
             assert_eq!(got.to_string(), error.to_string());
             assert_eq!(keyd.requests().len(), 1);
@@ -512,10 +511,7 @@ mod tests {
             let dir = Scratch::new("okta-no-second-route");
             let keyd = FakeKeyd::start(&dir, move |_, _| keyd_error(kind, "OSStatus -128"));
             let before = entries(&dir);
-            let got = sign_in_in(&Credentialed::at(&dir), Trigger::Startup, || {
-                panic!("in-process")
-            })
-            .unwrap_err();
+            let got = sign_in_in(&Credentialed::at(&dir), Trigger::Startup).unwrap_err();
             assert_eq!(got, want, "{kind}");
             assert!(!got.to_string().contains("Unexpected"), "{kind}: {got}");
             assert_eq!(keyd.requests().len(), 1, "{kind}: exactly one request");
@@ -552,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn only_an_absent_keyd_runs_the_fallbacks() {
+    fn only_an_absent_keyd_runs_the_credential_fallbacks_and_never_a_sign_in() {
         let dir = Scratch::new("okta-absent");
         let broker = Credentialed::at(&dir);
         let status = credential_status_in(&broker, || {
@@ -576,7 +572,13 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(ran.get(), 2);
-        let got = sign_in_in(&broker, Trigger::Manual, || Err(LoginError::NotConfigured));
-        assert_eq!(got, Err(LoginError::NotConfigured));
+        // No sign-in without keyd: the session would be one only keyd can use.
+        let Err(LoginError::Broker(why)) = sign_in_in(&broker, Trigger::Manual) else {
+            panic!("a sign-in with keyd absent is a broker error");
+        };
+        assert!(why.starts_with("oculus-keyd is not running"), "{why}");
+        assert!(LoginError::Broker(why)
+            .to_string()
+            .contains("only through it"));
     }
 }

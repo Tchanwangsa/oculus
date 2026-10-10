@@ -17,10 +17,12 @@
 
 mod call;
 mod path;
+mod rejection;
 mod route;
 mod upstream;
 
 pub use call::Call;
+pub use rejection::session_rejected;
 pub use route::{Auth, Route, Routes, SESSION_READ_TIMEOUT};
 pub use upstream::{read_capped, Opened, Upstream};
 
