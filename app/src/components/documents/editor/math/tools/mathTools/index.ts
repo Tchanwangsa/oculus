@@ -12,8 +12,8 @@ import { mathToolsField } from "./state";
  * close button), and `\` completion inside maths. Both insert `snippet()`s,
  * so a template's `{}` slots are Tab fields. The popover opens only when
  * asked — Σ or Mod-Shift-Space in maths — and stays until Esc, its close
- * button or the caret leaving that maths. Under Live mode's MathLive field
- * (`field/mathField`) it is lighter — no preview — and its cells insert into
+ * button or the caret leaving that maths. Under Live mode's visual field
+ * (`field/rustField`) it is lighter — no preview — and its cells insert into
  * the field; a control switches between the field and TeX. There Space first
  * opens quick picks at the field's caret: the five entries last used in the
  * note's subject, keyed 1–5, and a way on to the popover. The palette's

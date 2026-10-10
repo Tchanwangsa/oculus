@@ -1,17 +1,15 @@
 //! The shortcut table: what a run of typed keys expands to.
 //!
-//! MathLive 0.111.0's default inline shortcuts (`INLINE_SHORTCUTS`; an
-//! entry with conditions keeps only its value), less the ones the note
-//! field pruned (`shortcuts.ts`'s `PRUNED`), plus the note's shorthands
-//! from `tools/shorthand/tables.ts` (`@` Greek, powers, operators, which
-//! win over MathLive's). Left out: `&`, `%`, `$` (typing escapes them
-//! already, and `&` is an array's cell key), `\\` (its first `\` starts a
-//! command), the values KaTeX lacks (`''`, `∆`, `∂`, `?=`, `>->>`) and
-//! `'''`, `''''` (typed primes draw as primes already, and a prime after
-//! `^{\prime\prime\prime}` is a double superscript); `::` is `\dblcolon`,
-//! `//` a plain `/` (KaTeX draws both as MathLive did) and `Ω`
-//! `\Omega`. Placeholders are template slots: `#0` the first, `#?` the
-//! rest.
+//! Inline shortcuts: Greek letters, powers, operators, functions, arrows,
+//! relations and templates (`sum`, `int`, `sqrt`), plus the note's
+//! shorthands from `tools/shorthand/tables.ts` (`@` Greek, powers,
+//! operators). Left out: `&`, `%`, `$` (typing escapes them already, and
+//! `&` is an array's cell key), `\\` (its first `\` starts a command), the
+//! values KaTeX lacks (`''`, `∆`, `∂`, `?=`, `>->>`) and `'''`, `''''`
+//! (typed primes draw as primes already, and a prime after
+//! `^{\prime\prime\prime}` is a double superscript). `::` is `\dblcolon`,
+//! `//` a plain `/` (KaTeX draws it as a slash) and `Ω` `\Omega`.
+//! Placeholders are template slots: `#0` the first, `#?` the rest.
 
 /// The keys that take the atom before them as their base.
 pub const POWERS: &[&str] = &["sr", "cb", "rd", "invs"];

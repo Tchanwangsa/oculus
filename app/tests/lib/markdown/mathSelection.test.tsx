@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { Element, Root, RootContent } from "hast";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
@@ -6,17 +6,6 @@ import { fileMarkdownPlugins } from "@/components/files/FileMarkdown";
 import { BLOCK_MATH_TYPE } from "@/lib/markdown/math";
 import { copied } from "@/lib/markdown/mathSelection/clipboard";
 import { MathField, rehypeMaths } from "@/lib/maths";
-import { MATH_ENGINE_KEY } from "@/lib/maths/switch";
-
-type Storage = { localStorage?: unknown };
-const previous = (globalThis as Storage).localStorage;
-let engine: string | null = "rust";
-beforeAll(() => {
-  (globalThis as Storage).localStorage = { getItem: (k: string) => (k === MATH_ENGINE_KEY ? engine : null) };
-});
-afterAll(() => {
-  (globalThis as Storage).localStorage = previous;
-});
 
 const render = (text: string) =>
   renderToStaticMarkup(<ReactMarkdown {...fileMarkdownPlugins(text)}>{text}</ReactMarkdown>);
@@ -43,7 +32,7 @@ const md = [
   "```math\n  a \\\\ b\n```",
 ].join("\n\n");
 
-describe("rehypeMaths with the Rust switch on", () => {
+describe("rehypeMaths", () => {
   test("draws the source map and is still KaTeX's markup", () => {
     const html = render(md);
     expect(html).toContain('<span class="katex">');
@@ -86,15 +75,6 @@ describe("rehypeMaths with the Rust switch on", () => {
     walk(tree);
     expect(tex).toBe("a \\\\\nb");
     expect(letters.map((r) => tex.slice(...(r.split("-").map(Number) as [number, number])))).toEqual(["a", "b"]);
-  });
-
-  test("adds only data-s and data-e: the switch moves nothing", () => {
-    const on = render(md);
-    engine = null;
-    const off = render(md);
-    engine = "rust";
-    expect(off).not.toContain("data-s=");
-    expect(on.replace(/ data-[se]="\d+"/g, "")).toBe(off);
   });
 });
 

@@ -3,7 +3,7 @@ import { keymap, type Command } from "@codemirror/view";
 
 import { ancestorAt } from "@/components/documents/editor/syntax/syntax";
 import { mathContextOf, ownsLines } from "../../mathContext";
-import { fieldLoad, readsCleanly, visualOf, type VisualMath } from "./visual-state";
+import { fieldReady, readsCleanly, visualOf, type VisualMath } from "./visual-state";
 
 /** ←/Backspace from just after inline maths, →/Delete from just before it,
  *  open the field at that end instead of stepping over the rendered maths. */
@@ -11,7 +11,7 @@ function enterInline(back: boolean): Command {
   return (view) => {
     const { state } = view;
     const { ranges, main } = state.selection;
-    if (fieldLoad(state) !== "ready" || ranges.length !== 1 || !main.empty) return false;
+    if (!fieldReady(state) || ranges.length !== 1 || !main.empty) return false;
     const node = ancestorAt(
       state,
       main.head,
@@ -53,7 +53,7 @@ function enterBlock(dir: "up" | "down" | "left" | "right", deleting = false): Co
   return (view) => {
     const { state } = view;
     const { ranges, main } = state.selection;
-    if (fieldLoad(state) !== "ready" || ranges.length !== 1 || !main.empty) return false;
+    if (!fieldReady(state) || ranges.length !== 1 || !main.empty) return false;
     const ln = state.doc.lineAt(main.head);
     if (dir === "left" || dir === "right") {
       if (main.head !== (back ? ln.from : ln.to) || (deleting && !ln.length)) return false;
@@ -84,16 +84,12 @@ export const entryKeys = Prec.highest(
 );
 
 /** Where the last press on rendered maths landed, as a fraction of its
- *  `.ML__latex` box, so the field can put its caret there once it replaces
- *  the rendering, which it lays out the same (`staticMath`). A KaTeX
- *  rendering's ink stands in, spaced narrower than MathLive's. */
+ *  ink (the KaTeX bases), so the field can put its caret there once it
+ *  replaces the rendering (`rustField/mount.ts`). */
 let pressed: { fx: number; fy: number; at: number } | null = null;
 
 export function noteMathPress(x: number, y: number, rendered: HTMLElement) {
-  const ml = rendered.querySelector(".ML__latex");
-  const ink = ml
-    ? [ml.getBoundingClientRect()]
-    : [...rendered.querySelectorAll(".katex-html > .katex-base")].map((b) => b.getBoundingClientRect());
+  const ink = [...rendered.querySelectorAll(".katex-html > .katex-base")].map((b) => b.getBoundingClientRect());
   const r = ink.length ? ink : [rendered.getBoundingClientRect()];
   const left = Math.min(...r.map((b) => b.left));
   const top = Math.min(...r.map((b) => b.top));

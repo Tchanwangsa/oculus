@@ -1,11 +1,10 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { history, redo, undo, undoDepth } from "@codemirror/commands";
 import { EditorState, type TransactionSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
 import { noteMarkdown } from "@/components/documents/editor/core/language";
 import { focusedField, setFocused } from "@/components/documents/editor/core/liveFocus";
-import { MATH_ENGINE_KEY } from "@/components/documents/editor/math/field/fieldEngine";
 import { leaveMaths, removeMaths } from "@/components/documents/editor/math/field/fieldNote";
 import { readsCleanly, visualMath, visualMathField } from "@/components/documents/editor/math/field/mathField";
 import {
@@ -17,17 +16,6 @@ import {
   type NoteView,
 } from "@/components/documents/editor/math/field/rustField/write";
 import { MathField, type FieldCommand, type Step } from "@/lib/maths";
-
-/** The switch on for this file only: `rustField` reads it on each call. */
-const previous = (globalThis as { localStorage?: unknown }).localStorage;
-beforeAll(() => {
-  (globalThis as { localStorage?: unknown }).localStorage = {
-    getItem: (k: string) => (k === MATH_ENGINE_KEY ? "rust" : null),
-  };
-});
-afterAll(() => {
-  (globalThis as { localStorage?: unknown }).localStorage = previous;
-});
 
 /** A Live note's state, focused, as an `EditorView` stands in for it. */
 class Note implements NoteView {

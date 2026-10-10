@@ -10,11 +10,10 @@ function onEmptyLine(ctl: RustFieldController): boolean {
 }
 
 /**
- * The prompt to Space for the toolbox on an empty line, as MathLive's field
- * shows it (`mathField/controller/hint.ts`): after an empty inline field in
- * flow; in a block centred on the caret's row, which draws the caret just
- * before it (the view's own is hidden). The view draws synchronously, so
- * the caret's box is current.
+ * The prompt to Space for the toolbox on an empty line: after an empty
+ * inline field in flow; in a block centred on the caret's row, which draws
+ * the caret just before it (the view's own is hidden). The view draws
+ * synchronously, so the caret's box is current.
  */
 export function syncHint(ctl: RustFieldController) {
   const { hint, mv, dom } = ctl;

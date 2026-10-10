@@ -1,6 +1,6 @@
 import { renderToString, type MathField } from "@/lib/maths";
 import { HUG_KERN, huggedArrays } from "../../hugArrays";
-import { MATH_ARRAYSTRETCH } from "../mathField/loader";
+import { MATH_ARRAYSTRETCH } from "../mathField/layout";
 
 /** `tex`'s offset back in the source `huggedArrays` grew it from, or null
  *  inside an inserted kern. `at` holds the source offsets of the kerns. */

@@ -6,8 +6,7 @@ import "@/styles/katex/katex.min.css";
 import { mathsReady, onMathsReady, renderToString } from "@/lib/maths";
 import { mathFieldFocused } from "../../core/liveFocus";
 import { hugArrays } from "../../math/hugArrays";
-import { rustField } from "../../math/field/fieldEngine";
-import { MATH_ARRAYSTRETCH, mathLiveReady, noteMathPress, staticMath } from "../../math/field/mathField";
+import { MATH_ARRAYSTRETCH, noteMathPress } from "../../math/field/mathField";
 import { ancestorAt } from "../../syntax/syntax";
 import { SourceWidget } from "./source";
 
@@ -16,7 +15,7 @@ const katexCache = new Map<string, string | null>();
 const KATEX_CACHE_MAX = 500;
 
 /** KaTeX HTML for `source`, or null if it does not parse. Matrix rows get
- *  `MATH_ARRAYSTRETCH`, as the visual field draws them (`math/field/mathField`).
+ *  `MATH_ARRAYSTRETCH`, as the visual field draws them (`math/field/mathView`).
  *  Only once `mathsReady()`. */
 function renderMath(source: string, display: boolean): string | null {
   const key = `${display ? "D" : "I"}${source}`;
@@ -74,10 +73,6 @@ const drawnMath = new WeakMap<HTMLElement, MathWidget>();
  * extends the selection over the maths.
  */
 export class MathWidget extends SourceWidget {
-  /** Drawn by MathLive (`staticMath`) once it has loaded, else by KaTeX; a
-   *  rebuild after it loads draws again. The Rust field draws KaTeX, so
-   *  with it on (`rustField`) the rendering stays KaTeX's. */
-  readonly mathLive = mathLiveReady() && !rustField();
   /** Drawn as a placeholder until the maths engine is ready; a rebuild after
    *  it is (`mathsSettled`) draws again. */
   readonly maths = mathsReady();
@@ -102,7 +97,6 @@ export class MathWidget extends SourceWidget {
       other.display === this.display &&
       other.caret === this.caret &&
       other.block === this.block &&
-      other.mathLive === this.mathLive &&
       other.maths === this.maths
     );
   }
@@ -112,12 +106,9 @@ export class MathWidget extends SourceWidget {
     dom.className = this.display ? "cm-math cm-math-display" : "cm-math";
     dom.classList.toggle("cm-math-selected", this.selected);
     drawnMath.set(dom, this);
-    const ml = this.mathLive ? staticMath(this.source, this.display) : null;
-    const pending = !ml && !this.maths && !!this.source.trim();
-    const html = ml || pending || !this.source.trim() ? null : renderMath(this.source, this.display);
-    if (ml) {
-      dom.append(ml);
-    } else if (pending) {
+    const pending = !this.maths && !!this.source.trim();
+    const html = pending || !this.source.trim() ? null : renderMath(this.source, this.display);
+    if (pending) {
       dom.classList.add("cm-math-pending");
       dom.textContent = this.source;
     } else if (html) {
@@ -170,8 +161,7 @@ export class MathWidget extends SourceWidget {
       return true;
     }
     if (!this.block) return false;
-    // The box a field opened here would take, or KaTeX's.
-    const ink = dom.querySelector(".cm-math-ml, .katex-display")?.getBoundingClientRect();
+    const ink = dom.querySelector(".katex-display")?.getBoundingClientRect();
     if (!ink || (e.clientY >= ink.top && e.clientY <= ink.bottom)) return false;
     view.dispatch({ selection: { anchor: e.clientY < ink.top ? span.from : span.to } });
     return true;
@@ -200,26 +190,11 @@ export class MathWidget extends SourceWidget {
   }
 }
 
-/** A `\displaylines` table's rows in MathLive's static markup: each row's
- *  cell, stacked in the column's first vlist row. */
-const ML_LINES =
-  ".ML__latex > .ML__base > .ML__multiline_environment > .col-align-l:only-child > .ML__vlist-t > " +
-  ".ML__vlist-r:first-child > .ML__vlist > span > :not(.ML__pstrut)";
-
 type Row = { left: number; right: number; top: number; bottom: number };
 
 /** The boxes of a display rendering's rows (its top-level `\\` lines). */
 function mathRows(dom: HTMLElement): Row[] {
-  const rect = (el: Element): Row => {
-    const r = el.getBoundingClientRect();
-    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-  };
-  const ml = dom.querySelector(".ML__latex");
-  if (ml) {
-    const lines = dom.querySelectorAll(ML_LINES);
-    return lines.length ? [...lines].map(rect) : [rect(ml)];
-  }
-  // KaTeX: the runs between `.katex-newline`s.
+  // The runs between `.katex-newline`s.
   const rows: Row[] = [];
   let row: Row | null = null;
   for (const el of dom.querySelectorAll(".katex-display .katex-html > *")) {

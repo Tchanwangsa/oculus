@@ -2,13 +2,12 @@
 
 use super::harness::{Case, check_all};
 
-/// doc 71-72.
 #[test]
 fn enter_in_inline_maths_leaves() {
     check_all(&[("a|b", &["enter"], "a|b  => Leave(Right)")], false);
 }
 
-/// doc 73-78. A display block keeps one row per line, as the note
+/// A display block keeps one row per line, as the note
 /// stores it (`a \\`, a newline, `b`).
 #[test]
 fn enter_in_display_maths_adds_a_row_never_a_second_empty_one() {
@@ -34,7 +33,7 @@ fn enter_in_display_maths_adds_a_row_never_a_second_empty_one() {
     check_all(cases, true);
 }
 
-/// doc 73-78: in an environment's rows, a new row of empty cells.
+/// In an environment's rows, a new row of empty cells.
 #[test]
 fn enter_in_an_array_adds_an_array_row() {
     let cases: &[Case] = &[

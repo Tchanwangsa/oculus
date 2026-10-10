@@ -182,8 +182,7 @@ export function noteWrite(
  * Where the field's caret goes when the note's LaTeX changes under it (an
  * undo, a redo): the end of what changed, comparing `before` and `after`
  * from both ends. The common tail stops at the old caret, which places a
- * change that repeats the text beside it (as `caretAfterChange` does over
- * MathLive's atoms).
+ * change that repeats the text beside it.
  */
 export function caretAfterEdit(before: string, after: string, caret: number): number {
   const max = Math.min(before.length, after.length);

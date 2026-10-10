@@ -1,5 +1,5 @@
 import { mathOnly, pasteBeside } from "../fieldNote";
-import { BLOCK_MATH_TYPE } from "../mathField/controller/clipboard";
+import { BLOCK_MATH_TYPE } from "@/lib/markdown/math";
 import type { RustFieldController } from "./controller";
 
 /** The selection's LaTeX, or "" with none. */

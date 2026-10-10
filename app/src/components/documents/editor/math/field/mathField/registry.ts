@@ -2,13 +2,12 @@ import { Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
 import type { Direction } from "../fieldNote";
-import type { Box } from "./geometry";
+import type { Box } from "@/lib/maths/geometry";
 
 /**
- * The open visual field, whichever engine draws it: `FieldController`
- * (MathLive) or `RustFieldController` (`math/field/rustField`). The widget,
- * the toolbox and the note's undo use only this, never an engine's own
- * element.
+ * The open visual field (`RustFieldController`, `math/field/rustField`). The
+ * widget, the toolbox and the note's undo use only this, never the
+ * controller's own view.
  */
 export interface VisualField {
   readonly dom: HTMLElement;

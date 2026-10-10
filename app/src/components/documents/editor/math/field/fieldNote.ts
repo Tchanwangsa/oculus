@@ -5,9 +5,9 @@ import type { ActiveMath } from "./mathField/visual-state";
 import { fieldWrite, minimalChange, squeezeBlankLines } from "./mathFieldEdits";
 
 /**
- * What either visual field (MathLive's `mathField`, the Rust `rustField`)
- * does to the note around its maths: leave it, remove it, paste prose
- * beside it, tidy a block's blank lines as it opens. `target` is the maths
+ * What the visual field (`rustField`) does to the note around its maths:
+ * leave it, remove it, paste prose beside it, tidy a block's blank lines as
+ * it opens. `target` is the maths
  * the field may write to (`writableSpan`), null when it can't.
  */
 

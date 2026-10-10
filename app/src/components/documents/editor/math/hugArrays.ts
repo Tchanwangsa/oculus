@@ -1,9 +1,7 @@
 /** `\left[ \begin{array}…\end{array} \right]` drawn like `bmatrix`: an
  *  array keeps `\arraycolsep` outside its first and last columns (matrices
  *  drop it), which reads as a gap inside the brackets. Render-time only:
- *  the Live rendering, the MathLive field (`patchArrays` in
- *  `field/mathField/loader.ts`) and the Rust field (`field/mathView`) all
- *  draw it so. */
+ *  the Live rendering and the field (`field/mathView`) both draw it so. */
 const LEFT_BEFORE = /\\left\s*(?:\\[a-zA-Z]+|\\.|[^\s\\])\s*$/;
 const BEGIN = "\\begin{array}";
 const END = "\\end{array}";

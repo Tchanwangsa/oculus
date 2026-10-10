@@ -22,7 +22,7 @@ export const popoverTooltips: ThemeSpec = {
     lineHeight: "1.4",
   },
   ".cm-math-tools.cm-math-tools-hidden, &.cm-math-command .cm-math-tools": { display: "none" },
-  // Under the MathLive field: no preview, the field is the preview.
+  // Under the visual field: no preview, the field is the preview.
   ".cm-math-tools-visual .cm-math-preview, .cm-math-tools-visual .cm-math-error-text": { display: "none" },
   ".cm-math-tools-visual .cm-math-recents": { marginTop: "0" },
   ".cm-math-tools-visual .cm-math-recents[hidden] + .cm-math-tabbar": {

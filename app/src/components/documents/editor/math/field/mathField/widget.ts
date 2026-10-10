@@ -1,14 +1,11 @@
 import { WidgetType, type EditorView } from "@codemirror/view";
 
-import { rustField } from "../fieldEngine";
 import { openRustField } from "../rustField/controller";
-import { FieldController } from "./controller/field-controller";
 import type { VisualField } from "./registry";
 
 const controllers = new WeakMap<HTMLElement, VisualField>();
 
-/** The field in place of a maths node: the Rust one when the switch is on
- *  (`rustField`), else MathLive's. Keeps its DOM across the doc changes
+/** The field in place of a maths node. Keeps its DOM across the doc changes
  *  its own typing causes (`updateDOM`), or the field would lose its caret. */
 export class MathFieldWidget extends WidgetType {
   constructor(
@@ -27,16 +24,14 @@ export class MathFieldWidget extends WidgetType {
   }
 
   toDOM(view: EditorView) {
-    const field = rustField()
-      ? openRustField(view, this.source, this.display, this.block, this.id)
-      : new FieldController(view, this.source, this.display, this.block, this.id);
+    const field = openRustField(view, this.source, this.display, this.block, this.id);
     if (!field) return this.unopened();
     controllers.set(field.dom, field);
     return field.dom;
   }
 
-  /** The source, muted, while maths the Rust field couldn't open drops to
-   *  TeX mode. */
+  /** The source, muted, while maths the field couldn't open drops to TeX
+   *  mode. */
   private unopened(): HTMLElement {
     const dom = document.createElement(this.block ? "div" : "span");
     dom.className = "cm-math-pending";

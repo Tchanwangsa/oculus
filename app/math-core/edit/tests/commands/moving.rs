@@ -2,7 +2,6 @@
 
 use super::harness::{Case, check_all};
 
-/// doc 71.
 #[test]
 fn arrows_walk_the_stops_and_leave_past_the_edge() {
     let cases: &[Case] = &[
@@ -22,7 +21,6 @@ fn arrows_walk_the_stops_and_leave_past_the_edge() {
     check_all(cases, false);
 }
 
-/// doc 65-69.
 #[test]
 fn shift_arrows_extend_over_whole_structures() {
     let cases: &[Case] = &[
@@ -39,7 +37,7 @@ fn shift_arrows_extend_over_whole_structures() {
     check_all(cases, false);
 }
 
-/// doc 65-69: a block's rows select as one run.
+/// A block's rows select as one run.
 #[test]
 fn a_selection_across_rows_keeps_each_end_in_its_row() {
     let cases: &[Case] = &[
@@ -112,7 +110,6 @@ fn up_and_down_move_between_rows() {
     check_all(cases, true);
 }
 
-/// doc 78-79.
 #[test]
 fn tab_goes_to_the_next_empty_slot_else_types_a_qquad() {
     let cases: &[Case] = &[
@@ -126,7 +123,6 @@ fn tab_goes_to_the_next_empty_slot_else_types_a_qquad() {
     check_all(cases, false);
 }
 
-/// doc 86-88.
 #[test]
 fn tab_or_right_at_the_end_of_text_goes_back_to_maths() {
     let cases: &[Case] = &[
@@ -137,7 +133,6 @@ fn tab_or_right_at_the_end_of_text_goes_back_to_maths() {
     check_all(cases, false);
 }
 
-/// doc 71.
 #[test]
 fn escape_leaves() {
     check_all(&[("a|", &["esc"], "a|  => Leave(Right)")], false);

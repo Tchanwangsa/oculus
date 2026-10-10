@@ -61,7 +61,6 @@ fn an_empty_structure_goes_at_once() {
     check_all(cases, false);
 }
 
-/// doc 82-84.
 #[test]
 fn backspace_in_an_empty_script_drops_it_with_the_caret_after_its_base() {
     let cases: &[Case] = &[
@@ -84,7 +83,6 @@ fn an_emptied_bare_argument_keeps_braces() {
     check_all(cases, false);
 }
 
-/// doc 81-82.
 #[test]
 fn backspace_in_an_empty_field_removes_the_maths() {
     let cases: &[Case] = &[
@@ -142,7 +140,6 @@ fn text_deletes_a_character_at_a_time() {
     check_all(cases, false);
 }
 
-/// doc 79-81.
 #[test]
 fn command_backspace_deletes_the_line_up_to_the_caret() {
     check_all(

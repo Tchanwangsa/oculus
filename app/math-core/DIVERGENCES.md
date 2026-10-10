@@ -37,7 +37,7 @@ HTML differences and 12 error-text differences on the notes alone.
 KaTeX JS writes `<mo stretchy="true">undefined</mo>`: its `stretchyCodePoint`
 table has no entry for these labels, so the text node gets `undefined`. The
 fork writes a space. Only the MathML differs (hidden; screen readers would
-read KaTeX's "undefined"); copy and `mathSelect.ts` read the
+read KaTeX's "undefined"); copy and `mathSelection/` read the
 `annotation`, not the operator. Neither command appears in the notes.
 
 **Decision: accept.** The fork's output is the better one; the oracle

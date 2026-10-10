@@ -3,7 +3,7 @@ import { Prec, StateField, type EditorState, type Range } from "@codemirror/stat
 import { Decoration, EditorView, keymap, type Command, type DecorationSet } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 
-import { fieldLoad } from "../../math/field/mathField";
+import { fieldReady } from "../../math/field/mathField";
 import { MathWidget } from "../widgets";
 import { blockField } from "./blocks";
 import { caretOf, mathParts, type Span } from "./shared";
@@ -22,7 +22,7 @@ export function mathIn(decos: DecorationSet, block: boolean): DecorationSet {
  *  covers it whole and the caret rests only at its edges. Before the
  *  field's engine loads, Backspace at its edge would take the whole node. */
 export function mathAtoms(view: EditorView, set: DecorationSet | undefined): DecorationSet {
-  return fieldLoad(view.state) === "ready" && set ? set : Decoration.none;
+  return fieldReady(view.state) && set ? set : Decoration.none;
 }
 
 export const mathBlockField = StateField.define<DecorationSet>({

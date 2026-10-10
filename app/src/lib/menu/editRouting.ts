@@ -1,5 +1,3 @@
-import type { MathfieldElement } from "mathlive";
-
 import { selectAllMaths } from "@/lib/markdown/mathSelection";
 import { OVERLAY, currentFindTarget, selectContents } from "@/lib/menu/find";
 
@@ -13,7 +11,7 @@ import { OVERLAY, currentFindTarget, selectContents } from "@/lib/menu/find";
  *
  * Select All selects inside the screen in use, never the whole window: a
  * selection inside rendered maths widens in its formula
- * (`lib/markdown/mathSelection/`), else the focused control's own ⌘A (a note, a table's cell block, a maths field),
+ * (`lib/markdown/mathSelection/`), else the focused control's own ⌘A (a note, a table's cell block),
  * else a focused text control's contents, else the dialog or popover holding
  * focus, else the target ⌘F would search (`lib/menu/find.ts`).
  */
@@ -60,10 +58,6 @@ export function routeSelectAll(pane: number | undefined): void {
   const focus = active && active !== document.body ? active : null;
   if (focus) {
     if (offerKey(focus)) return;
-    // MathLive listens on a sink inside its shadow root, which the replayed
-    // key never reaches.
-    const math = focus.closest<MathfieldElement>("math-field");
-    if (math) return math.select();
     if (focus.closest(EDITABLE)) {
       document.execCommand("selectAll");
       return;

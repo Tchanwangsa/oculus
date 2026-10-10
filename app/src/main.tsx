@@ -7,7 +7,6 @@ import App from "./App";
 import { loadIconCatalogue } from "./components/subjects/SubjectIcon";
 import { useSubjectIconStore } from "./stores/planning/subjectIconStore";
 import { watchMathSelection } from "./lib/markdown/selection";
-import { watchMathPress } from "./lib/markdown/mathSelect";
 import { watchMathSelect } from "./lib/markdown/mathSelection";
 import { loadMaths } from "./lib/maths";
 
@@ -44,7 +43,6 @@ window.addEventListener("keydown", (ev) => {
 });
 
 watchMathSelection();
-watchMathPress();
 watchMathSelect();
 // Not awaited: surfaces that mount first draw maths as placeholders and
 // redraw when it is ready. A failed load is an unhandled rejection, painted.

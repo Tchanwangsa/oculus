@@ -48,7 +48,6 @@
     "hast-util-from-html-isomorphic": "^2.0.0",
     "hast-util-to-text": "^4.0.2",
     "highlight.js": "^11.12.0",
-    "mathlive": "^0.111.0",
     "mermaid": "^12.0.0",
     "radix-ui": "^1.6.7",
     "react": "^19.1.0",

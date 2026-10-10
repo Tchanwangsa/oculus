@@ -66,26 +66,19 @@ classes work even when there are no dollar delimiters.
   `app/src/styles/math.css`) instead of KaTeX's per-glyph highlight. A press on a formula
   selects by structure — a cell, a matrix, a run of atoms — and copies that
   part's LaTeX (a display formula's also as `BLOCK_MATH_TYPE` `$$` lines). A
-  press outside it, Esc or focus moving ends it. Two paths, picked per
-  press by the maths engine switch (`app/src/lib/maths/switch.ts`):
-  - **Switch on: in place** (`app/src/lib/markdown/mathSelection/`).
-    `rehypeMaths` renders with the source map, and the press runs the
-    note field's edit model (`MathField`) read-only over the drawing: the
-    geometry finds the stop under the pointer, a drag selects to it (the
-    model widening over whole structures), and one band per row is drawn
-    under the glyphs in a zero-size layer inside `.katex`, so no glyph
-    moves. The press's `mousedown` is cancelled (no text selection, focus
-    is blurred), never its `pointerdown`. A press with no drag selects
-    nothing; ⌘A widens in the formula (`lib/menu/editRouting.ts`); copy is
-    taken in the capture phase, after cancelling `beforecopy` so WebKit
-    enables Copy. The source map's offsets index the TeX annotation's
-    text, which is why `rehypeMaths` makes line ends `\n` first. Maths the
-    model cannot open selects as text does, whole.
-  - **Switch off: MathLive** (`app/src/lib/markdown/mathSelect.ts`). The
-    press swaps the formula for a read-only MathLive field through the
-    editor's own hit-test, widening and copy
-    (`components/documents/editor/math/field/mathField/`), which lays it
-    out differently. MathLive loads as the pointer first reaches a formula.
+  press outside it, Esc or focus moving ends it. It selects in place
+  (`app/src/lib/markdown/mathSelection/`): `rehypeMaths` renders every
+  formula with the source map, and the press runs the note field's edit model
+  (`MathField`) read-only over the drawing: the geometry finds the stop under
+  the pointer, a drag selects to it (the model widening over whole
+  structures), and one band per row is drawn under the glyphs in a zero-size
+  layer inside `.katex`, so no glyph moves. The press's `mousedown` is
+  cancelled (no text selection, focus is blurred), never its `pointerdown`. A
+  press with no drag selects nothing; ⌘A widens in the formula
+  (`lib/menu/editRouting.ts`); copy is taken in the capture phase, after
+  cancelling `beforecopy` so WebKit enables Copy. The source map's offsets
+  index the TeX annotation's text, which is why `rehypeMaths` makes line ends
+  `\n` first. Maths the model cannot open selects as text does, whole.
 - **A ```mermaid fence is caught at `pre`** (`Mermaid.tsx`), and the original
   `<pre>` shows until it renders or if it never parses. Config and drawing are
   `mermaidRender.ts`:

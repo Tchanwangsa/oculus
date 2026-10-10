@@ -4,7 +4,6 @@ use oculus_math_edit::{Command, Mode};
 
 use super::harness::{Case, check_all, field};
 
-/// doc 84-87.
 #[test]
 fn text_mode_types_every_character_literally() {
     let cases: &[Case] = &[
@@ -65,7 +64,6 @@ fn command_mode_commits_with_the_arguments_as_empty_slots() {
     check_all(cases, false);
 }
 
-/// doc 84-87.
 #[test]
 fn committing_a_text_command_starts_text_mode() {
     let cases: &[Case] = &[

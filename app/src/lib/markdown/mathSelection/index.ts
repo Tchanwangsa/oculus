@@ -1,12 +1,10 @@
-import { rustField } from "@/lib/maths/switch";
 import { copied } from "./clipboard";
 import { fieldOf, formulaAt } from "./formula";
 import { Session } from "./session";
 
 /**
  * Selecting inside a rendered formula (a chat reply, a markdown file) in
- * place, with the Rust switch on (`lib/maths/switch.ts`; `mathSelect.ts`
- * is MathLive's path). `rehypeMaths` draws the maths with the source map,
+ * place. `rehypeMaths` draws the maths with the source map,
  * and a press runs the note field's edit model (`MathField`) read-only over
  * that drawing: the geometry (`lib/maths/geometry`) finds the stop under
  * the pointer, a drag selects from the press to it, the model widening the
@@ -40,7 +38,6 @@ function blurFocus() {
 }
 
 function pointerDown(e: PointerEvent) {
-  if (!rustField()) return close();
   const plain = e.button === 0 && !e.metaKey && !e.ctrlKey && !e.altKey;
   const formula = plain ? formulaAt(e.target) : null;
   const base = formula ? fieldOf(formula) : null;
@@ -98,7 +95,7 @@ export function selectAllMaths(): boolean {
   return true;
 }
 
-/** Installed once, app-wide, beside `watchMathPress`. */
+/** Installed once, app-wide. */
 export function watchMathSelect() {
   document.addEventListener("pointerdown", pointerDown, true);
   document.addEventListener(

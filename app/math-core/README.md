@@ -183,8 +183,7 @@ typed character or template gives the source back, except where braces or
 a control word's space went in with it. The rules for each key are on the
 functions in `edit/src/command/`.
 
-Matrices are typed as in MATLAB (`edit/src/command/grid/`, a port of the
-MathLive field's `mathMatrix.ts`). The grid at the caret is the cell of a
+Matrices are typed as in MATLAB (`edit/src/command/grid/`). The grid at the caret is the cell of a
 `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `Vmatrix` or
 `smallmatrix` it is directly in, or the body of a bracket group whose
 brackets draw one: a `\left…\right` pair, or an opening bracket atom
@@ -211,11 +210,11 @@ cell), `\&` elsewhere. `space_free()` is false where Space is a grid key.
 
 **Shortcuts** (`edit/src/shortcut/`) expand typed keys: `sin` → `\sin`,
 `->` → `\to`, `@a` → `\alpha`, `xsr` → `x^2`, `sqrt` → `\sqrt{}` with the
-caret in it. The table (`table.rs`, exported as `SHORTCUTS`) is MathLive
-0.111.0's defaults less the note field's pruned ones, plus the note's
-shorthands. Only one character typed in maths takes part: never in text,
-in a pending `\command`, in a font's or `\operatorname`'s argument, nor
-from an IME's string, a template or a paste. A letter key expands only
+caret in it. The table (`table.rs`, exported as `SHORTCUTS`) holds the
+inline shortcuts and the note's shorthands. Only one character typed in
+maths takes part: never in text, in a pending `\command`, in a font's or
+`\operatorname`'s argument, nor from an IME's string, a template or a
+paste. A letter key expands only
 when the whole run of single-letter atoms before the caret is the key
 (`xsin` and `card` stay; `2pi` is `2\pi`, `sintheta` is `\sin\theta`); a
 power (`sr`, `cb`, `rd`, `invs`) takes the letter or operand before it as

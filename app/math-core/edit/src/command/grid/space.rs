@@ -6,7 +6,7 @@ use super::{
     model::Piece,
 };
 
-/// Most columns a row takes (MathLive's limit, which the field kept).
+/// Most columns a row takes (the matrix size the field allows).
 const MAX_COLS: usize = 10;
 
 /// Space in a grid's cell. An operator alone in a cell after the row's

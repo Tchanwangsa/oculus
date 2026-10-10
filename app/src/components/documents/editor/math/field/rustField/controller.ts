@@ -4,10 +4,10 @@ import { mathFieldFocused, setFocused } from "@/components/documents/editor/core
 import { noteHost } from "@/components/documents/editor/core/host";
 import type { Step } from "@/lib/maths";
 import { recordCommand } from "../../tools/mathUsage";
-import { markFieldTrap } from "../fieldEngine";
+import type { Box } from "@/lib/maths/geometry";
 import { dropBlankLines, leaveMaths, removeMaths, type Direction } from "../fieldNote";
-import type { Box } from "../mathField/geometry";
 import { fields, type VisualField } from "../mathField/registry";
+import { markFieldTrap } from "../mathField/trapped";
 import { setMathMode, type ActiveMath } from "../mathField/visual-state";
 import { MathView } from "../mathView";
 import { beforeClipboard, copy, paste } from "./clipboard";
@@ -25,8 +25,8 @@ const LEAVE: Record<string, Direction> = {
 };
 
 /**
- * The Rust field (`MathView` over the maths engine's edit model) on the
- * note's maths: the Rust engine's `VisualField`. Each step the view hands
+ * The field (`MathView` over the maths engine's edit model) on the note's
+ * maths: the editor's `VisualField`. Each step the view hands
  * over is written into the note as it happens (`writeStep`): its changes
  * as one transaction, a shortcut's rewrite as a second that is an undo step
  * of its own, then its effect. Keys, the clipboard, the empty-line hint and

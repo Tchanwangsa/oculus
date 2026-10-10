@@ -1,13 +1,12 @@
 //! Matrices typed as in MATLAB: Space, `;`, Backspace and the closing
-//! bracket in a grid, `&` in an array. The cases marked "TS" port
-//! `mathMatrix.test.ts` (the field's MathLive version) to the source.
+//! Matrices typed as in MATLAB: Space, `;`, Backspace and the closing
+//! bracket in a grid, `&` in an array.
 
 use oculus_math_edit::{Command, Field};
 
 use super::harness::{Case, check_all, field, press};
 
-/// doc 255-263 (TS: matching or ghost right delimiters draw a matrix;
-/// mismatched ones don't).
+/// Matching or ghost right delimiters draw a matrix; mismatched ones don't.
 #[test]
 fn bracket_groups_whose_brackets_draw_a_matrix() {
     let cases: &[Case] = &[
@@ -51,8 +50,8 @@ fn bracket_groups_whose_brackets_draw_a_matrix() {
     check_all(cases, false);
 }
 
-/// doc 255-263: a `\left…\right` pair is a bracket group too, and
-/// becomes plain environment brackets.
+/// A `\left…\right` pair is a bracket group too, and becomes plain
+/// environment brackets.
 #[test]
 fn left_right_groups() {
     let cases: &[Case] = &[
@@ -76,9 +75,9 @@ fn left_right_groups() {
     check_all(cases, false);
 }
 
-/// doc 264-271, 284-286 (TS: a one-cell grid is written as its bracket
-/// group, a ghost unless closed). The group comes back unclosed, so the
-/// closer the user types next is the only one.
+/// A one-cell grid is written as its bracket group, a ghost unless closed.
+/// The group comes back unclosed, so the closer the user types next is the
+/// only one.
 #[test]
 fn one_cell_left_is_a_bracket_group_again() {
     let cases: &[Case] = &[
@@ -101,8 +100,7 @@ fn one_cell_left_is_a_bracket_group_again() {
     check_all(cases, false);
 }
 
-/// Plan decision (TS: empty cells are placeholders): empty cells are
-/// stored empty.
+/// Empty cells are stored empty, not as placeholders.
 #[test]
 fn empty_cells_are_stored_empty() {
     let cases: &[Case] = &[(
@@ -113,7 +111,7 @@ fn empty_cells_are_stored_empty() {
     check_all(cases, false);
 }
 
-/// TS: a control word before a letter keeps a space.
+/// A control word before a letter keeps a space.
 #[test]
 fn a_control_word_keeps_its_space() {
     let cases: &[Case] = &[
@@ -136,8 +134,7 @@ fn a_control_word_keeps_its_space() {
     check_all(cases, false);
 }
 
-/// doc 264-271 (TS: Space after a term in a bracket group starts a
-/// second cell).
+/// Space after a term in a bracket group starts a second cell.
 #[test]
 fn space_after_a_term_starts_a_cell() {
     check_all(
@@ -146,8 +143,8 @@ fn space_after_a_term_starts_a_cell() {
     );
 }
 
-/// doc 266-269 (TS: leaves an empty cell, an operator's end or a cell's
-/// start to the toolbox), and after `\sin`-like and big operators.
+/// Space leaves an empty cell, an operator's end or a cell's start to the
+/// toolbox, and likewise after `\sin`-like and big operators.
 #[test]
 fn space_is_the_views_in_an_empty_cell_after_an_operator_or_at_a_start() {
     let cases: &[Case] = &[
@@ -169,8 +166,7 @@ fn space_is_the_views_in_an_empty_cell_after_an_operator_or_at_a_start() {
     check_all(cases, false);
 }
 
-/// doc 269-272 (TS: `(a + b)` with habitual spaces stays one cell, back
-/// to plain brackets).
+/// `(a + b)` with habitual spaces stays one cell, back to plain brackets.
 #[test]
 fn habitual_spaces_around_an_operator_keep_one_cell() {
     let cases: &[Case] = &[
@@ -185,7 +181,7 @@ fn habitual_spaces_around_an_operator_keep_one_cell() {
     check_all(cases, false);
 }
 
-/// doc 272 (TS: `[1 -1]` keeps two cells).
+/// `[1 -1]` keeps two cells.
 #[test]
 fn a_leading_minus_starts_a_cell() {
     check_all(
@@ -198,8 +194,8 @@ fn a_leading_minus_starts_a_cell() {
     );
 }
 
-/// doc 269-271 (TS: an operator merged in a row of a taller grid shifts
-/// the row's later cells left).
+/// An operator merged in a row of a taller grid shifts the row's later
+/// cells left.
 #[test]
 fn an_operator_merged_in_a_taller_grid_shifts_the_row_left() {
     check_all(
@@ -212,8 +208,7 @@ fn an_operator_merged_in_a_taller_grid_shifts_the_row_left() {
     );
 }
 
-/// doc 269-271 (TS: an operator alone in a row's first cell is not
-/// merged).
+/// An operator alone in a row's first cell is not merged.
 #[test]
 fn an_operator_alone_in_a_first_cell_stays() {
     let cases: &[Case] = &[
@@ -227,8 +222,7 @@ fn an_operator_alone_in_a_first_cell_stays() {
     check_all(cases, false);
 }
 
-/// doc 264-266 (TS: mid-cell splits off what follows the caret into a
-/// new column).
+/// Space mid-cell splits off what follows the caret into a new column.
 #[test]
 fn space_mid_cell_splits_into_a_new_column() {
     check_all(
@@ -241,8 +235,7 @@ fn space_mid_cell_splits_into_a_new_column() {
     );
 }
 
-/// doc 264-266 (TS: at a cell's end with an empty next cell, only moves
-/// into it).
+/// Space at a cell's end with an empty next cell only moves into it.
 #[test]
 fn space_at_a_cells_end_moves_into_an_empty_next_cell() {
     check_all(
@@ -255,15 +248,14 @@ fn space_at_a_cells_end_moves_into_an_empty_next_cell() {
     );
 }
 
-/// doc 289 (TS: stops at MathLive's ten columns).
+/// Space stops at ten columns.
 #[test]
 fn space_stops_at_ten_columns() {
     let ten = r"\begin{bmatrix}1&2&3&4&5&6&7&8&9&10|\end{bmatrix}";
     check_all(&[(ten, &["space"], ten)], false);
 }
 
-/// doc 288-289 (TS: `[a b; c d e f g]` pads the first row as the second
-/// grows).
+/// `[a b; c d e f g]` pads the first row as the second grows.
 #[test]
 fn rows_are_padded_as_a_row_grows() {
     let keys = &[
@@ -280,8 +272,8 @@ fn rows_are_padded_as_a_row_grows() {
     );
 }
 
-/// doc 288-289 (TS: a ragged grid read from LaTeX is padded before a
-/// split): the move into a cell the row lacks pads it first.
+/// A ragged grid read from LaTeX is padded before a split: the move into a
+/// cell the row lacks pads it first.
 #[test]
 fn a_ragged_grid_is_padded_before_an_edit() {
     let cases: &[Case] = &[
@@ -299,9 +291,8 @@ fn a_ragged_grid_is_padded_before_an_edit() {
     check_all(cases, false);
 }
 
-/// doc 273-276 (TS: `;` in a bracket group adds a row). `TS` typed the
-/// `;` first as an undo step of its own; here the group becomes the
-/// matrix in one step.
+/// `;` in a bracket group adds a row. The group becomes the matrix in one
+/// step.
 #[test]
 fn semicolon_in_a_bracket_group_adds_a_row() {
     let cases: &[Case] = &[
@@ -336,8 +327,8 @@ fn semicolon_in_a_bracket_group_adds_a_row() {
     check_all(cases, false);
 }
 
-/// doc 273-276 (TS: in a middle row inserts an empty row after it, or
-/// moves into an empty one).
+/// `;` in a middle row inserts an empty row after it, or moves into an
+/// empty one.
 #[test]
 fn semicolon_in_a_middle_row() {
     let cases: &[Case] = &[
@@ -355,7 +346,7 @@ fn semicolon_in_a_middle_row() {
     check_all(cases, false);
 }
 
-/// doc 288 (TS: new rows take the widest row's width).
+/// New rows take the widest row's width.
 #[test]
 fn new_rows_take_the_widest_rows_width() {
     check_all(
@@ -368,8 +359,8 @@ fn new_rows_take_the_widest_rows_width() {
     );
 }
 
-/// doc 277-282 (TS: in an empty column removes it; back to the bracket
-/// group at one cell).
+/// Backspace in an empty column removes it; at one cell left the grid is a
+/// bracket group again.
 #[test]
 fn backspace_in_an_empty_column_removes_it() {
     check_all(
@@ -378,8 +369,7 @@ fn backspace_in_an_empty_column_removes_it() {
     );
 }
 
-/// doc 277-280 (TS: removes the column when it is all empty, else the
-/// row).
+/// Backspace removes the column when it is all empty, else the row.
 #[test]
 fn backspace_removes_an_empty_column_else_an_empty_row() {
     let cases: &[Case] = &[
@@ -397,8 +387,7 @@ fn backspace_removes_an_empty_column_else_an_empty_row() {
     check_all(cases, false);
 }
 
-/// doc 277-280 (TS: a first column removed puts the caret at the
-/// previous row's end).
+/// A first column removed puts the caret at the previous row's end.
 #[test]
 fn a_first_column_removed_puts_the_caret_at_the_previous_rows_end() {
     let cases: &[Case] = &[
@@ -416,8 +405,8 @@ fn a_first_column_removed_puts_the_caret_at_the_previous_rows_end() {
     check_all(cases, false);
 }
 
-/// doc 277-282 (TS: an empty one-column row collapses a column vector to
-/// its group).
+/// Backspace in an empty one-column row collapses a column vector to its
+/// group.
 #[test]
 fn an_empty_row_collapses_a_column_vector_to_its_group() {
     let cases: &[Case] = &[
@@ -427,8 +416,8 @@ fn an_empty_row_collapses_a_column_vector_to_its_group() {
     check_all(cases, false);
 }
 
-/// doc 277-280 (TS: an empty cell beside full ones steps back a cell,
-/// row-major).
+/// Backspace in an empty cell beside full ones steps back a cell, row-
+/// major.
 #[test]
 fn backspace_in_an_empty_cell_beside_full_ones_steps_back() {
     let cases: &[Case] = &[
@@ -452,8 +441,8 @@ fn backspace_in_an_empty_cell_beside_full_ones_steps_back() {
     check_all(cases, false);
 }
 
-/// doc 277-280 (TS: leaves a cell with content, and a one-cell grid, to
-/// MathLive): here Backspace's own rules.
+/// Backspace in a cell with content, or in a one-cell grid, follows
+/// Backspace's own rules.
 #[test]
 fn backspace_leaves_a_full_cell_and_a_one_cell_grid_alone() {
     let cases: &[Case] = &[
@@ -468,8 +457,7 @@ fn backspace_leaves_a_full_cell_and_a_one_cell_grid_alone() {
     check_all(cases, false);
 }
 
-/// doc 283-286 (TS: the closing bracket drops trailing empty rows and
-/// columns).
+/// The closing bracket drops trailing empty rows and columns.
 #[test]
 fn the_closing_bracket_drops_trailing_empty_rows_and_columns() {
     check_all(
@@ -482,7 +470,7 @@ fn the_closing_bracket_drops_trailing_empty_rows_and_columns() {
     );
 }
 
-/// doc 283-286 (TS: a single cell left closes as a bracket group).
+/// A single cell left closes as a bracket group.
 #[test]
 fn a_single_cell_left_closes_as_a_bracket_group() {
     check_all(
@@ -491,10 +479,10 @@ fn a_single_cell_left_closes_as_a_bracket_group() {
     );
 }
 
-/// doc 283-286: each matrix's own closer, the caret after its scripts;
-/// a bracket group's closer is typed as itself; `}` closes a `Bmatrix`
-/// only from the cell itself, not from a `{…}` inside it. Matrices with
-/// no closing key (`Vmatrix`, `matrix`) type the character.
+/// Each matrix's own closer, the caret after its scripts; a bracket group's
+/// closer is typed as itself; `}` closes a `Bmatrix` only from the cell
+/// itself, not from a `{…}` inside it. Matrices with no closing key
+/// (`Vmatrix`, `matrix`) type the character.
 #[test]
 fn closers_per_environment() {
     let cases: &[Case] = &[
@@ -545,7 +533,7 @@ fn closers_per_environment() {
     check_all(cases, false);
 }
 
-/// doc 255-263: `[a b]^T` keeps its scripts on the matrix.
+/// `[a b]^T` keeps its scripts on the matrix.
 #[test]
 fn scripts_on_the_closer_stay_on_the_matrix() {
     let cases: &[Case] = &[
@@ -652,8 +640,8 @@ fn new_separators_follow_the_matrixs_style() {
     check_all(cases, false);
 }
 
-/// doc 73-78 with the layout rule: a matrix that is a whole display block
-/// goes one row per line; inside a larger formula it stays on one line.
+/// A matrix that is a whole display block goes one row per line; inside a
+/// larger formula it stays on one line.
 #[test]
 fn rows_in_a_display_block_go_one_per_line() {
     let cases: &[Case] = &[

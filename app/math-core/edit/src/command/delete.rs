@@ -1,6 +1,6 @@
-//! Backspace, Delete and ⌘Backspace, structure-aware as MathLive's are:
-//! deleting into a structure selects it first, and a second press deletes
-//! the selection.
+//! Backspace, Delete and ⌘Backspace, structure-aware:
+//! deleting into a structure selects it first, and a second press
+//! deletes the selection.
 
 use core::ops::Range;
 
