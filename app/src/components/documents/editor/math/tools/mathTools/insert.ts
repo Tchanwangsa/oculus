@@ -9,7 +9,7 @@ import { recordUse } from "../mathUsage";
 /** A template as the LaTeX it inserts, fields left empty. */
 export const sourceOf = (template: string) => template.replace(/[#$]\{[^{}]*\}/g, "");
 
-/** The note's subject, whose recents the quick picks show. */
+/** The note's subject, whose recents lead the field's picks. */
 export const subjectOf = (view: EditorView) => view.state.facet(noteHost).subjectId;
 
 /** A palette entry into the open field (slots become placeholders), else

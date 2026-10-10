@@ -1,4 +1,4 @@
-// Dev preflight: dependencies, native binaries, debug CLI, keyd and generated docs.
+// Dev preflight: dependencies, native binaries, the editor core's wasm, debug CLI, keyd and generated docs.
 // OCULUS_CLI_WATCH=1 also starts the CLI watcher; OCULUS_SKIP_PREDEV skips it.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
@@ -33,11 +33,23 @@ if (!existsSync(modules) || mtime(modules) < mtime(join(app, "bun.lock"))) {
   execFileSync("bun", ["install", "--frozen-lockfile"], { cwd: app, stdio: "inherit" });
 }
 
-// 2. The native sidecars. Each script no-ops when its file is already current;
-//    the speech helper and whisper-cli are compiled, not fetched, and only on
-//    macOS.
-for (const script of ["fetch-ffmpeg.mjs", "build-speech.mjs", "build-whisper.mjs"]) {
+// 2. The native sidecars and the maths wasm. Each script no-ops when its file
+//    is already current; the speech helper and whisper-cli are compiled, not
+//    fetched, and only on macOS.
+for (const script of ["fetch-ffmpeg.mjs", "build-speech.mjs", "build-whisper.mjs", "build-math.mjs"]) {
   execFileSync(process.execPath, [join(app, "scripts", script)], { cwd: app, stdio: "inherit" });
+}
+
+// The editor core's wasm for shadow mode (docs/editor-core.md). Without the wasm32
+// target or the pinned wasm-bindgen it skips with one line; a failed build
+// only leaves shadow mode off, so it never stops the app starting.
+try {
+  execFileSync(process.execPath, [join(app, "scripts", "build-editor-wasm.mjs"), "--optional"], {
+    cwd: app,
+    stdio: "inherit",
+  });
+} catch {
+  log("the editor core's wasm did not build — shadow mode stays off");
 }
 
 // The credential broker, built and signed every start as its helper app in

@@ -16,6 +16,7 @@ import {
   CodeHeaderWidget,
   ImageWidget,
   MathWidget,
+  mathsSettled,
 } from "../widgets";
 import { mathAtoms, mathIn } from "./math-blocks";
 import {
@@ -27,6 +28,7 @@ import {
   line,
   mark,
   mathParts,
+  selectedIn,
   showsSource,
   touches,
   touchesLines,
@@ -215,7 +217,9 @@ function buildInline(view: EditorView): DecorationSet {
           const parts = mathParts(state, node.node);
           if (parts && !showsSource(state, node, parts, false)) {
             out.push(
-              Decoration.replace({ widget: new MathWidget(parts.source, false, parts.caret) }).range(
+              Decoration.replace({
+                widget: new MathWidget(parts.source, false, parts.caret, false, selectedIn(state, node.from, node.to)),
+              }).range(
                 node.from,
                 node.to,
               ),
@@ -231,7 +235,9 @@ function buildInline(view: EditorView): DecorationSet {
           const parts = mathParts(state, node.node);
           if (parts && !showsSource(state, node, parts, true)) {
             out.push(
-              Decoration.replace({ widget: new MathWidget(parts.source, true, parts.caret) }).range(
+              Decoration.replace({
+                widget: new MathWidget(parts.source, true, parts.caret, false, selectedIn(state, node.from, node.to)),
+              }).range(
                 node.from,
                 node.to,
               ),
@@ -261,7 +267,7 @@ export const inlinePlugin = ViewPlugin.fromClass(
         u.selectionSet ||
         u.viewportChanged ||
         u.focusChanged ||
-        u.transactions.some((tr) => tr.effects.some((e) => e.is(setFocused))) ||
+        u.transactions.some((tr) => tr.effects.some((e) => e.is(setFocused) || e.is(mathsSettled))) ||
         findRevealed(u.state) !== findRevealed(u.startState) ||
         u.state.field(visualMathField) !== u.startState.field(visualMathField, false) ||
         syntaxTree(u.state) !== syntaxTree(u.startState) ||

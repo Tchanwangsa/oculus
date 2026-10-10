@@ -1,18 +1,19 @@
 import { EditorSelection, Prec, type EditorState } from "@codemirror/state";
-import { keymap, type Command } from "@codemirror/view";
+import { keymap, type Command, type EditorView } from "@codemirror/view";
 
 import { ancestorAt } from "@/components/documents/editor/syntax/syntax";
 import { mathContextOf, ownsLines } from "../../mathContext";
-import { readsCleanly, visualMathField, visualOf, type VisualMath } from "./visual-state";
+import { keepVisible } from "../noteScroll";
+import { fields } from "./registry";
+import { fieldReady, readsCleanly, visualOf, type VisualMath } from "./visual-state";
 
 /** ←/Backspace from just after inline maths, →/Delete from just before it,
  *  open the field at that end instead of stepping over the rendered maths. */
 function enterInline(back: boolean): Command {
   return (view) => {
     const { state } = view;
-    const v = state.field(visualMathField, false);
     const { ranges, main } = state.selection;
-    if (!v || v.lib !== "ready" || ranges.length !== 1 || !main.empty) return false;
+    if (!fieldReady(state) || ranges.length !== 1 || !main.empty) return false;
     const node = ancestorAt(
       state,
       main.head,
@@ -23,7 +24,7 @@ function enterInline(back: boolean): Command {
     const ctx = mathContextOf(node);
     const target = ctx && visualOf(state, ctx);
     if (!target || !readsCleanly(state.sliceDoc(target.from, target.to).trim(), target.display)) return false;
-    view.dispatch({ selection: { anchor: back ? target.to : target.from }, scrollIntoView: true });
+    enter(view, back ? target.to : target.from);
     return true;
   };
 }
@@ -42,20 +43,16 @@ function blockBeside(state: EditorState, pos: number, up: boolean): VisualMath |
   return target && readsCleanly(state.sliceDoc(target.from, target.to).trim(), true) ? target : null;
 }
 
-/** Up to a display block from the line beside it. ↑/↓ off the edge line go
- *  into the field, since block widgets don't hold the caret and vertical
- *  motion would step over them. ← at a line's start or → at its end, and
- *  Backspace/Delete (`deleting`) from a line with text, which would join it
- *  onto the `$$`, stop at the block's edge, beside its rendering, where
- *  Enter or typing adds a line; the same key again enters the field
- *  (`intoMathBlock` in `live-preview/livePreview/math-blocks.ts`). */
+/** Into a display block's field from the line beside it, at the near
+ *  end: ↑/↓ off the edge line, since vertical motion would step over the
+ *  widget; ← at a line's start or → at its end; Backspace/Delete
+ *  (`deleting`) from a line with text, which would join it onto the `$$`. */
 function enterBlock(dir: "up" | "down" | "left" | "right", deleting = false): Command {
   const back = dir === "up" || dir === "left";
   return (view) => {
     const { state } = view;
-    const v = state.field(visualMathField, false);
     const { ranges, main } = state.selection;
-    if (!v || v.lib !== "ready" || ranges.length !== 1 || !main.empty) return false;
+    if (!fieldReady(state) || ranges.length !== 1 || !main.empty) return false;
     const ln = state.doc.lineAt(main.head);
     if (dir === "left" || dir === "right") {
       if (main.head !== (back ? ln.from : ln.to) || (deleting && !ln.length)) return false;
@@ -65,13 +62,16 @@ function enterBlock(dir: "up" | "down" | "left" | "right", deleting = false): Co
     }
     const target = blockBeside(state, main.head, back);
     if (!target) return false;
-    const anchor =
-      dir === "left" ? state.doc.lineAt(target.end).to
-      : dir === "right" ? target.start
-      : back ? target.to : target.from;
-    view.dispatch({ selection: { anchor }, scrollIntoView: true });
+    enter(view, back ? target.to : target.from);
     return true;
   };
+}
+
+/** The caret into the maths at `anchor`: the field opens there, and the
+ *  page moves only if the field's caret would be off screen. */
+function enter(view: EditorView, anchor: number) {
+  view.dispatch({ selection: { anchor } });
+  keepVisible(view, () => fields.get(view)?.caretRect() ?? view.coordsAtPos(anchor));
 }
 
 export const entryKeys = Prec.highest(
@@ -86,16 +86,12 @@ export const entryKeys = Prec.highest(
 );
 
 /** Where the last press on rendered maths landed, as a fraction of its
- *  `.ML__latex` box, so the field can put its caret there once it replaces
- *  the rendering, which it lays out the same (`staticMath`). A KaTeX
- *  rendering's ink stands in, spaced narrower than MathLive's. */
+ *  ink (the KaTeX bases), so the field can put its caret there once it
+ *  replaces the rendering (`rustField/mount.ts`). */
 let pressed: { fx: number; fy: number; at: number } | null = null;
 
 export function noteMathPress(x: number, y: number, rendered: HTMLElement) {
-  const ml = rendered.querySelector(".ML__latex");
-  const ink = ml
-    ? [ml.getBoundingClientRect()]
-    : [...rendered.querySelectorAll(".katex-html > .base")].map((b) => b.getBoundingClientRect());
+  const ink = [...rendered.querySelectorAll(".katex-html > .katex-base")].map((b) => b.getBoundingClientRect());
   const r = ink.length ? ink : [rendered.getBoundingClientRect()];
   const left = Math.min(...r.map((b) => b.left));
   const top = Math.min(...r.map((b) => b.top));

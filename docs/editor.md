@@ -16,6 +16,7 @@ maths is [editor-maths.md](./editor-maths.md).
 | Find and replace | `app/src/components/documents/editor/chrome/find.ts`, `app/src/components/documents/editor/chrome/useEditorFind.ts` |
 | A note's versions and its History panel | `app/src/lib/notes/documentVersions.ts`, `app/src/components/documents/HistoryPanel/` |
 | The note editor as a form field (task body, a chat paste) | `app/src/components/documents/NoteField.tsx` |
+| The Rust editor core, and its shadow of every note editor in dev builds ([editor-core.md](./editor-core.md)) | `app/editor-core/`, `app/src/components/documents/editor/shadow/` |
 
 ## The note editor is CodeMirror 6 over the file's exact text
 
@@ -26,7 +27,7 @@ student document; its lightweight header controls live in
 whole editor by row id: image attachments belong to one note, while a
 rename keeps its editor. **Live** mode renders markdown in place —
 headings, marks, links, lists and checkboxes, quotes, rules, code, pictures,
-KaTeX maths and mermaid diagrams — and shows a construct's source while the selection touches
+maths and mermaid diagrams — and shows a construct's source while the selection touches
 it (a heading, quote or list marker while the caret is on its line); maths
 is edited in a visual field instead
 ([editor-maths.md](./editor-maths.md)). **Raw**
@@ -77,7 +78,8 @@ last updated (`modified_at` or the session's last save) and a word count.
   opens it, and its closing fence is found by looking up to 64 KiB ahead,
   which Lezer's fragment reuse cannot see: `noteLanguage`'s parser runs its
   fragments through `frontmatterFragments`, which drops the one from 0 when a
-  change in that window could make or unmake the block.
+  change in that window could make or unmake the block, as the core's
+  `incremental.rs` restarts at 0.
 - **Toolbar buttons and shortcuts are plain CodeMirror commands**
   (`app/src/components/documents/editor/commands/`) that rewrite markdown
   and unwrap when already applied, so they work in both modes. An inline mark
@@ -234,6 +236,12 @@ cannot wait on the blur (the chat's pasted text editor,
 
 ## Gotchas
 
+- **The selection highlight is our own layer** (`core/selectionLayer.ts`):
+  `drawSelection` draws the caret, and its highlight layer is hidden by the
+  theme, since it has no option to skip spans; `noteSelection` draws the
+  same rectangles less the `selectionGaps`, which Live mode fills with
+  rendered maths, which bands its own atoms
+  ([editor-maths.md](./editor-maths.md#rendered-maths-is-one-unit-to-the-selection-the-clipboard-and-the-caret)).
 - **CodeMirror block decorations come from a `StateField`** — it throws for
   block widgets from a view plugin
   (`app/src/components/documents/editor/live-preview/livePreview/`). Reveal-on-caret

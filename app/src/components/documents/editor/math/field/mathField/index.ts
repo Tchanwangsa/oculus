@@ -5,32 +5,27 @@ import { ancestorAt } from "@/components/documents/editor/syntax/syntax";
 import { mathContextOf } from "../../mathContext";
 import { minimalChange, selectionPastField, withoutEndRows } from "../mathFieldEdits";
 import { entryKeys } from "./keys";
-import { loader } from "./loader";
 import { visualMath, visualMathField } from "./visual-state";
 
 /**
- * Visual maths in Live mode: while the caret is in a maths node, a MathLive
- * `<math-field>` stands in for it and is where it is edited — slots for a
- * fraction's parts, `\` commands that become one symbol. Each edit in the
- * field rewrites only the LaTeX between the delimiters; opening it writes
- * nothing. Maths MathLive or KaTeX can't read cleanly, and maths switched to
- * TeX from the toolbox, are typed as LaTeX source (`tools/mathTools`).
- * MathLive is imported on first use (`loader.ts`). It also draws the maths
- * the field isn't on (`staticMath`), so opening the field doesn't move it;
- * until it arrives, if it fails, or for LaTeX it can't read, maths renders
- * as KaTeX. Rendered markdown's read-only field (`lib/markdown/mathSelect.ts`)
- * reuses the loader, hit-test, widening and copy helpers exported here.
+ * Visual maths in Live mode: while the caret is in a maths node, a visual
+ * field stands in for it and is where it is edited — slots for a
+ * fraction's parts, `\` commands that become one symbol. It is the Rust
+ * field (`math/field/rustField`: `MathView` over the maths engine's edit
+ * model), a `VisualField` to the rest of the editor. Each edit in the field
+ * rewrites only the LaTeX between the delimiters; opening it writes
+ * nothing. Maths the field can't read cleanly, and maths switched to TeX
+ * from the toolbox, are typed as LaTeX source (`tools/mathTools`). Until
+ * the maths engine has loaded, maths renders as a placeholder
+ * (`live-preview/widgets/math.ts`).
  */
 
-export { MATH_ARRAYSTRETCH, MATH_LINE_GAP, loadMathLive, mathLiveReady } from "./loader";
-export { caretAt, wholeStructures, type Box } from "./geometry";
+export { MATH_ARRAYSTRETCH, MATH_LINE_GAP } from "./layout";
 export { noteMathPress } from "./keys";
-export { modelOf, type MlAtom, type MlModel } from "./model";
-export { activeMathField, fieldKeys } from "./registry";
-export { centredRows } from "./rows";
-export { fromField, layoutBlock, tidy, toField } from "./serialize";
-export { staticMath } from "./static";
+export { activeMathField, fieldKeys, fieldTools, type VisualField } from "./registry";
+export { layoutBlock } from "./serialize";
 export {
+  fieldReady,
   readsCleanly,
   setMathMode,
   touchedMath,
@@ -40,7 +35,6 @@ export {
   type ActiveMath,
   type VisualMath,
 } from "./visual-state";
-export { BLOCK_MATH_TYPE, FieldController } from "./controller";
 export { MathFieldWidget } from "./widget";
 
 /** A selection extended from inside the open field to past its maths starts
@@ -52,10 +46,9 @@ const fieldSelection = EditorState.transactionFilter.of((tr) => {
   return sel ? [tr, { selection: sel, sequential: true }] : tr;
 });
 
-/** A block the field leaves loses empty rows at its end (Enter past its last
- *  line), which would draw as a blank line under the formula, where the
- *  caret beside the block then rests. Outside the history, after the update
- *  that closed the field. */
+/** A block the field leaves loses empty rows at its end (Shift+Enter past
+ *  its last line), which would draw as a blank line under the formula.
+ *  Outside the history, after the update that closed the field. */
 const dropEndRows = EditorView.updateListener.of((u) => {
   const left = visualMath(u.startState);
   if (!left?.block || visualMath(u.state)?.id === left.id) return;
@@ -88,8 +81,8 @@ const dropEmptyInline = EditorView.updateListener.of((u) => {
   });
 });
 
-/** The visual-maths state, the loader and the keys into a field. Live mode
+/** The visual-maths state and the keys into a field. Live mode
  *  only; the decorations are `live-preview/`'s. */
 export function mathField(): Extension {
-  return [visualMathField, loader, entryKeys, fieldSelection, dropEndRows, dropEmptyInline];
+  return [visualMathField, entryKeys, fieldSelection, dropEndRows, dropEmptyInline];
 }

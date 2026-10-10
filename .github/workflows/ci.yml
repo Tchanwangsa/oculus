@@ -1,8 +1,10 @@
 # Checks every push to master and every pull request on a fresh macOS checkout:
 # that the Rust is formatted, the frontend tests and bundle, the Rust tests
-# (the app's, keyd's and keyd core's), that keyd builds and signs as the bundle
-# ships it, and that the generated CLI reference matches the binary; and on
-# Linux, that keyd builds with no OS adapter. See
+# (the app's, keyd's, keyd core's and the maths engine's), that keyd builds and
+# signs as the bundle ships it, and that the generated CLI reference matches the
+# binary; and on Linux, that keyd builds with no OS adapter and the editor core
+# agrees with CodeMirror and Lezer, natively and as the dev build's shadow mode
+# runs it. See
 # docs/development.md#ci-proves-a-fresh-checkout-builds-releases-are-cut-by-hand.
 name: CI
 
@@ -40,6 +42,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+          targets: wasm32-unknown-unknown
+      # scripts/build-math.mjs needs the CLI at math-core/Cargo.lock's wasm-bindgen.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
@@ -54,6 +61,8 @@ jobs:
           (cd src-tauri && cargo fmt --check)
           (cd keyd && cargo fmt --check)
           (cd keyd/core && cargo fmt --check)
+          # Only our crates: the vendored katex/ keeps upstream's formatting.
+          (cd math-core && cargo fmt --check -p oculus-math -p oculus-math-edit -p oracle)
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
@@ -81,6 +90,9 @@ jobs:
       - name: keyd tests, release policy and dev
         working-directory: app/keyd
         run: cargo test --locked && cargo test --locked --features dev
+      - name: Maths engine tests
+        working-directory: app/math-core
+        run: cargo test --locked
 
       - name: CLI reference matches the binary
         run: |
@@ -107,3 +119,62 @@ jobs:
       - name: Check keyd
         working-directory: app/keyd
         run: cargo check --locked
+
+  editor-core:
+    name: Editor core (Linux)
+    runs-on: ubuntu-latest
+    # An uncached run also compiles the wasm-bindgen CLI.
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app/editor-core
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: app/package.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      # Caches ~/.cargo/bin too, so the wasm-bindgen CLI installs once.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/editor-core -> target
+
+      - name: Rust is formatted
+        run: cargo fmt --all --check
+      - name: Clippy, oracle binary and wasm bridge included
+        run: |
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --locked -p oculus-editor-core-wasm --target wasm32-unknown-unknown -- -D warnings
+      - name: Unit, property and spec tests
+        run: cargo test --locked --workspace
+      # The glue generator must be the version wasm/Cargo.toml pins.
+      - name: Install the wasm-bindgen CLI
+        run: |
+          version=$(sed -n 's/^wasm-bindgen = "=\(.*\)"$/\1/p' wasm/Cargo.toml)
+          if [ "$(wasm-bindgen --version 2>/dev/null)" != "wasm-bindgen $version" ]; then
+            cargo install wasm-bindgen-cli --version "$version" --locked
+          fi
+
+      # The oracles import the app's own CodeMirror, Lezer and noteLanguage.
+      - name: Install frontend dependencies
+        working-directory: app
+        run: bun install --frozen-lockfile
+      - name: Build the editor core's wasm
+        working-directory: app
+        run: bun run editor-wasm
+      # A new seed each run widens coverage; a failure prints the seed to replay.
+      - name: Oracles agree with CodeMirror and Lezer
+        working-directory: app
+        env:
+          SEED: ${{ github.run_number }}
+        run: |
+          bun editor-core/oracle/text.ts 2000 "$SEED"
+          bun editor-core/oracle/changes.ts 5000 "$SEED"
+          bun editor-core/oracle/history.ts 1000 "$SEED"
+          bun editor-core/oracle/markdown.ts 5000 "$SEED"
+          bun editor-core/oracle/shadow.ts 300 "$SEED"

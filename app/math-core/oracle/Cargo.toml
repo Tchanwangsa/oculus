@@ -1,0 +1,17 @@
+[package]
+name = "oracle"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+license.workspace = true
+description = "Renders JSON-lines requests with the katex fork, for oracle/render.ts to diff against KaTeX JS, and checks the edit field's stops."
+
+[[bin]]
+name = "oracle"
+path = "src/main.rs"
+
+[dependencies]
+katex = { package = "katex-rs", path = "../katex" }
+oculus-math-edit = { path = "../edit" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
