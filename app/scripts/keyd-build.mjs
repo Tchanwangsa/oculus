@@ -3,14 +3,22 @@
 // step for this OS is the only OS-specific part (docs/development.md); an OS
 // without one builds nothing.
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { app, buildCli, cliPath } from "./runtime.mjs";
+import { app, buildCli, cliPath, helperProgram, keydHelperApp } from "./runtime.mjs";
 
 export const log = (msg) => console.log(`[keyd] ${msg}`);
 
 export const crate = realpathSync(join(app, "keyd"));
+
+/** keyd's signing identifier: the helper's bundle identifier and launchd's label. */
+export const KEYD_IDENTIFIER = "com.tchan.oculus.keyd";
+
+// The helper app's Info.plist and icon. keyd's build.rs hashes both into its
+// source hash, since both are sealed into the signature.
+const helperPlist = join(crate, "bundle", "Info.plist");
+const helperIcon = join(app, "src-tauri", "icons", "icon.icns");
 
 /**
  * The two builds differ only in the `dev` feature, which admits any same-user
@@ -53,18 +61,31 @@ function buildForMacos(variant, signedDir) {
   execFileSync("cargo", cargoArgs(variant, rustflags), { cwd: crate, stdio: "inherit" });
   if (!existsSync(built)) throw new Error(`cargo reported success but ${built} is not there`);
 
-  // Sign a fresh copy, then rename it into place: re-signing a file that has
-  // already run leaves the kernel's cached signature stale. `-i` keeps the
-  // cdhash independent of the file name.
-  const signed = join(signedDir, "oculus-keyd");
-  const partial = `${signed}.${process.pid}.part`;
+  // keyd runs as a helper app so macOS names it "Oculus Helper", with the
+  // app's icon. Lay out and sign a fresh copy, then rename it into place:
+  // re-signing a file that has already run leaves the kernel's cached
+  // signature stale. Signing the bundle binds its Info.plist and seals the
+  // icon; `-i` keeps the cdhash independent of the directory's name, and every
+  // input is a checked-in or reproducibly built file, so the same source
+  // gives the same cdhash.
+  const signed = join(signedDir, keydHelperApp);
+  const partial = join(signedDir, `.${keydHelperApp}.${process.pid}.part`);
   mkdirSync(signedDir, { recursive: true });
+  rmSync(partial, { recursive: true, force: true });
   try {
-    copyFileSync(built, partial);
-    execFileSync("codesign", ["-s", "-", "-f", "-o", "runtime", "-i", "com.tchan.oculus.keyd", partial], { stdio: "inherit" });
+    mkdirSync(join(partial, "Contents", "MacOS"), { recursive: true });
+    mkdirSync(join(partial, "Contents", "Resources"), { recursive: true });
+    copyFileSync(helperPlist, join(partial, "Contents", "Info.plist"));
+    copyFileSync(helperIcon, join(partial, "Contents", "Resources", "icon.icns"));
+    copyFileSync(built, helperProgram(partial));
+    chmodSync(helperProgram(partial), 0o755);
+    // codesign refuses extended attributes (Finder info, provenance) as detritus.
+    execFileSync("xattr", ["-cr", partial]);
+    execFileSync("codesign", ["-s", "-", "-f", "-o", "runtime", "-i", KEYD_IDENTIFIER, partial], { stdio: "inherit" });
+    rmSync(signed, { recursive: true, force: true });
     renameSync(partial, signed);
   } finally {
-    rmSync(partial, { force: true });
+    rmSync(partial, { recursive: true, force: true });
   }
   return signed;
 }
@@ -76,8 +97,8 @@ export const hasAdapter = () => process.platform in buildSteps;
 
 /**
  * Build and sign keyd for `variant` ("dev" or "bundle"), returning the signed
- * binary and its source hash, or null on an OS with no adapter. `signedDir`
- * overrides where the signed copy lands.
+ * helper app, the keyd inside it and its source hash, or null on an OS with no
+ * adapter. `signedDir` overrides where the signed helper lands.
  */
 export function buildKeyd(variant, signedDir = variants[variant].signedDir) {
   const step = buildSteps[process.platform];
@@ -85,18 +106,19 @@ export function buildKeyd(variant, signedDir = variants[variant].signedDir) {
     log(`oculus-keyd has no adapter for ${process.platform} — nothing built`);
     return null;
   }
-  const binary = step(variant, signedDir);
+  const helper = step(variant, signedDir);
+  const binary = helperProgram(helper);
   const hash = execFileSync(binary, ["source-hash"], { encoding: "utf8" }).trim();
-  log(`built ${binary} (${variant}, source ${hash.slice(0, 12)})`);
-  return { binary, hash };
+  log(`built ${helper} (${variant}, source ${hash.slice(0, 12)})`);
+  return { helper, binary, hash };
 }
 
 /**
- * Install `binary` when the checkout is the main one and its source changed.
- * A worktree's build must never take over the registration the running app
- * depends on.
+ * Install the helper app `helper` when the checkout is the main one and its
+ * source changed. A worktree's build must never take over the registration
+ * the running app depends on.
  */
-export function installFromMainCheckout(binary) {
+export function installFromMainCheckout(helper) {
   const git = (...args) =>
     execFileSync("git", ["rev-parse", "--path-format=absolute", ...args], {
       cwd: app,
@@ -110,7 +132,7 @@ export function installFromMainCheckout(binary) {
     // No git, or not a checkout: nothing to install from.
   }
   if (!main) {
-    log(`not the main checkout — not installed (by hand: oculus keyd install --from ${binary})`);
+    log(`not the main checkout — not installed (by hand: oculus keyd install --from "${helper}")`);
     return;
   }
 
@@ -118,5 +140,5 @@ export function installFromMainCheckout(binary) {
   // an unchanged source installs nothing.
   const cli = process.env.OCULUS_BIN ?? cliPath("debug");
   if (!existsSync(cli)) buildCli("debug");
-  execFileSync(cli, ["keyd", "install", "--if-changed", "--from", binary], { stdio: "inherit" });
+  execFileSync(cli, ["keyd", "install", "--if-changed", "--from", helper], { stdio: "inherit" });
 }

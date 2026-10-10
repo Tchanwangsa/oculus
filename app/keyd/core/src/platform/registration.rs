@@ -18,7 +18,8 @@ pub trait Registrar: Sync {
     /// from here.
     fn check(&self, data_dir: &Path) -> Result<(), String>;
     /// Whether `program` must be registered where it is (inside an install,
-    /// for the caller check) rather than copied to `paths::installed_bin`.
+    /// for the caller check) rather than copied, with its helper app, to
+    /// `paths::installed_bin`.
     fn runs_in_place(&self, program: &Path) -> bool;
     /// Registers `program` to serve `data_dir`, replacing any registration
     /// and leaving it loaded. Returns `Registration::path`.

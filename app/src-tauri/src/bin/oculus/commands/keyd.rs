@@ -90,10 +90,7 @@ impl Ctx {
             }
             (Some(c), None, Some(e)) => println!("available  {} {}", c.display(), paint(e, RED)),
             (None, None, Some(e)) => println!("available  {}", paint(e, RED)),
-            _ => println!(
-                "available  {}",
-                paint("no built keyd beside this binary", DIM)
-            ),
+            _ => println!("available  {}", paint("no built keyd for this binary", DIM)),
         }
         match (&s.ping, &s.ping_error) {
             (Some(p), _) => {

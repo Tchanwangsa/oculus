@@ -12,8 +12,12 @@ pub const IDENTIFIER: &str = "com.tchan.oculus";
 /// where the app's requests go.
 pub const CANVAS_BASE: &str = "https://canvas.lms.unimelb.edu.au";
 
-/// keyd's executable name, in a bundle and in `bin/`.
+/// keyd's executable name, inside its helper app.
 pub const BINARY: &str = "oculus-keyd";
+
+/// The helper app keyd runs as: the name macOS shows for keyd in a keychain
+/// prompt and in Login Items. Its bundle identifier is `<IDENTIFIER>.keyd`.
+pub const HELPER: &str = "Oculus Helper";
 
 const STAMP: &str = "oculus-keyd.stamp";
 
@@ -129,12 +133,58 @@ pub fn append_bounded_log(path: &Path, message: &str, now: u64) {
     }
 }
 
-/// Where an install that does not run in place puts keyd, and its stamp.
+/// `<HELPER>.app`, the directory name of keyd's helper app.
+pub fn helper_app_name() -> String {
+    format!("{HELPER}.app")
+}
+
+/// keyd's executable inside the helper app `helper`.
+pub fn helper_program(helper: &Path) -> PathBuf {
+    helper.join("Contents/MacOS").join(BINARY)
+}
+
+/// The helper app `program` is the executable of, when it sits at
+/// `<x>.app/Contents/MacOS/<BINARY>`.
+pub fn helper_of(program: &Path) -> Option<PathBuf> {
+    let macos = program.parent()?;
+    let contents = macos.parent()?;
+    let app = contents.parent()?;
+    let shaped = program.file_name()? == BINARY
+        && macos.file_name()? == "MacOS"
+        && contents.file_name()? == "Contents"
+        && app.extension()? == "app";
+    shaped.then(|| app.to_path_buf())
+}
+
+/// The keyd an app bundle ships for `exe`, one of the bundle's
+/// `Contents/MacOS` executables: its `Contents/Helpers/<HELPER>.app`.
+pub fn bundled_program(exe: &Path) -> Option<PathBuf> {
+    let macos = exe.parent()?;
+    let contents = macos.parent()?;
+    let app = contents.parent()?;
+    let shaped = macos.file_name()? == "MacOS"
+        && contents.file_name()? == "Contents"
+        && app.extension()? == "app";
+    shaped.then(|| helper_program(&contents.join("Helpers").join(helper_app_name())))
+}
+
+/// Where an install that does not run in place puts keyd's helper app, and
+/// its stamp.
 pub fn bin_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("bin")
 }
 
+pub fn installed_helper(data_dir: &Path) -> PathBuf {
+    bin_dir(data_dir).join(helper_app_name())
+}
+
 pub fn installed_bin(data_dir: &Path) -> PathBuf {
+    helper_program(&installed_helper(data_dir))
+}
+
+/// Where an install put keyd before it ran as a helper app: a bare binary,
+/// removed by the next install.
+pub fn bare_installed_bin(data_dir: &Path) -> PathBuf {
     bin_dir(data_dir).join(BINARY)
 }
 
@@ -153,8 +203,40 @@ mod tests {
         assert_eq!(socket(d), Path::new("/d/keyd.sock"));
         assert_eq!(vault(d), Path::new("/d/vault.bin"));
         assert_eq!(vault_lock(&vault(d)), Path::new("/d/vault.bin.lock"));
-        assert_eq!(installed_bin(d), Path::new("/d/bin/oculus-keyd"));
+        assert_eq!(
+            installed_bin(d),
+            Path::new("/d/bin/Oculus Helper.app/Contents/MacOS/oculus-keyd")
+        );
+        assert_eq!(bare_installed_bin(d), Path::new("/d/bin/oculus-keyd"));
         assert_eq!(stamp(d), Path::new("/d/bin/oculus-keyd.stamp"));
         assert!(data_dir().ends_with(IDENTIFIER));
+    }
+
+    #[test]
+    fn keyd_is_the_executable_of_its_helper_app() {
+        let helper = Path::new("/d/bin/Oculus Helper.app");
+        assert_eq!(helper_of(&helper_program(helper)).as_deref(), Some(helper));
+        assert_eq!(helper_of(Path::new("/d/bin/oculus-keyd")), None);
+        assert_eq!(
+            helper_of(Path::new("/d/X.app/Contents/MacOS/other")),
+            None,
+            "another executable is not keyd"
+        );
+        assert_eq!(
+            helper_of(Path::new("/d/X/Contents/MacOS/oculus-keyd")),
+            None
+        );
+    }
+
+    #[test]
+    fn a_bundle_ships_keyd_as_a_nested_helper() {
+        assert_eq!(
+            bundled_program(Path::new("/A/Oculus.app/Contents/MacOS/app")).unwrap(),
+            Path::new(
+                "/A/Oculus.app/Contents/Helpers/Oculus Helper.app/Contents/MacOS/oculus-keyd"
+            )
+        );
+        assert_eq!(bundled_program(Path::new("/x/target/release/oculus")), None);
+        assert_eq!(bundled_program(Path::new("/x/Contents/MacOS/oculus")), None);
     }
 }

@@ -1,10 +1,11 @@
 //! keyd's release policy against a real, signed app bundle. The build here has
-//! no `dev` feature, so keyd admits only executables inside the bundle it runs
-//! from, and only while that bundle's seal verifies. The test lays out
-//! `Oculus.app` the way Tauri does (`Contents/MacOS/{app,oculus,oculus-keyd}`),
-//! signs it inside-out with the hardened runtime, starts the bundled keyd
-//! through its debug-only `serve-local`, and connects from copies of this very
-//! test binary placed inside and outside it.
+//! no `dev` feature, so keyd admits only executables inside the app its helper
+//! is nested in, and only while that app's seal verifies. The test lays out
+//! `Oculus.app` the way the release does (`Contents/MacOS/{app,oculus}`, keyd
+//! in `Contents/Helpers/Oculus Helper.app`), signs it inside-out with the
+//! hardened runtime, starts the bundled keyd through its debug-only
+//! `serve-local`, and connects from copies of this very test binary placed
+//! inside and outside it.
 
 #![cfg(all(target_os = "macos", debug_assertions, not(feature = "dev")))]
 
@@ -14,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use keyd_core::paths;
 use serde_json::{json, Value};
 
 const SOCK_VAR: &str = "OCULUS_BUNDLE_TEST_SOCK";
@@ -48,6 +50,11 @@ impl Scratch {
     fn macos(&self) -> PathBuf {
         self.app.join("Contents/MacOS")
     }
+    fn helper(&self) -> PathBuf {
+        self.app
+            .join("Contents/Helpers")
+            .join(paths::helper_app_name())
+    }
     fn sock(&self) -> PathBuf {
         self.root.join("k.sock")
     }
@@ -78,8 +85,32 @@ fn codesign(args: &[&str], path: &Path) {
     );
 }
 
-/// A signed `Oculus.app` with keyd, this binary as the app and as `oculus`, and
-/// a third executable the app has no role for. `app/` is the main executable.
+/// keyd's helper app at `helper`, laid out and signed as keyd-build.mjs does.
+fn helper_app(helper: &Path) {
+    std::fs::create_dir_all(helper.join("Contents/MacOS")).unwrap();
+    std::fs::create_dir_all(helper.join("Contents/Resources")).unwrap();
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    std::fs::copy(
+        crate_dir.join("bundle/Info.plist"),
+        helper.join("Contents/Info.plist"),
+    )
+    .unwrap();
+    std::fs::copy(
+        crate_dir.join("../src-tauri/icons/icon.icns"),
+        helper.join("Contents/Resources/icon.icns"),
+    )
+    .unwrap();
+    std::fs::copy(
+        env!("CARGO_BIN_EXE_oculus-keyd"),
+        paths::helper_program(helper),
+    )
+    .unwrap();
+    codesign(&["-o", "runtime", "-i", "com.tchan.oculus.keyd"], helper);
+}
+
+/// A signed `Oculus.app` with keyd's helper app, this binary as the app and as
+/// `oculus`, and a third executable the app has no role for. `app/` is the
+/// main executable.
 fn bundle() -> Scratch {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -106,36 +137,42 @@ fn bundle() -> Scratch {
     for name in ["app", "oculus", "helper"] {
         std::fs::copy(&me, macos.join(name)).unwrap();
     }
-    std::fs::copy(env!("CARGO_BIN_EXE_oculus-keyd"), macos.join("oculus-keyd")).unwrap();
-    // Inside-out, as Tauri signs: each executable, then the bundle.
-    for name in ["helper", "oculus", "oculus-keyd", "app"] {
-        codesign(&["-o", "runtime"], &macos.join(name));
-    }
-    codesign(&["-o", "runtime"], &app);
-    let verified = Command::new("codesign")
-        .args(["--verify", "--deep", "--strict"])
-        .arg(&app)
-        .status()
-        .unwrap();
-    assert!(verified.success(), "the scratch bundle verifies as shipped");
-
+    // Inside-out, as the release is signed: the helper app (signed by the
+    // build, left alone by Tauri), each executable, then the bundle.
     let mut scratch = Scratch {
         root,
         app,
         keyd: None,
     };
+    helper_app(&scratch.helper());
+    for name in ["helper", "oculus", "app"] {
+        codesign(&["-o", "runtime"], &macos.join(name));
+    }
+    codesign(&["-o", "runtime"], &scratch.app);
+    let verified = Command::new("codesign")
+        .args(["--verify", "--deep", "--strict"])
+        .arg(&scratch.app)
+        .status()
+        .unwrap();
+    assert!(verified.success(), "the scratch bundle verifies as shipped");
+
+    let keyd = paths::helper_program(&scratch.helper());
+    scratch.keyd = Some(serve(&scratch, &keyd));
+    scratch
+}
+
+/// keyd at `keyd`, serving the scratch socket.
+fn serve(scratch: &Scratch, keyd: &Path) -> Child {
     let sock = scratch.sock();
-    scratch.keyd = Some(
-        Command::new(scratch.macos().join("oculus-keyd"))
-            .arg("serve-local")
-            .arg(&sock)
-            .env("OCULUS_KEYD_DATA_DIR", &scratch.root)
-            .env("OCULUS_KEYD_TEST_KEY", "11".repeat(32))
-            .env("OCULUS_KEYD_IDLE_SECS", "120")
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
-    );
+    let child = Command::new(keyd)
+        .arg("serve-local")
+        .arg(&sock)
+        .env("OCULUS_KEYD_DATA_DIR", &scratch.root)
+        .env("OCULUS_KEYD_TEST_KEY", "11".repeat(32))
+        .env("OCULUS_KEYD_IDLE_SECS", "120")
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
     let started = Instant::now();
     while !sock.exists() {
         assert!(
@@ -144,7 +181,7 @@ fn bundle() -> Scratch {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    scratch
+    child
 }
 
 /// `client` run from `exe`, which decides who keyd sees at the other end.
@@ -238,6 +275,55 @@ fn a_bundle_edited_after_signing_is_refused_for_everyone_in_it() {
         assert_eq!(reply["error"], "caller", "{name}: {reply}");
         assert!(
             reply["detail"].as_str().unwrap().contains("seal"),
+            "{name}: {reply}"
+        );
+    }
+}
+
+#[test]
+fn a_helper_edited_after_signing_breaks_the_apps_seal() {
+    let b = bundle();
+    std::fs::write(
+        b.helper().join("Contents/Resources/icon.icns"),
+        "not the icon",
+    )
+    .unwrap();
+    for name in ["app", "oculus"] {
+        let reply = ask(&b, &b.macos().join(name), ping());
+        assert_eq!(reply["error"], "caller", "{name}: {reply}");
+        assert!(
+            reply["detail"].as_str().unwrap().contains("seal"),
+            "{name}: {reply}"
+        );
+    }
+}
+
+/// The helper copied out of the app, as an install that does not run in
+/// place keeps it, trusts only itself: the app and CLI beside it are outside.
+#[test]
+fn a_helper_outside_the_app_admits_neither_the_app_nor_the_cli() {
+    let mut b = bundle();
+    if let Some(mut keyd) = b.keyd.take() {
+        keyd.kill().ok();
+        keyd.wait().ok();
+    }
+    std::fs::remove_file(b.sock()).ok();
+    let alone = b.root.join("bin").join(paths::helper_app_name());
+    std::fs::create_dir_all(alone.parent().unwrap()).unwrap();
+    let copied = Command::new("cp")
+        .arg("-R")
+        .arg(b.helper())
+        .arg(&alone)
+        .status()
+        .unwrap();
+    assert!(copied.success());
+    b.keyd = Some(serve(&b, &paths::helper_program(&alone)));
+
+    for name in ["app", "oculus"] {
+        let reply = ask(&b, &b.macos().join(name), ping());
+        assert_eq!(reply["error"], "caller", "{name}: {reply}");
+        assert!(
+            reply["detail"].as_str().unwrap().contains("outside"),
             "{name}: {reply}"
         );
     }

@@ -31,7 +31,7 @@ agent queries and plans through. Flags are in
 | `lecture chapters`, `lecture end` | Derived rows, regenerable from the recording | They spend model quota, so an existing result is kept unless `--force` |
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |
-| `keyd install`, `keyd uninstall` | The LaunchAgent `com.tchan.oculus.keyd`, `bin/oculus-keyd` and its stamp in the data dir; install also (re)loads the agent | Never touches `vault.bin` or the keychain, so uninstalling loses no key ([below](#keyd-install-never-points-the-agent-at-a-build-tree)) |
+| `keyd install`, `keyd uninstall` | The LaunchAgent `com.tchan.oculus.keyd`, `bin/Oculus Helper.app` and keyd's stamp in the data dir; install also (re)loads the agent | Never touches `vault.bin` or the keychain, so uninstalling loses no key ([below](#keyd-install-never-points-the-agent-at-a-build-tree)) |
 | `keyd status` | Nothing | Pings keyd, which starts it; prints no secret |
 | `agent` | Nothing recorded | One turn through the app's own bridges; `--subject` appends the picker's scope ([harness.md](./harness.md)) |
 
@@ -65,10 +65,13 @@ migrations, so on a fresh machine the app must open once first; until then
 
 ## `keyd install` never points the agent at a build tree
 
-The LaunchAgent's program is fixed: a keyd inside an app bundle is registered
-in place, since its caller check needs its bundle, and any other is copied to
-`bin/oculus-keyd` in the data dir through a temp file and a rename. Without
-`--from` it takes the keyd beside the CLI in the bundle, or in a debug CLI the
+The LaunchAgent's program is fixed: a keyd whose helper app is nested in the
+Oculus app is registered in place, since its caller check needs that app, and
+any other has its whole helper app copied to `bin/Oculus Helper.app` in the
+data dir, built beside it and swapped in with one rename; the next install
+removes a bare `bin/oculus-keyd` an earlier one left. `--from` takes the
+helper app or the keyd inside it, and refuses a keyd that is not in one.
+Without `--from` it takes the keyd in the CLI's bundle, or in a debug CLI the
 output of `bun run keyd` in the checkout it was built from
 ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
 

@@ -64,11 +64,11 @@ jobs:
 
       - name: Fetch ffmpeg, build the speech helper and whisper-cli
         run: bun run ffmpeg && bun run speech && bun run whisper
-      # tauri-build refuses to compile anything until every externalBin exists.
-      # keyd's build never goes through it, so it is staged first, for real: the
-      # release policy, signed, as the bundle would carry it.
+      # keyd's helper app, built for real: the release policy, signed and
+      # verified, as the bundle would carry it.
       - name: Build, sign and stage oculus-keyd
         run: bun run stage-keyd
+      # tauri-build refuses to compile anything until every externalBin exists;
       # stage-cli is what bootstraps the oculus sidecar on a fresh checkout.
       - name: Build and stage the oculus CLI
         run: bun run stage-cli
