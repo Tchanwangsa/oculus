@@ -1,6 +1,8 @@
 //! Echo360 lecture capture, independent of Tauri. Access is an LTI launch:
 //! POSTing Canvas's OAuth-signed tool form to Echo360 mints the session and the
-//! CloudFront cookies the media CDN accepts.
+//! CloudFront cookies the media CDN accepts. Echo360's own cookies live in this
+//! process only; the Canvas page that carries the form comes through
+//! oculus-keyd, which holds the Canvas session.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -67,31 +69,12 @@ pub type SourceNum = u8;
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
-pub fn connect(canvas_cookie: &str, course_id: i64) -> Result<Session, String> {
-    if canvas_cookie.is_empty() {
-        return Err("Canvas session not found — connect Canvas first".to_string());
-    }
-
+pub fn connect(canvas: &crate::canvas::Canvas, course_id: i64) -> Result<Session, String> {
     let lti_url = format!(
         "{}/courses/{course_id}{LTI_TOOL_PATH}",
         crate::paths::CANVAS_BASE
     );
-
-    eprintln!("[oculus] echo360 auth: fetching LTI page for course {course_id}");
-    let html = ureq::get(&lti_url)
-        .set("Cookie", canvas_cookie)
-        .set("User-Agent", UA)
-        .call()
-        .map_err(|e| format!("Canvas LTI page fetch failed: {e}"))?
-        .into_string()
-        .map_err(|e| e.to_string())?;
-
-    let (action, fields) = parse_lti_form(&html).ok_or_else(|| {
-        "Could not parse the Echo360 LTI form — the course may not use Echo360, \
-         or the Canvas session has lapsed"
-            .to_string()
-    })?;
-
+    let (action, fields) = launch_form(canvas, course_id)?;
     let body = url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(&fields)
         .finish();
@@ -136,6 +119,29 @@ pub fn connect(canvas_cookie: &str, course_id: i64) -> Result<Session, String> {
 
     eprintln!("[oculus] echo360 auth done: section={}", s.section_id);
     Ok(s)
+}
+
+/// The form Canvas serves for the Echo360 tool: where it posts and its fields.
+/// The page is Canvas's, so it comes through oculus-keyd with the session.
+fn launch_form(
+    canvas: &crate::canvas::Canvas,
+    course_id: i64,
+) -> Result<(String, Vec<(String, String)>), String> {
+    eprintln!("[oculus] echo360 auth: fetching LTI page for course {course_id}");
+    let page = canvas
+        .get(&format!("/courses/{course_id}{LTI_TOOL_PATH}"))
+        .map_err(|e| format!("Canvas LTI page fetch failed: {e}"))?;
+    if !page.ok() {
+        return Err(format!(
+            "Canvas LTI page fetch failed: HTTP {}",
+            page.status
+        ));
+    }
+    parse_lti_form(&String::from_utf8_lossy(&page.body)).ok_or_else(|| {
+        "Could not parse the Echo360 LTI form — the course may not use Echo360, \
+         or the Canvas session has lapsed"
+            .to_string()
+    })
 }
 
 fn parse_lti_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
@@ -540,6 +546,74 @@ mod tests {
                 ("oauth_nonce".to_string(), "abc&1".to_string()),
                 ("lti_version".to_string(), "LTI-1p0".to_string()),
             ]
+        );
+    }
+
+    fn keyd_serving(
+        pages: &'static [(&'static str, u16, &'static str, &'static str)],
+    ) -> (crate::test_support::Scratch, crate::test_support::FakeKeyd) {
+        let dir = crate::test_support::Scratch::new("echo360-lti");
+        let keyd = crate::test_support::FakeKeyd::start(&dir, move |header, _| {
+            let path = header["path"].as_str().unwrap_or("");
+            let (_, status, location, body) = pages
+                .iter()
+                .find(|(p, ..)| *p == path)
+                .unwrap_or_else(|| panic!("unexpected {path}"));
+            let headers = if location.is_empty() {
+                serde_json::json!([])
+            } else {
+                serde_json::json!([["location", location]])
+            };
+            (
+                serde_json::json!({"status": status, "headers": headers}),
+                body.as_bytes().to_vec(),
+            )
+        });
+        (dir, keyd)
+    }
+
+    #[test]
+    fn the_launch_page_comes_through_keyd_and_its_redirects_are_followed_there() {
+        const FORM: &str = r#"<form action="https://echo360.net.au/lti"><input type="hidden" name="a" value="1"/></form>"#;
+        let (dir, keyd) = keyd_serving(&[
+            (
+                "/courses/5/external_tools/701",
+                302,
+                "/courses/5/launch",
+                "",
+            ),
+            ("/courses/5/launch", 200, "", FORM),
+        ]);
+        let canvas = crate::canvas::Canvas::open(&dir);
+        let (action, fields) = launch_form(&canvas, 5).unwrap();
+        assert_eq!(action, "https://echo360.net.au/lti");
+        assert_eq!(fields, vec![("a".to_string(), "1".to_string())]);
+        let requests = keyd.requests();
+        assert_eq!(requests.len(), 2);
+        for (header, _) in &requests {
+            assert_eq!(header["secret"], "canvas");
+            assert_eq!(header["headers"], serde_json::json!([]));
+        }
+    }
+
+    #[test]
+    fn a_launch_page_without_the_form_or_with_an_error_says_what_failed() {
+        let (dir, _keyd) = keyd_serving(&[
+            (
+                "/courses/5/external_tools/701",
+                200,
+                "",
+                "<html>nothing</html>",
+            ),
+            ("/courses/6/external_tools/701", 404, "", "{}"),
+        ]);
+        let canvas = crate::canvas::Canvas::open(&dir);
+        assert!(launch_form(&canvas, 5)
+            .unwrap_err()
+            .starts_with("Could not parse the Echo360 LTI form"));
+        assert_eq!(
+            launch_form(&canvas, 6).unwrap_err(),
+            "Canvas LTI page fetch failed: HTTP 404"
         );
     }
 

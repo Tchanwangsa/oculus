@@ -175,8 +175,7 @@ impl Ctx {
     /// subject, since the Echo360 session is per course.
     fn run_lectures(&self, args: &RunArgs) -> Result<(), String> {
         let pool = self.db().ok_or("lectures are stored in the database")?;
-        let cookie = std::fs::read_to_string(app_lib::paths::cookie_path(&self.data_dir))
-            .map_err(|_| "not connected — run `oculus auth login`".to_string())?;
+        let canvas = app_lib::canvas::Canvas::open(&self.data_dir);
 
         let subjects = self.rt.block_on(store::subjects(&pool))?;
         let wanted = filter_subjects(&subjects, &args.codes, !args.all)?;
@@ -193,7 +192,7 @@ impl Ctx {
 
         for s in &wanted {
             println!("{}", paint(&s.code, BOLD));
-            let session = match app_lib::echo360::connect(cookie.trim(), s.id) {
+            let session = match app_lib::echo360::connect(&canvas, s.id) {
                 Ok(sess) => sess,
                 Err(e) => {
                     eprintln!("  {} {e}", paint("skip", YELLOW));

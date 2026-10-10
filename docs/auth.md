@@ -378,8 +378,8 @@ checked against `/api/user` directly, and only a good one is stored.
 
 ## Echo360 has no stored credential
 
-Each session is minted on demand from the Canvas cookie by POSTing the
-course's LTI external-tool form (see
+Each session is minted on demand from the Canvas session (the tool page comes
+through keyd's `canvas` route) by POSTing the course's LTI external-tool form (see
 [sync.md](./sync.md#echo360-is-an-lti-launch-with-up-to-two-streams)), and
 `app/src-tauri/src/lectures.rs` caches it per course.
 

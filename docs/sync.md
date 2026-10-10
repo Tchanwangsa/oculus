@@ -152,9 +152,10 @@ The app's Echo360 commands run synchronous HTTP, file I/O and ffmpeg on
 blocking workers, leaving async runtime threads available for other commands.
 Workers share the course session cache and source-qualified cancellation flags.
 
-- Canvas mints an OAuth-signed form on the course's external-tool page;
-  POSTing it to Echo360 creates the session, and the CloudFront cookies that
-  come back are what the media CDN accepts.
+- Canvas mints an OAuth-signed form on the course's external-tool page, which
+  `echo360::connect` fetches through keyd; POSTing it to Echo360 (directly,
+  with Echo360's own in-process cookies) creates the session, and the
+  CloudFront cookies that come back are what the media CDN accepts.
 - A capture is one media id with the Presenter screen at `hd1.mp4` and the room
   camera at `hd2.mp4`. They land as `source1.mp4`/`source2.mp4`, trimmed
   identically with the fetched ffmpeg so the player runs them off one clock;
