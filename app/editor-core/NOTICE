@@ -1,0 +1,52 @@
+Third-party notices for oculus-editor-core
+==========================================
+
+src/markdown/ is a port of @lezer/markdown 1.7.2, and its tree navigation
+(src/markdown/tree.rs) ports @lezer/common 1.5.3. Both are MIT-licensed:
+
+  @lezer/markdown: Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+  @lezer/common:   Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+  Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
+
+tests/fixtures/commonmark-spec.json holds the examples of the CommonMark
+Spec 0.31.2, Copyright (C) 2014-2024 John MacFarlane, licensed under the
+Creative Commons Attribution-ShareAlike 4.0 International licence
+(https://creativecommons.org/licenses/by-sa/4.0/). It is used unmodified as
+test data; it was copied from goldmark v1.7.13's _test/spec.json.
+
+tests/fixtures/gfm-examples.json holds GitHub Flavored Markdown spec
+examples (tables, strikethrough, task list items; the GFM spec is
+Copyright (C) GitHub, Inc., CC-BY-SA 4.0), as pulldown-cmark 0.13.4's
+generated tests carry them (pulldown-cmark: MIT, Copyright 2015 Google Inc.).
+
+tests/fixtures/entities.json lists the HTML named character references,
+generated from the character-entities package (MIT, Copyright (c) 2015
+Titus Wormer).
+
+src/text/change.rs, selection.rs, transaction.rs and history.rs port
+@codemirror/state 6.7.6 (ChangeSet, ChangeDesc, EditorSelection, Transaction,
+EditorState.changeByRange/replaceSelection) and the history of
+@codemirror/commands 6.11.1. Both are MIT-licensed, under the same terms as
+above:
+
+  @codemirror/state:    Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+  @codemirror/commands: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others

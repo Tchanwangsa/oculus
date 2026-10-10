@@ -2,8 +2,8 @@
 //! from the same arithmetic the run bills against, without sending anything:
 //!
 //! * Voyage bills pixels, capped per image (`batch::BILLED_PIXEL_CAP`,
-//!   `ledger::USD_PER_BILLION_PIXELS`); page boxes come from pdfium without
-//!   rasterising (`raster::page_sizes`).
+//!   `ledger::USD_PER_BILLION_PIXELS`); page boxes come from the renderer
+//!   without rasterising (`raster::page_sizes`).
 //! * Packing is deterministic: `batch::plan` is the run's own function.
 //! * The pace is the learned tier: tokens over TPM or requests over RPM,
 //!   whichever is slower.
@@ -35,7 +35,7 @@ pub struct EmbedEstimate {
     /// Files that would be embedded, and the pages inside them.
     pub files: u32,
     pub pages: u32,
-    /// Files pdfium could not open to measure; still counted in `files`.
+    /// Files the renderer could not open to measure; still counted in `files`.
     pub unreadable: u32,
     /// Billed (capped) pixels and the tokens they pace against.
     pub pixels: u64,

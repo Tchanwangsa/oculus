@@ -90,8 +90,8 @@ impl Embedder for VoyageCloud {
         page_count: u32,
         on_progress: &dyn Fn(Progress),
     ) -> Result<EmbedOutput, EmbedError> {
-        // pdfium and the parse record's `hayro-syntax` can disagree on page
-        // count (damaged xref, lying `/Count`). `page_no` is the join key, so
+        // The renderer counts pages as the parse did, so they disagree only
+        // when the file changed after its parse. `page_no` is the join key, so
         // refuse before a pixel is billed rather than file vectors under wrong
         // pages.
         let theirs = raster::page_count(pdf)?;
@@ -151,15 +151,14 @@ impl Embedder for VoyageCloud {
         Ok(unpack_vector(&pack_vector(&raw)?))
     }
 
-    /// Ready means a key (guaranteed by `new`) and a renderer: a missing
-    /// libpdfium is refused once by `embed::preflight` instead of failing every
-    /// file. Quota is not readiness; it surfaces as `QuotaExhausted`.
+    /// Ready means a key, which `new` guarantees; the renderer is compiled
+    /// in. Quota is not readiness; it surfaces as `QuotaExhausted`.
     fn health(&self) -> Health {
         Health {
             backend: BACKEND.to_string(),
             model: EMBED_MODEL.to_string(),
             dim: EMBED_DIM,
-            ready: raster::available().is_ok(),
+            ready: true,
         }
     }
 }

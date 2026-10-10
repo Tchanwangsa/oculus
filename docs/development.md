@@ -13,7 +13,7 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | Shared cached native download and installation | `app/scripts/native-binary.mjs` |
 | The dev preflight | `app/scripts/predev.mjs` |
 | Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
-| Native binary fetchers | `app/scripts/fetch-pdfium.mjs`, `app/scripts/fetch-ffmpeg.mjs` |
+| Native binary fetcher (ffmpeg) | `app/scripts/fetch-ffmpeg.mjs` |
 | Compiles the on-device speech helper | `app/scripts/build-speech.mjs`, `app/src-tauri/speech/main.swift` |
 | Builds whisper.cpp's `whisper-cli` from a pinned release | `app/scripts/build-whisper.mjs` |
 | Builds, signs and (main checkout only) installs the dev `oculus-keyd` | `app/scripts/build-keyd.mjs`, `app/scripts/keyd-build.mjs`, `app/keyd/.cargo/config.toml` |
@@ -40,7 +40,6 @@ bun run cli           # release `oculus`
 bun run cli:dev       # debug `oculus` — the one the dev app's agents run
 bun run cli:install   # release build, symlink into ~/.local/bin, then `oculus docs`
 bun run docs:cli      # rebuild the release CLI, regenerate docs/cli-reference.md from its help
-bun run pdfium        # fetch libpdfium into app/src-tauri/binaries/
 bun run ffmpeg        # fetch ffmpeg into app/src-tauri/binaries/
 bun run speech        # compile the on-device speech helper there (macOS)
 bun run whisper       # build whisper.cpp's whisper-cli there (macOS, needs cmake)
@@ -52,7 +51,7 @@ bun run stage-keyd    # build and sign the release oculus-keyd the bundle ships,
 
 It is bun's lifecycle hook for `dev`, and `beforeDevCommand` is
 `OCULUS_CLI_WATCH=1 bun run dev`, so every `tauri dev` runs it. In order it
-runs `bun install`, fetches ffmpeg and pdfium, compiles the speech helper and
+runs `bun install`, fetches ffmpeg, compiles the speech helper and
 `whisper-cli`, builds and signs the dev `oculus-keyd` and stages it as the
 sidecar (failing like the CLI build does), builds the debug `oculus`, installs
 keyd only as
@@ -63,11 +62,11 @@ two are non-fatal: a machine whose app has never run has no library to fill.
 `OCULUS_SKIP_PREDEV=1` skips it all for a vite-only session.
 
 The scripts share target detection and artifact paths through `app/scripts/runtime.mjs`;
-both native fetchers reject failed HTTP responses and truncated downloads before
-installing anything. Pdfium extracts into a private temporary directory per run.
+the ffmpeg fetcher rejects failed HTTP responses and truncated downloads before
+installing anything.
 
 `cargo test` and `bun run cli` go through neither Tauri nor `predev`, so on a
-fresh checkout run `bun run pdfium`, `bun run ffmpeg` and (on macOS)
+fresh checkout run `bun run ffmpeg` and (on macOS)
 `bun run speech` and `bun run whisper` yourself, and on macOS `bun run
 stage-keyd`, since the app's build script needs keyd's sidecar to exist.
 
@@ -145,7 +144,7 @@ guaranteed to exist.
 
 `ci.yml` runs on every push to `master` and every pull request, on a macOS
 runner with nothing cached but crates: `cargo fmt --check` (the app, keyd
-and keyd core), `bun run test`, `bun run build`, the two native fetches, the
+and keyd core), `bun run test`, `bun run build`, the ffmpeg fetch, the
 speech helper and `whisper-cli`, `stage-keyd` (a real release build and signature
 of keyd, as the bundle carries it), `stage-cli`, `cargo test --release --locked`,
 keyd core's tests with every feature and keyd's with and without `dev`, then
@@ -160,6 +159,13 @@ through tauri-build, so its sidecar needs no placeholder; `stage-cli` is what
 writes the CLI's, on a clean tree. The release profile is shared with that
 CLI build, so the tests reuse its artifacts. sccache is installed because
 `app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
+
+A second job, on Linux because the crate is portable, checks
+`app/editor-core` ([editor.md](./editor.md#a-rust-editor-core-is-built-beside-the-editor-not-in-it)):
+`cargo fmt --check`, clippy with `-D warnings` over every target and feature
+(so the `oracle` binary too), `cargo test --locked`, then the four oracles at a
+few thousand cases each, seeded with the run number so each run tries new
+cases. Replay a failure locally with the seed it prints.
 
 `release.yml` is `workflow_dispatch` only. To cut a release, bump `version` in
 `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml` together, push,
@@ -327,27 +333,6 @@ exception: it is `include_str!`'d into the app, so it changes with the Rust
 rebuild. Which files are overwritten versus merged is in
 [cli.md](./cli.md#oculus-docs-writes-the-agents-folder).
 
-## `libpdfium` is pinned to `pdfium-render`'s Chromium revision
-
-It rasterizes pages for embedding (`app/src-tauri/src/embed/raster/`) and has
-no crates.io source, so `app/scripts/fetch-pdfium.mjs` downloads a prebuilt one.
-Its release tag must match the revision `pdfium-render`'s feature flag binds
-against: a mismatch fails at *bind* time, not compile time, so bump both
-together. At runtime (`app/src-tauri/src/embed/raster/library.rs`) a release
-bundle finds it only in `Contents/Frameworks/` or beside the executable. The
-app and CLI run with library validation off, so any dylib they `dlopen` is
-trusted; an environment variable, a nearby folder or the system's search path
-must not be able to name one. Those sources exist only where a developer runs
-the build: `OCULUS_PDFIUM_LIB` (the dylib or its directory), an ancestor
-`binaries/`, the build tree's `src-tauri/binaries/` and a system pdfium are
-compiled under `cfg(any(debug_assertions, test, feature = "dev-pdfium"))`.
-That covers `tauri dev`, `cli:dev`, and `cargo test` in either profile;
-`bun run cli` builds the release CLI with `--features dev-pdfium`, so
-`cli:install` keeps finding the library from `~/.local/bin`. `stage-cli`,
-`docs:cli` and `tauri build` do not pass the feature, which makes them rebuild
-the release CLI (and `docs:cli` replaces `target/release/oculus`): run `bun run
-cli` again afterwards if you use that binary.
-
 ## A UI change is verified by screenshot, not by `tsc`
 
 - Frontend type-check and bundle: `cd app && bun run build`; editor, shared
@@ -374,7 +359,6 @@ without keyd — neither is an environment variable.
 - `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
 - Anything under `app/src-tauri/` changing, templates included, rebuilds and relaunches the dev app.
 - A dev rebuild SIGTERMs the app past Tauri's Exit event, so agent subprocesses can outlive it ([harness.md](./harness.md)).
-- A pdfium from the wrong Chromium revision builds fine and fails at bind time.
 - Adding `app/keyd` to a workspace, or building it outside `app/keyd`, changes its bytes and brings back the keychain prompt.
 - An OS call outside `app/keyd/core/src/platform/` in keyd's or the app's keyd code fails `bun run test`, and on Linux CI fails the build.
 - Deleting `~/Library/Application Support/com.tchan.oculus` is a full reset, sign-in included.

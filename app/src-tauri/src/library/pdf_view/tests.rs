@@ -1,8 +1,9 @@
 use super::documents::{guarded, open_at, page_sizes, resolve_in};
 use super::layout::{layout, TextGlyph};
 use super::links::page_links;
-use super::render::{render_page, scale_to};
+use super::render::{check_size, render_page};
 use super::text::page_text;
+use crate::library::pdf_render::scale_to;
 use crate::test_support::Scratch;
 use hayro::hayro_interpret::InterpreterSettings;
 use hayro::hayro_syntax::Pdf;
@@ -242,6 +243,9 @@ fn pdf_view_renders_exactly_the_requested_size() {
         render_page(&pdf, 1, 8000, 8000).err().as_deref(),
         Some("too-large")
     );
+    // The 16M-pixel cap the frontend sizes against.
+    assert_eq!(check_size(4000, 4000), Ok(()));
+    assert_eq!(check_size(4001, 4000).err().as_deref(), Some("too-large"));
 }
 
 #[test]
@@ -251,16 +255,6 @@ fn pdf_view_a_panic_inside_hayro_fails_only_its_request() {
         Err("render-failed".to_string())
     );
     assert_eq!(guarded(|| 7), Ok(7));
-}
-
-#[test]
-fn pdf_view_scale_truncates_to_the_requested_pixels() {
-    for side in [612.0f32, 792.0, 595.28, 841.89, 1.0, 13.7] {
-        for pixels in [1u32, 13, 97, 300, 1001, 1600, 4096, 8192] {
-            let scale = scale_to(side, pixels);
-            assert_eq!((side * scale) as u16 as u32, pixels, "{side} -> {pixels}");
-        }
-    }
 }
 
 #[test]

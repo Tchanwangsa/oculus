@@ -126,17 +126,17 @@ second caller waits (no timeout) and then takes the already-parsed path, which
 emits `quality` without a second billed call.
 
 **Every parse ends in `quality`, `error` or `skipped`.** `parse_pdf_reporting` catches a
-panic on the parse thread (`hayro-syntax`, rendering, writing) as `Io` "the parser
-crashed on this file". The cloud client counts pages on the caller's thread
-before submitting, so a PDF that crashes `hayro-syntax` fails alone rather than
-through its batch.
+panic on the parse thread (rendering, writing) as `Io` "the parser crashed on
+this file", and a panic inside hayro while counting pages reads the same. The
+cloud client counts pages on the caller's thread before submitting, so a PDF
+that crashes hayro fails alone rather than through its batch.
 
-**Pages are counted with `hayro-syntax`** (`client::page_count`, used by both
-engines), and the count must equal pdfium's, since `page_no` is the join key
-the embedder rasterises against. Like pdfium it opens a PDF encrypted with an
-empty user password; a real password fails as `Document` `encrypted-pdf`. It
-is not pdfium itself because an embed holds pdfium's one session for minutes. `parse_file` reports its own refusals (not a parseable
-file, not on disk) as `Io` too, so a sweep kick never vanishes.
+**Pages are counted by the renderer** (`client::page_count`, used by both
+engines, over `pdf_render::page_count`), the same count the embedder
+rasterises against, since `page_no` is the join key. It opens a PDF encrypted
+with an empty user password; a real password fails as `Document`
+`encrypted-pdf`. `parse_file` reports its own refusals (not a parseable file,
+not on disk) as `Io` too, so a sweep kick never vanishes.
 
 ## A skip ends a parse without failing it
 

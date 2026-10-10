@@ -2,7 +2,7 @@
 
 use std::sync::OnceLock;
 
-use super::documents::{docs, open_at, page_sizes, resolve_in};
+use super::documents::{open_at, page_sizes, resolve_in};
 use super::links::page_links;
 use super::render::{check_size, render_page};
 use super::text::page_text;
@@ -54,13 +54,13 @@ pub async fn pdf_links(path: String, page: u32) -> Result<Vec<Link>, String> {
 
 #[tauri::command]
 pub async fn pdf_close(path: String) -> Result<(), String> {
-    let path = resolve_in(&crate::library::paths::data_dir(), &path)?;
-    docs().retain(|doc| doc.path != path);
+    crate::library::pdf_render::forget(&resolve_in(&crate::library::paths::data_dir(), &path)?);
     Ok(())
 }
 
-/// Runs CPU-heavy work on a blocking thread once one of the render slots
-/// (half the cores) is free.
+/// Runs page interpretation on a big-stack render thread once one of the
+/// render slots (half the cores) is free. Queued here, a request waits without
+/// holding a thread.
 async fn on_render_slot<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -70,5 +70,5 @@ async fn on_render_slot<T: Send + 'static>(
         tokio::sync::Semaphore::new((cores / 2).max(1))
     });
     let _slot = slots.acquire().await.map_err(|error| error.to_string())?;
-    crate::runtime::blocking::run(work).await
+    crate::library::pdf_render::on_render_thread(work).await
 }

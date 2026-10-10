@@ -36,7 +36,7 @@ if (!existsSync(modules) || mtime(modules) < mtime(join(app, "bun.lock"))) {
 // 2. The native sidecars. Each script no-ops when its file is already current;
 //    the speech helper and whisper-cli are compiled, not fetched, and only on
 //    macOS.
-for (const script of ["fetch-ffmpeg.mjs", "fetch-pdfium.mjs", "build-speech.mjs", "build-whisper.mjs"]) {
+for (const script of ["fetch-ffmpeg.mjs", "build-speech.mjs", "build-whisper.mjs"]) {
   execFileSync(process.execPath, [join(app, "scripts", script)], { cwd: app, stdio: "inherit" });
 }
 
@@ -63,8 +63,8 @@ try {
 }
 
 // A binary that builds but cannot answer `--version` is a linker problem
-// (pdfium, sqlite) that would otherwise surface as a silent tool failure
-// inside an agent's turn, hours later.
+// (sqlite, say) that would otherwise surface as a silent tool failure inside
+// an agent's turn, hours later.
 let version = "?";
 try {
   version = execFileSync(cli, ["--version"], { encoding: "utf8" }).trim();

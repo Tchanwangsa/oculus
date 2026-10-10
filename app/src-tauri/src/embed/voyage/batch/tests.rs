@@ -34,6 +34,17 @@ fn a_full_dpi_page_costs_what_was_measured() {
 }
 
 #[test]
+fn the_render_ceiling_keeps_standard_pages_at_full_dpi_and_above_the_billing_cap() {
+    // A4, US Letter and 16:9 slides at 200 DPI.
+    for (width, height) in [(1654u64, 2339u64), (1700, 2200), (2667, 1500)] {
+        assert!(width * height <= MAX_RENDER_PIXELS, "{width}x{height}");
+    }
+    // A clamped page still gives Voyage more pixels than it keeps.
+    assert!(MAX_RENDER_PIXELS > 2 * BILLED_PIXEL_CAP);
+    assert!(MAX_RENDER_PIXELS < MAX_PIXELS_PER_IMAGE);
+}
+
+#[test]
 fn a_request_holds_eighty_nine_pages_not_three_hundred_and_twenty() {
     let costs = vec![tokens_for(A4_LANDSCAPE.0, A4_LANDSCAPE.1); 200];
     let requests = plan(&costs, MAX_INPUTS_PER_REQUEST, MAX_TOKENS_PER_REQUEST);
@@ -147,9 +158,9 @@ fn an_oversized_page_is_this_documents_problem_and_nobody_elses() {
 
 #[test]
 fn the_raster_vocabulary_reconciles_into_the_seams() {
-    let library = EmbedError::from(RasterError::Library("no dylib".into()));
-    assert_eq!(library.kind(), "not_ready");
-    assert!(library.retryable());
+    let worker = EmbedError::from(RasterError::Worker("no threads".into()));
+    assert_eq!(worker.kind(), "not_ready");
+    assert!(worker.retryable());
 
     for (raster, code) in [
         (RasterError::Unreadable("junk".into()), "unreadable-pdf"),
@@ -164,9 +175,9 @@ fn the_raster_vocabulary_reconciles_into_the_seams() {
 
     let page = EmbedError::from(RasterError::Page {
         page_no: 12,
-        message: "internal pdfium detail".into(),
+        message: "internal renderer detail".into(),
     });
-    assert!(!format!("{page:?}").contains("pdfium"), "{page:?}");
+    assert!(!format!("{page:?}").contains("renderer"), "{page:?}");
     assert!(format!("{page:?}").contains("12"), "{page:?}");
 }
 
