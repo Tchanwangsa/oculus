@@ -135,8 +135,10 @@ has no binary at all.
 `tauri build` runs `stage-keyd`, `stage-cli` then `docs:cli` from
 `beforeBuildCommand`: the CLI ships inside the bundle because keyd admits only
 executables inside its own bundle, and gives `Contents/MacOS/oculus` the `cli`
-role ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key));
-the reference is regenerated at the one moment a current release binary is
+role ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+The `oculus` that lands in the bundle is the crate's own `[[bin]]` from
+`tauri build`'s cargo run, which Tauri copies over the staged sidecar; the
+sidecar only has to exist for tauri-build's `externalBin` check. The reference is regenerated at the one moment a current release binary is
 guaranteed to exist.
 
 ## CI proves a fresh checkout builds; releases are cut by hand
