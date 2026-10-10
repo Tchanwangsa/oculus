@@ -1,0 +1,30 @@
+[package]
+name = "oculus-editor-core"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+# The oracle binary speaks JSON lines to the bun driver in oracle/. It is behind
+# a feature so `cargo test` and the library itself stay dependency-free.
+[[bin]]
+name = "oracle"
+path = "src/bin/oracle/main.rs"
+required-features = ["oracle"]
+
+[features]
+oracle = ["dep:serde", "dep:serde_json"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+proptest = "1"
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "markdown"
+harness = false

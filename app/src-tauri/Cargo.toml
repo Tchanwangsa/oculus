@@ -18,12 +18,6 @@ default-run = "app"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[features]
-# Lets a release build find libpdfium through `OCULUS_PDFIUM_LIB`, an ancestor
-# `binaries/`, the build tree and the system, as a debug build does. Only
-# `bun run cli` sets it; a bundle's CLI must not (docs/development.md).
-dev-pdfium = []
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -64,7 +58,7 @@ keyring = { version = "3", features = ["apple-native"] }
 # block, and the command awaits a oneshot for it (see src/shell/browser/still.rs). `time`
 # is the usage ticker's interval (src/shell/usage/ticker.rs).
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-# Local time for the usage table's hour keys; already built for pdfium-render.
+# Local time for the usage table's hour keys.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 scraper = "0.27"
 # wrap_help so `--help` and the generated agents/OCULUS-CLI.md wrap to a width
@@ -77,19 +71,15 @@ libc = "0.2.189"
 regex = "1"
 
 # The MinerU cloud client, ported from the Python sidecar (see src/parse/).
-# `zip` reads the result archive, `hayro-syntax` counts pages so a document can
-# be split into MinerU's 200-page tasks (it opens PDFs encrypted with an empty
-# user password, and takes no pdfium session), and `imagesize` replaces PIL's
-# one use: reading a crop's dimensions from its header to drop template
-# furniture.
+# `zip` reads the result archive, and `imagesize` replaces PIL's one use:
+# reading a crop's dimensions from its header to drop template furniture.
 zip = { version = "2", default-features = false, features = ["deflate"] }
-hayro-syntax = { git = "https://github.com/LaurenzV/hayro", rev = "9016f891986f290b9bc00dabf3e5e572c6e1cdb2", default-features = false, features = ["std"] }
 imagesize = "0.13"
-pdfium-render = "0.9"
-# The PDF viewer's renderer, text and links (`src/library/pdf_view/`): pure Rust,
-# so the viewer needs no native library. Re-exports hayro-interpret/-syntax.
-# Both hayro crates pin one upstream commit after 0.8.0 for its soft-mask fix
-# (#1394, Figma exports); back to crates.io once a release carries it.
+# Every PDF raster, page count and page box (`src/library/pdf_render/`), and
+# the viewer's text and links (`src/library/pdf_view/`): pure Rust, so no
+# native library. Re-exports hayro-interpret/-syntax. Pinned to one upstream
+# commit after 0.8.0 for its soft-mask fix (#1394, Figma exports); back to
+# crates.io once a release carries it.
 hayro = { git = "https://github.com/LaurenzV/hayro", rev = "9016f891986f290b9bc00dabf3e5e572c6e1cdb2" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Spreadsheets (xlsx/xlsm/xls/ods) become markdown text in-process

@@ -2,7 +2,8 @@
 # that the Rust is formatted, the frontend tests and bundle, the Rust tests
 # (the app's, keyd's and keyd core's), that keyd builds and signs as the bundle
 # ships it, and that the generated CLI reference matches the binary; and on
-# Linux, that keyd builds with no OS adapter. See
+# Linux, that keyd builds with no OS adapter and the editor core agrees with
+# CodeMirror and Lezer. See
 # docs/development.md#ci-proves-a-fresh-checkout-builds-releases-are-cut-by-hand.
 name: CI
 
@@ -62,8 +63,8 @@ jobs:
       - name: Type-check and bundle the frontend
         run: bun run build
 
-      - name: Fetch ffmpeg and pdfium, build the speech helper and whisper-cli
-        run: bun run ffmpeg && bun run pdfium && bun run speech && bun run whisper
+      - name: Fetch ffmpeg, build the speech helper and whisper-cli
+        run: bun run ffmpeg && bun run speech && bun run whisper
       # tauri-build refuses to compile anything until every externalBin exists.
       # keyd's build never goes through it, so it is staged first, for real: the
       # release policy, signed, as the bundle would carry it.
@@ -107,3 +108,46 @@ jobs:
       - name: Check keyd
         working-directory: app/keyd
         run: cargo check --locked
+
+  editor-core:
+    name: Editor core (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app/editor-core
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: app/package.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/editor-core -> target
+
+      - name: Rust is formatted
+        run: cargo fmt --check
+      - name: Clippy, oracle binary included
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Unit, property and spec tests
+        run: cargo test --locked
+
+      # The oracles import the app's own CodeMirror, Lezer and noteLanguage.
+      - name: Install frontend dependencies
+        working-directory: app
+        run: bun install --frozen-lockfile
+      # A new seed each run widens coverage; a failure prints the seed to replay.
+      - name: Oracles agree with CodeMirror and Lezer
+        working-directory: app
+        env:
+          SEED: ${{ github.run_number }}
+        run: |
+          bun editor-core/oracle/text.ts 2000 "$SEED"
+          bun editor-core/oracle/changes.ts 5000 "$SEED"
+          bun editor-core/oracle/history.ts 1000 "$SEED"
+          bun editor-core/oracle/markdown.ts 5000 "$SEED"

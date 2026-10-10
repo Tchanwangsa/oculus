@@ -1,4 +1,4 @@
-//! How many pixels a page gets, within the backend's per-image ceiling.
+//! How many pixels a page gets, within the embedder's render ceiling.
 
 /// Pixels for a page this many points wide at `dpi`, bit-exact with MuPDF's
 /// `fz_round_rect` (`ceil(x - 0.001)`; the epsilon stops an integral edge
@@ -9,10 +9,9 @@ pub(super) fn pixels_for(points: f32, dpi: u32) -> u32 {
 }
 
 /// The DPI one page renders at: [`RENDER_DPI`], or less when its pixels would
-/// exceed the backend's per-image ceiling (a poster page in a deck), which
-/// would otherwise fail the whole document. Costs nothing: the backend
-/// downscales far below that ceiling before it bills. Rounded down and then
-/// verified, because [`pixels_for`] rounds up.
+/// exceed `max_pixels` (a poster page in a deck), the embedder's render
+/// ceiling. Costs nothing: the backend downscales below that ceiling before
+/// it embeds. Rounded down and then verified, because [`pixels_for`] rounds up.
 pub(super) fn dpi_for_page(
     width_pt: f32,
     height_pt: f32,

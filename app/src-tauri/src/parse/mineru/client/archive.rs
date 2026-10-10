@@ -5,20 +5,19 @@ use std::fs;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-/// The page count must equal pdfium's (`embed::raster`), since `page_no` is
-/// the join key. hayro opens a PDF encrypted with an empty user password, as
-/// pdfium does, and takes no pdfium session, which an embed holds for minutes.
+/// The renderer's count (`pdf_render::page_count`), which the embedder
+/// rasterises against, since `page_no` is the join key. It opens a PDF
+/// encrypted with an empty user password.
 pub(in crate::parse::mineru) fn page_count(pdf: &Path) -> Result<u32, ParseError> {
-    let bytes =
-        fs::read(pdf).map_err(|e| ParseError::Io(format!("read {}: {e}", pdf.display())))?;
-    let document = hayro_syntax::Pdf::new(bytes).map_err(|error| ParseError::Document {
-        code: match error {
-            hayro_syntax::LoadPdfError::Decryption(_) => "encrypted-pdf",
-            hayro_syntax::LoadPdfError::Invalid => "unreadable-pdf",
-        }
-        .into(),
+    use crate::library::pdf_render::{self, OpenError};
+    let document = |code: &str| ParseError::Document { code: code.into() };
+    let pages = pdf_render::page_count(pdf).map_err(|error| match error {
+        OpenError::Read(message) => ParseError::Io(format!("read {}: {message}", pdf.display())),
+        OpenError::Encrypted => document("encrypted-pdf"),
+        OpenError::Invalid => document("unreadable-pdf"),
+        // What `sync::parse_pdf_reporting` says of any panic on this thread.
+        OpenError::Panicked => ParseError::Io("the parser crashed on this file".into()),
     })?;
-    let pages = document.pages().len() as u32;
     if pages == 0 {
         return Err(ParseError::Document {
             code: "empty-pdf".into(),
