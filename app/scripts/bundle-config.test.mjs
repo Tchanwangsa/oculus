@@ -75,14 +75,10 @@ test("the bundled keyd is built without the dev feature, and the dev one with it
   for (const variant of ["dev", "bundle"]) expect(cargoArgs(variant, "x")).toContain("--locked");
 });
 
-test("the bundle is signed hardened, with the entitlement libpdfium needs", () => {
+test("the bundle is signed hardened, with library validation on", () => {
   const mac = base.bundle.macOS;
   expect(mac.signingIdentity).toBe("-");
   expect(mac.hardenedRuntime).toBe(true);
-  const plist = join(rust, mac.entitlements);
-  expect(existsSync(plist)).toBe(true);
-  const text = readFileSync(plist, "utf8");
-  expect(text).toMatch(/<key>com\.apple\.security\.cs\.disable-library-validation<\/key>\s*<true\/>/);
-  // Every entitlement is on keyd too, and is part of its code hash.
-  expect(text.match(/<key>/g)).toHaveLength(1);
+  // Tauri would put entitlements on keyd too, where they join its code hash.
+  expect(mac.entitlements).toBeUndefined();
 });

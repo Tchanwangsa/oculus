@@ -18,7 +18,7 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | Builds whisper.cpp's `whisper-cli` from a pinned release | `app/scripts/build-whisper.mjs` |
 | Builds, signs and (main checkout only) installs the dev `oculus-keyd` | `app/scripts/build-keyd.mjs`, `app/scripts/keyd-build.mjs`, `app/keyd/.cargo/config.toml` |
 | Builds, signs and stages the release `oculus-keyd` the bundle ships | `app/scripts/stage-keyd.mjs`, `app/scripts/keyd-build.mjs` |
-| Hardened-runtime signing of the bundle | `bundle.macOS` in `app/src-tauri/tauri.conf.json`, `app/src-tauri/Entitlements.plist` |
+| Hardened-runtime signing of the bundle | `bundle.macOS` in `app/src-tauri/tauri.conf.json` |
 | That the configs, `beforeBuildCommand` and CI agree on the sidecars | `app/scripts/bundle-config.test.mjs` |
 | keyd's release policy against a signed bundle | `app/keyd/tests/bundle.rs` |
 | Keeps keyd's OS calls inside its adapters | `app/scripts/keyd-seams.test.mjs` |
@@ -173,14 +173,15 @@ the draft is a manual step on GitHub.
   `include` with its runner and `args` (`--target …`); the sidecars are named by
   `hostTriple()`, so build on the runner whose triple you want.
 - The bundle is signed ad-hoc with the hardened runtime. `bundle.macOS` in
-  `tauri.conf.json` sets `signingIdentity: "-"`, `hardenedRuntime` and
-  `entitlements: "Entitlements.plist"`, so a local `tauri build` signs like CI
-  (`APPLE_SIGNING_IDENTITY` overrides the identity, which is how a Developer ID
-  certificate would come in). Tauri signs inside-out — libpdfium, each sidecar,
-  then the app — and puts the same entitlements on every executable. There is
-  one, `com.apple.security.cs.disable-library-validation`: an ad-hoc signature
-  has no team identifier, so without it the hardened app cannot load
-  `Contents/Frameworks/libpdfium.dylib`. A downloaded copy
+  `tauri.conf.json` sets `signingIdentity: "-"` and `hardenedRuntime`, so a
+  local `tauri build` signs like CI (`APPLE_SIGNING_IDENTITY` overrides the
+  identity, which is how a Developer ID certificate would come in). Tauri
+  signs inside-out, each sidecar then the app. There are no entitlements, so
+  library validation stays on: every executable links only system libraries,
+  and an ad-hoc signature has no team identifier that a bundled dylib could
+  match. A dylib in the bundle would need
+  `com.apple.security.cs.disable-library-validation`, which Tauri would put on
+  keyd too. A downloaded copy
   is quarantined — `xattr -dr com.apple.quarantine /Applications/Oculus.app` —
   and, having no team identifier, re-prompts for keychain items after every
   update. A Developer ID certificate plus notarisation (the `APPLE_*` secrets
@@ -228,15 +229,14 @@ is built to give the same bytes for the same source:
   same sidecar so `target/debug/oculus-keyd` is the dev keyd; a `tauri build`
   leaves a release one there until the next preflight puts the dev one back.
 - **Tauri re-signs the bundled keyd, so Tauri's signature is the one the
-  keychain trusts.** It runs `codesign --force -s - --options runtime
-  --entitlements Entitlements.plist` on every sidecar, with no `-i`, which
-  replaces the `com.tchan.oculus.keyd` signature `stage-keyd` made: the
-  identifier becomes `oculus-keyd-` plus the Mach-O's UUID, and the code
-  hash covers the entitlements. The result depends
-  only on keyd's bytes, its file name in the bundle and `Entitlements.plist`,
-  not on how the staged file was signed, so the same source gives the same
-  hash. Editing `Entitlements.plist` therefore changes keyd, and costs one
-  keychain prompt like a keyd update. `stage-keyd`'s own signature is what
+  keychain trusts.** It runs `codesign --force -s - --options runtime` on
+  every sidecar, with no `-i`, which replaces the `com.tchan.oculus.keyd`
+  signature `stage-keyd` made: the identifier becomes `oculus-keyd-` plus the
+  Mach-O's UUID. The result depends only on keyd's bytes, its file name in the
+  bundle and the bundle's entitlements (none), not on how the staged file was
+  signed, so the same source gives the same hash. Adding an entitlement
+  therefore changes keyd, and costs one keychain prompt like a keyd update.
+  `stage-keyd`'s own signature is what
   `codesign --verify --strict` checks before staging and what
   `oculus keyd install --from` sees on an unbundled copy.
 - **A dev and a bundled keyd on one Mac** share the LaunchAgent label and the
