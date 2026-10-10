@@ -1,4 +1,4 @@
-import type { Input } from "@lezer/common";
+import type { Input, TreeFragment } from "@lezer/common";
 import { tags } from "@lezer/highlight";
 import type { BlockContext, Line, MarkdownConfig } from "@lezer/markdown";
 
@@ -7,6 +7,9 @@ import type { BlockContext, Line, MarkdownConfig } from "@lezer/markdown";
  * line that is exactly `---` or `...`. Without that closing line it is not
  * frontmatter, and the `---` stays a rule. Node: `Frontmatter`, holding two
  * `FrontmatterMark` fences; the YAML lies between them.
+ *
+ * The closing fence is found by looking ahead, which Lezer's fragment reuse
+ * cannot see: `frontmatterFragments` drops what that lookahead invalidates.
  *
  * `parseProperties` reads the simple `key: value` subset Live mode shows; no
  * YAML library.
@@ -42,6 +45,23 @@ function frontmatter(cx: BlockContext, line: Line): boolean {
   cx.nextLine();
   cx.addElement(cx.elt("Frontmatter", 0, at + 3, marks));
   return true;
+}
+
+/**
+ * `fragments` without the one from 0 when a change inside the scan could
+ * make or unmake the frontmatter: with a `---` first line, Lezer would
+ * otherwise reuse the old first block (a rule) without running `frontmatter`.
+ * The parse then restarts at 0 and reuses fragments past the change. An old
+ * `Frontmatter` first block stays, as Lezer reuses it only when the change
+ * lies past its closing fence. Mirrors the core's `incremental.rs`.
+ */
+export function frontmatterFragments(input: Input, fragments: readonly TreeFragment[]): readonly TreeFragment[] {
+  const first = fragments[0];
+  if (!first || first.from > 0 || first.to > SCAN_MAX) return fragments;
+  const head = input.read(0, Math.min(input.length, 4));
+  if (head !== "---\n" && head !== "---") return fragments;
+  if (first.tree.topNode.firstChild?.name === "Frontmatter") return fragments;
+  return fragments.slice(1);
 }
 
 export const FrontmatterSyntax: MarkdownConfig = {
