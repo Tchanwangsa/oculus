@@ -168,6 +168,11 @@ mounts on open and loads through the same cache.
   `transition-opacity` / `transition-transform` on an icon, or on a row holding
   one, gets `will-change-[opacity]` (or `[opacity,transform]`)** — grep for
   `transition-` before finishing UI work, and check at zoom 1.1 and 1.3, not 1.0.
+- **Never `transition-all`** — inactive tabs hide with `visibility: hidden`
+  (`app/src/components/tabs/TabPane.tsx`), and `all` transitions the inherited
+  `visibility` too: going hidden it stays `visible` for the whole duration, so
+  the element ghosts over the next tab. List the properties instead
+  (`transition-[color,background-color,…]`, as `Button` does).
 - **Centre overflowing content with auto margins and `flex: none`**, not
   `justify-content: center`, which makes the start-edge overflow unreachable.
 - **Never nest a `<button>` in a row that is a button** — WebKit drops the inner
