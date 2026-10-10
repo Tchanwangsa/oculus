@@ -47,10 +47,11 @@ export function stageCli(binary) {
 export const keydHelperApp = "Oculus Helper.app";
 
 /**
- * keyd's executable inside a helper app. The release bundle copies the staged
+ * keyd's executable inside a helper app, named like the app
+ * (`keyd_core::paths::helper_program`). The release bundle copies the staged
  * helper to `Contents/Helpers/` (`bundle.macOS.files` in tauri.macos.conf.json).
  */
-export const helperProgram = (helper) => join(helper, "Contents", "MacOS", `oculus-keyd${exe}`);
+export const helperProgram = (helper) => join(helper, "Contents", "MacOS", `Oculus Helper${exe}`);
 
 /**
  * Copy a signed helper app to `dir` (`binaries/` unless a script is pointed

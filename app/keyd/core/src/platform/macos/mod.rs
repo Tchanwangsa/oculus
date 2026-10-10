@@ -185,14 +185,14 @@ mod tests {
         let outer = dir.join("Oculus.app");
         let helper = outer.join("Contents/Helpers/Oculus Helper.app");
         std::fs::create_dir_all(helper.join("Contents/MacOS")).unwrap();
-        let keyd = helper.join("Contents/MacOS/oculus-keyd");
+        let keyd = helper.join("Contents/MacOS/Oculus Helper");
         assert_eq!(outermost_app(&keyd), Some(outer.clone()));
         assert_eq!(outermost_app(&outer), Some(outer.clone()));
 
         let alone = dir.join("bin/Oculus Helper.app");
         std::fs::create_dir_all(alone.join("Contents/MacOS")).unwrap();
         assert_eq!(
-            outermost_app(&alone.join("Contents/MacOS/oculus-keyd")),
+            outermost_app(&alone.join("Contents/MacOS/Oculus Helper")),
             Some(alone)
         );
         // A directory named like a bundle, with no Contents, is not one.

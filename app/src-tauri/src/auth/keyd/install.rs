@@ -225,7 +225,7 @@ mod tests {
         let why = ensure_bundled_beside(&data, &exe, false).unwrap_err();
         assert!(why.contains("bundled oculus-keyd is missing"), "{why}");
         assert!(
-            why.contains("Contents/Helpers/Oculus Helper.app/Contents/MacOS/oculus-keyd"),
+            why.contains("Contents/Helpers/Oculus Helper.app/Contents/MacOS/Oculus Helper"),
             "{why}"
         );
         assert!(why.contains("reinstall"), "{why}");
@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(missing_bundled(&exe, false), None);
         let why = ensure_bundled_beside(&dir.join("data"), &exe, false).unwrap_err();
         assert!(
-            why.contains("Oculus Helper.app/Contents/MacOS/oculus-keyd"),
+            why.contains("Oculus Helper.app/Contents/MacOS/Oculus Helper"),
             "{why}"
         );
         assert!(!dir.join("data").exists());
@@ -264,9 +264,9 @@ mod tests {
         assert_eq!(
             program_for(
                 data,
-                Path::new("/x/target/signed/Oculus Helper.app/Contents/MacOS/oculus-keyd")
+                Path::new("/x/target/signed/Oculus Helper.app/Contents/MacOS/Oculus Helper")
             ),
-            Path::new("/d/bin/Oculus Helper.app/Contents/MacOS/oculus-keyd")
+            Path::new("/d/bin/Oculus Helper.app/Contents/MacOS/Oculus Helper")
         );
     }
 
