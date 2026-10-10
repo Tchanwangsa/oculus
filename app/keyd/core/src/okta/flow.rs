@@ -6,7 +6,7 @@ use super::jar::Jar;
 use super::totp::{seconds_remaining, totp_code};
 use super::{Credentials, Env, LoginError};
 use crate::clock::Clock;
-use crate::paths;
+use crate::session::Kind;
 
 // ── HTTP plumbing ────────────────────────────────────────────────────────────
 
@@ -525,17 +525,16 @@ pub(super) fn attempt_sign_in(env: &Env, creds: &Credentials) -> Result<String, 
     // be good.
     let name = verify(env, &cookie)?;
 
-    let path = paths::cookie(&env.data_dir);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    paths::write_private(&path, &cookie)
+    env.sessions
+        .put(Kind::Canvas, &cookie)
         .map_err(|e| LoginError::Unexpected(format!("could not save the session cookie: {e}")))?;
     // Okta's session too, so an in-app browser page that redirects to SSO
     // passes straight through (`browser::seed_sessions`).
     let sso = jar.header(&sso_host);
     if !sso.is_empty() {
-        paths::write_private(&paths::sso_cookie(&env.data_dir), &sso).ok();
+        if let Err(e) = env.sessions.put(Kind::Sso, &sso) {
+            eprintln!("[oculus] the Okta session was not saved: {e}");
+        }
     }
     eprintln!("[oculus] automated sign-in succeeded — Canvas accepted the session as {name}");
     Ok(cookie)

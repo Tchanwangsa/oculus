@@ -6,13 +6,15 @@
 //! the user pasted), is dropped, or is reported present. `session_get` is the
 //! one op whose reply carries a cookie, and only the app may ask: it seeds
 //! WebKit's cookie store for the in-app browser. The role check is
-//! `require_role`'s. None of these touches the signed-out and authenticated
-//! markers or the sign-in attempt record.
+//! `require_role`'s. Only `session_mark` and `sign_out` touch the
+//! authenticated flag and the signed-out marker; none touches the sign-in
+//! attempt record. The first of these ops after keyd starts imports the
+//! sessions an earlier version kept in files (`legacy.rs`).
 
 use serde_json::{json, Value};
 
 use super::{OpError, Reply, State};
-use crate::session::{check_value, store, Kind};
+use crate::session::{check_value, markers, store, Kind};
 
 fn kind_of(text: &Value) -> Result<Kind, OpError> {
     text.as_str().and_then(Kind::parse).ok_or_else(|| {
@@ -28,6 +30,7 @@ impl State {
     /// returned: nothing outside keyd needs it.
     pub(super) fn session_get(&self) -> Result<Reply, OpError> {
         let vault = self.vault()?;
+        self.import_sessions(&vault)?;
         let canvas = store::get(&vault, Kind::Canvas)?;
         let sso = store::get(&vault, Kind::Sso)?;
         Ok(json!({"canvas": canvas, "sso": sso}).into())
@@ -41,7 +44,9 @@ impl State {
             .and_then(Value::as_str)
             .ok_or_else(|| OpError::new("request", "session_put needs a string \"value\""))?;
         check_value(value).map_err(|why| OpError::new("request", why))?;
-        store::put(&self.vault()?, &self.generation, kind, value)?;
+        let vault = self.vault()?;
+        self.import_sessions(&vault)?;
+        store::put(&vault, &self.generation, kind, value)?;
         Ok(json!({"stored": true}).into())
     }
 
@@ -53,20 +58,62 @@ impl State {
             Some(Value::Array(list)) => list.iter().map(kind_of).collect::<Result<_, _>>()?,
             Some(_) => return Err(OpError::new("request", "kinds must be a list")),
         };
-        let cleared = store::clear(&self.vault()?, &self.generation, &kinds)?;
+        let vault = self.vault()?;
+        self.import_sessions(&vault)?;
+        let cleared = store::clear(&vault, &self.generation, &kinds)?;
         let cleared: Vec<&str> = cleared.into_iter().map(Kind::wire).collect();
         Ok(json!({"cleared": cleared}).into())
     }
 
-    /// Which sessions are held: booleans, never a value.
+    /// Which sessions are held, and whether the app believes it is signed in
+    /// (`authenticated`) or was signed out and not since (`signed_out`):
+    /// booleans, never a value.
     pub(super) fn session_status(&self) -> Result<Reply, OpError> {
-        let held = store::held(&self.vault()?)?;
+        let vault = self.vault()?;
+        self.import_sessions(&vault)?;
+        let held = store::held(&vault)?;
         Ok(json!({
             "canvas": held.contains(&Kind::Canvas),
             "sso": held.contains(&Kind::Sso),
             "ed": held.contains(&Kind::Ed),
+            "authenticated": markers::is_authenticated(&self.data_dir),
+            "signed_out": markers::is_signed_out(&self.data_dir),
         })
         .into())
+    }
+
+    /// `{"authenticated": bool}`: a person signed in (true: sets the flag and
+    /// lifts the signed-out marker) or the app found its session dead (false:
+    /// clears the flag only). The sessions themselves are `session_put`'s.
+    pub(super) fn session_mark(&self, req: &Value) -> Result<Reply, OpError> {
+        let on = req
+            .get("authenticated")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| {
+                OpError::new("request", "session_mark needs a boolean \"authenticated\"")
+            })?;
+        if on {
+            markers::mark_authenticated(&self.data_dir);
+        } else {
+            markers::clear_authenticated(&self.data_dir)
+                .map_err(|e| OpError::new("record", format!("the authenticated flag: {e}")))?;
+        }
+        Ok(json!({"authenticated": on}).into())
+    }
+
+    /// Drops all three sessions and the authenticated flag, and stands every
+    /// automatic sign-in down until a session is established again. The attempt
+    /// record stays: forgetting a lockout pause would let automatic sign-in
+    /// resume. `{"had": bool}` says whether there was anything to drop.
+    pub(super) fn sign_out(&self) -> Result<Reply, OpError> {
+        let vault = self.vault()?;
+        self.import_sessions(&vault)?;
+        let cleared = store::clear(&vault, &self.generation, &Kind::ALL)?;
+        let flagged = markers::clear_authenticated(&self.data_dir)
+            .map_err(|e| OpError::new("record", format!("the authenticated flag: {e}")))?;
+        markers::mark_signed_out(&self.data_dir)
+            .map_err(|e| OpError::new("record", format!("the signed-out marker: {e}")))?;
+        Ok(json!({"had": flagged || !cleared.is_empty()}).into())
     }
 }
 
@@ -94,13 +141,19 @@ mod tests {
         let dir = Scratch::new("session-ops");
         let state = state_in(&dir);
         let none = call(&state, "session_status", json!({})).unwrap();
-        assert_eq!(none, json!({"canvas": false, "sso": false, "ed": false}));
+        assert_eq!(
+            none,
+            json!({"canvas": false, "sso": false, "ed": false, "authenticated": false, "signed_out": false})
+        );
 
         put(&state, "canvas", CANVAS).unwrap();
         put(&state, "sso", "sid=SECRET-SSO").unwrap();
         put(&state, "ed", "SECRET.ED.JWT").unwrap();
         let status = call(&state, "session_status", json!({})).unwrap();
-        assert_eq!(status, json!({"canvas": true, "sso": true, "ed": true}));
+        assert_eq!(
+            status,
+            json!({"canvas": true, "sso": true, "ed": true, "authenticated": false, "signed_out": false})
+        );
 
         let app = as_role(Role::App);
         let got = state
@@ -120,7 +173,11 @@ mod tests {
         let cleared = call(&state, "session_clear", json!({"kinds": ["sso", "ed"]})).unwrap();
         assert_eq!(cleared, json!({"cleared": ["sso", "ed"]}));
         let status = call(&state, "session_status", json!({})).unwrap();
-        assert_eq!(status, json!({"canvas": true, "sso": false, "ed": false}));
+        assert_eq!(status["canvas"], true);
+        assert_eq!(
+            (status["sso"].clone(), status["ed"].clone()),
+            (json!(false), json!(false))
+        );
 
         let cleared = call(&state, "session_clear", json!({})).unwrap();
         assert_eq!(cleared, json!({"cleared": ["canvas"]}));
@@ -262,6 +319,92 @@ mod tests {
             state.session_generation(),
             3,
             "a refused put changes nothing"
+        );
+    }
+
+    #[test]
+    fn session_mark_sets_and_clears_the_flag_and_a_sign_in_by_a_person_lifts_the_sign_out() {
+        let dir = Scratch::new("session-mark");
+        let state = state_in(&dir);
+        let status = |s: &State| {
+            let v = call(s, "session_status", json!({})).unwrap();
+            (v["authenticated"].clone(), v["signed_out"].clone())
+        };
+        assert_eq!(status(&state), (json!(false), json!(false)));
+        assert_eq!(
+            call(&state, "session_mark", json!({"authenticated": true})).unwrap(),
+            json!({"authenticated": true})
+        );
+        assert_eq!(status(&state), (json!(true), json!(false)));
+        call(&state, "session_mark", json!({"authenticated": false})).unwrap();
+        assert_eq!(status(&state), (json!(false), json!(false)));
+        // Clearing a flag that is not there is not an error.
+        call(&state, "session_mark", json!({"authenticated": false})).unwrap();
+
+        call(&state, "sign_out", json!({})).unwrap();
+        assert_eq!(status(&state), (json!(false), json!(true)));
+        call(&state, "session_mark", json!({"authenticated": false})).unwrap();
+        assert_eq!(
+            status(&state),
+            (json!(false), json!(true)),
+            "marking the session dead is not a sign-in"
+        );
+        call(&state, "session_mark", json!({"authenticated": true})).unwrap();
+        assert_eq!(status(&state), (json!(true), json!(false)));
+
+        for bad in [
+            json!({}),
+            json!({"authenticated": "yes"}),
+            json!({"authenticated": null}),
+        ] {
+            let err = state
+                .dispatch(&cli(), "session_mark", &bad, b"")
+                .unwrap_err();
+            assert_eq!(err.kind, "request", "{bad}");
+        }
+    }
+
+    #[test]
+    fn sign_out_drops_every_session_and_the_flag_and_keeps_the_attempt_record() {
+        let dir = Scratch::new("session-sign-out");
+        let state = state_in(&dir);
+        put(&state, "canvas", CANVAS).unwrap();
+        put(&state, "sso", "sid=x").unwrap();
+        put(&state, "ed", "jwt").unwrap();
+        call(&state, "session_mark", json!({"authenticated": true})).unwrap();
+        std::fs::write(
+            crate::paths::sign_in_record(&dir.0),
+            r#"{"paused":"locked"}"#,
+        )
+        .unwrap();
+        let before = state.session_generation();
+
+        assert_eq!(
+            call(&state, "sign_out", json!({})).unwrap(),
+            json!({"had": true})
+        );
+        let status = call(&state, "session_status", json!({})).unwrap();
+        assert_eq!(
+            status,
+            json!({"canvas": false, "sso": false, "ed": false, "authenticated": false, "signed_out": true})
+        );
+        assert_eq!(
+            std::fs::read_to_string(crate::paths::sign_in_record(&dir.0)).unwrap(),
+            r#"{"paused":"locked"}"#
+        );
+        assert!(state.session_generation() > before);
+
+        // Nothing left: the answer says so, and the marker stands.
+        assert_eq!(
+            call(&state, "sign_out", json!({})).unwrap(),
+            json!({"had": false})
+        );
+        assert!(crate::paths::signed_out(&dir.0).exists());
+        // Only the flag counts as something to drop, too.
+        call(&state, "session_mark", json!({"authenticated": true})).unwrap();
+        assert_eq!(
+            call(&state, "sign_out", json!({})).unwrap(),
+            json!({"had": true})
         );
     }
 

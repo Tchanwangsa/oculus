@@ -95,6 +95,7 @@ impl Groq {
                     status,
                     headers,
                     body,
+                    signin: None,
                 })
             }
         }

@@ -1,17 +1,50 @@
 //! The `forward` op: one request to a route's fixed origin, with the
 //! credential from the vault attached and, on a session route, kept out of
 //! every answer.
+//!
+//! The `canvas` route also revives its session. A request whose session is
+//! missing, or whose answer says the session is dead (`forward::rejection`),
+//! signs in once through the same single flight and guard as every other
+//! sign-in (`State::sign_in`, `Trigger::Forward`) and is sent once more; a
+//! second rejection is the answer. A burst of rejected requests is therefore
+//! one sign-in: a request that finds the session replaced since it read it
+//! just retries. Ed never signs in here, because its token comes from a Canvas
+//! launch that only the app performs.
+
+use std::io::Cursor;
 
 use serde_json::{json, Value};
 
 use super::{BodyStream, OpError, Reply, State};
-use crate::forward::{read_capped, Auth, Call};
+use crate::forward::{read_capped, session_rejected, Auth, Call, Opened, Route};
+use crate::okta::{outcome_to_wire, Trigger, SSO_HOST};
+use crate::platform::Caller;
 use crate::session::{store, Kind};
+use crate::vault::Vault;
 
 /// Headers a session route's answer never carries to the client: a rotated
 /// cookie is absorbed into the vault instead, and the rest would echo a
 /// credential.
 const WITHHELD: &[&str] = &["set-cookie", "set-cookie2", "authorization", "x-token"];
+
+/// Where a request ended up, for the log line and the client.
+#[derive(Default)]
+struct Trail {
+    /// The sign-in that was refused or failed, as the client reads it.
+    signin: Option<Value>,
+    /// Another request had replaced the session since this one read it.
+    refreshed: bool,
+    /// This request ran the sign-in (or waited for the one running).
+    signed_in: bool,
+}
+
+/// An answer judged by `State::judge`.
+enum Judged {
+    Fine(Opened),
+    /// The session it was sent with is dead. Its body is buffered, so the
+    /// connection is not held open while a sign-in runs.
+    Rejected(Opened),
+}
 
 impl State {
     /// Sends the request, checked before the master key is read so a bad one
@@ -19,7 +52,12 @@ impl State {
     /// With `"stream": true` the answer's body is not buffered: the reply
     /// header has no `body_len` and the body follows until keyd closes the
     /// connection. Neither the vault nor any lock is held while it does.
-    pub(super) fn forward(&self, req: &Value, body: &[u8]) -> Result<Reply, OpError> {
+    pub(super) fn forward(
+        &self,
+        caller: &Caller,
+        req: &Value,
+        body: &[u8],
+    ) -> Result<Reply, OpError> {
         let name = req
             .get("secret")
             .and_then(Value::as_str)
@@ -38,14 +76,17 @@ impl State {
         let vault = self.vault()?;
         let secret = route.auth.secret();
         self.import_once(&vault, secret)?;
-        let credential = vault
-            .get(secret)?
-            .filter(|v| !v.is_empty())
-            .ok_or_else(|| {
-                let what = if route.is_session() { "session" } else { "key" };
-                OpError::new("missing", format!("no {name} {what} is stored"))
-            })?;
-        let opened = self.upstream.open(route, &call, &credential, body)?;
+        let mut trail = Trail::default();
+        let (opened, absorb) = if route.is_session() {
+            self.import_sessions(&vault)?;
+            self.send_session(caller, route, &vault, &call, body, &mut trail)?
+        } else {
+            let credential = vault
+                .get(secret)?
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| OpError::new("missing", format!("no {name} key is stored")))?;
+            (self.upstream.open(route, &call, &credential, body)?, false)
+        };
 
         let mut headers = opened.headers;
         if route.is_session() {
@@ -55,7 +96,7 @@ impl State {
                 .map(|(_, v)| v.clone())
                 .collect();
             headers.retain(|(k, _)| !WITHHELD.contains(&k.as_str()));
-            if matches!(route.auth, Auth::Cookie(_)) && !set_cookies.is_empty() {
+            if absorb && matches!(route.auth, Auth::Cookie(_)) && !set_cookies.is_empty() {
                 let kind = Kind::ALL.into_iter().find(|k| k.secret() == secret);
                 if let Some(kind) = kind {
                     if let Err(e) = store::absorb(&vault, &self.generation, kind, &set_cookies) {
@@ -68,32 +109,168 @@ impl State {
             .iter()
             .map(|(k, v)| [k.as_str(), v.as_str()])
             .collect();
+        let mut note = format!(
+            "secret={name} status={} bytes_out={}",
+            opened.status,
+            body.len()
+        );
+        let mut header = json!({"status": opened.status, "headers": headers});
+        if let Some(signin) = trail.signin.take() {
+            note.push_str(&format!(
+                " signin={}",
+                signin.get("code").and_then(Value::as_str).unwrap_or("?")
+            ));
+            header["signin"] = signin;
+        } else if trail.signed_in {
+            note.push_str(" signin=signed_in");
+        } else if trail.refreshed {
+            note.push_str(" retried");
+        }
 
         if stream {
+            note.push_str(" streamed");
             return Ok(Reply {
-                header: json!({"status": opened.status, "headers": headers}),
+                header,
                 body: Vec::new(),
-                note: Some(format!(
-                    "secret={name} status={} bytes_out={} streamed",
-                    opened.status,
-                    body.len()
-                )),
+                note: Some(note),
                 stream: Some(BodyStream(opened.body)),
             });
         }
         let answer = read_capped(opened.body)?;
+        header["body_len"] = json!(answer.len());
+        note.push_str(&format!(" bytes_in={}", answer.len()));
         Ok(Reply {
-            header: json!({"status": opened.status, "headers": headers, "body_len": answer.len()}),
-            note: Some(format!(
-                "secret={name} status={} bytes_out={} bytes_in={}",
-                opened.status,
-                body.len(),
-                answer.len()
-            )),
+            header,
+            note: Some(note),
             body: answer,
             stream: None,
         })
     }
+
+    /// A session route's request: the answer to send back, and whether its
+    /// `Set-Cookie` belongs to the session (a rejected answer's does not).
+    fn send_session(
+        &self,
+        caller: &Caller,
+        route: &Route,
+        vault: &Vault,
+        call: &Call,
+        body: &[u8],
+        trail: &mut Trail,
+    ) -> Result<(Opened, bool), OpError> {
+        let revives = matches!(route.auth, Auth::Cookie(_));
+        // Before the session is read, so a change in between counts as one.
+        let seen = self.generation.get();
+
+        let rejected = match self.send_once(route, vault, call, body)? {
+            None if !revives => return Err(missing(route, None)),
+            None => None,
+            Some(opened) => match self.judge(route, opened, revives) {
+                Judged::Fine(opened) => return Ok((opened, true)),
+                Judged::Rejected(opened) => Some(opened),
+            },
+        };
+
+        let mut signed_in = false;
+        if self.generation.get() != seen {
+            trail.refreshed = true;
+        } else {
+            match self.sign_in(Trigger::Forward, caller.role) {
+                Ok(_) => {
+                    trail.signed_in = true;
+                    signed_in = true;
+                }
+                // A request that read the session just before another's
+                // sign-in saved it still finds the new one here.
+                Err(why) if self.generation.get() == seen => {
+                    let signin = outcome_to_wire(&Err(why));
+                    return match rejected {
+                        Some(opened) => {
+                            trail.signin = Some(signin);
+                            Ok((opened, false))
+                        }
+                        None => Err(missing(route, Some(signin))),
+                    };
+                }
+                Err(_) => trail.refreshed = true,
+            }
+        }
+
+        match self.send_once(route, vault, call, body)? {
+            None => Err(missing(route, None)),
+            Some(opened) => match self.judge(route, opened, true) {
+                Judged::Fine(opened) => Ok((opened, true)),
+                Judged::Rejected(opened) => {
+                    if signed_in {
+                        crate::log(&format!("{}: still rejected after a sign-in", route.name));
+                    }
+                    Ok((opened, false))
+                }
+            },
+        }
+    }
+
+    /// One send with the session as it is now; `None` when there is none.
+    fn send_once(
+        &self,
+        route: &Route,
+        vault: &Vault,
+        call: &Call,
+        body: &[u8],
+    ) -> Result<Option<Opened>, OpError> {
+        let Some(session) = vault.get(route.auth.secret())?.filter(|v| !v.is_empty()) else {
+            return Ok(None);
+        };
+        self.upstream.open(route, call, &session, body).map(Some)
+    }
+
+    /// Tells a dead session from any other answer. Only a 401 reads its body,
+    /// and only a rejected answer is buffered.
+    fn judge(&self, route: &Route, mut opened: Opened, revives: bool) -> Judged {
+        if !revives {
+            return Judged::Fine(opened);
+        }
+        let location = opened
+            .headers
+            .iter()
+            .find(|(k, _)| k == "location")
+            .map(|(_, v)| v.clone());
+        let mut body = Vec::new();
+        if opened.status == 401 {
+            body = read_capped(&mut opened.body).unwrap_or_default();
+            opened.body = Box::new(Cursor::new(body.clone()));
+        }
+        let dead = session_rejected(
+            opened.status,
+            location.as_deref(),
+            &body,
+            &route.origin,
+            &self.sso_host(),
+        );
+        if !dead {
+            return Judged::Fine(opened);
+        }
+        if opened.status != 401 {
+            body = read_capped(&mut opened.body).unwrap_or_default();
+            opened.body = Box::new(Cursor::new(body));
+        }
+        Judged::Rejected(opened)
+    }
+
+    fn sso_host(&self) -> String {
+        self.sso_base
+            .as_deref()
+            .and_then(|base| url::Url::parse(base).ok())
+            .and_then(|u| u.host_str().map(str::to_string))
+            .unwrap_or_else(|| SSO_HOST.to_string())
+    }
+}
+
+/// `missing`, with the refused sign-in beside it when there was one.
+fn missing(route: &Route, signin: Option<Value>) -> OpError {
+    let mut error = OpError::new("missing", format!("no {} session is stored", route.name));
+    error.signin = signin;
+    error
 }
 
 #[cfg(test)]

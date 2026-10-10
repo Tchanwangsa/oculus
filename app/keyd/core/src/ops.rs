@@ -26,7 +26,10 @@ pub struct Build {
 }
 
 mod forward;
+mod legacy;
 mod okta;
+#[cfg(test)]
+mod resign_tests;
 mod session;
 #[cfg(test)]
 mod testing;
@@ -64,6 +67,8 @@ pub struct State {
     clock: Clock,
     /// Counts every change to a login session (`session::Generation`).
     generation: crate::session::Generation,
+    /// Set once the old session files have been dealt with (`ops/legacy.rs`).
+    sessions_imported: std::sync::atomic::AtomicBool,
 }
 
 /// An op's failure as it goes on the wire: `{"error": kind, "detail": …}`.
@@ -71,14 +76,19 @@ pub struct State {
 /// `caller` (refused: the peer check, or any op but `ping` asked by a program
 /// that is neither the app nor the CLI), `keychain` (the master key, or an old item
 /// being imported, was refused or failed), `vault`, `record` (`okta_resume`:
-/// the sign-in attempt record could not be replaced; a client reads it as
-/// `Broken`), `missing` (`forward` for a key or session the vault does not hold),
+/// the sign-in attempt record could not be replaced; `session_mark` and
+/// `sign_out` use it for a marker file they could not write; a client reads
+/// it as `Broken`), `missing` (`forward` for a key or session the vault does not hold),
 /// `upstream` (`forward` got no answer: DNS, connect, TLS, a reset, or a
-/// session route's origin stalled).
+/// session route's origin stalled). A `missing` session may also carry the
+/// `signin` outcome of the attempt to make one.
 #[derive(Debug)]
 pub struct OpError {
     pub kind: &'static str,
     pub detail: String,
+    /// The refused or failed sign-in beside a `missing` session, in
+    /// `outcome_to_wire`'s shape.
+    pub signin: Option<Value>,
 }
 
 impl OpError {
@@ -86,11 +96,16 @@ impl OpError {
         OpError {
             kind,
             detail: detail.into(),
+            signin: None,
         }
     }
 
     pub fn to_json(&self) -> Value {
-        json!({"error": self.kind, "detail": self.detail})
+        let mut error = json!({"error": self.kind, "detail": self.detail});
+        if let Some(signin) = &self.signin {
+            error["signin"] = signin.clone();
+        }
+        error
     }
 }
 
@@ -161,6 +176,7 @@ impl State {
             flight: okta::Flight::default(),
             clock: crate::clock::system(),
             generation: crate::session::Generation::default(),
+            sessions_imported: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -269,7 +285,7 @@ impl State {
                 })?;
                 Ok(json!({"existed": existed}).into())
             }
-            "forward" => self.forward(req, body),
+            "forward" => self.forward(caller, req, body),
             "okta_save" => self.okta_save(req),
             "okta_forget" => self.okta_forget(),
             "okta_status" => self.okta_status(),
@@ -279,6 +295,8 @@ impl State {
             "session_put" => self.session_put(req),
             "session_clear" => self.session_clear(req),
             "session_status" => self.session_status(),
+            "session_mark" => self.session_mark(req),
+            "sign_out" => self.sign_out(),
             _ => Err(OpError::new("request", format!("unknown op {op:?}"))),
         }
     }
@@ -534,6 +552,8 @@ mod tests {
             ),
             ("session_clear", json!({})),
             ("session_status", json!({})),
+            ("session_mark", json!({"authenticated": true})),
+            ("sign_out", json!({})),
             ("a_future_op", json!({})),
         ]
     }

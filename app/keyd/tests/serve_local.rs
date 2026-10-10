@@ -53,10 +53,22 @@ impl Keyd {
         let dir = std::env::temp_dir().join(format!("keyd-bin-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let sock = dir.join("k.sock");
+        let child = Keyd::run(&dir, &sock, idle_secs, origins, role);
+        Keyd { child, dir, sock }
+    }
+
+    /// A keyd over `dir`, started once its socket is bound.
+    fn run(
+        dir: &std::path::Path,
+        sock: &std::path::Path,
+        idle_secs: u64,
+        origins: &[(&str, &str)],
+        role: Option<&str>,
+    ) -> Child {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_oculus-keyd"));
         cmd.arg("serve-local")
-            .arg(&sock)
-            .env("OCULUS_KEYD_DATA_DIR", &dir)
+            .arg(sock)
+            .env("OCULUS_KEYD_DATA_DIR", dir)
             .env("OCULUS_KEYD_TEST_KEY", "11".repeat(32))
             .env("OCULUS_KEYD_IDLE_SECS", idle_secs.to_string())
             .stderr(Stdio::piped());
@@ -75,7 +87,16 @@ impl Keyd {
             );
             std::thread::sleep(Duration::from_millis(20));
         }
-        Keyd { child, dir, sock }
+        child
+    }
+
+    /// Stops this keyd and starts another over the same data dir (and so the
+    /// same vault) that sees every caller as `role`.
+    fn restart_as(&mut self, role: &str) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+        std::fs::remove_file(&self.sock).ok();
+        self.child = Keyd::run(&self.dir, &self.sock, 60, &[], Some(role));
     }
 
     fn call(&self, req: Value) -> Value {
@@ -458,6 +479,7 @@ fn okta_calls_made_as_the_cli() {
         ),
         call_at(&sock, &json!({"op": "okta_forget"})),
         call_at(&sock, &json!({"op": "okta_status"})),
+        call_at(&sock, &json!({"op": "session_status"})),
     ];
     println!("REPLIES {}", Value::Array(replies));
 }
@@ -559,18 +581,20 @@ fn the_binary_saves_credentials_and_signs_in_for_the_cli_only() {
         json!({"username": null, "has_password": false, "has_totp": false})
     );
 
+    // The sign-in's sessions are in the vault, not in files.
     assert_eq!(
-        std::fs::read_to_string(keyd.dir.join("canvas-session.cookie")).unwrap(),
-        COOKIE
+        replies[8],
+        json!({"canvas": true, "sso": true, "ed": false, "authenticated": true, "signed_out": false})
     );
-    assert_eq!(
-        std::fs::read_to_string(keyd.dir.join("sso-session.cookie")).unwrap(),
-        "JSESSIONID=js1; sid=sess1"
-    );
+    assert!(!keyd.dir.join("canvas-session.cookie").exists());
+    assert!(!keyd.dir.join("sso-session.cookie").exists());
     let vault = std::fs::read(keyd.dir.join("vault.bin")).unwrap();
-    assert!(!vault
-        .windows(PASSWORD.len())
-        .any(|w| w == PASSWORD.as_bytes()));
+    for secret in [PASSWORD, COOKIE, "sid=sess1"] {
+        assert!(
+            !vault.windows(secret.len()).any(|w| w == secret.as_bytes()),
+            "{secret} in the vault file in clear"
+        );
+    }
 
     keyd.child.kill().ok();
     keyd.child.wait().ok();
@@ -587,4 +611,15 @@ fn the_binary_saves_credentials_and_signs_in_for_the_cli_only() {
     for leak in [PASSWORD, SEED, COOKIE, "Password is incorrect"] {
         assert!(!log.contains(leak), "{leak} in {log}");
     }
+
+    // The sessions outlive this keyd, and the app, alone, can read them back.
+    keyd.restart_as("app");
+    let cookies = keyd.call(json!({"op": "session_get"}));
+    assert_eq!(
+        cookies,
+        json!({"canvas": COOKIE, "sso": "JSESSIONID=js1; sid=sess1"})
+    );
+    keyd.restart_as("cli");
+    let refused = keyd.call(json!({"op": "session_get"}));
+    assert_eq!(refused["error"], "caller", "{refused}");
 }

@@ -5,6 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
+use crate::session::Kind;
 use crate::test_support::okta_fake::{script, COOKIE, PASSWORD, SEED, USERNAME};
 use crate::test_support::{FakeOrigin, Scratch, TestClock};
 
@@ -54,9 +55,40 @@ impl CredentialStore for Store {
     }
 }
 
-fn env<'a>(dir: &Scratch, origin: &str, store: &'a Store) -> Env<'a> {
+/// The sessions a sign-in saved, in order; it can be told to refuse a kind.
+#[derive(Default)]
+struct Sessions {
+    saved: Mutex<Vec<(Kind, String)>>,
+    refuse: Option<Kind>,
+}
+
+impl Sessions {
+    fn get(&self, kind: Kind) -> Option<String> {
+        let saved = self.saved.lock().unwrap();
+        saved
+            .iter()
+            .rfind(|(k, _)| *k == kind)
+            .map(|(_, v)| v.clone())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.saved.lock().unwrap().is_empty()
+    }
+}
+
+impl SessionStore for Sessions {
+    fn put(&self, kind: Kind, value: &str) -> Result<(), String> {
+        if self.refuse == Some(kind) {
+            return Err("the vault is full".to_string());
+        }
+        self.saved.lock().unwrap().push((kind, value.to_string()));
+        Ok(())
+    }
+}
+
+fn env<'a>(dir: &Scratch, origin: &str, store: &'a Store, sessions: &'a Sessions) -> Env<'a> {
     let port = origin.rsplit(':').next().unwrap();
-    let mut env = Env::new(&dir.0, &format!("http://127.0.0.1:{port}"), store);
+    let mut env = Env::new(&dir.0, &format!("http://127.0.0.1:{port}"), store, sessions);
     env.sso_base = format!("http://localhost:{port}");
     env.now = Arc::new(at_t0);
     env
@@ -87,8 +119,10 @@ fn a_manual_sign_in_walks_canvas_to_okta_and_back_and_saves_both_sessions() {
     let dir = Scratch::new("sign-in-ok");
     let fake = FakeOrigin::start(script(|p| p == CODE));
     let store = Store::with_password(PASSWORD);
+    let sessions = Sessions::default();
 
-    let cookie = sign_in(&env(&dir, &fake.origin, &store), Trigger::Manual, Role::App).unwrap();
+    let env = env(&dir, &fake.origin, &store, &sessions);
+    let cookie = sign_in(&env, Trigger::Manual, Role::App).unwrap();
     assert_eq!(cookie, COOKIE);
 
     assert_eq!(
@@ -118,18 +152,17 @@ fn a_manual_sign_in_walks_canvas_to_okta_and_back_and_saves_both_sessions() {
         Some("application/x-www-form-urlencoded")
     );
 
-    let session = paths::cookie(&dir.0);
-    let sso = paths::sso_cookie(&dir.0);
-    assert_eq!(std::fs::read_to_string(&session).unwrap(), COOKIE);
+    assert_eq!(sessions.get(Kind::Canvas).as_deref(), Some(COOKIE));
     assert_eq!(
-        std::fs::read_to_string(&sso).unwrap(),
-        "JSESSIONID=js1; sid=sess1"
+        sessions.get(Kind::Sso).as_deref(),
+        Some("JSESSIONID=js1; sid=sess1")
     );
-    #[cfg(unix)]
-    {
-        assert!(crate::platform::files::is_owner_only(&session).unwrap());
-        assert!(crate::platform::files::is_owner_only(&sso).unwrap());
-    }
+    assert_eq!(sessions.get(Kind::Ed), None);
+    assert!(
+        !paths::cookie(&dir.0).exists() && !paths::sso_cookie(&dir.0).exists(),
+        "a session goes to the store, never to a file"
+    );
+    assert!(markers::is_authenticated(&dir.0));
 
     assert_eq!(log_lines(&dir), ["2005-03-18T01:58:31Z manual: signed in"]);
     let record = std::fs::read_to_string(paths::sign_in_record(&dir.0)).unwrap();
@@ -142,16 +175,21 @@ fn a_rejected_password_is_reported_logged_and_forgotten_without_saving_a_session
     let dir = Scratch::new("sign-in-bad-password");
     let fake = FakeOrigin::start(script(|p| p == CODE));
     let store = Store::with_password("not-the-password");
+    let sessions = Sessions::default();
 
-    let result = sign_in(&env(&dir, &fake.origin, &store), Trigger::Manual, Role::App);
+    let result = sign_in(
+        &env(&dir, &fake.origin, &store, &sessions),
+        Trigger::Manual,
+        Role::App,
+    );
     let Err(LoginError::BadPassword(why)) = result else {
         panic!("expected BadPassword, got {result:?}");
     };
     assert_eq!(why, "Password is incorrect");
     assert!(store.password_cleared());
 
-    assert!(!paths::cookie(&dir.0).exists());
-    assert!(!paths::sso_cookie(&dir.0).exists());
+    assert!(sessions.is_empty());
+    assert!(!markers::is_authenticated(&dir.0));
     assert_eq!(
         log_lines(&dir),
         ["2005-03-18T01:58:31Z manual: failed — Okta rejected the password: Password is incorrect"]
@@ -169,10 +207,11 @@ fn an_automatic_sign_in_goes_nowhere_when_the_attempt_record_is_out_of_reach() {
     let dir = Scratch::new("sign-in-closed");
     let fake = FakeOrigin::start(script(|p| p == CODE));
     let store = Store::with_password(PASSWORD);
+    let sessions = Sessions::default();
     std::fs::create_dir_all(paths::sign_in_record(&dir.0)).unwrap();
 
     let result = sign_in(
-        &env(&dir, &fake.origin, &store),
+        &env(&dir, &fake.origin, &store, &sessions),
         Trigger::Startup,
         Role::App,
     );
@@ -187,8 +226,9 @@ fn a_sign_in_after_a_recent_attempt_waits_without_a_request() {
     let next_code = totp_code(SEED, T0 + 60).unwrap();
     let fake = FakeOrigin::start(script(move |p| p == CODE || p == next_code));
     let store = Store::with_password(PASSWORD);
+    let sessions = Sessions::default();
     let clock = TestClock::at(T0);
-    let mut env = env(&dir, &fake.origin, &store);
+    let mut env = env(&dir, &fake.origin, &store, &sessions);
     env.now = clock.clock();
 
     sign_in(&env, Trigger::Startup, Role::App).unwrap();
@@ -222,8 +262,9 @@ fn a_lockout_stops_the_cli_before_any_request_and_the_app_may_try_again() {
     let next_code = totp_code(SEED, T0 + 120).unwrap();
     let fake = FakeOrigin::start(script(move |p| p == CODE || p == next_code));
     let store = Store::with_password(PASSWORD);
+    let sessions = Sessions::default();
     let clock = TestClock::at(T0 - 3600);
-    let mut env = env(&dir, &fake.origin, &store);
+    let mut env = env(&dir, &fake.origin, &store, &sessions);
     env.now = clock.clock();
     let record = paths::sign_in_record(&dir.0);
     std::fs::create_dir_all(record.parent().unwrap()).unwrap();
@@ -256,15 +297,18 @@ fn a_signed_out_app_or_missing_credentials_stop_before_any_request() {
     let dir = Scratch::new("sign-in-stops");
     let fake = FakeOrigin::start(script(|p| p == CODE));
     let store = Store::with_password(PASSWORD);
-    let env = env(&dir, &fake.origin, &store);
+    let sessions = Sessions::default();
+    let env = env(&dir, &fake.origin, &store, &sessions);
 
     let marker = paths::signed_out(&env.data_dir);
     std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
     std::fs::write(&marker, b"1").unwrap();
-    assert!(matches!(
-        sign_in(&env, Trigger::Startup, Role::App),
-        Err(LoginError::SignedOut)
-    ));
+    for trigger in [Trigger::Startup, Trigger::Browser, Trigger::Forward] {
+        assert!(matches!(
+            sign_in(&env, trigger, Role::App),
+            Err(LoginError::SignedOut)
+        ));
+    }
 
     store.clear_password().unwrap();
     assert!(matches!(
@@ -332,4 +376,82 @@ fn a_keyd_failure_and_an_unreadable_credential_are_described_as_what_they_are() 
         unreadable.contains("oculus-keyd") && unreadable.contains("this program"),
         "{unreadable}"
     );
+}
+
+#[test]
+fn any_trigger_that_signs_in_marks_the_app_authenticated_and_a_manual_one_lifts_the_sign_out() {
+    for trigger in [
+        Trigger::Startup,
+        Trigger::Browser,
+        Trigger::Forward,
+        Trigger::Manual,
+    ] {
+        let dir = Scratch::new("sign-in-marks");
+        let fake = FakeOrigin::start(script(|p| p == CODE));
+        let (store, sessions) = (Store::with_password(PASSWORD), Sessions::default());
+        let env = env(&dir, &fake.origin, &store, &sessions);
+        assert!(!markers::is_authenticated(&dir.0));
+        sign_in(&env, trigger, Role::Cli).unwrap();
+        assert!(markers::is_authenticated(&dir.0), "{trigger:?}");
+    }
+
+    let dir = Scratch::new("sign-in-lifts-sign-out");
+    let fake = FakeOrigin::start(script(|p| p == CODE));
+    let (store, sessions) = (Store::with_password(PASSWORD), Sessions::default());
+    let env = env(&dir, &fake.origin, &store, &sessions);
+    markers::mark_signed_out(&dir.0).unwrap();
+    sign_in(&env, Trigger::Manual, Role::App).unwrap();
+    assert!(markers::is_authenticated(&dir.0) && !markers::is_signed_out(&dir.0));
+}
+
+#[test]
+fn a_session_that_cannot_be_saved_is_a_failed_sign_in_and_an_okta_one_is_not() {
+    let dir = Scratch::new("sign-in-store-refuses");
+    let fake = FakeOrigin::start(script(|p| p == CODE));
+    let store = Store::with_password(PASSWORD);
+    let sessions = Sessions {
+        refuse: Some(Kind::Canvas),
+        ..Sessions::default()
+    };
+    let result = sign_in(
+        &env(&dir, &fake.origin, &store, &sessions),
+        Trigger::Manual,
+        Role::App,
+    );
+    let Err(LoginError::Unexpected(why)) = result else {
+        panic!("{result:?}");
+    };
+    assert!(why.contains("could not save the session cookie"), "{why}");
+    assert!(sessions.is_empty() && !markers::is_authenticated(&dir.0));
+
+    let dir = Scratch::new("sign-in-sso-refused");
+    let fake = FakeOrigin::start(script(|p| p == CODE));
+    let sessions = Sessions {
+        refuse: Some(Kind::Sso),
+        ..Sessions::default()
+    };
+    sign_in(
+        &env(&dir, &fake.origin, &store, &sessions),
+        Trigger::Manual,
+        Role::App,
+    )
+    .unwrap();
+    assert_eq!(sessions.get(Kind::Canvas).as_deref(), Some(COOKIE));
+    assert!(markers::is_authenticated(&dir.0));
+}
+
+#[test]
+fn with_nowhere_to_keep_a_session_the_sign_in_fails_and_marks_nothing() {
+    let dir = Scratch::new("sign-in-no-sessions");
+    let fake = FakeOrigin::start(script(|p| p == CODE));
+    let store = Store::with_password(PASSWORD);
+    let unused = Sessions::default();
+    let mut env = env(&dir, &fake.origin, &store, &unused);
+    env.sessions = &NoSessions;
+    let result = sign_in(&env, Trigger::Manual, Role::App);
+    assert!(
+        matches!(result, Err(LoginError::Unexpected(_))),
+        "{result:?}"
+    );
+    assert!(!markers::is_authenticated(&dir.0));
 }

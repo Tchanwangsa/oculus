@@ -16,9 +16,11 @@ use serde_json::{json, Value};
 use super::{OpError, Reply, State};
 use crate::names;
 use crate::okta::{
-    self, outcome_to_wire, CredentialStore, Credentials, Env, LoginError, OktaStatus, Trigger,
+    self, outcome_to_wire, CredentialStore, Credentials, Env, LoginError, OktaStatus, SessionStore,
+    Trigger,
 };
-use crate::platform::Caller;
+use crate::platform::{Caller, Role};
+use crate::session::{check_value, store, Kind};
 use crate::vault::Vault;
 
 type Outcome = Result<String, LoginError>;
@@ -149,7 +151,37 @@ impl CredentialStore for VaultStore<'_> {
     }
 }
 
+/// The vault as the sign-in's session store: a session it mints is a `put`,
+/// so the generation counts it and a request that was rejected meanwhile can
+/// tell. A legacy file is imported first, so it can never replace this one.
+struct VaultSessions<'a>(&'a State);
+
+impl SessionStore for VaultSessions<'_> {
+    fn put(&self, kind: Kind, value: &str) -> Result<(), String> {
+        check_value(value)?;
+        let vault = self.0.vault().map_err(describe)?;
+        self.0.import_sessions(&vault).map_err(describe)?;
+        store::put(&vault, &self.0.generation, kind, value).map_err(|e| e.to_string())
+    }
+}
+
 impl State {
+    /// Signs in (or waits for the sign-in already running) and returns its
+    /// outcome. The one way keyd signs in: `ensure_signed_in` and a rejected
+    /// `forward` both come here, so there is one attempt at a time and every
+    /// one is the guard's.
+    pub(super) fn sign_in(&self, trigger: Trigger, role: Role) -> Outcome {
+        self.flight.run(|| {
+            let (creds, sessions) = (VaultStore(self), VaultSessions(self));
+            let mut env = Env::new(&self.data_dir, &self.canvas_base, &creds, &sessions);
+            if let Some(sso) = &self.sso_base {
+                env.sso_base = sso.clone();
+            }
+            env.now = self.clock.clone();
+            okta::sign_in(&env, trigger, role)
+        })
+    }
+
     /// Copies each Okta item's old keychain item in, once. Each costs one
     /// keychain prompt, ever; a refusal is a `keychain` error and is retried.
     fn import_okta(&self, vault: &Vault) -> Result<(), OpError> {
@@ -232,7 +264,7 @@ impl State {
     }
 
     /// Signs in (or waits for the sign-in already running) and replies with
-    /// its outcome. The attempt guard, the log and both cookie files are
+    /// its outcome. The attempt guard, the log and the session entries are
     /// `okta::sign_in`'s.
     pub(super) fn ensure_signed_in(&self, caller: &Caller, req: &Value) -> Result<Reply, OpError> {
         let trigger = req
@@ -242,18 +274,10 @@ impl State {
             .ok_or_else(|| {
                 OpError::new(
                     "request",
-                    "ensure_signed_in needs a \"trigger\": manual, startup or browser",
+                    "ensure_signed_in needs a \"trigger\": manual, startup, browser or forward",
                 )
             })?;
-        let outcome = self.flight.run(|| {
-            let store = VaultStore(self);
-            let mut env = Env::new(&self.data_dir, &self.canvas_base, &store);
-            if let Some(sso) = &self.sso_base {
-                env.sso_base = sso.clone();
-            }
-            env.now = self.clock.clone();
-            okta::sign_in(&env, trigger, caller.role)
-        });
+        let outcome = self.sign_in(trigger, caller.role);
         let note = match &outcome {
             Ok(_) => "result=signed_in".to_string(),
             Err(e) => format!("result=error code={}", e.code()),
@@ -886,7 +910,7 @@ mod tests {
     // ── ensure_signed_in ─────────────────────────────────────────────────────
 
     #[test]
-    fn a_sign_in_through_dispatch_writes_both_cookie_files_and_replies_signed_in() {
+    fn a_sign_in_through_dispatch_saves_both_sessions_in_the_vault_and_replies_signed_in() {
         let dir = Scratch::new("okta-ensure");
         let fake = fake();
         let state = state(&dir, &fake);
@@ -902,21 +926,18 @@ mod tests {
             .unwrap();
         assert_eq!(reply.header, json!({"result": "signed_in"}));
         assert_eq!(reply.note.as_deref(), Some("result=signed_in"));
+        assert_eq!(stored(&dir, "session.canvas").as_deref(), Some(COOKIE));
         assert_eq!(
-            std::fs::read_to_string(crate::paths::cookie(&dir.0)).unwrap(),
-            COOKIE
+            stored(&dir, "session.sso").as_deref(),
+            Some("JSESSIONID=js1; sid=sess1")
         );
-        assert_eq!(
-            std::fs::read_to_string(crate::paths::sso_cookie(&dir.0)).unwrap(),
-            "JSESSIONID=js1; sid=sess1"
+        assert_eq!(state.session_generation(), 2, "both sessions are counted");
+        assert!(
+            !crate::paths::cookie(&dir.0).exists() && !crate::paths::sso_cookie(&dir.0).exists(),
+            "no cookie file"
         );
-        #[cfg(unix)]
-        for path in [
-            crate::paths::cookie(&dir.0),
-            crate::paths::sso_cookie(&dir.0),
-        ] {
-            assert!(crate::platform::files::is_owner_only(&path).unwrap());
-        }
+        assert!(crate::paths::authenticated(&dir.0).exists());
+        assert!(!reply.header.to_string().contains("canvas_session"));
         assert_eq!(requests(&fake), 11, "one flow");
         let log = std::fs::read_to_string(crate::paths::sign_in_log(&dir.0)).unwrap();
         assert!(log.trim_end().ends_with("manual: signed in"), "{log}");
@@ -932,15 +953,12 @@ mod tests {
         let state = state(&dir, &fake);
         for req in [
             json!({}),
-            json!({"trigger": "forward"}),
+            json!({"trigger": "Forward"}),
             json!({"trigger": 1}),
             json!({"trigger": "app startup"}),
         ] {
             let err = op(&state, &cli(), "ensure_signed_in", req).unwrap_err();
             assert_eq!(err.kind, "request");
-        }
-        for t in [Trigger::Manual, Trigger::Startup, Trigger::Browser] {
-            assert_eq!(Trigger::from_wire_name(t.wire_name()), Some(t));
         }
         assert_eq!(requests(&fake), 0);
     }
@@ -978,7 +996,7 @@ mod tests {
             Some(USERNAME)
         );
         assert_eq!(stored(&dir, names::OKTA_TOTP_SECRET).as_deref(), Some(SEED));
-        assert!(!crate::paths::cookie(&dir.0).exists());
+        assert_eq!(stored(&dir, "session.canvas"), None);
         assert_eq!(
             status(&state),
             OktaStatus {

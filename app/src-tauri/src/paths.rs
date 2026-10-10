@@ -44,7 +44,7 @@ pub fn ed_token_path(data_dir: &std::path::Path) -> PathBuf {
 }
 
 pub fn auth_flag_path(data_dir: &std::path::Path) -> PathBuf {
-    keyd_core::paths::session_dir(data_dir).join("authenticated")
+    keyd_core::paths::authenticated(data_dir)
 }
 
 /// Present from a sign-out until the next session (`mark_authenticated`).
@@ -84,12 +84,7 @@ pub fn sign_out(data_dir: &std::path::Path) -> std::io::Result<bool> {
 /// The app's startup probe ignores the cookie without this flag, so every path
 /// that establishes a session must write it, the CLI included.
 pub fn mark_authenticated(data_dir: &std::path::Path) {
-    let flag = auth_flag_path(data_dir);
-    if let Some(parent) = flag.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    std::fs::write(&flag, b"1").ok();
-    std::fs::remove_file(signed_out_path(data_dir)).ok();
+    keyd_core::session::markers::mark_authenticated(data_dir);
 }
 
 /// The attempt record every process checks before an automatic sign-in.

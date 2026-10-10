@@ -136,7 +136,9 @@ impl Unanswered {
     /// socket are a failure to reach Voyage, so they back off and retry.
     fn from_keyd(error: KeydError) -> Self {
         match error {
-            KeydError::Missing(_) => Unanswered::Fatal(EmbedError::MissingCredentials),
+            KeydError::Missing(_) | KeydError::NoSession(..) => {
+                Unanswered::Fatal(EmbedError::MissingCredentials)
+            }
             KeydError::Keychain(detail) => {
                 Unanswered::Fatal(EmbedError::UnreadableCredentials(detail))
             }
@@ -297,6 +299,7 @@ impl VoyageCloud {
                     status,
                     headers,
                     body,
+                    signin: None,
                 })
             }
         }

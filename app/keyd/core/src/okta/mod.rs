@@ -15,8 +15,10 @@
 //! second factor is not a second factor — the same deliberate trade as a
 //! password manager holding TOTP.
 //!
-//! The app runs this in-process when keyd is absent; keyd runs it otherwise.
-//! The only OS calls are `platform::files`' lock and private writes.
+//! keyd runs this, and the sessions it mints go to the `SessionStore` (keyd's
+//! vault), never to a file: a session only keyd can use must not be minted
+//! without keyd. The only OS calls are `platform::files`' lock and private
+//! writes.
 
 use std::path::{Path, PathBuf};
 
@@ -31,11 +33,12 @@ mod sign_in_tests;
 
 pub use guard::{resume_automatic_sign_in, Trigger};
 pub use totp::{base32_decode, totp_at, totp_code, totp_now, totp_seconds_remaining};
-pub use wire::{outcome_from_wire, outcome_to_wire, OktaStatus};
+pub use wire::{outcome_from_wire, outcome_to_wire, refused_signin_from_wire, OktaStatus};
 
 use crate::clock::Clock;
 use crate::paths;
 use crate::platform::Role;
+use crate::session::{markers, Kind};
 
 pub const SSO_HOST: &str = "sso.unimelb.edu.au";
 
@@ -89,9 +92,27 @@ pub trait CredentialStore {
     fn clear_password(&self) -> Result<(), String>;
 }
 
+/// Where the sign-in files the sessions it mints: keyd's vault.
+pub trait SessionStore {
+    /// Replaces the whole session `kind` (a cookie header). `Err` says why it
+    /// could not be saved; the text never holds the value.
+    fn put(&self, kind: Kind, value: &str) -> Result<(), String>;
+}
+
+/// A store that keeps nothing, for a caller that only reads the sign-in page
+/// (`diagnose`): a sign-in run against it fails when it comes to save.
+pub struct NoSessions;
+
+impl SessionStore for NoSessions {
+    fn put(&self, _kind: Kind, _value: &str) -> Result<(), String> {
+        Err("there is nowhere to keep a session here".to_string())
+    }
+}
+
 /// Everything the sign-in takes from outside: where its files go, the two
-/// origins it talks to, the credentials and the clock. `new` gives production's
-/// values; tests point the origins at a loopback server.
+/// origins it talks to, the credentials, where the sessions are kept and the
+/// clock. `new` gives production's values; tests point the origins at a
+/// loopback server.
 pub struct Env<'a> {
     pub data_dir: PathBuf,
     /// Canvas's origin, without a trailing slash.
@@ -100,17 +121,24 @@ pub struct Env<'a> {
     /// so it must differ from Canvas's host.
     pub sso_base: String,
     pub store: &'a dyn CredentialStore,
+    pub sessions: &'a dyn SessionStore,
     /// Unix seconds, for the guard, the log and the TOTP code.
     pub now: Clock,
 }
 
 impl<'a> Env<'a> {
-    pub fn new(data_dir: &Path, canvas_base: &str, store: &'a dyn CredentialStore) -> Env<'a> {
+    pub fn new(
+        data_dir: &Path,
+        canvas_base: &str,
+        store: &'a dyn CredentialStore,
+        sessions: &'a dyn SessionStore,
+    ) -> Env<'a> {
         Env {
             data_dir: data_dir.to_path_buf(),
             canvas_base: canvas_base.to_string(),
             sso_base: format!("https://{SSO_HOST}"),
             store,
+            sessions,
             now: crate::clock::system(),
         }
     }
@@ -215,12 +243,14 @@ impl std::fmt::Display for LoginError {
     }
 }
 
-/// Headless sign-in behind the attempt guard (`guard.rs`). `role` is who asked,
-/// and matters only to a manual attempt against a lockout or a rejected
-/// password: keyd takes it from its caller, an in-process run states its own.
-/// Each attempt is a line in `okta-sign-in.log`.
+/// Headless sign-in behind the attempt guard (`guard.rs`): the only way in, so
+/// nothing runs the flow around it. `role` is who asked, and matters only to a
+/// manual attempt against a lockout or a rejected password; keyd takes it from
+/// its caller. Each attempt is a line in `okta-sign-in.log`. A success has
+/// saved the Canvas (and Okta) session through the `SessionStore` and marked
+/// the app authenticated.
 pub fn sign_in(env: &Env, trigger: Trigger, role: Role) -> Result<String, LoginError> {
-    if trigger != Trigger::Manual && paths::signed_out(&env.data_dir).exists() {
+    if trigger != Trigger::Manual && markers::is_signed_out(&env.data_dir) {
         return Err(LoginError::SignedOut);
     }
     let creds = env
@@ -232,6 +262,10 @@ pub fn sign_in(env: &Env, trigger: Trigger, role: Role) -> Result<String, LoginE
 
     let result = flow::attempt_sign_in(env, &creds);
     guard::settle_recorded(&env.data_dir, trigger, &result);
+    if result.is_ok() {
+        // Whoever asked, the app's startup probe must find the session.
+        markers::mark_authenticated(&env.data_dir);
+    }
     let outcome = match &result {
         Ok(_) => "signed in".to_string(),
         Err(e) => format!("failed — {e}"),
