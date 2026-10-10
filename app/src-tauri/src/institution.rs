@@ -163,6 +163,26 @@ pub fn is_okta() -> bool {
     current().is_some_and(|i| i.idp == Idp::Okta && i.sso_host.is_some())
 }
 
+/// Country codes south of the equator, for reading season-named terms.
+const SOUTHERN_TLDS: &[&str] = &["au", "nz", "za", "ar", "br", "cl", "uy"];
+
+/// Whether the university is in the southern hemisphere, judged by its Canvas
+/// or SSO host's country code. Only term names lean on it (`terms.rs`).
+pub fn southern_hemisphere() -> bool {
+    current().is_some_and(|i| is_southern(&i.canvas, i.sso_host.as_deref()))
+}
+
+fn is_southern(canvas: &str, sso_host: Option<&str>) -> bool {
+    host_of(canvas)
+        .into_iter()
+        .chain(sso_host.map(str::to_string))
+        .any(|h| {
+            h.rsplit('.')
+                .next()
+                .is_some_and(|tld| SOUTHERN_TLDS.contains(&tld))
+        })
+}
+
 /// Seconds trimmed off the start of every recording.
 pub fn echo360_lead_in() -> u32 {
     current().map(|i| i.echo360_lead_in_secs).unwrap_or(0)
@@ -472,6 +492,20 @@ mod tests {
 
         save(&dir, &unimelb()).unwrap();
         assert_eq!(load(&dir), Some(unimelb()));
+    }
+
+    #[test]
+    fn the_hemisphere_comes_from_either_host() {
+        assert!(is_southern("https://canvas.lms.unimelb.edu.au", None));
+        assert!(is_southern(
+            "https://rmit.instructure.com",
+            Some("myapps.rmit.edu.au")
+        ));
+        assert!(!is_southern(
+            "https://canvas.harvard.edu",
+            Some("key.harvard.edu")
+        ));
+        assert!(!is_southern("https://foo.instructure.com", None));
     }
 
     #[test]

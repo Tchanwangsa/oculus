@@ -179,6 +179,8 @@ pub struct Course {
     pub code: String,
     pub name: String,
     pub term: Option<String>,
+    /// `terms::term_sort`, stored so every reader orders terms alike.
+    pub term_sort: Option<String>,
     pub workflow_state: String,
     pub is_current: bool,
 }
@@ -192,6 +194,7 @@ impl Course {
             "name": self.name,
             "workflow_state": self.workflow_state,
             "term": self.term.as_ref().map(|t| serde_json::json!({ "name": t })),
+            "_oculus_term_sort": self.term_sort,
             "_oculus_is_current": self.is_current,
         })
     }
@@ -289,31 +292,39 @@ impl Engine {
             })
             .collect();
 
-        // The newest term with live courses is "current". Ranked by
-        // `terms::term_key`, never compared as text.
-        let latest = academic
-            .iter()
-            .filter(|c| c["workflow_state"] == "available")
-            .filter_map(|c| c["term"]["name"].as_str())
-            .max_by_key(|t| crate::terms::term_key(t))
-            .map(str::to_string);
-
-        Ok(academic
+        let southern = crate::institution::southern_hemisphere();
+        let mut courses: Vec<Course> = academic
             .into_iter()
             .map(|c| {
                 let term = c["term"]["name"].as_str().map(str::to_string);
-                let workflow_state = c["workflow_state"].as_str().unwrap_or("").to_string();
+                let term_sort = term.as_deref().and_then(|t| {
+                    crate::terms::term_sort(t, c["term"]["start_at"].as_str(), southern)
+                });
                 Course {
                     id: c["id"].as_i64().unwrap_or(0),
                     code: c["course_code"].as_str().unwrap_or("").to_string(),
                     name: c["name"].as_str().unwrap_or("").to_string(),
-                    is_current: term.is_some() && term == latest && workflow_state == "available",
                     term,
-                    workflow_state,
+                    term_sort,
+                    workflow_state: c["workflow_state"].as_str().unwrap_or("").to_string(),
+                    is_current: false,
                 }
             })
             .filter(|c| c.id != 0)
-            .collect())
+            .collect();
+
+        // The newest term with live courses is "current", by `term_sort`,
+        // never by comparing names.
+        let latest = courses
+            .iter()
+            .filter(|c| c.workflow_state == "available")
+            .filter_map(|c| c.term_sort.clone())
+            .max();
+        for c in &mut courses {
+            c.is_current =
+                latest.is_some() && c.term_sort == latest && c.workflow_state == "available";
+        }
+        Ok(courses)
     }
 
     // ── Run ──────────────────────────────────────────────────────────────────

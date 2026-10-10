@@ -54,9 +54,10 @@ library files; the rest of the frontend has its own pages:
   because the chat agent writes too (`oculus project` / `oculus task`);
   `useBackendEvents` fires the same event when a finished tool call names one.
 - **`getSubjects` derives, it doesn't read**: `last_synced_at` from the latest
-  *completed* `sync_runs` row, and `is_current` from `app/src/lib/terms.ts`
-  rather than the stored column. Terms sort by rank (`TERM_RANK_SQL`), never by
-  name — `Su` > `Se` would file Summer last.
+  *completed* `sync_runs` row, and `is_current` as the newest `term_sort`
+  among available rows rather than the stored column, which a course fetch
+  stamps only for the courses it returned. Terms sort by `term_sort`
+  ([sync.md](./sync.md)), never by name — `Su` > `Se` would file Summer last.
 - **Errors**: `errorElement` takes down one pane, `ErrorBoundary` the shell, and
   `app/src/main.tsx`'s overlay paints handler throws (no console in release).
 

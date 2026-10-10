@@ -8,7 +8,6 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { useScrollFade } from "@/hooks/useScrollFade";
-import { compareTermsNewestFirst } from "@/lib/terms";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -136,9 +135,8 @@ export function SubjectPicker({
                     Past subjects ({past.length})
                   </CollapsibleTrigger>
                   <CollapsibleContent className="space-y-2 pt-1">
-                    {Object.entries(pastBySemester)
-                      .sort(([a], [b]) => compareTermsNewestFirst(a, b))
-                      .map(([term, courses]) => (
+                    {/* `getSubjects` returns newest term first; groups keep that order. */}
+                    {Object.entries(pastBySemester).map(([term, courses]) => (
                         <div key={term}>
                           <p className="text-[11px] text-muted-foreground mb-1 px-1">
                             {term}

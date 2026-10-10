@@ -153,11 +153,12 @@ pub struct SubjectRow {
 pub async fn upsert_subjects(pool: &SqlitePool, courses: &[Course]) -> Result<(), String> {
     for c in courses {
         sqlx::query(
-            r#"INSERT INTO subjects (id, code, name, term_name, is_current, workflow_state, selected)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)
+            r#"INSERT INTO subjects (id, code, name, term_name, term_sort, is_current, workflow_state, selected)
+               VALUES (?1, ?2, ?3, ?4, ?7, ?5, ?6, 1)
                ON CONFLICT(id) DO UPDATE SET
                  name           = excluded.name,
                  term_name      = excluded.term_name,
+                 term_sort      = excluded.term_sort,
                  is_current     = excluded.is_current,
                  workflow_state = excluded.workflow_state"#,
         )
@@ -167,6 +168,7 @@ pub async fn upsert_subjects(pool: &SqlitePool, courses: &[Course]) -> Result<()
         .bind(&c.term)
         .bind(i32::from(c.is_current))
         .bind(&c.workflow_state)
+        .bind(&c.term_sort)
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -182,7 +184,8 @@ pub async fn subjects(pool: &SqlitePool) -> Result<Vec<SubjectRow>, String> {
                 (SELECT MAX(r.finished_at)
                  FROM sync_runs r, json_each(r.subject_codes) j
                  WHERE r.status = 'completed' AND j.value = s.code) AS last_synced_at
-         FROM subjects s ORDER BY s.is_current DESC, s.term_name DESC, s.name ASC",
+         FROM subjects s
+         ORDER BY s.is_current DESC, s.term_sort IS NULL, s.term_sort DESC, s.name ASC",
     )
     .fetch_all(pool)
     .await

@@ -15,7 +15,7 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Canvas HTML → Markdown | `app/src-tauri/src/md.rs` |
 | App-side entry: thread + `AppReporter`; on-demand module videos | `app/src-tauri/src/scrape.rs` |
 | Headless DB writes, subject list state | `app/src-tauri/src/store.rs`, `app/src-tauri/src/subjects.rs` |
-| Chronological term ranking | `app/src-tauri/src/terms.rs` |
+| Chronological term ordering (`term_sort`) | `app/src-tauri/src/terms.rs` |
 | Agent docs written into the library | `app/src-tauri/src/agents.rs` |
 | Frontend sync page, runner, options | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts`, `app/src/components/sync/SyncSettings.tsx` |
 
@@ -36,10 +36,21 @@ live only there, and both scraping and auth probing go through it.
 `list_courses` marks the newest term that still has available courses as
 current; `oculus run` syncs it by default, `oculus list` marks it, and a
 search with no named subject falls back to it. Canvas term names do not sort
-chronologically (`"2026 Summer Term"` > `"2026 Semester 2"` as strings), so
-`app/src-tauri/src/terms.rs` ranks within the year — summer, semester 1,
-winter, semester 2 — and a month-named intensive (`"2026 June"`) takes the rank
-of the term it falls inside.
+chronologically (`"2026 Summer Term"` > `"2026 Semester 2"` as strings) and
+mean different months in different places, so `app/src-tauri/src/terms.rs`
+gives each term a `YYYY-MM` key, `subjects.term_sort`:
+
+- From the term's `start_at` when Canvas has one.
+- Otherwise from the name: the first 19xx/20xx anywhere in it, and the month
+  its words name — numbered semesters, trimesters, terms and quarters first,
+  then seasons, then month names. Seasons follow the hemisphere
+  (`institution::southern_hemisphere`, from the hosts' country code): Summer
+  opens a southern year and sits mid-year in a northern one. A month-named
+  southern intensive (`"2026 June"`, July) ranks with Winter, and an
+  unrecognised term sorts after every real one in its year.
+- Rows from before the column are UniMelb's; migration 44 backfilled them
+  from UniMelb's names. Every reader — the frontend, the CLI — sorts by the
+  column and ranks no names itself.
 
 ## Modules drive the scrape, and every body feeds one link crawl
 
