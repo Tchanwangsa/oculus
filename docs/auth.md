@@ -181,7 +181,7 @@ without a browser, inside keyd. The IdP is Okta Identity Engine at `sso.unimelb.
 
 ## With keyd installed, keyd holds the credentials and runs the sign-in
 
-`okta/` in the app only routes. Saving, forgetting, the Settings status and
+`auth/okta/` in the app only routes. Saving, forgetting, the Settings status and
 every sign-in a client starts (Settings, the startup probe, the browser,
 `oculus auth auto`) are requests to `oculus-keyd` through
 `credentials::Credentialed` (ops `okta_save`, `okta_forget`, `okta_status`,

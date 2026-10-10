@@ -223,7 +223,7 @@ app links too, for the client and the installer only.
   installed (`KeydError::Absent`), the only case in which a caller reads the
   keychain itself; every other error surfaces. The Voyage and MinerU clients,
   Groq transcription, the three keys' Settings commands
-  (`credentials::CloudKey`) and the Okta calls (`okta/`) use it
+  (`credentials::CloudKey`) and the Okta calls (`auth/okta/`) use it
   ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key),
   [parsing.md](./parsing.md#with-oculus-keyd-installed-no-oculus-process-holds-the-mineru-token),
   [viewers.md](./viewers.md)). A request's timeout is the caller's own, and

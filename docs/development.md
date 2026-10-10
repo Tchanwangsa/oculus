@@ -284,8 +284,9 @@ socket, launchd's activation, the caller's audit token and signature, the
 keychain, the LaunchAgent, `flock` and file modes — sits under
 `app/keyd/core/src/platform/`, whose `mod.rs` states the contract and picks
 the adapter by `cfg(target_os)`. Everything else in core, keyd's `main`, and
-the app's `credentials.rs`, `okta/`, `keyd/` and `bin/oculus/keyd.rs` stay
-OS-free, with one exception: `credentials/keychain.rs` is the legacy-keychain
+the app's `providers/credentials/`, `auth/okta/`, `auth/keyd/` and
+`bin/oculus/commands/keyd.rs` stay
+OS-free, with one exception: `providers/credentials/keychain.rs` is the legacy-keychain
 fallback (`Secret`, over the `keyring` crate) that runs while keyd is absent,
 and it goes with that fallback.
 
