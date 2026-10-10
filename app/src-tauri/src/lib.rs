@@ -1,6 +1,6 @@
 pub mod agents;
 mod atomic_write;
-mod auth;
+pub mod auth;
 mod blocking;
 pub mod browser;
 mod bundled;
@@ -49,9 +49,9 @@ mod usage;
 pub mod voyage;
 
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
-use auth::{auth_flag_path, saved_session_probe, AuthProbe, AuthState};
+use auth::AuthState;
 use lectures::Echo360Cache;
 use scrape::ScrapeCancel;
 use subjects::SubjectsState;
@@ -102,41 +102,8 @@ pub fn run() {
             // Open and active time per hour, from the window and the frontend's pings.
             usage::start(app.handle());
 
-            // Session restore: replay the saved cookie with a server-side
-            // ping. Rejected → try auto-recover, else sign out; unreachable →
-            // stay optimistic, since offline is not expired.
-            let app_handle = app.handle().clone();
-
-            if auth_flag_path().exists() {
-                eprintln!("[oculus] auth flag found — verifying persisted session");
-                let auth_state = app.state::<AuthState>();
-                // Optimistic until the async check below corrects it.
-                *auth_state.0.lock().unwrap() = true;
-                let mem = Arc::clone(&auth_state.0);
-
-                std::thread::spawn(move || match saved_session_probe() {
-                    AuthProbe::Valid(_) => {
-                        *mem.lock().unwrap() = true;
-                        app_handle.emit("canvas-auth-success", "ok").ok();
-                    }
-                    AuthProbe::Rejected(_) => {
-                        // `try_auto_recover` emits its own success event.
-                        if okta::try_auto_recover(&app_handle, okta::Trigger::Startup) {
-                            *mem.lock().unwrap() = true;
-                        } else {
-                            eprintln!("[oculus] session rejected — reset to disconnected");
-                            std::fs::remove_file(auth_flag_path()).ok();
-                            *mem.lock().unwrap() = false;
-                            app_handle.emit("canvas-auth-expired", "expired").ok();
-                        }
-                    }
-                    AuthProbe::Unreachable(_) => {
-                        eprintln!("[oculus] could not verify session — assuming still good");
-                    }
-                });
-            } else {
-                eprintln!("[oculus] no auth flag — fresh session");
-            }
+            // Session restore: replay the stored session with a server-side ping.
+            auth::restore_session(app.handle());
 
             // The session keep-alive agent an earlier version installed.
             legacy_agent::retire_in_background();
@@ -163,10 +130,10 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
-            auth::get_auth_status,
-            auth::check_canvas_session,
-            auth::launch_canvas_auth,
-            auth::disconnect_canvas,
+            auth::commands::get_auth_status,
+            auth::commands::check_canvas_session,
+            auth::commands::launch_canvas_auth,
+            auth::commands::disconnect_canvas,
             okta::okta_credential_status,
             okta::okta_save_credentials,
             okta::okta_clear_credentials,

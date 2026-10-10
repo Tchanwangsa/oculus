@@ -12,9 +12,9 @@
 //!   `with_webview` returns nothing, so answers are pushed as events.
 //!
 //! `canvas_session` is HttpOnly and session-scoped, so WebKit loses it on quit;
-//! `seed_sessions` restores it and Okta's session from their snapshots before
-//! any `*.unimelb.edu.au` load, and each signed-in Canvas page re-snapshots
-//! both (see `docs/auth.md`).
+//! `seed_sessions` restores it and Okta's session from oculus-keyd before any
+//! `*.unimelb.edu.au` load, and each signed-in Canvas page hands both back
+//! (see `docs/auth.md`).
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -140,8 +140,6 @@ fn broadcast(app: &AppHandle) {
         .ok();
 }
 
-// ── Cookie seeding ──────────────────────────────────────────────────────
-
 /// UniMelb's Okta sign-on fronts every service under this domain, so a page
 /// here loads only after the saved sessions are in WebKit's jar.
 fn wants_sessions(url: &url::Url) -> bool {
@@ -149,28 +147,63 @@ fn wants_sessions(url: &url::Url) -> bool {
         .is_some_and(|h| h == "unimelb.edu.au" || h.ends_with(".unimelb.edu.au"))
 }
 
-/// The Okta snapshot's mtime when it was last seeded. While the app runs the
+/// A fingerprint of the Okta header last seeded. While the app runs the
 /// browser's own Okta cookies are the freshest, so they are replaced only by a
-/// snapshot written since (a headless sign-in); otherwise a seed fills gaps.
-static SSO_SEEDED: Mutex<Option<std::time::SystemTime>> = Mutex::new(None);
+/// header oculus-keyd now holds that differs (a headless sign-in); otherwise a
+/// seed fills gaps.
+#[cfg(target_os = "macos")]
+static SSO_SEEDED: Mutex<Option<u64>> = Mutex::new(None);
 
-/// Each saved session as (host, bare `name=value; …` header, whether it
+/// Whether Okta's `now` header replaces the jar's cookies, given the
+/// fingerprint `seeded` of the last one seeded; records `now` as seeded. The
+/// first seed of a run replaces when keyd holds a header at all.
+#[cfg(target_os = "macos")]
+fn sso_changed(seeded: &mut Option<u64>, now: Option<&str>) -> bool {
+    use std::hash::{Hash, Hasher};
+
+    let now = now.map(|header| {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        header.hash(&mut hasher);
+        hasher.finish()
+    });
+    let changed = *seeded != now;
+    *seeded = now;
+    changed
+}
+
+/// Each stored session as (host, bare `name=value; …` header, whether it
 /// replaces the jar's same-named cookies). The scraper keeps Canvas's fresh,
-/// so it always replaces.
+/// so it always replaces. Asks oculus-keyd, so not from the main thread; an
+/// absent keyd or one with no session seeds nothing.
+#[cfg(target_os = "macos")]
 fn saved_sessions() -> Vec<(&'static str, String, bool)> {
-    let sso_path = crate::paths::sso_cookie_path(&crate::paths::data_dir());
-    let modified = std::fs::metadata(&sso_path).and_then(|m| m.modified()).ok();
+    let keyd = crate::credentials::Credentialed::at(&crate::paths::data_dir());
+    sessions_from(&keyd, &SSO_SEEDED)
+}
+
+/// `saved_sessions` for the keyd `keyd` reaches, comparing Okta's header with
+/// the fingerprint in `sso_seeded`.
+#[cfg(target_os = "macos")]
+fn sessions_from(
+    keyd: &crate::credentials::Credentialed,
+    sso_seeded: &Mutex<Option<u64>>,
+) -> Vec<(&'static str, String, bool)> {
+    let cookies = match keyd.session_get() {
+        Ok(cookies) => cookies,
+        Err(e) => {
+            crate::auth::report("could not read the stored sessions to seed WebKit", &e);
+            return Vec::new();
+        }
+    };
     let replace_sso = {
-        let mut seeded = SSO_SEEDED.lock().unwrap_or_else(|e| e.into_inner());
-        let changed = *seeded != modified;
-        *seeded = modified;
-        changed
+        let mut seeded = sso_seeded.lock().unwrap_or_else(|e| e.into_inner());
+        sso_changed(&mut seeded, cookies.sso.as_deref())
     };
     [
-        (CANVAS_HOST, crate::auth::saved_cookie_header(), true),
+        (CANVAS_HOST, cookies.canvas.unwrap_or_default(), true),
         (
             crate::okta::SSO_HOST,
-            crate::auth::saved_sso_cookie_header(),
+            cookies.sso.unwrap_or_default(),
             replace_sso,
         ),
     ]
@@ -179,16 +212,31 @@ fn saved_sessions() -> Vec<(&'static str, String, bool)> {
     .collect()
 }
 
-/// Copies the saved Canvas and Okta sessions into WebKit's shared jar, each
+/// Copies the stored Canvas and Okta sessions into WebKit's shared jar, each
 /// scoped to its host, then runs `then` on the main thread. Loads go in
 /// `then`: `setCookies` is async, and a request sent before it lands meets
-/// Canvas anonymous.
+/// Canvas anonymous. The sessions are fetched from oculus-keyd on a thread of
+/// its own, so a keychain prompt there never holds up the UI.
 ///
 /// Same-named cookies on those hosts are deleted first. WebKit will not let an
 /// API-set cookie replace an HttpOnly one a server set, so once Canvas hands
 /// out an anonymous `canvas_session`, a plain re-set is silently dropped.
 #[cfg(target_os = "macos")]
 pub fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let sessions = saved_sessions();
+        seed_webkit(&app, sessions, then);
+    });
+}
+
+/// `seed_sessions` once the sessions are in hand.
+#[cfg(target_os = "macos")]
+fn seed_webkit(
+    app: &AppHandle,
+    sessions: Vec<(&'static str, String, bool)>,
+    then: impl FnOnce() + Send + 'static,
+) {
     use std::cell::Cell;
     use std::ptr::NonNull;
     use std::rc::Rc;
@@ -211,7 +259,6 @@ pub fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
         });
     };
 
-    let sessions = saved_sessions();
     if sessions.is_empty() {
         finish();
         return;
@@ -634,8 +681,7 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
                 // cookie over the good one. If the app is not connected,
                 // someone signed in here, so connect it.
                 if crate::auth::is_authenticated_url(payload.url()) {
-                    crate::auth::save_session_cookie(webview.app_handle());
-                    crate::auth::confirm_browser_sign_in(webview.app_handle());
+                    crate::auth::save_browser_session(webview.app_handle());
                 }
                 if is_sso_app_entry(payload.url()) {
                     recover_sso(&load_app, id);
@@ -1345,5 +1391,68 @@ mod tests {
         assert!(!sent_to("library.unimelb.edu.au", CANVAS_HOST));
         assert!(!sent_to("lms.unimelb.edu.au.evil.com", CANVAS_HOST));
         assert!(!sent_to("edstem.org", crate::okta::SSO_HOST));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn okta_replaces_the_jar_only_when_the_stored_header_changed() {
+        let mut seeded = None;
+        assert!(
+            !sso_changed(&mut seeded, None),
+            "nothing stored, nothing to replace"
+        );
+        assert!(
+            sso_changed(&mut seeded, Some("sid=a")),
+            "the first seed of a run"
+        );
+        assert!(!sso_changed(&mut seeded, Some("sid=a")), "the same header");
+        assert!(
+            sso_changed(&mut seeded, Some("sid=b")),
+            "a headless sign-in wrote a new one"
+        );
+        assert!(sso_changed(&mut seeded, None), "the session was dropped");
+        assert!(!sso_changed(&mut seeded, None));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn sessions_come_from_keyd_and_a_missing_keyd_or_session_seeds_nothing() {
+        use crate::test_support::{FakeKeyd, Scratch};
+        use serde_json::json;
+
+        let dir = Scratch::new("seed-sessions");
+        let held = std::sync::Arc::new(Mutex::new(
+            json!({"canvas": "canvas_session=a", "sso": "sid=1"}),
+        ));
+        let served = held.clone();
+        let keyd = FakeKeyd::start(&dir, move |_, _| (served.lock().unwrap().clone(), vec![]));
+        let client = crate::credentials::Credentialed::at(&dir);
+        let seeded = Mutex::new(None);
+
+        let sessions = sessions_from(&client, &seeded);
+        assert_eq!(
+            sessions,
+            vec![
+                (CANVAS_HOST, "canvas_session=a".to_string(), true),
+                (crate::okta::SSO_HOST, "sid=1".to_string(), true),
+            ]
+        );
+        let sessions = sessions_from(&client, &seeded);
+        assert!(sessions[0].2, "Canvas always replaces");
+        assert!(!sessions[1].2, "Okta was seeded already");
+
+        *held.lock().unwrap() = json!({"canvas": "canvas_session=a", "sso": null});
+        let sessions = sessions_from(&client, &seeded);
+        assert_eq!(sessions.len(), 1, "no Okta session, none seeded");
+        assert_eq!(keyd.ops(), ["session_get", "session_get", "session_get"]);
+
+        let empty = Scratch::new("seed-sessions-absent");
+        let none = Mutex::new(None);
+        assert!(sessions_from(&crate::credentials::Credentialed::at(&empty), &none).is_empty());
+        assert_eq!(
+            *none.lock().unwrap(),
+            None,
+            "a keyd that cannot be asked changes nothing"
+        );
     }
 }
