@@ -27,6 +27,8 @@
       "{{LIBRARY}}/*.token": "deny",
       "{{LIBRARY}}/*.json": "deny",
       "{{LIBRARY}}/*.log": "deny",
+      "{{LIBRARY}}/vault.bin*": "deny",
+      "{{LIBRARY}}/.vault.bin.*": "deny",
       "opencode.json": "deny",
       "skills/**": "deny",
       ".claude/skills/**": "deny",

@@ -2504,6 +2504,8 @@ mod tests {
             "lectures/**",
             "canvas-session/**",
             "oculus.db*",
+            "vault.bin*",
+            ".vault.bin.*",
         ] {
             let key = format!("/Users/x/Library/Application Support/oculus/{sib}");
             assert_eq!(edit[&key], "deny", "{sib}");
