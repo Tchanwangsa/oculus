@@ -164,7 +164,11 @@ app links too, for the client and the installer only.
   [viewers.md](./viewers.md)). A request's timeout is the caller's own, and
   Groq's upload has none, and neither has `ensure_signed_in`.
 - `keyd::ensure_installed` runs at app startup and does nothing in a dev
-  build; a dev install is the preflight's ([cli.md](./cli.md)).
+  build; a dev install is the preflight's ([cli.md](./cli.md)). A release
+  registers its bundled `Contents/MacOS/oculus-keyd` (an `externalBin` on
+  macOS, built without `dev`) in place, and logs the failure when that file is
+  missing or is not a keyd
+  ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
 - **One data dir.** `keyd_core::paths::data_dir` (the OS data dir plus
   `com.tchan.oculus`) is the only definition; the app's `paths::data_dir`
   and keyd's `main` both call it. Only a debug keyd reads an override.

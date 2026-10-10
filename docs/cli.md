@@ -83,7 +83,9 @@ output of `bun run keyd` in the checkout it was built from
   candidate's source hash and the agent already runs the program it would
   register: the preflight's call, and the app's own check at startup.
 - `status` compares the installed stamp, the stamp of the keyd this CLI would
-  install, and the source hash the running keyd reports.
+  install, and the source hash the running keyd reports. A release CLI with no
+  keyd beside it reports a broken install there, and `install` says so instead
+  of asking for `bun run keyd`.
 
 ## `run` and `index` take minutes per file, and that is not a hang
 

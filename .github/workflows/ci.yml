@@ -1,7 +1,8 @@
 # Checks every push to master and every pull request on a fresh macOS checkout:
 # that the Rust is formatted, the frontend tests and bundle, the Rust tests
-# (the app's, keyd's and keyd core's), and that the generated CLI reference
-# matches the binary; and on Linux, that keyd builds with no OS adapter. See
+# (the app's, keyd's and keyd core's), that keyd builds and signs as the bundle
+# ships it, and that the generated CLI reference matches the binary; and on
+# Linux, that keyd builds with no OS adapter. See
 # docs/development.md#ci-proves-a-fresh-checkout-builds-releases-are-cut-by-hand.
 name: CI
 
@@ -63,8 +64,12 @@ jobs:
 
       - name: Fetch ffmpeg and pdfium, build the speech helper and whisper-cli
         run: bun run ffmpeg && bun run pdfium && bun run speech && bun run whisper
-      # tauri-build refuses to compile anything until every externalBin exists,
-      # and stage-cli is what bootstraps the oculus sidecar on a fresh checkout.
+      # tauri-build refuses to compile anything until every externalBin exists.
+      # keyd's build never goes through it, so it is staged first, for real: the
+      # release policy, signed, as the bundle would carry it.
+      - name: Build, sign and stage oculus-keyd
+        run: bun run stage-keyd
+      # stage-cli is what bootstraps the oculus sidecar on a fresh checkout.
       - name: Build and stage the oculus CLI
         run: bun run stage-cli
       - name: Rust tests

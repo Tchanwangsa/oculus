@@ -3,7 +3,8 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { app, buildCli, cliPath, stageCli } from "./runtime.mjs";
+import { buildKeyd, installFromMainCheckout } from "./keyd-build.mjs";
+import { app, buildCli, cliPath, stageCli, stageKeyd } from "./runtime.mjs";
 
 const cli = cliPath("debug");
 
@@ -39,6 +40,20 @@ for (const script of ["fetch-ffmpeg.mjs", "fetch-pdfium.mjs", "build-speech.mjs"
   execFileSync(process.execPath, [join(app, "scripts", script)], { cwd: app, stdio: "inherit" });
 }
 
+// The credential broker, built and signed every start. It comes before the CLI
+// because tauri-build, which every cargo build of the app runs, needs its
+// sidecar to exist, and copies the sidecar to `target/<profile>/oculus-keyd`:
+// that copy is the keyd the app and CLI offer to install, so the sidecar has
+// to be this dev build, not a release one left by `tauri build`.
+let keyd = null;
+try {
+  keyd = buildKeyd("dev");
+  if (keyd) stageKeyd(keyd.binary);
+} catch (e) {
+  console.error(`[predev] oculus-keyd did not build: ${e.message}`);
+  process.exit(1);
+}
+
 const started = Date.now();
 try {
   buildCli("debug");
@@ -63,17 +78,15 @@ log(`${version} built in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 // has to be this build too.
 stageCli(cli);
 
-// The credential broker: built and signed every start, installed only from the
-// main checkout and only when its source changed. Install runs this CLI.
-try {
-  execFileSync(process.execPath, [join(app, "scripts", "build-keyd.mjs")], {
-    cwd: app,
-    stdio: "inherit",
-    env: { ...process.env, OCULUS_BIN: cli },
-  });
-} catch (e) {
-  console.error(`[predev] oculus-keyd did not build or install: ${e.message}`);
-  process.exit(1);
+// Installed only from the main checkout and only when its source changed.
+// Install runs the CLI built above.
+if (keyd) {
+  try {
+    installFromMainCheckout(keyd.binary);
+  } catch (e) {
+    console.error(`[predev] oculus-keyd did not install: ${e.message}`);
+    process.exit(1);
+  }
 }
 
 // Regenerate the reference from this build, writing only changed help.
