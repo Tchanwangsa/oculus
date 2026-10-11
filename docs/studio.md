@@ -36,8 +36,9 @@ frames and contact sheets, lints, and narrates.
 | Narrating a video: the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
 | Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
-| Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
+| Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
+| The playground's commands: `studio_themes`, the component list, source, frame, validated write, history and restore | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
 | `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `render.rs`, `narrate.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
@@ -1099,6 +1100,74 @@ library, the length target, and the instruction to use this skill, lint and
 narrate, render a draft and say it is ready, and ask before the final. The
 agent is told not to run `oculus studio new`. See
 [harness.md](./harness.md#a-studio-thread-carries-its-video).
+
+### The playground's commands
+
+`studio::commands::components` and `studio::commands::themes` serve the
+Components page and the style chip (`app/src/lib/studio/components.ts` and
+`themes.ts` are the typed wrappers; JSON is camelCase). They read and write
+only the two libraries, `<data>/studio/library/` and
+`<data>/studio/subjects/<CODE>/`: a command takes a component name, a level
+(`subject` or `global`) and a subject code, never a path
+(`commands/levels.rs`), and a name that is not a PascalCase identifier (for a
+theme, lowercase letters, digits and `-`) or a subject that is not a course
+code's folder name is refused. Without a subject only the global library is
+read. Each call loads the global library first, so the starter set is
+there. Nothing is cached.
+
+| Command | Does |
+| --- | --- |
+| `studio_themes(subject?)` | one row per theme name: `{name, level, swatch, tokens, problem}` |
+| `studio_components(subject?)` | one row per component name: `{name, level, kind, props, examples, problem}` |
+| `studio_component_source(name, subject?)` | `{level, text}` from the nearest level that has it |
+| `studio_component_frame(name, subject?, theme, props?, example?, t, width, duration?)` | a PNG `width` px wide (1 to 4096), as bytes through `tauri::ipc::Response` |
+| `studio_component_write(name, level, subject?, text)` | writes once the text loads; returns `{level, text}` |
+| `studio_component_history(name, level, subject?)` | `[{id, savedAt}]`, newest first |
+| `studio_component_restore(name, level, subject?, id)` | writes snapshot `id` back; returns `{level, text}` |
+
+- **Themes** are the bundled names, `themes/*.json` in the global library and
+  in the subject's, resolved as a video resolves its theme: the subject's
+  over the global one over the bundled one, one row per name with the level
+  that won (`bundled`, `global`, `subject`), `default` first, then by name.
+  `tokens` is the parsed theme file and `swatch` up to four CSS colours from
+  its `color` tokens in the order `bg`, `text`, `accent`, `surface`. A file
+  that does not parse is a row with `problem` (the `Theme::parse` message),
+  no `tokens` and an empty `swatch`, not a failed call.
+- **Components** are read through the cascade without a video: the subject's
+  `components/` over the global one, `level` being the one that won. Every
+  one is loaded in a single engine for its `props` (the builders' own JSON
+  in declaration order, each prop `{name, kind, optional, default?}` with
+  `of` for a list, `values` for `oneOf` and `token` for a token) and its
+  `examples` (name to props, in declaration order); a component that does
+  not load is a row with `problem`, an empty `props` and no examples.
+  `PropSpec` serialises to that JSON in studio-core. `kind` is `shell` when
+  the name ends in `Shell`, else `component`: nothing in a component's code
+  says which, so the name does.
+- **A frame** draws the component alone in a 1920x1080 frame scaled to
+  `width`, in the theme `theme` names (resolved through the same levels).
+  `t` is seconds into the component and must be in `[0, duration)`;
+  `duration` is what the component sees as `ctx.duration` (default 4 s).
+  The props are `props` if given, else the example `example` names, else the
+  first example, else none. They are checked against the schema, so a wrong
+  one is refused with the engine's sentence and nothing is drawn as a guess;
+  so is a theme that does not parse or an error in the TSX. There is no
+  narration, so `word()` finds no cues. It takes a render slot
+  (`videos/slot.rs`) and builds one `Engine` for the call, since QuickJS is
+  not Send: a 480 px frame took about 3 ms and a 1920 px one about 6 ms
+  (a starter component, test build).
+- **A write** loads the text as the component first (a fresh engine; at most
+  512 KB), so a text with a syntax error, no default export or a bad
+  `props` is refused with the engine's message and the file, its history and
+  the library are untouched. Then it goes through `studio_core::write_library`,
+  which copies the text it replaces to `<library>/.history/` (see
+  "Libraries cascade"). A subject write creates the subject's version of a
+  global component; a global write may create a new component. The same text
+  again writes nothing.
+- **History and restore.** `history` lists `<Name>.<unix-ms>.tsx` files in
+  the level's `.history/`; `id` is the milliseconds as a string and `savedAt`
+  the same number. `restore` takes an id from that list, loads the old text
+  (it must still load) and writes it through the same path, so the text it
+  replaces is snapshotted as the newest entry and an Undo can be undone.
 
 ## `oculus studio` renders and lints from the terminal
 

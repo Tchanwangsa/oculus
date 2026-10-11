@@ -49,3 +49,23 @@ fn rejects_non_builders() {
     let e = parse_schema(&json!({ "title": "string" })).unwrap_err();
     assert!(e.contains("props.title is not a prop builder"), "{e}");
 }
+
+#[test]
+fn a_spec_serialises_to_the_json_its_builder_wrote() {
+    let written = json!({
+        "title": { "kind": "str", "optional": false },
+        "bullets": { "kind": "list", "optional": false, "of": { "kind": "num", "optional": true }, "default": [] },
+        "size": { "kind": "oneOf", "optional": false, "values": ["s", "m"], "default": "m" },
+        "accent": { "kind": "token", "optional": false, "token": "color", "default": "accent" },
+        "math": { "kind": "latex", "optional": true },
+        "on": { "kind": "bool", "optional": false, "default": true },
+    });
+    let schema = parse_schema(&written).unwrap();
+    for (name, spec) in &schema {
+        assert_eq!(
+            &serde_json::to_value(spec).unwrap(),
+            &written[name],
+            "{name}"
+        );
+    }
+}
