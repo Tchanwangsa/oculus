@@ -115,7 +115,7 @@ fn saving_clears_the_attempt_guards_wait_and_pause() {
         "{text}"
     );
     // So the next automatic attempt runs.
-    assert!(matches!(ensure(&state, "startup").unwrap(), Ok(_)));
+    assert!(ensure(&state, "startup").unwrap().is_ok());
 }
 
 #[test]
