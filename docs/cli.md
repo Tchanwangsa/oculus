@@ -200,7 +200,7 @@ no explanation of Oculus. Everything but the CLI reference is written by
   AGENTS.md  OCULUS-CLI.md  OCULUS.md  TASTE.md
   memories/MEMORY.md             cross-subject bucket
   memories/<code>/MEMORY.md      one subject's bucket
-  skills/<name>/SKILL.md
+  skills/<name>/SKILL.md          and any other files the skill ships
   .claude/skills/<name> → ../../skills/<name>
   .agents/skills/<name> → ../../skills/<name>
 <data>/courses/<code>/
@@ -212,9 +212,9 @@ no explanation of Oculus. Everything but the CLI reference is written by
 Each file has one of four lifetimes:
 
 - **Generated, always overwritten**: `OCULUS-CLI.md` (walked from clap's tree,
-  with a test asserting coverage), `AGENTS.md` and `skills/`. An agent trusts
-  these over `--help` and follows a skill as a procedure, so a stale one is
-  worse than none.
+  with a test asserting coverage), `AGENTS.md` and `skills/`, where a file a
+  skill no longer ships is deleted. An agent trusts these over `--help` and
+  follows a skill as a procedure, so a stale one is worse than none.
 - **Stubbed once**: `OCULUS.md`, which a human authors.
 - **Merged**: `TASTE.md`'s guidance is re-rendered with the user's bullets
   carried under their headings, and each `MEMORY.md` is rebuilt from the
