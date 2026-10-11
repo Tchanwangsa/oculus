@@ -32,6 +32,7 @@ export function checkoutPaths(apps) {
     keydCrates: unique.map((a) => join(a, "keyd")),
     predevScripts: unique.map((a) => join(a, "scripts", "predev.mjs")),
     watchers: unique.map((a) => join(a, "scripts", "watch-cli.mjs")),
+    vites: unique.map((a) => join(a, "node_modules", ".bin", "vite")),
   };
 }
 
@@ -84,6 +85,24 @@ export function isOurWatcher(command, paths) {
   return script != null && paths.watchers.includes(script);
 }
 
+/** This checkout's vite, which `bun run dev` starts by absolute path. */
+export function isOurVite(command, paths) {
+  const script = scriptOf(command);
+  return script != null && paths.vites.includes(script);
+}
+
+/**
+ * The orphaned root of this checkout's dev server: vite itself, or the
+ * `bun run dev` above it, once launchd has adopted it. A stopped `tauri dev`
+ * leaves it holding port 1420, and the next one fails to start. Null while a
+ * live `tauri dev` still owns it.
+ */
+export function orphanedViteRoot(procs, vite) {
+  if (vite.ppid === 1) return vite.pid;
+  const parent = procs.find((p) => p.pid === vite.ppid);
+  return parent?.ppid === 1 && /^bun run dev$/.test(parent.command) ? parent.pid : null;
+}
+
 /** `pid` and every process above it. */
 export function ancestorsOf(procs, pid) {
   const byPid = new Map(procs.map((p) => [p.pid, p]));
@@ -116,9 +135,9 @@ export function treeOf(procs, roots) {
 /**
  * The processes to end: a previous predev of this checkout (the pidfile's, or
  * any found by cwd), this checkout's CLI watcher (predev rebuilds the CLI and
- * starts a new one, and a quick restart never trips its dev-server probe), and
- * orphaned (ppid 1) cargo builds of this checkout's CLI or keyd, each with its
- * whole tree. Our own ancestors and tree are never
+ * starts a new one, and a quick restart never trips its dev-server probe),
+ * this checkout's orphaned dev server, and orphaned (ppid 1) cargo builds of
+ * this checkout's CLI or keyd, each with its whole tree. Our own ancestors and tree are never
  * picked. `cwdOf(pid)` returns a cwd or null.
  */
 export function planCleanup({ procs, paths, selfPid, stalePid = null, cwdOf = () => null }) {
@@ -132,6 +151,9 @@ export function planCleanup({ procs, paths, selfPid, stalePid = null, cwdOf = ()
       }
     } else if (isOurWatcher(p.command, paths)) {
       roots.push({ pid: p.pid, what: "the CLI watcher" });
+    } else if (isOurVite(p.command, paths)) {
+      const root = orphanedViteRoot(procs, p);
+      if (root != null && !protectedPids.has(root)) roots.push({ pid: root, what: "an orphaned dev server" });
     } else if (p.ppid === 1 && isOurCliBuild(p.command, paths)) {
       roots.push({ pid: p.pid, what: "an orphaned cargo build of oculus" });
     } else if (p.ppid === 1 && isOurKeydBuild(p.command, paths)) {

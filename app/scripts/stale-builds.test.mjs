@@ -133,6 +133,25 @@ test("this checkout's detached watcher is ended with its build; another checkout
   expect(pids).toEqual([600, 601, 602]);
 });
 
+test("an orphaned dev server of this checkout is ended with its parent; a live or foreign one is not", () => {
+  const vite = (a) => `node ${a}/node_modules/.bin/vite`;
+  const orphan = plan(`
+  700     1 bun run dev
+  701   700 ${vite(app)}
+  710     1 ${vite(app)}
+  720     1 bun run dev
+  721   720 ${vite(tree)}
+  730   300 bun run tauri dev
+  731   730 bun run dev
+  732   731 ${vite(app)}
+`);
+  expect(orphan.roots).toEqual([
+    { pid: 700, what: "an orphaned dev server" },
+    { pid: 710, what: "an orphaned dev server" },
+  ]);
+  expect(orphan.pids).toEqual([700, 710, 701]);
+});
+
 test("the pidfile's predev is trusted without a cwd; others need theirs", () => {
   const extra = `
   210   200 node scripts/predev.mjs

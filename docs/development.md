@@ -76,8 +76,11 @@ preflight first ends any other preflight of the same checkout (recorded in
 `target/.oculus-predev.pid`, or found by its cwd) and orphaned cargo builds of
 this checkout's CLI or keyd, and this checkout's CLI watcher, each with its
 whole process tree. The watcher goes because predev rebuilds the CLI and starts
-a new one, and a quick restart never trips its dev-server probe. Other
-checkouts, editors' `cargo check` and builds run from a shell are left alone.
+a new one, and a quick restart never trips its dev-server probe. It also ends
+this checkout's orphaned vite (adopted by launchd, alone or under its
+`bun run dev`), which would otherwise hold port 1420 and stop the new dev
+server; one under a live `tauri dev` is left alone. Other checkouts, editors'
+`cargo check` and builds run from a shell are left alone.
 Before each cargo build it names whoever else holds that target's lock rather
 than leaving cargo's "Blocking waiting for file lock" unexplained.
 `app/scripts/stale-builds.mjs` does both, fail-open, and skips Windows.
