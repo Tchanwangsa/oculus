@@ -1,25 +1,26 @@
 # Studio reference
 
-The authoring rules for a video folder. `SKILL.md` has the loop; this file
-has the details. `studio.d.ts` types every global named here. Every command
-takes the video's slug as `DIR`; `oculus studio <command> --help` has the
-full flags.
+The authoring rules for a video folder; `SKILL.md` has the workflow and
+the folder's layout. `studio.d.ts` types every global named here. Every
+command takes the video's slug as `DIR`; `oculus studio <command> --help`
+has the full flags.
 
-## The folder
+## Contents
 
-```
-video.json          the scenes, in order
-script.md           what is said: one `## <id>` section per narrated scene
-components/<Name>.tsx   the video's own components, one per file
-assets/             images, named by <Image src>
-narration/          made by `narrate`: manifest.json and the clips
-out/                PNGs from frame, strip and gallery
-renders/            draft.mp4 and final.mp4
-.cache/             render segments; never edit
-```
-
-You write `video.json`, `script.md`, `components/` and `assets/`. The rest
-is made by the CLI.
+- video.json: its keys, a scene's keys, how long a scene lasts
+- script.md: sections, the spoken-form table, acronyms and fusions
+- Components: the file's three exports, prop builders, flat props
+- Elements: element props, layout, the style keys
+- The theme: token names, making a new theme
+- Motion: Enter and Exit, Sequence, Stagger, Camera, Arrow, the helpers
+- A diagram scene: a whole component with cards, an arrow and a cued label
+- Word cues: `word()`, `wordEnd()`, cues in props
+- Transitions and magic move
+- Lint: each kind and what to do, the literal rules exactly
+- Looking: frame, strip and gallery
+- Narrate
+- Render
+- Libraries: how a name resolves, promoting, the starter components
 
 ## video.json
 
@@ -168,8 +169,9 @@ export default ({ heading, points, cues, accent }, { theme }) => {
 - `console.log` output is printed by `oculus studio frame`.
 
 **Prop builders:** `str()`, `num()`, `bool()`, `list(x)`, `oneOf([...])`,
-`latex()` (a string; there is no equation element yet), and `token(section)`,
-which takes a token's *name* and hands the component its value:
+`latex()` (a string of LaTeX source; no element draws it as an equation),
+and `token(section)`, which takes a token's *name* and hands the component
+its value:
 `token("color").default("accent")` set to `"positive"` in a scene's props
 gives `theme.color.positive`. Each takes `.default(v)` or `.optional()`.
 
@@ -254,8 +256,11 @@ Everything moves as a function of `t`.
 - `<Camera x y zoom rotate>`: a full-frame box that puts frame point
   `(x, y)` at the centre, zoomed. Use it as the root.
 - `<Arrow points curve progress head stroke>`: a stroke through frame-px
-  points drawn up to `progress`, with a head. Its parent must fill the
-  frame.
+  points drawn up to `progress`. Its parent must fill the frame.
+  `<Arrow>`'s head rides the drawn end of the shaft, pointing along the
+  shaft's tangent there, so the arrow reads as being drawn; it grows in
+  from nothing over the first head length of shaft and settles on the last
+  point at `progress` 1.
 - Helpers: `interpolate(t, [0, 1], [0, 200], { easing })` (easing must be
   a function here), `spring(t, { stiffness, damping, mass })`, `mix(c1, c2,
   p)` for colours, `clamp`, `lerp`, `linear`, `easeOutCubic`,
@@ -422,8 +427,7 @@ command prints the file, the line and the reason, and nothing else runs.
 
 ## Looking
 
-Each command prints the PNG's absolute path. Open it with your
-file-reading tool and look.
+Each command prints the PNG's absolute path.
 
 - `oculus studio frame <slug>` draws one frame to `out/frame-<t>.png`.
   `--t S` is seconds into the video; `--scene N --at S` is seconds into
@@ -446,19 +450,16 @@ server set in Settings → Voice, times its words, and writes
 `narration/manifest.json`. Unchanged scenes print `cached`. `--scene <id>`
 does one scene (an id, unlike `strip --scene`, which takes an index);
 `--force` makes it again. A failure keeps the scenes before it and names
-the failed one.
-
-When it fails because nothing is set (`no TTS server`, `no TTS model`, `no
-TTS voice`) or the aligner model is missing, stop and ask the student to
-set it in Settings → Voice. Never run `oculus studio aligner download`.
+the failed one: `no TTS server`, `no TTS model` and `no TTS voice` mean
+Settings → Voice is unset (`SKILL.md` step 6 says what to do).
 
 ## Render
 
 `oculus studio render <slug>` writes `renders/draft.mp4`: 540 px high and
 fast. `--final` writes `renders/final.mp4` at full size, with motion blur
-(by the default `motionBlur`, only finals blur). Each scene is cached, so a second render redoes only the
-scenes an edit touched. It never narrates: stale narration stops it, naming
-the scene. Report the path it prints.
+(by the default `motionBlur`, only finals blur). Each scene is cached, so a
+second render redoes only the scenes an edit touched. It never narrates:
+stale narration stops it, naming the scene. Report the path it prints.
 
 ## Libraries
 
@@ -473,11 +474,7 @@ list <slug>` prints each name and its level; `components show <slug>
 <Name>` prints its source.
 
 Library files change only through promote, which keeps the old text in
-`.history/`:
-
-```bash
-oculus studio components promote <slug> <Name> --to subject
-```
+`.history/`. A theme is promoted by its path:
 
 ```bash
 oculus studio themes promote <slug> themes/chalk.json --to global

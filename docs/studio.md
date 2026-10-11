@@ -200,12 +200,13 @@ A video is made in an ordinary Chat thread by the student's own CLI agent,
 through the `oculus` CLI and its file tools; there is no Studio page yet.
 The `oculus-studio` skill ([harness.md](./harness.md#the-brief-is-appended-except-on-opencode))
 is the whole brief, and `AGENTS.md` only points at it. Its `SKILL.md` is the
-loop: read the lecture (through the `oculus-lectures` skill), `studio new`,
-write `video.json`, `script.md` and any component of the video's own,
-`lint --json` until only stale narration is left, `narrate`, lint again,
-look at `frame` and `strip` PNGs with the agent's image-reading tool,
-`render` a draft and then `--final`, and `gallery` then `promote` a new
-component the student wants kept; the story rules (write the argument
+loop, as a checklist the agent copies: read the lecture (through the
+`oculus-lectures` skill), `studio new`, read `reference.md`, write
+`video.json`, `script.md` and any component of the video's own, `gallery`
+each new component, `lint --json` until only stale narration is left,
+`narrate`, lint again, look at `frame` and `strip` PNGs with the agent's
+image-reading tool, and `render` a draft and then `--final`; `promote` only
+a component the student wants kept; the story rules (write the argument
 before the scenes, every claim with its reason, each scene's narration
 opening on a link to the last, numbers given meaning, terms defined in
 passing, an example followed by its general rule, the payoff shown, the
