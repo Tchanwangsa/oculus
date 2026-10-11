@@ -92,6 +92,10 @@ switch is on.
   a search, in two columns when the page is wide
   ([music-library.md](./music-library.md)), and,
   with no session or track, a "Not connected" view linking to Settings → Music.
+- **Space plays and pauses on `/music`** while it is the focused pane
+  (`useMusicSpaceKey`), sending the same play or pause as the button. It is
+  taken from a focused button too, so it never re-clicks the track or toggle
+  just clicked; text fields, menus, dialogs and popovers keep their Space.
 - **The clock ticks in the UI**: `useMusicPosition` re-renders on each whole
   second of `positionNow` while playing, the pane is on screen and the
   window is visible. A slider keeps its dragged value until the next
