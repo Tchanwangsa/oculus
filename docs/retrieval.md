@@ -21,6 +21,7 @@ over the same pages sits beside it.
 | Engine selection, throwing the index away, `embed_blocked` | `app/src-tauri/src/embed/commands.rs` |
 | The `embed-status` event and shared wire payload | `app/src-tauri/src/embed/events.rs`, `app/src-tauri/src/runtime/pipeline_events.rs` |
 | API key: through `oculus-keyd` when installed, else the keychain | `app/src-tauri/src/providers/voyage.rs`, `app/keyd/core/src/client.rs` |
+| The key field, shared by Settings and onboarding's Library step | `app/src/hooks/keys/useVoyageKey.ts` (on `app/src/hooks/keys/useCloudKey.ts`) |
 | Ingest, brute-force cosine search, `PAGES_FTS_SQL` + `fts_tests` | `app/src-tauri/src/pages/retrieval/` |
 | Who writes `pages.markdown` (`db::store::upsert_pages`, `db::store::replace_pages`) | `app/src-tauri/src/sync/parse.rs`, `app/src-tauri/src/pages/sheets/db.rs`, `app/src-tauri/src/db/store/files.rs` |
 | `pages` table schema | `app/src-tauri/src/db/migrations.rs` |

@@ -20,7 +20,16 @@ type CredentialStatus = {
  * Stores the credentials that let Oculus answer the Okta sign-in itself. The
  * TOTP setup key can't be derived from codes, only from the enrolment screen.
  */
-export function AutoSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
+export function AutoSignIn({
+  onSignedIn,
+  embedded = false,
+}: {
+  onSignedIn?: () => void;
+  /** Inside onboarding's "Never sign in again" section, which supplies the
+   *  title and the key guide: both are dropped here, and the fields stay open
+   *  until credentials are saved. */
+  embedded?: boolean;
+}) {
   const [status, setStatus] = useState<CredentialStatus | null>(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,6 +53,7 @@ export function AutoSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
   }, [refresh]);
 
   const configured = !!status?.has_password && !!status?.has_totp;
+  const showFields = editing || (embedded && status !== null && !configured);
 
   const save = async () => {
     setBusy(true);
@@ -62,7 +72,11 @@ export function AutoSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
       await refresh();
       onSignedIn?.();
     } catch (e) {
-      setError(String(e));
+      // A failed test leaves the credentials saved, so the status changes too.
+      const why = String(e);
+      setEditing(true);
+      await refresh();
+      setError(why);
     } finally {
       setBusy(false);
     }
@@ -80,53 +94,63 @@ export function AutoSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
     }
   };
 
+  const title = embedded ? (
+    <span className="min-w-0 truncate text-xs text-muted-foreground">
+      Saved for <span className="text-foreground">{status?.username}</span>
+    </span>
+  ) : (
+    <Label className="text-xs font-normal text-foreground flex items-center gap-1.5">
+      Sign in without the browser
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Info size={12} className="text-muted-foreground/60" />
+        </TooltipTrigger>
+        <TooltipContent className="max-w-[260px]">
+          Answers the university's password and authenticator prompts from
+          the macOS keychain, so an expired session is rebuilt in the
+          background instead of interrupting you. Needs Google
+          Authenticator enrolled — push notifications cannot be automated.
+        </TooltipContent>
+      </Tooltip>
+    </Label>
+  );
+
   return (
     <div>
-      <div className="flex items-center justify-between gap-4 py-2">
-        <Label className="text-xs font-normal text-foreground flex items-center gap-1.5">
-          Sign in without the browser
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Info size={12} className="text-muted-foreground/60" />
-            </TooltipTrigger>
-            <TooltipContent className="max-w-[260px]">
-              Answers the university's password and authenticator prompts from
-              the macOS keychain, so an expired session is rebuilt in the
-              background instead of interrupting you. Needs Google
-              Authenticator enrolled — push notifications cannot be automated.
-            </TooltipContent>
-          </Tooltip>
-        </Label>
-        <div className="flex items-center gap-1.5">
-          {configured && !editing && (
-            <span className="text-xs text-muted-foreground">
-              {status?.username}
-            </span>
-          )}
-          <Button
-            variant={configured ? "ghost" : "default"}
-            size="xs"
-            onClick={() => setEditing((e) => !e)}
-            disabled={busy}
-          >
-            <Key size={13} />
-            {editing ? "Cancel" : configured ? "Replace" : "Set up"}
-          </Button>
-          {configured && !editing && (
+      {(!embedded || configured) && (
+        <div className="flex items-center justify-between gap-4 py-2">
+          {title}
+          <div className="flex items-center gap-1.5">
+            {configured && !editing && !embedded && (
+              <span className="text-xs text-muted-foreground">
+                {status?.username}
+              </span>
+            )}
             <Button
-              variant="ghost"
+              variant={configured ? "ghost" : "default"}
               size="xs"
-              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={forget}
+              onClick={() => setEditing((e) => !e)}
               disabled={busy}
             >
-              <X size={13} /> Forget
+              <Key size={13} />
+              {editing ? "Cancel" : configured ? "Replace" : "Set up"}
             </Button>
-          )}
+            {configured && !editing && (
+              <Button
+                variant="ghost"
+                size="xs"
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={forget}
+                disabled={busy}
+              >
+                <X size={13} /> Forget
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
-      {editing && (
+      {showFields && (
         <div className="flex flex-col gap-2 pb-2 pt-1">
           <Input
             className="h-7 text-xs"
@@ -151,13 +175,15 @@ export function AutoSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
           />
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            The setup key is shown only while enrolling an authenticator — open{" "}
-            <span className="text-foreground">sso.unimelb.edu.au/enduser/settings</span>,
-            set up Google Authenticator, and click “Can’t scan?” on the QR
-            screen. Scan the QR with your phone too, so you keep a working
-            authenticator.
-          </p>
+          {!embedded && (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              The setup key is shown only while enrolling an authenticator — open{" "}
+              <span className="text-foreground">sso.unimelb.edu.au/enduser/settings</span>,
+              set up Google Authenticator, and click “Can’t scan?” on the QR
+              screen. Scan the QR with your phone too, so you keep a working
+              authenticator.
+            </p>
+          )}
           <div className="flex items-center gap-1.5">
             <Button
               size="xs"

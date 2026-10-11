@@ -5,6 +5,7 @@ import { CredentialField } from "../shared/CredentialField";
 import { EngineSelect } from "../shared/EngineSelect";
 import { tokenish } from "@/lib/pipeline/parseState";
 import { expiryDate } from "@/lib/pipeline/resultCert";
+import { useMineruKey } from "@/hooks/keys/useMineruKey";
 import { useParseStore } from "@/stores/sync/parseStore";
 import { Section, StatRow } from "@/components/settings/shared/section";
 import { ProbeLine } from "./parser/ProbeLine";
@@ -25,30 +26,20 @@ export function ParserSection() {
     applySettings,
     error,
     setError,
-    hasToken,
-    setHasToken,
-    tokenCheckError,
     urlDraft,
     setUrlDraft,
     cert,
   } = useParseSettings();
   const { probe, probing, probeError, runProbe } = useLocalProbe(settings?.engine);
-  const {
-    switching,
-    token,
-    setToken,
-    tokenNote,
-    checkingToken,
-    urlNote,
-    savingUrl,
-    savingCert,
-    certError,
-    choose,
-    saveUrl,
-    saveToken,
-    setAcceptExpired,
-    deleteToken,
-  } = useParseActions({ settings, setSettings, applySettings, setError, setHasToken, urlDraft, runProbe });
+  const { switching, urlNote, savingUrl, savingCert, certError, choose, saveUrl, setAcceptExpired } =
+    useParseActions({ settings, applySettings, setError, urlDraft, runProbe });
+  const tokenField = useMineruKey({
+    onSaved: () =>
+      setSettings((prev) => (prev ? { ...prev, credentials_ready: true, credentials_error: null } : prev)),
+    onRemoved: () =>
+      setSettings((prev) => (prev ? { ...prev, credentials_ready: false, credentials_error: null } : prev)),
+  });
+  const { hasKey: hasToken, checkError: tokenCheckError } = tokenField;
 
   // The only live signal about the token: the app-wide latch parse events
   // raise. "Expired" is session-scoped because each parse re-reads the keychain.
@@ -99,15 +90,15 @@ export function ParserSection() {
         {isCloud ? (
           <CredentialField
             label="MinerU API token"
-            value={token}
+            value={tokenField.key}
             connected={hasToken === true && !tokenExpired}
-            busy={checkingToken}
+            busy={tokenField.busy}
             placeholder={tokenExpired ? "Paste new token" : "Paste token"}
-            onChange={setToken}
-            onSave={() => void saveToken()}
-            onRemove={() => void deleteToken()}
+            onChange={tokenField.setKey}
+            onSave={() => void tokenField.save()}
+            onRemove={() => void tokenField.remove()}
             status={tokenExpired ? <span className="text-xs text-warning">Expired</span> : null}
-            note={tokenNote}
+            note={tokenField.note}
           >
             {tokenExpired ? (
               <p className="mt-2 text-[11px] leading-relaxed text-warning">

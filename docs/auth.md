@@ -25,7 +25,7 @@ WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-
 | keyd's login sessions: the vault entries, the cookie rule shared with the sign-in's jar, the two markers, the `session_*` ops and `sign_out`, the one-time import of the old session files | `app/keyd/core/src/session/`, `app/keyd/core/src/ops/session.rs`, `app/keyd/core/src/ops/legacy.rs` |
 | The `canvas` and `ed` routes of `forward` (cookie and `x-token` attached by keyd), its path rules and streaming; the Canvas route's sign-in on a rejected request | `app/keyd/core/src/forward/`, `app/keyd/core/src/ops/forward.rs` ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)) |
 | The `oculus-keyd` client, which the Voyage, MinerU and Groq keys and the Okta credentials and sign-in go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/providers/credentials/mod.rs` (`CloudKey`) |
-| Credential entry UI | `app/src/components/settings/web/AutoSignIn.tsx` |
+| Credential entry UI (Settings → Canvas, and onboarding's *Never sign in again*) | `app/src/components/settings/web/AutoSignIn.tsx`, `app/src/components/onboarding/canvas/NeverSignInAgain.tsx` |
 | Spotify's stored credentials: the `music.spotify` vault entry, keyd's app-only `get`, and the music module that writes and reads it | `app/keyd/core/src/names.rs` (`READABLE`), `app/keyd/core/src/ops/get.rs`, `app/src-tauri/src/music/credentials.rs` ([music.md](./music.md)) |
 | WebKit's WebCrypto master key: the per-build names and items, the key's text form, keyd's `webcrypto_key` and its import, the client call | `app/keyd/core/src/names.rs` (`WEBCRYPTO`), `app/keyd/core/src/webcrypto.rs`, `app/keyd/core/src/ops/webcrypto.rs`, `app/keyd/core/src/client/webcrypto.rs`, the app's reader `app/src-tauri/src/shell/webcrypto/mod.rs` (`fetch`) |
 | Handing the key to WebKit: the data-store delegate, its once-per-process cache, where it is installed | `app/src-tauri/src/shell/webcrypto/delegate.rs`, `app/src-tauri/src/shell/webcrypto/cache.rs`, `install_default` in `app/src-tauri/src/shell/webcrypto/mod.rs` (called first in `app/src-tauri/src/lib.rs`'s setup), `configure_store` in `app/src-tauri/src/shell/dock/page.rs` |
@@ -211,6 +211,14 @@ and `oculus auth setup` prints the code from the seed just typed.
   keyd; its message for bad input reaches the user unchanged, and for a bad
   setup key never repeats any of it. A save also clears the attempt guard's
   failures, pause and wait.
+- **The setup key may be pasted as a key or as a link.** `okta::setup_key`
+  (`okta/setup_key.rs`) takes Okta's spaced, lowercase key or a whole
+  `otpauth://` link (any case of the scheme), keeping only the link's
+  percent-decoded `secret=`; a link without one is a bad key. The vault holds
+  the bare key either way. Google Authenticator's `otpauth-migration://`
+  export link is refused with its own message, since it holds no single key.
+  `totp_now` takes the key as pasted too, so `oculus auth setup` prints the
+  right code from a link.
 - **The vault holds `okta.username`, `okta.password` and `okta.totp_secret`.**
   The first `okta_status` or sign-in copies the old keychain items in, one
   keychain prompt each, once; the items stay in the keychain after an import,

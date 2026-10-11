@@ -87,6 +87,29 @@ fn a_save_writes_all_three_and_their_markers_in_one_vault_update() {
 }
 
 #[test]
+fn a_saved_otpauth_link_stores_only_its_secret() {
+    let dir = Scratch::new("okta-otpauth");
+    let fake = fake();
+    let state = state(&dir, &fake);
+    let link = format!(
+        "otpauth://totp/University%20of%20Melbourne:me@student.unimelb.edu.au?secret={SEED}&issuer=University%20of%20Melbourne"
+    );
+    save(&state, USERNAME, PASSWORD, &link).unwrap();
+    assert_eq!(stored(&dir, names::OKTA_TOTP_SECRET).as_deref(), Some(SEED));
+
+    let err = save(
+        &state,
+        USERNAME,
+        PASSWORD,
+        "otpauth-migration://offline?data=CjEK",
+    )
+    .unwrap_err();
+    assert_eq!(err.kind, "request");
+    assert!(err.detail.contains("export link") && !err.detail.contains("CjEK"));
+    assert_eq!(stored(&dir, names::OKTA_TOTP_SECRET).as_deref(), Some(SEED));
+}
+
+#[test]
 fn saving_clears_the_attempt_guards_wait_and_pause() {
     let dir = Scratch::new("okta-resume");
     let fake = fake();
