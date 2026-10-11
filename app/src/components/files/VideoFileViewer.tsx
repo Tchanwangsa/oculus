@@ -1,13 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { DbFile } from "@/lib/db";
-import {
-  mediaSrc,
-  parseVtt,
-  pauseLibraryVideos,
-  registerLibraryVideo,
-  type Cue,
-} from "@/lib/lectures/media";
-import { pauseLecturePlayback } from "@/lib/lectures/playback";
+import { mediaSrc, parseVtt, type Cue } from "@/lib/lectures/media";
 import { courseFileHasContent, readCourseFile } from "@/lib/files/courseFiles";
 import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { useTranscriptSearch } from "@/hooks/lectures/useTranscriptSearch";
@@ -21,6 +14,7 @@ import type { ViewTab } from "@/components/ui/table/ViewTabs";
 import type { Dock } from "@/stores/lectures/playerPrefsStore";
 import { MediaPlayer, useMediaPlayer } from "@/components/media/MediaPlayer";
 import { MediaDock } from "@/components/media/MediaDock";
+import { useLibraryPlayback } from "@/components/media/player/useLibraryPlayback";
 import { TranscriptList } from "@/components/media/TranscriptList";
 import { PanelEmpty } from "@/components/media/MediaDock";
 import { TranscribeEmpty } from "@/components/media/TranscribeEmpty";
@@ -108,27 +102,7 @@ export function VideoFileViewer({ file }: { file: DbFile }) {
   const { attach } = player;
   useEffect(() => attach(el), [el, attach]);
 
-  // Nothing else stops this element: a lecture's play on parked, this one
-  // pauses with its tab.
-  useEffect(() => {
-    if (!onScreen) el?.pause();
-  }, [onScreen, el]);
-
-  // One sound at a time: playing here pauses the lecture and any other
-  // library video; a lecture starting pauses this one (`lib/lectures/playback/`).
-  useEffect(() => {
-    if (!el) return;
-    const unregister = registerLibraryVideo(el);
-    const onPlay = () => {
-      pauseLecturePlayback();
-      pauseLibraryVideos(el);
-    };
-    el.addEventListener("play", onPlay);
-    return () => {
-      el.removeEventListener("play", onPlay);
-      unregister();
-    };
-  }, [el]);
+  useLibraryPlayback(el, onScreen);
 
   const { dock, size, resizing, startDockDrag } = player.dock;
 

@@ -8,6 +8,7 @@ import {
   ChatsCircle,
   CheckSquare,
   FileDashed,
+  FilmSlate,
   GearSix,
   Globe,
   House,
@@ -128,6 +129,20 @@ export function tabInfo(
   }
   if (pathname.startsWith("/tasks"))
     return { title: "Tasks", icon: <ListChecks size={size} /> };
+  if (pathname.startsWith("/studio")) {
+    // A video is titled by `?n=` when the link carries it, else by its slug.
+    const video = /^\/studio\/videos\/([^/]+)/.exec(pathname);
+    if (video) {
+      return {
+        title: new URLSearchParams(search).get("n") || humanizeSlug(decodeURIComponent(video[1])),
+        icon: <FilmSlate size={size} />,
+      };
+    }
+    return {
+      title: pathname.startsWith("/studio/videos") ? "Videos" : "New video",
+      icon: <FilmSlate size={size} />,
+    };
+  }
   if (pathname === "/music")
     return { title: "Music", icon: <MusicNotes size={size} /> };
   if (pathname.startsWith("/sync"))

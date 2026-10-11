@@ -44,8 +44,9 @@ interface MediaPlayerProps {
   /** Over the picture and the (then inert) control bar — a lecture's
    *  "Playing in the other pane" still. */
   overlay?: ReactNode;
-  /** The dock panel, usually a `MediaDock`. */
-  dock: ReactNode;
+  /** The dock panel, usually a `MediaDock`. A player with none has no dock
+   *  button either. */
+  dock?: ReactNode;
   /** Can play: a source is loaded. */
   canPlay: boolean;
   /** Streams the scrub bar's hover thumbnail. */
@@ -58,8 +59,11 @@ interface MediaPlayerProps {
   aboveSeek?: ReactNode;
   /** Buttons between speed and the dock button. */
   controls?: ReactNode;
-  /** The dock button's label. */
-  dockLabel: string;
+  /** The dock button's label; absent with no `dock`. */
+  dockLabel?: string;
+  /** Whether the bar has a captions button. A video with no transcript at
+   *  all (a Studio render) leaves it out rather than showing it dead. */
+  captions?: boolean;
   /** The caller's error, shown in place of the element's. */
   error?: string | null;
 }
@@ -77,6 +81,7 @@ export function MediaPlayer({
   aboveSeek,
   controls,
   dockLabel,
+  captions = true,
   error,
 }: MediaPlayerProps) {
   const {
@@ -217,30 +222,34 @@ export function MediaPlayer({
                 {controls}
 
                 {/* Labelled by the tab in front: it folds the whole dock. */}
-                <ControlButton
-                  label={dockLabel}
-                  active={dockOpen}
-                  onClick={player.toggleDock}
-                >
-                  <SidebarSimple
-                    size={16}
-                    className={cn("transition-transform", DOCK_ICON_FACING[dock])}
-                  />
-                </ControlButton>
+                {dockPanel && dockLabel && (
+                  <ControlButton
+                    label={dockLabel}
+                    active={dockOpen}
+                    onClick={player.toggleDock}
+                  >
+                    <SidebarSimple
+                      size={16}
+                      className={cn("transition-transform", DOCK_ICON_FACING[dock])}
+                    />
+                  </ControlButton>
+                )}
 
-                <ControlButton
-                  label={
-                    captionsEnabled ? "Hide captions (C)" : "Show captions (C)"
-                  }
-                  active={captionsEnabled}
-                  disabled={!hasCaptions}
-                  onClick={player.toggleCaptions}
-                >
-                  <ClosedCaptioning
-                    size={17}
-                    weight={captionsEnabled ? "fill" : "regular"}
-                  />
-                </ControlButton>
+                {captions && (
+                  <ControlButton
+                    label={
+                      captionsEnabled ? "Hide captions (C)" : "Show captions (C)"
+                    }
+                    active={captionsEnabled}
+                    disabled={!hasCaptions}
+                    onClick={player.toggleCaptions}
+                  >
+                    <ClosedCaptioning
+                      size={17}
+                      weight={captionsEnabled ? "fill" : "regular"}
+                    />
+                  </ControlButton>
+                )}
 
                 <ControlButton
                   label={isFullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}
@@ -260,7 +269,7 @@ export function MediaPlayer({
         )}
       </div>
 
-      {dockOpen && <DockResizeHandle dock={dock} onPointerDown={startResize} />}
+      {dockPanel && dockOpen && <DockResizeHandle dock={dock} onPointerDown={startResize} />}
       {dockPanel}
 
       {dropTarget && (

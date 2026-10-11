@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 /** The sidebar rail's reorderable sections; Search, Sync and Settings stay put. */
-export const RAIL_SECTIONS = ["home", "chat", "calendar", "tasks", "subjects"] as const;
+export const RAIL_SECTIONS = ["home", "chat", "calendar", "tasks", "subjects", "studio"] as const;
 export type RailSection = (typeof RAIL_SECTIONS)[number];
 
 const KEY = "oculus-rail-order";

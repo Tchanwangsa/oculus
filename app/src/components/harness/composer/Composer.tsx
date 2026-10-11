@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { SendControls } from "@/components/harness/composer/SendControls";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/mentions/MentionInput";
 import { MentionMenu } from "@/components/harness/mentions/MentionMenu";
@@ -54,6 +54,8 @@ export function Composer({
   autoFocus,
   dropRef,
   onDropping,
+  leading,
+  placeholder,
 }: {
   /** Whose draft this box shows (`draftKey` in `stores/chat/draftStore.ts`). */
   draftKey: string;
@@ -84,6 +86,10 @@ export function Composer({
    *  its own overlay from `onDropping`. */
   dropRef?: RefObject<HTMLElement | null>;
   onDropping?: (over: boolean) => void;
+  /** Chips after the subject's, above the box (Studio's style chip). */
+  leading?: ReactNode;
+  /** The empty box's hint; a running turn's own wins. */
+  placeholder?: string;
 }) {
   /** The serialized message (chips as paths); emptiness checks read this. */
   const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
@@ -144,14 +150,17 @@ export function Composer({
 
   return (
     <div ref={wrapRef} className="flex flex-col gap-1.5">
-      {!subjectLocked && (
-        <div className="flex items-center px-0.5">
-          <SubjectSelect
-            subjects={subjects}
-            value={subjectId}
-            onChange={onSubject}
-            className="h-6 max-w-[200px] rounded-full border-border/70 bg-card px-2 text-[11px] text-muted-foreground shadow-none hover:bg-accent hover:text-foreground"
-          />
+      {(!subjectLocked || leading) && (
+        <div className="flex items-center gap-1.5 px-0.5">
+          {!subjectLocked && (
+            <SubjectSelect
+              subjects={subjects}
+              value={subjectId}
+              onChange={onSubject}
+              className="h-6 max-w-[200px] rounded-full border-border/70 bg-card px-2 text-[11px] text-muted-foreground shadow-none hover:bg-accent hover:text-foreground"
+            />
+          )}
+          {leading}
         </div>
       )}
 
@@ -228,7 +237,9 @@ export function Composer({
               }
             }}
             placeholder={
-              running ? "Working… your next message waits its turn" : "What would you like to work on?"
+              running
+                ? "Working… your next message waits its turn"
+                : (placeholder ?? "What would you like to work on?")
             }
           />
         </div>
