@@ -1,0 +1,11 @@
+// rust-analyzer checks into `target/rust-analyzer`, so it never holds the
+// build lock that `tauri dev`, its preflight and the CLI watcher share.
+{
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        "cargo": { "targetDir": true }
+      }
+    }
+  }
+}
