@@ -83,10 +83,12 @@ narrated scene adds about a second of quiet around its clip).
 oculus studio lint gradient-descent --json
 ```
 
-Fix and re-run until the only issues left have kind `narration` and say to
-run `oculus studio narrate`. Fix every `script` issue now: each one is a
-word the voice would say wrong. `reference.md` says what to do about each
-kind.
+Before `narrate`, lint always fails: each narrated scene reports kind
+`narration` ("no narration for its current text … run `oculus studio
+narrate`"), and the command exits 1 with `{"error": "N problems in …"}`.
+That is expected. Fix every other kind, above all `script` (each is a word
+the voice would say wrong), then narrate. `[]` is required only after
+narrating. `reference.md` says what to do about each kind.
 
 **5. Narrate.**
 
@@ -107,10 +109,11 @@ words the aligner was unsure of and speech the script lacks. Re-run it after
 editing `script.md`: only changed scenes are made again.
 
 **6. Lint again, then look.** Lint now renders the narrated scenes and
-checks their word cues. When it prints `[]`, look at the result:
+checks their word cues. When it prints `[]`, look at the result. The
+default strip is 12 frames, one every 5 s of a 60 s video; take 16:
 
 ```bash
-oculus studio strip gradient-descent
+oculus studio strip gradient-descent --n 16 --cols 4
 ```
 
 ```bash
@@ -155,12 +158,20 @@ oculus studio components promote gradient-descent Takeaway --to subject
 - **One idea per scene.** A scene that needs two headings is two scenes.
 - **Words on screen summarise; the narration explains.** Never put the
   script on screen. A heading and three short points at most.
-- **No colour, font or spacing literals.** Read them from `theme` (lint
-  refuses literals and names the token to use).
+- **Fill the frame.** The scene's main element is large and centred in the
+  space below the heading, never parked in the top third.
+- **The key number or phrase is display size** (`theme.type.display`).
+- **Something meaningful is on screen within a second** of a scene
+  starting. Do not open on an empty frame or a slowly drawing line.
 - **Cue motion to words.** An element that illustrates a phrase enters as
   it is said: `at={word("gradient")}`.
 - **Keep magic-move keys stable.** An element that carries across two
-  scenes keeps the same `key` in both, so it moves instead of fading.
+  scenes keeps the same `key` in both, so it moves instead of fading. When
+  consecutive scenes each have a heading, give every heading the same key
+  (`key="heading"`), or the two headings cross-fade on top of each other.
+- **No colour, font or spacing literals.** Read them from `theme`, and
+  cite only token names that exist: "The theme" in `reference.md` and
+  `studio.d.ts` list them.
 - **Look before you report.** Never hand over a render you have not seen
   as frames.
 
