@@ -144,7 +144,6 @@ impl AgentPrinter {
 pub(crate) use app_lib::lectures::chapters::hms as clock;
 
 /// One line per artifact, remembered for one database write at the end.
-
 pub(crate) struct TermReporter {
     phase: Mutex<String>,
     counter: Mutex<(usize, usize)>,

@@ -128,7 +128,7 @@ pub async fn estimate(db_file: &Path, base: &Path) -> Result<EmbedEstimate, Stri
         bump(&mut kinds, &file.kind, 1, sizes.len() as u32);
     }
 
-    kinds.sort_by(|a, b| b.pages.cmp(&a.pages));
+    kinds.sort_by_key(|k| std::cmp::Reverse(k.pages));
     out.kinds = kinds;
 
     out.billable_pixels = out.pixels.saturating_sub(out.free_pixels_left);

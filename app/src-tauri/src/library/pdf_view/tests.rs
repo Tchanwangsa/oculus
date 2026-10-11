@@ -393,7 +393,7 @@ fn pdf_view_bench_a_real_deck() {
         .filter(|path| {
             wanted
                 .as_deref()
-                .map_or(true, |w| path.to_string_lossy().contains(w))
+                .is_none_or(|w| path.to_string_lossy().contains(w))
         })
         .find_map(|path| {
             let pdf = Pdf::new(Arc::new(std::fs::read(path).ok()?)).ok()?;

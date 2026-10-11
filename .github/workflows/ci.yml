@@ -41,7 +41,7 @@ jobs:
           bun-version-file: app/package.json
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
           targets: wasm32-unknown-unknown
       # scripts/build-math.mjs needs the CLI at math-core/Cargo.lock's wasm-bindgen.
       - uses: taiki-e/install-action@v2
@@ -81,6 +81,9 @@ jobs:
       # stage-cli is what bootstraps the oculus sidecar on a fresh checkout.
       - name: Build and stage the oculus CLI
         run: bun run stage-cli
+      - name: Clippy
+        working-directory: app/src-tauri
+        run: cargo clippy --release --locked --all-targets -- -D warnings
       - name: Rust tests
         working-directory: app/src-tauri
         run: cargo test --release --locked

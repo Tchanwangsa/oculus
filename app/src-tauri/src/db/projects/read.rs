@@ -41,7 +41,7 @@ pub async fn projects(
 
 pub async fn project(pool: &SqlitePool, id: i64) -> Result<Option<Project>, String> {
     let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
-    project_on(&mut *conn, id).await
+    project_on(&mut conn, id).await
 }
 
 pub(super) async fn project_on(

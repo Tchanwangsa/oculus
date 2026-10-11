@@ -89,7 +89,7 @@ impl GlyphCollector {
         // Text no reader sees: zero-scale glyphs (LaTeXiT and Keynote embed
         // equation source that way) and glyphs parked off the page (Beamer
         // overlays). Thresholds match the reference-text comparison in app/pdf-bench.
-        if !(bounds.area() > 1e-4) || bounds.intersect(self.page).area() <= 0.0 {
+        if bounds.area() <= 1e-4 || bounds.intersect(self.page).area() <= 0.0 {
             return;
         }
         // The baseline's direction, to the nearest quarter turn (y down).
@@ -203,7 +203,7 @@ fn emit_line(
             stops.push(line[k - 1].0.rect[2]);
         }
         text.push(glyph.ch);
-        stops.extend(std::iter::repeat(glyph.rect[0]).take(glyph.ch.len_utf16()));
+        stops.extend(std::iter::repeat_n(glyph.rect[0], glyph.ch.len_utf16()));
         union(&mut bounds, &glyph.rect);
     }
     stops.push(line.last()?.0.rect[2]);

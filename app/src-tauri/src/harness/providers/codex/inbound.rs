@@ -8,7 +8,7 @@ use super::translate::{translate, translate_account};
 
 impl CodexServer {
     pub(super) fn dispatch(&self, v: Value) {
-        let has_id = v.get("id").map_or(false, |i| !i.is_null());
+        let has_id = v.get("id").is_some_and(|i| !i.is_null());
         let method = v.get("method").and_then(|m| m.as_str());
         match (has_id, method) {
             (true, None) => {

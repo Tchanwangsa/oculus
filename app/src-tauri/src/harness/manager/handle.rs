@@ -6,6 +6,15 @@ use crate::harness::codex::{CodexServer, CodexThreadOpts};
 use crate::harness::opencode::OpencodeServer;
 use crate::harness::Provider;
 
+/// Where a rewind goes back to: `anchor` is the provider's handle for the
+/// question to take out, kept on its row; `last_seen` the newest question's,
+/// so Claude knows which later turns the timeline holds.
+#[derive(Clone, Copy)]
+pub struct RewindTo<'a> {
+    pub anchor: &'a str,
+    pub last_seen: Option<&'a str>,
+}
+
 /// One provider session: a process per thread (Claude, Antigravity) or a
 /// thread/session id on a shared server (Codex, opencode). Cheap to clone,
 /// so it can be lifted out of the live map and talked to without the lock.
@@ -46,7 +55,8 @@ impl Handle {
     }
 
     /// Antigravity refuses: its protocol has no way back to an earlier message.
-    pub(super) fn rewind(&self, anchor: &str, last_seen: Option<&str>) -> Result<(), String> {
+    pub(super) fn rewind(&self, to: RewindTo) -> Result<(), String> {
+        let RewindTo { anchor, last_seen } = to;
         match self {
             Handle::Claude(s) => s.rewind(anchor, last_seen),
             Handle::Codex(server, tid, _) => server.revert(tid, anchor),
