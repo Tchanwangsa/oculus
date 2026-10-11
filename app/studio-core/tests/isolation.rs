@@ -66,6 +66,7 @@ fn render(e: &mut Engine, component: &str, t: f64) -> Vec<u8> {
         t,
         duration: 1.0,
         index: 0,
+        id: None,
         words: None,
     })
     .unwrap()

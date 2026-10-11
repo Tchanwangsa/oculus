@@ -99,6 +99,7 @@ fn a_transition_plays_over_the_incoming_scenes_head_only() {
             t,
             duration: 2.0,
             index,
+            id: None,
             words: None,
         })
         .unwrap()

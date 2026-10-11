@@ -1,0 +1,11 @@
+{
+  "size": { "width": 160, "height": 90 },
+  "theme": "default",
+  "motion": { "transition": { "kind": "dissolve", "dur": 0.5, "easing": "linear" } },
+  "scenes": [
+    { "id": "a", "component": "Dots", "props": {}, "hold": 1.0 },
+    { "id": "b", "component": "Dots", "props": {}, "hold": 1.0 },
+    { "id": "c", "component": "Dots", "props": {}, "hold": 1.0 },
+    { "id": "d", "component": "Dots", "props": {}, "hold": 1.0 }
+  ]
+}

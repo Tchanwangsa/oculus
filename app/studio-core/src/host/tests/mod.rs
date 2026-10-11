@@ -271,8 +271,24 @@ export default () => <Text>{[
 
 #[test]
 fn seeds_are_stable() {
-    assert_eq!(seed("TitleCard", 0), seed("TitleCard", 0));
-    assert_ne!(seed("TitleCard", 0), seed("TitleCard", 1));
+    assert_eq!(seed("TitleCard", None, 0), seed("TitleCard", None, 0));
+    assert_ne!(seed("TitleCard", None, 0), seed("TitleCard", None, 1));
+    assert_eq!(
+        seed("TitleCard", Some("intro"), 0),
+        seed("TitleCard", Some("intro"), 5)
+    );
+    assert_ne!(
+        seed("TitleCard", Some("intro"), 0),
+        seed("TitleCard", Some("recap"), 0)
+    );
+}
+
+#[test]
+fn an_id_seed_never_hashes_an_index_seed() {
+    // Index 0x2d2d's first bytes spell the id "--"; the tag keeps them
+    // apart, and the end-of-name byte keeps "Ab"+"c" from "A"+"bc".
+    assert_ne!(seed("Card", Some("--"), 0), seed("Card", None, 0x2d2d));
+    assert_ne!(seed("Ab", Some("c"), 0), seed("A", Some("bc"), 0));
 }
 
 #[test]

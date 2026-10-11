@@ -30,7 +30,7 @@ impl Engine {
                 duration: call.duration,
                 width: f64::from(self.size.width),
                 height: f64::from(self.size.height),
-                seed: seed(name, call.index),
+                seed: seed(name, call.id, call.index),
                 words: call.words.map(WordCues::json),
             },
         )?;
