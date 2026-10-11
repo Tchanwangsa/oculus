@@ -287,17 +287,39 @@ fn a_save_interrupted_before_the_rename_leaves_the_record_as_it_was() {
     // And a save over the stale temp completes.
     resume_automatic_sign_in(&dir.0).unwrap();
     assert_eq!(on_disk(&dir)["failures"], 0);
+    #[cfg(unix)]
     assert!(!temp.exists(), "the temp file was renamed over the record");
+    #[cfg(windows)]
+    assert_eq!(
+        std::fs::read(&temp).unwrap(),
+        b"{\"last\":9",
+        "unique replacements leave unrelated stale files alone"
+    );
 }
 
 #[test]
 fn a_save_that_fails_leaves_the_old_record_and_says_so() {
     let dir = Scratch::new("guard-save-fails");
     write_record(&dir, br#"{"last":777,"failures":1,"paused":null}"#);
-    // The temp file's name is taken by a directory, so it cannot be written.
-    let temp = paths::sign_in_record(&dir.0)
-        .with_file_name(format!(".sign-in.json.{}.tmp", std::process::id()));
-    std::fs::create_dir(&temp).unwrap();
+    #[cfg(unix)]
+    {
+        // The fixed Unix temp file's name is taken by a directory.
+        let temp = paths::sign_in_record(&dir.0)
+            .with_file_name(format!(".sign-in.json.{}.tmp", std::process::id()));
+        std::fs::create_dir(&temp).unwrap();
+    }
+    #[cfg(windows)]
+    let _held = {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+        // Windows uses unique temp names. Deny replacing the destination while
+        // allowing the guard to read and judge its previous record.
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(paths::sign_in_record(&dir.0))
+            .unwrap()
+    };
 
     let why = with_record(&dir.0, |r| r.last = 5).unwrap_err();
     assert!(

@@ -245,7 +245,8 @@ with the app's icon.
   logs the failure when that file is missing or is not a keyd
   ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
 - **One data dir.** `keyd_core::paths::data_dir` (the OS data dir plus
-  `com.tchan.oculus`) is the only definition; the app's `paths::data_dir`
+  `com.tchan.oculus` on macOS; the Windows profile folder is described in
+  [windows.md](./windows.md)) is the only definition; the app's `paths::data_dir`
   and keyd's `main` both call it. Only a debug keyd reads an override.
 
 ## Scraping lives in Rust because hidden WebViews freeze
@@ -268,7 +269,8 @@ port with a per-launch token and Range support, scoped to `lectures/` and
 
 `library::paths::data_dir()` computes the directory Tauri would
 (`~/Library/Application Support/com.tchan.oculus`) with no `AppHandle`, and is
-the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
+the only way Rust reaches it — so the CLI and the app cannot disagree. Windows
+uses the shared profile folder described in [windows.md](./windows.md). Inside:
 
 - `oculus.db` — SQLite, everything structured.
 - `courses/<code>/…` — scraped files in Canvas's layout, with the parser's

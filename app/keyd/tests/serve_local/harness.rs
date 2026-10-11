@@ -1,7 +1,7 @@
 //! The daemon under test and the way to talk to it.
 
+use keyd_core::platform::{self, Conn};
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -12,11 +12,17 @@ use serde_json::Value;
 /// stuck keyd, origin or child fails the test instead of hanging the suite.
 pub(crate) const DEADLINE: Duration = Duration::from_secs(60);
 
+/// Transferred cross-compiled tests use the daemon's path on the guest.
+pub(crate) fn keyd_binary() -> PathBuf {
+    std::env::var_os("OCULUS_TEST_KEYD")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_oculus-keyd")))
+}
+
 /// A connection whose reads and writes give up after `DEADLINE`.
-pub(crate) fn connect(sock: &std::path::Path) -> UnixStream {
-    let stream = UnixStream::connect(sock).unwrap();
-    stream.set_read_timeout(Some(DEADLINE)).unwrap();
-    stream.set_write_timeout(Some(DEADLINE)).unwrap();
+pub(crate) fn connect(sock: &std::path::Path) -> Conn {
+    let stream = platform::connect(sock).unwrap();
+    stream.set_timeout(Some(DEADLINE)).unwrap();
     stream
 }
 
@@ -62,7 +68,7 @@ impl Keyd {
         origins: &[(&str, &str)],
         role: Option<&str>,
     ) -> Child {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_oculus-keyd"));
+        let mut cmd = Command::new(keyd_binary());
         cmd.arg("serve-local")
             .arg(sock)
             .env("OCULUS_KEYD_DATA_DIR", dir)
@@ -77,7 +83,7 @@ impl Keyd {
         }
         let child = cmd.spawn().unwrap();
         let started = Instant::now();
-        while !sock.exists() {
+        while platform::connect(sock).is_err() {
             assert!(
                 started.elapsed() < Duration::from_secs(10),
                 "keyd never bound its socket"
@@ -111,9 +117,9 @@ impl Drop for Keyd {
 
 /// One request and its one-line reply, over the endpoint at `sock`.
 pub(crate) fn call_at(sock: &std::path::Path, req: &Value) -> Value {
-    let stream = connect(sock);
-    (&stream).write_all(format!("{req}\n").as_bytes()).unwrap();
+    let mut stream = connect(sock);
+    stream.write_all(format!("{req}\n").as_bytes()).unwrap();
     let mut line = String::new();
-    BufReader::new(&stream).read_line(&mut line).unwrap();
+    BufReader::new(&mut stream).read_line(&mut line).unwrap();
     serde_json::from_str(&line).unwrap()
 }

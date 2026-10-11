@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use crate::harness::Keyd;
+use crate::harness::{keyd_binary, Keyd};
 
 #[test]
 fn the_binary_serves_or_refuses_by_its_build() {
@@ -14,7 +14,7 @@ fn the_binary_serves_or_refuses_by_its_build() {
         return;
     }
     assert_eq!(ping["source_hash"].as_str().unwrap().len(), 64);
-    let out = Command::new(env!("CARGO_BIN_EXE_oculus-keyd"))
+    let out = Command::new(keyd_binary())
         .arg("source-hash")
         .output()
         .unwrap();

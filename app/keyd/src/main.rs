@@ -37,7 +37,10 @@ use keyd_core::platform::{self, Listener, Policy};
 use keyd_core::server::Server;
 use keyd_core::vault::{KeySource, LegacySource};
 
+#[cfg(not(windows))]
 const IDLE: Duration = Duration::from_secs(60);
+#[cfg(windows)]
+const IDLE: Duration = Duration::MAX;
 
 const BUILD: Build = Build {
     version: env!("CARGO_PKG_VERSION"),

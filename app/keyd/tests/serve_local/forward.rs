@@ -77,12 +77,12 @@ fn the_binary_forwards_to_its_test_origin_and_never_logs_the_key() {
     );
 
     let body = b"{\"inputs\":[\"BODY-TEXT\"]}";
-    let stream = connect(&keyd.sock);
+    let mut stream = connect(&keyd.sock);
     let req = json!({"op": "forward", "secret": "voyage", "method": "POST", "path": "/v1/multimodalembeddings",
                      "headers": [["Content-Type", "application/json"]], "body_len": body.len()});
-    (&stream).write_all(format!("{req}\n").as_bytes()).unwrap();
-    (&stream).write_all(body).unwrap();
-    let mut reader = BufReader::new(&stream);
+    stream.write_all(format!("{req}\n").as_bytes()).unwrap();
+    stream.write_all(body).unwrap();
+    let mut reader = BufReader::new(&mut stream);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
     let reply: Value = serde_json::from_str(&line).unwrap();
@@ -127,10 +127,10 @@ fn the_binary_forwards_to_its_test_origin_and_never_logs_the_key() {
 
 /// One `forward` and its reply: header, then body.
 fn forward(keyd: &Keyd, req: Value, body: &[u8]) -> (Value, Vec<u8>) {
-    let stream = connect(&keyd.sock);
-    (&stream).write_all(format!("{req}\n").as_bytes()).unwrap();
-    (&stream).write_all(body).unwrap();
-    let mut reader = BufReader::new(&stream);
+    let mut stream = connect(&keyd.sock);
+    stream.write_all(format!("{req}\n").as_bytes()).unwrap();
+    stream.write_all(body).unwrap();
+    let mut reader = BufReader::new(&mut stream);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
     let reply: Value = serde_json::from_str(&line).unwrap();
@@ -239,11 +239,11 @@ fn the_binary_attaches_the_canvas_cookie_and_ed_token_and_streams_a_body() {
     );
 
     // Streamed: no body_len, and the body runs to the end of the connection.
-    let stream = connect(&keyd.sock);
+    let mut stream = connect(&keyd.sock);
     let req = json!({"op": "forward", "secret": "ed", "method": "GET",
                      "path": "/api/threads/77?view=1", "stream": true});
-    (&stream).write_all(format!("{req}\n").as_bytes()).unwrap();
-    let mut reader = BufReader::new(&stream);
+    stream.write_all(format!("{req}\n").as_bytes()).unwrap();
+    let mut reader = BufReader::new(&mut stream);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
     let reply: Value = serde_json::from_str(&line).unwrap();
