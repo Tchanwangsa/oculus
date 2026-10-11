@@ -7,29 +7,42 @@ fn main() {
     tauri_build::build()
 }
 
-/// `STUDIO_RENDER_BUILD`: sha256 hex of every file under studio-core's
-/// `src/` and `src/studio/render/` (sorted relative paths, each followed by
-/// its bytes). A render segment's key carries it, so a renderer or encoder
-/// change never reuses a segment the old code made, and the app and the CLI
-/// built from one tree share segments.
+/// `STUDIO_RENDER_BUILD`: sha256 hex of everything a segment's pixels can
+/// depend on beyond the project: studio-core's `src/`, its bundled `fonts/`
+/// and `themes/`, `src/studio/render/`, and `Cargo.lock`, which pins the
+/// versions of vello_cpu, parley, taffy and the rest. Each root's path, then
+/// its files' sorted relative paths and bytes, all length-prefixed. A
+/// segment's key carries it, so a change to any of them never reuses a
+/// segment the old build made, and the app and the CLI built from one tree
+/// share segments.
 fn studio_render_build() {
     let roots = [
         Path::new("../studio-core/src"),
+        Path::new("../studio-core/fonts"),
+        Path::new("../studio-core/themes"),
         Path::new("src/studio/render"),
+        Path::new("Cargo.lock"),
     ];
     let mut hash = Sha256::new();
+    let mut part = |bytes: &[u8]| {
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(bytes);
+    };
     for root in roots {
         println!("cargo:rerun-if-changed={}", root.display());
+        part(root.to_string_lossy().as_bytes());
         let mut files = Vec::new();
-        walk(root, &mut files);
+        if root.is_file() {
+            files.push(root.to_path_buf());
+        } else {
+            walk(root, &mut files);
+        }
         files.sort();
         for file in files {
-            let bytes = std::fs::read(&file).expect("read a studio source file");
+            let bytes = std::fs::read(&file).expect("read a studio render input");
             let rel = file.strip_prefix(root).unwrap_or(&file).to_string_lossy();
-            for part in [rel.as_bytes(), &bytes] {
-                hash.update((part.len() as u64).to_le_bytes());
-                hash.update(part);
-            }
+            part(rel.as_bytes());
+            part(&bytes);
         }
     }
     println!("cargo:rustc-env=STUDIO_RENDER_BUILD={:x}", hash.finalize());
