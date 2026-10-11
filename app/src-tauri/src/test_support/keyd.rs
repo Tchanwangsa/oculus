@@ -12,8 +12,11 @@ use crate::providers::ratelimit::hold;
 /// request's header and body go to `handler`, whose header and body are the
 /// reply. Its thread ends with the test process.
 pub struct FakeKeyd {
-    requests: Arc<Mutex<Vec<(Value, Vec<u8>)>>>,
+    requests: Requests,
 }
+
+/// Each request's header and body, in arrival order.
+type Requests = Arc<Mutex<Vec<(Value, Vec<u8>)>>>;
 
 impl FakeKeyd {
     pub fn start<H>(dir: &Path, handler: H) -> Self
@@ -25,7 +28,7 @@ impl FakeKeyd {
         let listener =
             keyd_core::platform::Listener::bind(&crate::library::paths::keyd_socket_path(dir))
                 .unwrap();
-        let requests: Arc<Mutex<Vec<(Value, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let requests: Requests = Arc::new(Mutex::new(Vec::new()));
         let log = requests.clone();
         std::thread::spawn(move || {
             while let Ok(conn) = listener.accept() {

@@ -119,7 +119,7 @@ pub fn run(
             ));
         }
         on_step(Step::Detected {
-            title: &title,
+            title,
             duration,
             candidates: found.len(),
         });
@@ -134,7 +134,7 @@ pub fn run(
         boundaries.sort_unstable();
         boundaries.dedup();
 
-        std::fs::write(dir.join("outline.md"), outline(&title, &cues, &found))
+        std::fs::write(dir.join("outline.md"), outline(title, &cues, &found))
             .map_err(|e| format!("{}: {e}", dir.join("outline.md").display()))?;
 
         let total = frames_at.len();
@@ -151,7 +151,7 @@ pub fn run(
             .map(|c| format!("../courses/{}", crate::library::paths::safe_dir(c)));
 
         let text = prompt(&Job {
-            title: &title,
+            title,
             duration_secs: duration,
             lecture_dir: &format!("../lectures/{id}"),
             course_dir: course_dir.as_deref(),

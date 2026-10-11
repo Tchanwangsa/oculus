@@ -188,7 +188,8 @@ keyd core and `app/math-core`'s own crates), `bun run test`, `bun run build`
 (both build the maths wasm, so the runner gets the wasm target and the locked
 `wasm-bindgen`), the ffmpeg fetch, the
 speech helper and `whisper-cli`, `stage-keyd` (a real release build and signature
-of keyd, as the bundle carries it), `stage-cli`, `cargo test --release --locked`,
+of keyd, as the bundle carries it), `stage-cli`, clippy with `-D warnings` over
+every target, `cargo test --release --locked`,
 keyd core's tests with every feature and keyd's with and without `dev`, the
 maths engine's `cargo test --locked`, then
 `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
@@ -199,7 +200,7 @@ through the macOS adapter, so they run only in the first job. `stage-cli`
 comes before any cargo call of the app because tauri-build refuses to compile
 until every `externalBin` exists, and it is what writes the CLI's on a clean
 tree. keyd's helper is no `externalBin`, so no cargo build waits on it. The release profile is shared with that
-CLI build, so the tests reuse its artifacts. sccache is installed because
+CLI build, so clippy reuses its build scripts and the tests its artifacts. sccache is installed because
 `app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
 
 A second job, on Linux because the crate is portable, checks

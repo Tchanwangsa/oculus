@@ -352,7 +352,7 @@ fn a_batch_runs_end_to_end_and_sums_progress_monotonically() {
     let pdf = scratch.join("deck.pdf");
     write_pdf(&pdf, 3);
 
-    let zips = vec![
+    let zips = [
         zip_of(&[("result/deck_content_list.json", content_list(0, 2))]),
         zip_of(&[("nested/deck_content_list.json", content_list(2, 1))]),
     ];
@@ -425,7 +425,7 @@ fn a_batch_runs_end_to_end_and_sums_progress_monotonically() {
         let client = client.clone();
         let document = document.clone();
         std::thread::spawn(move || {
-            let mut results = client.extract_documents(&[document.clone()]);
+            let mut results = client.extract_documents(std::slice::from_ref(&document));
             document.finish(results.remove(0));
         })
     };
@@ -508,7 +508,7 @@ fn one_bad_document_does_not_take_the_batch_with_it() {
     ])
     .to_string()
     .into_bytes();
-    let zips = vec![
+    let zips = [
         zip_of(&[("r/a_content_list.json", broken)]),
         zip_of(&[("r/c_content_list.json", content_list(0, 1))]),
     ];
@@ -679,10 +679,7 @@ fn a_rejected_token_fails_the_whole_batch() {
     let results = client.extract_documents(&documents);
     assert_eq!(results.len(), 2);
     for result in &results {
-        let error = result
-            .as_ref()
-            .err()
-            .expect("credentials condemn every file");
+        let error = result.as_ref().expect_err("credentials condemn every file");
         assert!(matches!(
             error,
             ParseError::RejectedCredentials { expired: false, .. }

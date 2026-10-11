@@ -94,8 +94,7 @@ pub fn stream_to_file(
                 file.write_all(&buf[..n])
                     .map_err(|e| format!("Write error after {done} bytes: {e}"))?;
                 done += n as u64;
-                if total > 0 {
-                    let pct = (done * 100 / total) as u8;
+                if let Some(pct) = (done * 100).checked_div(total).map(|p| p as u8) {
                     if pct != last_pct {
                         last_pct = pct;
                         on_progress(pct);

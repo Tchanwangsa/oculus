@@ -66,7 +66,7 @@ impl Engine {
                 .get(&fid.to_string())
                 .is_some_and(|(m, s)| *m == modified && *s == meta_size);
             let on_disk = paths::course_rel_path(&c.code, &path)
-                .map_or(false, |rel| self.data_dir.join(rel).is_file());
+                .is_some_and(|rel| self.data_dir.join(rel).is_file());
             if known && on_disk {
                 return Ok(Some(path));
             }
