@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DEFAULT_JOB_MODELS, type JobChain, type JobId } from "@/lib/db";
 import { reasoningLabel, type PickerProvider, type Provider } from "@/lib/harness";
-import { useJobAttention } from "@/stores/agents/jobAttentionStore";
 import { ChainPicker } from "./ChainPicker";
 import { JobAttention } from "./JobAttention";
 import { modelLabel, withEntry } from "./chain";
@@ -31,8 +30,6 @@ export function JobRow({
   onFallbacks: () => void;
 }) {
   const off = chain.length === 0;
-  // A removal notice already says the job is off.
-  const noticed = useJobAttention((s) => s.notices.some((n) => n.job === job));
   const fallbacks = chain.slice(1);
   const fallbacksTip =
     fallbacks.length === 0
@@ -53,14 +50,11 @@ export function JobRow({
       <div className="min-w-0">
         <div className="text-[13px] text-foreground">{label}</div>
         <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
-        {off && !noticed && (
-          <div className="mt-1 text-xs text-muted-foreground">
-            Off — choose a model to run this job.
-          </div>
-        )}
         <JobAttention job={job} off={off} providers={providers} />
       </div>
-      <div className="-mr-1.5 flex shrink-0 items-center gap-0.5">
+      {/* A fixed width, so a long model name truncates instead of narrowing
+          the description, and every row's text wraps at the same edge. */}
+      <div className="-mr-1.5 flex w-56 shrink-0 items-center justify-end gap-0.5">
         <ChainPicker
           providers={providers}
           entry={chain[0] ?? null}
@@ -69,6 +63,8 @@ export function JobRow({
           onView={onView}
           align="end"
           emptyLabel="None"
+          emptyIcon={null}
+          className="min-w-0 max-w-full"
         />
         <Tooltip>
           <TooltipTrigger asChild>

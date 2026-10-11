@@ -55,7 +55,8 @@ export const ModelPicker = memo(function ModelPicker({
   onOpenChange?: (open: boolean) => void;
   /** The trigger's text while no model is set. */
   emptyLabel?: string;
-  /** Replaces the agent's mark while no model is set, for an "add" trigger. */
+  /** Replaces the agent's mark while no model is set, for an "add" trigger;
+   *  null shows none. */
   emptyIcon?: ReactNode;
   /** The trigger keeps its empty look with a model set: an "add" menu whose
    *  pick lands in a row of its own. */
@@ -117,7 +118,7 @@ export const ModelPicker = memo(function ModelPicker({
         className,
       )}
     >
-      {(label == null || keepEmptyTrigger) && emptyIcon ? (
+      {(label == null || keepEmptyTrigger) && emptyIcon !== undefined ? (
         emptyIcon
       ) : (
         <ProviderMark provider={provider} className="size-3.5 shrink-0" />
