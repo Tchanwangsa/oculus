@@ -18,11 +18,12 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Paths no agent may write; opencode's ruleset; agy's rules | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/rules.rs` |
 | Finding, installing, updating and signing in the CLIs | `app/src-tauri/src/harness/cli/discover/`, `app/src-tauri/src/harness/cli/install/`, `app/src-tauri/src/harness/cli/update/`, `app/src-tauri/src/harness/cli/signin/` |
 | …their frontend | `app/src/hooks/agents/useBridgeHealth.ts`, `app/src/hooks/agents/useSignInStatus.ts`, `app/src/components/settings/agents/InstallAgentDialog.tsx`, `app/src/components/settings/agents/UpdateAgents.tsx`, `app/src/components/harness/SignInDialog.tsx`, `app/src/pages/settings/integrations/AgentsPage.tsx` |
+| Hidden native processes, Windows job ownership and npm shim resolution | `app/src-tauri/src/runtime/platform/` |
 | Process pipes, JSON lines and terminal turn failures shared by the bridges | `app/src-tauri/src/harness/child.rs` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store/` |
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents/mod.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
-| Provider table (`PROVIDERS`), types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/` |
+| Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
 | Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
@@ -36,6 +37,12 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
 | Library paths in rows and prose; copy as markdown | `app/src/lib/files/openFile.ts`, `app/src/lib/markdown/selection.ts` |
 | The lecture dock's chat | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx`, `lecture_grab_frames` in `app/src-tauri/src/lectures/chapters/app.rs` |
+
+Windows offers Codex and opencode; native Claude Code is disabled because its
+Windows sandbox is unsupported. Settings shows “Needs WSL2 (coming soon)” for
+Claude and model pickers omit it. `availability.ts` owns the frontend platform
+capabilities. Antigravity has no in-app Windows install or update route; its
+Settings row directs installation and updates to a terminal.
 
 ## Four dialects become one event stream
 
@@ -146,6 +153,8 @@ matcher is a word prefix), `sqlite3 <library>/oculus.db` denied per path
 spelling (not `command(sqlite3)`, which bans it everywhere), and the student's
 approvals. The entries are global — they apply in the student's own `agy` —
 and `antigravity-rules.json` at the library root records which are Oculus's.
+Generated file rules and suggested folder grants use `/` separators on every
+platform; a suggested grant requires a fully absolute native path.
 
 **A refusal ends the turn as `completed`** (an `ERROR` step reading
 `permission check failed…`, then a `SUCCESS` result with `denied_actions`).
@@ -167,22 +176,35 @@ system prompt, so the brief is the `oculus` agent's prompt in
 
 **Skills are one directory, found three ways.** Claude scans
 `<cwd>/.claude/skills`, Codex `<cwd>/.agents/skills` — each a relative link to
-`agents/skills/` — and opencode's `skills.paths` names it. Nothing goes in
+`agents/skills/` on Unix; Windows uses managed copies — and opencode's `skills.paths` names it. Nothing goes in
 `$CODEX_HOME/skills`, which every project shares. The set stays small: every
 CLI puts the skill index in every turn, headless jobs included.
+
+Windows children start suspended, enter a Job Object with kill-on-close, then
+resume. Stopping a turn or closing the app terminates descendants too; the Unix
+startup stray sweep is disabled on Windows. Native commands use one helper to
+suppress console windows.
 
 ## Finding, installing, updating and signing in the CLIs
 
 A Dock-launched app has launchd's PATH, so `cli/discover/` tries
 `OCULUS_{CLAUDE,CODEX,OPENCODE,ANTIGRAVITY}_BIN`, PATH, `well_known_dirs`, then
-a login shell. Provider and installer-tool discovery share that executable lookup order.
+a login shell on Unix. Windows adds `%APPDATA%/npm`, `%LOCALAPPDATA%/Programs`
+and the Node installation directory, searches PATHEXT with `.exe` first, and
+skips the login shell. Provider and installer-tool discovery share that executable lookup order.
+Supported npm `.cmd`/`.bat` shims are resolved from the package manifest and run
+with `node`, so agent prompts and settings never pass through batch quoting.
 Answers and the `--version` health probe are cached, failures
 included (every picker asks); `harness_health`'s `recheck` drops both.
 
 **Install** runs a literal vendor command (shown with Copy) only for routes
 that land in `well_known_dirs`; no `sudo`, stdin on `/dev/null` so a question
 fails instead of hanging, and the webview names a provider, never a command
-string. macOS only.
+string. Windows offers npm for Codex and npm/bun for opencode and runs the
+package managers directly; self-update commands use noninteractive PowerShell.
+Unix uses a login shell. Settings reads install offers before showing Install;
+a null offer or an empty route list exposes no action. The opened dialog keeps
+its offer while an installation finishes and health is rechecked.
 
 **Update.** Settings → Agents checks each installed CLI against its newest
 published version on every visit (`harness_updates`). The binary's
@@ -459,6 +481,11 @@ only path and the opencode page counts through it. A stale key or a
 provider-verified model (Meta's Muse Spark) fails once in the timeline.
 
 ## Per-job models
+
+Windows starts new chats with Codex. Job defaults use `gpt-5.6-luna`: lecture
+chapters takes `xhigh`, and the other jobs take `medium`. A stored Claude job
+selection resolves to its Windows default in memory without rewriting the
+stored setting; supported provider selections keep their saved model and level.
 
 Chaptering, the lecture end, thread naming and document suggestions each
 name their agent, model and level in a Settings → Jobs row

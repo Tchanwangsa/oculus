@@ -299,7 +299,7 @@ pub(super) fn refusal(
                 p.parent()
             };
             dir.filter(|d| d.is_absolute() && d.parent().is_some())
-                .map(|d| format!("{action}({})", d.display()))
+                .map(|d| format!("{action}({})", crate::library::paths::slash_path(d)))
         }
         "read_url" => url::Url::parse(t)
             .ok()

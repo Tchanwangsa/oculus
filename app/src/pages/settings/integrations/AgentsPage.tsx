@@ -4,6 +4,7 @@ import {
   harnessAntigravityRevoke,
   harnessAntigravityRules,
   splitRule,
+  providerAvailability,
   type Provider,
 } from "@/lib/harness";
 import { useBridgeHealth } from "@/hooks/agents/useBridgeHealth";
@@ -15,6 +16,8 @@ import { ProviderMark } from "@/components/icons/ProviderMark";
 import {
   InstallAgentDialog,
   useAgentInstall,
+  useAgentInstallOffers,
+  type InstallOffer,
 } from "@/components/settings/agents/InstallAgentDialog";
 import { UpdateOutputDialog, useAgentUpdates } from "@/components/settings/agents/UpdateAgents";
 import { Section } from "@/components/settings/shared/section";
@@ -47,16 +50,17 @@ function CliAgentsSection() {
   const rechecking = checking || checkingSignIn || updates.checking;
 
   const install = useAgentInstall(recheck);
+  const offers = useAgentInstallOffers(health);
   const signIn = useSignIn(recheckSignIn);
   /** Which row's dialog is open; the run outlives the dialog. */
-  const [openFor, setOpenFor] = useState<{ provider: Provider; label: string } | null>(null);
+  const [openFor, setOpenFor] = useState<{ provider: Provider; label: string; offer: InstallOffer } | null>(null);
   const [signInFor, setSignInFor] = useState<Provider | null>(null);
   const [outputFor, setOutputFor] = useState<{ provider: Provider; label: string } | null>(null);
   const outputRun = outputFor ? updates.runs[outputFor.provider] : undefined;
 
   /** Available and not yet queued or running — what *Update all* enqueues. */
   const pending = (updates.updates ?? [])
-    .filter((u) => u.available && updates.stateOf(u.provider) === null)
+    .filter((u) => u.available && providerAvailability(u.provider).update && updates.stateOf(u.provider) === null)
     .map((u) => u.provider);
 
   return (
@@ -66,10 +70,12 @@ function CliAgentsSection() {
     >
       <div className="divide-y divide-border-subtle">
         {(health ?? []).map((h) => {
+          const availability = providerAvailability(h.provider);
+          const offer = offers[h.provider];
           // `unknown` (not probed yet, or opencode) draws nothing.
-          const state = h.path ? signInState(statuses, h.provider) : "unknown";
+          const state = h.path && availability.supported ? signInState(statuses, h.provider) : "unknown";
           const account = signInAccount(statuses, h.provider);
-          const update = h.path ? updates.updates?.find((u) => u.provider === h.provider) : undefined;
+          const update = h.path && availability.update ? updates.updates?.find((u) => u.provider === h.provider) : undefined;
           const run = updates.runs[h.provider];
           const updating = updates.stateOf(h.provider);
           const liveLines = run && !run.result && !run.error ? run.lines : undefined;
@@ -82,18 +88,22 @@ function CliAgentsSection() {
                   {h.label}
                 </div>
                 <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {h.path ?? (
+                  {!availability.supported ? availability.note : h.path ?? (
                     <>
-                      Not found. Install it, or set <span className="text-foreground">{h.overrideEnv}</span> to the binary.
+                      Not found. {offer?.routes.length ? "Install it, or set " : "Set "}
+                      <span className="text-foreground">{h.overrideEnv}</span> to the binary.
                     </>
                   )}
                 </div>
+                {availability.supported && availability.note && (
+                  <div className="mt-0.5 text-xs text-muted-foreground">{availability.note}</div>
+                )}
                 {state !== "unknown" && (
                   <div className="mt-0.5 text-xs text-muted-foreground">
                     {state === "in" ? (account ? `Signed in — ${account}` : "Signed in") : "Signed out"}
                   </div>
                 )}
-                {h.error && h.path && <div className="mt-0.5 text-xs text-destructive">{h.error}</div>}
+                {availability.supported && h.error && h.path && <div className="mt-0.5 text-xs text-destructive">{h.error}</div>}
                 {liveLines && <TerminalLine lines={liveLines} className="mt-1.5 max-w-full" />}
                 {failed && (
                   <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs">
@@ -136,7 +146,7 @@ function CliAgentsSection() {
                   </Button>
                 )}
                 <span className="text-xs tabular-nums text-muted-foreground">
-                  {h.version ? `v${h.version}` : h.path ? "—" : "missing"}
+                  {!availability.supported ? "Unavailable" : h.version ? `v${h.version}` : h.path ? "—" : "missing"}
                 </span>
                 {state === "out" && (
                   <Button variant="outline" size="xs" onClick={() => setSignInFor(h.provider)}>
@@ -150,11 +160,11 @@ function CliAgentsSection() {
                     )}
                   </Button>
                 )}
-                {!h.path && (
+                {!h.path && availability.install && offer && offer.routes.length > 0 && (
                   <Button
                     variant="outline"
                     size="xs"
-                    onClick={() => setOpenFor({ provider: h.provider, label: h.label })}
+                    onClick={() => setOpenFor({ provider: h.provider, label: h.label, offer })}
                   >
                     {install.run?.provider === h.provider && !install.run.result ? (
                       <>
@@ -191,7 +201,7 @@ function CliAgentsSection() {
       )}
       {openFor && (
         <InstallAgentDialog
-          provider={openFor.provider}
+          offer={openFor.offer}
           label={openFor.label}
           run={install.run?.provider === openFor.provider ? install.run : null}
           onStart={(route) => install.start(openFor.provider, route)}

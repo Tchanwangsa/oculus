@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import {
+  DEFAULT_CHAT_PROVIDER,
   defaultSelectionFor,
+  providerAvailability,
   parseItemMeta,
   getHarnessItems,
   getHarnessThreads,
@@ -125,11 +127,11 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   rateLimits: {},
   queued: {},
   contextDrift: {},
-  provider: "claude",
+  provider: DEFAULT_CHAT_PROVIDER,
   subjectId: null,
   subjects: [],
   // Empty until `useProviderModels` lands the list.
-  ...defaultSelectionFor("claude"),
+  ...defaultSelectionFor(DEFAULT_CHAT_PROVIDER),
 
   loadThreads: async () => {
     const threads = await getHarnessThreads();
@@ -178,7 +180,10 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   },
 
   // Agents share no model ids or levels, so a switch replaces both.
-  setProvider: (provider) => set({ provider, ...defaultSelectionFor(provider) }),
+  setProvider: (selected) => {
+    const provider = providerAvailability(selected).supported ? selected : DEFAULT_CHAT_PROVIDER;
+    set({ provider, ...defaultSelectionFor(provider) });
+  },
   setModel: (model) => set({ model }),
   setReasoning: (reasoning) => set({ reasoning }),
   setSubject: (subjectId) => set({ subjectId }),

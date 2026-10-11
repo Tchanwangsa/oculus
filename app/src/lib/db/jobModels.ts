@@ -1,5 +1,6 @@
 import { getSetting, setSetting } from "./settings";
 import { isProvider, type Provider } from "@/lib/harness/providers";
+import { providerAvailability } from "@/lib/harness/availability";
 
 // Each non-chat model job names its own agent, model and reasoning level. One
 // JSON value, read back in Rust by `harness::jobs`, where the jobs run.
@@ -57,6 +58,13 @@ export const DEFAULT_JOB_MODELS: JobModels = {
   documentSuggestions: { provider: "claude", model: "claude-sonnet-5-5", reasoningEffort: "medium" },
 };
 
+if (!providerAvailability("claude").supported) {
+  for (const job of JOBS) {
+    if (providerAvailability(DEFAULT_JOB_MODELS[job.id].provider).supported) continue;
+    DEFAULT_JOB_MODELS[job.id] = { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" };
+  }
+}
+
 const JOB_MODELS_KEY = "job_models";
 
 /** A missing or malformed job row falls back to its default. */
@@ -70,7 +78,7 @@ export async function getJobModels(): Promise<JobModels> {
       const row = parsed?.[job.id];
       if (!row || typeof row.model !== "string" || !row.model.trim()) continue;
       // Checked against `PROVIDERS`, not a hardcoded list that falls behind.
-      if (!isProvider(row.provider)) continue;
+      if (!isProvider(row.provider) || !providerAvailability(row.provider).supported) continue;
       out[job.id] = {
         provider: row.provider,
         model: row.model,

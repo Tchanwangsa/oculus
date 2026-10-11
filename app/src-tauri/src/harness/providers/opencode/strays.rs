@@ -1,12 +1,15 @@
 //! Reaping `opencode serve` processes a signalled app left behind.
 
+#[cfg(any(unix, test))]
 use std::path::Path;
-use std::process::Command;
+#[cfg(unix)]
 use std::time::Duration;
 
+#[cfg(any(unix, test))]
 use super::server::SERVE_ARGS;
 
 /// How long a server gets to close its listener before it is killed outright.
+#[cfg(unix)]
 const STRAY_GRACE: Duration = Duration::from_secs(2);
 
 /// Kill the `opencode serve` processes a signalled app left behind (a
@@ -16,6 +19,7 @@ const STRAY_GRACE: Duration = Duration::from_secs(2);
 /// A stray is **our argv** ([`super::server::SERVE_ARGS`]) **and `ppid == 1`** (adopted by
 /// launchd): a living app's server, such as a worktree build running beside
 /// this one, is parented to that app and never touched. Same uid, too.
+#[cfg(unix)]
 pub fn sweep() -> Vec<u32> {
     let uid = unsafe { libc::getuid() };
     let found = strays(&ps_listing(), uid);
@@ -36,14 +40,16 @@ pub fn sweep() -> Vec<u32> {
     found
 }
 
+#[cfg(unix)]
 fn ps_listing() -> String {
-    Command::new("/bin/ps")
+    crate::runtime::platform::command("/bin/ps")
         .args(["-axww", "-o", "pid=,ppid=,uid=,command="])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default()
 }
 
+#[cfg(unix)]
 fn send_signal(pids: &[u32], sig: i32) {
     for pid in pids {
         unsafe { libc::kill(*pid as libc::pid_t, sig) };
@@ -52,6 +58,7 @@ fn send_signal(pids: &[u32], sig: i32) {
 
 /// The stray pids in a `ps -axww -o pid=,ppid=,uid=,command=` listing. The
 /// command is matched from its end so a binary path with a space resolves.
+#[cfg(any(unix, test))]
 pub(super) fn strays(listing: &str, uid: u32) -> Vec<u32> {
     let tail = SERVE_ARGS.join(" ");
     listing
@@ -71,6 +78,7 @@ pub(super) fn strays(listing: &str, uid: u32) -> Vec<u32> {
 }
 
 /// One space-delimited field off the front, advancing `rest` past it.
+#[cfg(any(unix, test))]
 fn ps_field<'a>(rest: &mut &'a str) -> Option<&'a str> {
     let trimmed = rest.trim_start();
     let end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
@@ -100,4 +108,9 @@ mod tests {
         );
         assert_eq!(strays(&listing, 501), vec![4011, 4017]);
     }
+}
+
+#[cfg(not(unix))]
+pub fn sweep() -> Vec<u32> {
+    Vec::new()
 }

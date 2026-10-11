@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -34,6 +34,7 @@ pub struct SignInLine {
 /// A login in flight: [`submit_code`] writes to its stdin, [`cancel`] kills it.
 struct Run {
     child: Arc<Mutex<Child>>,
+    job: Arc<crate::runtime::platform::ProcessJob>,
     /// `None` only if the pipe could not be taken.
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     /// Set by [`cancel`], so a killed child reports "cancelled", not a signal.
@@ -84,15 +85,16 @@ where
             return Err(format!("{} is already signing in", provider.label()));
         }
 
-        let mut child = Command::new(&bin)
+        let mut command = crate::runtime::platform::cli_command(&bin)?;
+        command
             .args(args)
             .env_clear()
             .envs(discover::child_env())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("cannot run {}: {e}", bin.display()))?;
+            .stderr(Stdio::piped());
+        let (mut child, job) = crate::runtime::platform::spawn_agent(&mut command)?;
+        let job = Arc::new(job);
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -104,6 +106,7 @@ where
             provider,
             Run {
                 child: child.clone(),
+                job,
                 stdin: stdin.clone(),
                 cancelled: cancelled.clone(),
             },
@@ -188,6 +191,7 @@ pub fn cancel(provider: Provider) -> Result<(), String> {
         .get(&provider)
         .ok_or_else(|| format!("{} is not signing in", provider.label()))?;
     run.cancelled.store(true, Ordering::SeqCst);
+    run.job.terminate();
     let mut child = run.child.lock().unwrap();
     let _ = child.kill();
     Ok(())

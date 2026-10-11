@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { providerHealth, useBridgeHealth } from "@/hooks/agents/useBridgeHealth";
-import { PROVIDERS, providerInfo, type HarnessModel, type Provider, type PickerProvider } from "@/lib/harness";
+import { PROVIDERS, providerAvailability, providerInfo, type HarnessModel, type Provider, type PickerProvider } from "@/lib/harness";
 import { useCatalogue } from "@/lib/harness/opencodeCatalogue";
 
 /**
@@ -39,7 +39,7 @@ export function useProviderModels(needed: Provider | Provider[]): {
     }
     for (const id of key.split(" ").filter(Boolean) as Provider[]) {
       const info = providerInfo(id);
-      if (!info?.fetchModels) continue;
+      if (!info?.fetchModels || !providerAvailability(id).supported) continue;
       const row = health?.find((h) => h.provider === id);
       const build = row?.path ? `${row.path}@${row.version ?? ""}` : "";
       // `unknown` health has no build yet; only a known build that changed re-asks.
@@ -62,7 +62,7 @@ export function useProviderModels(needed: Provider | Provider[]): {
 
   const providers = useMemo<PickerProvider[]>(
     () =>
-      PROVIDERS.map((p) => {
+      PROVIDERS.filter((p) => providerAvailability(p.id).supported).map((p) => {
         const state = providerHealth(health, p.id);
         return {
           id: p.id,

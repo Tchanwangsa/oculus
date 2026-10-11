@@ -1,7 +1,7 @@
 //! The model catalogue off `agy models`, and the slug a chosen model and
 //! reasoning level fold back into.
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// One model `agy models` printed; the same shape as Codex's `ModelInfo`.
 #[derive(serde::Serialize, Clone, Debug, PartialEq)]
@@ -43,15 +43,15 @@ const MODELS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 /// `agy models`, killed past [`MODELS_TIMEOUT`].
 pub fn run_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<ModelsRun, String> {
     use std::io::Read;
-    let mut child = Command::new(bin)
+    let mut command = crate::runtime::platform::cli_command(bin)?;
+    command
         .arg("models")
         .env_clear()
         .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("cannot run {}: {e}", bin.display()))?;
+        .stderr(Stdio::piped());
+    let (mut child, job) = crate::runtime::platform::spawn_agent(&mut command)?;
     // One thread per pipe, or a child filling the unread one blocks.
     fn drain(r: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<String> {
         std::thread::spawn(move || {
@@ -72,6 +72,7 @@ pub fn run_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<Mod
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             Ok(None) => {
+                job.terminate();
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!(
@@ -80,6 +81,7 @@ pub fn run_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<Mod
                 ));
             }
             Err(e) => {
+                job.terminate();
                 let _ = child.kill();
                 return Err(format!("`agy models`: {e}"));
             }

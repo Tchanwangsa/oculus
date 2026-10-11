@@ -3,7 +3,7 @@
 //! Every route is a literal vendor command, shown verbatim with a Copy
 //! button; the click on Run is the confirmation. The webview names only a
 //! provider and a manager — never the string handed to `$SHELL -lc` — and
-//! nothing needing `sudo` is offered or run. macOS routes only, matching
+//! nothing needing `sudo` is offered or run. Platform-specific routes, matching
 //! `discover`.
 //!
 //! Commands run through a login shell because a Dock-launched app lacks the

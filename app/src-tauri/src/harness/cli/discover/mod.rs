@@ -3,8 +3,8 @@
 //! A Dock-launched app inherits launchd's PATH (`/usr/bin`, `/bin`), so
 //! `~/.local/bin/claude` or `/opt/homebrew/bin/codex` would not resolve. So:
 //! an explicit override, PATH, the installers' usual dirs, then a login shell.
-//! Results are cached for the process. macOS-shaped on purpose (no Windows
-//! `.cmd`/`PATHEXT`), like [`install`](super::install).
+//! Results are cached for the process. Windows searches executable extensions
+//! and skips the login shell; supported npm shims run through node directly.
 
 mod env;
 mod health;

@@ -56,6 +56,14 @@ impl JobSelection {
 
 /// What a job runs on until someone says otherwise.
 pub fn default_selection(job: Job) -> JobSelection {
+    #[cfg(windows)]
+    if job != Job::LectureChapters {
+        return JobSelection {
+            provider: Provider::Codex,
+            model: "gpt-5.6-luna".into(),
+            reasoning_effort: Some("medium".into()),
+        };
+    }
     match job {
         Job::LectureChapters => JobSelection {
             provider: Provider::Codex,
@@ -103,6 +111,10 @@ fn from_json(raw: &str, job: Job) -> Option<JobSelection> {
     if picked.model.trim().is_empty() {
         return None;
     }
+    #[cfg(windows)]
+    if picked.provider == Provider::Claude {
+        return None;
+    }
     Some(picked)
 }
 
@@ -115,6 +127,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn a_configured_job_is_read_back() {
         let s = json(r#"{"lectureChapters":{"provider":"claude","model":"claude-opus-5","reasoningEffort":"max"}}"#)
             .expect("a well-formed row parses");
@@ -163,23 +176,51 @@ mod tests {
             (c.provider, c.model.as_str(), c.effort()),
             (Provider::Codex, "gpt-5.6-luna", Some("xhigh"))
         );
-        let n = default_selection(Job::ThreadNaming);
-        assert_eq!(n.provider, Provider::Claude);
-        assert_eq!(
-            (n.model.as_str(), n.effort()),
-            ("claude-haiku-4-5-20251001", None)
-        );
-        let e = default_selection(Job::LectureEnd);
-        assert_eq!(
-            (e.provider, e.model.as_str(), e.effort()),
-            (Provider::Claude, "claude-haiku-4-5-20251001", None)
-        );
-        assert_eq!(Job::LectureEnd.key(), "lectureEnd");
-        let d = default_selection(Job::DocumentSuggestions);
-        assert_eq!(
-            (d.provider, d.model.as_str(), d.effort()),
-            (Provider::Claude, "claude-sonnet-5-5", Some("medium"))
-        );
+        #[cfg(windows)]
+        for job in [Job::ThreadNaming, Job::LectureEnd, Job::DocumentSuggestions] {
+            let picked = default_selection(job);
+            assert_eq!(
+                (picked.provider, picked.model.as_str(), picked.effort()),
+                (Provider::Codex, "gpt-5.6-luna", Some("medium"))
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            let n = default_selection(Job::ThreadNaming);
+            assert_eq!(n.provider, Provider::Claude);
+            assert_eq!(
+                (n.model.as_str(), n.effort()),
+                ("claude-haiku-4-5-20251001", None)
+            );
+            let e = default_selection(Job::LectureEnd);
+            assert_eq!(
+                (e.provider, e.model.as_str(), e.effort()),
+                (Provider::Claude, "claude-haiku-4-5-20251001", None)
+            );
+            assert_eq!(Job::LectureEnd.key(), "lectureEnd");
+            let d = default_selection(Job::DocumentSuggestions);
+            assert_eq!(
+                (d.provider, d.model.as_str(), d.effort()),
+                (Provider::Claude, "claude-sonnet-5-5", Some("medium"))
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_windows_jobs_do_not_resolve_a_stored_claude_selection() {
+        for job in [
+            Job::LectureChapters,
+            Job::LectureEnd,
+            Job::ThreadNaming,
+            Job::DocumentSuggestions,
+        ] {
+            let raw = format!(
+                r#"{{"{}":{{"provider":"claude","model":"claude-opus-5","reasoningEffort":"max"}}}}"#,
+                job.key()
+            );
+            assert!(from_json(&raw, job).is_none());
+        }
     }
 
     #[test]

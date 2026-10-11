@@ -17,7 +17,7 @@ pub(super) fn transcript_path(cwd: &str, session_id: &str) -> Option<PathBuf> {
     }
     let root = std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude")))?;
+        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))?;
     let projects = root.join("projects");
     let slug: String = cwd
         .chars()
