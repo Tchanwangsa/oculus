@@ -42,6 +42,8 @@ pub fn run() {
         .manage(lectures::DownloadCancels::default())
         .manage(ScrapeCancel::default())
         .manage(sync::scrape::VideoCancels::default())
+        .manage(sync::scrape::embeds::EmbedCancels::default())
+        .manage(sync::scrape::embeds::EmbedBearer::default())
         .manage(shell::browser::BrowserState::default())
         .manage(shell::usage::UsageState::default())
         .manage(music::MusicState::default())
@@ -125,6 +127,9 @@ pub fn run() {
             sync::scrape::cancel_scrape,
             sync::scrape::videos::canvas_download_video,
             sync::scrape::videos::canvas_cancel_video,
+            sync::scrape::embeds::commands::echo360_embed_info,
+            sync::scrape::embeds::commands::echo360_embed_download,
+            sync::scrape::embeds::commands::echo360_embed_cancel,
             sync::scrape::parse_file,
             sync::scrape::parse_skip,
             library::files::commands::read_course_file,

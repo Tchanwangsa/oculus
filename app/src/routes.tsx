@@ -61,6 +61,7 @@ export const routes: RouteObject[] = [
             children: [
               { index: true, element: <Navigate to="downloads" replace /> },
               { path: "downloads", lazy: page(() => import("@/pages/subject/files/DownloadsPage")) },
+              { path: "media", lazy: page(() => import("@/pages/subject/files/MediaPage")) },
               { path: "uploads", lazy: page(() => import("@/pages/subject/files/UploadsPage")) },
               { path: "documents", lazy: page(() => import("@/pages/subject/files/DocumentsPage")) },
             ],

@@ -1,3 +1,5 @@
+use super::embeds::{details_md, iframe_md};
+use super::escape::escape_html;
 use super::inline::inline_md;
 use super::lists::list_md;
 use super::tables::table_md;
@@ -5,12 +7,17 @@ use super::tree::{dropped, is_heading, tag, text_content, Ref};
 use super::Ctx;
 
 pub(super) fn block_md(node: Ref<'_>, ctx: &Ctx) -> String {
+    block_md_where(node, ctx, |_| true)
+}
+
+/// `block_md` over the children `keep` accepts.
+pub(super) fn block_md_where(node: Ref<'_>, ctx: &Ctx, keep: impl Fn(&Ref<'_>) -> bool) -> String {
     let mut out = String::new();
-    for n in node.children() {
+    for n in node.children().filter(|c| keep(c)) {
         if let Some(t) = n.value().as_text() {
             let t = t.trim();
             if !t.is_empty() {
-                out.push_str(t);
+                out.push_str(&escape_html(t));
                 out.push_str("\n\n");
             }
             continue;
@@ -61,6 +68,13 @@ pub(super) fn block_md(node: Ref<'_>, ctx: &Ctx) -> String {
                 out.push('\n');
             }
             "div" | "section" | "article" => out.push_str(&block_md(n, ctx)),
+            "details" => out.push_str(&details_md(n, ctx)),
+            "iframe" => {
+                if let Some(md) = iframe_md(n, ctx) {
+                    out.push_str(md.trim_matches('\n'));
+                    out.push_str("\n\n");
+                }
+            }
             _ => {
                 let c = inline_md(n, ctx);
                 let c = c.trim();

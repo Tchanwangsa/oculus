@@ -2,6 +2,8 @@
 //! rather than stripped up front.
 
 mod blocks;
+mod embeds;
+mod escape;
 mod inline;
 mod lists;
 mod tables;

@@ -3,9 +3,11 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import type { PluggableList } from "unified";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { hasMath, normalizeMath } from "@/lib/markdown/math";
+import { SANITIZE_SCHEMA } from "@/lib/markdown/sanitizeSchema";
 import { rehypeMaths, useMathsReady } from "@/lib/maths";
 import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { readCourseFile } from "@/lib/files/courseFiles";
@@ -19,11 +21,14 @@ import type { PdfMdLink } from "@/components/files/pdf/pdfMdLink";
 const PLAIN = [remarkGfm];
 const WITH_MATH = [remarkGfm, remarkMath];
 const MATH = [rehypeMaths];
-const RAW_MATH = [rehypeRaw, rehypeMaths];
+/** Raw HTML is sanitized before `rehypeMaths` and the anchors, so their own
+ *  output (KaTeX markup, `data-page`) is never checked against the schema. */
+const RAW: PluggableList = [rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]];
+const RAW_MATH = [...RAW, rehypeMaths];
 
 /** `rehypeMaths` also takes math fences and HTML math classes without
  *  delimiters. `anchors` (`blockAnchorPlugins`) go around it, after raw HTML
- *  is parsed. */
+ *  is parsed and sanitized. */
 export function fileMarkdownPlugins(
   text: string,
   anchors?: ReturnType<typeof blockAnchorPlugins>,
@@ -32,7 +37,7 @@ export function fileMarkdownPlugins(
   return {
     remarkPlugins: hasMath(text) ? WITH_MATH : PLAIN,
     rehypePlugins: anchors
-      ? [...(raw ? [rehypeRaw] : []), anchors.before, rehypeMaths, anchors.after]
+      ? [...(raw ? RAW : []), anchors.before, rehypeMaths, anchors.after]
       : raw
         ? RAW_MATH
         : MATH,

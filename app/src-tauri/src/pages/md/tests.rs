@@ -123,3 +123,123 @@ fn extracts_page_slugs_and_course_file_ids() {
     assert_eq!(pages, vec!["week-one"]);
     assert_eq!(files, vec!["123"]);
 }
+
+#[test]
+fn ampersands_and_angle_brackets_in_text_are_entities() {
+    assert_eq!(
+        md("<p>Fish &amp; chips in your &lt;head&gt;</p>"),
+        "Fish &amp; chips in your &lt;head>"
+    );
+    assert_eq!(md("<div>a &lt;b&gt; c</div>"), "a &lt;b> c");
+    assert_eq!(md("<ul><li>x &lt; y</li></ul>"), "- x &lt; y");
+    assert!(md("<table><tr><td>a &amp; &lt;b&gt;</td></tr></table>").contains("a &amp; &lt;b>"));
+}
+
+#[test]
+fn code_stays_literal() {
+    assert_eq!(md("<p><code>&lt;div&gt; &amp;</code></p>"), "`<div> &`");
+    assert_eq!(md("<pre>&lt;div&gt;\n</pre>"), "```\n<div>\n```");
+}
+
+const ECHO_SRC: &str = "/courses/253699/external_tools/retrieve?display=borderless&amp;url=https%3A%2F%2Fecho360.net.au%2Flti%2F9381284d-5253-4e5b-b173-fb47a63576cb%3FlinkId%3Dabc-123%26autoplay%3Dfalse";
+
+#[test]
+fn relative_echo_iframe_becomes_an_absolute_block_tag() {
+    let out = md(&format!(
+        "<p>Watch <iframe src=\"{ECHO_SRC}\"></iframe> now</p>"
+    ));
+    assert_eq!(
+        out,
+        "Watch \n\n<echo-video link-id=\"abc-123\" src=\"https://canvas.lms.unimelb.edu.au/courses/253699/external_tools/retrieve?display=borderless&amp;url=https%3A%2F%2Fecho360.net.au%2Flti%2F9381284d-5253-4e5b-b173-fb47a63576cb%3FlinkId%3Dabc-123%26autoplay%3Dfalse\">\n</echo-video>\n\n now"
+    );
+}
+
+#[test]
+fn echo_iframe_in_a_list_item_stays_inside_it() {
+    let out = md(&format!(
+        "<ul><li>a<iframe src=\"{ECHO_SRC}\"></iframe></li><li>b</li></ul>"
+    ));
+    assert!(
+        out.starts_with("- a\n  \n  <echo-video link-id=\"abc-123\""),
+        "{out}"
+    );
+    assert!(out.ends_with("\n  </echo-video>\n- b"), "{out}");
+}
+
+#[test]
+fn other_iframes_link_out_by_host() {
+    assert_eq!(
+        md("<iframe src=\"https://player.vimeo.com/video/1?h=2\"></iframe>"),
+        "[Embedded: player.vimeo.com](https://player.vimeo.com/video/1?h=2)"
+    );
+    assert_eq!(md("<p>x<iframe src=\"about:blank\"></iframe></p>"), "x");
+    assert_eq!(md("<p>x<iframe></iframe></p>"), "x");
+}
+
+#[test]
+fn details_keep_markdown_inside() {
+    assert_eq!(
+        md("<details><summary>More &amp; <b>less</b></summary><p><b>hi</b></p></details>"),
+        "<details>\n<summary>More &amp; less</summary>\n\n**hi**\n\n</details>"
+    );
+    assert_eq!(
+        md("<details><p>no summary</p></details>"),
+        "<details>\n\nno summary\n\n</details>"
+    );
+}
+
+#[test]
+fn thtr_day_one_page() {
+    let out = md(include_str!("fixtures/thtr-day-one.html"));
+
+    let ids: Vec<&str> = out
+        .lines()
+        .filter_map(|l| l.strip_prefix("<echo-video link-id=\""))
+        .map(|l| &l[..l.find('"').unwrap()])
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "943d56e6-1f0b-4c4e-9a51-7d2c8f3b6a10",
+            "3c6e28af-5b7d-4e19-8c2a-0f6e1d9b4c27",
+            "b8a1f2d4-6c3e-4a7b-9e0d-2f5c8a1b3e64",
+            "e5d7c9a1-2b4f-4d6e-8a0c-3f1b5d7e9a82",
+            "71f3b5d9-8e2a-4c6b-a0d4-5e7f9b1c3d95",
+            "c2e4a6b8-0d1f-4e3a-b5c7-9d1e3f5a7b06",
+            "5a7c9e1b-3d5f-4a8c-b0e2-4f6a8c0e2d19",
+        ]
+    );
+    // Every tag opens a line of its own after a blank one, and closes on the next.
+    for (i, l) in out.lines().enumerate() {
+        if l.starts_with("<echo-video") {
+            assert_eq!(out.lines().nth(i - 1), Some(""), "{out}");
+            assert_eq!(out.lines().nth(i + 1), Some("</echo-video>"), "{out}");
+        }
+    }
+
+    assert!(out.contains("<details>\n<summary>Before you watch: set up your editor</summary>\n\nInstall **VS Code**"), "{out}");
+    assert!(out.contains("- Make `index.html`\n\n<details>\n<summary>Stuck on Windows?</summary>\n\nUse *File Explorer*"), "{out}");
+    assert_eq!(out.matches("</details>").count(), 2);
+
+    assert!(out.contains("## &lt;section1> The Wot"), "{out}");
+    assert!(out.contains("your &lt;head> section"), "{out}");
+    assert!(out.contains("Fish &amp; chips"), "{out}");
+
+    let fence = out
+        .find("```\n<div class=\"card\">\n  <p>Hello</p>\n</div>\n```")
+        .expect(&out);
+    assert_eq!(
+        out.find("<div"),
+        Some(fence + 4),
+        "only the fence holds a live <div: {out}"
+    );
+    assert!(
+        out.contains("&lt;div onclick=\"submit()\">Click&lt;/div>"),
+        "{out}"
+    );
+
+    assert!(
+        out.contains("\n[Embedded: padlet.com](https://padlet.com/embed/thtr30042dayone)\n"),
+        "{out}"
+    );
+}

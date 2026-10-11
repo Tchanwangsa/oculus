@@ -2,9 +2,11 @@
 //! POSTing Canvas's OAuth-signed tool form to Echo360 mints the session and the
 //! CloudFront cookies the media CDN accepts. Echo360's own cookies live in this
 //! process only; the Canvas page that carries the form comes through
-//! oculus-keyd, which holds the Canvas session.
+//! oculus-keyd, which holds the Canvas session. Videos embedded in Canvas
+//! pages launch per link instead (`embed/`).
 
 mod auth;
+pub mod embed;
 mod ffmpeg;
 mod media;
 mod syllabus;

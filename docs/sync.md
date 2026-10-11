@@ -14,7 +14,7 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Echo360 core | `app/src-tauri/src/sources/echo360/` |
 | Echo360 Tauri commands, session cache, downloads | `app/src-tauri/src/lectures/commands.rs`, `app/src-tauri/src/lectures/mod.rs`, `app/src-tauri/src/lectures/downloads.rs` |
 | Canvas HTML → Markdown | `app/src-tauri/src/pages/md/` |
-| App-side entry: thread + `AppReporter`; on-demand module videos | `app/src-tauri/src/sync/scrape/` |
+| App-side entry: thread + `AppReporter`; on-demand module videos and page embeds | `app/src-tauri/src/sync/scrape/` |
 | Headless DB writes, subject list state | `app/src-tauri/src/db/store/`, `app/src-tauri/src/sync/subjects.rs` |
 | Chronological term ranking | `app/src-tauri/src/sync/terms.rs` |
 | Agent docs written into the library | `app/src-tauri/src/agents/mod.rs` |
@@ -88,6 +88,31 @@ of the term it falls inside.
   frontend refreshes Echo360 lecture lists and the calendar
   ([calendar.md](./calendar.md)) after `scrape-complete`, database-only.
 
+## Canvas HTML becomes markdown with a few kept tags
+
+`app/src-tauri/src/pages/md/` converts every Canvas body. The renderer parses
+raw HTML in a page and sanitizes it
+([viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface)), so
+the output is markdown plus this contract:
+
+- **Text never reads as HTML.** Every text node turns `&` into `&amp;` and
+  `<` into `&lt;` (`app/src-tauri/src/pages/md/escape.rs`), so prose like
+  `your <head> section` stays text. Code spans and `<pre>` fences are literal.
+- **`<details>` stays HTML around markdown**:
+  `<details>\n<summary>text</summary>\n\n…\n\n</details>`. The summary is
+  plain text, since it shares the open tag's HTML block; the blank lines are
+  what make CommonMark parse the body. Nested ones nest.
+- **An Echo360 iframe becomes `<echo-video link-id src>`** with its open tag
+  alone on a line after a blank one (a CommonMark HTML block), splitting any
+  paragraph or indented under a list item. `src` is the Canvas
+  `external_tools/retrieve` URL made absolute, `link-id` the `linkId` inside
+  its `url` parameter (`app/src-tauri/src/pages/md/embeds.rs`). A table cell
+  keeps it on one line.
+- **Any other iframe becomes `[Embedded: <host>](<src>)`**; one without an
+  http(s) `src` is dropped.
+
+A sync never resolves an embed: the tag in the page is the only record of it.
+
 ## A scrape scaffolds the agent docs
 
 `Engine::scrape` writes the central `agents/AGENTS.md` once per run, then links
@@ -137,6 +162,41 @@ have nothing to do with Echo360 lectures.
 - Videos never reach parse or embed: every pipeline gate is a PDF/Office or
   spreadsheet allowlist (`library::paths::doc_pdf_rel`, `library::paths::is_sheet`,
   `isPdfBacked`, `isPipelineFile`, `PDF_BACKED_SQL_LIST`).
+
+## An embedded Echo360 video is resolved and downloaded by its card
+
+An `<echo-video>` tag's card calls into `app/src-tauri/src/sync/scrape/embeds/`;
+the launch, Bearer and CDN signing are in
+[auth.md](./auth.md#an-embedded-echo360-video-launches-per-link-and-plays-on-a-bearer-token).
+
+- `echo360_embed_info` returns the link's `echo_embeds` row, or resolves it
+  (launch, Bearer, player properties), saves the poster as
+  `courses/<code>/images/echo-<mediaId>.jpg` (its signed URL expires) and
+  writes the row. A link's media never changes, so the row is kept for good.
+  Its paths are data-dir-relative, and one whose file is gone from disk comes
+  back null (a deleted download is cleared from the row).
+- `echo360_embed_download` refuses a `restrict_download` video. A recording
+  another link of the subject already downloaded is pointed at, not fetched
+  again. Otherwise it takes fresh player properties (signed URLs expire),
+  then the highest-`BANDWIDTH` variant of the video master (the lowest
+  `sourceIndex` with a video track; other video sources are only counted in
+  `extra_sources`) and of the audio-only master.
+- A variant is byte ranges over one fMP4 its `#EXT-X-MAP` names, so a download
+  is two whole-file GETs and `ffmpeg -c copy -movflags +faststart`, no segment
+  stitching. A variant whose segments name any other file is refused as a
+  packaging Oculus doesn't support, rather than half-supported.
+- Both streams go through `runtime::stream::copy_to_file` (the same loop as
+  `Canvas::download_to`) into `tmp/echo-embeds/<linkId>/` in the data dir,
+  which is emptied first and removed on every exit. Only the muxed video and
+  its captions (`<video>.vtt`) move into `courses/<code>/files/`, named after
+  the media name as `.mp4`; a name another file holds gets `-<first 8 of the
+  media id>` before the extension.
+- The new file is reported as a `scrape-file` with `source_url` set to the
+  retrieve URL and no Canvas id, so the frontend writes its `files` row.
+  Progress is `echo-embed-progress` (`linkId`, `percent`, `phase`: `downloading`,
+  `muxing`, `complete`, `cancelled`, `error`); the percent is of both streams'
+  bytes when HEAD gave both sizes, else 80 for the video and 20 for the audio.
+  `echo360_embed_cancel` sets the link's flag in `EmbedCancels`, polled per chunk.
 
 ## Office documents are stored as themselves plus a derived PDF
 

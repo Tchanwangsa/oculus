@@ -4,7 +4,7 @@ use super::Session;
 
 const LTI_TOOL_PATH: &str = "/external_tools/701";
 
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+pub(super) const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
 pub fn connect(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Result<Session, String> {
     let lti_url = format!(
@@ -115,7 +115,7 @@ fn attr(elem: &str, name: &str) -> Option<String> {
     Some(html_unescape(&elem[s..e]))
 }
 
-fn html_unescape(s: &str) -> String {
+pub(super) fn html_unescape(s: &str) -> String {
     s.replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
