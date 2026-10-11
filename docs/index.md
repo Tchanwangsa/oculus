@@ -33,7 +33,7 @@ the root `CLAUDE.md` holds only the rules.
 | [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |
 | [editor-maths.md](./editor-maths.md) | Maths in the note editor: the visual field, the toolbox, shorthands |
 | [editor-core.md](./editor-core.md) | The Rust editor core, its oracles, and shadow mode checking it against every note editor in dev |
-| [studio.md](./studio.md) | Studio's renderer: video folders, the TSX component contract, narration (script.md, the manifest, `narrate` and its TTS server, scene lengths, word cues), styles, motion, transitions and magic move, motion blur, contact sheets (`strip`), dithered gradients, the sandbox, lint and golden frames |
+| [studio.md](./studio.md) | Studio's renderer: video folders, the TSX component contract, narration (script.md, the manifest, `narrate` and its TTS server, Settings → Voice, scene lengths, word cues), styles, motion, transitions and magic move, motion blur, contact sheets (`strip`), dithered gradients, the sandbox, lint and golden frames |
 | [cli.md](./cli.md) | The `oculus` binary: what each command writes, and the agent docs it generates |
 | [cli-reference.md](./cli-reference.md) | Every command and flag — generated from the binary, not hand-kept |
 | [windows.md](./windows.md) | Windows platform boundaries, broker security, data paths and release acceptance |

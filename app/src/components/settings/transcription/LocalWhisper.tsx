@@ -25,7 +25,7 @@ import {
 type WhisperSettings = TranscribeSettings["whisper"];
 
 /** Decimal, as Hugging Face and whisper.cpp quote these sizes. */
-function size(bytes: number): string {
+export function modelSize(bytes: number): string {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
 }
 
@@ -39,7 +39,7 @@ function machineLine(catalogue: WhisperCatalogue): string {
 
 export type Download = { received: number; total: number };
 
-function percent(download: Download): number {
+export function percent(download: Download): number {
   return download.total > 0 ? Math.min(100, Math.floor((download.received / download.total) * 100)) : 0;
 }
 
@@ -278,7 +278,7 @@ function Models({ catalogue, settings, downloads, onChange, onModelsChanged }: {
         title={`Delete ${confirm?.label ?? "this model"}?`}
         description={
           confirm
-            ? `Frees ${size(confirm.bytes)}. It can be downloaded again from here.`
+            ? `Frees ${modelSize(confirm.bytes)}. It can be downloaded again from here.`
             : ""
         }
         confirmLabel="Delete"
@@ -351,7 +351,7 @@ function ModelRow({
             ) : null}
           </p>
           <p className="text-[11px] text-muted-foreground tabular-nums">
-            {size(model.bytes)} download · {size(model.ramBytes)} memory
+            {modelSize(model.bytes)} download · {modelSize(model.ramBytes)} memory
             {model.fit === "too_large" ? " · Needs more memory than this Mac has to spare" : ""}
             {inUse ? " · In use" : ""}
           </p>

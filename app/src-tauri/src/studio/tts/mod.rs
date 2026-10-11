@@ -3,7 +3,9 @@
 //! Keyless only. No timeout: a cold server takes many seconds to load its
 //! model. A clip that is empty, not a WAV or digitally silent is a failure,
 //! never a pause (Kokoro answers an unknown voice with 200 and no audio).
+//! `models` lists the server's model ids for Settings -> Voice.
 
+mod models;
 #[cfg(test)]
 mod tests;
 
@@ -14,6 +16,7 @@ use serde_json::json;
 use super::audio::{decode_wav, silence, Decoded};
 use super::voice::Voice;
 use crate::providers::ratelimit::{transport_detail, Retry};
+pub use models::list_models;
 
 /// Tries per clip when the server answers 429, backing off 1 s, 2 s, 4 s...
 pub const ATTEMPTS: u32 = 5;

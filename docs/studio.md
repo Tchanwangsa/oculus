@@ -29,6 +29,7 @@ renders single frames and contact sheets, lints, and narrates.
 | Fixture videos and golden frames | `app/studio-core/tests/fixtures/`, `app/studio-core/tests/golden/` |
 | Narration audio decode and word timing (the aligner, its model download) | `app/src-tauri/src/studio/` (`audio/`, `timing/`), `app/src-tauri/src/runtime/onnx/` |
 | Narrating a video: the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
+| Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
 | `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`narrate.rs`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
@@ -170,7 +171,8 @@ CTC forced alignment of the script against wav2vec2's letter emissions, run
 by ONNX Runtime on the CPU (`app/src-tauri/src/runtime/onnx/`). The model
 is Xenova's fp32 ONNX export of `facebook/wav2vec2-base-960h` (Apache-2.0,
 credit facebook/wav2vec2-base-960h), pinned to one commit, 378 MB. It is
-downloaded on request (`oculus studio aligner download`) to
+downloaded on request (Settings -> Voice, or `oculus studio aligner
+download`) to
 `<app data>/models/align/` and never bundled; the download is checked
 against its pinned size and sha256 before it gets its name. ONNX Runtime
 itself is linked statically. `STUDIO_ALIGN_MODEL=<model.onnx>` points the
@@ -208,7 +210,7 @@ manifest. Scenes run one at a time, in video order.
 - **Voice.** Each of server, model, voice and speed comes from the first
   that sets it: the CLI flags, the video's `voice` block, then the `voice`
   settings row (`{ baseUrl, model, voice, speed }`, which Settings -> Voice
-  will write; `studio::voice`). A missing or ill-typed field in the row
+  writes; `studio::voice`). A missing or ill-typed field in the row
   reads as unset; only speed has a default (1.0). Server, model and voice
   have none, since ids differ per server (Kokoro-FastAPI `kokoro`, mlx-audio
   `mlx-community/Kokoro-82M-bf16`, OpenAI `tts-1`): narrate fails with
@@ -235,7 +237,8 @@ manifest. Scenes run one at a time, in video order.
   paragraph"), and the rest is resampled to 16 kHz and timed against the
   section's whitespace-separated words. The aligner model is checked before
   the first TTS request, so a missing one costs no synthesis and fails with
-  ``run `oculus studio aligner download` ``.
+  ``download it in Settings -> Voice or run `oculus studio aligner
+  download` ``.
 - **Writes.** The manifest is rewritten atomically after each scene, so a
   failure keeps the scenes before it; the error names the scene and the
   command exits 1. After the last scene, entries whose id is no longer a
@@ -256,6 +259,40 @@ manifest. Scenes run one at a time, in video order.
   a re-run after one paragraph edit took 0.5 s. Kokoro's clips start with
   about 0.2 s and end with about 0.4 s of exact zeros, well under the 1 s
   zero-run limit.
+
+## Settings -> Voice sets the server and holds the aligner model
+
+Settings -> Voice (Library group) has two sections. Nothing on it
+synthesises, so it has no sample button: Settings never makes a billed
+call. Its one network call is listing models, which is free.
+
+- **Narration voice** edits the `voice` row: Server URL, Model, Voice
+  (typed: the OpenAI API cannot list voices) and Speed (a slider, 0.5 to
+  2.0 in 0.05 steps). A text field saves on blur or Enter; each save sends
+  the whole row to `studio_set_voice_settings`, which trims it, unsets
+  blanks, normalises the URL (`tts::normalise_base`), refuses a speed that
+  is not a positive number, and answers with what it stored. A refusal shows
+  under its row. "List models" calls `studio_voice_models` with the URL as
+  typed: `GET <base>/v1/models`, the `data[].id`s in the server's order,
+  with only ureq's connect timeout (`studio::tts::list_models`). A non-empty
+  list turns the Model field into a select (the stored model stays in it
+  when the server does not list it); an empty list or a failure leaves the
+  text field, with the reason inline. Editing the URL drops the list. API
+  keys are not supported; the page says so.
+- **Word timing** is the aligner model's row, like a Local Whisper model:
+  "wav2vec2 base (English)", its 378 MB size and status, Download (then a
+  percentage, a progress bar and Cancel) or Delete behind a confirmation,
+  and the credit line. `studio_aligner_status` gives `{ status: missing |
+  downloading | present, bytes }` from the disk alone;
+  `studio_aligner_download` resolves when the model is on disk, rejects
+  `cancelled` on `studio_aligner_cancel`, and emits
+  `studio-aligner-progress` `{ phase: downloading | complete | cancelled |
+  error, received, total, error? }` about every 150 ms;
+  `studio_aligner_delete` returns the bytes freed. A download started on an
+  earlier visit shows at 0 % until its next event.
+
+There is no narrate command in the app yet: narration runs from `oculus
+studio narrate`.
 
 ## Four primitives and a closed set of style keys
 
@@ -701,6 +738,8 @@ dark-gradient golden, since a dithered 1080p frame is a 2.4 MB PNG.
 load errors and `word`/`wordEnd`; the `narrated` fixture (a hand-written
 manifest, no audio) pins a card entering at its word. In the app crate, `cargo test --lib studio::` covers the TTS client
 against a loopback fake server (WAV, empty, non-WAV, silent, 404, 429),
+the `/v1/models` listing (parsing, 404, non-JSON, unreachable), the Settings
+row's validation (`studio::commands`),
 the voice resolution, the cache key and `narrate` with a stubbed aligner
 (caching, one-paragraph edits, per-scene writes, pruning, failures).
 

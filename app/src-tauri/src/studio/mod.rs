@@ -1,9 +1,11 @@
 //! Studio's narration, the half studio-core may not do: the TTS client, audio
-//! decode, word timing against a local ONNX model, and `narrate`, which
-//! writes the manifest studio-core reads (docs/studio.md, "Narration is
-//! made by `oculus studio narrate`" and "Narration timing").
+//! decode, word timing against a local ONNX model, `narrate`, which writes
+//! the manifest studio-core reads, and the Tauri commands behind Settings ->
+//! Voice (docs/studio.md, "Narration is made by `oculus studio narrate`" and
+//! "Narration timing").
 
 pub mod audio;
+pub mod commands;
 pub mod error;
 pub mod narrate;
 #[cfg(test)]
