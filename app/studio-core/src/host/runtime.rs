@@ -85,13 +85,13 @@ pub fn install(c: &Ctx<'_>, prelude: &[u8]) -> Result<(), StudioError> {
 }
 
 /// The prelude's natives. `__studioClosest(name, candidates)` is
-/// `suggest::closest` (`word()`'s "closest:" hint), or `undefined`.
+/// `suggest::nearest` (`word()`'s "closest:" hint), `undefined` for none.
 /// `__studioPathEnd(d, fraction)` is where a `[0, fraction]` trim of `d` ends,
 /// `[x, y, ux, uy, length]` with a unit tangent, measured as the trim
 /// measures it; `undefined` for bad data or a path with no length.
 pub fn install_natives(c: &Ctx<'_>) -> Result<(), StudioError> {
     let closest = |name: String, candidates: Vec<String>| {
-        crate::suggest::closest(&name, candidates.iter().map(String::as_str)).map(str::to_owned)
+        crate::suggest::nearest(&name, candidates.iter().map(String::as_str)).map(str::to_owned)
     };
     let path_end = |d: String, fraction: f64| {
         let path = BezPath::from_svg(&d).ok()?;

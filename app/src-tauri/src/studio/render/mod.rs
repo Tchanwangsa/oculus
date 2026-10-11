@@ -40,7 +40,8 @@ pub use running::{Renders, Running, RENDERS};
 #[derive(Debug, Clone)]
 pub struct Options {
     pub quality: Quality,
-    /// Render threads (default: half the cores), capped by memory.
+    /// Frame-rendering threads (default: half the cores), capped by memory.
+    /// The encoder's own threads are fixed (`Quality::codec_args`).
     pub threads: Option<usize>,
     /// The mp4 (default: `<dir>/renders/<quality>.mp4`).
     pub out: Option<PathBuf>,

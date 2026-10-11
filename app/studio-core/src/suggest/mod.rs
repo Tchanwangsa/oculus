@@ -1,8 +1,29 @@
 //! "Did you mean" for unknown names: the closest candidate by edit distance,
-//! ignoring case, when it is close enough to be a plausible typo.
+//! ignoring case, when it is close enough to be a plausible typo, or the
+//! nearest one however far (`word()`'s hint, where any said phrase helps).
 
 /// The candidate closest to `name`, if any is within a third of its length.
 pub fn closest<'a, I>(name: &str, candidates: I) -> Option<&'a str>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let limit = (name.chars().count() / 3).max(2);
+    ranked(name, candidates)
+        .filter(|(d, _)| *d <= limit)
+        .map(|(_, c)| c)
+}
+
+/// The candidate closest to `name` however far it is (the first of a tie),
+/// or `None` when there are none.
+pub fn nearest<'a, I>(name: &str, candidates: I) -> Option<&'a str>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    ranked(name, candidates).map(|(_, c)| c)
+}
+
+/// The closest candidate and its distance, ignoring case.
+fn ranked<'a, I>(name: &str, candidates: I) -> Option<(usize, &'a str)>
 where
     I: IntoIterator<Item = &'a str>,
 {
@@ -14,8 +35,7 @@ where
             best = Some((d, c));
         }
     }
-    let limit = (name.chars().count() / 3).max(2);
-    best.filter(|(d, _)| *d <= limit).map(|(_, c)| c)
+    best
 }
 
 /// " (did you mean `x`?)" or "".

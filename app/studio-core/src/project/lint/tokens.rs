@@ -1,9 +1,9 @@
 //! Token use: a component's source names theme tokens, never literals.
 //! Three rules, each an error at the literal's line and column:
 //!
-//! - a colour literal (`#rgb`, `#rrggbb[aa]`, `rgb(`, `hsl(`, `oklch(` and
-//!   friends, or a CSS colour name as a whole string) outside the argument
-//!   of a `token(...)` default;
+//! - a colour literal outside the argument of a `token(...)` default: `#rgb`,
+//!   `#rrggbb[aa]`, `rgb(`, `hsl(`, `oklch(` and friends anywhere, and a
+//!   CSS colour name as a whole string only where a colour goes (`places`);
 //! - a font family string (a bundled family's name, or any string after
 //!   `fontFamily:`);
 //! - a number in a `style` value equal to a theme `space` or `radius`
@@ -12,17 +12,29 @@
 //! The rules read the source through `tsx::scan`, so a literal inside a
 //! template literal's `${...}` is not checked.
 
+mod names;
+mod places;
+
 use super::tsx::{Kind, Tok, line_text, scan};
 use crate::error::{StudioError, TsxLoc};
 use crate::theme::Theme;
+use names::CSS_COLOUR_NAMES;
+use places::{Place, places};
 use serde_json::Value;
 use std::collections::HashSet;
 
 /// Every error the token rules find in `src`, in source order.
-pub fn check(component: &str, src: &str, theme: &Theme) -> Vec<StudioError> {
+/// `colour_props` names the component's `token("color")` props.
+pub fn check(
+    component: &str,
+    src: &str,
+    theme: &Theme,
+    colour_props: &[String],
+) -> Vec<StudioError> {
     let palette = Palette::of(theme);
     let toks = scan(src);
     let exempt = exempt_flags(&toks);
+    let place = places(&toks, colour_props);
     let in_style = style_flags(&toks);
     let mut out = Vec::new();
     let mut fonts_seen: HashSet<usize> = HashSet::new();
@@ -54,7 +66,12 @@ pub fn check(component: &str, src: &str, theme: &Theme) -> Vec<StudioError> {
                     continue;
                 }
                 if !exempt[i] {
-                    for (at, lit) in colour_literals(&tok.text) {
+                    let named = match place[i] {
+                        Place::Colour => true,
+                        Place::ColourProp => !palette.is_colour_token(&tok.text),
+                        Place::Other => false,
+                    };
+                    for (at, lit) in colour_literals(&tok.text, named) {
                         let within = tok.text[..at].chars().count() + 1;
                         out.push(err(i, within, palette.colour_message(&lit)));
                     }
@@ -186,8 +203,9 @@ fn style_flags(toks: &[Tok]) -> Vec<bool> {
 }
 
 /// The colour literals in one string, each with its byte offset in it: hex,
-/// functional notation, or the whole string being a CSS colour name.
-fn colour_literals(s: &str) -> Vec<(usize, String)> {
+/// functional notation, or (when `named`) the whole string being a CSS
+/// colour name.
+fn colour_literals(s: &str, named: bool) -> Vec<(usize, String)> {
     let mut out = Vec::new();
     let bytes = s.as_bytes();
     for (i, &b) in bytes.iter().enumerate() {
@@ -221,7 +239,7 @@ fn colour_literals(s: &str) -> Vec<(usize, String)> {
         }
     }
     let whole = s.trim().to_ascii_lowercase();
-    if CSS_COLOUR_NAMES.contains(&whole.as_str()) {
+    if named && CSS_COLOUR_NAMES.contains(&whole.as_str()) {
         out.push((s.len() - s.trim_start().len(), s.trim().to_owned()));
     }
     out
@@ -273,6 +291,10 @@ impl Palette {
             body: font("body"),
             families: crate::bundled_families(),
         }
+    }
+
+    fn is_colour_token(&self, s: &str) -> bool {
+        self.colours.iter().any(|(n, _)| n == s)
     }
 
     fn is_family(&self, s: &str) -> bool {
@@ -370,159 +392,6 @@ fn rgb_of(text: &str) -> Option<[f64; 3]> {
 fn hex_digit(b: u8) -> u8 {
     (b as char).to_digit(16).unwrap_or(0) as u8
 }
-
-/// The CSS named colours, lowercase. A string literal equal to one of these
-/// is a colour literal.
-const CSS_COLOUR_NAMES: &[&str] = &[
-    "aliceblue",
-    "antiquewhite",
-    "aqua",
-    "aquamarine",
-    "azure",
-    "beige",
-    "bisque",
-    "black",
-    "blanchedalmond",
-    "blue",
-    "blueviolet",
-    "brown",
-    "burlywood",
-    "cadetblue",
-    "chartreuse",
-    "chocolate",
-    "coral",
-    "cornflowerblue",
-    "cornsilk",
-    "crimson",
-    "cyan",
-    "darkblue",
-    "darkcyan",
-    "darkgoldenrod",
-    "darkgray",
-    "darkgreen",
-    "darkgrey",
-    "darkkhaki",
-    "darkmagenta",
-    "darkolivegreen",
-    "darkorange",
-    "darkorchid",
-    "darkred",
-    "darksalmon",
-    "darkseagreen",
-    "darkslateblue",
-    "darkslategray",
-    "darkslategrey",
-    "darkturquoise",
-    "darkviolet",
-    "deeppink",
-    "deepskyblue",
-    "dimgray",
-    "dimgrey",
-    "dodgerblue",
-    "firebrick",
-    "floralwhite",
-    "forestgreen",
-    "fuchsia",
-    "gainsboro",
-    "ghostwhite",
-    "gold",
-    "goldenrod",
-    "gray",
-    "green",
-    "greenyellow",
-    "grey",
-    "honeydew",
-    "hotpink",
-    "indianred",
-    "indigo",
-    "ivory",
-    "khaki",
-    "lavender",
-    "lavenderblush",
-    "lawngreen",
-    "lemonchiffon",
-    "lightblue",
-    "lightcoral",
-    "lightcyan",
-    "lightgoldenrodyellow",
-    "lightgray",
-    "lightgreen",
-    "lightgrey",
-    "lightpink",
-    "lightsalmon",
-    "lightseagreen",
-    "lightskyblue",
-    "lightslategray",
-    "lightslategrey",
-    "lightsteelblue",
-    "lightyellow",
-    "lime",
-    "limegreen",
-    "linen",
-    "magenta",
-    "maroon",
-    "mediumaquamarine",
-    "mediumblue",
-    "mediumorchid",
-    "mediumpurple",
-    "mediumseagreen",
-    "mediumslateblue",
-    "mediumspringgreen",
-    "mediumturquoise",
-    "mediumvioletred",
-    "midnightblue",
-    "mintcream",
-    "mistyrose",
-    "moccasin",
-    "navajowhite",
-    "navy",
-    "oldlace",
-    "olive",
-    "olivedrab",
-    "orange",
-    "orangered",
-    "orchid",
-    "palegoldenrod",
-    "palegreen",
-    "paleturquoise",
-    "palevioletred",
-    "papayawhip",
-    "peachpuff",
-    "peru",
-    "pink",
-    "plum",
-    "powderblue",
-    "purple",
-    "rebeccapurple",
-    "red",
-    "rosybrown",
-    "royalblue",
-    "saddlebrown",
-    "salmon",
-    "sandybrown",
-    "seagreen",
-    "seashell",
-    "sienna",
-    "silver",
-    "skyblue",
-    "slateblue",
-    "slategray",
-    "slategrey",
-    "snow",
-    "springgreen",
-    "steelblue",
-    "tan",
-    "teal",
-    "thistle",
-    "tomato",
-    "turquoise",
-    "violet",
-    "wheat",
-    "white",
-    "whitesmoke",
-    "yellow",
-    "yellowgreen",
-];
 
 #[cfg(test)]
 mod tests;
