@@ -82,7 +82,8 @@ before leaving a playing lecture.
 `app/src/components/sidebar/Sidebar.tsx` is a 52px column of icon buttons,
 each named by a tooltip on its right: Search (opens ⌘K), then Home, Chat,
 Calendar, Tasks and Subjects, and Sync and Settings pinned to the foot under a
-short hairline. The five sections drag into any order on `useStripReorder`'s
+short hairline. While Spotify is on, its tile sits above that hairline and
+opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The five sections drag into any order on `useStripReorder`'s
 vertical axis, and the order is kept in `localStorage` (`railOrderStore`); a
 section the stored order lacks is appended. A `RailItem` is a button with `data-tab-href` that goes
 through `navigateActive`, since the sidebar sits outside every pane's router,
@@ -201,7 +202,8 @@ Left is the tab's main page; right is its side panel (`tab.side`, pure logic in
 closed panel opens one on `/new`.
 
 - **`openBeside` is what file rows, citations and lecture rows call**
-  (`openFileSmart`, `openCitation`, `LecturesPage`, Home's `RecentRow`): it
+  (`openFileSmart`, `openCitation`, `LecturesPage`, Home's `RecentRow`, the
+  rail's music popover for `/music`): it
   pushes onto the front tab's stack and focuses the panel. A plain `Link`
   navigates its own pane; ⌘-click is still a new tab.
 - **A push names a thing, not a path**: an item with the same `recentKey` comes

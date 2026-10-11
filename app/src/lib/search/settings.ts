@@ -5,6 +5,7 @@ import {
   Graph,
   HardDrives,
   Lightning,
+  MusicNotes,
   PaintBrush,
   Robot,
   Waveform,
@@ -25,6 +26,7 @@ export type SettingsPageId =
   | "canvas"
   | "appearance"
   | "browser"
+  | "music"
   | "storage"
   | "agents"
   | "opencode"
@@ -51,6 +53,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "canvas", label: "Canvas", icon: GraduationCap, group: "General" },
   { id: "appearance", label: "Appearance", icon: PaintBrush, group: "General" },
   { id: "browser", label: "Browser", icon: Globe, group: "General" },
+  { id: "music", label: "Music", icon: MusicNotes, group: "General" },
   { id: "storage", label: "Storage", icon: HardDrives, group: "General" },
   { id: "agents", label: "Agents", icon: Robot, group: "AI" },
   { id: "opencode", label: "opencode", icon: OpencodeIcon, group: "AI", fullBleed: true },
@@ -120,6 +123,14 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["Open links in", ["default browser"]],
   ]),
   ...section("browser", "History", ["clear history", "visited"]),
+
+  page("music", ["spotify", "librespot", "premium", "player"]),
+  ...rows("music", "Music", [
+    ["Play Spotify in Oculus", ["enable", "turn on", "spotify connect"]],
+    ["Log in with Spotify", ["account", "status", "connected as", "login", "connect", "disconnect"]],
+    ["Sign out", ["log out", "forget login"]],
+    ["Device", ["device name", "spotify connect"]],
+  ]),
 
   page("storage", ["disk", "space", "videos"]),
   ...rows("storage", "Storage", [["Largest files"]]),
