@@ -60,10 +60,9 @@ export default function SettingsOpencodePage() {
     <div className="flex h-full flex-col">
       <div className="shrink-0 px-5 pt-6">
         <h2 className="text-[15px] font-semibold text-foreground">opencode</h2>
-        <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">
-          Chat's opencode agent reaches whichever providers opencode is signed in to, and offers
-          every model they list unless you untick it. Credentials are saved in opencode's own store
-          on this machine, so they are shared with the opencode you run in a terminal.
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Chat offers every model from the providers opencode is signed in to, unless you untick
+          it. Sign-ins are shared with opencode in your terminal.
         </p>
       </div>
 

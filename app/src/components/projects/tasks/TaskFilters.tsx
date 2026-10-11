@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react";
-import { CalendarBlank, CaretUpDown, Check, Kanban, Tray } from "@phosphor-icons/react";
+import { useMemo } from "react";
+import { CalendarBlank, Kanban, Tray } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { FilterPopover, FilterRow } from "@/components/ui/filter/FilterPopover";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { useSubjects } from "@/hooks/data/useSubjects";
 import { addDays, startOfWeek } from "@/lib/planning/calendar";
@@ -272,76 +271,5 @@ export function TaskFilters({
         )}
       </FilterPopover>
     </div>
-  );
-}
-
-/** `children` is a render prop so a single-choice row can close the popover. */
-function FilterPopover({
-  label,
-  active,
-  icon,
-  children,
-}: {
-  label: string;
-  active: boolean;
-  icon?: React.ReactNode;
-  children: (close: () => void) => React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn(
-            "h-7 shrink-0 gap-1.5 px-2.5 text-xs font-normal",
-            active ? "border-brand/40 text-brand" : "text-foreground",
-          )}
-        >
-          {icon}
-          <span className="max-w-32 truncate">{label}</span>
-          <CaretUpDown size={11} className="shrink-0 text-muted-foreground/60" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-56 p-1.5">
-        {children(() => setOpen(false))}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function FilterRow({
-  label,
-  hint,
-  icon,
-  selected,
-  onPick,
-  className,
-}: {
-  label: string;
-  hint?: string;
-  icon?: React.ReactNode;
-  selected: boolean;
-  onPick: () => void;
-  className?: string;
-}) {
-  return (
-    <button
-      type="button"
-      title={hint ?? label}
-      onClick={onPick}
-      className={cn(
-        "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors",
-        selected
-          ? "bg-accent text-foreground"
-          : "text-muted-foreground hover:bg-accent hover:text-foreground",
-        className,
-      )}
-    >
-      {icon}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {selected && <Check size={12} weight="bold" className="shrink-0 text-brand" />}
-    </button>
   );
 }

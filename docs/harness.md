@@ -436,6 +436,10 @@ draws "—", never $0).
 - **Recommended providers are pinned.** OpenRouter and OpenCode Go
   (`RECOMMENDED_PROVIDERS` in `opencodeCatalogue.ts`) sit first in both Providers
   tabs with a star, connected or not.
+- **Models filter by provider, maker and status.** Maker is who built the
+  model, not who serves it (`makerOf` in `models/maker.ts`: the author slug in
+  an OpenRouter id, else the family or name). The header checkbox offers or
+  hides every filtered model; a blocked model says why on hover.
 - **Zen is greyed out.** Its provider (`opencode`) shows only under *All*, marked
   Unavailable with no Connect action; it never counts as connected, and none of its
   models is listed in Models.
