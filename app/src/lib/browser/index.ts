@@ -44,8 +44,6 @@ export interface Viewport {
   top: number;
   right: number;
   bottom: number;
-  /** Radius of the page's bottom corners, matching the card's. */
-  radius: number;
 }
 
 const BROWSE_PREFIX = "/browse/";
@@ -181,11 +179,6 @@ export const browser = {
     invoke("browser_set_viewport", { id, viewport }),
   /** Takes one page off screen; it keeps its history position. */
   hideTab: (id: number) => invoke("browser_hide_tab", { id }),
-  /** A PNG of the page, painted in its slot while the DOM draws over it —
-   *  nothing renders on top of a native page. Rejects when there is no still;
-   *  callers then just hide the page. */
-  snapshot: (id: number) =>
-    invoke<ArrayBuffer>("browser_snapshot", { id }),
   hide: () => invoke("browser_hide"),
   navigate: (id: number, url: string) =>
     invoke("browser_navigate", { id, url }),

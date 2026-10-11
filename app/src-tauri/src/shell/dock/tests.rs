@@ -66,7 +66,6 @@ fn a_parked_page_keeps_the_slot_size_off_screen() {
         top: 52.0,
         right: 8.0,
         bottom: 8.0,
-        radius: 12.0,
     };
     let (position, size) = parked_rect(window, Some(vp));
     assert_eq!((size.width, size.height), (1212.0, 860.0));
@@ -85,7 +84,6 @@ fn an_unplaced_page_parks_at_the_latest_slot() {
         top: 0.0,
         right: 0.0,
         bottom: 0.0,
-        radius: 0.0,
     };
     let mut s = Inner::default();
     assert!(slot(&s, "discord").is_none());

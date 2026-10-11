@@ -603,8 +603,9 @@ recording on a large model takes minutes.
 ## The in-app browser is a native page per tab, owned by Rust
 
 A browser tab is `/browse/<id>`, naming a WKWebView that
-`app/src-tauri/src/shell/browser/` parks over an empty slot in `BrowserPage` (Canvas
-refuses iframes).
+`app/src-tauri/src/shell/browser/` places under an empty slot in `BrowserPage`, seen
+through a hole in the app ([architecture.md](./architecture.md#native-pages-sit-under-the-app-seen-through-holes-in-root)).
+Canvas refuses iframes.
 
 - **Rust owns the tab list** and pushes `browser-state` on every change;
   `useBrowserTabs` reconciles it per *pane*. The mirror preserves unchanged
@@ -612,12 +613,10 @@ refuses iframes).
   Page navigations change the URL in
   Rust only, never the route. What a page knows about itself (history, find,
   zoom) is pushed as events, because `with_webview` returns nothing.
-- **A native page can't interleave with the DOM.** `BrowserPage` hides it while
-  a portal overlaps the slot, while its tab is backgrounded (`useTabActive`),
-  and while the address field is focused — showing a PNG still
-  (`browser_snapshot`) so the card doesn't blank. It stays hidden for the whole
-  edit, not just while the list shows, because `browser_place` focuses the
-  page: re-placing it on a backspace to empty would steal the caret.
+- **A page is hidden only while its tab is backgrounded** (`useTabActive`).
+  Popovers and the address suggestions (`AddressSuggestions`, a portal) draw
+  over the live page. Hiding throttles a page's timers, and `browser_place`
+  focuses it, so nothing else hides or re-places it.
 - **History is one row per URL, ranked by frecency**, recorded on load
   *finish* (one row per redirect chain). `historyUrl` drops the fragment, and
   the whole query if any part looks like a credential.

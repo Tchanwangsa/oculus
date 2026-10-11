@@ -79,9 +79,9 @@ export const routes: RouteObject[] = [
       // Spotify's full player, opened beside the page from the rail (docs/music.md).
       { path: "music", lazy: page(() => import("@/pages/tools/MusicPage")) },
       { path: "sync", lazy: page(() => import("@/pages/tools/SyncPage")) },
-      // The id names a native WebView Rust parks over this content area.
+      // The id names a native WebView Rust places under this content area.
       { path: "browse/:id", lazy: page(() => import("@/pages/tools/BrowserPage")) },
-      // Messaging: one service's native WebView, placed over this content
+      // Messaging: one service's native WebView, placed under this content
       // area. Bare `/dock` opens the last service shown.
       { path: "dock", lazy: page(() => import("@/pages/tools/DockPage")) },
       { path: "dock/:service", lazy: page(() => import("@/pages/tools/DockPage")) },
