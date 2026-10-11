@@ -6,7 +6,8 @@
 //!   push is kept until the connection drops. Spotify pushes only on a
 //!   change, and the cluster the Spirc gets back when it announces the device
 //!   stays inside the Spirc, so until the first push the list is this device
-//!   alone.
+//!   alone. A push also carries the active device's next tracks, for the
+//!   snapshot's `up_next`.
 //! - **A transfer** to Oculus itself is a pull (`control.rs`) then play; to
 //!   another device it is librespot's `spclient().transfer(from, to)`, the
 //!   request Spotify's own apps send.
@@ -19,7 +20,7 @@ use serde::Serialize;
 use tauri::AppHandle;
 
 use super::control::{self, Need};
-use super::state::{self, percent, DEVICE_NAME};
+use super::state::{self, percent, up_next, NextTrack, DEVICE_NAME};
 
 const CLUSTER_URI: &str = "hm://connect-state/v1/cluster";
 
@@ -41,6 +42,9 @@ pub struct Device {
 pub struct Cluster {
     pub(super) active_id: String,
     pub(super) devices: Vec<Device>,
+    /// What the active device plays next, when the push carried its player
+    /// state; empty when no device is active.
+    pub(super) up_next: Option<Vec<NextTrack>>,
 }
 
 impl Cluster {
@@ -86,9 +90,21 @@ pub(super) fn from_cluster(cluster: &ClusterProto, own_id: &str) -> Cluster {
         })
         .collect();
     sort(&mut devices);
+    let up_next = if cluster.active_device_id.is_empty() {
+        Some(Vec::new())
+    } else {
+        cluster.player_state.as_ref().map(|p| {
+            up_next(
+                p.next_tracks
+                    .iter()
+                    .map(|t| (t.uri.as_str(), t.provider.as_str())),
+            )
+        })
+    };
     Cluster {
         active_id: cluster.active_device_id.clone(),
         devices,
+        up_next,
     }
 }
 

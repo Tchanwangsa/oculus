@@ -9,7 +9,8 @@ const GROUPS = [
 ] as const;
 
 /** Search results under Playlists, Albums and Tracks. A playlist or album
- *  plays as a context; a track plays from its place in its album. */
+ *  plays as a context; a track plays from its place in its album, and can
+ *  be added to the queue. */
 export function SearchGroups({
   results,
   currentUri,
@@ -21,7 +22,7 @@ export function SearchGroups({
 }) {
   const run = useMusicStore((s) => s.run);
   const play = (item: MusicSearchItem) =>
-    run(() =>
+    void run(() =>
       item.uri.startsWith("spotify:track:")
         ? music.playTrack(item.uri, item.context_uri)
         : music.playContext(item.uri),
@@ -38,7 +39,8 @@ export function SearchGroups({
                 key={item.uri}
                 name={item.name}
                 subtitle={item.subtitle}
-                imageUrl={item.image_url}
+                images={item.image_url ? [item.image_url] : []}
+                queueUri={key === "tracks" ? item.uri : undefined}
                 current={item.uri === currentUri}
                 disabled={disabled}
                 onPlay={() => play(item)}

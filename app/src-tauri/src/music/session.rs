@@ -90,6 +90,8 @@ fn connect_config(volume: u8) -> ConnectConfig {
         name: DEVICE_NAME.to_string(),
         device_type: DeviceType::Computer,
         initial_volume: from_percent(volume),
+        // What plays next, for the snapshot's `up_next`.
+        emit_set_queue_events: true,
         ..ConnectConfig::default()
     }
 }

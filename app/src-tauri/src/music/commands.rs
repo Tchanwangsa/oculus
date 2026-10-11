@@ -2,17 +2,20 @@
 //! outcome arrives as `music-state`. Playback commands go to the connected
 //! device and fail with "Not connected to Spotify" otherwise; while another
 //! device holds playback they pull it back first (`control.rs`). The lists
-//! (`music_playlists`, `music_search`, `music_devices`, `music_outputs`)
-//! return their results.
+//! (`music_playlists`, `music_playlist_covers`, `music_playlist_tracks`,
+//! `music_tracks`, `music_search`, `music_devices`, `music_outputs`) return
+//! their results.
+
+use std::collections::HashMap;
 
 use librespot_connect::{LoadRequest, LoadRequestOptions, PlayingTrack, Spirc};
-use librespot_core::SessionConfig;
+use librespot_core::{SessionConfig, SpotifyUri};
 use tauri::AppHandle;
 
 use super::audio::{self, OutputDevice};
 use super::control::{self, Need};
 use super::devices::{self, Device};
-use super::library::{self, Playlist, SearchResults};
+use super::library::{self, Playlist, SearchResults, TrackRow};
 use super::login::{self, LoginError};
 use super::session::{self, Start};
 use super::state::{self, Snapshot};
@@ -191,9 +194,10 @@ pub async fn music_play_context(app: AppHandle, uri: String) -> Result<(), Strin
     .await
 }
 
-/// Plays a track here: from its place in `context_uri` (its album, from a
-/// search) so playback goes on through it, or alone without one. A track URI
-/// is not a context librespot can load.
+/// Plays a track here: from its place in `context_uri` (its album from a
+/// search, or the playlist it was picked in) so playback goes on through
+/// it, or alone without one. librespot finds the track by URI among the
+/// context's loaded tracks. A track URI is not a context librespot can load.
 #[tauri::command]
 pub async fn music_play_track(
     app: AppHandle,
@@ -242,6 +246,49 @@ async fn load(app: &AppHandle, request: LoadRequest) -> Result<(), String> {
 #[tauri::command]
 pub async fn music_playlists(app: AppHandle, refresh: bool) -> Result<Vec<Playlist>, String> {
     Ok(library::playlists(&app, refresh).await?)
+}
+
+/// Covers for playlists that have none, by URI: one URL, or four for a
+/// grid; empty when the playlist has no track covers. Kept in memory like
+/// the playlists; a URI missing from the answer can be asked for again.
+#[tauri::command]
+pub async fn music_playlist_covers(
+    app: AppHandle,
+    uris: Vec<String>,
+) -> Result<HashMap<String, Vec<String>>, String> {
+    Ok(library::playlist_covers(&app, uris).await?)
+}
+
+/// Every catalogue track of a playlist, in order, as URIs; kept until the
+/// playlists are refreshed. Rows come from `music_tracks`.
+#[tauri::command]
+pub async fn music_playlist_tracks(app: AppHandle, uri: String) -> Result<Vec<String>, String> {
+    Ok(library::playlist_tracks(&app, &uri).await?)
+}
+
+/// Rows for these tracks, by URI; one Spotify describes nothing for is left
+/// out. Kept in memory once fetched.
+#[tauri::command]
+pub async fn music_tracks(
+    app: AppHandle,
+    uris: Vec<String>,
+) -> Result<HashMap<String, TrackRow>, String> {
+    Ok(library::track_rows(&app, &uris).await?)
+}
+
+/// Adds a track to the queue, only while Oculus is the active device: the
+/// Spirc drops a queue command otherwise, and librespot has no way to queue
+/// on another device (`control.rs`).
+#[tauri::command]
+pub async fn music_add_to_queue(app: AppHandle, uri: String) -> Result<(), String> {
+    let track = SpotifyUri::from_uri(&uri).map_err(|_| format!("Not a Spotify URI: {uri}"))?;
+    if !matches!(track, SpotifyUri::Track { .. }) {
+        return Err(format!("Not a Spotify track: {uri}"));
+    }
+    control::send(&app, Need::Active, || {
+        state::with_spirc(&app, |spirc| spirc.add_to_queue(track))
+    })
+    .await
 }
 
 /// Playlists, albums and tracks matching `query`, ten of each.

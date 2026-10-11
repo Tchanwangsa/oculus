@@ -20,7 +20,7 @@ switch is on.
 | Connect devices and transfer | `app/src-tauri/src/music/devices.rs` |
 | The output on this Mac: the choice, cpal's devices, the player's sink | `app/src-tauri/src/music/audio/` |
 | A track and its cover URL | `app/src-tauri/src/music/track.rs` |
-| The library: rate-limit gate, playlists, search | `app/src-tauri/src/music/library/` |
+| The library: rate-limit gate, playlists and their tracks, covers, search | `app/src-tauri/src/music/library/` |
 | The duck a focus mode calls | `app/src-tauri/src/music/duck.rs` |
 | The OAuth login and its callback on port 8898 | `app/src-tauri/src/music/login.rs` |
 | The stored credentials in keyd; keyd's `get` and its allowlist | `app/src-tauri/src/music/credentials.rs`, `app/keyd/core/src/ops/get.rs`, `app/keyd/core/src/names.rs` |
@@ -33,7 +33,7 @@ switch is on.
 | Settings → Music | `app/src/pages/settings/integrations/MusicPage.tsx`, `app/src/components/settings/music/` |
 | The rail tile and its popover | `app/src/components/sidebar/MusicTile.tsx`, `app/src/components/music/NowPlaying.tsx` |
 | The full player (`/music`) and its parts | `app/src/pages/tools/MusicPage.tsx`, `app/src/components/music/` |
-| Playlists and search under the player | `app/src/components/music/library/` |
+| Up next, playlists and their tracks, and search under the player | `app/src/components/music/library/` |
 | The device menu (Spotify devices, output on this Mac) | `app/src/components/music/devices/`, `app/src/components/music/VolumeRow.tsx`, `app/src/components/music/PlayingElsewhere.tsx` |
 
 ## Settings → Music is the one switch, and the only startup connect
@@ -75,8 +75,9 @@ switch is on.
   <device>" shows under the volume, and the transport stays enabled.
 - **"Open player" opens `/music` beside the page** (`openBeside`); its
   `recentKey` is `music`, so there is one player item however it is opened.
-  The page adds the album, elapsed and total, shuffle and repeat, the
-  account's playlists and a search ([music-library.md](./music-library.md)), and,
+  The page adds the album, elapsed and total, shuffle and repeat, what
+  plays next, the account's playlists with their tracks and a search
+  ([music-library.md](./music-library.md)), and,
   with no session or track, a "Not connected" view linking to Settings → Music.
 - **The clock ticks in the UI**: `useMusicPosition` re-renders on each whole
   second of `positionNow` while playing, the pane is on screen and the
@@ -181,7 +182,7 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
 
 After a phone or the desktop app takes playback, librespot's Spirc drops
 every command but `activate` and `transfer` ("will be ignored while Not
-Active"). `control.rs` puts each command through one of three paths:
+Active"). `control.rs` puts each command through one of four paths:
 
 - **Pull** (play, play/pause, next, previous, seek, volume, shuffle, repeat,
   a transfer to Oculus): `Spirc::transfer`, which asks Spotify to move the
@@ -195,6 +196,12 @@ Active"). `control.rs` puts each command through one of three paths:
   the load after it is kept; the load replaces whatever a pull would bring.
 - **Nothing while inactive** (`music_pause`, `music_duck`): a pause never
   pulls playback here, and a duck never lowers a device that is not playing.
+- **Refused while inactive** (`music_add_to_queue`): the queue belongs to
+  the device playing, the Spirc can add only to its own, and librespot has
+  no command for another device's. Pulling playback here to queue one track
+  would move what is playing, so the command fails with "Playing on
+  <device>: Oculus can add to the queue only while it plays here" (or "Play
+  something here first" when nothing plays).
 
 `active` follows the player's `SessionConnected` (the Spirc activated, from a
 command, a transfer or a play from the phone) and `SessionDisconnected`
@@ -252,8 +259,9 @@ Connect device), `playing_on` (the active device's name when it is another,
 from the cluster), `output` (the chosen output, null for the system
 default), `track` (`uri`, `name`, `artists`,
 `album`, `cover_url`, `duration_ms`) or null, `position_ms` with
-`position_at_ms`, `playing`, `volume` (0–100), `shuffle`, `repeat` and
-`error`.
+`position_at_ms`, `playing`, `volume` (0–100), `shuffle`, `repeat`,
+`up_next` (`uri`, `queued`; [music-library.md](./music-library.md#up-next-comes-from-the-spirc-while-oculus-plays-and-the-cluster-otherwise))
+and `error`.
 
 - **The position is stamped, not ticked.** `position_at_ms` is the epoch ms at
   which `position_ms` was true; while playing, the UI adds the time since
@@ -298,9 +306,11 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_shuffle(on)`, `music_repeat(on)` | Shuffle; repeat the context (off also clears a repeated track) |
 | `music_seek(position_ms)`, `music_volume(percent)` | Seek; volume 0–100, which drops a held duck |
 | `music_play_context(uri)` | Activates the device, loads a `spotify:` context and plays it |
-| `music_play_track(uri, context_uri?)` | Plays a track from its place in the context, or alone without one |
+| `music_play_track(uri, context_uri?)` | Plays a track from its place in the context (its album, or the playlist it was picked in), or alone without one |
+| `music_add_to_queue(uri)` | Adds a track to the queue; refused while another device plays or nothing does |
 | `music_duck(level?)` | A level ducks to that share of the kept volume; null restores it; nothing while inactive |
 | `music_playlists(refresh)`, `music_search(query)` | The playlists, kept until `refresh`; ten playlists, albums and tracks ([music-library.md](./music-library.md)) |
+| `music_playlist_covers(uris)`, `music_playlist_tracks(uri)`, `music_tracks(uris)` | Covers made for playlists without one; a playlist's track URIs; track rows by URI ([music-library.md](./music-library.md)) |
 | `music_devices()`, `music_transfer(device_id)` | Connect devices from the last push; move playback and play ([music-library.md](./music-library.md#the-device-list-is-spotifys-pushed-cluster)) |
 | `music_outputs()`, `music_set_output(name?)` | This Mac's outputs, the default marked; choose one, null for the system default |
 
@@ -317,7 +327,8 @@ session.
 - Constructing librespot's `Cache` writes the account's credentials to disk in plain text — never use it.
 - `music_play_pause` from the exclusive-playback rule would start music it meant to stop — use `music_pause`.
 - `cargo update` on librespot moves it off the pinned rev and can move tauri off 2.11.2 — bump the rev by hand.
-- A track URI is not a context librespot can load — `music_play_track` uses its album, or `from_tracks`.
+- A track URI is not a context librespot can load — `music_play_track` uses its album or playlist, or `from_tracks`.
+- An inactive Spirc drops `add_to_queue` without a word — `music_add_to_queue` refuses instead (`Need::Active`).
 - librespot's rodio sink `unwrap`s a named device that is gone and hangs on a dead stream — the sink in `audio/` replaces it.
 - `.gitignore` ignores every `output/` directory — the output module is `audio/`.
 - `eprintln!` panics on a closed stderr — use `elog!` in the music module.

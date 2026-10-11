@@ -22,7 +22,9 @@ pub struct Playlist {
     pub name: String,
     pub owner: Option<String>,
     pub track_count: Option<u32>,
-    pub image_url: Option<String>,
+    /// The cover: one URL, or four for a 2×2 grid; none until one is known
+    /// (`covers.rs` makes one for a playlist Spotify gives none).
+    pub images: Vec<String>,
 }
 
 /// What a row shows of a playlist, from its rootlist decorations or, when
@@ -42,7 +44,7 @@ impl Header {
             name: self.name,
             owner: self.owner,
             track_count: self.track_count,
-            image_url: self.image_url,
+            images: self.image_url.into_iter().collect(),
         }
     }
 }

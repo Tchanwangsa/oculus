@@ -10,6 +10,7 @@ import { MusicTransport } from "@/components/music/MusicTransport";
 import { PlayingElsewhere } from "@/components/music/PlayingElsewhere";
 import { VolumeRow } from "@/components/music/VolumeRow";
 import { MusicLibrary } from "@/components/music/library/MusicLibrary";
+import { UpNext } from "@/components/music/library/UpNext";
 import type { MusicSnapshot } from "@/lib/music";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
 import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
@@ -26,9 +27,9 @@ const NOTHING_PLAYING = "Pick a playlist below, or choose Oculus in Spotify.";
 
 /**
  * The full player, opened beside the page from the rail's popover (`/music`),
- * with the account's playlists and search under it. Spotify's state is
- * Rust's (`useMusicState`); this only draws it and sends commands. Without a
- * session or a track it points to Settings → Music.
+ * with what plays next and the account's playlists and search under it.
+ * Spotify's state is Rust's (`useMusicState`); this only draws it and sends
+ * commands. Without a session or a track it points to Settings → Music.
  */
 export default function MusicPage() {
   const active = useTabActive();
@@ -83,6 +84,7 @@ export default function MusicPage() {
         <VolumeRow snapshot={snapshot} />
         <PlayingElsewhere snapshot={snapshot} />
         {error && <p className="text-xs text-destructive">{error}</p>}
+        <UpNext snapshot={snapshot} />
         <MusicLibrary snapshot={snapshot} />
       </div>
     </div>

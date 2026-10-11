@@ -22,6 +22,13 @@ export interface MusicTrack {
   duration_ms: number;
 }
 
+/** A track to play after the current one (`up_next`). */
+export interface MusicNextTrack {
+  uri: string;
+  /** Added to the queue, as against next in the context. */
+  queued: boolean;
+}
+
 export interface MusicSnapshot {
   connected: boolean;
   /** A login, a connect or a reconnect is under way. */
@@ -46,6 +53,10 @@ export interface MusicSnapshot {
   volume: number;
   shuffle: boolean;
   repeat: boolean;
+  /** What plays next, queued tracks first, up to 20 catalogue tracks: from
+   *  Oculus's own queue while it plays, from Spotify's device list otherwise.
+   *  Names come from `music.tracks`. */
+  up_next: MusicNextTrack[];
   /** The latest failure, kept until the next connect or load. */
   error: string | null;
 }
@@ -56,7 +67,20 @@ export interface MusicPlaylist {
   name: string;
   owner: string | null;
   track_count: number | null;
+  /** The cover: one URL, or four drawn as a 2×2 grid; empty until one is
+   *  known. A playlist Spotify gives no picture gets one from
+   *  `music.playlistCovers`. */
+  images: string[];
+}
+
+/** One track's row (`music_tracks`). */
+export interface MusicTrackRow {
+  uri: string;
+  name: string;
+  artists: string[];
+  album: string;
   image_url: string | null;
+  duration_ms: number;
 }
 
 /** One search hit (`music_search`). */
@@ -151,12 +175,24 @@ export const music = {
   setRepeat: (on: boolean) => invoke("music_repeat", { on }),
   /** `spotify:playlist:…`, `spotify:album:…`; played on this device. */
   playContext: (uri: string) => invoke("music_play_context", { uri }),
-  /** A `spotify:track:…`, from its place in `contextUri` when given. */
+  /** A `spotify:track:…`, from its place in `contextUri` (a playlist or
+   *  album) when given. */
   playTrack: (uri: string, contextUri: string | null = null) =>
     invoke("music_play_track", { uri, contextUri }),
   /** Calls Spotify can rate-limit: Rust keeps the playlists after the first
    *  fetch, and a 429 refuses every call until its wait is over. */
   playlists: (refresh = false) => invoke<MusicPlaylist[]>("music_playlists", { refresh }),
+  /** Covers for playlists without one, made from their first tracks' albums
+   *  and kept until a refresh. A URI missing from the answer was cut short
+   *  (a rate limit) and may be asked for again. */
+  playlistCovers: (uris: string[]) =>
+    invoke<Record<string, string[]>>("music_playlist_covers", { uris }),
+  /** Every catalogue track of a playlist as URIs, kept until a refresh. */
+  playlistTracks: (uri: string) => invoke<string[]>("music_playlist_tracks", { uri }),
+  /** Rows by URI, kept once fetched; ask for a page of ~100 at a time. */
+  tracks: (uris: string[]) => invoke<Record<string, MusicTrackRow>>("music_tracks", { uris }),
+  /** Refused, with the reason, unless Oculus is the device playing. */
+  addToQueue: (uri: string) => invoke("music_add_to_queue", { uri }),
   search: (query: string) => invoke<MusicSearchResults>("music_search", { query }),
   /** The account's Connect devices from Spotify's last pushed list; only
    *  this device until the first push. Costs no call. */
@@ -174,3 +210,28 @@ export const music = {
   /** Put the pre-duck volume back; nothing without a held duck. */
   unduck: () => invoke("music_duck", { level: null }),
 };
+
+/** Track rows fetched per `music.tracks` call. */
+export const TRACK_PAGE = 100;
+
+/** "artists · album" for a track row. */
+export function trackSubtitle(row: MusicTrackRow): string {
+  return [row.artists.join(", "), row.album].filter(Boolean).join(" · ");
+}
+
+/** The `TRACK_PAGE` pages holding rows `first` to `last` (inclusive). */
+export function trackPages(first: number, last: number): number[] {
+  if (last < first || first < 0) return [];
+  const pages: number[] = [];
+  for (let p = Math.floor(first / TRACK_PAGE); p <= Math.floor(last / TRACK_PAGE); p++) {
+    pages.push(p);
+  }
+  return pages;
+}
+
+/** "owner · N tracks" for a playlist. */
+export function playlistSubtitle(p: MusicPlaylist): string {
+  const count =
+    p.track_count === null ? null : `${p.track_count} ${p.track_count === 1 ? "track" : "tracks"}`;
+  return [p.owner, count].filter(Boolean).join(" · ");
+}

@@ -1,5 +1,6 @@
-//! One GET against the session's spclient host, with the session's Login5
-//! token and client token, its status read into a `LibraryError`. ureq
+//! One request against the session's spclient host — a GET, or a POST of a
+//! protobuf body — with the session's Login5 token and client token, its
+//! status read into a `LibraryError`. ureq
 //! rather than `SpClient::request`: librespot's HTTP client sleeps through a
 //! 429's `Retry-After` and tries again, retries other failures up to ten
 //! times, and folds every non-2xx into a generic error. Here a request is
@@ -20,7 +21,8 @@ use crate::runtime::blocking;
 /// Per request, so a stalled connection fails the click rather than hanging
 /// the page.
 const TIMEOUT: Duration = Duration::from_secs(20);
-/// A rootlist page or a search answer is a few hundred KB at most.
+/// A rootlist page, a search answer or a batch of track metadata is a few
+/// hundred KB at most.
 const MAX_BODY: u64 = 16 * 1024 * 1024;
 
 pub(super) const PROTOBUF: &str = "application/x-protobuf";
@@ -40,11 +42,21 @@ fn agent() -> &'static ureq::Agent {
     })
 }
 
-/// The body of `GET <spclient><endpoint>`. `endpoint` starts with `/`.
-pub(super) async fn get(
+/// How a request is sent.
+pub(super) enum Method {
+    /// A GET accepting this content type.
+    Get(&'static str),
+    /// A POST of this protobuf body, with the content type
+    /// `SpClient::request_with_protobuf` sets and no `Accept`, as it sends.
+    PostProtobuf(Vec<u8>),
+}
+
+/// The body of the answer to `<spclient><endpoint>`. `endpoint` starts with
+/// `/`.
+pub(super) async fn send(
     session: &Session,
     endpoint: &str,
-    accept: &'static str,
+    method: Method,
 ) -> Result<Vec<u8>, LibraryError> {
     let spclient = session.spclient();
     let base = spclient
@@ -60,25 +72,30 @@ pub(super) async fn get(
     let client_token = spclient.client_token().await.ok();
     let url = format!("{base}{endpoint}");
     let auth = format!("{} {}", token.token_type, token.access_token);
-    blocking::run(move || Ok(get_blocking(&url, &auth, client_token.as_deref(), accept)))
+    blocking::run(move || Ok(send_blocking(&url, &auth, client_token.as_deref(), method)))
         .await
         .map_err(LibraryError::Transport)?
 }
 
-fn get_blocking(
+fn send_blocking(
     url: &str,
     auth: &str,
     client_token: Option<&str>,
-    accept: &str,
+    method: Method,
 ) -> Result<Vec<u8>, LibraryError> {
-    let mut request = agent()
-        .get(url)
-        .set("Authorization", auth)
-        .set("Accept", accept);
+    let request = match &method {
+        Method::Get(accept) => agent().get(url).set("Accept", accept),
+        Method::PostProtobuf(_) => agent().post(url).set("Content-Type", PROTOBUF),
+    };
+    let mut request = request.set("Authorization", auth);
     if let Some(token) = client_token {
         request = request.set("client-token", token);
     }
-    match request.call() {
+    let sent = match &method {
+        Method::Get(_) => request.call(),
+        Method::PostProtobuf(body) => request.send_bytes(body),
+    };
+    match sent {
         Ok(response) => {
             let mut body = Vec::new();
             response
