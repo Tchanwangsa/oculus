@@ -100,6 +100,17 @@ with what to write instead:
 Letters and `, . ; : ! ? ' " - — ( )` pass. Words on screen (props) may use
 digits and symbols; only the script is spoken.
 
+Lint checks symbols, not sound. Two things it cannot see:
+
+- **Acronyms said letter by letter** are written as spaced capitals,
+  `R S A`; an acronym said as a word is written as one, `NASA`.
+- **Fusions across words.** The voice runs words together, so a spelled
+  letter or a short word can merge with its neighbour: `R S A rests` is
+  heard as "RS arrests", `a part` as "apart". After a spelled acronym,
+  avoid a next word that starts with a vowel sound or repeats the
+  acronym's last sound; rephrase (`R S A depends on`, `R S A's security
+  rests on`).
+
 ## Components
 
 A component is one file, `components/<Name>.tsx`, named as the component.

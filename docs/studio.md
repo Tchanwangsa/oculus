@@ -205,7 +205,13 @@ write `video.json`, `script.md` and any component of the video's own,
 `lint --json` until only stale narration is left, `narrate`, lint again,
 look at `frame` and `strip` PNGs with the agent's image-reading tool,
 `render` a draft and then `--final`, and `gallery` then `promote` a new
-component the student wants kept; plus the taste rules (one idea per scene,
+component the student wants kept; the story rules (write the argument
+before the scenes, every claim with its reason, each scene's narration
+opening on a link to the last, numbers given meaning, terms defined in
+passing, an example followed by its general rule, the payoff shown, the
+end answering the opening question, and phrasing the voice cannot fuse
+across words: "R S A rests" is heard as "RS arrests"); and the taste
+rules (one idea per scene,
 words on screen summarise the narration, the frame filled with the key
 figure at display size, something on screen within a second, motion cued
 with `word()`, one shared key for consecutive headings, tokens over

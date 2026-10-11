@@ -61,9 +61,15 @@ subject code you pass to `-s`. It refuses a slug that exists: pick another,
 or `oculus studio list --subject COMP30027` to see what is there. Add
 `--portrait` only when asked for a vertical video.
 
-**3. Plan, then write.** For about 60 seconds: 5 to 8 scenes and about
+**3. Plan, then write.** Write the argument first, as plain sentences in
+your head or your reply: the question the video answers, each step with its
+*reason*, and how the end answers the question. Then cut it into scenes
+(see "The story" below). For about 60 seconds: 5 to 8 scenes and about
 150 spoken words in all (speech runs at about 2.5 words a second, and each
-narrated scene adds about a second of quiet around its clip).
+narrated scene adds about a second of quiet around its clip). An explained
+step takes 15 to 20 seconds; if the idea needs more steps than the length
+allows, cover less ground, or tell the student how long it needs, rather
+than rushing.
 
 - See what you can use: `oculus studio components list gradient-descent`,
   then `oculus studio components show gradient-descent Steps` for one's
@@ -152,6 +158,35 @@ wants to keep it for other videos:
 ```bash
 oculus studio components promote gradient-descent Takeaway --to subject
 ```
+
+## The story
+
+The student watches to understand, not to be told. Each of these is a
+sentence or a clause, not a recap: do it lightly, but do it.
+
+- **Explain, don't assert.** Every claim gets its reason. Not "factoring
+  is hard", but why: the only general way is to try divisors, and their
+  number grows with the size of the number. A claim you cannot back in one
+  sentence does not belong in the video.
+- **Link each scene to the last.** Open each scene's narration with a
+  clause that picks up what was just shown ("That gap is the whole lock:
+  …"), so a new number or picture lands as the next step of the same
+  argument, not a new topic.
+- **Make every number mean something** for the argument. "A 768-bit key"
+  says nothing; "a 768-bit key, a number about two hundred and thirty
+  digits long, was factored in two thousand nine" does.
+- **Define a term the first time**, in passing: "nation states, that is,
+  governments with whole computing centres".
+- **Example, then the rule.** After a worked example, say the general rule
+  in one sentence and put it on screen, so the example is not left as a
+  trick that happened to work.
+- **Spell out the payoff.** When a step "gives away" or "breaks"
+  something, show how, in one concrete line.
+- **End on the opening question.** The last scene answers what the first
+  scene raised, naming the steps that got there in a clause each.
+- **Say it the way the voice will run it.** Speech is one stream, so words
+  fuse across their gaps: "R S A rests" is heard as "RS arrests". Read
+  each sentence as sounds and rephrase a fusion ("R S A depends on…").
 
 ## Taste
 
