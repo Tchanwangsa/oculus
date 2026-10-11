@@ -206,6 +206,13 @@ so it is staged before the CLI. The release profile is shared with that
 CLI build, so the tests reuse its artifacts. sccache is installed because
 `app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
 
+The app's Windows dev-dependency enables keyd core's `test-support` for scripted
+brokers in release tests. `app/src-tauri/src/test_support/keyd.rs` registers
+only its isolated Windows test endpoint, for the fake's lifetime. A registered
+endpoint still requires the pipe server's live PID to be this test process;
+unregistered endpoints retain MSIX verification, and the production pipe
+cannot be registered. Normal app and CLI builds select only `client`.
+
 A second job, on Linux because the crate is portable, checks
 `app/editor-core` ([editor-core.md](./editor-core.md)) and its wasm bridge:
 `cargo fmt --check`, clippy with `-D warnings` over every target and feature

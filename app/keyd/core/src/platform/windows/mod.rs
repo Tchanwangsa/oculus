@@ -10,6 +10,8 @@ mod secret_store;
 mod security;
 
 pub(crate) use endpoint::{accept_any, activated, bind, connect, set_timeout, Listener, Stream};
+#[cfg(all(feature = "client", feature = "test-support"))]
+pub use endpoint::{register_test_broker, TestBrokerRegistration};
 #[cfg(feature = "server")]
 pub(crate) fn peer_check(policy: super::Policy) -> Box<dyn super::PeerCheck> {
     Box::new(peer::WindowsPeers::new(policy))

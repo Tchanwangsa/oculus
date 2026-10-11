@@ -275,6 +275,16 @@ fn connect_inner(path: &Path, verify_server: bool) -> Result<Stream, ConnectErro
             let stream = Stream::new(Handle(value));
             #[cfg(all(feature = "client", any(test, not(debug_assertions))))]
             if verify_server {
+                #[cfg(feature = "test-support")]
+                if test_brokers()
+                    .lock()
+                    .map_err(|_| ConnectError::Broken("test broker lock poisoned".into()))?
+                    .contains(path)
+                {
+                    authenticate_test_server(&stream)
+                        .map_err(|e| ConnectError::Broken(e.to_string()))?;
+                    return Ok(stream);
+                }
                 authenticate_server(&stream).map_err(|e| ConnectError::Broken(e.to_string()))?;
             }
             return Ok(stream);
@@ -297,6 +307,79 @@ fn connect_inner(path: &Path, verify_server: bool) -> Result<Stream, ConnectErro
         }
     }
 }
+/// Keeps one explicitly registered fake endpoint available to this test process.
+#[cfg(all(feature = "client", feature = "test-support"))]
+#[must_use = "the test broker is registered only while this guard is held"]
+pub struct TestBrokerRegistration(std::path::PathBuf);
+
+#[cfg(all(feature = "client", feature = "test-support"))]
+impl Drop for TestBrokerRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut paths) = test_brokers().lock() {
+            paths.remove(&self.0);
+        }
+    }
+}
+
+#[cfg(all(feature = "client", feature = "test-support"))]
+fn test_brokers() -> &'static Mutex<std::collections::BTreeSet<std::path::PathBuf>> {
+    static PATHS: std::sync::OnceLock<Mutex<std::collections::BTreeSet<std::path::PathBuf>>> =
+        std::sync::OnceLock::new();
+    PATHS.get_or_init(|| Mutex::new(std::collections::BTreeSet::new()))
+}
+
+/// Test-support only: the production pipe is never eligible, and the server
+/// must be this process even after an endpoint has been registered.
+#[cfg(all(feature = "client", feature = "test-support"))]
+pub fn register_test_broker(path: &Path) -> io::Result<TestBrokerRegistration> {
+    let prefix = format!("{}.test.", super::pipe_name()?.display());
+    if !path.to_string_lossy().starts_with(&prefix) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "only isolated test broker endpoints can be registered",
+        ));
+    }
+    if !test_brokers()
+        .lock()
+        .map_err(|_| io::Error::other("test broker lock poisoned"))?
+        .insert(path.to_path_buf())
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "test broker endpoint is already registered",
+        ));
+    }
+    Ok(TestBrokerRegistration(path.to_path_buf()))
+}
+
+#[cfg(all(
+    feature = "client",
+    feature = "test-support",
+    any(test, not(debug_assertions))
+))]
+fn authenticate_test_server(stream: &Stream) -> io::Result<()> {
+    let mut pid = 0;
+    if unsafe { GetNamedPipeServerProcessId(stream.handle.0, &mut pid) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if pid != std::process::id() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "the test pipe server is not this process",
+        ));
+    }
+    let process = super::security::open_process(pid, false)?;
+    let mut still_pid = 0;
+    if unsafe { GetNamedPipeServerProcessId(stream.handle.0, &mut still_pid) } == 0
+        || pid != still_pid
+    {
+        return Err(io::Error::other(
+            "test pipe server changed while checking it",
+        ));
+    }
+    super::security::confirm_process(pid, process.0)
+}
+
 /// No credential is sent until Windows identifies the real installed broker.
 #[cfg(all(feature = "client", any(test, not(debug_assertions))))]
 fn authenticate_server(stream: &Stream) -> io::Result<()> {
@@ -449,6 +532,77 @@ mod tests {
             }
             Ok(_) => panic!("unsigned test process impersonated the credential broker"),
         }
+    }
+
+    #[cfg(all(feature = "client", feature = "test-support"))]
+    #[test]
+    fn test_broker_registration_is_scoped_and_excludes_the_production_pipe() {
+        let production = super::super::pipe_name().unwrap();
+        assert_eq!(
+            register_test_broker(&production).err().unwrap().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        let path = crate::paths::socket(&scratch("registered-broker"));
+        let listener = bind(&path).unwrap();
+        let registration = register_test_broker(&path).unwrap();
+        assert_eq!(
+            register_test_broker(&path).err().unwrap().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        let mut client = connect_inner(&path, true).unwrap();
+        let mut server = accept_any(&[&listener], Some(Duration::from_secs(2)))
+            .unwrap()
+            .unwrap();
+        client.write_all(b"fixture").unwrap();
+        let mut bytes = [0; 7];
+        server.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"fixture");
+        drop(registration);
+        match connect_inner(&path, true) {
+            Err(ConnectError::Broken(message)) => assert!(message.contains("current Oculus MSIX")),
+            _ => panic!("an expired registration bypassed MSIX verification"),
+        }
+    }
+
+    #[cfg(all(feature = "client", feature = "test-support"))]
+    #[test]
+    fn a_registered_test_broker_must_still_run_in_this_process() {
+        const CHILD_PIPE: &str = "OCULUS_KEYD_TEST_CHILD_PIPE";
+        if let Some(path) = std::env::var_os(CHILD_PIPE) {
+            let listener = bind(Path::new(&path)).unwrap();
+            let mut server = accept_any(&[&listener], Some(Duration::from_secs(5)))
+                .unwrap()
+                .expect("parent did not connect to child fixture");
+            set_timeout(&server, Some(Duration::from_secs(2))).unwrap();
+            assert_eq!(server.read(&mut [0]).unwrap(), 0);
+            return;
+        }
+        let path = crate::paths::socket(&scratch("other-process-broker"));
+        let _registration = register_test_broker(&path).unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "platform::windows::endpoint::tests::a_registered_test_broker_must_still_run_in_this_process",
+                "--test-threads=1",
+            ])
+            .env(CHILD_PIPE, &path)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+        loop {
+            match connect_inner(&path, true) {
+                Err(ConnectError::Absent(_)) if started.elapsed() < Duration::from_secs(4) => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(ConnectError::Broken(message)) => {
+                    assert!(message.contains("test pipe server is not this process"));
+                    break;
+                }
+                _ => panic!("a registered endpoint trusted another process"),
+            }
+        }
+        assert!(child.wait().unwrap().success());
     }
 
     #[test]

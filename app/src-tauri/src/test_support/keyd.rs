@@ -1,4 +1,4 @@
-//! A fake oculus-keyd on a Unix socket.
+//! A fake oculus-keyd on an isolated OS endpoint.
 
 use std::io::Write;
 use std::path::Path;
@@ -12,6 +12,8 @@ use crate::providers::ratelimit::hold;
 /// request's header and body go to `handler`, whose header and body are the
 /// reply. Its thread ends with the test process.
 pub struct FakeKeyd {
+    #[cfg(windows)]
+    _registration: keyd_core::platform::TestBrokerRegistration,
     requests: Arc<Mutex<Vec<(Value, Vec<u8>)>>>,
 }
 
@@ -22,9 +24,10 @@ impl FakeKeyd {
     {
         use keyd_core::framing;
 
-        let listener =
-            keyd_core::platform::Listener::bind(&crate::library::paths::keyd_socket_path(dir))
-                .unwrap();
+        let endpoint = crate::library::paths::keyd_socket_path(dir);
+        let listener = keyd_core::platform::Listener::bind(&endpoint).unwrap();
+        #[cfg(windows)]
+        let registration = keyd_core::platform::register_test_broker(&endpoint).unwrap();
         let requests: Arc<Mutex<Vec<(Value, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
         let log = requests.clone();
         std::thread::spawn(move || {
@@ -47,7 +50,11 @@ impl FakeKeyd {
                 }
             }
         });
-        Self { requests }
+        Self {
+            requests,
+            #[cfg(windows)]
+            _registration: registration,
+        }
     }
 
     /// Every request so far, in order: header, then body.

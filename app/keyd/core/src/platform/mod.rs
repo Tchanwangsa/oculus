@@ -29,6 +29,8 @@ mod windows;
 use windows as imp;
 #[cfg(windows)]
 pub use windows::pipe_name;
+#[cfg(all(windows, feature = "client", feature = "test-support"))]
+pub use windows::{register_test_broker, TestBrokerRegistration};
 
 /// Exclusive locks, owner-only files, durable renames: the POSIX ones on any
 /// Unix, whatever its adapter.
