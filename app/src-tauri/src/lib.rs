@@ -49,6 +49,11 @@ pub fn run() {
         .manage(shell::usage::UsageState::default())
         .manage(music::MusicState::default())
         .setup(|app| {
+            // WebKit's WebCrypto master key comes from keyd. First, so the
+            // default store has its delegate before any page can ask.
+            #[cfg(target_os = "macos")]
+            shell::webcrypto::install_default(app.handle());
+
             // Give the parse and embed seams a window to emit progress to;
             // headless (CLI) runs never bind, so their emits are no-ops.
             parse::events::bind(app.handle().clone());

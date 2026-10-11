@@ -184,10 +184,10 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
   (`Session::auth_data`, base64) and the Connect device id. The device id is
   made at login and kept, so the device keeps one identity across launches.
   It is written only when it differs from what was loaded.
-- **keyd's `get` is the one op that returns a stored value**, for the names in
+- **keyd's `get` returns a stored value**, for the names in
   `names::READABLE` (only `music.spotify`) and to the app alone: librespot logs
   in with the blob itself, so there is no request keyd could attach it to the
-  way `forward` attaches a key ([auth.md](./auth.md#spotifys-credentials-are-the-one-value-keyd-reads-back)).
+  way `forward` attaches a key ([auth.md](./auth.md#spotifys-credentials-are-read-back-with-get)).
 - **keyd calls run off the async runtime** (`runtime::blocking::run`); the
   save after a connect runs in its own task, so the Spirc keeps being polled
   while keyd waits on a keychain prompt. A failed save leaves playback running

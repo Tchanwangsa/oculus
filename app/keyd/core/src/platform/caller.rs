@@ -34,6 +34,10 @@ pub struct Caller {
     /// The running code is intact, as far as the OS can tell.
     pub valid: bool,
     pub role: Role,
+    /// For the app role: the name the OS files its data under, a bundle's
+    /// identifier or else the executable's name. WebKit names its WebCrypto
+    /// master key by it (`webcrypto_key`).
+    pub application: Option<String>,
     pub problems: Vec<String>,
 }
 

@@ -1,7 +1,8 @@
 //! The client side of `oculus-keyd`: `has`, `store`, `get`, `delete` and `forward`
 //! (buffered with `send`, streamed with `send_stream`), `okta_*` and
 //! `ensure_signed_in` for the Okta sign-in, `session_*` for the login
-//! sessions (`session`), one connection per call, and the `ping` that
+//! sessions (`session`), `webcrypto_key` for WebKit's master key
+//! (`webcrypto`), one connection per call, and the `ping` that
 //! `oculus keyd status` sends. The app re-exports it as
 //! `credentials::Credentialed`.
 //!
@@ -42,12 +43,16 @@ pub const SESSION_TIMEOUT: Option<Duration> = Some(Duration::from_secs(600));
 
 mod session;
 mod stream;
+mod webcrypto;
 
 #[cfg(all(test, feature = "server"))]
 mod against_session;
+#[cfg(all(test, feature = "server"))]
+mod against_webcrypto;
 
 pub use session::{SessionCookies, SessionStatus};
 pub use stream::{StreamBody, StreamedResponse};
+pub use webcrypto::ServedKey;
 
 pub use crate::session::Kind as SessionKind;
 
@@ -557,6 +562,54 @@ mod tests {
         assert_eq!(
             seen.lock().unwrap()[0].0,
             json!({"op": "get", "secret": "music.spotify"})
+        );
+    }
+
+    #[test]
+    fn webcrypto_key_returns_the_16_bytes_or_an_error_never_a_bad_key() {
+        let (broker, seen) = fake_keyd(|req, _| match req["app"].as_str().unwrap() {
+            "app" => (
+                json!({"key": "Zm9vYmFyZm9vYmFyZm9vYg==", "source": "keychain"}),
+                vec![],
+            ),
+            "denied" => (
+                json!({"error": "keychain", "detail": "reading x: OSStatus -128"}),
+                vec![],
+            ),
+            "other" => (
+                json!({"error": "caller", "detail": "not that application"}),
+                vec![],
+            ),
+            "short" => (json!({"key": "Zm9vYmFy", "source": "vault"}), vec![]),
+            "number" => (json!({"key": 7}), vec![]),
+            _ => (json!({"source": "vault"}), vec![]),
+        });
+        let served = broker.webcrypto_key("app").unwrap();
+        assert_eq!(served.key.bytes(), b"foobarfoobarfoob");
+        assert_eq!(served.source, "keychain");
+        assert!(!format!("{served:?}").contains("foob"));
+        assert_eq!(
+            seen.lock().unwrap()[0].0,
+            json!({"op": "webcrypto_key", "app": "app"})
+        );
+        assert_eq!(
+            broker.webcrypto_key("denied").unwrap_err(),
+            KeydError::Keychain("reading x: OSStatus -128".into())
+        );
+        assert!(matches!(
+            broker.webcrypto_key("other"),
+            Err(KeydError::Caller(_))
+        ));
+        for bad in ["short", "number", "missing"] {
+            let err = broker.webcrypto_key(bad).unwrap_err();
+            assert!(matches!(err, KeydError::Broken(_)), "{bad}");
+            assert!(!err.to_string().contains("Zm9v"), "{err}");
+        }
+        assert_eq!(
+            unreachable(ConnectError::Absent("ENOENT".into()))
+                .webcrypto_key("app")
+                .unwrap_err(),
+            KeydError::Absent
         );
     }
 
