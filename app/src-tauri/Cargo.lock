@@ -124,11 +124,13 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "dunce",
  "ego-tree",
  "half",
  "hayro",
  "image",
  "imagesize",
+ "junction",
  "keyring",
  "libc",
  "lopdf",
@@ -138,6 +140,8 @@ dependencies = [
  "objc2-web-kit",
  "oculus-keyd-core",
  "regex",
+ "ring",
+ "rpassword",
  "rustls",
  "scraper",
  "serde",
@@ -153,6 +157,7 @@ dependencies = [
  "ureq",
  "url",
  "webpki-roots 0.26.11",
+ "windows-sys 0.61.2",
  "zip 2.4.2",
 ]
 
@@ -2647,6 +2652,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "junction"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cfc352a66ba903c23239ef51e809508b6fc2b0f90e3476ac7a9ff47e863ae95"
+dependencies = [
+ "scopeguard",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2663,9 +2678,11 @@ version = "3.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eebcc3aff044e5944a8fbaf69eb277d11986064cba30c468730e8b9909fb551c"
 dependencies = [
+ "byteorder",
  "log",
  "security-framework 2.11.1",
  "security-framework 3.7.0",
+ "windows-sys 0.60.2",
  "zeroize",
 ]
 
@@ -3307,11 +3324,13 @@ name = "oculus-keyd-core"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "dunce",
  "libc",
  "scraper",
  "serde_json",
  "ureq",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4044,6 +4063,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpassword"
+version = "7.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2da316a15f47e3d053de9cb2c439650bd8fa4aaeb9365f2e5f27f492ff73c196"
+dependencies = [
+ "libc",
+ "rtoolbox",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "rsa"
 version = "0.9.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4061,6 +4091,16 @@ dependencies = [
  "spki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rtoolbox"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a1efe12a1469752d0e6ff5ebec0b6ef4924cc5c4c71046b0ec730040535819d"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

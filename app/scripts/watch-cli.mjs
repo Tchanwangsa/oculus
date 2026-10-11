@@ -126,30 +126,29 @@ let sawServer = false;
 let misses = 0;
 
 function probe() {
-  // `localhost`, not 127.0.0.1: vite binds whichever family localhost resolves
-  // to, which on macOS is ::1.
-  const sock = connect({ port: devPort, host: "localhost" });
-  let settled = false;
-  const done = (up) => {
-    // A timeout is routinely followed by an error on the same socket, and a
-    // miss counted twice would end the session a probe early.
-    if (settled) return;
-    settled = true;
-    sock.destroy();
-    if (up) {
-      sawServer = true;
-      misses = 0;
-      return;
-    }
+  let pending = 2;
+  let up = false;
+  const done = (answer) => {
+    up ||= answer;
+    if (--pending) return;
+    if (up) { sawServer = true; misses = 0; return; }
     if (sawServer && ++misses >= 3) bye("dev server is gone");
-    if (!sawServer && Date.now() - startedAt > STARTUP_GRACE_MS) {
-      bye("no dev server appeared");
-    }
+    if (!sawServer && Date.now() - startedAt > STARTUP_GRACE_MS) bye("no dev server appeared");
   };
-  sock.setTimeout(2000);
-  sock.once("connect", () => done(true));
-  sock.once("timeout", () => done(false));
-  sock.once("error", () => done(false));
+  for (const host of ["localhost", "127.0.0.1"]) {
+    const sock = connect({ port: devPort, host });
+    let settled = false;
+    const finish = (answer) => {
+      if (settled) return;
+      settled = true;
+      sock.destroy();
+      done(answer);
+    };
+    sock.setTimeout(2000);
+    sock.once("connect", () => finish(true));
+    sock.once("timeout", () => finish(false));
+    sock.once("error", () => finish(false));
+  }
 }
 
 setInterval(probe, PROBE_EVERY_MS);

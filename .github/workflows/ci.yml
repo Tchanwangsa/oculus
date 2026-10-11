@@ -1,5 +1,5 @@
-# Checks every push to master and every pull request on a fresh macOS checkout:
-# that the Rust is formatted, the frontend tests and bundle, the Rust tests
+# Checks every push to master and every pull request on fresh macOS and Windows
+# checkouts: Rust formatting, frontend tests and bundle, the Rust tests
 # (the app's, keyd's and keyd core's), that keyd builds and signs as the bundle
 # ships it, and that the generated CLI reference matches the binary; and on
 # Linux, that keyd builds with no OS adapter and the editor core agrees with
@@ -88,6 +88,72 @@ jobs:
           bun run docs:cli
           git diff --exit-code -- ../docs/cli-reference.md
 
+  windows:
+    name: Check (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: app
+    env:
+      CARGO_TERM_COLOR: always
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: app/package.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: mozilla-actions/sccache-action@v0.0.11
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            app/src-tauri -> target
+            app/keyd -> target
+            app/keyd/core -> target
+          cache-targets: false
+      - name: App Rust is formatted
+        working-directory: app/src-tauri
+        run: cargo fmt --check
+      - name: keyd Rust is formatted
+        working-directory: app/keyd
+        run: cargo fmt --check
+      - name: keyd core Rust is formatted
+        working-directory: app/keyd/core
+        run: cargo fmt --check
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+      - name: Frontend and script tests
+        run: bun run test
+      - name: Type-check and bundle the frontend
+        run: bun run build
+      - name: Fetch Windows ffmpeg
+        run: bun run ffmpeg
+      - name: Build and stage the Windows credential broker
+        run: bun run stage-keyd
+      - name: Build and stage the oculus CLI
+        run: bun run stage-cli
+      - name: Rust tests
+        working-directory: app/src-tauri
+        run: cargo test --release --locked
+      - name: keyd core tests
+        working-directory: app/keyd/core
+        run: cargo test --locked --all-features
+      - name: keyd tests with the release policy
+        working-directory: app/keyd
+        run: cargo test --locked
+      - name: keyd tests with dev admission
+        working-directory: app/keyd
+        run: cargo test --locked --features dev
+      - name: MSIX PowerShell script parses
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/package-msix.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
+
   # keyd's core and keyd itself on a target with no adapter: the build
   # proves no OS call has leaked out of app/keyd/core/src/platform/, and
   # core's tests run there over the in-memory endpoint.
@@ -103,8 +169,8 @@ jobs:
       - name: Check and test keyd core
         working-directory: app/keyd/core
         run: cargo check --locked --all-features && cargo test --locked --all-features
-      # keyd's own tests (tests/serve_local.rs) bind a socket through the OS
-      # adapter, which `unsupported` refuses, so they run only in the macOS job.
+      # keyd's own tests (tests/serve_local/) bind a real endpoint through the
+      # OS adapter, which `unsupported` refuses; macOS and Windows run them.
       - name: Check keyd
         working-directory: app/keyd
         run: cargo check --locked

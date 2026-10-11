@@ -1,0 +1,44 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Oculus",
+        "width": 1480,
+        "height": 920,
+        "minWidth": 900,
+        "minHeight": 560,
+        "decorations": false
+      }
+    ],
+    "security": {
+      "assetProtocol": {
+        "scope": [
+          "$HOME/Oculus/courses/**",
+          "$HOME/Oculus/lectures/**",
+          "$HOME/Oculus/agents/**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "targets": [
+      "nsis"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/oculus",
+      "binaries/oculus-keyd"
+    ],
+    "resources": {
+      "windows/distribution/FFMPEG-LICENSE.txt": "FFMPEG-LICENSE.txt",
+      "windows/distribution/FFMPEG-README.txt": "FFMPEG-README.txt"
+    }
+  },
+  "mainBinaryName": "oculus-app"
+}

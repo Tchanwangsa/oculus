@@ -1,11 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The app's own UI. Scoped to the main WEBVIEW, not the main window: the window also holds one webview of remote content per in-app browser tab (src/shell/browser.rs), and window/webview scopes match by OR — a window scope would hand every Tauri command to whatever page the user browses to.",
-  "webviews": ["main"],
+  "description": "The app's own UI. Scoped to the main WEBVIEW, not the main window: the window also holds one webview of remote content per in-app browser tab (src/shell/browser/), and window/webview scopes match by OR \u2014 a window scope would hand every Tauri command to whatever page the user browses to.",
+  "webviews": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
     "core:webview:allow-set-webview-zoom",
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",

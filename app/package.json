@@ -8,7 +8,7 @@
     "dev": "vite",
     "predev": "node scripts/predev.mjs",
     "build": "tsc && vite build",
-    "test": "bun test tests scripts/*.test.mjs",
+    "test": "node scripts/test.mjs",
     "preview": "vite preview",
     "ffmpeg": "node scripts/fetch-ffmpeg.mjs",
     "speech": "node scripts/build-speech.mjs",
