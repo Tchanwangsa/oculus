@@ -3,7 +3,8 @@ import type { Element, Root } from "hast";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 import { fileMarkdownPlugins } from "@/components/files/FileMarkdown";
-import { mathsReady, rehypeMaths, renderToString } from "@/lib/maths";
+import { MathsTrap, mathsReady, rehypeMaths } from "@/lib/maths";
+import { callEngine } from "@/lib/maths/engine";
 import { blockAnchorPlugins } from "@/lib/pdf/blockAnchors";
 import { buildBlockDoc } from "@/lib/pdf/pdfBlocks";
 import { deep, ready } from "./helpers";
@@ -71,8 +72,11 @@ describe("rehypeMaths", () => {
 
   test("before the engine is ready a formula is a placeholder, still anchored", async () => {
     await ready();
-    expect(() => renderToString(deep(330))).toThrow();
-    expect(() => renderToString(deep(331))).toThrow();
+    // Exhaust the current instance and any spare without a cached formula
+    // or the host's stack depth deciding whether the engine actually traps.
+    for (let i = 0; i < 2 && mathsReady(); i++) {
+      expect(() => callEngine(() => { throw new WebAssembly.RuntimeError("test engine panic"); })).toThrow(MathsTrap);
+    }
     expect(mathsReady()).toBe(false);
     const pending = blocksHtml(["Before", "$$\nx^2\n$$", "After"]);
     expect(pending).toContain('<span class="md-math-pending md-math-pending-display" data-page="4" data-block="1">x^2</span>');
