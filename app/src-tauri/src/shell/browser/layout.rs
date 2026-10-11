@@ -4,9 +4,9 @@ use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window
 use super::favicon::ensure_favicon;
 use super::page::refresh_nav;
 use super::seed::{is_sso_app_entry, recover_sso, wants_sessions};
-use super::{
-    broadcast, label, seed_sessions, with_state, Tab, Viewport, LABEL_PREFIX, MAIN, PAGE_USER_AGENT,
-};
+#[cfg(not(target_os = "windows"))]
+use super::PAGE_USER_AGENT;
+use super::{broadcast, label, seed_sessions, with_state, Tab, Viewport, LABEL_PREFIX, MAIN};
 
 /// Seeds the cookie jar and hooks the main window's resize. From `setup`.
 pub fn init(app: &AppHandle) {
@@ -147,7 +147,6 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     let title_app = app.clone();
     let popup_app = app.clone();
     let builder = WebviewBuilder::new(label(id), WebviewUrl::External(url))
-        .user_agent(PAGE_USER_AGENT)
         // A child webview reports `outerWidth`/`outerHeight` as 0, and canvas
         // renderers (Google Docs) read `outerWidth / innerWidth` as zoom and
         // drop to minimum resolution. Report the viewport's size instead.
@@ -205,6 +204,8 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
             NewWindowResponse::Deny
         });
 
+    #[cfg(not(target_os = "windows"))]
+    let builder = builder.user_agent(PAGE_USER_AGENT);
     let viewport = with_state(app, |s| s.viewports.get(&id).copied());
     let (position, size, radius) = rect(content_size(&window), viewport);
     let webview = window

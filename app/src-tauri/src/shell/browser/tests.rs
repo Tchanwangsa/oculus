@@ -1,8 +1,8 @@
 use super::seed::sent_to;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use super::seed::{sessions_from, sso_changed};
 use super::*;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::sync::Mutex;
 
 #[test]
@@ -15,7 +15,7 @@ fn sign_out_clears_what_cookies_for_url_would_send() {
     assert!(!sent_to("edstem.org", crate::auth::okta::SSO_HOST));
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[test]
 fn okta_replaces_the_jar_only_when_the_stored_header_changed() {
     let mut seeded = None;
@@ -36,7 +36,7 @@ fn okta_replaces_the_jar_only_when_the_stored_header_changed() {
     assert!(!sso_changed(&mut seeded, None));
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[test]
 fn sessions_come_from_keyd_and_a_missing_keyd_or_session_seeds_nothing() {
     use crate::providers::credentials::Credentialed;

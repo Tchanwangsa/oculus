@@ -41,6 +41,11 @@ pub fn run() {
         .manage(shell::browser::BrowserState::default())
         .manage(shell::usage::UsageState::default())
         .setup(|app| {
+            #[cfg(windows)]
+            if let Err(error) = shell::window::fit_startup(app.handle()) {
+                eprintln!("Could not fit the startup window to the monitor: {error}");
+            }
+
             // Give the parse and embed seams a window to emit progress to;
             // headless (CLI) runs never bind, so their emits are no-ops.
             parse::events::bind(app.handle().clone());

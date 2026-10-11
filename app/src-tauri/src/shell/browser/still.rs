@@ -3,10 +3,12 @@
 //! Raw `msg_send!`: the typed wrapper returns `NSImage` and would pull in all
 //! of AppKit.
 
+#[cfg(target_os = "macos")]
 use std::sync::Mutex;
 
 use tauri::AppHandle;
 
+#[cfg(target_os = "macos")]
 use super::layout::page;
 
 /// The block is `Fn` but the send consumes the sender, hence the lock.

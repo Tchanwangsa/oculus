@@ -3,3 +3,6 @@ pub mod browser;
 pub(crate) mod keys;
 pub mod menu;
 pub(crate) mod usage;
+
+#[cfg(any(windows, test))]
+pub(crate) mod window;

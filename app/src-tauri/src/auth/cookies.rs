@@ -39,7 +39,7 @@ fn snapshot(app: &AppHandle) -> Vec<(Kind, String)> {
 }
 
 /// Scoped with `cookies_for_url`: every webview shares one jar
-/// (`data_directory` is a no-op on WKWebView).
+/// (the default profile on Windows; `data_directory` is a no-op on WKWebView).
 fn webview_header(app: &AppHandle, base: &str) -> String {
     let Ok(base) = base.parse::<url::Url>() else {
         return String::new();
@@ -85,13 +85,13 @@ pub fn save_session_cookie(app: &AppHandle) -> bool {
 }
 
 /// `save_session_cookie` for a browser tab's page-load callback, which runs
-/// on a thread that must not wait on keyd: the jar is read here and handed
+/// on a thread that must not wait on keyd: the jar is read and handed
 /// over on another thread, which then connects the app if the tab was a
 /// sign-in.
 pub fn save_browser_session(app: &AppHandle) {
-    let snapshot = snapshot(app);
     let app = app.clone();
     std::thread::spawn(move || {
+        let snapshot = snapshot(&app);
         let keyd = Credentialed::at(&crate::library::paths::data_dir());
         if session::store_snapshot(&keyd, &snapshot) {
             tab::confirm_browser_sign_in(&app, &keyd);

@@ -8,9 +8,9 @@
 //! focused page sees ⌘-keys before the menu, bar the chrome keys `keys.rs`
 //! reserves.
 
-use tauri::menu::{
-    AboutMetadata, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
-};
+#[cfg(target_os = "macos")]
+use tauri::menu::AboutMetadata;
+use tauri::menu::{IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const SEARCH: &str = "search";
@@ -36,6 +36,12 @@ const HARD_RELOAD: &str = "hard-reload";
 const BACK: &str = "back";
 const FORWARD: &str = "forward";
 const ADDRESS: &str = "address";
+#[cfg(target_os = "windows")]
+const EXIT: &str = "exit";
+#[cfg(target_os = "windows")]
+const SIDE_PANEL_KEY: &str = "Ctrl+Shift+Y";
+#[cfg(not(target_os = "windows"))]
+const SIDE_PANEL_KEY: &str = "Alt+CmdOrCtrl+T";
 
 /// Ids of the ⌘1…⌘8 items are this plus the number; no other id may start
 /// with it (`handle` strips it).
@@ -70,7 +76,9 @@ pub const FORWARD_EVENT: &str = "menu-forward";
 pub const ADDRESS_EVENT: &str = "menu-address";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    #[cfg(target_os = "macos")]
     let pkg = app.package_info();
+    #[cfg(target_os = "macos")]
     let about = AboutMetadata {
         name: Some(pkg.name.clone()),
         version: Some(pkg.version.to_string()),
@@ -86,7 +94,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?,
             // The side panel of the tab in front, not a second tab.
-            &MenuItem::with_id(app, SIDE_PANEL, "Side Panel", true, Some("Alt+CmdOrCtrl+T"))?,
+            &MenuItem::with_id(app, SIDE_PANEL, "Side Panel", true, Some(SIDE_PANEL_KEY))?,
             &MenuItem::with_id(app, CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
             // Always enabled: only the frontend knows if there is anything
             // to reopen.
@@ -109,6 +117,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 true,
                 Some("Shift+CmdOrCtrl+W"),
             )?,
+            #[cfg(target_os = "windows")]
+            &PredefinedMenuItem::separator(app)?,
+            #[cfg(target_os = "windows")]
+            &MenuItem::with_id(app, EXIT, "Exit", true, Some("Alt+F4"))?,
         ],
     )?;
 
@@ -257,6 +269,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
 pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
     match event.id().as_ref() {
+        #[cfg(target_os = "windows")]
+        EXIT => app.exit(0),
         SEARCH => {
             app.emit(SEARCH_EVENT, ()).ok();
         }

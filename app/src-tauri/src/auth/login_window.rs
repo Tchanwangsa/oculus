@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use super::{cookies, is_authenticated_url, session_established, Via};
 
+#[cfg(not(target_os = "windows"))]
 fn canvas_session_dir() -> std::path::PathBuf {
     crate::library::paths::data_dir().join("canvas-session")
 }
@@ -21,7 +22,6 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
 
     let url = "https://canvas.lms.unimelb.edu.au/login/saml";
 
-    let session_dir = canvas_session_dir();
     let dir = crate::library::paths::data_dir();
     let app_nav = app.clone();
     let app_win = app.clone();
@@ -31,7 +31,7 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
     let resolved = Arc::new(AtomicBool::new(false));
     let resolved_nav = Arc::clone(&resolved);
 
-    let result = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         &app,
         "canvas-auth",
         WebviewUrl::External(url.parse().unwrap()),
@@ -40,7 +40,6 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
     .inner_size(900.0, 700.0)
     .center()
     .visible(true)
-    .data_directory(session_dir)
     .on_navigation(move |url| {
         eprintln!("[oculus] nav: {url}");
         if is_authenticated_url(&url) {
@@ -68,8 +67,12 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
             }
         }
         true
-    })
-    .build();
+    });
+    // WebView2 environments are keyed by data directory. Use the default
+    // profile shared with the main webview and every browser page.
+    #[cfg(not(target_os = "windows"))]
+    let builder = builder.data_directory(canvas_session_dir());
+    let result = builder.build();
 
     let win = match result {
         Ok(w) => w,
