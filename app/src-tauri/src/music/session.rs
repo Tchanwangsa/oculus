@@ -13,16 +13,16 @@ use librespot_core::authentication::Credentials;
 use librespot_core::config::DeviceType;
 use librespot_core::error::ErrorKind;
 use librespot_core::{Error, Session, SessionConfig};
-use librespot_playback::audio_backend;
-use librespot_playback::config::{AudioFormat, PlayerConfig};
+use librespot_playback::config::PlayerConfig;
 use librespot_playback::mixer::{self, Mixer, MixerConfig};
 use librespot_playback::player::Player;
 use tauri::AppHandle;
 use tokio::sync::watch;
 
+use super::audio::{Note, Switching};
 use super::credentials::{self, Loaded, Saved};
-use super::state::{self, from_percent, DEVICE_NAME, INITIAL_VOLUME};
-use super::{events, logs};
+use super::state::{self, from_percent, DEVICE_NAME};
+use super::{devices, events, logs};
 use crate::runtime::blocking;
 
 pub(super) const BACKOFF_MIN: Duration = Duration::from_secs(2);
@@ -82,11 +82,14 @@ fn is_auth_error(e: &Error) -> bool {
     )
 }
 
-fn connect_config() -> ConnectConfig {
+/// librespot takes the volume from here alone, on every connect (there is no
+/// `Cache` to restore one from), so a reconnect keeps the snapshot's volume:
+/// `INITIAL_VOLUME` until the user changes it.
+fn connect_config(volume: u8) -> ConnectConfig {
     ConnectConfig {
         name: DEVICE_NAME.to_string(),
         device_type: DeviceType::Computer,
-        initial_volume: from_percent(INITIAL_VOLUME),
+        initial_volume: from_percent(volume),
         ..ConnectConfig::default()
     }
 }
@@ -114,9 +117,12 @@ async fn run(app: &AppHandle, id: u64, how: Start, stop: watch::Receiver<bool>) 
         Some(Err(e)) => return End::Failed(format!("No audio mixer for Spotify: {e}")),
         None => return End::Failed("librespot was built without a mixer".into()),
     };
-    let Some(sink) = audio_backend::find(None) else {
-        return End::Failed("librespot was built without an audio backend".into());
-    };
+    let choice = state::audio(app);
+    let report_app = app.clone();
+    let report: super::audio::Report = std::sync::Arc::new(move |note| match note {
+        Note::Error(message) => state::update_run(&report_app, id, |s| s.error = Some(message)),
+        Note::Cleared(message) => state::clear_error_if(&report_app, id, &message),
+    });
     let session = Session::new(config.clone(), None);
     let player = Player::new(
         PlayerConfig {
@@ -125,7 +131,7 @@ async fn run(app: &AppHandle, id: u64, how: Start, stop: watch::Receiver<bool>) 
         },
         session.clone(),
         mixer.get_soft_volume(),
-        move || sink(None, AudioFormat::default()),
+        move || Box::new(Switching::new(choice, report)),
     );
     tauri::async_runtime::spawn(events::run(
         app.clone(),
@@ -179,8 +185,9 @@ impl Link<'_> {
             }
             fresh = false;
 
+            devices::listen(app, id, &session);
             let attempt = Spirc::new(
-                connect_config(),
+                connect_config(state::snapshot(app).volume),
                 session.clone(),
                 credentials.clone(),
                 self.player.clone(),
@@ -248,7 +255,7 @@ impl Link<'_> {
                     state::update_run(app, id, |s| {
                         s.connected = false;
                         s.connecting = true;
-                        s.playing = false;
+                        s.set_unlinked();
                         s.error = Some(format!(
                             "Lost the connection to Spotify; reconnecting in {} s",
                             backoff.as_secs()

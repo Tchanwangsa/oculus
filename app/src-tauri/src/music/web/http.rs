@@ -1,5 +1,5 @@
-//! One GET against api.spotify.com with a bearer token, its status read into
-//! a `WebError`. ureq rather than the session's own HTTP client, which folds
+//! One request (a GET, or a PUT with a JSON body) against api.spotify.com
+//! with a bearer token, its status read into a `WebError`. ureq rather than the session's own HTTP client, which folds
 //! every non-2xx into a generic error and drops `Retry-After`. Blocking, so
 //! it runs through `runtime::blocking::run`.
 
@@ -20,25 +20,50 @@ fn agent() -> &'static ureq::Agent {
     AGENT.get_or_init(|| ureq::AgentBuilder::new().timeout(TIMEOUT).build())
 }
 
-/// The response body. A URL that is not Spotify's Web API is refused, so a
-/// `next` link from a response can only lead back to it.
-pub(super) async fn get(token: String, url: String) -> Result<String, WebError> {
-    if !url.starts_with(API) {
+/// One Web API request: a GET, or a PUT with a JSON body.
+#[derive(Clone, Debug)]
+pub(super) enum Request {
+    Get(String),
+    Put(String, String),
+}
+
+impl Request {
+    fn url(&self) -> &str {
+        match self {
+            Self::Get(url) | Self::Put(url, _) => url,
+        }
+    }
+}
+
+/// The response body (empty for a 202 or 204). A URL that is not Spotify's
+/// Web API is refused, so a `next` link from a response can only lead back
+/// to it.
+pub(super) async fn send(token: String, request: Request) -> Result<String, WebError> {
+    if !request.url().starts_with(API) {
         return Err(WebError::Unreadable(format!(
-            "a link off the Web API: {url}"
+            "a link off the Web API: {}",
+            request.url()
         )));
     }
-    blocking::run(move || Ok(get_blocking(&token, &url)))
+    blocking::run(move || Ok(send_blocking(&token, &request)))
         .await
         .map_err(WebError::Transport)?
 }
 
-fn get_blocking(token: &str, url: &str) -> Result<String, WebError> {
-    let response = agent()
-        .get(url)
-        .set("Authorization", &format!("Bearer {token}"))
-        .set("Accept", "application/json")
-        .call();
+fn send_blocking(token: &str, request: &Request) -> Result<String, WebError> {
+    let auth = format!("Bearer {token}");
+    let response = match request {
+        Request::Get(url) => agent()
+            .get(url)
+            .set("Authorization", &auth)
+            .set("Accept", "application/json")
+            .call(),
+        Request::Put(url, body) => agent()
+            .put(url)
+            .set("Authorization", &auth)
+            .set("Content-Type", "application/json")
+            .send_string(body),
+    };
     match response {
         Ok(response) => response
             .into_string()

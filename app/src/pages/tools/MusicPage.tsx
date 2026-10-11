@@ -7,7 +7,8 @@ import { MusicCover } from "@/components/music/MusicCover";
 import { RepeatToggle, ShuffleToggle } from "@/components/music/MusicModes";
 import { MusicSeek } from "@/components/music/MusicSeek";
 import { MusicTransport } from "@/components/music/MusicTransport";
-import { MusicVolume } from "@/components/music/MusicVolume";
+import { PlayingElsewhere } from "@/components/music/PlayingElsewhere";
+import { VolumeRow } from "@/components/music/VolumeRow";
 import { MusicLibrary } from "@/components/music/library/MusicLibrary";
 import type { MusicSnapshot } from "@/lib/music";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
@@ -79,7 +80,8 @@ export default function MusicPage() {
           <MusicTransport snapshot={snapshot} large />
           <RepeatToggle snapshot={snapshot} />
         </div>
-        <MusicVolume snapshot={snapshot} />
+        <VolumeRow snapshot={snapshot} />
+        <PlayingElsewhere snapshot={snapshot} />
         {error && <p className="text-xs text-destructive">{error}</p>}
         <MusicLibrary snapshot={snapshot} />
       </div>

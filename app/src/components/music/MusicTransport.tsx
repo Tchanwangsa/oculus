@@ -1,6 +1,6 @@
 import { Pause, Play, SkipBack, SkipForward } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { music, type MusicSnapshot } from "@/lib/music";
+import { music, musicControllable, type MusicSnapshot } from "@/lib/music";
 import { useMusicStore } from "@/stores/music/musicStore";
 
 /** Previous, play/pause and next. Play and pause are explicit commands, so a
@@ -13,7 +13,7 @@ export function MusicTransport({
   large?: boolean;
 }) {
   const run = useMusicStore((s) => s.run);
-  const disabled = !snapshot.connected || !snapshot.track;
+  const disabled = !musicControllable(snapshot);
   const icon = large ? 18 : 15;
 
   return (

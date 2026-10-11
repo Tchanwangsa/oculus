@@ -1,12 +1,17 @@
 //! The music commands. Each returns as soon as its work is handed off; the
 //! outcome arrives as `music-state`. Playback commands go to the connected
-//! device and fail with "Not connected to Spotify" otherwise. The Web API's
-//! two (`music_playlists`, `music_search`) return their results.
+//! device and fail with "Not connected to Spotify" otherwise; while another
+//! device holds playback they pull it back first (`control.rs`). The lists
+//! (`music_playlists`, `music_search`, `music_devices`, `music_outputs`)
+//! return their results.
 
-use librespot_connect::{LoadRequest, LoadRequestOptions, PlayingTrack};
+use librespot_connect::{LoadRequest, LoadRequestOptions, PlayingTrack, Spirc};
 use librespot_core::SessionConfig;
 use tauri::AppHandle;
 
+use super::audio::{self, OutputDevice};
+use super::control::{self, Need};
+use super::devices::{self, Device};
 use super::login::{self, LoginError};
 use super::session::{self, Start};
 use super::state::{self, Snapshot};
@@ -86,72 +91,92 @@ pub async fn music_sign_out(app: AppHandle) -> Result<(), String> {
     deleted
 }
 
+/// Runs `f` once this device is active, pulling playback here first.
+async fn pulled(
+    app: &AppHandle,
+    f: impl FnOnce(&Spirc) -> Result<(), librespot_core::Error>,
+) -> Result<(), String> {
+    control::send(app, Need::Pull, || state::with_spirc(app, f)).await
+}
+
+/// While another device plays, a toggle would pause what the pull brings
+/// over, so it pulls and plays.
 #[tauri::command]
-pub fn music_play_pause(app: AppHandle) -> Result<(), String> {
-    state::with_spirc(&app, |spirc| spirc.play_pause())
+pub async fn music_play_pause(app: AppHandle) -> Result<(), String> {
+    if state::active(&app).ok_or("Not connected to Spotify")? {
+        state::with_spirc(&app, |spirc| spirc.play_pause())
+    } else {
+        pulled(&app, |spirc| spirc.play()).await
+    }
 }
 
 /// Explicit, unlike the toggle: what pauses music when a lecture starts
-/// (`app/src/lib/music/exclusive.ts`) must never start it instead.
+/// (`app/src/lib/music/exclusive/`) must never start it instead.
 #[tauri::command]
-pub fn music_play(app: AppHandle) -> Result<(), String> {
-    state::with_spirc(&app, |spirc| spirc.play())
+pub async fn music_play(app: AppHandle) -> Result<(), String> {
+    pulled(&app, |spirc| spirc.play()).await
+}
+
+/// Nothing while another device plays: a pause never pulls playback here.
+#[tauri::command]
+pub async fn music_pause(app: AppHandle) -> Result<(), String> {
+    control::send(&app, Need::IfActive, || {
+        state::with_spirc(&app, |spirc| spirc.pause())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn music_pause(app: AppHandle) -> Result<(), String> {
-    state::with_spirc(&app, |spirc| spirc.pause())
+pub async fn music_next(app: AppHandle) -> Result<(), String> {
+    pulled(&app, |spirc| spirc.next()).await
 }
 
 #[tauri::command]
-pub fn music_next(app: AppHandle) -> Result<(), String> {
-    state::with_spirc(&app, |spirc| spirc.next())
+pub async fn music_prev(app: AppHandle) -> Result<(), String> {
+    pulled(&app, |spirc| spirc.prev()).await
 }
 
 #[tauri::command]
-pub fn music_prev(app: AppHandle) -> Result<(), String> {
-    state::with_spirc(&app, |spirc| spirc.prev())
-}
-
-#[tauri::command]
-pub fn music_seek(app: AppHandle, position_ms: u32) -> Result<(), String> {
-    state::with_spirc(&app, |spirc| spirc.set_position_ms(position_ms))
+pub async fn music_seek(app: AppHandle, position_ms: u32) -> Result<(), String> {
+    pulled(&app, |spirc| spirc.set_position_ms(position_ms)).await
 }
 
 /// `percent` is 0–100; more is taken as 100. Drops a held duck.
 #[tauri::command]
-pub fn music_volume(app: AppHandle, percent: u8) -> Result<(), String> {
-    state::set_volume(&app, percent)
+pub async fn music_volume(app: AppHandle, percent: u8) -> Result<(), String> {
+    control::send(&app, Need::Pull, || state::set_volume(&app, percent)).await
 }
 
 /// The seam a focus mode calls. `Some(level)` lowers the volume to `level`%
 /// of what it was before the first duck; `None` puts that volume back. A
 /// volume the user sets in between wins, and the unduck then does nothing.
+/// Nothing while another device plays.
 #[tauri::command]
-pub fn music_duck(app: AppHandle, level: Option<u8>) -> Result<(), String> {
-    state::duck(&app, level)
+pub async fn music_duck(app: AppHandle, level: Option<u8>) -> Result<(), String> {
+    control::send(&app, Need::IfActive, || state::duck(&app, level)).await
 }
 
 #[tauri::command]
-pub fn music_shuffle(app: AppHandle, on: bool) -> Result<(), String> {
-    state::with_spirc(&app, |spirc| spirc.shuffle(on))
+pub async fn music_shuffle(app: AppHandle, on: bool) -> Result<(), String> {
+    pulled(&app, |spirc| spirc.shuffle(on)).await
 }
 
 /// On repeats the context. The snapshot's `repeat` is also true for a
 /// repeated track (set from the phone), so off clears both.
 #[tauri::command]
-pub fn music_repeat(app: AppHandle, on: bool) -> Result<(), String> {
-    state::with_spirc(&app, |spirc| {
+pub async fn music_repeat(app: AppHandle, on: bool) -> Result<(), String> {
+    pulled(&app, |spirc| {
         if !on {
             spirc.repeat_track(false)?;
         }
         spirc.repeat(on)
     })
+    .await
 }
 
 /// Plays a context (`spotify:playlist:…`, `spotify:album:…`) here.
 #[tauri::command]
-pub fn music_play_context(app: AppHandle, uri: String) -> Result<(), String> {
+pub async fn music_play_context(app: AppHandle, uri: String) -> Result<(), String> {
     spotify_uri(&uri)?;
     load(
         &app,
@@ -163,13 +188,14 @@ pub fn music_play_context(app: AppHandle, uri: String) -> Result<(), String> {
             },
         ),
     )
+    .await
 }
 
 /// Plays a track here: from its place in `context_uri` (its album, from a
 /// search) so playback goes on through it, or alone without one. A track URI
 /// is not a context librespot can load.
 #[tauri::command]
-pub fn music_play_track(
+pub async fn music_play_track(
     app: AppHandle,
     uri: String,
     context_uri: Option<String>,
@@ -189,7 +215,7 @@ pub fn music_play_track(
         }
         None => LoadRequest::from_tracks(vec![uri], options(None)),
     };
-    load(&app, request)
+    load(&app, request).await
 }
 
 fn spotify_uri(uri: &str) -> Result<(), String> {
@@ -201,12 +227,12 @@ fn spotify_uri(uri: &str) -> Result<(), String> {
 }
 
 /// Spotify ignores a load sent to a device that is not active, so this
-/// activates it first.
-fn load(app: &AppHandle, request: LoadRequest) -> Result<(), String> {
-    state::with_spirc(app, |spirc| {
-        spirc.activate()?;
-        spirc.load(request)
-    })?;
+/// activates it first; the load replaces whatever a pull would bring over.
+async fn load(app: &AppHandle, request: LoadRequest) -> Result<(), String> {
+    control::send(app, Need::Local, || {
+        state::with_spirc(app, |spirc| spirc.load(request))
+    })
+    .await?;
     state::update(app, |s| s.error = None);
     Ok(())
 }
@@ -222,4 +248,30 @@ pub async fn music_playlists(app: AppHandle, refresh: bool) -> Result<Vec<Playli
 #[tauri::command]
 pub async fn music_search(app: AppHandle, query: String) -> Result<SearchResults, String> {
     Ok(web::search(&app, &query).await?)
+}
+
+/// The account's Connect devices: the last pushed cluster, or the Web API's
+/// list on `refresh` or before the first push.
+#[tauri::command]
+pub async fn music_devices(app: AppHandle, refresh: bool) -> Result<Vec<Device>, String> {
+    devices::list(&app, refresh).await
+}
+
+/// Moves playback to `device_id` (this device's id pulls it here) and plays.
+#[tauri::command]
+pub async fn music_transfer(app: AppHandle, device_id: String) -> Result<(), String> {
+    devices::transfer(&app, device_id).await
+}
+
+/// This Mac's output devices, the current default marked.
+#[tauri::command]
+pub async fn music_outputs() -> Result<Vec<OutputDevice>, String> {
+    blocking::run(audio::list).await
+}
+
+/// Chooses the output (`None`: the system default). Playback moves at once;
+/// the frontend keeps the choice in the `music` settings row.
+#[tauri::command]
+pub fn music_set_output(app: AppHandle, name: Option<String>) {
+    state::set_output(&app, name);
 }

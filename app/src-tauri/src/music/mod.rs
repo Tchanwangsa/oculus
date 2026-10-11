@@ -12,13 +12,21 @@
 //!   (`state.rs`), the `browser-state` discipline.
 //! - **The Web API** (`web/`) lists playlists and searches with Login5's token
 //!   for the live session, in memory only, behind a rate-limit gate.
+//! - **Commands pull playback back** when another device holds it
+//!   (`control.rs`); `devices.rs` lists the account's Connect devices and
+//!   moves playback between them.
+//! - **The output on this Mac** is the system default or a named device,
+//!   switched mid-track by the player's own sink (`audio/`).
 //! - **`music_duck`** is the seam a focus mode calls (`duck.rs`); no mode
 //!   logic lives here.
 //!
 //! See `docs/music.md`.
 
+mod audio;
 pub mod commands;
+mod control;
 mod credentials;
+mod devices;
 mod duck;
 mod events;
 mod login;

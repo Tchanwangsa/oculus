@@ -49,12 +49,15 @@ pub(super) fn apply(s: &mut Snapshot, event: PlayerEvent) {
         PlayerEvent::VolumeChanged { volume } => s.volume = percent(volume),
         PlayerEvent::ShuffleChanged { shuffle } => s.shuffle = shuffle,
         PlayerEvent::RepeatChanged { context, track } => s.repeat = context || track,
-        PlayerEvent::SessionConnected { user_name, .. } => {
-            s.connected = true;
-            s.account = Some(user_name);
+        // The Spirc's own word on being the active Connect device: it emits
+        // these on activating and on another device taking over, while the
+        // session itself stays up.
+        PlayerEvent::SessionConnected { .. } => {
+            s.active = true;
+            s.playing_on = None;
         }
         PlayerEvent::SessionDisconnected { .. } => {
-            s.connected = false;
+            s.active = false;
             s.playing = false;
         }
         _ => {}

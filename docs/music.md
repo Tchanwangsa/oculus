@@ -2,7 +2,8 @@
 
 Spotify played natively: Oculus is a Spotify Connect device ("Oculus")
 through librespot, with audio out of CoreAudio and no Spotify app running.
-Spotify's Web API adds the account's playlists and search.
+Spotify's Web API adds the account's playlists and search
+([music-web.md](./music-web.md), with the Connect device list).
 Premium only, and off until Settings → Music turns it on. A session starts
 from `music_connect`, a finished `music_login`, or at startup while that
 switch is on.
@@ -15,6 +16,9 @@ switch is on.
 | The session task: player, connect, reconnect, stop | `app/src-tauri/src/music/session.rs` |
 | The snapshot, the `music-state` event, the Spirc, run and login handles | `app/src-tauri/src/music/state.rs` |
 | Player events folded into the snapshot | `app/src-tauri/src/music/events.rs` |
+| Commands against an inactive device: pull, activate or skip | `app/src-tauri/src/music/control.rs` |
+| Connect devices and transfer | `app/src-tauri/src/music/devices.rs` |
+| The output on this Mac: the choice, cpal's devices, the player's sink | `app/src-tauri/src/music/audio/` |
 | A track and its cover URL | `app/src-tauri/src/music/track.rs` |
 | The Web API: Login5 token, rate-limit gate, playlists, search | `app/src-tauri/src/music/web/` |
 | The duck a focus mode calls | `app/src-tauri/src/music/duck.rs` |
@@ -30,16 +34,20 @@ switch is on.
 | The rail tile and its popover | `app/src/components/sidebar/MusicTile.tsx`, `app/src/components/music/NowPlaying.tsx` |
 | The full player (`/music`) and its parts | `app/src/pages/tools/MusicPage.tsx`, `app/src/components/music/` |
 | Playlists and search under the player | `app/src/components/music/library/` |
+| The device menu (Spotify devices, output on this Mac) | `app/src/components/music/devices/`, `app/src/components/music/VolumeRow.tsx`, `app/src/components/music/PlayingElsewhere.tsx` |
 
 ## Settings → Music is the one switch, and the only startup connect
 
-- **The `music` settings row is `{"enabled": boolean}`**, absent (off) by
-  default. `musicPrefsStore` writes it; on saves and calls `music_connect`,
-  off saves and calls `music_disconnect`, which keeps the stored login.
+- **The `music` settings row is `{"enabled": boolean, "output": string |
+  null}`**, absent (off, system default) by default. `musicPrefsStore`
+  writes it, merging into the stored object so keys it does not know
+  survive; on saves and calls `music_connect`, off saves and calls
+  `music_disconnect`, which keeps the stored login. The output is written by
+  the device menu ([below](#the-output-on-this-mac-moves-mid-track-without-rebuilding-the-player)).
 - **At startup Rust reads the row** (`setting_blocking`) on the thread that
-  first installs keyd, since the stored login is keyd's to hand back, and
-  starts a session from it when it is on. Anything but `"enabled": true`
-  connects nothing.
+  first installs keyd, since the stored login is keyd's to hand back: it
+  applies `output` whatever the switch says, and starts a session when it is
+  on. Anything but `"enabled": true` connects nothing.
 - **The page draws the session while the switch is on**: a status dot and
   line (connected as the account, connecting, not signed in, could not
   connect), "Log in with Spotify" when `needs_login`, else Connect or
@@ -59,11 +67,18 @@ switch is on.
   drawn. It shows the cover (a note glyph without one) with the rail's corner
   marks: a spinner while connecting, a brand dot while playing. A click opens
   a popover to its right: the track, seek, previous / play-pause / next,
-  volume, and "Open player".
+  volume with the device button, and "Open player".
+- **The device button** (`DeviceMenu`, ending the volume row here and on
+  `/music`) opens "Spotify devices" (active checked, a click transfers, a
+  refresh) and "Output on this Mac" ("System default (<device>)", then each
+  output). Both lists are fetched on open, never on a timer; errors sit
+  inline. While another device plays, the button is brand-tinted, "Playing on
+  <device>" shows under the volume, and the transport stays enabled.
 - **"Open player" opens `/music` beside the page** (`openBeside`); its
   `recentKey` is `music`, so there is one player item however it is opened.
-  The page adds the album, elapsed and total, shuffle and repeat, and, with
-  no session or track, a "Not connected" view linking to Settings → Music.
+  The page adds the album, elapsed and total, shuffle and repeat, the
+  account's playlists and a search ([music-web.md](./music-web.md)), and,
+  with no session or track, a "Not connected" view linking to Settings → Music.
 - **The clock ticks in the UI**: `useMusicPosition` re-renders on each whole
   second of `positionNow` while playing, the pane is on screen and the
   window is visible. A slider keeps its dragged value until the next
@@ -71,23 +86,6 @@ switch is on.
   it moves.
 - **Play and pause are separate commands** from the toggle, so a click on a
   stale button, or the rule below, never does the opposite.
-
-## Under the player, the account's playlists and a search
-
-`MusicLibrary` sits below the player on `/music`; the rail popover has no
-list.
-
-- **"Your playlists" loads once per mount**, the first time the session is
-  connected; Rust answers from memory after its first fetch, so reopening the
-  player costs no call. The refresh button beside the heading asks Spotify
-  again. Rows show the cover, the name, and owner · N tracks; a click plays
-  the playlist (`music_play_context`).
-- **Search runs on Enter only**, never per keystroke: each search is a call
-  against the rate limit. Its results replace the playlists, grouped
-  Playlists, Albums, Tracks, until the field is cleared (its ×, or Escape).
-  A track plays from its place in its album (`music_play_track` with the
-  album as context), so playback goes on through the album.
-- Load and search errors sit inline where the list would be.
 
 ## Music and lecture audio never play together
 
@@ -163,9 +161,14 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    Each run has an id, and the snapshot ignores writes from a run that is no
    longer current, so a stopped task cannot change what the user sees.
 2. The task makes one player (normalisation off, rodio sink) and mixer, then
-   connects as "Oculus", device type computer, at 50% volume.
+   connects as "Oculus", device type computer, at the snapshot's volume
+   (100% until changed). librespot's soft volume is a 60 dB log curve, so 50%
+   is about −30 dB; at 100% the Mac's volume sets the loudness. librespot
+   restores no volume (no `Cache`), so each reconnect passes the user's.
 3. Every attempt gets a new `Session`, handed to the player with
-   `set_session`: a Session cannot be reused once its Spirc has ended.
+   `set_session`: a Session cannot be reused once its Spirc has ended. Each
+   session subscribes to the Connect cluster before its Spirc starts
+   ([music-web.md](./music-web.md#the-device-list-is-spotifys-pushed-cluster)).
 4. A connection that drops without a stop is rebuilt after a backoff of 2 s
    doubling to 60 s, reset once a connection has lived a minute; the snapshot
    says it is reconnecting.
@@ -175,47 +178,54 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    shutdown, which pauses and leaves Spotify's device list, gives it 10 s,
    then shuts the session down.
 
-`music_play_context` and `music_play_track` activate the device before they
-load: Spotify ignores a load or transfer sent to a device that is not active.
+## Commands pull playback back when another device holds it
 
-## The Web API runs on the session's Login5 token, with no Client ID of ours
+After a phone or the desktop app takes playback, librespot's Spirc drops
+every command but `activate` and `transfer` ("will be ignored while Not
+Active"). `control.rs` puts each command through one of three paths:
 
-- **The token is `session.login5().auth_token()`** for the live session:
-  Login5 trades the session's stored credentials for an access token on the
-  same client id the player uses. A Client ID of our own would cap Spotify at
-  five users ([the login](#the-login-is-librespots-client-id-in-the-browser-back-on-port-8898)),
-  and keymaster's `token_provider().get_token` answers 403.
-- **It lives in memory only** (`web/token.rs`): kept for the session it came
-  from (each connection bumps a generation in `state.rs`) and asked for again
-  a minute before it expires. It is never written to keyd or disk and never
-  reaches the frontend; Rust makes every call.
-- **A 401 gets one new token and one more try**; if Login5 hands back the
-  token just refused, or the retry is refused too, the call fails with
-  "Spotify refused the Web API token (401)". A 403 is "Spotify refused the
-  request (403)". Nothing else is retried.
-- **Calls are blocking `ureq`** through `runtime::blocking::run`: librespot's
-  own HTTP client turns every non-2xx into a generic error and drops
-  `Retry-After`. A `next` link that leaves `https://api.spotify.com/v1/` is
-  refused.
+- **Pull** (play, play/pause, next, previous, seek, volume, shuffle, repeat,
+  a transfer to Oculus): `Spirc::transfer`, which asks Spotify to move the
+  current playback here. It lands later as a dealer request, so a command
+  sent at once would still be dropped; the command waits up to 5 s for
+  `active`, then is sent. If the transfer never lands, `activate` takes over
+  locally and the command follows it. Play/pause while inactive pulls and
+  plays: a toggle would pause what the pull brings over.
+- **Local** (`music_play_context`, `music_play_track`): `activate` alone. The
+  Spirc handles commands in order and `activate` makes it active at once, so
+  the load after it is kept; the load replaces whatever a pull would bring.
+- **Nothing while inactive** (`music_pause`, `music_duck`): a pause never
+  pulls playback here, and a duck never lowers a device that is not playing.
 
-| Endpoint | Used for |
-| --- | --- |
-| `GET /v1/me/playlists?limit=50` | The playlists, following `next` up to 500, kept per account until a refresh |
-| `GET /v1/search?type=playlist,album,track&limit=10` | Search, ten of each |
+`active` follows the player's `SessionConnected` (the Spirc activated, from a
+command, a transfer or a play from the phone) and `SessionDisconnected`
+(another device took over), which the Spirc emits while the session itself
+stays up.
 
-Covers are the smallest image at least 120 px wide, as Spotify gives the URL
-(a playlist's four-cover grid is on `mosaic.scdn.co`, with no file id to
-rebuild an `i.scdn.co` URL from). Entries that are null or lack a URI or name
-are dropped; a playlist's count is read from `tracks.total` or `items.total`.
+## The output on this Mac moves mid-track without rebuilding the player
 
-## A 429 closes every Web API call until its Retry-After
+"System default" (the default) or a CoreAudio output by name, from the cpal
+and rodio versions librespot's rodio backend uses. `music_set_output` sets
+`audio::Choice` and the snapshot's `output`.
 
-librespot's client id is shared by every librespot-based player and is
-throttled hard. A 429 closes a gate in memory (`web/gate.rs`) for its
-`Retry-After` seconds (30 when it names none, a later deadline is never
-shortened). Until then each call fails at once with "Spotify is rate-limiting
-Oculus; try again in N s", without touching the network: a call made early
-only extends the wait. Nothing retries on its own.
+- **The player's sink is our own** (`audio/sink.rs`), librespot's rodio
+  sink rebuilt: librespot builds its sink once, inside `Player::new`, with no
+  way to reopen it, and a new player means a new Spirc and Session. On every
+  start, stop and write the sink checks the choice and reopens itself on a
+  new one, so the switch lands within a packet and the queue and position
+  stay.
+- **"System default" follows the Mac by itself**: cpal opens the default
+  device as CoreAudio's default-output unit, which moves with the Mac's
+  default output (AirPods connecting, Control Center), so nothing listens or
+  polls for it.
+- **A chosen device that disappears** (cpal reports it gone) falls back to
+  the default with "<name> is not available; playing on the system default"
+  in `error`; while it is missing the sink looks for it every 2 s as it
+  plays, moves back when it returns, and takes its message back.
+- **No output at all** fails `start` or `write`, which librespot answers by
+  pausing, with the reason in `error`. `stop` never fails (librespot exits the
+  process on that) and waits at most 1 s for queued audio: a stream whose
+  device has gone stops pulling, and librespot's own sink then waits forever.
 
 ## `music_duck` is the seam a focus mode calls
 
@@ -230,14 +240,18 @@ the music module.
 - **A volume the user sets while ducked wins**: `music_volume`, or a
   `VolumeChanged` from the Spotify app that is not the duck's own echo
   (within 1%), drops the kept volume, so the unduck leaves their choice.
-- A dropped connection or a stop forgets the duck.
+- A dropped connection or a stop forgets the duck, and so does a duck sent
+  while another device plays: it does nothing.
 
 ## Rust owns the state, and `music-state` carries all of it
 
 `state::Snapshot` is sent whole to the main webview on every change that
 alters it; `music_state` is the mount-time read. Fields, snake_case:
 `connected`, `connecting` (a login, connect or reconnect is under way),
-`needs_login`, `account`, `device_name`, `track` (`uri`, `name`, `artists`,
+`needs_login`, `account`, `device_name`, `active` (Oculus is the active
+Connect device), `playing_on` (the active device's name when it is another,
+from the cluster), `output` (the chosen output, null for the system
+default), `track` (`uri`, `name`, `artists`,
 `album`, `cover_url`, `duration_ms`) or null, `position_ms` with
 `position_at_ms`, `playing`, `volume` (0–100), `shuffle`, `repeat` and
 `error`.
@@ -247,7 +261,8 @@ alters it; `music_state` is the mount-time read. Fields, snake_case:
   (`positionNow` in `app/src/lib/music/index.ts`). Rust sends no per-second
   events.
 - **`error` is the latest failure** (keyd, connect, auth, a track that cannot
-  play) and stays until the next connect or `music_play_context`.
+  play, an output missing) and stays until the next connect or load; the
+  sink takes back only its own message.
 
 ## A track that cannot play is often only a log line
 
@@ -276,14 +291,15 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_connect` | Connects from keyd's credentials; `needs_login` when there are none |
 | `music_disconnect` | Stops the session and any waiting login; keeps the credentials |
 | `music_sign_out` | Disconnects and deletes `music.spotify` from keyd |
-| `music_play_pause`, `music_play`, `music_pause`, `music_next`, `music_prev` | Playback on the connected device; `music_pause` never starts it |
+| `music_play_pause`, `music_play`, `music_pause`, `music_next`, `music_prev` | Playback, pulled here first while inactive; `music_pause` never starts or pulls it |
 | `music_shuffle(on)`, `music_repeat(on)` | Shuffle; repeat the context (off also clears a repeated track) |
 | `music_seek(position_ms)`, `music_volume(percent)` | Seek; volume 0–100, which drops a held duck |
 | `music_play_context(uri)` | Activates the device, loads a `spotify:` context and plays it |
 | `music_play_track(uri, context_uri?)` | Plays a track from its place in the context, or alone without one |
-| `music_duck(level?)` | A level ducks to that share of the kept volume; null restores it |
-| `music_playlists(refresh)` | The account's playlists, from memory unless `refresh` |
-| `music_search(query)` | Playlists, albums and tracks; an empty query asks nothing |
+| `music_duck(level?)` | A level ducks to that share of the kept volume; null restores it; nothing while inactive |
+| `music_playlists(refresh)`, `music_search(query)` | The Web API's lists ([music-web.md](./music-web.md)) |
+| `music_devices(refresh)`, `music_transfer(device_id)` | Connect devices; move playback and play ([music-web.md](./music-web.md#the-device-list-is-spotifys-pushed-cluster)) |
+| `music_outputs()`, `music_set_output(name?)` | This Mac's outputs, the default marked; choose one, null for the system default |
 
 Playback and Web API commands fail with "Not connected to Spotify" without a
 session.
@@ -291,12 +307,13 @@ session.
 ## Gotchas
 
 - `reqwest::blocking` inside a tokio context panics — the login stays on a plain thread.
-- `load` and `transfer` are ignored by an inactive device — activate first.
+- Every Spirc command but `activate` and `transfer` is dropped by an inactive device — go through `control::send`.
+- A command sent right after `transfer` is still dropped — wait for `active` (`control.rs`).
 - A Session whose Spirc ended cannot connect again — make a new one and `set_session`.
 - `Playing` is not proof of audio — a missing audio key plays silence; watch `error`.
 - Constructing librespot's `Cache` writes the account's credentials to disk in plain text — never use it.
 - `music_play_pause` from the exclusive-playback rule would start music it meant to stop — use `music_pause`.
 - `cargo update` on librespot moves it off the pinned rev and can move tauri off 2.11.2 — bump the rev by hand.
-- `token_provider().get_token` (keymaster) answers 403 — the Web API token is Login5's.
 - A track URI is not a context librespot can load — `music_play_track` uses its album, or `from_tracks`.
-- Spotify pads search and playlist lists with `null` entries — parse items as optional.
+- librespot's rodio sink `unwrap`s a named device that is gone and hangs on a dead stream — the sink in `audio/` replaces it.
+- `.gitignore` ignores every `output/` directory — the output module is `audio/`.

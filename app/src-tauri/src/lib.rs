@@ -82,7 +82,7 @@ pub fn run() {
             std::thread::spawn(move || {
                 auth::keyd::ensure_installed();
                 // Spotify, when Settings → Music is on: its login is keyd's too.
-                music::startup::connect_if_enabled(&restore);
+                music::startup::apply_settings(&restore);
                 // Replay the stored session with a server-side ping.
                 auth::restore_session(&restore);
             });
@@ -253,6 +253,10 @@ pub fn run() {
             music::commands::music_playlists,
             music::commands::music_search,
             music::commands::music_duck,
+            music::commands::music_devices,
+            music::commands::music_transfer,
+            music::commands::music_outputs,
+            music::commands::music_set_output,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
