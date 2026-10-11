@@ -129,7 +129,7 @@ export function main(env = process.env, args = process.argv.slice(2)) {
     if (args.includes("--prepare-release")) prepareReleaseConfig(rust);
     const ready = distributionReady(distribution, env);
     output("distribution_ready", ready);
-    if (!ready) summary("Windows installer artifacts are available for VM validation. Public Windows distribution and Store submission require a reviewed FFMPEG-SOURCE-OFFER.txt plus OCULUS_WINDOWS_DISTRIBUTION_APPROVED=true; bundled upstream notices alone do not satisfy this release gate.");
+    if (!ready) summary("Windows installer artifacts are available for VM validation. Public Windows distribution and Store submission require FFMPEG-SOURCE-OFFER.txt plus OCULUS_WINDOWS_DISTRIBUTION_APPROVED=true, set once the ffmpeg source release is published and the offer reviewed; a successful build does not satisfy this release gate.");
     return;
   }
   const { identity, missing } = readMsixIdentity(env);

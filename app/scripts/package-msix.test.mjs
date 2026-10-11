@@ -136,7 +136,7 @@ test("public distribution requires a written offer plus explicit review approval
   expect(readFileSync(join(input.content, "FFMPEG-SOURCE-OFFER.txt"), "utf8")).toContain("Fixture offer");
 });
 
-test("release config includes an available offer while preserving the upstream notices", () => {
+test("release config includes an available offer beside the bundled notices", () => {
   const root = scratch();
   mkdirSync(join(root, "windows", "distribution"), { recursive: true });
   writeFileSync(join(root, "tauri.windows.conf.json"), JSON.stringify({ mainBinaryName: "oculus-app", bundle: { resources: { "windows/distribution/FFMPEG-LICENSE.txt": "FFMPEG-LICENSE.txt" } } }));
