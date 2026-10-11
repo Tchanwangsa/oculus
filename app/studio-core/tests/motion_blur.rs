@@ -124,7 +124,12 @@ fn a_bad_token_names_its_level() {
     );
     assert!(e.contains("did you mean `finals`"), "{e}");
     let report = p.lint().unwrap();
-    assert_eq!(report.issues.len(), 1, "{report}");
+    let other: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| !common::component_rule(&i.to_string()))
+        .collect();
+    assert_eq!(other.len(), 1, "{report}");
     assert!(report.to_string().contains("video.json motion.motionBlur"));
 }
 

@@ -1,0 +1,65 @@
+//! Gallery stills pinned by golden frames, and the gallery's determinism
+//! across thread counts.
+#![allow(clippy::unwrap_used, clippy::panic)] // helpers outside #[test] fns
+
+mod common;
+
+use common::{assert_golden, fixture};
+use studio_core::Project;
+use studio_core::gallery::{self, GalleryOptions};
+
+#[test]
+fn every_example_is_a_still_in_declaration_order() {
+    let project = Project::load(fixture("gallery")).unwrap();
+    let g = gallery::render(&project, "Tile", None, &GalleryOptions::default()).unwrap();
+    let names: Vec<&str> = g.stills.iter().map(|s| s.example.as_str()).collect();
+    assert_eq!(names, ["short", "long"]);
+    // The default moment is the middle of the scene's 2 s hold.
+    assert_eq!((g.moment.t, g.moment.duration), (1.0, 2.0));
+    for (name, still) in names.iter().zip(&g.stills) {
+        assert_golden(&format!("gallery-tile-{name}"), &still.frame);
+    }
+}
+
+#[test]
+fn stills_are_the_same_at_any_thread_count() {
+    let project = Project::load(fixture("gallery")).unwrap();
+    let one = |threads| {
+        gallery::render(
+            &project,
+            "Tile",
+            Some(0.5),
+            &GalleryOptions {
+                scale: 1.0,
+                threads: Some(threads),
+            },
+        )
+        .unwrap()
+    };
+    let serial = one(1);
+    let parallel = one(2);
+    assert_eq!(serial.threads, 1);
+    assert_eq!(parallel.threads, 2);
+    for (a, b) in serial.stills.iter().zip(&parallel.stills) {
+        assert_eq!(a.example, b.example);
+        assert!(a.frame.rgba == b.frame.rgba, "{}: frames differ", a.example);
+    }
+}
+
+#[test]
+fn a_moment_outside_the_preview_is_refused() {
+    let project = Project::load(fixture("gallery")).unwrap();
+    let err = gallery::render(&project, "Tile", Some(2.0), &GalleryOptions::default()).unwrap_err();
+    assert!(err.to_string().contains("t must be in [0, 2)"), "{err}");
+}
+
+#[test]
+fn the_sheet_is_one_png() {
+    let project = Project::load(fixture("gallery")).unwrap();
+    let g = gallery::render(&project, "Tile", None, &GalleryOptions::default()).unwrap();
+    let path = std::env::temp_dir().join(format!("gallery-sheet-{}.png", std::process::id()));
+    g.write_sheet(&path, 2).unwrap();
+    let (w, h) = image::image_dimensions(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+    assert!(w >= 2 * 640 && h >= 360, "{w}x{h}");
+}

@@ -26,6 +26,7 @@ frames and contact sheets, lints, and narrates.
 | The element tree and its style keys | `app/studio-core/src/scene/` |
 | Layout (taffy, parley) and paint (vello_cpu); Path trim and Text reveal | `app/studio-core/src/layout/`, `app/studio-core/src/paint/` (`path/`, `text/`) |
 | Props schemas and their validation | `app/studio-core/src/schema/` |
+| Galleries: each example of a component as a still, and its contact sheet | `app/studio-core/src/gallery/` |
 | Themes and bundled fonts | `app/studio-core/themes/`, `app/studio-core/fonts/`, `app/studio-core/src/theme/`, `app/studio-core/src/fonts/` |
 | Every error and its message | `app/studio-core/src/error.rs` |
 | Fixture videos and golden frames | `app/studio-core/tests/fixtures/`, `app/studio-core/tests/golden/` |
@@ -143,8 +144,9 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
   what came. Defaults are filled in.
 - `token("color")` takes a token *name* (`"accent"`) and hands the component
   its value; any theme section works, dotted ones too (`token("motion.spring")`).
-- `examples` are named prop sets. Lint checks them against the schema; nothing
-  renders them yet.
+- `examples` are named prop sets. Lint checks them against the schema and
+  requires each required prop in every example (see "Lint"); `gallery`
+  renders each one as a still.
 - Motion helpers are prelude globals and pure functions of `t`:
   `interpolate(t, inputs, outputs, { easing, clamp })`, `spring(t, { stiffness,
   damping, mass })` (closed form, so any `t` samples directly), `linear`,
@@ -736,6 +738,36 @@ with no `hold`) is reported and not rendered. It collects every problem
 with its scene, scene id and component instead of stopping at the first;
 an error is reported once even if several renders hit it.
 
+Lint also reads the source and declared props of each component a scene
+uses (`project/lint/tokens.rs`, `project/lint/props.rs`). Each problem is an
+error at the literal's `file.tsx:line:col`:
+
+- **Colour literals.** `#rgb`, `#rrggbb` or `#rrggbbaa`, `rgb(`, `rgba(`,
+  `hsl(`, `oklch(` and the other functional notations, or a whole string that
+  is a CSS colour name. The argument of `token(...)`, and a `.default(...)`
+  chained on it, may hold a name, not a literal. The message names the theme
+  colour to use and the three nearest by RGB distance (all colour names for a
+  functional or named notation): ``colour `#5e6ad3` is a literal; use
+  theme.color.accent (nearest: accent, accentStrong, muted)``.
+- **Font families.** A bundled family's name as a whole string, or any string
+  after `fontFamily:`: ``font family `Manrope` is a literal; use
+  theme.font.heading``.
+- **Style numbers.** A number that is a direct value of a `style` object, or
+  an element of an array there (`padding: [0, 16]`), and equals a theme
+  `space` or `radius` entry: ``style value 24 equals theme.space.m; use
+  theme.space.m``. Space is searched before radius, so 16 names `space.s`
+  when `radius.m` is also 16. Numbers inside nested objects (`shadow`,
+  `border`, `fill`), negative numbers and every other number are allowed.
+
+The check reads the TSX with a scanner, not a parser: comments are skipped,
+strings and template literals are read as strings (a literal inside a
+template's `${...}` is not checked), and JSX text is read token by token.
+
+- **Required props.** A prop with no `.default()` and not `.optional()` must
+  be set in every `examples` entry: ``example `short` omits required prop
+  `note`, which has no default``. A component with required props and no
+  `examples` is reported once.
+
 For a narrated video lint also reports, each naming the scene id:
 
 - a `script.md` section no scene matches (kind `script`, with its line);
@@ -890,6 +922,23 @@ with the `Narration` error before any frame renders.
 
 Flags are in [cli-reference.md](./cli-reference.md#oculus-studio).
 
+## Galleries render every example as a still
+
+`gallery::render(project, component, t, options)` renders each entry of the
+component's `examples` as one still, in declaration order. Each still is the
+component called with that example's props at one moment: `t`, by default the
+middle of the first scene that uses the component (its length is
+`ctx.duration`), or 1 s into a 2 s preview when no scene uses it. An explicit
+`t` must lie inside that length. A gallery renders without narration, so
+`word()` finds no cues. An example is checked against the props schema when
+it renders, and a failure names the example.
+
+Examples render in parallel, one engine per thread, at most one engine per
+example and within the strip's 2 GiB budget. Each still is put back at its
+declaration's index, so one thread and many give the same bytes
+(`tests/gallery_golden.rs`). `Gallery::write_sheet` tiles the stills, two
+or more a row, labelled with their example names.
+
 ## Golden frames pin the pixels
 
 `tests/golden.rs` renders the fixtures in `tests/fixtures/` at fixed times and
@@ -924,6 +973,9 @@ the voice resolution, the cache key and `narrate` with a stubbed aligner
 tree hashes, the audio placement, the reorder buffer and pruning, and,
 through the real ffmpeg (skipped without one), the join and cache check
 above, a narrated fixture's audio onset, cancel and a failing frame.
+
+`tests/gallery_golden.rs` pins the stills of the `gallery` fixture's examples
+and checks that their pixels do not depend on the thread count.
 
 From `app/studio-core`: `cargo test`, `cargo clippy --all-targets -- -D
 warnings`, `cargo fmt`. CI runs these in the `studio-core` job on macOS.
