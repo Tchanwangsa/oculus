@@ -109,6 +109,11 @@ pub enum StudioError {
     )]
     SceneTimeOutOfRange { index: usize, t: f64, hold: f64 },
 
+    /// A bad scene transition value; `level` names where it came from, as
+    /// `scene 3 transition.kind` or `theme motion.transition.easing`.
+    #[error("{level}: {message}")]
+    Transition { level: String, message: String },
+
     #[error("JavaScript host: {0}")]
     Host(String),
 
@@ -191,6 +196,7 @@ impl StudioError {
             Self::TimeOutOfRange { .. } => "time_out_of_range",
             Self::SceneOutOfRange { .. } => "scene_out_of_range",
             Self::SceneTimeOutOfRange { .. } => "scene_time_out_of_range",
+            Self::Transition { .. } => "transition",
             Self::Host(_) => "host",
             Self::Render(_) => "render",
             Self::Png { .. } => "png",
@@ -221,6 +227,15 @@ impl StudioError {
             | Self::Image { loc, .. }
             | Self::Font { loc, .. } => loc.as_ref(),
             _ => None,
+        }
+    }
+}
+
+impl From<crate::transition::TransitionError> for StudioError {
+    fn from(e: crate::transition::TransitionError) -> Self {
+        Self::Transition {
+            level: e.level,
+            message: e.message,
         }
     }
 }

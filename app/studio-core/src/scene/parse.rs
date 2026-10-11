@@ -41,6 +41,7 @@ fn parse(v: &Value, parent: &str, index: Option<usize>) -> Result<Node, NodeErro
         Some("text") => Kind::Text,
         Some("image") => Kind::Image,
         Some("path") => Kind::Path,
+        Some("morph") => Kind::Morph,
         _ => {
             return Err(fail(
                 "expected an element (Box, Text, Image, Path, Stack or Row)".to_owned(),
@@ -93,5 +94,11 @@ fn parse(v: &Value, parent: &str, index: Option<usize>) -> Result<Node, NodeErro
         children,
         key: obj.get("key").and_then(Value::as_str).map(str::to_owned),
         loc,
+        p: obj
+            .get("p")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0) as f32,
+        scope: None,
     })
 }

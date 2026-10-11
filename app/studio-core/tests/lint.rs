@@ -18,6 +18,9 @@ fn clean_projects_lint_clean() {
         "counter",
         "enter",
         "camera",
+        "transitions",
+        "morph",
+        "magic",
     ] {
         let report = Project::load(fixture(name)).unwrap().lint().unwrap();
         assert!(report.is_clean(), "{name}: {report}");

@@ -45,6 +45,31 @@ impl TextKey {
     pub fn text(&self) -> &str {
         &self.text
     }
+
+    /// The same string shaped between `a` and `b`: size, weight, line
+    /// height and letter spacing interpolated. `None` when the two differ in
+    /// anything that cannot be (the string, the family, tabular digits).
+    pub fn between(a: &TextKey, b: &TextKey, p: f32) -> Option<TextKey> {
+        if a.text != b.text || a.family != b.family || a.tabular != b.tabular {
+            return None;
+        }
+        let mix = |x: u32, y: u32| {
+            if x == y {
+                return y;
+            }
+            let (x, y) = (f32::from_bits(x), f32::from_bits(y));
+            (x + (y - x) * p).to_bits()
+        };
+        Some(TextKey {
+            text: b.text.clone(),
+            family: b.family.clone(),
+            size: mix(a.size, b.size),
+            weight: mix(a.weight, b.weight),
+            line_height: mix(a.line_height, b.line_height),
+            letter_spacing: mix(a.letter_spacing, b.letter_spacing),
+            tabular: b.tabular,
+        })
+    }
 }
 
 fn font_size(s: &Style) -> f32 {

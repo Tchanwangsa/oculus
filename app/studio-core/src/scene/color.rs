@@ -21,6 +21,13 @@ impl Color {
         a: 1.0,
     };
 
+    pub const CLEAR: Color = Color {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 0.0,
+    };
+
     pub fn parse(s: &str) -> Result<Color, String> {
         let bad = || {
             format!(

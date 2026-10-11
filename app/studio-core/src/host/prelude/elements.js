@@ -1,5 +1,5 @@
-// The JSX factory and the host elements. Box, Text, Image and Path are host
-// elements, checked as they are made; any other type is a function component,
+// The JSX factory and the host elements. Box, Text, Image, Path and Morph are
+// host elements, checked as they are made; any other type is a function component,
 // which `h` defers so the resolver (resolve.js) can call it top-down with its
 // subtree's ctx. The prelude files share one module scope, in this order:
 // elements, resolve, props, motion, time, presets, arrow, entry.
@@ -11,7 +11,7 @@ const define = (name, value) =>
 const COMPONENT = Symbol('component');
 const SCOPE = Symbol('scope');
 
-const NAMES = { box: 'Box', text: 'Text', image: 'Image', path: 'Path' };
+const NAMES = { box: 'Box', text: 'Text', image: 'Image', path: 'Path', morph: 'Morph' };
 const elementName = (k) => NAMES[k] || String(k);
 const componentName = (fn) => (fn && fn.name) || 'component';
 const describe = (v) => {
@@ -32,6 +32,7 @@ const ALLOWED = {
   text: ['style', 'key', 'children'],
   image: ['style', 'key', 'src'],
   path: ['style', 'key', 'd', 'viewBox', 'fill', 'stroke', 'trim'],
+  morph: ['p', 'children'],
 };
 const PATH_PROPS = ['viewBox', 'fill', 'stroke', 'trim'];
 const IGNORED = ['__source', '__self'];
@@ -106,6 +107,17 @@ function h(type, props, ...children) {
     }
     node.d = props.d;
     for (const k of PATH_PROPS) if (props[k] !== undefined) node[k] = props[k];
+  } else if (type === 'morph') {
+    // Rust lays the tree out with each child in the Morph's place and
+    // blends the two layouts at p.
+    if (typeof props.p !== 'number' || !Number.isFinite(props.p)) {
+      throw new TypeError(`<Morph> needs p={0..1}, a finite number, got ${describe(props.p)}`);
+    }
+    if (kids.length !== 2 || !kids.every(isElement)) {
+      throw new TypeError(`<Morph> takes exactly two elements, the layout at p = 0 and the layout at p = 1, got ${kids.length === 2 ? kids.map(describe).join(' and ') : kids.length}`);
+    }
+    node.p = clamp(props.p, 0, 1);
+    node.children = kids;
   } else {
     for (const c of kids) {
       if (!isElement(c)) {
@@ -121,6 +133,7 @@ define('Box', 'box');
 define('Text', 'text');
 define('Image', 'image');
 define('Path', 'path');
+define('Morph', 'morph');
 const Fragment = function Fragment(props) {
   return (props && props.children) || [];
 };

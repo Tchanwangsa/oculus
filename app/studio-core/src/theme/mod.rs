@@ -6,7 +6,9 @@ mod schema;
 
 use crate::error::{Result, StudioError};
 use crate::scene::Color;
+use crate::transition::MotionSpec;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 const BUNDLED: &[(&str, &str)] = &[("default", include_str!("../../themes/default.json"))];
@@ -22,6 +24,11 @@ pub struct Theme {
     pub text_color: Color,
     /// `font.body`: the family of `Text` without a `fontFamily`.
     pub body_font: String,
+    /// `motion.transition`, `motion.magicMove` and `motion.morphColor`: the
+    /// bottom of the transition cascade.
+    pub motion: MotionSpec,
+    /// `motion.easing`: named cubic-bezier points.
+    pub easings: BTreeMap<String, [f64; 4]>,
 }
 
 impl Theme {
@@ -61,6 +68,8 @@ impl Theme {
             background: checked.background,
             text_color: checked.text,
             body_font: checked.body_font,
+            motion: checked.motion,
+            easings: checked.easings,
         })
     }
 

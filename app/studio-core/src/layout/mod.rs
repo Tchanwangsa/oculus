@@ -5,10 +5,10 @@
 mod flex;
 mod text;
 
-pub use text::{TextKey, TextLayout, Typeset};
+pub use text::{TextKey, TextLayout, Typeset, finish};
 
 use crate::images::ImageCache;
-use crate::scene::{Dim, Kind, Node, PathSpec, Style};
+use crate::scene::{Dim, Kind, Node, PathSpec, Scope, Style};
 use std::sync::Arc;
 use taffy::{AvailableSpace, NodeId, Size, TaffyTree};
 use vello_cpu::Pixmap;
@@ -16,6 +16,7 @@ use vello_cpu::kurbo::Rect;
 
 /// A laid-out node. Rects are absolute, before any transform.
 pub struct LNode {
+    pub kind: Kind,
     pub style: Style,
     /// Border box.
     pub rect: Rect,
@@ -25,10 +26,13 @@ pub struct LNode {
     pub image: Option<Arc<Pixmap>>,
     pub path: Option<Box<PathSpec>>,
     pub children: Vec<LNode>,
-    /// The element's `key`, for matching nodes across frames; paint
+    /// The element's `key`, for matching nodes across trees; paint
     /// ignores it.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub key: Option<String>,
+    /// The element's TSX line and column.
+    pub loc: Option<(u32, u32)>,
+    /// The Morph this node is the chosen layout of (see `scene::select`).
+    pub scope: Option<Scope>,
 }
 
 pub enum LayoutError {
@@ -123,7 +127,8 @@ impl Layouter<'_> {
                 tree.new_leaf_with_context(style, Leaf::Path(w, h))
                     .map_err(taffy)
             }
-            Kind::Box => {
+            // `select` replaces every Morph before layout.
+            Kind::Box | Kind::Morph => {
                 let kids = n
                     .children
                     .iter()
@@ -215,6 +220,7 @@ fn extract(
         rect.y1 - f64::from(l.padding.bottom + l.border.bottom),
     );
     let mut out = LNode {
+        kind: n.kind,
         style: n.style,
         rect,
         content,
@@ -223,6 +229,8 @@ fn extract(
         path: n.path,
         children: Vec::new(),
         key: n.key,
+        loc: n.loc,
+        scope: n.scope,
     };
     match tree.get_node_context_mut(id) {
         Some(Leaf::Text(layout, key)) => {

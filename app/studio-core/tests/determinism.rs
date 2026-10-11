@@ -17,6 +17,9 @@ fn two_renderers_agree_byte_for_byte() {
         ("counter", 1.0),
         ("enter", 0.75),
         ("camera", 1.0),
+        ("transitions", 6.5),
+        ("morph", 0.5),
+        ("magic", 2.5),
     ] {
         let project = Project::load(fixture(name)).unwrap();
         let mut a = Renderer::new(&project, RenderOptions::default()).unwrap();

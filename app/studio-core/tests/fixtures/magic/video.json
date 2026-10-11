@@ -1,0 +1,9 @@
+{
+  "size": { "width": 640, "height": 360 },
+  "theme": "default",
+  "motion": { "transition": { "dur": 1.0, "easing": "linear" } },
+  "scenes": [
+    { "component": "Deck", "props": { "step": 1 }, "hold": 2.0 },
+    { "component": "Deck", "props": { "step": 2 }, "hold": 2.0 }
+  ]
+}

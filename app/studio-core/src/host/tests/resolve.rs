@@ -286,3 +286,41 @@ fn curved_arrows_have_natural_ends_and_the_head_follows_the_shaft() {
         assert!(same_direction((l[k], l[k + 1]), (90.0, 30.0)), "{l:?}");
     }
 }
+
+#[test]
+fn morph_is_a_host_node_with_two_resolved_children() {
+    let mut h = host();
+    h.load(
+        "M",
+        "export const props = {};\nconst Two = () => <><Box /><Box /></>;\nexport default () => <Morph p={1.4}><Text>a</Text><Row /></Morph>;\n",
+    )
+    .unwrap();
+    let (tree, _) = call(&mut h, "M").unwrap();
+    assert_eq!(tree["k"], "morph");
+    assert_eq!(tree["p"], 1.0);
+    assert_eq!(tree["children"].as_array().unwrap().len(), 2);
+    h.load(
+        "Bad",
+        "export const props = {};\nconst Two = () => <><Box /><Box /></>;\nexport default () => (\n  <Morph p={0.5}><Box /><Two /></Morph>\n);\n",
+    )
+    .unwrap();
+    let e = call(&mut h, "Bad").unwrap_err().to_string();
+    assert!(
+        e.starts_with("Bad.tsx:4:3: TypeError: <Morph> takes exactly two elements, the layout at p = 0 and the layout at p = 1; its children resolved to 3"),
+        "{e}"
+    );
+}
+
+#[test]
+fn a_hidden_sequence_hides_both_layouts_of_a_morph() {
+    let mut h = host();
+    h.load(
+        "M",
+        "export const props = {};\nexport default () => <Sequence from={1}><Morph p={0.5}><Box /><Box style={{ opacity: 0.5 }} /></Morph></Sequence>;\n",
+    )
+    .unwrap();
+    let (tree, _) = call(&mut h, "M").unwrap();
+    assert_eq!(tree["k"], "morph");
+    assert_eq!(tree["children"][0]["style"]["opacity"], 0.0);
+    assert_eq!(tree["children"][1]["style"]["opacity"], 0.0);
+}

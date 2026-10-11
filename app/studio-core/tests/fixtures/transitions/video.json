@@ -1,0 +1,14 @@
+{
+  "size": { "width": 640, "height": 360 },
+  "theme": "default",
+  "motion": { "transition": { "dur": 1.0, "easing": "linear" } },
+  "scenes": [
+    { "component": "Slide", "props": { "title": "Cut", "variant": "a" }, "hold": 2.0 },
+    { "component": "Slide", "props": { "title": "Dissolve", "variant": "b" }, "hold": 2.0, "transition": { "kind": "cut" } },
+    { "component": "Slide", "props": { "title": "Push", "variant": "a" }, "hold": 2.0, "transition": { "kind": "dissolve" } },
+    { "component": "Slide", "props": { "title": "Wipe", "variant": "b" }, "hold": 2.0, "transition": { "kind": "push", "direction": "left" } },
+    { "component": "Slide", "props": { "title": "Zoom", "variant": "a" }, "hold": 2.0, "transition": { "kind": "wipe", "direction": "left" } },
+    { "component": "Slide", "props": { "title": "Magic", "variant": "b" }, "hold": 2.0, "transition": { "kind": "zoom" } },
+    { "component": "Slide", "props": { "title": "The end", "variant": "a" }, "hold": 2.0, "transition": { "kind": "magic" } }
+  ]
+}

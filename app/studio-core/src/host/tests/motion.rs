@@ -101,3 +101,34 @@ fn counters_reveals_and_start_times() {
         numbers("...series([1, 2, 0.5], { gap: 0.25, at: 1 }), ...parallel([1, 2], { at: 3 })");
     assert_eq!(starts, [1.0, 2.25, 4.5, 3.0, 3.0]);
 }
+
+#[test]
+fn rust_easings_match_the_preludes() {
+    use crate::easing::Easing;
+    let curves = [
+        [0.2, 0.0, 0.0, 1.0],
+        [0.05, 0.7, 0.1, 1.0],
+        [0.3, 0.0, 0.8, 0.15],
+        [0.65, 0.0, 0.35, 1.0],
+    ];
+    let ps = [0.0, 0.1, 0.33, 0.5, 0.71, 0.9, 1.0];
+    for c in curves {
+        let js: Vec<String> = ps
+            .iter()
+            .map(|p| format!("cubicBezier({}, {}, {}, {})({p})", c[0], c[1], c[2], c[3]))
+            .collect();
+        for (p, g) in ps.iter().zip(numbers(&js.join(", "))) {
+            let r = Easing::Bezier(c).apply(*p);
+            assert!((g - r).abs() < 1e-12, "{c:?} at {p}: js {g} vs rust {r}");
+        }
+    }
+    let js: Vec<String> = ps
+        .iter()
+        .map(|p| format!("easeInOutCubic({p}), easeOutCubic({p})"))
+        .collect();
+    let got = numbers(&js.join(", "));
+    for (i, p) in ps.iter().enumerate() {
+        assert!((got[2 * i] - Easing::InOutCubic.apply(*p)).abs() < 1e-12);
+        assert!((got[2 * i + 1] - Easing::OutCubic.apply(*p)).abs() < 1e-12);
+    }
+}

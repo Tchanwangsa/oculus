@@ -65,6 +65,38 @@ fn camera_zoom() {
     assert_golden("camera-1.0", &render("camera", Time::Global(1.0)));
 }
 
+/// Each transition kind at p = 0.25, 0.5 and 0.75 (linear easing, 1 s), one
+/// after another in one 640x360 video.
+#[test]
+fn transitions_at_a_quarter_half_and_three_quarters() {
+    let project = Project::load(fixture("transitions")).unwrap();
+    let mut r = Renderer::new(&project, RenderOptions::default()).unwrap();
+    let kinds = ["cut", "dissolve", "push", "wipe", "zoom", "magic"];
+    for (i, kind) in kinds.iter().enumerate() {
+        for p in [0.25, 0.5, 0.75] {
+            let frame = r.frame(Time::Scene { index: i + 1, t: p }).unwrap();
+            assert_golden(&format!("transition-{kind}-{p}"), &frame);
+        }
+    }
+}
+
+/// A card moving between rows inside a Morph, the footer gliding after it.
+#[test]
+fn in_scene_morph() {
+    assert_golden("morph-0.5", &render("morph", Time::Global(0.5)));
+}
+
+/// Automatic magic move with unmatched children and a changed title.
+#[test]
+fn magic_move_with_unmatched_children_and_changed_text() {
+    let project = Project::load(fixture("magic")).unwrap();
+    let mut r = Renderer::new(&project, RenderOptions::default()).unwrap();
+    for p in [0.2, 0.5, 0.8] {
+        let frame = r.frame(Time::Scene { index: 1, t: p }).unwrap();
+        assert_golden(&format!("magic-{p}"), &frame);
+    }
+}
+
 #[test]
 fn half_scale_proxy_keeps_the_layout() {
     let project = Project::load(fixture("title-card")).unwrap();
@@ -99,5 +131,36 @@ fn report_frame_cost() {
         }
         let ms = start.elapsed().as_secs_f64() * 1000.0 / f64::from(n);
         println!("frame cost {name}: {ms:.2} ms/frame at 1080p");
+    }
+}
+
+/// ms per 1080p frame for a scene alone, mid-dissolve and mid-magic (the
+/// 640x360 fixtures laid out at 1080p). Meaningful with --release.
+#[test]
+fn report_transition_cost() {
+    let cases = [
+        ("transitions", "single scene", 2, 1.5),
+        ("transitions", "dissolve", 2, 0.5),
+        ("transitions", "push", 3, 0.5),
+        ("transitions", "magic", 6, 0.5),
+        ("magic", "magic, text halves", 1, 0.3),
+        ("morph", "in-scene Morph", 0, 0.5),
+    ];
+    for (name, what, index, t) in cases {
+        let mut project = Project::load(fixture(name)).unwrap();
+        project.video.size = studio_core::Size {
+            width: 1920,
+            height: 1080,
+        };
+        let mut r = Renderer::new(&project, RenderOptions::default()).unwrap();
+        r.frame(Time::Scene { index, t }).unwrap();
+        let n = 20;
+        let start = Instant::now();
+        for i in 0..n {
+            let t = t + f64::from(i) * 0.002;
+            r.frame(Time::Scene { index, t }).unwrap();
+        }
+        let ms = start.elapsed().as_secs_f64() * 1000.0 / f64::from(n);
+        println!("frame cost {what} ({name}): {ms:.2} ms/frame at 1080p");
     }
 }

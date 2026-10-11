@@ -1,0 +1,5 @@
+{
+  "size": { "width": 640, "height": 360 },
+  "theme": "default",
+  "scenes": [{ "component": "Regroup", "props": {}, "hold": 2.0 }]
+}
