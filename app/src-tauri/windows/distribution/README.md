@@ -1,20 +1,28 @@
 # Windows ffmpeg distribution
 
-`FFMPEG-LICENSE.txt` and `FFMPEG-README.txt` are unmodified assets from
-[ffmpeg-static b6.0](https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.0):
-`win32-x64.LICENSE` and `win32-x64.README`. Both Windows packages include them.
-The upstream README identifies the binary as Gyan's FFmpeg 6.0 essentials
-build under GPL v3 and identifies FFmpeg source commit `ea3d24bbe3`.
+Both Windows packages ship `ffmpeg.exe` with three notices from this folder:
 
-The upstream source link is provenance, not a written source offer by Oculus
-and not proof that all corresponding dependency sources are available. Before
-public Windows distribution or Store submission, establish the exact
-corresponding-source delivery for this binary and its linked libraries, place
-the reviewed written offer in `FFMPEG-SOURCE-OFFER.txt` here, and set the
-repository variable `OCULUS_WINDOWS_DISTRIBUTION_APPROVED` to `true`.
-Do not create a placeholder offer or treat a successful build as legal approval.
-The release workflow retains installer artifacts for VM validation while this
-public-distribution gate is closed.
+- `FFMPEG-LICENSE.txt`: the GNU LGPL v3 and GPL v3 texts from the FFmpeg
+  tarball, then the `COPYING` files of libopus and dav1d, which are statically
+  linked.
+- `FFMPEG-README.txt`: version, upstream source hashes, configure line and
+  where the build script lives.
+- `FFMPEG-SOURCE-OFFER.txt`: the written offer of the corresponding source,
+  which is the GitHub release `ffmpeg-8.1.3-oculus1` of this repository.
 
-See [development.md](../../../../docs/development.md#windows-packaging-separates-build-artifacts-from-public-distribution)
+The binary is our own LGPL v3 build from `app/scripts/ffmpeg/build.sh`;
+`.github/workflows/ffmpeg.yml` stages it, the byte-identical upstream
+tarballs and the build files in that release as a draft. A maintainer
+publishes the release, reviews the offer, then sets the repository variable
+`OCULUS_WINDOWS_DISTRIBUTION_APPROVED` to `true`; until then the release
+workflow retains installer artifacts for VM validation only. A build is not
+legal approval.
+
+These files describe one build. Once its release is published, any change to
+the build (a version pin, the configure flags, the script) needs a new tag,
+by `FFMPEG_VERSION` or `OCULUS_BUILD` in `build.sh`, and the README's hashes,
+the offer's URL and `app/scripts/fetch-ffmpeg.mjs` change with it.
+
+See [development.md](../../../../docs/development.md#windows-ffmpeg-is-our-own-lgpl-build)
+for the build and [the packaging section](../../../../docs/development.md#windows-packaging-separates-build-artifacts-from-public-distribution)
 for the Store identity variables and packaging commands.

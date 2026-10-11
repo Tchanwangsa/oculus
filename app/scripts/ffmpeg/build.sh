@@ -40,8 +40,9 @@ case "$target" in
     meson_system=windows
     meson_cpu=x86_64
     # Win32 threads and a fully static link: the binary imports Windows
-    # system DLLs only, never the MinGW runtime's. The linker strips it and
-    # writes no PE timestamp, as strip would, so a rebuild is byte-identical.
+    # system DLLs only, never the MinGW runtime's. The linker strips it, since
+    # strip would stamp the PE header with the time, so rebuilds match byte
+    # for byte.
     target_flags=(--enable-cross-compile --target-os=mingw32 --arch=x86_64
       "--cross-prefix=$host-" --enable-w32threads --disable-stripping)
     target_ldflags="-static -s -Wl,--no-insert-timestamp"
