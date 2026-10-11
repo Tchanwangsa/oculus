@@ -32,8 +32,24 @@ fn resolve(from: &Path) -> Result<PathBuf, String> {
     } else {
         from.to_path_buf()
     };
-    from.canonicalize()
-        .map_err(|e| format!("{}: {e}", from.display()))
+    crate::runtime::platform::canonicalize(&from).map_err(|e| format!("{}: {e}", from.display()))
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn resolved_broker_path_matches_the_registrars_native_path() {
+    let scratch = crate::test_support::Scratch::new("keyd-native-path");
+    let executable = scratch.join("oculus-keyd.exe");
+    std::fs::write(&executable, "test executable").unwrap();
+    let extended = std::fs::canonicalize(&executable).unwrap();
+    assert_eq!(
+        resolve(&extended).unwrap(),
+        dunce::canonicalize(&executable).unwrap()
+    );
+    assert!(!resolve(&extended)
+        .unwrap()
+        .to_string_lossy()
+        .starts_with(r"\\?\"));
 }
 
 /// Installs `from` (keyd's executable or its helper app) and (re)loads its
