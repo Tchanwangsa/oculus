@@ -113,7 +113,8 @@ export function useJobAudit() {
       armed && models ? [...new Set(JOBS.flatMap((j) => models[j.id].map((s) => s.provider)))] : [],
     [armed, models],
   );
-  const { providers } = useProviderModels(needed);
+  // Never starts opencode: only Settings → opencode may (docs/harness.md).
+  const { providers } = useProviderModels(needed, { start: false });
 
   // One prune at a time; a trigger that lands mid-run re-runs it after.
   const running = useRef(false);

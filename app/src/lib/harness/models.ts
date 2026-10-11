@@ -224,6 +224,18 @@ export function harnessCodexModels(): Promise<CodexModel[]> {
   return invoke<CodexModel[]>("harness_codex_models");
 }
 
-export function harnessOpencodeModels(): Promise<OpencodeModel[]> {
-  return invoke<OpencodeModel[]>("harness_opencode_models");
+/** Fired on `window` when `harnessOpencodeModels` answers, i.e. the server
+ *  is up, so a picker that found it dormant can read it now. */
+export const OPENCODE_RUNNING_EVENT = "oculus:opencode-running";
+
+/** Starts the server if it is down. */
+export async function harnessOpencodeModels(): Promise<OpencodeModel[]> {
+  const models = await invoke<OpencodeModel[]>("harness_opencode_models");
+  window.dispatchEvent(new Event(OPENCODE_RUNNING_EVENT));
+  return models;
+}
+
+/** The running server's catalogue, or null when it is down — never a start. */
+export function harnessOpencodeModelsIfRunning(): Promise<OpencodeModel[] | null> {
+  return invoke<OpencodeModel[] | null>("harness_opencode_models_if_running");
 }

@@ -432,7 +432,8 @@ compile without one.
 bridge's connection into opencode's own store (shared with the student's
 terminal). A method spec is data rendered by one dialog; providers declaring
 nothing take an API key. Opening the opencode page starts it; Settings opens
-on another page, so opening Settings alone does not. The page is two tables,
+on another page, so opening Settings alone does not, and nor does Settings →
+Jobs (see [Per-job models](#per-job-models)). The page is two tables,
 Providers and Models, the second one row per model with opencode's own price,
 limits and capabilities (`ModelFacts`, a free catalogue read; a missing figure
 draws "—", never $0).
@@ -511,6 +512,14 @@ is set in the same menu.
 - **Notices and flags badge Settings** (a dot on the rail item and the Jobs
   row, `useJobAttention`) and print on the job's row until dismissed or the
   job's list is edited.
+
+Neither the Jobs pickers nor the audit starts opencode: both call
+`useProviderModels(…, { start: false })`, which asks it through `peekModels`,
+reading only a server already up (`harness_opencode_models_if_running`). Found
+down, it answers an empty list (so the audit removes nothing) and the picker's
+opencode tab links to Settings → opencode, whose opening starts it. It is asked
+again when `harnessOpencodeModels` next answers (`OPENCODE_RUNNING_EVENT`) —
+the composer or the opencode page starting it.
 
 ## Memory
 
