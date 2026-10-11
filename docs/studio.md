@@ -185,10 +185,13 @@ and the theme `warm` beside `default`. Each takes its colours and fonts from
 the theme and has at least two examples. `Formula` waits for the maths
 primitive (stage 8). `tests/starter.rs` lints the set in both themes, and
 `tests/gallery_golden.rs` pins every example as `starter-<Component>-<example>.png`,
-laid out at 1920x1080 and drawn at half scale. Every load copies each starter
-file the global library lacks, and never replaces one, so an edit is the
-user's. `oculus studio components seed
---reset` writes the starter text over every file that differs. Every write
+laid out at 1920x1080 and drawn at half scale. A load copies each starter
+file the global library has never been offered, then lists it in the
+library's `.seeded`; a listed file is never copied again, so a deleted
+starter stays deleted, while one added to a later build still arrives. An
+existing file is never replaced, so an edit is the user's. `oculus studio
+components seed --reset` writes the starter text over every file that
+differs or is missing. Every write
 to a library file first copies the previous text to `.history/` beside it
 (`<Name>.<unix-ms>.tsx` or `.json`, the millisecond moved on past any
 snapshot already there); nothing prunes `.history`. `oculus studio

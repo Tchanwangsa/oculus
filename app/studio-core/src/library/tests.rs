@@ -1,4 +1,4 @@
-//! Seeding copies missing starter files and never overwrites; a write
+//! Seeding offers each starter file once and never overwrites; a write
 //! snapshots the old text first.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -113,5 +113,31 @@ fn seeding_copies_missing_files_and_never_overwrites() {
         .collect();
     texts.sort();
     assert_eq!(texts, ["my steps", "starter steps"]);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn a_deleted_starter_stays_deleted_and_a_new_one_still_arrives() {
+    let root = scratch("seeded");
+    let one = [("components/Steps.tsx".to_owned(), "starter steps")];
+    seed_files(&root, one.clone().into_iter(), false).unwrap();
+    std::fs::remove_file(root.join("components/Steps.tsx")).unwrap();
+    assert!(
+        seed_files(&root, one.clone().into_iter(), false)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!root.join("components/Steps.tsx").exists());
+    // A later build adds a starter: only that one is copied.
+    let two = [
+        ("components/Steps.tsx".to_owned(), "starter steps"),
+        ("components/BigNumber.tsx".to_owned(), "starter number"),
+    ];
+    let written = seed_files(&root, two.clone().into_iter(), false).unwrap();
+    assert_eq!(written, ["components/BigNumber.tsx"]);
+    assert!(!root.join("components/Steps.tsx").exists());
+    // Reset brings the deleted one back.
+    let reset = seed_files(&root, two.into_iter(), true).unwrap();
+    assert_eq!(reset, ["components/Steps.tsx"]);
     std::fs::remove_dir_all(&root).ok();
 }

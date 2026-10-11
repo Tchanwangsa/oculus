@@ -2,8 +2,9 @@
 //! seeding it into a library folder, and the one write path every library
 //! edit takes, which snapshots the old text into `.history` first.
 //!
-//! A library folder holds `components/<Name>.tsx`, `themes/<name>.json` and
-//! `.history/` (snapshots named `<stem>.<unix-ms>.<ext>`, never pruned).
+//! A library folder holds `components/<Name>.tsx`, `themes/<name>.json`,
+//! `.history/` (snapshots named `<stem>.<unix-ms>.<ext>`, never pruned) and
+//! `.seeded` (the starter files already offered, one path a line).
 
 mod starter;
 
@@ -13,9 +14,11 @@ use crate::error::{Result, StudioError};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Copies every starter file that is missing from `root`, never touching a
-/// file that exists. With `reset`, each starter file whose text differs is
-/// written over the library's, snapshotting the old text first. Returns the
+/// Copies each starter file `root` has never been offered, once: a file
+/// listed in `.seeded` is not copied again, so a starter the user deleted
+/// stays deleted, while one added to a later build still arrives. An existing
+/// file is never touched. With `reset`, every starter file whose text differs
+/// (or is missing) is written, snapshotting the old text first. Returns the
 /// paths written, relative to `root`.
 pub fn seed(root: &Path, reset: bool) -> Result<Vec<String>> {
     let files = STARTER_COMPONENTS
@@ -34,24 +37,45 @@ fn seed_files<'a>(
     files: impl Iterator<Item = (String, &'a str)>,
     reset: bool,
 ) -> Result<Vec<String>> {
+    let record = root.join(SEEDED);
+    let mut seeded: Vec<String> = match std::fs::read_to_string(&record) {
+        Ok(s) => s.lines().map(str::to_owned).collect(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(StudioError::io(&record, e)),
+    };
+    let before = seeded.len();
     let mut written = Vec::new();
     for (rel, text) in files {
+        let offered = seeded.contains(&rel);
+        if offered && !reset {
+            continue;
+        }
         let path = root.join(&rel);
         let exists = path.try_exists().map_err(|e| StudioError::io(&path, e))?;
-        if exists {
-            if !reset {
-                continue;
-            }
-            let current = std::fs::read_to_string(&path).map_err(|e| StudioError::io(&path, e))?;
-            if current == text {
-                continue;
-            }
+        let write_it = if exists {
+            reset && std::fs::read_to_string(&path).map_err(|e| StudioError::io(&path, e))? != text
+        } else {
+            true
+        };
+        if write_it {
+            write(root, &rel, text)?;
+            written.push(rel.clone());
         }
-        write(root, &rel, text)?;
-        written.push(rel);
+        if !offered {
+            seeded.push(rel);
+        }
+    }
+    if seeded.len() != before {
+        std::fs::create_dir_all(root).map_err(|e| StudioError::io(root, e))?;
+        let tmp = record.with_extension("tmp");
+        std::fs::write(&tmp, seeded.join("\n") + "\n").map_err(|e| StudioError::io(&tmp, e))?;
+        std::fs::rename(&tmp, &record).map_err(|e| StudioError::io(&record, e))?;
     }
     Ok(written)
 }
+
+/// The record of starter files already offered to a library.
+const SEEDED: &str = ".seeded";
 
 /// Writes `text` to `root/rel` (`components/<Name>.tsx` or
 /// `themes/<name>.json`). A file that exists is first copied to
