@@ -386,7 +386,7 @@ has applied the migrations fail quietly and later ones retry.
 ## The main window holds one webview per browser tab and messaging service
 
 External links open as in-app browser tabs: each is a child webview of remote
-content stacked over the slot the `/browse/:id` route leaves in the content
+content placed under the slot the `/browse/:id` route leaves in the content
 card ([viewers.md](./viewers.md#the-in-app-browser-is-a-native-page-per-tab-owned-by-rust)). The frontend reports that slot as window
 insets and Rust lays pages out from them, so a resize never waits on
 JavaScript.
@@ -412,11 +412,35 @@ webview, laid out the same way.
   load and emits `browser-favicon`; the frontend owns the `browser_favicons`
   rows. Rust sees events, the frontend owns rows — the same split as history.
 
+## Native pages sit under the app, seen through holes in `#root`
+
+The app's own webview is on top and transparent; every page is below it, so
+popovers, menus and dialogs draw over a live page and nothing is hidden for
+them.
+
+- **Rust** (`app/src-tauri/src/shell/native_layer/`): `init` turns off the app
+  webview's background, and `put_below_app` moves each page to the bottom of
+  the window's views right after `add_child`.
+- **The holes** (`app/src/lib/shell/nativeHoles.ts`): `#root` paints the
+  background, and one `clip-path` on it cuts a hole over each shown page,
+  rounded where the slot meets the card's bottom corners. Portals are
+  children of `body`, so they draw over the page; anything inside `#root`
+  over a slot falls in the hole. A fullscreen media player suspends every
+  hole, since it is a fixed overlay inside `#root`.
+- **Clicks** go through a `hitTest:` override on the window's content view: a
+  point inside a shown page's frame goes to that page, unless the frontend
+  has reported a portal over an open hole (`native_set_blocked`). Then the
+  app keeps the click, so clicking the page under a popover dismisses it.
+- **Ordering**: a hole opens only after its page is placed, and closes before
+  the page is hidden or parked, or the bare window shows through.
+
 ## Gotchas
 
 - Background work in a hidden WebView freezes silently — keep it in Rust ([above](#scraping-lives-in-rust-because-hidden-webviews-freeze)).
 - Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
 - A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
+- A background on `html` or `body` paints the whole canvas and hides every native page — keep it on `#root`.
+- A strip or menu drawn over a native page from inside `#root` is cut away — portal it ([above](#native-pages-sit-under-the-app-seen-through-holes-in-root)).
 - Reaching the data dir any way but `library::paths::data_dir()` (itself `keyd_core::paths::data_dir`) lets the CLI, the app and keyd diverge.
 - A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process; `get` is app-only and limited to `names::READABLE` for that reason.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.

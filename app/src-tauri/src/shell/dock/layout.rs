@@ -5,7 +5,7 @@ use tauri::webview::Webview;
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WindowEvent};
 
 use super::{label, with_state, Inner};
-use crate::shell::browser::{content_size, rect, round_corners, Viewport, MAIN};
+use crate::shell::browser::{content_size, rect, Viewport, MAIN};
 
 /// How far left of the window's edge a parked page's right edge sits.
 const PARK_GAP: f64 = 4000.0;
@@ -43,7 +43,7 @@ pub(super) fn parked_rect(
     window: LogicalSize<f64>,
     viewport: Option<Viewport>,
 ) -> (LogicalPosition<f64>, LogicalSize<f64>) {
-    let (position, size, _) = rect(window, viewport);
+    let (position, size) = rect(window, viewport);
     (
         LogicalPosition::new(-(size.width + PARK_GAP), position.y),
         size,
@@ -56,10 +56,9 @@ pub(super) fn place(app: &AppHandle, id: &str) {
         return;
     };
     let viewport = with_state(app, |s| slot(s, id));
-    let (position, size, radius) = rect(content_size(&window), viewport);
+    let (position, size) = rect(content_size(&window), viewport);
     page.set_position(position).ok();
     page.set_size(size).ok();
-    round_corners(&page, radius);
 }
 
 /// Moves a page off-screen at its slot's size. It stays visible to WebKit,

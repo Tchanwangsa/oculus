@@ -61,6 +61,9 @@ pub fn run() {
 
             sources::echo360::cleanup_partial_downloads(&library::paths::data_dir());
 
+            // The app's webview goes transparent and routes clicks to the
+            // pages under it. Before any page exists.
+            shell::native_layer::init(app.handle());
             // Seeds WebKit with the Canvas session and follows window resizes.
             shell::browser::init(app.handle());
             // Dock pages follow resizes; the frontend creates them (`dock_set_enabled`).
@@ -236,7 +239,7 @@ pub fn run() {
             shell::browser::commands::browser_place,
             shell::browser::commands::browser_set_viewport,
             shell::browser::commands::browser_hide_tab,
-            shell::browser::commands::browser_snapshot,
+            shell::native_layer::native_set_blocked,
             shell::browser::commands::browser_hide,
             shell::browser::commands::browser_navigate,
             shell::browser::commands::browser_history,

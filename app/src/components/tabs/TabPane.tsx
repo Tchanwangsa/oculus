@@ -110,7 +110,7 @@ const TabPane = memo(function TabPane({
       {tab.side && front && (
         <>
           {/* The divider carries the focus marker (indigo edge on the focused
-              side): inside a pane, a native browser WebView would cover it. */}
+              side): inside a pane, a native browser page's hole would cut it out. */}
           <ResizeHandle
             onMouseDown={onHandleDown}
             dragging={dragging}

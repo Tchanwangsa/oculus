@@ -61,14 +61,15 @@ Instagram's page also leaves an open thread when it parks
   hidden page throttles its timers to about 1 Hz; a parked one keeps its
   sockets and timers at full rate, and its title updates keep arriving. A
   sliver would flip these sites to their mobile layouts.
-- A page parks when its tab leaves the front, when a popover covers the slot
-  (nothing draws over a native view), and when the route unmounts. Two panes
+- A page parks when its tab leaves the front and when the route unmounts;
+  popovers draw over the live page
+  ([architecture.md](./architecture.md#native-pages-sit-under-the-app-seen-through-holes-in-root)). Two panes
   on one service share one page; only the pane that last placed it may move
   or park it.
 - Rust re-lays out the shown page on window resize, and resizes parked ones
   to the new slot size.
 - The service tabs sit in a header row above the slot, which also keeps the
-  card's top corners clear: `round_corners` rounds only a page's bottom ones.
+  card's top corners clear: the page's hole rounds only its bottom ones.
 
 ## Placing never takes keyboard focus
 
