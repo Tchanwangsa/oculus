@@ -1,0 +1,139 @@
+{
+ "source": "data/spikes/studio-align/audio16/us_f__p2_fog.wav, first 6.9 s, 16-bit; Kokoro US female voice",
+ "reference": "scripts/ref.py (Python onnxruntime 1.31, CPU EP) on model.onnx fp32 sha256 e4661427",
+ "frames": 344,
+ "words": [
+  {
+   "word": "IMAGINE",
+   "start_frame": 19,
+   "end_frame": 37,
+   "mean_logp": -0.038585
+  },
+  {
+   "word": "YOU'RE",
+   "start_frame": 41,
+   "end_frame": 48,
+   "mean_logp": -0.23158
+  },
+  {
+   "word": "LOST",
+   "start_frame": 51,
+   "end_frame": 64,
+   "mean_logp": -0.081321
+  },
+  {
+   "word": "IN",
+   "start_frame": 69,
+   "end_frame": 70,
+   "mean_logp": -3.2e-05
+  },
+  {
+   "word": "THICK",
+   "start_frame": 79,
+   "end_frame": 87,
+   "mean_logp": -0.063541
+  },
+  {
+   "word": "FOG",
+   "start_frame": 93,
+   "end_frame": 106,
+   "mean_logp": -2e-06
+  },
+  {
+   "word": "YOU",
+   "start_frame": 134,
+   "end_frame": 137,
+   "mean_logp": -3e-06
+  },
+  {
+   "word": "CAN'T",
+   "start_frame": 141,
+   "end_frame": 151,
+   "mean_logp": -0.065052
+  },
+  {
+   "word": "SEE",
+   "start_frame": 154,
+   "end_frame": 160,
+   "mean_logp": -0.000857
+  },
+  {
+   "word": "THE",
+   "start_frame": 163,
+   "end_frame": 166,
+   "mean_logp": -0.010619
+  },
+  {
+   "word": "VALLEY",
+   "start_frame": 169,
+   "end_frame": 182,
+   "mean_logp": -0.041214
+  },
+  {
+   "word": "BELOW",
+   "start_frame": 186,
+   "end_frame": 200,
+   "mean_logp": -0.052237
+  },
+  {
+   "word": "ALL",
+   "start_frame": 231,
+   "end_frame": 236,
+   "mean_logp": -0.203153
+  },
+  {
+   "word": "YOU",
+   "start_frame": 239,
+   "end_frame": 242,
+   "mean_logp": -0.032258
+  },
+  {
+   "word": "CAN",
+   "start_frame": 245,
+   "end_frame": 248,
+   "mean_logp": -1.4e-05
+  },
+  {
+   "word": "FEEL",
+   "start_frame": 253,
+   "end_frame": 263,
+   "mean_logp": -3e-05
+  },
+  {
+   "word": "IS",
+   "start_frame": 271,
+   "end_frame": 272,
+   "mean_logp": -1.7e-05
+  },
+  {
+   "word": "THE",
+   "start_frame": 277,
+   "end_frame": 280,
+   "mean_logp": -0.000361
+  },
+  {
+   "word": "SLOPE",
+   "start_frame": 284,
+   "end_frame": 298,
+   "mean_logp": -0.033611
+  },
+  {
+   "word": "UNDER",
+   "start_frame": 303,
+   "end_frame": 309,
+   "mean_logp": -1.5e-05
+  },
+  {
+   "word": "YOUR",
+   "start_frame": 312,
+   "end_frame": 317,
+   "mean_logp": -0.017172
+  },
+  {
+   "word": "FEET",
+   "start_frame": 320,
+   "end_frame": 329,
+   "mean_logp": -3.9e-05
+  }
+ ]
+}

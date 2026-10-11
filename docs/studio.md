@@ -27,6 +27,7 @@ contact sheets, and lints.
 | Themes and bundled fonts | `app/studio-core/themes/`, `app/studio-core/fonts/`, `app/studio-core/src/theme/`, `app/studio-core/src/fonts/` |
 | Every error and its message | `app/studio-core/src/error.rs` |
 | Fixture videos and golden frames | `app/studio-core/tests/fixtures/`, `app/studio-core/tests/golden/` |
+| Narration audio decode and word timing (the aligner, its model download) | `app/src-tauri/src/studio/` (`audio/`, `timing/`), `app/src-tauri/src/runtime/onnx/` |
 | `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio.rs`, `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
@@ -158,6 +159,40 @@ We follow the *gradient* downhill, one small step at a time.
   closest: gradient``. Each call gets its own scene's words (`SceneCall::
   words`, from `Project::word_cues`), so in a transition the outgoing scene
   cues to its words and the incoming one to its own.
+
+## Narration timing is forced alignment on the CPU
+
+The app crate times a clip's words (`app/src-tauri/src/studio/timing/`):
+CTC forced alignment of the script against wav2vec2's letter emissions, run
+by ONNX Runtime on the CPU (`app/src-tauri/src/runtime/onnx/`). The model
+is Xenova's fp32 ONNX export of `facebook/wav2vec2-base-960h` (Apache-2.0,
+credit facebook/wav2vec2-base-960h), pinned to one commit, 378 MB. It is
+downloaded on request to `<app data>/models/align/` and never bundled; the
+download is checked against its pinned size and sha256 before it gets its
+name. ONNX Runtime itself is linked statically.
+
+- **Input.** The server's WAV is decoded with hound (any integer or float
+  format, downmixed to mono) and resampled to 16 kHz with rubato
+  (`app/src-tauri/src/studio/audio/`). A clip whose whole RMS is under
+  -80 dBFS, or that holds a second or more of exact zeros, is digitally
+  silent: a failed narration, not a pause.
+- **Words.** Each script word is upper-cased to A-Z and `'`. A word with no
+  letters (a dash, `&`) is left out of the result rather than given a
+  made-up time; each word carries its index in the script.
+- **Times.** 20 ms frames. A word starts at its first letter frame minus
+  65 ms (clamped at 0) and ends after its last letter frame, unbiased. The
+  bias was measured against PyTorch wav2vec2, which the fp32 ONNX model
+  matches frame for frame.
+- **Confidence** is the mean log-probability of the word's letter frames;
+  below `LOW_CONFIDENCE` (-8.0) the word was mangled or not said.
+- **Gaps.** A word the voice said but the script lacks lowers no
+  confidence, so the aligner also reports each stretch between words with
+  4 or more frames whose best label is a letter, with what it heard there
+  ("THICK").
+- **Limits.** A clip over `MAX_NARRATION_SECS` (60 s) is refused: memory
+  grows with the square of its length (0.7 GB at 17 s, 2.2 GB at 57 s). Each
+  alignment opens its own session and drops it, since a reused one keeps
+  growing. Threads: half the cores, at most 4. No timeouts.
 
 ## Four primitives and a closed set of style keys
 
