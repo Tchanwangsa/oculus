@@ -328,11 +328,15 @@ fn modified(dir: &Path) -> Option<u64> {
     let components = std::fs::read_dir(dir.join("components"))
         .map(|rd| rd.flatten().map(|e| e.path()).collect::<Vec<_>>())
         .unwrap_or_default();
-    [dir.join("video.json"), dir.join("script.md")]
-        .into_iter()
-        .chain(components)
-        .filter_map(|p| p.metadata().and_then(|m| m.modified()).ok())
-        .filter_map(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .max()
+    [
+        dir.join("video.json"),
+        dir.join("script.md"),
+        dir.join(studio_core::MANIFEST_PATH),
+    ]
+    .into_iter()
+    .chain(components)
+    .filter_map(|p| p.metadata().and_then(|m| m.modified()).ok())
+    .filter_map(|t| t.duration_since(UNIX_EPOCH).ok())
+    .map(|d| d.as_secs())
+    .max()
 }

@@ -6,7 +6,7 @@ mod detail;
 mod frame;
 mod new;
 mod rows;
-mod slot;
+pub(super) mod slot;
 #[cfg(test)]
 mod tests;
 mod thumbnail;
