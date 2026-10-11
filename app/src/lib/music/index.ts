@@ -9,7 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const MUSIC_STATE_EVENT = "music-state";
 /** The `settings` row Rust reads at startup (`music/startup.rs`):
- *  `{"enabled": boolean}`, off when absent. */
+ *  `{"enabled": boolean, "output": string | null}`, off when absent. */
 export const MUSIC_SETTING = "music";
 
 export interface MusicTrack {
@@ -30,6 +30,13 @@ export interface MusicSnapshot {
   needs_login: boolean;
   account: string | null;
   device_name: string;
+  /** Oculus is Spotify's active device. While false, commands pull playback
+   *  here first, and a pause does nothing. */
+  active: boolean;
+  /** The active device's name when it is another one, if known. */
+  playing_on: string | null;
+  /** The chosen output on this Mac; null is the system default. */
+  output: string | null;
   track: MusicTrack | null;
   /** True at `position_at_ms` (epoch ms); add the time since while playing. */
   position_ms: number;
@@ -69,14 +76,48 @@ export interface MusicSearchResults {
   tracks: MusicSearchItem[];
 }
 
+/** One of the account's Spotify Connect devices (`music_devices`). */
+export interface MusicDevice {
+  id: string;
+  name: string;
+  kind: "computer" | "phone" | "tablet" | "speaker" | "tv" | "car" | "other";
+  active: boolean;
+  /** 0–100, when the device reports one. */
+  volume: number | null;
+  /** This Oculus. */
+  is_this: boolean;
+}
+
+/** One output device on this Mac (`music_outputs`). */
+export interface MusicOutput {
+  name: string;
+  /** The Mac's default output right now. */
+  is_default: boolean;
+}
+
+/** The settings row as an object, every key kept so a write never drops one
+ *  it does not know; anything unreadable is empty. */
+export function musicRow(raw: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 /** The settings row's `enabled`; anything unreadable is off. */
 export function musicEnabled(raw: string | null): boolean {
-  if (!raw) return false;
-  try {
-    return (JSON.parse(raw) as { enabled?: unknown })?.enabled === true;
-  } catch {
-    return false;
-  }
+  return musicRow(raw).enabled === true;
+}
+
+/** Whether the transport can act: a track here, or another device playing
+ *  that a command would pull back. */
+export function musicControllable(s: MusicSnapshot): boolean {
+  return s.connected && (s.track !== null || (!s.active && s.playing_on !== null));
 }
 
 /** The position now, interpolated from the snapshot's stamp. */
@@ -117,6 +158,15 @@ export const music = {
    *  the first fetch, and a 429 refuses every call until its wait is over. */
   playlists: (refresh = false) => invoke<MusicPlaylist[]>("music_playlists", { refresh }),
   search: (query: string) => invoke<MusicSearchResults>("music_search", { query }),
+  /** The account's Connect devices: Spotify's pushed list, or the Web API's
+   *  on `refresh` (rate-limited) or before the first push. */
+  devices: (refresh = false) => invoke<MusicDevice[]>("music_devices", { refresh }),
+  /** Moves playback to the device and plays; this device's id pulls it here. */
+  transfer: (deviceId: string) => invoke("music_transfer", { deviceId }),
+  outputs: () => invoke<MusicOutput[]>("music_outputs"),
+  /** null is the system default. Rust only; `musicPrefsStore.setOutput` also
+   *  keeps it in the settings row. */
+  setOutput: (name: string | null) => invoke("music_set_output", { name }),
   /** The focus-mode seam: lower the volume to `level`% of what it was before
    *  the first duck. A volume the user sets meanwhile wins. */
   duck: (level: number) =>

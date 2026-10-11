@@ -14,6 +14,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, EventTarget, Manager};
 use tokio::sync::watch;
 
+use super::audio::Choice;
+use super::devices::Cluster;
 use super::duck::Duck;
 use super::web::Web;
 use crate::shell::browser::MAIN;
@@ -21,7 +23,9 @@ use crate::shell::browser::MAIN;
 pub const EVENT: &str = "music-state";
 /// The name Spotify's device list shows.
 pub const DEVICE_NAME: &str = "Oculus";
-pub const INITIAL_VOLUME: u8 = 50;
+/// Full scale: librespot's softvol is a 60 dB log curve, so 50% is about
+/// −30 dB. At 100% the Mac's own volume sets the loudness.
+pub const INITIAL_VOLUME: u8 = 100;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Track {
@@ -43,6 +47,14 @@ pub struct Snapshot {
     pub needs_login: bool,
     pub account: Option<String>,
     pub device_name: String,
+    /// Oculus is Spotify's active Connect device; while false, Spotify drops
+    /// every command but a transfer (`control.rs`).
+    pub active: bool,
+    /// The active device's name when it is another one, from the Connect
+    /// cluster; none when unknown or when nothing is active.
+    pub playing_on: Option<String>,
+    /// The chosen output on this Mac; none is the system default.
+    pub output: Option<String>,
     pub track: Option<Track>,
     /// The position at `position_at_ms` (epoch ms). While `playing`, the UI
     /// adds the time since; Rust sends no per-second ticks.
@@ -66,6 +78,9 @@ impl Default for Snapshot {
             needs_login: false,
             account: None,
             device_name: DEVICE_NAME.to_string(),
+            active: false,
+            playing_on: None,
+            output: None,
             track: None,
             position_ms: 0,
             position_at_ms: 0,
@@ -88,7 +103,14 @@ impl Snapshot {
     pub(super) fn set_idle(&mut self) {
         self.connected = false;
         self.connecting = false;
+        self.set_unlinked();
+    }
+
+    /// The connection is gone: not active, nothing known about the others.
+    pub(super) fn set_unlinked(&mut self) {
         self.playing = false;
+        self.active = false;
+        self.playing_on = None;
     }
 }
 
@@ -124,16 +146,32 @@ struct Inner {
     /// is never reused.
     session_gen: u64,
     duck: Duck,
+    /// The Connect cluster from the last dealer push, for this connection.
+    cluster: Option<Cluster>,
     run: Option<Run>,
     next_run: u64,
     /// Set to cancel the pending login's callback listener.
     login: Option<Arc<AtomicBool>>,
 }
 
-#[derive(Default)]
 pub struct MusicState {
     inner: Mutex<Inner>,
     web: Web,
+    /// The output choice, shared with the player's sink.
+    audio: Arc<Choice>,
+    /// The snapshot's `active`, for a command waiting on a transfer.
+    active: watch::Sender<bool>,
+}
+
+impl Default for MusicState {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::default(),
+            web: Web::default(),
+            audio: Arc::default(),
+            active: watch::Sender::new(false),
+        }
+    }
 }
 
 fn with<T>(app: &AppHandle, f: impl FnOnce(&mut Inner) -> T) -> T {
@@ -158,6 +196,9 @@ fn change(app: &AppHandle, f: impl FnOnce(&mut Inner) -> bool) {
         Some(inner.snapshot.clone())
     });
     if let Some(snapshot) = changed {
+        app.state::<MusicState>().active.send_if_modified(|active| {
+            std::mem::replace(active, snapshot.active) != snapshot.active
+        });
         app.emit_to(EventTarget::webview(MAIN), EVENT, snapshot)
             .ok();
     }
@@ -225,6 +266,7 @@ impl Inner {
     /// Forgets the connection: its device handle, its session and any duck.
     fn drop_link(&mut self) -> Option<Spirc> {
         self.session = None;
+        self.cluster = None;
         self.session_gen += 1;
         self.duck = Duck::default();
         self.spirc.take()
@@ -290,6 +332,63 @@ pub(super) fn with_spirc(
         Some(spirc) => f(spirc).map_err(|e| e.to_string()),
         None => Err("Not connected to Spotify".into()),
     })
+}
+
+/// Whether this device is active, or `None` without a connected device.
+pub(super) fn active(app: &AppHandle) -> Option<bool> {
+    with(app, |inner| {
+        inner.spirc.as_ref().map(|_| inner.snapshot.active)
+    })
+}
+
+/// Follows the snapshot's `active`.
+pub(super) fn watch_active(app: &AppHandle) -> watch::Receiver<bool> {
+    app.state::<MusicState>().active.subscribe()
+}
+
+/// The output choice the player's sink reads.
+pub(super) fn audio(app: &AppHandle) -> Arc<Choice> {
+    app.state::<MusicState>().audio.clone()
+}
+
+/// Chooses the output (`None`: the system default); the sink moves to it on
+/// its next write.
+pub(super) fn set_output(app: &AppHandle, name: Option<String>) {
+    let choice = audio(app);
+    choice.set(name);
+    let chosen = choice.get().0;
+    update(app, |s| s.output = chosen);
+}
+
+/// Takes back an error only while it is still the one shown.
+pub(super) fn clear_error_if(app: &AppHandle, id: u64, message: &str) {
+    update_run(app, id, |s| {
+        if s.error.as_deref() == Some(message) {
+            s.error = None;
+        }
+    });
+}
+
+/// The Connect cluster from the last push, while connected.
+pub(super) fn cluster(app: &AppHandle) -> Option<Cluster> {
+    with(app, |inner| inner.cluster.clone())
+}
+
+/// A cluster push heard on the session `session_id` of run `id`; a push
+/// from any other session is dropped.
+pub(super) fn set_cluster(app: &AppHandle, id: u64, session_id: &str, cluster: Cluster) {
+    change(app, |inner| {
+        let current = inner
+            .session
+            .as_ref()
+            .is_some_and(|s| s.session_id() == session_id);
+        if inner.run.as_ref().map(|r| r.id) != Some(id) || !current {
+            return false;
+        }
+        inner.snapshot.playing_on = cluster.playing_on();
+        inner.cluster = Some(cluster);
+        true
+    });
 }
 
 /// Sets the volume the user chose; a held duck is dropped, since their

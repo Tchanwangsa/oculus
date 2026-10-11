@@ -1,5 +1,6 @@
 //! Spotify's Web API, for what the Connect protocol cannot do: list the
-//! account's playlists and search. The token is Login5's for the live session
+//! account's playlists and search, and the device list and transfer when no
+//! Connect cluster has been pushed yet (`devices.rs` in the music module). The token is Login5's for the live session
 //! (`token.rs`), so there is no Client ID of our own. That client id is
 //! throttled hard, so calls are few: the playlists are fetched once per
 //! account and kept until asked again, search runs only when asked, a 429
@@ -8,6 +9,7 @@
 //!
 //! See `docs/music.md`.
 
+mod devices;
 mod error;
 mod gate;
 mod http;
@@ -27,9 +29,10 @@ pub(super) use error::WebError;
 pub use playlists::Playlist;
 pub use search::SearchResults;
 
+use super::devices::Device;
 use super::state;
 use gate::Gate;
-use http::API;
+use http::{Request, API};
 use token::Cached;
 
 #[derive(Default)]
@@ -93,7 +96,7 @@ pub(super) async fn playlists(app: &AppHandle, refresh: bool) -> Result<Vec<Play
     let mut url = format!("{API}me/playlists?limit={}", playlists::PAGE);
     let mut all = Vec::new();
     loop {
-        let page = playlists::parse_page(&call(app, url).await?)?;
+        let page = playlists::parse_page(&call(app, Request::Get(url)).await?)?;
         all.extend(page.items);
         match page.next {
             Some(next) if all.len() < playlists::CAP => url = next,
@@ -113,18 +116,30 @@ pub(super) async fn search(app: &AppHandle, query: &str) -> Result<SearchResults
     if state::session(app).is_none() {
         return Err(WebError::NotConnected);
     }
-    search::parse(&call(app, search::url(&query)).await?)
+    search::parse(&call(app, Request::Get(search::url(&query))).await?)
 }
 
-/// One GET through the gate, with one new token after a 401.
-async fn call(app: &AppHandle, url: String) -> Result<String, WebError> {
+/// The account's Connect devices; this one carries `own_id`.
+pub(super) async fn devices(app: &AppHandle, own_id: &str) -> Result<Vec<Device>, WebError> {
+    let body = call(app, Request::Get(format!("{API}me/player/devices"))).await?;
+    devices::parse(&body, own_id)
+}
+
+/// Moves playback to `device_id` and plays.
+pub(super) async fn transfer(app: &AppHandle, device_id: &str) -> Result<(), WebError> {
+    let request = Request::Put(format!("{API}me/player"), devices::transfer_body(device_id));
+    call(app, request).await.map(|_| ())
+}
+
+/// One request through the gate, with one new token after a 401.
+async fn call(app: &AppHandle, request: Request) -> Result<String, WebError> {
     let web = state::web(app);
     web.check_gate()?;
     let token = token::get(app, None).await?;
-    let result = match http::get(token.clone(), url.clone()).await {
+    let result = match http::send(token.clone(), request.clone()).await {
         Err(WebError::Unauthorized) => {
             let fresh = token::get(app, Some(&token)).await?;
-            http::get(fresh, url).await.map_err(|e| match e {
+            http::send(fresh, request).await.map_err(|e| match e {
                 WebError::Unauthorized => WebError::StillUnauthorized,
                 e => e,
             })

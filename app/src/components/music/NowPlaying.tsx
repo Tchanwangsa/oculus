@@ -3,13 +3,14 @@ import type { MusicSnapshot } from "@/lib/music";
 import { MusicCover } from "./MusicCover";
 import { MusicSeek } from "./MusicSeek";
 import { MusicTransport } from "./MusicTransport";
-import { MusicVolume } from "./MusicVolume";
+import { PlayingElsewhere } from "./PlayingElsewhere";
+import { VolumeRow } from "./VolumeRow";
 
 /** What nothing playing says in the popover, which has no list to pick from. */
 export const NOTHING_PLAYING_HINT = "Choose Oculus as the device in Spotify.";
 
-/** The rail popover's player: the track, seek, transport, volume, and the way
- *  to the full player. */
+/** The rail popover's player: the track, seek, transport, volume and devices,
+ *  and the way to the full player. */
 export function NowPlaying({
   snapshot,
   error,
@@ -35,7 +36,8 @@ export function NowPlaying({
       </div>
       {track && <MusicSeek snapshot={snapshot} />}
       <MusicTransport snapshot={snapshot} />
-      <MusicVolume snapshot={snapshot} />
+      <VolumeRow snapshot={snapshot} />
+      <PlayingElsewhere snapshot={snapshot} />
       {error && <p className="text-xs text-destructive">{error}</p>}
       <Button variant="ghost" size="xs" className="self-center" onClick={onOpenPlayer}>
         Open player

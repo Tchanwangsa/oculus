@@ -100,6 +100,12 @@ oauth2 = { version = "5", default-features = false, features = ["reqwest", "reqw
 # librespot reports a track it cannot decrypt only as a log line
 # (`src/music/logs.rs`).
 log = { version = "0.4", features = ["std"] }
+# The music output picker and its sink (`src/music/audio/`): the same cpal
+# and rodio librespot-playback's rodio backend builds on, at its versions.
+cpal = "0.16"
+rodio = { version = "0.21", default-features = false, features = ["playback"] }
+# Reads librespot's dealer stream of Connect cluster updates (`src/music/devices.rs`).
+futures-util = { version = "0.3", default-features = false }
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_sessions` in src/shell/browser/seed.rs) — Tauri exposes no cookie setter, so

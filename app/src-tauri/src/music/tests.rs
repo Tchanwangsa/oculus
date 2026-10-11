@@ -5,14 +5,17 @@ use librespot_playback::player::PlayerEvent;
 use librespot_protocol::authentication::AuthenticationType;
 use log::Level;
 
+use super::audio::{fallback_message, resolve, Choice};
+use super::control::{step, Need, Step};
 use super::credentials::Saved;
+use super::devices::{connect_kind, from_cluster, web_kind};
 use super::duck::Duck;
 use super::events::apply;
 use super::login::{callback_outcome, LoginError};
 use super::logs::is_track_failure;
 use super::session::{next_backoff, BACKOFF_MAX, BACKOFF_MIN};
-use super::startup::enabled;
-use super::state::{from_percent, percent, Snapshot};
+use super::startup::{parse, Prefs};
+use super::state::{from_percent, percent, Snapshot, INITIAL_VOLUME};
 use super::track::cover_url;
 
 #[test]
@@ -192,7 +195,7 @@ fn player_events_fold_into_the_snapshot() {
 
 #[test]
 fn only_an_explicit_enabled_setting_connects_at_startup() {
-    assert!(enabled(Some(r#"{"enabled":true}"#)));
+    assert!(parse(Some(r#"{"enabled":true}"#)).enabled);
     for raw in [
         None,
         Some(""),
@@ -201,8 +204,150 @@ fn only_an_explicit_enabled_setting_connects_at_startup() {
         Some(r#"{"enabled":false}"#),
         Some(r#"{"enabled":"yes"}"#),
     ] {
-        assert!(!enabled(raw), "{raw:?}");
+        assert!(!parse(raw).enabled, "{raw:?}");
     }
+}
+
+#[test]
+fn the_settings_row_carries_the_output_and_ignores_unknown_keys() {
+    assert_eq!(
+        parse(Some(r#"{"enabled":true,"output":"AirPods","later":1}"#)),
+        Prefs {
+            enabled: true,
+            output: Some("AirPods".into()),
+        }
+    );
+    assert_eq!(
+        parse(Some(r#"{"enabled":false,"output":null}"#)).output,
+        None
+    );
+    assert_eq!(
+        parse(Some(r#"{"output":"AirPods"}"#)).output.as_deref(),
+        Some("AirPods")
+    );
+}
+
+#[test]
+fn a_new_device_starts_at_full_volume() {
+    assert_eq!(INITIAL_VOLUME, 100);
+    assert_eq!(Snapshot::default().volume, 100);
+    assert!(!Snapshot::default().active);
+}
+
+#[test]
+fn an_inactive_device_pulls_activates_or_skips_by_command() {
+    for need in [Need::Pull, Need::Local, Need::IfActive] {
+        assert_eq!(step(true, need), Step::Send);
+    }
+    assert_eq!(step(false, Need::Pull), Step::PullThenSend);
+    assert_eq!(step(false, Need::Local), Step::ActivateThenSend);
+    assert_eq!(step(false, Need::IfActive), Step::Skip);
+}
+
+#[test]
+fn becoming_active_and_inactive_follow_the_spircs_session_events() {
+    let mut s = Snapshot {
+        connected: true,
+        playing_on: Some("Phone".into()),
+        ..Snapshot::default()
+    };
+    apply(
+        &mut s,
+        PlayerEvent::SessionConnected {
+            connection_id: "c".into(),
+            user_name: "u".into(),
+        },
+    );
+    assert!(s.active && s.connected);
+    assert_eq!(s.playing_on, None);
+    s.playing = true;
+    apply(
+        &mut s,
+        PlayerEvent::SessionDisconnected {
+            connection_id: "c".into(),
+            user_name: "u".into(),
+        },
+    );
+    // Another device took over; the session is still up.
+    assert!(!s.active && !s.playing && s.connected);
+}
+
+#[test]
+fn a_chosen_output_binds_when_present_and_falls_back_when_missing() {
+    let present = ["MacBook Pro Speakers".to_string(), "AirPods".to_string()];
+    assert_eq!(resolve(None, &present), (None, false));
+    assert_eq!(
+        resolve(Some("AirPods"), &present),
+        (Some("AirPods".into()), false)
+    );
+    assert_eq!(resolve(Some("HomePod"), &present), (None, true));
+    assert_eq!(
+        fallback_message("HomePod"),
+        "HomePod is not available; playing on the system default"
+    );
+}
+
+#[test]
+fn the_output_choice_bumps_its_generation_only_on_a_change() {
+    let c = Choice::default();
+    assert_eq!(c.get(), (None, 0));
+    assert!(c.set(Some("AirPods".into())));
+    assert!(!c.set(Some("AirPods".into())));
+    assert_eq!(c.get(), (Some("AirPods".into()), 1));
+    // A blank name is the system default.
+    assert!(c.set(Some("  ".into())));
+    assert_eq!(c.get(), (None, 2));
+}
+
+#[test]
+fn device_types_map_to_the_pickers_kinds() {
+    assert_eq!(connect_kind(1), "computer");
+    assert_eq!(connect_kind(3), "phone");
+    assert_eq!(connect_kind(4), "speaker");
+    assert_eq!(connect_kind(5), "tv");
+    assert_eq!(connect_kind(99), "other");
+    assert_eq!(web_kind("Smartphone"), "phone");
+    assert_eq!(web_kind("CastAudio"), "speaker");
+    assert_eq!(web_kind("Computer"), "computer");
+    assert_eq!(web_kind("Toaster"), "other");
+}
+
+#[test]
+fn a_pushed_cluster_lists_devices_this_one_first_and_names_the_other_active_one() {
+    use librespot_protocol::connect::{Cluster, DeviceInfo};
+    use librespot_protocol::devices::DeviceType;
+    let info = |name: &str, kind: DeviceType, volume: u32, offline: bool| DeviceInfo {
+        name: name.into(),
+        device_type: kind.into(),
+        volume,
+        is_offline: offline,
+        ..DeviceInfo::default()
+    };
+    let mut cluster = Cluster {
+        active_device_id: "phone".into(),
+        ..Cluster::default()
+    };
+    cluster.device.insert(
+        "phone".into(),
+        info("Pixel", DeviceType::SMARTPHONE, 65535, false),
+    );
+    cluster
+        .device
+        .insert("me".into(), info("Oculus", DeviceType::COMPUTER, 0, false));
+    cluster
+        .device
+        .insert("tv".into(), info("Old TV", DeviceType::TV, 0, true));
+    let c = from_cluster(&cluster, "me");
+    let names: Vec<_> = c.devices.iter().map(|d| d.name.as_str()).collect();
+    assert_eq!(names, ["Oculus", "Pixel"]);
+    assert!(c.devices[0].is_this && !c.devices[0].active);
+    assert_eq!(
+        (c.devices[1].kind, c.devices[1].volume),
+        ("phone", Some(100))
+    );
+    assert_eq!(c.playing_on().as_deref(), Some("Pixel"));
+    cluster.active_device_id = "me".into();
+    assert_eq!(from_cluster(&cluster, "me").playing_on(), None);
 }
 
 #[test]

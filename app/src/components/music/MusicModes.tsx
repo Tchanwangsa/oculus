@@ -1,7 +1,7 @@
 import { Repeat, Shuffle } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { music, type MusicSnapshot } from "@/lib/music";
+import { music, musicControllable, type MusicSnapshot } from "@/lib/music";
 import { cn } from "@/lib/utils";
 import { useMusicStore } from "@/stores/music/musicStore";
 
@@ -45,7 +45,7 @@ export function ShuffleToggle({ snapshot }: { snapshot: MusicSnapshot }) {
     <ModeToggle
       on={snapshot.shuffle}
       label="Shuffle"
-      disabled={!snapshot.connected || !snapshot.track}
+      disabled={!musicControllable(snapshot)}
       onToggle={() => run(() => music.setShuffle(!snapshot.shuffle))}
     >
       <Shuffle size={17} />
@@ -59,7 +59,7 @@ export function RepeatToggle({ snapshot }: { snapshot: MusicSnapshot }) {
     <ModeToggle
       on={snapshot.repeat}
       label="Repeat"
-      disabled={!snapshot.connected || !snapshot.track}
+      disabled={!musicControllable(snapshot)}
       onToggle={() => run(() => music.setRepeat(!snapshot.repeat))}
     >
       <Repeat size={17} />

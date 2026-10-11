@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant, SystemTime};
 
+use super::devices;
 use super::error::WebError;
 use super::gate::{retry_after, Gate, DEFAULT_WAIT};
 use super::http::{status_error, API};
@@ -223,4 +224,43 @@ fn a_token_is_reused_only_for_its_session_and_before_its_last_minute() {
     assert!(token.usable(3, now));
     assert!(!token.usable(4, now));
     assert!(!token.usable(3, now + Duration::from_secs(3541)));
+}
+
+/// `/v1/me/player/devices`, trimmed: a device without an id, this Oculus
+/// under a Web API id of its own, a null volume.
+const DEVICES: &str = r#"{ "devices": [
+  { "id": "a1", "is_active": true, "is_private_session": false, "is_restricted": false,
+    "name": "Pixel 9", "supports_volume": true, "type": "Smartphone", "volume_percent": 60 },
+  { "id": null, "is_active": false, "name": "Restricted", "type": "Speaker", "volume_percent": 20 },
+  { "id": "web-oculus", "is_active": false, "name": "Oculus", "type": "Computer", "volume_percent": 100 },
+  { "id": "b2", "is_active": false, "name": "Living Room", "type": "CastAudio", "volume_percent": null }
+] }"#;
+
+#[test]
+fn the_device_list_parses_and_marks_this_device_with_its_own_id() {
+    let devices = devices::parse(DEVICES, "own").unwrap();
+    let names: Vec<_> = devices.iter().map(|d| d.name.as_str()).collect();
+    assert_eq!(names, ["Oculus", "Pixel 9", "Living Room"]);
+    assert!(devices[0].is_this);
+    assert_eq!(devices[0].id, "own");
+    assert!(devices[1].active);
+    assert_eq!((devices[1].kind, devices[1].volume), ("phone", Some(60)));
+    assert_eq!((devices[2].kind, devices[2].volume), ("speaker", None));
+    // An id match wins over the name.
+    let by_id = devices::parse(
+        r#"{"devices":[{"id":"own","name":"Desk","type":"Computer"},{"id":"x","name":"Oculus","type":"Computer"}]}"#,
+        "own",
+    )
+    .unwrap();
+    assert!(by_id.iter().find(|d| d.name == "Desk").unwrap().is_this);
+    assert!(!by_id.iter().find(|d| d.name == "Oculus").unwrap().is_this);
+}
+
+#[test]
+fn a_transfer_asks_spotify_to_play_on_the_device() {
+    let body: serde_json::Value = serde_json::from_str(&devices::transfer_body("a1")).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({ "device_ids": ["a1"], "play": true })
+    );
 }
