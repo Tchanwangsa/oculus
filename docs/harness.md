@@ -201,6 +201,14 @@ system prompt, so the brief is the `oculus` agent's prompt in
 `$CODEX_HOME/skills`, which every project shares. The set stays small: every
 CLI puts the skill index in every turn, headless jobs included.
 
+**A skill is a folder of files.** `agents::docs::SKILLS` lists each skill's
+name and its files, `SKILL.md` first; `oculus-studio` also ships
+`reference.md` and `studio.d.ts` (`app/studio-core/studio.d.ts`), which
+`SKILL.md` tells the agent to open when it needs them, so only the index
+line costs a turn. Every write rewrites each file and deletes anything else
+in the skill's folder: the folders are app-owned and agents may not write
+them, so a stray file could only be a stale instruction.
+
 ## Finding, installing, updating and signing in the CLIs
 
 A Dock-launched app has launchd's PATH, so `cli/discover/` tries

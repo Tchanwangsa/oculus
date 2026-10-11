@@ -37,6 +37,7 @@ frames and contact sheets, lints, and narrates.
 | Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
+| The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
 | `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `render.rs`, `narrate.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
@@ -192,6 +193,32 @@ one folder besides `agents/` and the database an agent thread may write
   `narrate`) also takes a bare slug (`studio::videos::resolve`): a path
   that exists is used as given, otherwise a slug names `videos/<slug>/`, and
   anything else fails naming both places.
+
+## Agent flow: a chat agent makes a video with the `oculus-studio` skill
+
+A video is made in an ordinary Chat thread by the student's own CLI agent,
+through the `oculus` CLI and its file tools; there is no Studio page yet.
+The `oculus-studio` skill ([harness.md](./harness.md#the-brief-is-appended-except-on-opencode))
+is the whole brief, and `AGENTS.md` only points at it. Its `SKILL.md` is the
+loop: read the lecture (through the `oculus-lectures` skill), `studio new`,
+write `video.json`, `script.md` and any component of the video's own,
+`lint --json` until only stale narration is left, `narrate`, lint again,
+look at `frame` and `strip` PNGs with the agent's image-reading tool,
+`render` a draft and then `--final`, and `gallery` then `promote` a new
+component the student wants kept; plus the taste rules (one idea per scene,
+words on screen summarise the narration, tokens over literals, motion cued
+with `word()`, stable magic-move keys). When `narrate` fails for want of a
+voice or the aligner, the agent stops and tells the student what to set in
+Settings -> Voice; it never downloads the aligner. `reference.md` is this
+page's authoring rules distilled for an agent (video.json, spoken form, the
+component contract, elements and style keys, motion, cues, transitions,
+each lint kind and what to do about it, and the commands' outputs).
+`studio.d.ts` types every prelude global; `src/host/tests/globals.rs` lists
+the globals a fresh sandbox context gains from the prelude (QuickJS's own
+`Object.getOwnPropertyNames(globalThis)` before and after, less the host's
+`__studio*` entry points) and fails when they differ from the file's
+top-level `declare`s, either way. The app ships the file with
+`include_str!`.
 
 ## Libraries cascade: project, subject, global
 
