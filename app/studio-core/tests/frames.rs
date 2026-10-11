@@ -193,3 +193,54 @@ fn a_fingerprint_ignores_key_order() {
     *props = reversed;
     assert_eq!(changed(&p, &q), [] as [usize; 0]);
 }
+
+/// Every frame of scene `index`, transition included.
+fn scene_pixels(p: &Project, index: usize) -> Vec<Vec<u8>> {
+    let mut r = Renderer::new(p, RenderOptions::default()).unwrap();
+    let frames = p.scene_frames(index).unwrap();
+    frames
+        .map(|k| r.frame(p.frame_time(k).unwrap()).unwrap().rgba)
+        .collect()
+}
+
+#[test]
+fn an_id_seeds_math_random_wherever_the_scene_sits() {
+    // Four Dots scenes "a".."d", whose bars take `Math.random` widths.
+    let p = Project::load(fixture("random")).unwrap();
+    let mut q = p.clone();
+    // a b c d -> b c a d: "c" moves from 2 to 1 behind the same "b".
+    let a = q.video.scenes.remove(0);
+    q.video.scenes.insert(2, a);
+    assert_eq!(
+        p.scene_fingerprint(2).unwrap(),
+        q.scene_fingerprint(1).unwrap()
+    );
+    assert!(scene_pixels(&p, 2) == scene_pixels(&q, 1), "c's frames");
+    // Inserting a scene before them keeps every later fingerprint.
+    let mut r = p.clone();
+    let mut new = r.video.scenes[0].clone();
+    new.id = Some("new".into());
+    r.video.scenes.insert(0, new);
+    for i in 1..4 {
+        assert_eq!(
+            p.scene_fingerprint(i).unwrap(),
+            r.scene_fingerprint(i + 1).unwrap()
+        );
+    }
+
+    // The ids are what tell the scenes apart: same component and props,
+    // other numbers.
+    assert!(scene_pixels(&p, 0).last() != scene_pixels(&p, 1).last());
+    // Without ids the index seeds, and a move moves the fingerprint.
+    let mut anon = p.clone();
+    for s in &mut anon.video.scenes {
+        s.id = None;
+    }
+    let mut moved = anon.clone();
+    let a = moved.video.scenes.remove(0);
+    moved.video.scenes.insert(2, a);
+    assert_ne!(
+        anon.scene_fingerprint(2).unwrap(),
+        moved.scene_fingerprint(1).unwrap()
+    );
+}

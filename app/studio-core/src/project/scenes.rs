@@ -26,6 +26,7 @@ impl Staged {
             t,
             duration: self.length,
             index,
+            id: self.spec.id.as_deref(),
             words: self.cues.as_ref(),
         }
     }

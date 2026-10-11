@@ -101,17 +101,19 @@ transitions) reads that one timeline.
   frame of the video. A `t` between frames renders as given.
 - `Project::scene_fingerprint(i)` is what in the folder scene `i`'s frames
   depend on, as canonical JSON bytes (keys sorted, so key order in a file
-  never matters), for a per-scene segment cache key: the scene's index
-  (`Math.random` is seeded by component and index), the size and fps, the
+  never matters), for a per-scene segment cache key: the size and fps, the
   theme's tokens and `video.json`'s `motion`, and for scene `i` and scene
-  `i - 1` (whose last moment the transition into `i` shows) the scene spec,
-  the narration words as components see them (`text`, `start`, `end`) and
-  the frame count. Words' confidence, the clip's file and `voice` reach no
+  `i - 1` (whose last moment the transition into `i` shows) the scene spec
+  (`id` included), the narration words as components see them (`text`,
+  `start`, `end`), the frame count and, for a scene without an `id` only,
+  its index (`Math.random` is seeded by component and id, or index when
+  there is no id). Words' confidence, the clip's file and `voice` reach no
   frame and are left out. The caller adds the rest: the contents of
   `components/` and `assets/`, the render settings (quality, scale, motion
-  blur, encoder arguments) and the build of studio-core. Because of the
-  index, inserting or removing a scene changes the fingerprint of every
-  scene after it.
+  blur, encoder arguments) and the build of studio-core. An id'd scene keeps
+  its fingerprint when scenes are inserted, removed or reordered around it,
+  as long as the scene before it is the same; an id-less scene, or one
+  right after an id-less scene, gets a new fingerprint when it moves.
 
 ## A component is `(props, ctx) => element` with a declared props schema
 
@@ -662,7 +664,10 @@ centroid smoothly.
   component, not a hang.
 - No `Date`, `performance`, `WeakRef` or `FinalizationRegistry`, no module
   loader (an `import` is an error at its line), no I/O. `Math.random` is
-  reseeded before every call from the component name and scene index.
+  reseeded before every call from the component name and the scene's `id`,
+  or its index when it has none (`host::seed`; a tag byte keeps an id seed
+  from ever hashing as an index seed), so an id'd scene draws the same
+  numbers wherever it sits.
 - `console.log` and friends go to `Frame::logs`, at most 200 lines a call.
 
 ## Errors are written for an agent to act on
@@ -774,7 +779,9 @@ goldens are 640x360 or smaller to keep the repo small; there is no
 dark-gradient golden, since a dithered 1080p frame is a 2.4 MB PNG.
 `tests/frames.rs` covers the whole-frame timeline at other rates, frame
 times against global times, blur at the video's fps, strips across thread
-counts and which edits move which scene fingerprints.
+counts, which edits move which scene fingerprints, and (the `random`
+fixture) that an id'd scene using `Math.random` keeps its fingerprint and
+its exact pixels when moved behind the same scene.
 `tests/narration.rs` covers scene lengths, stale and missing narration, the
 load errors and `word`/`wordEnd`; the `narrated` fixture (a hand-written
 manifest, no audio) pins a card entering at its word. In the app crate, `cargo test --lib studio::` covers the TTS client
