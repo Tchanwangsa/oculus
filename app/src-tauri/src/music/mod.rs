@@ -22,15 +22,6 @@
 //!
 //! See `docs/music.md`.
 
-/// A line on stderr that never panics: `eprintln!` panics when stderr is a
-/// closed pipe, as it is for a dev app whose terminal has gone.
-macro_rules! elog {
-    ($($arg:tt)*) => {{
-        use std::io::Write as _;
-        let _ = writeln!(std::io::stderr(), $($arg)*);
-    }};
-}
-
 mod audio;
 pub mod commands;
 mod control;

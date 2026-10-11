@@ -35,7 +35,7 @@ pub fn start(app: &AppHandle) {
                 Ok(()) => failing = false,
                 Err(e) => {
                     if !failing {
-                        eprintln!("[oculus] usage: {e}");
+                        elog!("[oculus] usage: {e}");
                     }
                     failing = true;
                 }

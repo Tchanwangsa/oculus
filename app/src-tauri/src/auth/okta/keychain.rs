@@ -74,7 +74,7 @@ pub(super) fn keychain_store(
     write("totp_secret", &creds.totp_secret)?;
     if let Err(why) = keyd_core::okta::resume_automatic_sign_in(&crate::library::paths::data_dir())
     {
-        eprintln!("[oculus] the attempt guard was not cleared: {why}");
+        elog!("[oculus] the attempt guard was not cleared: {why}");
     }
     Ok(())
 }

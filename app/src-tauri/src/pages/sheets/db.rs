@@ -93,7 +93,7 @@ pub fn index(data_dir: &Path, rel: &str, subject_id: i64) -> Result<usize, Parse
     // A database problem must not fail a conversion that is on disk; the
     // startup reconcile records it later.
     let recorded = stored.unwrap_or_else(|e| {
-        eprintln!("[oculus] spreadsheet {rel}: not recorded: {e}");
+        elog!("[oculus] spreadsheet {rel}: not recorded: {e}");
         0
     });
     match converted {
@@ -150,7 +150,7 @@ pub async fn reconcile(pool: &SqlitePool, data_dir: &Path) -> Result<u64, String
                 record(pool, subject_id, &rel, &pages).await?;
             }
             Err(error) => {
-                eprintln!("[oculus] spreadsheet {rel}: {error}");
+                elog!("[oculus] spreadsheet {rel}: {error}");
                 forget(pool, subject_id, &rel).await?;
             }
         }
@@ -173,11 +173,11 @@ pub fn reconcile_in_background() {
             });
             match outcome {
                 Ok(0) => {}
-                Ok(n) => eprintln!("[oculus] spreadsheets: converted {n} to text"),
-                Err(e) => eprintln!("[oculus] spreadsheets: {e}"),
+                Ok(n) => elog!("[oculus] spreadsheets: converted {n} to text"),
+                Err(e) => elog!("[oculus] spreadsheets: {e}"),
             }
         });
     if let Err(e) = spawned {
-        eprintln!("[oculus] spreadsheets: {e}");
+        elog!("[oculus] spreadsheets: {e}");
     }
 }

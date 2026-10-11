@@ -60,12 +60,12 @@ pub async fn canvas_download_video(
         cancels.0.lock().unwrap().remove(&canvas_file_id);
         match &result {
             Ok(rel) => {
-                eprintln!("[oculus] downloaded video {rel}");
+                elog!("[oculus] downloaded video {rel}");
                 emit(100, "complete");
             }
             Err(e) if e == crate::sources::canvas::CANCELLED => emit(0, "cancelled"),
             Err(e) => {
-                eprintln!("[oculus] video {canvas_file_id}: {e}");
+                elog!("[oculus] video {canvas_file_id}: {e}");
                 emit(0, "error");
             }
         }

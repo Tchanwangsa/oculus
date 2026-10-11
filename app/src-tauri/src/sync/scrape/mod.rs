@@ -32,7 +32,7 @@ impl Default for ScrapeCancel {
 #[tauri::command]
 pub fn cancel_scrape(cancel: tauri::State<ScrapeCancel>) -> Result<(), String> {
     cancel.0.store(true, Ordering::SeqCst);
-    eprintln!("[oculus] cancel_scrape: signalled");
+    elog!("[oculus] cancel_scrape: signalled");
     Ok(())
 }
 
@@ -65,7 +65,7 @@ pub async fn scrape_content(
     let flag = Arc::clone(&cancel.0);
     flag.store(false, Ordering::SeqCst);
 
-    eprintln!("[oculus] scrape: {} subject(s)", targets.len());
+    elog!("[oculus] scrape: {} subject(s)", targets.len());
 
     // Returns immediately; the frontend follows the events.
     std::thread::spawn(move || {
@@ -78,7 +78,7 @@ pub async fn scrape_content(
         let count = engine.scrape(&targets);
         let cancelled = flag.load(Ordering::SeqCst);
 
-        eprintln!("[oculus] scrape finished: {count} subject(s), cancelled={cancelled}");
+        elog!("[oculus] scrape finished: {count} subject(s), cancelled={cancelled}");
         app.emit(
             "scrape-complete",
             serde_json::json!({ "count": count, "cancelled": cancelled }),
@@ -104,15 +104,16 @@ impl Reporter for AppReporter {
     }
 
     fn file(&self, f: &FileEvent) {
-        eprintln!(
+        elog!(
             "[oculus] wrote {} ({} bytes)",
-            f.relative_path, f.size_bytes
+            f.relative_path,
+            f.size_bytes
         );
         self.app.emit("scrape-file", f).ok();
     }
 
     fn file_failed(&self, f: &FileFailed) {
-        eprintln!("[oculus] download failed: {}: {}", f.relative_path, f.error);
+        elog!("[oculus] download failed: {}: {}", f.relative_path, f.error);
         self.app.emit("scrape-file-failed", f).ok();
     }
 
@@ -159,9 +160,9 @@ pub fn parse_file(
         std::thread::spawn(move || {
             match crate::pages::sheets::index(&data_dir, &relative_path, subject_id) {
                 Ok(pages) => {
-                    eprintln!("[oculus] parse_file {relative_path}: {pages} sheet(s) as text")
+                    elog!("[oculus] parse_file {relative_path}: {pages} sheet(s) as text")
                 }
-                Err(e) => eprintln!("[oculus] parse_file {relative_path}: {e}"),
+                Err(e) => elog!("[oculus] parse_file {relative_path}: {e}"),
             }
         });
         return Ok(());
@@ -176,8 +177,8 @@ pub fn parse_file(
     let _ = subject_code;
     std::thread::spawn(move || {
         match crate::sync::parse_pdf(&data_dir, &relative_path, subject_id) {
-            Ok(summary) => eprintln!("[oculus] parse_file {relative_path}: {summary}"),
-            Err(e) => eprintln!("[oculus] parse_file {relative_path}: {e}"),
+            Ok(summary) => elog!("[oculus] parse_file {relative_path}: {summary}"),
+            Err(e) => elog!("[oculus] parse_file {relative_path}: {e}"),
         }
     });
     Ok(())

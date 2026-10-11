@@ -22,11 +22,11 @@ pub fn retire_in_background() {
         let data_dir = crate::library::paths::data_dir();
         match retire(&data_dir, |label| platform::registrar().retire(label)) {
             Ok(removed) if removed.is_empty() => {}
-            Ok(removed) => eprintln!(
+            Ok(removed) => elog!(
                 "[oculus] removed the old session keep-alive ({} file(s))",
                 removed.len()
             ),
-            Err(e) => eprintln!("[oculus] could not remove the old session keep-alive: {e}"),
+            Err(e) => elog!("[oculus] could not remove the old session keep-alive: {e}"),
         }
     });
 }

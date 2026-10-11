@@ -202,7 +202,7 @@ impl Harness {
         std::thread::spawn(
             move || match h.one_off(&sel, INSTRUCTIONS, opencode::WRITER_AGENT) {
                 Ok(turn) => h.keep_warm(key, turn),
-                Err(e) => eprintln!("[oculus] suggestion warm-up: {e}"),
+                Err(e) => elog!("[oculus] suggestion warm-up: {e}"),
             },
         );
     }

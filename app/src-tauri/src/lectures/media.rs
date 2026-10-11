@@ -44,7 +44,7 @@ pub fn start_media_server(data_dir: PathBuf) -> MediaServer {
         .port();
     let token = random_token();
 
-    eprintln!("[oculus] media HTTP server on 127.0.0.1:{port}");
+    elog!("[oculus] media HTTP server on 127.0.0.1:{port}");
 
     let server = Arc::new(server);
     for _ in 0..MEDIA_WORKERS {

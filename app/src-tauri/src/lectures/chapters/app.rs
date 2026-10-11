@@ -69,7 +69,7 @@ pub async fn lecture_find_chapters(
                         Step::Detected {
                             title, candidates, ..
                         } => {
-                            eprintln!("[oculus] chapters: {title} — {candidates} candidate(s)");
+                            elog!("[oculus] chapters: {title} — {candidates} candidate(s)");
                             Progress {
                                 done: Some(0),
                                 total: Some(candidates as u32 + 1),
@@ -134,7 +134,7 @@ pub async fn lecture_find_chapters(
                     error: None,
                 },
                 Err(e) => {
-                    eprintln!("[oculus] chapters: {e}");
+                    elog!("[oculus] chapters: {e}");
                     Finished {
                         lecture_id: lecture_id.clone(),
                         status: "error",
@@ -267,7 +267,7 @@ pub async fn lecture_grab_frames(
                 match grab_frame(&ffmpeg, &video, seconds, LIVE_GRAB_WIDTH, &out) {
                     Ok(()) => Some(n),
                     Err(e) => {
-                        eprintln!("[oculus] frame: source {n} at {seconds}s: {e}");
+                        elog!("[oculus] frame: source {n} at {seconds}s: {e}");
                         None
                     }
                 }

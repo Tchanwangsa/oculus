@@ -54,7 +54,7 @@ pub fn connect(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Resul
         );
     }
 
-    eprintln!("[oculus] echo360 auth done: section={}", s.section_id);
+    elog!("[oculus] echo360 auth done: section={}", s.section_id);
     Ok(s)
 }
 
@@ -64,7 +64,7 @@ pub(super) fn launch_form(
     canvas: &crate::sources::canvas::Canvas,
     course_id: i64,
 ) -> Result<(String, Vec<(String, String)>), String> {
-    eprintln!("[oculus] echo360 auth: fetching LTI page for course {course_id}");
+    elog!("[oculus] echo360 auth: fetching LTI page for course {course_id}");
     let page = canvas
         .get(&format!("/courses/{course_id}{LTI_TOOL_PATH}"))
         .map_err(|e| format!("Canvas LTI page fetch failed: {e}"))?;

@@ -282,9 +282,8 @@ mean a track will not be heard (audio key, decrypt, load, availability,
 Login5's `INVALID_CREDENTIALS`) into the snapshot's `error`. The player's
 `Unavailable` event does the same.
 
-Every line the music module prints goes through `elog!` (`music/mod.rs`),
-which drops the line rather than panicking when stderr is a closed pipe, as
-`eprintln!` does.
+Every line the music module prints goes through the crate's `elog!`
+([development.md](./development.md#gotchas)).
 
 ## Covers come from Spotify's image CDN
 
@@ -332,4 +331,3 @@ session.
 - An inactive Spirc drops `add_to_queue` without a word — `music_add_to_queue` refuses instead (`Need::Active`).
 - librespot's rodio sink `unwrap`s a named device that is gone and hangs on a dead stream — the sink in `audio/` replaces it.
 - `.gitignore` ignores every `output/` directory — the output module is `audio/`.
-- `eprintln!` panics on a closed stderr — use `elog!` in the music module.
