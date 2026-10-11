@@ -10,18 +10,18 @@ import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
 import { railButton, railIdle } from "./RailItem";
 
 /**
- * Spotify in the rail's foot: the album cover (or a note) with the rail's
- * corner marks — a spinner while connecting, a brand dot while playing — and
- * a popover player to its right. Only while Settings → Music is on and a
- * session is up or a track is loaded; otherwise nothing at all.
+ * Spotify in the rail's group after the sections: the album cover (or a
+ * note) with the rail's corner marks — a spinner while connecting, a brand
+ * dot while playing — and a popover player to its right. Only while
+ * `useMusicTileShown`; otherwise nothing at all.
  */
 export function MusicTile() {
-  const enabled = useMusicPrefsStore((s) => s.enabled);
+  const shown = useMusicTileShown();
   const snapshot = useMusicStore((s) => s.snapshot);
   const error = useMusicStore(musicError);
   const [open, setOpen] = useState(false);
 
-  if (!enabled || !snapshot || !(snapshot.connected || snapshot.track)) return null;
+  if (!shown || !snapshot) return null;
   const track = snapshot.track;
   const label = track ? `${track.name} · ${track.artists.join(", ")}` : "Music";
   const indicator = snapshot.connecting ? (
@@ -61,7 +61,7 @@ export function MusicTile() {
         </TooltipTrigger>
         {!open && <TooltipContent side="right">{label}</TooltipContent>}
       </Tooltip>
-      <PopoverContent side="right" align="end" sideOffset={8} className="w-72">
+      <PopoverContent side="right" align="start" sideOffset={8} className="w-72">
         <NowPlaying
           snapshot={snapshot}
           error={error}
@@ -73,4 +73,11 @@ export function MusicTile() {
       </PopoverContent>
     </Popover>
   );
+}
+
+/** Settings → Music is on and a session is up or a track is loaded. */
+export function useMusicTileShown() {
+  const enabled = useMusicPrefsStore((s) => s.enabled);
+  const snapshot = useMusicStore((s) => s.snapshot);
+  return enabled && !!snapshot && (snapshot.connected || !!snapshot.track);
 }

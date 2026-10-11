@@ -82,8 +82,8 @@ before leaving a playing lecture.
 `app/src/components/sidebar/Sidebar.tsx` is a 52px column of icon buttons,
 each named by a tooltip on its right: Search (opens ⌘K), then Home, Chat,
 Calendar, Tasks and Subjects, and Sync and Settings pinned to the foot under a
-short hairline. While Spotify is on, its tile sits above that hairline and
-opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The five sections drag into any order on `useStripReorder`'s
+short hairline. While Spotify is on, its tile sits under a rule after the
+sections and opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The five sections drag into any order on `useStripReorder`'s
 vertical axis, and the order is kept in `localStorage` (`railOrderStore`); a
 section the stored order lacks is appended. A `RailItem` is a button with `data-tab-href` that goes
 through `navigateActive`, since the sidebar sits outside every pane's router,
