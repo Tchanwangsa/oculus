@@ -28,6 +28,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/runtime/bundled.rs` |
 | PDF viewer's render, text and links | `app/src-tauri/src/library/pdf_view/` |
 | In-app browser | `app/src-tauri/src/shell/browser/`, `app/src-tauri/capabilities/default.json` |
+| Spotify playback ([music.md](./music.md)) | `app/src-tauri/src/music/`, `app/src/lib/music/index.ts` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes | `app/src-tauri/src/db/store/`, `app/src-tauri/src/db/projects/` |
 | App-usage ticker and its pinger | `app/src-tauri/src/shell/usage/`, `app/src/hooks/backend/useActivityPing.ts`, `app/src/lib/activity/usageContext.ts` |
@@ -40,9 +41,9 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 - Rust loose files sit in group directories under `app/src-tauri/src/`:
   `auth/`, `sources/`, `sync/`, `pages/`, `library/`, `db/`, `lectures/`,
   `agents/`, `shell/`, `runtime/`, `providers/`; `harness/`, `parse/`,
-  `embed/` and `transcribe/` are their own groups.
+  `embed/`, `transcribe/` and `music/` are their own groups.
 - The frontend groups the same way: `app/src/lib/` (`activity`, `citations`,
-  `db`, `files`, `format`, `harness`, `lectures`, `notes`, `pipeline`,
+  `db`, `files`, `format`, `harness`, `lectures`, `music`, `notes`, `pipeline`,
   `planning`, `search`, `shell`, …), `app/src/hooks/` (`agents`, `backend`,
   `data`, `lectures`, `shell`, `sync`, `ui`, …) and `app/src/stores/` (`chat`,
   `documents`, `lectures`, `planning`, `shell`, `sync`).
@@ -78,6 +79,8 @@ its failure rules are in [parsing.md](./parsing.md).
 - Credentials go keychain → in-process client, except the Voyage, MinerU and
   Groq keys and the Okta sign-in credentials while keyd is installed
   ([below](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+  Spotify's stored login lives only in keyd and comes back through its
+  app-only `get` ([music.md](./music.md)).
   No key enters SQLite, the WebView, a health response or a progress event.
   The local engines need none.
   A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
@@ -124,12 +127,15 @@ with the app's icon.
 - **The wire format** is one JSON line, then `body_len` raw bytes if the
   header names them; replies have the same shape. One module writes and reads
   it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
-  hash, pid), `has`, `store`, `delete`, `forward`, the Okta ops `okta_save`,
+  hash, pid), `has`, `store`, `get`, `delete`, `forward`, the Okta ops `okta_save`,
   `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`, and the
   session ops `session_get`, `session_put`, `session_clear`, `session_status`,
   `session_mark` and `sign_out` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
-  No op returns a key, a password, a seed or a token; the one reply that
-  carries a cookie is `session_get`, to the app. Only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
+  No op returns a key, a password, a seed or a token, with one exception:
+  `get` returns the stored value of a name in `names::READABLE`, which is only
+  `music.spotify`, Spotify's credentials, to the app
+  ([auth.md](./auth.md#spotifys-credentials-are-the-one-value-keyd-reads-back)).
+  The one reply that carries a cookie is `session_get`, to the app. Only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
   `request`, `caller`, `keychain` (the master key or an old item refused or
   failed), `vault`, `record` (the sign-in attempt record, or a marker file, could
   not be replaced), `missing` (a `canvas` one may carry the refused sign-in as
@@ -214,7 +220,7 @@ with the app's icon.
   the signing identifier. Ops check the role, never a path, and in one place
   (`State::dispatch`): every op but `ping` needs `app` or `cli`, because every
   executable in the install (ffmpeg ships in it) passes the caller check;
-  `okta_resume` and `session_get` need `app`. `ping` answers whoever was
+  `okta_resume`, `session_get` and `get` need `app`. `ping` answers whoever was
   admitted, for diagnostics.
 - **keyd holds the Okta credentials and runs the sign-in.** The username,
   password and TOTP seed are vault entries, written together by `okta_save`
@@ -397,6 +403,6 @@ JavaScript.
 - Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
 - A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
 - Reaching the data dir any way but `library::paths::data_dir()` (itself `keyd_core::paths::data_dir`) lets the CLI, the app and keyd diverge.
-- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process.
+- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process; `get` is app-only and limited to `names::READABLE` for that reason.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.
 - A `subject_id` that cascades on user-owned tables deletes the student's work with a course.
