@@ -85,8 +85,9 @@ before leaving a playing lecture.
 `app/src/components/sidebar/Sidebar.tsx` is a 52px column of icon buttons,
 each named by a tooltip on its right: Search (opens ⌘K), then Home, Chat,
 Calendar, Tasks and Subjects, and Sync and Settings pinned to the foot under a
-short hairline. While Spotify is on, its tile sits under a rule after the
-sections and opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The five sections drag into any order on `useStripReorder`'s
+short hairline. Messaging, while any service is on ([dock.md](./dock.md)), and
+Spotify's tile, while music is on, sit together under a rule after the
+sections; the tile opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The five sections drag into any order on `useStripReorder`'s
 vertical axis, and the order is kept in `localStorage` (`railOrderStore`); a
 section the stored order lacks is appended. A `RailItem` is a button with `data-tab-href` that goes
 through `navigateActive`, since the sidebar sits outside every pane's router,
@@ -246,7 +247,7 @@ closed panel opens one on `/new`.
   becomes the strip's `sideRatio`, which every new or reopened panel takes
   (half, `SIDE_RATIO`, before any drag). A stored `split` pane restores as a
   one-item panel.
-- **Nothing floats over a pane**: a native browser page covers anything drawn
+- **Nothing floats over a pane**: a native browser or dock page covers anything drawn
   above it, so the controls sit in the header and the focus marker on the seam.
 - **Shell navigation leaves the panel open**: the sidebar, ⌘K and crumbs go to
   the focused pane.

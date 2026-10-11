@@ -25,6 +25,7 @@ mod still;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use layout::{content_size, rect, round_corners};
 pub use layout::{init, open_tab};
 pub use seed::{clear_sessions, seed_sessions};
 
@@ -45,7 +46,8 @@ pub const CANVAS_HOST: &str = "canvas.lms.unimelb.edu.au";
 /// WKWebView's default UA has no `Version/… Safari/…` suffix, and UA-sniffing
 /// sites (google.com) serve their no-JavaScript fallback to it. Keep the
 /// version roughly current. Deliberately separate from `auth/okta/`'s string.
-const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15";
+/// The messaging dock (`shell/dock/`) sends it too.
+pub(crate) const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15";
 
 fn label(id: u32) -> String {
     format!("{LABEL_PREFIX}{id}")

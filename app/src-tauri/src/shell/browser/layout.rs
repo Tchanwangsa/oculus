@@ -52,7 +52,7 @@ fn pages(app: &AppHandle) -> Vec<Webview<tauri::Wry>> {
 }
 
 /// The window's content area in logical points.
-fn content_size(window: &Window) -> LogicalSize<f64> {
+pub(crate) fn content_size(window: &Window) -> LogicalSize<f64> {
     let scale = window.scale_factor().unwrap_or(1.0);
     window
         .inner_size()
@@ -62,7 +62,7 @@ fn content_size(window: &Window) -> LogicalSize<f64> {
 
 /// One page's rect: the content area minus its insets. An unplaced (hidden)
 /// page takes the whole window.
-fn rect(
+pub(crate) fn rect(
     window: LogicalSize<f64>,
     viewport: Option<Viewport>,
 ) -> (LogicalPosition<f64>, LogicalSize<f64>, f64) {
@@ -81,7 +81,7 @@ fn rect(
 /// Rounds a page's bottom corners to the card's radius; a native view over
 /// the DOM has to clip itself.
 #[cfg(target_os = "macos")]
-fn round_corners(page: &Webview<tauri::Wry>, radius: f64) {
+pub(crate) fn round_corners(page: &Webview<tauri::Wry>, radius: f64) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
@@ -106,7 +106,7 @@ fn round_corners(page: &Webview<tauri::Wry>, radius: f64) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn round_corners(_page: &Webview<tauri::Wry>, _radius: f64) {}
+pub(crate) fn round_corners(_page: &Webview<tauri::Wry>, _radius: f64) {}
 
 /// The resize handler: puts every placed page back in its slot. Unplaced
 /// pages are hidden and skipped.
