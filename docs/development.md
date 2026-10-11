@@ -189,7 +189,9 @@ keyd core and `app/math-core`'s own crates), `bun run test`, `bun run build`
 `wasm-bindgen`), the ffmpeg fetch, the
 speech helper and `whisper-cli`, `stage-keyd` (a real release build and signature
 of keyd, as the bundle carries it), `stage-cli`, clippy with `-D warnings` over
-every target, `cargo test --release --locked`,
+every target of the app, keyd core (every feature), keyd (with and without
+`dev`) and the maths engine's own crates (`--no-deps`, so not the vendored
+`katex/`; the bridge for `wasm32-unknown-unknown` too), `cargo test --release --locked`,
 keyd core's tests with every feature and keyd's with and without `dev`, the
 maths engine's `cargo test --locked`, then
 `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
