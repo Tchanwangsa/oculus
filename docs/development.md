@@ -305,12 +305,12 @@ is a Store-upload artifact, `oculus-store-x64`; installing it outside the Store
 requires separate signing. Packaging is not Store submission or certification.
 The native executable manifest opts into long paths.
 
-Windows logos come from `src-tauri/windows/logo.svg`: the mascot without the
-macOS squircle, in indigo so it reads on light and dark taskbars.
+Windows logos come from `src-tauri/windows/logo.svg`: the mascot on an
+indigo circle, the Windows counterpart of the macOS squircle.
 `bun run icons:windows` renders the MSIX scale and unplated taskbar
 `targetsize` variants and the `icon.ico` that `tauri.windows.conf.json` gives
-the exe and NSIS installer. The outputs are committed; rerun it after editing
-the SVG.
+the exe and NSIS installer, dropping the drop shadows below 64 px where they
+blur. The outputs are committed; rerun it after editing the SVG.
 
 Windows keyd is a release `.exe` without codesign, staged as a target-triple
 sidecar; the dev preflight stages it beside the debug app and the GUI starts

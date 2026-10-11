@@ -1,10 +1,44 @@
-<!-- Windows variant of the app icon: the mascot without the macOS squircle,
-     in indigo so it reads on both light and dark taskbars. Same geometry as
-     app/public/oculus-mark.svg, ears and body merged into one path.
-     `bun run icons:windows` renders the MSIX logos and icon.ico from it. -->
-<svg width="420" height="420" viewBox="15 58 420 420" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path fill="#5E6AD2" d="M346.183 221.237C393.092 185.514 419.397 108.02 405.114 103.375C390.83 98.7311 364.624 138.556 319.187 147.047C331.898 164.35 346.183 180.722 346.183 221.237Z M107.365 224.394C57.5424 189.836 30.0918 108.038 44.8922 104.803C59.6927 101.568 83.9776 142.504 131.506 147.809C128.349 151.882 107.962 178.791 107.365 224.394Z M333.5 432.417C333.5 432.417 345.656 258.595 346.183 221.237C346.183 180.722 331.898 164.35 319.187 147.047C299.407 122.274 269.012 103.929 228.848 103.375C185.827 102.782 152.342 120.926 131.506 147.809C128.349 151.882 107.962 178.791 107.365 224.394C108.712 285.428 120.5 432.187 120.5 432.187C145.5 432.187 170 432.417 198.33 432.187C201.469 428.764 203.591 425.39 207.801 425.39H242.002C246.211 425.39 248.517 428.746 250.946 432.417H333.5Z"/>
-<circle cx="225" cy="214.357" r="73" fill="white"/>
-<ellipse cx="224.5" cy="215.357" rx="34.5" ry="34" fill="#5E6AD2"/>
-<circle cx="244.5" cy="196.857" r="20.5" fill="white"/>
+<!-- Windows variant of the app icon: the mascot on an indigo circle instead
+     of the macOS squircle. Clipped to the circle so the shadows never spill
+     past its edge; `bun run icons:windows` renders the MSIX logos and
+     icon.ico from it and drops the shadows below 64 px, where they blur. -->
+<svg width="452" height="452" viewBox="-10 -10 452 452" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<clipPath id="circle">
+<circle cx="216" cy="216" r="216"/>
+</clipPath>
+<filter id="filter0_d_46_4" x="32.8896" y="117.643" width="365.804" height="333.034" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="12"/>
+<feGaussianBlur stdDeviation="4"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_46_4"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_46_4" result="shape"/>
+</filter>
+<filter id="filter1_d_46_4" x="179" y="192" width="73" height="73" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="4"/>
+<feGaussianBlur stdDeviation="2"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_46_4"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_46_4" result="shape"/>
+</filter>
+</defs>
+<g clip-path="url(#circle)">
+<circle cx="216" cy="216" r="216" fill="#5E6AD2"/>
+<g filter="url(#filter0_d_46_4)">
+<path d="M331 230C375.576 196.054 400.573 122.413 387 118C373.427 113.587 348.524 151.431 305.346 159.5C317.426 175.943 331 191.5 331 230Z" fill="#F9F9F9"/>
+<path d="M104.059 233C56.7141 200.161 30.6286 122.431 44.693 119.357C58.7574 116.283 81.8346 155.183 127 160.224C124 164.094 104.626 189.665 104.059 233Z" fill="#F9F9F9"/>
+<path d="M318 406.5C318 406.5 330.5 265.5 331 230C331 191.5 317.426 175.943 305.346 159.5C286.55 135.959 257.667 118.526 219.5 118C178.619 117.436 146.799 134.678 127 160.224C124 164.094 104.626 189.665 104.059 233C105.339 290.999 113 406 113 406C136.291 418.485 162.784 427.118 190.5 430.46C193.483 427.207 195.5 424 199.5 424H232C236 424 238.191 427.19 240.5 430.678C268.332 427.631 294.258 419.376 318 406.5Z" fill="white"/>
+</g>
+<circle cx="215.5" cy="223.5" r="69.5" fill="#5E6AD2"/>
+<g filter="url(#filter1_d_46_4)">
+<circle cx="215.5" cy="224.5" r="32.5" fill="white"/>
+</g>
+<circle cx="234.5" cy="206.5" r="19.5" fill="#5E6AD2"/>
+</g>
 </svg>

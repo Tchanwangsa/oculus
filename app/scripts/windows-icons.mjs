@@ -30,7 +30,9 @@ export function logoFiles() {
 function render(Resvg, svg, size, fill) {
   // Center the glyph at `fill` of the canvas; the tile logo needs margin.
   const inner = Math.round(size * fill), offset = (size - inner) / 2;
-  const body = svg.replace(/<!--[\s\S]*?-->/, "").replace(/<svg[^>]*>/, (open) => open
+  // Below 64 px the drop shadows' blur covers too much of the mark.
+  const source = inner < 64 ? svg.replace(/ filter="url\(#[^)]*\)"/g, "") : svg;
+  const body = source.replace(/<!--[\s\S]*?-->/, "").replace(/<svg[^>]*>/, (open) => open
     .replace(/width="[^"]*"/, `width="${inner}"`).replace(/height="[^"]*"/, `height="${inner}"`)
     .replace("<svg", `<svg x="${offset}" y="${offset}"`));
   const page = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">${body}</svg>`;
