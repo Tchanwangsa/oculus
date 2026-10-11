@@ -758,8 +758,10 @@ with the `Narration` error before any frame renders.
   file under `components/` and `assets/`, the render settings (quality,
   scale, size, fps, blur, filter, codec and tag arguments) and
   `STUDIO_RENDER_BUILD`, which `app/src-tauri/build.rs` hashes from
-  studio-core's `src/` and `src/studio/render/`, so a renderer change in
-  development never reuses an old segment. Editing one scene re-renders it
+  studio-core's `src/`, `fonts/` and `themes/`, `src/studio/render/` and
+  `app/src-tauri/Cargo.lock` (the versions of vello_cpu, parley, taffy and
+  the rest), so a renderer, font or dependency change in development never
+  reuses an old segment. Editing one scene re-renders it
   and the scene after it (whose transition shows it); the rest print
   `cached`.
 - **Frames in parallel, written in order.** Worker threads (half the cores,

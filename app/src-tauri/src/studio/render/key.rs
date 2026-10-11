@@ -4,7 +4,8 @@
 //! the scene before it, the resolved theme), every file under
 //! `components/` and `assets/` (an image may change under its name), the
 //! render settings, and the build: `STUDIO_RENDER_BUILD`, a hash of
-//! studio-core's and this module's sources (build.rs).
+//! studio-core's sources, bundled fonts and themes, this module's sources and
+//! `Cargo.lock`'s pinned dependency versions (build.rs).
 
 use std::path::Path;
 
@@ -17,7 +18,8 @@ use super::quality::Settings;
 /// show, so every segment renders again.
 const SCHEME: &str = "oculus-render-segment-1";
 
-/// The renderer's and encoder's sources, hashed by build.rs.
+/// The renderer's and encoder's sources, fonts, themes and locked
+/// dependencies, hashed by build.rs.
 const BUILD: &str = env!("STUDIO_RENDER_BUILD");
 
 /// The trees every segment depends on, hashed once per render.
