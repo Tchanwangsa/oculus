@@ -137,12 +137,22 @@ vergen at the versions librespot's build script accepts.
 
 **librespot-connect is a vendored copy of that rev**
 (`app/src-tauri/vendor/librespot-connect`, swapped in by a `[patch]` in
-`Cargo.toml`), with one addition: `Spirc::skip_to` and `Spirc::remove_next`
-([music-library.md](./music-library.md#skipping-to-and-removing-a-track-up-next)).
-Bumping the rev means copying the new `connect/` over it and carrying those
-two commands across (`SkipTo`, `RemoveNext` in `spirc.rs`;
-`find_next_track`, `skip_next_tracks_to`, `remove_next_track` in
-`state/tracks.rs`).
+`Cargo.toml`), with these additions, all of which a rev bump (copying the
+new `connect/` over it) must carry across:
+
+- **`Spirc::skip_to` and `Spirc::remove_next`**
+  ([music-library.md](./music-library.md#skipping-to-and-removing-a-track-up-next)):
+  `SkipTo`, `RemoveNext` in `spirc.rs`; `find_next_track`,
+  `skip_next_tracks_to`, `remove_next_track` in `state/tracks.rs`.
+- **A `SetQueue` event after every change to the next or previous tracks**
+  (`emit_set_queue_event` in `spirc.rs`): at the end of `handle_load`,
+  `handle_transfer`, `handle_next` and `handle_prev`, and after
+  `handle_shuffle` and `handle_repeat_context`.
+- **`handle_load` emits `ShuffleChanged` and `RepeatChanged`** once it has
+  applied the load's options, since it resets every option it is not given.
+- **Previous with no previous track seeks to zero** instead of stopping
+  (`handle_prev`, with `has_prev_track` in `state/tracks.rs`); with the
+  context repeating it plays the context's first track.
 
 librespot's `Cache` is never constructed: no `credentials.json`, no audio file
 cache, no volume file. While a track streams, librespot buffers it in a
@@ -240,8 +250,10 @@ pure function, picks what the command does:
   `resume`, `skip_next`, `skip_prev`; `seek_to` with `value` and `position`;
   `set_shuffling_context`, `set_repeating_context` and `set_repeating_track`
   with `value`; `add_to_queue` with a `queue`-provider track; `play` with
-  the context's `uri` and `url`, a `play_origin`, and `options.skip_to` for a
-  track inside it (a track with no context is sent as its own context).
+  the context's `uri` and `url`, a `play_origin`, `options.skip_to` for a
+  track inside it (a track with no context is sent as its own context), and,
+  from `music_play_context` only, `options.player_options_override` with
+  `shuffling_context`.
   Volume is `PUT /connect-state/v1/connect/volume/from/<own>/to/<active>`
   with `{"volume": 0–65535}`. The play/pause toggle sends `pause` or `resume`
   by the other device's playing state; repeat off clears both repeats, as
@@ -263,6 +275,10 @@ pure function, picks what the command does:
   queue".
 - **Nothing**: `music_pause` and `music_duck` never touch another device;
   a pause never pulls playback here.
+- **`music_prev` sends another device nothing** when its player state's
+  restrictions forbid going back (a phone at its first track answers
+  `skip_prev` with a 403, `no_prev_track`); the player's previous button is
+  disabled then anyway ([below](#the-snapshots-remote-is-the-other-devices-playback)).
 
 `active` follows the player's `SessionConnected` (the Spirc activated, from a
 command, a transfer or a play from the phone) and `SessionDisconnected`
@@ -275,10 +291,12 @@ While another device is active, each cluster push sets `remote` from its
 player state (`remote/playback.rs`): the device's name, the track,
 `position_as_of_timestamp` at `timestamp` as `position_ms` and
 `position_at_ms`, `playing` (playing and not paused), shuffle, repeat
-(context or track), and the device's volume from its device info (none when
-its capabilities disable volume). A push without a player state keeps what
-was known of the same device; Oculus becoming active, nothing being active,
-or the connection dropping clears it. The snapshot's own `track`,
+(context or track), `can_prev` (its player state's `restrictions` list no
+`disallow_skipping_prev_reasons`; true without a restrictions message), and
+the device's volume from its device info (none when its capabilities disable
+volume). A push without a player state keeps what was known of the same
+device; Oculus becoming active, nothing being active, or the connection
+dropping clears it. The snapshot's own `track`,
 `position_ms`, `playing`, `volume`, `shuffle` and `repeat` stay Oculus's,
 which the duck and the exclusive rule rely on.
 
@@ -341,9 +359,15 @@ default), `remote` (the other device's playback, [above](#the-snapshots-remote-i
 `album`, `cover_url`, `duration_ms`) or null, `position_ms` with
 `position_at_ms`, `playing`, `volume` (0–100), `shuffle`, `repeat`,
 `up_next` (`uri`, `queued`) and `context_uri` (what the device playing
-plays from; both [music-library.md](./music-library.md#up-next-comes-from-the-spirc-while-oculus-plays-and-the-cluster-otherwise))
-and `error`.
+plays from; both [music-library.md](./music-library.md#up-next-comes-from-the-spirc-while-oculus-plays-and-the-cluster-otherwise)),
+`can_prev` (Oculus's previous goes back a track: the last `SetQueue` lists
+a previous track, or the context repeats; false wherever `up_next` is
+cleared) and `error`.
 
+- **Previous is disabled when it would not go back**: the transport reads
+  `shownPlayback(…).can_prev`, Oculus's or the other device's. Pressed from
+  a phone with nothing to go back to, Oculus seeks to zero rather than
+  stopping (the vendored `handle_prev`, [above](#librespot-is-pinned-to-a-dev-branch-commit)).
 - **The position is stamped, not ticked.** `position_at_ms` is the epoch ms at
   which `position_ms` was true; while playing, the UI adds the time since
   (`positionNow` in `app/src/lib/music/index.ts`). Rust sends no per-second
@@ -360,7 +384,9 @@ continuing without decryption") and goes on reporting `Playing` over silence.
 it prints librespot's warnings and errors to stderr and turns the ones that
 mean a track will not be heard (audio key, decrypt, load, availability,
 Login5's `INVALID_CREDENTIALS`) into the snapshot's `error`. The player's
-`Unavailable` event does the same.
+`Unavailable` event does the same. A play, pause or seek sent to a player
+with nothing loaded ("Player::seek called from invalid state: Stopped") is
+printed but is not a failure; a load from an invalid state still is.
 
 Every line the music module prints goes through the crate's `elog!`
 ([development.md](./development.md#gotchas)).
@@ -382,12 +408,12 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_connect` | Connects from keyd's credentials; `needs_login` when there are none |
 | `music_disconnect` | Stops the session and any waiting login; keeps the credentials |
 | `music_sign_out` | Disconnects and deletes `music.spotify` from keyd |
-| `music_play_pause`, `music_play`, `music_pause_player`, `music_next`, `music_prev` | Playback of the device playing, here or another ([routing](#commands-control-the-device-playing-wherever-it-is)) |
+| `music_play_pause`, `music_play`, `music_pause_player`, `music_next`, `music_prev` | Playback of the device playing, here or another ([routing](#commands-control-the-device-playing-wherever-it-is)); `music_prev` sends nothing to a device that forbids it |
 | `music_pause` | Pauses Oculus only; never starts, pulls or touches another device (the exclusive rule's) |
 | `music_shuffle(on)`, `music_repeat(on)` | Shuffle; repeat the context (off also clears a repeated track) |
 | `music_seek(position_ms)`, `music_volume(percent)` | Seek; volume 0–100, which here drops a held duck |
-| `music_play_context(uri)` | Plays a `spotify:` context on the device playing elsewhere, else loads it here |
-| `music_play_track(uri, context_uri?)` | Plays a track from its place in the context (its album, or the playlist it was picked in), or alone without one; on the device playing elsewhere, else here |
+| `music_play_context(uri, shuffle)` | Plays a `spotify:` context on the device playing elsewhere, else loads it here; shuffled or in order as `shuffle` says, keeping repeat here |
+| `music_play_track(uri, context_uri?)` | Plays a track from its place in the context (its album, or the playlist it was picked in), or alone without one; on the device playing elsewhere, else here, keeping shuffle and repeat |
 | `music_add_to_queue(uri)` | Adds a track to the queue of the device playing; refused while nothing plays |
 | `music_skip_to(uri, index)`, `music_queue_remove(uri, index)` | Plays the `up_next` entry at `index`, or takes it out of the queue, on the device playing, Oculus or another ([music-library.md](./music-library.md#skipping-to-and-removing-a-track-up-next)) |
 | `music_play_here()` | Moves playback here and plays |
@@ -413,6 +439,8 @@ session.
 - A track URI is not a context librespot can load — `music_play_track` uses its album or playlist, or `from_tracks`.
 - An inactive Spirc drops `add_to_queue` without a word — `music_add_to_queue` sends it to the device playing, or refuses with nothing playing (`Need::Queue`).
 - librespot's receiver rejects a remote command without `logging_params` — every body carries `"logging_params": {}` (`remote/command.rs`).
+- A phone with no previous track answers `skip_prev` with a 403 — `music_prev` checks the remote's `can_prev` first.
+- librespot's load resets shuffle and repeat to what the request names, and stock librespot says nothing of it — the vendored `handle_load` emits both, and `music_play_context` passes the snapshot's repeat.
 - The snapshot's `track`, `playing` and `volume` are Oculus's even while a phone plays — the player reads `shownPlayback`, the exclusive rule and the duck read the snapshot's own.
 - librespot's rodio sink `unwrap`s a named device that is gone and hangs on a dead stream — the sink in `audio/` replaces it.
 - `.gitignore` ignores every `output/` directory — the output module is `audio/`.

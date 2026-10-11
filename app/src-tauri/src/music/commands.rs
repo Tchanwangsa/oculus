@@ -9,7 +9,9 @@
 
 use std::collections::HashMap;
 
-use librespot_connect::{LoadRequest, LoadRequestOptions, PlayingTrack, Spirc};
+use librespot_connect::{
+    LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack, Spirc,
+};
 use librespot_core::{SessionConfig, SpotifyUri};
 use tauri::AppHandle;
 
@@ -182,15 +184,17 @@ pub async fn music_next(app: AppHandle) -> Result<(), String> {
     .await
 }
 
+/// Another device whose player state forbids going back (a phone at its
+/// first track answers `skip_prev` with a 403) is sent nothing.
 #[tauri::command]
 pub async fn music_prev(app: AppHandle) -> Result<(), String> {
-    command(
-        &app,
-        Need::Control,
-        |spirc| spirc.prev(),
-        RemoteCommand::SkipPrev,
-    )
-    .await
+    match control::route(&app, Need::Control).await? {
+        Route::Here => state::with_spirc(&app, |spirc| spirc.prev()),
+        Route::There(device) if device.can_prev => {
+            remote::send(&app, &device, RemoteCommand::SkipPrev).await
+        }
+        Route::There(_) | Route::Skip => Ok(()),
+    }
 }
 
 #[tauri::command]
@@ -260,33 +264,36 @@ pub async fn music_repeat(app: AppHandle, on: bool) -> Result<(), String> {
 }
 
 /// Plays a context (`spotify:playlist:…`, `spotify:album:…`): on the device
-/// playing elsewhere, else here.
+/// playing elsewhere, else here. Shuffle is always stated, so Play plays in
+/// order and Shuffle play shuffles; here repeat stays as the snapshot has it
+/// (a load resets every option it is not given).
 #[tauri::command]
-pub async fn music_play_context(app: AppHandle, uri: String) -> Result<(), String> {
+pub async fn music_play_context(app: AppHandle, uri: String, shuffle: bool) -> Result<(), String> {
     spotify_uri(&uri)?;
     let remote = RemoteCommand::Play {
         context: uri.clone(),
         track: None,
+        shuffle: Some(shuffle),
     };
-    load(
-        &app,
-        LoadRequest::from_context_uri(
-            uri,
-            LoadRequestOptions {
-                start_playing: true,
-                ..Default::default()
-            },
-        ),
-        remote,
-    )
-    .await
+    let repeat = state::snapshot(&app).repeat_context;
+    let options = LoadRequestOptions {
+        start_playing: true,
+        context_options: Some(LoadContextOptions::Options(Options {
+            shuffle,
+            repeat,
+            repeat_track: false,
+        })),
+        ..Default::default()
+    };
+    load(&app, LoadRequest::from_context_uri(uri, options), remote).await
 }
 
 /// Plays a track: from its place in `context_uri` (its album from a search,
 /// or the playlist it was picked in) so playback goes on through it, or
 /// alone without one. librespot finds the track by URI among the context's
 /// loaded tracks. A track URI is not a context librespot can load; another
-/// device is sent the track as its own context.
+/// device is sent the track as its own context. Here shuffle and repeat stay
+/// as the snapshot has them, since a load resets every option it is not given.
 #[tauri::command]
 pub async fn music_play_track(
     app: AppHandle,
@@ -296,9 +303,15 @@ pub async fn music_play_track(
     if !uri.starts_with("spotify:track:") {
         return Err(format!("Not a Spotify track: {uri}"));
     }
+    let kept = state::snapshot(&app);
     let options = |playing_track| LoadRequestOptions {
         start_playing: true,
         playing_track,
+        context_options: Some(LoadContextOptions::Options(Options {
+            shuffle: kept.shuffle,
+            repeat: kept.repeat_context,
+            repeat_track: kept.repeat && !kept.repeat_context,
+        })),
         ..Default::default()
     };
     let (request, remote) = match context_uri {
@@ -307,6 +320,7 @@ pub async fn music_play_track(
             let remote = RemoteCommand::Play {
                 context: context.clone(),
                 track: Some(uri.clone()),
+                shuffle: None,
             };
             let request =
                 LoadRequest::from_context_uri(context, options(Some(PlayingTrack::Uri(uri))));
@@ -316,6 +330,7 @@ pub async fn music_play_track(
             let remote = RemoteCommand::Play {
                 context: uri.clone(),
                 track: None,
+                shuffle: None,
             };
             (LoadRequest::from_tracks(vec![uri], options(None)), remote)
         }

@@ -71,10 +71,12 @@ pub(in crate::music) enum RemoteCommand {
         prev: Vec<ListedTrack>,
         revision: String,
     },
-    /// Plays `context` from its start, or from `track` inside it.
+    /// Plays `context` from its start, or from `track` inside it; `shuffle`
+    /// overrides the device's shuffle for it, none keeps the device's own.
     Play {
         context: String,
         track: Option<String>,
+        shuffle: Option<bool>,
     },
     /// 0–100.
     Volume(u8),
@@ -144,10 +146,17 @@ pub(super) fn body(command: &RemoteCommand) -> Value {
             "prev_tracks": prev.iter().map(ListedTrack::json).collect::<Vec<_>>(),
             "queue_revision": revision,
         }),
-        RemoteCommand::Play { context, track } => {
+        RemoteCommand::Play {
+            context,
+            track,
+            shuffle,
+        } => {
             let mut options = json!({});
             if let Some(track) = track {
                 options["skip_to"] = json!({ "track_uri": track });
+            }
+            if let Some(shuffle) = shuffle {
+                options["player_options_override"] = json!({ "shuffling_context": shuffle });
             }
             json!({
                 "context": { "uri": context, "url": format!("context://{context}") },

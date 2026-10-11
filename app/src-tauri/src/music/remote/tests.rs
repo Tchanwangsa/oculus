@@ -1,5 +1,5 @@
 use librespot_protocol::connect::{Capabilities, Cluster as ClusterProto, DeviceInfo};
-use librespot_protocol::player::{ContextPlayerOptions, PlayerState, ProvidedTrack};
+use librespot_protocol::player::{ContextPlayerOptions, PlayerState, ProvidedTrack, Restrictions};
 use serde_json::json;
 
 use super::command::{body, path, ListedTrack};
@@ -164,6 +164,7 @@ fn a_play_names_the_context_and_skips_to_a_track_only_when_given_one() {
         body(&RemoteCommand::Play {
             context: PLAYLIST.into(),
             track: Some(T1.into()),
+            shuffle: None,
         }),
         command(
             "play",
@@ -178,12 +179,31 @@ fn a_play_names_the_context_and_skips_to_a_track_only_when_given_one() {
         body(&RemoteCommand::Play {
             context: PLAYLIST.into(),
             track: None,
+            shuffle: None,
         }),
         command(
             "play",
             json!({ "context": context, "play_origin": origin, "options": {} })
         )
     );
+    // Play and Shuffle play on a playlist or album state shuffle either way.
+    for shuffle in [true, false] {
+        assert_eq!(
+            body(&RemoteCommand::Play {
+                context: PLAYLIST.into(),
+                track: None,
+                shuffle: Some(shuffle),
+            }),
+            command(
+                "play",
+                json!({
+                    "context": context,
+                    "play_origin": origin,
+                    "options": { "player_options_override": { "shuffling_context": shuffle } },
+                })
+            )
+        );
+    }
 }
 
 #[test]
@@ -292,6 +312,23 @@ fn paused_without_metadata_or_volume_control() {
     assert!(!remote.playing);
     assert_eq!(remote.track, None);
     assert_eq!(remote.volume, None);
+}
+
+#[test]
+fn previous_is_allowed_unless_the_player_state_restricts_it() {
+    let mut cluster = phone_playing();
+    // No restrictions message: nothing forbids it.
+    assert!(from_cluster(&cluster, "me").unwrap().can_prev);
+    let player = cluster.player_state.as_mut().unwrap();
+    player.restrictions = Some(Restrictions::default()).into();
+    assert!(from_cluster(&cluster, "me").unwrap().can_prev);
+    let player = cluster.player_state.as_mut().unwrap();
+    player.restrictions = Some(Restrictions {
+        disallow_skipping_prev_reasons: vec!["no_prev_track".into()],
+        ..Restrictions::default()
+    })
+    .into();
+    assert!(!from_cluster(&cluster, "me").unwrap().can_prev);
 }
 
 #[test]

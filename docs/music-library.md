@@ -40,9 +40,9 @@ itself is [music.md](./music.md).
   plain cover, none as the note glyph (`PlaylistCover`).
 - **A click opens the playlist** in place of the list: "Your playlists"
   becomes a back button, which puts the list's scroll position back. The
-  header shows the cover, name, owner · N tracks and Play
-  (`music_play_context`). The tracks are a virtual list (TanStack Virtual,
-  48 px rows), since a playlist runs to thousands: `music_playlist_tracks`
+  header shows the cover, name, owner · N tracks, Play and Shuffle play (an
+  outline icon button; `music_play_context` in order or shuffled). The
+  tracks are a virtual list (TanStack Virtual, 48 px rows), since a playlist runs to thousands: `music_playlist_tracks`
   sends every URI at once, and `useTrackRows` asks `music_tracks` for the
   hundred-track pages the list shows as they scroll into view. A row shows
   the album cover, title, artists · album and duration; a click plays the
@@ -99,8 +99,9 @@ itself is [music.md](./music.md).
   its own.
 - **A search track plays** from its place in its album (`music_play_track`
   with the album as context). **An album or playlist opens** to its tracks
-  in the same view a playlist of the account's uses, with Play; Back
-  ("Results for …") returns to the results, which stay mounted under it, so
+  in the same view a playlist of the account's uses, with Play and Shuffle
+  play; Back ("Results for …") returns to the results, which stay mounted
+  under it, so
   their scroll position and loaded pages survive. An album's tracks come
   from `music_album_tracks`.
 - Load, track-list and search errors sit inline where the list would be. A
@@ -243,9 +244,11 @@ cluster push.
 
 - **While Oculus plays**, the Spirc's `SetQueue` player events (on with
   `ConnectConfig::emit_set_queue_events`) set `up_next` from its next
-  tracks; it sends one when a context loads and when the queue changes, not
-  when it moves on, so a track starting drops itself and everything before
-  it from the list.
+  tracks and `can_prev` from its previous ones. The vendored Spirc sends one
+  whenever either changes: a load (in its final, shuffled order), a
+  transfer, the queue, shuffle, repeat, and every move to the next or
+  previous track ([music.md](./music.md#librespot-is-pinned-to-a-dev-branch-commit)).
+  A track starting changes nothing by itself.
 - **A cluster push** sets it from the active device's
   `player_state.next_tracks`, whichever device that is; a push with no
   device active clears it, one without a player state leaves it.
@@ -320,7 +323,7 @@ its own.
 - The cluster arrives only on a change — the menu shows this device alone until the first push.
 - A search endpoint carries the query — log a label, never the endpoint.
 - librespot finds `music_play_track`'s track by URI among the context's loaded tracks — one past a page the resolver has not loaded yet starts the playlist from its top.
-- The Spirc sends no `SetQueue` when it moves to the next track — `Snapshot::advance_to` trims `up_next` on `TrackChanged`.
-- A virtual list's row array is new every snapshot — memoise `useTrackRows`' URIs by their joined key, or every snapshot asks again.
+- Stock librespot sends no `SetQueue` on a move, a shuffle or a repeat, and a shuffled load's arrives unshuffled — the vendored Spirc sends one after each; never trim `up_next` on `TrackChanged`, which can arrive before or after it.
+- A virtual list's row array is new every snapshot — memoise `useTrackRows`' URIs by their joined key, or every snapshot asks again; up next's key carries `queued` too, or a track queued with the same URIs keeps its old group.
 - `set_queue` replaces the previous tracks too — send the kept `prev_tracks` back unchanged, or the device's history is wiped.
 - Never send Oculus's own device a remote `skip_next` naming a track — librespot's `handle_next` loops forever when that track is not next, hanging the Spirc (no play or pause, then Spotify drops the device); and its queue events lack each track's `context_index`, so they cannot go back in a `set_queue`. Hence the vendored `skip_to` and `remove_next`.

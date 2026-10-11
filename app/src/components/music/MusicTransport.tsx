@@ -5,7 +5,8 @@ import { useMusicStore } from "@/stores/music/musicStore";
 
 /** Previous, play/pause and next, for what the player shows: Oculus, or the
  *  device playing elsewhere. Play and pause are explicit commands, so a
- *  click on a stale button never does the opposite. */
+ *  click on a stale button never does the opposite. Previous is disabled
+ *  when it would not go back a track (`can_prev`). */
 export function MusicTransport({
   snapshot,
   large = false,
@@ -15,7 +16,7 @@ export function MusicTransport({
 }) {
   const run = useMusicStore((s) => s.run);
   const disabled = !musicControllable(snapshot);
-  const playing = shownPlayback(snapshot).playing;
+  const { playing, can_prev } = shownPlayback(snapshot);
   const icon = large ? 18 : 15;
 
   return (
@@ -24,7 +25,7 @@ export function MusicTransport({
         variant="ghost"
         size={large ? "icon" : "icon-xs"}
         aria-label="Previous"
-        disabled={disabled}
+        disabled={disabled || !can_prev}
         onClick={() => run(music.prev)}
       >
         <SkipBack size={icon} weight="fill" />

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Play } from "@phosphor-icons/react";
+import { Play, Shuffle } from "@phosphor-icons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@/components/ui/button";
 import { SkeletonRows } from "@/components/ui/layout/PageParts";
@@ -25,8 +25,8 @@ export interface OpenedList {
 const isAlbum = (uri: string) => uri.startsWith("spotify:album:");
 
 /**
- * One playlist or album opened in the library: its header with a Play
- * button, and its tracks as a virtual list, since a playlist runs to
+ * One playlist or album opened in the library: its header with Play and
+ * Shuffle play, and its tracks as a virtual list, since a playlist runs to
  * thousands. Rust sends every track's URI at once; rows are fetched a hundred
  * at a time as they scroll into view (`useTrackRows`). A row plays from its
  * place in the playlist or album.
@@ -90,6 +90,16 @@ export function PlaylistView({
         >
           <Play weight="fill" />
           Play
+        </Button>
+        <Button
+          variant="outline"
+          size="icon-xs"
+          aria-label="Shuffle play"
+          title="Shuffle play"
+          disabled={disabled}
+          onClick={() => void run(() => music.playContext(playlist.uri, true))}
+        >
+          <Shuffle />
         </Button>
       </div>
       {error ? (

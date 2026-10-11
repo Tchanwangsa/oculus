@@ -40,8 +40,14 @@ impl Log for Logger {
 
 /// Lines that mean a track will not play: audio-key, decrypt, load and
 /// availability failures, and Login5's INVALID_CREDENTIALS, plus any error
-/// from the player or the audio fetcher.
+/// from the player or the audio fetcher but a play, pause or seek sent while
+/// nothing is loaded ("Player::seek called from invalid state: Stopped").
 pub(super) fn is_track_failure(level: Level, target: &str, msg: &str) -> bool {
+    const IDLE: &[&str] = &[
+        "player::play called from invalid state",
+        "player::pause called from invalid state",
+        "player::seek called from invalid state",
+    ];
     const PATTERNS: &[&str] = &[
         "audio key",
         "invalid_credentials",
@@ -55,6 +61,9 @@ pub(super) fn is_track_failure(level: Level, target: &str, msg: &str) -> bool {
         "unable to get cdn",
     ];
     let lower = msg.to_ascii_lowercase();
+    if IDLE.iter().any(|p| lower.contains(p)) {
+        return false;
+    }
     PATTERNS.iter().any(|p| lower.contains(p))
         || (level == Level::Error
             && (target.starts_with("librespot_playback") || target.starts_with("librespot_audio")))
