@@ -207,7 +207,7 @@ fn seed_webkit(
             let finish = finish.clone();
             let done = RcBlock::new(move || {
                 if let Some(finish) = finish.take() {
-                    eprintln!("[oculus] browser: seeded {count} UniMelb cookies into WebKit");
+                    elog!("[oculus] browser: seeded {count} UniMelb cookies into WebKit");
                     finish();
                 }
             });
@@ -236,7 +236,7 @@ fn seed_webkit(
         unsafe { get_store.getAllCookies(&got_all) };
     });
     if result.is_err() {
-        eprintln!("[oculus] browser: could not reach the main thread to seed cookies");
+        elog!("[oculus] browser: could not reach the main thread to seed cookies");
     }
 }
 
@@ -287,7 +287,7 @@ pub(super) fn recover_sso(app: &AppHandle, id: u32) {
 
         // The attempt guard in `okta::sign_in` keeps a session Okta will not
         // honour from looping sign-ins.
-        eprintln!("[oculus] browser: tab {id} reached Okta sign-in with no session; signing in");
+        elog!("[oculus] browser: tab {id} reached Okta sign-in with no session; signing in");
         if !crate::auth::okta::try_auto_recover(&app, crate::auth::okta::Trigger::Browser) {
             return;
         }
@@ -345,7 +345,7 @@ pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
                 let then = then.clone();
                 Rc::new(move || {
                     if let Some(then) = then.take() {
-                        eprintln!(
+                        elog!(
                             "[oculus] browser: cleared {count} Canvas and Okta cookies from WebKit"
                         );
                         then();
@@ -372,7 +372,7 @@ pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
         unsafe { get_store.getAllCookies(&got_all) };
     });
     if result.is_err() {
-        eprintln!("[oculus] browser: could not reach the main thread to clear cookies");
+        elog!("[oculus] browser: could not reach the main thread to clear cookies");
     }
 }
 

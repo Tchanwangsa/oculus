@@ -43,8 +43,8 @@ pub async fn lecture_find_end(
     spawn_job(
         "lecture end",
         crate::harness::jobs::Job::LectureEnd,
-        move |rt, pool, selection| {
-            let outcome = prepare(&lecture).and_then(|p| find(&harness, &selection, &p));
+        move |rt, pool, chain| {
+            let outcome = prepare(&lecture).and_then(|p| find(&harness, &chain, &p));
             let finished = match rt
                 .block_on(record(pool, &lecture.id, &outcome))
                 .and(outcome)
@@ -57,7 +57,7 @@ pub async fn lecture_find_end(
                     error: None,
                 },
                 Err(e) => {
-                    eprintln!("[oculus] lecture end: {e}");
+                    elog!("[oculus] lecture end: {e}");
                     Finished {
                         lecture_id: lecture.id.clone(),
                         status: "error",

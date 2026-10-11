@@ -32,7 +32,7 @@ fn get_or_auth(cache: &Echo360Cache, course_id: i64) -> Result<Session, String> 
         let g = cache.0.lock().unwrap();
         if let Some(c) = g.get(&course_id) {
             if now_secs() - c.saved_unix < SESSION_TTL_SECS {
-                eprintln!("[oculus] echo360: reusing cached session for course {course_id}");
+                elog!("[oculus] echo360: reusing cached session for course {course_id}");
                 return Ok(c.session.clone_fields());
             }
         }

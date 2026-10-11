@@ -1,3 +1,4 @@
+use super::escape::escape_html;
 use super::inline::inline_md;
 use super::lists::inline_md_self;
 use super::tree::{dropped, element_children, is_heading, tag, Ref};
@@ -29,7 +30,7 @@ fn cell_md(cell: Ref<'_>, images: &ImageMap) -> String {
 
     for n in cell.children() {
         if let Some(t) = n.value().as_text() {
-            cur.push_str(t);
+            cur.push_str(&escape_html(t));
             continue;
         }
         let Some(name) = tag(&n) else { continue };

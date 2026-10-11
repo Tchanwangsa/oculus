@@ -181,4 +181,4 @@ mounts on open and loads through the same cache.
 - **Centre overflowing content with auto margins and `flex: none`**, not
   `justify-content: center`, which makes the start-edge overflow unreachable.
 - **Never nest a `<button>` in a row that is a button** — WebKit drops the inner
-  clicks; use `RowAction` (`app/src/components/lectures/LectureRow.tsx`).
+  clicks; use `RowAction` (`app/src/components/ui/RowAction.tsx`).

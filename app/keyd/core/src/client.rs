@@ -1,4 +1,4 @@
-//! The client side of `oculus-keyd`: `has`, `store`, `delete` and `forward`
+//! The client side of `oculus-keyd`: `has`, `store`, `get`, `delete` and `forward`
 //! (buffered with `send`, streamed with `send_stream`), `okta_*` and
 //! `ensure_signed_in` for the Okta sign-in, `session_*` for the login
 //! sessions (`session`), one connection per call, and the `ping` that
@@ -156,6 +156,22 @@ impl Client {
             Some(OP_TIMEOUT),
         )
         .map(|_| ())
+    }
+
+    /// The stored value of a name keyd reads back (`names::READABLE`: only
+    /// `music.spotify`), or `None` when nothing is stored. App only: any other
+    /// caller gets `KeydError::Caller`, and any other name `KeydError::Request`.
+    pub fn get(&self, secret: &str) -> Result<Option<String>, KeydError> {
+        let (reply, _) = self.exchange(
+            &json!({"op": "get", "secret": secret}),
+            &[],
+            Some(OP_TIMEOUT),
+        )?;
+        match reply.get("value") {
+            Some(Value::String(v)) => Ok(Some(v.clone())),
+            Some(Value::Null) => Ok(None),
+            _ => Err(KeydError::Broken("get: no answer".into())),
+        }
     }
 
     /// True when a value was there.
@@ -519,6 +535,28 @@ mod tests {
         assert_eq!(
             seen.lock().unwrap()[1].0,
             json!({"op": "store", "secret": "voyage", "value": "pa-x"})
+        );
+    }
+
+    #[test]
+    fn get_reads_a_value_or_its_absence() {
+        let (broker, seen) = fake_keyd(|req, _| match req["secret"].as_str().unwrap() {
+            "music.spotify" => (json!({"value": "{\"u\":1}"}), vec![]),
+            "voyage" => (
+                json!({"error": "request", "detail": "voyage is never read back"}),
+                vec![],
+            ),
+            _ => (json!({"value": null}), vec![]),
+        });
+        assert_eq!(
+            broker.get("music.spotify").unwrap().as_deref(),
+            Some("{\"u\":1}")
+        );
+        assert_eq!(broker.get("other").unwrap(), None);
+        assert!(matches!(broker.get("voyage"), Err(KeydError::Request(_))));
+        assert_eq!(
+            seen.lock().unwrap()[0].0,
+            json!({"op": "get", "secret": "music.spotify"})
         );
     }
 

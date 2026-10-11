@@ -61,6 +61,7 @@ export const routes: RouteObject[] = [
             children: [
               { index: true, element: <Navigate to="downloads" replace /> },
               { path: "downloads", lazy: page(() => import("@/pages/subject/files/DownloadsPage")) },
+              { path: "media", lazy: page(() => import("@/pages/subject/files/MediaPage")) },
               { path: "uploads", lazy: page(() => import("@/pages/subject/files/UploadsPage")) },
               { path: "documents", lazy: page(() => import("@/pages/subject/files/DocumentsPage")) },
             ],
@@ -75,9 +76,15 @@ export const routes: RouteObject[] = [
           { path: "uploads", element: <Navigate to="../files/uploads" replace /> },
         ],
       },
+      // Spotify's full player, opened beside the page from the rail (docs/music.md).
+      { path: "music", lazy: page(() => import("@/pages/tools/MusicPage")) },
       { path: "sync", lazy: page(() => import("@/pages/tools/SyncPage")) },
       // The id names a native WebView Rust parks over this content area.
       { path: "browse/:id", lazy: page(() => import("@/pages/tools/BrowserPage")) },
+      // Messaging: one service's native WebView, placed over this content
+      // area. Bare `/dock` opens the last service shown.
+      { path: "dock", lazy: page(() => import("@/pages/tools/DockPage")) },
+      { path: "dock/:service", lazy: page(() => import("@/pages/tools/DockPage")) },
       {
         path: "settings",
         element: <SettingsLayout />,
@@ -86,6 +93,8 @@ export const routes: RouteObject[] = [
           { path: "canvas", lazy: page(() => import("@/pages/settings/integrations/CanvasPage")) },
           { path: "appearance", lazy: page(() => import("@/pages/settings/AppearancePage")) },
           { path: "browser", lazy: page(() => import("@/pages/settings/integrations/BrowserPage")) },
+          { path: "music", lazy: page(() => import("@/pages/settings/integrations/MusicPage")) },
+          { path: "messaging", lazy: page(() => import("@/pages/settings/integrations/MessagingPage")) },
           { path: "storage", lazy: page(() => import("@/pages/settings/library/StoragePage")) },
           { path: "agents", lazy: page(() => import("@/pages/settings/integrations/AgentsPage")) },
           { path: "opencode", lazy: page(() => import("@/pages/settings/integrations/OpencodePage")) },

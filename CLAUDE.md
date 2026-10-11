@@ -36,6 +36,7 @@ source. This file is only the rules; the reasons behind them live in `docs/`.
 - Parses and embeds take minutes. Don't layer timeouts on top. Never add a
   fallback between parse engines, and a failed parse must surface.
   (`docs/parsing.md`, `docs/retrieval.md`)
+- App code logs with `elog!`, never `eprintln!` (`docs/development.md`).
 - Nothing in Settings may make a billed call — no per-model probes.
   (`docs/harness.md`)
 - Retrieval embeds page images, not text. (`docs/retrieval.md`)

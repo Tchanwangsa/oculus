@@ -5,6 +5,7 @@ import {
   BookOpen,
   CalendarBlank,
   Chat,
+  ChatsCircle,
   CheckSquare,
   FileDashed,
   GearSix,
@@ -12,11 +13,14 @@ import {
   House,
   Kanban,
   ListChecks,
+  MusicNotes,
 } from "@phosphor-icons/react";
 import { browseId, hostOf, type BrowserTab } from "@/lib/browser";
+import { DOCK_ROOT, dockService, type DockPageInfo } from "@/lib/dock";
 import { faviconFor } from "@/hooks/shell/useBrowserTabs";
 import { useSubjects } from "@/hooks/data/useSubjects";
 import { useBrowserStore } from "@/stores/shell/browserStore";
+import { useDockStore } from "@/stores/shell/dockStore";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { displayCode, humanizeSlug } from "@/lib/format/format";
 import { SETTINGS_PAGES } from "@/lib/search/settings";
@@ -47,6 +51,7 @@ export function tabInfo(
   browserTabs: BrowserTab[],
   size = 13,
   favicons: Record<string, string> = {},
+  dockPages: DockPageInfo[] = [],
 ): TabInfo {
   const [pathname, search = ""] = path.split("?");
   // Browser tab icon: spinner while loading, else the site favicon, else a globe.
@@ -72,6 +77,21 @@ export function tabInfo(
       ),
     };
   }
+  // A messaging service: its name, never the page's title (which carries
+  // unread counts), and a spinner while it loads.
+  const service = dockService(pathname);
+  if (service) {
+    const loading = dockPages.find((p) => p.id === service.id)?.loading;
+    return {
+      title: service.label,
+      icon: loading ? (
+        <ArrowClockwise size={size} className="animate-spin" />
+      ) : (
+        <service.icon size={size} />
+      ),
+    };
+  }
+  if (pathname === DOCK_ROOT) return { title: "Messaging", icon: <ChatsCircle size={size} /> };
   if (pathname === "/") return { title: "Home", icon: <House size={size} /> };
   if (pathname === "/new")
     return { title: "New tab", icon: <FileDashed size={size} /> };
@@ -107,6 +127,8 @@ export function tabInfo(
   }
   if (pathname.startsWith("/tasks"))
     return { title: "Tasks", icon: <ListChecks size={size} /> };
+  if (pathname === "/music")
+    return { title: "Music", icon: <MusicNotes size={size} /> };
   if (pathname.startsWith("/sync"))
     return { title: "Sync", icon: <ArrowsClockwise size={size} /> };
   if (pathname.startsWith("/settings")) {
@@ -146,14 +168,15 @@ export function tabInfo(
   return { title: "Oculus", icon: null };
 }
 
-/** `tabInfo` over the app's live subjects, browser pages and favicons: what
+/** `tabInfo` over the app's live subjects, browser and dock pages and favicons: what
  *  the tab strip and the side panel's header title their panes with. */
 export function useTabInfo(): (path: string, size?: number) => TabInfo {
   const { subjects } = useSubjects();
   const browserTabs = useBrowserStore((s) => s.tabs);
   const favicons = useBrowserStore((s) => s.favicons);
+  const dockPages = useDockStore((s) => s.pages);
   return useCallback(
-    (path, size = 13) => tabInfo(path, subjects, browserTabs, size, favicons),
-    [subjects, browserTabs, favicons],
+    (path, size = 13) => tabInfo(path, subjects, browserTabs, size, favicons, dockPages),
+    [subjects, browserTabs, favicons, dockPages],
   );
 }

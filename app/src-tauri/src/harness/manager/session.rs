@@ -105,7 +105,7 @@ impl Harness {
         let handle = match provider {
             Provider::Claude => Handle::Claude(ClaudeSession::spawn(
                 ClaudeSpawn {
-                    base: base(cwd)?,
+                    base: self.claude_base(base(cwd)?)?,
                     oculus: discover::oculus_cli(),
                     permission_mode: "acceptEdits".into(),
                     system_append: instructions(

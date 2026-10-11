@@ -4,7 +4,7 @@ use super::Session;
 
 const LTI_TOOL_PATH: &str = "/external_tools/701";
 
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+pub(super) const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
 pub fn connect(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Result<Session, String> {
     let lti_url = format!(
@@ -54,7 +54,7 @@ pub fn connect(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Resul
         );
     }
 
-    eprintln!("[oculus] echo360 auth done: section={}", s.section_id);
+    elog!("[oculus] echo360 auth done: section={}", s.section_id);
     Ok(s)
 }
 
@@ -64,7 +64,7 @@ pub(super) fn launch_form(
     canvas: &crate::sources::canvas::Canvas,
     course_id: i64,
 ) -> Result<(String, Vec<(String, String)>), String> {
-    eprintln!("[oculus] echo360 auth: fetching LTI page for course {course_id}");
+    elog!("[oculus] echo360 auth: fetching LTI page for course {course_id}");
     let page = canvas
         .get(&format!("/courses/{course_id}{LTI_TOOL_PATH}"))
         .map_err(|e| format!("Canvas LTI page fetch failed: {e}"))?;
@@ -115,7 +115,7 @@ fn attr(elem: &str, name: &str) -> Option<String> {
     Some(html_unescape(&elem[s..e]))
 }
 
-fn html_unescape(s: &str) -> String {
+pub(super) fn html_unescape(s: &str) -> String {
     s.replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")

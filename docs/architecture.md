@@ -28,6 +28,8 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/runtime/bundled.rs` |
 | PDF viewer's render, text and links | `app/src-tauri/src/library/pdf_view/` |
 | In-app browser | `app/src-tauri/src/shell/browser/`, `app/src-tauri/capabilities/default.json` |
+| Spotify playback ([music.md](./music.md)) | `app/src-tauri/src/music/`, `app/src/lib/music/index.ts` |
+| Messaging dock ([dock.md](./dock.md)) | `app/src-tauri/src/shell/dock/` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes | `app/src-tauri/src/db/store/`, `app/src-tauri/src/db/projects/` |
 | App-usage ticker and its pinger | `app/src-tauri/src/shell/usage/`, `app/src/hooks/backend/useActivityPing.ts`, `app/src/lib/activity/usageContext.ts` |
@@ -40,9 +42,9 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 - Rust loose files sit in group directories under `app/src-tauri/src/`:
   `auth/`, `sources/`, `sync/`, `pages/`, `library/`, `db/`, `lectures/`,
   `agents/`, `shell/`, `runtime/`, `providers/`; `harness/`, `parse/`,
-  `embed/` and `transcribe/` are their own groups.
+  `embed/`, `transcribe/` and `music/` are their own groups.
 - The frontend groups the same way: `app/src/lib/` (`activity`, `citations`,
-  `db`, `files`, `format`, `harness`, `lectures`, `notes`, `pipeline`,
+  `db`, `files`, `format`, `harness`, `lectures`, `music`, `notes`, `pipeline`,
   `planning`, `search`, `shell`, …), `app/src/hooks/` (`agents`, `backend`,
   `data`, `lectures`, `shell`, `sync`, `ui`, …) and `app/src/stores/` (`chat`,
   `documents`, `lectures`, `planning`, `shell`, `sync`).
@@ -78,6 +80,8 @@ its failure rules are in [parsing.md](./parsing.md).
 - Credentials go keychain → in-process client, except the Voyage, MinerU and
   Groq keys and the Okta sign-in credentials while keyd is installed
   ([below](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+  Spotify's stored login lives only in keyd and comes back through its
+  app-only `get` ([music.md](./music.md)).
   No key enters SQLite, the WebView, a health response or a progress event.
   The local engines need none.
   A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
@@ -124,12 +128,15 @@ with the app's icon.
 - **The wire format** is one JSON line, then `body_len` raw bytes if the
   header names them; replies have the same shape. One module writes and reads
   it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
-  hash, pid), `has`, `store`, `delete`, `forward`, the Okta ops `okta_save`,
+  hash, pid), `has`, `store`, `get`, `delete`, `forward`, the Okta ops `okta_save`,
   `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`, and the
   session ops `session_get`, `session_put`, `session_clear`, `session_status`,
   `session_mark` and `sign_out` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
-  No op returns a key, a password, a seed or a token; the one reply that
-  carries a cookie is `session_get`, to the app. Only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
+  No op returns a key, a password, a seed or a token, with one exception:
+  `get` returns the stored value of a name in `names::READABLE`, which is only
+  `music.spotify`, Spotify's credentials, to the app
+  ([auth.md](./auth.md#spotifys-credentials-are-the-one-value-keyd-reads-back)).
+  The one reply that carries a cookie is `session_get`, to the app. Only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
   `request`, `caller`, `keychain` (the master key or an old item refused or
   failed), `vault`, `record` (the sign-in attempt record, or a marker file, could
   not be replaced), `missing` (a `canvas` one may carry the refused sign-in as
@@ -214,7 +221,7 @@ with the app's icon.
   the signing identifier. Ops check the role, never a path, and in one place
   (`State::dispatch`): every op but `ping` needs `app` or `cli`, because every
   executable in the install (ffmpeg ships in it) passes the caller check;
-  `okta_resume` and `session_get` need `app`. `ping` answers whoever was
+  `okta_resume`, `session_get` and `get` need `app`. `ping` answers whoever was
   admitted, for diagnostics.
 - **keyd holds the Okta credentials and runs the sign-in.** The username,
   password and TOTP seed are vault entries, written together by `okta_save`
@@ -318,6 +325,9 @@ never creates the database, so a fresh machine opens the app once first.
 - A parse writes `pages.markdown` without waiting on the embed, so a file with
   no embeddings is still found by keyword.
 - `lecture_chapters` is derived and regenerable ([chapters.md](./chapters.md)).
+- `echo_embeds` caches each Canvas page embed's Echo360 identity and its
+  downloaded file, written only by Rust (`db::store::upsert_echo_embed`);
+  it cascades with the subject ([sync.md](./sync.md#an-embedded-echo360-video-is-resolved-and-downloaded-by-its-card)).
 - `calendar_events` is the one table a sync replaces rather than upserts, so a
   cancelled class disappears ([calendar.md](./calendar.md)).
 - `projects`, `project_tasks` and `local_events` hold the student's own rows,
@@ -373,7 +383,7 @@ context when input made it active, which wins over media, else the media
 context; with none reported yet, it credits `other`. Ticks before the frontend
 has applied the migrations fail quietly and later ones retry.
 
-## The main window holds one webview per browser tab
+## The main window holds one webview per browser tab and messaging service
 
 External links open as in-app browser tabs: each is a child webview of remote
 content stacked over the slot the `/browse/:id` route leaves in the content
@@ -381,9 +391,20 @@ card ([viewers.md](./viewers.md#the-in-app-browser-is-a-native-page-per-tab-owne
 insets and Rust lays pages out from them, so a resize never waits on
 JavaScript.
 
-- `app/src-tauri/capabilities/default.json` is scoped to the `main` *webview*,
-  not the window: window and webview scopes match by OR, so a window scope
-  would hand every Tauri command to whatever page the user browsed to.
+The messaging dock's pages ([dock.md](./dock.md)) are the same kind of child
+webview, laid out the same way.
+
+- Tauri injects its IPC bridge into every child webview, remote pages
+  included, so the capability ACL is the only guard. IPC from a remote origin
+  is refused unless a capability's `remote.urls` matches it; app commands are
+  not ACL-gated for local pages (`build.rs` declares no app manifest).
+- There are two capabilities. `app/src-tauri/capabilities/default.json` is
+  scoped to the `main` *webview*, not the window: window and webview scopes
+  match by OR, so a window scope would hand every Tauri command to whatever
+  page the user browsed to. `app/src-tauri/capabilities/canvas-auth.json`
+  gives `core:default` to the Canvas sign-in windows. The dock's
+  `capabilities_test.rs` fails the build on any capability that could reach a
+  remote page.
 - Back-list state, find matches and zoom live only in the page, and
   `with_webview` dispatches to the main thread and returns nothing. So
   `shell::browser` *pushes* each answer as an event rather than returning it.
@@ -397,6 +418,6 @@ JavaScript.
 - Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
 - A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
 - Reaching the data dir any way but `library::paths::data_dir()` (itself `keyd_core::paths::data_dir`) lets the CLI, the app and keyd diverge.
-- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process.
+- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process; `get` is app-only and limited to `names::READABLE` for that reason.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.
 - A `subject_id` that cascades on user-owned tables deletes the student's work with a course.

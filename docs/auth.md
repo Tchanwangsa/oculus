@@ -1,7 +1,8 @@
 # Auth & sessions
 
 Three services, three credentials — all derived from one Canvas session
-cookie.
+cookie. Spotify's login, kept in keyd for the music player, is the one
+credential that is not ([below](#spotifys-credentials-are-the-one-value-keyd-reads-back)).
 
 ## Where
 
@@ -17,6 +18,7 @@ cookie.
 | Removing a leftover keep-alive agent at startup | `app/src-tauri/src/auth/legacy_agent.rs`, `app/keyd/core/src/platform/macos/registrar.rs` |
 | Ed token minting via LTI | `app/src-tauri/src/sources/ed/lti.rs` |
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/sources/echo360/auth.rs`, `app/src-tauri/src/lectures/mod.rs` |
+| Echo360 page embeds: per-link launch, Bearer, CDN signing; the shared Bearer | `app/src-tauri/src/sources/echo360/embed/`, `app/src-tauri/src/sync/scrape/embeds/state.rs` |
 | Frontend auth state | `app/src/hooks/sync/useAuth.ts` |
 | Handing the session to the in-app browser | `app/src-tauri/src/shell/browser/seed.rs` |
 | Keychain entry lifecycle (the fallback for the Okta credentials and for MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/providers/credentials/keychain.rs` (`Secret`), `app/src-tauri/src/providers/credentials/mod.rs` |
@@ -24,6 +26,7 @@ cookie.
 | The `canvas` and `ed` routes of `forward` (cookie and `x-token` attached by keyd), its path rules and streaming; the Canvas route's sign-in on a rejected request | `app/keyd/core/src/forward/`, `app/keyd/core/src/ops/forward.rs` ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)) |
 | The `oculus-keyd` client, which the Voyage, MinerU and Groq keys and the Okta credentials and sign-in go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/providers/credentials/mod.rs` (`CloudKey`) |
 | Credential entry UI | `app/src/components/settings/web/AutoSignIn.tsx` |
+| Spotify's stored credentials: the `music.spotify` vault entry, keyd's app-only `get`, and the music module that writes and reads it | `app/keyd/core/src/names.rs` (`READABLE`), `app/keyd/core/src/ops/get.rs`, `app/src-tauri/src/music/credentials.rs` ([music.md](./music.md)) |
 
 ## Canvas authenticates by session cookie only
 
@@ -186,8 +189,9 @@ every sign-in a client starts (Settings, the startup probe, the browser,
 `oculus auth auto`) are requests to `oculus-keyd` through
 `credentials::Credentialed` (ops `okta_save`, `okta_forget`, `okta_status`,
 `ensure_signed_in`, and `okta_resume` for the guard). Neither process reads the password or the seed back: no
-op returns one, and `oculus auth setup` prints the code from the seed just
-typed.
+op returns one (keyd's one read-back, `get`, serves only Spotify's
+credentials, [below](#spotifys-credentials-are-the-one-value-keyd-reads-back)),
+and `oculus auth setup` prints the code from the seed just typed.
 
 - **Only `KeydError::Absent` takes the old route, and only for the
   credentials.** The keychain items (`com.oculus.unimelb-sso`: `username`,
@@ -287,6 +291,24 @@ rotation, and read by `forward`, `session_get` and `session_status`.
   vault, unless it already holds that session, and deletes each file
   (`keyd.imported.session.<kind>` records it). `session_clear` and `sign_out`
   import first, so a cleared session is never brought back from an old file.
+
+## Spotify's credentials are the one value keyd reads back
+
+librespot logs in to Spotify with a stored-credentials blob it must hold
+itself; there is no HTTP request keyd could attach it to, as `forward` does
+for a key or a cookie. So the vault's `music.spotify` entry (username, blob,
+Connect device id, as JSON) has a read-back of its own.
+
+- **`get {secret}` returns `{"value": string|null}`, to the app only.** Every
+  other role gets `caller`, from `require_role`, before the vault is opened.
+- **Only the names in `names::READABLE` can be read**, and that list is
+  `music.spotify` alone. Any other name, a cloud key, an Okta value or a
+  session included, is `request`; a test pins the list.
+- **The generic `store` and `delete` write it** (app or CLI), with no old
+  keychain item to import. Okta's `okta_forget`, `sign_out` and `session_clear`
+  leave it alone, so signing out of Canvas keeps Spotify signed in.
+- With keyd absent there is no keychain fallback for it: the music module
+  reports the error and keeps nothing ([music.md](./music.md#the-credentials-live-in-keyd-read-back-by-an-app-only-get)).
 
 ## A rejected Canvas request signs in once and is sent once more
 
@@ -403,8 +425,41 @@ through keyd's `canvas` route) by POSTing the course's LTI external-tool form (s
 [sync.md](./sync.md#echo360-is-an-lti-launch-with-up-to-two-streams)), and
 `app/src-tauri/src/lectures/mod.rs` caches it per course.
 
+## An embedded Echo360 video launches per link and plays on a Bearer token
+
+A video embedded in a Canvas page is a different LTI launch from the course
+one, keyed by the embed's `linkId` (`app/src-tauri/src/sources/echo360/embed/`):
+
+1. GET the embed's Canvas `external_tools/retrieve` URL through keyd's
+   `canvas` route. It answers an LTI form; a page without one is reported as a
+   possibly lapsed Canvas session. The URL comes from page markdown, so
+   `embed::retrieve_url` accepts only a Canvas retrieve of an
+   `echo360.net.au/lti/…?linkId=` URL naming that same link, and rebuilds it.
+2. POST the form to Echo360 with redirects off. It answers a redirect to
+   `/ui/player/<mediaId>?sessionId=…&secureLinkAccessDataId=…`; the only cookie
+   is `PLAY_SESSION`, and there is no `ECHO_JWT`.
+3. GET `/api/ui/sessions/<sessionId>` on the same cookie jar, at once: the
+   session id goes stale within minutes. It answers 204 with the JWT in the
+   `token` *response header*.
+4. Send that JWT as `Authorization: Bearer` to
+   `/api/ui/echoplayer/secure-link-access-datas/<sl>/media/<mediaId>/player-properties`.
+
+One Bearer serves every link and lives about 13 hours, so the app keeps one in
+`EmbedBearer` and reuses it until five minutes before its `exp`. A link's media
+and secure-link ids never change, so they are cached in `echo_embeds`
+([sync.md](./sync.md#an-embedded-echo360-video-is-resolved-and-downloaded-by-its-card));
+with both cached and a live Bearer, no launch runs, which matters because every
+launch records a view in Echo360. A Bearer turned down with 401/403 is dropped
+and replaced from a fresh launch, once.
+
+The CDN takes neither the Bearer nor a cookie. A URL is signed by **replacing**
+its query with the `queryString` of the `sourceQueryStrings` entry whose
+`uriPattern` (a `*` glob) matches it (`embed::sign`); appending to the
+existing query 403s, as does the bare URL.
+
 ## Gotchas
 
+- Never POST Echo360's `last-played-to-seconds`: an embed launch already records a view under the student's name, and Oculus reports no playback.
 - Every sign-in by a person must end in `auth::session_established` (`session_mark(true)`), and keyd's own sign-ins mark themselves — the startup probe reads the flag first, and without it a valid session opens disconnected.
 - keyd calls (`session_get`, `session_status`, `session_put`) can wait on the keychain prompt for 60 s: never from the main thread or a WebKit callback.
 - Holding a `canvas_session` is not success: Canvas issues an anonymous one before auth, so `complete_saml` accepts one only after posting an assertion and `sign_in` verifies it against `/api/v1/users/self` before writing it.

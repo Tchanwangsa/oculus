@@ -25,7 +25,7 @@ pub fn convert(data_dir: &Path, rel: &str) -> Result<Vec<ParsePage>, ParseError>
     };
     let sections = sections.map_err(|detail| {
         // The UI keeps the sentence; calamine's reason goes to stderr.
-        eprintln!("[oculus] spreadsheet unreadable: {rel}: {detail}");
+        elog!("[oculus] spreadsheet unreadable: {rel}: {detail}");
         ParseError::Document {
             code: parse::SHEET_UNREADABLE.into(),
         }

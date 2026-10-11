@@ -87,6 +87,33 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # Spreadsheets (xlsx/xlsm/xls/ods) become markdown text in-process
 # (`src/pages/sheets/`); no LibreOffice, no parse service, no embedding.
 calamine = "0.36"
+# Spotify Connect playback (`src/music/`, docs/music.md). librespot's dev
+# branch by rev, not crates.io 0.8.0: Spotify's endpoint changes land there
+# first. Bump the rev by hand; never `cargo update` them.
+librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+librespot-metadata = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+librespot-playback = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+# `AuthenticationType`, which librespot-core keeps private, and the playlist4
+# and Connect messages `src/music/` reads.
+librespot-protocol = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+# Decodes those messages (`src/music/library/rootlist.rs`); the version
+# librespot-protocol is generated for.
+protobuf = "3.7"
+# The Spotify login: the same oauth2 librespot-oauth builds on, used directly
+# because librespot's client opens the browser itself and hides the URL.
+oauth2 = { version = "5", default-features = false, features = ["reqwest", "reqwest-blocking"] }
+# librespot reports a track it cannot decrypt only as a log line
+# (`src/music/logs.rs`).
+log = { version = "0.4", features = ["std"] }
+# The music output picker and its sink (`src/music/audio/`): the same cpal
+# and rodio librespot-playback's rodio backend builds on, at its versions.
+cpal = "0.16"
+rodio = { version = "0.21", default-features = false, features = ["playback"] }
+# Reads librespot's dealer stream of Connect cluster updates
+# (`src/music/devices.rs`) and fetches playlist headers four at a time
+# (`src/music/library/mod.rs`).
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_sessions` in src/shell/browser/seed.rs) — Tauri exposes no cookie setter, so
@@ -95,14 +122,18 @@ calamine = "0.36"
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSHTTPCookie", "NSString"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSHTTPCookie", "NSString", "NSURL", "NSUUID"] }
 # A local key-down monitor gives a focused browser page ⌘-keys before the
 # menu, and Undo/Redo/Select All reach it as AppKit actions (see `src/shell/keys.rs`).
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSResponder", "NSWindow"] }
 # `WKWebView` and the two `WKFind*` types are the browser toolbar's: the
 # back/forward list and find-in-page have no Tauri API, so they are read
 # and driven on the WKWebView directly (see `src/shell/browser/page.rs`).
-objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "WKWebsiteDataStore", "WKWebView", "WKNavigation", "WKFindConfiguration", "WKFindResult"] }
+# `WKWebViewConfiguration`, `NSURL` and `NSUUID` set up each messaging-dock
+# page's data store (`src/shell/dock/page.rs`); the `WKScriptMessage*`,
+# `WKFrameInfo` and `WKSecurityOrigin` types are its `dock` message handler
+# (`src/shell/dock/channel.rs`).
+objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "WKWebsiteDataStore", "WKWebView", "WKWebViewConfiguration", "WKNavigation", "WKFindConfiguration", "WKFindResult", "WKScriptMessage", "WKScriptMessageHandler", "WKUserContentController", "WKFrameInfo", "WKSecurityOrigin"] }
 
 [dev-dependencies]
 # Writes the synthetic PDFs the tests parse and rasterise.

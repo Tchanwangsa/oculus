@@ -17,6 +17,7 @@ import type { Subject } from "@/lib/db";
  *  `app/src/routes.tsx`. */
 const SUB_TABS = [
   { value: "downloads", label: "Downloads" },
+  { value: "media", label: "Media" },
   { value: "uploads", label: "Uploads" },
   { value: "documents", label: "Documents" },
 ] as const satisfies ReadonlyArray<{ value: string; label: string }>;
@@ -39,7 +40,7 @@ export function useFilesTab(): FilesTab {
 }
 
 /**
- * One subject tab for every file: Downloads, Uploads, Documents as routed
+ * One subject tab for every file: Downloads, Media, Uploads, Documents as routed
  * sub-tabs (so restore, crumbs and ⌘-click key off the path), drawn as
  * `PillTabs` under the subject's underline strip.
  *
