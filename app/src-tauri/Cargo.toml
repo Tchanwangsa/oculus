@@ -121,7 +121,9 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSHTTPCookie", "NSString", "NSURL", "NSUUID"] }
+# `NSBundle`, `NSProcessInfo` and `NSData` name WebKit's application and hand
+# it the WebCrypto master key (`src/shell/webcrypto/`).
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSData", "NSDictionary", "NSHTTPCookie", "NSProcessInfo", "NSString", "NSURL", "NSUUID"] }
 # A local key-down monitor gives a focused browser page ⌘-keys before the
 # menu, and Undo/Redo/Select All reach it as AppKit actions (see `src/shell/keys.rs`).
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSResponder", "NSWindow"] }

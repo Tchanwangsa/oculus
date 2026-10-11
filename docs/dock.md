@@ -91,6 +91,10 @@ browser page ([shell.md](./shell.md#the-shell-owns-tabs-side-panels-and-every-wi
   registrable domain.
 - Per-service stores need macOS 14. Below that wry silently uses the shared
   default store; `configure_store` logs it and leaves that store's ITP alone.
+- `configure_store` also gives each store the WebCrypto master key delegate,
+  so the `CryptoKey`s WhatsApp and Messenger keep in IndexedDB are unwrapped
+  with the key keyd serves, not WebKit's keychain item, whose prompt returns
+  with every dev rebuild ([auth.md](./auth.md#webkits-webcrypto-master-key-comes-from-keyd-per-build)).
 - Messenger is hosted at `www.facebook.com/messages/`: its session cookie
   lives on `.facebook.com`, which messenger.com doesn't read. A fresh store
   asks for the Messenger PIN to restore end-to-end-encrypted history; the

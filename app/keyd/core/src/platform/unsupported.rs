@@ -97,6 +97,13 @@ mod server {
         fn remove(&self, _service: &str, _account: &str) -> Result<bool, KeyError> {
             Err(KeyError::Platform(super::unsupported().to_string()))
         }
+
+        fn read_webcrypto(
+            &self,
+            _key: &crate::names::WebCrypto,
+        ) -> Result<Option<Vec<u8>>, KeyError> {
+            Err(KeyError::Platform(super::unsupported().to_string()))
+        }
     }
 }
 
