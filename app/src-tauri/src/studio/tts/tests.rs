@@ -129,3 +129,45 @@ fn an_unreachable_server_names_its_url() {
     let e = synthesise(&voice(&base), "Hi.").err().unwrap();
     assert!(e.contains("could not reach") && e.contains(&base), "{e}");
 }
+
+#[test]
+fn the_model_listing_reads_data_ids_in_order_without_repeats() {
+    let body = br#"{"object":"list","data":[{"id":"kokoro"},{"id":" tts-1 "},{"id":"kokoro"},{"name":"x"},{"id":""},{"id":7}]}"#;
+    assert_eq!(models::parse_models(body).unwrap(), ["kokoro", "tts-1"]);
+    assert_eq!(
+        models::parse_models(br#"{"data":[]}"#).unwrap(),
+        Vec::<String>::new()
+    );
+    assert!(models::parse_models(b"<html>").is_err());
+    assert!(models::parse_models(br#"{"models":[]}"#).is_err());
+}
+
+#[test]
+fn the_model_listing_gets_v1_models_from_the_normalised_base() {
+    let server = FakeServer::start(|hit| match (hit.method.as_str(), hit.url.as_str()) {
+        ("GET", "/v1/models") => Reply::json(json!({
+            "data": [{ "id": "mlx-community/Kokoro-82M-bf16" }, { "id": "kokoro" }]
+        })),
+        _ => Reply::status(404, json!({})),
+    });
+    let ids = list_models(&format!("{}/v1/", server.origin())).unwrap();
+    assert_eq!(ids, ["mlx-community/Kokoro-82M-bf16", "kokoro"]);
+    let hits = server.hits();
+    assert_eq!(hits.len(), 1, "one GET, never a synthesis");
+    assert_eq!(hits[0].method, "GET");
+}
+
+#[test]
+fn the_model_listing_fails_with_the_servers_answer() {
+    let server = FakeServer::start(|_| Reply::status(404, json!({ "detail": "Not Found" })));
+    let e = list_models(&server.origin()).unwrap_err();
+    assert!(e.contains("404") && e.contains("type the model id"), "{e}");
+
+    let server = FakeServer::start(|_| Reply::bytes(b"not json".to_vec()));
+    let e = list_models(&server.origin()).unwrap_err();
+    assert!(e.contains("not JSON") && e.contains("not json"), "{e}");
+
+    let e = list_models(&crate::test_support::dead_origin()).unwrap_err();
+    assert!(e.contains("could not reach"), "{e}");
+    assert!(list_models("localhost:8880").is_err());
+}
