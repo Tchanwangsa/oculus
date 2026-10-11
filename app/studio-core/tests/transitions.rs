@@ -188,6 +188,7 @@ fn lint(
     report
         .issues
         .iter()
+        .filter(|i| !common::component_rule(&i.to_string()))
         .map(|i| (i.scene, i.error.kind().to_owned(), i.error.to_string()))
         .collect()
 }
@@ -372,7 +373,12 @@ fn morph_color_oklab_changes_the_magic_move_and_lint_names_a_bad_one() {
 
     let bad = with("morph-bad", "okhsl");
     let report = Project::load(&bad).unwrap().lint().unwrap();
-    let issues: Vec<String> = report.issues.iter().map(ToString::to_string).collect();
+    let issues: Vec<String> = report
+        .issues
+        .iter()
+        .map(ToString::to_string)
+        .filter(|l| !common::component_rule(l))
+        .collect();
     assert_eq!(issues.len(), 1, "{issues:#?}");
     assert!(
         issues[0].starts_with(

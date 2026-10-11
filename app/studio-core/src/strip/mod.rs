@@ -4,8 +4,8 @@
 //! in parallel, one `Renderer` per thread (`workers`); the sheet and its
 //! labels are drawn by studio-core itself (`sheet`, `labels`).
 
-mod labels;
-mod sheet;
+pub(crate) mod labels;
+pub(crate) mod sheet;
 mod workers;
 
 use crate::error::{Result, StudioError};

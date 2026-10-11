@@ -26,8 +26,42 @@ fn clean_projects_lint_clean() {
         "narrated",
     ] {
         let report = Project::load(fixture(name)).unwrap().lint().unwrap();
-        assert!(report.is_clean(), "{name}: {report}");
+        // The renderer fixtures paint literal colours on purpose (their
+        // goldens pin those pixels); the token rules are checked below.
+        let other: Vec<_> = report
+            .issues
+            .iter()
+            .filter(|i| !common::component_rule(&i.to_string()))
+            .collect();
+        assert!(other.is_empty(), "{name}: {report}");
     }
+}
+
+#[test]
+fn token_use_is_reported_where_a_fixture_uses_literals() {
+    let report = Project::load(fixture("title-card"))
+        .unwrap()
+        .lint()
+        .unwrap();
+    let token: Vec<String> = report
+        .issues
+        .iter()
+        .map(ToString::to_string)
+        .filter(|l| common::component_rule(l))
+        .collect();
+    assert!(
+        token
+            .iter()
+            .any(|l| l
+                .contains("TitleCard.tsx:31:49: colour `#ffffff` is a literal; use theme.color.")),
+        "{token:#?}"
+    );
+    assert!(
+        token
+            .iter()
+            .any(|l| l.contains("style value 4 equals theme.space.xxs")),
+        "{token:#?}"
+    );
 }
 
 #[test]

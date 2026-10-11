@@ -15,7 +15,8 @@ mod script;
 mod timeline;
 mod video;
 
-pub use components::{ComponentSource, FolderComponents};
+pub(crate) use components::valid_name;
+pub use components::{CascadeComponents, ComponentSource, FolderComponents};
 pub use lint::{LintIssue, LintReport};
 pub use narration::{
     LOW_CONFIDENCE, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene, ManifestWord, WordCues,
