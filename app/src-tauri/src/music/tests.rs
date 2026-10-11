@@ -10,6 +10,7 @@ use super::events::apply;
 use super::login::{callback_outcome, LoginError};
 use super::logs::is_track_failure;
 use super::session::{next_backoff, BACKOFF_MAX, BACKOFF_MIN};
+use super::startup::enabled;
 use super::state::{from_percent, percent, Snapshot};
 use super::track::cover_url;
 
@@ -186,4 +187,19 @@ fn player_events_fold_into_the_snapshot() {
         },
     );
     assert!(s.error.as_deref().unwrap().contains("unavailable"));
+}
+
+#[test]
+fn only_an_explicit_enabled_setting_connects_at_startup() {
+    assert!(enabled(Some(r#"{"enabled":true}"#)));
+    for raw in [
+        None,
+        Some(""),
+        Some("true"),
+        Some("{}"),
+        Some(r#"{"enabled":false}"#),
+        Some(r#"{"enabled":"yes"}"#),
+    ] {
+        assert!(!enabled(raw), "{raw:?}");
+    }
 }

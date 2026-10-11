@@ -81,6 +81,8 @@ pub fn run() {
             let restore = app.handle().clone();
             std::thread::spawn(move || {
                 auth::keyd::ensure_installed();
+                // Spotify, when Settings → Music is on: its login is keyd's too.
+                music::startup::connect_if_enabled(&restore);
                 // Replay the stored session with a server-side ping.
                 auth::restore_session(&restore);
             });
@@ -238,6 +240,10 @@ pub fn run() {
             music::commands::music_disconnect,
             music::commands::music_sign_out,
             music::commands::music_play_pause,
+            music::commands::music_play,
+            music::commands::music_pause,
+            music::commands::music_shuffle,
+            music::commands::music_repeat,
             music::commands::music_next,
             music::commands::music_prev,
             music::commands::music_seek,

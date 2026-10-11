@@ -89,6 +89,18 @@ pub fn music_play_pause(app: AppHandle) -> Result<(), String> {
     state::with_spirc(&app, |spirc| spirc.play_pause())
 }
 
+/// Explicit, unlike the toggle: what pauses music when a lecture starts
+/// (`app/src/lib/music/exclusive.ts`) must never start it instead.
+#[tauri::command]
+pub fn music_play(app: AppHandle) -> Result<(), String> {
+    state::with_spirc(&app, |spirc| spirc.play())
+}
+
+#[tauri::command]
+pub fn music_pause(app: AppHandle) -> Result<(), String> {
+    state::with_spirc(&app, |spirc| spirc.pause())
+}
+
 #[tauri::command]
 pub fn music_next(app: AppHandle) -> Result<(), String> {
     state::with_spirc(&app, |spirc| spirc.next())
@@ -108,6 +120,23 @@ pub fn music_seek(app: AppHandle, position_ms: u32) -> Result<(), String> {
 #[tauri::command]
 pub fn music_volume(app: AppHandle, percent: u8) -> Result<(), String> {
     state::with_spirc(&app, |spirc| spirc.set_volume(from_percent(percent)))
+}
+
+#[tauri::command]
+pub fn music_shuffle(app: AppHandle, on: bool) -> Result<(), String> {
+    state::with_spirc(&app, |spirc| spirc.shuffle(on))
+}
+
+/// On repeats the context. The snapshot's `repeat` is also true for a
+/// repeated track (set from the phone), so off clears both.
+#[tauri::command]
+pub fn music_repeat(app: AppHandle, on: bool) -> Result<(), String> {
+    state::with_spirc(&app, |spirc| {
+        if !on {
+            spirc.repeat_track(false)?;
+        }
+        spirc.repeat(on)
+    })
 }
 
 /// Plays a context (`spotify:playlist:…`, `spotify:album:…`) here. Spotify

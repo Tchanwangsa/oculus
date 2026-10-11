@@ -12,6 +12,7 @@ import {
   House,
   Kanban,
   ListChecks,
+  MusicNotes,
 } from "@phosphor-icons/react";
 import { browseId, hostOf, type BrowserTab } from "@/lib/browser";
 import { faviconFor } from "@/hooks/shell/useBrowserTabs";
@@ -107,6 +108,8 @@ export function tabInfo(
   }
   if (pathname.startsWith("/tasks"))
     return { title: "Tasks", icon: <ListChecks size={size} /> };
+  if (pathname === "/music")
+    return { title: "Music", icon: <MusicNotes size={size} /> };
   if (pathname.startsWith("/sync"))
     return { title: "Sync", icon: <ArrowsClockwise size={size} /> };
   if (pathname.startsWith("/settings")) {

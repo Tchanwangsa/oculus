@@ -8,6 +8,9 @@ import { invoke } from "@tauri-apps/api/core";
  */
 
 export const MUSIC_STATE_EVENT = "music-state";
+/** The `settings` row Rust reads at startup (`music/startup.rs`):
+ *  `{"enabled": boolean}`, off when absent. */
+export const MUSIC_SETTING = "music";
 
 export interface MusicTrack {
   uri: string;
@@ -40,6 +43,16 @@ export interface MusicSnapshot {
   error: string | null;
 }
 
+/** The settings row's `enabled`; anything unreadable is off. */
+export function musicEnabled(raw: string | null): boolean {
+  if (!raw) return false;
+  try {
+    return (JSON.parse(raw) as { enabled?: unknown })?.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
 /** The position now, interpolated from the snapshot's stamp. */
 export function positionNow(s: MusicSnapshot, now = Date.now()): number {
   if (!s.playing) return s.position_ms;
@@ -58,11 +71,17 @@ export const music = {
   /** Also deletes the stored login. */
   signOut: () => invoke("music_sign_out"),
   playPause: () => invoke("music_play_pause"),
+  play: () => invoke("music_play"),
+  /** Never starts playback, unlike `playPause`. */
+  pause: () => invoke("music_pause"),
   next: () => invoke("music_next"),
   prev: () => invoke("music_prev"),
   seek: (positionMs: number) => invoke("music_seek", { positionMs }),
   setVolume: (percent: number) =>
     invoke("music_volume", { percent: Math.round(Math.min(100, Math.max(0, percent))) }),
+  setShuffle: (on: boolean) => invoke("music_shuffle", { on }),
+  /** On repeats the context; off also clears a repeated track. */
+  setRepeat: (on: boolean) => invoke("music_repeat", { on }),
   /** `spotify:playlist:…`, `spotify:album:…`; played on this device. */
   playContext: (uri: string) => invoke("music_play_context", { uri }),
 };
