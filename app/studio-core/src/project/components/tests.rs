@@ -31,19 +31,28 @@ impl ComponentSource for Mem {
 fn cascade() -> CascadeComponents {
     // Project, then subject, then global.
     CascadeComponents::new(vec![
-        Arc::new(Mem(vec![
-            ("Steps", "project steps"),
-            ("Only", "project only"),
-        ])),
-        Arc::new(Mem(vec![
-            ("Steps", "subject steps"),
-            ("Card", "subject card"),
-        ])),
-        Arc::new(Mem(vec![
-            ("Steps", "global steps"),
-            ("Card", "global card"),
-            ("Title", "global title"),
-        ])),
+        (
+            "project".to_owned(),
+            Arc::new(Mem(vec![
+                ("Steps", "project steps"),
+                ("Only", "project only"),
+            ])),
+        ),
+        (
+            "subject S".to_owned(),
+            Arc::new(Mem(vec![
+                ("Steps", "subject steps"),
+                ("Card", "subject card"),
+            ])),
+        ),
+        (
+            "global".to_owned(),
+            Arc::new(Mem(vec![
+                ("Steps", "global steps"),
+                ("Card", "global card"),
+                ("Title", "global title"),
+            ])),
+        ),
     ])
 }
 
@@ -53,6 +62,19 @@ fn the_first_source_by_priority_wins_a_name() {
     assert_eq!(c.read("Steps").unwrap(), "project steps");
     assert_eq!(c.read("Card").unwrap(), "subject card");
     assert_eq!(c.read("Title").unwrap(), "global title");
+}
+
+#[test]
+fn each_name_reports_the_level_it_resolves_from() {
+    assert_eq!(
+        cascade().levels(),
+        [
+            ("Card".to_owned(), "subject S".to_owned()),
+            ("Only".to_owned(), "project".to_owned()),
+            ("Steps".to_owned(), "project".to_owned()),
+            ("Title".to_owned(), "global".to_owned()),
+        ]
+    );
 }
 
 #[test]

@@ -1423,14 +1423,16 @@ Render, check and narrate Studio videos: TSX scenes drawn frame by frame
 Usage: oculus studio <COMMAND>
 
 Commands:
-  frame    Render one frame of a video to a PNG
-  strip    Render frames across a stretch of a video as one contact-sheet PNG
-  lint     Check a whole video without writing anything
-  render   Render a video to an mp4
-  narrate  Synthesise and time a video's narration, writing narration/manifest.json
-  tts      Synthesise one clip of text to a WAV, to hear a voice
-  aligner  Download, check or delete the narration aligner model (378 MB)
-  help     Print this message or the help of the given subcommand(s)
+  frame       Render one frame of a video to a PNG
+  strip       Render frames across a stretch of a video as one contact-sheet PNG
+  lint        Check a whole video without writing anything
+  gallery     Render every example of a component as a still
+  components  List, show or seed a video's components
+  render      Render a video to an mp4
+  narrate     Synthesise and time a video's narration, writing narration/manifest.json
+  tts         Synthesise one clip of text to a WAV, to hear a voice
+  aligner     Download, check or delete the narration aligner model (378 MB)
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
@@ -1579,6 +1581,143 @@ Arguments:
           The video folder, the one holding `video.json`
 
 Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio gallery`
+
+```
+Render every example of a component as a still
+
+Each entry of the component's `examples` is drawn as one PNG, at one moment: `--t`
+seconds from the start of the component's scene, by default the middle of the first
+scene that uses it (or 1 s of a 2 s preview when none does). Examples render in parallel
+and the PNGs are the same at any thread count. The component is read through the cascade
+(the video's `components/`, then the subject's library, then the global one), and the
+theme the same way. `--sheet` also writes all the stills as one contact sheet, `--cols`
+a row. Stills are named `<Component>-<example>.png`.
+
+oculus studio gallery lectures/week-4 Steps
+
+oculus studio gallery lectures/week-4 Steps --subject COMP2011 --sheet --cols 2
+
+Usage: oculus studio gallery [OPTIONS] <DIR> <COMPONENT>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json`
+
+  <COMPONENT>
+          The component's name (PascalCase), as its file is named
+
+Options:
+      --subject <CODE>
+          The course whose library is read for this load, over video.json's
+
+      --theme <THEME>
+          The theme (a bundled or library name, or a `.json` path), over video.json's
+
+      --t <SECONDS>
+          Seconds from the start of the component's scene (default: the middle of its
+          scene, or 1 s)
+
+      --out <DIR>
+          The folder for the PNGs (default: `<DIR>/out/gallery/`)
+
+      --sheet
+          Also write every still as one contact sheet, `<Component>.png`
+
+      --cols <N>
+          Stills per row in the contact sheet
+
+          [default: 4]
+
+      --threads <T>
+          Render threads (default: half the cores, at most one per example)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio components`
+
+```
+List, show or seed a video's components
+
+`list` and `show` read the components a video can use through the cascade and say which
+level each comes from: `project` (its own `components/`), `subject <CODE>` (the course's
+`studio/components/`) or `global` (`<app data>/studio/library/components/`). `seed`
+copies the starter set into the global library; it never replaces an edit, and `--reset`
+writes the starter text over the library's, keeping each old text in the library's
+`.history/` first.
+
+Usage: oculus studio components <COMMAND>
+
+Commands:
+  list  Each component name a video can use, and the level it comes from
+  show  A component's level and its TSX source
+  seed  Copy the starter components and themes into the global library
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio components list`
+
+```
+Each component name a video can use, and the level it comes from
+
+Usage: oculus studio components list [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json`
+
+Options:
+      --subject <CODE>
+          The course whose library is read for this load, over video.json's
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio components show`
+
+```
+A component's level and its TSX source
+
+Usage: oculus studio components show [OPTIONS] <DIR> <COMPONENT>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json`
+
+  <COMPONENT>
+          The component's name (PascalCase)
+
+Options:
+      --subject <CODE>
+          The course whose library is read for this load, over video.json's
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio components seed`
+
+```
+Copy the starter components and themes into the global library
+
+Usage: oculus studio components seed [OPTIONS]
+
+Options:
+      --reset
+          Write the starter text over every file that differs, keeping the old text in
+          `.history/`
+
   -h, --help
           Print help (see a summary with '-h')
 ```

@@ -10,6 +10,11 @@ pub(crate) enum StudioAction {
     Frame(StudioFrameArgs),
     Strip(StudioStripArgs),
     Lint(StudioLintArgs),
+    Gallery(StudioGalleryArgs),
+    Components {
+        #[command(subcommand)]
+        action: StudioComponentsAction,
+    },
     Render(StudioRenderArgs),
     Narrate(StudioNarrateArgs),
     Tts(StudioTtsArgs),
@@ -243,6 +248,100 @@ pub(crate) struct StudioLintArgs {
     pub(crate) dir: PathBuf,
 }
 
+/// Render every example of a component as a still
+///
+/// Each entry of the component's `examples` is drawn as one PNG, at one
+/// moment: `--t` seconds from the start of the component's scene, by default
+/// the middle of the first scene that uses it (or 1 s of a 2 s preview when
+/// none does). Examples render in parallel and the PNGs are the same at any
+/// thread count. The component is read through the cascade (the video's
+/// `components/`, then the subject's library, then the global one), and the
+/// theme the same way. `--sheet` also writes all the stills as one contact
+/// sheet, `--cols` a row. Stills are named `<Component>-<example>.png`.
+///
+///     oculus studio gallery lectures/week-4 Steps
+///
+///     oculus studio gallery lectures/week-4 Steps --subject COMP2011 --sheet --cols 2
+#[derive(Args)]
+pub(crate) struct StudioGalleryArgs {
+    /// The video folder, the one holding `video.json`
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The component's name (PascalCase), as its file is named
+    #[arg(value_name = "COMPONENT")]
+    pub(crate) component: String,
+    /// The course whose library is read for this load, over video.json's
+    #[arg(long, value_name = "CODE")]
+    pub(crate) subject: Option<String>,
+    /// The theme (a bundled or library name, or a `.json` path), over
+    /// video.json's
+    #[arg(long, value_name = "THEME")]
+    pub(crate) theme: Option<String>,
+    /// Seconds from the start of the component's scene (default: the middle
+    /// of its scene, or 1 s)
+    #[arg(long = "t", value_name = "SECONDS", allow_negative_numbers = true)]
+    pub(crate) t: Option<f64>,
+    /// The folder for the PNGs (default: `<DIR>/out/gallery/`)
+    #[arg(long, value_name = "DIR")]
+    pub(crate) out: Option<PathBuf>,
+    /// Also write every still as one contact sheet, `<Component>.png`
+    #[arg(long)]
+    pub(crate) sheet: bool,
+    /// Stills per row in the contact sheet
+    #[arg(long, value_name = "N", default_value_t = 4)]
+    pub(crate) cols: usize,
+    /// Render threads (default: half the cores, at most one per example)
+    #[arg(long, value_name = "T")]
+    pub(crate) threads: Option<usize>,
+}
+
+/// List, show or seed a video's components
+///
+/// `list` and `show` read the components a video can use through the
+/// cascade and say which level each comes from: `project` (its own
+/// `components/`), `subject <CODE>` (the course's `studio/components/`) or
+/// `global` (`<app data>/studio/library/components/`). `seed` copies the
+/// starter set into the global library; it never replaces an edit, and
+/// `--reset` writes the starter text over the library's, keeping each old
+/// text in the library's `.history/` first.
+#[derive(Subcommand)]
+pub(crate) enum StudioComponentsAction {
+    /// Each component name a video can use, and the level it comes from
+    List(StudioComponentsListArgs),
+    /// A component's level and its TSX source
+    Show(StudioComponentsShowArgs),
+    /// Copy the starter components and themes into the global library
+    Seed {
+        /// Write the starter text over every file that differs, keeping the
+        /// old text in `.history/`
+        #[arg(long)]
+        reset: bool,
+    },
+}
+
+#[derive(Args)]
+pub(crate) struct StudioComponentsListArgs {
+    /// The video folder, the one holding `video.json`
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The course whose library is read for this load, over video.json's
+    #[arg(long, value_name = "CODE")]
+    pub(crate) subject: Option<String>,
+}
+
+#[derive(Args)]
+pub(crate) struct StudioComponentsShowArgs {
+    /// The video folder, the one holding `video.json`
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The component's name (PascalCase)
+    #[arg(value_name = "COMPONENT")]
+    pub(crate) component: String,
+    /// The course whose library is read for this load, over video.json's
+    #[arg(long, value_name = "CODE")]
+    pub(crate) subject: Option<String>,
+}
+
 /// Render a video to an mp4
 ///
 /// Each scene is rendered frame by frame (in parallel, one renderer per
@@ -327,6 +426,52 @@ mod tests {
         assert!(ok(&["--draft", "-o", "x.mp4", "--threads", "3"]));
         assert!(ok(&["--final"]));
         assert!(!ok(&["--draft", "--final"]));
+    }
+
+    #[test]
+    fn gallery_and_components_take_their_flags() {
+        let ok = |args: &[&str]| Cli::try_parse_from(args).is_ok();
+        assert!(ok(&["oculus", "studio", "gallery", "v", "Steps"]));
+        assert!(ok(&[
+            "oculus",
+            "studio",
+            "gallery",
+            "v",
+            "Steps",
+            "--subject",
+            "COMP2011",
+            "--theme",
+            "warm",
+            "--t",
+            "1.5",
+            "--out",
+            "x",
+            "--sheet",
+            "--cols",
+            "2",
+            "--threads",
+            "1"
+        ]));
+        assert!(!ok(&["oculus", "studio", "gallery", "v"]));
+        assert!(ok(&[
+            "oculus",
+            "studio",
+            "components",
+            "list",
+            "v",
+            "--subject",
+            "S"
+        ]));
+        assert!(ok(&[
+            "oculus",
+            "studio",
+            "components",
+            "show",
+            "v",
+            "Steps"
+        ]));
+        assert!(ok(&["oculus", "studio", "components", "seed", "--reset"]));
+        assert!(!ok(&["oculus", "studio", "components"]));
     }
 
     #[test]

@@ -72,6 +72,7 @@ fn options(ffmpeg: &Path, quality: Quality, out: Option<PathBuf>) -> Options {
         threads: Some(2),
         out,
         ffmpeg: ffmpeg.to_owned(),
+        library: studio_core::Library::default(),
     }
 }
 

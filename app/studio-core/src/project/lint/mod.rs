@@ -13,7 +13,7 @@ mod spoken;
 mod tokens;
 mod tsx;
 
-use super::{Project, Staged};
+use super::{ComponentSource, Project, Staged};
 use crate::error::{Result, StudioError};
 use crate::render::{Engine, RenderOptions, scene_frame};
 use crate::theme::Theme;

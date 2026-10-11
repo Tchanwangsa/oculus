@@ -1,15 +1,17 @@
 //! A segment's content address. A key that misses an input renders a stale
 //! video silently, so it takes everything a scene's frames can depend on:
 //! studio-core's fingerprint of the scene (its spec, words and frame count,
-//! the scene before it, the resolved theme), every file under
-//! `components/` and `assets/` (an image may change under its name), the
-//! render settings, and the build: `STUDIO_RENDER_BUILD`, a hash of
-//! studio-core's sources, bundled fonts and themes, this module's sources and
-//! `Cargo.lock`'s pinned dependency versions (build.rs).
+//! the scene before it, the resolved theme), the source of every component a
+//! scene uses as the library cascade resolves it (a library edit re-renders
+//! the scenes that use it), every file under `assets/` (an image may change
+//! under its name), the render settings, and the build: `STUDIO_RENDER_BUILD`,
+//! a hash of studio-core's sources, bundled fonts and themes, this module's
+//! sources and `Cargo.lock`'s pinned dependency versions (build.rs).
 
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
+use studio_core::Project;
 
 use super::error::RenderError;
 use super::quality::Settings;
@@ -30,12 +32,35 @@ pub(super) struct Trees {
 }
 
 impl Trees {
-    pub fn of(dir: &Path) -> Result<Self, RenderError> {
+    /// The trees of `project`, the video in `dir`.
+    pub fn of(dir: &Path, project: &Project) -> Result<Self, RenderError> {
         Ok(Self {
-            components: tree_hash(&dir.join("components"))?,
+            components: components_hash(project)?,
             assets: tree_hash(&dir.join("assets"))?,
         })
     }
+}
+
+/// sha256 hex over the name and TSX source of each distinct component the
+/// video's scenes use, in name order, as `project.components` resolves them.
+fn components_hash(project: &Project) -> Result<String, RenderError> {
+    let mut names: Vec<&str> = project
+        .video
+        .scenes
+        .iter()
+        .map(|s| s.component.as_str())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    let mut hash = Sha256::new();
+    for name in names {
+        let tsx = studio_core::ComponentSource::read(project.components.as_ref(), name)?;
+        for part in [name.as_bytes(), tsx.as_bytes()] {
+            hash.update((part.len() as u64).to_le_bytes());
+            hash.update(part);
+        }
+    }
+    Ok(format!("{:x}", hash.finalize()))
 }
 
 /// sha256 hex over each length-prefixed part.

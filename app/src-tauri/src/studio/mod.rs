@@ -8,6 +8,7 @@
 pub mod audio;
 pub mod commands;
 pub mod error;
+pub mod libraries;
 pub mod narrate;
 pub mod render;
 #[cfg(test)]

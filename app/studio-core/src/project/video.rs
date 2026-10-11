@@ -25,6 +25,10 @@ pub struct Video {
     /// stored here; the app's narrator reads it.
     #[serde(default)]
     pub voice: Option<Voice>,
+    /// The course this video belongs to: its `studio/` folder beside the
+    /// course's files is a library read before the global one.
+    #[serde(default)]
+    pub subject: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -90,6 +94,16 @@ pub(crate) fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
+/// A subject is a course code's folder name: letters, digits, `-` and `_`,
+/// at most 64 characters.
+pub(crate) fn valid_subject(subject: &str) -> bool {
+    !subject.is_empty()
+        && subject.len() <= 64
+        && subject
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// The checks serde cannot make. `scripted` says the project has a
 /// script.md, which makes every scene's `id` required.
 pub(super) fn check(video: &Video, scripted: bool) -> Result<(), String> {
@@ -101,6 +115,13 @@ pub(super) fn check(video: &Video, scripted: bool) -> Result<(), String> {
         ));
     }
     check_fps(f64::from(video.fps))?;
+    if let Some(subject) = &video.subject
+        && !valid_subject(subject)
+    {
+        return Err(format!(
+            "subject `{subject}` must be a course code's folder name: letters, digits, `-` and `_`, up to 64 characters"
+        ));
+    }
     if video.scenes.is_empty() {
         return Err("scenes is empty; a video needs at least one scene".to_owned());
     }

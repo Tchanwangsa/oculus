@@ -80,16 +80,35 @@ impl ComponentSource for FolderComponents {
     }
 }
 
-/// Several sources in priority order: a name resolves to the first source
-/// that has it, and `names` is the union. The project's folder comes first,
-/// then the subject's library, then the global one.
+/// Several sources in priority order, each with its level's name (`project`,
+/// `subject S`, `global`): a name resolves to the first source that has it,
+/// and `names` is the union. The project's folder comes first, then the
+/// subject's library, then the global one.
 pub struct CascadeComponents {
-    sources: Vec<Arc<dyn ComponentSource>>,
+    sources: Vec<(String, Arc<dyn ComponentSource>)>,
 }
 
 impl CascadeComponents {
-    pub fn new(sources: Vec<Arc<dyn ComponentSource>>) -> CascadeComponents {
+    pub fn new(sources: Vec<(String, Arc<dyn ComponentSource>)>) -> CascadeComponents {
         CascadeComponents { sources }
+    }
+
+    /// Every name with the level it resolves from, sorted by name.
+    pub fn levels(&self) -> Vec<(String, String)> {
+        self.names()
+            .into_iter()
+            .filter_map(|name| {
+                let level = self.level_of(&name)?;
+                Some((name, level.to_owned()))
+            })
+            .collect()
+    }
+
+    fn level_of(&self, name: &str) -> Option<&str> {
+        self.sources
+            .iter()
+            .find(|(_, s)| s.names().iter().any(|n| n == name))
+            .map(|(level, _)| level.as_str())
     }
 }
 
@@ -102,7 +121,7 @@ impl ComponentSource for CascadeComponents {
                     .to_owned(),
             });
         }
-        for source in &self.sources {
+        for (_, source) in &self.sources {
             if source.names().iter().any(|n| n == name) {
                 return source.read(name);
             }
@@ -123,7 +142,7 @@ impl ComponentSource for CascadeComponents {
     }
 
     fn names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.sources.iter().flat_map(|s| s.names()).collect();
+        let mut names: Vec<String> = self.sources.iter().flat_map(|(_, s)| s.names()).collect();
         names.sort();
         names.dedup();
         names

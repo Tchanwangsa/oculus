@@ -129,6 +129,7 @@ fn render_once(
         threads: None,
         out: None,
         ffmpeg,
+        library: crate::studio::libraries::libraries(false).map_err(|e| e.to_string())?,
     };
     let (mut of, mut scene) = (0, 0);
     let mut last: Option<Instant> = None;
