@@ -85,6 +85,15 @@ pub struct Snapshot {
     /// The playlist, album or other context the active device plays from,
     /// from the same two sources as `up_next`; none when unknown.
     pub context_uri: Option<String>,
+    /// Oculus's previous goes back a track: the Spirc's queue event lists a
+    /// previous track, or the context repeats.
+    pub can_prev: bool,
+    /// The last queue event listed a previous track.
+    #[serde(skip)]
+    pub(super) has_prev: bool,
+    /// The context repeats (`repeat` also covers a repeated track).
+    #[serde(skip)]
+    pub(super) repeat_context: bool,
     /// The latest failure (connect, auth, keyd, a track that cannot play),
     /// kept until the next connect or load.
     pub error: Option<String>,
@@ -111,6 +120,9 @@ impl Default for Snapshot {
             repeat: false,
             up_next: Vec::new(),
             context_uri: None,
+            can_prev: false,
+            has_prev: false,
+            repeat_context: false,
             error: None,
         }
     }
@@ -137,16 +149,25 @@ impl Snapshot {
         self.remote = None;
         self.up_next.clear();
         self.context_uri = None;
+        self.set_has_prev(false);
     }
 
-    /// `uri` started: it and everything before it leave `up_next`. The
-    /// Spirc sends no queue event when it moves on, only when the queue or
-    /// the context changes.
-    pub(super) fn advance_to(&mut self, uri: &str) {
-        if let Some(at) = self.up_next.iter().position(|t| t.uri == uri) {
-            self.up_next.drain(..=at);
-        }
+    pub(super) fn set_has_prev(&mut self, has_prev: bool) {
+        self.has_prev = has_prev;
+        self.can_prev = has_prev || self.repeat_context;
     }
+
+    pub(super) fn set_repeat(&mut self, context: bool, track: bool) {
+        self.repeat = context || track;
+        self.repeat_context = context;
+        self.can_prev = self.has_prev || context;
+    }
+}
+
+/// Whether previous tracks as the Spirc lists them hold one to go back to:
+/// delimiters are not tracks.
+pub(super) fn has_prev<'a>(uris: impl IntoIterator<Item = &'a str>) -> bool {
+    uris.into_iter().any(|uri| uri != "spotify:delimiter")
 }
 
 /// Whether a next track's URI goes into `up_next`: catalogue tracks only,
@@ -450,6 +471,9 @@ pub(super) fn apply_cluster(s: &mut Snapshot, cluster: &mut Cluster) {
     if let Some(next) = &cluster.up_next {
         s.up_next = next.clone();
         s.context_uri = cluster.queue.as_ref().and_then(|q| context(&q.context_uri));
+    }
+    if cluster.active_id.is_empty() {
+        s.set_has_prev(false);
     }
     s.remote = match (cluster.remote.take(), &s.playing_on) {
         (Some(remote), _) => Some(remote),

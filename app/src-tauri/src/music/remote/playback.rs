@@ -28,6 +28,9 @@ pub struct RemotePlayback {
     pub volume: Option<u8>,
     pub shuffle: bool,
     pub repeat: bool,
+    /// Its previous goes back a track: its player state's restrictions name
+    /// no reason against it (a phone at its first track says `no_prev_track`).
+    pub can_prev: bool,
     /// The playing item's URI, for matching a row fetched later.
     #[serde(skip)]
     pub(in crate::music) uri: String,
@@ -68,6 +71,10 @@ pub(in crate::music) fn from_cluster(
             .map(|d| percent(d.volume.min(u16::MAX as u32) as u16)),
         shuffle: options.is_some_and(|o| o.shuffling_context),
         repeat: options.is_some_and(|o| o.repeating_context || o.repeating_track),
+        can_prev: player
+            .restrictions
+            .as_ref()
+            .is_none_or(|r| r.disallow_skipping_prev_reasons.is_empty()),
         uri,
     })
 }

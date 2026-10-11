@@ -152,6 +152,26 @@ fn a_missing_audio_key_is_a_track_failure() {
 }
 
 #[test]
+fn a_seek_with_nothing_loaded_is_not_a_track_failure() {
+    assert!(!is_track_failure(
+        Level::Error,
+        "librespot_playback::player",
+        "Player::seek called from invalid state: Stopped"
+    ));
+    assert!(!is_track_failure(
+        Level::Error,
+        "librespot_playback::player",
+        "Player::play called from invalid state: Stopped"
+    ));
+    // A load the player cannot start still is.
+    assert!(is_track_failure(
+        Level::Error,
+        "librespot_playback::player",
+        "Player::handle_command_load called from invalid state: Invalid"
+    ));
+}
+
+#[test]
 fn player_events_fold_into_the_snapshot() {
     let track_id = SpotifyUri::from_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQC").unwrap();
     let mut s = Snapshot::default();
@@ -287,6 +307,7 @@ fn becoming_active_and_inactive_follow_the_spircs_session_events() {
             volume: None,
             shuffle: false,
             repeat: false,
+            can_prev: true,
             uri: T1.into(),
         }),
         ..Snapshot::default()
@@ -458,39 +479,78 @@ fn up_next_keeps_every_track_only_and_marks_queued_ones() {
 }
 
 #[test]
-fn a_queue_event_sets_up_next_and_a_track_change_moves_past_it() {
+fn a_queue_event_sets_up_next_and_whether_previous_goes_back() {
     use librespot_playback::player::QueueTrack;
     let queued = |uri: &str, provider: &str| QueueTrack {
         uri: uri.into(),
         provider: provider.into(),
     };
+    let set_queue = |next_tracks, prev_tracks| PlayerEvent::SetQueue {
+        context_uri: "spotify:playlist:x".into(),
+        current_track: None,
+        next_tracks,
+        prev_tracks,
+    };
     let mut s = Snapshot::default();
     apply(
         &mut s,
-        PlayerEvent::SetQueue {
-            context_uri: "spotify:playlist:x".into(),
-            current_track: None,
-            next_tracks: vec![
+        set_queue(
+            vec![
                 queued(T1, "queue"),
                 queued(T2, "context"),
                 queued(T3, "context"),
             ],
-            prev_tracks: vec![],
-        },
+            vec![queued("spotify:delimiter", "context")],
+        ),
     );
     assert_eq!(
         s.up_next,
         [next(T1, true), next(T2, false), next(T3, false)]
     );
     assert_eq!(s.context_uri.as_deref(), Some("spotify:playlist:x"));
-    s.advance_to(T2);
+    // A delimiter is not a track to go back to.
+    assert!(!s.can_prev);
+
+    // A track starting changes nothing up next; the Spirc's next event does.
+    apply(
+        &mut s,
+        set_queue(vec![queued(T3, "context")], vec![queued(T2, "context")]),
+    );
     assert_eq!(s.up_next, [next(T3, false)]);
-    // A track that was not up next leaves the list alone.
-    s.advance_to(T1);
-    assert_eq!(s.up_next, [next(T3, false)]);
+    assert!(s.can_prev);
+
+    // With none behind it, previous goes back only round a repeated context.
+    apply(&mut s, set_queue(vec![], vec![]));
+    assert!(!s.can_prev);
+    apply(
+        &mut s,
+        PlayerEvent::RepeatChanged {
+            context: false,
+            track: true,
+        },
+    );
+    assert!(s.repeat && !s.can_prev);
+    apply(
+        &mut s,
+        PlayerEvent::RepeatChanged {
+            context: true,
+            track: false,
+        },
+    );
+    assert!(s.can_prev);
+
+    apply(
+        &mut s,
+        PlayerEvent::RepeatChanged {
+            context: false,
+            track: false,
+        },
+    );
+    apply(&mut s, set_queue(vec![], vec![queued(T1, "context")]));
     s.set_unlinked();
     assert!(s.up_next.is_empty());
     assert_eq!(s.context_uri, None);
+    assert!(!s.can_prev);
 }
 
 #[test]

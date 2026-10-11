@@ -36,6 +36,8 @@ pub(super) struct Device {
     pub(super) name: String,
     /// Its player state says it is playing.
     pub(super) playing: bool,
+    /// Its player state allows going back a track.
+    pub(super) can_prev: bool,
 }
 
 /// Sends `command` to `device`.

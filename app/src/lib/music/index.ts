@@ -41,6 +41,9 @@ export interface MusicRemotePlayback {
   volume: number | null;
   shuffle: boolean;
   repeat: boolean;
+  /** Previous goes back a track: Spotify names no reason against it (a
+   *  phone at its first track says `no_prev_track`). */
+  can_prev: boolean;
 }
 
 export interface MusicSnapshot {
@@ -80,6 +83,9 @@ export interface MusicSnapshot {
   /** The playlist, album or other context the device playing plays from;
    *  null when unknown. */
   context_uri: string | null;
+  /** Oculus's previous goes back a track: its queue lists a previous track,
+   *  or the context repeats. */
+  can_prev: boolean;
   /** The latest failure, kept until the next connect or load. */
   error: string | null;
 }
@@ -182,6 +188,8 @@ export interface MusicPlayback {
   volume: number | null;
   shuffle: boolean;
   repeat: boolean;
+  /** Previous goes back a track; without one it would only restart this. */
+  can_prev: boolean;
   /** The other device's name while it plays; null for Oculus. */
   device: string | null;
 }
@@ -197,6 +205,7 @@ export function shownPlayback(s: MusicSnapshot): MusicPlayback {
     volume: s.volume,
     shuffle: s.shuffle,
     repeat: s.repeat,
+    can_prev: s.can_prev,
     device: null,
   };
 }
@@ -249,8 +258,9 @@ export const music = {
   /** On repeats the context; off also clears a repeated track. */
   setRepeat: (on: boolean) => invoke("music_repeat", { on }),
   /** `spotify:playlist:…`, `spotify:album:…`; played on the device playing
-   *  elsewhere, else on this one. */
-  playContext: (uri: string) => invoke("music_play_context", { uri }),
+   *  elsewhere, else on this one, in order or shuffled. */
+  playContext: (uri: string, shuffle = false) =>
+    invoke("music_play_context", { uri, shuffle }),
   /** A `spotify:track:…`, from its place in `contextUri` (a playlist or
    *  album) when given. */
   playTrack: (uri: string, contextUri: string | null = null) =>

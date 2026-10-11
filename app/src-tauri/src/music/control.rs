@@ -172,7 +172,8 @@ fn other_device(app: &AppHandle) -> Option<remote::Device> {
         from: own_id,
         to: cluster.active_id,
         name,
-        playing: snapshot.remote.is_some_and(|r| r.playing),
+        playing: snapshot.remote.as_ref().is_some_and(|r| r.playing),
+        can_prev: snapshot.remote.as_ref().is_none_or(|r| r.can_prev),
     })
 }
 

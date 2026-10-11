@@ -106,6 +106,16 @@ impl<'ct> ConnectState {
         }
     }
 
+    /// Whether [ConnectState::prev_track] has a track to go back to: one
+    /// trailing delimiter is passed over, as it does.
+    pub fn has_prev_track(&self) -> bool {
+        let prev = self.prev_tracks();
+        let delimiter = prev
+            .last()
+            .is_some_and(|t| t.uid.starts_with(IDENTIFIER_DELIMITER));
+        prev.len() > usize::from(delimiter)
+    }
+
     pub fn set_current_track_random(&mut self) -> Result<(), Error> {
         let max_tracks = self.get_context(self.active_context)?.tracks.len();
         let rng_track = rand::rng().random_range(0..max_tracks);

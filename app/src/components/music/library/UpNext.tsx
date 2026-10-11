@@ -42,7 +42,9 @@ function itemKey(item: Item): string {
 export function UpNext({ snapshot }: { snapshot: MusicSnapshot }) {
   const run = useMusicStore((s) => s.run);
   const next = snapshot.up_next;
-  const key = next.map((t) => t.uri).join("|");
+  // Each entry's URI and whether it is queued: a track queued or unqueued
+  // with the same URIs regroups the list.
+  const key = next.map((t) => `${t.queued ? "q" : "c"}:${t.uri}`).join("|");
   const playback = shownPlayback(snapshot);
   const contextUri = snapshot.context_uri;
   const rest = useContextRest(

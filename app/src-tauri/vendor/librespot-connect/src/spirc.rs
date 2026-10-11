@@ -790,7 +790,6 @@ impl SpircTask {
                     }
                     None => warn!("skip to <{uri}> ignored: it is not a next track"),
                 }
-                self.emit_set_queue_event();
             }
             SpircCommand::RemoveNext { uri, nth } => {
                 match self.connect_state.find_next_track(&uri, nth) {
@@ -1335,7 +1334,9 @@ impl SpircTask {
             }
         }
 
-        self.load_track(is_playing, position.try_into()?)
+        self.load_track(is_playing, position.try_into()?)?;
+        self.emit_set_queue_event();
+        Ok(())
     }
 
     async fn handle_disconnect(&mut self) -> Result<(), Error> {
@@ -1466,6 +1467,14 @@ impl SpircTask {
             self.connect_state.set_repeat_track(options.repeat_track);
         }
 
+        // reset_options above cleared every option the load was not given
+        self.player
+            .emit_shuffle_changed_event(self.connect_state.shuffling_context());
+        self.player.emit_repeat_changed_event(
+            self.connect_state.repeat_context(),
+            self.connect_state.repeat_track(),
+        );
+
         if matches!(cmd_options.context_options, Some(LoadContextOptions::Options(ref o)) if o.shuffle)
         {
             if let Some(index) = index {
@@ -1493,6 +1502,10 @@ impl SpircTask {
             info!("No active track, stopping");
             self.handle_stop()
         }
+
+        // the queue event sent while resolving the context came before the
+        // options above, so it lacks the shuffled order and the start track
+        self.emit_set_queue_event();
 
         Ok(())
     }
@@ -1658,13 +1671,19 @@ impl SpircTask {
 
     fn handle_shuffle(&mut self, shuffle: bool) -> Result<(), Error> {
         self.player.emit_shuffle_changed_event(shuffle);
-        self.connect_state.handle_shuffle(shuffle)
+        let result = self.connect_state.handle_shuffle(shuffle);
+        // the next tracks were reshuffled or restored to context order
+        self.emit_set_queue_event();
+        result
     }
 
     fn handle_repeat_context(&mut self, repeat: bool) -> Result<(), Error> {
         self.player
             .emit_repeat_changed_event(repeat, self.connect_state.repeat_track());
-        self.connect_state.handle_set_repeat_context(repeat)
+        let result = self.connect_state.handle_set_repeat_context(repeat);
+        // the next tracks were refilled, wrapping round the context or not
+        self.emit_set_queue_event();
+        result
     }
 
     fn handle_repeat_track(&mut self, repeat: bool) {
@@ -1786,30 +1805,36 @@ impl SpircTask {
             };
         };
 
-        if has_next_track {
+        let result = if has_next_track {
             self.add_autoplay_resolving_when_required();
             self.load_track(continue_playing, 0)
         } else {
             info!("Not playing next track because there are no more tracks left in queue.");
             self.handle_stop();
             Ok(())
-        }
+        };
+        self.emit_set_queue_event();
+        result
     }
 
     fn handle_prev(&mut self) -> Result<(), Error> {
         // Previous behaves differently based on the position
         // Under 3s it goes to the previous song (starts playing)
         // Over 3s it seeks to zero (retains previous play status)
-        if self.position() < 3000 {
-            let repeat_context = self.connect_state.repeat_context();
+        // With no previous track it seeks to zero rather than stopping; with
+        // the context repeating it plays the context's first track.
+        if self.position() < 3000
+            && (self.connect_state.has_prev_track() || self.connect_state.repeat_context())
+        {
+            let playing = self.connect_state.is_playing();
             match self.connect_state.prev_track()? {
-                None if repeat_context => self.connect_state.reset_playback_to_position(None)?,
                 None => {
                     self.connect_state.reset_playback_to_position(None)?;
-                    self.handle_stop()
+                    self.load_track(playing, 0)?
                 }
-                Some(_) => self.load_track(self.connect_state.is_playing(), 0)?,
+                Some(_) => self.load_track(playing, 0)?,
             }
+            self.emit_set_queue_event();
         } else {
             self.handle_seek(0);
         }
