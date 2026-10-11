@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use librespot_core::SpotifyId;
 use librespot_protocol::entity_extension_data::EntityExtensionData;
 use librespot_protocol::extended_metadata::{
     BatchedEntityRequest, BatchedExtensionResponse, EntityExtensionDataArray,
 };
 use librespot_protocol::extension_kind::ExtensionKind;
-use librespot_protocol::metadata::{image::Size, Album, Artist, Image, ImageGroup, Track};
+use librespot_protocol::metadata::{image::Size, Album, Artist, Disc, Image, ImageGroup, Track};
 use librespot_protocol::playlist4_external::{
     Item, ListAttributes, ListItems, MetaItem, PictureSize, SelectedListContent,
 };
@@ -22,7 +23,7 @@ use super::metadata::{self, TrackRow};
 use super::rootlist::{
     self, encode, parse_page, parse_playlist, playlist_endpoint, playlist_uri, Entry, Header,
 };
-use super::search::{self, clean, parse, MAX_QUERY};
+use super::search::{self, clean, parse, SearchKind, MAX_QUERY};
 use super::spclient::status_error;
 
 fn item(uri: &str) -> Item {
@@ -198,7 +199,7 @@ fn rootlist_endpoints_and_uris() {
 
 /// A `searchDesktop` answer in the shape the web player reads, trimmed: a
 /// null hit, a hit without a URI, a `NotFound` hit, a playlist owned by
-/// Spotify, plain-http and sized image sources.
+/// Spotify, an artist without a name, plain-http and sized image sources.
 const SEARCH: &str = r#"{
   "data": { "searchV2": {
     "tracksV2": { "totalCount": 800, "items": [
@@ -228,7 +229,12 @@ const SEARCH: &str = r#"{
           "images": { "items": [ { "sources": [ { "url": "https://i.scdn.co/image/p1", "width": null } ] } ] } } },
       { "data": { "__typename": "Playlist", "uri": "spotify:playlist:pl2", "name": "" } }
     ] },
-    "artists": { "items": [] }
+    "artists": { "items": [
+      { "data": { "__typename": "Artist", "uri": "spotify:artist:ar1",
+          "profile": { "name": "Miles Davis" },
+          "visuals": { "avatarImage": { "sources": [ { "url": "https://i.scdn.co/image/m320", "width": 320 } ] } } } },
+      { "data": { "__typename": "Artist", "uri": "spotify:artist:ar3", "profile": {} } }
+    ] }
   } },
   "extensions": {}
 }"#;
@@ -242,6 +248,13 @@ fn search_hits_group_with_subtitles_and_a_tracks_album() {
     assert_eq!(
         r.playlists[0].image_url.as_deref(),
         Some("https://i.scdn.co/image/p1")
+    );
+    assert_eq!(r.artists.len(), 1);
+    assert_eq!(r.artists[0].name, "Miles Davis");
+    assert_eq!(r.artists[0].subtitle, "Artist");
+    assert_eq!(
+        r.artists[0].image_url.as_deref(),
+        Some("https://i.scdn.co/image/m320")
     );
     assert_eq!(r.albums[0].subtitle, "Miles Davis");
     assert_eq!(r.albums[0].image_url, None);
@@ -283,6 +296,32 @@ fn a_stale_hash_reads_as_search_outdated_and_other_errors_surface() {
         search::unavailable(LibraryError::Status(412)),
         LibraryError::SearchOutdated
     );
+}
+
+#[test]
+fn a_page_reads_its_own_group_and_the_next_offset() {
+    let page = search::parse_page(SEARCH.as_bytes(), SearchKind::Albums).unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].uri, "spotify:album:al1");
+    assert_eq!(page.next_offset, None);
+    let body = br#"{"data":{"searchV2":{"tracksV2":{"items":[
+        {"item":{"data":{"__typename":"Track","uri":"spotify:track:t9","name":"Nine"}}}],
+        "pagingInfo":{"nextOffset":30,"limit":20}}}}}"#;
+    let page = search::parse_page(body, SearchKind::Tracks).unwrap();
+    assert_eq!(page.items[0].name, "Nine");
+    assert_eq!(page.next_offset, Some(30));
+    assert_eq!(
+        search::parse_page(
+            br#"{"errors":[{"message":"PersistedQueryNotFound"}]}"#,
+            SearchKind::Tracks
+        ),
+        Err(LibraryError::SearchOutdated)
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(&search::page_body("lo-fi", SearchKind::Playlists, 40)).unwrap();
+    assert_eq!(body["operationName"], "searchPlaylists");
+    assert_eq!(body["variables"]["offset"], 40);
+    assert_eq!(body["variables"]["limit"], 20);
 }
 
 #[test]
@@ -447,12 +486,66 @@ fn metadata_bytes(tracks: Vec<(&str, Track)>) -> Vec<u8> {
 }
 
 #[test]
+fn an_albums_tracks_list_disc_by_disc_and_skip_tracks_without_a_gid() {
+    let id = |b: u8| [b; 16].to_vec();
+    let disc = |gids: Vec<Vec<u8>>| Disc {
+        track: gids
+            .into_iter()
+            .map(|gid| Track {
+                gid: (!gid.is_empty()).then_some(gid),
+                ..Track::default()
+            })
+            .collect(),
+        ..Disc::default()
+    };
+    let album = Album {
+        disc: vec![disc(vec![id(1), Vec::new()]), disc(vec![id(2)])],
+        ..Album::default()
+    };
+    let body = BatchedExtensionResponse {
+        extended_metadata: vec![EntityExtensionDataArray {
+            extension_kind: ExtensionKind::ALBUM_V4.into(),
+            extension_data: vec![EntityExtensionData {
+                entity_uri: "spotify:album:al1".into(),
+                extension_data: Some(Any {
+                    type_url: "type.googleapis.com/spotify.metadata.Album".into(),
+                    value: album.write_to_bytes().unwrap(),
+                    ..Any::default()
+                })
+                .into(),
+                ..EntityExtensionData::default()
+            }],
+            ..EntityExtensionDataArray::default()
+        }],
+        ..BatchedExtensionResponse::default()
+    }
+    .write_to_bytes()
+    .unwrap();
+    let uris = metadata::album_tracks(&body).unwrap();
+    let base62 = |b: u8| SpotifyId::from_raw(&[b; 16]).unwrap().to_base62();
+    assert_eq!(
+        uris,
+        [
+            format!("spotify:track:{}", base62(1)),
+            format!("spotify:track:{}", base62(2)),
+        ]
+    );
+    assert!(metadata::album_tracks(
+        &BatchedExtensionResponse::default()
+            .write_to_bytes()
+            .unwrap()
+    )
+    .unwrap()
+    .is_empty());
+}
+
+#[test]
 fn the_metadata_request_asks_track_v4_for_each_track() {
     assert_eq!(
         metadata::ENDPOINT,
         "/extended-metadata/v0/extended-metadata"
     );
-    let body = metadata::request(&[A.to_string(), B.to_string()]);
+    let body = metadata::request(&[A.to_string(), B.to_string()], ExtensionKind::TRACK_V4);
     let request = BatchedEntityRequest::parse_from_bytes(&body).unwrap();
     let asked: Vec<(&str, Vec<ExtensionKind>)> = request
         .entity_request

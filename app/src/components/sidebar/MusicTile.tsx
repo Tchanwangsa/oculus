@@ -3,7 +3,7 @@ import { CircleNotch, MusicNotes } from "@phosphor-icons/react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NowPlaying } from "@/components/music/NowPlaying";
-import { openBeside } from "@/lib/shell/tabRouters";
+import { navigateActive } from "@/lib/shell/tabRouters";
 import { cn } from "@/lib/utils";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
 import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
@@ -67,7 +67,7 @@ export function MusicTile() {
           error={error}
           onOpenPlayer={() => {
             setOpen(false);
-            openBeside("/music");
+            navigateActive("/music");
           }}
         />
       </PopoverContent>

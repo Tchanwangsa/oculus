@@ -3,8 +3,8 @@
 //! device and fail with "Not connected to Spotify" otherwise; while another
 //! device holds playback they pull it back first (`control.rs`). The lists
 //! (`music_playlists`, `music_playlist_covers`, `music_playlist_tracks`,
-//! `music_tracks`, `music_search`, `music_devices`, `music_outputs`) return
-//! their results.
+//! `music_album_tracks`, `music_tracks`, `music_search`, `music_search_more`,
+//! `music_devices`, `music_outputs`) return their results.
 
 use std::collections::HashMap;
 
@@ -15,7 +15,7 @@ use tauri::AppHandle;
 use super::audio::{self, OutputDevice};
 use super::control::{self, Need};
 use super::devices::{self, Device};
-use super::library::{self, Playlist, SearchResults, TrackRow};
+use super::library::{self, Playlist, SearchKind, SearchPage, SearchResults, TrackRow};
 use super::login::{self, LoginError};
 use super::session::{self, Start};
 use super::state::{self, Snapshot};
@@ -266,6 +266,16 @@ pub async fn music_playlist_tracks(app: AppHandle, uri: String) -> Result<Vec<St
     Ok(library::playlist_tracks(&app, &uri).await?)
 }
 
+/// Every track of an album, in order, as URIs. Rows come from
+/// `music_tracks`.
+#[tauri::command]
+pub async fn music_album_tracks(app: AppHandle, uri: String) -> Result<Vec<String>, String> {
+    if !uri.starts_with("spotify:album:") {
+        return Err(format!("Not a Spotify album: {uri}"));
+    }
+    Ok(library::album_tracks(&app, &uri).await?)
+}
+
 /// Rows for these tracks, by URI; one Spotify describes nothing for is left
 /// out. Kept in memory once fetched.
 #[tauri::command]
@@ -291,10 +301,22 @@ pub async fn music_add_to_queue(app: AppHandle, uri: String) -> Result<(), Strin
     .await
 }
 
-/// Playlists, albums and tracks matching `query`, ten of each.
+/// Tracks, artists, albums and playlists matching `query`, ten of each.
 #[tauri::command]
 pub async fn music_search(app: AppHandle, query: String) -> Result<SearchResults, String> {
     Ok(library::search(&app, &query).await?)
+}
+
+/// The page of `kind` matching `query` from `offset` on, for a list that
+/// keeps loading as it scrolls.
+#[tauri::command]
+pub async fn music_search_more(
+    app: AppHandle,
+    query: String,
+    kind: SearchKind,
+    offset: u32,
+) -> Result<SearchPage, String> {
+    Ok(library::search_page(&app, &query, kind, offset).await?)
 }
 
 /// The account's Connect devices from the last pushed cluster; only this

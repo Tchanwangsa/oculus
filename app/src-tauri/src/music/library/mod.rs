@@ -28,13 +28,14 @@ use std::time::Duration;
 
 use futures_util::{stream, StreamExt};
 use librespot_core::Session;
+use librespot_protocol::extension_kind::ExtensionKind;
 use tauri::AppHandle;
 
 pub use cache::Library;
 pub(super) use error::LibraryError;
 pub use metadata::TrackRow;
 pub use rootlist::Playlist;
-pub use search::SearchResults;
+pub use search::{SearchKind, SearchPage, SearchResults};
 
 use super::state;
 use cache::{lookup, map_for};
@@ -153,6 +154,18 @@ pub(super) async fn playlist_tracks(
     tracks::contents(app, &session, &account, uri, true).await
 }
 
+/// Every track of the album `uri`, disc by disc, from one `ALBUM_V4`
+/// metadata request. Not kept: an album is one request each time it opens.
+pub(super) async fn album_tracks(app: &AppHandle, uri: &str) -> Result<Vec<String>, LibraryError> {
+    let session = state::session(app).ok_or(LibraryError::NotConnected)?;
+    let body = Method::PostProtobuf(metadata::request(
+        &[uri.to_string()],
+        ExtensionKind::ALBUM_V4,
+    ));
+    let body = call(app, &session, "album", metadata::ENDPOINT, body).await?;
+    logged("album", metadata::album_tracks(&body))
+}
+
 /// Rows for these tracks, by URI, from memory or batched metadata requests.
 /// A track Spotify describes nothing for is left out; a batch failing for
 /// now (a rate limit, the connection) fails the call, keeping what the
@@ -186,6 +199,29 @@ pub(super) async fn search(app: &AppHandle, query: &str) -> Result<SearchResults
     .await
     .map_err(search::unavailable)?;
     logged("search", search::parse(&body))
+}
+
+/// The page of `kind` for `query` from `offset`; an empty query asks nothing.
+pub(super) async fn search_page(
+    app: &AppHandle,
+    query: &str,
+    kind: SearchKind,
+    offset: u32,
+) -> Result<SearchPage, LibraryError> {
+    let Some(query) = search::clean(query) else {
+        return Ok(SearchPage::default());
+    };
+    let session = state::session(app).ok_or(LibraryError::NotConnected)?;
+    let body = call_to(
+        app,
+        &session,
+        "search page",
+        Target::Url(search::PATHFINDER),
+        Method::PostJson(search::page_body(&query, kind, offset)),
+    )
+    .await
+    .map_err(search::unavailable)?;
+    logged("search page", search::parse_page(&body, kind))
 }
 
 /// One request through the gate; a 429 closes it. `what` names it in the
