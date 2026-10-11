@@ -27,7 +27,10 @@ sweep and the index queue run during setup. While the gate decides, `App`
 paints a blank `bg-background` window, so neither onboarding nor a
 "not connected" state flashes. `App` applies the stored page zoom at boot
 (`app/src/lib/ui/pageZoom.ts`), so setup renders at the shell's size; the
-zoom shortcuts live in `AppLayout` and don't work during setup.
+zoom shortcuts live in `AppLayout` and don't work during setup. Onboarding
+owns its 44px drag header while the shell is unmounted. On Windows it reuses
+`app/src/components/tabs/WindowControls.tsx` for minimize, maximize/restore and
+close; native fullscreen hides the caption controls just as the shell does.
 
 ## The settings row decides, and existing setups never see it
 

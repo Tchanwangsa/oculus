@@ -1,5 +1,8 @@
 import { useState, type ComponentType } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { WindowControls } from "@/components/tabs/WindowControls";
+import { useWindowFullscreen } from "@/hooks/shell/useWindowFullscreen";
+import { isWindows } from "@/lib/platform";
 import { STEP_IDS, type StepId } from "@/lib/onboarding/steps";
 import { finishOnboarding } from "@/stores/shell/onboardingStore";
 import { AgentStep } from "./AgentStep";
@@ -27,6 +30,7 @@ const NUMBERED = STEP_IDS.slice(1, -1);
  * step order and the skipped list; finishing writes both to the settings row.
  */
 export function Onboarding() {
+  const fullscreen = useWindowFullscreen();
   const [index, setIndex] = useState(0);
   const [skipped, setSkipped] = useState<StepId[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -49,8 +53,9 @@ export function Onboarding() {
   return (
     <TooltipProvider delayDuration={500}>
       <div data-select-scope className="flex h-full w-full flex-col bg-background">
-        {/* Under the overlay title bar: drags the window like the tab strip. */}
-        <div data-tauri-drag-region className="h-11 shrink-0" />
+        <div data-tauri-drag-region="deep" className="flex h-11 shrink-0 items-center justify-end pr-2">
+          {isWindows && !fullscreen && <WindowControls />}
+        </div>
         <div className="flex flex-1 overflow-y-auto px-8 pb-8">
           <div className="m-auto w-full max-w-lg flex-none rounded-xl border border-border bg-card p-8 shadow-panel">
             <StepNavContext.Provider
