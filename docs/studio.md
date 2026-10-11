@@ -179,8 +179,13 @@ does not. `oculus studio` commands that load a video take `--subject` and
 `--theme` where they can, which replace video.json's for that load. A
 component that no level has is an error listing every name in every level.
 
-The starter set (`app/studio-core/library/`) is compiled into the crate.
-Every load copies each starter
+The starter set (`app/studio-core/library/`) is compiled into the crate: the
+components `TitleCard`, `Steps`, `BigNumber`, `LowerThird` and `SplitShell`,
+and the theme `warm` beside `default`. Each takes its colours and fonts from
+the theme and has at least two examples. `Formula` waits for the maths
+primitive (stage 8). `tests/starter.rs` lints the set in both themes, and
+`tests/gallery_golden.rs` pins every example as `starter-<Component>-<example>.png`,
+laid out at 1920x1080 and drawn at half scale. Every load copies each starter
 file the global library lacks, and never replaces one, so an edit is the
 user's. `oculus studio components seed
 --reset` writes the starter text over every file that differs. Every write

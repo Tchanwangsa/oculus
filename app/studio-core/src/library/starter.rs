@@ -5,10 +5,30 @@ use crate::error::{Result, StudioError};
 use crate::project::{ComponentSource, valid_name};
 
 /// `(name, TSX)` for each starter component, in `library/components/`.
-pub const STARTER_COMPONENTS: &[(&str, &str)] = &[];
+/// `Formula` is not here: it needs the maths primitive (stage 8).
+pub const STARTER_COMPONENTS: &[(&str, &str)] = &[
+    (
+        "BigNumber",
+        include_str!("../../library/components/BigNumber.tsx"),
+    ),
+    (
+        "LowerThird",
+        include_str!("../../library/components/LowerThird.tsx"),
+    ),
+    (
+        "SplitShell",
+        include_str!("../../library/components/SplitShell.tsx"),
+    ),
+    ("Steps", include_str!("../../library/components/Steps.tsx")),
+    (
+        "TitleCard",
+        include_str!("../../library/components/TitleCard.tsx"),
+    ),
+];
 
 /// `(name, JSON)` for each starter theme, in `library/themes/`.
-pub const STARTER_THEMES: &[(&str, &str)] = &[];
+pub const STARTER_THEMES: &[(&str, &str)] =
+    &[("warm", include_str!("../../library/themes/warm.json"))];
 
 /// The starter components as a `ComponentSource` (no folder involved).
 pub struct Starter;

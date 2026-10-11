@@ -5,8 +5,8 @@
 mod common;
 
 use common::{assert_golden, fixture};
-use studio_core::Project;
-use studio_core::gallery::{self, GalleryOptions};
+use studio_core::gallery::{self, GalleryOptions, Moment};
+use studio_core::{ComponentSource, Project, Size, Starter, Theme};
 
 #[test]
 fn every_example_is_a_still_in_declaration_order() {
@@ -62,4 +62,43 @@ fn the_sheet_is_one_png() {
     let (w, h) = image::image_dimensions(&path).unwrap();
     std::fs::remove_file(&path).ok();
     assert!(w >= 2 * 640 && h >= 360, "{w}x{h}");
+}
+
+/// Every example of every starter component, at the default theme, pinned
+/// by a golden each (`starter-<Component>-<example>.png`); and one warm
+/// still, so the second bundled theme is pinned too.
+#[test]
+fn every_starter_example_has_its_golden() {
+    // Laid out at 1920x1080 and drawn at half scale (the 540p proxy), so the
+    // layouts are the ones a video gets.
+    let size = Size {
+        width: 1920,
+        height: 1080,
+    };
+    let moment = Moment {
+        t: 1.0,
+        duration: 2.0,
+    };
+    let options = GalleryOptions {
+        scale: 0.5,
+        threads: None,
+    };
+    let theme = Theme::bundled("default").unwrap();
+    for name in Starter.names() {
+        let g =
+            gallery::render_source(&Starter, &theme, size, None, &name, moment, &options).unwrap();
+        assert!(!g.stills.is_empty(), "{name} has no examples");
+        for still in &g.stills {
+            assert_golden(&format!("starter-{name}-{}", still.example), &still.frame);
+        }
+    }
+    let lib = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("library/themes/warm.json"),
+    )
+    .unwrap();
+    let warm = Theme::parse(&lib, std::path::Path::new("library/themes/warm.json")).unwrap();
+    let g =
+        gallery::render_source(&Starter, &warm, size, None, "TitleCard", moment, &options).unwrap();
+    let long = g.stills.iter().find(|s| s.example == "long").unwrap();
+    assert_golden("starter-TitleCard-long-warm", &long.frame);
 }
