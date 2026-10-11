@@ -70,6 +70,18 @@ changed), and runs `oculus docs` to refresh the library's agent docs. The last
 two are non-fatal: a machine whose app has never run has no library to fill.
 `OCULUS_SKIP_PREDEV=1` skips it all for a vite-only session.
 
+There is one preflight per checkout. A stopped `tauri dev` leaves its
+preflight's synchronous cargo builds running and holding cargo's lock, so a new
+preflight first ends any other preflight of the same checkout (recorded in
+`target/.oculus-predev.pid`, or found by its cwd) and orphaned cargo builds of
+this checkout's CLI or keyd, and this checkout's CLI watcher, each with its
+whole process tree. The watcher goes because predev rebuilds the CLI and starts
+a new one, and a quick restart never trips its dev-server probe. Other
+checkouts, editors' `cargo check` and builds run from a shell are left alone.
+Before each cargo build it names whoever else holds that target's lock rather
+than leaving cargo's "Blocking waiting for file lock" unexplained.
+`app/scripts/stale-builds.mjs` does both, fail-open, and skips Windows.
+
 The scripts share target detection and artifact paths through `app/scripts/runtime.mjs`;
 the ffmpeg fetcher rejects failed HTTP responses and truncated downloads before
 installing anything.
@@ -139,7 +151,8 @@ PATH. Four pieces keep it current:
 - `app/scripts/watch-cli.mjs` rebuilds it on Rust changes through the session,
   since `tauri dev` never re-runs `beforeDevCommand`. Its debounce is longer
   than tauri's, so the app build takes cargo's lock first. It exits when the
-  vite port (probed on `localhost`, which is `::1` on macOS) stops answering.
+  vite port (probed on `localhost`, which is `::1` on macOS) stops answering,
+  and takes an in-flight build down with it.
 - Both, and `bun run cli`/`cli:dev`, copy each build over the
   `binaries/oculus-<triple>` sidecar. tauri-build copies every `externalBin`
   into `target/<profile>/` whenever the app's build script runs, so `tauri
@@ -405,6 +418,7 @@ without keyd — neither is an environment variable.
 
 - Any build of the crate copies the `binaries/` sidecar to `target/<profile>/oculus` — a stale sidecar means a stale CLI.
 - `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
+- rust-analyzer sharing `app/src-tauri/target/` takes cargo's build lock and stalls the preflight's builds. The repo's `.zed/settings.json` sets rust-analyzer's `cargo.targetDir` to `true`, which moves it to `target/rust-analyzer`; other editors need the same setting.
 - Anything under `app/src-tauri/` changing, templates included, rebuilds and relaunches the dev app.
 - A dev rebuild SIGTERMs the app past Tauri's Exit event, so agent subprocesses can outlive it ([harness.md](./harness.md)).
 - `eprintln!` panics once stderr is a closed pipe, as it is for an app a dead `tauri dev` left running, and a panic inside a WebKit or Objective-C callback aborts the app. The app crate logs with `elog!` (`app/src-tauri/src/elog.rs`), which drops the write error; tests and the CLI binary keep `eprintln!`.
