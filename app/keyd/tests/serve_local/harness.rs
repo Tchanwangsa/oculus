@@ -120,6 +120,19 @@ pub(crate) fn call_at(sock: &std::path::Path, req: &Value) -> Value {
     let mut stream = connect(sock);
     stream.write_all(format!("{req}\n").as_bytes()).unwrap();
     let mut line = String::new();
-    BufReader::new(&mut stream).read_line(&mut line).unwrap();
+    BufReader::new(&mut stream)
+        .read_line(&mut line)
+        .unwrap_or_else(|error| {
+            let op = req
+                .get("op")
+                .and_then(Value::as_str)
+                .filter(|op| {
+                    !op.is_empty()
+                        && op.len() <= 32
+                        && op.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+                })
+                .unwrap_or("?");
+            panic!("keyd reply for op={op} failed: {error}");
+        });
     serde_json::from_str(&line).unwrap()
 }

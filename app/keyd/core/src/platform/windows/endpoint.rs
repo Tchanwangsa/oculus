@@ -112,14 +112,27 @@ fn millis(duration: Option<Duration>) -> u32 {
     })
 }
 
+enum ConnectState {
+    Idle,
+    Pending,
+    Connected,
+    Failed(u32),
+}
+
 struct Pending {
     pipe: Option<Handle>,
     event: Handle,
     ov: Box<OVERLAPPED>,
+    state: ConnectState,
 }
 unsafe impl Send for Pending {}
 impl Pending {
     fn new(path: &Path, first: bool) -> io::Result<Self> {
+        let mut pending = Self::create(path, first)?;
+        pending.start_connect()?;
+        Ok(pending)
+    }
+    fn create(path: &Path, first: bool) -> io::Result<Self> {
         let descriptor = Descriptor::owner_only()?;
         let attributes = descriptor.attributes();
         let name = wide(path);
@@ -144,20 +157,71 @@ impl Pending {
         let event = handle(unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) })?;
         let mut ov: Box<OVERLAPPED> = Box::new(unsafe { std::mem::zeroed() });
         ov.hEvent = event.0;
-        if unsafe { ConnectNamedPipe(pipe.0, ov.as_mut()) } == 0 {
-            match unsafe { GetLastError() } {
-                ERROR_IO_PENDING => {}
-                ERROR_PIPE_CONNECTED => unsafe {
-                    SetEvent(event.0);
-                },
-                error => return Err(io::Error::from_raw_os_error(error as i32)),
-            }
-        }
         Ok(Self {
             pipe: Some(pipe),
             event,
             ov,
+            state: ConnectState::Idle,
         })
+    }
+    fn start_connect(&mut self) -> io::Result<()> {
+        debug_assert!(!matches!(self.state, ConnectState::Pending));
+        *self.ov = unsafe { std::mem::zeroed() };
+        self.ov.hEvent = self.event.0;
+        if unsafe { ResetEvent(self.event.0) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let pipe = self.pipe.as_ref().unwrap();
+        self.state = if unsafe { ConnectNamedPipe(pipe.0, self.ov.as_mut()) } != 0 {
+            ConnectState::Connected
+        } else {
+            match unsafe { GetLastError() } {
+                ERROR_IO_PENDING => ConnectState::Pending,
+                ERROR_PIPE_CONNECTED => ConnectState::Connected,
+                // A client can connect and close between creating the instance
+                // and arming its accept. Let the accept tick retire that client.
+                error @ (ERROR_NO_DATA | ERROR_BROKEN_PIPE) => ConnectState::Failed(error),
+                error => return Err(io::Error::from_raw_os_error(error as i32)),
+            }
+        };
+        if !matches!(self.state, ConnectState::Pending) && unsafe { SetEvent(self.event.0) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+    fn complete(&mut self) -> io::Result<()> {
+        if matches!(self.state, ConnectState::Pending) {
+            let mut count = 0;
+            self.state = if unsafe {
+                GetOverlappedResult(
+                    self.pipe.as_ref().unwrap().0,
+                    self.ov.as_ref(),
+                    &mut count,
+                    0,
+                )
+            } != 0
+            {
+                ConnectState::Connected
+            } else {
+                ConnectState::Failed(unsafe { GetLastError() })
+            };
+        }
+        match self.state {
+            ConnectState::Connected => Ok(()),
+            ConnectState::Failed(error) => Err(io::Error::from_raw_os_error(error as i32)),
+            _ => Err(io::Error::other("pipe accept has not completed")),
+        }
+    }
+    fn reconnect(&mut self) -> io::Result<()> {
+        debug_assert!(!matches!(self.state, ConnectState::Pending));
+        if unsafe { DisconnectNamedPipe(self.pipe.as_ref().unwrap().0) } == 0 {
+            let error = unsafe { GetLastError() };
+            if error != ERROR_PIPE_NOT_CONNECTED {
+                return Err(io::Error::from_raw_os_error(error as i32));
+            }
+        }
+        self.state = ConnectState::Idle;
+        self.start_connect()
     }
     fn ready(&self) -> io::Result<bool> {
         match unsafe { WaitForSingleObject(self.event.0, 0) } {
@@ -170,6 +234,9 @@ impl Pending {
 impl Drop for Pending {
     fn drop(&mut self) {
         if let Some(pipe) = &self.pipe {
+            if !matches!(self.state, ConnectState::Pending) {
+                return;
+            }
             unsafe {
                 CancelIoEx(pipe.0, self.ov.as_ref());
                 let mut count = 0;
@@ -214,13 +281,19 @@ pub(crate) fn accept_any(
                 .lock()
                 .map_err(|_| io::Error::other("pipe listener lock poisoned"))?;
             if pending.ready()? {
-                let mut count = 0;
-                let pipe = pending.pipe.as_ref().unwrap();
-                if unsafe { GetOverlappedResult(pipe.0, pending.ov.as_ref(), &mut count, 0) } == 0 {
-                    let error = unsafe { GetLastError() };
-                    if error != ERROR_PIPE_CONNECTED {
-                        return Err(io::Error::from_raw_os_error(error as i32));
+                if let Err(error) = pending.complete() {
+                    // Never leave a failed, signaled accept at the front of the
+                    // listener: the next tick must wait for a fresh client.
+                    pending.reconnect()?;
+                    if matches!(
+                        error.raw_os_error(),
+                        Some(code) if code == ERROR_NO_DATA as i32
+                            || code == ERROR_BROKEN_PIPE as i32
+                            || code == ERROR_PIPE_NOT_CONNECTED as i32
+                    ) {
+                        continue;
                     }
+                    return Err(error);
                 }
                 // Keep a listening instance alive before releasing this one.
                 let replacement = Pending::new(&listener.path, false)?;
@@ -603,6 +676,82 @@ mod tests {
             }
         }
         assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn a_client_connected_before_connect_can_exchange_bytes() {
+        let path = crate::paths::socket(&scratch("connected-before-connect"));
+        let mut pending = Pending::create(&path, true).unwrap();
+        let mut client = connect_inner(&path, false).unwrap();
+        pending.start_connect().unwrap();
+        assert!(matches!(pending.state, ConnectState::Connected));
+        let listener = Listener {
+            path: path.clone(),
+            pending: Mutex::new(pending),
+        };
+        let mut server = accept_any(&[&listener], Some(Duration::from_secs(2)))
+            .unwrap()
+            .unwrap();
+        client.write_all(b"hi").unwrap();
+        let mut bytes = [0; 2];
+        server.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"hi");
+    }
+
+    #[test]
+    fn a_client_closed_before_connect_is_retired_before_the_next_client() {
+        let path = crate::paths::socket(&scratch("closed-before-connect"));
+        let mut pending = Pending::create(&path, true).unwrap();
+        drop(connect_inner(&path, false).unwrap());
+        pending.start_connect().unwrap();
+        assert!(matches!(pending.state, ConnectState::Failed(ERROR_NO_DATA)));
+        let listener = Listener {
+            path: path.clone(),
+            pending: Mutex::new(pending),
+        };
+        assert!(accept_any(&[&listener], Some(Duration::from_millis(10)))
+            .unwrap()
+            .is_none());
+        let mut client = connect_inner(&path, false).unwrap();
+        let mut server = accept_any(&[&listener], Some(Duration::from_secs(2)))
+            .unwrap()
+            .unwrap();
+        client.write_all(b"hi").unwrap();
+        let mut bytes = [0; 2];
+        server.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"hi");
+    }
+
+    #[test]
+    fn a_failed_accept_is_retired_before_the_next_client() {
+        let path = crate::paths::socket(&scratch("cancelled-accept"));
+        let listener = bind(&path).unwrap();
+        {
+            let pending = listener.pending.lock().unwrap();
+            assert_ne!(
+                unsafe { CancelIoEx(pending.pipe.as_ref().unwrap().0, pending.ov.as_ref()) },
+                0
+            );
+            assert_eq!(
+                unsafe { WaitForSingleObject(pending.event.0, 2_000) },
+                WAIT_OBJECT_0
+            );
+        }
+        let error = accept_any(&[&listener], Some(Duration::from_millis(10)))
+            .err()
+            .expect("the cancelled accept must report its error");
+        assert_eq!(error.raw_os_error(), Some(ERROR_OPERATION_ABORTED as i32));
+        assert!(accept_any(&[&listener], Some(Duration::from_millis(10)))
+            .unwrap()
+            .is_none());
+        let mut client = connect_inner(&path, false).unwrap();
+        let mut server = accept_any(&[&listener], Some(Duration::from_secs(2)))
+            .unwrap()
+            .unwrap();
+        client.write_all(b"hi").unwrap();
+        let mut bytes = [0; 2];
+        server.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"hi");
     }
 
     #[test]

@@ -55,6 +55,10 @@ stops the verified daemon before removing its registration.
 The endpoint is `\\.\pipe\com.tchan.oculus.keyd.<user SID>`. Its DACL admits
 only the current user and refuses remote clients. Overlapped I/O lets accept
 checks and client read deadlines complete without blocking the event loop.
+An accept whose client has already disconnected is rearmed for the next client;
+a failed completion is retired before its error is returned, so it cannot keep
+waking the accept loop and filling the broker log. Synchronous connects and
+pending I/O completions have separate states.
 Release clients verify the pipe server’s process, user and current MSIX
 package before sending credentials; an identity mismatch is a connection
 error rather than a missing broker. The broker checks the client process
