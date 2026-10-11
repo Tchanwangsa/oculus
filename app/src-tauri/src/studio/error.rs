@@ -3,16 +3,12 @@
 
 use std::fmt;
 
-use studio_core::MAX_NARRATION_SECS;
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum NarrationError {
     /// The aligner model is not downloaded.
     ModelMissing,
     /// The script has no word with a letter in it.
     EmptyScript,
-    /// The clip is over `MAX_NARRATION_SECS`.
-    TooLong { seconds: f64 },
     /// ONNX Runtime failed to load or run the model.
     Onnx(String),
     /// The audio is not a WAV hound reads, or could not be resampled.
@@ -32,10 +28,6 @@ impl fmt::Display for NarrationError {
             Self::EmptyScript => write!(
                 f,
                 "the narration has no words to time: every word is punctuation or symbols"
-            ),
-            Self::TooLong { seconds } => write!(
-                f,
-                "the clip is {seconds:.1} s; narration clips over {MAX_NARRATION_SECS} s are refused because timing them needs gigabytes of memory; split the paragraph"
             ),
             Self::Onnx(e) => write!(f, "the aligner failed: {e}"),
             Self::Decode(e) => write!(f, "could not decode the narration audio: {e}"),

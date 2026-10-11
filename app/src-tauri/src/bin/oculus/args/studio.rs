@@ -70,7 +70,7 @@ pub(crate) struct StudioVoiceArgs {
 /// rest print `cached`. Scenes run one at a time in video order and the
 /// manifest is saved after each, so a failure keeps the scenes before it;
 /// the command then exits 1 naming the failed scene. At the end, entries
-/// for scenes no longer narrated and clips nothing names are deleted. A clip over 60 s is refused: split the paragraph.
+/// for scenes no longer narrated and clips nothing names are deleted.
 ///
 /// Per scene it prints the id, `narrated` or `cached`, the clip's length,
 /// its word count, and as warnings the words the aligner was unsure of and
@@ -230,10 +230,10 @@ pub(crate) struct StudioStripArgs {
 /// component's `examples` against its `props` schema, and renders every scene
 /// at its first and last moment. For a narrated video it also checks
 /// `script.md` (sections no scene matches, text not written as it is said)
-/// and the narration (missing or stale clips, clips over 60 s, words the
-/// aligner was unsure of, unscripted speech). Every problem is reported, not
-/// just the first, each with its scene, component and, where there is one,
-/// the TSX line. Exits 1 when there is any problem, so it can gate a render.
+/// and the narration (missing or stale clips, words the aligner was unsure
+/// of, unscripted speech). Every problem is reported, not just the first,
+/// each with its scene, component and, where there is one, the TSX line.
+/// Exits 1 when there is any problem, so it can gate a render.
 ///
 /// See `oculus studio frame --help` for what a video folder holds.
 #[derive(Args)]

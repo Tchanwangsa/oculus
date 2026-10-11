@@ -18,8 +18,7 @@ mod video;
 pub use components::{ComponentSource, FolderComponents};
 pub use lint::{LintIssue, LintReport};
 pub use narration::{
-    LOW_CONFIDENCE, MANIFEST_PATH, MAX_NARRATION_SECS, Manifest, ManifestGap, ManifestScene,
-    ManifestWord, WordCues,
+    LOW_CONFIDENCE, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene, ManifestWord, WordCues,
 };
 pub use script::{Script, ScriptSection};
 pub use timeline::Timeline;

@@ -62,19 +62,14 @@ impl Aligner for Stub {
 }
 
 /// A TTS server whose clip lasts 0.1 s per word of input; an input with
-/// `broken` in it gets a 500, and one with `marathon` a 61 s clip.
+/// `broken` in it gets a 500.
 fn tts() -> FakeServer {
     FakeServer::start(|hit| {
         let input = hit.json()["input"].as_str().unwrap_or("").to_owned();
         if input.contains("broken") {
             return Reply::status(500, json!({ "detail": "engine exploded" }));
         }
-        let seconds = if input.contains("marathon") {
-            61.0
-        } else {
-            0.1 * input.split_whitespace().count() as f64
-        };
-        Reply::bytes(tone(seconds))
+        Reply::bytes(tone(0.1 * input.split_whitespace().count() as f64))
     })
 }
 
@@ -316,25 +311,6 @@ fn reports_low_confidence_words_and_leading_gaps() {
     assert_eq!(manifest(&dir).scenes["a"].gaps[0].after, None);
     let lint = studio_core::Project::load(&*dir).unwrap();
     assert!(lint.manifest.is_some());
-}
-
-#[test]
-fn a_clip_over_the_limit_is_refused_with_its_scene() {
-    let dir = Scratch::new("narrate-long");
-    video(&dir, "## a\nA marathon of a paragraph.\n\n## b\nShort.\n");
-    let server = tts();
-    let stub = Stub::new();
-    let error = narrate(
-        &dir,
-        &voice(&server),
-        &stub,
-        &Options::default(),
-        &mut |_| {},
-    )
-    .unwrap_err();
-    assert_eq!(error.scene.as_deref(), Some("a"));
-    assert!(error.message.contains("split the paragraph"), "{error}");
-    assert_eq!(stub.calls.get(), 0, "never aligned");
 }
 
 #[test]

@@ -4,14 +4,13 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::emissions::{log_softmax, logits, normalise};
+use super::emissions::emissions;
 use super::gaps::{unscripted, Heard};
 use super::model::resolve_model;
 use super::targets::targets;
 use super::viterbi::{force_align, Span};
-use crate::studio::audio::ALIGN_RATE;
+use super::windows::Windows;
 use crate::studio::NarrationError;
-use studio_core::MAX_NARRATION_SECS;
 
 /// One emission frame of wav2vec2: 320 samples at 16 kHz.
 pub const FRAME_SECONDS: f64 = 0.02;
@@ -70,29 +69,28 @@ pub fn align(pcm: &[f32], script_words: &[String]) -> Result<Alignment, Narratio
     align_with(&model, pcm, script_words)
 }
 
-/// [`align`] with the model at `model`. Opens a session for this clip and
-/// drops it after: a reused session's memory grows from run to run. A clip
-/// over `MAX_NARRATION_SECS` is refused, since memory grows with the square
-/// of its length (2.2 GB at 57 s).
+/// [`align`] with the model at `model`, a long clip in
+/// [`Windows::DEFAULT`]'s windows.
 pub fn align_with(
     model: &Path,
     pcm: &[f32],
     script_words: &[String],
 ) -> Result<Alignment, NarrationError> {
+    align_windows(model, pcm, script_words, &Windows::DEFAULT)
+}
+
+/// [`align_with`] cutting a long clip as `windows` says.
+pub(super) fn align_windows(
+    model: &Path,
+    pcm: &[f32],
+    script_words: &[String],
+    windows: &Windows,
+) -> Result<Alignment, NarrationError> {
     let targets = targets(script_words);
     if targets.words.is_empty() {
         return Err(NarrationError::EmptyScript);
     }
-    let seconds = pcm.len() as f64 / ALIGN_RATE as f64;
-    if seconds > MAX_NARRATION_SECS {
-        return Err(NarrationError::TooLong { seconds });
-    }
-    let logits = {
-        let mut session = crate::runtime::onnx::session(model).map_err(NarrationError::Onnx)?;
-        logits(&mut session, normalise(pcm))?
-    };
-    let em = log_softmax(&logits);
-    drop(logits);
+    let em = emissions(model, pcm, windows)?;
     let spans = force_align(&em, &targets.words)?;
     let heard = unscripted(&em, &spans);
     Ok(assemble(&spans, &heard, &targets.index, script_words))

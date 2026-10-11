@@ -101,19 +101,6 @@ fn a_script_with_no_letters_is_refused_before_the_model_loads() {
 }
 
 #[test]
-fn a_clip_over_sixty_seconds_is_refused_before_the_model_loads() {
-    let pcm = vec![0.0; studio_core::MAX_NARRATION_SECS as usize * 16_000 + 1];
-    let error = align_with(
-        std::path::Path::new("/nonexistent/model.onnx"),
-        &pcm,
-        &words(&["hello"]),
-    )
-    .unwrap_err();
-    assert!(matches!(error, NarrationError::TooLong { .. }));
-    assert!(error.to_string().contains("split the paragraph"), "{error}");
-}
-
-#[test]
 fn a_model_that_will_not_load_is_an_onnx_error() {
     let error = align_with(
         std::path::Path::new("/nonexistent/model.onnx"),

@@ -1,5 +1,6 @@
 //! Narration timing: when each script word is spoken in a TTS clip, by CTC
-//! forced alignment against wav2vec2's letter emissions (ONNX, CPU). Ported
+//! forced alignment against wav2vec2's letter emissions (ONNX, CPU), a long
+//! clip's emissions computed in windows (`windows`). Ported
 //! from the alignment spike, which matched Python frame for frame. Rules
 //! and thresholds: docs/studio.md, "Narration timing".
 
@@ -11,6 +12,7 @@ mod targets;
 #[cfg(test)]
 mod tests;
 mod viterbi;
+mod windows;
 
 pub use crate::runtime::onnx::CANCELLED;
 pub use align::{
