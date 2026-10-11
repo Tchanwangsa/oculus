@@ -109,6 +109,9 @@ pub enum StudioError {
     )]
     SceneTimeOutOfRange { index: usize, t: f64, length: f64 },
 
+    #[error("frame {frame} does not exist; the video has {frames} frames at {fps} fps (0-based)")]
+    FrameOutOfRange { frame: u64, frames: u64, fps: u32 },
+
     /// A narrated scene's clip is missing from `narration/manifest.json` or
     /// was made for other text; `scene` is its id.
     #[error("scene `{scene}`: {message}")]
@@ -215,6 +218,7 @@ impl StudioError {
             Self::TimeOutOfRange { .. } => "time_out_of_range",
             Self::SceneOutOfRange { .. } => "scene_out_of_range",
             Self::SceneTimeOutOfRange { .. } => "scene_time_out_of_range",
+            Self::FrameOutOfRange { .. } => "frame_out_of_range",
             Self::Transition { .. } => "transition",
             Self::Narration { .. } => "narration",
             Self::Script { .. } => "script",

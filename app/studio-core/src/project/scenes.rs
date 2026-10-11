@@ -1,7 +1,9 @@
 //! Each scene's narration, length and word cues, resolved from the script,
 //! the manifest and the theme's `narration` tokens. A narrated scene lasts
-//! `max(hold, lead + clip + tail)`; a silent one lasts its `hold`.
+//! `max(hold, lead + clip + tail)`; a silent one lasts its `hold`; either
+//! rounds up to whole frames.
 
+use super::timeline::whole_frames;
 use super::{ManifestScene, Project, SceneSpec, ScriptSection, WordCues};
 use crate::error::{Result, StudioError};
 use crate::render::SceneCall;
@@ -60,10 +62,18 @@ impl Project {
         })
     }
 
-    /// Scene `index`'s length in seconds: the hold for a silent scene, at
-    /// least `lead + clip + tail` for a narrated one. Fails on stale
-    /// narration and on a silent scene without a hold.
+    /// Scene `index`'s length in seconds, rounded up to whole frames at
+    /// the video's fps (`Timeline`). Fails on stale narration and on a
+    /// silent scene without a hold.
     pub fn scene_length(&self, index: usize) -> Result<f64> {
+        let fps = self.fps();
+        let frames = whole_frames(self.written_length(index)?, fps);
+        Ok(frames as f64 / f64::from(fps))
+    }
+
+    /// The length the folder asks for: the hold for a silent scene, at
+    /// least `lead + clip + tail` for a narrated one.
+    fn written_length(&self, index: usize) -> Result<f64> {
         let scene = self.scene(index)?;
         let Some(clip) = self.narration(index)? else {
             return scene.hold.ok_or_else(|| self.no_hold(index, scene));
@@ -92,7 +102,7 @@ impl Project {
         })
     }
 
-    fn scene(&self, index: usize) -> Result<&SceneSpec> {
+    pub(super) fn scene(&self, index: usize) -> Result<&SceneSpec> {
         self.video
             .scenes
             .get(index)

@@ -3,7 +3,7 @@ use super::average::Accumulator;
 
 #[test]
 fn samples_grow_with_the_move_and_stop_at_the_cap() {
-    let mb = MotionBlur::default();
+    let mb = MotionBlur::at(30);
     assert_eq!(mb.samples(0.0), 1);
     assert_eq!(mb.samples(1.0), 1);
     assert_eq!(mb.samples(1.1), 2);
@@ -14,7 +14,7 @@ fn samples_grow_with_the_move_and_stop_at_the_cap() {
 
 #[test]
 fn bad_shutters_are_refused() {
-    let ok = MotionBlur::default();
+    let ok = MotionBlur::at(30);
     assert!(ok.check().is_ok());
     for bad in [
         MotionBlur { fps: 0.0, ..ok },

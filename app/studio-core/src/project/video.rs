@@ -2,7 +2,7 @@
 
 use crate::render::Size;
 use crate::transition::{MotionSpec, TransitionSpec};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
@@ -11,6 +11,10 @@ use std::collections::HashMap;
 #[serde(deny_unknown_fields)]
 pub struct Video {
     pub size: Size,
+    /// Frames per second, one of `FRAME_RATES`. Every scene's length rounds
+    /// up to whole frames at this rate (`Timeline`).
+    #[serde(default = "default_fps", deserialize_with = "deserialize_fps")]
+    pub fps: u32,
     /// A bundled theme name, or a `.json` path relative to the project.
     pub theme: String,
     pub scenes: Vec<SceneSpec>,
@@ -23,7 +27,7 @@ pub struct Video {
     pub voice: Option<Voice>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SceneSpec {
     /// Names the scene's `## id` section in script.md; required when the
@@ -39,6 +43,33 @@ pub struct SceneSpec {
     /// How this scene comes in, over the video's and theme's defaults.
     #[serde(default)]
     pub transition: Option<TransitionSpec>,
+}
+
+/// The frame rates `video.json`'s `fps` takes.
+pub const FRAME_RATES: [u32; 5] = [24, 25, 30, 50, 60];
+
+fn default_fps() -> u32 {
+    30
+}
+
+/// Any JSON number, so 29.97 is refused with the rates rather than as a
+/// type error.
+fn deserialize_fps<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    let fps = f64::deserialize(d)?;
+    check_fps(fps).map_err(serde::de::Error::custom)
+}
+
+fn check_fps(fps: f64) -> Result<u32, String> {
+    match FRAME_RATES.iter().find(|&&r| f64::from(r) == fps) {
+        Some(&r) => Ok(r),
+        None => {
+            let rates: Vec<String> = FRAME_RATES.iter().map(u32::to_string).collect();
+            Err(format!(
+                "fps is {fps}; it must be one of {} (default 30)",
+                rates.join(", ")
+            ))
+        }
+    }
 }
 
 /// `video.json`'s `voice`: each field overrides the same Settings -> Voice
@@ -69,6 +100,7 @@ pub(super) fn check(video: &Video, scripted: bool) -> Result<(), String> {
             size.width, size.height
         ));
     }
+    check_fps(f64::from(video.fps))?;
     if video.scenes.is_empty() {
         return Err("scenes is empty; a video needs at least one scene".to_owned());
     }

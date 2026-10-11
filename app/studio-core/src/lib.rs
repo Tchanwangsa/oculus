@@ -34,9 +34,9 @@ pub use error::{BudgetKind, Result, StudioError, TsxLoc};
 pub use fonts::bundled_families;
 pub use host::ComponentInfo;
 pub use project::{
-    ComponentSource, FolderComponents, LOW_CONFIDENCE, LintIssue, LintReport, MANIFEST_PATH,
-    MAX_NARRATION_SECS, Manifest, ManifestGap, ManifestScene, ManifestWord, Project, SceneSpec,
-    Script, ScriptSection, Timeline, Video, Voice, WordCues,
+    ComponentSource, FRAME_RATES, FolderComponents, LOW_CONFIDENCE, LintIssue, LintReport,
+    MANIFEST_PATH, MAX_NARRATION_SECS, Manifest, ManifestGap, ManifestScene, ManifestWord, Project,
+    SceneSpec, Script, ScriptSection, Timeline, Video, Voice, WordCues,
 };
 pub use render::{
     Engine, Frame, MotionBlur, Purpose, RenderOptions, Renderer, SceneCall, Size, Time,

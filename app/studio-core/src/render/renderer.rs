@@ -34,7 +34,7 @@ impl Renderer {
         let scenes = (0..project.video.scenes.len())
             .map(|i| project.staged(i))
             .collect::<Result<Vec<_>>>()?;
-        let timeline = Timeline::new(scenes.iter().map(|s| s.length));
+        let timeline = Timeline::new(project.fps(), scenes.iter().map(|s| s.length));
         let mut engine = Engine::new(
             project.theme.clone(),
             project.video.size,
@@ -58,7 +58,7 @@ impl Renderer {
         &mut self.engine
     }
 
-    /// The video's scene lengths, narration included.
+    /// The video's scene lengths in whole frames, narration included.
     pub fn timeline(&self) -> &Timeline {
         &self.timeline
     }

@@ -15,10 +15,10 @@ pub use renderer::Renderer;
 pub(crate) use frame::write_png;
 pub(crate) use renderer::{last_moment, scene_frame};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Logical frame size in px; layout always happens at this size.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Size {
     pub width: u32,

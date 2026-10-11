@@ -6,6 +6,8 @@
 //! needed (`scenes`), so a stale manifest fails renders but not `lint`.
 
 mod components;
+mod fingerprint;
+mod frames;
 mod lint;
 mod narration;
 mod scenes;
@@ -21,7 +23,7 @@ pub use narration::{
 };
 pub use script::{Script, ScriptSection};
 pub use timeline::Timeline;
-pub use video::{SceneSpec, Video, Voice};
+pub use video::{FRAME_RATES, SceneSpec, Video, Voice};
 
 pub(crate) use scenes::Staged;
 
@@ -87,20 +89,6 @@ impl Project {
         self.dir.join("assets")
     }
 
-    /// Every scene's length in order; fails on the first scene whose length
-    /// is unknown (see `scene_length`).
-    pub fn timeline(&self) -> Result<Timeline> {
-        let lengths = (0..self.video.scenes.len())
-            .map(|i| self.scene_length(i))
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Timeline::new(lengths.into_iter()))
-    }
-
-    /// Total length in seconds.
-    pub fn length(&self) -> Result<f64> {
-        Ok(self.timeline()?.length())
-    }
-
     /// The video's `morphColor` (video.json `motion`, then the theme), as
     /// `<Morph>` uses it.
     pub(crate) fn morph_color(&self) -> Result<MorphColor, TransitionError> {
@@ -109,15 +97,16 @@ impl Project {
 
     /// The motion blur a render for `purpose` gets from the `motionBlur`
     /// token (video.json `motion`, then the theme, then `finals`), for
-    /// `RenderOptions::motion_blur`. The export asks for `Purpose::Final`;
-    /// `oculus studio frame` and `strip` blur only when asked.
+    /// `RenderOptions::motion_blur`, with the shutter at the video's fps.
+    /// The export asks for `Purpose::Final`; `oculus studio frame` and
+    /// `strip` blur only when asked.
     pub fn motion_blur(&self, purpose: Purpose) -> Result<Option<MotionBlur>> {
         let on = match blur_mode(&self.video.motion, &self.theme)? {
             BlurMode::Always => true,
             BlurMode::Finals => purpose == Purpose::Final,
             BlurMode::Off => false,
         };
-        Ok(on.then(MotionBlur::default))
+        Ok(on.then(|| MotionBlur::at(self.fps())))
     }
 
     /// The transition into each scene through the cascade (`None` for the

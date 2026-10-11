@@ -159,8 +159,9 @@ pub(crate) struct StudioFrameArgs {
     /// Pixel scale over the same layout: 0.5 draws a 1080p video at 540p
     #[arg(long, value_name = "F", default_value_t = 1.0)]
     pub(crate) scale: f64,
-    /// Average sub-frames over a 30 fps, 180° shutter, as many as the
-    /// motion needs (off unless given, whatever the theme's motionBlur says)
+    /// Average sub-frames over a 180° shutter at the video's fps, as many as
+    /// the motion needs (off unless given, whatever the theme's motionBlur
+    /// says)
     #[arg(long)]
     pub(crate) motion_blur: bool,
 }
@@ -212,7 +213,8 @@ pub(crate) struct StudioStripArgs {
     /// Render threads (default: half the cores, at most one per frame)
     #[arg(long, value_name = "T")]
     pub(crate) threads: Option<usize>,
-    /// Blur each frame over a 30 fps, 180° shutter (see `frame --help`)
+    /// Blur each frame over a 180° shutter at the video's fps (see `frame
+    /// --help`)
     #[arg(long)]
     pub(crate) motion_blur: bool,
     /// Where to write the PNG (default: `<DIR>/out/strip-<from>-<to>.png`)

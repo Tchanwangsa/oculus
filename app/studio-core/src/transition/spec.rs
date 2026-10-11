@@ -3,10 +3,10 @@
 //! are checked when the cascade resolves them (`cascade`), so lint can name
 //! the level a bad one came from.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct TransitionSpec {
     /// cut, dissolve, push, wipe, zoom or magic.
@@ -23,7 +23,7 @@ pub struct TransitionSpec {
 }
 
 /// `video.json`'s top-level `motion` and the theme's motion defaults.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct MotionSpec {
     pub transition: Option<TransitionSpec>,

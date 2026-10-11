@@ -15,7 +15,7 @@ renders single frames and contact sheets, lints, and narrates.
 | The crate (`oculus-studio-core`, lib `studio_core`), its own cargo root | `app/studio-core/` |
 | Public API: `Renderer`, `Engine`, `Frame`, `Time`; motion blur | `app/studio-core/src/render/` (`blur/`) |
 | Contact sheets (`strip`): parallel frames, the tiled sheet and its labels | `app/studio-core/src/strip/` |
-| Video folder, component lookup, timeline, lint | `app/studio-core/src/project/` (`lint/`) |
+| Video folder, component lookup, the whole-frame timeline, scene fingerprints, lint | `app/studio-core/src/project/` (`timeline.rs`, `frames.rs`, `fingerprint.rs`, `lint/`) |
 | `script.md`, the narration manifest, scene lengths and word cues | `app/studio-core/src/project/` (`script/`, `narration/`, `scenes.rs`), `app/studio-core/src/host/prelude/words.js` |
 | Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
 | Magic move: matching and blending two laid-out trees, OKLab colour | `app/studio-core/src/morph/` |
@@ -45,6 +45,7 @@ narration/    manifest.json and the clips it names
 ```json
 {
   "size": { "width": 1920, "height": 1080 },
+  "fps": 30,
   "theme": "default",
   "motion": { "transition": { "kind": "push", "dur": 0.6 }, "magicMove": "auto" },
   "voice": { "voice": "af_heart", "speed": 1.0 },
@@ -56,10 +57,13 @@ narration/    manifest.json and the clips it names
 ```
 
 - A scene's length is its `hold` in seconds, or for a narrated scene the
-  length of its narration (see "Narration"). A global `t` maps to a scene
-  and a scene-relative `t` by summing lengths (`Timeline`, from
+  length of its narration (see "Narration"), rounded up to whole frames at
+  the video's `fps` (see "Frames"). A global `t` maps to a scene and a
+  scene-relative `t` by summing lengths (`Timeline`, from
   `Project::timeline`); a `t` past the end is an error that states the
   video's length.
+- `fps` (optional, default 30) is 24, 25, 30, 50 or 60; any other value
+  fails the load with the rates.
 - `id` (`[a-z0-9-]+`, unique) names the scene's section in `script.md`. It
   is required on every scene once the folder has a `script.md`; a scene
   whose id has no section is silent and needs a `hold`.
@@ -75,6 +79,39 @@ narration/    manifest.json and the clips it names
 - Component names are PascalCase letters and digits and resolve to
   `components/<Name>.tsx` through the `ComponentSource` trait
   (`FolderComponents`); a missing one is an error listing the ones there are.
+
+## Frames: scenes are whole frames, and a scene has a fingerprint
+
+The timeline counts frames at the video's `fps`: each scene's length rounds
+up to whole frames (`ceil(length * fps)`, at most one frame longer, with a
+millionth of a frame of slack so `0.1 s * 30` is 3 frames), and every
+consumer (`Renderer`, `strip`, lint, `ctx.duration`, word cues, the
+transitions) reads that one timeline.
+
+- `Project::fps()`, `Project::frames()` (the frame count),
+  `Project::scene_frames(i) -> Range<u64>` (global frame indices) and
+  `Project::frame_time(k) -> Time` are what an encoder walks; `Timeline` has
+  the same methods. Frame `k` of scene `i` is `Time::Scene { index: i, t: j
+  / fps }` for its `j`th frame, so a scene's frames sample the same
+  scene-relative times wherever it sits. The last frame is one frame
+  before the video's end, never at it; a `k` past it is
+  `StudioError::FrameOutOfRange`.
+- A global `t` on the frame grid (`k / fps`) locates to exactly
+  `frame_time(k)`, so `oculus studio frame --t` at a frame's time is that
+  frame of the video. A `t` between frames renders as given.
+- `Project::scene_fingerprint(i)` is what in the folder scene `i`'s frames
+  depend on, as canonical JSON bytes (keys sorted, so key order in a file
+  never matters), for a per-scene segment cache key: the scene's index
+  (`Math.random` is seeded by component and index), the size and fps, the
+  theme's tokens and `video.json`'s `motion`, and for scene `i` and scene
+  `i - 1` (whose last moment the transition into `i` shows) the scene spec,
+  the narration words as components see them (`text`, `start`, `end`) and
+  the frame count. Words' confidence, the clip's file and `voice` reach no
+  frame and are left out. The caller adds the rest: the contents of
+  `components/` and `assets/`, the render settings (quality, scale, motion
+  blur, encoder arguments) and the build of studio-core. Because of the
+  index, inserting or removing a scene changes the fingerprint of every
+  scene after it.
 
 ## A component is `(props, ctx) => element` with a declared props schema
 
@@ -145,7 +182,8 @@ We follow the *gradient* downhill, one small step at a time.
   `hold` is optional and only a minimum. `lead` and `tail` are the theme's
   `narration` tokens (0.25 s and 0.6 s in the bundled theme); the clip
   starts `lead` into the scene. A silent scene (no section) lasts its
-  `hold`, and one without a `hold` has no length.
+  `hold`, and one without a `hold` has no length. Either rounds up to
+  whole frames: 3.85 s is 116 frames at 30 fps, 3.867 s.
 - **Stale narration fails, it is never estimated.** A scene with script
   text whose manifest entry is missing or was made for other text makes
   `Project::timeline`, `Renderer::new` and `strip` fail with
@@ -493,8 +531,8 @@ inside another is an error for now.
 
 ## Motion blur averages sub-frames, off unless asked
 
-`RenderOptions::motion_blur` (`MotionBlur { fps, shutter, max_samples }`,
-default 30 fps, a 180° shutter of 0.5 and at most 32 samples) makes
+`RenderOptions::motion_blur` (`MotionBlur { fps, shutter, max_samples }`;
+`MotionBlur::at(fps)` is a 180° shutter of 0.5 and at most 32 samples) makes
 `Renderer` average sub-frames spread evenly over the shutter, `t ± shutter
 / fps / 2`, kept inside the frame's scene so a cut stays a cut. It is off
 by default (`None`); `Engine` renders single calls and ignores it.
@@ -515,11 +553,11 @@ by default (`None`); `Engine` renders single calls and ignores it.
   `motion`; the bundled theme ships `finals`) says which renders blur:
   `finals` the export, `always` drafts and previews too, `off` none.
   `Project::motion_blur(Purpose::Final | Purpose::Draft)` resolves it into
-  the `RenderOptions` value, and the export (a later stage) asks for
-  `Final`. A bad value is an error naming its level (`video.json
-  motion.motionBlur`), and lint reports it. `oculus studio frame` and
-  `strip` are inspection tools and blur only with `--motion-blur`, whatever
-  the token says.
+  the `RenderOptions` value at the video's fps, and the export (a later
+  stage) asks for `Final`. A bad value is an error naming its level
+  (`video.json motion.motionBlur`), and lint reports it. `oculus studio
+  frame` and `strip` are inspection tools and blur only with
+  `--motion-blur`, whatever the token says.
 - At the default shutter, sharp edges moving fast show as N copies about 6
   px apart in a single frame; in motion they read as blur.
 
@@ -700,8 +738,8 @@ All of these are errors: lint has no warning level, so any of them makes
   sheet and tile sizes, the render time and the thread count; `--json`
   gives `{path, times, width, height, tile: {width, height}, cols, ms,
   threads}`.
-- `frame` and `strip` take `--motion-blur` (30 fps, 180° shutter); `frame`
-  then reports the sub-frames it averaged.
+- `frame` and `strip` take `--motion-blur` (a 180° shutter at the video's
+  fps); `frame` then reports the sub-frames it averaged.
 - `frame` and `strip` read `script.md` and the narration manifest; stale or
   missing narration stops them with the `Narration` error, while `lint`
   lists it with the rest.
@@ -734,6 +772,9 @@ transitions fixture and its sameness across thread counts,
 `tests/dither.rs` the dark-gradient measurement. The transition and strip
 goldens are 640x360 or smaller to keep the repo small; there is no
 dark-gradient golden, since a dithered 1080p frame is a 2.4 MB PNG.
+`tests/frames.rs` covers the whole-frame timeline at other rates, frame
+times against global times, blur at the video's fps, strips across thread
+counts and which edits move which scene fingerprints.
 `tests/narration.rs` covers scene lengths, stale and missing narration, the
 load errors and `word`/`wordEnd`; the `narrated` fixture (a hand-written
 manifest, no audio) pins a card entering at its word. In the app crate, `cargo test --lib studio::` covers the TTS client
