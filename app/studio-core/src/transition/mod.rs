@@ -8,7 +8,9 @@ mod cascade;
 mod composite;
 mod spec;
 
-pub use cascade::{Look, Transition, TransitionError, check_hold, morph_color, resolve};
+pub use cascade::{
+    BlurMode, Look, Transition, TransitionError, blur_mode, check_hold, morph_color, resolve,
+};
 pub use composite::layers;
 pub use spec::{MotionSpec, TransitionSpec};
 

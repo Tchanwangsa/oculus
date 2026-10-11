@@ -4,14 +4,15 @@ Studio makes lecture videos from scenes written as TSX components.
 `app/studio-core/` is its renderer: a video folder plus a time in, one RGBA
 frame out, the same pixels on every machine, scene transitions included.
 Narration and encoding to video are not built yet; `oculus studio` renders
-single frames and lints.
+single frames and contact sheets, and lints.
 
 ## Where
 
 | Piece | Location |
 | --- | --- |
 | The crate (`oculus-studio-core`, lib `studio_core`), its own cargo root | `app/studio-core/` |
-| Public API: `Renderer`, `Engine`, `Frame`, `Time` | `app/studio-core/src/render/` |
+| Public API: `Renderer`, `Engine`, `Frame`, `Time`; motion blur | `app/studio-core/src/render/` (`blur/`) |
+| Contact sheets (`strip`): parallel frames, the tiled sheet and its labels | `app/studio-core/src/strip/` |
 | Video folder, component lookup, timeline, lint | `app/studio-core/src/project/` |
 | Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
 | Magic move: matching and blending two laid-out trees, OKLab colour | `app/studio-core/src/morph/` |
@@ -49,9 +50,9 @@ assets/       images, named by <Image src>
   scene-relative `t` by summing holds (`Timeline`); a `t` past the end is an
   error that states the video's length.
 - `theme` is a bundled theme's name or a `.json` path relative to the folder.
-- `motion` (optional) overrides the theme's transition defaults for this
-  video; a scene's `transition` (optional) overrides both. See
-  "Transitions".
+- `motion` (optional) overrides the theme's transition and motion-blur
+  defaults for this video; a scene's `transition` (optional) overrides
+  both. See "Transitions" and "Motion blur".
 - `video.json` refuses unknown keys, an empty `scenes`, a non-positive `hold`
   and sides outside 1–8192 px.
 - Component names are PascalCase letters and digits and resolve to
@@ -126,6 +127,7 @@ only `style`, `key`, children, `src` on `Image`, `d`, `viewBox`, `fill`,
   `#rrggbbaa` only; a theme colour is just the value read from `theme`.
 - `fill` is a colour or `{ linear: { angle, stops: [[offset, colour], …] } }`
   with a CSS angle (0 is to top, 90 to right) and offsets rising from 0 to 1.
+  Gradients are dithered (see "Gradients are dithered").
 - Transforms apply about `transformOrigin`: `[fx, fy]` fractions of the
   border box or keywords (`"center"`, `"top left"`, …), default the centre.
   `opacity` and `blur` composite the node and its children as one group;
@@ -199,7 +201,8 @@ prelude easing (`linear`, `easeOutCubic`, `easeInOutCubic`) or `[x1, y1,
 x2, y2]`, and `direction` (`left`, `right`, `up`, `down`) is where the
 incoming scene comes from for `push` and `wipe` (`left` pushes the old scene
 out to the left). `morphColor` is under "Magic move". `video.json`'s
-`motion` block takes `transition`, `magicMove` and `morphColor`.
+`motion` block takes `transition`, `magicMove`, `morphColor` and
+`motionBlur`.
 
 - **Timing.** It plays over `[0, dur)` of the incoming scene B, with the
   outgoing scene A held at its last moment (the left limit of its hold,
@@ -286,6 +289,86 @@ Morph's `p`, so siblings that shift because a Morph changes size glide too.
 `p` is clamped to 0 to 1. A Morph takes exactly two elements, and a Morph
 inside another is an error for now.
 
+## Motion blur averages sub-frames, off unless asked
+
+`RenderOptions::motion_blur` (`MotionBlur { fps, shutter, max_samples }`,
+default 30 fps, a 180° shutter of 0.5 and at most 32 samples) makes
+`Renderer` average sub-frames spread evenly over the shutter, `t ± shutter
+/ fps / 2`, kept inside the frame's scene so a cut stays a cut. It is off
+by default (`None`); `Engine` renders single calls and ignores it.
+
+- **Adaptive N.** Before drawing, the renderer lays the frame out at the
+  shutter's start and end (both scenes and the morph, during a
+  transition), matches nodes by `key` (anywhere in the tree) else by their
+  path of child indices from the nearest keyed ancestor, and takes the
+  largest move of any node's transformed bounds in output px: `N =
+  clamp(ceil(px), 1, max_samples)`, one sub-frame per px, so a fast edge
+  smears instead of doubling. N = 1 is exactly the sharp frame, for two
+  extra layouts and no extra paint. Only boxes count, so a fade,
+  a reveal's rise inside its box or a trim does not add samples.
+- Sub-frames average premultiplied in integers, so a blurred frame is
+  deterministic and seekable like any other. `Frame::samples` says how many
+  were drawn; the logs are the middle sample's.
+- **The `motionBlur` token** (theme `motion`, overridden by `video.json`'s
+  `motion`; the bundled theme ships `finals`) says which renders blur:
+  `finals` the export, `always` drafts and previews too, `off` none.
+  `Project::motion_blur(Purpose::Final | Purpose::Draft)` resolves it into
+  the `RenderOptions` value, and the export (a later stage) asks for
+  `Final`. A bad value is an error naming its level (`video.json
+  motion.motionBlur`), and lint reports it. `oculus studio frame` and
+  `strip` are inspection tools and blur only with `--motion-blur`, whatever
+  the token says.
+- At the default shutter, sharp edges moving fast show as N copies about 6
+  px apart in a single frame; in motion they read as blur.
+
+## A strip is a contact sheet of a motion
+
+`strip(project, StripOptions { from, to, n, cols, scale, threads,
+motion_blur })` renders `n` frames evenly spaced over `[from, to]` (both
+included; `n = 1` is `from`, and a `to` at or past the end is clamped to the
+video's last moment, as a transition holds the outgoing scene) and tiles
+them `cols` a row on a neutral grey, which is neither theme's background. It
+is how an agent or a reviewer checks a motion without a video: what moves,
+in which order, and where it settles.
+
+- Under each tile, never over the frame, a label bar gives the global time
+  (`1.250 s`) and, in a video of more than one scene, `scene N · t`. A time
+  just inside a scene's end reads `1.999`, never the end itself. Labels are
+  an element tree drawn by studio-core with bundled Inter at 13 px and
+  tabular digits, through the normal layout and text paint.
+- Tiles are the frames' pixels copied in, identical to `Renderer::frame` at
+  the same scale, between 8 px gutters. When a tile is too narrow for the
+  time and the scene on one line, every bar stacks them on two. A sheet over
+  64 Mpx or 65,535 px a side is refused before any frame renders.
+- Frames render on worker threads, one `Renderer` per thread (never vello's
+  own threads, which panic with filters), dealt round-robin and put back by
+  index, so the sheet is byte-identical at any thread count. The default is
+  half the cores, at most one per frame, and the count is capped so the
+  renderers' estimated memory (64 MB each plus their frame buffers and
+  decoded images) stays under 2 GB.
+- A frame that fails fails the strip with `StudioError::Frame`, which names
+  the global time, the scene and the time within it, and carries the frame's
+  own error (its `kind`, component and TSX line). The earliest failing frame
+  is the one reported, whatever the thread count.
+
+## Gradients are dithered
+
+An 8-bit linear ramp across a dark range bands: the dark theme's `#0e0f13`
+to `#1c1e26` across 1920 px has 15 to 20 levels a channel, and undithered
+its flat runs are 87 px wide even averaged over 8×8 px, with 1-level steps
+between them. So studio-core rasterises gradient fills itself
+(`app/studio-core/src/paint/gradient.rs`): the colour is evaluated in f32 at
+every device pixel, premultiplied, and dithered to 8 bits with an 8×8 Bayer
+matrix fixed to the canvas, so a still gradient never shimmers from frame
+to frame. vello draws the result as an image paint sampled at its own pixel
+grid, under the shape's anti-aliased coverage. Dithered, the widest run of
+equal 8×8 means is 4 px, no step exceeds 1 level, and every column averages
+to the ideal ramp within a fraction of a level (`tests/dither.rs`, on the
+`dark-gradient` fixture). A full-frame gradient costs about 4 ms more per
+1080p frame than vello's own gradient paint. vello_cpu's `f32_pipeline` does
+not help: it still writes 8-bit pixels with no dither, so its output bands
+the same.
+
 ## Blur means what it means in CSS
 
 - An element's `blur` is `filter: blur()`: the value is the gaussian sigma.
@@ -310,8 +393,9 @@ centroid smoothly.
 - A theme is tokens only: `color`, `font` (`heading` and `body` families),
   `type` (style fragments to spread into `style`), `space`, `radius` and
   `motion` (`duration`, `easing` as cubic-bezier points, `spring` presets,
-  and optionally `transition`, `magicMove` and `morphColor`, the bottom of
-  the transition cascade; the bundled theme sets `morphColor: "oklch"`). Components read it as `ctx.theme` and it is frozen.
+  and optionally `transition`, `magicMove`, `morphColor` and `motionBlur`,
+  the bottom of the motion cascade; the bundled theme sets `morphColor:
+  "oklch"` and `motionBlur: "finals"`). Components read it as `ctx.theme` and it is frozen.
 - `color.bg` is the canvas under every frame, `color.text` the colour and
   `font.body` the family of `Text` that sets none.
 - The bundled `default` theme is neutral greys with the app's indigo
@@ -368,7 +452,8 @@ before `hold`, at scale 0.25, writing nothing; a key on two nodes of a
 scene's tree is reported there too. When a scene and the one before it both
 render cleanly, it also renders the middle of the transition between them,
 so a morph error shows. It checks the transition values through the cascade
-(reported at the first scene that uses a bad one, naming its level), a
+(reported at the first scene that uses a bad one, naming its level) and the
+video's `morphColor` and `motionBlur`, a
 `transition` on the first scene, and a `dur` longer than the incoming
 scene's hold. It collects every problem with its scene and component instead
 of stopping at the first; an error is reported once even if several renders
@@ -380,6 +465,16 @@ hit it.
   `<DIR>/out/frame-<t>.png` with `t` global; `--t S` or `--scene N --at S`
   pick the moment. It prints the path, the scene, its component, the
   scene-relative `t`, the size and the render time, then any component logs.
+- `oculus studio strip <DIR>` writes a contact sheet, by default the whole
+  video in 12 frames, 4 a row, at quarter scale, to
+  `<DIR>/out/strip-<from>-<to>.png`; `--from`/`--to` (global seconds) or
+  `--scene N` pick the stretch, `--n`, `--cols`, `--scale` and `--threads`
+  shape it. It prints the path, then the frame count, the time range, the
+  sheet and tile sizes, the render time and the thread count; `--json`
+  gives `{path, times, width, height, tile: {width, height}, cols, ms,
+  threads}`.
+- `frame` and `strip` take `--motion-blur` (30 fps, 180° shutter); `frame`
+  then reports the sub-frames it averaged.
 - `oculus studio lint <DIR>` prints each problem and exits 1 if there is
   any. With `--json` it prints the issues as an array of `{scene, component,
   example, kind, message, loc}`.
@@ -397,8 +492,12 @@ checks two renderers produce identical bytes, and `tests/isolation.rs` that
 a frame (a sequenced timeline, a transition and a Morph included) is the
 same whatever the engine rendered before it. `tests/transitions.rs` covers
 timing, the cascade, automatic magic move, the changed-text halves and
-lint's transition checks. The transition goldens are 640x360 to keep the
-repo small.
+lint's transition checks. `tests/strip.rs` pins a contact sheet of the
+transitions fixture and its sameness across thread counts,
+`tests/motion_blur.rs` the sample counts, a blurred push and the token, and
+`tests/dither.rs` the dark-gradient measurement. The transition and strip
+goldens are 640x360 or smaller to keep the repo small; there is no
+dark-gradient golden, since a dithered 1080p frame is a 2.4 MB PNG.
 
 From `app/studio-core`: `cargo test`, `cargo clippy --all-targets -- -D
 warnings`, `cargo fmt`. CI runs these in the `studio-core` job on macOS.
@@ -413,6 +512,10 @@ warnings`, `cargo fmt`. CI runs these in the `studio-core` job on macOS.
 - A component element is not a host node until it resolves: `<Text>` still
   rejects a component child, and a component returning a string or a
   function is an error at its element's line.
+- Dithered gradients compress badly: a golden whose frame is mostly
+  gradient grows several-fold when reblessed (`title-card` from 0.4 to
+  2.1 MB). The pre-dither goldens still pass, since dithering moves no
+  channel more than 2 levels and the comparison allows 2.
 - The theme's default dissolve lasts 0.7 s, so a scene held shorter than
   that is a lint error naming `theme motion.transition.dur` until the scene
   sets a shorter `dur` or a `cut`, or the video's `motion` a shorter `dur`.

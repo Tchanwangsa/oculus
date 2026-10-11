@@ -3,7 +3,7 @@
 //! layers; renders parallelise across frames instead. Glyphs are drawn as
 //! unhinted outlines with the atlas off, so text keeps sub-pixel positions.
 
-use super::gradient::linear;
+use super::gradient::ramp;
 use crate::scene::{Color, Fill};
 use std::sync::Arc;
 use vello_cpu::filter_effects::{Filter, FilterFunction};
@@ -83,18 +83,43 @@ impl Canvas {
     }
 
     pub fn fill(&mut self, t: Affine, r: Rect, radius: f64, fill: &Fill, alpha: f32) {
+        let shape = (radius > 0.0).then(|| rounded(r, radius));
+        if !self.set_fill(t, fill, r, r, alpha) {
+            return;
+        }
+        match &shape {
+            None => self.ctx.fill_rect(&r),
+            Some(s) => self.ctx.fill_path(s),
+        }
+        self.ctx.reset_paint_transform();
+    }
+
+    /// Sets `fill` as the paint under `t`; a gradient spans `bounds` and is
+    /// rasterised over `covers` (see `gradient`). False when a gradient
+    /// has nothing on the canvas to draw.
+    fn set_fill(&mut self, t: Affine, fill: &Fill, bounds: Rect, covers: Rect, alpha: f32) -> bool {
         self.ctx.set_transform(t);
         match fill {
             Fill::Solid(c) => self.ctx.set_paint(c.with_alpha_mul(alpha).to_vello()),
             Fill::Linear { angle_deg, stops } => {
-                self.ctx.set_paint(linear(r, *angle_deg, stops, alpha));
+                let size = (self.width, self.height);
+                let Some((img, place)) = ramp(t, bounds, *angle_deg, stops, alpha, covers, size)
+                else {
+                    return false;
+                };
+                self.ctx.set_paint(Image {
+                    image: ImageSource::Pixmap(img),
+                    sampler: ImageSampler {
+                        x_extend: Extend::Pad,
+                        y_extend: Extend::Pad,
+                        quality: ImageQuality::Low,
+                        alpha: 1.0,
+                    },
+                });
+                self.ctx.set_paint_transform(place);
             }
         }
-        if radius <= 0.0 {
-            self.ctx.fill_rect(&r);
-        } else {
-            self.ctx.fill_path(&rounded(r, radius));
-        }
+        true
     }
 
     /// A `box-shadow` under a rounded rect: analytic gaussian, `sigma` px.
@@ -141,14 +166,10 @@ impl Canvas {
 
     /// Fills any path; a gradient spans `bounds` (local units).
     pub fn fill_shape(&mut self, t: Affine, shape: &BezPath, fill: &Fill, bounds: Rect) {
-        self.ctx.set_transform(t);
-        match fill {
-            Fill::Solid(c) => self.ctx.set_paint(c.to_vello()),
-            Fill::Linear { angle_deg, stops } => {
-                self.ctx.set_paint(linear(bounds, *angle_deg, stops, 1.0));
-            }
+        if self.set_fill(t, fill, bounds, shape.bounding_box(), 1.0) {
+            self.ctx.fill_path(shape);
+            self.ctx.reset_paint_transform();
         }
-        self.ctx.fill_path(shape);
     }
 
     /// Strokes a path; vello keeps the stroke as state, so it is set whole.

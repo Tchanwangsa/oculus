@@ -1,22 +1,23 @@
 //! A transition frame: two component calls (A at its last moment, B at
-//! `t`), both isolated, composed onto one canvas or morphed into one tree.
+//! `t`), both isolated, laid out as layers for one canvas or morphed into
+//! one tree.
 
 use super::{Engine, SceneCall};
 use crate::error::Result;
 use crate::layout::LNode;
 use crate::morph::morph;
-use crate::render::Frame;
 use crate::transition::{Look, Transition, layers};
 use std::collections::HashSet;
 
 impl Engine {
-    pub(crate) fn render_transition(
+    /// The layers to compose, A's logs first (prefixed with its scene).
+    pub(crate) fn transition_layers(
         &mut self,
         a: SceneCall<'_>,
         b: SceneCall<'_>,
         transition: &Transition,
         t: f64,
-    ) -> Result<Frame> {
+    ) -> Result<(Vec<LNode>, Vec<String>)> {
         let pa = self.prepare(a)?;
         let pb = match self.prepare(b) {
             Ok(pb) => pb,
@@ -58,7 +59,7 @@ impl Engine {
             }
             painted
         };
-        self.compose(painted, logs, b.component)
+        Ok((painted, logs))
     }
 }
 

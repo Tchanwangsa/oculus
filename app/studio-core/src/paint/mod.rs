@@ -141,7 +141,7 @@ fn inset_rect(r: Rect, Inset([t, right, b, l]): Inset) -> Option<Rect> {
 
 /// translate(o + d) * rotate * scale * translate(-o), o = the transform
 /// origin (the box centre unless `transformOrigin` says otherwise).
-fn local_transform(n: &LNode) -> Affine {
+pub fn local_transform(n: &LNode) -> Affine {
     let s = &n.style;
     if !s.has_transform() {
         return Affine::IDENTITY;

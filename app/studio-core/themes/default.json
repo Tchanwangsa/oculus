@@ -66,6 +66,7 @@
     },
     "transition": { "kind": "dissolve", "dur": 0.7, "easing": "easeInOutCubic", "direction": "left" },
     "magicMove": "auto",
-    "morphColor": "oklch"
+    "morphColor": "oklch",
+    "motionBlur": "finals"
   }
 }

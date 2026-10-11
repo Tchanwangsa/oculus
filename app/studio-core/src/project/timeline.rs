@@ -1,7 +1,7 @@
 //! Global time -> (scene, scene-relative time), by cumulative `hold`.
 
 use crate::error::{Result, StudioError};
-use crate::render::Time;
+use crate::render::{Time, last_moment};
 
 #[derive(Clone, Debug)]
 pub struct Timeline {
@@ -22,6 +22,19 @@ impl Timeline {
     /// When scene `index` starts, in global seconds.
     pub fn start(&self, index: usize) -> f64 {
         self.holds.iter().take(index).sum()
+    }
+
+    /// Scene `index`'s first and last moment in global seconds: the last is
+    /// just inside its hold, as a transition holds the outgoing scene.
+    pub fn window(&self, index: usize) -> Result<(f64, f64)> {
+        let Some(&hold) = self.holds.get(index) else {
+            return Err(StudioError::SceneOutOfRange {
+                index,
+                count: self.holds.len(),
+            });
+        };
+        let start = self.start(index);
+        Ok((start, start + last_moment(hold)))
     }
 
     /// The scene index and scene-relative t for a time; out of range is an

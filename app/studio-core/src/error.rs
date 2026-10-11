@@ -114,6 +114,16 @@ pub enum StudioError {
     #[error("{level}: {message}")]
     Transition { level: String, message: String },
 
+    /// One frame of a contact sheet failed; `kind`, `component` and `loc`
+    /// are the inner error's.
+    #[error("frame at {t:.3} s (scene {scene}, {scene_t:.3} s in): {source}")]
+    Frame {
+        t: f64,
+        scene: usize,
+        scene_t: f64,
+        source: Box<StudioError>,
+    },
+
     #[error("JavaScript host: {0}")]
     Host(String),
 
@@ -197,6 +207,7 @@ impl StudioError {
             Self::SceneOutOfRange { .. } => "scene_out_of_range",
             Self::SceneTimeOutOfRange { .. } => "scene_time_out_of_range",
             Self::Transition { .. } => "transition",
+            Self::Frame { source, .. } => source.kind(),
             Self::Host(_) => "host",
             Self::Render(_) => "render",
             Self::Png { .. } => "png",
@@ -214,6 +225,7 @@ impl StudioError {
             | Self::Font { component, .. }
             | Self::Budget { component, .. } => Some(component),
             Self::ComponentNotFound { name, .. } => Some(name),
+            Self::Frame { source, .. } => source.component(),
             _ => None,
         }
     }
@@ -226,6 +238,7 @@ impl StudioError {
             | Self::Style { loc, .. }
             | Self::Image { loc, .. }
             | Self::Font { loc, .. } => loc.as_ref(),
+            Self::Frame { source, .. } => source.loc(),
             _ => None,
         }
     }
