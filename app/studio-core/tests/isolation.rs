@@ -66,6 +66,7 @@ fn render(e: &mut Engine, component: &str, t: f64) -> Vec<u8> {
         t,
         duration: 1.0,
         index: 0,
+        words: None,
     })
     .unwrap()
     .rgba
@@ -111,15 +112,17 @@ fn sequenced_frames_are_seekable() {
 
 #[test]
 fn transition_and_morph_frames_are_seekable() {
-    // Times in transitions of every kind, in an in-scene Morph and in an
-    // automatic magic move, plus frames outside them.
-    let cases: [(&str, &[f64]); 3] = [
+    // Times in transitions of every kind, in an in-scene Morph, in an
+    // automatic magic move and around word cues (and the dissolve from a
+    // narrated scene to a silent one), plus frames outside them.
+    let cases: [(&str, &[f64]); 4] = [
         (
             "transitions",
             &[1.0, 2.25, 4.5, 6.75, 8.5, 10.6, 12.4, 13.0],
         ),
         ("morph", &[0.1, 0.5, 0.9, 1.5]),
         ("magic", &[1.0, 2.2, 2.5, 2.8, 3.5]),
+        ("narrated", &[0.5, 0.86, 0.9, 1.05, 2.9, 3.9, 4.2, 5.0]),
     ];
     for (name, times) in cases {
         let project = Project::load(fixture(name)).unwrap();

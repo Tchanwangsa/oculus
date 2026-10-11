@@ -81,7 +81,7 @@ impl MotionBlur {
 pub(super) fn frame(r: &mut Renderer, index: usize, t: f64, mb: MotionBlur) -> Result<Frame> {
     let half = mb.shutter / mb.fps / 2.0;
     let t0 = (t - half).max(0.0);
-    let t1 = (t + half).min(last_moment(r.hold(index)));
+    let t1 = (t + half).min(last_moment(r.length(index)));
     let n = if t1 > t0 {
         mb.samples(moved(r, index, t0, t1)?)
     } else {

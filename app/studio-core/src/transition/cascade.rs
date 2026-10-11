@@ -256,12 +256,12 @@ pub fn blur_mode(video: &MotionSpec, theme: &Theme) -> Result<BlurMode, Transiti
 }
 
 /// The lint-only checks: the first scene sets no transition, and one that
-/// changes the picture fits in its scene's hold.
-pub fn check_hold(
+/// changes the picture fits in its scene's length.
+pub fn check_length(
     index: usize,
     scene: Option<&TransitionSpec>,
     resolved: Option<&Transition>,
-    hold: f64,
+    length: f64,
 ) -> Result<(), TransitionError> {
     if index == 0 && scene.is_some() {
         return Err(TransitionError {
@@ -271,12 +271,12 @@ pub fn check_hold(
     }
     if let Some(t) = resolved
         && t.covers(0.0)
-        && t.dur > hold
+        && t.dur > length
     {
         return Err(TransitionError {
             level: t.dur_level.name("dur"),
             message: format!(
-                "{} s is longer than scene {index}'s hold of {hold} s; a transition plays over the start of the incoming scene, so it must fit in it",
+                "{} s is longer than scene {index}'s length of {length} s; a transition plays over the start of the incoming scene, so it must fit in it",
                 t.dur
             ),
         });

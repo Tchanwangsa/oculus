@@ -12,6 +12,7 @@ fn laid_out(tsx: &str) -> LNode {
         width: 200.0,
         height: 100.0,
         seed: 0,
+        words: None,
     };
     let (tree, _) = host.call("Keys", &Map::new(), call).unwrap();
     let mut typeset = Typeset::new();

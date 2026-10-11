@@ -12,6 +12,7 @@ use crate::images::ImageCache;
 use crate::layout::{LNode, Typeset};
 use crate::morph::{Ink, MorphColor, duplicate_key};
 use crate::paint::{Canvas, paint};
+use crate::project::WordCues;
 use crate::schema::validate_props;
 use crate::theme::Theme;
 use crate::transition::{MotionSpec, morph_color};
@@ -30,6 +31,9 @@ pub struct SceneCall<'a> {
     pub duration: f64,
     /// The scene's index, which seeds `Math.random`.
     pub index: usize,
+    /// The scene's narration timings for `word()` and `wordEnd()`; `None`
+    /// for a silent scene or a component rendered on its own.
+    pub words: Option<&'a WordCues>,
 }
 
 pub struct Engine {

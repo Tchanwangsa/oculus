@@ -56,6 +56,7 @@ fn centre(e: &mut Engine, props: &Map<String, Value>) -> ([u8; 4], Vec<String>) 
             t: 0.0,
             duration: 1.0,
             index: 0,
+            words: None,
         })
         .unwrap();
     let i = ((frame.height / 2 * frame.width + frame.width / 2) * 4) as usize;

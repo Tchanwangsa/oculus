@@ -105,9 +105,18 @@ pub enum StudioError {
     SceneOutOfRange { index: usize, count: usize },
 
     #[error(
-        "t = {t} s is outside scene {index}, which holds for {hold:.3} s; t must be in [0, {hold:.3})"
+        "t = {t} s is outside scene {index}, which lasts {length:.3} s; t must be in [0, {length:.3})"
     )]
-    SceneTimeOutOfRange { index: usize, t: f64, hold: f64 },
+    SceneTimeOutOfRange { index: usize, t: f64, length: f64 },
+
+    /// A narrated scene's clip is missing from `narration/manifest.json` or
+    /// was made for other text; `scene` is its id.
+    #[error("scene `{scene}`: {message}")]
+    Narration { scene: String, message: String },
+
+    /// A problem in `script.md` text at a 1-based line.
+    #[error("script.md:{line}: {message}")]
+    Script { line: usize, message: String },
 
     /// A bad scene transition value; `level` names where it came from, as
     /// `scene 3 transition.kind` or `theme motion.transition.easing`.
@@ -207,6 +216,8 @@ impl StudioError {
             Self::SceneOutOfRange { .. } => "scene_out_of_range",
             Self::SceneTimeOutOfRange { .. } => "scene_time_out_of_range",
             Self::Transition { .. } => "transition",
+            Self::Narration { .. } => "narration",
+            Self::Script { .. } => "script",
             Self::Frame { source, .. } => source.kind(),
             Self::Host(_) => "host",
             Self::Render(_) => "render",

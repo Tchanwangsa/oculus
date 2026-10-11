@@ -1,53 +1,37 @@
-//! A video project folder: `video.json` (size, theme, scenes),
-//! `components/<Name>.tsx` and `assets/`. Loading parses and validates
-//! `video.json` and the theme; components load when first rendered.
+//! A video project folder: `video.json` (size, theme, scenes, voice),
+//! `components/<Name>.tsx`, `assets/`, and for a narrated video `script.md`
+//! and `narration/manifest.json`. Loading parses and validates `video.json`,
+//! the theme, the script and the manifest; components load when first
+//! rendered. Narration is checked against the script when scene lengths are
+//! needed (`scenes`), so a stale manifest fails renders but not `lint`.
 
 mod components;
 mod lint;
+mod narration;
+mod scenes;
+mod script;
 mod timeline;
+mod video;
 
 pub use components::{ComponentSource, FolderComponents};
 pub use lint::{LintIssue, LintReport};
+pub use narration::{
+    LOW_CONFIDENCE, MANIFEST_PATH, MAX_NARRATION_SECS, Manifest, ManifestGap, ManifestScene,
+    ManifestWord, WordCues,
+};
+pub use script::{Script, ScriptSection};
 pub use timeline::Timeline;
+pub use video::{SceneSpec, Video, Voice};
+
+pub(crate) use scenes::Staged;
 
 use crate::error::{Result, StudioError};
 use crate::morph::MorphColor;
-use crate::render::{MotionBlur, Purpose, Size};
+use crate::render::{MotionBlur, Purpose};
 use crate::theme::Theme;
-use crate::transition::{
-    BlurMode, MotionSpec, Transition, TransitionError, TransitionSpec, blur_mode, morph_color,
-    resolve,
-};
-use serde::Deserialize;
-use serde_json::{Map, Value};
+use crate::transition::{BlurMode, Transition, TransitionError, blur_mode, morph_color, resolve};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-/// `video.json`.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Video {
-    pub size: Size,
-    /// A bundled theme name, or a `.json` path relative to the project.
-    pub theme: String,
-    pub scenes: Vec<SceneSpec>,
-    /// Transition defaults for this video, over the theme's.
-    #[serde(default)]
-    pub motion: MotionSpec,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SceneSpec {
-    pub component: String,
-    #[serde(default)]
-    pub props: Map<String, Value>,
-    /// Seconds the scene lasts.
-    pub hold: f64,
-    /// How this scene comes in, over the video's and theme's defaults.
-    #[serde(default)]
-    pub transition: Option<TransitionSpec>,
-}
 
 #[derive(Clone)]
 pub struct Project {
@@ -55,52 +39,39 @@ pub struct Project {
     pub video: Video,
     pub theme: Theme,
     pub components: Arc<dyn ComponentSource>,
+    /// `script.md`, when the video is narrated.
+    pub script: Option<Script>,
+    /// `narration/manifest.json`, when it exists.
+    pub manifest: Option<Manifest>,
 }
 
 impl Project {
     pub fn load(dir: impl AsRef<Path>) -> Result<Project> {
         let dir = dir.as_ref().to_path_buf();
         let path = dir.join("video.json");
-        let fail = |message: String| StudioError::Project {
-            path: path.clone(),
-            message,
-        };
         let json = std::fs::read_to_string(&path).map_err(|e| StudioError::io(&path, e))?;
-        let video: Video = serde_json::from_str(&json).map_err(|e| fail(e.to_string()))?;
-        if video.size.width == 0
-            || video.size.height == 0
-            || video.size.width > 8192
-            || video.size.height > 8192
-        {
-            return Err(fail(format!(
-                "size {}x{} must be 1 to 8192 px a side",
-                video.size.width, video.size.height
-            )));
-        }
-        if video.scenes.is_empty() {
-            return Err(fail(
-                "scenes is empty; a video needs at least one scene".to_owned(),
-            ));
-        }
-        for (i, s) in video.scenes.iter().enumerate() {
-            if !(s.hold.is_finite() && s.hold > 0.0) {
-                return Err(fail(format!(
-                    "scenes[{i}].hold is {}; it must be a positive number of seconds",
-                    s.hold
-                )));
-            }
-        }
+        let script = read_script(&dir)?;
+        let video: Video = serde_json::from_str(&json)
+            .map_err(|e| e.to_string())
+            .and_then(|v| video::check(&v, script.is_some()).map(|()| v))
+            .map_err(|message| StudioError::Project {
+                path: path.clone(),
+                message,
+            })?;
         let theme = if video.theme.ends_with(".json") || video.theme.contains('/') {
             Theme::from_file(&dir.join(&video.theme))?
         } else {
             Theme::bundled(&video.theme)?
         };
         let components = Arc::new(FolderComponents::new(dir.join("components")));
+        let manifest = Manifest::read(&dir)?;
         Ok(Project {
             dir,
             video,
             theme,
             components,
+            script,
+            manifest,
         })
     }
 
@@ -108,13 +79,18 @@ impl Project {
         self.dir.join("assets")
     }
 
-    pub fn timeline(&self) -> Timeline {
-        Timeline::new(self.video.scenes.iter().map(|s| s.hold))
+    /// Every scene's length in order; fails on the first scene whose length
+    /// is unknown (see `scene_length`).
+    pub fn timeline(&self) -> Result<Timeline> {
+        let lengths = (0..self.video.scenes.len())
+            .map(|i| self.scene_length(i))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Timeline::new(lengths.into_iter()))
     }
 
     /// Total length in seconds.
-    pub fn length(&self) -> f64 {
-        self.timeline().length()
+    pub fn length(&self) -> Result<f64> {
+        Ok(self.timeline()?.length())
     }
 
     /// The video's `morphColor` (video.json `motion`, then the theme), as
@@ -143,5 +119,17 @@ impl Project {
         scenes
             .map(|(i, s)| resolve(i, s.transition.as_ref(), &self.video.motion, &self.theme))
             .collect()
+    }
+}
+
+/// `<dir>/script.md`, parsed, when it exists.
+fn read_script(dir: &Path) -> Result<Option<Script>> {
+    let path = dir.join("script.md");
+    match std::fs::read_to_string(&path) {
+        Ok(src) => Script::parse(&src)
+            .map(Some)
+            .map_err(|message| StudioError::Project { path, message }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(StudioError::io(&path, e)),
     }
 }

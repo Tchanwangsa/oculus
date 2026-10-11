@@ -80,7 +80,7 @@ fn changed_text_is_gone_at_the_halfway_point() {
 fn a_transition_plays_over_the_incoming_scenes_head_only() {
     let dir = fixture("magic");
     let project = Project::load(&dir).unwrap();
-    assert_eq!(project.length(), 4.0);
+    assert_eq!(project.length().unwrap(), 4.0);
     let mut r = Renderer::new(&project, RenderOptions::default()).unwrap();
     let mut engine = Engine::new(
         project.theme.clone(),
@@ -99,6 +99,7 @@ fn a_transition_plays_over_the_incoming_scenes_head_only() {
             t,
             duration: 2.0,
             index,
+            words: None,
         })
         .unwrap()
         .rgba
@@ -224,7 +225,7 @@ fn lint_names_the_level_of_a_bad_transition_value() {
     assert!(
         has(
             3,
-            "scene 3 transition.dur: 1.5 s is longer than scene 3's hold of 1 s"
+            "scene 3 transition.dur: 1.5 s is longer than scene 3's length of 1 s"
         ),
         "{issues:#?}"
     );
@@ -251,7 +252,7 @@ fn lint_names_the_level_of_a_bad_transition_value() {
     assert_eq!(issues.len(), 1, "{issues:#?}");
     assert!(
         issues[0].2.starts_with(
-            "theme motion.transition.dur: 0.7 s is longer than scene 1's hold of 0.5 s"
+            "theme motion.transition.dur: 0.7 s is longer than scene 1's length of 0.5 s"
         ),
         "{issues:#?}"
     );

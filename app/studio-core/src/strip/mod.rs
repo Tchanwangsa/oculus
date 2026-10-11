@@ -74,7 +74,7 @@ impl Strip {
 /// Renders the frames and tiles them. A frame that fails fails the strip
 /// with its time and scene named (`StudioError::Frame`).
 pub fn strip(project: &Project, options: StripOptions) -> Result<Strip> {
-    let timeline = project.timeline();
+    let timeline = project.timeline()?;
     let times = times(&options, timeline.length())?;
     if options.cols == 0 {
         return Err(bad("cols must be at least 1".to_owned()));

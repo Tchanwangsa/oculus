@@ -18,6 +18,7 @@ use crate::error::{Result, StudioError};
 use crate::schema::{PropsSchema, parse_schema};
 use budget::Budget;
 use exception::{Source, convert};
+use rquickjs::function::{Args, IntoArgs};
 use rquickjs::{Ctx, Function, Module, Object, Runtime, WriteOptions};
 use serde_json::{Map, Value};
 use sourcemap::LineMap;
@@ -40,12 +41,14 @@ struct Loaded {
 
 /// One component call's inputs besides its props.
 #[derive(Clone, Copy, Debug)]
-pub struct CallCtx {
+pub struct CallCtx<'a> {
     pub t: f64,
     pub duration: f64,
     pub width: f64,
     pub height: f64,
     pub seed: u32,
+    /// The scene's word cues as JSON (`WordCues`), for `word()`.
+    pub words: Option<&'a str>,
 }
 
 pub struct Host {
@@ -141,7 +144,7 @@ impl Host {
         &mut self,
         name: &str,
         props: &Map<String, Value>,
-        call: CallCtx,
+        call: CallCtx<'_>,
     ) -> Result<(Value, Vec<String>)> {
         let loaded = self
             .loaded
@@ -171,15 +174,13 @@ impl Host {
                 // The call gets the whole budget, as `load` gave the module.
                 budget.reset();
                 let f: Function = globals.get("__studioCall")?;
-                f.call((
-                    ns,
-                    props_json.as_str(),
-                    call.t,
-                    call.duration,
-                    call.width,
-                    call.height,
-                    call.seed,
-                ))
+                // Eight arguments: one past the tuples rquickjs converts.
+                let mut args = Args::new(c.clone(), 8);
+                let first = (ns, props_json.as_str(), call.t, call.duration);
+                first.into_args(&mut args)?;
+                (call.width, call.height, call.seed).into_args(&mut args)?;
+                args.push_arg(call.words)?;
+                f.call_arg(args)
             };
             let json = run().map_err(|e| convert(c, e, budget, &src))?;
             let logs = globals
@@ -202,6 +203,7 @@ impl Host {
         self.budget.reset();
         let out = ctx.with(|c| {
             runtime::install(&c, &self.prelude)?;
+            runtime::install_closest(&c)?;
             let set: Function = c
                 .globals()
                 .get("__studioSetTheme")

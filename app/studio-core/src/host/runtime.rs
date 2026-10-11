@@ -10,7 +10,7 @@ use crate::error::StudioError;
 use rquickjs::context::intrinsic::{
     Eval, Json, MapSet, Promise, Proxy, RegExp, RegExpCompiler, TypedArrays,
 };
-use rquickjs::{Context, Ctx, Module, Runtime, WriteOptions};
+use rquickjs::{Context, Ctx, Function, Module, Runtime, WriteOptions};
 
 const MEMORY_LIMIT: usize = 256 << 20;
 const STACK_LIMIT: usize = 1 << 20;
@@ -23,6 +23,7 @@ const PRELUDE: &str = concat!(
     include_str!("prelude/time.js"),
     include_str!("prelude/presets.js"),
     include_str!("prelude/arrow.js"),
+    include_str!("prelude/words.js"),
     include_str!("prelude/entry.js"),
 );
 const PRELUDE_NAME: &str = "studio:prelude";
@@ -80,4 +81,15 @@ pub fn install(c: &Ctx<'_>, prelude: &[u8]) -> Result<(), StudioError> {
         let caught = c.catch();
         StudioError::Host(format!("prelude failed: {e} {caught:?}"))
     })
+}
+
+/// `__studioClosest(name, candidates)`: `suggest::closest` for the prelude
+/// (`word()`'s "closest:" hint), or `undefined`.
+pub fn install_closest(c: &Ctx<'_>) -> Result<(), StudioError> {
+    let closest = |name: String, candidates: Vec<String>| {
+        crate::suggest::closest(&name, candidates.iter().map(String::as_str)).map(str::to_owned)
+    };
+    Function::new(c.clone(), closest)
+        .and_then(|f| c.globals().set("__studioClosest", f))
+        .map_err(host)
 }

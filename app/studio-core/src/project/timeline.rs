@@ -1,40 +1,44 @@
-//! Global time -> (scene, scene-relative time), by cumulative `hold`.
+//! Global time -> (scene, scene-relative time), by cumulative scene length
+//! (`Project::scene_length`: the hold, or the narration clip with its lead
+//! and tail).
 
 use crate::error::{Result, StudioError};
 use crate::render::{Time, last_moment};
 
 #[derive(Clone, Debug)]
 pub struct Timeline {
-    holds: Vec<f64>,
+    lengths: Vec<f64>,
 }
 
 impl Timeline {
-    pub fn new(holds: impl Iterator<Item = f64>) -> Timeline {
+    /// From each scene's length in seconds, in order.
+    pub fn new(lengths: impl Iterator<Item = f64>) -> Timeline {
         Timeline {
-            holds: holds.collect(),
+            lengths: lengths.collect(),
         }
     }
 
+    /// The video's length in seconds.
     pub fn length(&self) -> f64 {
-        self.holds.iter().sum()
+        self.lengths.iter().sum()
+    }
+
+    /// Scene `index`'s length in seconds, if it exists.
+    pub fn scene_length(&self, index: usize) -> Option<f64> {
+        self.lengths.get(index).copied()
     }
 
     /// When scene `index` starts, in global seconds.
     pub fn start(&self, index: usize) -> f64 {
-        self.holds.iter().take(index).sum()
+        self.lengths.iter().take(index).sum()
     }
 
     /// Scene `index`'s first and last moment in global seconds: the last is
-    /// just inside its hold, as a transition holds the outgoing scene.
+    /// just inside its length, as a transition holds the outgoing scene.
     pub fn window(&self, index: usize) -> Result<(f64, f64)> {
-        let Some(&hold) = self.holds.get(index) else {
-            return Err(StudioError::SceneOutOfRange {
-                index,
-                count: self.holds.len(),
-            });
-        };
+        let length = self.get(index)?;
         let start = self.start(index);
-        Ok((start, start + last_moment(hold)))
+        Ok((start, start + last_moment(length)))
     }
 
     /// The scene index and scene-relative t for a time; out of range is an
@@ -47,27 +51,30 @@ impl Timeline {
                     return Err(StudioError::TimeOutOfRange { t, length });
                 }
                 let mut start = 0.0;
-                for (i, hold) in self.holds.iter().enumerate() {
-                    if t < start + hold {
+                for (i, l) in self.lengths.iter().enumerate() {
+                    if t < start + l {
                         return Ok((i, t - start));
                     }
-                    start += hold;
+                    start += l;
                 }
                 Err(StudioError::TimeOutOfRange { t, length })
             }
             Time::Scene { index, t } => {
-                let Some(&hold) = self.holds.get(index) else {
-                    return Err(StudioError::SceneOutOfRange {
-                        index,
-                        count: self.holds.len(),
-                    });
-                };
-                if !(t.is_finite() && t >= 0.0 && t < hold) {
-                    return Err(StudioError::SceneTimeOutOfRange { index, t, hold });
+                let length = self.get(index)?;
+                if !(t.is_finite() && t >= 0.0 && t < length) {
+                    return Err(StudioError::SceneTimeOutOfRange { index, t, length });
                 }
                 Ok((index, t))
             }
         }
+    }
+
+    fn get(&self, index: usize) -> Result<f64> {
+        self.scene_length(index)
+            .ok_or(StudioError::SceneOutOfRange {
+                index,
+                count: self.lengths.len(),
+            })
     }
 }
 

@@ -12,6 +12,7 @@ const CALL: CallCtx = CallCtx {
     width: 1920.0,
     height: 1080.0,
     seed: 7,
+    words: None,
 };
 
 fn call(h: &mut Host, name: &str) -> Result<(Value, Vec<String>)> {

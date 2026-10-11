@@ -1414,9 +1414,10 @@ Render one frame of a video to a PNG
 
 A video is a folder: `video.json` (size, theme and the scenes in order, each a
 component, its props and how many seconds it holds), `components/<Name>.tsx` (one TSX
-component per file, run in a sandbox) and `assets/` (the images `<Image src>` names).
-Every frame is a pure function of the folder and the time, so the same call always draws
-the same pixels.
+component per file, run in a sandbox), `assets/` (the images `<Image src>` names) and,
+for a narrated video, `script.md` and `narration/manifest.json`, which make a narrated
+scene last as long as its narration. Every frame is a pure function of the folder and
+the time, so the same call always draws the same pixels.
 
 Time is either global, `--t` seconds from the start of the video, or scene-relative,
 `--scene N --at S` (scenes count from 0). With neither it draws the first frame. The PNG
@@ -1533,9 +1534,11 @@ Check a whole video without writing anything
 
 Loads every component the video uses, checks each scene's props and each component's
 `examples` against its `props` schema, and renders every scene at its first and last
-moment. Every problem is reported, not just the first, each with its scene, component
-and, where there is one, the TSX line. Exits 1 when there is any problem, so it can gate
-a render.
+moment. For a narrated video it also checks `script.md` (sections no scene matches, text
+not written as it is said) and the narration (missing or stale clips, clips over 60 s,
+words the aligner was unsure of, unscripted speech). Every problem is reported, not just
+the first, each with its scene, component and, where there is one, the TSX line. Exits 1
+when there is any problem, so it can gate a render.
 
 See `oculus studio frame --help` for what a video folder holds.
 

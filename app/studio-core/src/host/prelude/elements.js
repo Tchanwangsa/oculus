@@ -2,7 +2,7 @@
 // host elements, checked as they are made; any other type is a function component,
 // which `h` defers so the resolver (resolve.js) can call it top-down with its
 // subtree's ctx. The prelude files share one module scope, in this order:
-// elements, resolve, props, motion, time, presets, arrow, entry.
+// elements, resolve, props, motion, time, presets, arrow, words, entry.
 const g = globalThis;
 const define = (name, value) =>
   Object.defineProperty(g, name, { value, writable: false, enumerable: false, configurable: false });

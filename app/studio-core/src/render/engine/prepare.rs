@@ -8,6 +8,7 @@ use crate::error::{Result, StudioError};
 use crate::host::{CallCtx, seed, tsx_loc};
 use crate::layout::{LNode, LayoutError, Layouter};
 use crate::morph::{self, MorphError};
+use crate::project::WordCues;
 use crate::scene::{Node, NodeError, parse_tree, select};
 
 /// A laid-out tree, not yet painted; its text layouts go back to the pool
@@ -30,6 +31,7 @@ impl Engine {
                 width: f64::from(self.size.width),
                 height: f64::from(self.size.height),
                 seed: seed(name, call.index),
+                words: call.words.map(WordCues::json),
             },
         )?;
         let tree = parse_tree(&json).map_err(|e| self.node_error(name, e))?;

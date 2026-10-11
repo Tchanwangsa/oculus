@@ -56,6 +56,18 @@ fn tabular_counter_mid_count() {
 }
 
 #[test]
+fn narrated_enter_at_its_word() {
+    // The card enters at `word("gradient")`: 0.62 s into the clip plus the
+    // 0.25 s lead, so 0.87 s.
+    for t in [0.85, 1.05] {
+        assert_golden(
+            &format!("narrated-{t:.2}"),
+            &render("narrated", Time::Global(t)),
+        );
+    }
+}
+
+#[test]
 fn enter_presets_keep_their_slots() {
     assert_golden("enter-0.75", &render("enter", Time::Global(0.75)));
 }
