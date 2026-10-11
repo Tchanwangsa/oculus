@@ -196,35 +196,41 @@ fn rootlist_endpoints_and_uris() {
     assert_eq!(encode("é/+?"), "%C3%A9%2F%2B%3F");
 }
 
-/// A `searchview/km/v4` answer in the shape librespot-golang's
-/// `SearchResponse` describes, trimmed: a null hit, a hit without a URI, a
-/// playlist under the older user-form URI, a plain-http image.
+/// A `searchDesktop` answer in the shape the web player reads, trimmed: a
+/// null hit, a hit without a URI, a `NotFound` hit, a playlist owned by
+/// Spotify, plain-http and sized image sources.
 const SEARCH: &str = r#"{
-  "results": {
-    "tracks": { "hits": [
-      { "name": "So What", "uri": "spotify:track:tr1",
-        "image": "https://i.scdn.co/image/a300", "duration": 562000,
-        "artists": [{ "name": "Miles Davis", "uri": "spotify:artist:ar1" },
-                    { "name": "John Coltrane", "uri": "spotify:artist:ar2" }],
-        "album": { "name": "Kind of Blue", "uri": "spotify:album:al1" } },
+  "data": { "searchV2": {
+    "tracksV2": { "totalCount": 800, "items": [
+      { "item": { "data": { "__typename": "Track", "uri": "spotify:track:tr1", "name": "So What",
+          "albumOfTrack": { "uri": "spotify:album:al1", "name": "Kind of Blue",
+            "coverArt": { "sources": [
+              { "url": "https://i.scdn.co/image/a64", "width": 64 },
+              { "url": "https://i.scdn.co/image/a640", "width": 640 },
+              { "url": "https://i.scdn.co/image/a300", "width": 300 } ] } },
+          "artists": { "items": [
+            { "uri": "spotify:artist:ar1", "profile": { "name": "Miles Davis" } },
+            { "uri": "spotify:artist:ar2", "profile": { "name": "John Coltrane" } } ] } } } },
       null,
-      { "name": "Loose", "uri": "spotify:track:tr2", "artists": [] },
-      { "name": "No uri" }
-    ], "total": 800 },
-    "albums": { "hits": [
-      { "name": "Kind of Blue", "uri": "spotify:album:al1",
-        "image": "http://insecure.example/a",
-        "artists": [{ "name": "Miles Davis", "uri": "spotify:artist:ar1" }] }
-    ], "total": 1 },
-    "playlists": { "hits": [
-      { "name": "Jazz Classics", "uri": "spotify:user:spotify:playlist:pl1",
-        "image": "https://i.scdn.co/image/p1", "followersCount": 1000, "author": "spotify" },
-      { "name": "", "uri": "spotify:playlist:pl2" }
-    ], "total": 2 },
-    "artists": { "hits": [], "total": 0 }
-  },
-  "requestId": "abc",
-  "categoriesOrder": ["topHit", "tracks", "artists", "albums", "playlists"]
+      { "item": { "data": { "__typename": "Track", "uri": "spotify:track:tr2", "name": "Loose",
+          "artists": { "items": [] } } } },
+      { "item": { "data": { "__typename": "Track", "name": "No uri" } } },
+      { "item": { "data": { "__typename": "NotFound" } } }
+    ] },
+    "albumsV2": { "totalCount": 1, "items": [
+      { "data": { "__typename": "Album", "uri": "spotify:album:al1", "name": "Kind of Blue",
+          "coverArt": { "sources": [ { "url": "http://insecure.example/a", "width": 640 } ] },
+          "artists": { "items": [ { "profile": { "name": "Miles Davis" } } ] } } }
+    ] },
+    "playlists": { "totalCount": 2, "items": [
+      { "data": { "__typename": "Playlist", "uri": "spotify:playlist:pl1", "name": "Jazz Classics",
+          "ownerV2": { "data": { "__typename": "User", "name": "Spotify" } },
+          "images": { "items": [ { "sources": [ { "url": "https://i.scdn.co/image/p1", "width": null } ] } ] } } },
+      { "data": { "__typename": "Playlist", "uri": "spotify:playlist:pl2", "name": "" } }
+    ] },
+    "artists": { "items": [] }
+  } },
+  "extensions": {}
 }"#;
 
 #[test]
@@ -256,18 +262,46 @@ fn search_hits_group_with_subtitles_and_a_tracks_album() {
     assert_eq!(r.tracks[1].context_uri, None);
     // No results, or a group left out, is empty; junk is unreadable.
     assert_eq!(parse(b"{}").unwrap(), Default::default());
-    assert_eq!(parse(br#"{"results":{}}"#).unwrap(), Default::default());
+    assert_eq!(
+        parse(br#"{"data":{"searchV2":{}}}"#).unwrap(),
+        Default::default()
+    );
     assert!(matches!(parse(b"<html>"), Err(LibraryError::Unreadable(_))));
 }
 
 #[test]
-fn a_search_query_is_trimmed_capped_and_encoded_into_the_path() {
+fn a_stale_hash_reads_as_search_outdated_and_other_errors_surface() {
+    assert_eq!(
+        parse(br#"{"errors":[{"message":"PersistedQueryNotFound"}]}"#),
+        Err(LibraryError::SearchOutdated)
+    );
+    assert_eq!(
+        parse(br#"{"errors":[{"message":"Variable missing"}],"data":null}"#),
+        Err(LibraryError::Unreadable("Variable missing".into()))
+    );
+    assert_eq!(
+        search::unavailable(LibraryError::Status(412)),
+        LibraryError::SearchOutdated
+    );
+}
+
+#[test]
+fn a_search_query_is_trimmed_capped_and_sent_as_search_desktop() {
     assert_eq!(clean("   "), None);
     assert_eq!(clean("  lo-fi ").as_deref(), Some("lo-fi"));
     assert_eq!(clean(&"é".repeat(300)).unwrap().chars().count(), MAX_QUERY);
+    let body: serde_json::Value =
+        serde_json::from_slice(&search::body("kind of \"blue\"")).unwrap();
+    assert_eq!(body["operationName"], "searchDesktop");
+    assert_eq!(body["variables"]["searchTerm"], "kind of \"blue\"");
+    assert_eq!(body["variables"]["limit"], 10);
+    assert_eq!(body["extensions"]["persistedQuery"]["version"], 1);
     assert_eq!(
-        search::endpoint("kind of blue & more", "TH", "tanat"),
-        "/searchview/km/v4/search/kind%20of%20blue%20%26%20more?limit=10&entityVersion=2&imageSize=large&catalogue=premium&country=TH&locale=en&username=tanat"
+        body["extensions"]["persistedQuery"]["sha256Hash"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
     );
 }
 

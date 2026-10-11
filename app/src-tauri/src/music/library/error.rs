@@ -15,6 +15,8 @@ pub(in crate::music) enum LibraryError {
     /// Search answered with a status that means the route is gone or
     /// refused for this client, not that the query was bad.
     SearchUnavailable(u16),
+    /// Pathfinder no longer knows search's persisted-query hash.
+    SearchOutdated,
     Status(u16),
     Transport(String),
     Unreadable(String),
@@ -50,6 +52,10 @@ impl fmt::Display for LibraryError {
                     "Search isn't available right now (Spotify answered {code})"
                 )
             }
+            Self::SearchOutdated => write!(
+                f,
+                "Search needs an update: Spotify changed the search request its apps send"
+            ),
             Self::Status(code) => write!(f, "Spotify answered {code}"),
             Self::Transport(why) => write!(f, "Could not reach Spotify ({why})"),
             Self::Unreadable(why) => write!(f, "Spotify sent something unreadable ({why})"),
