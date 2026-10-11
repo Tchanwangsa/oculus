@@ -123,16 +123,14 @@ export default ({ heading, points, cues, accent }, { theme }) => {
   // With cues, each point enters as its phrase is said; without (gallery), every 0.6 s.
   const at = (i) => (cues ? word(cues[i]) : 0.4 + i * 0.6);
   return (
-    <Stack gap={space.l} style={{ flexGrow: 1, padding: space.xl, fill: color.bg }}>
-      <Enter preset="rise">
-        <Text style={{ ...type.h1, color: color.text }}>{heading}</Text>
-      </Enter>
-      <Stack gap={space.m}>
+    <Stack gap={space.xl} justify="center" style={{ flexGrow: 1, padding: space.xxl, fill: color.bg }}>
+      <Text key="heading" style={{ ...type.h1, color: color.text }}>{heading}</Text>
+      <Stack gap={space.l}>
         {points.map((point, i) => (
           <Enter key={`point-${i}`} preset="rise" at={at(i)}>
             <Row gap={space.m} align="center">
-              <Box style={{ width: 12, height: 12, radius: radius.pill, fill: accent }} />
-              <Text style={{ ...type.h3, color: color.text }}>{point}</Text>
+              <Box style={{ width: 18, height: 18, radius: radius.pill, fill: accent }} />
+              <Text style={{ ...type.h2, color: color.text }}>{point}</Text>
             </Row>
           </Enter>
         ))}
@@ -164,6 +162,12 @@ which takes a token's *name* and hands the component its value:
 `token("color").default("accent")` set to `"positive"` in a scene's props
 gives `theme.color.positive`. Each takes `.default(v)` or `.optional()`.
 
+Props are flat: there is no object builder, so a prop is never an object
+and `list(x)` holds what `x` does (strings, numbers, booleans, `oneOf`
+values, tokens or lists). Describe a list of records as parallel lists:
+`labels: list(str())`, `values: list(num())`, `tones:
+list(token("color"))`, read together by index.
+
 ## Elements
 
 | Element | Props | Notes |
@@ -178,6 +182,14 @@ gives `theme.color.positive`. Each takes `.default(v)` or `.optional()`.
 
 An element takes only these props; anything else is an error that names
 the allowed ones. Style keys go inside `style`.
+
+- **A Box is a row.** `justifyContent` places children across, `alignItems`
+  up and down; in a Stack it is the other way round.
+- **Text wraps at its box's width.** A box with `position: "absolute"` and
+  no `width` takes its text's width. Give it a `width` and the text wraps
+  inside it, so make the width generous: a label centred on a point is a
+  wide box centred on that point with `justifyContent: "center"`, as in the
+  diagram below.
 
 **Style keys** (a closed set; an unknown key names the closest one):
 
@@ -246,6 +258,67 @@ Everything moves as a function of `t`.
 
 `easing` props take a function, `[x1, y1, x2, y2]`, or a theme easing name
 (`"enter"`, `"exit"`, `"standard"`).
+
+## A diagram scene
+
+Cards placed absolutely from `ctx.size`, an arrow between them, and a label
+that enters on a word. `Arrow` draws in frame pixels with the frame as its
+box, so its parent must fill the frame: here the root `Box`, with
+`flexGrow: 1`.
+
+```tsx
+export const props = {
+  heading: str(),
+  from: str(),
+  to: str(),
+  label: str(),
+  cues: list(str()).optional(),
+};
+
+export const examples = {
+  bank: { heading: "One message, two ends", from: "Your phone", to: "The bank", label: "Encrypted" },
+  chat: { heading: "Same road, any message", from: "Alice", to: "Bob", label: "Private" },
+};
+
+export default ({ heading, from, to, label, cues }, { t, theme, size }) => {
+  const { color, space, radius, type } = theme;
+  // cues[0]: when the arrow draws; cues[1]: when the label enters.
+  const tArrow = cues ? word(cues[0]) : 0.6;
+  const tLabel = cues ? word(cues[1]) : 1.6;
+  const cardW = 520;
+  const cardH = 280;
+  const top = (size.height - cardH) / 2 + space.xl;
+  const xs = [space.xxl, size.width - space.xxl - cardW];
+  const midY = top + cardH / 2;
+  const card = (text, x) => (
+    <Box style={{ position: "absolute", left: x, top, width: cardW, height: cardH, radius: radius.l,
+      fill: color.surface, border: { width: 2, color: color.border }, justifyContent: "center", alignItems: "center" }}>
+      <Text style={{ ...type.h1, color: color.text }}>{text}</Text>
+    </Box>
+  );
+  return (
+    <Box style={{ flexGrow: 1, fill: color.bg }}>
+      <Box key="heading" style={{ position: "absolute", left: space.xxl, top: space.xl, width: size.width - 2 * space.xxl }}>
+        <Text style={{ ...type.h1, color: color.text }}>{heading}</Text>
+      </Box>
+      <Enter preset="scale">{card(from, xs[0])}</Enter>
+      <Enter preset="scale" at={0.2}>{card(to, xs[1])}</Enter>
+      <Arrow
+        points={[[xs[0] + cardW + space.m, midY], [xs[1] - space.m, midY]]}
+        progress={interpolate(t, [tArrow, tArrow + 0.8], [0, 1], { easing: easeOutCubic })}
+        stroke={{ width: 10, color: color.accent }}
+      />
+      <Box style={{ position: "absolute", left: 0, top: top - space.xxl, width: size.width, justifyContent: "center" }}>
+        <Enter preset="rise" at={tLabel}>
+          <Box style={{ padding: [space.s, space.l], radius: radius.pill, fill: color.accent }}>
+            <Text style={{ ...type.h2, color: color.onAccent }}>{label}</Text>
+          </Box>
+        </Enter>
+      </Box>
+    </Box>
+  );
+};
+```
 
 ## Word cues
 
@@ -316,6 +389,22 @@ on any problem. Read `message`: it says what is wrong and what is valid.
 | `component_not_found` | No component by that name | Use one the message lists, or write it in `components/`. |
 | `transpile` | The TSX does not compile, or uses `import` | Fix the syntax at `loc`. |
 | `image`, `font`, `budget` | A missing asset, an unknown font, or a component doing too much work | Add the file; use `theme.font`; remove the loop. |
+
+**The literal rules, exactly.** Lint reads each component's source:
+
+- A colour is a `#` hex string, `rgb(`, `hsl(`, `oklch(` and the like, or a
+  string that is a CSS colour name, anywhere outside `token(...)` and its
+  `.default(...)`.
+- A font is a bundled family's name as a string, or any string after
+  `fontFamily:`.
+- A number is checked only inside a `style={{ … }}` (or `style: { … }`)
+  object, at any depth of brackets or calls, so the `8` in `width:
+  Math.max(8, w)` and both numbers in `padding: [0, 16]` count. It is an
+  error only when it equals a theme `space` or `radius` value (4, 8, 16,
+  24, 28, 40, 44, 64, 112, 999 in the bundled themes; space is named
+  first). Numbers inside a nested object (`shadow`, `border`, a gradient
+  `fill`), after a minus sign, outside `style` (a `const`, `Arrow` points,
+  a `stroke` prop) and every other value, such as 56 or 18, pass.
 
 A broken `video.json` or `script.md` is not an issue but a failure: the
 command prints the file, the line and the reason, and nothing else runs.
@@ -391,10 +480,12 @@ a `subject` in `video.json`. Promote only what the student wants to keep.
 | Component | Props | For |
 | --- | --- | --- |
 | `TitleCard` | `title`; optional `eyebrow`, `subtitle` | The opening card, dark |
-| `Steps` | `steps` (a list); optional `heading` | A numbered list |
+| `Steps` | `steps` (a list); optional `heading` | 3 to 5 steps of a few words. Packed at the top, so fewer leave the lower half empty |
 | `BigNumber` | `value`, `label`; optional `unit` | One figure, large |
-| `LowerThird` | `name`; optional `role` | A name caption |
-| `SplitShell` | `heading`, `left` and `right` (lists); `leftTitle`, `rightTitle` (default `Left`, `Right`) | Two columns, compared |
+| `LowerThird` | `name`; optional `role` | A name caption, bottom left |
+| `SplitShell` | `heading`, `left` and `right` (lists); `leftTitle`, `rightTitle` (default `Left`, `Right`) | 3 to 5 short lines a side. Its body-size text sits in cards that fill the frame, so one or two lines leave them mostly empty |
 
-Each also takes `accent`, a colour token's name (default `"accent"`). None of
-them moves: for motion or word cues, write the video's own component.
+Each also takes `accent`, a colour token's name (default `"accent"`). All
+five are static and text only: nothing moves and nothing is cued. For
+motion, word cues, a diagram, or a comparison of a few big words, write the
+video's own component.

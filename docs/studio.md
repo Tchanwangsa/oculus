@@ -206,8 +206,10 @@ write `video.json`, `script.md` and any component of the video's own,
 look at `frame` and `strip` PNGs with the agent's image-reading tool,
 `render` a draft and then `--final`, and `gallery` then `promote` a new
 component the student wants kept; plus the taste rules (one idea per scene,
-words on screen summarise the narration, tokens over literals, motion cued
-with `word()`, stable magic-move keys). When `narrate` fails for want of a
+words on screen summarise the narration, the frame filled with the key
+figure at display size, something on screen within a second, motion cued
+with `word()`, one shared key for consecutive headings, tokens over
+literals). When `narrate` fails for want of a
 voice or the aligner, the agent stops and tells the student what to set in
 Settings -> Voice; it never downloads the aligner. `reference.md` is this
 page's authoring rules distilled for an agent (video.json, spoken form, the
