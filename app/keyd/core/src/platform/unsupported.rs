@@ -147,10 +147,6 @@ impl super::Registrar for NoRegistrar {
     fn uninstall(&self) -> Result<Vec<std::path::PathBuf>, String> {
         Ok(Vec::new())
     }
-
-    fn retire(&self, _label: &str) -> Result<Vec<std::path::PathBuf>, String> {
-        Ok(Vec::new())
-    }
 }
 
 #[cfg(feature = "client")]

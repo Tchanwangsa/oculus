@@ -6,7 +6,6 @@
 pub(crate) mod commands;
 mod cookies;
 pub mod keyd;
-pub mod legacy_agent;
 mod login_window;
 pub mod okta;
 mod session;

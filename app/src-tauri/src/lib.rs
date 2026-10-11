@@ -100,9 +100,6 @@ pub fn run() {
                 auth::restore_session(&restore);
             });
 
-            // The session keep-alive agent an earlier version installed.
-            auth::legacy_agent::retire_in_background();
-
             Ok(())
         })
         // No click handler: it would be injected into browser pages too,

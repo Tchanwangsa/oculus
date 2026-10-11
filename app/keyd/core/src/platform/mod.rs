@@ -9,8 +9,7 @@
 //! 3. PeerCheck: `inspect` (same user, which executable, its `Role`) and
 //!    `admit`, both before a byte of the request is read.
 //! 4, 5. `master_key()` and `legacy_items()`: the OS secret store.
-//! 6. `registrar()`: installs, reports and removes what starts keyd, and
-//!    retires a registration an earlier Oculus made.
+//! 6. `registrar()`: installs, reports and removes what starts keyd.
 //! 7. Paths are `crate::paths`; 8. the build step is the adapter's part of
 //!    `app/scripts/build-keyd.mjs`. `files` holds the file helpers.
 

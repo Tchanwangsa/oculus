@@ -16,7 +16,6 @@ WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-
 | keyd's Okta ops: the vault entries, the old-item import, one sign-in at a time; the role check every op passes | `app/keyd/core/src/ops/okta.rs`, `app/keyd/core/src/ops.rs` |
 | Staging the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Startup probe | `app/src-tauri/src/auth/startup.rs` |
-| Removing a leftover keep-alive agent at startup | `app/src-tauri/src/auth/legacy_agent.rs`, `app/keyd/core/src/platform/macos/registrar.rs` |
 | Ed token minting via LTI | `app/src-tauri/src/sources/ed/lti.rs` |
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/sources/echo360/auth.rs`, `app/src-tauri/src/lectures/mod.rs` |
 | Echo360 page embeds: per-link launch, Bearer, CDN signing; the shared Bearer | `app/src-tauri/src/sources/echo360/embed/`, `app/src-tauri/src/sync/scrape/embeds/state.rs` |
@@ -154,10 +153,6 @@ attempt (`LoginError::UnsupportedFactor`).
   `binaries/`. `tauri-build` validates every `externalBin`
   path even while building `oculus` itself, so the script writes an empty
   placeholder for that build and removes it on failure.
-- Startup removes the session keep-alive LaunchAgent
-  (`com.tchan.oculus.session-keepalive`) and its data-dir files, if an earlier
-  version installed them (`app/src-tauri/src/auth/legacy_agent.rs`). The unload goes
-  through the platform registrar's `retire`, which refuses keyd's own label.
 - No sign-in beats an absolute session cap or a forced IdP re-auth.
 
 ## Okta sign-in runs headless in Rust
