@@ -153,7 +153,7 @@ pub fn try_each<T>(
             Ok(value) => return Ok(value),
             Err(e) => {
                 if i + 1 < chain.len() {
-                    eprintln!(
+                    elog!(
                         "[oculus] {}: {} failed, trying the next model: {e}",
                         job.label(),
                         sel.model

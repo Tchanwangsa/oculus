@@ -20,11 +20,11 @@ pub(super) fn confirm_browser_sign_in(app: &AppHandle, keyd: &Credentialed) {
     let dir = crate::library::paths::data_dir();
     match crate::sources::canvas::Canvas::open(&dir).whoami() {
         Ok(name) => {
-            eprintln!("[oculus] signed in from a browser tab as {name}");
+            elog!("[oculus] signed in from a browser tab as {name}");
             session_established(app, &dir, Via::Browser);
         }
         Err(e) => {
-            eprintln!("[oculus] browser tab looked signed in, but Canvas refused the session: {e}")
+            elog!("[oculus] browser tab looked signed in, but Canvas refused the session: {e}")
         }
     }
     CONFIRMING.store(false, Ordering::SeqCst);

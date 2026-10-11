@@ -28,7 +28,7 @@ pub async fn sync_subjects(app: AppHandle) -> Result<(), String> {
                     .map(crate::sync::Course::to_canvas_json)
                     .collect();
                 let current = courses.iter().filter(|c| c.is_current).count();
-                eprintln!(
+                elog!(
                     "[oculus] subjects: {} total, {current} current",
                     courses.len()
                 );
@@ -36,7 +36,7 @@ pub async fn sync_subjects(app: AppHandle) -> Result<(), String> {
                 app.emit("subjects-loaded", payload).ok();
             }
             Err(e) => {
-                eprintln!("[oculus] subjects failed: {e}");
+                elog!("[oculus] subjects failed: {e}");
                 app.emit("subjects-error", e).ok();
             }
         }

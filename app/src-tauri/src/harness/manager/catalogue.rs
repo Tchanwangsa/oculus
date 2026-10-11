@@ -45,7 +45,7 @@ impl Harness {
             let s = server.clone();
             std::thread::spawn(move || {
                 if let Err(e) = s.read_rate_limits() {
-                    eprintln!("[oculus] codex rate limits: {e}");
+                    elog!("[oculus] codex rate limits: {e}");
                 }
             });
         }
@@ -61,7 +61,7 @@ impl Harness {
         };
         if let Some(s) = server {
             if let Err(e) = s.read_rate_limits() {
-                eprintln!("[oculus] codex rate limits: {e}");
+                elog!("[oculus] codex rate limits: {e}");
             }
         }
     }

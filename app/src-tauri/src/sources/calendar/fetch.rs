@@ -15,11 +15,11 @@ pub fn fetch(canvas: &Canvas, course_id: i64) -> Result<Vec<CalendarEvent>, Stri
 
     match fetch_events(canvas, course_id, &sections) {
         Ok(events) => out.extend(events),
-        Err(e) => eprintln!("[oculus] calendar: course {course_id} events: {e}"),
+        Err(e) => elog!("[oculus] calendar: course {course_id} events: {e}"),
     }
     match fetch_due(canvas, course_id) {
         Ok(due) => out.extend(due),
-        Err(e) => eprintln!("[oculus] calendar: course {course_id} due dates: {e}"),
+        Err(e) => elog!("[oculus] calendar: course {course_id} due dates: {e}"),
     }
 
     // A dead session is not an empty calendar: the caller would store nothing.

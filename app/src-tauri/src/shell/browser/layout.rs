@@ -12,7 +12,7 @@ use super::{
 pub fn init(app: &AppHandle) {
     seed_sessions(app, || {});
     let Some(window) = app.get_window(MAIN) else {
-        eprintln!("[oculus] browser: no main window at setup; pages will not follow resizes");
+        elog!("[oculus] browser: no main window at setup; pages will not follow resizes");
         return;
     };
     let events_app = app.clone();
@@ -234,7 +234,7 @@ pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
         s.tabs.push(Tab::new(s.next_id, url.to_string()));
         s.next_id
     });
-    eprintln!("[oculus] browser: opening tab {id} → {url}");
+    elog!("[oculus] browser: opening tab {id} → {url}");
     if wants_sessions(&url) {
         broadcast(app);
         let app = app.clone();
@@ -244,7 +244,7 @@ pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
                 return;
             }
             if let Err(e) = create_page(&app, id, url) {
-                eprintln!("[oculus] browser: tab {id}: {e}");
+                elog!("[oculus] browser: tab {id}: {e}");
                 with_state(&app, |s| s.tabs.retain(|t| t.id != id));
                 broadcast(&app);
             }

@@ -41,7 +41,7 @@ fn link_skill(link: &Path, target: &str, name: &str, body: &str) -> Result<Link,
             std::fs::remove_file(link).map_err(|e| format!("cannot relink {name}: {e}"))?;
         }
         Ok(_) => {
-            eprintln!("[oculus] {} is not ours — left alone", link.display());
+            elog!("[oculus] {} is not ours — left alone", link.display());
             return Ok(Link::Skipped);
         }
         Err(_) => {}

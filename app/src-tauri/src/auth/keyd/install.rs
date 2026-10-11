@@ -165,13 +165,13 @@ pub fn ensure_installed() {
         return;
     }
     match ensure_bundled(&crate::library::paths::data_dir()) {
-        Ok(Some(i)) => eprintln!(
+        Ok(Some(i)) => elog!(
             "[oculus] keyd installed from {} ({})",
             i.program.display(),
             &i.source_hash[..12]
         ),
         Ok(None) => {}
-        Err(e) => eprintln!("[oculus] could not install keyd: {e}"),
+        Err(e) => elog!("[oculus] could not install keyd: {e}"),
     }
 }
 

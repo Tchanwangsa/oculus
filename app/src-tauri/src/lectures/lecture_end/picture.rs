@@ -46,7 +46,7 @@ pub(super) fn black_from(ffmpeg: &Path, sources: &[PathBuf], length: u32) -> Opt
         {
             Ok(decoded) => decoded,
             Err(e) => {
-                eprintln!("[oculus] lecture end: {}: {e}", video.display());
+                elog!("[oculus] lecture end: {}: {e}", video.display());
                 continue;
             }
         };

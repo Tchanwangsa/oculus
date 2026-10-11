@@ -110,8 +110,8 @@ impl Engine {
         let _ = std::thread::Builder::new()
             .name("oculus-parse".into())
             .spawn(move || match parse_pdf(&data_dir, &rel, subject_id) {
-                Ok(summary) => eprintln!("[oculus] parse-pdf {rel}: {summary}"),
-                Err(e) => eprintln!("[oculus] parse-pdf {rel}: {e}"),
+                Ok(summary) => elog!("[oculus] parse-pdf {rel}: {summary}"),
+                Err(e) => elog!("[oculus] parse-pdf {rel}: {e}"),
             });
     }
 }

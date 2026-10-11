@@ -407,6 +407,7 @@ without keyd — neither is an environment variable.
 - `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
 - Anything under `app/src-tauri/` changing, templates included, rebuilds and relaunches the dev app.
 - A dev rebuild SIGTERMs the app past Tauri's Exit event, so agent subprocesses can outlive it ([harness.md](./harness.md)).
+- `eprintln!` panics once stderr is a closed pipe, as it is for an app a dead `tauri dev` left running, and a panic inside a WebKit or Objective-C callback aborts the app. The app crate logs with `elog!` (`app/src-tauri/src/elog.rs`), which drops the write error; tests and the CLI binary keep `eprintln!`.
 - Adding `app/keyd` to a workspace, or building it outside `app/keyd`, changes its bytes and brings back the keychain prompt.
 - An OS call outside `app/keyd/core/src/platform/` in keyd's or the app's keyd code fails `bun run test`, and on Linux CI fails the build.
 - Deleting `~/Library/Application Support/com.tchan.oculus` is a full reset, sign-in included.
