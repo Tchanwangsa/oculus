@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::emissions::{log_softmax, logits, normalise};
 use super::gaps::{unscripted, Heard};
-use super::model::{dir, model_file};
+use super::model::resolve_model;
 use super::targets::targets;
 use super::viterbi::{force_align, Span};
 use crate::studio::audio::ALIGN_RATE;
@@ -63,9 +63,10 @@ pub struct Alignment {
     pub gaps: Vec<Gap>,
 }
 
-/// Time `script_words` against mono 16 kHz `pcm` with the downloaded model.
+/// Time `script_words` against mono 16 kHz `pcm` with the downloaded model
+/// (or `STUDIO_ALIGN_MODEL`'s; see `resolve_model`).
 pub fn align(pcm: &[f32], script_words: &[String]) -> Result<Alignment, NarrationError> {
-    let model = model_file(&dir()).ok_or(NarrationError::ModelMissing)?;
+    let model = resolve_model()?;
     align_with(&model, pcm, script_words)
 }
 

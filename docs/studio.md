@@ -4,9 +4,9 @@ Studio makes lecture videos from scenes written as TSX components.
 `app/studio-core/` is its renderer: a video folder plus a time in, one RGBA
 frame out, the same pixels on every machine, scene transitions included.
 A narrated scene lasts as long as its narration and can cue elements to its
-words, from timings the app writes; synthesising the narration and encoding
-to video are not built yet. `oculus studio` renders single frames and
-contact sheets, and lints.
+words, from clips and timings `oculus studio narrate` makes with a TTS server
+and a local aligner; encoding to video is not built yet. `oculus studio`
+renders single frames and contact sheets, lints, and narrates.
 
 ## Where
 
@@ -28,7 +28,8 @@ contact sheets, and lints.
 | Every error and its message | `app/studio-core/src/error.rs` |
 | Fixture videos and golden frames | `app/studio-core/tests/fixtures/`, `app/studio-core/tests/golden/` |
 | Narration audio decode and word timing (the aligner, its model download) | `app/src-tauri/src/studio/` (`audio/`, `timing/`), `app/src-tauri/src/runtime/onnx/` |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio.rs`, `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| Narrating a video: the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`narrate.rs`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -112,7 +113,8 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
 
 `script.md` holds what is said, and `narration/manifest.json` the timings of
 the clips made from it. studio-core reads both and never the audio. The
-manifest is written by `oculus studio narrate`, which is not built yet.
+manifest is written by `oculus studio narrate` (see "Narration is made by
+`oculus studio narrate`").
 
 ```markdown
 ## steps
@@ -129,12 +131,13 @@ We follow the *gradient* downhill, one small step at a time.
 - **The manifest** is `{ version: 1, scenes: { <id>: { key, text, audio,
   duration, words: [{ text, start, end, confidence }], gaps: [{ after,
   start, end, heard }] } } }` (`Manifest`). `text` is the section text the
-  clip says, `audio` the clip's file in `narration/`, `key` its content
+  clip says, `audio` the clip's file name in `narration/`, `key` its content
   address (sha256 of the text, server, model, voice, speed and aligner
   model), times are seconds from the clip's start, `confidence` is the
   aligner's (mean log-probability of the word's letter frames; higher is
   surer), and `gaps` (optional) is speech the aligner heard that the
-  script does not have, after word index `after`. Unknown keys, another
+  script does not have, after word index `after` (`null`: before the first
+  word). Unknown keys, another
   version, non-finite times and a word or gap ending before it starts fail
   the load.
 - **Length.** A narrated scene lasts `max(hold, lead + duration + tail)`:
@@ -167,9 +170,11 @@ CTC forced alignment of the script against wav2vec2's letter emissions, run
 by ONNX Runtime on the CPU (`app/src-tauri/src/runtime/onnx/`). The model
 is Xenova's fp32 ONNX export of `facebook/wav2vec2-base-960h` (Apache-2.0,
 credit facebook/wav2vec2-base-960h), pinned to one commit, 378 MB. It is
-downloaded on request to `<app data>/models/align/` and never bundled; the
-download is checked against its pinned size and sha256 before it gets its
-name. ONNX Runtime itself is linked statically.
+downloaded on request (`oculus studio aligner download`) to
+`<app data>/models/align/` and never bundled; the download is checked
+against its pinned size and sha256 before it gets its name. ONNX Runtime
+itself is linked statically. `STUDIO_ALIGN_MODEL=<model.onnx>` points the
+aligner at a copy elsewhere instead, for development and the parity tests.
 
 - **Input.** The server's WAV is decoded with hound (any integer or float
   format, downmixed to mono) and resampled to 16 kHz with rubato
@@ -193,6 +198,64 @@ name. ONNX Runtime itself is linked statically.
   grows with the square of its length (0.7 GB at 17 s, 2.2 GB at 57 s). Each
   alignment opens its own session and drops it, since a reused one keeps
   growing. Threads: half the cores, at most 4. No timeouts.
+
+## Narration is made by `oculus studio narrate`
+
+`narrate` (`app/src-tauri/src/studio/narrate/`) turns each scene's
+`script.md` section into a clip and its word times, and writes the
+manifest. Scenes run one at a time, in video order.
+
+- **Voice.** Each of server, model, voice and speed comes from the first
+  that sets it: the CLI flags, the video's `voice` block, then the `voice`
+  settings row (`{ baseUrl, model, voice, speed }`, which Settings -> Voice
+  will write; `studio::voice`). A missing or ill-typed field in the row
+  reads as unset; only speed has a default (1.0). Server, model and voice
+  have none, since ids differ per server (Kokoro-FastAPI `kokoro`, mlx-audio
+  `mlx-community/Kokoro-82M-bf16`, OpenAI `tts-1`): narrate fails with
+  ``set a TTS server in Settings -> Voice, or pass --server`` and the same
+  for `--model` and `--voice`.
+- **The TTS server** is OpenAI-compatible (Kokoro-FastAPI, mlx-audio):
+  `POST <base>/v1/audio/speech` with `{ model, input, voice,
+  response_format: "wav", speed }`, one request per clip, no timeout
+  (`studio::tts`). The base URL is accepted with or without a trailing
+  `/v1`, normalised once. Keyless servers only: no API key is sent. A
+  non-2xx answer fails with its status and a short excerpt of the body; a
+  429 is retried with back-off (1, 2, 4, 8 s; five tries). A 200 whose body
+  is empty, is not a WAV, or is digitally silent (see "Input" above) is a
+  failure, never a pause: Kokoro answers an unknown voice with 200 and
+  nothing.
+- **Cache.** A clip's `key` is the sha256 hex of the section text, the
+  normalised server URL, model, voice, speed and the aligner's `MODEL_ID`,
+  each length-prefixed. A scene whose manifest entry has the same key and
+  whose `narration/<key>.wav` exists is kept (`cached`) unless `--force`;
+  editing one paragraph re-requests that one scene.
+- **A new clip** is saved byte for byte as the server sent it to
+  `narration/<key>.wav`; its duration comes from the decoded samples, a clip
+  over `MAX_NARRATION_SECS` is refused before alignment ("split the
+  paragraph"), and the rest is resampled to 16 kHz and timed against the
+  section's whitespace-separated words. The aligner model is checked before
+  the first TTS request, so a missing one costs no synthesis and fails with
+  ``run `oculus studio aligner download` ``.
+- **Writes.** The manifest is rewritten atomically after each scene, so a
+  failure keeps the scenes before it; the error names the scene and the
+  command exits 1. After the last scene, entries whose id is no longer a
+  narrated scene are dropped and every `.wav` (or interrupted `.wav.part`)
+  in `narration/` that no entry names is deleted; other files are left. A
+  manifest this build cannot read (another version, damaged) is rebuilt
+  from nothing, with a warning.
+- **Output.** Per scene: the id, `narrated` or `cached`, the clip's length,
+  its word count, and as warnings each word under `LOW_CONFIDENCE` and each
+  gap (times into the clip; lint fails on the same ones, at scene time).
+  `--json` gives `{ dir, voice, scenes: [{ id, outcome, audio, duration,
+  words, low_confidence, gaps, timings }], dropped, deleted, ms }`.
+- `oculus studio tts "<text>"` makes one clip the same way and writes it
+  (`tts.wav` unless `-o`), for hearing a voice. `oculus studio aligner
+  status|download|delete` manages the aligner model.
+- **Measured** on Kokoro (mlx-audio, `af_heart`, M-series Mac, debug
+  build): three scenes of 4 to 8 s narrated in 1.8 s with a 0.67 GB peak;
+  a re-run after one paragraph edit took 0.5 s. Kokoro's clips start with
+  about 0.2 s and end with about 0.4 s of exact zeros, well under the 1 s
+  zero-run limit.
 
 ## Four primitives and a closed set of style keys
 
@@ -581,7 +644,7 @@ For a narrated video lint also reports, each naming the scene id:
   measured on Kokoro, where clean words stayed above -4.83; re-check it for
   another TTS engine), since a mangled word smears its neighbours' timing;
 - each manifest gap: ``the audio has unscripted speech after `word` (heard
-  "…")``.
+  "…")``, or ``before the first word``.
 
 All of these are errors: lint has no warning level, so any of them makes
 `oculus studio lint` exit 1.
@@ -605,6 +668,11 @@ All of these are errors: lint has no warning level, so any of them makes
 - `frame` and `strip` read `script.md` and the narration manifest; stale or
   missing narration stops them with the `Narration` error, while `lint`
   lists it with the rest.
+- `oculus studio narrate <DIR>` makes the narration (`--scene ID`,
+  `--force`, and `--server`, `--model`, `--voice`, `--speed` over the
+  video's and Settings' voice); `oculus studio tts` makes one clip; `oculus
+  studio aligner` manages the aligner model. See "Narration is made by
+  `oculus studio narrate`".
 - `oculus studio lint <DIR>` prints each problem and exits 1 if there is
   any. With `--json` it prints the issues as an array of `{scene, id,
   component, example, kind, message, loc}`; `scene` and `component` are
@@ -631,7 +699,10 @@ goldens are 640x360 or smaller to keep the repo small; there is no
 dark-gradient golden, since a dithered 1080p frame is a 2.4 MB PNG.
 `tests/narration.rs` covers scene lengths, stale and missing narration, the
 load errors and `word`/`wordEnd`; the `narrated` fixture (a hand-written
-manifest, no audio) pins a card entering at its word.
+manifest, no audio) pins a card entering at its word. In the app crate, `cargo test --lib studio::` covers the TTS client
+against a loopback fake server (WAV, empty, non-WAV, silent, 404, 429),
+the voice resolution, the cache key and `narrate` with a stubbed aligner
+(caching, one-paragraph edits, per-scene writes, pruning, failures).
 
 From `app/studio-core`: `cargo test`, `cargo clippy --all-targets -- -D
 warnings`, `cargo fmt`. CI runs these in the `studio-core` job on macOS.

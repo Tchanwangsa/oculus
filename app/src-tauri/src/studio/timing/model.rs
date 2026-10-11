@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::runtime::onnx::{self, Pack, PackFile};
+use crate::studio::NarrationError;
 
 /// Names the model in a narration cache key, so changing the model
 /// re-times every scene.
@@ -53,6 +54,27 @@ pub fn status(dir: &Path) -> Status {
 /// The model file, when it is downloaded.
 pub fn model_file(dir: &Path) -> Option<PathBuf> {
     onnx::is_present(dir, &PACK).then(|| dir.join(PACK.files[0].file))
+}
+
+/// Overrides the downloaded model with a file elsewhere, for development
+/// and tests (the parity tests read it too), so they need not download
+/// 378 MB into the app's data folder.
+pub const MODEL_ENV: &str = "STUDIO_ALIGN_MODEL";
+
+/// The model narration aligns with: [`MODEL_ENV`] when set, else the
+/// downloaded one.
+pub fn resolve_model() -> Result<PathBuf, NarrationError> {
+    if let Some(path) = std::env::var_os(MODEL_ENV).filter(|p| !p.is_empty()) {
+        let path = PathBuf::from(path);
+        if !path.is_file() {
+            return Err(NarrationError::Onnx(format!(
+                "{MODEL_ENV} names {}, which is not a file",
+                path.display()
+            )));
+        }
+        return Ok(path);
+    }
+    model_file(&dir()).ok_or(NarrationError::ModelMissing)
 }
 
 /// Download the model into `dir`, reporting `(received, total)` bytes. Ends

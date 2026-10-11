@@ -16,4 +16,7 @@ pub use crate::runtime::onnx::CANCELLED;
 pub use align::{
     align, align_with, Alignment, Gap, WordTime, FRAME_SECONDS, GAP_LETTER_FRAMES, START_BIAS,
 };
-pub use model::{cancel, delete, dir, download, model_file, status, Status, MODEL_ID, PACK};
+pub use model::{
+    cancel, delete, dir, download, model_file, resolve_model, status, Status, MODEL_ENV, MODEL_ID,
+    PACK,
+};

@@ -47,6 +47,15 @@ pub struct Project {
 
 impl Project {
     pub fn load(dir: impl AsRef<Path>) -> Result<Project> {
+        let mut project = Project::load_unnarrated(dir)?;
+        project.manifest = Manifest::read(&project.dir)?;
+        Ok(project)
+    }
+
+    /// [`Project::load`] without reading `narration/manifest.json`
+    /// (`manifest` is `None`): for the narrator, which rewrites a manifest
+    /// this build cannot read instead of failing on it.
+    pub fn load_unnarrated(dir: impl AsRef<Path>) -> Result<Project> {
         let dir = dir.as_ref().to_path_buf();
         let path = dir.join("video.json");
         let json = std::fs::read_to_string(&path).map_err(|e| StudioError::io(&path, e))?;
@@ -64,14 +73,13 @@ impl Project {
             Theme::bundled(&video.theme)?
         };
         let components = Arc::new(FolderComponents::new(dir.join("components")));
-        let manifest = Manifest::read(&dir)?;
         Ok(Project {
             dir,
             video,
             theme,
             components,
             script,
-            manifest,
+            manifest: None,
         })
     }
 

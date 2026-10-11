@@ -263,6 +263,13 @@ fn script_ids_and_manifest_errors_fail_the_load() {
         t.load_err()
             .contains("scenes.a.gaps[0] follows word 1 of 1")
     );
+    t.manifest(
+        json!({ "a": { "key": "k", "text": "Hello.", "audio": "k.wav", "duration": 1.0,
+        "words": [{ "text": "Hello.", "start": 0.3, "end": 0.5, "confidence": 0 }],
+        "gaps": [{ "after": null, "start": 0.0, "end": 0.2, "heard": "uh" }] } }),
+    );
+    let gap = &t.load().manifest.unwrap().scenes["a"].gaps[0];
+    assert_eq!(gap.after, None, "null is speech before the first word");
     t.manifest(json!({}));
 
     let video = |voice: Value| {

@@ -70,8 +70,9 @@ pub struct ManifestWord {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ManifestGap {
-    /// The index in `words` of the word it follows.
-    pub after: usize,
+    /// The index in `words` of the word it follows; `None` (`null`) for
+    /// speech before the first word.
+    pub after: Option<usize>,
     /// Seconds from the clip's start.
     pub start: f64,
     pub end: f64,
@@ -124,13 +125,13 @@ impl Manifest {
                 }
             }
             for (i, g) in s.gaps.iter().enumerate() {
-                if g.after >= s.words.len()
+                if g.after.is_some_and(|a| a >= s.words.len())
                     || !(g.start.is_finite() && g.end.is_finite())
                     || g.start > g.end
                 {
+                    let after = g.after.map_or("null".to_owned(), |a| a.to_string());
                     return Err(format!(
-                        "scenes.{id}.gaps[{i}] follows word {} of {} and runs {} to {} s; it must follow a word, with finite times and start <= end",
-                        g.after,
+                        "scenes.{id}.gaps[{i}] follows word {after} of {} and runs {} to {} s; `after` must be a word's index or null (before the first word), with finite times and start <= end",
                         s.words.len(),
                         g.start,
                         g.end
