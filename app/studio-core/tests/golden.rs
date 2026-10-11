@@ -31,6 +31,41 @@ fn text_motion_settled() {
 }
 
 #[test]
+fn reveal_by_word_and_line() {
+    for t in [0.5, 1.0, 1.6] {
+        assert_golden(
+            &format!("reveal-{t:.1}"),
+            &render("reveal", Time::Global(t)),
+        );
+    }
+}
+
+#[test]
+fn stroke_draw_and_arrows() {
+    for t in [0.6, 1.6] {
+        assert_golden(
+            &format!("stroke-draw-{t:.1}"),
+            &render("stroke-draw", Time::Global(t)),
+        );
+    }
+}
+
+#[test]
+fn tabular_counter_mid_count() {
+    assert_golden("counter-1.0", &render("counter", Time::Global(1.0)));
+}
+
+#[test]
+fn enter_presets_keep_their_slots() {
+    assert_golden("enter-0.75", &render("enter", Time::Global(0.75)));
+}
+
+#[test]
+fn camera_zoom() {
+    assert_golden("camera-1.0", &render("camera", Time::Global(1.0)));
+}
+
+#[test]
 fn half_scale_proxy_keeps_the_layout() {
     let project = Project::load(fixture("title-card")).unwrap();
     let mut r = Renderer::new(&project, RenderOptions { scale: 0.5 }).unwrap();
@@ -39,10 +74,21 @@ fn half_scale_proxy_keeps_the_layout() {
     assert_golden("title-card-540p", &frame);
 }
 
+const FIXTURES: [(&str, f64); 8] = [
+    ("title-card", 1.0),
+    ("layout", 0.0),
+    ("text-motion", 0.45),
+    ("reveal", 1.0),
+    ("stroke-draw", 0.6),
+    ("counter", 1.0),
+    ("enter", 0.75),
+    ("camera", 1.0),
+];
+
 /// ms per 1080p frame, warm, over 20 frames. Meaningful with --release.
 #[test]
 fn report_frame_cost() {
-    for (name, t) in [("title-card", 1.0), ("layout", 0.0), ("text-motion", 0.45)] {
+    for (name, t) in FIXTURES {
         let project = Project::load(fixture(name)).unwrap();
         let mut r = Renderer::new(&project, RenderOptions::default()).unwrap();
         r.frame(Time::Global(t)).unwrap();

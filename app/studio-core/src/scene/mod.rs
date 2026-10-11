@@ -1,18 +1,22 @@
-//! The element tree a component returns: `Box`, `Text` and `Image` nodes
-//! with a typed `style`. It arrives from JS as JSON and is checked here, so
+//! The element tree a component returns: `Box`, `Text`, `Image` and `Path`
+//! nodes with a typed `style`. It arrives from JS as JSON and is checked here, so
 //! layout and paint only see valid trees.
 
 mod color;
+mod motion;
 mod parse;
+mod path;
 mod style;
 mod values;
 
 pub use color::Color;
+pub use motion::{Inset, Reveal, RevealBy, RevealFrom};
 pub use parse::parse_tree;
+pub use path::{LineCap, LineJoin, PathSpec, StrokeSpec};
 pub use style::{STYLE_KEYS, Style};
 pub use values::{
-    Align, Dim, Fill, FlexDirection, FlexWrap, Justify, ObjectFit, Position, Sides, TextAlign,
-    describe,
+    Align, Dim, Fill, FlexDirection, FlexWrap, Justify, NumericVariant, ObjectFit, Position, Sides,
+    TextAlign, describe,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +24,7 @@ pub enum Kind {
     Box,
     Text,
     Image,
+    Path,
 }
 
 impl Kind {
@@ -28,6 +33,7 @@ impl Kind {
             Kind::Box => "Box",
             Kind::Text => "Text",
             Kind::Image => "Image",
+            Kind::Path => "Path",
         }
     }
 }
@@ -40,7 +46,11 @@ pub struct Node {
     pub text: String,
     /// An `Image` node's path, relative to the project's `assets/`.
     pub src: String,
+    /// A `Path` node's geometry and paint.
+    pub path: Option<Box<PathSpec>>,
     pub children: Vec<Node>,
+    /// The element's `key`, kept so a later frame or scene can match it.
+    pub key: Option<String>,
     /// The JSX element's TSX line and column, from the `__source` transform.
     pub loc: Option<(u32, u32)>,
 }

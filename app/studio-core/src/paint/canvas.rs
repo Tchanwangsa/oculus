@@ -4,12 +4,10 @@
 //! unhinted outlines with the atlas off, so text keeps sub-pixel positions.
 
 use super::gradient::linear;
-use crate::layout::TextLayout;
 use crate::scene::{Color, Fill};
-use parley::PositionedLayoutItem;
 use std::sync::Arc;
 use vello_cpu::filter_effects::{Filter, FilterFunction};
-use vello_cpu::kurbo::{Affine, BezPath, Rect, RoundedRect, Shape};
+use vello_cpu::kurbo::{Affine, BezPath, Rect, RoundedRect, Shape, Stroke};
 use vello_cpu::peniko::{Extend, ImageQuality, ImageSampler};
 use vello_cpu::{
     Glyph, Image, ImageSource, Level, Pixmap, RasterizerSettings, RenderContext, RenderSettings,
@@ -22,6 +20,8 @@ const TOLERANCE: f64 = 0.05;
 pub struct Canvas {
     ctx: RenderContext,
     res: Resources,
+    /// Scratch for a run's variation coordinates.
+    coords: Vec<i16>,
     width: u16,
     height: u16,
 }
@@ -46,6 +46,7 @@ impl Canvas {
                 },
             ),
             res: Resources::new(),
+            coords: Vec::new(),
             width,
             height,
         }
@@ -138,41 +139,47 @@ impl Canvas {
         self.ctx.reset_paint_transform();
     }
 
-    /// Draws a laid-out text block with its top-left at `origin`.
-    pub fn text(
-        &mut self,
-        t: Affine,
-        origin: (f64, f64),
-        layout: &TextLayout,
-        color: Color,
-    ) -> Result<(), String> {
-        self.ctx.set_transform(t * Affine::translate(origin));
-        self.ctx.set_paint(color.to_vello());
-        let mut coords: Vec<i16> = Vec::new();
-        for line in layout.lines() {
-            for item in line.items() {
-                let PositionedLayoutItem::GlyphRun(run) = item else {
-                    continue;
-                };
-                let r = run.run();
-                coords.clear();
-                coords.extend(r.normalized_coords().iter().map(|c| c.to_bits()));
-                let glyphs = run.positioned_glyphs().map(|g| Glyph {
-                    id: g.id,
-                    x: g.x,
-                    y: g.y,
-                });
-                self.ctx
-                    .glyph_run(&mut self.res, r.font())
-                    .font_size(r.font_size())
-                    .hint(false)
-                    .normalized_coords(&coords)
-                    .atlas_cache(false)
-                    .fill_glyphs(glyphs)
-                    .map_err(|e| format!("drawing glyphs failed: {e:?}"))?;
+    /// Fills any path; a gradient spans `bounds` (local units).
+    pub fn fill_shape(&mut self, t: Affine, shape: &BezPath, fill: &Fill, bounds: Rect) {
+        self.ctx.set_transform(t);
+        match fill {
+            Fill::Solid(c) => self.ctx.set_paint(c.to_vello()),
+            Fill::Linear { angle_deg, stops } => {
+                self.ctx.set_paint(linear(bounds, *angle_deg, stops, 1.0));
             }
         }
-        Ok(())
+        self.ctx.fill_path(shape);
+    }
+
+    /// Strokes a path; vello keeps the stroke as state, so it is set whole.
+    pub fn stroke_shape(&mut self, t: Affine, shape: &BezPath, stroke: Stroke, color: Color) {
+        self.ctx.set_transform(t);
+        self.ctx.set_paint(color.to_vello());
+        self.ctx.set_stroke(stroke);
+        self.ctx.stroke_path(shape);
+    }
+
+    /// Draws glyphs of one parley run, positioned in local units under `t`.
+    pub fn glyphs(
+        &mut self,
+        t: Affine,
+        run: &parley::Run<'_, ()>,
+        glyphs: impl Iterator<Item = Glyph> + Clone,
+        color: Color,
+    ) -> Result<(), String> {
+        self.ctx.set_transform(t);
+        self.ctx.set_paint(color.to_vello());
+        self.coords.clear();
+        self.coords
+            .extend(run.normalized_coords().iter().map(|c| c.to_bits()));
+        self.ctx
+            .glyph_run(&mut self.res, run.font())
+            .font_size(run.font_size())
+            .hint(false)
+            .normalized_coords(&self.coords)
+            .atlas_cache(false)
+            .fill_glyphs(glyphs)
+            .map_err(|e| format!("drawing glyphs failed: {e:?}"))
     }
 
     /// Rasterises the frame into straight-alpha RGBA8.

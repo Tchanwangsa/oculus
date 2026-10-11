@@ -52,6 +52,7 @@ const TYPE_KEYS: &[&str] = &[
     "fontWeight",
     "lineHeight",
     "letterSpacing",
+    "fontVariantNumeric",
 ];
 
 pub struct Checked {

@@ -2,8 +2,8 @@
 //! the step budget) and a fresh context for every entry, with only the
 //! intrinsics a pure component needs. No `Date`, `performance`, `WeakRef` or
 //! `FinalizationRegistry` (clock- or GC-dependent), no module loader, no I/O.
-//! The prelude is compiled to bytecode once per runtime and evaluated into
-//! each new context.
+//! The prelude (`prelude/*.js`, one module scope, concatenated in order) is
+//! compiled to bytecode once per runtime and evaluated into each new context.
 
 use super::budget::Budget;
 use crate::error::StudioError;
@@ -15,7 +15,16 @@ use rquickjs::{Context, Ctx, Module, Runtime, WriteOptions};
 const MEMORY_LIMIT: usize = 256 << 20;
 const STACK_LIMIT: usize = 1 << 20;
 
-const PRELUDE: &str = include_str!("prelude.js");
+const PRELUDE: &str = concat!(
+    include_str!("prelude/elements.js"),
+    include_str!("prelude/resolve.js"),
+    include_str!("prelude/props.js"),
+    include_str!("prelude/motion.js"),
+    include_str!("prelude/time.js"),
+    include_str!("prelude/presets.js"),
+    include_str!("prelude/arrow.js"),
+    include_str!("prelude/entry.js"),
+);
 const PRELUDE_NAME: &str = "studio:prelude";
 
 fn host(e: rquickjs::Error) -> StudioError {

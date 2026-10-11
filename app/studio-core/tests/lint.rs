@@ -9,7 +9,16 @@ use studio_core::{Project, StudioError};
 
 #[test]
 fn clean_projects_lint_clean() {
-    for name in ["title-card", "layout", "text-motion"] {
+    for name in [
+        "title-card",
+        "layout",
+        "text-motion",
+        "reveal",
+        "stroke-draw",
+        "counter",
+        "enter",
+        "camera",
+    ] {
         let report = Project::load(fixture(name)).unwrap().lint().unwrap();
         assert!(report.is_clean(), "{name}: {report}");
     }

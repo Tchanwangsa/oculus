@@ -1,6 +1,7 @@
 //! Text gliding 0.25 px per frame must move smoothly: its ink centroid
 //! follows a straight line, with no whole-pixel steps (a glyph atlas or
-//! pixel snapping would show up here as ~0.4 px residuals).
+//! pixel snapping would show up here as ~0.4 px residuals). The same holds
+//! for a word rising in through `reveal` and for text under a moving Camera.
 #![allow(clippy::unwrap_used, clippy::panic)] // helpers outside #[test] fns
 
 use serde_json::{Map, json};
@@ -16,7 +17,39 @@ export default ({ dx, dy }) => (
 );
 "##;
 
+const REVEAL: &str = r##"export const props = { p: num() };
+export default ({ p }) => (
+  <Box style={{ fill: "#ffffff", padding: 40 }}>
+    <Text style={{ fontFamily: "Inter", fontSize: 40, fontWeight: 500, color: "#000000", reveal: { by: "word", from: "rise", progress: p } }}>
+      Rising
+    </Text>
+  </Box>
+);
+"##;
+
+const CAMERA: &str = r##"export const props = { y: num() };
+export default ({ y }) => (
+  <Camera y={y} zoom={1.2}>
+    <Box style={{ flexGrow: 1, fill: "#ffffff", padding: 40 }}>
+      <Text style={{ fontFamily: "Inter", fontSize: 40, fontWeight: 500, color: "#000000" }}>Panning</Text>
+    </Box>
+  </Camera>
+);
+"##;
+
 fn centroids(axis_y: bool) -> Vec<f64> {
+    let props = |d: f64| {
+        if axis_y {
+            json!({ "dx": 0, "dy": d })
+        } else {
+            json!({ "dx": d, "dy": 0 })
+        }
+    };
+    ink_centroids(COMPONENT, axis_y, |k| props(f64::from(k) * 0.25))
+}
+
+/// The ink centroid along one axis over 12 frames, frame k with `props(k)`.
+fn ink_centroids(tsx: &str, axis_y: bool, props: impl Fn(u32) -> serde_json::Value) -> Vec<f64> {
     let mut e = Engine::new(
         Theme::bundled("default").unwrap(),
         Size {
@@ -27,18 +60,10 @@ fn centroids(axis_y: bool) -> Vec<f64> {
         RenderOptions::default(),
     )
     .unwrap();
-    e.load_component("Glide", COMPONENT).unwrap();
+    e.load_component("Glide", tsx).unwrap();
     (0..12)
         .map(|k| {
-            let d = f64::from(k) * 0.25;
-            let props: Map<_, _> = if axis_y {
-                json!({ "dx": 0, "dy": d })
-            } else {
-                json!({ "dx": d, "dy": 0 })
-            }
-            .as_object()
-            .cloned()
-            .unwrap();
+            let props: Map<_, _> = props(k).as_object().cloned().unwrap();
             let f = e
                 .render(SceneCall {
                     component: "Glide",
@@ -94,5 +119,37 @@ fn horizontal_glide_has_no_pixel_steps() {
     let (worst, slope) = fit(&centroids(false));
     assert!((slope - 0.25).abs() < 0.01, "slope {slope}");
     println!("worst deviation {worst:.4} px, slope {slope:.4}");
+    assert!(worst < 0.05, "worst deviation {worst} px");
+}
+
+#[test]
+fn a_word_rising_in_has_no_pixel_steps() {
+    // Rise is (1 - eased p) * 0.35 em: pick p so the lift falls 0.25 px a
+    // frame (6 px down to 3.25 px), while the fade goes from 57% to 77%.
+    let lift = |k: u32| 6.0 - f64::from(k) * 0.25;
+    let ys = ink_centroids(
+        REVEAL,
+        true,
+        |k| json!({ "p": 1.0 - (lift(k) / (0.35 * 40.0)).cbrt() }),
+    );
+    let off: Vec<f64> = ys
+        .iter()
+        .enumerate()
+        .map(|(k, y)| y - lift(k as u32))
+        .collect();
+    let (worst, slope) = fit(&off);
+    println!("rise: worst deviation {worst:.4} px, slope {slope:.4}");
+    assert!(slope.abs() < 0.01, "slope {slope}");
+    assert!(worst < 0.05, "worst deviation {worst} px");
+}
+
+#[test]
+fn text_under_a_panning_camera_has_no_pixel_steps() {
+    // The camera's point moves up 0.25 px a frame; at zoom 1.2 the text
+    // moves down 0.3 px a frame.
+    let ys = ink_centroids(CAMERA, true, |k| json!({ "y": 70.0 - f64::from(k) * 0.25 }));
+    let (worst, slope) = fit(&ys);
+    println!("camera: worst deviation {worst:.4} px, slope {slope:.4}");
+    assert!((slope - 0.3).abs() < 0.01, "slope {slope}");
     assert!(worst < 0.05, "worst deviation {worst} px");
 }

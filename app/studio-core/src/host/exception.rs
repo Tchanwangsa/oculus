@@ -1,6 +1,7 @@
 //! A failed JS entry -> `StudioError`. The thrown value's stack gives the
 //! first frame inside the component's module; the source map turns that JS
-//! position into a TSX line.
+//! position into a TSX line. Errors raised while the prelude resolves the
+//! tree have no such frame, and carry the element's TSX position instead.
 
 use super::budget::Budget;
 use super::sourcemap::LineMap;
@@ -40,14 +41,21 @@ pub fn convert(
             loc: None,
         };
     };
-    let (message, stack) = describe(&thrown);
+    let (message, stack, tagged) = describe(&thrown);
     if message.contains("out of memory") {
         return memory(src);
     }
+    let loc = stack.as_deref().and_then(|s| locate(s, src)).or_else(|| {
+        tagged.map(|(line, col)| TsxLoc {
+            line,
+            col,
+            snippet: line_text(src.tsx, line),
+        })
+    });
     StudioError::Component {
         component: src.component.to_owned(),
         message,
-        loc: stack.as_deref().and_then(|s| locate(s, src)),
+        loc,
     }
 }
 
@@ -58,8 +66,9 @@ fn memory(src: &Source<'_>) -> StudioError {
     }
 }
 
-/// The thrown value's message ("TypeError: x is undefined") and stack.
-fn describe(v: &Value<'_>) -> (String, Option<String>) {
+/// The thrown value's message ("TypeError: x is undefined"), its stack, and
+/// the TSX position the resolver tagged it with (`__studioLoc`).
+fn describe(v: &Value<'_>) -> (String, Option<String>, Option<(u32, u32)>) {
     if let Some(obj) = v.as_object() {
         let get = |k: &str| obj.get::<_, Option<String>>(k).ok().flatten();
         let message = get("message");
@@ -69,7 +78,12 @@ fn describe(v: &Value<'_>) -> (String, Option<String>) {
                 Some(n) if !n.is_empty() && n != "Error" => format!("{n}: {message}"),
                 _ => message,
             };
-            return (full, get("stack"));
+            let tagged = obj
+                .get::<_, Option<Vec<u32>>>("__studioLoc")
+                .ok()
+                .flatten()
+                .and_then(|l| Some((*l.first()?, l.get(1).copied().unwrap_or(1))));
+            return (full, get("stack"), tagged);
         }
     }
     let text = v
@@ -77,7 +91,7 @@ fn describe(v: &Value<'_>) -> (String, Option<String>) {
         .and_then(|s| s.to_string().ok())
         .map(|s| format!("threw {s:?}"))
         .unwrap_or_else(|| format!("threw a non-Error value ({})", v.type_name()));
-    (text, None)
+    (text, None, None)
 }
 
 /// The first stack frame in the component's module, mapped to TSX.

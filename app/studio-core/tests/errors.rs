@@ -223,3 +223,74 @@ fn returning_a_non_element_is_an_error() {
     );
     assert!(e.to_string().contains("must return one element"), "{e}");
 }
+
+#[test]
+fn sequence_with_a_negative_dur_names_its_line() {
+    let e = render(
+        "export const props = {};\nexport default () => <Stack>\n  <Sequence from={1} dur={-2}><Box /></Sequence>\n</Stack>;\n",
+        json!({}),
+    );
+    assert_eq!(e.loc().map(|l| l.line), Some(3), "{e}");
+    assert!(
+        e.to_string().starts_with(
+            "Comp.tsx:3:3: RangeError: <Sequence> dur must be a finite number of seconds, 0 or more, got -2"
+        ),
+        "{e}"
+    );
+}
+
+#[test]
+fn unknown_enter_preset_lists_the_presets() {
+    let e = render(
+        "export const props = {};\nexport default () => <Stack>\n  <Enter preset=\"fade-in\"><Box /></Enter>\n</Stack>;\n",
+        json!({}),
+    );
+    assert_eq!(e.loc().map(|l| l.line), Some(3), "{e}");
+    assert!(e.to_string().contains("presets: fade, rise,"), "{e}");
+}
+
+#[test]
+fn unknown_reveal_unit_is_a_style_error_with_a_suggestion() {
+    let e = render(
+        "export const props = {};\nexport default () => <Stack>\n  <Text style={{ reveal: { by: 'wrod', progress: 0.5 } }}>Hello there</Text>\n</Stack>;\n",
+        json!({}),
+    );
+    let StudioError::Style {
+        ref node, ref loc, ..
+    } = e
+    else {
+        panic!("{e:?}")
+    };
+    assert_eq!(node, "Box > Text[0]");
+    assert_eq!(loc.as_ref().map(|l| l.line), Some(3));
+    let msg = e.to_string();
+    assert!(
+        msg.contains("unknown reveal.by `wrod` (did you mean `word`?)"),
+        "{msg}"
+    );
+    let e = render(
+        "export const props = {};\nexport default () => <Text style={{ reveal: { progress: 1, from: 'rice' } }}>x</Text>;\n",
+        json!({}),
+    );
+    assert!(e.to_string().contains("did you mean `rise`"), "{e}");
+}
+
+#[test]
+fn bad_path_data_names_the_element_and_line() {
+    let e = render(
+        "export const props = {};\nexport default () => <Stack>\n  <Path d=\"M 0 0 Q 10\" stroke={{ width: 2, color: '#000' }} />\n</Stack>;\n",
+        json!({}),
+    );
+    let msg = e.to_string();
+    assert!(matches!(e, StudioError::Component { .. }), "{e:?}");
+    assert_eq!(e.loc().map(|l| l.line), Some(3), "{msg}");
+    assert!(
+        msg.contains("Box > Path[0]: d is not SVG path data"),
+        "{msg}"
+    );
+    let e = render(
+        "export const props = {};\nexport default () => <Path d=\"M 0 0 L 1 1\" stroke={{ width: 2 }} />;\n",
+        json!({}),
+    );
+    assert!(e.to_string().contains("missing field `color`"), "{e}");
+}

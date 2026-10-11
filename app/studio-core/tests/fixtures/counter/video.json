@@ -1,0 +1,5 @@
+{
+  "size": { "width": 1920, "height": 1080 },
+  "theme": "default",
+  "scenes": [{ "component": "Stats", "props": {}, "hold": 3.0 }]
+}

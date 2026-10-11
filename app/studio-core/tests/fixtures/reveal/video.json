@@ -1,0 +1,14 @@
+{
+  "size": { "width": 1920, "height": 1080 },
+  "theme": "default",
+  "scenes": [
+    {
+      "component": "Reveal",
+      "props": {
+        "title": "Gradient descent walks downhill, one small step at a time",
+        "body": "Each step follows the slope of the loss. Near the bottom the slope flattens, so the steps shrink and the walk settles into a minimum."
+      },
+      "hold": 3.0
+    }
+  ]
+}

@@ -215,6 +215,16 @@ pub enum TextAlign {
     Justify,
 }
 
+/// `fontVariantNumeric`: with tabular digits every digit has one advance, so
+/// a changing number does not jitter.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum NumericVariant {
+    #[default]
+    Normal,
+    TabularNums,
+}
+
 /// How an image fills its box, as CSS `object-fit`.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

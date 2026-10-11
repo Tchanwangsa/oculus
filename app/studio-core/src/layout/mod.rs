@@ -8,7 +8,7 @@ mod text;
 pub use text::{TextKey, TextLayout, Typeset};
 
 use crate::images::ImageCache;
-use crate::scene::{Dim, Kind, Node, Style};
+use crate::scene::{Dim, Kind, Node, PathSpec, Style};
 use std::sync::Arc;
 use taffy::{AvailableSpace, NodeId, Size, TaffyTree};
 use vello_cpu::Pixmap;
@@ -23,7 +23,12 @@ pub struct LNode {
     pub content: Rect,
     pub text: Option<(TextKey, TextLayout)>,
     pub image: Option<Arc<Pixmap>>,
+    pub path: Option<Box<PathSpec>>,
     pub children: Vec<LNode>,
+    /// The element's `key`, for matching nodes across frames; paint
+    /// ignores it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub key: Option<String>,
 }
 
 pub enum LayoutError {
@@ -42,6 +47,8 @@ pub enum LayoutError {
 enum Leaf {
     Text(Option<Box<TextLayout>>, TextKey),
     Image(Arc<Pixmap>),
+    /// A path's viewBox width and height.
+    Path(f64, f64),
 }
 
 pub struct Layouter<'a> {
@@ -108,6 +115,14 @@ impl Layouter<'_> {
                 tree.new_leaf_with_context(style, Leaf::Image(pixmap))
                     .map_err(taffy)
             }
+            Kind::Path => {
+                let (w, h) = n
+                    .path
+                    .as_ref()
+                    .map_or((0.0, 0.0), |p| (p.view_box.width(), p.view_box.height()));
+                tree.new_leaf_with_context(style, Leaf::Path(w, h))
+                    .map_err(taffy)
+            }
             Kind::Box => {
                 let kids = n
                     .children
@@ -159,8 +174,21 @@ fn measure(
                 },
             }
         }
+        Some(Leaf::Path(w, h)) => keep_aspect(known, *w as f32, *h as f32),
         _ => Size::ZERO,
     }
+}
+
+/// A known side and the other from the aspect ratio, or the natural size;
+/// a zero side keeps its natural length.
+fn keep_aspect(known: Size<Option<f32>>, w: f32, h: f32) -> Size<f32> {
+    let (width, height) = match (known.width, known.height) {
+        (Some(kw), Some(kh)) => (kw, kh),
+        (Some(kw), None) => (kw, if w > 0.0 { kw * h / w } else { h }),
+        (None, Some(kh)) => (if h > 0.0 { kh * w / h } else { w }, kh),
+        (None, None) => (w, h),
+    };
+    Size { width, height }
 }
 
 fn extract(
@@ -192,7 +220,9 @@ fn extract(
         content,
         text: None,
         image: None,
+        path: n.path,
         children: Vec::new(),
+        key: n.key,
     };
     match tree.get_node_context_mut(id) {
         Some(Leaf::Text(layout, key)) => {
@@ -202,6 +232,7 @@ fn extract(
             }
         }
         Some(Leaf::Image(p)) => out.image = Some(Arc::clone(p)),
+        Some(Leaf::Path(..)) => {}
         None => {
             let kids = tree
                 .children(id)
@@ -227,3 +258,6 @@ impl Typeset {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
