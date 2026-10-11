@@ -99,7 +99,7 @@ fn accept_within(listeners: &[Listener], within: Option<Duration>) -> io::Result
     }
     let os: Vec<&imp::Listener> = listeners
         .iter()
-        .filter_map(|l| match &l.0 {
+        .flat_map(|l| match &l.0 {
             Accept::Os(l) => Some(l),
             #[cfg(test)]
             Accept::Memory(_) => None,

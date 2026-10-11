@@ -391,9 +391,9 @@ fn forward_header(
 }
 
 /// A `forward` reply's status, headers and refused sign-in, if any.
-fn forward_head(
-    reply: &Value,
-) -> Result<(u16, Vec<(String, String)>, Option<LoginError>), KeydError> {
+type ForwardHead = (u16, Vec<(String, String)>, Option<LoginError>);
+
+fn forward_head(reply: &Value) -> Result<ForwardHead, KeydError> {
     let status = reply
         .get("status")
         .and_then(Value::as_u64)
@@ -453,9 +453,12 @@ mod tests {
     use std::io::Write;
     use std::sync::Mutex;
 
+    /// Every request a stand-in keyd saw: header, then body.
+    type Seen = Arc<Mutex<Vec<(Value, Vec<u8>)>>>;
+
     /// A client of a stand-in keyd that answers each request with `handler`,
-    /// and every request it saw: header, then body.
-    fn fake_keyd<H>(handler: H) -> (Client, Arc<Mutex<Vec<(Value, Vec<u8>)>>>)
+    /// and every request it saw.
+    fn fake_keyd<H>(handler: H) -> (Client, Seen)
     where
         H: Fn(&Value, &[u8]) -> (Value, Vec<u8>) + Send + Sync + 'static,
     {
@@ -464,9 +467,7 @@ mod tests {
     }
 
     /// `fake_keyd`, and every timeout the client set on its connections.
-    fn fake_keyd_timed<H>(
-        handler: H,
-    ) -> (Client, Arc<Mutex<Vec<(Value, Vec<u8>)>>>, memory::Timeouts)
+    fn fake_keyd_timed<H>(handler: H) -> (Client, Seen, memory::Timeouts)
     where
         H: Fn(&Value, &[u8]) -> (Value, Vec<u8>) + Send + Sync + 'static,
     {

@@ -139,15 +139,19 @@ pub type Removed = Arc<Mutex<Vec<(String, String)>>>;
 #[cfg(feature = "server")]
 type WebKitItems = Vec<(&'static str, Result<Option<Vec<u8>>, KeyError>)>;
 
+/// The (service, account) keys and what reading each yields, for `OldItems`.
+#[cfg(feature = "server")]
+pub type OldItemList = Vec<(
+    (&'static str, &'static str),
+    Result<Option<String>, KeyError>,
+)>;
+
 /// Old keychain items by (service, account), counting every read and
 /// recording every removal. A removed item is gone for later calls. WebKit's
 /// WebCrypto items answer by account; one not given is not there.
 #[cfg(feature = "server")]
 pub struct OldItems {
-    items: Vec<(
-        (&'static str, &'static str),
-        Result<Option<String>, KeyError>,
-    )>,
+    items: OldItemList,
     reads: Reads,
     removed: Removed,
     removal_fails: Option<KeyError>,
@@ -158,13 +162,7 @@ pub struct OldItems {
 
 #[cfg(feature = "server")]
 impl OldItems {
-    pub fn new(
-        items: Vec<(
-            (&'static str, &'static str),
-            Result<Option<String>, KeyError>,
-        )>,
-        reads: Reads,
-    ) -> Self {
+    pub fn new(items: OldItemList, reads: Reads) -> Self {
         OldItems {
             items,
             reads,

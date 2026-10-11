@@ -350,7 +350,9 @@ mod tests {
                 let decoded = decode(route_part).unwrap();
                 assert!(decoded.starts_with(b"/"), "{path:?}");
                 assert!(
-                    !decoded.iter().any(|&b| b == b'\\' || b < 0x20 || b >= 0x7f),
+                    !decoded
+                        .iter()
+                        .any(|&b| b == b'\\' || !(0x20..0x7f).contains(&b)),
                     "{path:?}"
                 );
                 let raw_slashes = route_part.bytes().filter(|&b| b == b'/').count();
