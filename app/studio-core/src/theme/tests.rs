@@ -38,3 +38,19 @@ fn rejects_unknown_sections_fonts_and_missing_bg() {
     let e = with(&|v| v["type"]["h1"]["color"] = "#000".into());
     assert!(e.contains("type.h1.color"), "{e}");
 }
+
+#[test]
+fn narration_tokens_are_required_and_non_negative() {
+    let t = Theme::bundled("default").unwrap();
+    assert_eq!((t.narration.lead, t.narration.tail), (0.25, 0.6));
+    let base: Value = serde_json::from_str(BUNDLED[0].1).unwrap();
+    let parse = |v: &Value| Theme::parse(&v.to_string(), Path::new("t.json"));
+    let mut v = base.clone();
+    v["narration"]["lead"] = (-0.1).into();
+    let e = parse(&v).unwrap_err().to_string();
+    assert!(e.contains("narration.lead = -0.1"), "{e}");
+    let mut v = base;
+    v.as_object_mut().unwrap().remove("narration");
+    let e = parse(&v).unwrap_err().to_string();
+    assert!(e.contains("missing field `narration`"), "{e}");
+}

@@ -1,8 +1,11 @@
-//! Themes: tokens only (colours, fonts, type scale, space, radii, motion).
+//! Themes: tokens only (colours, fonts, type scale, space, radii, motion,
+//! narration timing).
 //! Components read them from `ctx.theme`; a retheme is an edit here, never
 //! in a component. Bundled themes live in the crate's `themes/` folder.
 
 mod schema;
+
+pub use schema::NarrationTokens;
 
 use crate::error::{Result, StudioError};
 use crate::scene::Color;
@@ -29,6 +32,8 @@ pub struct Theme {
     pub motion: MotionSpec,
     /// `motion.easing`: named cubic-bezier points.
     pub easings: BTreeMap<String, [f64; 4]>,
+    /// `narration`: the silence before and after a scene's narration.
+    pub narration: NarrationTokens,
 }
 
 impl Theme {
@@ -70,6 +75,7 @@ impl Theme {
             body_font: checked.body_font,
             motion: checked.motion,
             easings: checked.easings,
+            narration: checked.narration,
         })
     }
 

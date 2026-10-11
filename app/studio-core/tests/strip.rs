@@ -98,7 +98,7 @@ fn a_tile_is_the_frame_pixel_for_pixel() {
 #[test]
 fn the_end_is_clamped_and_one_frame_is_from() {
     let project = Project::load(fixture("transitions")).unwrap();
-    let length = project.length();
+    let length = project.length().unwrap();
     let s = strip(
         &project,
         StripOptions {

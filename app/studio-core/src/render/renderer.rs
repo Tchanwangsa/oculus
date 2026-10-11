@@ -7,13 +7,13 @@ use super::engine::{Engine, SceneCall};
 use super::{Frame, RenderOptions, Time};
 use crate::error::{Result, StudioError};
 use crate::layout::LNode;
-use crate::project::{ComponentSource, Project, SceneSpec, Timeline};
+use crate::project::{ComponentSource, Project, Staged, Timeline};
 use crate::transition::{Transition, TransitionError};
 use std::sync::Arc;
 
 pub struct Renderer {
     pub(super) engine: Engine,
-    scenes: Vec<SceneSpec>,
+    scenes: Vec<Staged>,
     transitions: Vec<Result<Option<Transition>, TransitionError>>,
     /// The video's `morphColor` for `<Morph>`, or the bad value that stops
     /// every frame.
@@ -24,10 +24,17 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    /// Fails when a scene's length is unknown: narration missing or made
+    /// for other text (`StudioError::Narration`), or a silent scene with no
+    /// hold.
     pub fn new(project: &Project, options: RenderOptions) -> Result<Renderer> {
         if let Some(mb) = &options.motion_blur {
             mb.check()?;
         }
+        let scenes = (0..project.video.scenes.len())
+            .map(|i| project.staged(i))
+            .collect::<Result<Vec<_>>>()?;
+        let timeline = Timeline::new(scenes.iter().map(|s| s.length));
         let mut engine = Engine::new(
             project.theme.clone(),
             project.video.size,
@@ -38,9 +45,9 @@ impl Renderer {
         Ok(Renderer {
             engine,
             morph_color,
-            scenes: project.video.scenes.clone(),
+            scenes,
             transitions: project.transitions(),
-            timeline: project.timeline(),
+            timeline,
             components: Arc::clone(&project.components),
             motion_blur: options.motion_blur,
         })
@@ -49,6 +56,11 @@ impl Renderer {
     /// The engine underneath, e.g. to inspect a loaded component's schema.
     pub fn engine(&mut self) -> &mut Engine {
         &mut self.engine
+    }
+
+    /// The video's scene lengths, narration included.
+    pub fn timeline(&self) -> &Timeline {
+        &self.timeline
     }
 
     /// One frame. In the first `dur` seconds of a scene after the first, it
@@ -63,9 +75,9 @@ impl Renderer {
         }
     }
 
-    /// Scene `index`'s hold in seconds.
-    pub(super) fn hold(&self, index: usize) -> f64 {
-        self.scenes[index].hold
+    /// Scene `index`'s length in seconds.
+    pub(super) fn length(&self, index: usize) -> f64 {
+        self.scenes[index].length
     }
 
     /// Checks the scene's transition and loads the components a frame of it
@@ -81,7 +93,7 @@ impl Renderer {
         let scene = self.scenes.get(index).ok_or_else(out_of_range)?;
         let before = index.checked_sub(1).and_then(|i| self.scenes.get(i));
         for s in std::iter::once(scene).chain(before) {
-            let name = s.component.as_str();
+            let name = s.spec.component.as_str();
             if self.engine.component(name).is_none() {
                 let tsx = self.components.read(name)?;
                 self.engine.load_component(name, &tsx)?;
@@ -92,72 +104,69 @@ impl Renderer {
 
     /// The frame at scene-relative `t`, without motion blur. `ready` first.
     pub(super) fn sharp(&mut self, index: usize, t: f64) -> Result<Frame> {
-        let into = self.transitions[index]
-            .as_ref()
-            .ok()
-            .and_then(Option::as_ref);
-        scene_frame(&mut self.engine, &self.scenes, index, into, t)
+        let (a, b, into) = calls(&self.scenes, &self.transitions, index, t);
+        scene_frame(&mut self.engine, a, b, into)
     }
 
     /// What `sharp` would paint, laid out but not painted. Hand the trees
     /// back with `Engine::discard`.
     pub(super) fn layers(&mut self, index: usize, t: f64) -> Result<Vec<LNode>> {
-        let into = self.transitions[index]
-            .as_ref()
-            .ok()
-            .and_then(Option::as_ref);
-        let (layers, _logs) = scene_layers(&mut self.engine, &self.scenes, index, into, t)?;
+        let (a, b, into) = calls(&self.scenes, &self.transitions, index, t);
+        let (layers, _logs) = scene_layers(&mut self.engine, a, b, into)?;
         Ok(layers)
     }
 }
 
-/// Scene `index` at `t`, through `into` (its resolved transition) while it
-/// plays. Both scenes' components must be loaded.
+/// Scene `index` at `t`, the scene before it and the transition into it.
+fn calls<'a>(
+    scenes: &'a [Staged],
+    transitions: &'a [Result<Option<Transition>, TransitionError>],
+    index: usize,
+    t: f64,
+) -> (Option<SceneCall<'a>>, SceneCall<'a>, Option<&'a Transition>) {
+    let into = transitions[index].as_ref().ok().and_then(Option::as_ref);
+    let before = index.checked_sub(1).map(|i| scenes[i].call(i, 0.0));
+    (before, scenes[index].call(index, t), into)
+}
+
+/// Scene call `b` through `into` (its resolved transition) while it plays,
+/// with `a` (the scene before, at any `t`) held at its last moment. Both
+/// components must be loaded.
 pub(crate) fn scene_frame(
     engine: &mut Engine,
-    scenes: &[SceneSpec],
-    index: usize,
+    a: Option<SceneCall<'_>>,
+    b: SceneCall<'_>,
     into: Option<&Transition>,
-    t: f64,
 ) -> Result<Frame> {
-    let (layers, logs) = scene_layers(engine, scenes, index, into, t)?;
-    engine.compose(layers, logs, &scenes[index].component)
+    let (layers, logs) = scene_layers(engine, a, b, into)?;
+    engine.compose(layers, logs, b.component)
 }
 
 /// The laid-out trees `scene_frame` paints, in order, and the logs.
 fn scene_layers(
     engine: &mut Engine,
-    scenes: &[SceneSpec],
-    index: usize,
+    a: Option<SceneCall<'_>>,
+    b: SceneCall<'_>,
     into: Option<&Transition>,
-    t: f64,
 ) -> Result<(Vec<LNode>, Vec<String>)> {
-    let call = |i: usize, t: f64| {
-        let s = &scenes[i];
-        SceneCall {
-            component: &s.component,
-            props: &s.props,
-            t,
-            duration: s.hold,
-            index: i,
+    match (into, a) {
+        (Some(tr), Some(a)) if tr.covers(b.t) => {
+            let a = SceneCall {
+                t: last_moment(a.duration),
+                ..a
+            };
+            engine.transition_layers(a, b, tr, b.t)
         }
-    };
-    match (into, index.checked_sub(1)) {
-        (Some(tr), Some(prev)) if tr.covers(t) => engine.transition_layers(
-            call(prev, last_moment(scenes[prev].hold)),
-            call(index, t),
-            tr,
-            t,
-        ),
         _ => {
-            let p = engine.prepare(call(index, t))?;
+            let p = engine.prepare(b)?;
             Ok((vec![p.tree], p.logs))
         }
     }
 }
 
-/// The last moment of a hold: Sequence and Stagger windows are half-open,
-/// so at exactly `hold` their children have ended and would vanish.
-pub(crate) fn last_moment(hold: f64) -> f64 {
-    (hold - 1e-6).max(hold / 2.0)
+/// The last moment of a scene of `length` seconds: Sequence and Stagger
+/// windows are half-open, so at exactly `length` their children have ended
+/// and would vanish.
+pub(crate) fn last_moment(length: f64) -> f64 {
+    (length - 1e-6).max(length / 2.0)
 }

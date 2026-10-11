@@ -3,8 +3,10 @@
 Studio makes lecture videos from scenes written as TSX components.
 `app/studio-core/` is its renderer: a video folder plus a time in, one RGBA
 frame out, the same pixels on every machine, scene transitions included.
-Narration and encoding to video are not built yet; `oculus studio` renders
-single frames and contact sheets, and lints.
+A narrated scene lasts as long as its narration and can cue elements to its
+words, from timings the app writes; synthesising the narration and encoding
+to video are not built yet. `oculus studio` renders single frames and
+contact sheets, and lints.
 
 ## Where
 
@@ -13,7 +15,8 @@ single frames and contact sheets, and lints.
 | The crate (`oculus-studio-core`, lib `studio_core`), its own cargo root | `app/studio-core/` |
 | Public API: `Renderer`, `Engine`, `Frame`, `Time`; motion blur | `app/studio-core/src/render/` (`blur/`) |
 | Contact sheets (`strip`): parallel frames, the tiled sheet and its labels | `app/studio-core/src/strip/` |
-| Video folder, component lookup, timeline, lint | `app/studio-core/src/project/` |
+| Video folder, component lookup, timeline, lint | `app/studio-core/src/project/` (`lint/`) |
+| `script.md`, the narration manifest, scene lengths and word cues | `app/studio-core/src/project/` (`script/`, `narration/`, `scenes.rs`), `app/studio-core/src/host/prelude/words.js` |
 | Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
 | Magic move: matching and blending two laid-out trees, OKLab colour | `app/studio-core/src/morph/` |
 | Easings shared by transitions and the morph (the prelude's, in Rust) | `app/studio-core/src/easing/` |
@@ -32,6 +35,8 @@ single frames and contact sheets, and lints.
 video.json
 components/   <Name>.tsx, one component per file
 assets/       images, named by <Image src>
+script.md     the narration, one `## <id>` section per narrated scene
+narration/    manifest.json and the clips it names
 ```
 
 ```json
@@ -39,22 +44,31 @@ assets/       images, named by <Image src>
   "size": { "width": 1920, "height": 1080 },
   "theme": "default",
   "motion": { "transition": { "kind": "push", "dur": 0.6 }, "magicMove": "auto" },
+  "voice": { "voice": "af_heart", "speed": 1.0 },
   "scenes": [
-    { "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 4.0 },
-    { "component": "Steps", "hold": 6.0, "transition": { "kind": "wipe", "direction": "up" } }
+    { "id": "title", "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 4.0 },
+    { "id": "steps", "component": "Steps", "transition": { "kind": "wipe", "direction": "up" } }
   ]
 }
 ```
 
-- `hold` is a scene's length in seconds. A global `t` maps to a scene and a
-  scene-relative `t` by summing holds (`Timeline`); a `t` past the end is an
-  error that states the video's length.
+- A scene's length is its `hold` in seconds, or for a narrated scene the
+  length of its narration (see "Narration"). A global `t` maps to a scene
+  and a scene-relative `t` by summing lengths (`Timeline`, from
+  `Project::timeline`); a `t` past the end is an error that states the
+  video's length.
+- `id` (`[a-z0-9-]+`, unique) names the scene's section in `script.md`. It
+  is required on every scene once the folder has a `script.md`; a scene
+  whose id has no section is silent and needs a `hold`.
+- `voice` (optional: `model`, `voice`, `speed`) overrides Settings -> Voice
+  for this video. studio-core only stores it; the app's narrator reads it.
 - `theme` is a bundled theme's name or a `.json` path relative to the folder.
 - `motion` (optional) overrides the theme's transition and motion-blur
   defaults for this video; a scene's `transition` (optional) overrides
   both. See "Transitions" and "Motion blur".
-- `video.json` refuses unknown keys, an empty `scenes`, a non-positive `hold`
-  and sides outside 1–8192 px.
+- `video.json` refuses unknown keys, an empty `scenes`, a non-positive `hold`,
+  a bad or repeated `id`, a non-positive `voice.speed` and sides outside
+  1–8192 px.
 - Component names are PascalCase letters and digits and resolve to
   `components/<Name>.tsx` through the `ComponentSource` trait
   (`FolderComponents`); a missing one is an error listing the ones there are.
@@ -69,7 +83,7 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
 ```
 
 - `ctx` is `{ t, duration, theme, size: { width, height } }`, `t` in seconds
-  from the scene's start, frozen. Function components used inside the JSX
+  from the scene's start and `duration` the scene's length, frozen. Function components used inside the JSX
   are called as `(props, ctx)` with their subtree's ctx, which a `Sequence`
   or `Stagger` above them shifts (see "Motion").
 - The default export returns exactly one element. A component with no
@@ -90,7 +104,60 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
   damping, mass })` (closed form, so any `t` samples directly), `linear`,
   `easeOutCubic`, `easeInOutCubic`, `cubicBezier(a, b, c, d)`, `mix(a, b, p)`
   for hex colours, `clamp`, `lerp`, `counter`, `revealProgress`, `series` and
-  `parallel`. The motion components are in "Motion" below.
+  `parallel`. The motion components are in "Motion" below; `word` and
+  `wordEnd` are in "Narration".
+
+## Narration sets a scene's length and cues its elements
+
+`script.md` holds what is said, and `narration/manifest.json` the timings of
+the clips made from it. studio-core reads both and never the audio. The
+manifest is written by `oculus studio narrate`, which is not built yet.
+
+```markdown
+## steps
+
+We follow the *gradient* downhill, one small step at a time.
+```
+
+- **`script.md`** is one `## <id>` section per narrated scene, written as it
+  is said. A section's text is its prose with `*`, `_` and backticks
+  removed and whitespace collapsed; nothing else is interpreted (`#` and
+  `###` lines are prose). Text before the first heading, a heading that is
+  not an id, a repeated id and an empty section fail `Project::load` with
+  the line. A section no scene's `id` matches is a lint error.
+- **The manifest** is `{ version: 1, scenes: { <id>: { key, text, audio,
+  duration, words: [{ text, start, end, confidence }], gaps: [{ after,
+  start, end, heard }] } } }` (`Manifest`). `text` is the section text the
+  clip says, `audio` the clip's file in `narration/`, `key` its content
+  address (sha256 of the text, server, model, voice, speed and aligner
+  model), times are seconds from the clip's start, `confidence` is the
+  aligner's (mean log-probability of the word's letter frames; higher is
+  surer), and `gaps` (optional) is speech the aligner heard that the
+  script does not have, after word index `after`. Unknown keys, another
+  version, non-finite times and a word or gap ending before it starts fail
+  the load.
+- **Length.** A narrated scene lasts `max(hold, lead + duration + tail)`:
+  `hold` is optional and only a minimum. `lead` and `tail` are the theme's
+  `narration` tokens (0.25 s and 0.6 s in the bundled theme); the clip
+  starts `lead` into the scene. A silent scene (no section) lasts its
+  `hold`, and one without a `hold` has no length.
+- **Stale narration fails, it is never estimated.** A scene with script
+  text whose manifest entry is missing or was made for other text makes
+  `Project::timeline`, `Renderer::new` and `strip` fail with
+  `StudioError::Narration` (kind `narration`): ``scene `steps`: no
+  narration for its current text (…); run `oculus studio narrate <dir>` ``.
+  `Project::load` still succeeds, so lint reports it with everything else.
+- **Word cues.** `word(phrase, nth = 1)` is the scene time (lead included)
+  at which the nth occurrence of `phrase` starts, and `wordEnd(phrase, nth
+  = 1)` when its last word ends, so `<Enter at={word("gradient")}>` enters
+  as it is said. Words match lowercased with only letters, digits and
+  apostrophes kept; a phrase is consecutive words. A phrase that is not
+  said, an `nth` past the last occurrence and a call in a silent scene
+  throw at the call's TSX line, with the closest phrase that is said:
+  ``Steps.tsx:12:20: `word("gradiant")`: no such word in scene `steps`;
+  closest: gradient``. Each call gets its own scene's words (`SceneCall::
+  words`, from `Project::word_cues`), so in a transition the outgoing scene
+  cues to its words and the incoming one to its own.
 
 ## Four primitives and a closed set of style keys
 
@@ -205,9 +272,9 @@ out to the left). `morphColor` is under "Magic move". `video.json`'s
 `motionBlur`.
 
 - **Timing.** It plays over `[0, dur)` of the incoming scene B, with the
-  outgoing scene A held at its last moment (the left limit of its hold,
+  outgoing scene A held at its last moment (the left limit of its length,
   since Sequence and Stagger windows are half-open). The video's length
-  stays the sum of holds, and past `dur` a frame is B alone. `p =
+  stays the sum of scene lengths, and past `dur` a frame is B alone. `p =
   easing(t / dur)`. Each frame calls both components, each in its own fresh
   context, so a transition frame is seekable like any other. A's logs come
   first, prefixed `scene N:`.
@@ -391,11 +458,13 @@ centroid smoothly.
   never loaded, so a frame is the same on every machine; an unknown
   `fontFamily` is an error naming the bundled families.
 - A theme is tokens only: `color`, `font` (`heading` and `body` families),
-  `type` (style fragments to spread into `style`), `space`, `radius` and
+  `type` (style fragments to spread into `style`), `space`, `radius`,
   `motion` (`duration`, `easing` as cubic-bezier points, `spring` presets,
   and optionally `transition`, `magicMove`, `morphColor` and `motionBlur`,
   the bottom of the motion cascade; the bundled theme sets `morphColor:
-  "oklch"` and `motionBlur: "finals"`). Components read it as `ctx.theme` and it is frozen.
+  "oklch"` and `motionBlur: "finals"`) and `narration` (`lead` and `tail`,
+  non-negative seconds; see "Narration"). Components read it as
+  `ctx.theme` and it is frozen.
 - `color.bg` is the canvas under every frame, `color.text` the colour and
   `font.body` the family of `Text` that sets none.
 - The bundled `default` theme is neutral greys with the app's indigo
@@ -448,16 +517,39 @@ gallery drive `Engine` directly.
 
 `Project::lint` loads each component once, checks every scene's props and
 every component's `examples`, and renders each scene at `t = 0` and just
-before `hold`, at scale 0.25, writing nothing; a key on two nodes of a
+before its length, at scale 0.25, writing nothing; a key on two nodes of a
 scene's tree is reported there too. When a scene and the one before it both
 render cleanly, it also renders the middle of the transition between them,
 so a morph error shows. It checks the transition values through the cascade
 (reported at the first scene that uses a bad one, naming its level) and the
 video's `morphColor` and `motionBlur`, a
 `transition` on the first scene, and a `dur` longer than the incoming
-scene's hold. It collects every problem with its scene and component instead
-of stopping at the first; an error is reported once even if several renders
-hit it.
+scene's length. A scene whose length is unknown (stale narration, or silent
+with no `hold`) is reported and not rendered. It collects every problem
+with its scene, scene id and component instead of stopping at the first;
+an error is reported once even if several renders hit it.
+
+For a narrated video lint also reports, each naming the scene id:
+
+- a `script.md` section no scene matches (kind `script`, with its line);
+- script text that is not spoken form (kind `script`, `script.md:<line>:`
+  and the token): digits, `%`, `^`, `=`, `/`, `+`, `<`, `>`, a lone `*`, maths
+  symbols such as `×`, `÷`, `±`, `√`, `∑`, `∫`, `∈`, `≤`, `≠`, `≈`, Greek
+  letters, any other symbol, and dotted abbreviations (`e.g.`, `i.e.`,
+  `etc.`, `U.S.`), each with what to write instead (`` say `%` as
+  `percent` ``). Letters and `, . ; : ! ? ' " - — ( )` pass, and `*` or `_`
+  inside a word is emphasis. The rules are in
+  `app/studio-core/src/project/lint/spoken.rs`;
+- a clip longer than `MAX_NARRATION_SECS` (60 s): the aligner's memory grows
+  with the square of the clip's length, so the paragraph should be split;
+- each word whose aligner confidence is below `LOW_CONFIDENCE` (-8.0,
+  measured on Kokoro, where clean words stayed above -4.83; re-check it for
+  another TTS engine), since a mangled word smears its neighbours' timing;
+- each manifest gap: ``the audio has unscripted speech after `word` (heard
+  "…")``.
+
+All of these are errors: lint has no warning level, so any of them makes
+`oculus studio lint` exit 1.
 
 ## `oculus studio` renders and lints from the terminal
 
@@ -475,9 +567,13 @@ hit it.
   threads}`.
 - `frame` and `strip` take `--motion-blur` (30 fps, 180° shutter); `frame`
   then reports the sub-frames it averaged.
+- `frame` and `strip` read `script.md` and the narration manifest; stale or
+  missing narration stops them with the `Narration` error, while `lint`
+  lists it with the rest.
 - `oculus studio lint <DIR>` prints each problem and exits 1 if there is
-  any. With `--json` it prints the issues as an array of `{scene, component,
-  example, kind, message, loc}`.
+  any. With `--json` it prints the issues as an array of `{scene, id,
+  component, example, kind, message, loc}`; `scene` and `component` are
+  null for a script section no scene matches.
 
 Flags are in [cli-reference.md](./cli-reference.md#oculus-studio).
 
@@ -498,6 +594,9 @@ transitions fixture and its sameness across thread counts,
 `tests/dither.rs` the dark-gradient measurement. The transition and strip
 goldens are 640x360 or smaller to keep the repo small; there is no
 dark-gradient golden, since a dithered 1080p frame is a 2.4 MB PNG.
+`tests/narration.rs` covers scene lengths, stale and missing narration, the
+load errors and `word`/`wordEnd`; the `narrated` fixture (a hand-written
+manifest, no audio) pins a card entering at its word.
 
 From `app/studio-core`: `cargo test`, `cargo clippy --all-targets -- -D
 warnings`, `cargo fmt`. CI runs these in the `studio-core` job on macOS.

@@ -11,6 +11,8 @@ fn global_time_finds_the_scene() {
     assert_eq!(tl.locate(Time::Global(4.0)).unwrap(), (1, 0.0));
     assert_eq!(tl.locate(Time::Global(6.75)).unwrap(), (2, 0.25));
     assert_eq!(tl.start(2), 6.5);
+    assert_eq!(tl.scene_length(1), Some(2.5));
+    assert_eq!(tl.scene_length(3), None);
 }
 
 #[test]
@@ -29,5 +31,5 @@ fn out_of_range_states_the_length() {
         .locate(Time::Scene { index: 1, t: 2.5 })
         .unwrap_err()
         .to_string();
-    assert!(e.contains("2.500 s"), "{e}");
+    assert!(e.contains("which lasts 2.500 s"), "{e}");
 }

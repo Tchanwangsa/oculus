@@ -1,13 +1,19 @@
 //! `lint`: load every component, check every scene's props and every
 //! component example, render each scene at its first and last moment and
 //! the middle of the transition into it, and check its transition and
-//! motion values (no files written). Collects every problem instead of stopping at the
-//! first, each tagged with its scene and component.
+//! motion values (no files written). For a narrated video it also checks
+//! the script (`script`) and the narration (`narration`). Collects every
+//! problem instead of stopping at the first, each tagged with its scene,
+//! scene id and component.
 
-use super::Project;
+mod narration;
+mod script;
+mod spoken;
+
+use super::{Project, Staged};
 use crate::error::{Result, StudioError};
-use crate::render::{Engine, RenderOptions, SceneCall, scene_frame};
-use crate::transition::{blur_mode, check_hold};
+use crate::render::{Engine, RenderOptions, scene_frame};
+use crate::transition::{blur_mode, check_length};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fmt;
@@ -17,9 +23,13 @@ const LINT_SCALE: f64 = 0.25;
 
 #[derive(Debug)]
 pub struct LintIssue {
-    /// The scene (0-based), or `None` for a problem in a component itself.
+    /// The scene (0-based), or `None` for a problem in a component itself
+    /// or in a script section no scene matches.
     pub scene: Option<usize>,
-    pub component: String,
+    /// The scene's `id`, or the script section's.
+    pub id: Option<String>,
+    /// The component, or `None` for a problem in the script alone.
+    pub component: Option<String>,
     /// The `examples` entry this is about, if any.
     pub example: Option<String>,
     pub error: StudioError,
@@ -36,12 +46,36 @@ impl LintReport {
     }
 }
 
+impl LintIssue {
+    /// An issue about scene `index` of `project`.
+    fn scene(project: &Project, index: usize, error: StudioError) -> LintIssue {
+        let spec = &project.video.scenes[index];
+        LintIssue {
+            scene: Some(index),
+            id: spec.id.clone(),
+            component: Some(spec.component.clone()),
+            example: None,
+            error,
+        }
+    }
+}
+
+/// Where the issue is (`scene 2 \`update\` (Steps)`, `Steps example
+/// \`short\``), or nothing when the error names its own place.
 impl fmt::Display for LintIssue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match (&self.scene, &self.example) {
-            (Some(i), _) => write!(f, "scene {i} ({}): {}", self.component, self.error),
-            (None, Some(e)) => write!(f, "{} example `{e}`: {}", self.component, self.error),
-            (None, None) => write!(f, "{}: {}", self.component, self.error),
+        let id = self
+            .id
+            .as_ref()
+            .map(|id| format!(" `{id}`"))
+            .unwrap_or_default();
+        let component = self.component.as_deref();
+        match (self.scene, &self.example, component) {
+            (Some(i), _, Some(c)) => write!(f, "scene {i}{id} ({c}): {}", self.error),
+            (Some(i), _, None) => write!(f, "scene {i}{id}: {}", self.error),
+            (None, Some(e), Some(c)) => write!(f, "{c} example `{e}`: {}", self.error),
+            (None, _, Some(c)) => write!(f, "{c}: {}", self.error),
+            (None, _, None) => write!(f, "{}", self.error),
         }
     }
 }
@@ -60,7 +94,9 @@ impl fmt::Display for LintReport {
 
 impl Project {
     /// Errors here are about the project as a whole (the renderer could not
-    /// start); everything about scenes and components is in the report.
+    /// start); everything about scenes, components, the script and the
+    /// narration is in the report. A scene whose length is unknown (stale
+    /// narration, no hold) is reported and not rendered.
     pub fn lint(&self) -> Result<LintReport> {
         let mut engine = Engine::new(
             self.theme.clone(),
@@ -72,6 +108,7 @@ impl Project {
             },
         )?;
         let mut report = LintReport::default();
+        script::lint(self, &mut report);
         let mut failed: HashSet<&str> = HashSet::new();
         let mut checked: HashSet<&str> = HashSet::new();
         // A theme or video.json value is reported once, not per scene.
@@ -79,32 +116,27 @@ impl Project {
         let transitions = self.transitions();
         let scenes = &self.video.scenes;
         let mut clean = vec![false; scenes.len()];
+        let mut staged: Vec<Option<Staged>> = Vec::with_capacity(scenes.len());
         let video_level = [
             self.morph_color().map(|c| engine.set_morph_color(c)),
             blur_mode(&self.video.motion, &self.theme).map(|_| ()),
         ];
         for e in video_level.into_iter().filter_map(Result::err) {
             transition_seen.insert(e.to_string());
-            report.issues.push(LintIssue {
-                scene: Some(0),
-                component: scenes[0].component.clone(),
-                example: None,
-                error: e.into(),
-            });
+            report.issues.push(LintIssue::scene(self, 0, e.into()));
         }
         for (index, scene) in scenes.iter().enumerate() {
             let name = scene.component.as_str();
-            let issue = |error| LintIssue {
-                scene: Some(index),
-                component: name.to_owned(),
-                example: None,
-                error,
-            };
+            let issue = |error| LintIssue::scene(self, index, error);
+            let stage = self.staged(index);
+            narration::lint(self, index, &mut report);
+            let length = stage.as_ref().map_or(f64::INFINITY, |s| s.length);
+            let stage = stage.map_err(|e| report.issues.push(issue(e))).ok();
             let into = transitions[index]
                 .as_ref()
                 .map_err(Clone::clone)
                 .and_then(|t| {
-                    check_hold(index, scene.transition.as_ref(), t.as_ref(), scene.hold)?;
+                    check_length(index, scene.transition.as_ref(), t.as_ref(), length)?;
                     Ok(t.as_ref())
                 });
             if let Err(e) = &into
@@ -125,21 +157,15 @@ impl Project {
                     }
                 }
             }
-            if failed.contains(name) {
+            let Some(st) = stage.filter(|_| !failed.contains(name)) else {
+                staged.push(None);
                 continue;
-            }
-            let end = scene.hold - (scene.hold / 2.0).min(1e-3);
+            };
+            let end = st.length - (st.length / 2.0).min(1e-3);
             let mut seen: HashSet<String> = HashSet::new();
             let before = report.issues.len();
             for t in [0.0, end] {
-                let call = SceneCall {
-                    component: name,
-                    props: &scene.props,
-                    t,
-                    duration: scene.hold,
-                    index,
-                };
-                if let Err(error) = engine.render_checked(call)
+                if let Err(error) = engine.render_checked(st.call(index, t))
                     && seen.insert(error.to_string())
                 {
                     report.issues.push(issue(error));
@@ -151,14 +177,17 @@ impl Project {
                 && clean[index]
                 && clean[index - 1]
                 && tr.covers(0.0)
+                && let Some(prev) = &staged[index - 1]
             {
-                let mid = tr.dur.min(scene.hold) / 2.0;
-                if let Err(error) = scene_frame(&mut engine, scenes, index, Some(tr), mid)
+                let mid = tr.dur.min(st.length) / 2.0;
+                let a = prev.call(index - 1, 0.0);
+                if let Err(error) = scene_frame(&mut engine, Some(a), st.call(index, mid), Some(tr))
                     && seen.insert(error.to_string())
                 {
                     report.issues.push(issue(error));
                 }
             }
+            staged.push(Some(st));
         }
         Ok(report)
     }
@@ -183,7 +212,8 @@ fn lint_examples(engine: &Engine, name: &str, report: &mut LintReport) {
         if let Err(error) = result {
             report.issues.push(LintIssue {
                 scene: None,
-                component: name.to_owned(),
+                id: None,
+                component: Some(name.to_owned()),
                 example: Some(example.clone()),
                 error,
             });

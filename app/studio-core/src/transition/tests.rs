@@ -140,10 +140,10 @@ fn bad_values_name_the_level_they_came_from() {
 }
 
 #[test]
-fn lint_checks_the_first_scene_and_the_hold() {
+fn lint_checks_the_first_scene_and_the_length() {
     let theme = Theme::bundled("default").unwrap();
     let push = spec(json!({ "kind": "push" }));
-    let e = check_hold(0, Some(&push), None, 2.0)
+    let e = check_length(0, Some(&push), None, 2.0)
         .unwrap_err()
         .to_string();
     assert_eq!(
@@ -151,18 +151,20 @@ fn lint_checks_the_first_scene_and_the_hold() {
         "scene 0 transition: the first scene has nothing to transition from; remove it"
     );
     let t = resolve(1, None, &MotionSpec::default(), &theme).unwrap();
-    let e = check_hold(1, None, t.as_ref(), 0.5)
+    let e = check_length(1, None, t.as_ref(), 0.5)
         .unwrap_err()
         .to_string();
     assert!(
-        e.starts_with("theme motion.transition.dur: 0.7 s is longer than scene 1's hold of 0.5 s"),
+        e.starts_with(
+            "theme motion.transition.dur: 0.7 s is longer than scene 1's length of 0.5 s"
+        ),
         "{e}"
     );
-    assert!(check_hold(1, None, t.as_ref(), 0.7).is_ok());
+    assert!(check_length(1, None, t.as_ref(), 0.7).is_ok());
     // A cut that cannot turn into magic changes nothing over time.
     let cut = spec(json!({ "kind": "cut", "dur": 5 }));
     let t = resolve(1, Some(&cut), &MotionSpec::default(), &theme).unwrap();
-    assert!(check_hold(1, Some(&cut), t.as_ref(), 0.5).is_ok());
+    assert!(check_length(1, Some(&cut), t.as_ref(), 0.5).is_ok());
 }
 
 #[test]

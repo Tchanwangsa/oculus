@@ -118,7 +118,6 @@ fn work(
             return vec![(k, Err(e))];
         }
     };
-    let timeline = project.timeline();
     let mut out = Vec::new();
     for i in (k..times.len()).step_by(step) {
         if i > first_bad.load(Ordering::Relaxed) {
@@ -129,7 +128,7 @@ fn work(
             Ok(f) => out.push((i, Ok(f))),
             Err(e) => {
                 first_bad.fetch_min(i, Ordering::Relaxed);
-                let e = match timeline.locate(Time::Global(t)) {
+                let e = match renderer.timeline().locate(Time::Global(t)) {
                     Ok((scene, scene_t)) => StudioError::Frame {
                         t,
                         scene,

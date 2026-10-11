@@ -34,7 +34,9 @@ pub use error::{BudgetKind, Result, StudioError, TsxLoc};
 pub use fonts::bundled_families;
 pub use host::ComponentInfo;
 pub use project::{
-    ComponentSource, FolderComponents, LintIssue, LintReport, Project, SceneSpec, Timeline, Video,
+    ComponentSource, FolderComponents, LOW_CONFIDENCE, LintIssue, LintReport, MANIFEST_PATH,
+    MAX_NARRATION_SECS, Manifest, ManifestGap, ManifestScene, ManifestWord, Project, SceneSpec,
+    Script, ScriptSection, Timeline, Video, Voice, WordCues,
 };
 pub use render::{
     Engine, Frame, MotionBlur, Purpose, RenderOptions, Renderer, SceneCall, Size, Time,
@@ -42,4 +44,4 @@ pub use render::{
 pub use scene::STYLE_KEYS;
 pub use schema::{PropKind, PropSpec, PropsSchema};
 pub use strip::{Strip, StripOptions, strip};
-pub use theme::Theme;
+pub use theme::{NarrationTokens, Theme};
