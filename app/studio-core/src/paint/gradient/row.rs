@@ -41,7 +41,12 @@ pub fn fill(row: &mut [u8], stops: &Stops, s0: f64, ds: f64, bayer: &[f32; 8], p
             }
             _ => w,
         };
-        for (m, px) in row[i * 4..end * 4].chunks_exact_mut(4).enumerate() {
+        for (m, px) in row[i * 4..end * 4]
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .enumerate()
+        {
             let d = bayer[(phase + i + m) & 7];
             let t = m as f32;
             // `as u8` truncates and saturates: floor(v + d), clamped.

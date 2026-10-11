@@ -83,7 +83,7 @@ pub(super) fn logits(session: &mut Session, input: Vec<f32>) -> Result<Vec<f32>,
 /// Row-wise log-softmax over `[t, VOCAB]` logits, in f32 like numpy's.
 pub(super) fn log_softmax(logits: &[f32]) -> Vec<f32> {
     let mut out = Vec::with_capacity(logits.len());
-    for row in logits.chunks_exact(VOCAB) {
+    for row in logits.as_chunks::<VOCAB>().0 {
         let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let lse = row.iter().map(|x| (x - max).exp()).sum::<f32>().ln();
         out.extend(row.iter().map(|x| x - max - lse));

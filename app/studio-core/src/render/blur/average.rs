@@ -21,7 +21,13 @@ impl Accumulator {
     }
 
     pub fn add(&mut self, rgba: &[u8]) {
-        for (s, px) in self.sums.chunks_exact_mut(4).zip(rgba.chunks_exact(4)) {
+        for (s, px) in self
+            .sums
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(rgba.as_chunks::<4>().0)
+        {
             let a = u32::from(px[3]);
             s[0] += u32::from(px[0]) * a;
             s[1] += u32::from(px[1]) * a;
@@ -32,7 +38,12 @@ impl Accumulator {
 
     pub fn finish(self, logs: Vec<String>, n: u32) -> Frame {
         let mut rgba = vec![0u8; self.sums.len()];
-        for (px, s) in rgba.chunks_exact_mut(4).zip(self.sums.chunks_exact(4)) {
+        for (px, s) in rgba
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(self.sums.as_chunks::<4>().0)
+        {
             let sa = s[3];
             if sa == 0 {
                 continue;
