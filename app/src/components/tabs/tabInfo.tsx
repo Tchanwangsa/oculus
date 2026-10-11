@@ -7,6 +7,7 @@ import {
   Chat,
   ChatsCircle,
   CheckSquare,
+  Cube,
   FileDashed,
   FilmSlate,
   GearSix,
@@ -137,6 +138,9 @@ export function tabInfo(
         icon: <FilmSlate size={size} />,
       };
     }
+    const component = /^\/studio\/components\/([^/]+)/.exec(pathname);
+    if (component) return { title: decodeURIComponent(component[1]), icon: <Cube size={size} /> };
+    if (pathname.startsWith("/studio/components")) return { title: "Components", icon: <Cube size={size} /> };
     return {
       title: pathname.startsWith("/studio/videos") ? "Videos" : "New video",
       icon: <FilmSlate size={size} />,

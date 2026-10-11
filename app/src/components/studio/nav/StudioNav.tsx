@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FilmSlate, Plus, SquaresFour } from "@phosphor-icons/react";
+import { Cube, FilmSlate, Plus, SquaresFour } from "@phosphor-icons/react";
 
 import { RecentVideoRow } from "@/components/studio/nav/RecentVideoRow";
 import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
@@ -14,7 +14,7 @@ import {
 import { useTabActive } from "@/components/tabs/TabContext";
 import { useWindowEvent } from "@/hooks/backend/useEvents";
 import type { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
-import { NEW_VIDEO_HREF, VIDEOS_HREF, videoHref } from "@/lib/studio/routes";
+import { COMPONENTS_HREF, NEW_VIDEO_HREF, VIDEOS_HREF, videoHref } from "@/lib/studio/routes";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { useRenderStore } from "@/stores/studio/renderStore";
 import { useVideosStore } from "@/stores/studio/videosStore";
@@ -106,6 +106,7 @@ export function StudioNav({ panel }: { panel: ReturnType<typeof useResizablePane
           <div className="mb-2">
             <SideNavLink to={NEW_VIDEO_HREF} end icon={Plus} label="New video" />
             <SideNavLink to={VIDEOS_HREF} icon={SquaresFour} label="Videos" />
+            <SideNavLink to={COMPONENTS_HREF} icon={Cube} label="Components" />
           </div>
         )}
         {(q || listed.length > 0) && <SideNavGroupLabel>{q ? "Results" : "Recent"}</SideNavGroupLabel>}
