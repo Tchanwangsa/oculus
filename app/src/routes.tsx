@@ -81,6 +81,10 @@ export const routes: RouteObject[] = [
       { path: "sync", lazy: page(() => import("@/pages/tools/SyncPage")) },
       // The id names a native WebView Rust parks over this content area.
       { path: "browse/:id", lazy: page(() => import("@/pages/tools/BrowserPage")) },
+      // Messaging: one service's native WebView, placed over this content
+      // area. Bare `/dock` opens the last service shown.
+      { path: "dock", lazy: page(() => import("@/pages/tools/DockPage")) },
+      { path: "dock/:service", lazy: page(() => import("@/pages/tools/DockPage")) },
       {
         path: "settings",
         element: <SettingsLayout />,
@@ -90,6 +94,7 @@ export const routes: RouteObject[] = [
           { path: "appearance", lazy: page(() => import("@/pages/settings/AppearancePage")) },
           { path: "browser", lazy: page(() => import("@/pages/settings/integrations/BrowserPage")) },
           { path: "music", lazy: page(() => import("@/pages/settings/integrations/MusicPage")) },
+          { path: "messaging", lazy: page(() => import("@/pages/settings/integrations/MessagingPage")) },
           { path: "storage", lazy: page(() => import("@/pages/settings/library/StoragePage")) },
           { path: "agents", lazy: page(() => import("@/pages/settings/integrations/AgentsPage")) },
           { path: "opencode", lazy: page(() => import("@/pages/settings/integrations/OpencodePage")) },
