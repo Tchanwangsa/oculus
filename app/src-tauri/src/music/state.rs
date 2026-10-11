@@ -2,7 +2,8 @@
 //! change) and the handles behind it: the live `Spirc` and `Session`, the
 //! running session task, a pending login and a held duck. A session task tags
 //! its writes with its run id, so a stopped one cannot change what the user
-//! sees. The Web API's caches sit beside it (`web::Web`), under their own lock.
+//! sees. The library's caches sit beside it (`library::Library`), under their
+//! own lock.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,7 +18,7 @@ use tokio::sync::watch;
 use super::audio::Choice;
 use super::devices::Cluster;
 use super::duck::Duck;
-use super::web::Web;
+use super::library::Library;
 use crate::shell::browser::MAIN;
 
 pub const EVENT: &str = "music-state";
@@ -140,11 +141,8 @@ struct Inner {
     snapshot: Snapshot,
     /// The running task's device handle, once it has connected.
     spirc: Option<Spirc>,
-    /// That connection's session, for the Web API's token.
+    /// That connection's session, for the library's and transfer's requests.
     session: Option<Session>,
-    /// Bumped whenever `session` changes, so a token from an older session
-    /// is never reused.
-    session_gen: u64,
     duck: Duck,
     /// The Connect cluster from the last dealer push, for this connection.
     cluster: Option<Cluster>,
@@ -156,7 +154,7 @@ struct Inner {
 
 pub struct MusicState {
     inner: Mutex<Inner>,
-    web: Web,
+    library: Library,
     /// The output choice, shared with the player's sink.
     audio: Arc<Choice>,
     /// The snapshot's `active`, for a command waiting on a transfer.
@@ -167,7 +165,7 @@ impl Default for MusicState {
     fn default() -> Self {
         Self {
             inner: Mutex::default(),
-            web: Web::default(),
+            library: Library::default(),
             audio: Arc::default(),
             active: watch::Sender::new(false),
         }
@@ -180,9 +178,9 @@ fn with<T>(app: &AppHandle, f: impl FnOnce(&mut Inner) -> T) -> T {
     f(&mut inner)
 }
 
-/// The Web API's caches and rate-limit gate.
-pub(super) fn web(app: &AppHandle) -> &Web {
-    &app.state::<MusicState>().inner().web
+/// The library's caches and rate-limit gate.
+pub(super) fn library(app: &AppHandle) -> &Library {
+    &app.state::<MusicState>().inner().library
 }
 
 /// Applies `f` to the snapshot under the lock and emits it, outside the
@@ -267,7 +265,6 @@ impl Inner {
     fn drop_link(&mut self) -> Option<Spirc> {
         self.session = None;
         self.cluster = None;
-        self.session_gen += 1;
         self.duck = Duck::default();
         self.spirc.take()
     }
@@ -293,14 +290,9 @@ pub(super) fn set_link(
     })
 }
 
-/// The connected session and its generation, for a Web API token.
-pub(super) fn session(app: &AppHandle) -> Option<(Session, u64)> {
-    with(app, |inner| {
-        inner
-            .session
-            .as_ref()
-            .map(|session| (session.clone(), inner.session_gen))
-    })
+/// The connected session.
+pub(super) fn session(app: &AppHandle) -> Option<Session> {
+    with(app, |inner| inner.session.clone())
 }
 
 /// Stops the running session task, if any: the device leaves Spotify's list

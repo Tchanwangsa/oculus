@@ -1,15 +1,15 @@
 //! The account's Spotify Connect devices, and moving playback between them.
 //!
-//! - **The list comes from the Connect cluster** Spotify pushes over
-//!   librespot's dealer (`hm://connect-state/v1/cluster`, which the Spirc
-//!   also hears): free, and never rate-limited. Each session subscribes once,
-//!   and the last push is kept until the connection drops. Spotify pushes
-//!   only on a change, so until the first push, and on a refresh, the list is
-//!   the Web API's `GET /v1/me/player/devices` instead.
-//! - **A transfer** to Oculus itself is a pull (`control.rs`) then play; to a
-//!   device in the cluster it is librespot's `spclient().transfer(from, to)`,
-//!   the request Spotify's own apps send; to anything else, the Web API's
-//!   `PUT /v1/me/player`.
+//! - **The list is the Connect cluster** Spotify pushes over librespot's
+//!   dealer (`hm://connect-state/v1/cluster`, which the Spirc also hears):
+//!   free, and never rate-limited. Each session subscribes once, and the last
+//!   push is kept until the connection drops. Spotify pushes only on a
+//!   change, and the cluster the Spirc gets back when it announces the device
+//!   stays inside the Spirc, so until the first push the list is this device
+//!   alone.
+//! - **A transfer** to Oculus itself is a pull (`control.rs`) then play; to
+//!   another device it is librespot's `spclient().transfer(from, to)`, the
+//!   request Spotify's own apps send.
 
 use futures_util::StreamExt;
 use librespot_core::dealer::protocol::Message;
@@ -20,7 +20,6 @@ use tauri::AppHandle;
 
 use super::control::{self, Need};
 use super::state::{self, percent, DEVICE_NAME};
-use super::web;
 
 const CLUSTER_URI: &str = "hm://connect-state/v1/cluster";
 
@@ -71,19 +70,6 @@ pub(super) fn connect_kind(device_type: i32) -> &'static str {
     }
 }
 
-/// The Web API's device `type` strings as the picker's kinds.
-pub(super) fn web_kind(device_type: &str) -> &'static str {
-    match device_type.to_ascii_lowercase().as_str() {
-        "computer" => "computer",
-        "tablet" => "tablet",
-        "smartphone" => "phone",
-        "speaker" | "avr" | "audiodongle" | "castaudio" => "speaker",
-        "tv" | "stb" | "castvideo" => "tv",
-        "automobile" => "car",
-        _ => "other",
-    }
-}
-
 /// A pushed cluster's devices (offline ones left out), this one first.
 pub(super) fn from_cluster(cluster: &ClusterProto, own_id: &str) -> Cluster {
     let mut devices: Vec<Device> = cluster
@@ -107,7 +93,7 @@ pub(super) fn from_cluster(cluster: &ClusterProto, own_id: &str) -> Cluster {
 }
 
 /// This device first, then the active one, then by name.
-pub(super) fn sort(devices: &mut [Device]) {
+fn sort(devices: &mut [Device]) {
     devices.sort_by(|a, b| {
         (!a.is_this, !a.active, a.name.to_lowercase()).cmp(&(
             !b.is_this,
@@ -126,7 +112,7 @@ pub(super) fn listen(app: &AppHandle, id: u64, session: &Session) {
     {
         Ok(updates) => updates,
         Err(e) => {
-            eprintln!("[music] could not follow Spotify's device list: {e}");
+            elog!("[music] could not follow Spotify's device list: {e}");
             return;
         }
     };
@@ -142,28 +128,27 @@ pub(super) fn listen(app: &AppHandle, id: u64, session: &Session) {
                         state::set_cluster(&app, id, &session_id, from_cluster(cluster, &own_id));
                     }
                 }
-                Err(e) => eprintln!("[music] unreadable Connect cluster update: {e}"),
+                Err(e) => elog!("[music] unreadable Connect cluster update: {e}"),
             }
         }
     });
 }
 
-/// The devices: the last pushed cluster unless `refresh` or none came yet,
-/// else the Web API's list.
-pub(super) async fn list(app: &AppHandle, refresh: bool) -> Result<Vec<Device>, String> {
-    let (session, _) = state::session(app).ok_or("Not connected to Spotify")?;
+/// The devices of the last pushed cluster, or this device alone before the
+/// first push.
+pub(super) fn list(app: &AppHandle) -> Result<Vec<Device>, String> {
+    let session = state::session(app).ok_or("Not connected to Spotify")?;
     let own_id = session.device_id().to_string();
-    if !refresh {
-        if let Some(cluster) = state::cluster(app) {
-            return Ok(with_this(cluster.devices, &own_id, &state::snapshot(app)));
-        }
-    }
-    let devices = web::devices(app, &own_id).await?;
+    let devices = state::cluster(app).map(|c| c.devices).unwrap_or_default();
     Ok(with_this(devices, &own_id, &state::snapshot(app)))
 }
 
 /// Adds this device when the list lacks it.
-fn with_this(mut devices: Vec<Device>, own_id: &str, s: &state::Snapshot) -> Vec<Device> {
+pub(super) fn with_this(
+    mut devices: Vec<Device>,
+    own_id: &str,
+    s: &state::Snapshot,
+) -> Vec<Device> {
     if !devices.iter().any(|d| d.is_this) {
         devices.push(Device {
             id: own_id.to_string(),
@@ -180,7 +165,7 @@ fn with_this(mut devices: Vec<Device>, own_id: &str, s: &state::Snapshot) -> Vec
 
 /// Moves playback to `device_id` and plays.
 pub(super) async fn transfer(app: &AppHandle, device_id: String) -> Result<(), String> {
-    let (session, _) = state::session(app).ok_or("Not connected to Spotify")?;
+    let session = state::session(app).ok_or("Not connected to Spotify")?;
     let own_id = session.device_id().to_string();
     if device_id == own_id {
         return control::send(app, Need::Pull, || {
@@ -188,20 +173,18 @@ pub(super) async fn transfer(app: &AppHandle, device_id: String) -> Result<(), S
         })
         .await;
     }
-    match state::cluster(app).filter(|c| c.has(&device_id)) {
-        Some(cluster) => {
-            let from = if cluster.active_id.is_empty() {
-                own_id
-            } else {
-                cluster.active_id
-            };
-            session
-                .spclient()
-                .transfer(&from, &device_id, None)
-                .await
-                .map(|_| ())
-                .map_err(|e| format!("Spotify would not move playback ({e})"))
-        }
-        None => Ok(web::transfer(app, &device_id).await?),
-    }
+    let cluster = state::cluster(app)
+        .filter(|c| c.has(&device_id))
+        .ok_or("That device is no longer in Spotify's device list")?;
+    let from = if cluster.active_id.is_empty() {
+        own_id
+    } else {
+        cluster.active_id
+    };
+    session
+        .spclient()
+        .transfer(&from, &device_id, None)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("Spotify would not move playback ({e})"))
 }

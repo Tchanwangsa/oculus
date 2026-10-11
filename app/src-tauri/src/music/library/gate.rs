@@ -1,6 +1,5 @@
-//! The rate-limit gate: after a 429, no Web API call leaves until its
-//! `Retry-After` has passed. The shared client id is throttled hard, and a
-//! call made early only extends the wait.
+//! The rate-limit gate: after a 429, no library call leaves until its
+//! `Retry-After` has passed, and a call made early only extends the wait.
 
 use std::time::{Duration, Instant};
 

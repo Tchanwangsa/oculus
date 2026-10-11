@@ -29,7 +29,7 @@ impl Log for Logger {
             return;
         }
         let msg = record.args().to_string();
-        eprintln!("[music] {} {}: {msg}", record.level(), record.target());
+        elog!("[music] {} {}: {msg}", record.level(), record.target());
         if is_track_failure(record.level(), record.target(), &msg) {
             self.failures.send(msg).ok();
         }
@@ -67,7 +67,7 @@ pub(super) fn install(app: &AppHandle) {
     ONCE.call_once(|| {
         let (tx, mut rx) = mpsc::unbounded_channel();
         if log::set_boxed_logger(Box::new(Logger { failures: tx })).is_err() {
-            eprintln!("[music] another logger is installed; track failures will not be reported");
+            elog!("[music] another logger is installed; track failures will not be reported");
             return;
         }
         log::set_max_level(LevelFilter::Warn);

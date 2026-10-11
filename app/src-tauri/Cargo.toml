@@ -92,8 +92,12 @@ librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "4a
 librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
 librespot-metadata = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
 librespot-playback = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
-# Only for `AuthenticationType`, which librespot-core keeps private.
+# `AuthenticationType`, which librespot-core keeps private, and the playlist4
+# and Connect messages `src/music/` reads.
 librespot-protocol = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+# Decodes those messages (`src/music/library/rootlist.rs`); the version
+# librespot-protocol is generated for.
+protobuf = "3.7"
 # The Spotify login: the same oauth2 librespot-oauth builds on, used directly
 # because librespot's client opens the browser itself and hides the URL.
 oauth2 = { version = "5", default-features = false, features = ["reqwest", "reqwest-blocking"] }
@@ -104,8 +108,10 @@ log = { version = "0.4", features = ["std"] }
 # and rodio librespot-playback's rodio backend builds on, at its versions.
 cpal = "0.16"
 rodio = { version = "0.21", default-features = false, features = ["playback"] }
-# Reads librespot's dealer stream of Connect cluster updates (`src/music/devices.rs`).
-futures-util = { version = "0.3", default-features = false }
+# Reads librespot's dealer stream of Connect cluster updates
+# (`src/music/devices.rs`) and fetches playlist headers four at a time
+# (`src/music/library/mod.rs`).
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_sessions` in src/shell/browser/seed.rs) — Tauri exposes no cookie setter, so

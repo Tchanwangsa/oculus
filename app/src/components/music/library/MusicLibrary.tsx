@@ -28,9 +28,9 @@ interface Search {
 
 /**
  * The player's browser: the account's playlists, and a search that replaces
- * them while it has results. Both are Web API calls Spotify rate-limits, so
- * the playlists load once per mount (Rust answers later mounts from memory
- * until the refresh button asks again) and search runs on Enter only.
+ * them while it has results. Both are calls Spotify can rate-limit, so the
+ * playlists load once per mount (Rust answers later mounts from memory until
+ * the refresh button asks again) and search runs on Enter only.
  */
 export function MusicLibrary({ snapshot }: { snapshot: MusicSnapshot }) {
   const run = useMusicStore((s) => s.run);

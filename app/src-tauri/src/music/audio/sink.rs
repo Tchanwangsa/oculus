@@ -111,7 +111,7 @@ impl Switching {
         if !(self.alive() && self.bound == target) {
             if let Err(why) = self.reopen(target.clone()) {
                 if target.is_some() {
-                    eprintln!("[music] {why}; playing on the system default");
+                    elog!("[music] {why}; playing on the system default");
                     missing = true;
                     if !(self.alive() && self.bound.is_none()) {
                         failure = self.reopen(None).err();
@@ -142,7 +142,7 @@ impl Switching {
         } else {
             open.sink.pause();
         }
-        eprintln!(
+        elog!(
             "[music] audio output: {}",
             target.as_deref().unwrap_or("the system default")
         );

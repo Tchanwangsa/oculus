@@ -1,7 +1,7 @@
 import { MagnifyingGlass, X } from "@phosphor-icons/react";
 
-/** The pill search field. It searches on Enter only: every search is a Web
- *  API call, and Spotify rate-limits Oculus's client id hard. Escape clears. */
+/** The pill search field. It searches on Enter only: every search is a call
+ *  to Spotify, which can rate-limit Oculus. Escape clears. */
 export function LibrarySearch({
   value,
   onChange,
