@@ -10,6 +10,10 @@ use super::{broadcast, label, seed_sessions, with_state, Tab, Viewport, LABEL_PR
 
 /// Seeds the cookie jar and hooks the main window's resize. From `setup`.
 pub fn init(app: &AppHandle) {
+    #[cfg(target_os = "windows")]
+    if let Some(main) = app.get_webview(MAIN) {
+        crate::shell::menu::windows::install(&main, false);
+    }
     seed_sessions(app, || {});
     let Some(window) = app.get_window(MAIN) else {
         eprintln!("[oculus] browser: no main window at setup; pages will not follow resizes");
@@ -211,6 +215,8 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     let webview = window
         .add_child(builder, position, size)
         .map_err(|e| format!("failed to open page webview: {e}"))?;
+    #[cfg(target_os = "windows")]
+    crate::shell::menu::windows::install(&webview, true);
     round_corners(&webview, radius);
     if with_state(app, |s| s.shown.contains(&id)) {
         webview.show().ok();

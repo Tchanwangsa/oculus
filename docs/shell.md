@@ -12,6 +12,7 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Tabs, side panels, per-pane routers, titles from paths | `app/src/stores/shell/tabStore.ts`, `app/src/lib/shell/sideStack.ts`, `app/src/components/tabs/TabPane.tsx`, `app/src/components/tabs/SidePanelHeader.tsx`, `app/src/components/tabs/PaneHeader.tsx`, `app/src/lib/shell/tabRouters.ts`, `app/src/components/tabs/tabInfo.tsx` |
 | Windows startup size in the monitor work area | `app/src-tauri/src/shell/window.rs` |
 | Window shortcuts (all menu items), platform labels, Windows caption controls | `app/src-tauri/src/shell/menu.rs`, `app/src/lib/platform.ts`, `app/src/components/tabs/WindowControls.tsx` |
+| WebView2 window shortcut dispatch | `app/src-tauri/src/shell/menu/windows.rs` |
 | ⌘-click → a new tab, app-wide | `app/src/lib/shell/newTabClicks.ts` |
 | Search (⌘K and the new-tab field), the new-tab page's Recent list | `app/src/lib/search/`, `app/src/lib/search/filters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/shell/recentTabsStore.ts` |
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/files/openFile.ts`, `app/src/pages/subject/files/FilePage.tsx`, `app/src/hooks/find/useLocateHighlight.ts` |
@@ -130,6 +131,13 @@ while Ctrl+Shift+Z is Redo.
   the frontend as `menu-*` events and the frontend owns what each means.
   Close Window is ⇧⌘W, and the Edit submenu must stay or ⌘C/⌘V die in every
   field.
+- **Windows attaches `AcceleratorKeyPressed` to the main and browser-page
+  WebView2 controllers** (`app/src-tauri/src/shell/menu/windows.rs`), because
+  focused webview keys need not reach the host's menu message loop. It invokes
+  the same menu handler after the callback returns, suppresses repeated presses,
+  and leaves Ctrl+Alt combinations alone for AltGr. Browser pages keep their
+  Ctrl+Z, Ctrl+A, clipboard and find keys; app tab, navigation and zoom keys
+  reach the shell.
 - **A browser page gets ⌘-keys before the menu**, as in Safari, so a site's
   own ⌘Z/⌘A/⌘F (Google Docs) work; a key the page doesn't take falls through
   to the menu. The app's tab and window keys (⌘T, ⌘W, ⌘N, ⌘K, ⌘L, ⌘1–9 and

@@ -13,6 +13,9 @@ use tauri::menu::AboutMetadata;
 use tauri::menu::{IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
+#[cfg(any(target_os = "windows", test))]
+pub(crate) mod windows;
+
 const SEARCH: &str = "search";
 const NEW_TAB: &str = "new-tab";
 const SIDE_PANEL: &str = "side-panel";

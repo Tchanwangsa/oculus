@@ -11,6 +11,7 @@ boundaries; native Windows acceptance testing is required before release.
 | Windows window and NSIS settings | `app/src-tauri/tauri.windows.conf.json` |
 | Native executable manifest | `app/src-tauri/windows-app-manifest.xml`, `app/src-tauri/build.rs` |
 | Keyboard labels and caption controls | `app/src/lib/platform.ts`, `app/src/components/tabs/WindowControls.tsx` |
+| WebView2 keyboard dispatch | `app/src-tauri/src/shell/menu/windows.rs` |
 | Shared data directory and broker endpoint | `app/keyd/core/src/paths.rs` |
 | Named pipes, DPAPI, file ACLs and broker lifetime | `app/keyd/core/src/platform/windows/` |
 | GUI broker startup | `app/src-tauri/src/auth/keyd/install.rs` |
@@ -110,6 +111,10 @@ use their JavaScript implementations; page snapshots and native rounded page
 corners are unavailable. The suggestion list hides a page without a snapshot.
 The tab bar supplies caption buttons and Ctrl labels; its custom caption has
 no native Windows 11 snap-layout flyout.
+Window shortcuts use WebView2's controller callback and the shared menu
+handler; browser pages keep editing and find shortcuts. See
+[shell.md](./shell.md#the-shell-owns-tabs-side-panels-and-every-window-shortcut)
+for keyboard ownership.
 
 ## Release validation includes a packaged installation
 
