@@ -22,6 +22,9 @@
     }
   },
   "bundle": {
+    "icon": [
+      "windows/icon.ico"
+    ],
     "targets": [
       "nsis"
     ],

@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { logoFiles } from "./windows-icons.mjs";
 import { distributionReady, prepareReleaseConfig, readMsixIdentity, renderManifest, requireExecutable, stageMsix, validateWindowsRelease } from "./package-msix.mjs";
 
 const roots = [];
@@ -54,11 +55,13 @@ function payload() {
   const binaries = join(root, "binaries");
   const distributionDir = join(root, "distribution");
   const content = join(root, "content");
-  for (const dir of [release, binaries, distributionDir, content]) mkdirSync(dir);
+  const assetsDir = join(root, "Assets");
+  for (const dir of [release, binaries, distributionDir, content, assetsDir]) mkdirSync(dir);
+  writeFileSync(join(assetsDir, "StoreLogo.scale-100.png"), "fixture logo");
   for (const path of [join(release, "oculus-app.exe"), join(release, "oculus.exe"),
     join(binaries, "oculus-keyd-x86_64-pc-windows-msvc.exe"), join(binaries, "ffmpeg-x86_64-pc-windows-msvc.exe")]) writeFileSync(path, "MZfixture");
   for (const file of ["FFMPEG-LICENSE.txt", "FFMPEG-README.txt"]) writeFileSync(join(distributionDir, file), `Fixture notice: ${file}`);
-  return { content, release, binaries, distributionDir, template, identity: readMsixIdentity(configured).identity };
+  return { content, release, binaries, distributionDir, assetsDir, template, identity: readMsixIdentity(configured).identity };
 }
 
 test("payload stages all four executables together with distribution notices", () => {
@@ -68,6 +71,29 @@ test("payload stages all four executables together with distribution notices", (
   for (const exe of ["oculus-app.exe", "oculus.exe", "oculus-keyd.exe", "ffmpeg.exe"]) expect(readFileSync(join(input.content, exe), "utf8")).toBe("MZfixture");
   expect(readFileSync(join(input.content, "FFMPEG-README.txt"), "utf8")).toBe("Fixture notice: FFMPEG-README.txt");
   expect(readFileSync(join(input.content, "AppxManifest.xml"), "utf8")).toContain('Version="1.2.3.0"');
+  expect(readFileSync(join(input.content, "Assets", "StoreLogo.scale-100.png"), "utf8")).toBe("fixture logo");
+});
+
+test("missing logos fail before replacing a previous staged payload", () => {
+  const input = payload();
+  rmSync(join(input.assetsDir, "StoreLogo.scale-100.png"));
+  writeFileSync(join(input.content, "last-good"), "keep");
+  expect(() => stageMsix(input)).toThrow("icons:windows");
+  expect(readFileSync(join(input.content, "last-good"), "utf8")).toBe("keep");
+});
+
+test("committed Windows logos cover every manifest logo, the unplated taskbar sizes and icon.ico", () => {
+  const windows = new URL("../src-tauri/windows/", import.meta.url);
+  for (const { name } of logoFiles()) expect(existsSync(new URL(`Assets/${name}`, windows))).toBe(true);
+  for (const logo of template.matchAll(/Assets\\(\w+)\.png/g)) {
+    expect(logoFiles().some(({ name }) => name.startsWith(`${logo[1]}.scale-100`))).toBe(true);
+  }
+  for (const size of [16, 24, 32, 48]) {
+    expect(logoFiles().map(({ name }) => name)).toContain(`Square44x44Logo.altform-unplated_targetsize-${size}.png`);
+  }
+  const ico = readFileSync(new URL("icon.ico", windows));
+  expect([ico.readUInt16LE(0), ico.readUInt16LE(2)]).toEqual([0, 1]);
+  expect(ico.readUInt16LE(4)).toBeGreaterThanOrEqual(4);
 });
 
 test("a placeholder executable fails before removing a previous staged payload", () => {
@@ -135,6 +161,7 @@ test("Windows bundle keeps custom chrome, separate GUI and CLI names, and all re
   expect(config.app.windows[0].decorations).toBe(false);
   for (const macOnly of ["titleBarStyle", "trafficLightPosition", "hiddenTitle"]) expect(config.app.windows[0][macOnly]).toBeUndefined();
   expect(config.bundle.targets).toContain("nsis");
+  expect(config.bundle.icon).toEqual(["windows/icon.ico"]);
   expect(config.bundle.windows.nsis.installMode).toBe("currentUser");
   expect(config.bundle.externalBin.slice().sort()).toEqual(["binaries/ffmpeg", "binaries/oculus", "binaries/oculus-keyd"]);
   expect(config.app.security.assetProtocol.scope).toEqual(["$HOME/Oculus/courses/**", "$HOME/Oculus/lectures/**", "$HOME/Oculus/agents/**"]);

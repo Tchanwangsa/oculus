@@ -29,7 +29,7 @@ and stable Rust, plus the MSVC toolchain, Windows SDK and WebView2.
 | Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
 | How an agent thread finds `oculus` | `app/src-tauri/src/harness/cli/discover/` |
-| Windows native manifest, Store manifest template and MSIX packaging | `app/src-tauri/windows-app-manifest.xml`, `app/src-tauri/windows/AppxManifest.xml`, `app/scripts/package-msix.mjs`, `app/scripts/package-msix.ps1`, `app/scripts/package-msix.test.mjs` |
+| Windows native manifest, Store manifest template and MSIX packaging | `app/src-tauri/windows-app-manifest.xml`, `app/src-tauri/windows/AppxManifest.xml`, `app/src-tauri/windows/logo.svg`, `app/scripts/windows-icons.mjs`, `app/scripts/package-msix.mjs`, `app/scripts/package-msix.ps1`, `app/scripts/package-msix.test.mjs` |
 | Windows ffmpeg distribution notices and release gate | `app/src-tauri/windows/distribution/README.md` |
 | CI checks and the release bundle | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
@@ -295,14 +295,21 @@ and [Store version rules](https://learn.microsoft.com/en-us/windows/apps/publish
 
 After `tauri build`, run `bun scripts/package-msix.mjs` from `app/`. It stages
 `oculus-app.exe`, `oculus.exe`, `oculus-keyd.exe` and ffmpeg beside each other,
-with the notices, then generates 100/150/200-scale icons and a PRI with the
-Windows SDK. MakeAppx packs the result with semantic validation enabled,
+with the notices and the committed logos in `src-tauri/windows/Assets`, then
+builds a PRI with the Windows SDK. MakeAppx packs the result with semantic validation enabled,
 following Microsoft's [packaging commands](https://learn.microsoft.com/en-us/windows/msix/package/create-app-package-with-makeappx-tool).
 The manifest requests `runFullTrust` and an `oculus.exe` execution alias,
 without a startup task or data-virtualization capability. The unsigned output
 is a Store-upload artifact, `oculus-store-x64`; installing it outside the Store
 requires separate signing. Packaging is not Store submission or certification.
 The native executable manifest opts into long paths.
+
+Windows logos come from `src-tauri/windows/logo.svg`: the mascot without the
+macOS squircle, in indigo so it reads on light and dark taskbars.
+`bun run icons:windows` renders the MSIX scale and unplated taskbar
+`targetsize` variants and the `icon.ico` that `tauri.windows.conf.json` gives
+the exe and NSIS installer. The outputs are committed; rerun it after editing
+the SVG.
 
 Windows keyd is a release `.exe` without codesign, staged as a target-triple
 sidecar; the dev preflight stages it beside the debug app and the GUI starts

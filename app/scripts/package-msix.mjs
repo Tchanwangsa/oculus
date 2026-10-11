@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -81,12 +81,13 @@ export function validateWindowsRelease(release, binaries) {
   return installers;
 }
 
-export function stageMsix({ content, release, binaries, distributionDir, template, identity }) {
+export function stageMsix({ content, release, binaries, distributionDir, assetsDir, template, identity }) {
   // Validate every input before replacing generated staging output.
   const sources = releaseSources(release, binaries);
   for (const file of ["FFMPEG-LICENSE.txt", "FFMPEG-README.txt"]) {
     if (!existsSync(join(distributionDir, file))) throw new Error(`Missing ffmpeg distribution notice: ${file}`);
   }
+  if (!existsSync(join(assetsDir, "StoreLogo.scale-100.png"))) throw new Error(`Missing MSIX logos in ${assetsDir}; run bun run icons:windows`);
   const manifest = renderManifest(template, identity);
   rmSync(content, { recursive: true, force: true });
   mkdirSync(content, { recursive: true });
@@ -94,6 +95,7 @@ export function stageMsix({ content, release, binaries, distributionDir, templat
   for (const file of ["FFMPEG-LICENSE.txt", "FFMPEG-README.txt", "FFMPEG-SOURCE-OFFER.txt"]) {
     if (existsSync(join(distributionDir, file))) copyFileSync(join(distributionDir, file), join(content, file));
   }
+  cpSync(assetsDir, join(content, "Assets"), { recursive: true });
   writeFileSync(join(content, "AppxManifest.xml"), manifest);
 }
 
@@ -141,11 +143,11 @@ export function main(env = process.env, args = process.argv.slice(2)) {
   const release = join(rust, "target", "release");
   const out = join(release, "bundle", "msix");
   const content = join(out, "content");
-  stageMsix({ content, release, binaries: join(rust, "binaries"), distributionDir: distribution,
+  stageMsix({ content, release, binaries: join(rust, "binaries"), distributionDir: distribution, assetsDir: join(rust, "windows", "Assets"),
     template: readFileSync(join(rust, "windows", "AppxManifest.xml"), "utf8"), identity });
   const packaged = join(out, `Oculus_${identity.VERSION}_x64.msix`);
   const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-File", join(app, "scripts", "package-msix.ps1"),
-    "-ContentDir", content, "-IconPath", join(rust, "icons", "icon.png"), "-OutputPath", packaged], { stdio: "inherit" });
+    "-ContentDir", content, "-OutputPath", packaged], { stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`Windows SDK packaging failed (${result.status})`);
   summary(`Unsigned Store-upload MSIX created: ${packaged}. Installing it outside the Store requires separate signing. Build success does not approve Store submission.`);

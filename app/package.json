@@ -17,6 +17,7 @@
     "keyd": "node scripts/build-keyd.mjs",
     "stage-keyd": "node scripts/stage-keyd.mjs",
     "math": "node scripts/build-math.mjs",
+    "icons:windows": "node scripts/windows-icons.mjs",
     "tauri": "tauri",
     "cli": "bun scripts/build-cli.mjs",
     "cli:dev": "bun scripts/build-cli.mjs --debug",
@@ -63,6 +64,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@resvg/resvg-wasm": "2.6.2",
     "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/cli": "^2",
     "@types/bun": "^1.4.2",
