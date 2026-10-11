@@ -146,7 +146,10 @@ pub(super) fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'stati
             eprintln!("[oculus] browser: could not seed WebView2 sessions: {e}");
             return;
         }
-        app.run_on_main_thread(then).ok();
+        // The continuation may create a WebView2 child, which must stay
+        // off the event loop. Release the jar before running page work.
+        drop(_work);
+        then();
     });
 }
 

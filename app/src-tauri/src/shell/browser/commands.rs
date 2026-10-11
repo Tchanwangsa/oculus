@@ -7,7 +7,7 @@ use super::still::snapshot_page;
 use super::{broadcast, open_tab, seed_sessions, snapshot, with_state, Snapshot, Viewport};
 
 #[tauri::command]
-pub fn browser_open_url(app: AppHandle, url: String) -> Result<u32, String> {
+pub async fn browser_open_url(app: AppHandle, url: String) -> Result<u32, String> {
     open_tab(&app, parse(&url)?)
 }
 

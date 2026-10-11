@@ -566,6 +566,11 @@ refuses iframes).
   native page is hidden. It stays hidden for the whole
   edit, not just while the list shows, because `browser_place` focuses the
   page: re-placing it on a backspace to empty would steal the caret.
+- **Windows page creation runs off the main event loop.** `browser_open_url`
+  is an async command so its tab ID or creation error reaches the caller without
+  blocking WebView2. Popup tabs and the continuation after cookie seeding stay
+  on worker threads; moving either back to the main loop deadlocks child creation.
+  macOS popup creation is queued onto the main thread after the WebKit callback.
 - **Windows browser pages and the login window share WebView2's default jar.**
   Cookie reads and writes run on worker threads: calling Tauri's cookie APIs
   on the main event loop deadlocks. Seeding copies both Canvas and SSO headers

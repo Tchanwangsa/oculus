@@ -193,17 +193,22 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
             });
             broadcast(&title_app);
         })
-        // `target=_blank`/`window.open` become a new tab. On the main thread
-        // `run_on_main_thread` runs inline, inside WebKit's delegate callback,
-        // so hop through a helper thread to queue it behind the callback.
+        // Windows creation must leave the WebView2 callback and event loop.
+        // WebKit needs the main thread, queued behind its delegate callback
+        // through a helper thread so `run_on_main_thread` cannot run inline.
         .on_new_window(move |url, _| {
             let app = popup_app.clone();
             std::thread::spawn(move || {
-                app.clone()
-                    .run_on_main_thread(move || {
-                        open_tab(&app, url).ok();
-                    })
-                    .ok();
+                let open_app = app.clone();
+                let open = move || {
+                    if let Err(e) = open_tab(&open_app, url) {
+                        eprintln!("[oculus] browser: could not open popup: {e}");
+                    }
+                };
+                #[cfg(target_os = "windows")]
+                open();
+                #[cfg(not(target_os = "windows"))]
+                app.run_on_main_thread(open).ok();
             });
             NewWindowResponse::Deny
         });
