@@ -109,13 +109,24 @@ impl OculusCli {
 /// Oculus's rules for a thread over `library`, plus the student's approvals:
 /// Claude's `settings_json` (`claude/settings.rs`) in agy's syntax. The workspace
 /// (`agents/`) is writable under `accept-edits` already, so only the
-/// database's files are granted.
-pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]) -> Rules {
+/// database's files and `paths::agent_write_dirs` are granted. `tts_host`,
+/// the TTS server's host, goes in as `read_url(host)`, which agy adds to the
+/// terminal sandbox's outbound allowlist.
+pub fn rules_for(
+    library: &Path,
+    oculus: Option<&OculusCli>,
+    approved: &[String],
+    tts_host: Option<&str>,
+) -> Rules {
     let at = |rel: &str| library.join(rel).display().to_string();
     let mut allow: Vec<String> = crate::library::paths::db_write_paths(library)
-        .iter()
+        .into_iter()
+        .chain(crate::library::paths::agent_write_dirs(library))
         .map(|p| format!("write_file({})", p.display()))
         .collect();
+    if let Some(host) = tts_host {
+        allow.push(format!("read_url({host})"));
+    }
     if let Some(cli) = oculus {
         if let Some(dir) = cli.bin.parent() {
             allow.push(format!("read_file({})", dir.display()));
@@ -186,7 +197,7 @@ fn sqlite_paths(library: &Path) -> Vec<String> {
 /// Whether one of Oculus's own denies already covers `rule`, so approving it
 /// would change nothing.
 pub fn denied_by(library: &Path, rule: &str) -> Option<String> {
-    let deny = rules_for(library, None, &[]).deny;
+    let deny = rules_for(library, None, &[], None).deny;
     let inner = |r: &str, head: &str| {
         r.strip_prefix(head)
             .and_then(|s| s.strip_suffix(')'))

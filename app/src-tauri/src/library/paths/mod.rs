@@ -9,6 +9,7 @@ mod course;
 mod db;
 mod file_types;
 mod own_files;
+mod studio;
 #[cfg(test)]
 mod tests;
 
@@ -17,6 +18,7 @@ pub use course::*;
 pub use db::*;
 pub use file_types::*;
 pub use own_files::*;
+pub use studio::*;
 
 use std::path::PathBuf;
 

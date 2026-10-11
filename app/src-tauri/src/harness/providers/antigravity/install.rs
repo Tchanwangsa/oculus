@@ -17,12 +17,16 @@ pub fn install(library: &Path, approved: Option<Vec<String>>) -> Result<(), Stri
     // A thread and its namer can spawn together.
     static LOCK: Mutex<()> = Mutex::new(());
     let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let voice = crate::studio::voice::settings();
     install_at(
         &settings_path()?,
         &state_path(library),
         library,
         OculusCli::discover().as_ref(),
         approved,
+        crate::studio::voice::server_host(&voice)
+            .map(|(host, _)| host)
+            .as_deref(),
     )
 }
 
@@ -32,6 +36,7 @@ pub(super) fn install_at(
     library: &Path,
     oculus: Option<&OculusCli>,
     approved: Option<Vec<String>>,
+    tts_host: Option<&str>,
 ) -> Result<(), String> {
     // Missing is empty: at worst a stale entry stays, never a student's goes.
     let last: State = std::fs::read_to_string(state_file)
@@ -39,7 +44,7 @@ pub(super) fn install_at(
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
     let approved = approved.unwrap_or_else(|| last.approved.clone());
-    let rules = rules_for(library, oculus, &approved);
+    let rules = rules_for(library, oculus, &approved, tts_host);
     let managed = apply(
         settings,
         &Rules {

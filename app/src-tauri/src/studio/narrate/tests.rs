@@ -4,6 +4,7 @@ use std::path::Path;
 use serde_json::json;
 
 use super::*;
+use crate::studio::libraries::libraries_at;
 use crate::studio::test_wav::tone;
 use crate::studio::timing::{Gap, WordTime};
 use crate::test_support::{FakeServer, Reply, Scratch};
@@ -103,7 +104,15 @@ fn video(dir: &Path, script: &str) {
 const SCRIPT: &str = "## a\nWe follow the gradient.\n\n## b\nOne small step at a time.\n";
 
 fn run(dir: &Path, server: &FakeServer, aligner: &dyn Aligner, options: &Options) -> Report {
-    narrate(dir, &voice(server), aligner, options, &mut |_| {}).unwrap()
+    narrate(
+        dir,
+        &Library::default(),
+        &voice(server),
+        aligner,
+        options,
+        &mut |_| {},
+    )
+    .unwrap()
 }
 
 fn manifest(dir: &Path) -> Manifest {
@@ -213,6 +222,7 @@ fn a_failure_keeps_the_scenes_before_it() {
     let mut seen_before_b = None;
     let error = narrate(
         &dir,
+        &Library::default(),
         &voice(&server),
         &Stub::new(),
         &Options::default(),
@@ -280,6 +290,7 @@ fn a_missing_aligner_fails_before_any_tts_request() {
     };
     let error = narrate(
         &dir,
+        &Library::default(),
         &voice(&server),
         &stub,
         &Options::default(),
@@ -322,11 +333,20 @@ fn an_unknown_scene_or_no_script_is_an_error() {
         scene: Some("quiet".into()),
         force: false,
     };
-    let e = narrate(&dir, &voice(&server), &Stub::new(), &options, &mut |_| {}).unwrap_err();
+    let e = narrate(
+        &dir,
+        &Library::default(),
+        &voice(&server),
+        &Stub::new(),
+        &options,
+        &mut |_| {},
+    )
+    .unwrap_err();
     assert!(e.message.contains("`a`, `b`"), "{e}");
     std::fs::remove_file(dir.join("script.md")).unwrap();
     let e = narrate(
         &dir,
+        &Library::default(),
         &voice(&server),
         &Stub::new(),
         &Options::default(),
@@ -346,6 +366,7 @@ fn an_unreadable_manifest_is_rebuilt() {
     let mut reset = None;
     narrate(
         &dir,
+        &Library::default(),
         &voice(&server),
         &Stub::new(),
         &Options::default(),
@@ -393,4 +414,48 @@ fn the_cache_key_changes_with_every_input() {
     }
     let distinct: BTreeSet<_> = variants.iter().collect();
     assert_eq!(distinct.len(), variants.len());
+}
+
+/// A video whose theme lives in a library (the starter `warm`) narrates:
+/// the narrator loads it over the libraries, as every other command does.
+#[test]
+fn a_library_theme_narrates() {
+    let root = Scratch::new("narrate-library");
+    let dir = root.join("video");
+    std::fs::create_dir_all(&dir).unwrap();
+    video(&dir, SCRIPT);
+    let json = std::fs::read_to_string(dir.join("video.json"))
+        .unwrap()
+        .replace("\"default\"", "\"warm\"");
+    std::fs::write(dir.join("video.json"), json).unwrap();
+    let library = libraries_at(&root.join("library"), &root.join("subjects"), false).unwrap();
+    let server = tts();
+    let options = Options::default();
+    let bare = narrate(
+        &dir,
+        &Library::default(),
+        &voice(&server),
+        &Stub::new(),
+        &options,
+        &mut |_| {},
+    );
+    assert!(
+        bare.unwrap_err()
+            .message
+            .contains("no bundled theme `warm`"),
+        "without the libraries `warm` does not resolve"
+    );
+    let report = narrate(
+        &dir,
+        &library,
+        &voice(&server),
+        &Stub::new(),
+        &options,
+        &mut |_| {},
+    )
+    .unwrap();
+    assert_eq!(report.scenes.len(), 2);
+    let project = studio_core::Project::load_with(&dir, &library).unwrap();
+    assert!(project.manifest.is_some());
+    assert_eq!(project.video.theme, "warm");
 }

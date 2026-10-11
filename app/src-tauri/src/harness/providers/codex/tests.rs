@@ -54,21 +54,24 @@ fn a_failed_request_write_does_not_leave_a_pending_reply() {
 }
 
 #[test]
-fn a_thread_may_write_the_database_and_nothing_else_outside_its_cwd() {
-    let library = std::path::Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
+fn a_thread_may_write_the_database_and_studio_and_nothing_else_outside_its_cwd() {
+    let library = crate::test_support::Scratch::new("codex-roots");
+    let db = crate::library::paths::db_path(&library);
+    std::fs::write(&db, "").unwrap();
+    // The WAL sidecars do not exist yet, so they are left out; studio/ is.
+    std::fs::create_dir_all(library.join("studio")).unwrap();
     let opts = CodexThreadOpts {
         cwd: library.join("agents"),
-        writable_files: crate::library::paths::db_write_paths(library),
+        writable_roots: super::writable_roots(&library),
         model: Some("gpt-5.3-codex".into()),
         reasoning_effort: Some("high".into()),
         instructions: String::new(),
         ephemeral: false,
     };
-    let want = serde_json::json!([
-        "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db",
-        "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db-wal",
-        "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db-shm",
-    ]);
+    let want = serde_json::json!([db, library.join("studio")]);
+    for dir in crate::library::paths::agent_write_dirs(&library) {
+        assert!(opts.writable_roots.contains(&dir), "{dir:?}");
+    }
 
     let thread = CodexServer::thread_params(&opts);
     assert_eq!(thread["sandbox"], "workspace-write");
@@ -101,7 +104,7 @@ fn every_thread_and_turn_keeps_the_sandbox_network_open() {
     ] {
         let opts = CodexThreadOpts {
             cwd: "/lib/agents".into(),
-            writable_files: Vec::new(),
+            writable_roots: Vec::new(),
             model: model.map(String::from),
             reasoning_effort: effort.map(String::from),
             instructions: instructions.into(),

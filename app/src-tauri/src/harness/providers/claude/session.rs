@@ -60,9 +60,19 @@ impl ClaudeSession {
                 .arg("--no-session-persistence");
         }
         cmd.args(["--add-dir", &base.library.display().to_string()]);
+        // The TTS server, so `oculus studio narrate` can reach it; a one-off
+        // turn has no tools to use it with.
+        let hosts: Vec<String> = if cfg.one_off {
+            Vec::new()
+        } else {
+            crate::studio::voice::server_host(&crate::studio::voice::settings())
+                .map(|(host, port)| format!("{host}:{port}"))
+                .into_iter()
+                .collect()
+        };
         cmd.args([
             "--settings",
-            &settings_json(&base.library, &base.cwd, cfg.oculus.as_deref()),
+            &settings_json(&base.library, &base.cwd, cfg.oculus.as_deref(), &hosts),
         ]);
         cmd.current_dir(&base.cwd)
             .env_clear()

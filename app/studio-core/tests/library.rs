@@ -27,30 +27,22 @@ fn tsx(label: &str) -> String {
 }
 
 /// A video with one scene of `Card`, its project components, and the three
-/// libraries under `root`: `global`, `courses/SUB/studio` and `courses`.
+/// libraries under `root`: `global`, and `subjects/SUB` under `subjects`.
 struct Fixture {
     video: PathBuf,
     global: PathBuf,
-    courses: PathBuf,
+    subjects: PathBuf,
 }
 
 fn fixture(name: &str, video_json: serde_json::Value) -> Fixture {
     let root = dir(name);
     let video = root.join("video");
     let global = root.join("global");
-    let courses = root.join("courses");
+    let subjects = root.join("subjects");
     put(&video, "video.json", &video_json.to_string());
     put(&video, "components/Card.tsx", &tsx("project card"));
-    put(
-        &courses,
-        "SUB/studio/components/Steps.tsx",
-        &tsx("subject steps"),
-    );
-    put(
-        &courses,
-        "SUB/studio/components/Card.tsx",
-        &tsx("subject card"),
-    );
+    put(&subjects, "SUB/components/Steps.tsx", &tsx("subject steps"));
+    put(&subjects, "SUB/components/Card.tsx", &tsx("subject card"));
     put(&global, "components/Steps.tsx", &tsx("global steps"));
     put(&global, "components/Title.tsx", &tsx("global title"));
     put(
@@ -64,14 +56,14 @@ fn fixture(name: &str, video_json: serde_json::Value) -> Fixture {
     Fixture {
         video,
         global,
-        courses,
+        subjects,
     }
 }
 
 fn library(f: &Fixture) -> Library {
     Library {
         global: Some(f.global.clone()),
-        courses: Some(f.courses.clone()),
+        subjects: Some(f.subjects.clone()),
         ..Library::default()
     }
 }
@@ -135,8 +127,8 @@ fn a_subject_passed_to_the_load_replaces_the_videos() {
 }
 
 #[test]
-fn no_courses_root_leaves_the_subject_library_unread() {
-    let f = fixture("nocourses", video(Some("SUB"), "default"));
+fn no_subjects_root_leaves_the_subject_library_unread() {
+    let f = fixture("nosubjects", video(Some("SUB"), "default"));
     let lib = Library {
         global: Some(f.global.clone()),
         ..Library::default()
@@ -154,8 +146,8 @@ fn a_theme_name_resolves_subject_then_global_then_bundled() {
     assert_eq!(p.theme.tokens["color"]["accent"], "#c2410c");
     // The subject's file beats the global one.
     put(
-        &f.courses,
-        "SUB/studio/themes/warm.json",
+        &f.subjects,
+        "SUB/themes/warm.json",
         &std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("themes/default.json"))
             .unwrap()
             .replace("\"accent\": \"#5e6ad2\"", "\"accent\": \"#0f766e\""),

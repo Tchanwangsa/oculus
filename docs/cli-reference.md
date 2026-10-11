@@ -28,7 +28,8 @@ Commands:
   memory      Read and write the memory store the agents keep in the library
   lecture     Look inside a downloaded lecture recording
   transcribe  Transcribe a video that has no captions, on Groq or on this Mac
-  studio      Render, check and narrate Studio videos: TSX scenes drawn frame by frame
+  studio      Make, render, check and narrate Studio videos: TSX scenes drawn frame by
+              frame
   docs        Write the agent-facing docs into the library
   agent       Run one prompt through a CLI agent (Claude Code, Codex, opencode or
               Antigravity)
@@ -1392,16 +1393,19 @@ Options:
 ## `oculus studio`
 
 ```
-Render, check and narrate Studio videos: TSX scenes drawn frame by frame
+Make, render, check and narrate Studio videos: TSX scenes drawn frame by frame
 
 Usage: oculus studio <COMMAND>
 
 Commands:
+  new         Make a new video under `<app data>/studio/videos/<SLUG>/`
+  list        List the videos under `<app data>/studio/videos/`
   frame       Render one frame of a video to a PNG
   strip       Render frames across a stretch of a video as one contact-sheet PNG
-  lint        Check a whole video without writing anything
+  lint        Check a whole video without writing to its folder
   gallery     Render every example of a component as a still
-  components  List, show or seed a video's components
+  components  List, show, promote or seed a video's components
+  themes      Promote a video's own theme file into a library
   render      Render a video to an mp4
   narrate     Synthesise and time a video's narration, writing narration/manifest.json
   tts         Synthesise one clip of text to a WAV, to hear a voice
@@ -1409,6 +1413,58 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio new`
+
+```
+Make a new video under `<app data>/studio/videos/<SLUG>/`
+
+Writes `video.json` (1920x1080, or 1080x1920 with `--portrait`, 30 fps, theme `default`,
+the subject, and one silent `TitleCard` scene holding `--title`), an empty `script.md`,
+and empty `components/` and `assets/`, then prints the folder. A subject's library can
+replace the `default` theme with its own `themes/default.json`. Every other `oculus
+studio` command takes the slug in place of the folder. Refuses a slug that exists.
+
+oculus studio new gradient-descent --subject COMP30027 --title "Gradient descent"
+
+Usage: oculus studio new [OPTIONS] <SLUG>
+
+Arguments:
+  <SLUG>
+          The video's name: lowercase letters, digits and `-`
+
+Options:
+      --subject <CODE>
+          The course the video belongs to; its library is read before the global one
+
+      --title <TITLE>
+          The title card's text (default: the slug, spaced)
+
+      --portrait
+          1080x1920 instead of 1920x1080
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio list`
+
+```
+List the videos under `<app data>/studio/videos/`
+
+One line per video: its slug, subject, scene count, whether it has narration
+(`narrated`; `lint` says whether it is current), the renders in its `renders/` and when
+it last changed. A folder whose video.json does not load is listed with the reason.
+
+Usage: oculus studio list [OPTIONS]
+
+Options:
+      --subject <CODE>
+          Only this course's videos
+
   -h, --help
           Print help (see a summary with '-h')
 ```
@@ -1438,7 +1494,7 @@ Usage: oculus studio frame [OPTIONS] <DIR>
 
 Arguments:
   <DIR>
-          The video folder, the one holding `video.json`
+          The video folder, the one holding `video.json` (or its slug)
 
 Options:
       --t <SECONDS>
@@ -1492,7 +1548,7 @@ Usage: oculus studio strip [OPTIONS] <DIR>
 
 Arguments:
   <DIR>
-          The video folder, the one holding `video.json`
+          The video folder, the one holding `video.json` (or its slug)
 
 Options:
       --from <SECONDS>
@@ -1536,7 +1592,7 @@ Options:
 ### `oculus studio lint`
 
 ```
-Check a whole video without writing anything
+Check a whole video without writing to its folder
 
 Loads every component the video uses, checks each scene's props and each component's
 `examples` against its `props` schema, and renders every scene at its first and last
@@ -1552,7 +1608,7 @@ Usage: oculus studio lint <DIR>
 
 Arguments:
   <DIR>
-          The video folder, the one holding `video.json`
+          The video folder, the one holding `video.json` (or its slug)
 
 Options:
   -h, --help
@@ -1580,7 +1636,7 @@ Usage: oculus studio gallery [OPTIONS] <DIR> <COMPONENT>
 
 Arguments:
   <DIR>
-          The video folder, the one holding `video.json`
+          The video folder, the one holding `video.json` (or its slug)
 
   <COMPONENT>
           The component's name (PascalCase), as its file is named
@@ -1617,22 +1673,24 @@ Options:
 ### `oculus studio components`
 
 ```
-List, show or seed a video's components
+List, show, promote or seed a video's components
 
 `list` and `show` read the components a video can use through the cascade and say which
-level each comes from: `project` (its own `components/`), `subject <CODE>` (the course's
-`studio/components/`) or `global` (`<app data>/studio/library/components/`). `seed`
-copies the starter set into the global library; it never replaces an edit, and `--reset`
-writes the starter text over the library's, keeping each old text in the library's
-`.history/` first.
+level each comes from: `project` (its own `components/`), `subject <CODE>` (`<app
+data>/studio/subjects/<CODE>/ components/`) or `global` (`<app
+data>/studio/library/components/`). `promote` copies one of the video's own components
+into a library. `seed` copies the starter set into the global library; it never replaces
+an edit, and `--reset` writes the starter text over the library's. Every library write
+keeps the old text in the library's `.history/` first.
 
 Usage: oculus studio components <COMMAND>
 
 Commands:
-  list  Each component name a video can use, and the level it comes from
-  show  A component's level and its TSX source
-  seed  Copy the starter components and themes into the global library
-  help  Print this message or the help of the given subcommand(s)
+  list     Each component name a video can use, and the level it comes from
+  show     A component's level and its TSX source
+  promote  Copy a video's own component into a library
+  seed     Copy the starter components and themes into the global library
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
@@ -1648,7 +1706,7 @@ Usage: oculus studio components list [OPTIONS] <DIR>
 
 Arguments:
   <DIR>
-          The video folder, the one holding `video.json`
+          The video folder, the one holding `video.json` (or its slug)
 
 Options:
       --subject <CODE>
@@ -1667,7 +1725,7 @@ Usage: oculus studio components show [OPTIONS] <DIR> <COMPONENT>
 
 Arguments:
   <DIR>
-          The video folder, the one holding `video.json`
+          The video folder, the one holding `video.json` (or its slug)
 
   <COMPONENT>
           The component's name (PascalCase)
@@ -1675,6 +1733,41 @@ Arguments:
 Options:
       --subject <CODE>
           The course whose library is read for this load, over video.json's
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio components promote`
+
+```
+Copy a video's own component into a library
+
+Copies `<DIR>/components/<COMPONENT>.tsx` into the global library or the video's
+subject's, so other videos can use it. A library file it replaces is kept in that
+library's `.history/` first; when the library already holds the same text nothing is
+written. The video keeps its own copy, which still wins for it. Check the component with
+`gallery` (and its scenes with `strip`) before promoting it.
+
+oculus studio components promote gradient-descent Steps --to subject
+
+Usage: oculus studio components promote --to <LIBRARY> <DIR> <COMPONENT>
+
+Arguments:
+  <DIR>
+          The video folder (or its slug)
+
+  <COMPONENT>
+          The component's name (PascalCase), as its file is named
+
+Options:
+      --to <LIBRARY>
+          The library to copy it into
+
+          Possible values:
+          - global:  `<app data>/studio/library/`, read by every video
+          - subject: `<app data>/studio/subjects/<CODE>/`, for the subject in the
+            video's video.json
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1691,6 +1784,57 @@ Options:
       --reset
           Write the starter text over every file that differs, keeping the old text in
           `.history/`
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio themes`
+
+```
+Promote a video's own theme file into a library
+
+Usage: oculus studio themes <COMMAND>
+
+Commands:
+  promote  Copy a video's own theme file into a library
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio themes promote`
+
+```
+Copy a video's own theme file into a library
+
+Checks that `FILE` (a `.json` path inside the video folder, such as `themes/chalk.json`)
+loads as a theme, then copies it into the global library or the video's subject's as
+`themes/<stem>.json`, so any video can name it by its stem (`"theme": "chalk"`). A
+library file it replaces is kept in that library's `.history/` first; when the library
+already holds the same text nothing is written.
+
+oculus studio themes promote gradient-descent themes/chalk.json --to global
+
+Usage: oculus studio themes promote --to <LIBRARY> <DIR> <FILE>
+
+Arguments:
+  <DIR>
+          The video folder (or its slug)
+
+  <FILE>
+          The theme file, relative to the video folder
+
+Options:
+      --to <LIBRARY>
+          The library to copy it into
+
+          Possible values:
+          - global:  `<app data>/studio/library/`, read by every video
+          - subject: `<app data>/studio/subjects/<CODE>/`, for the subject in the
+            video's video.json
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1726,7 +1870,7 @@ Usage: oculus studio render [OPTIONS] <DIR>
 
 Arguments:
   <DIR>
-          The video folder, the one holding `video.json`
+          The video folder, the one holding `video.json` (or its slug)
 
 Options:
       --draft
@@ -1774,7 +1918,7 @@ Usage: oculus studio narrate [OPTIONS] <DIR>
 
 Arguments:
   <DIR>
-          The video folder, the one holding `video.json` and `script.md`
+          The video folder, the one holding `video.json` (or its slug) and `script.md`
 
 Options:
       --scene <ID>

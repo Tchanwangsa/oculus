@@ -29,6 +29,7 @@
       "{{LIBRARY}}/*.log": "deny",
       "{{LIBRARY}}/vault.bin*": "deny",
       "{{LIBRARY}}/.vault.bin.*": "deny",
+      "{{LIBRARY}}/studio/**": "allow",
       "opencode.json": "deny",
       "skills/**": "deny",
       ".claude/skills/**": "deny",

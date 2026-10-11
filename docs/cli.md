@@ -14,7 +14,7 @@ agent queries and plans through. Flags are in
 | `project` and `task` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs`, `app/src-tauri/src/db/projects/` |
 | `lecture` | `app/src-tauri/src/bin/oculus/commands/lecture.rs`, `app/src-tauri/src/bin/oculus/args/lecture.rs` |
 | `transcribe` | `app/src-tauri/src/bin/oculus/commands/transcribe.rs`, `app/src-tauri/src/transcribe/` |
-| `studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`render.rs`, `narrate.rs` for `narrate` and `tts`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs`, `app/studio-core/`, `app/src-tauri/src/studio/` |
+| `studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs` resolves a slug and dispatches; `videos.rs` for `new` and `list`, `components.rs`, `themes.rs`, `gallery.rs`, `render.rs`, `narrate.rs` for `narrate` and `tts`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs`, `app/studio-core/`, `app/src-tauri/src/studio/` (`videos/`, `libraries/`) |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/commands/docs.rs`, `app/src-tauri/src/agents/` (`docs.rs`, `links.rs`) |
 | The memory store | `app/src-tauri/src/agents/memory/`, `app/src-tauri/src/bin/oculus/commands/memory.rs` |
 | `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/commands/keyd.rs`, `app/src-tauri/src/auth/keyd/`; the LaunchAgent itself in `app/keyd/core/src/platform/macos/registrar.rs` |
@@ -31,8 +31,11 @@ agent queries and plans through. Flags are in
 | `memory` | Agents' notes in `agents/memories/` | Files, not rows, because the thread writing them cannot open the database ([harness.md](./harness.md)) |
 | `lecture chapters`, `lecture end` | Derived rows, regenerable from the recording | They spend model quota, so an existing result is kept unless `--force` |
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
-| `studio frame` | One PNG, in the video folder's `out/` unless `-o` says elsewhere | Reads only the folder: no database, no network ([studio.md](./studio.md)) |
-| `studio lint` | Nothing | Renders every scene in memory; exits 1 on any problem |
+| `studio new` | A video folder, `<app data>/studio/videos/<slug>/` | Refuses a slug that exists ([studio.md](./studio.md#videos-live-in-the-data-directory)) |
+| `studio list` | Nothing | Reads each video's folder |
+| `studio frame`, `studio strip`, `studio gallery` | PNGs, in the video folder's `out/` unless `-o`/`--out` says elsewhere | Read the video and the libraries: no database, no network ([studio.md](./studio.md)) |
+| `studio lint`, `studio components list`, `studio components show` | Nothing in the video folder | `lint` renders every scene in memory and exits 1 on any problem |
+| `studio components promote`, `studio themes promote`, `studio components seed` | A file in the global or a subject's library under `<app data>/studio/` | The library's previous text goes to its `.history/` first; nothing prunes it ([studio.md](./studio.md#libraries-cascade-project-subject-global)) |
 | `studio render` | `renders/draft.mp4` or `renders/final.mp4` in the video folder unless `-o` says elsewhere, and segments, the narration track and `renders.json` under its `.cache/` | Runs ffmpeg once per segment it renders and once to join; no network; deletes cache files neither quality's last render uses ([studio.md](./studio.md#rendering-a-video)) |
 | `studio narrate` | `narration/manifest.json` and `narration/<key>.wav` in the video folder; reads the `voice` settings row | Calls the TTS server for each scene whose text or voice changed, and saves the manifest after each; deletes clips nothing names ([studio.md](./studio.md#narration-is-made-by-oculus-studio-narrate)) |
 | `studio tts` | One WAV, `tts.wav` unless `-o` says elsewhere | One TTS request; nothing else |
@@ -41,6 +44,12 @@ agent queries and plans through. Flags are in
 | `keyd install`, `keyd uninstall` | The LaunchAgent `com.tchan.oculus.keyd`, `bin/Oculus Helper.app` and keyd's stamp in the data dir; install also (re)loads the agent | Never touches `vault.bin` or the keychain, so uninstalling loses no key ([below](#keyd-install-never-points-the-agent-at-a-build-tree)) |
 | `keyd status` | Nothing | Pings keyd, which starts it; prints no secret |
 | `agent` | Nothing recorded | One turn through the app's own bridges; `--subject` appends the picker's scope ([harness.md](./harness.md)) |
+
+Every `studio` command that loads a video first copies each starter
+component and theme the global library lacks into
+`<app data>/studio/library/`, never replacing a file, so even `lint` can
+write there; a command that takes a video folder also takes a bare slug
+under `<app data>/studio/videos/`.
 
 `lecture candidates` only decodes a recording on disk, so re-running it is the
 whole story ([chapters.md](./chapters.md)). `--json` is the only global flag.
