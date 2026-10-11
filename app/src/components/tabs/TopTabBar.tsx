@@ -1,3 +1,5 @@
+import { isMac, isWindows, shortcut, sidePanelShortcut } from "@/lib/platform";
+import { WindowControls } from "./WindowControls";
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -206,7 +208,7 @@ export default function TopTabBar({
          spot is `trafficLightPosition.y` in `app/src-tauri/tauri.conf.json`,
          tuned to this bar's h-11 x DEFAULT_ZOOM — retune it if either changes. */
       style={{
-        paddingLeft: fullscreen ? "0.5rem" : "calc(84px / var(--app-zoom, 1))",
+        paddingLeft: !isMac || fullscreen ? "0.5rem" : "calc(84px / var(--app-zoom, 1))",
       }}
     >
       {/* Sidebar toggle — before the arrows, like Notion. */}
@@ -225,7 +227,7 @@ export default function TopTabBar({
           className="flex flex-col items-start gap-0.5"
         >
           {sidebarCollapsed ? "Open sidebar" : "Close sidebar"}
-          <span className="text-[11px] text-background/60">⌘B</span>
+          <span className="text-[11px] text-background/60">{shortcut("mod+B")}</span>
         </TooltipContent>
       </Tooltip>
 
@@ -307,9 +309,10 @@ export default function TopTabBar({
           className="flex flex-col items-start gap-0.5"
         >
           {sideOpen ? "Close side panel" : "Open side panel"}
-          <span className="text-[11px] text-background/60">⌥⌘T</span>
+          <span className="text-[11px] text-background/60">{shortcut(sidePanelShortcut)}</span>
         </TooltipContent>
       </Tooltip>
+      {isWindows && !fullscreen && <WindowControls />}
     </div>
   );
 }

@@ -51,7 +51,7 @@ impl Whisper {
 
     fn command(&self, wav: &Path, out: &Path) -> Command {
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get().min(8));
-        let mut command = Command::new(&self.helper);
+        let mut command = crate::runtime::platform::command(&self.helper);
         command
             .arg("-m")
             .arg(&self.model)

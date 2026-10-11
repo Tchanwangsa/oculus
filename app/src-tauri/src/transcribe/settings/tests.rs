@@ -4,6 +4,7 @@ fn settings(row: &str) -> Settings {
     settings_from(Some(row))
 }
 
+#[cfg(not(target_os = "windows"))]
 #[test]
 fn the_order_defaults_to_groq_whisper_apple_and_keeps_each_engine_once() {
     let default = vec!["groq", "whisper", "apple"];
@@ -24,6 +25,19 @@ fn the_order_defaults_to_groq_whisper_apple_and_keeps_each_engine_once() {
         settings(r#"{"order":["whisper","whisper","apple","whisper"]}"#).order,
         vec!["whisper", "apple", "groq"]
     );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_keeps_only_groq_even_when_local_engines_are_saved() {
+    for row in [
+        None,
+        Some("not json"),
+        Some(r#"{"order":["apple","whisper","groq","groq"]}"#),
+        Some(r#"{"order":["whisper","apple"]}"#),
+    ] {
+        assert_eq!(settings_from(row).order, vec!["groq"]);
+    }
 }
 
 #[test]
@@ -168,8 +182,12 @@ fn an_unknown_forced_engine_is_refused_before_anything_is_read() {
     let refused = engines(None, Path::new("/no/ffmpeg"), Some("vosk"))
         .err()
         .unwrap();
+    #[cfg(windows)]
+    assert_eq!(ENGINES, ["groq"]);
+    #[cfg(not(windows))]
+    assert_eq!(ENGINES, ["groq", "whisper", "apple"]);
     assert_eq!(
         refused,
-        "no engine called vosk — it is groq, whisper, apple"
+        format!("no engine called vosk — it is {}", ENGINES.join(", "))
     );
 }

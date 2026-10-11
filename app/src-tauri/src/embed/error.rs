@@ -119,8 +119,8 @@ impl fmt::Display for EmbedError {
             }
             EmbedError::UnreadableCredentials(detail) => write!(
                 f,
-                "The keychain refused to give out the Voyage API key ({detail}). The key is \
-                 not missing — macOS denied this process access to it."
+                "The credential store refused to give out the Voyage API key ({detail}). The key is \
+                 not missing — the operating system denied this process access to it."
             ),
             EmbedError::Broker(detail) => write!(
                 f,

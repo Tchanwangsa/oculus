@@ -1,3 +1,4 @@
+import { shortcut } from "@/lib/platform";
 import {
   Chat,
   CalendarBlank,
@@ -163,7 +164,7 @@ function SearchButton() {
       </TooltipTrigger>
       <TooltipContent side="right" className="flex flex-col items-start gap-0.5">
         Search
-        <span className="text-[11px] text-background/60">⌘K</span>
+        <span className="text-[11px] text-background/60">{shortcut("mod+K")}</span>
       </TooltipContent>
     </Tooltip>
   );

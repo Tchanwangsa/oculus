@@ -1,3 +1,4 @@
+import { isMac } from "@/lib/platform";
 import type { MathfieldElement } from "mathlive";
 
 import { OVERLAY, currentFindTarget, selectContents } from "@/lib/menu/find";
@@ -35,7 +36,6 @@ export function routeEdit(redo: boolean): void {
   if (active?.closest(EDITABLE)) document.execCommand(redo ? "redo" : "undo");
 }
 
-const MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
 /** Replays ⌘A on `el`, as the menu kept the real key from it; whether a
  *  handler (CodeMirror's keymap, `components/documents/editor/live-preview/table/`) took it. */
@@ -43,8 +43,8 @@ function offerKey(el: Element): boolean {
   const key = new KeyboardEvent("keydown", {
     key: "a",
     code: "KeyA",
-    metaKey: MAC,
-    ctrlKey: !MAC,
+    metaKey: isMac,
+    ctrlKey: !isMac,
     bubbles: true,
     cancelable: true,
   });

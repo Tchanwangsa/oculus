@@ -28,6 +28,15 @@ library files; the rest of the frontend has its own pages:
 | Scraped document metadata loaders | `app/src/hooks/data/useCourseFileData.ts`, `app/src/hooks/data/useModuleTocs.ts` |
 | Module videos downloaded on demand | `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/stores/lectures/videoDownloadStore.ts` |
 
+## Windows transcription settings expose Groq only
+
+`TranscriptionSection` keeps the shared language and Groq key controls on
+Windows, hides the local Whisper and on-device speech dialogs, and skips
+their model and OS-status reads. The stored settings retain every engine's
+preferences; Windows only renders the Groq row. Backend selection follows
+the same platform limit ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)).
+Credential descriptions and parse errors say credential store across platforms.
+
 ## Source is grouped by feature, and tests mirror it
 
 - `app/src/{lib,hooks,stores,components,pages}/` hold grouped folders

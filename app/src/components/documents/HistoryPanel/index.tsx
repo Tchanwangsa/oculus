@@ -1,3 +1,4 @@
+import { shortcut } from "@/lib/platform";
 import { useRef } from "react";
 import { ArrowCounterClockwise, CircleNotch, CopySimple, PencilSimple, Trash, X } from "@phosphor-icons/react";
 
@@ -100,7 +101,7 @@ export function HistoryPanel({
           <div className="px-4 py-8 text-center">
             <p className="text-[13px] text-foreground">No versions yet</p>
             <p className="mt-1 text-[12px] text-muted-foreground">
-              Save a version (⇧⌘S) to keep the note as it is now. Snapshots are
+              Save a version ({shortcut("shift+mod+S")}) to keep the note as it is now. Snapshots are
               also taken as you write.
             </p>
           </div>
@@ -208,7 +209,7 @@ export function HistoryPanel({
         open={confirm === "replace" && !!selected}
         onCancel={() => setConfirm(null)}
         title={selected ? `Replace the note with ${versionTitle(selected)}?` : ""}
-        description="The note's current text is saved as a snapshot first, and ⌘Z in the note undoes the replace."
+        description={`The note's current text is saved as a snapshot first, and ${shortcut("mod+Z")} in the note undoes the replace.`}
         confirmLabel="Replace"
         busyLabel="Replacing…"
         busy={busy === "replace"}

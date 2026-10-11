@@ -64,7 +64,7 @@ export function ParserSection() {
   return (
     <Section
       title="PDF processing"
-      description="Which MinerU reads your PDFs — its cloud service, or a server running on this Mac."
+      description="Which MinerU reads your PDFs — its cloud service, or a server running on this computer."
     >
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-4 py-2">
@@ -236,7 +236,7 @@ export function ParserSection() {
         ) : null}
         {isLocal ? (
           <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
-            Lecture PDFs are read by the MinerU server on this Mac. Nothing is uploaded to
+            Lecture PDFs are read by the MinerU server on this computer. Nothing is uploaded to
             MinerU’s cloud service or its PRC-hosted OSS storage, and nothing leaves this
             machine.
           </p>

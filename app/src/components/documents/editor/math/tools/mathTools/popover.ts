@@ -1,3 +1,4 @@
+import { shortcut } from "@/lib/platform";
 import type { EditorState } from "@codemirror/state";
 import { repositionTooltips, type EditorView, type Rect, type TooltipView, type ViewUpdate } from "@codemirror/view";
 import katex from "katex";
@@ -138,7 +139,7 @@ export class MathToolsView implements TooltipView {
     const label = next === "tex" ? "TeX" : "Visual";
     if (this.mode.textContent !== label) {
       this.mode.textContent = label;
-      const hint = next === "tex" ? "Edit as LaTeX source (⌘⇧M)" : "Edit visually (⌘⇧M)";
+      const hint = next === "tex" ? `Edit as LaTeX source (${shortcut("mod+shift+M")})` : `Edit visually (${shortcut("mod+shift+M")})`;
       this.mode.title = hint;
       this.mode.setAttribute("aria-label", hint);
     }
