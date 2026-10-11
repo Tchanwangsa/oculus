@@ -2,7 +2,7 @@
 //! spclient host with its Login5 token: the rootlist (`rootlist.rs`), a
 //! playlist's contents (`contents.rs`), track metadata in batches
 //! (`metadata.rs`), covers for playlists Spotify gives none (`covers.rs`)
-//! and the `searchview` service (`search.rs`). Spotify's public Web API is
+//! and search through pathfinder (`search.rs`). Spotify's public Web API is
 //! never called; its shared client id is throttled. Calls stay few all the
 //! same: what is fetched is kept per account (`cache.rs`) until asked again,
 //! search runs only when asked, a 429 closes a gate until its `Retry-After`
@@ -40,7 +40,7 @@ use super::state;
 use cache::{lookup, map_for};
 use contents::Contents;
 use rootlist::Entry;
-use spclient::{Method, JSON, PROTOBUF};
+use spclient::{Method, Target, PROTOBUF};
 
 /// Playlists read at once: headers when the rootlist names none, first
 /// pages for covers.
@@ -176,11 +176,16 @@ pub(super) async fn search(app: &AppHandle, query: &str) -> Result<SearchResults
         return Ok(SearchResults::default());
     };
     let session = state::session(app).ok_or(LibraryError::NotConnected)?;
-    let endpoint = search::endpoint(&query, &session.country(), &session.username());
-    let body = call(app, &session, "search", &endpoint, Method::Get(JSON))
-        .await
-        .map_err(search::unavailable)?;
-    search::parse(&body)
+    let body = call_to(
+        app,
+        &session,
+        "search",
+        Target::Url(search::PATHFINDER),
+        Method::PostJson(search::body(&query)),
+    )
+    .await
+    .map_err(search::unavailable)?;
+    logged("search", search::parse(&body))
 }
 
 /// One request through the gate; a 429 closes it. `what` names it in the
@@ -192,9 +197,20 @@ async fn call(
     endpoint: &str,
     method: Method,
 ) -> Result<Vec<u8>, LibraryError> {
+    call_to(app, session, what, Target::SpClient(endpoint), method).await
+}
+
+/// `call` to any target.
+async fn call_to(
+    app: &AppHandle,
+    session: &Session,
+    what: &str,
+    target: Target<'_>,
+    method: Method,
+) -> Result<Vec<u8>, LibraryError> {
     let library = state::library(app);
     library.check_gate()?;
-    let result = spclient::send(session, endpoint, method).await;
+    let result = spclient::send(session, target, method).await;
     if let Err(e) = &result {
         if let LibraryError::RateLimited(secs) = e {
             library.close_gate(Duration::from_secs(*secs));

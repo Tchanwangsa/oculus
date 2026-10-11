@@ -17,7 +17,7 @@ itself is [music.md](./music.md).
 | A playlist's tracks, decoded and paged | `app/src-tauri/src/music/library/contents.rs` |
 | Track metadata batches, decoded into rows | `app/src-tauri/src/music/library/metadata.rs` |
 | A cover made from a playlist's tracks | `app/src-tauri/src/music/library/covers.rs` |
-| The `searchview` request and its answer | `app/src-tauri/src/music/library/search.rs` |
+| The pathfinder `searchDesktop` request and its answer | `app/src-tauri/src/music/library/search.rs` |
 | Queueing, refused while inactive | `app/src-tauri/src/music/commands.rs` (`music_add_to_queue`), `app/src-tauri/src/music/control.rs` |
 | Up next in the snapshot | `app/src-tauri/src/music/state.rs`, `app/src-tauri/src/music/events.rs`, `app/src-tauri/src/music/devices.rs` |
 | The Connect cluster, the device list and transfer | `app/src-tauri/src/music/devices.rs` |
@@ -67,7 +67,8 @@ itself is [music.md](./music.md).
 
 `library/spclient.rs` sends `GET <spclient>/<endpoint>`, or a POST of a
 protobuf body with `Content-Type: application/x-protobuf` (what
-`SpClient::request_with_protobuf` sets), once, with the session's Login5
+`SpClient::request_with_protobuf` sets), or, for search only, a POST of
+JSON to pathfinder's full URL. Each is sent once, with the session's Login5
 token, its client token (when librespot has one) and librespot's user
 agent. librespot's own client also appends `product=0`, `country` and a
 cache-busting `salt` to each URL; these requests do not. The host is the spclient access point librespot
@@ -76,7 +77,8 @@ resolved for the session. It is blocking `ureq` through
 sleeps through a 429's `Retry-After` and sends again, retries other failures
 up to ten times, and folds every non-2xx into one generic error. Here a
 request is sent once, and its status becomes a typed message (401, 403, 429,
-other).
+other). A non-2xx answer's first 512 bytes are logged as
+`[music] refused <status>`, since the typed error keeps only the status.
 
 | Endpoint | Used for |
 | --- | --- |
@@ -84,7 +86,7 @@ other).
 | `GET /playlist/v2/playlist/<id>` | A playlist's header when the rootlist carries none for it; its tracks (`SpClient::get_playlist`) |
 | `GET /playlist/v2/playlist/<id>?from&length=500` | The rest of a playlist whose answer is `truncated` |
 | `POST /extended-metadata/v0/extended-metadata` | Track rows, `TRACK_V4` for up to 100 tracks per request (`SpClient::get_extended_metadata`) |
-| `GET /searchview/km/v4/search/<query>?entityVersion=2&limit=10&…` | Search, ten of each type |
+| `POST https://api-partner.spotify.com/pathfinder/v2/query` (`searchDesktop`) | Search, ten of each type; the one request not sent to spclient |
 
 ## The rootlist is decoded with librespot-protocol's playlist4 types
 
@@ -151,17 +153,29 @@ reopening the player asks nothing; a refresh drops them. A playlist left
 unfinished by a rate limit or a lost connection is left out of the answer
 and made the next time it is asked for.
 
-## Search is the `searchview` service Spotify's clients use
+## Search is pathfinder's `searchDesktop`, named by a hash that rotates
 
-The request is the one Spotify-Android-Good's librespot-based client sends
-to spclient (`via_searchview`); librespot-java's `SearchManager` sends the
-same route over Mercury, and librespot-golang's `SearchResponse` is the
-answer's shape: `{"results": {"<type>": {"hits": [...], "total": n}}}`, each
-hit a `uri`, `name`, `image` URL and, for albums and tracks, `artists`, a
-track also its `album`. Null hits and hits without a usable URI or name are
-dropped; only https images are kept. A 400, 403, 404, 405, 410 or 501 reads
-"Search isn't available right now", since it means the route itself is gone
-or refused.
+Spotify's own search service on spclient (`searchview`) answers 400 with an
+empty body, so search is the request Spotify's web player and desktop app
+send: a POST of the persisted GraphQL query `searchDesktop` to pathfinder,
+with the same Login5 token and client token. The query is named only by the
+SHA-256 of its document (`SEARCH_DESKTOP` in `search.rs`), which changes when
+a web-player release changes the search query. Pathfinder then answers 200
+with a `PersistedQueryNotFound` error (or a 412), shown as "Search needs an
+update". Every other GraphQL error is shown as unreadable, with its messages.
+
+To find the current hash: fetch `https://open.spotify.com`, take its
+`web-player.<hash>.js` bundle from `open.spotifycdn.com`, find the
+`xpui-routes-search` chunk in its chunk map, and in that chunk read the hash
+after `"searchDesktop","query",`.
+
+The answer is `{"data": {"searchV2": {"tracksV2", "albumsV2", "playlists"}}}`.
+A track hit is wrapped as `{"item": {"data": …}}`, the others as
+`{"data": …}`, and a hit whose `__typename` is not its group's (`NotFound`,
+`RestrictedContent`) is dropped. So are null hits and hits without a usable
+URI or name. Each hit takes the smallest https image at least 300 px wide.
+A 400, 403, 404, 405, 410 or 501 still reads "Search isn't available right
+now", because it means the route is gone or refused.
 
 ## Queueing works only while Oculus plays
 
@@ -216,6 +230,7 @@ its own.
 
 - `SpClient::request` sleeps through a 429 and retries — library calls go through `library/spclient.rs`.
 - Spotify pads search hits with `null` — parse hits as optional.
+- A search error that is not an HTTP status arrives as HTTP 200 with an `errors` array — check it before reading `data`.
 - `ListItems` has required fields — a test protobuf without `pos` and `truncated` will not encode.
 - The cluster arrives only on a change — the menu shows this device alone until the first push.
 - A search endpoint carries the query — log a label, never the endpoint.

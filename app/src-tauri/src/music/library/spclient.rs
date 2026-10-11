@@ -1,6 +1,7 @@
-//! One request against the session's spclient host — a GET, or a POST of a
-//! protobuf body — with the session's Login5 token and client token, its
-//! status read into a `LibraryError`. ureq
+//! One request against the session's spclient host, or a full URL on another
+//! Spotify host (search's pathfinder) — a GET, or a POST of a protobuf or JSON
+//! body — with the session's Login5 token and client token, its status read
+//! into a `LibraryError`. ureq
 //! rather than `SpClient::request`: librespot's HTTP client sleeps through a
 //! 429's `Retry-After` and tries again, retries other failures up to ten
 //! times, and folds every non-2xx into a generic error. Here a request is
@@ -24,9 +25,13 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 /// A rootlist page, a search answer or a batch of track metadata is a few
 /// hundred KB at most.
 const MAX_BODY: u64 = 16 * 1024 * 1024;
+/// How much of a refused request's body is logged.
+const REFUSAL_EXCERPT: u64 = 512;
 
 pub(super) const PROTOBUF: &str = "application/x-protobuf";
-pub(super) const JSON: &str = "application/json";
+const JSON: &str = "application/json";
+/// What Spotify's web player sends with a pathfinder query.
+const JSON_BODY: &str = "application/json;charset=UTF-8";
 
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
@@ -49,20 +54,35 @@ pub(super) enum Method {
     /// A POST of this protobuf body, with the content type
     /// `SpClient::request_with_protobuf` sets and no `Accept`, as it sends.
     PostProtobuf(Vec<u8>),
+    /// A POST of this JSON body, accepting JSON.
+    PostJson(Vec<u8>),
 }
 
-/// The body of the answer to `<spclient><endpoint>`. `endpoint` starts with
-/// `/`.
+/// Where a request goes.
+pub(super) enum Target<'a> {
+    /// `<spclient><endpoint>`; `endpoint` starts with `/`.
+    SpClient(&'a str),
+    /// A full URL.
+    Url(&'a str),
+}
+
+/// The body of the answer from `target`.
 pub(super) async fn send(
     session: &Session,
-    endpoint: &str,
+    target: Target<'_>,
     method: Method,
 ) -> Result<Vec<u8>, LibraryError> {
     let spclient = session.spclient();
-    let base = spclient
-        .base_url()
-        .await
-        .map_err(|e| LibraryError::Transport(e.to_string()))?;
+    let url = match target {
+        Target::SpClient(endpoint) => {
+            let base = spclient
+                .base_url()
+                .await
+                .map_err(|e| LibraryError::Transport(e.to_string()))?;
+            format!("{base}{endpoint}")
+        }
+        Target::Url(url) => url.to_string(),
+    };
     let token = session
         .login5()
         .auth_token()
@@ -70,7 +90,6 @@ pub(super) async fn send(
         .map_err(|e| LibraryError::Token(e.to_string()))?;
     // librespot goes on without one too; these endpoints answer without it.
     let client_token = spclient.client_token().await.ok();
-    let url = format!("{base}{endpoint}");
     let auth = format!("{} {}", token.token_type, token.access_token);
     blocking::run(move || Ok(send_blocking(&url, &auth, client_token.as_deref(), method)))
         .await
@@ -86,6 +105,10 @@ fn send_blocking(
     let request = match &method {
         Method::Get(accept) => agent().get(url).set("Accept", accept),
         Method::PostProtobuf(_) => agent().post(url).set("Content-Type", PROTOBUF),
+        Method::PostJson(_) => agent()
+            .post(url)
+            .set("Content-Type", JSON_BODY)
+            .set("Accept", JSON),
     };
     let mut request = request.set("Authorization", auth);
     if let Some(token) = client_token {
@@ -93,7 +116,7 @@ fn send_blocking(
     }
     let sent = match &method {
         Method::Get(_) => request.call(),
-        Method::PostProtobuf(body) => request.send_bytes(body),
+        Method::PostProtobuf(body) | Method::PostJson(body) => request.send_bytes(body),
     };
     match sent {
         Ok(response) => {
@@ -106,9 +129,31 @@ fn send_blocking(
             Ok(body)
         }
         Err(ureq::Error::Status(code, response)) => {
-            Err(status_error(code, response.header("Retry-After")))
+            let retry = response.header("Retry-After").map(str::to_owned);
+            log_refusal(code, response);
+            Err(status_error(code, retry.as_deref()))
         }
         Err(ureq::Error::Transport(t)) => Err(LibraryError::Transport(t.to_string())),
+    }
+}
+
+/// The start of a non-2xx answer's body, on one line: Spotify says why it
+/// refused there, and `LibraryError` keeps only the status. Logged without
+/// the endpoint, as `call` does, though the body may echo a search's query.
+fn log_refusal(code: u16, response: ureq::Response) {
+    let content_type = response.content_type().to_owned();
+    let mut body = Vec::new();
+    let read = response
+        .into_reader()
+        .take(REFUSAL_EXCERPT)
+        .read_to_end(&mut body);
+    let excerpt = String::from_utf8_lossy(&body);
+    match read {
+        Ok(_) => elog!(
+            "[music] refused {code} ({content_type}): {}",
+            excerpt.trim().escape_debug()
+        ),
+        Err(e) => elog!("[music] refused {code} ({content_type}), body unread: {e}"),
     }
 }
 
