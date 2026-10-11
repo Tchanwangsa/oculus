@@ -49,20 +49,25 @@ pub fn init(app: &AppHandle) -> HarnessState {
                 {
                     match rt.block_on(store::claim_naming(p, thread_id)) {
                         Ok(Some(seed)) => {
-                            let sel = rt.block_on(jobs::selection(p, jobs::Job::ThreadNaming));
-                            let (namer, bus) = (namer.clone(), bus.clone());
-                            std::thread::spawn(move || {
-                                match namer.name_thread(&sel, &seed.first_message, &seed.reply) {
-                                    Ok(title) => {
-                                        let _ = bus.send((
-                                            thread_id,
-                                            provider,
-                                            HarnessEvent::ThreadTitled { title },
-                                        ));
+                            let chain = rt.block_on(jobs::chain(p, jobs::Job::ThreadNaming));
+                            // An empty list switches naming off; the thread stays as it is.
+                            if !chain.is_empty() {
+                                let (namer, bus) = (namer.clone(), bus.clone());
+                                std::thread::spawn(move || {
+                                    match jobs::try_each(jobs::Job::ThreadNaming, &chain, |sel| {
+                                        namer.name_thread(sel, &seed.first_message, &seed.reply)
+                                    }) {
+                                        Ok(title) => {
+                                            let _ = bus.send((
+                                                thread_id,
+                                                provider,
+                                                HarnessEvent::ThreadTitled { title },
+                                            ));
+                                        }
+                                        Err(e) => eprintln!("[oculus] harness title: {e}"),
                                     }
-                                    Err(e) => eprintln!("[oculus] harness title: {e}"),
-                                }
-                            });
+                                });
+                            }
                         }
                         Ok(None) => {}
                         Err(e) => eprintln!("[oculus] harness title: {e}"),

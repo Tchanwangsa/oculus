@@ -28,7 +28,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
 | Model picker and its catalogue hook | `app/src/components/harness/composer/ModelPicker.tsx`, `app/src/hooks/agents/useProviderModels.ts` |
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/integrations/OpencodePage.tsx`, `app/src/components/settings/agents/opencode/`, `app/src/components/settings/agents/OpencodeConnectDialog.tsx`, `app/src/lib/harness/opencodeCatalogue.ts` |
-| Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db/jobModels.ts`, `app/src/pages/settings/library/JobsPage.tsx` |
+| Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db/jobModels.ts`, `app/src/components/settings/jobs/`, `app/src/hooks/agents/useJobAudit.ts` |
 | One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends | `app/src-tauri/src/harness/manager/one_off.rs`, `app/src-tauri/src/harness/app/suggest.rs`, `app/src-tauri/src/harness/suggest/`, `app/src-tauri/src/lectures/lecture_end/` |
 | `@` menu and mention input | `app/src/components/harness/mentions/useMentionMenu.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
@@ -413,7 +413,11 @@ compile without one.
   `initialize` response of a throwaway `claude -p` (no API call), cached on the
   binary's path and mtime and dropped on sign-in. A mounted picker re-asks when
   its CLI's path or version changes (an update from Settings → Agents). Aliases are stored as the
-  concrete model, since an alias changes meaning next release.
+  concrete model, since an alias changes meaning next release. Claude's
+  "Default (recommended)" row is dropped (`claudeAsModels`), since it hides
+  which model a run gets; the model it resolves to keeps the default mark. No
+  Claude spawn passes it either: `claude::concrete_model` swaps a missing
+  model or the `default` alias for what the catalogue resolves it to.
 - **Levels belong to the model.** Haiku declares none (no `--effort`);
   opencode's are variants; `agy` bakes them into the slug (`parse_models`
   splits, `model_slug` rejoins). `sortReasoning` orders by
@@ -433,6 +437,16 @@ Providers and Models, the second one row per model with opencode's own price,
 limits and capabilities (`ModelFacts`, a free catalogue read; a missing figure
 draws "—", never $0).
 
+- **Recommended providers are pinned.** OpenRouter and OpenCode Go
+  (`RECOMMENDED_PROVIDERS` in `opencodeCatalogue.ts`) sit first in both Providers
+  tabs with a star, connected or not.
+- **Models filter by provider, maker and status.** Maker is who built the
+  model, not who serves it (`makerOf` in `models/maker.ts`: the author slug in
+  an OpenRouter id, else the family or name). The header checkbox offers or
+  hides every filtered model; a blocked model says why on hover.
+- **Zen is greyed out.** Its provider (`opencode`) shows only under *All*, marked
+  Unavailable with no Connect action; it never counts as connected, and none of its
+  models is listed in Models.
 - **`connected` goes stale** after `PUT /auth` until `POST /instance/dispose`,
   which is skipped while a turn is open.
 - **A key is never held**: field → `PUT /auth/{id}` only. Errors are redacted,
@@ -461,12 +475,42 @@ provider-verified model (Meta's Muse Spark) fails once in the timeline.
 ## Per-job models
 
 Chaptering, the lecture end, thread naming and document suggestions each
-name their agent, model and level in a Settings → Jobs row
-using `ModelPicker`. The registry is one
-`settings` value, `job_models`, read by `jobs.rs` and written by `jobModels.ts`; both
-carry the defaults and must agree (a new job is a `Job` variant plus entries in
-`JOBS` and `DEFAULT_JOB_MODELS`). A bad value costs the configuration, not the
-run; CLI flags override for one run.
+name an ordered list of models (agent, model and level) in a Settings → Jobs
+row using `ModelPicker`. The first runs; when its run fails for any reason —
+the CLI won't start, the turn errors, the reply is empty or rejected (an empty
+suggestion is an answer, not a failure) — the next one runs (`jobs::try_each`), and when all fail the error names each
+model's failure. Only the model's turn is retried: chaptering does not detect
+or grab frames again, and document suggestions keep their warm spare for the
+first model only.
+
+An empty list switches the job off: it fails with "No model is set", and thread
+naming is skipped. It never falls back to the default, which can be an
+expensive model. The registry is one `settings` value, `job_models`, read by
+`jobs.rs` and written by `jobModels.ts`, which must parse it alike: each job's
+key holds an array (entries that don't parse are dropped one by one), or a
+single selection object, still read as a one-model list. A missing or unreadable
+value or key is the job's default; both sides carry the defaults and must agree
+(a new job is a `Job` variant plus entries in `JOBS` and `DEFAULT_JOB_MODELS`).
+On the CLI, `--provider`/`--model`/`--effort` override the first model and drop
+the fallbacks for one run.
+
+In Settings the row's picker is the first model; its fallbacks are ordered in
+a dialog (`JobModelsDialog`) by dragging a row or by the arrow keys on its
+handle (`ChainList`). Browsing another agent's tab changes nothing until
+a model is picked (`ChainPicker`), so no entry is ever an agent without a model.
+The dialog's add menu stays open on the model it just appended, so its level
+is set in the same menu.
+
+- **A model that leaves its agent's list is removed, never replaced.**
+  `useJobAudit`, mounted in `AppLayout` and asking for catalogues only after
+  10 s, drops it in place (later fallbacks move up) and records a notice under
+  `job_model_notices`. It removes only on a definite answer: the agent's list
+  arrived non-empty and lacks the model — for opencode, the model's own
+  provider still lists others — so a failed fetch or a signed-out provider
+  removes nothing. A model whose CLI is missing is flagged, not removed.
+- **Notices and flags badge Settings** (a dot on the rail item and the Jobs
+  row, `useJobAttention`) and print on the job's row until dismissed or the
+  job's list is edited.
 
 ## Memory
 

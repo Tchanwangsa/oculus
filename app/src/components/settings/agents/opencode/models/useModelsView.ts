@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { OpencodeProvider } from "@/lib/harness/opencodeAuth";
-import { providerOf, type OpencodeCatalogue } from "@/lib/harness/opencodeCatalogue";
+import { isZen, providerOf, type OpencodeCatalogue } from "@/lib/harness/opencodeCatalogue";
 import type { HarnessModel } from "@/lib/harness";
+import type { FilterOption } from "@/components/ui/filter/FilterChecklist";
 import { usePagedRows } from "@/components/ui/table/TablePagination";
 import { blockedBecause, isHidden } from "../useOpencode";
 import type { SortDir } from "../parts";
-import { ALL, PAGE_SIZE, type ModelsFocus, type Scope, type SortKey } from "./constants";
+import { PAGE_SIZE, UNKNOWN_MAKER, type ModelsFocus, type Scope, type SortKey } from "./constants";
+import { makerName, makerOf } from "./maker";
+
+type Facet = "provider" | "maker" | "status";
 
 /** The table's filters, sort, pagination and the counts drawn from them. */
 export function useModelsView(
@@ -15,7 +19,8 @@ export function useModelsView(
   focus: ModelsFocus,
 ) {
   const [query, setQuery] = useState("");
-  const [provider, setProvider] = useState<string>(focus.provider ?? ALL);
+  const [providerSet, setProviderSet] = useState<Set<string>>(() => focusSet(focus));
+  const [makerSet, setMakerSet] = useState<Set<string>>(() => new Set());
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "id", dir: "asc" });
   // *Offered* and *Hidden* snapshot the ticks when chosen, not live, so
   // unticking a row doesn't pull it out from under the click.
@@ -27,7 +32,8 @@ export function useModelsView(
   useEffect(() => {
     setQuery("");
     setPicked(null);
-    setProvider(focus.provider ?? ALL);
+    setMakerSet(new Set());
+    setProviderSet(new Set(focus.provider ? [focus.provider] : []));
   }, [focus.n, focus.provider]);
 
   const names = useMemo(
@@ -36,25 +42,51 @@ export function useModelsView(
   );
   const providerName = useCallback((id: string) => names.get(id) ?? id, [names]);
 
-  // A hidden provider's models never reach the picker, so they aren't listed.
+  // A hidden provider's models never reach the picker, and Zen's never run, so neither is listed.
   const rows = useMemo(() => {
     if (!models) return [];
     const hiddenIds = new Set(catalogue?.hiddenProviders ?? []);
-    return models.filter((m) => !hiddenIds.has(providerOf(m.id)));
+    return models.filter((m) => !isZen(m.id) && !hiddenIds.has(providerOf(m.id)));
   }, [models, catalogue]);
 
-  const providerIds = useMemo(
-    () =>
-      [...new Set(rows.map((m) => providerOf(m.id)))].sort((a, b) =>
-        providerName(a).localeCompare(providerName(b)),
-      ),
-    [rows, providerName],
+  const makers = useMemo(
+    () => new Map(rows.map((m) => [m.id, makerOf(m) ?? UNKNOWN_MAKER])),
+    [rows],
+  );
+  const makerLabel = useCallback(
+    (slug: string) => (slug === UNKNOWN_MAKER ? "Unknown maker" : makerName(slug)),
+    [],
   );
 
-  const inProvider = useMemo(
-    () => (provider === ALL ? rows : rows.filter((m) => providerOf(m.id) === provider)),
-    [rows, provider],
+  // Every filter but `skip`, so a facet's own counts don't collapse to its pick.
+  const matches = useCallback(
+    (m: HarnessModel, skip?: Facet) => {
+      const q = query.trim().toLowerCase();
+      if (q && !m.label.toLowerCase().includes(q) && !m.id.toLowerCase().includes(q)) return false;
+      if (skip !== "provider" && providerSet.size > 0 && !providerSet.has(providerOf(m.id))) {
+        return false;
+      }
+      if (skip !== "maker" && makerSet.size > 0 && !makerSet.has(makers.get(m.id)!)) return false;
+      if (skip !== "status" && picked && !picked.ids.has(m.id)) return false;
+      return true;
+    },
+    [query, providerSet, makerSet, picked, makers],
   );
+
+  const providerOptions = useMemo(
+    () => facetOptions(rows, (m) => providerOf(m.id), providerName, (m) => matches(m, "provider")),
+    [rows, providerName, matches],
+  );
+  const makerOptions = useMemo(
+    () => facetOptions(rows, (m) => makers.get(m.id)!, makerLabel, (m) => matches(m, "maker")),
+    [rows, makers, makerLabel, matches],
+  );
+
+  const inStatus = (m: HarnessModel, s: Exclude<Scope, "all">) => {
+    const blocked = blockedBecause(m) !== null;
+    if (s === "unavailable") return blocked;
+    return !blocked && isHidden(catalogue, m.id) === (s === "hidden");
+  };
 
   const onScope = (next: Scope) =>
     setPicked(
@@ -62,23 +94,11 @@ export function useModelsView(
         ? null
         : {
             scope: next,
-            ids: new Set(
-              rows
-                .filter((m) => blockedBecause(m) === null)
-                .filter((m) => isHidden(catalogue, m.id) === (next === "hidden"))
-                .map((m) => m.id),
-            ),
+            ids: new Set(rows.filter((m) => inStatus(m, next)).map((m) => m.id)),
           },
     );
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return inProvider.filter(
-      (m) =>
-        (!picked || picked.ids.has(m.id)) &&
-        (!q || m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)),
-    );
-  }, [inProvider, picked, query]);
+  const filtered = useMemo(() => rows.filter((m) => matches(m)), [rows, matches]);
 
   const sorted = useMemo(() => {
     const value = (m: HarnessModel): string | number | null => {
@@ -119,38 +139,51 @@ export function useModelsView(
   }, [filtered, sort, providerName]);
 
   const { page, pageCount, setPage, pageRows } = usePagedRows(sorted, PAGE_SIZE);
-  useEffect(() => setPage(1), [query, provider, picked, sort, setPage]);
+  useEffect(() => setPage(1), [query, providerSet, makerSet, picked, sort, setPage]);
 
   const onSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
 
-  // Blocked rows stay listed with their reason but are never counted offered.
-  const blocked = inProvider.filter((m) => blockedBecause(m) !== null).length;
-  const hiddenCount = inProvider.filter(
+  // Counted over every filter but status, so picking *Hidden* still reports
+  // how many are offered. Blocked rows stay listed but are never offered.
+  const inScope = rows.filter((m) => matches(m, "status"));
+  const blocked = inScope.filter((m) => blockedBecause(m) !== null).length;
+  const hiddenCount = inScope.filter(
     (m) => blockedBecause(m) === null && isHidden(catalogue, m.id),
   ).length;
-  const offered = Math.max(inProvider.length - blocked - hiddenCount, 0);
+  const offered = Math.max(inScope.length - blocked - hiddenCount, 0);
   const status =
     blocked > 0
-      ? `${offered} of ${inProvider.length} offered · ${blocked} cannot run here`
-      : `${offered} of ${inProvider.length} offered`;
+      ? `${offered} of ${inScope.length} offered · ${blocked} cannot run here`
+      : `${offered} of ${inScope.length} offered`;
 
-  // Bulk ticks act on the filtered rows only, across every page.
+  // The header tick acts on the filtered rows only, across every page.
   const tickable = filtered.filter((m) => blockedBecause(m) === null);
   const showable = tickable.filter((m) => isHidden(catalogue, m.id)).map((m) => m.id);
   const hideable = tickable.filter((m) => !isHidden(catalogue, m.id)).map((m) => m.id);
 
+  const clearFilters = () => {
+    setProviderSet(new Set());
+    setMakerSet(new Set());
+    setPicked(null);
+  };
+
   return {
     query,
     setQuery,
-    provider,
-    setProvider,
+    providerSet,
+    setProviderSet,
+    makerSet,
+    setMakerSet,
+    providerOptions,
+    makerOptions,
+    makerLabel,
+    clearFilters,
     sort,
     picked,
     scope,
     providerName,
     rows,
-    providerIds,
     onScope,
     sorted,
     page,
@@ -162,4 +195,25 @@ export function useModelsView(
     showable,
     hideable,
   };
+}
+
+function focusSet(focus: ModelsFocus): Set<string> {
+  return new Set(focus.provider ? [focus.provider] : []);
+}
+
+/** One option per value any row has, counted under the other filters, by name. */
+function facetOptions(
+  rows: HarnessModel[],
+  key: (m: HarnessModel) => string,
+  label: (value: string) => string,
+  counts: (m: HarnessModel) => boolean,
+): FilterOption[] {
+  const tally = new Map<string, number>();
+  for (const m of rows) {
+    const k = key(m);
+    tally.set(k, (tally.get(k) ?? 0) + (counts(m) ? 1 : 0));
+  }
+  return [...tally]
+    .map(([value, count]) => ({ value, label: label(value), count }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }

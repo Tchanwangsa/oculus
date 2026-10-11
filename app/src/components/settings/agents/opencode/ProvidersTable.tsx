@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { CaretRight, CircleNotch, Eye, EyeSlash, Plugs } from "@phosphor-icons/react";
+import { CaretRight, CircleNotch, Eye, EyeSlash, Plugs, Star } from "@phosphor-icons/react";
 
 import type { OpencodeProvider, OpencodeProviderList } from "@/lib/harness/opencodeAuth";
 import {
   filterOffered,
   isZenProvider,
   providerOf,
+  RECOMMENDED_PROVIDERS,
   type OpencodeCatalogue,
 } from "@/lib/harness/opencodeCatalogue";
 import type { HarnessModel } from "@/lib/harness";
@@ -33,10 +34,18 @@ const SOURCE_LABEL: Record<string, string> = {
   custom: "Custom",
 };
 
+/** The line under a recommended provider's name. */
+const RECOMMENDED_NOTE: Record<string, string> = {
+  openrouter: "Recommended · one key for hundreds of models, pay as you go",
+  "opencode-go": "Recommended · flat monthly subscription, open coding models",
+};
+
 /**
  * Every provider opencode knows: connect, disconnect or hide, and a way into
  * its models. *Connected* holds the signed-in and hidden ones; *All* is the
- * whole list (~200), sign-in flows first. Search runs inside the scope.
+ * whole list (~200), sign-in flows first. The recommended providers are pinned
+ * first in both. Zen is greyed out under *All* and never counts as connected.
+ * Search runs inside the scope.
  */
 export function ProvidersTable({
   list,
@@ -70,17 +79,29 @@ export function ProvidersTable({
   const providers = list?.providers ?? [];
   const hiddenIds = useMemo(() => catalogue?.hiddenProviders ?? [], [catalogue]);
   const isHidden = (p: OpencodeProvider) => hiddenIds.includes(p.id);
-  const isConnected = (p: OpencodeProvider) => p.connected || isHidden(p);
+  const isConnected = (p: OpencodeProvider) =>
+    !isZenProvider(p.id) && (p.connected || isHidden(p));
 
-  const connectedCount = providers.filter((p) => p.connected && !hiddenIds.includes(p.id)).length;
+  const connectedCount = providers.filter(
+    (p) => p.connected && !isZenProvider(p.id) && !hiddenIds.includes(p.id),
+  ).length;
 
   const rows = useMemo(() => {
     const hidden = new Set(hiddenIds);
-    const rank = (p: OpencodeProvider) =>
-      p.connected || hidden.has(p.id) ? 0 : p.methods.some((m) => m.kind === "oauth") ? 1 : 2;
+    const rank = (p: OpencodeProvider) => {
+      const pinned = RECOMMENDED_PROVIDERS.indexOf(p.id);
+      if (pinned >= 0) return pinned - RECOMMENDED_PROVIDERS.length;
+      if (isZenProvider(p.id)) return 3;
+      return p.connected || hidden.has(p.id) ? 0 : p.methods.some((m) => m.kind === "oauth") ? 1 : 2;
+    };
     const q = query.trim().toLowerCase();
     return providers
-      .filter((p) => scope === "all" || p.connected || hidden.has(p.id))
+      .filter((p) =>
+        scope === "all"
+          ? true
+          : !isZenProvider(p.id) &&
+            (p.connected || hidden.has(p.id) || RECOMMENDED_PROVIDERS.includes(p.id)),
+      )
       .filter((p) => !q || p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q))
       .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   }, [providers, hiddenIds, scope, query]);
@@ -244,32 +265,45 @@ function ProviderRow({
   const n = provider.modelCount;
   const size = `${n} ${n === 1 ? "model" : "models"}`;
   const zen = isZenProvider(provider.id);
-  const models = hidden
-    ? "none offered"
-    : !provider.connected || offered === null
-      ? size
-      : `${offered} of ${n} offered`;
+  const note = zen
+    ? "free tier — only runs inside opencode itself"
+    : RECOMMENDED_NOTE[provider.id];
+  const models = zen
+    ? "—"
+    : hidden
+      ? "none offered"
+      : !provider.connected || offered === null
+        ? size
+        : `${offered} of ${n} offered`;
 
   return (
     <div className={cn(COLS, "py-2 transition-colors hover:bg-surface/60")}>
       <div className="min-w-0">
         <div
           className={cn(
-            "truncate text-xs",
-            hidden ? "text-muted-foreground" : "text-foreground",
+            "flex items-center gap-1.5 text-xs",
+            hidden || zen ? "text-muted-foreground" : "text-foreground",
           )}
         >
-          {provider.name}
+          <span className="truncate">{provider.name}</span>
+          {RECOMMENDED_PROVIDERS.includes(provider.id) && (
+            <Star
+              size={12}
+              weight="fill"
+              className="shrink-0 text-brand"
+              aria-label="Recommended"
+            />
+          )}
         </div>
-        {zen && provider.connected && (
-          <div className="truncate text-[11px] text-muted-foreground">
-            free tier — only runs inside opencode itself
-          </div>
-        )}
+        {note && <div className="truncate text-[11px] text-muted-foreground">{note}</div>}
       </div>
 
       <div>
-        {hidden ? (
+        {zen ? (
+          <Badge variant="outline" className="text-[11px] text-muted-foreground">
+            Unavailable
+          </Badge>
+        ) : hidden ? (
           <Badge variant="secondary" className="text-[11px]">
             Hidden
           </Badge>
@@ -291,15 +325,17 @@ function ProviderRow({
       <span className="truncate text-[11px] text-muted-foreground tabular-nums">{models}</span>
 
       <div className="flex items-center gap-1 justify-self-end">
-        <ProviderActions
-          provider={provider}
-          hidden={hidden}
-          removing={removing}
-          onModels={onModels}
-          onDisconnect={onDisconnect}
-          onHide={onHide}
-          onConnect={onConnect}
-        />
+        {!zen && (
+          <ProviderActions
+            provider={provider}
+            hidden={hidden}
+            removing={removing}
+            onModels={onModels}
+            onDisconnect={onDisconnect}
+            onHide={onHide}
+            onConnect={onConnect}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ export function TablePagination({
   onPage,
   total,
   unit,
+  summary,
   className,
 }: {
   page: number;
@@ -19,6 +20,8 @@ export function TablePagination({
   total: number;
   /** Singular noun for the total, pluralised with a trailing "s". */
   unit: string;
+  /** Stands in for the total, for a table whose count says more. */
+  summary?: ReactNode;
   className?: string;
 }) {
   // Commits on Enter or blur, so a half-typed "1" of "12" doesn't jump pages.
@@ -76,9 +79,13 @@ export function TablePagination({
         <ArrowRight size={13} />
       </Button>
 
-      <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
-        {total} {unit}
-        {total === 1 ? "" : "s"}
+      <span className="ml-auto min-w-0 truncate text-[11px] text-muted-foreground tabular-nums">
+        {summary ?? (
+          <>
+            {total} {unit}
+            {total === 1 ? "" : "s"}
+          </>
+        )}
       </span>
     </div>
   );

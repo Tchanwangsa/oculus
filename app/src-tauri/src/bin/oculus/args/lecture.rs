@@ -52,8 +52,9 @@ pub(crate) struct LectureChaptersArgs {
     /// Lecture id, as `oculus list -l` prints it; a unique prefix is enough
     #[arg(value_name = "LECTURE_ID")]
     pub(crate) id: String,
-    // No defaults here: the job's selection comes from `harness::jobs`, shared
-    // with the app; a flag overrides the part it names for one run.
+    // No defaults here: the job's models come from `harness::jobs`, shared
+    // with the app; a flag overrides the part it names on the first and drops
+    // the fallbacks, for one run.
     /// Which CLI to drive (default: the configured one)
     #[arg(short, long, value_parser = ["claude", "codex", "opencode"])]
     pub(crate) provider: Option<String>,
@@ -99,7 +100,7 @@ pub(crate) struct LectureEndArgs {
     /// (with --force, every lecture with a transcript)
     #[arg(long)]
     pub(crate) all: bool,
-    // As for chapters: flags override the job's configured selection.
+    // As for chapters: flags override the job's first model, without fallbacks.
     /// Which CLI to drive (default: the configured one)
     #[arg(short, long, value_parser = ["claude", "codex", "opencode"])]
     pub(crate) provider: Option<String>,

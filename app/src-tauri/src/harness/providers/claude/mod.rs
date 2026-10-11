@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 use crate::harness::child::ThreadSpawn;
 
-pub use models::{list_models, ModelInfo};
+pub use models::{concrete_model, list_models, ModelInfo};
 pub use session::ClaudeSession;
 
 pub struct ClaudeSpawn {

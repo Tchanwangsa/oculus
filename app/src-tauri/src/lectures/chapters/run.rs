@@ -38,6 +38,8 @@ pub struct Outcome {
     /// A 2 here is the only visible sign that source 1 was dead.
     pub source: crate::sources::echo360::SourceNum,
     pub chapters: Vec<Chapter>,
+    /// The model whose reply these chapters are, which a fallback may be.
+    pub selection: crate::harness::jobs::JobSelection,
 }
 
 /// Detect, grab, ask, validate, write. Blocking and minutes long, so callers
@@ -54,6 +56,8 @@ pub fn run(
     on_event: impl Fn(&crate::harness::HarnessEvent) + Send + Sync + 'static,
 ) -> Result<Outcome, String> {
     let id = job.lecture_id;
+    // Shared, since each model's turn takes its own handler.
+    let on_event = std::sync::Arc::new(on_event);
     let source = rt.block_on(crate::lectures::lecture_jobs::source(pool, id))?;
     let title = &source.title;
     let duration = source.duration;
@@ -70,6 +74,11 @@ pub fn run(
     let video = source.video()?;
     let ffmpeg = crate::sources::echo360::find_ffmpeg(None)
         .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
+    if job.selections.is_empty() {
+        return Err(crate::harness::jobs::off(
+            crate::harness::jobs::Job::LectureChapters,
+        ));
+    }
 
     // Claimed before the decode, so the UI shows the run immediately.
     rt.block_on(crate::db::store::set_chapter_status(
@@ -151,12 +160,20 @@ pub fn run(
         });
 
         on_step(Step::Asking);
-        let chapters =
-            crate::lectures::lecture_jobs::reply(job.data_dir, job.selection, &text, on_event)
+        // Only the turn moves to the next model; detection and frames stand.
+        let (chapters, selection) = crate::harness::jobs::try_each(
+            crate::harness::jobs::Job::LectureChapters,
+            job.selections,
+            |selection| {
+                let on_event = on_event.clone();
+                crate::lectures::lecture_jobs::reply(job.data_dir, selection, &text, move |e| {
+                    on_event(e)
+                })
                 .and_then(|reply| parse_chapters(&reply))
-                .and_then(|chapters| {
-                    validate(&chapters, &boundaries, duration).map(|()| chapters)
-                })?;
+                .and_then(|chapters| validate(&chapters, &boundaries, duration).map(|()| chapters))
+                .map(|chapters| (chapters, selection.clone()))
+            },
+        )?;
         on_step(Step::Writing);
         rt.block_on(crate::db::store::save_chapters(pool, id, &chapters))?;
         Ok(Outcome {
@@ -165,6 +182,7 @@ pub fn run(
             candidates: found.len(),
             source: detected.source,
             chapters,
+            selection,
         })
     })();
 

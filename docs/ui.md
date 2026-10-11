@@ -17,6 +17,7 @@ Read this before any UI work.
 | Drag gestures | `app/src/hooks/gestures/usePointerDrag.ts`, `app/src/hooks/gestures/useCardDrag.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
 | Table chrome | `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
+| Toolbar filters: pill popovers, checklists, applied-filter chips | `app/src/components/ui/filter/` |
 
 ## One colour, two fonts, and a floating card
 
@@ -89,6 +90,10 @@ headings and Inter for everything else, Notion-style layout.
 - **Tables are full-bleed in `GridTable`**, header outside the scroller (or the
   bar runs down it). Alternate views are sibling `ViewTabs`/`PillTabs`, not a
   dropdown, over a fixed-height toolbar so switching never jolts the rows.
+- **Filters are pills over popovers** (`FilterPopover`, brand-tinted while
+  narrowing); a multi-select is a `FilterChecklist`, and the applied values sit
+  under the toolbar as `FilterChips` — one line that scrolls with faded edges,
+  never wraps.
 - **Settings, subjects and Chat share one nav column**, `SideNav`: a 208px column
   on the window's `background` beside the page, a pinned header, rows with a
   16px icon and the active row filled, never an underline strip, and

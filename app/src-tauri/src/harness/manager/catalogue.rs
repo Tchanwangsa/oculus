@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::harness::antigravity;
+use crate::harness::child::ThreadSpawn;
 use crate::harness::claude;
 use crate::harness::codex::{CodexServer, CodexSpawn, ModelInfo};
 use crate::harness::discover;
@@ -99,6 +100,15 @@ impl Harness {
             models: models.clone(),
         });
         Ok(models)
+    }
+
+    /// Every Claude spawn goes through here, so no run is left to the CLI's
+    /// "Default (recommended)" alias or to no `--model` at all.
+    pub(super) fn claude_base(&self, mut base: ThreadSpawn) -> Result<ThreadSpawn, String> {
+        base.model = Some(claude::concrete_model(base.model.as_deref(), || {
+            self.claude_models()
+        })?);
+        Ok(base)
     }
 
     /// A sign-in may change the account, and with it the catalogue.

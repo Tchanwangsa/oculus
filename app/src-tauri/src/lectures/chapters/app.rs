@@ -48,7 +48,7 @@ pub async fn lecture_find_chapters(
     spawn_job(
         "chapters",
         crate::harness::jobs::Job::LectureChapters,
-        move |rt, pool, selection| {
+        move |rt, pool, chain| {
             let emit = {
                 let app = app.clone();
                 move |p: Progress| {
@@ -119,7 +119,7 @@ pub async fn lecture_find_chapters(
                 &Run {
                     data_dir: &data_dir,
                     lecture_id: &lecture_id,
-                    selection: &selection,
+                    selections: &chain,
                     force,
                     source,
                 },

@@ -12,8 +12,9 @@ pub struct Run<'a> {
     pub data_dir: &'a Path,
     /// A full lecture id (prefix matching is the CLI's).
     pub lecture_id: &'a str,
-    /// Already resolved by the caller (`harness::jobs`).
-    pub selection: &'a crate::harness::jobs::JobSelection,
+    /// The job's models in the order tried, already resolved by the caller
+    /// (`harness::jobs::chain`). Empty fails the run.
+    pub selections: &'a [crate::harness::jobs::JobSelection],
     /// Replace an existing derived result instead of refusing.
     pub force: bool,
     /// Read this stream instead of letting `chapters::detect` choose.
@@ -159,11 +160,11 @@ pub(crate) async fn check_start(
 }
 
 /// Run `body` on a thread of its own with its own runtime, pool and the
-/// agent selection configured for `job`. `tag` prefixes setup errors.
+/// models configured for `job`, in the order tried. `tag` prefixes setup errors.
 pub(crate) fn spawn_job(
     tag: &'static str,
     job: crate::harness::jobs::Job,
-    body: impl FnOnce(&tokio::runtime::Runtime, &sqlx::SqlitePool, crate::harness::jobs::JobSelection)
+    body: impl FnOnce(&tokio::runtime::Runtime, &sqlx::SqlitePool, Vec<crate::harness::jobs::JobSelection>)
         + Send
         + 'static,
 ) {
@@ -176,8 +177,8 @@ pub(crate) fn spawn_job(
             Ok(p) => p,
             Err(e) => return eprintln!("[oculus] {tag}: {e}"),
         };
-        let selection = rt.block_on(crate::harness::jobs::selection(&pool, job));
-        body(&rt, &pool, selection);
+        let chain = rt.block_on(crate::harness::jobs::chain(&pool, job));
+        body(&rt, &pool, chain);
     });
 }
 
