@@ -33,6 +33,7 @@ the root `CLAUDE.md` holds only the rules.
 | [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |
 | [editor-maths.md](./editor-maths.md) | Maths in the note editor: the visual field, the toolbox, shorthands |
 | [editor-core.md](./editor-core.md) | The Rust editor core, its oracles, and shadow mode checking it against every note editor in dev |
+| [studio.md](./studio.md) | Studio's renderer: video folders, the TSX component contract, styles, the sandbox, lint and golden frames |
 | [cli.md](./cli.md) | The `oculus` binary: what each command writes, and the agent docs it generates |
 | [cli-reference.md](./cli-reference.md) | Every command and flag — generated from the binary, not hand-kept |
 | [windows.md](./windows.md) | Windows platform boundaries, broker security, data paths and release acceptance |
@@ -47,6 +48,7 @@ the root `CLAUDE.md` holds only the rules.
 | `app/src-tauri/src/bin/oculus/` | The headless CLI over the same engine |
 | `app/keyd/` | `oculus-keyd`, the credential broker, and `core/`, its OS-free logic and OS adapters — a separate cargo root |
 | `app/editor-core/` | A standalone Rust port of the note editor's text model and markdown parser, checked against CodeMirror and Lezer; in dev builds, as WebAssembly, against every note editor |
+| `app/studio-core/` | Studio's scene renderer: TSX components in a QuickJS sandbox, laid out with taffy and parley and drawn with vello_cpu — a separate cargo root the CLI links |
 | `app/src-tauri/templates/` | The agent-facing docs and skills written into the library |
 | `app/scripts/` | Dev preflight, native-binary fetchers, CLI staging and reference generation |
 | `docs/` | These pages |

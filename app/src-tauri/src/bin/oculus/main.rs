@@ -96,6 +96,10 @@ fn main() {
             MemoryAction::Promote(a) => ctx.memory_promote(&a),
         },
         Some(Command::Transcribe(args)) => ctx.transcribe(&args),
+        Some(Command::Studio { action }) => match action {
+            StudioAction::Frame(a) => ctx.studio_frame(&a),
+            StudioAction::Lint(a) => ctx.studio_lint(&a),
+        },
         Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
     };

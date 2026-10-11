@@ -11,12 +11,14 @@ mod memory;
 mod misc;
 mod planning;
 mod query;
+mod studio;
 
 pub(crate) use lecture::*;
 pub(crate) use memory::*;
 pub(crate) use misc::*;
 pub(crate) use planning::*;
 pub(crate) use query::*;
+pub(crate) use studio::*;
 
 #[derive(Parser)]
 #[command(
@@ -28,7 +30,7 @@ pub(crate) struct Cli {
     /// Print machine-readable JSON instead of formatted text
     ///
     /// Honoured by every command that prints: status, list, search, grep,
-    /// read, files, calendar, project, task and keyd. On failure the JSON is
+    /// read, files, calendar, project, task, keyd and studio. On failure the JSON is
     /// `{"error": "..."}` on stderr and the exit code is 1.
     #[arg(long, global = true)]
     pub(crate) json: bool,
@@ -84,6 +86,11 @@ pub(crate) enum Command {
         action: LectureAction,
     },
     Transcribe(TranscribeArgs),
+    /// Render and check Studio videos: TSX scenes drawn frame by frame
+    Studio {
+        #[command(subcommand)]
+        action: StudioAction,
+    },
     Docs(DocsArgs),
     Agent(AgentArgs),
 }

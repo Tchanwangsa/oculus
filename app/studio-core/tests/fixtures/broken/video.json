@@ -1,0 +1,12 @@
+{
+  "size": { "width": 1280, "height": 720 },
+  "theme": "default",
+  "scenes": [
+    { "component": "Fine", "props": { "label": "first" }, "hold": 1.0 },
+    { "component": "Missing", "hold": 1.0 },
+    { "component": "Fine", "props": { "label": 3 }, "hold": 1.0 },
+    { "component": "Typo", "hold": 1.0 },
+    { "component": "LateThrow", "hold": 2.0 },
+    { "component": "Fine", "props": { "label": "last" }, "hold": 1.0 }
+  ]
+}

@@ -11,4 +11,5 @@ mod planning;
 pub(crate) mod query;
 mod run;
 mod status;
+mod studio;
 mod transcribe;

@@ -33,6 +33,8 @@ dirs = "6"
 # the headless Okta sign-in the app runs when keyd is absent. Never keyd's
 # server half (docs/development.md).
 keyd_core = { package = "oculus-keyd-core", path = "../keyd/core", features = ["client"] }
+# Studio's scene renderer, for `oculus studio` (docs/studio.md).
+studio_core = { package = "oculus-studio-core", path = "../studio-core" }
 serde = { version = "1", features = ["derive"] }
 # `raw_value`: `harness/providers/antigravity/rules.rs` rewrites two lists in agy's
 # settings file and hands every other value back verbatim, in file order.
