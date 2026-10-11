@@ -293,6 +293,12 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   captions are the sibling `<video>.vtt`, and one that exists but won't read
   is an error, never a Transcribe offer. The element pauses when its tab goes
   to the back, since nothing parks it, and keeps no position.
+- **A Studio render uses it without a dock** (`VideoPlayer`, see
+  [studio-page.md](./studio-page.md)): `dock` and `dockLabel` are optional, and
+  with no dock there is no dock button, no resize handle and T does nothing;
+  `captions={false}` leaves out the captions button. `useLibraryPlayback` is
+  what `VideoFileViewer` and Studio's element share: pause with the tab, and
+  one sound across lectures and library videos.
 - **Files ▸ Media lists the videos Oculus fetched** — module videos and
   Canvas-page embeds, the `file` rows that are videos
   (`app/src/pages/subject/files/MediaPage.tsx`) — with a captions mark when the

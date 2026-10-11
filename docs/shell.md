@@ -84,17 +84,18 @@ before leaving a playing lecture.
 
 `app/src/components/sidebar/Sidebar.tsx` is a 52px column of icon buttons,
 each named by a tooltip on its right: Search (opens ⌘K), then Home, Chat,
-Calendar, Tasks and Subjects, and Sync and Settings pinned to the foot under a
+Calendar, Tasks, Subjects and Studio, and Sync and Settings pinned to the foot under a
 short hairline. Messaging, while any service is on ([dock.md](./dock.md)), and
 Spotify's tile, while music is on, sit together under a rule after the
-sections; the tile opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The five sections drag into any order on `useStripReorder`'s
+sections; the tile opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The six sections drag into any order on `useStripReorder`'s
 vertical axis, and the order is kept in `localStorage` (`railOrderStore`); a
 section the stored order lacks is appended. A `RailItem` is a button with `data-tab-href` that goes
 through `navigateActive`, since the sidebar sits outside every pane's router,
 and it lights on its path or anything under it. Background jobs show on their
 item's corner: a spinner on Chat while an agent turn runs, on Sync while
-indexing, and a brand dot on Subjects while any subject has never-opened files
-(`newFilesStore`). ⌘B and the title bar's button collapse it to zero width.
+indexing, a brand dot on Subjects while any subject has never-opened files
+(`newFilesStore`), and a brand dot on Studio while any video renders
+([studio-page.md](./studio-page.md)). ⌘B and the title bar's button collapse it to zero width.
 
 ## Settings has its own nav column
 

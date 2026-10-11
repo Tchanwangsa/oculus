@@ -5,6 +5,7 @@ import {
   ArrowsClockwise,
   BookOpen,
   CircleNotch,
+  FilmSlate,
   ListChecks,
   MagnifyingGlass,
   GearSix,
@@ -14,6 +15,7 @@ import { anyRunning, useHarnessStore } from "@/stores/chat/harnessStore";
 import { useIndexStore } from "@/stores/sync/indexStore";
 import { useJobAttention } from "@/stores/agents/jobAttentionStore";
 import { newCountForSubject, useNewFilesStore } from "@/stores/sync/newFilesStore";
+import { anyRendering, useRenderStore } from "@/stores/studio/renderStore";
 import { usePaletteStore } from "@/stores/shell/paletteStore";
 import { useRailOrder, type RailSection } from "@/stores/shell/railOrderStore";
 import { useDockPrefsStore } from "@/stores/shell/dockPrefsStore";
@@ -98,6 +100,7 @@ function Sections() {
   const order = useRailOrder((s) => s.order);
   const setOrder = useRailOrder((s) => s.setOrder);
   const agentBusy = useHarnessStore((s) => anyRunning(s.live));
+  const rendering = useRenderStore((s) => anyRendering(s.active));
   const anyNew = useNewFilesStore((s) =>
     Object.keys(s.bySubject).some((id) => newCountForSubject(s.bySubject, Number(id)) > 0),
   );
@@ -128,6 +131,14 @@ function Sections() {
         icon={BookOpen}
         label="Subjects"
         indicator={anyNew ? <span className="size-1.5 rounded-full bg-brand" /> : null}
+      />
+    ),
+    studio: (
+      <RailItem
+        to="/studio"
+        icon={FilmSlate}
+        label="Studio"
+        indicator={rendering ? <span className="size-1.5 rounded-full bg-brand" /> : null}
       />
     ),
   };
