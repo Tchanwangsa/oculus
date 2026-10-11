@@ -3,6 +3,7 @@ import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { useSubjects } from "@/hooks/data/useSubjects";
 import { TrailMore, useInSidePanel, useTrailCollapsed } from "@/components/tabs/PaneHeader";
 import { displayCode } from "@/lib/format/format";
+import { isVideoFile } from "@/lib/files/fileTypes";
 
 /** A subject tab as a crumb: path segment under the subject, and its label. */
 export interface CrumbTab {
@@ -31,8 +32,13 @@ const FILE_TAB: Record<string, CrumbTab> = {
   ed: { to: "discussion", label: "Discussion" },
 };
 
-export const fileCrumbTab = (category: string | null): CrumbTab | null =>
-  (category && FILE_TAB[category]) || null;
+/** Downloaded videos are listed under Media, not Downloads (`MediaPage`). */
+const MEDIA_TAB: CrumbTab = { to: "files/media", label: "Files" };
+
+export const fileCrumbTab = (file: { category: string | null; filename: string }): CrumbTab | null =>
+  file.category === "file" && isVideoFile(file.filename)
+    ? MEDIA_TAB
+    : (file.category && FILE_TAB[file.category]) || null;
 
 /**
  * The subject → tab trail for full pages outside `SubjectLayout` (a file or

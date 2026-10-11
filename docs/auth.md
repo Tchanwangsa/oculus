@@ -18,6 +18,7 @@ credential that is not ([below](#spotifys-credentials-are-the-one-value-keyd-rea
 | Removing a leftover keep-alive agent at startup | `app/src-tauri/src/auth/legacy_agent.rs`, `app/keyd/core/src/platform/macos/registrar.rs` |
 | Ed token minting via LTI | `app/src-tauri/src/sources/ed/lti.rs` |
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/sources/echo360/auth.rs`, `app/src-tauri/src/lectures/mod.rs` |
+| Echo360 page embeds: per-link launch, Bearer, CDN signing; the shared Bearer | `app/src-tauri/src/sources/echo360/embed/`, `app/src-tauri/src/sync/scrape/embeds/state.rs` |
 | Frontend auth state | `app/src/hooks/sync/useAuth.ts` |
 | Handing the session to the in-app browser | `app/src-tauri/src/shell/browser/seed.rs` |
 | Keychain entry lifecycle (the fallback for the Okta credentials and for MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/providers/credentials/keychain.rs` (`Secret`), `app/src-tauri/src/providers/credentials/mod.rs` |
@@ -424,8 +425,41 @@ through keyd's `canvas` route) by POSTing the course's LTI external-tool form (s
 [sync.md](./sync.md#echo360-is-an-lti-launch-with-up-to-two-streams)), and
 `app/src-tauri/src/lectures/mod.rs` caches it per course.
 
+## An embedded Echo360 video launches per link and plays on a Bearer token
+
+A video embedded in a Canvas page is a different LTI launch from the course
+one, keyed by the embed's `linkId` (`app/src-tauri/src/sources/echo360/embed/`):
+
+1. GET the embed's Canvas `external_tools/retrieve` URL through keyd's
+   `canvas` route. It answers an LTI form; a page without one is reported as a
+   possibly lapsed Canvas session. The URL comes from page markdown, so
+   `embed::retrieve_url` accepts only a Canvas retrieve of an
+   `echo360.net.au/lti/…?linkId=` URL naming that same link, and rebuilds it.
+2. POST the form to Echo360 with redirects off. It answers a redirect to
+   `/ui/player/<mediaId>?sessionId=…&secureLinkAccessDataId=…`; the only cookie
+   is `PLAY_SESSION`, and there is no `ECHO_JWT`.
+3. GET `/api/ui/sessions/<sessionId>` on the same cookie jar, at once: the
+   session id goes stale within minutes. It answers 204 with the JWT in the
+   `token` *response header*.
+4. Send that JWT as `Authorization: Bearer` to
+   `/api/ui/echoplayer/secure-link-access-datas/<sl>/media/<mediaId>/player-properties`.
+
+One Bearer serves every link and lives about 13 hours, so the app keeps one in
+`EmbedBearer` and reuses it until five minutes before its `exp`. A link's media
+and secure-link ids never change, so they are cached in `echo_embeds`
+([sync.md](./sync.md#an-embedded-echo360-video-is-resolved-and-downloaded-by-its-card));
+with both cached and a live Bearer, no launch runs, which matters because every
+launch records a view in Echo360. A Bearer turned down with 401/403 is dropped
+and replaced from a fresh launch, once.
+
+The CDN takes neither the Bearer nor a cookie. A URL is signed by **replacing**
+its query with the `queryString` of the `sourceQueryStrings` entry whose
+`uriPattern` (a `*` glob) matches it (`embed::sign`); appending to the
+existing query 403s, as does the bare URL.
+
 ## Gotchas
 
+- Never POST Echo360's `last-played-to-seconds`: an embed launch already records a view under the student's name, and Oculus reports no playback.
 - Every sign-in by a person must end in `auth::session_established` (`session_mark(true)`), and keyd's own sign-ins mark themselves — the startup probe reads the flag first, and without it a valid session opens disconnected.
 - keyd calls (`session_get`, `session_status`, `session_put`) can wait on the keychain prompt for 60 s: never from the main thread or a WebKit callback.
 - Holding a `canvas_session` is not success: Canvas issues an anonymous one before auth, so `complete_saml` accepts one only after posting an assertion and `sign_in` verifies it against `/api/v1/users/self` before writing it.

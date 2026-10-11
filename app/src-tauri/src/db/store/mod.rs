@@ -5,6 +5,7 @@
 
 mod calendar;
 mod content_end;
+mod echo_embeds;
 mod files;
 mod lectures;
 mod pool;
@@ -15,6 +16,7 @@ mod tests;
 
 pub use calendar::*;
 pub use content_end::*;
+pub use echo_embeds::*;
 pub use files::*;
 pub use lectures::*;
 pub use pool::*;

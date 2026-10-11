@@ -324,6 +324,9 @@ never creates the database, so a fresh machine opens the app once first.
 - A parse writes `pages.markdown` without waiting on the embed, so a file with
   no embeddings is still found by keyword.
 - `lecture_chapters` is derived and regenerable ([chapters.md](./chapters.md)).
+- `echo_embeds` caches each Canvas page embed's Echo360 identity and its
+  downloaded file, written only by Rust (`db::store::upsert_echo_embed`);
+  it cascades with the subject ([sync.md](./sync.md#an-embedded-echo360-video-is-resolved-and-downloaded-by-its-card)).
 - `calendar_events` is the one table a sync replaces rather than upserts, so a
   cancelled class disappears ([calendar.md](./calendar.md)).
 - `projects`, `project_tasks` and `local_events` hold the student's own rows,

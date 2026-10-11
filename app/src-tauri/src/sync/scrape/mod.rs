@@ -11,6 +11,7 @@ use crate::sync::{
     Engine, FileEvent, FileFailed, FileStart, Progress, Reporter, Subject, SyncOptions,
 };
 
+pub(crate) mod embeds;
 pub(crate) mod videos;
 pub use videos::VideoCancels;
 

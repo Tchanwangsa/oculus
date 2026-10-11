@@ -62,9 +62,12 @@ before leaving a playing lecture.
   (`newFilesStore`); a switcher row's is the sum of its subject's tabs. A switch
   navigates the pane's router to the same top-level tab of the other subject;
   anything deeper lands on that tab's default. Files is one tab whose sub-tabs are
-  routes (`files/downloads`, `files/uploads`, `files/documents`), and its
-  `useFilesTab()` context *extends* the subject, because `useOutletContext`
-  reads the nearest Outlet and a different shape would make `useSubject()` lie.
+  routes (`files/downloads`, `files/media`, `files/uploads`, `files/documents`),
+  and its `useFilesTab()` context *extends* the subject, because
+  `useOutletContext` reads the nearest Outlet and a different shape would make
+  `useSubject()` lie. Downloads and Media split the `file` rows: Media lists the
+  videos (`isVideoFile`), Downloads everything else, so no file shows twice; the
+  student's own videos stay in Uploads.
 - **`/subjects` is a redirect, not a page** (`SubjectsRedirect`): it replaces
   itself with the Overview of the last subject `SubjectLayout` resolved
   (`localStorage`, `oculus-last-subject`), else the first current subject,
