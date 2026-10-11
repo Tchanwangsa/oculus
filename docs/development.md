@@ -419,6 +419,7 @@ without keyd — neither is an environment variable.
 
 ## Gotchas
 
+- A Rust build sitting at 0% CPU is macOS scanning each new build script and proc-macro (`syspolicyd`). Add every app that starts builds (terminal, editor) under System Settings → Privacy & Security → Developer Tools, then relaunch it. Claude Code runs its agents under its own bundle, not Claude.app: add `~/Library/Application Support/Claude/claude-code/<version>/<hash>/claude.app` (⌘⇧G in the picker). A build with no `GK evaluateScanResult` line for its `build_script_build` in `/usr/bin/log show --predicate 'process == "syspolicyd"'` is exempt. Every compile runs under one shared sccache server, which belongs to whichever app started it, so restart it (`sccache --stop-server`) after adding one.
 - Any build of the crate copies the `binaries/` sidecar to `target/<profile>/oculus` — a stale sidecar means a stale CLI.
 - `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
 - rust-analyzer sharing `app/src-tauri/target/` takes cargo's build lock and stalls the preflight's builds. The repo's `.zed/settings.json` sets rust-analyzer's `cargo.targetDir` to `true`, which moves it to `target/rust-analyzer`; other editors need the same setting.
