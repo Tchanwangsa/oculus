@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,11 +29,13 @@ afterEach(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-function download(install = (buf, partial) => writeFileSync(partial, buf)) {
+function download(install = (buf, partial) => writeFileSync(partial, buf), sha256) {
   return fetchNative("test", { [host]: "test.bin" }, (asset) => ({
-    asset, dest, url: "https://invalid.test/binary", install,
+    asset, dest, url: "https://invalid.test/binary", install, sha256,
   }));
 }
+
+const sha256Of = (buf) => createHash("sha256").update(buf).digest("hex");
 
 test("downloads follow redirects and install the complete payload", async () => {
   const requests = [];
@@ -101,4 +104,26 @@ test("concurrent downloads use independent partial files", async () => {
     if (partials.length === 2) release();
     await bothInstalling;
   }
+});
+
+test("a download that misses its pinned SHA-256 never replaces the cache", async () => {
+  writeFileSync(dest, "previous");
+  await expect(download(undefined, "0".repeat(64))).rejects.toThrow("expected 0000");
+  expect(readFileSync(dest, "utf8")).toBe("previous");
+  expect(readdirSync(scratch)).toEqual(["binary"]);
+});
+
+test("a cached binary with another hash is downloaded again", async () => {
+  process.argv.pop();
+  writeFileSync(dest, Buffer.alloc(1_000_001, "o"));
+  await download(undefined, sha256Of(Buffer.alloc(1_000_001, "n")));
+  expect(downloads).toBe(1);
+  expect(readFileSync(dest)[0]).toBe("n".charCodeAt(0));
+});
+
+test("a cached binary matching its pinned hash is kept", async () => {
+  process.argv.pop();
+  writeFileSync(dest, Buffer.alloc(1_000_001, "o"));
+  await download(undefined, sha256Of(Buffer.alloc(1_000_001, "o")));
+  expect(downloads).toBe(0);
 });
