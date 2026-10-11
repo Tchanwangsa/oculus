@@ -4,6 +4,7 @@
 
 use super::{call, host};
 use serde_json::Value;
+use vello_cpu::kurbo::{BezPath, ParamCurve};
 
 fn tree(name: &str, tsx: &str) -> Value {
     let mut h = host();
@@ -204,11 +205,80 @@ fn arrows_are_a_trimmed_shaft_and_a_head() {
         d.starts_with("M 0 0 L ") && (end - 89.2).abs() < 1e-9,
         "{d}"
     );
-    assert_eq!(
-        kids[1]["style"]["opacity"], 0,
-        "the head waits for the last 15%"
-    );
+    assert_eq!(kids[1]["key"], "a:head");
     assert_eq!(kids[1]["fill"], "#ff0000");
+}
+
+/// Where the painter's trim of a resolved shaft ends.
+fn drawn_end(shaft: &Value) -> (f64, f64) {
+    let d = BezPath::from_svg(shaft["d"].as_str().unwrap()).unwrap();
+    let to = shaft["trim"][1].as_f64().unwrap();
+    let pieces = crate::paint::trim(&d, 0.0, to);
+    let end = pieces.last().unwrap().path.segments().last().unwrap().end();
+    (end.x, end.y)
+}
+
+/// At every progress the shaft's drawn end is where the head says it is:
+/// `back` behind the tip along the head's axis, which is `back / size` of
+/// the way from the tip to the base centre whatever the head's scale.
+#[test]
+fn the_arrow_head_rides_the_drawn_end_of_the_shaft() {
+    // (points, curve, stroke width): straight; the loop (down, a long run
+    // left, a short run up); a curve.
+    let cases: [(&str, f64, f64); 3] = [
+        ("[[100, 100], [900, 400]]", 0.0, 4.0),
+        (
+            "[[1380, 560], [1380, 680], [540, 680], [540, 560]]",
+            0.0,
+            8.0,
+        ),
+        (
+            "[[300, 800], [800, 300], [1300, 700], [1700, 400]]",
+            1.0,
+            6.0,
+        ),
+    ];
+    let steps = 200;
+    let mut worst = 0.0f64;
+    for (points, curve, width) in cases {
+        let pts: Vec<[f64; 2]> = serde_json::from_str(points).unwrap();
+        let [a, b] = [pts[pts.len() - 2], pts[pts.len() - 1]];
+        let size = width * 4.5;
+        let back = (size * 0.6).min((b[0] - a[0]).hypot(b[1] - a[1]) * 0.9);
+        let arrows: String = (0..=steps)
+            .map(|i| {
+                let p = f64::from(i) / f64::from(steps);
+                format!("<Arrow points={{{points}}} curve={{{curve}}} progress={{{p}}} stroke={{{{ width: {width} }}}} />\n")
+            })
+            .collect();
+        let t = tree(
+            "Ride",
+            &format!("export const props = {{}};\nexport default () => <Box>\n{arrows}</Box>;\n"),
+        );
+        let kids = t["children"].as_array().unwrap();
+        assert_eq!(kids.len(), 2 * (steps as usize + 1));
+        for (i, pair) in kids.chunks(2).enumerate() {
+            let hd = path_numbers(pair[1]["d"].as_str().unwrap());
+            let tip = (hd[0], hd[1]);
+            let base = ((hd[2] + hd[4]) / 2.0, (hd[3] + hd[5]) / 2.0);
+            let f = back / size;
+            let attach = (tip.0 + (base.0 - tip.0) * f, tip.1 + (base.1 - tip.1) * f);
+            let gap = if i == 0 {
+                // Nothing is drawn yet, and the head is a point at the start.
+                (tip.0 - pts[0][0]).hypot(tip.1 - pts[0][1])
+            } else {
+                let end = drawn_end(&pair[0]);
+                (end.0 - attach.0).hypot(end.1 - attach.1)
+            };
+            worst = worst.max(gap);
+            assert!(gap < 0.5, "{points} at {i}/{steps}: gap {gap} px");
+        }
+        // At 1 the tip is the last point.
+        let hd = path_numbers(kids[kids.len() - 1]["d"].as_str().unwrap());
+        let miss = (hd[0] - b[0]).hypot(hd[1] - b[1]);
+        assert!(miss < 0.5, "{points}: tip {miss} px off the last point");
+    }
+    eprintln!("worst head gap {worst:e} px");
 }
 
 #[test]

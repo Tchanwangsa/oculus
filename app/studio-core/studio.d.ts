@@ -286,7 +286,8 @@ declare const Camera: Component<{
   children?: Children;
 }>;
 /**
- * A stroke through `points` (frame px) drawn up to `progress` (0 to 1), with a head that grows in over the last 15%.
+ * A stroke through `points` (frame px) drawn up to `progress` (0 to 1), with a head riding the drawn end along the
+ * shaft's tangent there (it grows in over the first head length of shaft), so the arrow reads as being drawn.
  * Two absolute full-frame Paths: its parent must fill the frame.
  */
 declare const Arrow: Component<{

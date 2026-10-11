@@ -591,10 +591,15 @@ carries the element's TSX line.
   `revealProgress(t, at, dur, easing?)` feeds `progress`.
 - `<Arrow points curve progress head stroke>` strokes through `points`
   (frame px; `curve` 0 is straight segments, otherwise a Catmull-Rom curve)
-  up to `progress`, and fades and grows a head (`head` px, default 4.5 ×
-  the stroke width, 0 for none) in over the last 15%. It is two absolute,
-  full-frame Paths with the frame as viewBox, so its parent must fill the
-  frame.
+  up to `progress`, with a head (`head` px, default 4.5 × the stroke width,
+  0 for none) riding the drawn end along the shaft's tangent there, so the
+  arrow reads as being drawn. The shaft ends inside the head, a fixed
+  pull-back behind its tip, so the round cap never pokes past it; the head
+  grows in from nothing over the first head length of shaft. The head is
+  placed by `__studioPathEnd`, a native that measures arc length as `trim`
+  does (`paint/path/trim.rs`), so the two cannot drift apart. It is two
+  absolute, full-frame Paths with the frame as viewBox, so its parent must
+  fill the frame.
 
 ## Transitions play over the incoming scene's head
 

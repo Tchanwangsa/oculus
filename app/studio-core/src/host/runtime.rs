@@ -11,6 +11,7 @@ use rquickjs::context::intrinsic::{
     Eval, Json, MapSet, Promise, Proxy, RegExp, RegExpCompiler, TypedArrays,
 };
 use rquickjs::{Context, Ctx, Function, Module, Runtime, WriteOptions};
+use vello_cpu::kurbo::BezPath;
 
 const MEMORY_LIMIT: usize = 256 << 20;
 const STACK_LIMIT: usize = 1 << 20;
@@ -83,13 +84,29 @@ pub fn install(c: &Ctx<'_>, prelude: &[u8]) -> Result<(), StudioError> {
     })
 }
 
-/// `__studioClosest(name, candidates)`: `suggest::closest` for the prelude
-/// (`word()`'s "closest:" hint), or `undefined`.
-pub fn install_closest(c: &Ctx<'_>) -> Result<(), StudioError> {
+/// The prelude's natives. `__studioClosest(name, candidates)` is
+/// `suggest::closest` (`word()`'s "closest:" hint), or `undefined`.
+/// `__studioPathEnd(d, fraction)` is where a `[0, fraction]` trim of `d` ends,
+/// `[x, y, ux, uy, length]` with a unit tangent, measured as the trim
+/// measures it; `undefined` for bad data or a path with no length.
+pub fn install_natives(c: &Ctx<'_>) -> Result<(), StudioError> {
     let closest = |name: String, candidates: Vec<String>| {
         crate::suggest::closest(&name, candidates.iter().map(String::as_str)).map(str::to_owned)
     };
+    let path_end = |d: String, fraction: f64| {
+        let path = BezPath::from_svg(&d).ok()?;
+        let e = crate::paint::end_of(&path, fraction)?;
+        Some(vec![
+            e.point.x,
+            e.point.y,
+            e.tangent.x,
+            e.tangent.y,
+            e.length,
+        ])
+    };
     Function::new(c.clone(), closest)
         .and_then(|f| c.globals().set("__studioClosest", f))
+        .and_then(|()| Function::new(c.clone(), path_end))
+        .and_then(|f| c.globals().set("__studioPathEnd", f))
         .map_err(host)
 }

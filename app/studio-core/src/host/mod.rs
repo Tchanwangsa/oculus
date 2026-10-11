@@ -203,7 +203,7 @@ impl Host {
         self.budget.reset();
         let out = ctx.with(|c| {
             runtime::install(&c, &self.prelude)?;
-            runtime::install_closest(&c)?;
+            runtime::install_natives(&c)?;
             let set: Function = c
                 .globals()
                 .get("__studioSetTheme")
