@@ -33,6 +33,26 @@ enum Shortcut {
     Slot(usize),
 }
 
+impl Shortcut {
+    fn focuses_shell(&self, page: bool) -> bool {
+        page && matches!(
+            self,
+            Self::Slot(_)
+                | Self::Item(
+                    SEARCH
+                        | ADDRESS
+                        | NEW_TAB
+                        | CLOSE_TAB
+                        | REOPEN_TAB
+                        | LAST_TAB
+                        | SIDE_PANEL
+                        | SIDE_NEXT
+                        | SIDE_PREV
+                )
+        )
+    }
+}
+
 fn shortcut(key: u32, ctrl: bool, shift: bool, alt: bool, page: bool) -> Option<Shortcut> {
     if !ctrl || alt {
         // Ctrl+Alt can be AltGr on international keyboard layouts.
@@ -116,6 +136,16 @@ pub(crate) fn install(webview: &tauri::Webview<tauri::Wry>, page: bool) {
                 std::thread::spawn(move || {
                     app.clone()
                         .run_on_main_thread(move || {
+                            // DOM autofocus cannot move focus between native
+                            // WebView2 controllers. Focus the shell before its
+                            // event; a destination browser reclaims it on place.
+                            if action.focuses_shell(page) {
+                                if let Some(main) = app.get_webview("main") {
+                                    if let Err(error) = main.set_focus() {
+                                        eprintln!("[oculus] could not focus the shell: {error}");
+                                    }
+                                }
+                            }
                             let id = match action {
                                 Shortcut::Item(id) => id.to_string(),
                                 Shortcut::Slot(slot) => format!("{TAB_SLOT}{}", slot + 1),
@@ -230,6 +260,44 @@ mod tests {
             shortcut(0x46, true, false, false, false),
             Some(Shortcut::Item(FIND))
         );
+    }
+
+    #[test]
+    fn browser_shell_actions_transfer_focus_without_taking_page_actions() {
+        for action in [
+            Shortcut::Item(SEARCH),
+            Shortcut::Item(ADDRESS),
+            Shortcut::Item(NEW_TAB),
+            Shortcut::Item(CLOSE_TAB),
+            Shortcut::Item(REOPEN_TAB),
+            Shortcut::Item(LAST_TAB),
+            Shortcut::Item(SIDE_PANEL),
+            Shortcut::Item(SIDE_NEXT),
+            Shortcut::Item(SIDE_PREV),
+            Shortcut::Slot(0),
+            Shortcut::Slot(7),
+        ] {
+            assert!(action.focuses_shell(true), "{action:?}");
+            assert!(!action.focuses_shell(false), "{action:?}");
+        }
+        for id in [
+            UNDO,
+            REDO,
+            SELECT_ALL,
+            FIND,
+            FIND_NEXT,
+            FIND_PREV,
+            RELOAD,
+            HARD_RELOAD,
+            BACK,
+            FORWARD,
+            ZOOM_IN,
+            ZOOM_OUT,
+            ZOOM_RESET,
+            CLOSE_WINDOW,
+        ] {
+            assert!(!Shortcut::Item(id).focuses_shell(true), "{id}");
+        }
     }
 
     #[test]

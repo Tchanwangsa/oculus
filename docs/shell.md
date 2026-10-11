@@ -139,7 +139,10 @@ while Ctrl+Shift+Z is Redo.
   shortcut labels without native accelerators, so the host loop cannot consume
   them before the controller applies its policy. Browser pages keep their
   Ctrl+Z, Ctrl+A, clipboard and find keys; app tab, navigation and zoom keys
-  reach the shell.
+  reach the shell. Search, Address and tab or side-panel changes from a browser
+  focus the main WebView2 controller before emitting their event, so DOM
+  autofocus receives typing and Escape. A destination browser reclaims focus
+  when placed; page reload, history and zoom retain their controller's focus.
 - **A browser page gets ⌘-keys before the menu**, as in Safari, so a site's
   own ⌘Z/⌘A/⌘F (Google Docs) work; a key the page doesn't take falls through
   to the menu. The app's tab and window keys (⌘T, ⌘W, ⌘N, ⌘K, ⌘L, ⌘1–9 and

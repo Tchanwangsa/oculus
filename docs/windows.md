@@ -117,7 +117,8 @@ corners are unavailable. The suggestion list hides a page without a snapshot.
 The tab bar supplies caption buttons and Ctrl labels; its custom caption has
 no native Windows 11 snap-layout flyout.
 Window shortcuts use WebView2's controller callback and the shared menu
-handler; browser pages keep editing and find shortcuts. See
+handler; browser pages keep editing and find shortcuts. Moving from a native
+browser into a shell input also transfers native controller focus. See
 [shell.md](./shell.md#the-shell-owns-tabs-side-panels-and-every-window-shortcut)
 for keyboard ownership.
 
