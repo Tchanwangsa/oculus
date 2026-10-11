@@ -18,9 +18,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use studio_core::{
-    Manifest, ManifestGap, ManifestScene, ManifestWord, Project, MANIFEST_PATH, MAX_NARRATION_SECS,
-};
+use studio_core::{Manifest, ManifestGap, ManifestScene, ManifestWord, Project, MANIFEST_PATH};
 
 use super::audio::resample_to_16k;
 use super::timing::{self, Alignment};
@@ -216,11 +214,6 @@ fn make_clip(
     let speech = tts::synthesise(voice, text).map_err(fail)?;
     let synth_ms = started.elapsed().as_millis() as u64;
     let duration = speech.decoded.duration;
-    if duration > MAX_NARRATION_SECS {
-        return Err(fail(
-            NarrationError::TooLong { seconds: duration }.to_string(),
-        ));
-    }
     let started = Instant::now();
     let pcm = resample_to_16k(&speech.decoded.samples, speech.decoded.sample_rate)
         .map_err(|e| fail(e.to_string()))?;

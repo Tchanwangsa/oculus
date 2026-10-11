@@ -22,10 +22,6 @@ pub const MANIFEST_PATH: &str = "narration/manifest.json";
 /// and their smeared neighbours fell to -12 to -18. Re-check per TTS engine.
 pub const LOW_CONFIDENCE: f64 = -8.0;
 
-/// The longest narration clip lint accepts, in seconds: the aligner's
-/// memory grows with the square of the clip's length.
-pub const MAX_NARRATION_SECS: f64 = 60.0;
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {

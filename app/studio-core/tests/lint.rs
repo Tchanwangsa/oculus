@@ -6,7 +6,7 @@ mod common;
 
 use common::fixture;
 use serde_json::json;
-use studio_core::{LOW_CONFIDENCE, MAX_NARRATION_SECS, Project, StudioError};
+use studio_core::{LOW_CONFIDENCE, Project, StudioError};
 
 #[test]
 fn clean_projects_lint_clean() {
@@ -157,7 +157,7 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
         "narration/manifest.json",
         &json!({ "version": 1, "scenes": {
             "a": { "key": "k", "text": "Hello, a rate of 0.01, e.g. here.", "audio": "k.wav",
-                   "duration": MAX_NARRATION_SECS + 1.0,
+                   "duration": 6.0,
                    "words": [word("Hello,", -0.5), word("rate", LOW_CONFIDENCE - 1.0)],
                    "gaps": [{ "after": null, "start": 0.0, "end": 0.1, "heard": "ah" },
                             { "after": 0, "start": 0.4, "end": 0.6, "heard": "um" }] },
@@ -183,9 +183,6 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
     has("scene 0 `a` (Say): scene `a`: the aligner is unsure of `rate` at 0.35 s");
     has("scene 1 `b` (Say): scene `b`: no narration for its current text");
     has(
-        "scene 0 `a` (Say): scene `a`: narration is 61.0 s; split the paragraph into scenes of at most 60 s",
-    );
-    has(
         "scene 0 `a` (Say): scene `a`: the audio has unscripted speech after `Hello,` (heard \"um\")",
     );
     has(
@@ -196,7 +193,7 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
         text.contains("`word(\"helo\")`: no such word in scene `a`; closest: hello"),
         "{text}"
     );
-    assert_eq!(lines.len(), 9, "{text}");
+    assert_eq!(lines.len(), 8, "{text}");
     let orphan = report.issues.iter().find(|i| i.scene.is_none()).unwrap();
     assert_eq!(
         (orphan.id.as_deref(), orphan.component.as_deref()),

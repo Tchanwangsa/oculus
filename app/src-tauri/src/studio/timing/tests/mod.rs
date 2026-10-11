@@ -1,9 +1,11 @@
 mod assemble;
+mod chunked;
 mod gaps;
 mod model;
 mod parity;
 mod targets;
 mod viterbi;
+mod windows;
 
 use super::targets::{label, BLANK, SEPARATOR, VOCAB};
 

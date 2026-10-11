@@ -1,13 +1,57 @@
 //! Audio to per-frame label log-probabilities through the ONNX model.
 
+use std::path::Path;
+
 use ort::session::Session;
 use ort::value::Tensor;
 
 use super::targets::VOCAB;
+use super::windows::{frames, samples, Windows};
 use crate::studio::NarrationError;
 
-/// Zero mean, unit variance over the whole clip, as wav2vec2's feature
-/// extractor does (`do_normalize`); the exported graph does not. Computed in
+/// `[frames, VOCAB]` log-probs for the whole of mono 16 kHz `pcm` from the
+/// model at `model`, one window of `windows`' plan at a time. A clip that
+/// fits in one pass runs as a whole; otherwise each window runs with its
+/// context, normalised on its own, and keeps only its own frames.
+///
+/// Each run opens its own session and drops it: a session reused across
+/// runs keeps growing, and a load costs only about 0.2 s.
+pub(super) fn emissions(
+    model: &Path,
+    pcm: &[f32],
+    windows: &Windows,
+) -> Result<Vec<f32>, NarrationError> {
+    let plan = windows.plan(pcm);
+    if plan.len() == 1 {
+        return Ok(log_softmax(&logits(&mut session(model)?, normalise(pcm))?));
+    }
+    let total = frames(pcm.len());
+    let mut out = Vec::with_capacity(total * VOCAB);
+    for own in &plan {
+        let run = windows.run(own, total);
+        let audio = &pcm[samples(&run)];
+        let logits = logits(&mut session(model)?, normalise(audio))?;
+        if logits.len() != run.len() * VOCAB {
+            return Err(NarrationError::Onnx(format!(
+                "the model gave {} frames for {} samples, expected {}",
+                logits.len() / VOCAB,
+                audio.len(),
+                run.len()
+            )));
+        }
+        let keep = (own.start - run.start) * VOCAB..(own.end - run.start) * VOCAB;
+        out.extend(log_softmax(&logits[keep]));
+    }
+    Ok(out)
+}
+
+fn session(model: &Path) -> Result<Session, NarrationError> {
+    crate::runtime::onnx::session(model).map_err(NarrationError::Onnx)
+}
+
+/// Zero mean, unit variance over `x` (a clip or one window of it), as
+/// wav2vec2's feature extractor does (`do_normalize`); the exported graph
+/// does not. Computed in
 /// f64 and rounded once, which matched Python frame for frame.
 pub(super) fn normalise(x: &[f32]) -> Vec<f32> {
     let n = x.len() as f64;

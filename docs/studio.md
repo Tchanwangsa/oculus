@@ -240,10 +240,36 @@ aligner at a copy elsewhere instead, for development and the parity tests.
   confidence, so the aligner also reports each stretch between words with
   4 or more frames whose best label is a letter, with what it heard there
   ("THICK").
-- **Limits.** A clip over `MAX_NARRATION_SECS` (60 s) is refused: memory
-  grows with the square of its length (0.7 GB at 17 s, 2.2 GB at 57 s). Each
-  alignment opens its own session and drops it, since a reused one keeps
-  growing. Threads: half the cores, at most 4. No timeouts.
+- **Long clips run in windows** (`timing/windows.rs`), since the model's
+  self-attention makes its memory grow with the square of the audio it sees
+  (over 2 GB for a 57 s clip in one pass). A clip of up to 40 s runs in one
+  pass. A longer one is cut into `ceil(length / 30 s)` windows of even
+  length, each cut moved to the quietest 20 ms frame (least energy, ties to
+  the nearest) within 3 s of its even position, and no window under 15 s.
+  Each window runs with 2 s of context audio on both sides, normalised on
+  its own, and keeps only its own frames, so the stitched emissions have
+  exactly the frames one pass would (a frame per 320 samples whose 400
+  sample receptive field fits). The Viterbi then runs once over the whole
+  clip: words never meet a seam. No run sees more than 40 s, so peak
+  memory stays about 1.3-1.6 GB at any length.
+- **Windows change a few edges.** wav2vec2 attends over everything it is
+  given, so a window's emissions differ from one pass's throughout, not only
+  near its cuts (the cuts themselves sit in silence). On a 57 s clip, two
+  windows moved 15 of 304 word edges by one frame (20 ms) and none further,
+  and confidences by up to 1.1; shorter windows move more (20 s: 10%, some
+  by two frames). Appending a second of silence to a one-pass clip moves an
+  edge too.
+- **Sessions and threads.** Each model run (the clip, or each window) opens
+  its own session and drops it, since a reused one keeps growing (two
+  windows of a 57 s clip: 1.8 GB on one session, 1.3 GB on one each); a
+  load is about 0.2 s. Threads: half the cores, at most 4. No timeouts.
+- **The Viterbi** keeps a byte of backpointer per frame and state (two per
+  letter or word break, plus one): about 6 MB per minute squared of
+  speech, 150 MB at 5 minutes, 240 MB at 6.
+- **Measured** (debug build, Kokoro `af_heart`): a 170 s clip timed in
+  9.2 s and a 371 s clip (13 windows) in 22.5 s, both at a 1.6 GB peak,
+  no word under -4.2, no gaps, and the last word ending within 40 ms of
+  the speech.
 
 ## Narration is made by `oculus studio narrate`
 
@@ -276,10 +302,9 @@ manifest. Scenes run one at a time, in video order.
   whose `narration/<key>.wav` exists is kept (`cached`) unless `--force`;
   editing one paragraph re-requests that one scene.
 - **A new clip** is saved byte for byte as the server sent it to
-  `narration/<key>.wav`; its duration comes from the decoded samples, a clip
-  over `MAX_NARRATION_SECS` is refused before alignment ("split the
-  paragraph"), and the rest is resampled to 16 kHz and timed against the
-  section's whitespace-separated words. The aligner model is checked before
+  `narration/<key>.wav`; its duration comes from the decoded samples, and
+  it is resampled to 16 kHz and timed against the section's
+  whitespace-separated words, at any length. The aligner model is checked before
   the first TTS request, so a missing one costs no synthesis and fails with
   ``download it in Settings -> Voice or run `oculus studio aligner
   download` ``.
@@ -722,8 +747,6 @@ For a narrated video lint also reports, each naming the scene id:
   `percent` ``). Letters and `, . ; : ! ? ' " - — ( )` pass, and `*` or `_`
   inside a word is emphasis. The rules are in
   `app/studio-core/src/project/lint/spoken.rs`;
-- a clip longer than `MAX_NARRATION_SECS` (60 s): the aligner's memory grows
-  with the square of the clip's length, so the paragraph should be split;
 - each word whose aligner confidence is below `LOW_CONFIDENCE` (-8.0,
   measured on Kokoro, where clean words stayed above -4.83; re-check it for
   another TTS engine), since a mangled word smears its neighbours' timing;

@@ -122,13 +122,6 @@ impl Ctx {
                 DIM
             )
         );
-        if d.duration > studio_core::MAX_NARRATION_SECS {
-            println!(
-                "{} over {} s: `narrate` refuses a clip this long; split the text",
-                paint("warning:", YELLOW),
-                studio_core::MAX_NARRATION_SECS
-            );
-        }
         Ok(())
     }
 }
