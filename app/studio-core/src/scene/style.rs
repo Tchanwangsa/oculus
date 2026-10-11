@@ -6,9 +6,10 @@
 //! (sigma = blur / 2).
 
 use super::color::Color;
+use super::motion::{Inset, Origin, Reveal};
 use super::values::{
-    Align, Border, Dim, Fill, FlexDirection, FlexWrap, Justify, ObjectFit, Position, Shadow, Sides,
-    TextAlign, describe,
+    Align, Border, Dim, Fill, FlexDirection, FlexWrap, Justify, NumericVariant, ObjectFit,
+    Position, Shadow, Sides, TextAlign, describe,
 };
 use crate::suggest::did_you_mean;
 use serde::Deserialize;
@@ -76,6 +77,8 @@ style! {
     "translateY" => translate_y: f32,
     "scale" => scale: f32,
     "rotate" => rotate: f32,
+    "transformOrigin" => transform_origin: Origin,
+    "clipInset" => clip_inset: Inset,
     "fontFamily" => font_family: String,
     "fontSize" => font_size: f32,
     "fontWeight" => font_weight: f32,
@@ -83,6 +86,8 @@ style! {
     "lineHeight" => line_height: f32,
     "letterSpacing" => letter_spacing: f32,
     "textAlign" => text_align: TextAlign,
+    "fontVariantNumeric" => font_variant_numeric: NumericVariant,
+    "reveal" => reveal: Reveal,
     "objectFit" => object_fit: ObjectFit,
 }
 

@@ -1,6 +1,8 @@
-//! JSON from the prelude's `h()` -> [`Node`]. The prelude already checks
-//! element props and `Text` children; this checks styles and the shape.
+//! JSON from the prelude's resolver -> [`Node`]. The prelude already checks
+//! element props and `Text` children; this checks styles, `Path` props and
+//! the shape.
 
+use super::path::parse_path;
 use super::style::Style;
 use super::{Kind, Node};
 use serde_json::{Map, Value};
@@ -28,7 +30,7 @@ fn parse(v: &Value, parent: &str, index: Option<usize>) -> Result<Node, NodeErro
     };
     let Some(obj) = v.as_object() else {
         return Err(fail(
-            "expected an element (Box, Text, Image, Stack or Row)".to_owned(),
+            "expected an element (Box, Text, Image, Path, Stack or Row)".to_owned(),
             parent,
             None,
             false,
@@ -38,9 +40,10 @@ fn parse(v: &Value, parent: &str, index: Option<usize>) -> Result<Node, NodeErro
         Some("box") => Kind::Box,
         Some("text") => Kind::Text,
         Some("image") => Kind::Image,
+        Some("path") => Kind::Path,
         _ => {
             return Err(fail(
-                "expected an element (Box, Text, Image, Stack or Row)".to_owned(),
+                "expected an element (Box, Text, Image, Path, Stack or Row)".to_owned(),
                 parent,
                 None,
                 false,
@@ -68,6 +71,12 @@ fn parse(v: &Value, parent: &str, index: Option<usize>) -> Result<Node, NodeErro
             .map(str::to_owned)
             .unwrap_or_default()
     };
+    let path_spec = match kind {
+        Kind::Path => Some(Box::new(
+            parse_path(obj).map_err(|e| fail(e, &path, loc, false))?,
+        )),
+        _ => None,
+    };
     let mut children = Vec::new();
     if let Some(Value::Array(kids)) = obj.get("children") {
         children.reserve(kids.len());
@@ -80,7 +89,9 @@ fn parse(v: &Value, parent: &str, index: Option<usize>) -> Result<Node, NodeErro
         style,
         text: str_field(obj, "text"),
         src: str_field(obj, "src"),
+        path: path_spec,
         children,
+        key: obj.get("key").and_then(Value::as_str).map(str::to_owned),
         loc,
     })
 }

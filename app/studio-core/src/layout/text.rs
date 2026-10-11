@@ -7,7 +7,7 @@
 //! reused for a frame is dropped, so the pool stays bounded.
 
 use crate::fonts::font_context;
-use crate::scene::{Style, TextAlign};
+use crate::scene::{NumericVariant, Style, TextAlign};
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontFamily, FontFamilyName, FontWeight, Layout,
     LayoutContext, LineHeight, StyleProperty,
@@ -25,6 +25,7 @@ pub struct TextKey {
     weight: u32,
     line_height: u32,
     letter_spacing: u32,
+    tabular: bool,
 }
 
 impl TextKey {
@@ -36,7 +37,13 @@ impl TextKey {
             weight: s.font_weight.unwrap_or(400.0).to_bits(),
             line_height: s.line_height.unwrap_or(1.25).to_bits(),
             letter_spacing: s.letter_spacing.unwrap_or(0.0).to_bits(),
+            tabular: s.font_variant_numeric == Some(NumericVariant::TabularNums),
         }
+    }
+
+    /// The string that was shaped.
+    pub fn text(&self) -> &str {
+        &self.text
     }
 }
 
@@ -91,6 +98,9 @@ impl Typeset {
         b.push_default(StyleProperty::LetterSpacing(f32::from_bits(
             key.letter_spacing,
         )));
+        if key.tabular {
+            b.push_default(StyleProperty::FontFeatures("\"tnum\" 1".into()));
+        }
         b.build(&key.text)
     }
 

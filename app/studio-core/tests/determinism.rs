@@ -8,7 +8,16 @@ use studio_core::{Project, RenderOptions, Renderer, Time};
 
 #[test]
 fn two_renderers_agree_byte_for_byte() {
-    for (name, t) in [("title-card", 1.0), ("layout", 0.0), ("text-motion", 0.45)] {
+    for (name, t) in [
+        ("title-card", 1.0),
+        ("layout", 0.0),
+        ("text-motion", 0.45),
+        ("reveal", 1.0),
+        ("stroke-draw", 0.6),
+        ("counter", 1.0),
+        ("enter", 0.75),
+        ("camera", 1.0),
+    ] {
         let project = Project::load(fixture(name)).unwrap();
         let mut a = Renderer::new(&project, RenderOptions::default()).unwrap();
         let mut b = Renderer::new(&project, RenderOptions::default()).unwrap();

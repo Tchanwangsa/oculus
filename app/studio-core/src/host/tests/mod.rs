@@ -345,3 +345,6 @@ fn the_heap_does_not_grow_across_calls() {
     println!("QuickJS heap after 1 call: {start} B, after 2001: {end} B");
     assert_eq!(start, end);
 }
+
+mod motion;
+mod resolve;
