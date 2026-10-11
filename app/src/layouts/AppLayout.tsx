@@ -14,6 +14,7 @@ import {
   stepZoom,
 } from "@/lib/browser";
 import { useActivityPing } from "@/hooks/backend/useActivityPing";
+import { useJobAudit } from "@/hooks/agents/useJobAudit";
 import { useBrowserTabs } from "@/hooks/shell/useBrowserTabs";
 import { useTauriEvent, useWindowEvent } from "@/hooks/backend/useEvents";
 import { routeEdit, routeSelectAll } from "@/lib/menu/editRouting";
@@ -58,6 +59,8 @@ export default function AppLayout() {
   useNewTabClicks();
 
   useActivityPing();
+
+  useJobAudit();
 
   useEffect(() => containSelection(), []);
 

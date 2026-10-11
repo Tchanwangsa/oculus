@@ -16,7 +16,7 @@ ends](#where-the-lecture-ends) before the Q&A (`oculus lecture end`).
 | Row writes, status, claims, reconcile; the tables (migrations 29, 42) | `app/src-tauri/src/db/store/` (`lectures.rs`, `content_end.rs`, `files.rs`); `app/src-tauri/src/db/migrations.rs` |
 | Where the lecture ends: window, picture hint, brief, prompt, reply parser, validator, app command | `app/src-tauri/src/lectures/lecture_end/` |
 | `oculus lecture candidates` / `chapters` / `end` | `app/src-tauri/src/bin/oculus/commands/lecture.rs` |
-| Which agent, model and effort each job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/pages/settings/library/JobsPage.tsx` |
+| Which agent, model and effort each job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/components/settings/jobs/` |
 | Transcript search and stable source indexes | `app/src/hooks/lectures/useTranscriptSearch.ts` |
 | The one-turn headless run chapters use; ffmpeg lookup | `run_once` in `app/src-tauri/src/harness/manager/one_off.rs`; `find_ffmpeg` in `app/src-tauri/src/sources/echo360/ffmpeg.rs` |
 | Frontend bindings, event names, `chapterEnds`; `spanAt` and the VTT parser | `app/src/lib/lectures/index.ts`, `app/src/lib/lectures/chapters.ts`, `app/src/lib/lectures/media/clock.ts`, `app/src/lib/lectures/media/vtt.ts` |

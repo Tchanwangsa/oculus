@@ -33,6 +33,9 @@ export const ModelPicker = memo(function ModelPicker({
   onProvider,
   onModel,
   onReasoning,
+  align = "start",
+  onOpenChange,
+  emptyLabel = "Choose a model",
   className,
 }: {
   providers: PickerProvider[];
@@ -44,9 +47,19 @@ export const ModelPicker = memo(function ModelPicker({
   onProvider: (p: Provider) => void;
   onModel: (m: string | null) => void;
   onReasoning: (level: string | null) => void;
+  /** Which trigger edge the menu lines up with; `end` for a trigger at a page's right edge. */
+  align?: "start" | "end";
+  /** Told whenever the menu opens or closes. */
+  onOpenChange?: (open: boolean) => void;
+  /** The trigger's text while no model is set. */
+  emptyLabel?: string;
   className?: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    onOpenChange?.(next);
+  };
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -98,7 +111,7 @@ export const ModelPicker = memo(function ModelPicker({
       )}
     >
       <ProviderMark provider={provider} className="size-3.5 shrink-0" />
-      <span className="min-w-0 truncate">{label ?? "Choose a model"}</span>
+      <span className="min-w-0 truncate">{label ?? emptyLabel}</span>
       {levelText ? <span className="shrink-0 text-muted-foreground">{levelText}</span> : null}
       <CaretDown className="size-3 shrink-0 text-muted-foreground" />
     </Button>
@@ -108,7 +121,7 @@ export const ModelPicker = memo(function ModelPicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       <PopoverContent
-        align="start"
+        align={align}
         sideOffset={6}
         className="flex max-h-[min(var(--radix-popover-content-available-height),28rem)] w-72 flex-col overflow-hidden p-0"
         onOpenAutoFocus={(e) => {
