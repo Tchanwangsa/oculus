@@ -249,6 +249,10 @@ pub fn run() {
             music::commands::music_seek,
             music::commands::music_volume,
             music::commands::music_play_context,
+            music::commands::music_play_track,
+            music::commands::music_playlists,
+            music::commands::music_search,
+            music::commands::music_duck,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

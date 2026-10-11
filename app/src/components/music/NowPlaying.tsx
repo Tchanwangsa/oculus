@@ -5,7 +5,7 @@ import { MusicSeek } from "./MusicSeek";
 import { MusicTransport } from "./MusicTransport";
 import { MusicVolume } from "./MusicVolume";
 
-/** What nothing playing says: there is no browsing in Oculus to start from. */
+/** What nothing playing says in the popover, which has no list to pick from. */
 export const NOTHING_PLAYING_HINT = "Choose Oculus as the device in Spotify.";
 
 /** The rail popover's player: the track, seek, transport, volume, and the way

@@ -203,7 +203,7 @@ impl Link<'_> {
                         self.config.device_id.clone(),
                     );
                     credentials = reusable.credentials.clone();
-                    if let Err(spirc) = state::set_spirc(app, id, Some(spirc)) {
+                    if let Err(spirc) = state::set_link(app, id, Some((spirc, session.clone()))) {
                         spirc.shutdown().ok();
                     }
                     state::update_run(app, id, |s| {
@@ -236,7 +236,7 @@ impl Link<'_> {
                         return End::Stopped;
                     }
 
-                    state::set_spirc(app, id, None).ok();
+                    state::set_link(app, id, None).ok();
                     if connected_at.elapsed() >= STABLE_AFTER {
                         backoff = BACKOFF_MIN;
                     }

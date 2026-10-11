@@ -2,6 +2,7 @@
 
 Spotify played natively: Oculus is a Spotify Connect device ("Oculus")
 through librespot, with audio out of CoreAudio and no Spotify app running.
+Spotify's Web API adds the account's playlists and search.
 Premium only, and off until Settings → Music turns it on. A session starts
 from `music_connect`, a finished `music_login`, or at startup while that
 switch is on.
@@ -15,6 +16,8 @@ switch is on.
 | The snapshot, the `music-state` event, the Spirc, run and login handles | `app/src-tauri/src/music/state.rs` |
 | Player events folded into the snapshot | `app/src-tauri/src/music/events.rs` |
 | A track and its cover URL | `app/src-tauri/src/music/track.rs` |
+| The Web API: Login5 token, rate-limit gate, playlists, search | `app/src-tauri/src/music/web/` |
+| The duck a focus mode calls | `app/src-tauri/src/music/duck.rs` |
 | The OAuth login and its callback on port 8898 | `app/src-tauri/src/music/login.rs` |
 | The stored credentials in keyd; keyd's `get` and its allowlist | `app/src-tauri/src/music/credentials.rs`, `app/keyd/core/src/ops/get.rs`, `app/keyd/core/src/names.rs` |
 | librespot's log lines, and the ones that mean a track will not play | `app/src-tauri/src/music/logs.rs` |
@@ -26,6 +29,7 @@ switch is on.
 | Settings → Music | `app/src/pages/settings/integrations/MusicPage.tsx`, `app/src/components/settings/music/` |
 | The rail tile and its popover | `app/src/components/sidebar/MusicTile.tsx`, `app/src/components/music/NowPlaying.tsx` |
 | The full player (`/music`) and its parts | `app/src/pages/tools/MusicPage.tsx`, `app/src/components/music/` |
+| Playlists and search under the player | `app/src/components/music/library/` |
 
 ## Settings → Music is the one switch, and the only startup connect
 
@@ -67,6 +71,23 @@ switch is on.
   it moves.
 - **Play and pause are separate commands** from the toggle, so a click on a
   stale button, or the rule below, never does the opposite.
+
+## Under the player, the account's playlists and a search
+
+`MusicLibrary` sits below the player on `/music`; the rail popover has no
+list.
+
+- **"Your playlists" loads once per mount**, the first time the session is
+  connected; Rust answers from memory after its first fetch, so reopening the
+  player costs no call. The refresh button beside the heading asks Spotify
+  again. Rows show the cover, the name, and owner · N tracks; a click plays
+  the playlist (`music_play_context`).
+- **Search runs on Enter only**, never per keystroke: each search is a call
+  against the rate limit. Its results replace the playlists, grouped
+  Playlists, Albums, Tracks, until the field is cleared (its ×, or Escape).
+  A track plays from its place in its album (`music_play_track` with the
+  album as context), so playback goes on through the album.
+- Load and search errors sit inline where the list would be.
 
 ## Music and lecture audio never play together
 
@@ -154,8 +175,62 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    shutdown, which pauses and leaves Spotify's device list, gives it 10 s,
    then shuts the session down.
 
-`music_play_context` activates the device before it loads: Spotify ignores a
-load or transfer sent to a device that is not active.
+`music_play_context` and `music_play_track` activate the device before they
+load: Spotify ignores a load or transfer sent to a device that is not active.
+
+## The Web API runs on the session's Login5 token, with no Client ID of ours
+
+- **The token is `session.login5().auth_token()`** for the live session:
+  Login5 trades the session's stored credentials for an access token on the
+  same client id the player uses. A Client ID of our own would cap Spotify at
+  five users ([the login](#the-login-is-librespots-client-id-in-the-browser-back-on-port-8898)),
+  and keymaster's `token_provider().get_token` answers 403.
+- **It lives in memory only** (`web/token.rs`): kept for the session it came
+  from (each connection bumps a generation in `state.rs`) and asked for again
+  a minute before it expires. It is never written to keyd or disk and never
+  reaches the frontend; Rust makes every call.
+- **A 401 gets one new token and one more try**; if Login5 hands back the
+  token just refused, or the retry is refused too, the call fails with
+  "Spotify refused the Web API token (401)". A 403 is "Spotify refused the
+  request (403)". Nothing else is retried.
+- **Calls are blocking `ureq`** through `runtime::blocking::run`: librespot's
+  own HTTP client turns every non-2xx into a generic error and drops
+  `Retry-After`. A `next` link that leaves `https://api.spotify.com/v1/` is
+  refused.
+
+| Endpoint | Used for |
+| --- | --- |
+| `GET /v1/me/playlists?limit=50` | The playlists, following `next` up to 500, kept per account until a refresh |
+| `GET /v1/search?type=playlist,album,track&limit=10` | Search, ten of each |
+
+Covers are the smallest image at least 120 px wide, as Spotify gives the URL
+(a playlist's four-cover grid is on `mosaic.scdn.co`, with no file id to
+rebuild an `i.scdn.co` URL from). Entries that are null or lack a URI or name
+are dropped; a playlist's count is read from `tracks.total` or `items.total`.
+
+## A 429 closes every Web API call until its Retry-After
+
+librespot's client id is shared by every librespot-based player and is
+throttled hard. A 429 closes a gate in memory (`web/gate.rs`) for its
+`Retry-After` seconds (30 when it names none, a later deadline is never
+shortened). Until then each call fails at once with "Spotify is rate-limiting
+Oculus; try again in N s", without touching the network: a call made early
+only extends the wait. Nothing retries on its own.
+
+## `music_duck` is the seam a focus mode calls
+
+A focus mode lowers music with `music.duck(level)` and puts it back with
+`music.unduck()` (`music_duck` with a level or null). No mode logic lives in
+the music module.
+
+- **A duck sets the volume to `level`% of the volume before the first duck**,
+  which is kept; a second duck is a share of that kept volume, not of the
+  ducked one, and does not replace it.
+- **The unduck restores the kept volume**, and does nothing without one.
+- **A volume the user sets while ducked wins**: `music_volume`, or a
+  `VolumeChanged` from the Spotify app that is not the duck's own echo
+  (within 1%), drops the kept volume, so the unduck leaves their choice.
+- A dropped connection or a stop forgets the duck.
 
 ## Rust owns the state, and `music-state` carries all of it
 
@@ -203,10 +278,15 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_sign_out` | Disconnects and deletes `music.spotify` from keyd |
 | `music_play_pause`, `music_play`, `music_pause`, `music_next`, `music_prev` | Playback on the connected device; `music_pause` never starts it |
 | `music_shuffle(on)`, `music_repeat(on)` | Shuffle; repeat the context (off also clears a repeated track) |
-| `music_seek(position_ms)`, `music_volume(percent)` | Seek; volume 0–100 |
+| `music_seek(position_ms)`, `music_volume(percent)` | Seek; volume 0–100, which drops a held duck |
 | `music_play_context(uri)` | Activates the device, loads a `spotify:` context and plays it |
+| `music_play_track(uri, context_uri?)` | Plays a track from its place in the context, or alone without one |
+| `music_duck(level?)` | A level ducks to that share of the kept volume; null restores it |
+| `music_playlists(refresh)` | The account's playlists, from memory unless `refresh` |
+| `music_search(query)` | Playlists, albums and tracks; an empty query asks nothing |
 
-Playback commands fail with "Not connected to Spotify" without a session.
+Playback and Web API commands fail with "Not connected to Spotify" without a
+session.
 
 ## Gotchas
 
@@ -217,3 +297,6 @@ Playback commands fail with "Not connected to Spotify" without a session.
 - Constructing librespot's `Cache` writes the account's credentials to disk in plain text — never use it.
 - `music_play_pause` from the exclusive-playback rule would start music it meant to stop — use `music_pause`.
 - `cargo update` on librespot moves it off the pinned rev and can move tauri off 2.11.2 — bump the rev by hand.
+- `token_provider().get_token` (keymaster) answers 403 — the Web API token is Login5's.
+- A track URI is not a context librespot can load — `music_play_track` uses its album, or `from_tracks`.
+- Spotify pads search and playlist lists with `null` entries — parse items as optional.

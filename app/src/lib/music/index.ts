@@ -43,6 +43,32 @@ export interface MusicSnapshot {
   error: string | null;
 }
 
+/** One of the account's playlists (`music_playlists`). */
+export interface MusicPlaylist {
+  uri: string;
+  name: string;
+  owner: string | null;
+  track_count: number | null;
+  image_url: string | null;
+}
+
+/** One search hit (`music_search`). */
+export interface MusicSearchItem {
+  uri: string;
+  name: string;
+  /** The owner, the artists, or the artists and album. */
+  subtitle: string;
+  image_url: string | null;
+  /** A track's album, so the track plays on into it. */
+  context_uri: string | null;
+}
+
+export interface MusicSearchResults {
+  playlists: MusicSearchItem[];
+  albums: MusicSearchItem[];
+  tracks: MusicSearchItem[];
+}
+
 /** The settings row's `enabled`; anything unreadable is off. */
 export function musicEnabled(raw: string | null): boolean {
   if (!raw) return false;
@@ -84,4 +110,17 @@ export const music = {
   setRepeat: (on: boolean) => invoke("music_repeat", { on }),
   /** `spotify:playlist:…`, `spotify:album:…`; played on this device. */
   playContext: (uri: string) => invoke("music_play_context", { uri }),
+  /** A `spotify:track:…`, from its place in `contextUri` when given. */
+  playTrack: (uri: string, contextUri: string | null = null) =>
+    invoke("music_play_track", { uri, contextUri }),
+  /** Web API calls, rate-limited by Spotify: Rust keeps the playlists after
+   *  the first fetch, and a 429 refuses every call until its wait is over. */
+  playlists: (refresh = false) => invoke<MusicPlaylist[]>("music_playlists", { refresh }),
+  search: (query: string) => invoke<MusicSearchResults>("music_search", { query }),
+  /** The focus-mode seam: lower the volume to `level`% of what it was before
+   *  the first duck. A volume the user sets meanwhile wins. */
+  duck: (level: number) =>
+    invoke("music_duck", { level: Math.round(Math.min(100, Math.max(0, level))) }),
+  /** Put the pre-duck volume back; nothing without a held duck. */
+  unduck: () => invoke("music_duck", { level: null }),
 };
