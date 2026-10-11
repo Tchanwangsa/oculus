@@ -96,6 +96,8 @@ fn main() {
             StudioAction::Frame(a) => ctx.studio_frame(&a),
             StudioAction::Strip(a) => ctx.studio_strip(&a),
             StudioAction::Lint(a) => ctx.studio_lint(&a),
+            StudioAction::Gallery(a) => ctx.studio_gallery(&a),
+            StudioAction::Components { action } => ctx.studio_components(&action),
             StudioAction::Render(a) => ctx.studio_render(&a),
             StudioAction::Narrate(a) => ctx.studio_narrate(&a),
             StudioAction::Tts(a) => ctx.studio_tts(&a),

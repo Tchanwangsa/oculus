@@ -26,6 +26,7 @@ frames and contact sheets, lints, and narrates.
 | The element tree and its style keys | `app/studio-core/src/scene/` |
 | Layout (taffy, parley) and paint (vello_cpu); Path trim and Text reveal | `app/studio-core/src/layout/`, `app/studio-core/src/paint/` (`path/`, `text/`) |
 | Props schemas and their validation | `app/studio-core/src/schema/` |
+| Component and theme libraries: the starter set, seeding, the snapshot write path | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots) |
 | Galleries: each example of a component as a still, and its contact sheet | `app/studio-core/src/gallery/` |
 | Themes and bundled fonts | `app/studio-core/themes/`, `app/studio-core/fonts/`, `app/studio-core/src/theme/`, `app/studio-core/src/fonts/` |
 | Every error and its message | `app/studio-core/src/error.rs` |
@@ -35,7 +36,7 @@ frames and contact sheets, lints, and narrates.
 | Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`render.rs`, `narrate.rs`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`render.rs`, `narrate.rs`, `aligner.rs`, `gallery.rs`, `components.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -74,7 +75,11 @@ narration/    manifest.json and the clips it names
   whose id has no section is silent and needs a `hold`.
 - `voice` (optional: `model`, `voice`, `speed`) overrides Settings -> Voice
   for this video. studio-core only stores it; the app's narrator reads it.
-- `theme` is a bundled theme's name or a `.json` path relative to the folder.
+- `theme` is a bundled theme's name, a library theme's name (see "Libraries
+  cascade") or a `.json` path relative to the folder.
+- `subject` (optional) is the course the video belongs to: a folder name
+  (letters, digits, `-` and `_`, up to 64 characters) under the app's
+  `courses/`, whose `studio/` library is read before the global one.
 - `motion` (optional) overrides the theme's transition and motion-blur
   defaults for this video; a scene's `transition` (optional) overrides
   both. See "Transitions" and "Motion blur".
@@ -154,6 +159,40 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
   for hex colours, `clamp`, `lerp`, `counter`, `revealProgress`, `series` and
   `parallel`. The motion components are in "Motion" below; `word` and
   `wordEnd` are in "Narration".
+
+## Libraries cascade: project, subject, global
+
+A video's components and themes resolve through up to three libraries, and
+the first hit wins:
+
+| Level | Components | Themes |
+| --- | --- | --- |
+| `project` | the video folder's `components/` | (a `.json` path in the folder) |
+| `subject <CODE>` | `<app data>/courses/<CODE>/studio/components/` | `<app data>/courses/<CODE>/studio/themes/` |
+| `global` | `<app data>/studio/library/components/` | `<app data>/studio/library/themes/` |
+
+A component resolves by name (`CascadeComponents`, in the order above). A
+theme name resolves through the subject's library, then the global one, then
+the bundled set. A subject's library is read only when the libraries are
+given; the app and the CLI always give them, and the `Project::load` API
+does not. `oculus studio` commands that load a video take `--subject` and
+`--theme` where they can, which replace video.json's for that load. A
+component that no level has is an error listing every name in every level.
+
+The starter set (`app/studio-core/library/`) is compiled into the crate.
+Every load copies each starter
+file the global library lacks, and never replaces one, so an edit is the
+user's. `oculus studio components seed
+--reset` writes the starter text over every file that differs. Every write
+to a library file first copies the previous text to `.history/` beside it
+(`<Name>.<unix-ms>.tsx` or `.json`, the millisecond moved on past any
+snapshot already there); nothing prunes `.history`. `oculus studio
+components list <DIR>` prints each name with the level it resolves from, and
+`components show <DIR> <Name>` its source.
+
+The render segment key covers the source of every component a scene uses, as
+the cascade resolves it, so an edit to a library component re-renders the
+scenes that use it.
 
 ## Narration sets a scene's length and cues its elements
 
@@ -919,6 +958,17 @@ with the `Narration` error before any frame renders.
   any. With `--json` it prints the issues as an array of `{scene, id,
   component, example, kind, message, loc}`; `scene` and `component` are
   null for a script section no scene matches.
+
+- `oculus studio gallery <DIR> <Component>` renders each example of a
+  component as `<DIR>/out/gallery/<Component>-<example>.png` (`--out`),
+  at `--t` seconds of the component's scene (default: the middle of its
+  scene, or 1 s of a 2 s preview), and with `--sheet` a contact sheet
+  `<Component>.png` (`--cols`). `--subject` and `--theme` replace video.json's
+  for the load; `--threads` sets the render threads. See "Galleries render
+  every example as a still".
+- `oculus studio components list <DIR>` and `components show <DIR>
+  <Component>` read through the cascade (see "Libraries cascade"), and
+  `components seed [--reset]` copies the starter set into the global library.
 
 Flags are in [cli-reference.md](./cli-reference.md#oculus-studio).
 

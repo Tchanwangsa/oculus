@@ -4,18 +4,21 @@
 //! `aligner` are in their own files.
 
 mod aligner;
+mod components;
+mod gallery;
 mod narrate;
 mod render;
 
 use crate::*;
+use app_lib::studio::libraries;
 use std::time::Instant;
 use studio_core::{
-    LintIssue, MotionBlur, Project, RenderOptions, Renderer, StripOptions, StudioError, Time,
+    LintIssue, MotionBlur, RenderOptions, Renderer, StripOptions, StudioError, Time,
 };
 
 impl Ctx {
     pub(crate) fn studio_frame(&self, args: &StudioFrameArgs) -> Result<(), String> {
-        let project = Project::load(&args.dir).map_err(studio_error)?;
+        let project = libraries::open(&args.dir, None, None).map_err(studio_error)?;
         let at = match args.scene {
             Some(index) => Time::Scene {
                 index,
@@ -83,7 +86,7 @@ impl Ctx {
     }
 
     pub(crate) fn studio_strip(&self, args: &StudioStripArgs) -> Result<(), String> {
-        let project = Project::load(&args.dir).map_err(studio_error)?;
+        let project = libraries::open(&args.dir, None, None).map_err(studio_error)?;
         let (from, to) = match args.scene {
             Some(index) => project
                 .timeline()
@@ -151,7 +154,7 @@ impl Ctx {
     }
 
     pub(crate) fn studio_lint(&self, args: &StudioLintArgs) -> Result<(), String> {
-        let project = Project::load(&args.dir).map_err(studio_error)?;
+        let project = libraries::open(&args.dir, None, None).map_err(studio_error)?;
         let report = project.lint().map_err(studio_error)?;
         let count = report.issues.len();
 

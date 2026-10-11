@@ -39,9 +39,9 @@ pub use library::{
     STARTER_COMPONENTS, STARTER_THEMES, Starter, seed as seed_library, write as write_library,
 };
 pub use project::{
-    CascadeComponents, ComponentSource, FRAME_RATES, FolderComponents, LOW_CONFIDENCE, LintIssue,
-    LintReport, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene, ManifestWord, Project,
-    SceneSpec, Script, ScriptSection, Timeline, Video, Voice, WordCues,
+    CascadeComponents, ComponentSource, FRAME_RATES, FolderComponents, LOW_CONFIDENCE, Library,
+    LintIssue, LintReport, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene, ManifestWord,
+    Project, SceneSpec, Script, ScriptSection, Timeline, Video, Voice, WordCues,
 };
 pub use render::{
     Engine, Frame, MotionBlur, Purpose, RenderOptions, Renderer, SceneCall, Size, Time,

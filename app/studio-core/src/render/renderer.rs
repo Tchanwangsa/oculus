@@ -48,7 +48,7 @@ impl Renderer {
             scenes,
             transitions: project.transitions(),
             timeline,
-            components: Arc::clone(&project.components),
+            components: project.components.clone(),
             motion_blur: options.motion_blur,
         })
     }
