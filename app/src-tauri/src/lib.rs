@@ -257,6 +257,8 @@ pub fn run() {
             music::commands::music_album_tracks,
             music::commands::music_tracks,
             music::commands::music_add_to_queue,
+            music::commands::music_skip_to,
+            music::commands::music_queue_remove,
             music::commands::music_search,
             music::commands::music_search_more,
             music::commands::music_duck,

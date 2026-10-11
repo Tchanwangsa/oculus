@@ -6,9 +6,10 @@
 //!   push is kept until the connection drops. Spotify pushes only on a
 //!   change, and the cluster the Spirc gets back when it announces the device
 //!   stays inside the Spirc, so until the first push the list is this device
-//!   alone. A push also carries the active device's next tracks, for the
-//!   snapshot's `up_next`, and, when that device is another one, what it
-//!   plays, for the snapshot's `remote` (`remote/playback.rs`).
+//!   alone. A push also carries the active device's next tracks and context,
+//!   for the snapshot's `up_next` and `context_uri` and for skipping to or
+//!   removing a track (`queue.rs`), and, when that device is another one,
+//!   what it plays, for the snapshot's `remote` (`remote/playback.rs`).
 //! - **A transfer** to Oculus itself is a pull (`control.rs`) then play; to
 //!   another device it is librespot's `spclient().transfer(from, to)`, the
 //!   request Spotify's own apps send.
@@ -21,6 +22,7 @@ use serde::Serialize;
 use tauri::AppHandle;
 
 use super::control;
+use super::queue::Queue;
 use super::remote::{self, RemotePlayback};
 use super::state::{self, percent, up_next, NextTrack, DEVICE_NAME};
 
@@ -47,6 +49,10 @@ pub struct Cluster {
     /// What the active device plays next, when the push carried its player
     /// state; empty when no device is active.
     pub(super) up_next: Option<Vec<NextTrack>>,
+    /// The active device's queue and context in full, for skipping to and
+    /// removing a track (`queue.rs`); none when nothing is active, and
+    /// carried over from the last push through one without a player state.
+    pub(super) queue: Option<Queue>,
     /// What the active device plays when it is another one and the push
     /// carried its player state; moved into the snapshot on arrival.
     pub(super) remote: Option<RemotePlayback>,
@@ -63,6 +69,17 @@ impl Cluster {
 
     fn has(&self, id: &str) -> bool {
         self.devices.iter().any(|d| d.id == id)
+    }
+
+    /// Takes `last`'s queue when this push named the same active device
+    /// without its player state.
+    pub(super) fn keep_queue(&mut self, last: Option<Cluster>) {
+        if self.queue.is_some() || self.active_id.is_empty() {
+            return;
+        }
+        self.queue = last
+            .filter(|c| c.active_id == self.active_id)
+            .and_then(|c| c.queue);
     }
 }
 
@@ -106,10 +123,16 @@ pub(super) fn from_cluster(cluster: &ClusterProto, own_id: &str) -> Cluster {
             )
         })
     };
+    let queue = if cluster.active_device_id.is_empty() {
+        None
+    } else {
+        cluster.player_state.as_ref().map(Queue::from_player)
+    };
     Cluster {
         active_id: cluster.active_device_id.clone(),
         devices,
         up_next,
+        queue,
         remote: remote::from_cluster(cluster, own_id),
     }
 }

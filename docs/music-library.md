@@ -19,10 +19,12 @@ itself is [music.md](./music.md).
 | A cover made from a playlist's tracks | `app/src-tauri/src/music/library/covers.rs` |
 | The pathfinder `searchDesktop` request and its answer | `app/src-tauri/src/music/library/search.rs` |
 | Queueing, here or on the device playing elsewhere | `app/src-tauri/src/music/commands.rs` (`music_add_to_queue`), `app/src-tauri/src/music/control.rs`, `app/src-tauri/src/music/remote/` |
-| Up next in the snapshot | `app/src-tauri/src/music/state.rs`, `app/src-tauri/src/music/events.rs`, `app/src-tauri/src/music/devices.rs` |
+| Skipping to and removing a track up next | `app/src-tauri/src/music/queue.rs` (`music_skip_to`, `music_queue_remove` in `commands.rs`), `app/src-tauri/src/music/remote/command.rs` |
+| Up next and the context in the snapshot | `app/src-tauri/src/music/state.rs`, `app/src-tauri/src/music/events.rs`, `app/src-tauri/src/music/devices.rs` |
 | The Connect cluster, the device list and transfer | `app/src-tauri/src/music/devices.rs` |
-| Up next, playlists, a playlist's tracks and search under the player | `app/src/components/music/library/` (search: `SearchGroups.tsx`, `SearchPages.tsx`; an opened playlist or album: `PlaylistView.tsx`) |
+| Up next, playlists, a playlist's tracks and search under the player | `app/src/components/music/library/` (up next: `UpNext.tsx`, `RemoveAction.tsx`; search: `SearchGroups.tsx`, `SearchPages.tsx`; an opened playlist or album: `PlaylistView.tsx`) |
 | Track rows fetched a page at a time | `app/src/hooks/music/useTrackRows.ts` |
+| The rest of the context after Spotify's next tracks | `app/src/hooks/music/useContextRest.ts`, `app/src/lib/music/contextRest.ts` |
 | The device menu | `app/src/components/music/devices/` |
 
 ## Under the player, up next, the account's playlists and a search
@@ -48,17 +50,36 @@ itself is [music.md](./music.md).
   playlist as context); the playing track is in brand colour. Local files
   and episodes are left out; a track Spotify describes nothing for reads
   "Unavailable track".
-- **Every track row offers "Add to queue"** (a playlist's and search's): an
+- **Every track row offers "Add to queue"** (a playlist's, search's and up next's): an
   icon shown on the row's hover, a `RowAction` inside the row's button. It
   turns to a brand tick for 1.5 s once queued; a refusal shows as the
   player's error, like any command.
 - **Up next is behind the queue button** (`QueueToggle`, before the device
-  button on `/music`): while it is on, the snapshot's `up_next` replaces the
-  library: queued tracks, then the context's, labelled Queued and Then only
-  while something is queued, their rows from `music_tracks`, or "Nothing up
-  next." The library stays mounted
-  under it, so an open playlist and a search survive. The rows are not
-  controls: librespot has no command to skip to one.
+  button on `/music`): while it is on, it replaces the library with every
+  track the snapshot's `up_next` lists (up to librespot's 80 while Oculus
+  plays): queued tracks, then the context's, labelled Queued and Then only
+  while something is queued, or "Nothing up next." It is a virtual list
+  like a playlist's (48 px rows, labels as items of their own), its rows
+  fetched a hundred at a time by `useTrackRows` as they scroll into view.
+  The library stays mounted under it, so an open playlist and a search
+  survive.
+- **An up next row plays on a click** (`music_skip_to`, the row's place in
+  `up_next`), and offers "Add to queue" and "Remove from queue"
+  (`RemoveAction`, `music_queue_remove`) on hover. A removed row hides at
+  once and stays hidden until `up_next` changes; a refusal shows as the
+  player's error.
+- **After Spotify's list, Up next carries on with the rest of the playing
+  playlist or album**, as Spotify's desktop queue does: `useContextRest`
+  fetches the snapshot's `context_uri` tracks once (`music_playlist_tracks`
+  or `music_album_tracks`) and appends, under Then, everything after the
+  last non-queued `up_next` track's place in it (its first place after the
+  current track's when it repeats, else its first). Nothing is appended
+  while the device playing shuffles, for any other context (an artist,
+  Liked Songs), before the tracks arrive, or when that track is not in the
+  context. These rows page as they scroll like the rest, so a playlist of
+  thousands scrolls to its end. Spotify does not list them, so a click
+  plays the track from its place in the context (`music_play_track`) and
+  they offer "Add to queue" but no Remove.
 - **One list scrolls at a time.** Narrow, the page is one column and the
   list caps at `max-h-96`; from `@3xl` of the page's own width the player
   takes a left column and the list fills the height on the right.
@@ -228,9 +249,37 @@ cluster push.
 - **A cluster push** sets it from the active device's
   `player_state.next_tracks`, whichever device that is; a push with no
   device active clears it, one without a player state leaves it.
-- **Each entry is a URI and `queued`** (Spotify's provider `queue`), the
-  first 20 catalogue tracks; episodes, local files and delimiters are left
+- **Each entry is a URI and `queued`** (Spotify's provider `queue`), every
+  catalogue track listed; episodes, local files and delimiters are left
   out. Names come from `music_tracks`.
+- **`context_uri`** comes from the same two places: the `SetQueue` event's
+  context while Oculus plays, the active player state's `context_uri`
+  otherwise; it clears with `up_next`.
+
+## Skipping to and removing a track up next
+
+With nothing active both are refused with "Play something first".
+
+- **While Oculus plays, the Spirc does both**, through two commands the
+  vendored librespot-connect adds ([music.md](./music.md#librespot-is-pinned-to-a-dev-branch-commit)).
+  The entry goes as its URI and which of that URI's tracks it is in
+  `up_next` (`queue::nth`, from 0); the Spirc finds that track in its own
+  next tracks, else the first with the URI, and does nothing when none has
+  it. `skip_to` drops the next tracks before it (delimiters join the
+  previous ones, as librespot's `next_track` does) and moves on as Next
+  does; `remove_next` removes it. Each ends with a `SetQueue` event, so
+  `up_next` follows.
+- **Another device gets Spotify's remote commands** (`remote/`), built from
+  its player state in the last cluster push (`devices::Cluster::queue`): its
+  next and previous tracks whole (uri, uid, provider, metadata) and
+  `queue_revision`. A push without a player state keeps the last one for
+  the same device; nothing active, or the connection dropping, clears it.
+  The entry is the one at `index` among the catalogue tracks, or, when the
+  list moved since the snapshot, the first with that URI; none is "That
+  track is no longer up next". `skip_next` names that track (`uri`, and
+  `uid` and `provider` when listed); `set_queue` sends every next track but
+  that one (episodes and delimiters too), the previous tracks unchanged, and
+  the kept revision.
 
 ## A 429 closes every library call until its Retry-After
 
@@ -273,3 +322,5 @@ its own.
 - librespot finds `music_play_track`'s track by URI among the context's loaded tracks — one past a page the resolver has not loaded yet starts the playlist from its top.
 - The Spirc sends no `SetQueue` when it moves to the next track — `Snapshot::advance_to` trims `up_next` on `TrackChanged`.
 - A virtual list's row array is new every snapshot — memoise `useTrackRows`' URIs by their joined key, or every snapshot asks again.
+- `set_queue` replaces the previous tracks too — send the kept `prev_tracks` back unchanged, or the device's history is wiped.
+- Never send Oculus's own device a remote `skip_next` naming a track — librespot's `handle_next` loops forever when that track is not next, hanging the Spirc (no play or pause, then Spotify drops the device); and its queue events lack each track's `context_index`, so they cannot go back in a `set_queue`. Hence the vendored `skip_to` and `remove_next`.

@@ -4,7 +4,7 @@
 use librespot_playback::player::{PlayerEvent, PlayerEventChannel};
 use tauri::AppHandle;
 
-use super::state::{self, percent, up_next, Snapshot};
+use super::state::{self, context, percent, up_next, Snapshot};
 use super::track;
 
 pub(super) async fn run(app: AppHandle, id: u64, mut rx: PlayerEventChannel) {
@@ -26,12 +26,17 @@ pub(super) fn apply(s: &mut Snapshot, event: PlayerEvent) {
             s.advance_to(&audio_item.uri);
             s.track = Some(track::from_item(&audio_item));
         }
-        PlayerEvent::SetQueue { next_tracks, .. } => {
+        PlayerEvent::SetQueue {
+            context_uri,
+            next_tracks,
+            ..
+        } => {
             s.up_next = up_next(
                 next_tracks
                     .iter()
                     .map(|t| (t.uri.as_str(), t.provider.as_str())),
             );
+            s.context_uri = context(&context_uri);
         }
         PlayerEvent::Playing { position_ms, .. } => {
             s.playing = true;
