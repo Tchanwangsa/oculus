@@ -9,3 +9,10 @@ export function videoHref(slug: string, title?: string | null, thread = false): 
   const name = title?.trim();
   return name ? `${base}?n=${encodeURIComponent(name)}` : base;
 }
+
+export const COMPONENTS_HREF = "/studio/components";
+
+/** The Components page with one component selected. */
+export function componentHref(name: string): string {
+  return `${COMPONENTS_HREF}/${encodeURIComponent(name)}`;
+}
