@@ -15,6 +15,9 @@
 //! - **Pages report only through the `dock` message handler** (`channel.rs`),
 //!   and only into the in-memory Inbox (`inbox.rs`). Unread counts come from
 //!   page titles (`title.rs`).
+//! - **A service with a rule table stays one hop from its messages**
+//!   (`rules.rs`: Instagram), guarded in the page and in `on_navigation`,
+//!   and leaves an open thread when parked so it sends no read receipts.
 
 #[cfg(test)]
 mod capabilities_test;
@@ -25,6 +28,7 @@ mod inbox;
 mod layout;
 mod message;
 mod page;
+mod rules;
 mod scripts;
 mod services;
 #[cfg(test)]

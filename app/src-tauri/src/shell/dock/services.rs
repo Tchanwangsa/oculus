@@ -1,5 +1,7 @@
 //! The four services the dock can host, in rail order.
 
+use super::rules;
+
 /// One messaging web app. `store_id` names its WebKit data store, which holds
 /// the login: it is derived from `id` and must never change, or the user is
 /// signed out of that service for good.
@@ -15,6 +17,15 @@ pub struct DockService {
     /// Whether the chat-list row watcher runs here (`scripts/rows.js` has a
     /// config for it). Discord has none: its notifications carry the sender.
     pub watches_rows: bool,
+    /// The one-hop rule table (`rules.rs`), which turns on the guard script
+    /// and the native navigation guard. Only where client modification is
+    /// tolerated (`scripts.rs`).
+    pub rules: Option<&'static str>,
+    /// A stylesheet that hides the page's ways into the rest of the site.
+    pub trim_css: Option<&'static str>,
+    /// Where the page goes when it is parked, for a service that marks an
+    /// open thread read while it is off-screen. Needs `rules`.
+    pub park_path: Option<&'static str>,
     pub store_id: [u8; 16],
 }
 
@@ -25,6 +36,9 @@ pub const SERVICES: [DockService; 4] = [
         sites: &["https://web.whatsapp.com/"],
         domains: &["whatsapp.com"],
         watches_rows: true,
+        rules: None,
+        trim_css: None,
+        park_path: None,
         store_id: store_id("whatsapp"),
     },
     DockService {
@@ -33,6 +47,9 @@ pub const SERVICES: [DockService; 4] = [
         sites: &["https://www.instagram.com/"],
         domains: &["instagram.com"],
         watches_rows: true,
+        rules: Some(rules::INSTAGRAM),
+        trim_css: Some(include_str!("scripts/instagram.css")),
+        park_path: Some("/direct/inbox/"),
         store_id: store_id("instagram"),
     },
     // messenger.com no longer keeps a session: its `c_user` cookie lives on
@@ -43,6 +60,9 @@ pub const SERVICES: [DockService; 4] = [
         sites: &["https://www.facebook.com/", "https://www.messenger.com/"],
         domains: &["facebook.com", "messenger.com"],
         watches_rows: true,
+        rules: None,
+        trim_css: Some(include_str!("scripts/facebook.css")),
+        park_path: None,
         store_id: store_id("messenger"),
     },
     DockService {
@@ -51,6 +71,9 @@ pub const SERVICES: [DockService; 4] = [
         sites: &["https://discord.com/"],
         domains: &["discord.com"],
         watches_rows: false,
+        rules: None,
+        trim_css: None,
+        park_path: None,
         store_id: store_id("discord"),
     },
 ];
