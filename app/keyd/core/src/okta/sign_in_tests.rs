@@ -336,6 +336,30 @@ fn credentials_are_trimmed_and_validated_before_they_are_saved() {
 }
 
 #[test]
+fn a_pasted_otpauth_link_is_saved_as_its_bare_secret() {
+    let link =
+        format!("otpauth://totp/UniMelb:me%40student.unimelb.edu.au?secret={SEED}&issuer=UniMelb");
+    assert_eq!(
+        validate_credentials("u", "pw", &link).unwrap().totp_secret,
+        SEED
+    );
+    assert!(
+        validate_credentials("u", "pw", "otpauth://totp/UniMelb?issuer=UniMelb")
+            .err()
+            .unwrap()
+            .starts_with("That does not look like a TOTP setup key:")
+    );
+    assert!(
+        validate_credentials("u", "pw", "otpauth-migration://offline?data=CjEK")
+            .err()
+            .unwrap()
+            .contains("Google Authenticator export link")
+    );
+    // `oculus auth setup` prints the code from the key as pasted.
+    assert_eq!(totp_now(&link).unwrap(), totp_now(SEED).unwrap());
+}
+
+#[test]
 fn a_refused_setup_key_is_never_echoed_not_even_one_character() {
     // Characters the message's own words do not contain.
     let message = validate_credentials("u", "pw", "GEZD!").err().unwrap();
