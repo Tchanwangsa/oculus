@@ -212,6 +212,7 @@ pub fn run() {
             harness::app::models::harness_antigravity_rules,
             harness::app::models::harness_antigravity_revoke,
             harness::app::models::harness_opencode_models,
+            harness::app::models::harness_opencode_models_if_running,
             harness::app::models::harness_opencode_providers,
             harness::app::models::harness_opencode_set_key,
             harness::app::models::harness_opencode_disconnect,

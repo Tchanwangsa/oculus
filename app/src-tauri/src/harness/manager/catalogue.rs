@@ -151,6 +151,19 @@ impl Harness {
         self.opencode_server()?.list_models()
     }
 
+    /// The catalogue of a server that is already up, or `None` — never a
+    /// start. For Settings → Jobs: only Settings → opencode starts it.
+    pub fn opencode_models_if_running(&self) -> Result<Option<Vec<opencode::ModelInfo>>, String> {
+        let server = self
+            .opencode
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|s| s.is_alive())
+            .cloned();
+        server.map(|s| s.list_models()).transpose()
+    }
+
     // opencode's credentials go through the server's own auth endpoints, so
     // a credential lands in opencode's store and nowhere else. Each starts the
     // server if it is down: they answer a button press, never a page opening.
