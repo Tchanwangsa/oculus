@@ -1,5 +1,10 @@
 //! `oculus studio`: render and check a Studio video folder with
-//! `studio_core` (docs/studio.md). Reads only the folder; writes only the PNG.
+//! `studio_core` (docs/studio.md). `frame`, `strip` and `lint` read only
+//! the folder and write only the PNG; `narrate`, `tts` and `aligner` are in
+//! their own files.
+
+mod aligner;
+mod narrate;
 
 use crate::*;
 use std::time::Instant;

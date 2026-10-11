@@ -368,6 +368,9 @@ never creates the database, so a fresh machine opens the app once first.
 - Parse and embed settings are the `parse` and `embed` rows of `settings`, read
   by `parse_config` and `embed_config`. `db::store::edit_setting` preserves unknown
   keys when changing either object; malformed records start from defaults.
+- Studio's narration voice is the `voice` row (`{ baseUrl, model, voice,
+  speed }`), read by `studio::voice::settings` and written through
+  `edit_setting` by `studio::voice::save` ([studio.md](./studio.md#narration-is-made-by-oculus-studio-narrate)).
 
 ## Rust counts app usage; the frontend only pings
 

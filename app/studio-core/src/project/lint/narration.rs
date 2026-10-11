@@ -33,9 +33,12 @@ pub(super) fn lint(project: &Project, index: usize, report: &mut LintReport) {
         ));
     }
     for g in &clip.gaps {
-        let after = clip.words.get(g.after).map_or("", |w| w.text.as_str());
+        let place = match g.after.and_then(|a| clip.words.get(a)) {
+            Some(w) => format!("after `{}`", w.text),
+            None => "before the first word".to_owned(),
+        };
         push(format!(
-            "the audio has unscripted speech after `{after}` (heard \"{}\")",
+            "the audio has unscripted speech {place} (heard \"{}\")",
             g.heard
         ));
     }

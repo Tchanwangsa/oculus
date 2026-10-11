@@ -146,7 +146,8 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
             "a": { "key": "k", "text": "Hello, a rate of 0.01, e.g. here.", "audio": "k.wav",
                    "duration": MAX_NARRATION_SECS + 1.0,
                    "words": [word("Hello,", -0.5), word("rate", LOW_CONFIDENCE - 1.0)],
-                   "gaps": [{ "after": 0, "start": 0.4, "end": 0.6, "heard": "um" }] },
+                   "gaps": [{ "after": null, "start": 0.0, "end": 0.1, "heard": "ah" },
+                            { "after": 0, "start": 0.4, "end": 0.6, "heard": "um" }] },
             "b": { "key": "k2", "text": "Old words.", "audio": "k2.wav", "duration": 1.0, "words": [] }
         } })
         .to_string(),
@@ -174,12 +175,15 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
     has(
         "scene 0 `a` (Say): scene `a`: the audio has unscripted speech after `Hello,` (heard \"um\")",
     );
+    has(
+        "scene 0 `a` (Say): scene `a`: the audio has unscripted speech before the first word (heard \"ah\")",
+    );
     has("scene 0 `a` (Say): Say.tsx:3:");
     assert!(
         text.contains("`word(\"helo\")`: no such word in scene `a`; closest: hello"),
         "{text}"
     );
-    assert_eq!(lines.len(), 8, "{text}");
+    assert_eq!(lines.len(), 9, "{text}");
     let orphan = report.issues.iter().find(|i| i.scene.is_none()).unwrap();
     assert_eq!(
         (orphan.id.as_deref(), orphan.component.as_deref()),
