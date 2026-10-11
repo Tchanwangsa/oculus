@@ -11,6 +11,9 @@ mod path;
 mod text;
 
 pub use canvas::Canvas;
+pub(crate) use path::end_of;
+#[cfg(test)]
+pub(crate) use path::trim;
 
 use crate::layout::LNode;
 use crate::scene::{Color, Inset, ObjectFit};
