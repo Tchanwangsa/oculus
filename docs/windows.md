@@ -75,8 +75,9 @@ claiming protection against a compromised Windows user account.
 Unsigned NSIS installations have user-writable executable files and no MSIX
 package identity. Release keyd refuses that installation with a descriptive
 error. The NSIS artifact supports installation and shell testing; Canvas and
-headless Okta need the MSIX installation. Debug builds use the development
-broker policy and must not be distributed as release packages.
+headless Okta need the MSIX installation. The development preflight builds keyd with `--features dev`, enabling its
+development broker policy. Cargo's debug profile alone does not select that
+policy. Development brokers must not be distributed as release packages.
 
 ## Windows uses native providers and Groq transcription
 
