@@ -20,6 +20,8 @@ crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Hashes the renderer's sources into `STUDIO_RENDER_BUILD` (build.rs).
+sha2 = "0.10"
 
 [dependencies]
 # `unstable` is what enables multiwebview (`Window::add_child`) — every

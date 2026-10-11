@@ -1426,6 +1426,7 @@ Commands:
   frame    Render one frame of a video to a PNG
   strip    Render frames across a stretch of a video as one contact-sheet PNG
   lint     Check a whole video without writing anything
+  render   Render a video to an mp4
   narrate  Synthesise and time a video's narration, writing narration/manifest.json
   tts      Synthesise one clip of text to a WAV, to hear a voice
   aligner  Download, check or delete the narration aligner model (378 MB)
@@ -1578,6 +1579,55 @@ Arguments:
           The video folder, the one holding `video.json`
 
 Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio render`
+
+```
+Render a video to an mp4
+
+Each scene is rendered frame by frame (in parallel, one renderer per thread) and encoded
+by ffmpeg as its own segment, which is kept in `<DIR>/.cache/segments/` under a hash of
+everything its frames depend on: the scene and the one before it, their narration, the
+theme, the `components/` and `assets/` folders and the render settings. A second render
+only renders the scenes an edit touched and prints `cached` for the rest. The segments
+are joined without re-encoding, beside the narration clips mixed into one track (AAC).
+Segments neither quality's last render used are deleted afterwards.
+
+`--draft` (the default) is a 540 px-high proxy on the hardware encoder, without motion
+blur unless the theme's `motionBlur` says `always`; `--final` is full size on libx264
+(crf 18), blurred unless `motionBlur` is `off`. Both are H.264, yuv420p, BT.709. The mp4
+goes to `<DIR>/renders/draft.mp4` or `final.mp4` unless `-o` names another file.
+
+Render never narrates: run `oculus studio narrate` first, or it stops with the stale
+narration's scene. A frame that fails stops the render, naming its time and scene; an
+ffmpeg failure quotes ffmpeg.
+
+oculus studio render lectures/week-4
+
+oculus studio render lectures/week-4 --final -o ~/Desktop/week-4.mp4
+
+Usage: oculus studio render [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json`
+
+Options:
+      --draft
+          A 540 px-high proxy on the hardware encoder (the default)
+
+      --final
+          Full size on libx264, with the theme's motion blur
+
+  -o, --out <OUT.mp4>
+          Where to write the mp4 (default: `<DIR>/renders/<quality>.mp4`)
+
+      --threads <T>
+          Render threads (default: half the cores, capped to keep memory under 2 GB)
+
   -h, --help
           Print help (see a summary with '-h')
 ```

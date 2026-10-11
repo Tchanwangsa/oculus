@@ -5,8 +5,9 @@ Studio makes lecture videos from scenes written as TSX components.
 frame out, the same pixels on every machine, scene transitions included.
 A narrated scene lasts as long as its narration and can cue elements to its
 words, from clips and timings `oculus studio narrate` makes with a TTS server
-and a local aligner; encoding to video is not built yet. `oculus studio`
-renders single frames and contact sheets, lints, and narrates.
+and a local aligner. `oculus studio render` encodes a video to an mp4 with
+ffmpeg, one cached segment per scene. `oculus studio` also renders single
+frames and contact sheets, lints, and narrates.
 
 ## Where
 
@@ -30,7 +31,8 @@ renders single frames and contact sheets, lints, and narrates.
 | Narration audio decode and word timing (the aligner, its model download) | `app/src-tauri/src/studio/` (`audio/`, `timing/`), `app/src-tauri/src/runtime/onnx/` |
 | Narrating a video: the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
 | Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`narrate.rs`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`render.rs`, `narrate.rs`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -555,8 +557,8 @@ by default (`None`); `Engine` renders single calls and ignores it.
   `motion`; the bundled theme ships `finals`) says which renders blur:
   `finals` the export, `always` drafts and previews too, `off` none.
   `Project::motion_blur(Purpose::Final | Purpose::Draft)` resolves it into
-  the `RenderOptions` value at the video's fps, and the export (a later
-  stage) asks for `Final`. A bad value is an error naming its level
+  the `RenderOptions` value at the video's fps; a `--final` render asks
+  for `Final` and a `--draft` one for `Draft`. A bad value is an error naming its level
   (`video.json motion.motionBlur`), and lint reports it. `oculus studio
   frame` and `strip` are inspection tools and blur only with
   `--motion-blur`, whatever the token says.
@@ -729,6 +731,83 @@ For a narrated video lint also reports, each naming the scene id:
 All of these are errors: lint has no warning level, so any of them makes
 `oculus studio lint` exit 1.
 
+## Rendering a video
+
+`render` (`app/src-tauri/src/studio/render/`) turns a video folder into an
+mp4: H.264, yuv420p, BT.709, 48 kHz AAC narration, `+faststart`. It never
+narrates and never touches the network: stale or missing narration fails
+with the `Narration` error before any frame renders.
+
+- **Two qualities.** `draft` renders at the scale that makes the frame 540
+  px high (never above 1) on the hardware encoder (`h264_videotoolbox -q:v
+  65`); `final` renders full size on `libx264 -preset medium -crf 18
+  -threads 8`. Motion blur follows the `motionBlur` token for the purpose
+  (`Draft` or `Final`): with the bundled `finals`, only `final` blurs. An
+  odd output side is an error naming the size and scale, since yuv420p
+  needs even sides; nothing is padded.
+- **Colour.** Frames go to ffmpeg as raw RGBA on stdin (`-f rawvideo
+  -pix_fmt rgba -s WxH -r fps -i -`), converted with `-vf
+  scale=out_color_matrix=bt709:out_range=tv -pix_fmt yuv420p` and tagged
+  `-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range
+  tv`. Untagged, swscale converts with BT.601 and the indigo shifts.
+- **Segments.** Each scene is one segment, `.cache/segments/<key>.mp4`,
+  covering its whole frames (`scene_frames`), each frame sampled at
+  `Time::Scene { t: j / fps }`, so a scene's segment does not depend on
+  where it sits. The key is the sha256 of the scene's fingerprint
+  (`scene_fingerprint`, which covers the scene before it), a hash of every
+  file under `components/` and `assets/`, the render settings (quality,
+  scale, size, fps, blur, filter, codec and tag arguments) and
+  `STUDIO_RENDER_BUILD`, which `app/src-tauri/build.rs` hashes from
+  studio-core's `src/` and `src/studio/render/`, so a renderer change in
+  development never reuses an old segment. Editing one scene re-renders it
+  and the scene after it (whose transition shows it); the rest print
+  `cached`.
+- **Frames in parallel, written in order.** Worker threads (half the cores,
+  or `--threads`, capped so the renderers, their frames and the reorder
+  slots are estimated under 2 GB: `strip`'s policy) each build their own
+  `Renderer` and claim frames from a reorder buffer that holds at most two
+  per worker; the calling thread takes them in order and writes each to the
+  current segment's ffmpeg, one process per segment. The earliest failing
+  frame stops the render with `StudioError::Frame` (its time and scene).
+- **Joining.** The segments are joined by the concat demuxer as a stream
+  copy (`-f concat -safe 0 -c:v copy`, absolute paths in
+  `.cache/concat-<quality>.txt`). x264's B-frames do not drop or repeat a
+  frame at the joins: the joined file decodes (`-f framemd5`) to each
+  segment's frames in turn, and a render that reused cached segments
+  decodes to the same frames as a cold one.
+- **Narration track.** Mixed in Rust, not with `amix` (which divides by its
+  input count): each clip is decoded, resampled to 48 kHz mono (rubato) and
+  added into one buffer as long as the video at sample `round((first frame
+  / fps + lead) * 48000)`. It is written as 16-bit WAV to
+  `.cache/narration-<key>.wav` (keyed by the clips and their offsets) and
+  encoded with `-c:a aac -b:a 160k`. A video without narration has no audio
+  stream.
+- **Output.** `<dir>/renders/draft.mp4` or `final.mp4` (`-o` for another
+  path). Segments, the track and the output are written as `.part` and
+  renamed. After a render, `.cache/renders.json` records what that quality
+  used, and segments and tracks neither quality's last render used, and
+  any `.part`, are deleted.
+- **Failure and cancel.** ffmpeg's non-zero exit is an error quoting its
+  last stderr lines. Cancel (an `&AtomicBool`, checked before every frame
+  and while joining) kills ffmpeg, deletes the partial segment and returns
+  `Finished::Cancelled`, which is not an error. No timeouts.
+- **Progress.** A sync `&mut dyn FnMut(Progress)`: `Planned` (segments,
+  cached, frames to render, threads), `Segment`, `Frame` (frame of frames
+  and frames a second), `Done` per segment in video order, `Muxing`.
+- **Measured** (debug build, 18-core M-series Mac, a 15.5 s narrated
+  three-scene 1080p video at 30 fps, 465 frames, 9 render threads; the
+  spread is other load on the machine): `draft` (960×540) in 1.7 to 1.8 s
+  wall, 390 to 700 frames/s, 0.2 GB peak for oculus and ffmpeg together;
+  `final` in 2.3 to 3.8 s, 135 to 220 frames/s, 1.2 GB peak (oculus 0.49
+  GB, x264 0.75 GB; x264's default threads held 1.1 GB on their own).
+  After one paragraph edit (and its narration), `final` re-rendered that
+  one scene and reused the other two. The mixed track put each clip on its
+  exact sample (cross-correlated against the clip), and a card cued to a
+  word appeared on the first frame at or after the word, matching the frame
+  `oculus studio frame` draws at that frame's time (41 to 48 dB PSNR, 23 dB
+  against its neighbour). The scenes were mostly still; motion-blurred
+  motion costs up to 32 sub-frames a frame.
+
 ## `oculus studio` renders and lints from the terminal
 
 - `oculus studio frame <DIR>` writes one PNG, by default to
@@ -753,6 +832,13 @@ All of these are errors: lint has no warning level, so any of them makes
   video's and Settings' voice); `oculus studio tts` makes one clip; `oculus
   studio aligner` manages the aligner model. See "Narration is made by
   `oculus studio narrate`".
+- `oculus studio render <DIR>` writes an mp4 (`--draft`, the default, or
+  `--final`; `-o`, `--threads`). It prints the plan, then per scene
+  `rendered` with its frames, seconds and frames a second, or `cached`,
+  then the path and a summary; `--json` gives `{dir, report: {path,
+  quality, width, height, fps, frames, duration, audio, threads, segments:
+  [{scene, id, outcome, frames, ms, fps}], pruned, ms}}`. See "Rendering a
+  video".
 - `oculus studio lint <DIR>` prints each problem and exits 1 if there is
   any. With `--json` it prints the issues as an array of `{scene, id,
   component, example, kind, message, loc}`; `scene` and `component` are
@@ -790,6 +876,10 @@ the `/v1/models` listing (parsing, 404, non-JSON, unreachable), the Settings
 row's validation (`studio::commands`),
 the voice resolution, the cache key and `narrate` with a stubbed aligner
 (caching, one-paragraph edits, per-scene writes, pruning, failures).
+`cargo test --lib studio::render` covers the render plan, segment keys and
+tree hashes, the audio placement, the reorder buffer and pruning, and,
+through the real ffmpeg (skipped without one), the join and cache check
+above, a narrated fixture's audio onset, cancel and a failing frame.
 
 From `app/studio-core`: `cargo test`, `cargo clippy --all-targets -- -D
 warnings`, `cargo fmt`. CI runs these in the `studio-core` job on macOS.
