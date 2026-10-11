@@ -1456,8 +1456,8 @@ Options:
           [default: 1]
 
       --motion-blur
-          Average sub-frames over a 30 fps, 180° shutter, as many as the motion needs
-          (off unless given, whatever the theme's motionBlur says)
+          Average sub-frames over a 180° shutter at the video's fps, as many as the
+          motion needs (off unless given, whatever the theme's motionBlur says)
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1521,7 +1521,7 @@ Options:
           Render threads (default: half the cores, at most one per frame)
 
       --motion-blur
-          Blur each frame over a 30 fps, 180° shutter (see `frame --help`)
+          Blur each frame over a 180° shutter at the video's fps (see `frame --help`)
 
   -o, --out <OUT.png>
           Where to write the PNG (default: `<DIR>/out/strip-<from>-<to>.png`)

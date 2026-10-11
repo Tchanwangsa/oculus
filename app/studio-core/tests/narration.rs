@@ -75,15 +75,22 @@ fn near(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-9
 }
 
+/// `n` frames at the default 30 fps, in seconds.
+fn frames(n: u32) -> f64 {
+    f64::from(n) / 30.0
+}
+
 #[test]
 fn the_fixture_is_narrated_then_silent() {
     let p = Project::load(fixture("narrated")).unwrap();
-    assert!(near(p.scene_length(0).unwrap(), 0.25 + 3.0 + 0.6));
+    // lead + clip + tail is 0.25 + 3.0 + 0.6 = 3.85 s, 115.5 frames: 116.
+    assert!(near(p.scene_length(0).unwrap(), frames(116)));
     assert!(near(p.scene_length(1).unwrap(), 1.5));
     let tl = p.timeline().unwrap();
-    assert!(near(tl.length(), 5.35));
-    assert!(near(tl.start(1), 3.85));
-    assert!(near(p.length().unwrap(), 5.35));
+    assert!(near(tl.length(), frames(161)));
+    assert!(near(tl.start(1), frames(116)));
+    assert!(near(p.length().unwrap(), frames(161)));
+    assert_eq!(p.scene_frames(1).unwrap(), 116..161);
     assert_eq!(
         p.video.voice.as_ref().unwrap().voice.as_deref(),
         Some("af_heart")
@@ -126,7 +133,7 @@ fn hold_is_a_minimum_for_narrated_scenes() {
     let p = t.load();
     let lengths: Vec<f64> = (0..3).map(|i| p.scene_length(i).unwrap()).collect();
     assert!(
-        near(lengths[0], 2.85),
+        near(lengths[0], frames(86)),
         "the clip outlasts the hold: {lengths:?}"
     );
     assert!(
@@ -137,7 +144,7 @@ fn hold_is_a_minimum_for_narrated_scenes() {
         near(lengths[2], 2.0),
         "a silent scene is its hold: {lengths:?}"
     );
-    assert!(near(p.length().unwrap(), 9.85));
+    assert!(near(p.length().unwrap(), frames(86 + 150 + 60)));
     let e = p.scene_length(3).unwrap_err();
     assert!(matches!(e, StudioError::SceneOutOfRange { .. }), "{e}");
 }
@@ -175,7 +182,7 @@ fn missing_or_stale_narration_fails_renders_not_the_load() {
     check("its clip in narration/manifest.json is for older text");
     // Emphasis and line breaks are not part of the text it must match.
     t.manifest(json!({ "update": clip("The new text.", 1.0, &[]) }));
-    assert!(near(t.load().length().unwrap(), 1.85));
+    assert!(near(t.load().length().unwrap(), frames(56)));
 }
 
 #[test]

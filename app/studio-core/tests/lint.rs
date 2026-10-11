@@ -80,10 +80,23 @@ fn bad_video_json_is_a_project_error() {
     std::fs::create_dir_all(&dir).unwrap();
     let write = |s: &str| std::fs::write(dir.join("video.json"), s).unwrap();
     write(
-        r#"{ "size": { "width": 100, "height": 100 }, "theme": "default", "scenes": [], "fps": 30 }"#,
+        r#"{ "size": { "width": 100, "height": 100 }, "theme": "default", "scenes": [], "rate": 30 }"#,
     );
     let e = Project::load(&dir).err().unwrap().to_string();
-    assert!(e.contains("unknown field `fps`"), "{e}");
+    assert!(e.contains("unknown field `rate`"), "{e}");
+    write(
+        r#"{ "size": { "width": 100, "height": 100 }, "theme": "default", "fps": 29.97, "scenes": [{ "component": "A", "hold": 1 }] }"#,
+    );
+    let e = Project::load(&dir).err().unwrap().to_string();
+    assert!(e.contains("fps is 29.97; it must be one of"), "{e}");
+    write(
+        r#"{ "size": { "width": 100, "height": 100 }, "theme": "default", "fps": 48, "scenes": [{ "component": "A", "hold": 1 }] }"#,
+    );
+    let e = Project::load(&dir).err().unwrap().to_string();
+    assert!(
+        e.contains("fps is 48; it must be one of 24, 25, 30, 50, 60"),
+        "{e}"
+    );
     write(r#"{ "size": { "width": 100, "height": 100 }, "theme": "default", "scenes": [] }"#);
     let e = Project::load(&dir).err().unwrap().to_string();
     assert!(e.contains("at least one scene"), "{e}");

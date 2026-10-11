@@ -39,7 +39,7 @@ impl Ctx {
 
         let options = RenderOptions {
             scale: args.scale,
-            motion_blur: args.motion_blur.then(MotionBlur::default),
+            motion_blur: args.motion_blur.then(|| MotionBlur::at(project.fps())),
         };
         let mut renderer = Renderer::new(&project, options).map_err(studio_error)?;
         let started = Instant::now();
@@ -97,7 +97,7 @@ impl Ctx {
             cols: args.cols,
             scale: args.scale,
             threads: args.threads,
-            motion_blur: args.motion_blur.then(MotionBlur::default),
+            motion_blur: args.motion_blur.then(|| MotionBlur::at(project.fps())),
         };
         let started = Instant::now();
         let strip = studio_core::strip(&project, options).map_err(studio_error)?;
