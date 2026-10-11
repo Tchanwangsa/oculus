@@ -3,8 +3,9 @@
 use tauri::webview::{NewWindowResponse, PageLoadEvent, Webview, WebviewBuilder};
 use tauri::{AppHandle, Manager, WebviewUrl};
 
-use super::layout::{parked_rect, place, slot};
-use super::scripts::init_scripts;
+use super::layout::{parked_rect, place, slot, webview};
+use super::rules::{allows, Place, Rules};
+use super::scripts::{init_scripts, leave_script};
 use super::services::DockService;
 use super::{broadcast, channel, focus, label, title, with_state, DockPageInfo};
 use crate::shell::browser::{content_size, MAIN, PAGE_USER_AGENT};
@@ -60,6 +61,12 @@ pub(super) fn create(app: &AppHandle, service: &'static DockService) -> Result<(
     for script in init_scripts(service) {
         builder = builder.initialization_script(script);
     }
+    if let Some(rules) = service.rules {
+        match Rules::parse(rules) {
+            Ok(rules) => builder = builder.on_navigation(navigation_guard(app, service, rules)),
+            Err(e) => elog!("[oculus] dock: {id}: {e}; no navigation guard"),
+        }
+    }
 
     let viewport = with_state(app, |s| {
         s.pages.push(DockPageInfo {
@@ -85,6 +92,71 @@ pub(super) fn create(app: &AppHandle, service: &'static DockService) -> Result<(
         place(app, id);
     }
     Ok(())
+}
+
+/// The native half of the one-hop guard, for full loads the page's script
+/// never sees (a server redirect, a reload). It also sees every iframe and
+/// gets only the URL, so it judges only the service's own hosts with no hop
+/// state, and lets everything else through: a guard that breaks login (its
+/// captcha and SSO frames) is worse than none. A denied load sends the page
+/// home unless it already sits on its messages or an item, so a blocked
+/// iframe there can't loop it.
+fn navigation_guard(
+    app: &AppHandle,
+    service: &'static DockService,
+    rules: Rules,
+) -> impl Fn(&url::Url) -> bool + Send + 'static {
+    let app = app.clone();
+    let rules = std::sync::Arc::new(rules);
+    move |url| {
+        let place = rules.classify(url);
+        if allows(None, &place) {
+            return true;
+        }
+        // Host and path only: a query can carry tokens.
+        elog!(
+            "[oculus] dock: {}: blocked a load of {}{}",
+            service.id,
+            url.host_str().unwrap_or(""),
+            url.path()
+        );
+        let (app, rules) = (app.clone(), rules.clone());
+        // Off the handler: on the main thread `navigate` would run inline,
+        // inside WebKit's navigation policy callback.
+        tauri::async_runtime::spawn(async move {
+            let Some(page) = webview(&app, service.id) else {
+                return;
+            };
+            let settled = page
+                .url()
+                .map(|now| matches!(rules.classify(&now), Place::Home | Place::Item(_)))
+                .unwrap_or(false);
+            if settled {
+                return;
+            }
+            if let Ok(home) = service.home.parse() {
+                page.navigate(home).ok();
+            }
+        });
+        false
+    }
+}
+
+/// The page just went from shown to parked. Services that mark an open
+/// thread read while it is off-screen go back to their inbox.
+pub(super) fn parked(app: &AppHandle, id: &str) {
+    let Some(service) = super::services::service(id) else {
+        return;
+    };
+    let (Some(script), Some(page)) = (leave_script(service), webview(app, id)) else {
+        return;
+    };
+    if let Err(e) = page.eval(script) {
+        elog!(
+            "[oculus] dock: {}: could not leave the thread: {e}",
+            service.id
+        );
+    }
 }
 
 /// wry's macOS `Drop` leaks the WKWebView, which would keep the page's
