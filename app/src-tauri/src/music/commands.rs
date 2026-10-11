@@ -1,14 +1,16 @@
 //! The music commands. Each returns as soon as its work is handed off; the
 //! outcome arrives as `music-state`. Playback commands go to the connected
-//! device and fail with "Not connected to Spotify" otherwise.
+//! device and fail with "Not connected to Spotify" otherwise. The Web API's
+//! two (`music_playlists`, `music_search`) return their results.
 
-use librespot_connect::{LoadRequest, LoadRequestOptions};
+use librespot_connect::{LoadRequest, LoadRequestOptions, PlayingTrack};
 use librespot_core::SessionConfig;
 use tauri::AppHandle;
 
 use super::login::{self, LoginError};
 use super::session::{self, Start};
-use super::state::{self, from_percent, Snapshot};
+use super::state::{self, Snapshot};
+use super::web::{self, Playlist, SearchResults};
 use crate::runtime::blocking;
 
 /// For the frontend's mount, which may have missed earlier events.
@@ -116,10 +118,18 @@ pub fn music_seek(app: AppHandle, position_ms: u32) -> Result<(), String> {
     state::with_spirc(&app, |spirc| spirc.set_position_ms(position_ms))
 }
 
-/// `percent` is 0–100; more is taken as 100.
+/// `percent` is 0–100; more is taken as 100. Drops a held duck.
 #[tauri::command]
 pub fn music_volume(app: AppHandle, percent: u8) -> Result<(), String> {
-    state::with_spirc(&app, |spirc| spirc.set_volume(from_percent(percent)))
+    state::set_volume(&app, percent)
+}
+
+/// The seam a focus mode calls. `Some(level)` lowers the volume to `level`%
+/// of what it was before the first duck; `None` puts that volume back. A
+/// volume the user sets in between wins, and the unduck then does nothing.
+#[tauri::command]
+pub fn music_duck(app: AppHandle, level: Option<u8>) -> Result<(), String> {
+    state::duck(&app, level)
 }
 
 #[tauri::command]
@@ -139,24 +149,77 @@ pub fn music_repeat(app: AppHandle, on: bool) -> Result<(), String> {
     })
 }
 
-/// Plays a context (`spotify:playlist:…`, `spotify:album:…`) here. Spotify
-/// ignores a load sent to a device that is not active, so this activates it
-/// first.
+/// Plays a context (`spotify:playlist:…`, `spotify:album:…`) here.
 #[tauri::command]
 pub fn music_play_context(app: AppHandle, uri: String) -> Result<(), String> {
-    if !uri.starts_with("spotify:") {
-        return Err(format!("Not a Spotify URI: {uri}"));
-    }
-    state::with_spirc(&app, |spirc| {
-        spirc.activate()?;
-        spirc.load(LoadRequest::from_context_uri(
+    spotify_uri(&uri)?;
+    load(
+        &app,
+        LoadRequest::from_context_uri(
             uri,
             LoadRequestOptions {
                 start_playing: true,
                 ..Default::default()
             },
-        ))
+        ),
+    )
+}
+
+/// Plays a track here: from its place in `context_uri` (its album, from a
+/// search) so playback goes on through it, or alone without one. A track URI
+/// is not a context librespot can load.
+#[tauri::command]
+pub fn music_play_track(
+    app: AppHandle,
+    uri: String,
+    context_uri: Option<String>,
+) -> Result<(), String> {
+    if !uri.starts_with("spotify:track:") {
+        return Err(format!("Not a Spotify track: {uri}"));
+    }
+    let options = |playing_track| LoadRequestOptions {
+        start_playing: true,
+        playing_track,
+        ..Default::default()
+    };
+    let request = match context_uri {
+        Some(context) => {
+            spotify_uri(&context)?;
+            LoadRequest::from_context_uri(context, options(Some(PlayingTrack::Uri(uri))))
+        }
+        None => LoadRequest::from_tracks(vec![uri], options(None)),
+    };
+    load(&app, request)
+}
+
+fn spotify_uri(uri: &str) -> Result<(), String> {
+    if uri.starts_with("spotify:") {
+        Ok(())
+    } else {
+        Err(format!("Not a Spotify URI: {uri}"))
+    }
+}
+
+/// Spotify ignores a load sent to a device that is not active, so this
+/// activates it first.
+fn load(app: &AppHandle, request: LoadRequest) -> Result<(), String> {
+    state::with_spirc(app, |spirc| {
+        spirc.activate()?;
+        spirc.load(request)
     })?;
-    state::update(&app, |s| s.error = None);
+    state::update(app, |s| s.error = None);
     Ok(())
+}
+
+/// The account's playlists: kept in memory after the first fetch, fetched
+/// again only on `refresh`.
+#[tauri::command]
+pub async fn music_playlists(app: AppHandle, refresh: bool) -> Result<Vec<Playlist>, String> {
+    Ok(web::playlists(&app, refresh).await?)
+}
+
+/// Playlists, albums and tracks matching `query`, ten of each.
+#[tauri::command]
+pub async fn music_search(app: AppHandle, query: String) -> Result<SearchResults, String> {
+    Ok(web::search(&app, &query).await?)
 }

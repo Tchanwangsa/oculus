@@ -8,7 +8,7 @@ import { RepeatToggle, ShuffleToggle } from "@/components/music/MusicModes";
 import { MusicSeek } from "@/components/music/MusicSeek";
 import { MusicTransport } from "@/components/music/MusicTransport";
 import { MusicVolume } from "@/components/music/MusicVolume";
-import { NOTHING_PLAYING_HINT } from "@/components/music/NowPlaying";
+import { MusicLibrary } from "@/components/music/library/MusicLibrary";
 import type { MusicSnapshot } from "@/lib/music";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
 import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
@@ -20,10 +20,14 @@ function notConnectedBody(enabled: boolean, s: MusicSnapshot | null): string {
   return s?.error ?? "Connect to Spotify in Settings → Music.";
 }
 
+/** What nothing playing says here, above the list to pick from. */
+const NOTHING_PLAYING = "Pick a playlist below, or choose Oculus in Spotify.";
+
 /**
- * The full player, opened beside the page from the rail's popover (`/music`).
- * Spotify's state is Rust's (`useMusicState`); this only draws it and sends
- * commands. Without a session or a track it points to Settings → Music.
+ * The full player, opened beside the page from the rail's popover (`/music`),
+ * with the account's playlists and search under it. Spotify's state is
+ * Rust's (`useMusicState`); this only draws it and sends commands. Without a
+ * session or a track it points to Settings → Music.
  */
 export default function MusicPage() {
   const active = useTabActive();
@@ -63,7 +67,7 @@ export default function MusicPage() {
             {track?.name ?? (snapshot.connecting ? "Connecting…" : "Nothing playing")}
           </h1>
           <p className="truncate text-[13px] text-foreground/80">
-            {track ? track.artists.join(", ") : NOTHING_PLAYING_HINT}
+            {track ? track.artists.join(", ") : NOTHING_PLAYING}
           </p>
           {track?.album && (
             <p className="truncate text-xs text-muted-foreground">{track.album}</p>
@@ -77,6 +81,7 @@ export default function MusicPage() {
         </div>
         <MusicVolume snapshot={snapshot} />
         {error && <p className="text-xs text-destructive">{error}</p>}
+        <MusicLibrary snapshot={snapshot} />
       </div>
     </div>
   );

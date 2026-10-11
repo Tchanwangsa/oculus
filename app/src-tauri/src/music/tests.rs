@@ -6,6 +6,7 @@ use librespot_protocol::authentication::AuthenticationType;
 use log::Level;
 
 use super::credentials::Saved;
+use super::duck::Duck;
 use super::events::apply;
 use super::login::{callback_outcome, LoginError};
 use super::logs::is_track_failure;
@@ -202,4 +203,32 @@ fn only_an_explicit_enabled_setting_connects_at_startup() {
     ] {
         assert!(!enabled(raw), "{raw:?}");
     }
+}
+
+#[test]
+fn a_duck_lowers_from_the_kept_volume_and_the_unduck_restores_it() {
+    let mut d = Duck::default();
+    assert_eq!(d.unduck(), None);
+    assert_eq!(d.duck(80, 25), 20);
+    // Its own echo keeps it.
+    d.seen(20);
+    d.seen(21);
+    assert!(d.is_held());
+    // A second duck is a share of 80, not of 20, and keeps 80.
+    assert_eq!(d.duck(20, 50), 40);
+    assert_eq!(d.unduck(), Some(80));
+    assert!(!d.is_held());
+    assert_eq!(d.unduck(), None);
+    assert_eq!(d.duck(60, 200), 60);
+}
+
+#[test]
+fn a_volume_the_user_sets_while_ducked_wins() {
+    let mut d = Duck::default();
+    d.duck(80, 25);
+    d.seen(55);
+    assert_eq!(d.unduck(), None);
+    d.duck(80, 25);
+    d.forget();
+    assert_eq!(d.unduck(), None);
 }

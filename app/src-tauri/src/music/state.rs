@@ -1,17 +1,21 @@
 //! What the frontend mirrors (`Snapshot`, sent whole as `music-state` on every
-//! change) and the handles behind it: the live `Spirc`, the running session
-//! task and a pending login. A session task tags its writes with its run id,
-//! so a stopped one cannot change what the user sees.
+//! change) and the handles behind it: the live `Spirc` and `Session`, the
+//! running session task, a pending login and a held duck. A session task tags
+//! its writes with its run id, so a stopped one cannot change what the user
+//! sees. The Web API's caches sit beside it (`web::Web`), under their own lock.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use librespot_connect::Spirc;
+use librespot_core::Session;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, EventTarget, Manager};
 use tokio::sync::watch;
 
+use super::duck::Duck;
+use super::web::Web;
 use crate::shell::browser::MAIN;
 
 pub const EVENT: &str = "music-state";
@@ -114,6 +118,12 @@ struct Inner {
     snapshot: Snapshot,
     /// The running task's device handle, once it has connected.
     spirc: Option<Spirc>,
+    /// That connection's session, for the Web API's token.
+    session: Option<Session>,
+    /// Bumped whenever `session` changes, so a token from an older session
+    /// is never reused.
+    session_gen: u64,
+    duck: Duck,
     run: Option<Run>,
     next_run: u64,
     /// Set to cancel the pending login's callback listener.
@@ -121,12 +131,20 @@ struct Inner {
 }
 
 #[derive(Default)]
-pub struct MusicState(Mutex<Inner>);
+pub struct MusicState {
+    inner: Mutex<Inner>,
+    web: Web,
+}
 
 fn with<T>(app: &AppHandle, f: impl FnOnce(&mut Inner) -> T) -> T {
     let state = app.state::<MusicState>();
-    let mut inner = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
     f(&mut inner)
+}
+
+/// The Web API's caches and rate-limit gate.
+pub(super) fn web(app: &AppHandle) -> &Web {
+    &app.state::<MusicState>().inner().web
 }
 
 /// Applies `f` to the snapshot under the lock and emits it, outside the
@@ -197,22 +215,49 @@ pub(super) fn end_run(app: &AppHandle, id: u64, f: impl FnOnce(&mut Snapshot)) {
             return false;
         }
         inner.run = None;
-        inner.spirc = None;
+        inner.drop_link();
         f(&mut inner.snapshot);
         true
     });
 }
 
-/// Hands run `id`'s device handle over for commands (`None` when its
-/// connection dropped). A stopped run gets its handle back to shut down.
-pub(super) fn set_spirc(app: &AppHandle, id: u64, spirc: Option<Spirc>) -> Result<(), Spirc> {
+impl Inner {
+    /// Forgets the connection: its device handle, its session and any duck.
+    fn drop_link(&mut self) -> Option<Spirc> {
+        self.session = None;
+        self.session_gen += 1;
+        self.duck = Duck::default();
+        self.spirc.take()
+    }
+}
+
+/// Hands run `id`'s device handle and session over for commands (`None` when
+/// its connection dropped). A stopped run gets its handle back to shut down.
+pub(super) fn set_link(
+    app: &AppHandle,
+    id: u64,
+    link: Option<(Spirc, Session)>,
+) -> Result<(), Spirc> {
     with(app, |inner| {
-        if inner.run.as_ref().map(|r| r.id) == Some(id) {
-            inner.spirc = spirc;
-            Ok(())
-        } else {
-            spirc.map_or(Ok(()), Err)
+        if inner.run.as_ref().map(|r| r.id) != Some(id) {
+            return link.map_or(Ok(()), |(spirc, _)| Err(spirc));
         }
+        inner.drop_link();
+        if let Some((spirc, session)) = link {
+            inner.spirc = Some(spirc);
+            inner.session = Some(session);
+        }
+        Ok(())
+    })
+}
+
+/// The connected session and its generation, for a Web API token.
+pub(super) fn session(app: &AppHandle) -> Option<(Session, u64)> {
+    with(app, |inner| {
+        inner
+            .session
+            .as_ref()
+            .map(|session| (session.clone(), inner.session_gen))
     })
 }
 
@@ -225,7 +270,7 @@ pub(super) fn stop_run(app: &AppHandle) -> bool {
         let Some(run) = inner.run.take() else {
             return false;
         };
-        if let Some(spirc) = inner.spirc.take() {
+        if let Some(spirc) = inner.drop_link() {
             spirc.shutdown().ok();
         }
         run.stop.send_replace(true);
@@ -244,6 +289,54 @@ pub(super) fn with_spirc(
     with(app, |inner| match inner.spirc.as_ref() {
         Some(spirc) => f(spirc).map_err(|e| e.to_string()),
         None => Err("Not connected to Spotify".into()),
+    })
+}
+
+/// Sets the volume the user chose; a held duck is dropped, since their
+/// choice wins.
+pub(super) fn set_volume(app: &AppHandle, percent: u8) -> Result<(), String> {
+    with_duck(app, |duck, _, spirc| {
+        duck.forget();
+        spirc.set_volume(from_percent(percent))
+    })
+}
+
+/// `Some(level)` lowers the volume to `level`% of the volume before the first
+/// duck; `None` restores that volume, or does nothing without a held duck.
+pub(super) fn duck(app: &AppHandle, level: Option<u8>) -> Result<(), String> {
+    with_duck(app, |duck, volume, spirc| {
+        let target = match level {
+            Some(level) => Some(duck.duck(volume, level)),
+            None => duck.unduck(),
+        };
+        match target {
+            Some(target) => spirc.set_volume(from_percent(target)),
+            None => Ok(()),
+        }
+    })
+}
+
+/// A volume the player reported, which may drop a held duck.
+pub(super) fn volume_seen(app: &AppHandle, percent: u8) {
+    with(app, |inner| inner.duck.seen(percent));
+}
+
+/// Runs `f` with the duck, the current volume and the connected device.
+fn with_duck(
+    app: &AppHandle,
+    f: impl FnOnce(&mut Duck, u8, &Spirc) -> Result<(), librespot_core::Error>,
+) -> Result<(), String> {
+    with(app, |inner| {
+        let Inner {
+            spirc,
+            duck,
+            snapshot,
+            ..
+        } = inner;
+        match spirc.as_ref() {
+            Some(spirc) => f(duck, snapshot.volume, spirc).map_err(|e| e.to_string()),
+            None => Err("Not connected to Spotify".into()),
+        }
     })
 }
 
