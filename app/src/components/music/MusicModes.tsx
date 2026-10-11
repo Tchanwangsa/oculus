@@ -1,7 +1,7 @@
 import { Repeat, Shuffle } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { music, musicControllable, type MusicSnapshot } from "@/lib/music";
+import { music, musicControllable, shownPlayback, type MusicSnapshot } from "@/lib/music";
 import { cn } from "@/lib/utils";
 import { useMusicStore } from "@/stores/music/musicStore";
 
@@ -38,15 +38,17 @@ function ModeToggle({
   );
 }
 
-/** Shuffle and repeat, lit in the brand colour while on. */
+/** Shuffle and repeat of what the player shows, lit in the brand colour
+ *  while on. */
 export function ShuffleToggle({ snapshot }: { snapshot: MusicSnapshot }) {
   const run = useMusicStore((s) => s.run);
+  const on = shownPlayback(snapshot).shuffle;
   return (
     <ModeToggle
-      on={snapshot.shuffle}
+      on={on}
       label="Shuffle"
       disabled={!musicControllable(snapshot)}
-      onToggle={() => run(() => music.setShuffle(!snapshot.shuffle))}
+      onToggle={() => run(() => music.setShuffle(!on))}
     >
       <Shuffle size={17} />
     </ModeToggle>
@@ -55,12 +57,13 @@ export function ShuffleToggle({ snapshot }: { snapshot: MusicSnapshot }) {
 
 export function RepeatToggle({ snapshot }: { snapshot: MusicSnapshot }) {
   const run = useMusicStore((s) => s.run);
+  const on = shownPlayback(snapshot).repeat;
   return (
     <ModeToggle
-      on={snapshot.repeat}
+      on={on}
       label="Repeat"
       disabled={!musicControllable(snapshot)}
-      onToggle={() => run(() => music.setRepeat(!snapshot.repeat))}
+      onToggle={() => run(() => music.setRepeat(!on))}
     >
       <Repeat size={17} />
     </ModeToggle>

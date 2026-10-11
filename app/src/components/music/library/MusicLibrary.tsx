@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import {
   music,
   playlistSubtitle,
+  shownPlayback,
   type MusicPlaylist,
   type MusicSearchItem,
   type MusicSearchResults,
@@ -171,7 +172,7 @@ export function MusicLibrary({ snapshot }: { snapshot: MusicSnapshot }) {
     else clearSearch();
   };
 
-  const currentUri = snapshot.track?.uri ?? null;
+  const currentUri = shownPlayback(snapshot).track?.uri ?? null;
   const found = search?.results;
   const filters = found ? searchFilters(found) : [];
   // "All" alone means nothing was found.

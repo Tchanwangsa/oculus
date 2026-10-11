@@ -10,8 +10,9 @@ const CONFIRM_MS = 1500;
 
 /**
  * "Add to queue" inside a track row: shown on the row's hover (or while
- * focused), a tick for a moment once Spotify took it. A refusal (Oculus is
- * not the device playing) shows as the player's error, like any command.
+ * focused), a tick for a moment once Spotify took it. It adds to the queue
+ * of the device playing, Oculus or another; a refusal (nothing plays) shows
+ * as the player's error, like any command.
  */
 export function QueueAction({ uri, disabled = false }: { uri: string; disabled?: boolean }) {
   const run = useMusicStore((s) => s.run);

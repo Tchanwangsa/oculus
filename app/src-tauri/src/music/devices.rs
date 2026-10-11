@@ -7,7 +7,8 @@
 //!   change, and the cluster the Spirc gets back when it announces the device
 //!   stays inside the Spirc, so until the first push the list is this device
 //!   alone. A push also carries the active device's next tracks, for the
-//!   snapshot's `up_next`.
+//!   snapshot's `up_next`, and, when that device is another one, what it
+//!   plays, for the snapshot's `remote` (`remote/playback.rs`).
 //! - **A transfer** to Oculus itself is a pull (`control.rs`) then play; to
 //!   another device it is librespot's `spclient().transfer(from, to)`, the
 //!   request Spotify's own apps send.
@@ -19,7 +20,8 @@ use librespot_protocol::connect::{Cluster as ClusterProto, ClusterUpdate};
 use serde::Serialize;
 use tauri::AppHandle;
 
-use super::control::{self, Need};
+use super::control;
+use super::remote::{self, RemotePlayback};
 use super::state::{self, percent, up_next, NextTrack, DEVICE_NAME};
 
 const CLUSTER_URI: &str = "hm://connect-state/v1/cluster";
@@ -45,6 +47,9 @@ pub struct Cluster {
     /// What the active device plays next, when the push carried its player
     /// state; empty when no device is active.
     pub(super) up_next: Option<Vec<NextTrack>>,
+    /// What the active device plays when it is another one and the push
+    /// carried its player state; moved into the snapshot on arrival.
+    pub(super) remote: Option<RemotePlayback>,
 }
 
 impl Cluster {
@@ -105,6 +110,7 @@ pub(super) fn from_cluster(cluster: &ClusterProto, own_id: &str) -> Cluster {
         active_id: cluster.active_device_id.clone(),
         devices,
         up_next,
+        remote: remote::from_cluster(cluster, own_id),
     }
 }
 
@@ -135,13 +141,19 @@ pub(super) fn listen(app: &AppHandle, id: u64, session: &Session) {
     let app = app.clone();
     let session_id = session.session_id();
     let own_id = session.device_id().to_string();
+    let account = session.username();
     tauri::async_runtime::spawn(async move {
         let mut updates = updates;
+        let mut asked = None;
         while let Some(update) = updates.next().await {
             match update {
                 Ok(update) => {
                     if let Some(cluster) = update.cluster.as_ref() {
-                        state::set_cluster(&app, id, &session_id, from_cluster(cluster, &own_id));
+                        let mut cluster = from_cluster(cluster, &own_id);
+                        if let Some(remote) = cluster.remote.as_mut() {
+                            remote::describe(&app, id, &account, remote, &mut asked);
+                        }
+                        state::set_cluster(&app, id, &session_id, cluster);
                     }
                 }
                 Err(e) => elog!("[music] unreadable Connect cluster update: {e}"),
@@ -184,10 +196,7 @@ pub(super) async fn transfer(app: &AppHandle, device_id: String) -> Result<(), S
     let session = state::session(app).ok_or("Not connected to Spotify")?;
     let own_id = session.device_id().to_string();
     if device_id == own_id {
-        return control::send(app, Need::Pull, || {
-            state::with_spirc(app, |spirc| spirc.play())
-        })
-        .await;
+        return control::play_here(app).await;
     }
     let cluster = state::cluster(app)
         .filter(|c| c.has(&device_id))

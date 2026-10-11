@@ -12,13 +12,13 @@ itself is [music.md](./music.md).
 | --- | --- |
 | The library's calls: playlists, contents, rows, covers, search | `app/src-tauri/src/music/library/mod.rs`, `app/src-tauri/src/music/library/tracks.rs` |
 | What it keeps per account, and the rate-limit gate | `app/src-tauri/src/music/library/cache.rs`, `app/src-tauri/src/music/library/gate.rs` |
-| The one spclient request (GET, or POST of a protobuf) | `app/src-tauri/src/music/library/spclient.rs` |
+| The one spclient request (GET, POST of a protobuf or JSON, PUT of JSON), shared with remote commands | `app/src-tauri/src/music/library/spclient.rs` |
 | The rootlist and a playlist's header, decoded | `app/src-tauri/src/music/library/rootlist.rs` |
 | A playlist's tracks, decoded and paged | `app/src-tauri/src/music/library/contents.rs` |
 | Track metadata batches, decoded into rows | `app/src-tauri/src/music/library/metadata.rs` |
 | A cover made from a playlist's tracks | `app/src-tauri/src/music/library/covers.rs` |
 | The pathfinder `searchDesktop` request and its answer | `app/src-tauri/src/music/library/search.rs` |
-| Queueing, refused while inactive | `app/src-tauri/src/music/commands.rs` (`music_add_to_queue`), `app/src-tauri/src/music/control.rs` |
+| Queueing, here or on the device playing elsewhere | `app/src-tauri/src/music/commands.rs` (`music_add_to_queue`), `app/src-tauri/src/music/control.rs`, `app/src-tauri/src/music/remote/` |
 | Up next in the snapshot | `app/src-tauri/src/music/state.rs`, `app/src-tauri/src/music/events.rs`, `app/src-tauri/src/music/devices.rs` |
 | The Connect cluster, the device list and transfer | `app/src-tauri/src/music/devices.rs` |
 | Up next, playlists, a playlist's tracks and search under the player | `app/src/components/music/library/` (search: `SearchGroups.tsx`, `SearchPages.tsx`; an opened playlist or album: `PlaylistView.tsx`) |
@@ -208,13 +208,15 @@ URI or name. Each hit takes the smallest https image at least 300 px wide.
 A 400, 403, 404, 405, 410 or 501 still reads "Search isn't available right
 now", because it means the route is gone or refused.
 
-## Queueing works only while Oculus plays
+## Queueing adds to the device playing
 
 `music_add_to_queue` sends `Spirc::add_to_queue` while Oculus is the active
-device. librespot's Spirc drops it on an inactive device, and it has no
-command to queue on another device, so the command is refused there with
-the device's name rather than pulling playback here
-([music.md](./music.md#commands-pull-playback-back-when-another-device-holds-it)).
+device. While another device plays, it sends that device Spotify's remote
+`add_to_queue` command instead, never pulling playback here; with nothing
+playing anywhere it is refused with "Play something first, then add to the
+queue" ([music.md](./music.md#commands-control-the-device-playing-wherever-it-is)).
+Either way the queued track shows in up next from the next queue event or
+cluster push.
 
 ## Up next comes from the Spirc while Oculus plays, and the cluster otherwise
 
@@ -251,8 +253,11 @@ its own.
   device stays inside the Spirc. `music_devices` reads the kept push; the
   menu asks once when it opens. Offline devices are left out; Oculus is
   listed first, then the active device, then by name.
-- **A transfer to Oculus is a pull** then play
-  ([music.md](./music.md#commands-pull-playback-back-when-another-device-holds-it)).
+- **A transfer to Oculus is a pull** then play, the same as "Play here"
+  ([music.md](./music.md#commands-control-the-device-playing-wherever-it-is)).
+- **A push also carries the active device's player state**, which becomes
+  the snapshot's `remote` while that device is another one
+  ([music.md](./music.md#the-snapshots-remote-is-the-other-devices-playback)).
   To another device it is `spclient().transfer(from, to)`, from the active
   device (or this one when none is): the request Spotify's own apps send. A
   device the last push does not list cannot be chosen.

@@ -18,7 +18,8 @@ use tokio::sync::watch;
 use super::audio::Choice;
 use super::devices::Cluster;
 use super::duck::Duck;
-use super::library::Library;
+use super::library::{Library, TrackRow};
+use super::remote::{self, RemotePlayback};
 use crate::shell::browser::MAIN;
 
 pub const EVENT: &str = "music-state";
@@ -66,6 +67,9 @@ pub struct Snapshot {
     pub playing_on: Option<String>,
     /// The chosen output on this Mac; none is the system default.
     pub output: Option<String>,
+    /// What the active device plays while it is another one, from the
+    /// Connect cluster; the fields below stay Oculus's own.
+    pub remote: Option<RemotePlayback>,
     pub track: Option<Track>,
     /// The position at `position_at_ms` (epoch ms). While `playing`, the UI
     /// adds the time since; Rust sends no per-second ticks.
@@ -96,6 +100,7 @@ impl Default for Snapshot {
             active: false,
             playing_on: None,
             output: None,
+            remote: None,
             track: None,
             position_ms: 0,
             position_at_ms: 0,
@@ -127,6 +132,7 @@ impl Snapshot {
         self.playing = false;
         self.active = false;
         self.playing_on = None;
+        self.remote = None;
         self.up_next.clear();
     }
 
@@ -408,7 +414,7 @@ pub(super) fn cluster(app: &AppHandle) -> Option<Cluster> {
 
 /// A cluster push heard on the session `session_id` of run `id`; a push
 /// from any other session is dropped.
-pub(super) fn set_cluster(app: &AppHandle, id: u64, session_id: &str, cluster: Cluster) {
+pub(super) fn set_cluster(app: &AppHandle, id: u64, session_id: &str, mut cluster: Cluster) {
     change(app, |inner| {
         let current = inner
             .session
@@ -417,12 +423,40 @@ pub(super) fn set_cluster(app: &AppHandle, id: u64, session_id: &str, cluster: C
         if inner.run.as_ref().map(|r| r.id) != Some(id) || !current {
             return false;
         }
-        inner.snapshot.playing_on = cluster.playing_on();
-        if let Some(next) = &cluster.up_next {
-            inner.snapshot.up_next = next.clone();
-        }
+        apply_cluster(&mut inner.snapshot, &mut cluster);
         inner.cluster = Some(cluster);
         true
+    });
+}
+
+/// A pushed cluster's effect on the snapshot. Another device active with no
+/// player state in the push keeps what was known of that device.
+pub(super) fn apply_cluster(s: &mut Snapshot, cluster: &mut Cluster) {
+    s.playing_on = cluster.playing_on();
+    if let Some(next) = &cluster.up_next {
+        s.up_next = next.clone();
+    }
+    s.remote = match (cluster.remote.take(), &s.playing_on) {
+        (Some(remote), _) => Some(remote),
+        (None, Some(name)) => s.remote.take().filter(|r| &r.device_name == name),
+        (None, None) => None,
+    };
+}
+
+/// A track row for what the device playing elsewhere plays, fetched after
+/// the push that named it; dropped when that device has moved on.
+pub(super) fn set_remote_row(app: &AppHandle, id: u64, row: &TrackRow) {
+    change(app, |inner| {
+        if inner.run.as_ref().map(|r| r.id) != Some(id) {
+            return false;
+        }
+        match inner.snapshot.remote.as_mut() {
+            Some(playing) if playing.uri == row.uri => {
+                remote::with_row(playing, row);
+                true
+            }
+            _ => false,
+        }
     });
 }
 

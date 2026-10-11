@@ -29,6 +29,20 @@ export interface MusicNextTrack {
   queued: boolean;
 }
 
+/** What another Connect device plays while it holds playback (`remote`). */
+export interface MusicRemotePlayback {
+  device_name: string;
+  /** Null until Spotify's metadata or the library names it. */
+  track: MusicTrack | null;
+  position_ms: number;
+  position_at_ms: number;
+  playing: boolean;
+  /** 0–100; null when the device takes no volume commands. */
+  volume: number | null;
+  shuffle: boolean;
+  repeat: boolean;
+}
+
 export interface MusicSnapshot {
   connected: boolean;
   /** A login, a connect or a reconnect is under way. */
@@ -37,13 +51,18 @@ export interface MusicSnapshot {
   needs_login: boolean;
   account: string | null;
   device_name: string;
-  /** Oculus is Spotify's active device. While false, commands pull playback
-   *  here first, and a pause does nothing. */
+  /** Oculus is Spotify's active device. While false, the player's commands
+   *  go to the device playing elsewhere, or pull playback here when nothing
+   *  plays; `music.pause` does nothing. */
   active: boolean;
   /** The active device's name when it is another one, if known. */
   playing_on: string | null;
   /** The chosen output on this Mac; null is the system default. */
   output: string | null;
+  /** What the device playing elsewhere plays; null while Oculus is active or
+   *  nothing is. The fields below stay Oculus's own (the exclusive rule reads
+   *  them); the player shows `shownPlayback`. */
+  remote: MusicRemotePlayback | null;
   track: MusicTrack | null;
   /** True at `position_at_ms` (epoch ms); add the time since while playing. */
   position_ms: number;
@@ -148,14 +167,50 @@ export function musicEnabled(raw: string | null): boolean {
   return musicRow(raw).enabled === true;
 }
 
-/** Whether the transport can act: a track here, or another device playing
- *  that a command would pull back. */
-export function musicControllable(s: MusicSnapshot): boolean {
-  return s.connected && (s.track !== null || (!s.active && s.playing_on !== null));
+/** What the player shows: the remote device's playback while another device
+ *  plays, Oculus's own otherwise. */
+export interface MusicPlayback {
+  track: MusicTrack | null;
+  position_ms: number;
+  position_at_ms: number;
+  playing: boolean;
+  /** Null when the device playing takes no volume commands. */
+  volume: number | null;
+  shuffle: boolean;
+  repeat: boolean;
+  /** The other device's name while it plays; null for Oculus. */
+  device: string | null;
 }
 
-/** The position now, interpolated from the snapshot's stamp. */
-export function positionNow(s: MusicSnapshot, now = Date.now()): number {
+export function shownPlayback(s: MusicSnapshot): MusicPlayback {
+  const r = s.remote;
+  if (r) return { ...r, device: r.device_name };
+  return {
+    track: s.track,
+    position_ms: s.position_ms,
+    position_at_ms: s.position_at_ms,
+    playing: s.playing,
+    volume: s.volume,
+    shuffle: s.shuffle,
+    repeat: s.repeat,
+    device: null,
+  };
+}
+
+/** Whether the transport can act: a track here, or another device playing
+ *  that a command would control. */
+export function musicControllable(s: MusicSnapshot): boolean {
+  return (
+    s.connected &&
+    (s.track !== null || s.remote !== null || (!s.active && s.playing_on !== null))
+  );
+}
+
+/** The position now, interpolated from the playback's stamp. */
+export function positionNow(
+  s: Pick<MusicPlayback, "track" | "position_ms" | "position_at_ms" | "playing">,
+  now = Date.now(),
+): number {
   if (!s.playing) return s.position_ms;
   const at = s.position_ms + Math.max(0, now - s.position_at_ms);
   return s.track ? Math.min(at, s.track.duration_ms) : at;
@@ -172,9 +227,15 @@ export const music = {
   /** Also deletes the stored login. */
   signOut: () => invoke("music_sign_out"),
   playPause: () => invoke("music_play_pause"),
+  /** The player's play: resumes the device playing elsewhere, else plays
+   *  here (pulling playback here when nothing plays). */
   play: () => invoke("music_play"),
-  /** Never starts playback, unlike `playPause`. */
+  /** This device only: never starts playback, never pulls it, never touches
+   *  another device. What the exclusive-playback rule sends. */
   pause: () => invoke("music_pause"),
+  /** The player's pause: pauses what the player shows, here or on the
+   *  device playing elsewhere. */
+  pausePlayer: () => invoke("music_pause_player"),
   next: () => invoke("music_next"),
   prev: () => invoke("music_prev"),
   seek: (positionMs: number) => invoke("music_seek", { positionMs }),
@@ -183,7 +244,8 @@ export const music = {
   setShuffle: (on: boolean) => invoke("music_shuffle", { on }),
   /** On repeats the context; off also clears a repeated track. */
   setRepeat: (on: boolean) => invoke("music_repeat", { on }),
-  /** `spotify:playlist:…`, `spotify:album:…`; played on this device. */
+  /** `spotify:playlist:…`, `spotify:album:…`; played on the device playing
+   *  elsewhere, else on this one. */
   playContext: (uri: string) => invoke("music_play_context", { uri }),
   /** A `spotify:track:…`, from its place in `contextUri` (a playlist or
    *  album) when given. */
@@ -202,7 +264,8 @@ export const music = {
   albumTracks: (uri: string) => invoke<string[]>("music_album_tracks", { uri }),
   /** Rows by URI, kept once fetched; ask for a page of ~100 at a time. */
   tracks: (uris: string[]) => invoke<Record<string, MusicTrackRow>>("music_tracks", { uris }),
-  /** Refused, with the reason, unless Oculus is the device playing. */
+  /** To the queue of the device playing, this one or another; refused
+   *  while nothing plays. */
   addToQueue: (uri: string) => invoke("music_add_to_queue", { uri }),
   search: (query: string) => invoke<MusicSearchResults>("music_search", { query }),
   searchMore: (query: string, kind: MusicSearchKind, offset: number) =>
@@ -212,6 +275,8 @@ export const music = {
   devices: () => invoke<MusicDevice[]>("music_devices"),
   /** Moves playback to the device and plays; this device's id pulls it here. */
   transfer: (deviceId: string) => invoke("music_transfer", { deviceId }),
+  /** Moves playback from the device playing elsewhere to this one. */
+  playHere: () => invoke("music_play_here"),
   outputs: () => invoke<MusicOutput[]>("music_outputs"),
   /** null is the system default. Rust only; `musicPrefsStore.setOutput` also
    *  keeps it in the settings row. */

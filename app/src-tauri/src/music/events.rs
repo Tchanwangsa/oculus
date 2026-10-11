@@ -63,6 +63,7 @@ pub(super) fn apply(s: &mut Snapshot, event: PlayerEvent) {
         PlayerEvent::SessionConnected { .. } => {
             s.active = true;
             s.playing_on = None;
+            s.remote = None;
         }
         PlayerEvent::SessionDisconnected { .. } => {
             s.active = false;

@@ -242,6 +242,7 @@ pub fn run() {
             music::commands::music_play_pause,
             music::commands::music_play,
             music::commands::music_pause,
+            music::commands::music_pause_player,
             music::commands::music_shuffle,
             music::commands::music_repeat,
             music::commands::music_next,
@@ -261,6 +262,7 @@ pub fn run() {
             music::commands::music_duck,
             music::commands::music_devices,
             music::commands::music_transfer,
+            music::commands::music_play_here,
             music::commands::music_outputs,
             music::commands::music_set_output,
         ])
