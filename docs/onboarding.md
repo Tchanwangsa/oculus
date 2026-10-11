@@ -41,10 +41,13 @@ One `settings` row, `onboarding`, JSON `{ completedAt, skipped }`, where
    least one agent ready → write `completedAt` silently and show the shell.
    Otherwise → onboarding.
 
-An agent is ready when installed and signed in. opencode's sign-in can't be
-asked from outside its own page, so installed is enough for it, and the gate
-never starts opencode ([harness.md](./harness.md)). The probe asks Canvas
-first and skips the agents when it is not signed in, because the sign-in
+An agent is ready when supported on the current platform, installed and
+signed in. opencode's sign-in can't be asked from outside its own page, so installed is enough for it, and the gate
+never starts opencode ([harness.md](./harness.md)). Native Claude does not
+count as ready on Windows, even when installed and signed in. The probe and
+Agent step read the shared capabilities in `app/src/lib/harness/availability.ts`;
+the step names supported agents and directs terminal-only setup to a terminal.
+The probe asks Canvas first and skips the agents when it is not signed in, because the sign-in
 check spawns every CLI. It reads through `loadBridgeHealth` and
 `loadSignInStatus`, filling the same caches `useBridgeHealth` and
 `useSignInStatus` read, so the shell's pickers don't ask again. A gate that
