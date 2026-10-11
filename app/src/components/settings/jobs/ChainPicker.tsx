@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { ModelPicker } from "@/components/harness/composer/ModelPicker";
 import type { JobSelection } from "@/lib/db";
@@ -23,6 +23,9 @@ export function ChainPicker({
   onView,
   align = "start",
   emptyLabel,
+  emptyIcon,
+  keepEmptyTrigger,
+  onOpenChange,
   className,
 }: {
   providers: PickerProvider[];
@@ -35,6 +38,9 @@ export function ChainPicker({
   onView?: (provider: Provider) => void;
   align?: "start" | "end";
   emptyLabel?: string;
+  emptyIcon?: ReactNode;
+  keepEmptyTrigger?: boolean;
+  onOpenChange?: (open: boolean) => void;
   className?: string;
 }) {
   const committed = entry?.provider ?? fallbackProvider;
@@ -80,9 +86,12 @@ export function ChainPicker({
       onOpenChange={(open) => {
         if (open) onView?.(tab);
         else setViewed(null);
+        onOpenChange?.(open);
       }}
       align={align}
       emptyLabel={emptyLabel}
+      emptyIcon={emptyIcon}
+      keepEmptyTrigger={keepEmptyTrigger}
       className={className}
     />
   );

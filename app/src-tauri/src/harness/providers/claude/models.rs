@@ -25,6 +25,30 @@ pub struct ModelInfo {
     pub supported_effort_levels: Vec<String>,
 }
 
+/// The CLI's "Default (recommended)" alias, which hides which model a run
+/// gets. Never passed to `--model`: `concrete_model` swaps it for what it
+/// resolves to.
+pub fn is_default_alias(model: &str) -> bool {
+    model.trim().eq_ignore_ascii_case("default")
+}
+
+/// The model to pass to `--model`: `model` itself unless it is missing or the
+/// default alias, else the concrete model the catalogue says the default
+/// resolves to today. The catalogue is asked only in that case.
+pub fn concrete_model(
+    model: Option<&str>,
+    catalogue: impl FnOnce() -> Result<Vec<ModelInfo>, String>,
+) -> Result<String, String> {
+    if let Some(m) = model.filter(|m| !m.trim().is_empty() && !is_default_alias(m)) {
+        return Ok(m.to_string());
+    }
+    catalogue()?
+        .into_iter()
+        .find(|m| is_default_alias(&m.value) && !m.resolved_model.is_empty())
+        .map(|m| m.resolved_model)
+        .ok_or_else(|| "Claude Code names no default model; choose one in Settings".into())
+}
+
 /// For a CLI wedged on a login prompt or an update, not a slow one.
 const MODELS_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -174,6 +198,38 @@ mod tests {
         assert!(models_from_response(&refused, "oculus-models")
             .unwrap()
             .is_err());
+    }
+
+    #[test]
+    fn the_default_alias_is_swapped_for_its_model() {
+        let row = |value: &str, resolved: &str| ModelInfo {
+            value: value.into(),
+            resolved_model: resolved.into(),
+            display_name: String::new(),
+            description: String::new(),
+            supported_effort_levels: Vec::new(),
+        };
+        let catalogue = || {
+            Ok(vec![
+                row("Default", "claude-opus-5-5"),
+                row("sonnet", "claude-sonnet-5-5"),
+            ])
+        };
+        let unasked = || -> Result<Vec<ModelInfo>, String> { panic!("catalogue asked") };
+
+        assert_eq!(
+            concrete_model(Some("claude-sonnet-5-5"), unasked).unwrap(),
+            "claude-sonnet-5-5"
+        );
+        for alias in [Some("default"), Some(" Default "), Some(""), None] {
+            assert_eq!(
+                concrete_model(alias, catalogue).unwrap(),
+                "claude-opus-5-5",
+                "{alias:?}"
+            );
+        }
+        assert!(concrete_model(None, || Ok(vec![row("sonnet", "claude-sonnet-5-5")])).is_err());
+        assert!(concrete_model(None, || Err("no CLI".into())).is_err());
     }
 
     /// Needs an installed CLI: `cargo test --lib list_models_from_the_real_cli -- --ignored`.

@@ -413,7 +413,11 @@ compile without one.
   `initialize` response of a throwaway `claude -p` (no API call), cached on the
   binary's path and mtime and dropped on sign-in. A mounted picker re-asks when
   its CLI's path or version changes (an update from Settings → Agents). Aliases are stored as the
-  concrete model, since an alias changes meaning next release.
+  concrete model, since an alias changes meaning next release. Claude's
+  "Default (recommended)" row is dropped (`claudeAsModels`), since it hides
+  which model a run gets; the model it resolves to keeps the default mark. No
+  Claude spawn passes it either: `claude::concrete_model` swaps a missing
+  model or the `default` alias for what the catalogue resolves it to.
 - **Levels belong to the model.** Haiku declares none (no `--effort`);
   opencode's are variants; `agy` bakes them into the slug (`parse_models`
   splits, `model_slug` rejoins). `sortReasoning` orders by
@@ -491,8 +495,11 @@ On the CLI, `--provider`/`--model`/`--effort` override the first model and drop
 the fallbacks for one run.
 
 In Settings the row's picker is the first model; its fallbacks are ordered in
-a dialog (`JobModelsDialog`). Browsing another agent's tab changes nothing until
+a dialog (`JobModelsDialog`) by dragging a row or by the arrow keys on its
+handle (`ChainList`). Browsing another agent's tab changes nothing until
 a model is picked (`ChainPicker`), so no entry is ever an agent without a model.
+The dialog's add menu stays open on the model it just appended, so its level
+is set in the same menu.
 
 - **A model that leaves its agent's list is removed, never replaced.**
   `useJobAudit`, mounted in `AppLayout` and asking for catalogues only after

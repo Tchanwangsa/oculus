@@ -36,6 +36,8 @@ export const ModelPicker = memo(function ModelPicker({
   align = "start",
   onOpenChange,
   emptyLabel = "Choose a model",
+  emptyIcon,
+  keepEmptyTrigger = false,
   className,
 }: {
   providers: PickerProvider[];
@@ -53,6 +55,11 @@ export const ModelPicker = memo(function ModelPicker({
   onOpenChange?: (open: boolean) => void;
   /** The trigger's text while no model is set. */
   emptyLabel?: string;
+  /** Replaces the agent's mark while no model is set, for an "add" trigger. */
+  emptyIcon?: ReactNode;
+  /** The trigger keeps its empty look with a model set: an "add" menu whose
+   *  pick lands in a row of its own. */
+  keepEmptyTrigger?: boolean;
   className?: string;
 }) {
   const [open, setOpenState] = useState(false);
@@ -110,9 +117,15 @@ export const ModelPicker = memo(function ModelPicker({
         className,
       )}
     >
-      <ProviderMark provider={provider} className="size-3.5 shrink-0" />
-      <span className="min-w-0 truncate">{label ?? emptyLabel}</span>
-      {levelText ? <span className="shrink-0 text-muted-foreground">{levelText}</span> : null}
+      {(label == null || keepEmptyTrigger) && emptyIcon ? (
+        emptyIcon
+      ) : (
+        <ProviderMark provider={provider} className="size-3.5 shrink-0" />
+      )}
+      <span className="min-w-0 truncate">{keepEmptyTrigger ? emptyLabel : (label ?? emptyLabel)}</span>
+      {levelText && !keepEmptyTrigger ? (
+        <span className="shrink-0 text-muted-foreground">{levelText}</span>
+      ) : null}
       <CaretDown className="size-3 shrink-0 text-muted-foreground" />
     </Button>
   );

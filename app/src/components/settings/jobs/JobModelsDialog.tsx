@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { Plus } from "@phosphor-icons/react";
+
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -7,11 +10,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { DEFAULT_JOB_MODELS, type JobChain, type JobId } from "@/lib/db";
+import { DEFAULT_JOB_MODELS, type JobChain, type JobId, type JobSelection } from "@/lib/db";
 import type { PickerProvider, Provider } from "@/lib/harness";
 import { ChainPicker } from "./ChainPicker";
-import { ChainEntryRow } from "./ChainEntryRow";
-import { moveEntry, withEntry, withoutEntry } from "./chain";
+import { ChainList } from "./ChainList";
+import { withEntry, withoutEntry } from "./chain";
 
 /** Edits apply as they are made, through the same save as the job's row, so
  *  there is nothing to confirm or cancel. */
@@ -35,6 +38,17 @@ export function JobModelsDialog({
   onClose: () => void;
 }) {
   const addProvider = chain[chain.length - 1]?.provider ?? DEFAULT_JOB_MODELS[job][0].provider;
+  // The entry the open "add" menu just appended, so the menu stays on it for
+  // its level and a second pick replaces it rather than appending again.
+  // Cleared when the menu closes.
+  const [added, setAdded] = useState<number | null>(null);
+  const addPick = (pick: JobSelection) => {
+    const at = added ?? chain.length;
+    // A pick already in the chain moves there (`withEntry`), so find it again.
+    const next = withEntry(chain, at, pick);
+    setAdded(next.findIndex((e) => e.provider === pick.provider && e.model === pick.model));
+    onChange((c) => withEntry(c, at, pick));
+  };
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -47,37 +61,29 @@ export function JobModelsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div>
+        <div className="space-y-1">
           {chain.length > 0 && (
-            // Keyed by place, not model: a row whose model changes keeps its
-            // picker mounted, so the menu stays open for the level.
-            <ol>
-              {chain.map((entry, i) => (
-                <ChainEntryRow
-                  key={i}
-                  position={i + 1}
-                  entry={entry}
-                  providers={providers}
-                  isFirst={i === 0}
-                  isLast={i === chain.length - 1}
-                  onPick={(pick) => onChange((c) => withEntry(c, i, pick))}
-                  onView={onView}
-                  onMove={(by) => onChange((c) => moveEntry(c, i, by))}
-                  onRemove={() => onChange((c) => withoutEntry(c, i))}
-                />
-              ))}
-            </ol>
-          )}
-          <div className="mt-1 pl-6">
-            <ChainPicker
+            <ChainList
+              chain={chain}
               providers={providers}
-              entry={null}
-              fallbackProvider={addProvider}
-              onPick={(pick) => onChange((c) => withEntry(c, c.length, pick))}
+              onChange={onChange}
               onView={onView}
-              emptyLabel="Add a model"
+              onPick={(i, pick) => onChange((c) => withEntry(c, i, pick))}
+              onRemove={(i) => onChange((c) => withoutEntry(c, i))}
             />
-          </div>
+          )}
+          <ChainPicker
+            providers={providers}
+            entry={added === null ? null : (chain[added] ?? null)}
+            fallbackProvider={addProvider}
+            onPick={addPick}
+            onView={onView}
+            onOpenChange={(open) => !open && setAdded(null)}
+            emptyLabel={chain.length > (added === null ? 0 : 1) ? "Add a fallback" : "Add a model"}
+            emptyIcon={<Plus className="size-3.5 shrink-0" />}
+            keepEmptyTrigger
+            className="ml-1"
+          />
         </div>
 
         <DialogFooter>
