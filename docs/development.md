@@ -197,6 +197,11 @@ at 300 — seeded with the run number so each run tries new cases. Replay a
 failure locally with the seed it prints. The first job's `bun run build` never
 builds the editor core's wasm, so it proves the frontend builds without it.
 
+The `studio-core` job runs `cargo fmt --check`, clippy with `-D warnings`
+over every target and `cargo test --locked` in `app/studio-core`
+([studio.md](./studio.md)) on macOS, because its golden frames are rendered
+on Apple Silicon.
+
 `release.yml` is `workflow_dispatch` only. To cut a release, bump `version` in
 `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml` together, push,
 then run **Release** from the Actions tab. `tauri-apps/tauri-action` runs

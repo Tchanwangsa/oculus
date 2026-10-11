@@ -1,0 +1,15 @@
+{
+  "size": { "width": 1920, "height": 1080 },
+  "theme": "default",
+  "scenes": [
+    {
+      "component": "TitleCard",
+      "props": {
+        "eyebrow": "Lecture 4 · Optimisation",
+        "title": "Gradient descent, step by step",
+        "subtitle": "How a model walks downhill on its loss surface, and why the step size decides everything."
+      },
+      "hold": 4.0
+    }
+  ]
+}

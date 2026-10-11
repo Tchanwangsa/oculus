@@ -1,0 +1,68 @@
+{
+  "color": {
+    "bg": "#f4f4f6",
+    "surface": "#ffffff",
+    "surfaceAlt": "#ececf1",
+    "text": "#16161d",
+    "muted": "#6b6e7a",
+    "faint": "#a1a3ad",
+    "border": "#e2e2e8",
+    "accent": "#5e6ad2",
+    "accentStrong": "#4752c4",
+    "accentSoft": "#e6e8fa",
+    "onAccent": "#ffffff",
+    "ink": "#101018",
+    "onInk": "#f4f4f6",
+    "shadow": "#16161d26",
+    "positive": "#2f9e6e",
+    "warning": "#d99a2b",
+    "negative": "#d1495b"
+  },
+  "font": {
+    "heading": "Manrope",
+    "body": "Inter"
+  },
+  "type": {
+    "display": { "fontFamily": "Manrope", "fontSize": 104, "fontWeight": 750, "lineHeight": 1.02, "letterSpacing": -3.2 },
+    "h1": { "fontFamily": "Manrope", "fontSize": 72, "fontWeight": 700, "lineHeight": 1.08, "letterSpacing": -1.8 },
+    "h2": { "fontFamily": "Manrope", "fontSize": 52, "fontWeight": 650, "lineHeight": 1.12, "letterSpacing": -1.0 },
+    "h3": { "fontFamily": "Manrope", "fontSize": 38, "fontWeight": 600, "lineHeight": 1.2, "letterSpacing": -0.5 },
+    "body": { "fontFamily": "Inter", "fontSize": 32, "fontWeight": 420, "lineHeight": 1.45, "letterSpacing": -0.2 },
+    "label": { "fontFamily": "Inter", "fontSize": 24, "fontWeight": 600, "lineHeight": 1.2, "letterSpacing": 0.2 },
+    "caption": { "fontFamily": "Inter", "fontSize": 22, "fontWeight": 450, "lineHeight": 1.35, "letterSpacing": 0 }
+  },
+  "space": {
+    "xxs": 4,
+    "xs": 8,
+    "s": 16,
+    "m": 24,
+    "l": 40,
+    "xl": 64,
+    "xxl": 112
+  },
+  "radius": {
+    "s": 8,
+    "m": 16,
+    "l": 28,
+    "xl": 44,
+    "pill": 999
+  },
+  "motion": {
+    "duration": {
+      "fast": 0.2,
+      "base": 0.45,
+      "slow": 0.9,
+      "stagger": 0.07
+    },
+    "easing": {
+      "standard": [0.2, 0, 0, 1],
+      "enter": [0.05, 0.7, 0.1, 1],
+      "exit": [0.3, 0, 0.8, 0.15]
+    },
+    "spring": {
+      "gentle": { "stiffness": 120, "damping": 20, "mass": 1 },
+      "snappy": { "stiffness": 260, "damping": 28, "mass": 1 },
+      "bouncy": { "stiffness": 180, "damping": 12, "mass": 1 }
+    }
+  }
+}

@@ -14,6 +14,7 @@ agent queries and plans through. Flags are in
 | `project` and `task` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs`, `app/src-tauri/src/db/projects/` |
 | `lecture` | `app/src-tauri/src/bin/oculus/commands/lecture.rs`, `app/src-tauri/src/bin/oculus/args/lecture.rs` |
 | `transcribe` | `app/src-tauri/src/bin/oculus/commands/transcribe.rs`, `app/src-tauri/src/transcribe/` |
+| `studio` | `app/src-tauri/src/bin/oculus/commands/studio.rs`, `app/src-tauri/src/bin/oculus/args/studio.rs`, `app/studio-core/` |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/commands/docs.rs`, `app/src-tauri/src/agents/` (`docs.rs`, `links.rs`) |
 | The memory store | `app/src-tauri/src/agents/memory/`, `app/src-tauri/src/bin/oculus/commands/memory.rs` |
 | `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/commands/keyd.rs`, `app/src-tauri/src/auth/keyd/`; the LaunchAgent itself in `app/keyd/core/src/platform/macos/registrar.rs` |
@@ -30,6 +31,8 @@ agent queries and plans through. Flags are in
 | `memory` | Agents' notes in `agents/memories/` | Files, not rows, because the thread writing them cannot open the database ([harness.md](./harness.md)) |
 | `lecture chapters`, `lecture end` | Derived rows, regenerable from the recording | They spend model quota, so an existing result is kept unless `--force` |
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
+| `studio frame` | One PNG, in the video folder's `out/` unless `-o` says elsewhere | Reads only the folder: no database, no network ([studio.md](./studio.md)) |
+| `studio lint` | Nothing | Renders every scene in memory; exits 1 on any problem |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |
 | `keyd install`, `keyd uninstall` | The LaunchAgent `com.tchan.oculus.keyd`, `bin/Oculus Helper.app` and keyd's stamp in the data dir; install also (re)loads the agent | Never touches `vault.bin` or the keychain, so uninstalling loses no key ([below](#keyd-install-never-points-the-agent-at-a-build-tree)) |
 | `keyd status` | Nothing | Pings keyd, which starts it; prints no secret |
