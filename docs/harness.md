@@ -433,6 +433,12 @@ Providers and Models, the second one row per model with opencode's own price,
 limits and capabilities (`ModelFacts`, a free catalogue read; a missing figure
 draws "—", never $0).
 
+- **Recommended providers are pinned.** OpenRouter and OpenCode Go
+  (`RECOMMENDED_PROVIDERS` in `opencodeCatalogue.ts`) sit first in both Providers
+  tabs with a star, connected or not.
+- **Zen is greyed out.** Its provider (`opencode`) shows only under *All*, marked
+  Unavailable with no Connect action; it never counts as connected, and none of its
+  models is listed in Models.
 - **`connected` goes stale** after `PUT /auth` until `POST /instance/dispose`,
   which is skipped while a turn is open.
 - **A key is never held**: field → `PUT /auth/{id}` only. Errors are redacted,

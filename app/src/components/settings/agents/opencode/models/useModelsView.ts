@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { OpencodeProvider } from "@/lib/harness/opencodeAuth";
-import { providerOf, type OpencodeCatalogue } from "@/lib/harness/opencodeCatalogue";
+import { isZen, providerOf, type OpencodeCatalogue } from "@/lib/harness/opencodeCatalogue";
 import type { HarnessModel } from "@/lib/harness";
 import { usePagedRows } from "@/components/ui/table/TablePagination";
 import { blockedBecause, isHidden } from "../useOpencode";
@@ -36,11 +36,11 @@ export function useModelsView(
   );
   const providerName = useCallback((id: string) => names.get(id) ?? id, [names]);
 
-  // A hidden provider's models never reach the picker, so they aren't listed.
+  // A hidden provider's models never reach the picker, and Zen's never run, so neither is listed.
   const rows = useMemo(() => {
     if (!models) return [];
     const hiddenIds = new Set(catalogue?.hiddenProviders ?? []);
-    return models.filter((m) => !hiddenIds.has(providerOf(m.id)));
+    return models.filter((m) => !isZen(m.id) && !hiddenIds.has(providerOf(m.id)));
   }, [models, catalogue]);
 
   const providerIds = useMemo(
