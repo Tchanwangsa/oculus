@@ -1,25 +1,25 @@
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
 import { isValidElement, memo } from "react";
 import { ArrowSquareOut } from "@phosphor-icons/react";
 import { CitationCode, CitationLink, linkCitation } from "@/components/markdown/Citation";
 import { FileChip } from "@/components/markdown/FileChip";
 import { Mermaid } from "@/components/markdown/Mermaid";
 import { OutputEmbed, embedKind } from "@/components/markdown/OutputEmbed";
-import { attachmentPath, attachmentSrc } from "@/lib/attachments";
-import { useDataDir } from "@/hooks/useDataDir";
+import { attachmentPath, attachmentSrc } from "@/lib/harness/attachments";
+import { useDataDir } from "@/hooks/backend/useDataDir";
 import { parseCitation, remarkProsePaths } from "@/lib/citations";
-import { libraryPath, openLibraryPath } from "@/lib/openFile";
+import { libraryPath, openLibraryPath } from "@/lib/files/openFile";
 import { cn } from "@/lib/utils";
 
 // Imported here so every markdown renderer gets it; unlayered, so `.katex`
 // keeps its own metrics over Tailwind's layers.
-import "katex/dist/katex.min.css";
+import "@/styles/katex/katex.min.css";
 
-import { visibleLines, type AnsiSpan } from "@/lib/ansi";
-import { hasMath, normalizeMath } from "@/lib/mathMarkdown";
+import { visibleLines, type AnsiSpan } from "@/lib/format/ansi";
+import { hasMath, normalizeMath } from "@/lib/markdown/math";
+import { rehypeMaths, useMathsReady } from "@/lib/maths";
 
 /** Code outside markdown. The app's only `font-mono` lives in this file. */
 export function CodeText({ className, ...p }: React.ComponentProps<"pre">) {
@@ -121,7 +121,7 @@ function MdImage({ src, alt, ...p }: any) {
  * only filters the parsed tree, not an `<img>` a component draws.
  */
 function codeRenderer(pictures: boolean) {
-  // An inline span that is nothing but a citation (`lib/citations.ts`) draws
+  // An inline span that is nothing but a citation (`lib/citations/index.ts`) draws
   // as a FileChip, or as the picture for an attachment; anything else stays code.
   return ({ className, children, ...p }: any) => {
     const isBlock = /language-/.test(className ?? "") || String(children).includes("\n");
@@ -221,12 +221,10 @@ export const MD_COMPONENTS: Components = {
   ),
 };
 
-// ── Two ready-made renderers ─────────────────────────────────────────────────
-
 /** Hoisted for stable array identity across re-renders. */
 const PLAIN = [remarkGfm, remarkProsePaths];
 const WITH_MATH = [remarkGfm, remarkMath, remarkProsePaths];
-const KATEX = [rehypeKatex];
+const MATHS = [rehypeMaths];
 const NO_PLUGINS: never[] = [];
 
 /**
@@ -235,12 +233,13 @@ const NO_PLUGINS: never[] = [];
  * button early.
  */
 export const InlineMd = memo(function InlineMd({ text, className }: { text: string; className?: string }) {
+  useMathsReady();
   const math = hasMath(text);
   return (
     <span className={cn("md-inline", className)}>
       <ReactMarkdown
         remarkPlugins={math ? WITH_MATH : PLAIN}
-        rehypePlugins={math ? KATEX : NO_PLUGINS}
+        rehypePlugins={math ? MATHS : NO_PLUGINS}
         components={INLINE_COMPONENTS}
         disallowedElements={BLOCKS}
         unwrapDisallowed
@@ -270,12 +269,13 @@ const INLINE_COMPONENTS: Components = {
  * it beats their utilities.
  */
 export const CompactMd = memo(function CompactMd({ text, className }: { text: string; className?: string }) {
+  useMathsReady();
   const math = hasMath(text);
   return (
     <div data-selectable className={cn("md-compact min-w-0", className)}>
       <ReactMarkdown
         remarkPlugins={math ? WITH_MATH : PLAIN}
-        rehypePlugins={math ? KATEX : NO_PLUGINS}
+        rehypePlugins={math ? MATHS : NO_PLUGINS}
         components={MD_COMPONENTS}
       >
         {math ? normalizeMath(text) : text}

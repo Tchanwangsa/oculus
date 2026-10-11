@@ -1,0 +1,72 @@
+[
+ {
+  "name": "gfm_table_test_1",
+  "markdown": "| foo | bar |\n| --- | --- |\n| baz | bim |\n",
+  "html": "<table>\n<thead>\n<tr>\n<th>foo</th>\n<th>bar</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>baz</td>\n<td>bim</td>\n</tr>\n</tbody>\n</table>\n"
+ },
+ {
+  "name": "gfm_table_test_2",
+  "markdown": "| abc | defghi |\n:-: | -----------:\nbar | baz\n",
+  "html": "<table>\n<thead>\n<tr>\n<th style=\"text-align: center\">abc</th>\n<th style=\"text-align: right\">defghi</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td style=\"text-align: center\">bar</td>\n<td style=\"text-align: right\">baz</td>\n</tr>\n</tbody>\n</table>\n"
+ },
+ {
+  "name": "gfm_table_test_3",
+  "markdown": "| f\\|oo  |\n| ------ |\n| b `\\|` az |\n| b **\\|** im |\n",
+  "html": "<table>\n<thead>\n<tr>\n<th>f|oo</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>b <code>|</code> az</td>\n</tr>\n<tr>\n<td>b <strong>|</strong> im</td>\n</tr>\n</tbody>\n</table>\n"
+ },
+ {
+  "name": "gfm_table_test_4",
+  "markdown": "| abc | def |\n| --- | --- |\n| bar | baz |\n> bar\n",
+  "html": "<table>\n<thead>\n<tr>\n<th>abc</th>\n<th>def</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>bar</td>\n<td>baz</td>\n</tr>\n</tbody>\n</table>\n<blockquote>\n<p>bar</p>\n</blockquote>\n"
+ },
+ {
+  "name": "gfm_table_test_5",
+  "markdown": "| abc | def |\n| --- | --- |\n| bar | baz |\nbar\n\nbar\n",
+  "html": "<table>\n<thead>\n<tr>\n<th>abc</th>\n<th>def</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>bar</td>\n<td>baz</td>\n</tr>\n<tr>\n<td>bar</td>\n<td></td>\n</tr>\n</tbody>\n</table>\n<p>bar</p>\n"
+ },
+ {
+  "name": "gfm_table_test_6",
+  "markdown": "| abc | def |\n| --- |\n| bar |\n",
+  "html": "<p>| abc | def |\n| --- |\n| bar |</p>\n"
+ },
+ {
+  "name": "gfm_table_test_7",
+  "markdown": "| abc | def |\n| --- | --- |\n| bar |\n| bar | baz | boo |\n",
+  "html": "<table>\n<thead>\n<tr>\n<th>abc</th>\n<th>def</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>bar</td>\n<td></td>\n</tr>\n<tr>\n<td>bar</td>\n<td>baz</td>\n</tr>\n</tbody>\n</table>\n"
+ },
+ {
+  "name": "gfm_table_test_8",
+  "markdown": "| abc | def |\n| --- | --- |\n",
+  "html": "<table>\n<thead>\n<tr>\n<th>abc</th>\n<th>def</th>\n</tr>\n</thead>\n<tbody></tbody>\n</table>\n"
+ },
+ {
+  "name": "gfm_table_test_9",
+  "markdown": "Hello World\n| abc | def |\n| --- | --- |\n| bar | baz |\n",
+  "html": "<p>Hello World</p>\n<table>\n<thead>\n<tr>\n<th>abc</th>\n<th>def</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>bar</td>\n<td>baz</td>\n</tr>\n</tbody>\n</table>\n"
+ },
+ {
+  "name": "gfm_strikethrough_test_1",
+  "markdown": "~~Hi~~ Hello, ~there~ world!\n",
+  "html": "<p><del>Hi</del> Hello, <del>there</del> world!</p>\n"
+ },
+ {
+  "name": "gfm_strikethrough_test_2",
+  "markdown": "This ~~has a\n\nnew paragraph~~.\n",
+  "html": "<p>This ~~has a</p>\n<p>new paragraph~~.</p>\n"
+ },
+ {
+  "name": "gfm_strikethrough_test_3",
+  "markdown": "This will ~~~not~~~ strike.\n",
+  "html": "<p>This will ~~~not~~~ strike.</p>\n"
+ },
+ {
+  "name": "gfm_tasklist_test_1",
+  "markdown": "- [ ] foo\n- [x] bar\n",
+  "html": "<ul>\n<li><input disabled=\"\" type=\"checkbox\"/>\nfoo</li>\n<li><input disabled=\"\" type=\"checkbox\" checked=\"\"/>\nbar</li>\n</ul>\n"
+ },
+ {
+  "name": "gfm_tasklist_test_2",
+  "markdown": "- [x] foo\n  - [ ] bar\n  - [x] baz\n- [ ] bim\n",
+  "html": "<ul>\n<li><input disabled=\"\" type=\"checkbox\" checked=\"\"/>\nfoo\n<ul>\n<li><input disabled=\"\" type=\"checkbox\"/>\nbar</li>\n<li><input disabled=\"\" type=\"checkbox\" checked=\"\"/>\nbaz</li>\n</ul>\n</li>\n<li><input disabled=\"\" type=\"checkbox\"/>\nbim</li>\n</ul>\n"
+ }
+]

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Book, type Icon as PhosphorIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { courseColor, iconKey, useSubjectIconStore } from "@/stores/subjectIconStore";
+import { courseColor, iconKey, useSubjectIconStore } from "@/stores/planning/subjectIconStore";
 
 let catalogue: Map<string, PhosphorIcon> | null = null;
 let loading: Promise<Map<string, PhosphorIcon>> | null = null;

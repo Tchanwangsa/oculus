@@ -15,9 +15,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::clock;
 use crate::parse::ParseError;
-use crate::ratelimit::{hold, TokenBucket};
+use crate::providers::ratelimit::{hold, TokenBucket};
+use crate::runtime::clock;
 
 /// MinerU's upload ceiling; a larger file is refused before upload.
 pub const MAX_FILE_BYTES: u64 = 200 * 1024 * 1024;
@@ -76,7 +76,7 @@ impl UsageLedger {
         SHARED
             .get_or_init(|| {
                 Arc::new(UsageLedger::at(
-                    crate::paths::data_dir().join("mineru-usage.json"),
+                    crate::library::paths::data_dir().join("mineru-usage.json"),
                 ))
             })
             .clone()
@@ -142,7 +142,7 @@ impl UsageLedger {
 
     /// Temp file in the same directory, then rename.
     fn write(&self, usage: &Usage) {
-        crate::atomic_write::json(&self.path, usage).ok();
+        crate::runtime::atomic_write::json(&self.path, usage).ok();
     }
 }
 
@@ -152,8 +152,6 @@ impl UsageLedger {
 fn beijing_day() -> String {
     clock::ymd((clock::now_secs() as i64 + 8 * 3600).div_euclid(86_400))
 }
-
-// ── Rate limiting ────────────────────────────────────────────────────────────
 
 /// Process-global, or concurrent batches would each spend the whole limit.
 pub fn submit_bucket() -> Arc<TokenBucket> {

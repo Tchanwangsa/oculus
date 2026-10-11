@@ -1,0 +1,45 @@
+/* Rendered maths selects as one unit (`watchMathSelection`): no native
+ * highlight on KaTeX's glyphs; a formula the selection touches gets bands
+ * over its atoms instead (`.md-math-band`). */
+.katex::selection,
+.katex ::selection {
+  background-color: transparent;
+}
+
+/* A formula's source while the maths engine loads (`rehypeMaths`); the
+ * component re-renders it as maths once it is ready. */
+.md-math-pending {
+  color: var(--color-muted-foreground);
+}
+.md-math-pending-display {
+  display: block;
+  margin: 1em 0;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
+/* Bands over rendered maths (`lib/markdown/mathSelection/`: an in-place
+ * selection, or a formula a selection takes whole, a note's rendering
+ * included): the formula is positioned and isolated so its bands sit under
+ * its glyphs, neither of which moves anything; the bands take the note
+ * field's tint (`.cm-math-view-band`). */
+.katex[data-math-selecting] {
+  position: relative;
+  isolation: isolate;
+}
+.md-math-bands {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: -1;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.md-math-band {
+  position: absolute;
+  border-radius: 2px;
+  background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+}

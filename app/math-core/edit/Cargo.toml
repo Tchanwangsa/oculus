@@ -1,0 +1,21 @@
+[package]
+name = "oculus-math-edit"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The visual maths field's edit model: caret stops and slots over a formula's LaTeX source."
+readme = "../README.md"
+keywords = ["latex", "math", "katex", "editor"]
+categories = ["mathematics", "text-editors"]
+
+[dependencies]
+katex = { package = "katex-rs", path = "../katex" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest = { version = "1.11.0", default-features = false, features = ["std"] }
+serde_json = "1.0.151"

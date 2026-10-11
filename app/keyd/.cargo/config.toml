@@ -1,0 +1,6 @@
+# The path-independent half of keyd's reproducible build. ld64 hashes the
+# object files' paths (which name the target dir) into LC_UUID unless stabs
+# are left out. The path remaps differ per checkout, so `bun run keyd` passes
+# them (app/scripts/build-keyd.mjs).
+[build]
+rustflags = ["-C", "link-arg=-Wl,-S"]

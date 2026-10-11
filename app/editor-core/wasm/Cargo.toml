@@ -1,0 +1,16 @@
+[package]
+name = "oculus-editor-core-wasm"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+oculus-editor-core = { path = ".." }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Pinned exactly: the `wasm-bindgen` CLI that generates the JS glue must be the
+# same version (app/scripts/build-editor-wasm.mjs reads this line to check).
+wasm-bindgen = "=0.2.129"

@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
-import { navigateActive } from "@/lib/tabRouters";
-import { useActivePath } from "@/stores/tabStore";
+import { navigateActive } from "@/lib/shell/tabRouters";
+import { useActivePath } from "@/stores/shell/tabStore";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
 import {
   Tooltip,
@@ -29,7 +29,7 @@ interface RailItemProps {
  * An icon in the sidebar rail, named by its tooltip. Not a `NavLink`: the
  * sidebar is outside every tab's router, so it navigates the front tab via
  * `navigateActive`; ⌘-click opens a new tab off `data-tab-href`
- * (`app/src/lib/newTabClicks.ts`).
+ * (`app/src/lib/shell/newTabClicks.ts`).
  */
 export default function RailItem({ to, icon: Icon, label, match, indicator }: RailItemProps) {
   // Prefix match on `${to}/`, so Home (`/`) tests "//" and lights only on `/`.

@@ -1,19 +1,19 @@
 import { memo, useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { ClockCounterClockwise, NotePencil } from "@phosphor-icons/react";
 
-import { DropOverlay } from "@/components/ui/DropOverlay";
+import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ProviderMark } from "@/components/harness/ProviderMark";
-import { Timeline } from "@/components/harness/Timeline";
-import { useThreadActions } from "@/components/harness/useThreadActions";
+import { ProviderMark } from "@/components/icons/ProviderMark";
+import { Timeline } from "@/components/harness/timeline/Timeline";
+import { useThreadActions } from "@/components/harness/threads/useThreadActions";
 import { LectureChatComposer } from "@/components/lectures/LectureChatComposer";
-import { useProviderModels } from "@/hooks/useProviderModels";
-import { useStickToBottom } from "@/hooks/useStickToBottom";
-import { useScrollFade } from "@/hooks/useScrollFade";
-import { fmtAgo, sqliteUtcToMs } from "@/lib/format";
+import { useProviderModels } from "@/hooks/agents/useProviderModels";
+import { useStickToBottom } from "@/hooks/ui/useStickToBottom";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
+import { fmtAgo, sqliteUtcToMs } from "@/lib/format/format";
 import { defaultSelection, getLectureThreads, type HarnessThread } from "@/lib/harness";
-import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
-import { draftKey } from "@/stores/draftStore";
+import { itemsFor, useHarnessStore } from "@/stores/chat/harnessStore";
+import { draftKey } from "@/stores/chat/draftStore";
 import { cn } from "@/lib/utils";
 
 /**

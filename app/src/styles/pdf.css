@@ -1,0 +1,117 @@
+/* The PDF viewer (`components/files/pdf/`). The scroller always shows its
+ * vertical bar, so a fit never changes the width it fitted to (docs/ui.md). */
+.pdf-surface {
+  overflow-x: auto;
+  overflow-y: scroll;
+}
+.pdf-surface .pdf-pages {
+  position: relative;
+}
+/* A page sits white in either theme, with a card's shadow. Inside, in paint
+ * order: the raster, block boxes, find highlights, the text layer, links. */
+.pdf-surface .page {
+  position: absolute;
+  overflow: hidden;
+  background: white;
+  border-radius: 4px;
+  box-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.1),
+    0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+.pdf-surface .pdf-canvas,
+.pdf-surface .pdf-block-layer,
+.pdf-surface .pdf-find-layer,
+.pdf-surface .textLayer,
+.pdf-surface .pdf-link-layer {
+  position: absolute;
+  inset: 0;
+}
+.pdf-surface .pdf-canvas {
+  width: 100%;
+  height: 100%;
+}
+.pdf-surface .pdf-block-layer,
+.pdf-surface .pdf-find-layer,
+.pdf-surface .pdf-link-layer {
+  pointer-events: none;
+}
+/* A cited parse block's box (`PdfPage`'s block layer). Under the text
+ * layer, like find. */
+.pdf-surface .pdf-block-layer > div {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 55%, transparent);
+  background-color: color-mix(in srgb, var(--color-brand) 18%, transparent);
+}
+.pdf-surface .pdf-find-layer > div {
+  position: absolute;
+  border-radius: 2px;
+}
+/* Find matches: every one a tint of the accent, the current one stronger —
+ * the same pair as DOM find's below. Both sit over the white page. */
+.pdf-surface .pdf-find-match {
+  background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+}
+.pdf-surface .pdf-find-current {
+  background-color: color-mix(in srgb, var(--color-brand) 50%, transparent);
+}
+/* The text layer (`textLayer.ts`): transparent lines over the raster, placed
+ * in points times `--pdf-unit`. Its own stacking context, so the spans' z-index
+ * stays under the links. */
+.pdf-surface .textLayer {
+  z-index: 0;
+  overflow: hidden;
+  line-height: 1;
+  -webkit-text-size-adjust: none;
+  forced-color-adjust: none;
+}
+.pdf-surface .textLayer > span {
+  position: absolute;
+  z-index: 1;
+  white-space: pre;
+  color: transparent;
+  font-family: sans-serif;
+  transform-origin: 0 0;
+  cursor: text;
+}
+/* While a drag selects, the end block covers the layer under the spans. */
+.pdf-surface .textLayer > .pdf-text-end {
+  position: absolute;
+  inset: 100% 0 0;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pdf-surface .textLayer.selecting > .pdf-text-end {
+  top: 0;
+}
+.pdf-surface .pdf-link-layer > a {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* A cited passage: its text-layer spans in a PDF (transparent over the
+ * raster, so the ground shows through) and the markdown highlight
+ * (`useLocateHighlight.ts`). */
+.pdf-surface .textLayer .citation-hit {
+  background-color: color-mix(in srgb, var(--color-brand) 30%, transparent);
+  border-radius: 2px;
+}
+/* Its own rule: a selector list with one unknown pseudo-element is dropped whole. */
+::highlight(citation-hit) {
+  background-color: color-mix(in srgb, var(--color-brand) 30%, transparent);
+}
+/* DOM find (`useDomFind.ts`): every match a tint of the accent, the current
+ * one stronger. */
+::highlight(find-match) {
+  background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+}
+::highlight(find-current) {
+  background-color: color-mix(in srgb, var(--color-brand) 50%, transparent);
+}
+/* A PDF selection, in the accent rather than the system's colour. */
+.pdf-surface .textLayer ::selection {
+  background: color-mix(in srgb, var(--color-brand) 30%, transparent);
+}

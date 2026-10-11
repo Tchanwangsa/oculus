@@ -3,13 +3,13 @@ import { syntaxTree } from "@codemirror/language";
 import { Prec, Transaction } from "@codemirror/state";
 import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
 
-import { FindBar } from "@/components/ui/FindBar";
-import { useFileDrop } from "@/hooks/useFileDrop";
-import { useScrollFade } from "@/hooks/useScrollFade";
-import { imagePaths } from "@/lib/attachments";
-import { pickDocumentImages } from "@/lib/documents";
-import { registerNoteLinkCommand } from "@/lib/noteShortcuts";
-import { openNoteLink } from "@/lib/openFile";
+import { FindBar } from "@/components/ui/search/FindBar";
+import { useFileDrop } from "@/hooks/gestures/useFileDrop";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
+import { imagePaths } from "@/lib/harness/attachments";
+import { pickDocumentImages } from "@/lib/notes/documents";
+import { registerNoteLinkCommand } from "@/lib/notes/noteShortcuts";
+import { openNoteLink } from "@/lib/files/openFile";
 import { cn } from "@/lib/utils";
 
 import {
@@ -20,10 +20,10 @@ import {
   toggleLink,
   type ActiveFormats,
 } from "./editor/commands";
-import { noteExtensions } from "./editor/extensions";
-import { hostCompartment, noteHost, type NoteHost } from "./editor/host";
-import { Toolbar } from "./editor/Toolbar";
-import { useEditorFind } from "./editor/useEditorFind";
+import { noteExtensions } from "./editor/core/extensions";
+import { hostCompartment, noteHost, type NoteHost } from "./editor/core/host";
+import { Toolbar } from "./editor/chrome/Toolbar";
+import { useEditorFind } from "./editor/chrome/useEditorFind";
 
 /** The document page's `.cm-content` is half a screen tall; a field is a
  *  few lines. Highest precedence: CodeMirror mounts it after `noteTheme`. */

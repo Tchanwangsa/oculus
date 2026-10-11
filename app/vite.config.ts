@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
@@ -6,9 +6,21 @@ import path from "node:path";
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+/** Editor shadow mode is dev-only (docs/editor-core.md). Its loader's import
+ *  of the wasm glue is dead code in a release build, but Rollup loads the glue
+ *  anyway, and the glue's `new URL(wasm, import.meta.url)` would ship the wasm. */
+function noEditorShadowInBuild(): Plugin {
+  return {
+    name: "oculus:no-editor-shadow-in-build",
+    apply: "build",
+    enforce: "pre",
+    load: (id) => (id.includes("/editor/shadow/pkg/") ? "export {};" : null),
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), noEditorShadowInBuild()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

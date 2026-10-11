@@ -10,7 +10,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::parse::{ParseError, Progress};
-use crate::ratelimit::{hold, Permits};
+use crate::providers::ratelimit::{hold, Permits};
 
 use super::client::{CloudDocument, DocumentOutput};
 

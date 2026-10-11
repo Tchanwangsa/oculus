@@ -1,9 +1,9 @@
-import { Lightbox, type LightboxSize } from "@/components/ui/Lightbox";
+import { Lightbox, type LightboxSize } from "@/components/ui/lightbox/Lightbox";
 
 export type DiagramSize = LightboxSize;
 
 /**
- * A mermaid diagram full-window in `ui/Lightbox.tsx`: SVG as markup, with
+ * A mermaid diagram full-window in `ui/lightbox/Lightbox.tsx`: SVG as markup, with
  * selectable label text.
  */
 export function DiagramLightbox({

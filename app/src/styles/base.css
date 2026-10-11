@@ -1,0 +1,106 @@
+/* Every reset stays inside @layer base, or it outranks all utilities — see
+   docs/ui.md#gotchas. Unlayered blocks elsewhere are overrides. */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    border-color: var(--color-border);
+  }
+
+  html {
+    height: 100%;
+    overflow: hidden; /* desktop app — no scroll on html root */
+  }
+
+  body {
+    height: 100%;
+    margin: 0;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-optical-sizing: auto;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  #root {
+    height: 100%;
+    display: flex;
+  }
+
+  /* Phosphor glyphs (256 viewBox) such as VideoCamera run flush to the box
+     edge; at fractional page zoom the SVG's default clip shaves that edge. */
+  svg[viewBox="0 0 256 256"] {
+    overflow: visible;
+  }
+
+  /* Only content selects — a `data-selectable` block (a document, a chat
+     message, code, an error) — never the chrome around it, never a control's
+     label. `lib/ui/selectScope.ts` keeps a drag-select inside its scope. */
+  input, textarea, :where([data-selectable]) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  :where([data-selectable])
+    :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"]),
+  :where([data-selectable])
+    :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"]) * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* Important so it beats `select-text` and an editor's own rule. */
+  html[data-select-drag] :is([data-select-scope], [role="dialog"], [role="alertdialog"], [data-slot="popover-content"]):not([data-select-active]),
+  html[data-select-drag] :is([data-select-scope], [role="dialog"], [role="alertdialog"], [data-slot="popover-content"]):not([data-select-active]) * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+    color: inherit;
+  }
+}
+
+@layer base {
+  /* An explicit width makes this a classic bar that takes a 6px gutter;
+     `page-scroll` and headed tables reserve it by hand. */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  /* Inset so the card's rounded corners don't clip the thumb. */
+  ::-webkit-scrollbar-track:vertical {
+    margin-block: 10px;
+  }
+  ::-webkit-scrollbar-track:horizontal {
+    margin-inline: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-surface-overlay);
+    border-radius: 99px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted-foreground);
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  /* Layered so `focus:outline-none` can override it. */
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+}

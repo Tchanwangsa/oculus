@@ -1,7 +1,7 @@
 // apple-speech: Apple's on-device recogniser (macOS 26 `SpeechAnalyzer`) as a
 // command-line helper, so the Rust transcription pipeline can spawn it like
 // ffmpeg. Built by `app/scripts/build-speech.mjs`; the Rust side is
-// `app/src-tauri/src/transcribe/apple.rs`.
+// `app/src-tauri/src/transcribe/engines/apple.rs`.
 //
 //   apple-speech locales
 //     stdout {"available","reason","supported","installed","defaultLocale"}

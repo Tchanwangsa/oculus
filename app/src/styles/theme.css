@@ -1,0 +1,30 @@
+@theme {
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Manrope Variable", "Manrope", "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  /* Manrope runs wide, so display sizes carry negative tracking. */
+  --text-display: 2.125rem;
+  --text-display--line-height: 1.15;
+  --text-display--letter-spacing: -0.028em;
+  --text-display-sm: 1.5rem;
+  --text-display-sm--line-height: 1.25;
+  --text-display-sm--letter-spacing: -0.022em;
+
+  /* Radius. Buttons and chips are `rounded-full`, not on this scale. */
+  --radius-xs:  4px;
+  --radius-sm:  6px;
+  --radius-md:  8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
+  --radius-2xl: 22px;
+  --radius-3xl: 28px;
+
+  /* Shadows. */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+  --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 0.10), 0 4px 8px -4px rgb(0 0 0 / 0.05);
+  /* The content pane: a hairline lift, not a drop shadow. */
+  --shadow-panel: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 8px 24px -14px rgb(0 0 0 / 0.16);
+}

@@ -1,5 +1,5 @@
-import { sqliteUtcToMs } from "@/lib/format";
-import { relativeTime } from "@/lib/recents";
+import { sqliteUtcToMs } from "@/lib/format/format";
+import { relativeTime } from "@/lib/activity/recents";
 import type { DbFile } from "@/lib/db";
 
 /**

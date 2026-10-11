@@ -7,7 +7,7 @@ import {
   ICON_COLORS,
   iconKey,
   useSubjectIconStore,
-} from "@/stores/subjectIconStore";
+} from "@/stores/planning/subjectIconStore";
 
 /** The catalogue grid, mounted only while its picker is open. */
 export default function SubjectIconPickerBody({ code }: { code: string }) {

@@ -9,12 +9,13 @@ import {
   GearSix,
   House,
 } from "@phosphor-icons/react";
-import { anyRunning, useHarnessStore } from "@/stores/harnessStore";
-import { useIndexStore } from "@/stores/indexStore";
-import { newCountForSubject, useNewFilesStore } from "@/stores/newFilesStore";
-import { usePaletteStore } from "@/stores/paletteStore";
-import { useRailOrder, type RailSection } from "@/stores/railOrderStore";
-import { DRAG_SURFACE, useStripReorder } from "@/hooks/usePointerDrag";
+import { anyRunning, useHarnessStore } from "@/stores/chat/harnessStore";
+import { useIndexStore } from "@/stores/sync/indexStore";
+import { useJobAttention } from "@/stores/agents/jobAttentionStore";
+import { newCountForSubject, useNewFilesStore } from "@/stores/sync/newFilesStore";
+import { usePaletteStore } from "@/stores/shell/paletteStore";
+import { useRailOrder, type RailSection } from "@/stores/shell/railOrderStore";
+import { DRAG_SURFACE, useStripReorder } from "@/hooks/gestures/usePointerDrag";
 import { cn } from "@/lib/utils";
 import RailItem, { railButton, railIdle } from "./RailItem";
 import {
@@ -39,6 +40,8 @@ export default function Sidebar({ collapsed }: SidebarProps) {
   const width = collapsed ? 0 : WIDTH;
   // Background jobs surface only in the sidebar (see docs/ui.md): a spinner.
   const indexing = useIndexStore((s) => s.running);
+  // A job's model left its agent's list or its CLI is missing (`useJobAudit`).
+  const jobsNeedAttention = useJobAttention((s) => s.attention);
 
   return (
     <aside
@@ -68,7 +71,14 @@ export default function Sidebar({ collapsed }: SidebarProps) {
           label="Sync"
           indicator={indexing ? <Spinner /> : null}
         />
-        <RailItem to="/settings" icon={GearSix} label="Settings" />
+        <RailItem
+          to="/settings"
+          icon={GearSix}
+          label="Settings"
+          indicator={
+            jobsNeedAttention ? <span className="size-1.5 rounded-full bg-destructive" /> : null
+          }
+        />
       </div>
     </aside>
   );

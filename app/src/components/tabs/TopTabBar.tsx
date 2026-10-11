@@ -1,45 +1,37 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { listen } from "@tauri-apps/api/event";
 import {
   CaretLeft,
   CaretRight,
   Plus,
   Sidebar,
   SidebarSimple,
-  X,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { useStripReorder } from "@/hooks/usePointerDrag";
-import { focusedPane, panesOf, useTabStore } from "@/stores/tabStore";
-import { useBrowserStore } from "@/stores/browserStore";
+import { useStripReorder } from "@/hooks/gestures/usePointerDrag";
+import { focusedPane, panesOf, useTabStore } from "@/stores/shell/tabStore";
+import { useBrowserStore } from "@/stores/shell/browserStore";
 import { browser, browseId } from "@/lib/browser";
 import { useTabInfo } from "@/components/tabs/tabInfo";
-import { stepItem } from "@/lib/sideStack";
-import { goInActiveTab } from "@/lib/tabRouters";
+import { stepItem } from "@/lib/shell/sideStack";
+import { goInActiveTab } from "@/lib/shell/tabRouters";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useWindowFullscreen } from "@/hooks/useWindowFullscreen";
-import { ownsPlayback } from "@/lib/lecturePlayback";
-import { confirmLeavingLecture } from "@/stores/leaveLectureStore";
-
-/** Where + and ⌘T open (`app/src/pages/NewTabPage.tsx`). */
-const NEW_TAB_PATH = "/new";
-
-/** Column between two tabs; also part of the distance a swapped tab travels. */
-const SEPARATOR_W = 6;
-
-/** Uniform Chrome-style widths: TAB_W each until the strip is full, then an
- *  equal share down to TAB_MIN_W, then the strip scrolls. Computed rather than
- *  left to `flex-shrink`: a scrolling flex container in WebKit sizes itself to
- *  its content, so the tabs would hug their titles. */
-const TAB_W = 200;
-const TAB_MIN_W = 76;
-/** What the new-tab button and its two gaps take out of the tab region. */
-const TRAILING_W = 36;
+import { useWindowFullscreen } from "@/hooks/shell/useWindowFullscreen";
+import { ownsPlayback } from "@/lib/lectures/playback";
+import { confirmLeavingLecture } from "@/stores/shell/leaveLectureStore";
+import {
+  NEW_TAB_PATH,
+  SEPARATOR_W,
+  TAB_MIN_W,
+  TAB_W,
+  TRAILING_W,
+} from "@/components/tabs/strip/constants";
+import { StripTab } from "@/components/tabs/strip/StripTab";
+import { useTabMenuEvents } from "@/components/tabs/strip/useTabMenuEvents";
 
 interface TopTabBarProps {
   sidebarCollapsed: boolean;
@@ -184,20 +176,7 @@ export default function TopTabBar({
     frontSide(activeTab.id, stepItem(activeTab.side, delta));
   };
 
-  // Tab shortcuts arrive as menu events (`app/src-tauri/src/menu.rs`): macOS
-  // gives the menu bar every ⌘-key first, which also makes them work while a
-  // browser page's native WebView holds focus.
-  const menuActions = useRef({
-    newTab,
-    side,
-    reopenTab,
-    closeActive: () => {},
-    selectTab: (_: number) => {},
-    selectLastTab: () => {},
-    go: (_: 1 | -1) => {},
-    stepSide: (_: 1 | -1) => {},
-  });
-  menuActions.current = {
+  useTabMenuEvents({
     newTab,
     side,
     go,
@@ -211,27 +190,7 @@ export default function TopTabBar({
       if (!tab || (tabs.length === 1 && browseId(tab.path) == null)) return;
       close(tab.id);
     },
-  };
-
-  useEffect(() => {
-    const pending = [
-      listen("menu-new-tab", () => menuActions.current.newTab()),
-      listen("menu-close-tab", () => menuActions.current.closeActive()),
-      listen("menu-reopen-tab", () => menuActions.current.reopenTab()),
-      listen<number>("menu-select-tab", (e) =>
-        menuActions.current.selectTab(e.payload),
-      ),
-      listen("menu-last-tab", () => menuActions.current.selectLastTab()),
-      listen("menu-side-panel", () => menuActions.current.side()),
-      listen("menu-side-next", () => menuActions.current.stepSide(1)),
-      listen("menu-side-prev", () => menuActions.current.stepSide(-1)),
-      listen("menu-back", () => menuActions.current.go(-1)),
-      listen("menu-forward", () => menuActions.current.go(1)),
-    ];
-    return () => {
-      for (const p of pending) p.then((un) => un()).catch(() => {});
-    };
-  }, []);
+  });
 
   const barButton =
     "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent transition-colors";
@@ -292,122 +251,33 @@ export default function TopTabBar({
           inner strip hugs its tabs so + sits beside the last one. */}
       <div ref={stripRef} className="flex flex-1 min-w-0 items-center gap-1">
         <div className="flex min-w-0 select-none items-center overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {tabs.map((tab, i) => {
-          const active = tab.id === activeId;
-          const hovered = tab.id === hoveredId;
-          const { title, icon } = tabInfo(tab.path);
-          // Separator only between two inactive, unhovered neighbours.
-          const prev = tabs[i - 1];
-          const showSeparator =
-            i > 0 &&
-            !active &&
-            prev.id !== activeId &&
-            !hovered &&
-            prev.id !== hoveredId &&
-            !drag;
-          const grabbed = drag?.key === tab.id;
-          return (
-            <Fragment key={tab.id}>
-              {/* Always SEPARATOR_W wide: the drag maths counts on it. */}
-              <span
-                className={cn(
-                  "flex shrink-0 items-center justify-center",
-                  i === 0 && "hidden",
-                )}
-                style={{ width: SEPARATOR_W }}
-              >
-                <span
-                  className={cn(
-                    "h-3.5 w-px rounded-full transition-colors",
-                    showSeparator ? "bg-border" : "bg-transparent",
-                  )}
-                />
-              </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div
-                    data-tauri-drag-region="false"
-                    ref={reorder.itemRef(tab.id)}
-                    style={{ flex: "none", width: tabW, ...reorder.styleFor(tab.id, i) }}
-                    className={cn(
-                      "group relative flex h-7 items-center rounded-lg px-3 overflow-hidden cursor-pointer",
-                      active
-                        ? "bg-card text-foreground border border-border shadow-xs"
-                        : "text-muted-foreground hover:text-foreground",
-                      grabbed
-                        ? "z-10 shadow-md"
-                        : drag
-                          ? "transition-transform duration-200 ease-out"
-                          : "transition-colors",
-                    )}
-                    onPointerDown={(e) => {
-                      if (e.button !== 0) return;
-                      switchTo(tab.id);
-                      reorder.onPointerDown(e, tab.id);
-                    }}
-                    onAuxClick={(e) => {
-                      if (e.button === 1) close(tab.id);
-                    }}
-                    onMouseEnter={() => setHoveredId(tab.id)}
-                    onMouseLeave={() =>
-                      setHoveredId((h) => (h === tab.id ? null : h))
-                    }
-                  >
-                    {!active && (
-                      <span
-                        aria-hidden
-                        className={cn(
-                          "absolute inset-0 rounded-lg transition-colors",
-                          hovered && "bg-sidebar-item-hover",
-                        )}
-                      />
-                    )}
-                    {icon && (
-                      <span className="relative mr-1.5 flex shrink-0 items-center">
-                        {icon}
-                      </span>
-                    )}
-                    {/* Long titles fade out at the edge instead of an ellipsis. */}
-                    <span
-                      style={{
-                        maskImage:
-                          "linear-gradient(to right, #000 calc(100% - 22px), transparent)",
-                      }}
-                      className="relative min-w-0 flex-1 text-[12px] whitespace-nowrap overflow-hidden [text-overflow:clip] py-1"
-                    >
-                      {title}
-                    </span>
-                    {(tabs.length > 1 || browseId(tab.path) != null) && (
-                      /* The × overlays the right edge on hover; its gradient
-                         stays soft since the title mask already fades the text. */
-                      <span
-                        className={cn(
-                          "absolute flex items-center pl-6 opacity-0 group-hover:opacity-100 transition-opacity will-change-[opacity]",
-                          active
-                            ? "inset-y-px right-px pr-1.5 rounded-r-lg bg-gradient-to-l from-card from-40% via-card/70 via-75% to-transparent"
-                            : "inset-y-0 right-0 pr-1.5 rounded-r-lg bg-gradient-to-l from-sidebar-item-hover from-40% via-sidebar-item-hover/70 via-75% to-transparent",
-                        )}
-                      >
-                        <button
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            close(tab.id);
-                          }}
-                          aria-label="Close tab"
-                          className="rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-sidebar-item-active transition-colors"
-                        >
-                          <X size={11} />
-                        </button>
-                      </span>
-                    )}
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{title}</TooltipContent>
-              </Tooltip>
-            </Fragment>
-          );
-        })}
+          {tabs.map((tab, i) => {
+            const { title, icon } = tabInfo(tab.path);
+            const prev = tabs[i - 1];
+            return (
+              <StripTab
+                key={tab.id}
+                title={title}
+                icon={icon}
+                index={i}
+                active={tab.id === activeId}
+                hovered={tab.id === hoveredId}
+                prevActiveOrHovered={!!prev && (prev.id === activeId || prev.id === hoveredId)}
+                dragging={!!drag}
+                grabbed={drag?.key === tab.id}
+                width={tabW}
+                closable={tabs.length > 1 || browseId(tab.path) != null}
+                itemRef={reorder.itemRef(tab.id)}
+                dragStyle={reorder.styleFor(tab.id, i)}
+                onPress={(e) => {
+                  switchTo(tab.id);
+                  reorder.onPointerDown(e, tab.id);
+                }}
+                onClose={() => close(tab.id)}
+                onHover={(on) => setHoveredId((h) => (on ? tab.id : h === tab.id ? null : h))}
+              />
+            );
+          })}
         </div>
 
         <button onClick={newTab} aria-label="New tab" className={barButton}>

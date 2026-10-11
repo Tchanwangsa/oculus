@@ -6,19 +6,19 @@ import {
   pauseLibraryVideos,
   registerLibraryVideo,
   type Cue,
-} from "@/lib/media";
-import { pauseLecturePlayback } from "@/lib/lecturePlayback";
-import { courseFileHasContent, readCourseFile } from "@/lib/courseFiles";
-import { useWindowEvent } from "@/hooks/useEvents";
-import { useTranscriptSearch } from "@/hooks/useTranscriptSearch";
+} from "@/lib/lectures/media";
+import { pauseLecturePlayback } from "@/lib/lectures/playback";
+import { courseFileHasContent, readCourseFile } from "@/lib/files/courseFiles";
+import { useWindowEvent } from "@/hooks/backend/useEvents";
+import { useTranscriptSearch } from "@/hooks/lectures/useTranscriptSearch";
 import {
   TRANSCRIBED_EVENT,
   settleTranscription,
   type TranscribedDetail,
-} from "@/hooks/useTranscription";
+} from "@/hooks/lectures/useTranscription";
 import { useTabActive } from "@/components/tabs/TabContext";
-import type { ViewTab } from "@/components/ui/ViewTabs";
-import type { Dock } from "@/stores/playerPrefsStore";
+import type { ViewTab } from "@/components/ui/table/ViewTabs";
+import type { Dock } from "@/stores/lectures/playerPrefsStore";
 import { MediaPlayer, useMediaPlayer } from "@/components/media/MediaPlayer";
 import { MediaDock } from "@/components/media/MediaDock";
 import { TranscriptList } from "@/components/media/TranscriptList";
@@ -115,7 +115,7 @@ export function VideoFileViewer({ file }: { file: DbFile }) {
   }, [onScreen, el]);
 
   // One sound at a time: playing here pauses the lecture and any other
-  // library video; a lecture starting pauses this one (`lib/lecturePlayback.ts`).
+  // library video; a lecture starting pauses this one (`lib/lectures/playback/`).
   useEffect(() => {
     if (!el) return;
     const unregister = registerLibraryVideo(el);

@@ -9,8 +9,8 @@ import {
 } from "react";
 import { useLocation } from "react-router-dom";
 import { PanelActions, PanelSwitcher } from "@/components/tabs/SidePanelHeader";
-import { useScrollFade } from "@/hooks/useScrollFade";
-import type { SidePanel } from "@/lib/sideStack";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
+import type { SidePanel } from "@/lib/shell/sideStack";
 import { cn } from "@/lib/utils";
 
 /**

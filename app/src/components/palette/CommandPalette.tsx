@@ -11,7 +11,7 @@ import {
   SearchList,
   useSearchSelection,
 } from "@/components/search/SearchList";
-import { navigateActive, openUrlInFocusedPane } from "@/lib/tabRouters";
+import { navigateActive, openUrlInFocusedPane } from "@/lib/shell/tabRouters";
 import {
   filterChip,
   filterId,
@@ -25,16 +25,16 @@ import {
   type SearchFilter,
   type SearchItem,
 } from "@/lib/search";
-import { useSearch } from "@/hooks/useSearch";
-import { useTauriEvent } from "@/hooks/useEvents";
-import { usePaletteStore } from "@/stores/paletteStore";
-import { useTabStore } from "@/stores/tabStore";
-import { useSubjects } from "@/hooks/useSubjects";
-import { linkInFocusedNote } from "@/lib/noteShortcuts";
+import { useSearch } from "@/hooks/find/useSearch";
+import { useTauriEvent } from "@/hooks/backend/useEvents";
+import { usePaletteStore } from "@/stores/shell/paletteStore";
+import { useTabStore } from "@/stores/shell/tabStore";
+import { useSubjects } from "@/hooks/data/useSubjects";
+import { linkInFocusedNote } from "@/lib/notes/noteShortcuts";
 
 /**
  * The ⌘K palette over everything reachable (library, pages, web). What it
- * searches is `app/src/lib/search.ts`, shared with the new-tab page. Enter
+ * searches is `app/src/lib/search/index.ts`, shared with the new-tab page. Enter
  * opens in the current (focused) pane, ⌘↵ in a new tab. `in:` and `type:`
  * tokens become chips in the field that narrow the search.
  */
@@ -44,7 +44,7 @@ export default function CommandPalette() {
   const toggle = usePaletteStore((s) => s.toggle);
 
   // A menu item, not a key handler: macOS gives the menu bar ⌘-keys first, which
-  // also makes it work over a native browser tab. See `app/src-tauri/src/menu.rs`.
+  // also makes it work over a native browser tab. See `app/src-tauri/src/shell/menu.rs`.
   // In a focused note, ⌘K makes a link instead.
   useTauriEvent("menu-search", () => {
     if (!linkInFocusedNote()) toggle();

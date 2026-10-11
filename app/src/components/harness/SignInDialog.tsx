@@ -17,9 +17,9 @@ import {
   type Provider,
   type SignInLine,
 } from "@/lib/harness";
-import { useTauriEvent } from "@/hooks/useEvents";
-import { signInAccount, useSignInStatus } from "@/hooks/useSignInStatus";
-import { navigateActive } from "@/lib/tabRouters";
+import { useTauriEvent } from "@/hooks/backend/useEvents";
+import { signInAccount, useSignInStatus } from "@/hooks/agents/useSignInStatus";
+import { navigateActive } from "@/lib/shell/tabRouters";
 import { copyText, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -114,7 +114,7 @@ export function useSignIn(onFinished: () => void): {
 /**
  * Signs a CLI agent in via its own login subcommand, which writes the CLI's own
  * store — Oculus never sees the token. The flow is the provider's
- * (`ProviderInfo.signIn` in `app/src/lib/harness.ts`): `code` (Claude: paste the
+ * (`ProviderInfo.signIn` in `app/src/lib/harness/index.ts`): `code` (Claude: paste the
  * callback code to stdin), `callback` (Codex: loopback server, nothing to type),
  * or null (opencode: per-provider credentials live in Settings → opencode).
  * The URL gets a Copy button in case Rust's browser `open` silently failed.

@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
-import { useResizablePanel } from "@/hooks/useResizablePanel";
-import { useSubjects } from "@/hooks/useSubjects";
+import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
+import { useSubjects } from "@/hooks/data/useSubjects";
 import { SubjectCrumbs } from "@/components/subjects/SubjectCrumbs";
 import {
   SUBJECT_NAV_PANEL,
@@ -10,13 +10,13 @@ import {
   subjectTabLabel,
 } from "@/components/subjects/SubjectNav";
 import { PaneHeaderRow, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
-import { SideNavCollapseToggle } from "@/components/ui/SideNav";
+import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import type { Subject } from "@/lib/db";
 
 const LAST_SUBJECT_KEY = "oculus-last-subject";
 
 /** The subject a page last resolved, for `/subjects` to reopen
- *  (`app/src/pages/SubjectsRedirect.tsx`). The caller checks it still exists. */
+ *  (`app/src/pages/start/SubjectsRedirect.tsx`). The caller checks it still exists. */
 export function lastSubjectId(): number | null {
   try {
     const id = Number(localStorage.getItem(LAST_SUBJECT_KEY));

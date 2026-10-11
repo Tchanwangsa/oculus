@@ -14,12 +14,10 @@ use serde_json::Value;
 use super::mineru::local::{self, LocalHealth};
 use super::mineru::result_tls::{self, CertState};
 use super::{parse_config, Engine, LOCAL_BASE_URL, PARSER_VERSION};
-use crate::store::{db_path, edit_setting, pool};
+use crate::db::store::{db_path, edit_setting, pool};
 
 /// The `settings` row this module writes; `parse::parse_config` reads it.
 const SETTINGS_KEY: &str = "parse";
-
-// ── The view ─────────────────────────────────────────────────────────────────
 
 /// One selectable backend, with everything the row needs to draw itself.
 #[derive(Serialize)]
@@ -47,8 +45,12 @@ pub struct ParseSettings {
     pub overridden: bool,
     /// The artifact version both backends write.
     pub parser_version: u32,
-    /// Cloud: a token is in the keychain. Local: always true.
+    /// Cloud: a token is saved, in keyd's vault or the keychain. Local:
+    /// always true.
     pub credentials_ready: bool,
+    /// Cloud: the keychain or oculus-keyd refused to say whether a token is
+    /// saved, so `credentials_ready` is false without the token being missing.
+    pub credentials_error: Option<String>,
     /// Download results through MinerU's expired CDN certificate (on unless
     /// turned off); see `mineru::result_tls`.
     pub accept_expired_result_cert: bool,
@@ -89,7 +91,14 @@ fn engines() -> Vec<EngineOption> {
 
 fn view() -> ParseSettings {
     let config = parse_config();
-    let overridden = super::stored_settings()
+    let (credentials_ready, credentials_error) = match config.engine {
+        Engine::Cloud => match crate::providers::mineru::mineru_has_api_key() {
+            Ok(saved) => (saved, None),
+            Err(e) => (false, Some(e)),
+        },
+        Engine::Local => (true, None),
+    };
+    let overridden = super::config::stored_settings()
         .and_then(|stored| stored.engine_url)
         .is_some_and(|url| !url.trim().is_empty());
     ParseSettings {
@@ -98,10 +107,8 @@ fn view() -> ParseSettings {
         default_base_url: config.engine.default_base_url(),
         overridden,
         parser_version: PARSER_VERSION,
-        credentials_ready: match config.engine {
-            Engine::Cloud => crate::mineru::stored_api_key().is_some(),
-            Engine::Local => true,
-        },
+        credentials_ready,
+        credentials_error,
         accept_expired_result_cert: config.accept_expired_result_cert,
         engines: engines(),
     }
@@ -112,8 +119,6 @@ fn view() -> ParseSettings {
 pub async fn parse_settings() -> Result<ParseSettings, String> {
     Ok(view())
 }
-
-// ── Changing it ──────────────────────────────────────────────────────────────
 
 /// Select a parse backend. Nothing on disk is invalidated (see module header).
 #[tauri::command]

@@ -2,11 +2,14 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { app, buildCli, cliPath } from "./runtime.mjs";
+import { app, buildCli } from "./runtime.mjs";
 
 const out = join(dirname(app), "docs", "cli-reference.md");
-const binary = process.env.OCULUS_BIN ?? cliPath();
-if (!existsSync(binary)) buildCli();
+// Always rebuilt from the current sources, never read from `target/` as found:
+// a `cargo test` or `cargo check` reruns the app's build script, and tauri-build
+// then copies the staged sidecar (possibly older) over `target/<profile>/oculus`.
+// `buildCli` deletes that file first. This writes nothing under `binaries/`.
+const binary = process.env.OCULUS_BIN ?? buildCli();
 
 // `--stdout` renders and returns before touching the data directory, so this
 // works on a machine where the app has never run and no database exists.

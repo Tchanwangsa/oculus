@@ -1,0 +1,55 @@
+/* Colour values `Mermaid.tsx` reads with `getComputedStyle`. Tailwind v4 only
+ * emits a theme variable something references — an unreferenced one reads as
+ * "" and mermaid draws nothing — so these `var()`s are what pin them. Neutral:
+ * the indigo is for controls; only the series slots take colour. */
+:root {
+  --diagram-node: var(--color-surface);
+  --diagram-node-alt: var(--color-surface-raised);
+  --diagram-ground: var(--color-background);
+  --diagram-paper: var(--color-card);
+  --diagram-border: var(--color-border);
+  --diagram-stroke: var(--color-ink-500);
+  --diagram-edge: var(--color-muted-foreground);
+  --diagram-ink: var(--color-foreground);
+  --diagram-font: var(--font-sans);
+  --diagram-series-1: var(--color-chart-1);
+  --diagram-series-2: var(--color-chart-2);
+  --diagram-series-3: var(--color-chart-3);
+  --diagram-series-4: var(--color-chart-4);
+  --diagram-series-5: var(--color-chart-5);
+}
+
+/* A rendered ```mermaid fence: the `<figure>` and its scroller. The label size
+ * is bounded, not the box — `--diagram-min`/`--diagram-max` come from
+ * `Mermaid.tsx`, and past the minimum the diagram overflows. Unlayered. */
+.diagram-figure {
+  margin-block: 0.75rem;
+  /* A pan must not select the reply's text around it. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+.diagram {
+  overflow: auto;
+  /* Keeps an edge node's hairline border inside the scroller. */
+  padding-block: 1px;
+  /* Flex only so the svg can centre with an auto margin: `justify-content:
+   * center` would overflow both ways and make a wide diagram's left end
+   * unreachable by scrolling. */
+  display: flex;
+  align-items: flex-start;
+  /* Cap the box, not the picture: shrinking a tall diagram to fit would
+   * push its labels under the readable minimum. */
+  max-height: min(60vh, 30rem);
+}
+/* Non-flowchart diagrams draw HTML labels in a `<foreignObject>`, where
+   `.md-compact`'s margins would push a caption out of its box. Wins by coming
+   later at equal specificity. */
+.diagram :is(p, ul, ol, li, blockquote) {
+  margin: 0;
+}
+.diagram > svg {
+  width: clamp(var(--diagram-min, 0px), 100%, var(--diagram-max, 100%));
+  margin-inline: auto;
+  /* `flex-shrink: 1` would undo the clamp's floor. */
+  flex: none;
+}

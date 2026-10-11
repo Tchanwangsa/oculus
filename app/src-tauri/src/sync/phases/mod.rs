@@ -1,0 +1,9 @@
+mod announcements;
+mod assignments;
+mod ed;
+mod files;
+mod home;
+mod images;
+mod modules;
+mod output;
+mod videos;

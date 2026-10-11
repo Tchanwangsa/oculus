@@ -9,7 +9,7 @@ import {
   SPEED_PRESETS,
   SPEED_STEP,
   clampSpeed,
-} from "@/stores/playerPrefsStore";
+} from "@/stores/lectures/playerPrefsStore";
 
 /** `1×`, `1.75×` — trailing zeros trimmed so a badge never reads `1.50×`. */
 const fmtSpeed = (s: number) => `${Number(s.toFixed(2))}×`;

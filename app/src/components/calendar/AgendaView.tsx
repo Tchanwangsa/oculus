@@ -1,9 +1,9 @@
-import { useNow } from "@/hooks/useNow";
-import type { CalEvent } from "@/lib/calendar";
-import { sameDay, startOfDay } from "@/lib/format";
+import { useNow } from "@/hooks/ui/useNow";
+import type { CalEvent } from "@/lib/planning/calendar";
+import { sameDay, startOfDay } from "@/lib/format/format";
 import { EventRow } from "./EventRow";
-import { ListCard } from "@/components/ui/PageParts";
-import { displayLocale } from "@/lib/locale";
+import { ListCard } from "@/components/ui/layout/PageParts";
+import { displayLocale } from "@/lib/format/locale";
 
 /** Everything ahead, grouped by day. Past events are left to month and week. */
 export function AgendaView({

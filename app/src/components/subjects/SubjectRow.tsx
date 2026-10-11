@@ -1,7 +1,7 @@
 import { Checkbox } from "@/components/ui/checkbox";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { cn } from "@/lib/utils";
-import { displayCode, displayName, fmtSynced } from "@/lib/format";
+import { displayCode, displayName, fmtSynced } from "@/lib/format/format";
 import type { Subject } from "@/lib/db";
 
 interface SubjectRowProps {

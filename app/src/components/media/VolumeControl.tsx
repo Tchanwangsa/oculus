@@ -8,7 +8,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { clampVolume } from "@/stores/playerPrefsStore";
+import { clampVolume } from "@/stores/lectures/playerPrefsStore";
 
 /** The icon says the level, since a collapsed slider cannot. */
 function VolumeIcon({

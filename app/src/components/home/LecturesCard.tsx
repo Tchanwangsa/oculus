@@ -1,11 +1,11 @@
 import { useCallback, useState } from "react";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { lectureLabel } from "@/lib/calendar";
+import { lectureLabel } from "@/lib/planning/calendar";
 import { getRecentlyWatchedLectures, type Lecture } from "@/lib/db";
-import { displayCode } from "@/lib/format";
+import { displayCode } from "@/lib/format/format";
 import { LECTURES_CHANGED_EVENT, lecturePagePath } from "@/lib/lectures";
-import { findStartedLectureEnds, progressLabel, watchedFraction } from "@/lib/lectureEnd";
-import { openBeside } from "@/lib/tabRouters";
+import { findStartedLectureEnds, progressLabel, watchedFraction } from "@/lib/lectures/end";
+import { openBeside } from "@/lib/shell/tabRouters";
 import { useHomeSection } from "./useHomeSection";
 
 /** Write-back only, not `LECTURE_PROGRESS_EVENT`: it fires every few seconds

@@ -5,6 +5,11 @@
       "binaries/oculus",
       "binaries/apple-speech",
       "binaries/whisper-cli"
-    ]
+    ],
+    "macOS": {
+      "files": {
+        "Helpers/Oculus Helper.app": "binaries/Oculus Helper.app"
+      }
+    }
   }
 }

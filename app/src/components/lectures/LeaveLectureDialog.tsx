@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { useLeaveLecture } from "@/stores/leaveLectureStore";
+import { useLeaveLecture } from "@/stores/shell/leaveLectureStore";
 
 /**
  * Asks before a playing lecture is left with no tab to come back to. Mounted

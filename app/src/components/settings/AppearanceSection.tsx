@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Desktop, Moon, Sun } from "@phosphor-icons/react";
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { applyTheme, getStoredTheme, type Theme } from "@/lib/theme";
+import { applyTheme, getStoredTheme, type Theme } from "@/lib/ui/theme";
 
 const OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "light", label: "Light", icon: Sun },

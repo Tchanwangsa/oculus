@@ -3,8 +3,8 @@ import { Sparkle } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useProviderModels } from "@/hooks/useProviderModels";
-import { getJobModels, type JobSelection } from "@/lib/db";
+import { useProviderModels } from "@/hooks/agents/useProviderModels";
+import { getJobModels, type JobChain } from "@/lib/db";
 import { reasoningLabel } from "@/lib/harness";
 import { cn } from "@/lib/utils";
 
@@ -66,25 +66,31 @@ export function SuggestToggle({
 /** Mounted only while the tooltip shows, so the job and its model's name are
  *  read on hover, current with Settings, and never on page load. */
 function SuggestTooltip({ error }: { error: string | null }) {
-  const [job, setJob] = useState<JobSelection | null>(null);
+  const [chain, setChain] = useState<JobChain | null>(null);
   useEffect(() => {
     let live = true;
     getJobModels()
-      .then((m) => live && setJob(m.documentSuggestions))
+      .then((m) => live && setChain(m.documentSuggestions))
       .catch(() => {});
     return () => {
       live = false;
     };
   }, []);
+  const job = chain?.[0];
   const { modelsFor } = useProviderModels(job ? job.provider : []);
   const model = job ? (modelsFor(job.provider).find((m) => m.id === job.model)?.label ?? job.model) : null;
-  const line = ["AI suggestions", model, job?.reasoningEffort ? reasoningLabel(job.reasoningEffort) : null]
-    .filter(Boolean)
-    .join(" · ");
+  const fallbacks = chain ? chain.length - 1 : 0;
+  const line =
+    ["AI suggestions", model, job?.reasoningEffort ? reasoningLabel(job.reasoningEffort) : null]
+      .filter(Boolean)
+      .join(" · ") +
+    (fallbacks > 0 ? ` (+${fallbacks} ${fallbacks === 1 ? "fallback" : "fallbacks"})` : "");
+  // An empty chain is the job switched off, not a reason to name a default.
+  const off = chain !== null && !job;
   return (
     <>
-      {line}
-      <span className="text-[11px] text-background/60">Change in Settings → Jobs</span>
+      {off ? "No model is set — choose one in Settings → Jobs" : line}
+      {!off && <span className="text-[11px] text-background/60">Change in Settings → Jobs</span>}
       {error && <span className="text-[11px] text-destructive">{error}</span>}
     </>
   );

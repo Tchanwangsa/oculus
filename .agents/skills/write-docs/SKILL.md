@@ -68,7 +68,7 @@ Don't write:
 
 ## Citations
 
-- Paths in backticks, repo-relative (`app/src-tauri/src/sync.rs`) —
+- Paths in backticks, repo-relative (`app/src-tauri/src/sync/mod.rs`) —
   `check-doc-drift` resolves every one.
 - Links between pages are relative with `.md` (`./retrieval.md#anchor`).
 - Add a new page to the table in `docs/index.md`.

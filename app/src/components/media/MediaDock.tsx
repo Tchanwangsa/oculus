@@ -1,10 +1,10 @@
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import { DotsSixVertical, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { useScrollFade } from "@/hooks/useScrollFade";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ViewTabs, type ViewTab } from "@/components/ui/ViewTabs";
-import { isVertical, type Dock } from "@/stores/playerPrefsStore";
+import { ViewTabs, type ViewTab } from "@/components/ui/table/ViewTabs";
+import { isVertical, type Dock } from "@/stores/lectures/playerPrefsStore";
 
 /** Border on the panel's inner edge — the side that faces the video. */
 const INNER_BORDER: Record<Dock, string> = {
@@ -164,7 +164,7 @@ export function DockDropPreview({
     <div className="absolute inset-0 z-40 pointer-events-none">
       <div
         style={edge[dock]}
-        className="absolute rounded-sm bg-brand/25 border border-brand/60 backdrop-blur-[1px] transition-all duration-100"
+        className="absolute rounded-sm bg-brand/25 border border-brand/60 backdrop-blur-[1px] transition-[top,right,bottom,left,width,height] duration-100"
       />
     </div>
   );

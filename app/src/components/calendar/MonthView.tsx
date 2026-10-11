@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { useNow } from "@/hooks/useNow";
+import { useNow } from "@/hooks/ui/useNow";
 import {
   fmtEventTime,
   groupEventsByDay,
@@ -10,8 +10,8 @@ import {
   monthGrid,
   weekDays,
   type CalEvent,
-} from "@/lib/calendar";
-import { sameDay, startOfDay } from "@/lib/format";
+} from "@/lib/planning/calendar";
+import { sameDay, startOfDay } from "@/lib/format/format";
 import {
   Popover,
   PopoverContent,
@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/popover";
 import { EventMark } from "./EventMark";
 import { EventPopover } from "./EventPopover";
-import { displayLocale } from "@/lib/locale";
+import { displayLocale } from "@/lib/format/locale";
 
 /** Short day names in the locale's week order (`WEEK_START`). */
 const WEEKDAYS = weekDays(new Date()).map((d) =>

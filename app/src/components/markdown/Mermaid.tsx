@@ -10,9 +10,9 @@ import { ArrowsOutSimple } from "@phosphor-icons/react";
 import { DiagramLightbox, type DiagramSize } from "@/components/markdown/DiagramLightbox";
 import { diagramBounds, mermaidId, renderMermaid } from "@/components/markdown/mermaidRender";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { isDark, subscribeDark } from "@/lib/theme";
+import { isDark, subscribeDark } from "@/lib/ui/theme";
 import { cn } from "@/lib/utils";
-import { useScrollFade } from "@/hooks/useScrollFade";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
 
 /**
  * A ```mermaid fence, drawn. Reached from `MD_COMPONENTS.pre`, so every

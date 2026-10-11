@@ -4,7 +4,7 @@ import {
   isPast,
   shortLocation,
   type CalEvent,
-} from "@/lib/calendar";
+} from "@/lib/planning/calendar";
 import { EventMark } from "./EventMark";
 import { EventPopover } from "./EventPopover";
 

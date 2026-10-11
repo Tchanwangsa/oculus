@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { SkeletonRows } from "@/components/ui/PageParts";
+import { SkeletonRows } from "@/components/ui/layout/PageParts";
 
 /** Subject tabs share one gutter and width, including their loading view. */
 export function SubjectPage({ children, className }: { children: ReactNode; className?: string }) {

@@ -12,8 +12,8 @@ use sqlx::Row;
 use super::estimate::EmbedEstimate;
 use super::voyage::ledger::{self, UsageLedger};
 use super::{Engine, EMBED_DIM, EMBED_MODEL};
-use crate::retrieval::IndexStats;
-use crate::store::{db_path, edit_setting, pool};
+use crate::db::store::{db_path, edit_setting, pool};
+use crate::pages::retrieval::IndexStats;
 
 /// The `settings` row this module writes and `embed::embed_config` reads.
 const SETTINGS_KEY: &str = "embed";
@@ -27,8 +27,6 @@ const LOCAL_READY: bool = false;
 const LOCAL_UNAVAILABLE: &str =
     "The local embedder is a separate program that runs on this Mac, and Oculus does not ship \
      one yet.";
-
-// ── The view ─────────────────────────────────────────────────────────────────
 
 /// One selectable backend. Labels live beside the refusal so they cannot drift.
 #[derive(Serialize)]
@@ -149,7 +147,7 @@ fn available(engine: Engine) -> bool {
 async fn view(db: &Path) -> Result<EmbedSettings, String> {
     let config = super::embed_config();
     let (credentials_ready, credentials_error) = match config.engine {
-        Engine::Cloud => match crate::voyage::voyage_has_api_key() {
+        Engine::Cloud => match crate::providers::voyage::voyage_has_api_key() {
             Ok(saved) => (saved, None),
             Err(e) => (false, Some(e)),
         },
@@ -163,7 +161,7 @@ async fn view(db: &Path) -> Result<EmbedSettings, String> {
         credentials_ready,
         credentials_error,
         engines: engines(),
-        index: crate::retrieval::stats(db).await?,
+        index: crate::pages::retrieval::stats(db).await?,
         usage: match config.engine {
             Engine::Cloud => Some(usage_view()),
             Engine::Local => None,
@@ -203,18 +201,16 @@ pub fn embed_blocked() -> Option<String> {
 
 /// What the outstanding run would cost and how long it would take. Separate
 /// from `embed_settings` because it opens every outstanding PDF; blocking
-/// because pdfium is synchronous.
+/// because reading them is synchronous.
 #[tauri::command]
 pub async fn embed_estimate() -> Result<EmbedEstimate, String> {
     let database = db_path();
-    let base = crate::paths::data_dir();
-    crate::blocking::run(move || {
+    let base = crate::library::paths::data_dir();
+    crate::runtime::blocking::run(move || {
         tauri::async_runtime::block_on(super::estimate::estimate(&database, &base))
     })
     .await
 }
-
-// ── Changing it ──────────────────────────────────────────────────────────────
 
 /// Select an embedding backend, and discard the index when that is a change:
 /// two spaces in one table rank noise (see `Health::check`).
@@ -245,12 +241,12 @@ pub async fn embed_set_engine(engine: String) -> Result<EmbedSettings, String> {
         return view(&database).await;
     }
 
-    let base = crate::paths::data_dir();
+    let base = crate::library::paths::data_dir();
     let db = pool(&database).await?;
 
     // 1. The records beside the PDFs.
     for relative in embeddable_paths(&db).await? {
-        let Some(pdf_rel) = crate::paths::doc_pdf_rel(&relative) else {
+        let Some(pdf_rel) = crate::library::paths::doc_pdf_rel(&relative) else {
             continue;
         };
         let record = super::emb_path(&base.join(pdf_rel));
@@ -298,7 +294,7 @@ pub async fn embed_set_engine(engine: String) -> Result<EmbedSettings, String> {
 async fn embeddable_paths(db: &sqlx::SqlitePool) -> Result<Vec<String>, String> {
     let sql = format!(
         "SELECT relative_path FROM files WHERE lower(file_type) IN {}",
-        crate::paths::pdf_backed_sql_list()
+        crate::library::paths::pdf_backed_sql_list()
     );
     let rows = sqlx::query(&sql)
         .fetch_all(db)

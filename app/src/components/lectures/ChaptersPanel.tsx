@@ -8,8 +8,8 @@ import { EntryProgress } from "@/components/lectures/EntryProgress";
 import { RegenerateRow, RunStatus } from "@/components/lectures/RunStatus";
 import { PanelEmpty } from "@/components/media/MediaDock";
 import { CHAPTER_PHASE_LABEL, chapterEnds, type ChapterRunProgress } from "@/lib/lectures";
-import { fmtClockSecs } from "@/lib/media";
-import type { ChapterStatus } from "@/hooks/useLectureChapters";
+import { fmtClockSecs } from "@/lib/lectures/media";
+import type { ChapterStatus } from "@/hooks/lectures/useLectureChapters";
 
 /** A chapter's length to the minute — chapters are minutes long, and seconds
  *  would push the title onto another line in a narrow dock. */
@@ -40,7 +40,7 @@ export interface ChaptersPanelProps {
   downloaded: boolean;
   onSeek: (seconds: number) => void;
   onFind: (force: boolean) => void;
-  /** The end job's error (`lib/lectureEnd.ts`), or null unless it failed. */
+  /** The end job's error (`lib/lectures/end.ts`), or null unless it failed. */
   endError: string | null;
   onRetryEnd: () => void;
 }

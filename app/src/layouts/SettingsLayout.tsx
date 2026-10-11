@@ -2,8 +2,8 @@ import { useEffect, useRef } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
 import SettingsNav from "@/components/settings/SettingsNav";
-import { SETTINGS_PAGES, type SettingsJump } from "@/lib/settingsSearch";
-import { settingsSectionId } from "@/pages/settings/section";
+import { SETTINGS_PAGES, type SettingsJump } from "@/lib/search/settings";
+import { settingsSectionId } from "@/components/settings/shared/section";
 
 /** How long a jump waits for its section, and keeps it aligned while the page
  *  above it fills in. */

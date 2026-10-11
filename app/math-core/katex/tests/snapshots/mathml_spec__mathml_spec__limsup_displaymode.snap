@@ -1,0 +1,5 @@
+---
+source: crates/katex/tests/mathml_spec.rs
+expression: markup
+---
+<math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munder><mrow><mi mathvariant="normal">lim sup</mi><mo>⁡</mo></mrow><mrow><mi>x</mi><mo>→</mo><mi mathvariant="normal">∞</mi></mrow></munder></mrow><annotation encoding="application/x-tex">\limsup_{x \rightarrow \infty}</annotation></semantics></math>
