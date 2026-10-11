@@ -42,6 +42,8 @@ struct Motion {
     magic_move: Option<String>,
     #[serde(default, rename = "morphColor")]
     morph_color: Option<String>,
+    #[serde(default, rename = "motionBlur")]
+    motion_blur: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -124,6 +126,7 @@ pub fn check(tokens: &Value) -> Result<Checked, String> {
             transition: file.motion.transition,
             magic_move: file.motion.magic_move,
             morph_color: file.motion.morph_color,
+            motion_blur: file.motion.motion_blur,
         },
         easings: file.motion.easing,
     })

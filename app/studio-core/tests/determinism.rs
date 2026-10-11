@@ -20,6 +20,7 @@ fn two_renderers_agree_byte_for_byte() {
         ("transitions", 6.5),
         ("morph", 0.5),
         ("magic", 2.5),
+        ("dark-gradient", 0.0),
     ] {
         let project = Project::load(fixture(name)).unwrap();
         let mut a = Renderer::new(&project, RenderOptions::default()).unwrap();

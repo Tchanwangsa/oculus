@@ -31,4 +31,6 @@ pub struct MotionSpec {
     pub magic_move: Option<String>,
     /// oklch or oklab: how magic moves and `<Morph>` blend colours.
     pub morph_color: Option<String>,
+    /// finals, off or always: which renders get motion blur.
+    pub motion_blur: Option<String>,
 }

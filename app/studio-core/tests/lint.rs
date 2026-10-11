@@ -21,6 +21,7 @@ fn clean_projects_lint_clean() {
         "transitions",
         "morph",
         "magic",
+        "dark-gradient",
     ] {
         let report = Project::load(fixture(name)).unwrap().lint().unwrap();
         assert!(report.is_clean(), "{name}: {report}");

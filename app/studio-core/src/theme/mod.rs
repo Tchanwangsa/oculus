@@ -24,8 +24,8 @@ pub struct Theme {
     pub text_color: Color,
     /// `font.body`: the family of `Text` without a `fontFamily`.
     pub body_font: String,
-    /// `motion.transition`, `motion.magicMove` and `motion.morphColor`: the
-    /// bottom of the transition cascade.
+    /// `motion.transition`, `motion.magicMove`, `motion.morphColor` and
+    /// `motion.motionBlur`: the bottom of the motion cascade.
     pub motion: MotionSpec,
     /// `motion.easing`: named cubic-bezier points.
     pub easings: BTreeMap<String, [f64; 4]>,

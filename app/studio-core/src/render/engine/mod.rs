@@ -141,6 +141,18 @@ impl Engine {
         self.compose(vec![prepared.tree], prepared.logs, call.component)
     }
 
+    /// Returns trees that will not be painted to the text pool.
+    pub(crate) fn discard(&mut self, layers: Vec<LNode>) {
+        for layer in layers {
+            self.typeset.reclaim(layer);
+        }
+    }
+
+    /// Output px per layout px.
+    pub(crate) fn scale(&self) -> f64 {
+        self.scale
+    }
+
     /// Paints laid-out trees in order onto one frame over the theme
     /// background, then returns their text layouts to the pool. `label`
     /// names the frame in a paint error.
@@ -175,6 +187,7 @@ impl Engine {
             height: u32::from(self.pixels.1),
             rgba,
             logs,
+            samples: 1,
         })
     }
 }

@@ -100,7 +100,14 @@ fn magic_move_with_unmatched_children_and_changed_text() {
 #[test]
 fn half_scale_proxy_keeps_the_layout() {
     let project = Project::load(fixture("title-card")).unwrap();
-    let mut r = Renderer::new(&project, RenderOptions { scale: 0.5 }).unwrap();
+    let mut r = Renderer::new(
+        &project,
+        RenderOptions {
+            scale: 0.5,
+            motion_blur: None,
+        },
+    )
+    .unwrap();
     let frame = r.frame(Time::Global(1.0)).unwrap();
     assert_eq!((frame.width, frame.height), (960, 540));
     assert_golden("title-card-540p", &frame);

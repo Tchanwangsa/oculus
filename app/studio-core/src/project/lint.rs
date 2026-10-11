@@ -1,13 +1,13 @@
 //! `lint`: load every component, check every scene's props and every
 //! component example, render each scene at its first and last moment and
-//! the middle of the transition into it, and check its transition values
-//! (no files written). Collects every problem instead of stopping at the
+//! the middle of the transition into it, and check its transition and
+//! motion values (no files written). Collects every problem instead of stopping at the
 //! first, each tagged with its scene and component.
 
 use super::Project;
 use crate::error::{Result, StudioError};
 use crate::render::{Engine, RenderOptions, SceneCall, scene_frame};
-use crate::transition::check_hold;
+use crate::transition::{blur_mode, check_hold};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fmt;
@@ -66,7 +66,10 @@ impl Project {
             self.theme.clone(),
             self.video.size,
             Some(self.assets_dir()),
-            RenderOptions { scale: LINT_SCALE },
+            RenderOptions {
+                scale: LINT_SCALE,
+                motion_blur: None,
+            },
         )?;
         let mut report = LintReport::default();
         let mut failed: HashSet<&str> = HashSet::new();
@@ -76,17 +79,18 @@ impl Project {
         let transitions = self.transitions();
         let scenes = &self.video.scenes;
         let mut clean = vec![false; scenes.len()];
-        match self.morph_color() {
-            Ok(c) => engine.set_morph_color(c),
-            Err(e) => {
-                transition_seen.insert(e.to_string());
-                report.issues.push(LintIssue {
-                    scene: Some(0),
-                    component: scenes[0].component.clone(),
-                    example: None,
-                    error: e.into(),
-                });
-            }
+        let video_level = [
+            self.morph_color().map(|c| engine.set_morph_color(c)),
+            blur_mode(&self.video.motion, &self.theme).map(|_| ()),
+        ];
+        for e in video_level.into_iter().filter_map(Result::err) {
+            transition_seen.insert(e.to_string());
+            report.issues.push(LintIssue {
+                scene: Some(0),
+                component: scenes[0].component.clone(),
+                example: None,
+                error: e.into(),
+            });
         }
         for (index, scene) in scenes.iter().enumerate() {
             let name = scene.component.as_str();

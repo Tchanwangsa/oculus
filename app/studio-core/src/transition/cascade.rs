@@ -65,7 +65,7 @@ impl Level {
             Level::Video => "video.json motion",
             Level::Theme | Level::Default => "theme motion",
         };
-        if field == "magicMove" || field == "morphColor" {
+        if matches!(field, "magicMove" | "morphColor" | "motionBlur") {
             format!("{prefix}.{field}")
         } else {
             format!("{prefix}.transition.{field}")
@@ -218,6 +218,38 @@ pub fn morph_color(
         None => Ok(MorphColor::default()),
         Some((l, v)) => keyword(v, MORPH_COLORS, "morphColor").map_err(|message| TransitionError {
             level: l.name("morphColor"),
+            message,
+        }),
+    }
+}
+
+/// Which renders get motion blur.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlurMode {
+    /// The export only.
+    Finals,
+    Off,
+    /// Drafts and previews too.
+    Always,
+}
+
+const BLUR_MODES: &[(&str, BlurMode)] = &[
+    ("finals", BlurMode::Finals),
+    ("off", BlurMode::Off),
+    ("always", BlurMode::Always),
+];
+
+/// `motionBlur`: `video.json` `motion`, then the theme's `motion`, then
+/// finals.
+pub fn blur_mode(video: &MotionSpec, theme: &Theme) -> Result<BlurMode, TransitionError> {
+    let levels = [
+        video.motion_blur.as_ref().map(|v| (Level::Video, v)),
+        theme.motion.motion_blur.as_ref().map(|v| (Level::Theme, v)),
+    ];
+    match levels.into_iter().flatten().next() {
+        None => Ok(BlurMode::Finals),
+        Some((l, v)) => keyword(v, BLUR_MODES, "motionBlur").map_err(|message| TransitionError {
+            level: l.name("motionBlur"),
             message,
         }),
     }

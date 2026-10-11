@@ -3,7 +3,9 @@
 
 use crate::*;
 use std::time::Instant;
-use studio_core::{LintIssue, Project, RenderOptions, Renderer, StudioError, Time};
+use studio_core::{
+    LintIssue, MotionBlur, Project, RenderOptions, Renderer, StripOptions, StudioError, Time,
+};
 
 impl Ctx {
     pub(crate) fn studio_frame(&self, args: &StudioFrameArgs) -> Result<(), String> {
@@ -30,8 +32,11 @@ impl Ctx {
             }
         };
 
-        let mut renderer =
-            Renderer::new(&project, RenderOptions { scale: args.scale }).map_err(studio_error)?;
+        let options = RenderOptions {
+            scale: args.scale,
+            motion_blur: args.motion_blur.then(MotionBlur::default),
+        };
+        let mut renderer = Renderer::new(&project, options).map_err(studio_error)?;
         let started = Instant::now();
         let frame = renderer.frame(at).map_err(studio_error)?;
         let ms = started.elapsed().as_millis();
@@ -46,15 +51,20 @@ impl Ctx {
                 "width": frame.width,
                 "height": frame.height,
                 "ms": ms,
+                "samples": frame.samples,
                 "logs": frame.logs,
             }));
         }
         println!("{} {}", paint("wrote", GREEN), out.display());
+        let samples = match frame.samples {
+            1 => String::new(),
+            n => format!(" · {n} sub-frames"),
+        };
         println!(
             "{}",
             paint(
                 &format!(
-                    "  scene {scene} ({component}), {t:.3} s in · {}×{} · {ms} ms",
+                    "  scene {scene} ({component}), {t:.3} s in · {}×{} · {ms} ms{samples}",
                     frame.width, frame.height
                 ),
                 DIM
@@ -63,6 +73,71 @@ impl Ctx {
         for line in &frame.logs {
             println!("{}", paint(&format!("  log: {line}"), DIM));
         }
+        Ok(())
+    }
+
+    pub(crate) fn studio_strip(&self, args: &StudioStripArgs) -> Result<(), String> {
+        let project = Project::load(&args.dir).map_err(studio_error)?;
+        let (from, to) = match args.scene {
+            Some(index) => project.timeline().window(index).map_err(studio_error)?,
+            None => (args.from.unwrap_or(0.0), args.to.unwrap_or(f64::INFINITY)),
+        };
+        let options = StripOptions {
+            from,
+            to,
+            n: args.n,
+            cols: args.cols,
+            scale: args.scale,
+            threads: args.threads,
+            motion_blur: args.motion_blur.then(MotionBlur::default),
+        };
+        let started = Instant::now();
+        let strip = studio_core::strip(&project, options).map_err(studio_error)?;
+        let ms = started.elapsed().as_millis();
+
+        let out = match &args.out {
+            Some(path) => path.clone(),
+            None => {
+                let dir = args.dir.join("out");
+                std::fs::create_dir_all(&dir)
+                    .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+                let last = strip.times.last().copied().unwrap_or(from);
+                dir.join(format!("strip-{}-{}.png", seconds(from), seconds(last)))
+            }
+        };
+        strip.write_png(&out).map_err(studio_error)?;
+
+        if self.json {
+            return self.emit(&serde_json::json!({
+                "path": out.to_string_lossy(),
+                "times": strip.times,
+                "width": strip.width,
+                "height": strip.height,
+                "tile": { "width": strip.tile.0, "height": strip.tile.1 },
+                "cols": strip.cols,
+                "ms": ms,
+                "threads": strip.threads,
+            }));
+        }
+        println!("{} {}", paint("wrote", GREEN), out.display());
+        println!(
+            "{}",
+            paint(
+                &format!(
+                    "  {} frames, {} to {} s · {}×{} ({}×{} tiles) · {ms} ms on {} thread{}",
+                    strip.times.len(),
+                    seconds(strip.times.first().copied().unwrap_or(from)),
+                    seconds(strip.times.last().copied().unwrap_or(from)),
+                    strip.width,
+                    strip.height,
+                    strip.tile.0,
+                    strip.tile.1,
+                    strip.threads,
+                    if strip.threads == 1 { "" } else { "s" },
+                ),
+                DIM
+            )
+        );
         Ok(())
     }
 
