@@ -34,7 +34,7 @@ export function MusicStatus({ snapshot }: { snapshot: MusicSnapshot }) {
     connected: `Connected as ${snapshot.account ?? "your account"}`,
     connecting: "Connecting…",
     "signed-out": "Not signed in",
-    failed: "Could not connect",
+    failed: "Stopped by the error below",
     idle: "Not connected",
   };
 
@@ -69,7 +69,7 @@ export function MusicStatus({ snapshot }: { snapshot: MusicSnapshot }) {
               {snapshot.connecting ? (
                 <><CircleNotch size={13} className="animate-spin" /> Connecting…</>
               ) : (
-                <><SignIn size={13} /> Connect</>
+                <><SignIn size={13} /> {status === "failed" ? "Try again" : "Connect"}</>
               )}
             </Button>
           )}
