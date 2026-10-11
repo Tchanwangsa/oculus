@@ -122,11 +122,13 @@ Cross-check the code from macOS with LLVM tools on PATH:
 
 ```sh
 cd app/src-tauri
-cargo xwin check --target x86_64-pc-windows-msvc --lib --bins --tests --locked
+cargo xwin check --target x86_64-pc-windows-msvc --all-targets --locked
 ```
 
 A check compiles platform branches but does not prove Windows linking,
 installation, WebView2 behavior, broker identity or Store certification.
+The `render_memory` example reports peak working-set bytes with
+`GetProcessMemoryInfo` on Windows and peak RSS with `getrusage` on Unix.
 Windows CI runs real builds and tests; [development.md](./development.md)
 explains artifact packaging and Partner Center configuration.
 
