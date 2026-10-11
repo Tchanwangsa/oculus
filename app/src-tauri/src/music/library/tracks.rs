@@ -101,8 +101,7 @@ pub(super) async fn contents(
             Contents::first(logged(what, contents::parse_page(&body))?)
         }
     };
-    while whole {
-        let Some(from) = list.next else { break };
+    while let Some(from) = list.next.filter(|_| whole) {
         let endpoint = contents::page_endpoint(uri, from).ok_or(LibraryError::Status(404))?;
         // A failed later page keeps what was read; the next open goes on.
         let page = match call(app, session, what, &endpoint, Method::Get(PROTOBUF))
