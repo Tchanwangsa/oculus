@@ -28,7 +28,7 @@ function notConnectedBody(enabled: boolean, s: MusicSnapshot | null): string {
 }
 
 /** What nothing playing says here, above the list to pick from. */
-const NOTHING_PLAYING = "Pick a playlist below, or choose Oculus in Spotify.";
+const NOTHING_PLAYING = "Play a song here or from any device.";
 
 /**
  * The full player, opened as the page from the rail's popover (`/music`),
