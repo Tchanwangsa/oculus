@@ -4,52 +4,8 @@ import { cancelLectureDownload, dlKey, isDownloading, useLectureDownloads } from
 import { fmtDurationSecs, fmtLectureDate, lecturePagePath } from "@/lib/lectures";
 import { progressLabel } from "@/lib/lectures/end";
 import type { Lecture } from "@/lib/db";
+import { RowAction } from "@/components/ui/RowAction";
 import { cn } from "@/lib/utils";
-
-/**
- * A control inside the row's own `button`: a `div` with a button role, because
- * a nested `<button>` is invalid HTML and WebKit swallows its clicks. Stops
- * propagation so it never also opens the lecture.
- */
-function RowAction({
-  label,
-  onTrigger,
-  className,
-  children,
-}: {
-  label: string;
-  onTrigger: () => void;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      data-tab-skip
-      aria-label={label}
-      title={label}
-      onClick={(e) => {
-        e.stopPropagation();
-        onTrigger();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          e.stopPropagation();
-          onTrigger();
-        }
-      }}
-      className={cn(
-        "-m-1 p-1 rounded text-muted-foreground/50 transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
-}
 
 /** Download ticks belong to one row, even when another subject is downloading. */
 export const LectureRow = memo(function LectureRow({

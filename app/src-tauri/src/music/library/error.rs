@@ -20,6 +20,18 @@ pub(in crate::music) enum LibraryError {
     Unreadable(String),
 }
 
+impl LibraryError {
+    /// An answer asking again would not change — a refusal, another status,
+    /// a body that will not decode — as against a rate limit, a token or the
+    /// connection.
+    pub(super) fn is_lasting(&self) -> bool {
+        matches!(
+            self,
+            Self::Forbidden | Self::Status(_) | Self::Unreadable(_)
+        )
+    }
+}
+
 impl fmt::Display for LibraryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

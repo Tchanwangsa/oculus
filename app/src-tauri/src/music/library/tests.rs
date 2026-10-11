@@ -1,12 +1,24 @@
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use librespot_protocol::entity_extension_data::EntityExtensionData;
+use librespot_protocol::extended_metadata::{
+    BatchedEntityRequest, BatchedExtensionResponse, EntityExtensionDataArray,
+};
+use librespot_protocol::extension_kind::ExtensionKind;
+use librespot_protocol::metadata::{image::Size, Album, Artist, Image, ImageGroup, Track};
 use librespot_protocol::playlist4_external::{
     Item, ListAttributes, ListItems, MetaItem, PictureSize, SelectedListContent,
 };
+use protobuf::well_known_types::any::Any;
 use protobuf::Message;
 
+use super::cache::{lookup, map_for, PerAccount};
+use super::contents::{self, Contents, Page};
+use super::covers::pick;
 use super::error::LibraryError;
 use super::gate::{retry_after, Gate, DEFAULT_WAIT};
+use super::metadata::{self, TrackRow};
 use super::rootlist::{
     self, encode, parse_page, parse_playlist, playlist_endpoint, playlist_uri, Entry, Header,
 };
@@ -323,4 +335,327 @@ fn statuses_read_as_typed_errors() {
         LibraryError::NotConnected.to_string(),
         "Not connected to Spotify"
     );
+}
+
+const A: &str = "spotify:track:4uLU6hMCjMI75M1A2tKUQC";
+const B: &str = "spotify:track:7ouMYWpwJ422jRcDASZB7P";
+const C: &str = "spotify:track:0eGsygTp906u18L0Oimnem";
+const D: &str = "spotify:track:3n3Ppam7vgaVa1iaRUc9Lp";
+const E: &str = "spotify:track:6rqhFgbbKwnb9MLmUQDhG6";
+
+fn image(id: &[u8], size: Size) -> Image {
+    Image {
+        file_id: Some(id.to_vec()),
+        size: Some(size.into()),
+        ..Image::default()
+    }
+}
+
+fn track(name: &str, album_gid: &[u8], covers: Vec<Image>) -> Track {
+    Track {
+        name: Some(name.into()),
+        duration: Some(201_000),
+        artist: vec![
+            Artist {
+                name: Some("Miles Davis".into()),
+                ..Artist::default()
+            },
+            Artist {
+                name: Some("John Coltrane".into()),
+                ..Artist::default()
+            },
+        ],
+        album: Some(Album {
+            gid: Some(album_gid.to_vec()),
+            name: Some("Kind of Blue".into()),
+            cover_group: Some(ImageGroup {
+                image: covers,
+                ..ImageGroup::default()
+            })
+            .into(),
+            ..Album::default()
+        })
+        .into(),
+        ..Track::default()
+    }
+}
+
+/// A `get_extended_metadata` answer: one `TRACK_V4` array whose entities
+/// each wrap a `metadata::Track` in an `Any`, one entity with no data.
+fn metadata_bytes(tracks: Vec<(&str, Track)>) -> Vec<u8> {
+    let mut data: Vec<EntityExtensionData> = tracks
+        .into_iter()
+        .map(|(uri, t)| EntityExtensionData {
+            entity_uri: uri.into(),
+            extension_data: Some(Any {
+                type_url: "type.googleapis.com/spotify.metadata.Track".into(),
+                value: t.write_to_bytes().unwrap(),
+                ..Any::default()
+            })
+            .into(),
+            ..EntityExtensionData::default()
+        })
+        .collect();
+    data.push(EntityExtensionData {
+        entity_uri: E.into(),
+        ..EntityExtensionData::default()
+    });
+    BatchedExtensionResponse {
+        extended_metadata: vec![EntityExtensionDataArray {
+            extension_kind: ExtensionKind::TRACK_V4.into(),
+            extension_data: data,
+            ..EntityExtensionDataArray::default()
+        }],
+        ..BatchedExtensionResponse::default()
+    }
+    .write_to_bytes()
+    .unwrap()
+}
+
+#[test]
+fn the_metadata_request_asks_track_v4_for_each_track() {
+    assert_eq!(
+        metadata::ENDPOINT,
+        "/extended-metadata/v0/extended-metadata"
+    );
+    let body = metadata::request(&[A.to_string(), B.to_string()]);
+    let request = BatchedEntityRequest::parse_from_bytes(&body).unwrap();
+    let asked: Vec<(&str, Vec<ExtensionKind>)> = request
+        .entity_request
+        .iter()
+        .map(|e| {
+            let kinds = e.query.iter().map(|q| q.extension_kind.unwrap()).collect();
+            (e.entity_uri.as_str(), kinds)
+        })
+        .collect();
+    assert_eq!(
+        asked,
+        [
+            (A, vec![ExtensionKind::TRACK_V4]),
+            (B, vec![ExtensionKind::TRACK_V4])
+        ]
+    );
+    assert!(request.header.is_none());
+}
+
+#[test]
+fn a_metadata_answer_decodes_into_track_rows() {
+    let body = metadata_bytes(vec![
+        (
+            A,
+            track(
+                "So What",
+                &[0x0a, 0x0b],
+                vec![
+                    image(&[0x64], Size::SMALL),
+                    image(&[0x30, 0x0f], Size::DEFAULT),
+                    image(&[0x64, 0x40], Size::LARGE),
+                ],
+            ),
+        ),
+        // No DEFAULT size: the largest.
+        (
+            B,
+            track(
+                "Blue in Green",
+                &[0x0c],
+                vec![image(&[0x01], Size::SMALL), image(&[0x02], Size::XLARGE)],
+            ),
+        ),
+        // No name: not a row.
+        (C, track("", &[0x0d], vec![])),
+    ]);
+    let rows = metadata::parse(&body).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[A],
+        TrackRow {
+            uri: A.into(),
+            name: "So What".into(),
+            artists: vec!["Miles Davis".into(), "John Coltrane".into()],
+            album: "Kind of Blue".into(),
+            image_url: Some("https://i.scdn.co/image/300f".into()),
+            duration_ms: 201_000,
+            album_key: "0a0b".into(),
+        }
+    );
+    assert_eq!(
+        rows[B].image_url.as_deref(),
+        Some("https://i.scdn.co/image/02")
+    );
+    // The album key never reaches the frontend.
+    let json = serde_json::to_value(&rows[A]).unwrap();
+    assert!(json.get("album_key").is_none());
+    assert!(matches!(
+        metadata::parse(b"\xff\xff\xff"),
+        Err(LibraryError::Unreadable(_))
+    ));
+}
+
+fn row(uri: &str, album: &str, image: Option<&str>) -> (String, TrackRow) {
+    let row = TrackRow {
+        uri: uri.into(),
+        name: "t".into(),
+        artists: vec![],
+        album: String::new(),
+        image_url: image.map(Into::into),
+        duration_ms: 0,
+        album_key: album.into(),
+    };
+    (uri.to_string(), row)
+}
+
+fn uris(list: &[&str]) -> Vec<String> {
+    list.iter().map(|u| u.to_string()).collect()
+}
+
+#[test]
+fn a_cover_is_four_distinct_albums_else_the_first_alone() {
+    let rows: HashMap<String, TrackRow> = [
+        row(A, "al1", Some("u1")),
+        row(B, "al1", Some("u1-again")),
+        row(C, "al2", Some("u2")),
+        row(D, "al3", Some("u3")),
+        row(E, "al4", Some("u4")),
+        row("spotify:track:nocover", "al5", None),
+    ]
+    .into_iter()
+    .collect();
+    // Empty, or no rows: none.
+    assert!(pick(&[], &rows).is_empty());
+    assert!(pick(&uris(&["spotify:track:unknown"]), &rows).is_empty());
+    // One album, or three: the first track's alone.
+    assert_eq!(pick(&uris(&[A, B]), &rows), ["u1"]);
+    assert_eq!(pick(&uris(&[A, C, D]), &rows), ["u1"]);
+    // A coverless first track is passed over.
+    assert_eq!(pick(&uris(&["spotify:track:nocover", C]), &rows), ["u2"]);
+    // Four distinct albums, a repeated one skipped, the rest unread.
+    assert_eq!(
+        pick(&uris(&[A, B, C, D, E, A]), &rows),
+        ["u1", "u2", "u3", "u4"]
+    );
+}
+
+fn list_bytes(uris: &[&str], pos: i32, truncated: bool) -> Vec<u8> {
+    SelectedListContent {
+        contents: Some(ListItems {
+            pos: Some(pos),
+            truncated: Some(truncated),
+            items: uris.iter().map(|u| item(u)).collect(),
+            ..ListItems::default()
+        })
+        .into(),
+        ..SelectedListContent::default()
+    }
+    .write_to_bytes()
+    .unwrap()
+}
+
+#[test]
+fn a_playlists_contents_keep_catalogue_tracks_in_order() {
+    let body = list_bytes(
+        &[
+            A,
+            "spotify:local:Artist:Album:Song:180",
+            "spotify:episode:5Xt5DXGzch68nYYamXrNxZ",
+            B,
+            "spotify:track:short",
+        ],
+        0,
+        true,
+    );
+    let page = contents::parse_page(&body).unwrap();
+    assert_eq!(
+        page,
+        Page {
+            tracks: uris(&[A, B]),
+            pos: 0,
+            items: 5,
+            truncated: true,
+        }
+    );
+    assert_eq!(
+        contents::page_endpoint("spotify:playlist:3c4d", 500).as_deref(),
+        Some("/playlist/v2/playlist/3c4d?from=500&length=500")
+    );
+    assert_eq!(contents::page_endpoint("spotify:album:x", 0), None);
+}
+
+#[test]
+fn contents_page_on_while_truncated_and_stop_when_paging_is_ignored() {
+    let page = |tracks: &[&str], pos, items, truncated| Page {
+        tracks: uris(tracks),
+        pos,
+        items,
+        truncated,
+    };
+    // Whole in one answer.
+    assert_eq!(Contents::first(page(&[A], 0, 1, false)).next, None);
+    let mut list = Contents::first(page(&[A, B], 0, 3, true));
+    assert_eq!(list.next, Some(3));
+    list.extend(3, page(&[C], 3, 2, true));
+    assert_eq!(
+        (list.tracks.clone(), list.next),
+        (uris(&[A, B, C]), Some(5))
+    );
+    list.extend(5, page(&[D], 5, 1, false));
+    assert_eq!((list.tracks.len(), list.next), (4, None));
+    // A page that starts at the top again: `from` was ignored.
+    let mut list = Contents::first(page(&[A], 0, 1, true));
+    list.extend(1, page(&[A], 0, 1, true));
+    assert_eq!((list.tracks, list.next), (uris(&[A]), None));
+    // An empty page ends it too.
+    let mut list = Contents::first(page(&[A], 0, 1, true));
+    list.extend(1, page(&[], 1, 0, true));
+    assert_eq!(list.next, None);
+}
+
+#[test]
+fn caches_belong_to_one_account() {
+    let mut slot: PerAccount<u32> = None;
+    map_for(&mut slot, "a").insert("x".into(), 1);
+    assert_eq!(lookup(&slot, "a", "x"), Some(1));
+    assert_eq!(lookup(&slot, "b", "x"), None);
+    // Another account starts afresh.
+    map_for(&mut slot, "b").insert("y".into(), 2);
+    assert_eq!(lookup(&slot, "a", "x"), None);
+    assert_eq!(lookup(&slot, "b", "y"), Some(2));
+}
+
+#[test]
+fn only_refusals_and_unreadable_answers_are_lasting() {
+    for e in [
+        LibraryError::Forbidden,
+        LibraryError::Status(404),
+        LibraryError::Unreadable("x".into()),
+    ] {
+        assert!(e.is_lasting(), "{e:?}");
+    }
+    for e in [
+        LibraryError::RateLimited(3),
+        LibraryError::Transport("x".into()),
+        LibraryError::Token("x".into()),
+        LibraryError::Unauthorized,
+    ] {
+        assert!(!e.is_lasting(), "{e:?}");
+    }
+}
+
+#[test]
+fn a_playlist_shows_its_header_picture_as_a_one_cover_image_list() {
+    let header = Header {
+        name: "n".into(),
+        owner: None,
+        track_count: None,
+        image_url: Some("https://i.scdn.co/image/ab".into()),
+    };
+    assert_eq!(
+        header.clone().playlist("spotify:playlist:a".into()).images,
+        ["https://i.scdn.co/image/ab"]
+    );
+    let bare = Header {
+        image_url: None,
+        ..header
+    };
+    assert!(bare.playlist("spotify:playlist:a".into()).images.is_empty());
 }

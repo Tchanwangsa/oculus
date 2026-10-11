@@ -24,6 +24,8 @@ use crate::shell::browser::MAIN;
 pub const EVENT: &str = "music-state";
 /// The name Spotify's device list shows.
 pub const DEVICE_NAME: &str = "Oculus";
+/// Tracks of what plays next kept in the snapshot.
+pub const UP_NEXT: usize = 20;
 /// Full scale: librespot's softvol is a 60 dB log curve, so 50% is about
 /// −30 dB. At 100% the Mac's own volume sets the loudness.
 pub const INITIAL_VOLUME: u8 = 100;
@@ -37,6 +39,14 @@ pub struct Track {
     /// `https://i.scdn.co/image/<id>`; none when Spotify lists no cover.
     pub cover_url: Option<String>,
     pub duration_ms: u32,
+}
+
+/// A track to play after the current one.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct NextTrack {
+    pub uri: String,
+    /// Added to the queue, as against next in the context.
+    pub queued: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -66,6 +76,10 @@ pub struct Snapshot {
     pub volume: u8,
     pub shuffle: bool,
     pub repeat: bool,
+    /// What plays next, queued tracks first, up to `UP_NEXT`: from the
+    /// Spirc's queue events while Oculus plays, from the Connect cluster's
+    /// player state otherwise. Catalogue tracks only.
+    pub up_next: Vec<NextTrack>,
     /// The latest failure (connect, auth, keyd, a track that cannot play),
     /// kept until the next connect or load.
     pub error: Option<String>,
@@ -89,6 +103,7 @@ impl Default for Snapshot {
             volume: INITIAL_VOLUME,
             shuffle: false,
             repeat: false,
+            up_next: Vec::new(),
             error: None,
         }
     }
@@ -112,7 +127,32 @@ impl Snapshot {
         self.playing = false;
         self.active = false;
         self.playing_on = None;
+        self.up_next.clear();
     }
+
+    /// `uri` started: it and everything before it leave `up_next`. The
+    /// Spirc sends no queue event when it moves on, only when the queue or
+    /// the context changes.
+    pub(super) fn advance_to(&mut self, uri: &str) {
+        if let Some(at) = self.up_next.iter().position(|t| t.uri == uri) {
+            self.up_next.drain(..=at);
+        }
+    }
+}
+
+/// Next tracks as (URI, provider) pairs, as the Spirc and the cluster list
+/// them, into `up_next`: Spotify's provider `queue` marks a queued one.
+/// Episodes, local files and delimiters are left out.
+pub(super) fn up_next<'a>(tracks: impl IntoIterator<Item = (&'a str, &'a str)>) -> Vec<NextTrack> {
+    tracks
+        .into_iter()
+        .filter(|(uri, _)| uri.starts_with("spotify:track:"))
+        .take(UP_NEXT)
+        .map(|(uri, provider)| NextTrack {
+            uri: uri.to_string(),
+            queued: provider == "queue",
+        })
+        .collect()
 }
 
 pub(super) fn now_ms() -> u64 {
@@ -378,6 +418,9 @@ pub(super) fn set_cluster(app: &AppHandle, id: u64, session_id: &str, cluster: C
             return false;
         }
         inner.snapshot.playing_on = cluster.playing_on();
+        if let Some(next) = &cluster.up_next {
+            inner.snapshot.up_next = next.clone();
+        }
         inner.cluster = Some(cluster);
         true
     });

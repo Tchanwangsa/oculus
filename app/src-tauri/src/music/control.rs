@@ -11,6 +11,10 @@
 //!   order and `activate` sets it active at once, so the load that follows is
 //!   not dropped.
 //! - **IfActive** (pause, a duck): nothing at all while inactive.
+//! - **Active** (add to queue): refused while inactive, saying why. The
+//!   queue is the active device's: librespot's Spirc can add to its own
+//!   alone, and has no command for another device's. Pulling playback here
+//!   just to queue a track would move what is playing.
 
 use std::time::Duration;
 
@@ -26,6 +30,7 @@ pub(super) enum Need {
     Pull,
     Local,
     IfActive,
+    Active,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +39,7 @@ pub(super) enum Step {
     Skip,
     ActivateThenSend,
     PullThenSend,
+    Refuse,
 }
 
 pub(super) fn step(active: bool, need: Need) -> Step {
@@ -42,6 +48,17 @@ pub(super) fn step(active: bool, need: Need) -> Step {
         (false, Need::Pull) => Step::PullThenSend,
         (false, Need::Local) => Step::ActivateThenSend,
         (false, Need::IfActive) => Step::Skip,
+        (false, Need::Active) => Step::Refuse,
+    }
+}
+
+/// Why an `Active` command was refused, naming the device playing if known.
+pub(super) fn refusal(playing_on: Option<&str>) -> String {
+    match playing_on {
+        Some(device) => {
+            format!("Playing on {device}: Oculus can add to the queue only while it plays here")
+        }
+        None => "Play something here first, then add to the queue".into(),
     }
 }
 
@@ -55,6 +72,7 @@ pub(super) async fn send(
     match step(active, need) {
         Step::Send => {}
         Step::Skip => return Ok(()),
+        Step::Refuse => return Err(refusal(state::snapshot(app).playing_on.as_deref())),
         Step::ActivateThenSend => state::with_spirc(app, |spirc| spirc.activate())?,
         Step::PullThenSend => pull(app).await?,
     }
