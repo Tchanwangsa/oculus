@@ -7,8 +7,8 @@ use serde_json::json;
 /// included, ready for a component call. Only a project makes them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WordCues {
-    /// `{ scene, words: [[text, start, end], ...] }`, parsed by the prelude's
-    /// `words.js` on first use.
+    /// `{ scene, words: [[text, start, end], ...] }`, or `{ unavailable:
+    /// why }`, parsed by the prelude's `words.js` on first use.
     json: String,
 }
 
@@ -21,6 +21,14 @@ impl WordCues {
             .collect();
         WordCues {
             json: json!({ "scene": scene, "words": words }).to_string(),
+        }
+    }
+
+    /// No words, for a call that has no narration to read (a gallery):
+    /// `word()` and `wordEnd()` throw `why` after the call.
+    pub(crate) fn unavailable(why: &str) -> WordCues {
+        WordCues {
+            json: json!({ "unavailable": why }).to_string(),
         }
     }
 

@@ -1621,8 +1621,10 @@ Options:
 Render every example of a component as a still
 
 Each entry of the component's `examples` is drawn as one PNG, at one moment: `--t`
-seconds from the start of the component's scene, by default the middle of the first
-scene that uses it (or 1 s of a 2 s preview when none does). Examples render in parallel
+seconds from the start of the component's scene, by default its middle. That is the
+middle of the first scene that uses it when the scene is silent with a `hold`, else of a
+6 s preview (a narrated scene's length needs its narration, which a gallery never reads,
+so it runs before `narrate`; `word()` throws in a gallery). Examples render in parallel
 and the PNGs are the same at any thread count. The component is read through the cascade
 (the video's `components/`, then the subject's library, then the global one), and the
 theme the same way. `--sheet` also writes all the stills as one contact sheet, `--cols`
@@ -1650,7 +1652,7 @@ Options:
 
       --t <SECONDS>
           Seconds from the start of the component's scene (default: the middle of its
-          scene, or 1 s)
+          silent scene's hold, or 3 s of the 6 s preview)
 
       --out <DIR>
           The folder for the PNGs (default: `<DIR>/out/gallery/`)
@@ -1883,7 +1885,9 @@ Options:
           Where to write the mp4 (default: `<DIR>/renders/<quality>.mp4`)
 
       --threads <T>
-          Render threads (default: half the cores, capped to keep memory under 2 GB)
+          Frame-rendering threads (default: half the cores, capped to keep their memory
+          under 2 GB). The encoder runs its own: `--final`'s libx264 always uses 8, so
+          its output is the same at any `--threads`
 
   -h, --help
           Print help (see a summary with '-h')

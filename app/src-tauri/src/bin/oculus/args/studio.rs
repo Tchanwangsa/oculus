@@ -329,9 +329,11 @@ pub(crate) struct StudioLintArgs {
 ///
 /// Each entry of the component's `examples` is drawn as one PNG, at one
 /// moment: `--t` seconds from the start of the component's scene, by default
-/// the middle of the first scene that uses it (or 1 s of a 2 s preview when
-/// none does). Examples render in parallel and the PNGs are the same at any
-/// thread count. The component is read through the cascade (the video's
+/// its middle. That is the middle of the first scene that uses it when the
+/// scene is silent with a `hold`, else of a 6 s preview (a narrated scene's
+/// length needs its narration, which a gallery never reads, so it runs
+/// before `narrate`; `word()` throws in a gallery). Examples render in
+/// parallel and the PNGs are the same at any thread count. The component is read through the cascade (the video's
 /// `components/`, then the subject's library, then the global one), and the
 /// theme the same way. `--sheet` also writes all the stills as one contact
 /// sheet, `--cols` a row. Stills are named `<Component>-<example>.png`.
@@ -355,7 +357,7 @@ pub(crate) struct StudioGalleryArgs {
     #[arg(long, value_name = "THEME")]
     pub(crate) theme: Option<String>,
     /// Seconds from the start of the component's scene (default: the middle
-    /// of its scene, or 1 s)
+    /// of its silent scene's hold, or 3 s of the 6 s preview)
     #[arg(long = "t", value_name = "SECONDS", allow_negative_numbers = true)]
     pub(crate) t: Option<f64>,
     /// The folder for the PNGs (default: `<DIR>/out/gallery/`)
@@ -522,8 +524,9 @@ pub(crate) struct StudioRenderArgs {
     /// Where to write the mp4 (default: `<DIR>/renders/<quality>.mp4`)
     #[arg(short, long, value_name = "OUT.mp4")]
     pub(crate) out: Option<PathBuf>,
-    /// Render threads (default: half the cores, capped to keep memory
-    /// under 2 GB)
+    /// Frame-rendering threads (default: half the cores, capped to keep
+    /// their memory under 2 GB). The encoder runs its own: `--final`'s
+    /// libx264 always uses 8, so its output is the same at any `--threads`
     #[arg(long, value_name = "T")]
     pub(crate) threads: Option<usize>,
 }

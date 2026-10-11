@@ -334,13 +334,18 @@ We follow the *gradient* downhill, one small step at a time.
   at which the nth occurrence of `phrase` starts, and `wordEnd(phrase, nth
   = 1)` when its last word ends, so `<Enter at={word("gradient")}>` enters
   as it is said. Words match lowercased with only letters, digits and
-  apostrophes kept; a phrase is consecutive words. A phrase that is not
-  said, an `nth` past the last occurrence and a call in a silent scene
-  throw at the call's TSX line, with the closest phrase that is said:
-  ``Steps.tsx:12:20: `word("gradiant")`: no such word in scene `steps`;
-  closest: gradient``. Each call gets its own scene's words (`SceneCall::
-  words`, from `Project::word_cues`), so in a transition the outgoing scene
-  cues to its words and the incoming one to its own.
+  apostrophes kept. A hyphen or dash splits a word into parts, in the phrase
+  and the narration alike, so `word("ninety one")` and `word("ninety-one")`
+  both find the said `ninety-one`; a phrase is consecutive parts that start
+  and end on whole said words (`word("one")` does not find it), since only
+  words have times. A phrase that is not said, an `nth` past the last
+  occurrence and a call in a silent scene throw at the call's TSX line. A
+  phrase not said names the said run of words nearest it by edit distance,
+  however far, spelt with its hyphens (`suggest::nearest`): ``Steps.tsx:12:20:
+  `word("gradiant")`: no such word in scene `steps`; closest: gradient``.
+  Each call gets its own scene's words (`SceneCall::words`, from
+  `Project::word_cues`), so in a transition the outgoing scene cues to its
+  words and the incoming one to its own.
 
 ## Narration timing is forced alignment on the CPU
 
@@ -880,9 +885,17 @@ uses (`project/lint/tokens.rs`, `project/lint/props.rs`). Each problem is an
 error at the literal's `file.tsx:line:col`:
 
 - **Colour literals.** `#rgb`, `#rrggbb` or `#rrggbbaa`, `rgb(`, `rgba(`,
-  `hsl(`, `oklch(` and the other functional notations, or a whole string that
-  is a CSS colour name. The argument of `token(...)`, and a `.default(...)`
-  chained on it, may hold a name, not a literal. The message names the theme
+  `hsl(`, `oklch(` and the other functional notations in any string, and a
+  whole string that is a CSS colour name where a colour goes
+  (`project/lint/tokens/places.rs`): the value of a `color`, `fill`,
+  `stroke`, `background` or `stops` key, or of any key ending in `Color`,
+  whether an object key (`color: "red"`) or a JSX attribute (`fill="red"`),
+  including the arrays, calls and ternaries inside it; or the value of a
+  key named after a `token("color")` prop, unless the theme has a colour by
+  that name. Elsewhere a colour name is a word on screen (`rightValue:
+  "purple"`) and passes. The argument of `token(...)`, and a `.default(...)`
+  chained on it, may hold a name, not a literal; the props check rejects a
+  default the theme has no token for. The message names the theme
   colour to use and the three nearest by RGB distance (all colour names for a
   functional or named notation): ``colour `#5e6ad3` is a literal; use
   theme.color.accent (nearest: accent, accentStrong, muted)``.
@@ -965,6 +978,11 @@ with the `Narration` error before any frame renders.
   per worker; the calling thread takes them in order and writes each to the
   current segment's ffmpeg, one process per segment. The earliest failing
   frame stops the render with `StudioError::Frame` (its time and scene).
+  `--threads` bounds only these renderers. The encoder runs beside them on
+  its own threads: `final`'s x264 always on 8 (see "Two qualities"), so a
+  `--final --threads 3` render was measured at 553% CPU. The fixed count
+  keeps x264's memory known and its output, and so the segment cache, the
+  same at any `--threads`.
 - **Joining.** The segments are joined by the concat demuxer as a stream
   copy (`-f concat -safe 0 -c:v copy`, absolute paths in
   `.cache/concat-<quality>.txt`). x264's B-frames do not drop or repeat a
@@ -1046,7 +1064,7 @@ with the `Narration` error before any frame renders.
   studio aligner` manages the aligner model. See "Narration is made by
   `oculus studio narrate`".
 - `oculus studio render <DIR>` writes an mp4 (`--draft`, the default, or
-  `--final`; `-o`, `--threads`). It prints the plan, then per scene
+  `--final`; `-o`, `--threads` for the frame renderers, not the encoder). It prints the plan, then per scene
   `rendered` with its frames, seconds and frames a second, or `cached`,
   then the path and a summary; `--json` gives `{dir, report: {path,
   quality, width, height, fps, frames, duration, audio, threads, segments:
@@ -1060,8 +1078,9 @@ with the `Narration` error before any frame renders.
 - `oculus studio gallery <DIR> <Component>` renders each example of a
   component as `<DIR>/out/gallery/<Component>-<example>.png` (`--out`),
   at `--t` seconds of the component's scene (default: the middle of its
-  scene, or 1 s of a 2 s preview), and with `--sheet` a contact sheet
-  `<Component>.png` (`--cols`). `--subject` and `--theme` replace video.json's
+  silent scene's hold, or 3 s of a 6 s preview), and with `--sheet` a
+  contact sheet `<Component>.png` (`--cols`). It never reads the narration,
+  so it runs before `narrate`. `--subject` and `--theme` replace video.json's
   for the load; `--threads` sets the render threads. See "Galleries render
   every example as a still".
 - `oculus studio components list <DIR>` and `components show <DIR>
@@ -1080,11 +1099,21 @@ Flags are in [cli-reference.md](./cli-reference.md#oculus-studio).
 `gallery::render(project, component, t, options)` renders each entry of the
 component's `examples` as one still, in declaration order. Each still is the
 component called with that example's props at one moment: `t`, by default the
-middle of the first scene that uses the component (its length is
-`ctx.duration`), or 1 s into a 2 s preview when no scene uses it. An explicit
-`t` must lie inside that length. A gallery renders without narration, so
-`word()` finds no cues. An example is checked against the props schema when
-it renders, and a failure names the example.
+middle of the first scene that uses the component when that scene is silent
+with a `hold` (its length is `ctx.duration`), else the middle of a 6 s
+preview (`gallery::PREVIEW`), long enough for entrances on fixed fallback
+times to have settled. An explicit `t` must lie inside that length.
+
+A gallery reads neither the narration nor the timeline: a narrated scene's
+length would need its narration, and a stale scene elsewhere in the video
+does not concern the component. So it runs before `narrate`, and the CLI
+loads the video with `Project::load_unnarrated_with`
+(`studio::libraries::open_unnarrated`), so a missing or unreadable manifest
+does not stop it. `word()` and `wordEnd()` in a gallery throw ``a gallery
+renders without narration, so there are no words to cue; take the phrases
+in an optional `cues` prop, …`` (`WordCues::unavailable`). An example is
+checked against the props schema when it renders, and a failure names the
+example.
 
 Examples render in parallel, one engine per thread, at most one engine per
 example and within the strip's 2 GiB budget. Each still is put back at its
@@ -1115,7 +1144,8 @@ counts, which edits move which scene fingerprints, and (the `random`
 fixture) that an id'd scene using `Math.random` keeps its fingerprint and
 its exact pixels when moved behind the same scene.
 `tests/narration.rs` covers scene lengths, stale and missing narration, the
-load errors and `word`/`wordEnd`; the `narrated` fixture (a hand-written
+load errors, `word`/`wordEnd` (hyphenated words, and the nearest phrase on
+every miss) and a gallery of a narrated video with no manifest; the `narrated` fixture (a hand-written
 manifest, no audio) pins a card entering at its word. In the app crate, `cargo test --lib studio::` covers the TTS client
 against a loopback fake server (WAV, empty, non-WAV, silent, 404, 429),
 the `/v1/models` listing (parsing, 404, non-JSON, unreachable), the Settings

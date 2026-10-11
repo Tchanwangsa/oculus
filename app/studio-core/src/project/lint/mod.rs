@@ -16,6 +16,7 @@ mod tsx;
 use super::{ComponentSource, Project, Staged};
 use crate::error::{Result, StudioError};
 use crate::render::{Engine, RenderOptions, scene_frame};
+use crate::schema::PropKind;
 use crate::theme::Theme;
 use crate::transition::{blur_mode, check_length};
 use serde_json::Value;
@@ -203,7 +204,14 @@ impl Project {
 /// The checks on a component's own source and declared props: token use
 /// (`tokens`) and required props (`props`).
 fn lint_source(engine: &Engine, name: &str, tsx: &str, theme: &Theme, report: &mut LintReport) {
-    for error in tokens::check(name, tsx, theme) {
+    let colour_props: Vec<String> = engine.component(name).map_or_else(Vec::new, |info| {
+        info.props
+            .iter()
+            .filter(|(_, spec)| matches!(&spec.kind, PropKind::Token(k) if k == "color"))
+            .map(|(prop, _)| prop.clone())
+            .collect()
+    });
+    for error in tokens::check(name, tsx, theme, &colour_props) {
         report.issues.push(LintIssue {
             scene: None,
             id: None,

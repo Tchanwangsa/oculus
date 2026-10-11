@@ -4,6 +4,7 @@
 use super::GalleryOptions;
 use super::Moment;
 use crate::error::{Result, StudioError};
+use crate::project::WordCues;
 use crate::render::{Engine, Frame, RenderOptions, SceneCall, Size};
 use crate::theme::Theme;
 use serde_json::{Map, Value};
@@ -27,6 +28,9 @@ pub fn threads(size: Size, options: &GalleryOptions, n: usize) -> usize {
     let fit = (BUDGET / per_engine).max(1);
     wanted.min(usize::try_from(fit).unwrap_or(usize::MAX))
 }
+
+/// What `word()` and `wordEnd()` throw in a gallery, after the call.
+const NO_CUES: &str = "a gallery renders without narration, so there are no words to cue; take the phrases in an optional `cues` prop, fall back to fixed times when it is absent, and leave `cues` out of `examples`";
 
 pub struct Inputs<'a> {
     pub name: &'a str,
@@ -111,6 +115,7 @@ fn work(
             return vec![(k, Err(e))];
         }
     };
+    let cues = WordCues::unavailable(NO_CUES);
     let mut out = Vec::new();
     for i in (k..examples.len()).step_by(step) {
         if i > first_bad.load(Ordering::Relaxed) {
@@ -124,7 +129,7 @@ fn work(
             duration: inputs.moment.duration,
             index: 0,
             id: None,
-            words: None,
+            words: Some(&cues),
         };
         match engine.render(call) {
             Ok(frame) => out.push((i, Ok(frame))),

@@ -1,6 +1,6 @@
 //! `oculus studio gallery`: one PNG per example of a component
 //! (`studio_core::gallery`, docs/studio.md, "Galleries render every example
-//! as a still").
+//! as a still"). It never reads the narration, so it runs before `narrate`.
 
 use super::studio_error;
 use crate::*;
@@ -10,8 +10,9 @@ use studio_core::gallery::{self, GalleryOptions};
 
 impl Ctx {
     pub(crate) fn studio_gallery(&self, args: &StudioGalleryArgs) -> Result<(), String> {
-        let project = libraries::open(&args.dir, args.subject.clone(), args.theme.clone())
-            .map_err(studio_error)?;
+        let project =
+            libraries::open_unnarrated(&args.dir, args.subject.clone(), args.theme.clone())
+                .map_err(studio_error)?;
         let options = GalleryOptions {
             scale: 1.0,
             threads: args.threads,

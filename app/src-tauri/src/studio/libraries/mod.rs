@@ -52,8 +52,23 @@ pub fn open(
     subject: Option<String>,
     theme: Option<String>,
 ) -> Result<Project, StudioError> {
+    Project::load_with(dir, &with(subject, theme)?)
+}
+
+/// [`open`] without reading the narration manifest, for what never needs
+/// it (`gallery`): a missing or unreadable manifest does not stop it.
+pub fn open_unnarrated(
+    dir: &Path,
+    subject: Option<String>,
+    theme: Option<String>,
+) -> Result<Project, StudioError> {
+    Project::load_unnarrated_with(dir, &with(subject, theme)?)
+}
+
+/// The app's libraries with `subject` and `theme` replacing video.json's.
+fn with(subject: Option<String>, theme: Option<String>) -> Result<Library, StudioError> {
     let mut library = libraries(false)?;
     library.subject = subject;
     library.theme = theme;
-    Project::load_with(dir, &library)
+    Ok(library)
 }

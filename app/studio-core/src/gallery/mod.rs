@@ -4,9 +4,11 @@
 //! `Engine` per thread, and the stills are put back in declaration order, so
 //! the output does not depend on the thread count.
 //!
-//! The moment is the middle of the first scene that uses the component (its
-//! length is `ctx.duration`), or 1 s of a 2 s preview when no scene uses it.
-//! A gallery renders without narration, so `word()` finds no cues.
+//! The moment is the middle of the first scene that uses the component when
+//! video.json alone fixes its length (a silent scene's `hold`), else the
+//! middle of a 6 s preview: a narrated scene's length needs its narration.
+//! A gallery reads neither the narration nor the timeline, so it works
+//! before `narrate`; `word()` in a gallery throws saying there are no cues.
 
 mod workers;
 
@@ -83,32 +85,14 @@ impl Gallery {
 /// The gallery of a video's component: its library cascade and theme, the
 /// video's size and assets, and the moment from its first scene. `t`
 /// overrides the moment (seconds from the scene's start, or from the start
-/// of the 2 s preview).
+/// of the preview).
 pub fn render(
     project: &Project,
     component: &str,
     t: Option<f64>,
     options: &GalleryOptions,
 ) -> Result<Gallery> {
-    let timeline = project.timeline()?;
-    let scene = project
-        .video
-        .scenes
-        .iter()
-        .position(|s| s.component == component);
-    let default = match scene {
-        Some(i) => {
-            let duration = timeline.start(i + 1) - timeline.start(i);
-            Moment {
-                t: duration / 2.0,
-                duration,
-            }
-        }
-        None => Moment {
-            t: 1.0,
-            duration: 2.0,
-        },
-    };
+    let default = default_moment(project, component);
     let moment = Moment {
         t: t.unwrap_or(default.t),
         duration: default.duration,
@@ -122,6 +106,29 @@ pub fn render(
         moment,
         options,
     )
+}
+
+/// The preview's length in seconds, for a component whose scene length
+/// video.json does not fix: at its middle, entrances on the fixed times a
+/// component falls back to without `cues` have settled.
+pub const PREVIEW: f64 = 6.0;
+
+/// The middle of the first scene using `component` when it is silent with a
+/// `hold`, else the middle of the preview.
+fn default_moment(project: &Project, component: &str) -> Moment {
+    let first = project
+        .video
+        .scenes
+        .iter()
+        .position(|s| s.component == component);
+    let duration = first
+        .filter(|&i| project.section(i).is_none())
+        .and_then(|i| project.scene_length(i).ok())
+        .unwrap_or(PREVIEW);
+    Moment {
+        t: duration / 2.0,
+        duration,
+    }
 }
 
 /// A gallery from any component source (a video's cascade, or the starter
