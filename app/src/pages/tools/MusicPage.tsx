@@ -12,6 +12,7 @@ import { nothingNamed } from "@/components/music/NowPlaying";
 import { PlayingElsewhere } from "@/components/music/PlayingElsewhere";
 import { QueueToggle } from "@/components/music/QueueToggle";
 import { VolumeRow } from "@/components/music/VolumeRow";
+import { useMusicSpaceKey } from "@/hooks/music/useMusicSpaceKey";
 import { MusicLibrary } from "@/components/music/library/MusicLibrary";
 import { UpNext } from "@/components/music/library/UpNext";
 import { shownPlayback, type MusicSnapshot } from "@/lib/music";
@@ -36,7 +37,7 @@ const NOTHING_PLAYING = "Pick a playlist below, or choose Oculus in Spotify.";
  * player sits left and the list fills the height on the right, the list
  * being the only scroller. Spotify's state is Rust's (`useMusicState`); this
  * only draws it and sends commands. Without a session or a track it points
- * to Settings → Music.
+ * to Settings → Music. Space plays and pauses (`useMusicSpaceKey`).
  */
 export default function MusicPage() {
   const active = useTabActive();
@@ -44,6 +45,7 @@ export default function MusicPage() {
   const snapshot = useMusicStore((s) => s.snapshot);
   const error = useMusicStore(musicError);
   const [queueOpen, setQueueOpen] = useState(false);
+  useMusicSpaceKey(snapshot);
 
   if (!enabled || !snapshot || !(snapshot.connected || snapshot.connecting || snapshot.track)) {
     return (
