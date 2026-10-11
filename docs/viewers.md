@@ -346,6 +346,9 @@ frontend's call; `oculus transcribe` is the terminal's.
 
 **Engines are tried in the order set in Settings → Transcription** — Groq,
 local Whisper, then on-device speech until the user drags them into another.
+Windows offers Groq only: local Whisper and on-device speech are hidden in
+Settings and excluded from backend selection, even if their switches are stored.
+A missing enabled Groq key fails the run with a Settings → Transcription hint.
 An `Engine` turns one audio file into timed segments; the pipeline owns
 everything else. `engines()` in `app/src-tauri/src/transcribe/settings/mod.rs` lists
 the configured ones in that order before any decoding: Groq when it is on and
@@ -498,7 +501,7 @@ recording on a large model takes minutes.
   needing at most a quarter, capped at `small` without a GPU (`fits`).
 - **Settings only lists, downloads and deletes.** `whisper_models` reads the
   directory, the RAM size and whether `whisper-cli` is found, so it runs on
-  every visit; `whisper_download_model`
+  every macOS visit; `whisper_download_model`
   resolves when the file is on disk (rejecting `cancelled` on a cancel) and
   reports through `whisper-model-progress`
   (`{id, phase, received, total, error?}`, every ~150 ms). A download in
@@ -509,7 +512,8 @@ recording on a large model takes minutes.
 
 ## The in-app browser is a native page per tab, owned by Rust
 
-A browser tab is `/browse/<id>`, naming a WKWebView that
+A browser tab is `/browse/<id>`, naming a native child webview (WKWebView on
+macOS, WebView2 on Windows) that
 `app/src-tauri/src/shell/browser/` parks over an empty slot in `BrowserPage` (Canvas
 refuses iframes).
 
@@ -522,14 +526,23 @@ refuses iframes).
 - **A native page can't interleave with the DOM.** `BrowserPage` hides it while
   a portal overlaps the slot, while its tab is backgrounded (`useTabActive`),
   and while the address field is focused — showing a PNG still
-  (`browser_snapshot`) so the card doesn't blank. It stays hidden for the whole
+  (`browser_snapshot`) on macOS; Windows accepts a blank slot while the
+  native page is hidden. It stays hidden for the whole
   edit, not just while the list shows, because `browser_place` focuses the
   page: re-placing it on a backspace to empty would steal the caret.
+- **Windows browser pages and the login window share WebView2's default jar.**
+  Cookie reads and writes run on worker threads: calling Tauri's cookie APIs
+  on the main event loop deadlocks. Seeding copies both Canvas and SSO headers
+  from keyd and reads back the jar until queued writes match before navigating.
+  Sign-out deletes both hosts' cookies from the same jar.
+- **Windows uses JavaScript for browser history, reload and find.** The page's
+  native snapshot preview is unavailable on Windows.
 - **History is one row per URL, ranked by frecency**, recorded on load
   *finish* (one row per redirect chain). `historyUrl` drops the fragment, and
   the whole query if any part looks like a credential.
-- **A page must claim to be Safari** (`PAGE_USER_AGENT`) or UA-sniffing sites
-  serve fallbacks, and an `initialization_script` reports a real
+- **macOS pages claim to be Safari** (`PAGE_USER_AGENT`) so UA-sniffing sites
+  serve their full pages; Windows keeps WebView2's default user agent.
+  An `initialization_script` reports a real
   `outerWidth`/`outerHeight` (a child view's are 0, which drops canvas renderers
   to minimum scale).
 - **Pages get every plugin's init script.** `tauri-plugin-opener` is built

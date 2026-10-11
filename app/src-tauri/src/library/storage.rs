@@ -34,6 +34,10 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<StorageFile>, total: &mut u64) {
         let Ok(meta) = entry.path().symlink_metadata() else {
             continue;
         };
+        #[cfg(windows)]
+        if junction::exists(&path).unwrap_or(false) {
+            continue;
+        }
         if meta.is_dir() {
             walk(root, &path, out, total);
         } else if meta.is_file() {
@@ -41,7 +45,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<StorageFile>, total: &mut u64) {
             *total += bytes;
             let rel = path
                 .strip_prefix(root)
-                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .map(|p| crate::library::paths::slash_path(p))
                 .unwrap_or_else(|_| path.to_string_lossy().into_owned());
             out.push(StorageFile { path: rel, bytes });
         }
@@ -62,7 +66,7 @@ fn disk_space(path: &Path) -> (u64, u64) {
     (s.f_bavail as u64 * frsize, s.f_blocks as u64 * frsize)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn disk_space(_path: &Path) -> (u64, u64) {
     (0, 0)
 }
@@ -85,4 +89,16 @@ pub async fn storage_report() -> Result<StorageReport, String> {
         })
     })
     .await
+}
+
+#[cfg(windows)]
+fn disk_space(path: &Path) -> (u64, u64) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let (mut free, mut total, mut volume_free) = (0, 0, 0);
+    if unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, &mut volume_free) } == 0 {
+        return (0, 0);
+    }
+    (free, total)
 }

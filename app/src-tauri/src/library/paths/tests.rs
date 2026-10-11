@@ -175,3 +175,23 @@ fn only_a_markdown_note_in_a_subjects_documents_folder_is_writable() {
     assert!(!is_document_rel("courses//documents/x.md"));
     assert!(!is_document_rel("lectures/abc/documents/x.md"));
 }
+
+#[test]
+fn filenames_are_portable_to_windows_volumes() {
+    for name in ["CON", "con.pdf", "NUL.txt", "COM1.md", "LPT9", "COM¹"] {
+        assert_eq!(safe_filename(name), format!("_{name}"));
+    }
+    assert_eq!(safe_filename("notes..."), "notes_");
+    assert_eq!(safe_dir("CON"), "_CON");
+    assert_eq!(
+        slash_path(r"courses\X\files\a.pdf"),
+        "courses/X/files/a.pdf"
+    );
+}
+
+#[test]
+fn writable_file_guards_reject_windows_path_spellings() {
+    assert!(!is_document_rel(r"courses/X/documents/C:\secret.md"));
+    assert!(!is_document_rel(r"courses/X/documents/..\secret.md"));
+    assert!(!is_upload_rel(r"courses/X/uploads/file.txt:stream"));
+}

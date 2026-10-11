@@ -40,6 +40,11 @@ fn link_skill(link: &Path, target: &str, name: &str, body: &str) -> Result<Link,
             }
             std::fs::remove_file(link).map_err(|e| format!("cannot relink {name}: {e}"))?;
         }
+        #[cfg(windows)]
+        Ok(meta) if meta.is_dir() => {
+            return managed_copy(&link.join(super::SKILL_DOC_NAME), body)
+                .map_err(|e| format!("cannot refresh {name}: {e}"));
+        }
         Ok(_) => {
             eprintln!("[oculus] {} is not ours — left alone", link.display());
             return Ok(Link::Skipped);
@@ -118,6 +123,19 @@ const SUBJECT_MEMORIES_REL: &str = "../../../agents/memories";
 /// in place rather than overwriting what is filed.
 fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Result<(), String> {
     let old = course_agents.join(MEMORIES_DIR);
+    #[cfg(windows)]
+    if junction::exists(&old).unwrap_or(false) {
+        if junction::get_target(&old)
+            .ok()
+            .and_then(|p| crate::runtime::platform::canonicalize(p).ok())
+            == crate::runtime::platform::canonicalize(bucket).ok()
+        {
+            return Ok(());
+        }
+        // junction::delete removes only the reparse point; its empty directory remains.
+        junction::delete(&old).map_err(|e| format!("cannot relink {name}/agents/memories: {e}"))?;
+        std::fs::remove_dir(&old).map_err(|e| e.to_string())?;
+    }
     match std::fs::symlink_metadata(&old) {
         // Already a link; repoint it if it aims elsewhere (links are ours).
         Ok(meta) if meta.file_type().is_symlink() => {
@@ -161,6 +179,9 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
     let target = format!("{SUBJECT_MEMORIES_REL}/{name}");
     #[cfg(unix)]
     std::os::unix::fs::symlink(&target, &old)
+        .map_err(|e| format!("cannot link {name}/agents/memories: {e}"))?;
+    #[cfg(windows)]
+    junction::create(bucket, &old)
         .map_err(|e| format!("cannot link {name}/agents/memories: {e}"))?;
     #[cfg(not(unix))]
     let _ = target;
@@ -206,6 +227,10 @@ fn link_dir(data_dir: &Path, dir: &Path) -> Result<Link, String> {
             }
             std::fs::remove_file(&link).map_err(|e| format!("cannot relink {name}: {e}"))?;
         }
+        #[cfg(windows)]
+        Ok(meta) if meta.is_file() => {
+            return managed_copy(&link, AGENTS_DOC).map_err(|e| e.to_string())
+        }
         Ok(_) => return Ok(Link::Skipped),
         Err(_) => {}
     }
@@ -229,7 +254,14 @@ fn symlink_or_copy(target: &str, link: &Path, _body: &str) -> std::io::Result<()
 
 #[cfg(not(unix))]
 fn symlink_or_copy(_target: &str, link: &Path, body: &str) -> std::io::Result<()> {
-    std::fs::write(link, body)
+    #[cfg(windows)]
+    {
+        managed_copy(link, body).map(|_| ())
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::write(link, body)
+    }
 }
 
 /// The same for a skill directory: the copy rebuilds the directory's shape.
@@ -241,5 +273,48 @@ fn link_skill_dir(target: &str, link: &Path, _body: &str) -> std::io::Result<()>
 #[cfg(not(unix))]
 fn link_skill_dir(_target: &str, link: &Path, body: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(link)?;
-    std::fs::write(link.join(super::SKILL_DOC_NAME), body)
+    symlink_or_copy("", &link.join(super::SKILL_DOC_NAME), body)
+}
+
+#[cfg(any(windows, test))]
+fn managed_copy(path: &Path, body: &str) -> std::io::Result<Link> {
+    let marker = path.with_file_name(format!(
+        "{}.oculus-managed",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    let hash = |bytes: &[u8]| {
+        ring::digest::digest(&ring::digest::SHA256, bytes)
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    if let Ok(existing) = std::fs::read(path) {
+        let recorded = std::fs::read_to_string(&marker).unwrap_or_default();
+        if recorded != hash(&existing) {
+            return Ok(Link::Skipped);
+        }
+        if existing == body.as_bytes() {
+            return Ok(Link::Current);
+        }
+    }
+    std::fs::write(path, body)?;
+    std::fs::write(marker, hash(body.as_bytes()))?;
+    Ok(Link::Linked)
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::*;
+    #[test]
+    fn managed_copies_refresh_and_preserve_user_edits() {
+        let dir = crate::test_support::Scratch::new("agent-managed-copy");
+        let path = dir.join("AGENTS.md");
+        assert_eq!(managed_copy(&path, "one").unwrap(), Link::Linked);
+        assert_eq!(managed_copy(&path, "two").unwrap(), Link::Linked);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "two");
+        std::fs::write(&path, "mine").unwrap();
+        assert_eq!(managed_copy(&path, "three").unwrap(), Link::Skipped);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "mine");
+    }
 }

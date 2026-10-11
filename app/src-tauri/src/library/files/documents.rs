@@ -77,7 +77,27 @@ fn same_entry(current: &Path, wanted: &Path) -> bool {
             _ => false,
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        };
+        let identity = |path: &Path| -> Option<(u32, u32, u32)> {
+            let file = std::fs::File::open(path).ok()?;
+            let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+            if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+                return None;
+            }
+            Some((
+                info.dwVolumeSerialNumber,
+                info.nFileIndexHigh,
+                info.nFileIndexLow,
+            ))
+        };
+        matches!((identity(current), identity(wanted)), (Some(a), Some(b)) if a == b)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = (current, wanted);
         false

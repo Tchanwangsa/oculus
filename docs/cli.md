@@ -200,8 +200,11 @@ Each file has one of four lifetimes:
   carried under their headings, and each `MEMORY.md` is rebuilt from the
   memories beside it. Prose under a heading, or missing headings, is reported
   and left alone rather than guessed at.
-- **Linked, never clobbered**: every link is relative, so the library can
-  move. A wrong target is relinked; a real file is left with a warning. A real
+- **Linked, never clobbered**: Unix links are relative, so the library can
+  move. Windows copies `AGENTS.md` and skills with a content-hash sidecar: a
+  managed copy refreshes with the generated source, while a user edit is
+  preserved. Subject memory directories use Windows junctions. A wrong Unix
+  target is relinked; a real file is left with a warning. A real
   `agents/memories/` folder in a course has its files moved into the bucket
   before it becomes a link.
 
@@ -225,3 +228,7 @@ pull document that `AGENTS.md` says when to open.
 - An empty `search` result would read as "no answer" — keep failing loudly with the next command to run.
 - Ripgrep over `courses/` misses PDF text — use `oculus grep`.
 - A stale `oculus` documents and runs the wrong build — `bun run cli` deletes the binary before building ([development.md](./development.md#the-dev-cli-is-built-by-the-preflight-not-by-tauri-dev)).
+
+The app and CLI share `%USERPROFILE%/Oculus` on Windows. Database and IPC
+relative paths use `/`, filenames avoid Windows device names and trailing
+dots, and authentication prompts use hidden terminal input on both platforms.

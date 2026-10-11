@@ -3,7 +3,7 @@
 use super::{FRAME_BYTES, FRAME_H, FRAME_W};
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// Mean absolute difference between each sampled frame (`fps=1`, so frame *n*
 /// is second *n*; the first entry is second 1) and the one before it. Frames
@@ -61,7 +61,7 @@ fn each_frame(
     seek: &[&str],
     mut on_frame: impl FnMut(u32, &[u8]),
 ) -> Result<String, String> {
-    let mut child = Command::new(ffmpeg)
+    let mut child = crate::runtime::platform::command(ffmpeg)
         .args(["-v", level, "-nostdin", "-hide_banner", "-nostats"])
         .args(seek)
         .arg("-i")
