@@ -2,7 +2,7 @@ use librespot_protocol::connect::{Capabilities, Cluster as ClusterProto, DeviceI
 use librespot_protocol::player::{ContextPlayerOptions, PlayerState, ProvidedTrack};
 use serde_json::json;
 
-use super::command::{body, path};
+use super::command::{body, path, ListedTrack};
 use super::playback::{from_cluster, with_row};
 use super::{refused, RemoteCommand, RemotePlayback};
 use crate::music::devices::from_cluster as devices_from_cluster;
@@ -10,6 +10,7 @@ use crate::music::library::{LibraryError, TrackRow};
 use crate::music::state::{apply_cluster, Snapshot};
 
 const T1: &str = "spotify:track:4uLU6hMCjMI75M1A2tKUQC";
+const T2: &str = "spotify:track:7ouMYWpwJ422jRcDASZB7P";
 const PLAYLIST: &str = "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M";
 
 fn command(endpoint: &str, extra: serde_json::Value) -> serde_json::Value {
@@ -78,6 +79,81 @@ fn valued_commands_carry_what_librespots_receiver_reads() {
         json!({ "volume": 65535 })
     );
     assert_eq!(body(&RemoteCommand::Volume(0)), json!({ "volume": 0 }));
+}
+
+fn listed(uri: &str, uid: &str, provider: &str, metadata: &[(&str, &str)]) -> ListedTrack {
+    ListedTrack {
+        uri: uri.into(),
+        uid: uid.into(),
+        provider: provider.into(),
+        metadata: metadata
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+    }
+}
+
+#[test]
+fn a_skip_to_names_the_track_with_its_uid_and_provider_when_known() {
+    assert_eq!(
+        body(&RemoteCommand::SkipTo(listed(
+            T1,
+            "q3",
+            "queue",
+            &[("is_queued", "true")]
+        ))),
+        command(
+            "skip_next",
+            json!({ "track": { "uri": T1, "uid": "q3", "provider": "queue" } })
+        )
+    );
+    assert_eq!(
+        body(&RemoteCommand::SkipTo(listed(T1, "", "", &[]))),
+        command("skip_next", json!({ "track": { "uri": T1 } }))
+    );
+    assert_eq!(
+        path(&RemoteCommand::SkipTo(listed(T1, "", "", &[])), "me", "me"),
+        "/connect-state/v1/player/command/from/me/to/me"
+    );
+}
+
+#[test]
+fn a_set_queue_lists_next_and_previous_tracks_whole_with_the_revision() {
+    let next = vec![
+        listed(T1, "q0", "queue", &[("is_queued", "true")]),
+        listed("spotify:delimiter", "", "context", &[("hidden", "true")]),
+    ];
+    let prev = vec![listed(T2, "c9", "context", &[])];
+    assert_eq!(
+        body(&RemoteCommand::SetQueue {
+            next,
+            prev,
+            revision: "1234".into(),
+        }),
+        command(
+            "set_queue",
+            json!({
+                "next_tracks": [
+                    {
+                        "uri": T1,
+                        "uid": "q0",
+                        "provider": "queue",
+                        "metadata": { "is_queued": "true" },
+                    },
+                    {
+                        "uri": "spotify:delimiter",
+                        "uid": "",
+                        "provider": "context",
+                        "metadata": { "hidden": "true" },
+                    },
+                ],
+                "prev_tracks": [
+                    { "uri": T2, "uid": "c9", "provider": "context", "metadata": {} },
+                ],
+                "queue_revision": "1234",
+            })
+        )
+    );
 }
 
 #[test]

@@ -33,6 +33,7 @@ mod events;
 mod library;
 mod login;
 mod logs;
+mod queue;
 mod remote;
 mod session;
 pub mod startup;

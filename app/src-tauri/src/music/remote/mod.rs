@@ -3,6 +3,9 @@
 //! go to it rather than pulling playback here (`control.rs`), and the
 //! snapshot's `remote` shows what it plays (`playback.rs`).
 //!
+//! Skipping to a track up next and removing one go the same way while
+//! another device plays (`queue.rs`).
+//!
 //! A command is one request through the library's spclient sender, from this
 //! device's id to the active one's: Spotify's connect-state player command
 //! API, or its volume endpoint (`command.rs`). It is sent once; a non-2xx
@@ -16,7 +19,7 @@ mod tests;
 
 use tauri::AppHandle;
 
-pub(super) use command::RemoteCommand;
+pub(super) use command::{ListedTrack, RemoteCommand};
 pub(super) use playback::{describe, from_cluster, with_row, RemotePlayback};
 
 use super::library::spclient::{self, Method, Target};

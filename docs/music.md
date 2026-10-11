@@ -135,6 +135,15 @@ on dev long before a release. The rev is bumped by hand when playback breaks;
 `cargo update` never touches it, and the lockfile keeps tauri at 2.11.2 and
 vergen at the versions librespot's build script accepts.
 
+**librespot-connect is a vendored copy of that rev**
+(`app/src-tauri/vendor/librespot-connect`, swapped in by a `[patch]` in
+`Cargo.toml`), with one addition: `Spirc::skip_to` and `Spirc::remove_next`
+([music-library.md](./music-library.md#skipping-to-and-removing-a-track-up-next)).
+Bumping the rev means copying the new `connect/` over it and carrying those
+two commands across (`SkipTo`, `RemoveNext` in `spirc.rs`;
+`find_next_track`, `skip_next_tracks_to`, `remove_next_track` in
+`state/tracks.rs`).
+
 librespot's `Cache` is never constructed: no `credentials.json`, no audio file
 cache, no volume file. While a track streams, librespot buffers it in a
 temporary file in the OS temp dir that is deleted when the track is dropped.
@@ -331,7 +340,8 @@ from the cluster), `output` (the chosen output, null for the system
 default), `remote` (the other device's playback, [above](#the-snapshots-remote-is-the-other-devices-playback)), `track` (`uri`, `name`, `artists`,
 `album`, `cover_url`, `duration_ms`) or null, `position_ms` with
 `position_at_ms`, `playing`, `volume` (0–100), `shuffle`, `repeat`,
-`up_next` (`uri`, `queued`; [music-library.md](./music-library.md#up-next-comes-from-the-spirc-while-oculus-plays-and-the-cluster-otherwise))
+`up_next` (`uri`, `queued`) and `context_uri` (what the device playing
+plays from; both [music-library.md](./music-library.md#up-next-comes-from-the-spirc-while-oculus-plays-and-the-cluster-otherwise))
 and `error`.
 
 - **The position is stamped, not ticked.** `position_at_ms` is the epoch ms at
@@ -379,6 +389,7 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_play_context(uri)` | Plays a `spotify:` context on the device playing elsewhere, else loads it here |
 | `music_play_track(uri, context_uri?)` | Plays a track from its place in the context (its album, or the playlist it was picked in), or alone without one; on the device playing elsewhere, else here |
 | `music_add_to_queue(uri)` | Adds a track to the queue of the device playing; refused while nothing plays |
+| `music_skip_to(uri, index)`, `music_queue_remove(uri, index)` | Plays the `up_next` entry at `index`, or takes it out of the queue, on the device playing, Oculus or another ([music-library.md](./music-library.md#skipping-to-and-removing-a-track-up-next)) |
 | `music_play_here()` | Moves playback here and plays |
 | `music_duck(level?)` | A level ducks to that share of the kept volume; null restores it; nothing while inactive |
 | `music_playlists(refresh)`, `music_search(query)`, `music_search_more(query, kind, offset)` | The playlists, kept until `refresh`; up to ten each of tracks, artists, albums and playlists; a page of 20 of one kind and the next offset ([music-library.md](./music-library.md)) |

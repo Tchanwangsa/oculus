@@ -3,11 +3,12 @@ import { fmtClockSecs } from "@/lib/lectures/media";
 import { cn } from "@/lib/utils";
 import { PlaylistCover } from "./PlaylistCover";
 import { QueueAction } from "./QueueAction";
+import { RemoveAction } from "./RemoveAction";
 
 /**
  * One playlist, album or track in the player's lists: a click plays or opens it.
- * A track row can carry its duration and an "Add to queue" action; a row
- * with no `onPlay` (up next) is not a control at all.
+ * A track row can carry its duration, an "Add to queue" action and, up
+ * next, a "Remove from queue" one; a row with no `onPlay` is not a control.
  */
 export function LibraryRow({
   name,
@@ -18,6 +19,7 @@ export function LibraryRow({
   current = false,
   disabled = false,
   onPlay,
+  onRemove,
 }: {
   name: string;
   subtitle: string;
@@ -30,6 +32,8 @@ export function LibraryRow({
   current?: boolean;
   disabled?: boolean;
   onPlay?: () => void;
+  /** Offers "Remove from queue", which calls this. */
+  onRemove?: () => void;
 }) {
   const body: ReactNode = (
     <>
@@ -50,6 +54,7 @@ export function LibraryRow({
         )}
       </span>
       {queueUri && <QueueAction uri={queueUri} disabled={disabled} />}
+      {onRemove && <RemoveAction onRemove={onRemove} disabled={disabled} />}
       {durationMs !== undefined && (
         <span className="w-10 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
           {fmtClockSecs(durationMs / 1000)}

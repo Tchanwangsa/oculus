@@ -72,10 +72,14 @@ export interface MusicSnapshot {
   volume: number;
   shuffle: boolean;
   repeat: boolean;
-  /** What plays next, queued tracks first, up to 20 catalogue tracks: from
-   *  Oculus's own queue while it plays, from Spotify's device list otherwise.
-   *  Names come from `music.tracks`. */
+  /** What plays next, queued tracks first, every catalogue track Spotify
+   *  lists (up to 80 while Oculus plays): from Oculus's own queue while it
+   *  plays, from Spotify's device list otherwise. Names come from
+   *  `music.tracks`. */
   up_next: MusicNextTrack[];
+  /** The playlist, album or other context the device playing plays from;
+   *  null when unknown. */
+  context_uri: string | null;
   /** The latest failure, kept until the next connect or load. */
   error: string | null;
 }
@@ -267,6 +271,13 @@ export const music = {
   /** To the queue of the device playing, this one or another; refused
    *  while nothing plays. */
   addToQueue: (uri: string) => invoke("music_add_to_queue", { uri }),
+  /** Plays the `up_next` entry at `index` (named `uri`) now, on the device
+   *  playing; refused once it is no longer up next. */
+  skipTo: (uri: string, index: number) => invoke("music_skip_to", { uri, index }),
+  /** Takes the `up_next` entry at `index` (named `uri`) out of the queue of
+   *  the device playing. */
+  removeFromQueue: (uri: string, index: number) =>
+    invoke("music_queue_remove", { uri, index }),
   search: (query: string) => invoke<MusicSearchResults>("music_search", { query }),
   searchMore: (query: string, kind: MusicSearchKind, offset: number) =>
     invoke<MusicSearchPage>("music_search_more", { query, kind, offset }),

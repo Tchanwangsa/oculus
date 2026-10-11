@@ -87,7 +87,8 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 calamine = "0.36"
 # Spotify Connect playback (`src/music/`, docs/music.md). librespot's dev
 # branch by rev, not crates.io 0.8.0: Spotify's endpoint changes land there
-# first. Bump the rev by hand; never `cargo update` them.
+# first. Bump the rev by hand; never `cargo update` them. librespot-connect
+# is patched to a vendored copy (`[patch]` below).
 librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
 librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
 librespot-metadata = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
@@ -136,3 +137,9 @@ objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "W
 [dev-dependencies]
 # Writes the synthetic PDFs the tests parse and rasterise.
 lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] }
+
+# librespot-connect with Spirc::skip_to and Spirc::remove_next, which act on
+# the Spirc's own queue (`vendor/librespot-connect`, docs/music-library.md).
+# Bump it with the other librespot crates' rev.
+[patch."https://github.com/librespot-org/librespot"]
+librespot-connect = { path = "vendor/librespot-connect" }

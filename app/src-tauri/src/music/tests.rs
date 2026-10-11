@@ -13,9 +13,12 @@ use super::duck::Duck;
 use super::events::apply;
 use super::login::{callback_outcome, LoginError};
 use super::logs::is_track_failure;
+use super::queue::{find, nth, without};
 use super::session::{next_backoff, BACKOFF_MAX, BACKOFF_MIN};
 use super::startup::{parse, Prefs};
-use super::state::{from_percent, percent, up_next, NextTrack, Snapshot, INITIAL_VOLUME, UP_NEXT};
+use super::state::{
+    apply_cluster, from_percent, percent, up_next, NextTrack, Snapshot, INITIAL_VOLUME,
+};
 use super::track::cover_url;
 
 #[test]
@@ -440,7 +443,7 @@ const T2: &str = "spotify:track:7ouMYWpwJ422jRcDASZB7P";
 const T3: &str = "spotify:track:0eGsygTp906u18L0Oimnem";
 
 #[test]
-fn up_next_keeps_tracks_only_marks_queued_ones_and_caps() {
+fn up_next_keeps_every_track_only_and_marks_queued_ones() {
     let listed = [
         (T1, "queue"),
         ("spotify:delimiter", "context"),
@@ -449,8 +452,9 @@ fn up_next_keeps_tracks_only_marks_queued_ones_and_caps() {
         (T2, "context"),
     ];
     assert_eq!(up_next(listed), [next(T1, true), next(T2, false)]);
-    let many: Vec<(&str, &str)> = (0..UP_NEXT + 5).map(|_| (T3, "context")).collect();
-    assert_eq!(up_next(many).len(), UP_NEXT);
+    // librespot lists up to 80; none is cut.
+    let many: Vec<(&str, &str)> = (0..80).map(|_| (T3, "context")).collect();
+    assert_eq!(up_next(many).len(), 80);
 }
 
 #[test]
@@ -478,6 +482,7 @@ fn a_queue_event_sets_up_next_and_a_track_change_moves_past_it() {
         s.up_next,
         [next(T1, true), next(T2, false), next(T3, false)]
     );
+    assert_eq!(s.context_uri.as_deref(), Some("spotify:playlist:x"));
     s.advance_to(T2);
     assert_eq!(s.up_next, [next(T3, false)]);
     // A track that was not up next leaves the list alone.
@@ -485,6 +490,7 @@ fn a_queue_event_sets_up_next_and_a_track_change_moves_past_it() {
     assert_eq!(s.up_next, [next(T3, false)]);
     s.set_unlinked();
     assert!(s.up_next.is_empty());
+    assert_eq!(s.context_uri, None);
 }
 
 #[test]
@@ -503,15 +509,106 @@ fn a_pushed_cluster_carries_what_the_active_device_plays_next() {
     // No player state: nothing known, so the snapshot's list is kept.
     assert_eq!(from_cluster(&cluster, "me").up_next, None);
     cluster.player_state = Some(PlayerState {
+        context_uri: "spotify:album:a".into(),
         next_tracks: vec![track(T1, "queue"), track(T2, "context")],
+        prev_tracks: vec![track(T3, "context")],
+        queue_revision: "42".into(),
         ..PlayerState::default()
     })
     .into();
+    let pushed = from_cluster(&cluster, "me");
+    assert_eq!(pushed.up_next, Some(vec![next(T1, true), next(T2, false)]));
+    let queue = pushed.queue.as_ref().unwrap();
     assert_eq!(
-        from_cluster(&cluster, "me").up_next,
-        Some(vec![next(T1, true), next(T2, false)])
+        (queue.next.len(), queue.prev.len(), queue.revision.as_str()),
+        (2, 1, "42")
     );
-    // Nothing active: nothing plays next.
+    let mut s = Snapshot::default();
+    apply_cluster(&mut s, &mut pushed.clone());
+    assert_eq!(s.context_uri.as_deref(), Some("spotify:album:a"));
+
+    // A push without a player state keeps the last queue of the same device.
+    let mut bare = cluster.clone();
+    bare.player_state.clear();
+    let mut later = from_cluster(&bare, "me");
+    later.keep_queue(Some(pushed.clone()));
+    assert_eq!(later.queue, pushed.queue);
+    apply_cluster(&mut s, &mut later);
+    assert_eq!(s.context_uri.as_deref(), Some("spotify:album:a"));
+    // Not another device's.
+    bare.active_device_id = "speaker".into();
+    let mut other = from_cluster(&bare, "me");
+    other.keep_queue(Some(pushed.clone()));
+    assert_eq!(other.queue, None);
+
+    // Nothing active: nothing plays next, from no context.
     cluster.active_device_id.clear();
-    assert_eq!(from_cluster(&cluster, "me").up_next, Some(vec![]));
+    let mut idle = from_cluster(&cluster, "me");
+    assert_eq!(idle.up_next, Some(vec![]));
+    idle.keep_queue(Some(pushed));
+    assert_eq!(idle.queue, None);
+    apply_cluster(&mut s, &mut idle);
+    assert_eq!(s.context_uri, None);
+}
+
+fn provided(uri: &str, uid: &str) -> librespot_protocol::player::ProvidedTrack {
+    librespot_protocol::player::ProvidedTrack {
+        uri: uri.into(),
+        uid: uid.into(),
+        provider: "context".into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn an_up_next_entry_is_found_by_its_place_among_the_listed_tracks() {
+    let next = [
+        provided(T1, "a"),
+        provided("spotify:episode:e", "b"),
+        provided(T2, "c"),
+        provided("spotify:delimiter", "d"),
+        provided(T1, "e"),
+    ];
+    // up_next is T1, T2, T1: the episode and the delimiter are not shown.
+    assert_eq!(find(&next, T1, 0), Some(0));
+    assert_eq!(find(&next, T2, 1), Some(2));
+    // A duplicate URI: the entry at that place, not the first.
+    assert_eq!(find(&next, T1, 2), Some(4));
+    // The list moved: the first entry with that URI.
+    assert_eq!(find(&next, T2, 0), Some(2));
+    assert_eq!(find(&next, T2, 9), Some(2));
+    assert_eq!(find(&next, T3, 0), None);
+    assert_eq!(find(&[], T1, 0), None);
+}
+
+#[test]
+fn a_removal_keeps_every_other_entry_episodes_and_delimiters_included() {
+    let next = [
+        provided(T1, "a"),
+        provided("spotify:episode:e", "b"),
+        provided(T2, "c"),
+        provided(T1, "d"),
+    ];
+    let at = find(&next, T1, 2).unwrap();
+    let uids: Vec<String> = without(&next, at).into_iter().map(|t| t.uid).collect();
+    assert_eq!(uids, ["a", "b", "c"]);
+    let uids: Vec<String> = without(&next, 0).into_iter().map(|t| t.uid).collect();
+    assert_eq!(uids, ["b", "c", "d"]);
+}
+
+#[test]
+fn oculus_names_an_up_next_entry_by_its_uri_and_which_of_its_tracks_it_is() {
+    let up = [
+        next(T1, true),
+        next(T2, false),
+        next(T1, false),
+        next(T1, false),
+    ];
+    assert_eq!(nth(&up, T1, 0), 0);
+    assert_eq!(nth(&up, T2, 1), 0);
+    assert_eq!(nth(&up, T1, 2), 1);
+    assert_eq!(nth(&up, T1, 3), 2);
+    // The entry moved or the list ended: the first track with that URI.
+    assert_eq!(nth(&up, T2, 3), 0);
+    assert_eq!(nth(&up, T1, 9), 0);
 }

@@ -18,6 +18,7 @@ use super::control::{self, Need, Route};
 use super::devices::{self, Device};
 use super::library::{self, Playlist, SearchKind, SearchPage, SearchResults, TrackRow};
 use super::login::{self, LoginError};
+use super::queue;
 use super::remote::{self, RemoteCommand};
 use super::session::{self, Start};
 use super::state::{self, Snapshot};
@@ -399,6 +400,21 @@ pub async fn music_add_to_queue(app: AppHandle, uri: String) -> Result<(), Strin
         RemoteCommand::AddToQueue(uri),
     )
     .await
+}
+
+/// Plays the snapshot's `up_next` entry at `index`, named `uri`, on the
+/// device playing, Oculus or another, skipping what comes before it
+/// (`queue.rs`).
+#[tauri::command]
+pub async fn music_skip_to(app: AppHandle, uri: String, index: usize) -> Result<(), String> {
+    queue::skip_to(&app, &uri, index).await
+}
+
+/// Takes the snapshot's `up_next` entry at `index`, named `uri`, out of the
+/// queue of the device playing (`queue.rs`).
+#[tauri::command]
+pub async fn music_queue_remove(app: AppHandle, uri: String, index: usize) -> Result<(), String> {
+    queue::remove(&app, &uri, index).await
 }
 
 /// Tracks, artists, albums and playlists matching `query`, ten of each.
