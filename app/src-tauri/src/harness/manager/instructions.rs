@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use super::options::LectureBrief;
+use super::studio::{self, StudioBrief};
 
 const INSTRUCTIONS_TEMPLATE: &str = include_str!("../../../templates/HARNESS.template.md");
 
@@ -14,13 +15,15 @@ pub fn thread_cwd(data_dir: &Path) -> PathBuf {
 }
 
 /// The instructions appended to the provider's own system prompt, with the
-/// library's real paths in them. `scope` (the subject folder) and `lecture`
-/// only say what the questions are about — they never narrow what the agent
-/// may reach — and are appended to the library-wide brief, not substituted.
+/// library's real paths in them. `scope` (the subject folder), `lecture` and
+/// `studio` only say what the questions are about — they never narrow what
+/// the agent may reach — and are appended to the library-wide brief, not
+/// substituted.
 pub fn instructions(
     data_dir: &Path,
     scope: Option<&str>,
     lecture: Option<&LectureBrief>,
+    studio: Option<&StudioBrief>,
 ) -> String {
     let mut courses: Vec<String> = std::fs::read_dir(data_dir.join("courses"))
         .map(|rd| {
@@ -44,13 +47,18 @@ pub fn instructions(
     let base = INSTRUCTIONS_TEMPLATE
         .replace("{{DATA_DIR}}", &data_dir.display().to_string())
         .replace("{{COURSES}}", &courses);
-    format!("{base}{}", thread_sections(scope, lecture))
+    format!("{base}{}", thread_sections(scope, lecture, studio))
 }
 
-/// The part of the brief about *this thread* (subject, lecture). Split out
-/// for the bridges with no per-thread system prompt — opencode and
-/// Antigravity — which send it ahead of the session's first message.
-pub fn thread_sections(scope: Option<&str>, lecture: Option<&LectureBrief>) -> String {
+/// The part of the brief about *this thread* (subject, lecture, Studio
+/// video). Split out for the bridges with no per-thread system prompt —
+/// opencode and Antigravity — which send it ahead of the session's first
+/// message.
+pub fn thread_sections(
+    scope: Option<&str>,
+    lecture: Option<&LectureBrief>,
+    studio: Option<&StudioBrief>,
+) -> String {
     let mut out = String::new();
     if let Some(code) = scope {
         out.push_str(&format!(
@@ -66,6 +74,9 @@ pub fn thread_sections(scope: Option<&str>, lecture: Option<&LectureBrief>) -> S
     }
     if let Some(lec) = lecture {
         out.push_str(&lecture_section(lec, scope));
+    }
+    if let Some(video) = studio {
+        out.push_str(&studio::section(video));
     }
     out
 }
@@ -148,7 +159,7 @@ mod tests {
         let root = crate::test_support::Scratch::new("harness-scope");
         std::fs::create_dir_all(root.join("courses/COMP30026_2026_SM2")).unwrap();
 
-        let general = instructions(&root, None, None);
+        let general = instructions(&root, None, None, None);
         assert!(
             general.contains("`COMP30026_2026_SM2`"),
             "the course list is filled in"
@@ -176,7 +187,7 @@ mod tests {
             "and the contract is its own section"
         );
 
-        let scoped = instructions(&root, Some("COMP30026_2026_SM2"), None);
+        let scoped = instructions(&root, Some("COMP30026_2026_SM2"), None, None);
         assert!(
             scoped.starts_with(&general),
             "the scope is appended to the same brief"
@@ -198,7 +209,7 @@ mod tests {
         let root = crate::test_support::Scratch::new("harness-lecture");
         std::fs::create_dir_all(root.join("courses/COMP30026_2026_SM2")).unwrap();
 
-        let scoped = instructions(&root, Some("COMP30026_2026_SM2"), None);
+        let scoped = instructions(&root, Some("COMP30026_2026_SM2"), None, None);
         let lecture = LectureBrief {
             id: "abc-123".into(),
             title: "Lecture 14".into(),
@@ -210,7 +221,7 @@ mod tests {
                 summary: "Unification, worked".into(),
             }],
         };
-        let full = instructions(&root, Some("COMP30026_2026_SM2"), Some(&lecture));
+        let full = instructions(&root, Some("COMP30026_2026_SM2"), Some(&lecture), None);
 
         assert!(
             full.starts_with(&scoped),
@@ -240,10 +251,35 @@ mod tests {
                 chapters: vec![],
                 ..lecture
             }),
+            None,
         );
         assert!(
             !no_transcript.contains("`../lectures/abc-123/transcript.vtt`"),
             "a transcript that is not on disk is not named"
         );
+    }
+
+    /// The video is a layer on the same brief, for every provider.
+    #[test]
+    fn a_studio_thread_keeps_the_brief_and_names_its_video() {
+        let root = crate::test_support::Scratch::new("harness-studio");
+        let video = StudioBrief {
+            slug: "bayes".into(),
+            dir: root.join("studio/videos/bayes"),
+            theme: Some("default".into()),
+            subject: None,
+            portrait: Some(false),
+            length_secs: Some(90),
+        };
+        let plain = instructions(&root, None, None, None);
+        let full = instructions(&root, None, None, Some(&video));
+        assert!(full.starts_with(&plain), "appended, not substituted");
+        assert!(full.contains("## The video being made"));
+        assert_eq!(
+            thread_sections(None, None, Some(&video)),
+            full[plain.len()..],
+            "the bridges without a system prompt send the same section"
+        );
+        assert!(!plain.contains("The video being made"));
     }
 }

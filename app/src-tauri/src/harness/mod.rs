@@ -22,13 +22,14 @@ mod manager;
 mod protected;
 mod providers;
 pub mod store;
+pub mod studio_agents;
 mod suggest;
 
 pub use cli::{discover, install, signin, update};
 pub use event::{HarnessEvent, Provider, ToolKind};
 pub use manager::{
     instructions, run_once, thread_cwd, thread_sections, Harness, LectureBrief, Queue,
-    QueuedMessage, RawLog, RewindTo, SendOptions,
+    QueuedMessage, RawLog, RewindTo, SendOptions, StudioBrief, StudioSend,
 };
 pub use providers::antigravity::rules as antigravity_rules;
 pub use providers::{antigravity, claude, codex, opencode};
