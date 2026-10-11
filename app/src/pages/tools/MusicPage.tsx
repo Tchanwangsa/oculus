@@ -8,12 +8,13 @@ import { MusicCover } from "@/components/music/MusicCover";
 import { RepeatToggle, ShuffleToggle } from "@/components/music/MusicModes";
 import { MusicSeek } from "@/components/music/MusicSeek";
 import { MusicTransport } from "@/components/music/MusicTransport";
+import { nothingNamed } from "@/components/music/NowPlaying";
 import { PlayingElsewhere } from "@/components/music/PlayingElsewhere";
 import { QueueToggle } from "@/components/music/QueueToggle";
 import { VolumeRow } from "@/components/music/VolumeRow";
 import { MusicLibrary } from "@/components/music/library/MusicLibrary";
 import { UpNext } from "@/components/music/library/UpNext";
-import type { MusicSnapshot } from "@/lib/music";
+import { shownPlayback, type MusicSnapshot } from "@/lib/music";
 import { cn } from "@/lib/utils";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
 import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
@@ -62,7 +63,7 @@ export default function MusicPage() {
     );
   }
 
-  const track = snapshot.track;
+  const { track, device } = shownPlayback(snapshot);
   return (
     <div className="@container h-full">
       <div className="page-scroll @3xl:overflow-y-hidden">
@@ -76,10 +77,10 @@ export default function MusicPage() {
               />
               <div className="min-w-0 text-center">
                 <h1 className="truncate text-lg font-semibold text-foreground">
-                  {track?.name ?? (snapshot.connecting ? "Connecting…" : "Nothing playing")}
+                  {track?.name ?? (snapshot.connecting ? "Connecting…" : nothingNamed(device))}
                 </h1>
                 <p className="truncate text-[13px] text-foreground/80">
-                  {track ? track.artists.join(", ") : NOTHING_PLAYING}
+                  {track ? track.artists.join(", ") : device ? "" : NOTHING_PLAYING}
                 </p>
                 {track?.album && (
                   <p className="truncate text-xs text-muted-foreground">{track.album}</p>

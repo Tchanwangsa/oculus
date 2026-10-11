@@ -37,7 +37,7 @@ pub struct TrackRow {
     /// Tells albums apart: the album's gid in hex, else its cover's URL,
     /// else its name.
     #[serde(skip)]
-    pub(super) album_key: String,
+    pub(in crate::music) album_key: String,
 }
 
 /// The `BatchedEntityRequest` asking `kind` for each of these entities.

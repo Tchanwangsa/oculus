@@ -16,7 +16,8 @@ switch is on.
 | The session task: player, connect, reconnect, stop | `app/src-tauri/src/music/session.rs` |
 | The snapshot, the `music-state` event, the Spirc, run and login handles | `app/src-tauri/src/music/state.rs` |
 | Player events folded into the snapshot | `app/src-tauri/src/music/events.rs` |
-| Commands against an inactive device: pull, activate or skip | `app/src-tauri/src/music/control.rs` |
+| Where a command goes: here, the device playing elsewhere, a pull, an activate or nothing | `app/src-tauri/src/music/control.rs` |
+| Remote control of another device: its commands' requests, its playback for the snapshot | `app/src-tauri/src/music/remote/` |
 | Connect devices and transfer | `app/src-tauri/src/music/devices.rs` |
 | The output on this Mac: the choice, cpal's devices, the player's sink | `app/src-tauri/src/music/audio/` |
 | A track and its cover URL | `app/src-tauri/src/music/track.rs` |
@@ -73,7 +74,16 @@ switch is on.
   `/music`) opens "Spotify devices" (active checked, a click transfers) and
   "Output on this Mac" ("System default (<device>)", then each output). Both
   lists are read on open, never on a timer; errors sit inline. While another device plays, the button is brand-tinted, "Playing on
-  <device>" shows under the volume, and the transport stays enabled.
+  <device>" shows under the volume with a "Play here" button
+  (`music_play_here`) that moves playback to Oculus, and the transport
+  controls that device ([below](#commands-control-the-device-playing-wherever-it-is)).
+- **The player shows what the device playing plays**: `shownPlayback` in
+  `app/src/lib/music/index.ts` picks the snapshot's `remote` while another
+  device plays and Oculus's own fields otherwise, and the cover, title, seek,
+  play/pause, shuffle, repeat, volume, the rail tile, the playing row in the
+  library and `useMusicPosition` all read it. Another device's volume is sent
+  on release, not as it moves, since each change is a request to Spotify; a
+  device that takes no volume disables the slider.
 - **"Open player" opens `/music` as the page** in the focused pane of the
   tab in front (`navigateActive`, as the rail's sections do); its
   `recentKey` is `music`, so there is one player item however it is opened.
@@ -85,20 +95,26 @@ switch is on.
 - **The clock ticks in the UI**: `useMusicPosition` re-renders on each whole
   second of `positionNow` while playing, the pane is on screen and the
   window is visible. A slider keeps its dragged value until the next
-  snapshot confirms it (`useSliderDraft`); seek is sent on release, volume as
-  it moves.
+  snapshot confirms it (`useSliderDraft`); seek is sent on release, this
+  device's volume as it moves.
 - **Play and pause are separate commands** from the toggle, so a click on a
-  stale button, or the rule below, never does the opposite.
+  stale button, or the rule below, never does the opposite. The player's
+  pause is `music_pause_player`, which pauses what it shows; `music_pause` is
+  the rule's, which pauses this Mac only.
 
 ## Music and lecture audio never play together
 
 The one started last wins, and the other pauses. Nothing resumes by itself,
 on either side.
 
-- **Music starting** (`playing` going false to true in the snapshot, whether
-  from Oculus or from the Spotify app on a phone) pauses the lecture
-  (`pauseLecturePlayback`) and every library video.
-- **A lecture or library video starting** pauses music with `music_pause`.
+- **Music starting on this Mac** (`playing` going false to true in the
+  snapshot, whether from Oculus's player or from the Spotify app on a phone
+  that chose Oculus) pauses the lecture (`pauseLecturePlayback`) and every
+  library video.
+- **A lecture or library video starting** pauses music with `music_pause`,
+  which pauses Oculus only: a lecture on the Mac never pauses a phone. The
+  rule reads the snapshot's own `playing`, never `remote`, so music playing
+  on another device is not music here.
   The lecture's start is the playback owner's `playing`; a library video's is
   its element's `play`, which `lib/lectures/media/library.ts` reports.
 - **Both starting in one step keeps the app's own sound**, the one clicked
@@ -181,35 +197,83 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    shutdown, which pauses and leaves Spotify's device list, gives it 10 s,
    then shuts the session down.
 
-## Commands pull playback back when another device holds it
+## Commands control the device playing, wherever it is
 
 After a phone or the desktop app takes playback, librespot's Spirc drops
 every command but `activate` and `transfer` ("will be ignored while Not
-Active"). `control.rs` puts each command through one of four paths:
+Active"). So `control.rs` first finds where playback is — here (the
+snapshot's `active`), on another device (the last cluster push names an
+active device that is not this one), or nowhere — and `control::step`, a
+pure function, picks what the command does:
 
-- **Pull** (play, play/pause, next, previous, seek, volume, shuffle, repeat,
-  a transfer to Oculus): `Spirc::transfer`, which asks Spotify to move the
-  current playback here. It lands later as a dealer request, so a command
-  sent at once would still be dropped; the command waits up to 5 s for
-  `active`, then is sent. If the transfer never lands, `activate` takes over
-  locally and the command follows it. Play/pause while inactive pulls and
-  plays: a toggle would pause what the pull brings over.
-- **Local** (`music_play_context`, `music_play_track`): `activate` alone. The
-  Spirc handles commands in order and `activate` makes it active at once, so
-  the load after it is kept; the load replaces whatever a pull would bring.
-- **Nothing while inactive** (`music_pause`, `music_duck`): a pause never
-  pulls playback here, and a duck never lowers a device that is not playing.
-- **Refused while inactive** (`music_add_to_queue`): the queue belongs to
-  the device playing, the Spirc can add only to its own, and librespot has
-  no command for another device's. Pulling playback here to queue one track
-  would move what is playing, so the command fails with "Playing on
-  <device>: Oculus can add to the queue only while it plays here" (or "Play
-  something here first" when nothing plays).
+| Command | Here | Another device plays | Nothing plays |
+| --- | --- | --- | --- |
+| `music_play`, `music_play_pause`, `music_next`, `music_prev`, `music_seek`, `music_shuffle`, `music_repeat`, `music_volume` | Spirc | Remote | Pull, then Spirc |
+| `music_pause_player` (the player's pause) | Spirc | Remote | Nothing |
+| `music_play_context`, `music_play_track` | Spirc | Remote `play` | Activate, then Spirc |
+| `music_add_to_queue` | Spirc | Remote `add_to_queue` | Refused |
+| `music_play_here`, `music_transfer` to Oculus | Spirc `play` | Pull, then play | Pull, then play |
+| `music_pause` (the exclusive rule), `music_duck` | Spirc | Nothing | Nothing |
+
+- **Remote** sends the command to the device playing (`remote/`), from this
+  device's Connect id to the active one's, through the library's spclient
+  sender with the session's Login5 and client tokens. Player commands are
+  Spotify's connect-state player command API, the request Spotify's own apps
+  send to remote-control each other: `POST
+  /connect-state/v1/player/command/from/<own>/to/<active>` with
+  `{"command": {"endpoint": …, …, "logging_params": {}}}`. The body's shape
+  follows librespot's receiver (`core/src/dealer/protocol/request.rs` at the
+  pinned rev), which needs `logging_params` on every command: `pause`,
+  `resume`, `skip_next`, `skip_prev`; `seek_to` with `value` and `position`;
+  `set_shuffling_context`, `set_repeating_context` and `set_repeating_track`
+  with `value`; `add_to_queue` with a `queue`-provider track; `play` with
+  the context's `uri` and `url`, a `play_origin`, and `options.skip_to` for a
+  track inside it (a track with no context is sent as its own context).
+  Volume is `PUT /connect-state/v1/connect/volume/from/<own>/to/<active>`
+  with `{"volume": 0–65535}`. The play/pause toggle sends `pause` or `resume`
+  by the other device's playing state; repeat off clears both repeats, as
+  here. A command is sent once: a non-2xx fails it with "Spotify refused the
+  command on <device> (<status>)" and is logged with the start of Spotify's
+  answer, and nothing falls back to pulling playback here. The outcome
+  arrives with the next cluster push.
+- **Pull**: `Spirc::transfer`, which asks Spotify to move the current
+  playback here. It lands later as a dealer request, so a command sent at
+  once would still be dropped; the command waits up to 5 s for `active`,
+  then is sent. If the transfer never lands, `activate` takes over locally
+  and the command follows it. Play/pause pulls and plays: a toggle would
+  pause what the pull brings over.
+- **Activate** (a load with nothing active): `activate` alone. The Spirc
+  handles commands in order and `activate` makes it active at once, so the
+  load after it is kept.
+- **Refused**: with nothing playing anywhere there is no queue, so
+  `music_add_to_queue` fails with "Play something first, then add to the
+  queue".
+- **Nothing**: `music_pause` and `music_duck` never touch another device;
+  a pause never pulls playback here.
 
 `active` follows the player's `SessionConnected` (the Spirc activated, from a
 command, a transfer or a play from the phone) and `SessionDisconnected`
 (another device took over), which the Spirc emits while the session itself
 stays up.
+
+### The snapshot's `remote` is the other device's playback
+
+While another device is active, each cluster push sets `remote` from its
+player state (`remote/playback.rs`): the device's name, the track,
+`position_as_of_timestamp` at `timestamp` as `position_ms` and
+`position_at_ms`, `playing` (playing and not paused), shuffle, repeat
+(context or track), and the device's volume from its device info (none when
+its capabilities disable volume). A push without a player state keeps what
+was known of the same device; Oculus becoming active, nothing being active,
+or the connection dropping clears it. The snapshot's own `track`,
+`position_ms`, `playing`, `volume`, `shuffle` and `repeat` stay Oculus's,
+which the duck and the exclusive rule rely on.
+
+The track is named first from the metadata Spotify's apps attach to the
+track they play (`title`, `album_title`, `artist_name`, `image_large_url` or
+`image_url`) when it is there, then from the library's row for its URI
+(`music_tracks`' cache): a row already kept fills it at once; otherwise the
+row is fetched once per URI and the snapshot goes out again when it comes.
 
 ## The output on this Mac moves mid-track without rebuilding the player
 
@@ -260,7 +324,7 @@ alters it; `music_state` is the mount-time read. Fields, snake_case:
 `needs_login`, `account`, `device_name`, `active` (Oculus is the active
 Connect device), `playing_on` (the active device's name when it is another,
 from the cluster), `output` (the chosen output, null for the system
-default), `track` (`uri`, `name`, `artists`,
+default), `remote` (the other device's playback, [above](#the-snapshots-remote-is-the-other-devices-playback)), `track` (`uri`, `name`, `artists`,
 `album`, `cover_url`, `duration_ms`) or null, `position_ms` with
 `position_at_ms`, `playing`, `volume` (0–100), `shuffle`, `repeat`,
 `up_next` (`uri`, `queued`; [music-library.md](./music-library.md#up-next-comes-from-the-spirc-while-oculus-plays-and-the-cluster-otherwise))
@@ -304,12 +368,14 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_connect` | Connects from keyd's credentials; `needs_login` when there are none |
 | `music_disconnect` | Stops the session and any waiting login; keeps the credentials |
 | `music_sign_out` | Disconnects and deletes `music.spotify` from keyd |
-| `music_play_pause`, `music_play`, `music_pause`, `music_next`, `music_prev` | Playback, pulled here first while inactive; `music_pause` never starts or pulls it |
+| `music_play_pause`, `music_play`, `music_pause_player`, `music_next`, `music_prev` | Playback of the device playing, here or another ([routing](#commands-control-the-device-playing-wherever-it-is)) |
+| `music_pause` | Pauses Oculus only; never starts, pulls or touches another device (the exclusive rule's) |
 | `music_shuffle(on)`, `music_repeat(on)` | Shuffle; repeat the context (off also clears a repeated track) |
-| `music_seek(position_ms)`, `music_volume(percent)` | Seek; volume 0–100, which drops a held duck |
-| `music_play_context(uri)` | Activates the device, loads a `spotify:` context and plays it |
-| `music_play_track(uri, context_uri?)` | Plays a track from its place in the context (its album, or the playlist it was picked in), or alone without one |
-| `music_add_to_queue(uri)` | Adds a track to the queue; refused while another device plays or nothing does |
+| `music_seek(position_ms)`, `music_volume(percent)` | Seek; volume 0–100, which here drops a held duck |
+| `music_play_context(uri)` | Plays a `spotify:` context on the device playing elsewhere, else loads it here |
+| `music_play_track(uri, context_uri?)` | Plays a track from its place in the context (its album, or the playlist it was picked in), or alone without one; on the device playing elsewhere, else here |
+| `music_add_to_queue(uri)` | Adds a track to the queue of the device playing; refused while nothing plays |
+| `music_play_here()` | Moves playback here and plays |
 | `music_duck(level?)` | A level ducks to that share of the kept volume; null restores it; nothing while inactive |
 | `music_playlists(refresh)`, `music_search(query)`, `music_search_more(query, kind, offset)` | The playlists, kept until `refresh`; up to ten each of tracks, artists, albums and playlists; a page of 20 of one kind and the next offset ([music-library.md](./music-library.md)) |
 | `music_playlist_covers(uris)`, `music_playlist_tracks(uri)`, `music_album_tracks(uri)`, `music_tracks(uris)` | Covers made for playlists without one; a playlist's or album's track URIs; track rows by URI ([music-library.md](./music-library.md)) |
@@ -322,14 +388,16 @@ session.
 ## Gotchas
 
 - `reqwest::blocking` inside a tokio context panics — the login stays on a plain thread.
-- Every Spirc command but `activate` and `transfer` is dropped by an inactive device — go through `control::send`.
+- Every Spirc command but `activate` and `transfer` is dropped by an inactive device — go through `control::send` or `control::route`.
 - A command sent right after `transfer` is still dropped — wait for `active` (`control.rs`).
 - A Session whose Spirc ended cannot connect again — make a new one and `set_session`.
 - `Playing` is not proof of audio — a missing audio key plays silence; watch `error`.
 - Constructing librespot's `Cache` writes the account's credentials to disk in plain text — never use it.
-- `music_play_pause` from the exclusive-playback rule would start music it meant to stop — use `music_pause`.
+- `music_play_pause` from the exclusive-playback rule would start music it meant to stop, and `music_pause_player` would pause a phone — the rule uses `music_pause`.
 - `cargo update` on librespot moves it off the pinned rev and can move tauri off 2.11.2 — bump the rev by hand.
 - A track URI is not a context librespot can load — `music_play_track` uses its album or playlist, or `from_tracks`.
-- An inactive Spirc drops `add_to_queue` without a word — `music_add_to_queue` refuses instead (`Need::Active`).
+- An inactive Spirc drops `add_to_queue` without a word — `music_add_to_queue` sends it to the device playing, or refuses with nothing playing (`Need::Queue`).
+- librespot's receiver rejects a remote command without `logging_params` — every body carries `"logging_params": {}` (`remote/command.rs`).
+- The snapshot's `track`, `playing` and `volume` are Oculus's even while a phone plays — the player reads `shownPlayback`, the exclusive rule and the duck read the snapshot's own.
 - librespot's rodio sink `unwrap`s a named device that is gone and hangs on a dead stream — the sink in `audio/` replaces it.
 - `.gitignore` ignores every `output/` directory — the output module is `audio/`.

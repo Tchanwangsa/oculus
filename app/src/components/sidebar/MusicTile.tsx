@@ -3,6 +3,7 @@ import { CircleNotch, MusicNotes } from "@phosphor-icons/react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NowPlaying } from "@/components/music/NowPlaying";
+import { shownPlayback } from "@/lib/music";
 import { navigateActive } from "@/lib/shell/tabRouters";
 import { cn } from "@/lib/utils";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
@@ -11,8 +12,9 @@ import { railButton, railIdle } from "./RailItem";
 
 /**
  * Spotify in the rail's group after the sections: the album cover (or a
- * note) with the rail's corner marks — a spinner while connecting, a brand
- * dot while playing — and a popover player to its right. Only while
+ * note) of what the player shows — Oculus, or the device playing elsewhere —
+ * with the rail's corner marks: a spinner while connecting, a brand dot
+ * while playing. A popover player opens to its right. Only while
  * `useMusicTileShown`; otherwise nothing at all.
  */
 export function MusicTile() {
@@ -22,11 +24,11 @@ export function MusicTile() {
   const [open, setOpen] = useState(false);
 
   if (!shown || !snapshot) return null;
-  const track = snapshot.track;
+  const { track, playing } = shownPlayback(snapshot);
   const label = track ? `${track.name} · ${track.artists.join(", ")}` : "Music";
   const indicator = snapshot.connecting ? (
     <CircleNotch size={10} weight="bold" className="animate-spin text-brand" />
-  ) : snapshot.playing ? (
+  ) : playing ? (
     // Ringed in the rail's ground, so it reads over a cover.
     <span className="size-1.5 rounded-full bg-brand ring-2 ring-background" />
   ) : null;

@@ -6,7 +6,7 @@ use librespot_protocol::authentication::AuthenticationType;
 use log::Level;
 
 use super::audio::{fallback_message, resolve, Choice};
-use super::control::{refusal, step, Need, Step};
+use super::control::{step, At, Need, Step, QUEUE_REFUSAL};
 use super::credentials::Saved;
 use super::devices::{connect_kind, from_cluster, with_this};
 use super::duck::Duck;
@@ -235,23 +235,39 @@ fn a_new_device_starts_at_full_volume() {
 }
 
 #[test]
-fn an_inactive_device_pulls_activates_skips_or_refuses_by_command() {
-    for need in [Need::Pull, Need::Local, Need::IfActive, Need::Active] {
-        assert_eq!(step(true, need), Step::Send);
+fn a_command_goes_here_to_the_other_device_or_pulls_by_where_playback_is() {
+    use Need::*;
+    let all = [Pull, Control, NeverPull, Load, Queue, IfActive];
+    for need in all {
+        assert_eq!(step(At::Here, need), Step::Send, "{need:?}");
     }
-    assert_eq!(step(false, Need::Pull), Step::PullThenSend);
-    assert_eq!(step(false, Need::Local), Step::ActivateThenSend);
-    assert_eq!(step(false, Need::IfActive), Step::Skip);
-    // Queueing never moves playback here.
-    assert_eq!(step(false, Need::Active), Step::Refuse);
+    // Another device playing is controlled where it is, except by "Play
+    // here" and by what must never touch it (the exclusive rule, a duck).
+    let elsewhere: Vec<Step> = all.iter().map(|n| step(At::Elsewhere, *n)).collect();
     assert_eq!(
-        refusal(Some("Phone")),
-        "Playing on Phone: Oculus can add to the queue only while it plays here"
+        elsewhere,
+        [
+            Step::PullThenSend,
+            Step::Remote,
+            Step::Remote,
+            Step::Remote,
+            Step::Remote,
+            Step::Skip
+        ]
     );
+    let nowhere: Vec<Step> = all.iter().map(|n| step(At::Nowhere, *n)).collect();
     assert_eq!(
-        refusal(None),
-        "Play something here first, then add to the queue"
+        nowhere,
+        [
+            Step::PullThenSend,
+            Step::PullThenSend,
+            Step::Skip,
+            Step::ActivateThenSend,
+            Step::Refuse,
+            Step::Skip
+        ]
     );
+    assert_eq!(QUEUE_REFUSAL, "Play something first, then add to the queue");
 }
 
 #[test]
@@ -259,6 +275,17 @@ fn becoming_active_and_inactive_follow_the_spircs_session_events() {
     let mut s = Snapshot {
         connected: true,
         playing_on: Some("Phone".into()),
+        remote: Some(super::remote::RemotePlayback {
+            device_name: "Phone".into(),
+            track: None,
+            position_ms: 0,
+            position_at_ms: 0,
+            playing: true,
+            volume: None,
+            shuffle: false,
+            repeat: false,
+            uri: T1.into(),
+        }),
         ..Snapshot::default()
     };
     apply(
@@ -270,6 +297,7 @@ fn becoming_active_and_inactive_follow_the_spircs_session_events() {
     );
     assert!(s.active && s.connected);
     assert_eq!(s.playing_on, None);
+    assert_eq!(s.remote, None);
     s.playing = true;
     apply(
         &mut s,

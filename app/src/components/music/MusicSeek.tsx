@@ -1,13 +1,14 @@
 import { Slider } from "@/components/ui/slider";
 import { fmtClockSecs } from "@/lib/lectures/media";
-import { music, type MusicSnapshot } from "@/lib/music";
+import { music, shownPlayback, type MusicSnapshot } from "@/lib/music";
 import { cn } from "@/lib/utils";
 import { useMusicPosition } from "@/hooks/music/useMusicPosition";
 import { useSliderDraft } from "@/hooks/music/useSliderDraft";
 import { useMusicStore } from "@/stores/music/musicStore";
 import { MUSIC_SLIDER } from "./sliderStyle";
 
-/** The seek slider over elapsed and total. A drag seeks once, on release. */
+/** The seek slider over elapsed and total of what the player shows. A drag
+ *  seeks once, on release. */
 export function MusicSeek({
   snapshot,
   active = true,
@@ -18,8 +19,9 @@ export function MusicSeek({
 }) {
   const run = useMusicStore((s) => s.run);
   const position = useMusicPosition(snapshot, active);
-  const { draft, change, commit } = useSliderDraft(snapshot.position_at_ms);
-  const duration = snapshot.track?.duration_ms ?? 0;
+  const playback = shownPlayback(snapshot);
+  const { draft, change, commit } = useSliderDraft(playback.position_at_ms);
+  const duration = playback.track?.duration_ms ?? 0;
   const shown = draft ?? position;
   const long = duration >= 3_600_000;
 
@@ -30,7 +32,7 @@ export function MusicSeek({
         max={Math.max(duration, 1)}
         step={1000}
         value={[Math.min(shown, duration)]}
-        disabled={!snapshot.connected || !snapshot.track}
+        disabled={!snapshot.connected || !playback.track}
         onValueChange={([v]) => change(v)}
         onValueCommit={([v]) => {
           commit(v);

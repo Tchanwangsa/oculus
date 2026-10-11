@@ -18,7 +18,7 @@ mod gate;
 mod metadata;
 mod rootlist;
 mod search;
-mod spclient;
+pub(super) mod spclient;
 #[cfg(test)]
 mod tests;
 mod tracks;
@@ -181,6 +181,12 @@ pub(super) async fn track_rows(
         Some(e) => Err(e),
         None => Ok(found.rows),
     }
+}
+
+/// The row kept for `uri`, without a request: `Some(None)` when Spotify
+/// described nothing for it, `None` when it was never fetched.
+pub(super) fn kept_row(app: &AppHandle, account: &str, uri: &str) -> Option<Option<TrackRow>> {
+    state::library(app).with(|inner| lookup(&inner.tracks, account, uri))
 }
 
 /// Playlists, albums and tracks for `query`; an empty query asks nothing.

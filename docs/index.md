@@ -26,7 +26,7 @@ the root `CLAUDE.md` holds only the rules.
 | [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, window shortcuts, ⌘F, search |
 | [dock.md](./dock.md) | The messaging dock: WhatsApp, Instagram, Messenger and Discord as parked native pages, their data stores, the capability invariant |
 | [ui.md](./ui.md) | The UI system: design rules, and the WebKit and CSS traps |
-| [music.md](./music.md) | Spotify played natively through librespot: the session task, credentials in keyd, the `music-state` snapshot, Settings → Music, the rail tile and `/music` player, commands that pull playback back, the output on this Mac, and why music and lecture audio never play together |
+| [music.md](./music.md) | Spotify played natively through librespot: the session task, credentials in keyd, the `music-state` snapshot, Settings → Music, the rail tile and `/music` player, commands that control the device playing (here or another one), the output on this Mac, and why music and lecture audio never play together |
 | [music-library.md](./music-library.md) | Playlists (the rootlist), their tracks and made covers (playlist contents, batched track metadata), search (pathfinder `searchDesktop`) and the 429 gate over the session's spclient, the queue and up next, and the Connect device list and transfer |
 | [viewers.md](./viewers.md) | Markdown, PDFs, the media player (lectures, Up Next and library videos), transcription and the in-app browser |
 | [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |

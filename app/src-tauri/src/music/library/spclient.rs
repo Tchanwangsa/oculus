@@ -1,11 +1,12 @@
 //! One request against the session's spclient host, or a full URL on another
-//! Spotify host (search's pathfinder) — a GET, or a POST of a protobuf or JSON
-//! body — with the session's Login5 token and client token, its status read
-//! into a `LibraryError`. ureq
-//! rather than `SpClient::request`: librespot's HTTP client sleeps through a
-//! 429's `Retry-After` and tries again, retries other failures up to ten
-//! times, and folds every non-2xx into a generic error. Here a request is
-//! sent once and a 429 reaches the gate. Blocking, so it runs through
+//! Spotify host (search's pathfinder) — a GET, a POST of a protobuf or JSON
+//! body, or a PUT of JSON — with the session's Login5 token and client token,
+//! its status read into a `LibraryError`. The library and the remote commands
+//! (`music/remote/`) both send through it. ureq rather than
+//! `SpClient::request`: librespot's HTTP client sleeps through a 429's
+//! `Retry-After` and tries again, retries other failures up to ten times, and
+//! folds every non-2xx into a generic error. Here a request is sent once and
+//! a 429 reaches the caller. Blocking, so it runs through
 //! `runtime::blocking::run`.
 
 use std::io::Read;
@@ -28,7 +29,7 @@ const MAX_BODY: u64 = 16 * 1024 * 1024;
 /// How much of a refused request's body is logged.
 const REFUSAL_EXCERPT: u64 = 512;
 
-pub(super) const PROTOBUF: &str = "application/x-protobuf";
+pub(in crate::music) const PROTOBUF: &str = "application/x-protobuf";
 const JSON: &str = "application/json";
 /// What Spotify's web player sends with a pathfinder query.
 const JSON_BODY: &str = "application/json;charset=UTF-8";
@@ -48,7 +49,7 @@ fn agent() -> &'static ureq::Agent {
 }
 
 /// How a request is sent.
-pub(super) enum Method {
+pub(in crate::music) enum Method {
     /// A GET accepting this content type.
     Get(&'static str),
     /// A POST of this protobuf body, with the content type
@@ -56,10 +57,12 @@ pub(super) enum Method {
     PostProtobuf(Vec<u8>),
     /// A POST of this JSON body, accepting JSON.
     PostJson(Vec<u8>),
+    /// A PUT of this JSON body, accepting JSON.
+    PutJson(Vec<u8>),
 }
 
 /// Where a request goes.
-pub(super) enum Target<'a> {
+pub(in crate::music) enum Target<'a> {
     /// `<spclient><endpoint>`; `endpoint` starts with `/`.
     SpClient(&'a str),
     /// A full URL.
@@ -67,7 +70,7 @@ pub(super) enum Target<'a> {
 }
 
 /// The body of the answer from `target`.
-pub(super) async fn send(
+pub(in crate::music) async fn send(
     session: &Session,
     target: Target<'_>,
     method: Method,
@@ -109,6 +112,10 @@ fn send_blocking(
             .post(url)
             .set("Content-Type", JSON_BODY)
             .set("Accept", JSON),
+        Method::PutJson(_) => agent()
+            .put(url)
+            .set("Content-Type", JSON_BODY)
+            .set("Accept", JSON),
     };
     let mut request = request.set("Authorization", auth);
     if let Some(token) = client_token {
@@ -116,7 +123,9 @@ fn send_blocking(
     }
     let sent = match &method {
         Method::Get(_) => request.call(),
-        Method::PostProtobuf(body) | Method::PostJson(body) => request.send_bytes(body),
+        Method::PostProtobuf(body) | Method::PostJson(body) | Method::PutJson(body) => {
+            request.send_bytes(body)
+        }
     };
     match sent {
         Ok(response) => {
