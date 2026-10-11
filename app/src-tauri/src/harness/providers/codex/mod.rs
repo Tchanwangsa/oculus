@@ -17,7 +17,7 @@ mod tests;
 mod translate;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -39,15 +39,30 @@ pub struct CodexSpawn {
 /// How to open a thread. `cwd` is also the sandbox's writable root.
 pub struct CodexThreadOpts {
     pub cwd: PathBuf,
-    /// The database's three files (`paths::db_write_paths`) — files, not
-    /// their folder, since the sandbox is Codex's only containment.
-    pub writable_files: Vec<PathBuf>,
+    /// Writable besides `cwd`: [`writable_roots`] for a thread, none for a
+    /// one-off turn.
+    pub writable_roots: Vec<PathBuf>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     /// Appended to Codex's own instructions (`developerInstructions`).
     pub instructions: String,
     /// Kept out of the student's `codex resume` list: a one-off turn's thread.
     pub ephemeral: bool,
+}
+
+/// What a Codex thread over `library` may write besides its cwd: the
+/// database's three files (`paths::db_write_paths`), files rather than
+/// their folder since the sandbox is Codex's only containment, then
+/// `paths::agent_write_dirs`. Existing paths only: Codex fails the whole
+/// turn on a writable root it cannot stat ("failed to inspect Seatbelt
+/// writable root"), e.g. an absent WAL sidecar; the manager creates the
+/// folders first.
+pub fn writable_roots(library: &Path) -> Vec<PathBuf> {
+    crate::library::paths::db_write_paths(library)
+        .into_iter()
+        .chain(crate::library::paths::agent_write_dirs(library))
+        .filter(|p| p.exists())
+        .collect()
 }
 
 #[derive(Serialize, Clone, Debug)]

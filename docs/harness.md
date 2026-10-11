@@ -80,12 +80,13 @@ A thread rooted at the library writes straight into `courses/` under
 `acceptEdits`. From `agents/`, each CLI refuses other writes its own way; the
 protected paths are one list in `protected.rs`: the library folders, the root files by pattern (the vault and its lock and temp files among them, so an agent cannot delete or truncate the sealed sessions) and the workspace folders. agy names the files instead.
 
-- **Claude**: its sandbox with the cwd as the only write root, `--add-dir` for
+- **Claude**: its sandbox with the cwd as the write root (plus the two holes
+  below), `--add-dir` for
   reads (without it `ls ../courses` is refused), `Edit` denies on protected
   paths so `--add-dir` doesn't pull them into `acceptEdits`, and
   `--permission-prompts none`, since an unanswered prompt under `-p` hangs.
-- **Codex**: `workspace-write` with one root, `approvalPolicy: never`; any
-  server request is declined.
+- **Codex**: `workspace-write` rooted at the cwd (plus the two holes below),
+  `approvalPolicy: never`; any server request is declined.
 - **opencode has no sandbox** — a rule list its runner checks. File tools are
   real (`edit` covers `write`/`edit`/`apply_patch`); `bash` is a glob over the
   command string, allow-listing `oculus …` and `ls …` — it stops `rm -rf`, not
@@ -94,13 +95,28 @@ protected paths are one list in `protected.rs`: the library folders, the root fi
   last; a path inside the session directory is written relative to it.
 - **Antigravity**: [below](#antigravity-keeps-its-rules-in-the-students-global-settings).
 
-**The database is the one hole, three files wide.** `oculus project`/`task`
+**The database is the first hole, three files wide.** `oculus project`/`task`
 write the board ([projects.md](./projects.md)), and a sandbox that opens
 `oculus.db` but not `-wal` fails "attempt to write a readonly database". So
 `library::paths::db_write_paths` names `oculus.db`, `-wal`, `-shm`: `allowWrite` for
 Claude; `writableRoots` on the turn's `sandboxPolicy` plus
 `sandbox_workspace_write.writable_roots` in thread config for Codex. Files,
 not the folder — it holds keyd's vault.
+
+**Studio is the second hole: `<data>/studio/`.** Studio's videos and its
+component and theme libraries live there ([studio.md](./studio.md#videos-live-in-the-data-directory)),
+and it holds no secrets. `library::paths::agent_write_dirs` names it once;
+the manager creates it before a spawn, and each CLI renders it: `allowWrite`
+for Claude; a writable root for Codex (`codex::writable_roots`, which keeps
+only paths that exist, the database's absent sidecars included);
+`"{{LIBRARY}}/studio/**": "allow"` in opencode's template, after every
+library deny, since opencode's `*` crosses `/` and the last matching rule
+wins, so `{{LIBRARY}}/*.json` alone would refuse a video's `video.json`;
+`write_file(<data>/studio)` for agy. Each bridge's tests pin the grant and
+that no deny covers a video's files. A library file is meant to change only
+through `oculus studio components|themes promote`, which keeps the old text
+in `.history/`; the sandbox cannot tell the CLI from a direct edit, so that
+is a skill rule, a speed bump like the `sqlite3` deny, not a wall.
 
 **The CLI stays the only door.** Claude merges `Edit(...)` denies into its
 sandbox's `denyWrite`, so an `oculus.db*` deny would cancel the grant; instead
@@ -140,13 +156,27 @@ Each bridge's tests pin its row, and that nothing it denies covers the socket.
 The app is not involved: once keyd is installed, launchd starts it on the first
 connect, so a chat agent's `oculus search` works with the app closed.
 
+**The TTS server is the one network host a thread is granted.** `oculus
+studio narrate` calls the server in Settings → Voice. At each spawn the
+bridges read the `voice` row (`studio::voice::server_host`: the base URL's
+host and port, or nothing without a row, a URL or a host; never a
+wildcard), so a changed server reaches the next spawn:
+
+| CLI | Grant | What reaches the server |
+| --- | --- | --- |
+| Claude | `sandbox.network.allowedDomains: ["<host>:<port>"]` (omitted with no row; the CLI matches the port too); none on a one-off turn | A loopback server (`localhost`, `127.0.0.1`, `::1`) needs no entry on macOS: with `allowLocalBinding` a sandboxed command may connect to any localhost port, and the CLI sets `NO_PROXY` so loopback is dialled directly (Claude Code's sandboxing docs, "A command fails to reach a server on localhost"). Any other host is reachable only through the sandbox's filtering proxy (`HTTP(S)_PROXY`/`ALL_PROXY`), where the entry admits it; `oculus`'s TTS client (ureq 2) reads no proxy variable and dials directly, so a non-loopback server is not reached from a Claude thread |
+| Codex | none needed: the `workspace-write` policy's `networkAccess` is already on (for keyd's socket) | Any host |
+| opencode | none: no sandbox | Any host |
+| Antigravity | `read_url(<host>)` in its rules, which its docs say joins the terminal sandbox's outbound allowlist | Not measured: its docs say sandboxed commands have no network by default and that `read_url` domains are added to the allowlist, and say nothing about localhost |
+
 ### Antigravity keeps its rules in the student's global settings
 
 `--sandbox` bounds shell commands only, and `--dangerously-skip-permissions`
 lets `write_to_file` write outside the library, so that flag is never passed.
 `agy` 1.2.9 reads rules only from `~/.gemini/antigravity-cli/settings.json`,
 so `providers/antigravity/rules.rs` merges Oculus's block there before every spawn (or
-fails the spawn): writes on the three database files, the `oculus` binary's
+fails the spawn): writes on the three database files and `studio/`, the
+`read_url` grant for the TTS server's host, the `oculus` binary's
 real directory (the sandbox can't read through the `~/.local/bin` symlink),
 read-only commands no flag turns into a write (`find`/`rg` are out — the
 matcher is a word prefix), `sqlite3 <library>/oculus.db` denied per path

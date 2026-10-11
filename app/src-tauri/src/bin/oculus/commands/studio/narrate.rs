@@ -3,6 +3,7 @@
 //! narrate`").
 
 use crate::*;
+use app_lib::studio::libraries;
 use app_lib::studio::narrate::{self, ModelAligner, Outcome, Progress, SceneReport};
 use app_lib::studio::tts;
 use app_lib::studio::voice::{self, Voice, VoiceOverrides};
@@ -10,7 +11,9 @@ use studio_core::{Project, LOW_CONFIDENCE};
 
 impl Ctx {
     pub(crate) fn studio_narrate(&self, args: &StudioNarrateArgs) -> Result<(), String> {
-        let project = Project::load_unnarrated(&args.dir).map_err(|e| e.to_string())?;
+        let library = libraries::libraries(false).map_err(|e| e.to_string())?;
+        let project =
+            Project::load_unnarrated_with(&args.dir, &library).map_err(|e| e.to_string())?;
         let video = project
             .video
             .voice
@@ -36,11 +39,18 @@ impl Ctx {
             );
         }
         let started = std::time::Instant::now();
-        let report = narrate::narrate(&args.dir, &voice, &ModelAligner, &options, &mut |p| {
-            if !quiet {
-                print_progress(&p);
-            }
-        })
+        let report = narrate::narrate(
+            &args.dir,
+            &library,
+            &voice,
+            &ModelAligner,
+            &options,
+            &mut |p| {
+                if !quiet {
+                    print_progress(&p);
+                }
+            },
+        )
         .map_err(|e| e.to_string())?;
         let ms = started.elapsed().as_millis();
 

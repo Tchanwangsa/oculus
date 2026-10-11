@@ -23,7 +23,7 @@ pub use narration::{
 };
 pub use script::{Script, ScriptSection};
 pub use timeline::Timeline;
-pub(crate) use video::valid_subject;
+pub use video::valid_subject;
 pub use video::{FRAME_RATES, SceneSpec, Video, Voice};
 
 pub(crate) use scenes::Staged;
@@ -37,16 +37,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// What a load looks at beyond the video's folder. `global` is the global
-/// library (`studio/library/`) and `courses` the folder holding each subject's
-/// `<code>/studio/` library; a subject's library is read only when both it
-/// and `courses` are given. `subject` and `theme`, when set, replace
+/// library (`studio/library/`) and `subjects` the folder holding each
+/// subject's library as `<code>/`; a subject's library is read only when
+/// both it and `subjects` are given. `subject` and `theme`, when set, replace
 /// video.json's for this load (the CLI's `--subject` and `--theme`). Themes
 /// and components resolve through the subject's library, then the global
 /// one, then (for themes) the bundled set.
 #[derive(Clone, Debug, Default)]
 pub struct Library {
     pub global: Option<PathBuf>,
-    pub courses: Option<PathBuf>,
+    pub subjects: Option<PathBuf>,
     pub subject: Option<String>,
     pub theme: Option<String>,
 }
@@ -106,8 +106,8 @@ impl Project {
                 message: format!("subject `{s}` must be a course code's folder name"),
             });
         }
-        let subject_dir = match (&subject, &library.courses) {
-            (Some(s), Some(courses)) => Some(courses.join(s).join("studio")),
+        let subject_dir = match (&subject, &library.subjects) {
+            (Some(s), Some(subjects)) => Some(subjects.join(s)),
             _ => None,
         };
         let name = library.theme.as_deref().unwrap_or(&video.theme);

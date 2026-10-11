@@ -1,32 +1,40 @@
-//! The app's Studio libraries, in its data directory: the global library at
-//! `studio/library/` and each course's `studio/` folder under `courses/`.
-//! The starter set is seeded into the global library on every load, missing
-//! files only, so an edited file is never replaced. `--reset` (the CLI's
-//! `components seed --reset`) writes the starter text over the edits, with
-//! each old text kept in `.history` first.
+//! The app's Studio libraries, under `<data dir>/studio/`: the global
+//! library at `library/` and each subject's at `subjects/<CODE>/`, beside
+//! the videos (`super::videos`). The starter set is seeded into the global
+//! library on every load, missing files only, so an edited file is never
+//! replaced. `--reset` (the CLI's `components seed --reset`) writes the
+//! starter text over the edits, with each old text kept in `.history`
+//! first. `promote` copies a video's own component or theme into a library
+//! through the same snapshotting write.
 
-use crate::library::paths::data_dir;
+mod promote;
+#[cfg(test)]
+mod tests;
+
+use crate::library::paths::{data_dir, studio_dir};
 use std::path::{Path, PathBuf};
 use studio_core::{seed_library, Library, Project, StudioError};
 
+pub use promote::{promote_component, promote_theme, Promoted, Target};
+
 /// `<data dir>/studio/library`.
 pub fn global_dir() -> PathBuf {
-    data_dir().join("studio").join("library")
+    studio_dir(&data_dir()).join("library")
 }
 
-/// `<data dir>/courses`, whose `<code>/studio/` folders are the subjects'
+/// `<data dir>/studio/subjects`, whose `<CODE>/` folders are the subjects'
 /// libraries.
-pub fn courses_dir() -> PathBuf {
-    data_dir().join("courses")
+pub fn subjects_dir() -> PathBuf {
+    studio_dir(&data_dir()).join("subjects")
 }
 
-/// The libraries at `global` and `courses`, with the starter set seeded into
-/// `global` first (see the module docs for `reset`).
-pub fn libraries_at(global: &Path, courses: &Path, reset: bool) -> Result<Library, StudioError> {
+/// The libraries at `global` and `subjects`, with the starter set seeded
+/// into `global` first (see the module docs for `reset`).
+pub fn libraries_at(global: &Path, subjects: &Path, reset: bool) -> Result<Library, StudioError> {
     seed_library(global, reset)?;
     Ok(Library {
         global: Some(global.to_owned()),
-        courses: Some(courses.to_owned()),
+        subjects: Some(subjects.to_owned()),
         subject: None,
         theme: None,
     })
@@ -34,7 +42,7 @@ pub fn libraries_at(global: &Path, courses: &Path, reset: bool) -> Result<Librar
 
 /// [`libraries_at`] for the app's data directory.
 pub fn libraries(reset: bool) -> Result<Library, StudioError> {
-    libraries_at(&global_dir(), &courses_dir(), reset)
+    libraries_at(&global_dir(), &subjects_dir(), reset)
 }
 
 /// The project at `dir`, loaded over the app's libraries. `subject` and
@@ -49,6 +57,3 @@ pub fn open(
     library.theme = theme;
     Project::load_with(dir, &library)
 }
-
-#[cfg(test)]
-mod tests;

@@ -168,3 +168,23 @@ async fn save_writes_the_camel_case_row_and_keeps_other_keys() {
     settings.speed = f64::NAN;
     assert!(save(&pool, &settings).await.is_err());
 }
+
+#[test]
+fn the_granted_host_is_the_rows_server_and_nothing_else() {
+    let host = |row: Option<&str>| server_host(&settings_from(row));
+    assert_eq!(host(None), None, "no row, no grant");
+    assert_eq!(host(Some(r#"{ "voice": "af_heart" }"#)), None);
+    assert_eq!(
+        host(Some(r#"{ "baseUrl": "http://127.0.0.1:8880" }"#)),
+        Some(("127.0.0.1".into(), 8880))
+    );
+    assert_eq!(
+        host(Some(r#"{ "baseUrl": "http://localhost:8880/v1" }"#)),
+        Some(("localhost".into(), 8880))
+    );
+    assert_eq!(
+        host(Some(r#"{ "baseUrl": "https://tts.example.org" }"#)),
+        Some(("tts.example.org".into(), 443))
+    );
+    assert_eq!(host(Some(r#"{ "baseUrl": "not a url" }"#)), None);
+}

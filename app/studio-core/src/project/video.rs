@@ -25,8 +25,8 @@ pub struct Video {
     /// stored here; the app's narrator reads it.
     #[serde(default)]
     pub voice: Option<Voice>,
-    /// The course this video belongs to: its `studio/` folder beside the
-    /// course's files is a library read before the global one.
+    /// The course this video belongs to: its library (`Library::subjects`)
+    /// is read before the global one.
     #[serde(default)]
     pub subject: Option<String>,
 }
@@ -96,7 +96,7 @@ pub(crate) fn valid_id(id: &str) -> bool {
 
 /// A subject is a course code's folder name: letters, digits, `-` and `_`,
 /// at most 64 characters.
-pub(crate) fn valid_subject(subject: &str) -> bool {
+pub fn valid_subject(subject: &str) -> bool {
     !subject.is_empty()
         && subject.len() <= 64
         && subject

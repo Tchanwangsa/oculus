@@ -26,7 +26,8 @@ frames and contact sheets, lints, and narrates.
 | The element tree and its style keys | `app/studio-core/src/scene/` |
 | Layout (taffy, parley) and paint (vello_cpu); Path trim and Text reveal | `app/studio-core/src/layout/`, `app/studio-core/src/paint/` (`path/`, `text/`) |
 | Props schemas and their validation | `app/studio-core/src/schema/` |
-| Component and theme libraries: the starter set, seeding, the snapshot write path | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots) |
+| Component and theme libraries: the starter set, seeding, the snapshot write path, promoting a video's own file | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots, `promote.rs`) |
+| Videos in the data directory: `new`, `list`, slug resolution | `app/src-tauri/src/studio/videos/`, `app/src-tauri/src/library/paths/studio.rs` (`studio_dir`, `agent_write_dirs`) |
 | Galleries: each example of a component as a still, and its contact sheet | `app/studio-core/src/gallery/` |
 | Themes and bundled fonts | `app/studio-core/themes/`, `app/studio-core/fonts/`, `app/studio-core/src/theme/`, `app/studio-core/src/fonts/` |
 | Every error and its message | `app/studio-core/src/error.rs` |
@@ -36,7 +37,7 @@ frames and contact sheets, lints, and narrates.
 | Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`render.rs`, `narrate.rs`, `aligner.rs`, `gallery.rs`, `components.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `render.rs`, `narrate.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -77,9 +78,10 @@ narration/    manifest.json and the clips it names
   for this video. studio-core only stores it; the app's narrator reads it.
 - `theme` is a bundled theme's name, a library theme's name (see "Libraries
   cascade") or a `.json` path relative to the folder.
-- `subject` (optional) is the course the video belongs to: a folder name
-  (letters, digits, `-` and `_`, up to 64 characters) under the app's
-  `courses/`, whose `studio/` library is read before the global one.
+- `subject` (optional) is the course the video belongs to: a course code's
+  folder name (letters, digits, `-` and `_`, up to 64 characters), whose
+  library (`<app data>/studio/subjects/<CODE>/`) is read before the global
+  one.
 - `motion` (optional) overrides the theme's transition and motion-blur
   defaults for this video; a scene's `transition` (optional) overrides
   both. See "Transitions" and "Motion blur".
@@ -160,6 +162,37 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
   `parallel`. The motion components are in "Motion" below; `word` and
   `wordEnd` are in "Narration".
 
+## Videos live in the data directory
+
+Everything Studio keeps is under `<app data>/studio/`
+(`library::paths::studio_dir`): `videos/<slug>/` (one folder per video),
+`library/` (the global library) and `subjects/<CODE>/` (each subject's).
+`courses/` stays read-only to agents, so no library lives there. It is the
+one folder besides `agents/` and the database an agent thread may write
+([harness.md](./harness.md#every-thread-runs-from-agents-and-that-is-the-containment)).
+
+- `oculus studio new <slug> [--subject CODE] [--title T] [--portrait]`
+  (`studio::videos::create_in`) makes `videos/<slug>/`: `video.json` at
+  1920x1080 (1080x1920 with `--portrait`), 30 fps, theme `default`, the
+  subject, and one silent `TitleCard` scene (`id` `title`, 4 s) whose title
+  is `--title` or the slug with spaces; an empty `script.md`; and empty
+  `components/` and `assets/`. A subject's library holding
+  `themes/default.json` gives its videos its own look through the cascade,
+  with no setting. A slug is lowercase letters, digits and `-`, at most 64
+  characters; one that exists is refused and left alone. It prints the
+  folder (`--json`: `{dir, slug}`).
+- `oculus studio list [--subject CODE]` prints each video's slug, subject,
+  scene count, whether `narration/manifest.json` exists (`narrated`; `lint`
+  says whether it is current), the files in `renders/` and the newest change
+  to video.json, script.md or `components/`. A folder whose video.json does
+  not parse is listed with the reason. `--json` gives `[{slug, dir,
+  subject, scenes, narrated, renders, modified, problem}]`.
+- Every command that takes a video folder (`frame`, `strip`, `lint`,
+  `gallery`, `components list|show|promote`, `themes promote`, `render`,
+  `narrate`) also takes a bare slug (`studio::videos::resolve`): a path
+  that exists is used as given, otherwise a slug names `videos/<slug>/`, and
+  anything else fails naming both places.
+
 ## Libraries cascade: project, subject, global
 
 A video's components and themes resolve through up to three libraries, and
@@ -168,16 +201,18 @@ the first hit wins:
 | Level | Components | Themes |
 | --- | --- | --- |
 | `project` | the video folder's `components/` | (a `.json` path in the folder) |
-| `subject <CODE>` | `<app data>/courses/<CODE>/studio/components/` | `<app data>/courses/<CODE>/studio/themes/` |
+| `subject <CODE>` | `<app data>/studio/subjects/<CODE>/components/` | `<app data>/studio/subjects/<CODE>/themes/` |
 | `global` | `<app data>/studio/library/components/` | `<app data>/studio/library/themes/` |
 
 A component resolves by name (`CascadeComponents`, in the order above). A
 theme name resolves through the subject's library, then the global one, then
 the bundled set. A subject's library is read only when the libraries are
-given; the app and the CLI always give them, and the `Project::load` API
-does not. `oculus studio` commands that load a video take `--subject` and
-`--theme` where they can, which replace video.json's for that load. A
-component that no level has is an error listing every name in every level.
+given (`Library::subjects`); every app and CLI path that loads a video
+gives them (`studio::libraries::open`, `libraries`), narrate included, and
+the `Project::load` API does not. `gallery` takes `--subject` and `--theme`,
+and `components list` and `show` take `--subject`, which replace
+video.json's for that load. A component that no level has is an error
+listing every name in every level.
 
 The starter set (`app/studio-core/library/`) is compiled into the crate: the
 components `TitleCard`, `Steps`, `BigNumber`, `LowerThird` and `SplitShell`,
@@ -197,6 +232,20 @@ to a library file first copies the previous text to `.history/` beside it
 snapshot already there); nothing prunes `.history`. `oculus studio
 components list <DIR>` prints each name with the level it resolves from, and
 `components show <DIR> <Name>` its source.
+
+A library grows through a video: a component is written and tuned in the
+video's own `components/`, where it wins the cascade, checked with
+`gallery` and `strip`, then copied into a library with `oculus studio
+components promote <DIR> <Name> --to global|subject`
+(`studio::libraries::promote_component`). Only a component the video itself
+has (level `project`) can be promoted; `--to subject` writes to the subject
+in video.json and fails when there is none. `oculus studio themes promote
+<DIR> <FILE> --to global|subject` does the same for a theme file inside the
+video (a `.json` path such as `themes/chalk.json`, checked to load as a
+theme) as `themes/<stem>.json`, the stem being lowercase letters, digits
+and `-`, so any video can name it. Both go through the snapshotting write,
+write nothing when the library already has the same text, and leave the
+video's copy in place.
 
 The render segment key covers the source of every component a scene uses, as
 the cascade resolves it, so an edit to a library component re-renders the
@@ -975,8 +1024,13 @@ with the `Narration` error before any frame renders.
   for the load; `--threads` sets the render threads. See "Galleries render
   every example as a still".
 - `oculus studio components list <DIR>` and `components show <DIR>
-  <Component>` read through the cascade (see "Libraries cascade"), and
-  `components seed [--reset]` copies the starter set into the global library.
+  <Component>` read through the cascade (see "Libraries cascade"),
+  `components promote` and `themes promote` copy a video's own file into a
+  library, and `components seed [--reset]` copies the starter set into the
+  global library.
+- `oculus studio new` and `list` make and list the videos in the data
+  directory, and every command above takes a video's slug in place of its
+  folder (see "Videos live in the data directory").
 
 Flags are in [cli-reference.md](./cli-reference.md#oculus-studio).
 

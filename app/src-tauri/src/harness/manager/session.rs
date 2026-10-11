@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::harness::antigravity::{AntigravitySession, AntigravitySpawn};
 use crate::harness::child::ThreadSpawn;
 use crate::harness::claude::{ClaudeSession, ClaudeSpawn};
-use crate::harness::codex::CodexThreadOpts;
+use crate::harness::codex::{self, CodexThreadOpts};
 use crate::harness::discover;
 use crate::harness::opencode::{self, OpencodeSessionOpts};
 use crate::harness::{Provider, Sink};
@@ -83,8 +83,14 @@ impl Harness {
         live.remove(&thread_id);
 
         let cwd = thread_cwd(&self.data_dir);
-        std::fs::create_dir_all(&cwd)
-            .map_err(|e| format!("cannot create {}: {e}", cwd.display()))?;
+        // The cwd and every folder a thread may write, before any CLI grants
+        // them (Codex refuses a root that does not exist).
+        for dir in std::iter::once(cwd.clone())
+            .chain(crate::library::paths::agent_write_dirs(&self.data_dir))
+        {
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        }
         let raw_log = RawLog::open(&self.data_dir, thread_id);
         let base = |cwd: PathBuf| -> Result<ThreadSpawn, String> {
             Ok(ThreadSpawn {
@@ -117,13 +123,7 @@ impl Harness {
                 let server = self.codex_server()?;
                 let topts = CodexThreadOpts {
                     cwd,
-                    // Existing files only: Codex fails the whole turn on a
-                    // writable root it cannot stat ("failed to inspect
-                    // Seatbelt writable root"), e.g. an absent WAL sidecar.
-                    writable_files: crate::library::paths::db_write_paths(&self.data_dir)
-                        .into_iter()
-                        .filter(|p| p.exists())
-                        .collect(),
+                    writable_roots: codex::writable_roots(&self.data_dir),
                     model: opts.model.clone(),
                     reasoning_effort: opts.reasoning_effort.clone(),
                     instructions: instructions(

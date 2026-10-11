@@ -168,6 +168,18 @@ pub fn resolve(
     })
 }
 
+/// The `voice` row's server as `(host, port)`: the one network destination
+/// an agent thread is granted, so `oculus studio narrate` reaches it from
+/// inside the sandbox (docs/harness.md). `None` with no row, no URL or no
+/// host, so no grant; never a wildcard.
+pub fn server_host(settings: &VoiceSettings) -> Option<(String, u16)> {
+    let url = url::Url::parse(settings.base_url.as_deref()?).ok()?;
+    let host = url
+        .host_str()
+        .filter(|h| !h.is_empty() && !h.contains('*'))?;
+    Some((host.to_owned(), url.port_or_known_default()?))
+}
+
 fn valid_speed(speed: f64) -> bool {
     speed.is_finite() && speed > 0.0
 }

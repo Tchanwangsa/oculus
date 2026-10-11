@@ -1,10 +1,11 @@
 //! `oculus studio components`: the components a video can use, read through
-//! the library cascade, and seeding the global library with the starter set
-//! (docs/studio.md, "Libraries cascade").
+//! the library cascade, promoting a video's own into a library, and seeding
+//! the global library with the starter set (docs/studio.md, "Libraries
+//! cascade").
 
 use super::studio_error;
 use crate::*;
-use app_lib::studio::libraries;
+use app_lib::studio::libraries::{self, Promoted, Target};
 use studio_core::ComponentSource;
 
 impl Ctx {
@@ -55,6 +56,16 @@ impl Ctx {
                 print!("{source}");
                 Ok(())
             }
+            StudioComponentsAction::Promote(args) => {
+                let library = libraries::libraries(false).map_err(studio_error)?;
+                let promoted = libraries::promote_component(
+                    &args.dir,
+                    &args.component,
+                    target(args.to),
+                    &library,
+                )?;
+                print_promoted(self, &promoted)
+            }
             StudioComponentsAction::Seed { reset } => {
                 let global = libraries::global_dir();
                 let written = studio_core::seed_library(&global, *reset).map_err(studio_error)?;
@@ -77,4 +88,39 @@ impl Ctx {
             }
         }
     }
+}
+
+pub(super) fn target(arg: StudioLibraryArg) -> Target {
+    match arg {
+        StudioLibraryArg::Global => Target::Global,
+        StudioLibraryArg::Subject => Target::Subject,
+    }
+}
+
+/// `wrote <path> (global)`, or that the library already had it.
+pub(super) fn print_promoted(ctx: &Ctx, p: &Promoted) -> Result<(), String> {
+    if ctx.json {
+        return ctx.emit(&serde_json::json!({
+            "path": p.path.to_string_lossy(),
+            "level": p.level,
+            "changed": p.changed,
+        }));
+    }
+    if p.changed {
+        println!(
+            "{} {} {}",
+            paint("wrote", GREEN),
+            p.path.display(),
+            paint(&format!("({})", p.level), DIM)
+        );
+    } else {
+        println!(
+            "{}",
+            paint(
+                &format!("{} ({}) already has this text", p.path.display(), p.level),
+                DIM
+            )
+        );
+    }
+    Ok(())
 }

@@ -1,4 +1,6 @@
-//! Arguments of the `studio` commands. `frame`, `strip`, `lint` and
+//! Arguments of the `studio` commands. `new` and `list` make and list the
+//! videos under `<app data>/studio/videos/`; every command that takes a DIR
+//! also takes a bare slug naming one of them. `frame`, `strip`, `lint` and
 //! `render` read a video folder on disk (no database, no network); `narrate`
 //! and `tts` call the TTS server, and `aligner` manages the word-timing
 //! model.
@@ -7,6 +9,8 @@ use crate::*;
 
 #[derive(Subcommand)]
 pub(crate) enum StudioAction {
+    New(StudioNewArgs),
+    List(StudioListArgs),
     Frame(StudioFrameArgs),
     Strip(StudioStripArgs),
     Lint(StudioLintArgs),
@@ -14,6 +18,11 @@ pub(crate) enum StudioAction {
     Components {
         #[command(subcommand)]
         action: StudioComponentsAction,
+    },
+    /// Promote a video's own theme file into a library
+    Themes {
+        #[command(subcommand)]
+        action: StudioThemesAction,
     },
     Render(StudioRenderArgs),
     Narrate(StudioNarrateArgs),
@@ -39,6 +48,74 @@ pub(crate) enum StudioAlignerAction {
     Download,
     /// Delete the aligner model and any partial download
     Delete,
+}
+
+impl StudioAction {
+    /// The DIR this command reads, if it takes one, for slug resolution.
+    pub(crate) fn dir_mut(&mut self) -> Option<&mut PathBuf> {
+        match self {
+            StudioAction::Frame(a) => Some(&mut a.dir),
+            StudioAction::Strip(a) => Some(&mut a.dir),
+            StudioAction::Lint(a) => Some(&mut a.dir),
+            StudioAction::Gallery(a) => Some(&mut a.dir),
+            StudioAction::Render(a) => Some(&mut a.dir),
+            StudioAction::Narrate(a) => Some(&mut a.dir),
+            StudioAction::Components { action } => match action {
+                StudioComponentsAction::List(a) => Some(&mut a.dir),
+                StudioComponentsAction::Show(a) => Some(&mut a.dir),
+                StudioComponentsAction::Promote(a) => Some(&mut a.dir),
+                StudioComponentsAction::Seed { .. } => None,
+            },
+            StudioAction::Themes { action } => match action {
+                StudioThemesAction::Promote(a) => Some(&mut a.dir),
+            },
+            StudioAction::New(_)
+            | StudioAction::List(_)
+            | StudioAction::Tts(_)
+            | StudioAction::Aligner { .. } => None,
+        }
+    }
+}
+
+/// Make a new video under `<app data>/studio/videos/<SLUG>/`
+///
+/// Writes `video.json` (1920x1080, or 1080x1920 with `--portrait`, 30 fps,
+/// theme `default`, the subject, and one silent `TitleCard` scene holding
+/// `--title`), an empty `script.md`, and empty `components/` and `assets/`,
+/// then prints the folder. A subject's library can replace the `default`
+/// theme with its own `themes/default.json`. Every other `oculus studio`
+/// command takes the slug in place of the folder. Refuses a slug that
+/// exists.
+///
+///     oculus studio new gradient-descent --subject COMP30027 --title "Gradient descent"
+#[derive(Args)]
+pub(crate) struct StudioNewArgs {
+    /// The video's name: lowercase letters, digits and `-`
+    #[arg(value_name = "SLUG")]
+    pub(crate) slug: String,
+    /// The course the video belongs to; its library is read before the
+    /// global one
+    #[arg(long, value_name = "CODE")]
+    pub(crate) subject: Option<String>,
+    /// The title card's text (default: the slug, spaced)
+    #[arg(long, value_name = "TITLE")]
+    pub(crate) title: Option<String>,
+    /// 1080x1920 instead of 1920x1080
+    #[arg(long)]
+    pub(crate) portrait: bool,
+}
+
+/// List the videos under `<app data>/studio/videos/`
+///
+/// One line per video: its slug, subject, scene count, whether it has
+/// narration (`narrated`; `lint` says whether it is current), the renders
+/// in its `renders/` and when it last changed. A folder whose video.json
+/// does not load is listed with the reason.
+#[derive(Args)]
+pub(crate) struct StudioListArgs {
+    /// Only this course's videos
+    #[arg(long, value_name = "CODE")]
+    pub(crate) subject: Option<String>,
 }
 
 /// Which TTS server, model, voice and speed to use. Each flag overrides the
@@ -87,7 +164,7 @@ pub(crate) struct StudioVoiceArgs {
 ///     oculus studio narrate lectures/week-4 --scene steps --force --voice bf_emma
 #[derive(Args)]
 pub(crate) struct StudioNarrateArgs {
-    /// The video folder, the one holding `video.json` and `script.md`
+    /// The video folder, the one holding `video.json` (or its slug) and `script.md`
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
     /// Only this scene id
@@ -143,7 +220,7 @@ pub(crate) struct StudioTtsArgs {
 #[derive(Args)]
 #[command(group(clap::ArgGroup::new("when").args(["t", "scene"]).multiple(false)))]
 pub(crate) struct StudioFrameArgs {
-    /// The video folder, the one holding `video.json`
+    /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
     /// Seconds from the start of the video (default: 0)
@@ -195,7 +272,7 @@ pub(crate) struct StudioFrameArgs {
 ///     oculus studio strip lectures/week-4 --from 3 --to 4 --n 6 -o /tmp/motion.png
 #[derive(Args)]
 pub(crate) struct StudioStripArgs {
-    /// The video folder, the one holding `video.json`
+    /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
     /// First frame, in seconds from the start of the video (default: 0)
@@ -229,7 +306,7 @@ pub(crate) struct StudioStripArgs {
     pub(crate) out: Option<PathBuf>,
 }
 
-/// Check a whole video without writing anything
+/// Check a whole video without writing to its folder
 ///
 /// Loads every component the video uses, checks each scene's props and each
 /// component's `examples` against its `props` schema, and renders every scene
@@ -243,7 +320,7 @@ pub(crate) struct StudioStripArgs {
 /// See `oculus studio frame --help` for what a video folder holds.
 #[derive(Args)]
 pub(crate) struct StudioLintArgs {
-    /// The video folder, the one holding `video.json`
+    /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
 }
@@ -264,7 +341,7 @@ pub(crate) struct StudioLintArgs {
 ///     oculus studio gallery lectures/week-4 Steps --subject COMP2011 --sheet --cols 2
 #[derive(Args)]
 pub(crate) struct StudioGalleryArgs {
-    /// The video folder, the one holding `video.json`
+    /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
     /// The component's name (PascalCase), as its file is named
@@ -295,21 +372,23 @@ pub(crate) struct StudioGalleryArgs {
     pub(crate) threads: Option<usize>,
 }
 
-/// List, show or seed a video's components
+/// List, show, promote or seed a video's components
 ///
 /// `list` and `show` read the components a video can use through the
 /// cascade and say which level each comes from: `project` (its own
-/// `components/`), `subject <CODE>` (the course's `studio/components/`) or
-/// `global` (`<app data>/studio/library/components/`). `seed` copies the
-/// starter set into the global library; it never replaces an edit, and
-/// `--reset` writes the starter text over the library's, keeping each old
-/// text in the library's `.history/` first.
+/// `components/`), `subject <CODE>` (`<app data>/studio/subjects/<CODE>/
+/// components/`) or `global` (`<app data>/studio/library/components/`).
+/// `promote` copies one of the video's own components into a library.
+/// `seed` copies the starter set into the global library; it never replaces
+/// an edit, and `--reset` writes the starter text over the library's. Every
+/// library write keeps the old text in the library's `.history/` first.
 #[derive(Subcommand)]
 pub(crate) enum StudioComponentsAction {
     /// Each component name a video can use, and the level it comes from
     List(StudioComponentsListArgs),
     /// A component's level and its TSX source
     Show(StudioComponentsShowArgs),
+    Promote(StudioComponentsPromoteArgs),
     /// Copy the starter components and themes into the global library
     Seed {
         /// Write the starter text over every file that differs, keeping the
@@ -321,7 +400,7 @@ pub(crate) enum StudioComponentsAction {
 
 #[derive(Args)]
 pub(crate) struct StudioComponentsListArgs {
-    /// The video folder, the one holding `video.json`
+    /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
     /// The course whose library is read for this load, over video.json's
@@ -331,7 +410,7 @@ pub(crate) struct StudioComponentsListArgs {
 
 #[derive(Args)]
 pub(crate) struct StudioComponentsShowArgs {
-    /// The video folder, the one holding `video.json`
+    /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
     /// The component's name (PascalCase)
@@ -340,6 +419,67 @@ pub(crate) struct StudioComponentsShowArgs {
     /// The course whose library is read for this load, over video.json's
     #[arg(long, value_name = "CODE")]
     pub(crate) subject: Option<String>,
+}
+
+/// Which library a promote writes to
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub(crate) enum StudioLibraryArg {
+    /// `<app data>/studio/library/`, read by every video
+    Global,
+    /// `<app data>/studio/subjects/<CODE>/`, for the subject in the video's
+    /// video.json
+    Subject,
+}
+
+/// Copy a video's own component into a library
+///
+/// Copies `<DIR>/components/<COMPONENT>.tsx` into the global library or the
+/// video's subject's, so other videos can use it. A library file it
+/// replaces is kept in that library's `.history/` first; when the library
+/// already holds the same text nothing is written. The video keeps its own
+/// copy, which still wins for it. Check the component with `gallery` (and
+/// its scenes with `strip`) before promoting it.
+///
+///     oculus studio components promote gradient-descent Steps --to subject
+#[derive(Args)]
+pub(crate) struct StudioComponentsPromoteArgs {
+    /// The video folder (or its slug)
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The component's name (PascalCase), as its file is named
+    #[arg(value_name = "COMPONENT")]
+    pub(crate) component: String,
+    /// The library to copy it into
+    #[arg(long, value_enum, value_name = "LIBRARY")]
+    pub(crate) to: StudioLibraryArg,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum StudioThemesAction {
+    Promote(StudioThemesPromoteArgs),
+}
+
+/// Copy a video's own theme file into a library
+///
+/// Checks that `FILE` (a `.json` path inside the video folder, such as
+/// `themes/chalk.json`) loads as a theme, then copies it into the global
+/// library or the video's subject's as `themes/<stem>.json`, so any video
+/// can name it by its stem (`"theme": "chalk"`). A library file it replaces
+/// is kept in that library's `.history/` first; when the library already
+/// holds the same text nothing is written.
+///
+///     oculus studio themes promote gradient-descent themes/chalk.json --to global
+#[derive(Args)]
+pub(crate) struct StudioThemesPromoteArgs {
+    /// The video folder (or its slug)
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The theme file, relative to the video folder
+    #[arg(value_name = "FILE")]
+    pub(crate) file: PathBuf,
+    /// The library to copy it into
+    #[arg(long, value_enum, value_name = "LIBRARY")]
+    pub(crate) to: StudioLibraryArg,
 }
 
 /// Render a video to an mp4
@@ -370,7 +510,7 @@ pub(crate) struct StudioComponentsShowArgs {
 #[derive(Args)]
 #[command(group(clap::ArgGroup::new("quality").args(["draft", "final_"]).multiple(false)))]
 pub(crate) struct StudioRenderArgs {
-    /// The video folder, the one holding `video.json`
+    /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
     /// A 540 px-high proxy on the hardware encoder (the default)
@@ -472,6 +612,66 @@ mod tests {
         ]));
         assert!(ok(&["oculus", "studio", "components", "seed", "--reset"]));
         assert!(!ok(&["oculus", "studio", "components"]));
+    }
+
+    #[test]
+    fn new_list_and_promote_take_their_flags() {
+        let ok = |args: &[&str]| Cli::try_parse_from(args).is_ok();
+        assert!(ok(&["oculus", "studio", "new", "week-4"]));
+        assert!(ok(&[
+            "oculus",
+            "studio",
+            "new",
+            "week-4",
+            "--subject",
+            "COMP2011",
+            "--title",
+            "Week 4",
+            "--portrait"
+        ]));
+        assert!(!ok(&["oculus", "studio", "new"]));
+        assert!(ok(&["oculus", "studio", "list"]));
+        assert!(ok(&["oculus", "studio", "list", "--subject", "COMP2011"]));
+        for to in ["global", "subject"] {
+            assert!(ok(&[
+                "oculus",
+                "studio",
+                "components",
+                "promote",
+                "week-4",
+                "Steps",
+                "--to",
+                to
+            ]));
+            assert!(ok(&[
+                "oculus",
+                "studio",
+                "themes",
+                "promote",
+                "week-4",
+                "themes/chalk.json",
+                "--to",
+                to
+            ]));
+        }
+        assert!(!ok(&[
+            "oculus",
+            "studio",
+            "components",
+            "promote",
+            "week-4",
+            "Steps"
+        ]));
+        assert!(!ok(&[
+            "oculus",
+            "studio",
+            "components",
+            "promote",
+            "week-4",
+            "Steps",
+            "--to",
+            "project"
+        ]));
     }
 
     #[test]

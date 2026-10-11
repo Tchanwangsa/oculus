@@ -120,7 +120,7 @@ impl Harness {
                 let server = self.codex_server()?;
                 let opts = CodexThreadOpts {
                     cwd,
-                    writable_files: Vec::new(),
+                    writable_roots: Vec::new(),
                     model: Some(sel.model.clone()),
                     reasoning_effort: sel.reasoning_effort.clone(),
                     instructions: instructions.to_string(),
