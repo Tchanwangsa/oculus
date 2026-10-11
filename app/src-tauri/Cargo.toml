@@ -120,6 +120,18 @@ rodio = { version = "0.21", default-features = false, features = ["playback"] }
 # (`src/music/devices.rs`) and fetches playlist headers four at a time
 # (`src/music/library/mod.rs`).
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+# ONNX Runtime for Studio's narration aligner (`src/runtime/onnx/`,
+# `src/studio/timing/`). Links ORT 1.28 statically on macOS arm64, fetched by
+# ort-sys's build script; pinned exactly because rc releases change the API.
+ort = "=2.0.0-rc.13"
+# Narration clips in (`src/studio/audio/`): hound reads the TTS server's WAV,
+# rubato resamples it to the aligner's 16 kHz. rubato's API changes between
+# majors and this one is new, so it is pinned exactly.
+hound = "3.5.1"
+rubato = "=5.0.1"
+# Verifies a downloaded model against its pinned checksum (`src/runtime/onnx/pack/`).
+# Already in the lock tree.
+sha2 = "0.10"
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_sessions` in src/shell/browser/seed.rs). WebKit cookie ordering uses

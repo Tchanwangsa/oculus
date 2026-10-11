@@ -15,6 +15,7 @@ pub mod providers;
 pub mod runtime;
 pub mod shell;
 pub mod sources;
+pub mod studio;
 pub mod sync;
 #[cfg(test)]
 mod test_support;

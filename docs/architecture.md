@@ -26,6 +26,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Lecture video server | `app/src-tauri/src/lectures/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/runtime/bundled.rs` |
+| ONNX Runtime (static): the CPU session and pinned, checksummed model-pack downloads | `app/src-tauri/src/runtime/onnx/` |
 | PDF viewer's render, text and links | `app/src-tauri/src/library/pdf_view/` |
 | In-app browser | `app/src-tauri/src/shell/browser/`, `app/src-tauri/capabilities/default.json` |
 | Spotify playback ([music.md](./music.md)) | `app/src-tauri/src/music/`, `app/src/lib/music/index.ts` |
@@ -307,6 +308,9 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
   writes ([cli.md](./cli.md#oculus-docs-writes-the-agents-folder)); the
   working directory and only writable root of every chat thread, with raw
   provider output in `agents/threads/<id>.ndjson` ([harness.md](./harness.md)).
+- `models/` — downloaded local models, never bundled: `whisper/` for local
+  transcription ([viewers.md](./viewers.md#local-whisper-whispercpp-with-a-downloaded-model)) and `align/` for Studio's
+  narration aligner ([studio.md](./studio.md#narration-timing-is-forced-alignment-on-the-cpu)).
 - `mineru-usage.json`, `voyage-usage.json` — each cloud's daily reservations
   and quota latch. Voyage's also holds the learned rate-limit tier and the
   spend guard from Settings → Embeddings, kept here rather than in `settings`
