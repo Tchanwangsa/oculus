@@ -164,7 +164,7 @@ export function DockDropPreview({
     <div className="absolute inset-0 z-40 pointer-events-none">
       <div
         style={edge[dock]}
-        className="absolute rounded-sm bg-brand/25 border border-brand/60 backdrop-blur-[1px] transition-all duration-100"
+        className="absolute rounded-sm bg-brand/25 border border-brand/60 backdrop-blur-[1px] transition-[top,right,bottom,left,width,height] duration-100"
       />
     </div>
   );

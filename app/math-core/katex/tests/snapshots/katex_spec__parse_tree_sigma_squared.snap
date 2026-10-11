@@ -1,0 +1,36 @@
+---
+source: crates/katex/tests/katex_spec.rs
+assertion_line: 2668
+expression: "format!(\"{:#?}\", tree)"
+---
+[
+    SupSub(
+        ParseNodeSupSub {
+            mode: Math,
+            loc: None,
+            base: Some(
+                MathOrd(
+                    ParseNodeMathOrd {
+                        mode: Math,
+                        loc: None,
+                        text: Owned(
+                            "\\sigma",
+                        ),
+                    },
+                ),
+            ),
+            sup: Some(
+                TextOrd(
+                    ParseNodeTextOrd {
+                        mode: Math,
+                        loc: None,
+                        text: Owned(
+                            "2",
+                        ),
+                    },
+                ),
+            ),
+            sub: None,
+        },
+    ),
+]

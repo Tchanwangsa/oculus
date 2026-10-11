@@ -3,10 +3,10 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
-import rehypeKatex from "rehype-katex";
 import type { PluggableList } from "unified";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { hasMath, normalizeMath } from "@/lib/markdown/math";
+import { rehypeMaths, useMathsReady } from "@/lib/maths";
 import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { readCourseFile } from "@/lib/files/courseFiles";
 import { loadPagesRecord } from "@/lib/citations";
@@ -18,11 +18,12 @@ import type { PdfMdLink } from "@/components/files/pdf/pdfMdLink";
 
 const PLAIN = [remarkGfm];
 const WITH_MATH = [remarkGfm, remarkMath];
-const MATH = [rehypeKatex];
-const RAW_MATH = [rehypeRaw, rehypeKatex];
+const MATH = [rehypeMaths];
+const RAW_MATH = [rehypeRaw, rehypeMaths];
 
-/** KaTeX also accepts math fences and HTML math classes without delimiters.
- *  `anchors` (`blockAnchorPlugins`) go around KaTeX, after raw HTML is parsed. */
+/** `rehypeMaths` also takes math fences and HTML math classes without
+ *  delimiters. `anchors` (`blockAnchorPlugins`) go around it, after raw HTML
+ *  is parsed. */
 export function fileMarkdownPlugins(
   text: string,
   anchors?: ReturnType<typeof blockAnchorPlugins>,
@@ -31,7 +32,7 @@ export function fileMarkdownPlugins(
   return {
     remarkPlugins: hasMath(text) ? WITH_MATH : PLAIN,
     rehypePlugins: anchors
-      ? [...(raw ? [rehypeRaw] : []), anchors.before, rehypeKatex, anchors.after]
+      ? [...(raw ? [rehypeRaw] : []), anchors.before, rehypeMaths, anchors.after]
       : raw
         ? RAW_MATH
         : MATH,
@@ -67,6 +68,7 @@ export const FileMarkdown = memo(function FileMarkdown({
   const [content, setContent] = useState<Content | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const parsed = !!link;
+  useMathsReady();
 
   useEffect(() => {
     setContent(null);
@@ -112,7 +114,8 @@ export const FileMarkdown = memo(function FileMarkdown({
   );
 });
 
-/** One render of the whole document; scrolls never re-run it. */
+/** One render of the whole document; scrolls never re-run it, the maths
+ *  engine coming up does. */
 const Body = memo(function Body({
   text,
   plugins,
@@ -122,6 +125,7 @@ const Body = memo(function Body({
   plugins: ReturnType<typeof fileMarkdownPlugins>;
   components: Components;
 }) {
+  useMathsReady();
   return (
     <ReactMarkdown {...plugins} components={components}>
       {text}

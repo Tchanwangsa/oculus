@@ -6,6 +6,7 @@ import {
 } from "@codemirror/autocomplete";
 import { EditorView } from "@codemirror/view";
 
+import { visualMath } from "../../field/mathField";
 import { mathAt } from "../../mathContext";
 import { COMMON_COMMANDS, MATH_COMMANDS, MATH_TABS, previewOf, snippetTemplate } from "../mathPalette";
 import { commandOf, recordCommand, recordUse } from "../mathUsage";
@@ -60,13 +61,17 @@ function mathOptions(): Completion[] {
 }
 
 /**
- * Answers only inside maths (`mathAt`): after `\` and a letter while typing,
- * or anywhere on Ctrl-Space. CodeMirror's fuzzy match ranks prefix matches
- * first. Exported so the editor's one `autocompletion()` can hold other sources.
+ * Answers only inside maths typed as source (`mathAt`, and no visual field
+ * open on it, whose own list offers its commands and whose writes would read
+ * as typing): after `\` and a letter while typing, or anywhere on
+ * Ctrl-Space. CodeMirror's fuzzy match ranks prefix matches first. Exported
+ * so the editor's one `autocompletion()` can hold other sources.
  */
 export function mathCompletionSource(cx: CompletionContext): CompletionResult | null {
   const math = mathAt(cx.state, cx.pos);
   if (!math) return null;
+  const field = visualMath(cx.state);
+  if (field && cx.pos >= field.start && cx.pos <= field.end) return null;
   const word = cx.matchBefore(/\\[a-zA-Z]*/);
   // `\\` is a line break, not the start of a command.
   if (word && word.from >= math.from && cx.state.sliceDoc(word.from - 1, word.from) !== "\\") {

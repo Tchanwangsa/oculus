@@ -1,9 +1,6 @@
-# Checks every push to master and every pull request on fresh macOS and Windows
-# checkouts: Rust formatting, frontend tests and bundle, the Rust tests
-# (the app's, keyd's and keyd core's), that keyd builds and signs as the bundle
-# ships it, and that the generated CLI reference matches the binary; and on
-# Linux, that keyd builds with no OS adapter and the editor core agrees with
-# CodeMirror and Lezer, natively and as the dev build's shadow mode runs it. See
+# Checks fresh macOS and Windows checkouts: formatting, frontend and Rust tests,
+# maths WASM, sidecars and bundle staging. Linux checks keyd seams and editor
+# core oracles. See
 # docs/development.md#ci-proves-a-fresh-checkout-builds-releases-are-cut-by-hand.
 name: CI
 
@@ -41,6 +38,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+          targets: wasm32-unknown-unknown
+      # scripts/build-math.mjs needs the CLI at math-core/Cargo.lock's wasm-bindgen.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
@@ -55,6 +57,8 @@ jobs:
           (cd src-tauri && cargo fmt --check)
           (cd keyd && cargo fmt --check)
           (cd keyd/core && cargo fmt --check)
+          # Only our crates: the vendored katex/ keeps upstream's formatting.
+          (cd math-core && cargo fmt --check -p oculus-math -p oculus-math-edit -p oracle)
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
@@ -82,6 +86,9 @@ jobs:
       - name: keyd tests, release policy and dev
         working-directory: app/keyd
         run: cargo test --locked && cargo test --locked --features dev
+      - name: Maths engine tests
+        working-directory: app/math-core
+        run: cargo test --locked
 
       - name: CLI reference matches the binary
         run: |
@@ -91,7 +98,7 @@ jobs:
   windows:
     name: Check (Windows x64)
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: app
@@ -106,6 +113,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
@@ -123,6 +134,9 @@ jobs:
       - name: keyd core Rust is formatted
         working-directory: app/keyd/core
         run: cargo fmt --check
+      - name: Maths Rust is formatted
+        working-directory: app/math-core
+        run: cargo fmt --check -p oculus-math -p oculus-math-edit -p oracle
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
       - name: Frontend and script tests
@@ -147,12 +161,29 @@ jobs:
       - name: keyd tests with dev admission
         working-directory: app/keyd
         run: cargo test --locked --features dev
+      - name: Maths engine tests
+        working-directory: app/math-core
+        run: cargo test --locked
       - name: MSIX PowerShell script parses
         run: |
           $tokens = $null
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/package-msix.ps1", [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count) { throw ($errors | Out-String) }
+      - name: Prepare Windows installer resources
+        run: bun scripts/package-msix.mjs --prepare-release
+      - name: Build the Windows NSIS installer
+        run: bun run tauri build --config src-tauri/target/windows-release.conf.json -- --locked
+      - name: Validate the Windows GUI, sidecars and installer
+        run: bun scripts/package-msix.mjs --check-release
+      - name: Retain the Windows installer for VM testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: oculus-windows-x64-ci
+          if-no-files-found: error
+          path: |
+            app/src-tauri/target/release/bundle/nsis/*.exe
+            app/src-tauri/windows/distribution/FFMPEG-*.txt
 
   # keyd's core and keyd itself on a target with no adapter: the build
   # proves no OS call has leaked out of app/keyd/core/src/platform/, and

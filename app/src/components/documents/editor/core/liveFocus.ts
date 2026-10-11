@@ -3,9 +3,9 @@ import { EditorView } from "@codemirror/view";
 
 /**
  * Whether Live mode treats the editor as focused, which decides what reveals
- * its source. A maths field (`math/field/mathField`) holding focus counts: it is a
- * widget inside the note, and focus moving into it must not redraw the note
- * as if the editor had blurred.
+ * its source. A maths field (`math/field/rustField`) holding focus counts: it is
+ * a widget inside the note, and focus moving into it must not redraw the
+ * note as if the editor had blurred.
  */
 
 export const setFocused = StateEffect.define<boolean>();
@@ -18,11 +18,13 @@ export const focusedField = StateField.define<boolean>({
   },
 });
 
-/** The focused element is a maths field inside an editor. CodeMirror reports
- *  the change 10 ms after the event, so focus has settled by then. */
+/** The focused element is a maths field's input inside an editor
+ *  (`math/field/mathView`). CodeMirror reports the change 10 ms after the
+ *  event, so focus has settled by then. */
 export function mathFieldFocused(): boolean {
   const active = document.activeElement;
-  return active instanceof HTMLElement && active.tagName === "MATH-FIELD" && active.closest(".cm-editor") != null;
+  if (!(active instanceof HTMLElement) || active.closest(".cm-editor") == null) return false;
+  return active.classList.contains("cm-math-view-input");
 }
 
 export const trackFocus = EditorView.focusChangeEffect.of((_state, focusing) =>

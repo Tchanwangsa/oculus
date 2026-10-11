@@ -3,7 +3,7 @@ import { MATH_COMMANDS, MATH_TABS, POPULAR_DEFAULTS, type MathEntry } from "./ma
 /**
  * What the maths toolbox remembers between sessions: the last few entries
  * used (its Recent row), how often each was used (its Popular tab), and the
- * last few used in each subject (the visual field's quick picks). A
+ * last few used in each subject (which lead the visual field's list). A
  * palette click, an accepted `\` completion and a `\command` typed out in
  * TeX or in the visual field all count; a typed command counts as its
  * palette entry, so its cell renders and inserts like one. All live in
@@ -54,7 +54,7 @@ function readSubjectRecents(): Record<string, unknown> {
 
 /** The entries last used in `subject`'s notes, most recent first. */
 export function subjectRecents(subject: number | null): MathEntry[] {
-  return entries(readSubjectRecents()[subjectKey(subject)]).slice(0, QUICK_PICKS);
+  return entries(readSubjectRecents()[subjectKey(subject)]).slice(0, SUBJECT_RECENTS);
 }
 
 interface Usage extends MathEntry {
@@ -89,7 +89,7 @@ export function recordUse(entry: MathEntry, subject: number | null) {
   version++;
   const recents = toFront(entry, readRecents(), RECENTS_MAX);
   const bySubject = readSubjectRecents();
-  bySubject[subjectKey(subject)] = toFront(entry, subjectRecents(subject), QUICK_PICKS);
+  bySubject[subjectKey(subject)] = toFront(entry, subjectRecents(subject), SUBJECT_RECENTS);
   const usage = readUsage();
   const prev = usage.find((e) => e.template === entry.template);
   const next: Usage = { ...kept(entry), n: (prev?.n ?? 0) + 1, t: Date.now() };
@@ -168,16 +168,19 @@ export function popularEntries(): MathEntry[] {
   return out;
 }
 
-/** How many entries the visual field's quick picks hold, keyed 1 to this. */
-export const QUICK_PICKS = 5;
+/** How many of a subject's last used entries are kept, to lead its picks. */
+export const SUBJECT_RECENTS = 5;
+/** How many entries the visual field's list offers before a letter is typed
+ *  (after Space, or a bare `\`). */
+export const FIELD_PICKS = 20;
 
-/** The quick picks: the last few used in this subject, most recent first,
- *  then the Popular tab's while the subject has little history. */
-export function quickPicks(subject: number | null): MathEntry[] {
+/** The field's picks: the last few used in this subject, most recent first,
+ *  then the Popular tab's. */
+export function fieldPicks(subject: number | null): MathEntry[] {
   const out = subjectRecents(subject);
   const seen = new Set(out.map((e) => e.template));
   for (const entry of popularEntries()) {
-    if (out.length === QUICK_PICKS) break;
+    if (out.length === FIELD_PICKS) break;
     if (!seen.has(entry.template)) out.push(entry);
   }
   return out;

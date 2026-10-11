@@ -6,6 +6,7 @@ import { useLibraryMdComponents } from "@/components/files/FileViewer";
 import type { DbFile } from "@/lib/db";
 import { openFileSmart } from "@/lib/files/openFile";
 import { hasMath, normalizeMath } from "@/lib/markdown/math";
+import { useMathsReady } from "@/lib/maths";
 import { copyAsMarkdown, dragAsMarkdown } from "@/lib/markdown/selection";
 
 import { FRONTMATTER } from "./constants";
@@ -22,6 +23,7 @@ export const VersionPreview = memo(function VersionPreview({
   files: DbFile[];
 }) {
   const components = useLibraryMdComponents(file, files, openFileSmart);
+  useMathsReady();
   const front = FRONTMATTER.exec(text);
   const source = front ? "~~~yaml\n" + front[1] + "\n~~~\n\n" + text.slice(front[0].length) : text;
   if (!source.trim()) {

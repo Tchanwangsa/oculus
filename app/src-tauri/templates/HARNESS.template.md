@@ -168,8 +168,8 @@ are.
 
 ### Maths
 
-**Every formula, symbol and variable goes in LaTeX** — the app renders it with
-KaTeX, so it is set properly rather than read as source.
+**Every formula, symbol and variable goes in LaTeX** — the app's maths engine
+(KaTeX's LaTeX) renders it, so it is set properly rather than read as source.
 
 - `$…$` inline, for a symbol in a sentence: "the polar angle $\theta_B$", not
   "the polar angle θ_B".

@@ -107,6 +107,9 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   ...rows("canvas", "Canvas", [
     ["Sign in without the browser", ["okta", "password", "keychain", "authenticator"]],
   ]),
+  ...section("canvas", "Setup", ["onboarding", "first run", "welcome"], [
+    ["Run setup again", ["onboarding", "start over"]],
+  ]),
 
   page("appearance"),
   ...rows("appearance", "Appearance", [["Theme", ["dark mode", "light mode", "system"]]]),

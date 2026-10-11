@@ -5,7 +5,6 @@ import { EditorSelection, EditorState, Transaction, type TransactionSpec } from 
 import {
   FIELD_INPUT,
   fieldWrite,
-  caretAfterChange,
   minimalChange,
   selectionPastField,
   squeezeBlankLines,
@@ -170,35 +169,6 @@ describe("the field's writes in the note's history", () => {
     expect(state.doc.toString()).toBe(DOC.slice(0, from) + DOC.slice(to));
     state = run(state, undo);
     expect(state.doc.toString()).toBe(DOC);
-  });
-});
-
-describe("caretAfterChange", () => {
-  // Atom 0 is the field's root; offset k sits after atom k.
-  const atoms = (s: string) => [..."^" + s];
-  test("an undone insertion puts the caret where it was", () => {
-    // "abXYZ|cd" → "ab|cd"
-    expect(caretAfterChange(atoms("abXYZcd"), atoms("abcd"), 5)).toBe(2);
-  });
-  test("a redone insertion puts the caret after it", () => {
-    expect(caretAfterChange(atoms("abcd"), atoms("abXYZcd"), 2)).toBe(5);
-  });
-  test("a replacement puts the caret after the new atoms", () => {
-    expect(caretAfterChange(atoms("abXcd"), atoms("abYYcd"), 3)).toBe(4);
-  });
-  test("an undone copy pasted above its original goes back to the paste", () => {
-    // "abcd|cd" → "ab|cd", not the field's end.
-    expect(caretAfterChange(atoms("abcdcd"), atoms("abcd"), 4)).toBe(2);
-  });
-  test("an undone copy pasted below its original goes back to the paste", () => {
-    // "abcdcd|" → "abcd|"
-    expect(caretAfterChange(atoms("abcdcd"), atoms("abcd"), 6)).toBe(4);
-  });
-  test("a redone copy goes after itself", () => {
-    expect(caretAfterChange(atoms("abcd"), atoms("abcdcd"), 2)).toBe(4);
-  });
-  test("an edit after the caret puts it at the edit", () => {
-    expect(caretAfterChange(atoms("abcdX"), atoms("abcd"), 2)).toBe(4);
   });
 });
 

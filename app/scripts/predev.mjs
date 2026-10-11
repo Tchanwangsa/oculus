@@ -33,10 +33,10 @@ if (!existsSync(modules) || mtime(modules) < mtime(join(app, "bun.lock"))) {
   execFileSync("bun", ["install", "--frozen-lockfile"], { cwd: app, stdio: "inherit" });
 }
 
-// 2. The native sidecars. Each script no-ops when its file is already current;
-//    the speech helper and whisper-cli are compiled, not fetched, and only on
-//    macOS.
-for (const script of ["fetch-ffmpeg.mjs", "build-speech.mjs", "build-whisper.mjs"]) {
+// 2. The native sidecars and the maths wasm. Each script no-ops when its file
+//    is already current; the speech helper and whisper-cli are compiled, not
+//    fetched, and only on macOS.
+for (const script of ["fetch-ffmpeg.mjs", "build-speech.mjs", "build-whisper.mjs", "build-math.mjs"]) {
   execFileSync(process.execPath, [join(app, "scripts", script)], { cwd: app, stdio: "inherit" });
 }
 

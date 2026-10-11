@@ -35,6 +35,13 @@ export function snippetTemplate(template: string): string {
   return `${template.replace(FIELD, () => `\${${++n}}`)}\${0}`;
 }
 
+/** The template as the visual field's edit model takes it: the first field
+ *  `#0` (it takes the selection), the rest `#?` (empty slots). */
+export function fieldTemplate(template: string): string {
+  let n = 0;
+  return template.replace(FIELD, () => (n++ === 0 ? "#0" : "#?"));
+}
+
 const plain = (...commands: string[]): MathEntry[] => commands.map((template) => ({ template }));
 
 export const MATH_TABS: MathTab[] = [

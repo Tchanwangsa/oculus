@@ -21,6 +21,7 @@ the root `CLAUDE.md` holds only the rules.
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [projects.md](./projects.md) | Projects and tasks: the Overview, board, table, timeline and the universal Tasks view |
 | [chapters.md](./chapters.md) | Lecture chapters and where a lecture ends: the detector and the two model jobs |
+| [onboarding.md](./onboarding.md) | First-run setup: the launch gate, the `onboarding` settings row, the steps, *Run setup again* |
 | [frontend.md](./frontend.md) | The frontend's data side: backend events, settings, parse state, library files |
 | [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, window shortcuts, ⌘F, search |
 | [ui.md](./ui.md) | The UI system: design rules, and the WebKit and CSS traps |

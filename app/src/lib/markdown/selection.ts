@@ -1,5 +1,7 @@
 import type { ClipboardEvent, DragEvent } from "react";
 
+import { layoutBlock } from "@/components/documents/editor/math/field/mathField/serialize";
+
 /**
  * A partial selection in rendered markdown (a chat reply, a parsed PDF),
  * walked back into markdown (a whole message copies its source instead).
@@ -7,7 +9,7 @@ import type { ClipboardEvent, DragEvent } from "react";
  * - KaTeX renders twice (MathML + spans); the TeX comes from its `<annotation>`
  *   and the subtree is never descended into. Rendered maths is one unit, as
  *   in the note editor: an end inside a formula takes the whole formula, and
- *   `watchMathSelection` paints it whole.
+ *   `watchMathSelection` (`mathSelection/whole.ts`) paints it whole.
  * - A mermaid figure carries its fence source in `data-md` (`Mermaid.tsx`), as
  *   does an embedded picture or page (`OutputEmbed.tsx`) — inline, since it
  *   usually sits in a `<p>` — and a sent pasted text card its `<pasted_text>`
@@ -60,6 +62,13 @@ function tex(el: Element): string | null {
   return source ? source : null;
 }
 
+/** A rendered formula taken whole, as markdown: inline `$…$`, or a display
+ *  formula's `$$` lines, one row each, as the in-place copy writes them
+ *  (`mathSelection/clipboard.ts`). */
+export function formulaMarkdown(source: string, display: boolean): string {
+  return display ? `$$\n${layoutBlock(source)}\n$$` : `$${source}$`;
+}
+
 function isKatex(el: Element): boolean {
   return el.classList.contains("katex") || el.classList.contains("katex-display");
 }
@@ -87,7 +96,7 @@ function inline(node: Node, range: Range): string {
   if (skipped(el)) return "";
   if (isKatex(el)) {
     const source = tex(el);
-    return source ? `$${source}$` : "";
+    return source ? formulaMarkdown(source, false) : "";
   }
   const md = el.getAttribute("data-md");
   if (md) return md.trim();
@@ -230,7 +239,7 @@ function block(el: Element, range: Range): string[] {
   }
   if (el.classList.contains("katex-display")) {
     const source = tex(el);
-    return source ? [`$$\n${source}\n$$`] : [];
+    return source ? [formulaMarkdown(source, true)] : [];
   }
   switch (el.tagName) {
     case "H1":
@@ -308,42 +317,12 @@ export function elementMarkdown(el: Element): string {
 }
 
 /** The selection under `target` as markdown, or "" — a selection inside a
- *  field (an open formula's too, `mathSelect.ts`) belongs to the field. */
+ *  field belongs to the field. */
 function markdownFor(target: EventTarget | null): string {
-  if (target instanceof Element && target.closest("input, textarea, [contenteditable='true'], math-field")) {
+  if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) {
     return "";
   }
   return selectionMarkdown(window.getSelection());
-}
-
-const MATH_SELECTED = "data-math-selected";
-
-/**
- * Paints each rendered formula a selection touches as one highlight
- * (`index.css`), since the native one leaves gaps between KaTeX's glyph boxes
- * and hides that the copy takes the formula whole. Installed once, app-wide.
- */
-export function watchMathSelection() {
-  let marked: Element[] = [];
-  document.addEventListener("selectionchange", () => {
-    const selection = window.getSelection();
-    const next: Element[] = [];
-    if (selection && selection.rangeCount && !selection.isCollapsed) {
-      const range = selection.getRangeAt(0);
-      const inside = mathAround(range.commonAncestorContainer);
-      if (inside) next.push(inside);
-      else {
-        const root = range.commonAncestorContainer;
-        const scope = root.nodeType === Node.ELEMENT_NODE ? (root as Element) : root.parentElement;
-        for (const el of Array.from(scope?.querySelectorAll(".katex-display, .katex") ?? [])) {
-          if (mathAround(el) === el && intersects(el, range)) next.push(el);
-        }
-      }
-    }
-    for (const el of marked) if (!next.includes(el)) el.removeAttribute(MATH_SELECTED);
-    for (const el of next) el.setAttribute(MATH_SELECTED, "");
-    marked = next;
-  });
 }
 
 /** `onCopy` for rendered markdown: the selection goes out as `text/plain`

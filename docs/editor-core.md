@@ -85,10 +85,9 @@ Without them the console says the shadow is off and why.
 ## Gotchas
 
 - **A tree report with `shadowMatchesFreshLezerParse: true` is CodeMirror's**
-  — its incremental parse can keep a first-line `---` as a rule after the
-  frontmatter's closing fence is typed, since the frontmatter parser
-  (`app/src/components/documents/editor/syntax/frontmatter.ts`) looks ahead;
-  the shadow oracle counts these apart rather than failing.
+  — its incremental tree, not the core, parted from a fresh parse, as
+  frontmatter's lookahead would make it without `frontmatterFragments`
+  ([editor.md](./editor.md)). The shadow oracle fails on it all the same.
 - **`noEditorShadowInBuild` in `app/vite.config.ts` looks removable and isn't**
   — Rollup loads the wasm glue from the dead dev branch anyway, and the glue's
   `new URL(wasm, import.meta.url)` would ship the wasm in a release bundle.

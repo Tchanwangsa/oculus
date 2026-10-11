@@ -9,7 +9,7 @@ import { ownsLines } from "../../math/mathContext";
 import { visualMath, visualMathField } from "../../math/field/mathField";
 import { TableWidget } from "../table";
 import { parseTable } from "../tableModel";
-import { ImageWidget, MathWidget, MermaidWidget, PropertiesWidget, RuleWidget } from "../widgets";
+import { ImageWidget, MathWidget, MermaidWidget, PropertiesWidget, RuleWidget, mathsSettled } from "../widgets";
 import {
   fieldDecoration,
   imageParts,
@@ -138,7 +138,7 @@ export const blockField = StateField.define<DecorationSet>({
     const stale =
       tr.docChanged ||
       tr.selection ||
-      tr.effects.some((e) => e.is(setFocused)) ||
+      tr.effects.some((e) => e.is(setFocused) || e.is(mathsSettled)) ||
       findRevealed(tr.state) !== findRevealed(tr.startState) ||
       tr.state.field(visualMathField) !== tr.startState.field(visualMathField, false) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||

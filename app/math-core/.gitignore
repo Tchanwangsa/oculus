@@ -1,0 +1,3 @@
+/target/
+# scripts/build-math.mjs output
+/pkg/

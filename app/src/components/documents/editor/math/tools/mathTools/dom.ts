@@ -1,19 +1,21 @@
 import { completionStatus } from "@codemirror/autocomplete";
 import type { EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import katex from "katex";
 
 import { mathFieldFocused } from "@/components/documents/editor/core/liveFocus";
+import { mathsReady, renderToString } from "@/lib/maths";
 import { previewOf, type MathEntry } from "../mathPalette";
 import { sourceOf } from "./insert";
 
 /** Button and completion previews, by LaTeX; the set is small and fixed. */
 const previewCache = new Map<string, string>();
 
+/** Empty, and not cached, until the maths engine is ready. */
 export function previewHtml(latex: string): string {
+  if (!mathsReady()) return "";
   let html = previewCache.get(latex);
   if (html === undefined) {
-    html = katex.renderToString(latex, { throwOnError: false });
+    html = renderToString(latex, { throwOnError: false });
     previewCache.set(latex, html);
   }
   return html;

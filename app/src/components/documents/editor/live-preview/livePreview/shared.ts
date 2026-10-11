@@ -66,7 +66,7 @@ export function showsSource(state: EditorState, node: SyntaxNodeRef, parts: { fr
   return !state.field(focusedField) || touchedMath(state, node.from, parts.from, parts.to, display) === "source";
 }
 
-/** The MathLive field over the maths it is editing. */
+/** The visual field over the maths it is editing. */
 export function fieldDecoration(state: EditorState, v: ActiveMath): Range<Decoration> {
   const widget = new MathFieldWidget(state.sliceDoc(v.from, v.to).trim(), v.display, v.block, v.id);
   return v.block

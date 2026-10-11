@@ -52,7 +52,7 @@ export function offerShapeSwitch(view: EditorView, end: number) {
  * with any other edit.
  */
 class PastedView implements TooltipView {
-  dom = el("div", "cm-math-tools cm-math-quick cm-math-pasted");
+  dom = el("div", "cm-math-tools cm-math-pasted");
   private shape = button("cm-math-pill cm-math-shape", "", () => this.toggle());
   private timer = 0;
   private hovered = false;

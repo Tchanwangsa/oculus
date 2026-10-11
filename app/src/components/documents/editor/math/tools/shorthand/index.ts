@@ -28,8 +28,6 @@ import { inTextArgument } from "./scan";
  * themselves `rules.ts`.
  */
 
-export { GREEK, OPERATORS, POWERS } from "./tables";
-
 /** End of the last control word a rewrite inserted, while the caret has not
  *  moved off it: a letter typed there gets a space so it can't extend it. */
 const setGlueEnd = StateEffect.define<number>();

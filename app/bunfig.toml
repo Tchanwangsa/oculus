@@ -1,0 +1,3 @@
+[test]
+# Instantiates the maths engine before any test renders maths.
+preload = ["./tests/preload.ts"]

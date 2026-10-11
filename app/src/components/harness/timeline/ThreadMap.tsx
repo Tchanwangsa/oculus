@@ -147,7 +147,7 @@ export const ThreadMap = memo(function ThreadMap({
             >
               <span
                 className={cn(
-                  "block h-[1.5px] rounded-full transition-all duration-150",
+                  "block h-[1.5px] rounded-full transition-[width,background-color] duration-150",
                   on ? "w-4 bg-primary" : "w-2.5 bg-surface-overlay group-hover/map:bg-ink-500",
                   hover === i && !on && "w-4 bg-muted-foreground",
                 )}

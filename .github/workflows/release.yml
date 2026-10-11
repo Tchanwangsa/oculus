@@ -37,6 +37,13 @@ jobs:
         with:
           bun-version-file: app/package.json
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      # scripts/build-math.mjs (in `bun run build`) needs the CLI at
+      # math-core/Cargo.lock's wasm-bindgen.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
@@ -47,9 +54,10 @@ jobs:
         working-directory: app
         run: bun install --frozen-lockfile
 
-      # beforeBuildCommand fetches and builds the native sidecars and stages
-      # oculus-keyd's signed helper app (the release policy) and the CLI; tauri
-      # signs every sidecar with the bundle and seals the helper as it is.
+      # beforeBuildCommand fetches and builds the native sidecars, builds the
+      # maths wasm and stages oculus-keyd's signed helper app (the release
+      # policy) and the CLI; tauri signs every sidecar with the bundle and seals
+      # the helper as it is.
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

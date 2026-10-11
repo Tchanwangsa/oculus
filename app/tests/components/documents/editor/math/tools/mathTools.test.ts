@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, test } from "bun:test";
-import { ChangeSet, EditorState } from "@codemirror/state";
+import { describe, expect, test } from "bun:test";
+import { ChangeSet, EditorState, type TransactionSpec } from "@codemirror/state";
 
 const store = new Map<string, string>();
 (globalThis as { localStorage?: unknown }).localStorage = {
@@ -13,15 +13,13 @@ const { mathTools, mathToolsOpen, nextOpen, openMathTools } = await import(
 );
 const { noteMarkdown } = await import("@/components/documents/editor/core/language");
 const { mathAt } = await import("@/components/documents/editor/math/mathContext");
-const { QUICK_PICKS, popularEntries, quickPicks, recordUse } = await import(
-  "@/components/documents/editor/math/tools/mathUsage"
-);
+const { fieldKey } = await import("@/components/documents/editor/math/tools/mathTools/keys");
+const { fieldTools } = await import("@/components/documents/editor/math/field/mathField");
 
 describe("maths toolbox open state", () => {
   test("opens only on request, on the caret's maths", () => {
     expect(nextOpen(null, null, undefined, 4)).toBeNull();
-    expect(nextOpen(null, null, "quick", 4)).toEqual({ nodeFrom: 4, kind: "quick" });
-    expect(nextOpen({ nodeFrom: 4, kind: "quick" }, null, "full", 4)).toEqual({ nodeFrom: 4, kind: "full" });
+    expect(nextOpen(null, null, "full", 4)).toEqual({ nodeFrom: 4, kind: "full" });
     expect(nextOpen({ nodeFrom: 4, kind: "full" }, null, null, 4)).toBeNull();
     // No maths at the caret: nothing to open on.
     expect(nextOpen(null, null, "full", null)).toBeNull();
@@ -77,21 +75,56 @@ describe("empty inline pairs", () => {
   });
 });
 
-describe("quick picks", () => {
-  beforeEach(() => store.clear());
+describe("Space in the visual field", () => {
+  /** A focused note with the caret in `$x^2$`, as an `EditorView` stands in for it. */
+  const note = () => {
+    const view = {
+      state: EditorState.create({ doc: "Text $x^2$ and", extensions: [noteMarkdown(), mathTools()], selection: { anchor: 7 } }),
+      dispatch(spec: TransactionSpec) {
+        view.state = view.state.update(spec).state;
+      },
+    };
+    return view;
+  };
+  const space = { key: " ", code: "Space", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false } as KeyboardEvent;
+  const field = (mode: "math" | "command", free = true) => {
+    const opened: string[] = [];
+    return {
+      opened,
+      field: {
+        mode: () => mode,
+        spaceFree: () => free,
+        isEmpty: () => false,
+        display: false,
+        openList: () => opened.push("list"),
+      } as never,
+    };
+  };
 
-  test("are the Popular tab's first five before the subject has history", () => {
-    expect(quickPicks(1)).toEqual(popularEntries().slice(0, QUICK_PICKS));
-    expect(quickPicks(1)).toHaveLength(QUICK_PICKS);
+  test("opens the field's picks where Space is free", () => {
+    const view = note();
+    const f = field("math");
+    expect(fieldKey(view as never, space, f.field)).toBe(true);
+    expect(f.opened).toEqual(["list"]);
+    const busy = field("math", false);
+    expect(fieldKey(view as never, space, busy.field)).toBe(false);
+    expect(busy.opened).toEqual([]);
   });
 
-  test("lead with the entry last used in the subject", () => {
-    const [often, last] = [popularEntries()[10], popularEntries()[11]];
-    recordUse(often, 1);
-    recordUse(often, 1);
-    recordUse(last, 1);
-    expect(quickPicks(1).slice(0, 2).map((e) => e.template)).toEqual([last.template, often.template]);
-    expect(quickPicks(1)).toHaveLength(QUICK_PICKS);
-    expect(quickPicks(2)[0].template).not.toBe(last.template);
+  test("leaves Space to a \\command being typed and to an open toolbox", () => {
+    const view = note();
+    const typing = field("command");
+    expect(fieldKey(view as never, space, typing.field)).toBe(false);
+    view.dispatch({ effects: openMathTools.of("full") });
+    const f = field("math");
+    expect(fieldKey(view as never, space, f.field)).toBe(false);
+    expect(f.opened).toEqual([]);
+  });
+
+  test("Space again in the picks opens the full toolbox (`fieldTools`)", () => {
+    const view = note();
+    expect(mathToolsOpen(view.state)).toBeNull();
+    for (const open of view.state.facet(fieldTools)) open(view as never);
+    expect(mathToolsOpen(view.state)).toBe("full");
   });
 });

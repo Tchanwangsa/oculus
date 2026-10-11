@@ -1,7 +1,7 @@
 import { Annotation, EditorSelection, type EditorState, type Text } from "@codemirror/state";
 
 /**
- * How the visual maths field (`field/mathField`) writes into the note. The
+ * How the visual maths field (`field/rustField`) writes into the note. The
  * note's history is the only undo: the field's writes are ordinary typing
  * transactions, so consecutive keystrokes join one undo step, and a field
  * only ever writes to the maths it was mounted on.
@@ -77,21 +77,6 @@ export function selectionPastField(
   return EditorSelection.single(head > last ? last : first, head);
 }
 
-/** Where the caret goes when the maths changes under the field (an undo, a
- *  redo): after the last atom that differs, comparing the atoms before and
- *  after from both ends. The common tail stops at the old caret (`caret`),
- *  which places a change that repeats the atoms beside it, such as a pasted
- *  copy of the rows below. Offsets are MathLive's: offset `k` is after atom `k`. */
-export function caretAfterChange(before: readonly string[], after: readonly string[], caret: number): number {
-  const max = Math.min(before.length, after.length);
-  let s = 0;
-  const tail = Math.min(max, before.length - 1 - caret);
-  while (s < tail && before[before.length - 1 - s] === after[after.length - 1 - s]) s++;
-  let p = 0;
-  while (p < max - s && before[p] === after[p]) p++;
-  return Math.max(0, after.length - s - 1);
-}
-
 /** `latex` without blank lines at either end and never two in a row: they
  *  would end the block's paragraph, and the field's empty rows (`\\` lines)
  *  need none. */
@@ -105,7 +90,7 @@ export function squeezeBlankLines(latex: string): string {
 }
 
 /** A block's LaTeX without empty rows at its end (`\\` lines past the last
- *  formula, what Enter on the last row leaves), its trailing whitespace kept;
+ *  formula, what Shift+Enter on the last row leaves), its trailing whitespace kept;
  *  unchanged when nothing else would be left. */
 export function withoutEndRows(latex: string): string {
   const body = latex.trimEnd();

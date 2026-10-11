@@ -10,7 +10,6 @@ import { showTooltip, type EditorView, type Tooltip, type TooltipView } from "@c
 import { mathFieldFocused } from "@/components/documents/editor/core/liveFocus";
 import { mathAt } from "../../mathContext";
 import { MathToolsView } from "./popover";
-import { QuickPicksView } from "./quick-picks";
 
 /** The LaTeX range (`from`–`to`) and the whole node, delimiters included. */
 export interface MathRange {
@@ -57,8 +56,8 @@ const sameRange = (a: MathRange | null, b: MathRange | null) =>
     a.nodeFrom === b.nodeFrom &&
     a.nodeTo === b.nodeTo);
 
-/** "quick": the visual field's quick picks; "full": the popover. */
-export type ToolsKind = "quick" | "full";
+/** What the toolbox has open: its popover. */
+export type ToolsKind = "full";
 
 /** What is open, on the maths starting at `nodeFrom`. */
 export interface ToolsOpen {
@@ -90,7 +89,7 @@ interface ToolsState {
   tooltip: Tooltip | null;
 }
 
-/** Open the quick picks or the popover on the caret's maths, or close. */
+/** Open the popover on the caret's maths, or close it. */
 export const openMathTools = StateEffect.define<ToolsKind | null>();
 
 export const mathToolsField = StateField.define<ToolsState>({
@@ -123,12 +122,11 @@ export function mathToolsOpen(state: EditorState): ToolsKind | null {
 }
 
 /** One `create` for every popover, so CodeMirror keeps the open one's DOM
- *  while it stays open; another for the quick picks. */
+ *  while it stays open. */
 const createTools = (view: EditorView): TooltipView => new MathToolsView(view);
-const createQuick = (view: EditorView): TooltipView => new QuickPicksView(view);
 
 function toolsTooltip(open: ToolsOpen): Tooltip {
-  return { pos: open.nodeFrom, above: false, create: open.kind === "full" ? createTools : createQuick };
+  return { pos: open.nodeFrom, above: false, create: createTools };
 }
 
 /** Σ and Mod-Shift-Space in maths: open the popover, or close it. False when
@@ -136,7 +134,7 @@ function toolsTooltip(open: ToolsOpen): Tooltip {
 export function toggleMathTools(view: EditorView): boolean {
   const v = view.state.field(mathToolsField, false);
   if (!v?.math) return false;
-  view.dispatch({ effects: openMathTools.of(v.open?.kind === "full" ? null : "full") });
+  view.dispatch({ effects: openMathTools.of(v.open ? null : "full") });
   if (!view.hasFocus && !mathFieldFocused()) view.focus();
   return true;
 }

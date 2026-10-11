@@ -1,3 +1,8 @@
+/** Clipboard type of a display formula's copy (a block field's, rendered
+ *  markdown's): its source with the `$$` lines, for a paste outside maths
+ *  (`components/documents/editor/live-preview/livePreview/edges.ts`). */
+export const BLOCK_MATH_TYPE = "application/x-oculus-math-block";
+
 /** Detect source delimiters before enabling remark-math or normalizing them.
  *  `\(` and `\[` count: the gate runs before [`normalizeMath`] rewrites them. */
 const MATH = /\$|\\\(|\\\[/;
