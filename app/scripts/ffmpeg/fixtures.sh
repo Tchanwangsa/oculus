@@ -20,7 +20,7 @@ av 20 -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 64k h264-aac.
 av 5 -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 64k -f mov h264-aac.mov
 av 5 -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -b:v 200k -c:a libopus -b:a 48k vp9-opus.webm
 av 5 -c:v libx265 -preset ultrafast -x265-params log-level=error -c:a ac3 hevc-ac3.mkv
-av 5 -c:v libaom-av1 -usage realtime -cpu-used 10 -b:v 100k -c:a libopus -b:a 48k av1-opus.mp4
+av 5 -c:v libaom-av1 -usage realtime -cpu-used 8 -b:v 100k -c:a libopus -b:a 48k av1-opus.mp4
 av 5 -c:v mpeg2video -c:a mp2 -f mpegts mpeg2-mp2.ts
 av 5 -c:v mpeg4 -c:a libmp3lame avi-mpeg4-mp3.avi
 av 5 -c:v wmv2 -c:a wmav2 wmv2-wmav2.wmv

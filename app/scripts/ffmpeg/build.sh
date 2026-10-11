@@ -172,7 +172,7 @@ cp ffbuild/config.log "$out/config-$target.log"
   echo "meson $(meson --version)"
   echo "ninja $(ninja --version)"
   if command -v dpkg-query >/dev/null; then
-    dpkg-query -W -f '${Package} ${Version}\n' 'gcc-mingw-w64*' 'binutils-mingw-w64*' 'mingw-w64*' 2>/dev/null | grep -v '^$' || true
+    dpkg-query -W -f '${Package} ${Version}\n' 'gcc-mingw-w64*' 'binutils-mingw-w64*' 'mingw-w64*' 2>/dev/null | grep -v 'i686' | grep -Ev '^[^ ]+ $' || true
   fi
 } > "$out/toolchain-$target.txt"
 
