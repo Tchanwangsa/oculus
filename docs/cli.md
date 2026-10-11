@@ -16,7 +16,7 @@ agent queries and plans through. Flags are in
 | `transcribe` | `app/src-tauri/src/bin/oculus/commands/transcribe.rs`, `app/src-tauri/src/transcribe/` |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/commands/docs.rs`, `app/src-tauri/src/agents/` (`docs.rs`, `links.rs`) |
 | The memory store | `app/src-tauri/src/agents/memory/`, `app/src-tauri/src/bin/oculus/commands/memory.rs` |
-| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/commands/keyd.rs`, `app/src-tauri/src/auth/keyd/`; the LaunchAgent itself in `app/keyd/core/src/platform/macos/registrar.rs` |
+| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/commands/keyd.rs`, `app/src-tauri/src/auth/keyd/`; the platform registrations in `app/keyd/core/src/platform/macos/registrar.rs` and `app/keyd/core/src/platform/windows/registrar.rs` |
 | Headless writes to the scrape tables | `app/src-tauri/src/db/store/` |
 | Repo copy of the reference | `app/scripts/gen-cli-docs.mjs` |
 
@@ -31,8 +31,8 @@ agent queries and plans through. Flags are in
 | `lecture chapters`, `lecture end` | Derived rows, regenerable from the recording | They spend model quota, so an existing result is kept unless `--force` |
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |
-| `keyd install`, `keyd uninstall` | The LaunchAgent `com.tchan.oculus.keyd`, `bin/Oculus Helper.app` and keyd's stamp in the data dir; install also (re)loads the agent | Never touches `vault.bin` or the keychain, so uninstalling loses no key ([below](#keyd-install-never-points-the-agent-at-a-build-tree)) |
-| `keyd status` | Nothing | Pings keyd, which starts it; prints no secret |
+| `keyd install`, `keyd uninstall` | macOS: the LaunchAgent, copied helper app and stamp; Windows: uninstall stops the verified resident broker and removes its registration and stamp, while CLI install cannot start it | Keeps the vault and its master key ([below](#keyd-lifetime-follows-the-platform)) |
+| `keyd status` | Nothing | Pings keyd; macOS launchd can activate it, while Windows only checks an existing broker. Prints no secret |
 | `agent` | Nothing recorded | One turn through the app's own bridges; `--subject` appends the picker's scope ([harness.md](./harness.md)) |
 
 `lecture candidates` only decodes a recording on disk, so re-running it is the
@@ -63,30 +63,32 @@ migrations, so on a fresh machine the app must open once first; until then
 - Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`);
   lecture ids match on a unique prefix as `oculus list -l` prints them.
 
-## `keyd install` never points the agent at a build tree
+## keyd lifetime follows the platform
 
-The LaunchAgent's program is fixed: a keyd whose helper app is nested in the
-Oculus app is registered in place, since its caller check needs that app, and
-any other has its whole helper app copied to `bin/Oculus Helper.app` in the
-data dir, built beside it and swapped in with one rename; the next install
-removes a bare `bin/oculus-keyd` an earlier one left. `--from` takes the
-helper app or the keyd inside it, and refuses a keyd that is not in one.
-Without `--from` it takes the keyd in the CLI's bundle, or in a debug CLI the
-output of `bun run keyd` in the checkout it was built from
+On macOS, `keyd install` registers a LaunchAgent. A keyd whose signed helper
+app is nested in Oculus runs in place; any other has its whole helper app
+copied to `bin/Oculus Helper.app` in the data dir and swapped in with one
+rename. `--from` takes the helper app or the keyd inside it, and refuses a
+keyd outside a helper app. Without `--from` it takes the keyd in the CLI's
+bundle, or in a debug CLI the output of `bun run keyd` in its checkout
 ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
 
-- `launchctl bootout` returns before launchd lets go of the job, and a
-  `bootstrap` too soon after fails and leaves keyd unloaded. Install and
-  uninstall wait until `launchctl print` stops finding the label.
-- The stamp is written last, so a failed load is retried by the next
-  preflight.
-- `--if-changed` installs nothing when the stamp already holds the
-  candidate's source hash and the agent already runs the program it would
-  register: the preflight's call, and the app's own check at startup.
-- `status` compares the installed stamp, the stamp of the keyd this CLI would
-  install, and the source hash the running keyd reports. A release CLI with no
-  keyd beside it reports a broken install there, and `install` says so instead
-  of asking for `bun run keyd`.
+- macOS install and uninstall wait until `launchctl print` stops finding the
+  old label before proceeding; `bootout` returns before launchd releases it.
+- The stamp is written last, so a failed load is retried at the next startup.
+- `--if-changed` installs nothing when the stamp holds the candidate's source
+  hash and the registration already runs the expected program.
+
+On Windows, the GUI starts the bundled resident broker and updates its
+registration and stamp. `keyd install` cannot start it from the CLI: open
+Oculus. `keyd status` only connects to an existing broker and never activates
+one. `keyd uninstall` stops the verified broker before removing its
+registration; the vault and DPAPI-protected master key remain. The release
+broker requires the MSIX installation ([windows.md](./windows.md)).
+
+On both platforms, `status` compares the installed stamp, the candidate's
+source hash and the running keyd's reply. A release CLI with no keyd beside
+it reports a broken installation.
 
 ## `run` and `index` take minutes per file, and that is not a hang
 
