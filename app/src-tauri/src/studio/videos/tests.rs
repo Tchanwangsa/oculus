@@ -1,7 +1,8 @@
 //! `new` scaffolds a video that loads and lints clean over the libraries,
-//! `list` reads every video, and a bare slug resolves under `videos/`.
+//! `list` reads every video, a bare slug resolves under `videos/`, a title
+//! makes a unique slug, and the app's scope reaches only a video's folder.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::studio::libraries::libraries_at;
@@ -24,8 +25,7 @@ fn a_new_video_loads_and_lints_clean_over_the_libraries() {
         &NewVideo {
             slug: "gradient-descent".into(),
             subject: Some("COMP30027".into()),
-            title: None,
-            portrait: false,
+            ..NewVideo::default()
         },
     )
     .unwrap();
@@ -159,4 +159,113 @@ fn a_bare_slug_resolves_under_videos_and_an_existing_dir_wins() {
     );
     let err = resolve_in(&videos, Path::new("no/such/dir")).unwrap_err();
     assert!(err.contains("no folder no/such/dir"), "{err}");
+}
+
+#[test]
+fn a_slug_is_kebab_ascii_and_unique_among_the_folders() {
+    for (title, slug) in [
+        ("Gradient descent: a primer!", "gradient-descent-a-primer"),
+        ("  Bayes' rule  ", "bayes-rule"),
+        ("Écoulement 3D", "coulement-3d"),
+        ("???", ""),
+        ("", ""),
+    ] {
+        assert_eq!(slug_from_title(title), slug, "{title:?}");
+    }
+    let long = slug_from_title(&"word ".repeat(40));
+    assert!(
+        valid_slug(&long) && long.len() <= 56 && !long.ends_with('-'),
+        "{long}"
+    );
+
+    let root = Scratch::new("videos-unique");
+    assert_eq!(unique_slug(&root, Some("Bayes rule")), "bayes-rule");
+    assert_eq!(unique_slug(&root, None), "untitled");
+    create_in(&root, &new("bayes-rule")).unwrap();
+    create_in(&root, &new("bayes-rule-2")).unwrap();
+    assert_eq!(unique_slug(&root, Some("Bayes rule")), "bayes-rule-3");
+    let made = unique_slug(&root, Some(&"x".repeat(100)));
+    assert!(valid_slug(&made), "{made}");
+}
+
+#[test]
+fn the_app_may_name_only_a_video() {
+    let root = Scratch::new("videos-scope");
+    let videos = root.join("videos");
+    let dir = create_in(&videos, &new("week-4")).unwrap();
+    std::fs::create_dir_all(root.join("elsewhere")).unwrap();
+    std::fs::create_dir_all(dir.join("components/nested")).unwrap();
+    let canonical = dir.canonicalize().unwrap();
+
+    assert_eq!(scoped_in(&videos, Path::new("week-4")).unwrap(), canonical);
+    assert_eq!(scoped_in(&videos, &dir).unwrap(), canonical);
+    assert_eq!(video_in(&videos, "week-4").unwrap(), dir);
+
+    for outside in [
+        root.join("elsewhere"),
+        videos.clone(),
+        dir.join("components"),
+        dir.join("../../elsewhere"),
+        PathBuf::from("/"),
+    ] {
+        let err = scoped_in(&videos, &outside).unwrap_err();
+        assert!(err.contains("not a video"), "{outside:?}: {err}");
+    }
+    assert!(scoped_in(&videos, Path::new("week-5")).is_err());
+    for bad in ["", "../elsewhere", "Week 4", "a/b"] {
+        assert!(video_in(&videos, bad).is_err(), "{bad:?}");
+    }
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("elsewhere"), videos.join("link")).unwrap();
+        let err = scoped_in(&videos, Path::new("link")).unwrap_err();
+        assert!(err.contains("not a video"), "{err}");
+        assert!(video_in(&videos, "link").is_err());
+    }
+}
+
+#[test]
+fn a_new_video_takes_a_theme_and_a_voice_block() {
+    let root = Scratch::new("videos-theme");
+    let dir = create_in(
+        &root,
+        &NewVideo {
+            slug: "warm-one".into(),
+            theme: Some("warm".into()),
+            voice: Some(studio_core::Voice {
+                model: None,
+                voice: Some("af_heart".into()),
+                speed: Some(1.1),
+            }),
+            ..NewVideo::default()
+        },
+    )
+    .unwrap();
+    let video: Video =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("video.json")).unwrap()).unwrap();
+    assert_eq!(video.theme, "warm");
+    let voice = video.voice.unwrap();
+    assert_eq!(voice.voice.as_deref(), Some("af_heart"));
+    assert_eq!(voice.speed, Some(1.1));
+    assert_eq!(voice.model, None);
+
+    let plain = create_in(&root, &new("plain")).unwrap();
+    let text = std::fs::read_to_string(plain.join("video.json")).unwrap();
+    assert!(
+        text.contains("\"theme\": \"default\"") && !text.contains("voice"),
+        "{text}"
+    );
+
+    for theme in ["../x", "a b", ""] {
+        let err = create_in(
+            &root,
+            &NewVideo {
+                slug: "bad".into(),
+                theme: Some(theme.into()),
+                ..NewVideo::default()
+            },
+        );
+        assert!(err.is_err(), "{theme:?}");
+    }
 }

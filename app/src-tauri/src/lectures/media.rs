@@ -2,8 +2,9 @@
 //! custom-scheme sources (`asset://` fails with MEDIA_ERR_SRC_NOT_SUPPORTED on
 //! macOS 26; cf. tauri-apps/tauri#3725), so lecture video is served over HTTP.
 //!
-//! Scope: files under the data dir's `lectures/` and `courses/`, and only with
-//! the per-launch token in the path — any local process can reach the port.
+//! Scope: files under the data dir's `lectures/`, `courses/` and
+//! `studio/videos/` (rendered videos and their stills), and only with the
+//! per-launch token in the path — any local process can reach the port.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -89,7 +90,7 @@ fn handle(request: tiny_http::Request, data_dir: &PathBuf, token: &str) {
     let Ok(path) = path.canonicalize() else {
         return respond_status(request, 404);
     };
-    let in_scope = ["lectures", "courses"]
+    let in_scope = ["lectures", "courses", "studio/videos"]
         .iter()
         .any(|dir| path.starts_with(data_dir.join(dir)));
     if !in_scope {
@@ -111,6 +112,9 @@ fn handle(request: tiny_http::Request, data_dir: &PathBuf, token: &str) {
         Some("mp3") => "audio/mpeg",
         Some("vtt") => "text/vtt",
         Some("pdf") => "application/pdf",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
         _ => "application/octet-stream",
     };
     let hdr = |k: &str, v: &str| Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap();

@@ -670,6 +670,20 @@ chapter list inline — rebuilt on every send and before any spawn.
   use counted `hold`/`unhold` ownership of cached rows; closing one view does
   not release a thread still displayed by another.
 
+## A Studio thread carries its video
+
+A thread that makes a Studio video is linked to its folder by a
+`studio_videos` row, written when `harness_send` creates the thread with
+`SendOptions.studio` ([studio.md](./studio.md#a-video-has-a-thread)). Like the
+lecture, the link is read back on every send and before any spawn
+(`studio_brief` in `harness/app/send.rs`, a rewind's included), and
+`instructions()` / `thread_sections()` append the "The video being made"
+section after the subject and lecture ones: the absolute folder, format,
+theme, subject library and length target read from video.json and the link,
+and the order of work (skill, narrate, draft, ask before the final). It is
+the per-thread half the opencode and `agy` bridges send ahead of the first
+message.
+
 ## Gotchas
 
 - Never pass `agy` `--dangerously-skip-permissions` — its file tools then write outside the library.

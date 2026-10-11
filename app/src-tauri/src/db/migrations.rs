@@ -813,6 +813,24 @@ CREATE TABLE IF NOT EXISTS echo_embeds (
                         "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 45,
+            description: "studio videos: the thread that makes each one",
+            // Written only by Rust (`db::store::link_studio_video`). The slug names a
+            // folder under `<data>/studio/videos/`; the folder is the video.
+            sql: r#"
+CREATE TABLE IF NOT EXISTS studio_videos (
+    slug        TEXT    PRIMARY KEY,
+    thread_id   INTEGER REFERENCES harness_threads(id) ON DELETE SET NULL,
+    length_secs INTEGER,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_videos_thread
+    ON studio_videos(thread_id) WHERE thread_id IS NOT NULL;
+                        "#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

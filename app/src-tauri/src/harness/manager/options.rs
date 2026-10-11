@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+use super::studio::StudioBrief;
+
 /// What a send asks for beyond the text. The model is persisted on the
 /// thread; a later send with a different one changes it from then on.
 #[derive(Deserialize, Clone, Default)]
@@ -24,10 +26,29 @@ pub struct SendOptions {
     pub context: Option<String>,
     /// The playhead's second at send; see [`crate::harness::HarnessEvent::UserMessage`].
     pub at: Option<i64>,
+    /// The Studio video this send creates a thread for. Read only on
+    /// creation, where it links the video to the thread (`studio_videos`).
+    pub studio: Option<StudioSend>,
+    /// That video, resolved from the thread's link.
+    #[serde(skip)]
+    pub studio_brief: Option<StudioBrief>,
     /// Antigravity only: the student's approved rules, for the spawn to write
     /// (`antigravity_rules::install`). `None` keeps the last ones written.
     #[serde(skip)]
     pub antigravity_rules: Option<Vec<String>>,
+}
+
+/// The video a thread is created for, as `StudioSend` in
+/// `app/src/lib/studio/videos.ts` sends it. The brief reads the format from
+/// video.json's size, which is what renders use, so the TS `format` is not
+/// read here.
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioSend {
+    /// A folder under `<data>/studio/videos/`, made before the send.
+    pub slug: String,
+    /// The narration length asked for, in seconds.
+    pub length_secs: Option<u32>,
 }
 
 /// What a lecture thread's brief says about the recording, assembled from

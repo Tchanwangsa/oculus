@@ -30,6 +30,7 @@ use studio_core::{Project, RenderOptions, StudioError};
 
 pub use error::RenderError;
 use error::Stop;
+pub use key::still_key;
 use plan::Scene;
 pub use progress::{Outcome, Progress, Report, SegmentReport};
 pub use quality::Quality;

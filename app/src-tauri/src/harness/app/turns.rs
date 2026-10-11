@@ -9,7 +9,7 @@ use crate::harness::store;
 use crate::harness::{HarnessEvent, Provider, QueuedMessage, SendOptions};
 use crate::runtime::blocking::run as blocking;
 
-use super::send::{dispatch, lecture_brief};
+use super::send::{dispatch, lecture_brief, studio_brief};
 use super::HarnessState;
 
 /// Send a message; creates the thread when `thread_id` is null. Returns
@@ -38,7 +38,10 @@ pub async fn harness_send(
             id
         }
         None => {
-            store::create_thread(
+            if let Some(video) = &opts.studio {
+                crate::studio::videos::video_in(&crate::studio::videos::videos_dir(), &video.slug)?;
+            }
+            let id = store::create_thread(
                 &pool,
                 provider,
                 opts.model.as_deref(),
@@ -46,7 +49,17 @@ pub async fn harness_send(
                 opts.lecture_id.as_deref(),
                 &text,
             )
-            .await?
+            .await?;
+            if let Some(video) = &opts.studio {
+                let length = video.length_secs.map(i64::from);
+                let linked =
+                    crate::db::store::link_studio_video(&pool, &video.slug, id, length).await;
+                if let Err(e) = linked {
+                    store::delete_thread(&pool, id).await.ok();
+                    return Err(e);
+                }
+            }
+            id
         }
     };
 
@@ -138,6 +151,7 @@ async fn rewind_provider(
         model: opts.model.clone().or_else(|| row.model.clone()),
         scope: row.subject_code.clone(),
         lecture: lecture_brief(pool, row).await,
+        studio_brief: studio_brief(pool, thread_id).await,
         ..opts.clone()
     };
     blocking(move || {

@@ -1,5 +1,5 @@
-//! Starting a turn: the thread row decides model, subject and lecture, then
-//! the send runs on a blocking thread.
+//! Starting a turn: the thread row decides model, subject and lecture, its
+//! link decides the Studio video, then the send runs on a blocking thread.
 
 use std::sync::Arc;
 
@@ -7,7 +7,9 @@ use sqlx::SqlitePool;
 
 use crate::harness::antigravity_rules;
 use crate::harness::store;
-use crate::harness::{Harness, HarnessEvent, LectureBrief, Provider, SendOptions, Sink};
+use crate::harness::{
+    Harness, HarnessEvent, LectureBrief, Provider, SendOptions, Sink, StudioBrief,
+};
 use crate::runtime::blocking::run as blocking;
 
 use super::{sink_for, Bus};
@@ -54,6 +56,19 @@ pub(super) async fn lecture_brief(
     })
 }
 
+/// The Studio section of a thread's brief, read off the video's link and
+/// folder on every send. `None` for a thread that makes no video.
+pub(super) async fn studio_brief(pool: &SqlitePool, thread_id: i64) -> Option<StudioBrief> {
+    let link = crate::db::store::studio_link_of_thread(pool, thread_id)
+        .await
+        .ok()
+        .flatten()?;
+    Some(StudioBrief::read(
+        &crate::studio::videos::videos_dir(),
+        &link,
+    ))
+}
+
 async fn start_turn(
     harness: &Arc<Harness>,
     thread_id: i64,
@@ -78,8 +93,9 @@ async fn start_turn(
             harness.close(thread_id);
         }
     }
-    // The row, not the payload, decides model, subject and lecture.
+    // The row, not the payload, decides model, subject, lecture and video.
     let lecture = lecture_brief(&pool, &row).await;
+    let studio_brief = studio_brief(&pool, thread_id).await;
     // Only a spawn uses these, but whether this send spawns is `ensure`'s call.
     let antigravity_rules = match provider {
         Provider::Antigravity => Some(antigravity_rules::stored(&pool).await?),
@@ -89,6 +105,7 @@ async fn start_turn(
         model: opts.model.or(row.model),
         scope: row.subject_code,
         lecture,
+        studio_brief,
         antigravity_rules,
         ..opts
     };

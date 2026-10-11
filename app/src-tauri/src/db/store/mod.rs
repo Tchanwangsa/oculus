@@ -10,6 +10,7 @@ mod files;
 mod lectures;
 mod pool;
 mod runs;
+mod studio_videos;
 mod subjects;
 #[cfg(test)]
 mod tests;
@@ -21,4 +22,5 @@ pub use files::*;
 pub use lectures::*;
 pub use pool::*;
 pub use runs::*;
+pub use studio_videos::*;
 pub use subjects::*;

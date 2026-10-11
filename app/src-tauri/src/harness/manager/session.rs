@@ -118,6 +118,7 @@ impl Harness {
                         &self.data_dir,
                         opts.scope.as_deref(),
                         opts.lecture.as_ref(),
+                        opts.studio_brief.as_ref(),
                     ),
                     one_off: false,
                 },
@@ -134,6 +135,7 @@ impl Harness {
                         &self.data_dir,
                         opts.scope.as_deref(),
                         opts.lecture.as_ref(),
+                        opts.studio_brief.as_ref(),
                     ),
                     ephemeral: false,
                 };
@@ -152,7 +154,11 @@ impl Harness {
                     model: opts.model.clone(),
                     // Set only when the model declared levels.
                     variant: opts.reasoning_effort.clone(),
-                    brief: thread_sections(opts.scope.as_deref(), opts.lecture.as_ref()),
+                    brief: thread_sections(
+                        opts.scope.as_deref(),
+                        opts.lecture.as_ref(),
+                        opts.studio_brief.as_ref(),
+                    ),
                     agent: opencode::AGENT,
                 };
                 let ses = match resume {
@@ -169,7 +175,11 @@ impl Harness {
                     base: base(cwd)?,
                     // `agy` reads the library-wide brief (`agents/AGENTS.md`)
                     // itself; only the per-thread half is sent.
-                    brief: thread_sections(opts.scope.as_deref(), opts.lecture.as_ref()),
+                    brief: thread_sections(
+                        opts.scope.as_deref(),
+                        opts.lecture.as_ref(),
+                        opts.studio_brief.as_ref(),
+                    ),
                     approved: opts.antigravity_rules.clone(),
                 },
                 sink,

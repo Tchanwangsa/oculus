@@ -14,6 +14,7 @@ impl Ctx {
                 subject: args.subject.clone(),
                 title: args.title.clone(),
                 portrait: args.portrait,
+                ..NewVideo::default()
             },
         )?;
         if self.json {
