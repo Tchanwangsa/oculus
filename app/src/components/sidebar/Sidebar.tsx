@@ -18,7 +18,7 @@ import { useRailOrder, type RailSection } from "@/stores/shell/railOrderStore";
 import { DRAG_SURFACE, useStripReorder } from "@/hooks/gestures/usePointerDrag";
 import { cn } from "@/lib/utils";
 import RailItem, { railButton, railIdle } from "./RailItem";
-import { MusicTile } from "./MusicTile";
+import { MusicTile, useMusicTileShown } from "./MusicTile";
 import {
   Tooltip,
   TooltipContent,
@@ -62,9 +62,9 @@ export default function Sidebar({ collapsed }: SidebarProps) {
 
         <Sections />
 
-        <div className="flex-1" />
+        <AppItems />
 
-        <MusicTile />
+        <div className="flex-1" />
 
         <Rule />
 
@@ -152,6 +152,18 @@ function Sections() {
         );
       })}
     </div>
+  );
+}
+
+/** Spotify's tile, under a seam, while music is on. */
+function AppItems() {
+  const music = useMusicTileShown();
+  if (!music) return null;
+  return (
+    <>
+      <Rule />
+      <MusicTile />
+    </>
   );
 }
 

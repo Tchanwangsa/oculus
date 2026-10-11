@@ -62,12 +62,13 @@ switch is on.
 - **`useMusicState` (mounted once in `AppLayout`) mirrors the snapshot** into
   `musicStore`: one `music_state` read on mount, then `music-state`. It also
   loads the switch and wires the exclusive-playback rule.
-- **The rail tile sits in the foot, above the hairline**, only while the
-  switch is on and a session is up or a track is loaded; otherwise it is not
-  drawn. It shows the cover (a note glyph without one) with the rail's corner
-  marks: a spinner while connecting, a brand dot while playing. A click opens
-  a popover to its right: the track, seek, previous / play-pause / next,
-  volume with the device button, and "Open player".
+- **The rail tile sits in the group after the sections**, under its own
+  rule, only while the switch is on and a session is up or a track is
+  loaded; otherwise it is not drawn. It shows the cover (a note glyph without
+  one) with the rail's corner marks: a spinner while connecting, a brand dot
+  while playing. A click opens a popover below and to its right: the track,
+  seek, previous / play-pause / next, volume with the device button, and
+  "Open player".
 - **The device button** (`DeviceMenu`, ending the volume row here and on
   `/music`) opens "Spotify devices" (active checked, a click transfers) and
   "Output on this Mac" ("System default (<device>)", then each output). Both
