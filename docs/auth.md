@@ -1,7 +1,8 @@
 # Auth & sessions
 
 Three services, three credentials — all derived from one Canvas session
-cookie.
+cookie. Spotify's login, kept in keyd for the music player, is the one
+credential that is not ([below](#spotifys-credentials-are-the-one-value-keyd-reads-back)).
 
 ## Where
 
@@ -24,6 +25,7 @@ cookie.
 | The `canvas` and `ed` routes of `forward` (cookie and `x-token` attached by keyd), its path rules and streaming; the Canvas route's sign-in on a rejected request | `app/keyd/core/src/forward/`, `app/keyd/core/src/ops/forward.rs` ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)) |
 | The `oculus-keyd` client, which the Voyage, MinerU and Groq keys and the Okta credentials and sign-in go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/providers/credentials/mod.rs` (`CloudKey`) |
 | Credential entry UI | `app/src/components/settings/web/AutoSignIn.tsx` |
+| Spotify's stored credentials: the `music.spotify` vault entry, keyd's app-only `get`, and the music module that writes and reads it | `app/keyd/core/src/names.rs` (`READABLE`), `app/keyd/core/src/ops/get.rs`, `app/src-tauri/src/music/credentials.rs` ([music.md](./music.md)) |
 
 ## Canvas authenticates by session cookie only
 
@@ -186,8 +188,9 @@ every sign-in a client starts (Settings, the startup probe, the browser,
 `oculus auth auto`) are requests to `oculus-keyd` through
 `credentials::Credentialed` (ops `okta_save`, `okta_forget`, `okta_status`,
 `ensure_signed_in`, and `okta_resume` for the guard). Neither process reads the password or the seed back: no
-op returns one, and `oculus auth setup` prints the code from the seed just
-typed.
+op returns one (keyd's one read-back, `get`, serves only Spotify's
+credentials, [below](#spotifys-credentials-are-the-one-value-keyd-reads-back)),
+and `oculus auth setup` prints the code from the seed just typed.
 
 - **Only `KeydError::Absent` takes the old route, and only for the
   credentials.** The keychain items (`com.oculus.unimelb-sso`: `username`,
@@ -287,6 +290,24 @@ rotation, and read by `forward`, `session_get` and `session_status`.
   vault, unless it already holds that session, and deletes each file
   (`keyd.imported.session.<kind>` records it). `session_clear` and `sign_out`
   import first, so a cleared session is never brought back from an old file.
+
+## Spotify's credentials are the one value keyd reads back
+
+librespot logs in to Spotify with a stored-credentials blob it must hold
+itself; there is no HTTP request keyd could attach it to, as `forward` does
+for a key or a cookie. So the vault's `music.spotify` entry (username, blob,
+Connect device id, as JSON) has a read-back of its own.
+
+- **`get {secret}` returns `{"value": string|null}`, to the app only.** Every
+  other role gets `caller`, from `require_role`, before the vault is opened.
+- **Only the names in `names::READABLE` can be read**, and that list is
+  `music.spotify` alone. Any other name, a cloud key, an Okta value or a
+  session included, is `request`; a test pins the list.
+- **The generic `store` and `delete` write it** (app or CLI), with no old
+  keychain item to import. Okta's `okta_forget`, `sign_out` and `session_clear`
+  leave it alone, so signing out of Canvas keeps Spotify signed in.
+- With keyd absent there is no keychain fallback for it: the music module
+  reports the error and keeps nothing ([music.md](./music.md#the-credentials-live-in-keyd-read-back-by-an-app-only-get)).
 
 ## A rejected Canvas request signs in once and is sent once more
 

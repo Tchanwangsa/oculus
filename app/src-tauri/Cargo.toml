@@ -85,6 +85,21 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # Spreadsheets (xlsx/xlsm/xls/ods) become markdown text in-process
 # (`src/pages/sheets/`); no LibreOffice, no parse service, no embedding.
 calamine = "0.36"
+# Spotify Connect playback (`src/music/`, docs/music.md). librespot's dev
+# branch by rev, not crates.io 0.8.0: Spotify's endpoint changes land there
+# first. Bump the rev by hand; never `cargo update` them.
+librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+librespot-metadata = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+librespot-playback = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+# Only for `AuthenticationType`, which librespot-core keeps private.
+librespot-protocol = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
+# The Spotify login: the same oauth2 librespot-oauth builds on, used directly
+# because librespot's client opens the browser itself and hides the URL.
+oauth2 = { version = "5", default-features = false, features = ["reqwest", "reqwest-blocking"] }
+# librespot reports a track it cannot decrypt only as a log line
+# (`src/music/logs.rs`).
+log = { version = "0.4", features = ["std"] }
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_sessions` in src/shell/browser/seed.rs) — Tauri exposes no cookie setter, so

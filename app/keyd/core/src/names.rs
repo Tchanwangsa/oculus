@@ -9,6 +9,7 @@ pub const OKTA_TOTP_SECRET: &str = "okta.totp_secret";
 pub const SESSION_CANVAS: &str = "session.canvas";
 pub const SESSION_SSO: &str = "session.sso";
 pub const SESSION_ED: &str = "session.ed";
+pub const MUSIC_SPOTIFY: &str = "music.spotify";
 
 /// The Okta sign-in's three values. They are written only by `okta_save` and
 /// `okta_forget`, never by the generic `store` and `delete`.
@@ -30,7 +31,13 @@ pub const KNOWN: &[&str] = &[
     SESSION_CANVAS,
     SESSION_SSO,
     SESSION_ED,
+    MUSIC_SPOTIFY,
 ];
+
+/// The names `get` reads back, to the app alone: Spotify's stored
+/// credentials, which librespot must hold to log in and which no keyd route
+/// could attach for it. Never a cloud key, an Okta value or a session.
+pub const READABLE: &[&str] = &[MUSIC_SPOTIFY];
 
 pub fn is_known(name: &str) -> bool {
     KNOWN.contains(&name)
@@ -120,6 +127,16 @@ mod tests {
         assert_eq!(seen.len(), LEGACY.len());
         assert!(LEGACY.iter().all(|l| is_known(l.secret)));
         assert!(LEGACY.iter().all(|l| !SESSIONS.contains(&l.secret)));
+    }
+
+    #[test]
+    fn only_the_spotify_credentials_are_readable() {
+        assert_eq!(READABLE, [MUSIC_SPOTIFY]);
+        for name in READABLE {
+            assert!(is_known(name));
+            assert!(!OKTA.contains(name) && !SESSIONS.contains(name));
+            assert!(LEGACY.iter().all(|l| l.secret != *name));
+        }
     }
 
     #[test]

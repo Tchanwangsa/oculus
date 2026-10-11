@@ -5,6 +5,7 @@ pub mod embed;
 pub mod harness;
 pub mod lectures;
 pub mod library;
+pub mod music;
 pub mod pages;
 pub mod parse;
 pub mod providers;
@@ -40,6 +41,7 @@ pub fn run() {
         .manage(sync::scrape::VideoCancels::default())
         .manage(shell::browser::BrowserState::default())
         .manage(shell::usage::UsageState::default())
+        .manage(music::MusicState::default())
         .setup(|app| {
             // Give the parse and embed seams a window to emit progress to;
             // headless (CLI) runs never bind, so their emits are no-ops.
@@ -230,13 +232,26 @@ pub fn run() {
             shell::browser::commands::browser_find,
             shell::browser::commands::browser_find_clear,
             shell::browser::commands::browser_close_tab,
+            music::commands::music_state,
+            music::commands::music_login,
+            music::commands::music_connect,
+            music::commands::music_disconnect,
+            music::commands::music_sign_out,
+            music::commands::music_play_pause,
+            music::commands::music_next,
+            music::commands::music_prev,
+            music::commands::music_seek,
+            music::commands::music_volume,
+            music::commands::music_play_context,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // Don't let a CLI agent outlive the window.
+            // Don't let a CLI agent outlive the window, or the Spotify
+            // device linger in Spotify's device list.
             if matches!(event, tauri::RunEvent::Exit) {
                 harness::app::shutdown(app_handle);
+                music::shutdown(app_handle);
             }
         });
 }
