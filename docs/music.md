@@ -2,8 +2,8 @@
 
 Spotify played natively: Oculus is a Spotify Connect device ("Oculus")
 through librespot, with audio out of CoreAudio and no Spotify app running.
-Spotify's Web API adds the account's playlists and search
-([music-web.md](./music-web.md), with the Connect device list).
+The same session lists the account's playlists, searches and lists its
+Connect devices ([music-library.md](./music-library.md)).
 Premium only, and off until Settings → Music turns it on. A session starts
 from `music_connect`, a finished `music_login`, or at startup while that
 switch is on.
@@ -20,7 +20,7 @@ switch is on.
 | Connect devices and transfer | `app/src-tauri/src/music/devices.rs` |
 | The output on this Mac: the choice, cpal's devices, the player's sink | `app/src-tauri/src/music/audio/` |
 | A track and its cover URL | `app/src-tauri/src/music/track.rs` |
-| The Web API: Login5 token, rate-limit gate, playlists, search | `app/src-tauri/src/music/web/` |
+| The library: rate-limit gate, playlists, search | `app/src-tauri/src/music/library/` |
 | The duck a focus mode calls | `app/src-tauri/src/music/duck.rs` |
 | The OAuth login and its callback on port 8898 | `app/src-tauri/src/music/login.rs` |
 | The stored credentials in keyd; keyd's `get` and its allowlist | `app/src-tauri/src/music/credentials.rs`, `app/keyd/core/src/ops/get.rs`, `app/keyd/core/src/names.rs` |
@@ -69,15 +69,14 @@ switch is on.
   a popover to its right: the track, seek, previous / play-pause / next,
   volume with the device button, and "Open player".
 - **The device button** (`DeviceMenu`, ending the volume row here and on
-  `/music`) opens "Spotify devices" (active checked, a click transfers, a
-  refresh) and "Output on this Mac" ("System default (<device>)", then each
-  output). Both lists are fetched on open, never on a timer; errors sit
-  inline. While another device plays, the button is brand-tinted, "Playing on
+  `/music`) opens "Spotify devices" (active checked, a click transfers) and
+  "Output on this Mac" ("System default (<device>)", then each output). Both
+  lists are read on open, never on a timer; errors sit inline. While another device plays, the button is brand-tinted, "Playing on
   <device>" shows under the volume, and the transport stays enabled.
 - **"Open player" opens `/music` beside the page** (`openBeside`); its
   `recentKey` is `music`, so there is one player item however it is opened.
   The page adds the album, elapsed and total, shuffle and repeat, the
-  account's playlists and a search ([music-web.md](./music-web.md)), and,
+  account's playlists and a search ([music-library.md](./music-library.md)), and,
   with no session or track, a "Not connected" view linking to Settings → Music.
 - **The clock ticks in the UI**: `useMusicPosition` re-renders on each whole
   second of `positionNow` while playing, the pane is on screen and the
@@ -168,7 +167,7 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
 3. Every attempt gets a new `Session`, handed to the player with
    `set_session`: a Session cannot be reused once its Spirc has ended. Each
    session subscribes to the Connect cluster before its Spirc starts
-   ([music-web.md](./music-web.md#the-device-list-is-spotifys-pushed-cluster)).
+   ([music-library.md](./music-library.md#the-device-list-is-spotifys-pushed-cluster)).
 4. A connection that drops without a stop is rebuilt after a backoff of 2 s
    doubling to 60 s, reset once a connection has lived a minute; the snapshot
    says it is reconnecting.
@@ -274,6 +273,10 @@ mean a track will not be heard (audio key, decrypt, load, availability,
 Login5's `INVALID_CREDENTIALS`) into the snapshot's `error`. The player's
 `Unavailable` event does the same.
 
+Every line the music module prints goes through `elog!` (`music/mod.rs`),
+which drops the line rather than panicking when stderr is a closed pipe, as
+`eprintln!` does.
+
 ## Covers come from Spotify's image CDN
 
 `cover_url` is `https://i.scdn.co/image/<hex file id>` for the album's largest
@@ -297,11 +300,11 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_play_context(uri)` | Activates the device, loads a `spotify:` context and plays it |
 | `music_play_track(uri, context_uri?)` | Plays a track from its place in the context, or alone without one |
 | `music_duck(level?)` | A level ducks to that share of the kept volume; null restores it; nothing while inactive |
-| `music_playlists(refresh)`, `music_search(query)` | The Web API's lists ([music-web.md](./music-web.md)) |
-| `music_devices(refresh)`, `music_transfer(device_id)` | Connect devices; move playback and play ([music-web.md](./music-web.md#the-device-list-is-spotifys-pushed-cluster)) |
+| `music_playlists(refresh)`, `music_search(query)` | The playlists, kept until `refresh`; ten playlists, albums and tracks ([music-library.md](./music-library.md)) |
+| `music_devices()`, `music_transfer(device_id)` | Connect devices from the last push; move playback and play ([music-library.md](./music-library.md#the-device-list-is-spotifys-pushed-cluster)) |
 | `music_outputs()`, `music_set_output(name?)` | This Mac's outputs, the default marked; choose one, null for the system default |
 
-Playback and Web API commands fail with "Not connected to Spotify" without a
+Playback and library commands fail with "Not connected to Spotify" without a
 session.
 
 ## Gotchas
@@ -317,3 +320,4 @@ session.
 - A track URI is not a context librespot can load — `music_play_track` uses its album, or `from_tracks`.
 - librespot's rodio sink `unwrap`s a named device that is gone and hangs on a dead stream — the sink in `audio/` replaces it.
 - `.gitignore` ignores every `output/` directory — the output module is `audio/`.
+- `eprintln!` panics on a closed stderr — use `elog!` in the music module.

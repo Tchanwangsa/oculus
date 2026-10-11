@@ -61,7 +61,7 @@ pub(super) fn open(name: Option<&str>) -> Result<Open, String> {
     let dead = Arc::new(AtomicBool::new(false));
     let flag = dead.clone();
     let on_error = move |e: cpal::StreamError| {
-        eprintln!("[music] audio output: {e}");
+        elog!("[music] audio output: {e}");
         if matches!(e, cpal::StreamError::DeviceNotAvailable) {
             flag.store(true, Ordering::Release);
         }

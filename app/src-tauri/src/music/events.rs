@@ -10,7 +10,7 @@ use super::track;
 pub(super) async fn run(app: AppHandle, id: u64, mut rx: PlayerEventChannel) {
     while let Some(event) = rx.recv().await {
         if let PlayerEvent::Unavailable { track_id, .. } = &event {
-            eprintln!("[music] track unavailable: {}", track_id.to_uri());
+            elog!("[music] track unavailable: {}", track_id.to_uri());
         }
         if let PlayerEvent::VolumeChanged { volume } = &event {
             state::volume_seen(&app, percent(*volume));

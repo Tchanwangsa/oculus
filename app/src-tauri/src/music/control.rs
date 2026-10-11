@@ -68,7 +68,7 @@ async fn pull(app: &AppHandle) -> Result<(), String> {
         .await
         .is_ok_and(|r| r.is_ok());
     if !landed {
-        eprintln!("[music] Spotify's transfer did not arrive within 5 s; taking over locally");
+        elog!("[music] Spotify's transfer did not arrive within 5 s; taking over locally");
         state::with_spirc(app, |spirc| spirc.activate())?;
     }
     Ok(())

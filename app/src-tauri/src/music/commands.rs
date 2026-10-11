@@ -12,10 +12,10 @@ use tauri::AppHandle;
 use super::audio::{self, OutputDevice};
 use super::control::{self, Need};
 use super::devices::{self, Device};
+use super::library::{self, Playlist, SearchResults};
 use super::login::{self, LoginError};
 use super::session::{self, Start};
 use super::state::{self, Snapshot};
-use super::web::{self, Playlist, SearchResults};
 use crate::runtime::blocking;
 
 /// For the frontend's mount, which may have missed earlier events.
@@ -40,7 +40,7 @@ pub fn music_login(app: AppHandle) {
         let client_id = SessionConfig::default().client_id;
         let result = login::authorize(&client_id, &cancel, |url| {
             if let Err(e) = tauri_plugin_opener::open_url(url, None::<&str>) {
-                eprintln!("[music] could not open the Spotify login: {e}");
+                elog!("[music] could not open the Spotify login: {e}");
             }
         });
         if !state::end_login(&app, &cancel) {
@@ -53,7 +53,7 @@ pub fn music_login(app: AppHandle) {
             }
             Err(LoginError::Cancelled) => state::update(&app, |s| s.connecting = false),
             Err(e) => {
-                eprintln!("[music] {e}");
+                elog!("[music] {e}");
                 state::update(&app, |s| {
                     s.connecting = false;
                     s.error = Some(e.to_string());
@@ -241,20 +241,20 @@ async fn load(app: &AppHandle, request: LoadRequest) -> Result<(), String> {
 /// again only on `refresh`.
 #[tauri::command]
 pub async fn music_playlists(app: AppHandle, refresh: bool) -> Result<Vec<Playlist>, String> {
-    Ok(web::playlists(&app, refresh).await?)
+    Ok(library::playlists(&app, refresh).await?)
 }
 
 /// Playlists, albums and tracks matching `query`, ten of each.
 #[tauri::command]
 pub async fn music_search(app: AppHandle, query: String) -> Result<SearchResults, String> {
-    Ok(web::search(&app, &query).await?)
+    Ok(library::search(&app, &query).await?)
 }
 
-/// The account's Connect devices: the last pushed cluster, or the Web API's
-/// list on `refresh` or before the first push.
+/// The account's Connect devices from the last pushed cluster; only this
+/// device until the first push.
 #[tauri::command]
-pub async fn music_devices(app: AppHandle, refresh: bool) -> Result<Vec<Device>, String> {
-    devices::list(&app, refresh).await
+pub fn music_devices(app: AppHandle) -> Result<Vec<Device>, String> {
+    devices::list(&app)
 }
 
 /// Moves playback to `device_id` (this device's id pulls it here) and plays.

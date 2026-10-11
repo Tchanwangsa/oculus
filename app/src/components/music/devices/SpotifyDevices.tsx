@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowClockwise } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
 import { FilterRow } from "@/components/ui/filter/FilterPopover";
 import { music, type MusicDevice } from "@/lib/music";
 import { DeviceIcon } from "./deviceIcon";
@@ -8,38 +6,27 @@ import { MenuGroup } from "./MenuGroup";
 
 /**
  * The account's Spotify Connect devices, the active one checked; a click
- * moves playback there. Asked for once when the menu opens: Rust answers from
- * Spotify's pushed device list, and the refresh asks the Web API, which is
- * rate-limited.
+ * moves playback there. Read once when the menu opens from the device list
+ * Spotify last pushed, which lists only this Mac until the first push.
  */
 export function SpotifyDevices({ onMoved }: { onMoved: () => void }) {
   const [devices, setDevices] = useState<MusicDevice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const seq = useRef(0);
 
-  const load = useCallback((refresh: boolean) => {
-    const id = ++seq.current;
-    setBusy(true);
-    setError(null);
-    music.devices(refresh).then(
-      (list) => {
-        if (id !== seq.current) return;
-        setDevices(list);
-        setBusy(false);
-      },
-      (e: unknown) => {
-        if (id !== seq.current) return;
-        setError(String(e));
-        setBusy(false);
-      },
+  useEffect(() => {
+    let live = true;
+    music.devices().then(
+      (list) => live && setDevices(list),
+      (e: unknown) => live && setError(String(e)),
     );
+    return () => {
+      live = false;
+    };
   }, []);
 
-  useEffect(() => load(false), [load]);
-
   const move = (device: MusicDevice) => {
-    if (device.active) return;
+    if (device.active || busy) return;
     setError(null);
     setBusy(true);
     music.transfer(device.id).then(onMoved, (e: unknown) => {
@@ -49,20 +36,7 @@ export function SpotifyDevices({ onMoved }: { onMoved: () => void }) {
   };
 
   return (
-    <MenuGroup
-      label="Spotify devices"
-      action={
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Refresh devices"
-          disabled={busy}
-          onClick={() => load(true)}
-        >
-          <ArrowClockwise size={12} />
-        </Button>
-      }
-    >
+    <MenuGroup label="Spotify devices">
       {devices === null && !error && (
         <p className="px-2 py-1.5 text-xs text-muted-foreground">Looking for devices…</p>
       )}

@@ -179,6 +179,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-web-kit",
  "oculus-keyd-core",
+ "protobuf",
  "regex",
  "rodio",
  "rustls",

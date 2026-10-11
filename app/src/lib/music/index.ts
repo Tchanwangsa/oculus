@@ -154,13 +154,13 @@ export const music = {
   /** A `spotify:track:…`, from its place in `contextUri` when given. */
   playTrack: (uri: string, contextUri: string | null = null) =>
     invoke("music_play_track", { uri, contextUri }),
-  /** Web API calls, rate-limited by Spotify: Rust keeps the playlists after
-   *  the first fetch, and a 429 refuses every call until its wait is over. */
+  /** Calls Spotify can rate-limit: Rust keeps the playlists after the first
+   *  fetch, and a 429 refuses every call until its wait is over. */
   playlists: (refresh = false) => invoke<MusicPlaylist[]>("music_playlists", { refresh }),
   search: (query: string) => invoke<MusicSearchResults>("music_search", { query }),
-  /** The account's Connect devices: Spotify's pushed list, or the Web API's
-   *  on `refresh` (rate-limited) or before the first push. */
-  devices: (refresh = false) => invoke<MusicDevice[]>("music_devices", { refresh }),
+  /** The account's Connect devices from Spotify's last pushed list; only
+   *  this device until the first push. Costs no call. */
+  devices: () => invoke<MusicDevice[]>("music_devices"),
   /** Moves playback to the device and plays; this device's id pulls it here. */
   transfer: (deviceId: string) => invoke("music_transfer", { deviceId }),
   outputs: () => invoke<MusicOutput[]>("music_outputs"),

@@ -8,7 +8,7 @@ use log::Level;
 use super::audio::{fallback_message, resolve, Choice};
 use super::control::{step, Need, Step};
 use super::credentials::Saved;
-use super::devices::{connect_kind, from_cluster, web_kind};
+use super::devices::{connect_kind, from_cluster, with_this};
 use super::duck::Duck;
 use super::events::apply;
 use super::login::{callback_outcome, LoginError};
@@ -306,10 +306,22 @@ fn device_types_map_to_the_pickers_kinds() {
     assert_eq!(connect_kind(4), "speaker");
     assert_eq!(connect_kind(5), "tv");
     assert_eq!(connect_kind(99), "other");
-    assert_eq!(web_kind("Smartphone"), "phone");
-    assert_eq!(web_kind("CastAudio"), "speaker");
-    assert_eq!(web_kind("Computer"), "computer");
-    assert_eq!(web_kind("Toaster"), "other");
+}
+
+#[test]
+fn before_the_first_push_the_list_is_this_device_alone() {
+    let s = Snapshot {
+        active: true,
+        volume: 40,
+        ..Snapshot::default()
+    };
+    let list = with_this(Vec::new(), "me", &s);
+    assert_eq!(list.len(), 1);
+    assert!(list[0].is_this && list[0].active);
+    assert_eq!(
+        (list[0].id.as_str(), list[0].name.as_str(), list[0].volume),
+        ("me", "Oculus", Some(40))
+    );
 }
 
 #[test]

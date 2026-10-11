@@ -237,7 +237,7 @@ impl Link<'_> {
                             .await
                             .is_err()
                         {
-                            eprintln!("[music] the Spotify device did not shut down within 10 s");
+                            elog!("[music] the Spotify device did not shut down within 10 s");
                         }
                         session.shutdown();
                         return End::Stopped;
@@ -247,7 +247,7 @@ impl Link<'_> {
                     if connected_at.elapsed() >= STABLE_AFTER {
                         backoff = BACKOFF_MIN;
                     }
-                    eprintln!(
+                    elog!(
                         "[music] the Spotify connection dropped after {} s; reconnecting in {} s",
                         connected_at.elapsed().as_secs(),
                         backoff.as_secs()
@@ -263,14 +263,14 @@ impl Link<'_> {
                     });
                 }
                 Err(e) if is_auth_error(&e) => {
-                    eprintln!("[music] Spotify refused the login: {e}");
+                    elog!("[music] Spotify refused the login: {e}");
                     session.shutdown();
                     return End::NeedsLogin(Some(format!(
                         "Spotify refused the login ({e}). Log in again."
                     )));
                 }
                 Err(e) => {
-                    eprintln!(
+                    elog!(
                         "[music] connecting to Spotify failed: {e}; retrying in {} s",
                         backoff.as_secs()
                     );
@@ -300,7 +300,7 @@ fn keep(app: &AppHandle, id: u64, saved: Saved) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(why) = blocking::run(move || credentials::save(&saved)).await {
-            eprintln!("[music] could not keep the Spotify login: {why}");
+            elog!("[music] could not keep the Spotify login: {why}");
             state::update_run(&app, id, |s| {
                 s.error = Some(format!("Signed in, but the login was not kept: {why}"));
             });
