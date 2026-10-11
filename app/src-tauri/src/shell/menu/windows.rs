@@ -4,6 +4,29 @@
 
 use super::*;
 
+#[cfg(any(target_os = "windows", test))]
+pub(super) fn menu_label<'a>(
+    text: &str,
+    accelerator: Option<&'a str>,
+) -> (String, Option<&'a str>) {
+    let Some(key) = accelerator else {
+        return (text.to_string(), None);
+    };
+    if !key.contains("Ctrl") {
+        return (text.to_string(), Some(key));
+    }
+    // The host message loop runs TranslateAccelerator before WebView2 sees
+    // keys. Custom Ctrl shortcuts belong only to the controller callback.
+    let label = key
+        .replace("CmdOrCtrl", "Ctrl")
+        .replace("Shift+Ctrl+", "Ctrl+Shift+")
+        .replace("BracketLeft", "[")
+        .replace("BracketRight", "]")
+        .replace("Equal", "=")
+        .replace("Minus", "-");
+    (format!("{text}\t{label}"), None)
+}
+
 #[derive(Debug, PartialEq)]
 enum Shortcut {
     Item(&'static str),
@@ -122,6 +145,33 @@ pub(crate) fn install(webview: &tauri::Webview<tauri::Wry>, page: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_ctrl_keys_are_labels_without_native_accelerators() {
+        for key in [
+            "CmdOrCtrl+K",
+            "CmdOrCtrl+T",
+            "CmdOrCtrl+A",
+            "CmdOrCtrl+Z",
+            "CmdOrCtrl+F",
+            "Shift+CmdOrCtrl+Z",
+            "Ctrl+Tab",
+            "Ctrl+Shift+Y",
+        ] {
+            let (label, native) = menu_label("Action", Some(key));
+            assert!(label.starts_with("Action\t"));
+            assert!(label.contains("Ctrl"));
+            assert_eq!(native, None, "the native menu must not consume {key}");
+        }
+        assert_eq!(
+            menu_label("Redo", Some("Shift+CmdOrCtrl+Z")),
+            ("Redo\tCtrl+Shift+Z".into(), None)
+        );
+        assert_eq!(
+            menu_label("Exit", Some("Alt+F4")),
+            ("Exit".into(), Some("Alt+F4"))
+        );
+    }
 
     #[test]
     fn shell_shortcuts_work_in_app_and_browser_pages() {

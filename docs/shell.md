@@ -135,7 +135,9 @@ while Ctrl+Shift+Z is Redo.
   WebView2 controllers** (`app/src-tauri/src/shell/menu/windows.rs`), because
   focused webview keys need not reach the host's menu message loop. It invokes
   the same menu handler after the callback returns, suppresses repeated presses,
-  and leaves Ctrl+Alt combinations alone for AltGr. Browser pages keep their
+  and leaves Ctrl+Alt combinations alone for AltGr. Custom Ctrl menu items show
+  shortcut labels without native accelerators, so the host loop cannot consume
+  them before the controller applies its policy. Browser pages keep their
   Ctrl+Z, Ctrl+A, clipboard and find keys; app tab, navigation and zoom keys
   reach the shell.
 - **A browser page gets ⌘-keys before the menu**, as in Safari, so a site's

@@ -78,6 +78,23 @@ pub const BACK_EVENT: &str = "menu-back";
 pub const FORWARD_EVENT: &str = "menu-forward";
 pub const ADDRESS_EVENT: &str = "menu-address";
 
+fn item<R: Runtime>(
+    app: &AppHandle<R>,
+    id: impl Into<tauri::menu::MenuId>,
+    text: impl AsRef<str>,
+    enabled: bool,
+    accelerator: Option<impl AsRef<str>>,
+) -> tauri::Result<MenuItem<R>> {
+    #[cfg(target_os = "windows")]
+    {
+        let (text, accelerator) =
+            windows::menu_label(text.as_ref(), accelerator.as_ref().map(AsRef::as_ref));
+        MenuItem::with_id(app, id, text, enabled, accelerator)
+    }
+    #[cfg(not(target_os = "windows"))]
+    MenuItem::with_id(app, id, text, enabled, accelerator)
+}
+
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     #[cfg(target_os = "macos")]
     let pkg = app.package_info();
@@ -93,15 +110,15 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         "File",
         true,
         &[
-            &MenuItem::with_id(app, SEARCH, "Search…", true, Some("CmdOrCtrl+K"))?,
+            &item(app, SEARCH, "Search…", true, Some("CmdOrCtrl+K"))?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?,
+            &item(app, NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?,
             // The side panel of the tab in front, not a second tab.
-            &MenuItem::with_id(app, SIDE_PANEL, "Side Panel", true, Some(SIDE_PANEL_KEY))?,
-            &MenuItem::with_id(app, CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
+            &item(app, SIDE_PANEL, "Side Panel", true, Some(SIDE_PANEL_KEY))?,
+            &item(app, CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
             // Always enabled: only the frontend knows if there is anything
             // to reopen.
-            &MenuItem::with_id(
+            &item(
                 app,
                 REOPEN_TAB,
                 "Reopen Closed Tab",
@@ -110,10 +127,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             )?,
             // Ignored by the frontend outside a browser tab, rather than
             // disabled, so Rust needn't track which tab is in front.
-            &MenuItem::with_id(app, ADDRESS, "Open Location…", true, Some("CmdOrCtrl+L"))?,
+            &item(app, ADDRESS, "Open Location…", true, Some("CmdOrCtrl+L"))?,
             &PredefinedMenuItem::separator(app)?,
             // Not the predefined item: muda hard-wires ⌘W onto that one.
-            &MenuItem::with_id(
+            &item(
                 app,
                 CLOSE_WINDOW,
                 "Close Window",
@@ -123,7 +140,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             #[cfg(target_os = "windows")]
             &PredefinedMenuItem::separator(app)?,
             #[cfg(target_os = "windows")]
-            &MenuItem::with_id(app, EXIT, "Exit", true, Some("Alt+F4"))?,
+            &item(app, EXIT, "Exit", true, Some("Alt+F4"))?,
         ],
     )?;
 
@@ -136,17 +153,17 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             // Undo, Redo and Select All are not the predefined items: those
             // hand ⌘Z to WebKit's own undo stack, which a note's history never
             // fills. The frontend routes them, bar a focused browser page (`edit`).
-            &MenuItem::with_id(app, UNDO, "Undo", true, Some("CmdOrCtrl+Z"))?,
-            &MenuItem::with_id(app, REDO, "Redo", true, Some("Shift+CmdOrCtrl+Z"))?,
+            &item(app, UNDO, "Undo", true, Some("CmdOrCtrl+Z"))?,
+            &item(app, REDO, "Redo", true, Some("Shift+CmdOrCtrl+Z"))?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::cut(app, None)?,
             &PredefinedMenuItem::copy(app, None)?,
             &PredefinedMenuItem::paste(app, None)?,
-            &MenuItem::with_id(app, SELECT_ALL, "Select All", true, Some("CmdOrCtrl+A"))?,
+            &item(app, SELECT_ALL, "Select All", true, Some("CmdOrCtrl+A"))?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, FIND, "Find…", true, Some("CmdOrCtrl+F"))?,
-            &MenuItem::with_id(app, FIND_NEXT, "Find Next", true, Some("CmdOrCtrl+G"))?,
-            &MenuItem::with_id(
+            &item(app, FIND, "Find…", true, Some("CmdOrCtrl+F"))?,
+            &item(app, FIND_NEXT, "Find Next", true, Some("CmdOrCtrl+G"))?,
+            &item(
                 app,
                 FIND_PREV,
                 "Find Previous",
@@ -163,8 +180,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         "View",
         true,
         &[
-            &MenuItem::with_id(app, RELOAD, "Reload Page", true, Some("CmdOrCtrl+R"))?,
-            &MenuItem::with_id(
+            &item(app, RELOAD, "Reload Page", true, Some("CmdOrCtrl+R"))?,
+            &item(
                 app,
                 HARD_RELOAD,
                 "Reload Ignoring Cache",
@@ -173,8 +190,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             )?,
             &PredefinedMenuItem::separator(app)?,
             // Page history on a browser tab, the pane's elsewhere.
-            &MenuItem::with_id(app, BACK, "Back", true, Some("CmdOrCtrl+BracketLeft"))?,
-            &MenuItem::with_id(
+            &item(app, BACK, "Back", true, Some("CmdOrCtrl+BracketLeft"))?,
+            &item(
                 app,
                 FORWARD,
                 "Forward",
@@ -182,9 +199,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 Some("CmdOrCtrl+BracketRight"),
             )?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, ZOOM_IN, "Zoom In", true, Some("CmdOrCtrl+Equal"))?,
-            &MenuItem::with_id(app, ZOOM_OUT, "Zoom Out", true, Some("CmdOrCtrl+Minus"))?,
-            &MenuItem::with_id(app, ZOOM_RESET, "Actual Size", true, Some("CmdOrCtrl+0"))?,
+            &item(app, ZOOM_IN, "Zoom In", true, Some("CmdOrCtrl+Equal"))?,
+            &item(app, ZOOM_OUT, "Zoom Out", true, Some("CmdOrCtrl+Minus"))?,
+            &item(app, ZOOM_RESET, "Actual Size", true, Some("CmdOrCtrl+0"))?,
         ],
     )?;
 
@@ -192,7 +209,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     // to the frontend.
     let slots = (1..=TAB_SLOTS)
         .map(|n| {
-            MenuItem::with_id(
+            item(
                 app,
                 format!("{TAB_SLOT}{n}"),
                 format!("Tab {n}"),
@@ -202,19 +219,19 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         })
         .collect::<tauri::Result<Vec<_>>>()?;
 
-    let last = MenuItem::with_id(app, LAST_TAB, "Last Tab", true, Some("CmdOrCtrl+9"))?;
+    let last = item(app, LAST_TAB, "Last Tab", true, Some("CmdOrCtrl+9"))?;
 
     // ⌃, not ⌘: these walk the side panel's items, not the strip. The
     // frontend ignores them unless the side panel has focus.
     let side_separator = PredefinedMenuItem::separator(app)?;
-    let side_next = MenuItem::with_id(
+    let side_next = item(
         app,
         SIDE_NEXT,
         "Next Side Panel Item",
         true,
         Some("Ctrl+Tab"),
     )?;
-    let side_prev = MenuItem::with_id(
+    let side_prev = item(
         app,
         SIDE_PREV,
         "Previous Side Panel Item",
