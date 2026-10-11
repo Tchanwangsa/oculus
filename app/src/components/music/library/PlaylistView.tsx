@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { SkeletonRows } from "@/components/ui/layout/PageParts";
 import { useTrackRows } from "@/hooks/music/useTrackRows";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
-import { music, playlistSubtitle, trackPages, type MusicPlaylist } from "@/lib/music";
+import { music, trackPages } from "@/lib/music";
 import { useMusicStore } from "@/stores/music/musicStore";
 import { PlaylistCover } from "./PlaylistCover";
 import { TrackRow } from "./TrackRow";
@@ -14,19 +14,29 @@ import { TrackRow } from "./TrackRow";
 const ROW = 48;
 const NO_TRACKS: string[] = [];
 
+/** A playlist or album to open: what its header shows. */
+export interface OpenedList {
+  uri: string;
+  name: string;
+  subtitle: string;
+  images: string[];
+}
+
+const isAlbum = (uri: string) => uri.startsWith("spotify:album:");
+
 /**
- * One playlist opened in the library: its header with a Play button, and its
- * tracks as a virtual list, since a playlist runs to thousands. Rust sends
- * every track's URI at once; rows are fetched a hundred at a time as they
- * scroll into view (`useTrackRows`). A row plays from its place in the
- * playlist.
+ * One playlist or album opened in the library: its header with a Play
+ * button, and its tracks as a virtual list, since a playlist runs to
+ * thousands. Rust sends every track's URI at once; rows are fetched a hundred
+ * at a time as they scroll into view (`useTrackRows`). A row plays from its
+ * place in the playlist or album.
  */
 export function PlaylistView({
   playlist,
   currentUri,
   disabled,
 }: {
-  playlist: MusicPlaylist;
+  playlist: OpenedList;
   currentUri: string | null;
   disabled: boolean;
 }) {
@@ -39,7 +49,8 @@ export function PlaylistView({
     let live = true;
     setUris(null);
     setError(null);
-    music.playlistTracks(playlist.uri).then(
+    const tracks = isAlbum(playlist.uri) ? music.albumTracks : music.playlistTracks;
+    tracks(playlist.uri).then(
       (list) => live && setUris(list),
       (e: unknown) => live && setError(String(e)),
     );
@@ -63,16 +74,14 @@ export function PlaylistView({
   const rows = useTrackRows(list, pages);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 @3xl:min-h-0 @3xl:flex-1">
       <div className="flex items-center gap-3 px-2">
         <PlaylistCover images={playlist.images} className="size-14 rounded-lg" iconSize={20} />
         <div className="min-w-0 flex-1">
           <p className="truncate font-display text-sm font-semibold text-foreground">
             {playlist.name}
           </p>
-          <p className="truncate text-xs text-muted-foreground tabular-nums">
-            {playlistSubtitle(playlist)}
-          </p>
+          <p className="truncate text-xs text-muted-foreground tabular-nums">{playlist.subtitle}</p>
         </div>
         <Button
           size="xs"
@@ -88,9 +97,14 @@ export function PlaylistView({
       ) : uris === null ? (
         <SkeletonRows count={4} rowClassName="h-11" className="px-2" />
       ) : uris.length === 0 ? (
-        <p className="px-2 text-xs text-muted-foreground">No tracks in this playlist.</p>
+        <p className="px-2 text-xs text-muted-foreground">
+          No tracks in this {isAlbum(playlist.uri) ? "album" : "playlist"}.
+        </p>
       ) : (
-        <div ref={scrollRef} className="max-h-96 overflow-y-auto">
+        <div
+          ref={scrollRef}
+          className="max-h-96 overflow-y-auto @3xl:max-h-none @3xl:min-h-0 @3xl:flex-1"
+        >
           <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
             {items.map((item) => {
               const uri = list[item.index];

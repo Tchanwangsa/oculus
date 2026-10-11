@@ -1,7 +1,9 @@
 import { MagnifyingGlass, X } from "@phosphor-icons/react";
 
-/** The pill search field. It searches on Enter only: every search is a call
- *  to Spotify, which can rate-limit Oculus. Escape clears. */
+/** The pill search field. Enter searches; `MusicLibrary` also searches after
+ *  a pause in typing, never per keystroke, since every search is a call to
+ *  Spotify, which can rate-limit Oculus. Escape, ×, or emptying the field
+ *  clears. */
 export function LibrarySearch({
   value,
   onChange,

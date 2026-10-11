@@ -87,7 +87,7 @@ export interface MusicTrackRow {
 export interface MusicSearchItem {
   uri: string;
   name: string;
-  /** The owner, the artists, or the artists and album. */
+  /** The owner, the artists, the artists and album, or "Artist". */
   subtitle: string;
   image_url: string | null;
   /** A track's album, so the track plays on into it. */
@@ -95,9 +95,19 @@ export interface MusicSearchItem {
 }
 
 export interface MusicSearchResults {
-  playlists: MusicSearchItem[];
-  albums: MusicSearchItem[];
   tracks: MusicSearchItem[];
+  artists: MusicSearchItem[];
+  albums: MusicSearchItem[];
+  playlists: MusicSearchItem[];
+}
+
+/** A search group that pages (`music_search_more`). */
+export type MusicSearchKind = "tracks" | "albums" | "playlists";
+
+/** One page of a group; `next_offset` is null on the last. */
+export interface MusicSearchPage {
+  items: MusicSearchItem[];
+  next_offset: number | null;
 }
 
 /** One of the account's Spotify Connect devices (`music_devices`). */
@@ -189,11 +199,14 @@ export const music = {
     invoke<Record<string, string[]>>("music_playlist_covers", { uris }),
   /** Every catalogue track of a playlist as URIs, kept until a refresh. */
   playlistTracks: (uri: string) => invoke<string[]>("music_playlist_tracks", { uri }),
+  albumTracks: (uri: string) => invoke<string[]>("music_album_tracks", { uri }),
   /** Rows by URI, kept once fetched; ask for a page of ~100 at a time. */
   tracks: (uris: string[]) => invoke<Record<string, MusicTrackRow>>("music_tracks", { uris }),
   /** Refused, with the reason, unless Oculus is the device playing. */
   addToQueue: (uri: string) => invoke("music_add_to_queue", { uri }),
   search: (query: string) => invoke<MusicSearchResults>("music_search", { query }),
+  searchMore: (query: string, kind: MusicSearchKind, offset: number) =>
+    invoke<MusicSearchPage>("music_search_more", { query, kind, offset }),
   /** The account's Connect devices from Spotify's last pushed list; only
    *  this device until the first push. Costs no call. */
   devices: () => invoke<MusicDevice[]>("music_devices"),

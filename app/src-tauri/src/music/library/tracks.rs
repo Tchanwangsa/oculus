@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use futures_util::{stream, StreamExt};
 use librespot_core::Session;
+use librespot_protocol::extension_kind::ExtensionKind;
 use tauri::AppHandle;
 
 use super::cache::{lookup, map_for};
@@ -56,7 +57,7 @@ pub(super) async fn rows(
     });
     for batch in missing.chunks(metadata::BATCH) {
         let what = "track metadata";
-        let body = Method::PostProtobuf(metadata::request(batch));
+        let body = Method::PostProtobuf(metadata::request(batch, ExtensionKind::TRACK_V4));
         let answered = match call(app, session, what, metadata::ENDPOINT, body)
             .await
             .and_then(|body| logged(what, metadata::parse(&body)))

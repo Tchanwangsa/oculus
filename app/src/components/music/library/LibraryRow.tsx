@@ -5,7 +5,7 @@ import { PlaylistCover } from "./PlaylistCover";
 import { QueueAction } from "./QueueAction";
 
 /**
- * One playlist, album or track in the player's lists: a click plays it.
+ * One playlist, album or track in the player's lists: a click plays or opens it.
  * A track row can carry its duration and an "Add to queue" action; a row
  * with no `onPlay` (up next) is not a control at all.
  */

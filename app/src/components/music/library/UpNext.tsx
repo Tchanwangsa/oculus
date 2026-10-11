@@ -7,10 +7,11 @@ import { TrackRow } from "./TrackRow";
 const FIRST_PAGE = [0];
 
 /**
- * What plays next, from the snapshot's `up_next`: queued tracks under
- * Queued, then the rest of the context under Next. Rows are not controls:
- * librespot has no command to skip to one. Nothing shows while the list is
- * empty.
+ * What plays next, from the snapshot's `up_next`: queued tracks, then the
+ * rest of the context. The two are labelled Queued and Then only while there
+ * are queued tracks; otherwise it is one list. Rows are not controls:
+ * librespot has no command to skip to one. Shown in the player's queue view,
+ * where it fills the column like the library it replaces.
  */
 export function UpNext({ snapshot }: { snapshot: MusicSnapshot }) {
   const next = snapshot.up_next;
@@ -21,14 +22,15 @@ export function UpNext({ snapshot }: { snapshot: MusicSnapshot }) {
   const rows = useTrackRows(uris, FIRST_PAGE);
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollFade(scrollRef, "y", next.length > 0);
-  if (next.length === 0) return null;
 
   const queued = next.filter((t) => t.queued);
   const rest = next.filter((t) => !t.queued);
-  const group = (label: string, tracks: MusicNextTrack[]) =>
+  const group = (label: string | null, tracks: MusicNextTrack[]) =>
     tracks.length === 0 ? null : (
       <section>
-        <h3 className="px-2 pb-1 text-xs font-medium text-muted-foreground">{label}</h3>
+        {label && (
+          <h3 className="px-2 pb-1 text-xs font-medium text-muted-foreground">{label}</h3>
+        )}
         {tracks.map((t, i) => (
           <TrackRow
             key={`${t.uri}-${i}`}
@@ -43,16 +45,20 @@ export function UpNext({ snapshot }: { snapshot: MusicSnapshot }) {
     );
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 @3xl:min-h-0 @3xl:flex-1">
       <h2 className="flex h-6 items-center px-2 text-xs font-medium text-muted-foreground">
         Up next
       </h2>
-      <div ref={scrollRef} className="max-h-60 overflow-y-auto">
-        <div className="flex flex-col gap-3">
-          {group("Queued", queued)}
-          {group("Next", rest)}
+      {next.length === 0 ? (
+        <p className="px-2 text-xs text-muted-foreground">Nothing up next.</p>
+      ) : (
+        <div ref={scrollRef} className="max-h-96 overflow-y-auto @3xl:max-h-none @3xl:min-h-0 @3xl:flex-1">
+          <div className="flex flex-col gap-3">
+            {group("Queued", queued)}
+            {group(queued.length > 0 ? "Then" : null, rest)}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -2,10 +2,13 @@
 //! with a `BatchedEntityRequest` asking `TRACK_V4` for each track, the
 //! request librespot's `SpClient::get_extended_metadata` sends (and
 //! `get_track_metadata` fills for one track). Each answered entity carries a
-//! `metadata::Track` in its `extension_data`.
+//! `metadata::Track` in its `extension_data`. The same request asking
+//! `ALBUM_V4` for an album answers a `metadata::Album`, whose discs list its
+//! tracks' gids.
 
 use std::collections::HashMap;
 
+use librespot_core::SpotifyId;
 use librespot_protocol::extended_metadata::{
     BatchedEntityRequest, BatchedExtensionResponse, EntityRequest, ExtensionQuery,
 };
@@ -37,15 +40,15 @@ pub struct TrackRow {
     pub(super) album_key: String,
 }
 
-/// The `BatchedEntityRequest` for these tracks.
-pub(super) fn request(uris: &[String]) -> Vec<u8> {
+/// The `BatchedEntityRequest` asking `kind` for each of these entities.
+pub(super) fn request(uris: &[String], kind: ExtensionKind) -> Vec<u8> {
     BatchedEntityRequest {
         entity_request: uris
             .iter()
             .map(|uri| EntityRequest {
                 entity_uri: uri.clone(),
                 query: vec![ExtensionQuery {
-                    extension_kind: EnumOrUnknown::new(ExtensionKind::TRACK_V4),
+                    extension_kind: EnumOrUnknown::new(kind),
                     ..ExtensionQuery::default()
                 }],
                 ..EntityRequest::default()
@@ -72,6 +75,28 @@ pub(super) fn parse(body: &[u8]) -> Result<HashMap<String, TrackRow>, LibraryErr
             let row = row(&data.entity_uri, &track)?;
             Some((data.entity_uri.clone(), row))
         })
+        .collect())
+}
+
+/// The album's tracks as URIs, disc by disc in order; a track without a gid
+/// is left out, and an answer with no album is empty.
+pub(super) fn album_tracks(body: &[u8]) -> Result<Vec<String>, LibraryError> {
+    let response = BatchedExtensionResponse::parse_from_bytes(body)
+        .map_err(|e| LibraryError::Unreadable(e.to_string()))?;
+    let Some(album) = response
+        .extended_metadata
+        .iter()
+        .flat_map(|array| array.extension_data.iter())
+        .find_map(|data| Album::parse_from_bytes(&data.extension_data.as_ref()?.value).ok())
+    else {
+        return Ok(Vec::new());
+    };
+    Ok(album
+        .disc
+        .iter()
+        .flat_map(|disc| disc.track.iter())
+        .filter_map(|track| SpotifyId::from_raw(track.gid()).ok())
+        .map(|id| format!("spotify:track:{}", id.to_base62()))
         .collect())
 }
 

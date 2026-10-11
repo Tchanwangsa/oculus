@@ -74,10 +74,12 @@ switch is on.
   "Output on this Mac" ("System default (<device>)", then each output). Both
   lists are read on open, never on a timer; errors sit inline. While another device plays, the button is brand-tinted, "Playing on
   <device>" shows under the volume, and the transport stays enabled.
-- **"Open player" opens `/music` beside the page** (`openBeside`); its
+- **"Open player" opens `/music` as the page** in the focused pane of the
+  tab in front (`navigateActive`, as the rail's sections do); its
   `recentKey` is `music`, so there is one player item however it is opened.
-  The page adds the album, elapsed and total, shuffle and repeat, what
-  plays next, the account's playlists with their tracks and a search
+  The page adds the album, elapsed and total, shuffle and repeat, a queue
+  button for what plays next, the account's playlists with their tracks and
+  a search, in two columns when the page is wide
   ([music-library.md](./music-library.md)), and,
   with no session or track, a "Not connected" view linking to Settings → Music.
 - **The clock ticks in the UI**: `useMusicPosition` re-renders on each whole
@@ -309,8 +311,8 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_play_track(uri, context_uri?)` | Plays a track from its place in the context (its album, or the playlist it was picked in), or alone without one |
 | `music_add_to_queue(uri)` | Adds a track to the queue; refused while another device plays or nothing does |
 | `music_duck(level?)` | A level ducks to that share of the kept volume; null restores it; nothing while inactive |
-| `music_playlists(refresh)`, `music_search(query)` | The playlists, kept until `refresh`; ten playlists, albums and tracks ([music-library.md](./music-library.md)) |
-| `music_playlist_covers(uris)`, `music_playlist_tracks(uri)`, `music_tracks(uris)` | Covers made for playlists without one; a playlist's track URIs; track rows by URI ([music-library.md](./music-library.md)) |
+| `music_playlists(refresh)`, `music_search(query)`, `music_search_more(query, kind, offset)` | The playlists, kept until `refresh`; up to ten each of tracks, artists, albums and playlists; a page of 20 of one kind and the next offset ([music-library.md](./music-library.md)) |
+| `music_playlist_covers(uris)`, `music_playlist_tracks(uri)`, `music_album_tracks(uri)`, `music_tracks(uris)` | Covers made for playlists without one; a playlist's or album's track URIs; track rows by URI ([music-library.md](./music-library.md)) |
 | `music_devices()`, `music_transfer(device_id)` | Connect devices from the last push; move playback and play ([music-library.md](./music-library.md#the-device-list-is-spotifys-pushed-cluster)) |
 | `music_outputs()`, `music_set_output(name?)` | This Mac's outputs, the default marked; choose one, null for the system default |
 

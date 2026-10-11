@@ -21,7 +21,7 @@ itself is [music.md](./music.md).
 | Queueing, refused while inactive | `app/src-tauri/src/music/commands.rs` (`music_add_to_queue`), `app/src-tauri/src/music/control.rs` |
 | Up next in the snapshot | `app/src-tauri/src/music/state.rs`, `app/src-tauri/src/music/events.rs`, `app/src-tauri/src/music/devices.rs` |
 | The Connect cluster, the device list and transfer | `app/src-tauri/src/music/devices.rs` |
-| Up next, playlists, a playlist's tracks and search under the player | `app/src/components/music/library/` |
+| Up next, playlists, a playlist's tracks and search under the player | `app/src/components/music/library/` (search: `SearchGroups.tsx`, `SearchPages.tsx`; an opened playlist or album: `PlaylistView.tsx`) |
 | Track rows fetched a page at a time | `app/src/hooks/music/useTrackRows.ts` |
 | The device menu | `app/src/components/music/devices/` |
 
@@ -52,14 +52,36 @@ itself is [music.md](./music.md).
   icon shown on the row's hover, a `RowAction` inside the row's button. It
   turns to a brand tick for 1.5 s once queued; a refusal shows as the
   player's error, like any command.
-- **Up next** sits above the playlists while the snapshot's `up_next` has
-  anything: queued tracks under Queued, then the context's under Next,
-  their rows from `music_tracks`. The rows are not controls: librespot has
-  no command to skip to one.
-- **Search runs on Enter only**, never per keystroke. Its results replace the
-  playlists (or the open playlist), grouped Playlists, Albums, Tracks, until
-  the field is cleared (its ×, or Escape). A track plays from its place in
-  its album (`music_play_track` with the album as context).
+- **Up next is behind the queue button** (`QueueToggle`, before the device
+  button on `/music`): while it is on, the snapshot's `up_next` replaces the
+  library: queued tracks, then the context's, labelled Queued and Then only
+  while something is queued, their rows from `music_tracks`, or "Nothing up
+  next." The library stays mounted
+  under it, so an open playlist and a search survive. The rows are not
+  controls: librespot has no command to skip to one.
+- **One list scrolls at a time.** Narrow, the page is one column and the
+  list caps at `max-h-96`; from `@3xl` of the page's own width the player
+  takes a left column and the list fills the height on the right.
+- **Search runs on Enter, or once typing pauses for 500 ms** on a query of
+  more than three characters; never per keystroke, and a pause after Enter
+  does not ask again. Its results replace the
+  playlists (or the open playlist) until the field is cleared (its ×,
+  Escape, or deleting the text). Under All they are grouped Songs, Albums,
+  Playlists, four of each with a "Show all". When more than one group found
+  something, `PillTabs` beside the heading narrow to one group, and a new
+  search starts at All. Rust also parses artist hits; nothing shows them
+  yet.
+- **One group's filter loads more as it scrolls** (`SearchPages`): the first
+  ten from `music_search`, then a page of 20 from `music_search_more` each
+  time the end of the list comes into view, until Spotify names no next
+  page. A failed page shows its error and Try again rather than asking on
+  its own.
+- **A search track plays** from its place in its album (`music_play_track`
+  with the album as context). **An album or playlist opens** to its tracks
+  in the same view a playlist of the account's uses, with Play; Back
+  ("Results for …") returns to the results, which stay mounted under it, so
+  their scroll position and loaded pages survive. An album's tracks come
+  from `music_album_tracks`.
 - Load, track-list and search errors sit inline where the list would be. A
   cover that cannot be made keeps the glyph silently (Rust logs it).
 
@@ -85,8 +107,8 @@ other). A non-2xx answer's first 512 bytes are logged as
 | `GET /playlist/v2/user/<user>/rootlist?decorate=…&from&length=500` | The playlists, as `SpClient::get_rootlist` asks for them, paged while `truncated`, up to 500 |
 | `GET /playlist/v2/playlist/<id>` | A playlist's header when the rootlist carries none for it; its tracks (`SpClient::get_playlist`) |
 | `GET /playlist/v2/playlist/<id>?from&length=500` | The rest of a playlist whose answer is `truncated` |
-| `POST /extended-metadata/v0/extended-metadata` | Track rows, `TRACK_V4` for up to 100 tracks per request (`SpClient::get_extended_metadata`) |
-| `POST https://api-partner.spotify.com/pathfinder/v2/query` (`searchDesktop`) | Search, ten of each type; the one request not sent to spclient |
+| `POST /extended-metadata/v0/extended-metadata` | Track rows, `TRACK_V4` for up to 100 tracks per request (`SpClient::get_extended_metadata`); an album's track list, `ALBUM_V4` for one album |
+| `POST https://api-partner.spotify.com/pathfinder/v2/query` | Search: `searchDesktop` for ten of each type, `searchTracks`, `searchAlbums` or `searchPlaylists` for a page of 20 of one; the one host that is not spclient |
 
 ## The rootlist is decoded with librespot-protocol's playlist4 types
 
@@ -129,6 +151,10 @@ other). A non-2xx answer's first 512 bytes are logged as
   `ExtensionKind::TRACK_V4`, no header, as `SpClient::get_metadata` builds
   it. The answer, a `BatchedExtensionResponse`, wraps a `metadata::Track` in
   each entity's `extension_data`.
+- **An album's tracks** are the same request for the album asking
+  `ALBUM_V4`: its `metadata::Album` lists the tracks' gids disc by disc,
+  turned into `spotify:track:` URIs, and the rows come from `music_tracks`
+  like a playlist's. Not kept: an album is one request each time it opens.
 - **A row** is the track's name, artists' names, album name, duration and
   the album's cover: `album.cover_group` (what librespot reads; `cover`
   when empty), the `DEFAULT` size (300 px), else the largest, as
@@ -163,13 +189,18 @@ SHA-256 of its document (`SEARCH_DESKTOP` in `search.rs`), which changes when
 a web-player release changes the search query. Pathfinder then answers 200
 with a `PersistedQueryNotFound` error (or a 412), shown as "Search needs an
 update". Every other GraphQL error is shown as unreadable, with its messages.
+More of one group is that group's own operation (`searchTracks`,
+`searchAlbums`, `searchPlaylists`) with an `offset`, answered with that group
+alone and `pagingInfo.nextOffset`, null on the last page. Each has its own
+hash, so a release can outdate one and not the others.
 
-To find the current hash: fetch `https://open.spotify.com`, take its
+To find the current hashes: fetch `https://open.spotify.com`, take its
 `web-player.<hash>.js` bundle from `open.spotifycdn.com`, find the
 `xpui-routes-search` chunk in its chunk map, and in that chunk read the hash
-after `"searchDesktop","query",`.
+after each `"<operation>","query",`.
 
-The answer is `{"data": {"searchV2": {"tracksV2", "albumsV2", "playlists"}}}`.
+The answer is `{"data": {"searchV2": {"tracksV2", "artists", "albumsV2",
+"playlists"}}}`.
 A track hit is wrapped as `{"item": {"data": …}}`, the others as
 `{"data": …}`, and a hit whose `__typename` is not its group's (`NotFound`,
 `RestrictedContent`) is dropped. So are null hits and hits without a usable
