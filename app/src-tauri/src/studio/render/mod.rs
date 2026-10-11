@@ -2,8 +2,8 @@
 //! segment, encoded by its own ffmpeg from frames rendered in parallel and
 //! written in order, and cached under its content address, so a re-render
 //! only renders the scenes an edit touched. The segments are joined by a
-//! stream copy beside the narration track, mixed here. Rules:
-//! docs/studio.md, "Rendering a video".
+//! stream copy beside the narration track, mixed here. `RENDERS` keeps the
+//! app to one render per folder. Rules: docs/studio.md, "Rendering a video".
 
 mod audio;
 mod cache;
@@ -17,6 +17,7 @@ mod plan;
 mod progress;
 mod quality;
 mod reorder;
+mod running;
 #[cfg(test)]
 mod tests;
 mod workers;
@@ -33,6 +34,7 @@ use plan::Scene;
 pub use progress::{Outcome, Progress, Report, SegmentReport};
 pub use quality::Quality;
 use quality::Settings;
+pub use running::{Renders, Running, RENDERS};
 
 #[derive(Debug, Clone)]
 pub struct Options {

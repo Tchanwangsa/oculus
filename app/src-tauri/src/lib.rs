@@ -175,6 +175,8 @@ pub fn run() {
             studio::commands::aligner::studio_aligner_download,
             studio::commands::aligner::studio_aligner_cancel,
             studio::commands::aligner::studio_aligner_delete,
+            studio::commands::render::studio_render,
+            studio::commands::render::studio_render_cancel,
             lectures::media::media_server_info,
             pages::retrieval::commands::embed_file,
             pages::retrieval::commands::search_pages,

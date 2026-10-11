@@ -5,8 +5,9 @@ Studio makes lecture videos from scenes written as TSX components.
 frame out, the same pixels on every machine, scene transitions included.
 A narrated scene lasts as long as its narration and can cue elements to its
 words, from clips and timings `oculus studio narrate` makes with a TTS server
-and a local aligner. `oculus studio render` encodes a video to an mp4 with
-ffmpeg, one cached segment per scene. `oculus studio` also renders single
+and a local aligner. `oculus studio render`, or the app's `studio_render`
+command, encodes a video to an mp4 with ffmpeg, one cached segment per
+scene. `oculus studio` also renders single
 frames and contact sheets, lints, and narrates.
 
 ## Where
@@ -31,7 +32,8 @@ frames and contact sheets, lints, and narrates.
 | Narration audio decode and word timing (the aligner, its model download) | `app/src-tauri/src/studio/` (`audio/`, `timing/`), `app/src-tauri/src/runtime/onnx/` |
 | Narrating a video: the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
 | Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
-| Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
+| Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
+| Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`render.rs`, `narrate.rs`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
@@ -796,6 +798,23 @@ with the `Narration` error before any frame renders.
 - **Progress.** A sync `&mut dyn FnMut(Progress)`: `Planned` (segments,
   cached, frames to render, threads), `Segment`, `Frame` (frame of frames
   and frames a second), `Done` per segment in video order, `Muxing`.
+- **From the app.** `studio_render(dir, quality)` (`"draft"` or `"final"`,
+  to `<dir>/renders/<quality>.mp4`, half the cores) runs `render` on a
+  blocking thread, finding ffmpeg like the CLI does plus the app's
+  resources. It resolves to the report (`--json`'s `report`), or `null`
+  when cancelled; it rejects with the failure's message. One render per
+  folder: `render::RENDERS` maps each canonical folder to its quality and
+  an `Arc<AtomicBool>` cancel flag, and a second start for the same folder
+  is refused at once ("a draft render of <dir> is already running"), with
+  no event. A guard frees the folder however the render ends, before the
+  last event. `studio_render_cancel(dir)` sets the flag (false when none
+  runs). Each step is a `studio-render-progress` event `{ dir, phase, ...
+  }`, `dir` as given: `planning` at the start and again with `plan:
+  {segments, cached, frames, threads}`; `rendering` with `{segment, of,
+  scene, frame, frames, fps}` (1-based segment and frame), at most one per
+  100 ms besides each segment's first and last frame; `muxing`; then
+  `complete` with `{path, report}`, `cancelled`, or `error` with `{error}`.
+  Each ending is logged.
 - **Measured** (debug build, 18-core M-series Mac, a 15.5 s narrated
   three-scene 1080p video at 30 fps, 465 frames, 9 render threads; the
   spread is other load on the machine): `draft` (960×540) in 1.7 to 1.8 s
