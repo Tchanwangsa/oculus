@@ -1,11 +1,13 @@
 //! `lint`: load every component, check every scene's props and every
-//! component example, and render each scene at its first and last moment
+//! component example, render each scene at its first and last moment and
+//! the middle of the transition into it, and check its transition values
 //! (no files written). Collects every problem instead of stopping at the
 //! first, each tagged with its scene and component.
 
 use super::Project;
 use crate::error::{Result, StudioError};
-use crate::render::{Engine, RenderOptions, SceneCall};
+use crate::render::{Engine, RenderOptions, SceneCall, scene_frame};
+use crate::transition::check_hold;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fmt;
@@ -69,8 +71,43 @@ impl Project {
         let mut report = LintReport::default();
         let mut failed: HashSet<&str> = HashSet::new();
         let mut checked: HashSet<&str> = HashSet::new();
-        for (index, scene) in self.video.scenes.iter().enumerate() {
+        // A theme or video.json value is reported once, not per scene.
+        let mut transition_seen: HashSet<String> = HashSet::new();
+        let transitions = self.transitions();
+        let scenes = &self.video.scenes;
+        let mut clean = vec![false; scenes.len()];
+        match self.morph_color() {
+            Ok(c) => engine.set_morph_color(c),
+            Err(e) => {
+                transition_seen.insert(e.to_string());
+                report.issues.push(LintIssue {
+                    scene: Some(0),
+                    component: scenes[0].component.clone(),
+                    example: None,
+                    error: e.into(),
+                });
+            }
+        }
+        for (index, scene) in scenes.iter().enumerate() {
             let name = scene.component.as_str();
+            let issue = |error| LintIssue {
+                scene: Some(index),
+                component: name.to_owned(),
+                example: None,
+                error,
+            };
+            let into = transitions[index]
+                .as_ref()
+                .map_err(Clone::clone)
+                .and_then(|t| {
+                    check_hold(index, scene.transition.as_ref(), t.as_ref(), scene.hold)?;
+                    Ok(t.as_ref())
+                });
+            if let Err(e) = &into
+                && transition_seen.insert(e.to_string())
+            {
+                report.issues.push(issue(e.clone().into()));
+            }
             if checked.insert(name) {
                 let loaded = self
                     .components
@@ -80,12 +117,7 @@ impl Project {
                     Ok(()) => lint_examples(&engine, name, &mut report),
                     Err(error) => {
                         failed.insert(name);
-                        report.issues.push(LintIssue {
-                            scene: Some(index),
-                            component: name.to_owned(),
-                            example: None,
-                            error,
-                        });
+                        report.issues.push(issue(error));
                     }
                 }
             }
@@ -94,6 +126,7 @@ impl Project {
             }
             let end = scene.hold - (scene.hold / 2.0).min(1e-3);
             let mut seen: HashSet<String> = HashSet::new();
+            let before = report.issues.len();
             for t in [0.0, end] {
                 let call = SceneCall {
                     component: name,
@@ -102,15 +135,24 @@ impl Project {
                     duration: scene.hold,
                     index,
                 };
-                if let Err(error) = engine.render(call)
+                if let Err(error) = engine.render_checked(call)
                     && seen.insert(error.to_string())
                 {
-                    report.issues.push(LintIssue {
-                        scene: Some(index),
-                        component: name.to_owned(),
-                        example: None,
-                        error,
-                    });
+                    report.issues.push(issue(error));
+                }
+            }
+            clean[index] = report.issues.len() == before;
+            // The transition's middle, once both scenes render on their own.
+            if let Ok(Some(tr)) = into
+                && clean[index]
+                && clean[index - 1]
+                && tr.covers(0.0)
+            {
+                let mid = tr.dur.min(scene.hold) / 2.0;
+                if let Err(error) = scene_frame(&mut engine, scenes, index, Some(tr), mid)
+                    && seen.insert(error.to_string())
+                {
+                    report.issues.push(issue(error));
                 }
             }
         }

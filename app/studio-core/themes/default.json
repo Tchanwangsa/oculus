@@ -63,6 +63,9 @@
       "gentle": { "stiffness": 120, "damping": 20, "mass": 1 },
       "snappy": { "stiffness": 260, "damping": 28, "mass": 1 },
       "bouncy": { "stiffness": 180, "damping": 12, "mass": 1 }
-    }
+    },
+    "transition": { "kind": "dissolve", "dur": 0.7, "easing": "easeInOutCubic", "direction": "left" },
+    "magicMove": "auto",
+    "morphColor": "oklch"
   }
 }

@@ -11,8 +11,12 @@ pub use lint::{LintIssue, LintReport};
 pub use timeline::Timeline;
 
 use crate::error::{Result, StudioError};
+use crate::morph::MorphColor;
 use crate::render::Size;
 use crate::theme::Theme;
+use crate::transition::{
+    MotionSpec, Transition, TransitionError, TransitionSpec, morph_color, resolve,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -26,6 +30,9 @@ pub struct Video {
     /// A bundled theme name, or a `.json` path relative to the project.
     pub theme: String,
     pub scenes: Vec<SceneSpec>,
+    /// Transition defaults for this video, over the theme's.
+    #[serde(default)]
+    pub motion: MotionSpec,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -36,6 +43,9 @@ pub struct SceneSpec {
     pub props: Map<String, Value>,
     /// Seconds the scene lasts.
     pub hold: f64,
+    /// How this scene comes in, over the video's and theme's defaults.
+    #[serde(default)]
+    pub transition: Option<TransitionSpec>,
 }
 
 #[derive(Clone)]
@@ -104,5 +114,20 @@ impl Project {
     /// Total length in seconds.
     pub fn length(&self) -> f64 {
         self.timeline().length()
+    }
+
+    /// The transition into each scene through the cascade (`None` for the
+    /// first scene), or the bad value that stops it.
+    /// The video's `morphColor` (video.json `motion`, then the theme), as
+    /// `<Morph>` uses it.
+    pub(crate) fn morph_color(&self) -> Result<MorphColor, TransitionError> {
+        morph_color(None, &self.video.motion, &self.theme)
+    }
+
+    pub(crate) fn transitions(&self) -> Vec<Result<Option<Transition>, TransitionError>> {
+        let scenes = self.video.scenes.iter().enumerate();
+        scenes
+            .map(|(i, s)| resolve(i, s.transition.as_ref(), &self.video.motion, &self.theme))
+            .collect()
     }
 }

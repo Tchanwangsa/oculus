@@ -12,11 +12,13 @@
 //! # Ok::<(), studio_core::StudioError>(())
 //! ```
 
+mod easing;
 mod error;
 mod fonts;
 mod host;
 mod images;
 mod layout;
+mod morph;
 mod paint;
 mod project;
 mod render;
@@ -24,6 +26,7 @@ mod scene;
 mod schema;
 mod suggest;
 mod theme;
+mod transition;
 
 pub use error::{BudgetKind, Result, StudioError, TsxLoc};
 pub use fonts::bundled_families;

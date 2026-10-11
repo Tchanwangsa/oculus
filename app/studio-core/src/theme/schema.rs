@@ -3,6 +3,7 @@
 
 use crate::fonts::bundled_families;
 use crate::scene::{Color, Style};
+use crate::transition::{MotionSpec, TransitionSpec};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -28,12 +29,19 @@ struct Fonts {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)] // read only to validate the shape
 struct Motion {
     duration: BTreeMap<String, f64>,
     /// cubic-bezier control points, for `cubicBezier(...theme.motion.easing.x)`.
     easing: BTreeMap<String, [f64; 4]>,
+    #[allow(dead_code)] // read only to validate the shape
     spring: BTreeMap<String, Spring>,
+    /// Scene transition defaults; values are checked where they are used.
+    #[serde(default)]
+    transition: Option<TransitionSpec>,
+    #[serde(default, rename = "magicMove")]
+    magic_move: Option<String>,
+    #[serde(default, rename = "morphColor")]
+    morph_color: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -59,6 +67,8 @@ pub struct Checked {
     pub background: Color,
     pub text: Color,
     pub body_font: String,
+    pub motion: MotionSpec,
+    pub easings: BTreeMap<String, [f64; 4]>,
 }
 
 pub fn check(tokens: &Value) -> Result<Checked, String> {
@@ -110,5 +120,11 @@ pub fn check(tokens: &Value) -> Result<Checked, String> {
         background,
         text,
         body_font: file.font.body,
+        motion: MotionSpec {
+            transition: file.motion.transition,
+            magic_move: file.motion.magic_move,
+            morph_color: file.motion.morph_color,
+        },
+        easings: file.motion.easing,
     })
 }

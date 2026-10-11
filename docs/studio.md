@@ -2,9 +2,9 @@
 
 Studio makes lecture videos from scenes written as TSX components.
 `app/studio-core/` is its renderer: a video folder plus a time in, one RGBA
-frame out, the same pixels on every machine. Narration, transitions and
-encoding to video are not built yet; `oculus studio` renders single frames
-and lints.
+frame out, the same pixels on every machine, scene transitions included.
+Narration and encoding to video are not built yet; `oculus studio` renders
+single frames and lints.
 
 ## Where
 
@@ -13,6 +13,9 @@ and lints.
 | The crate (`oculus-studio-core`, lib `studio_core`), its own cargo root | `app/studio-core/` |
 | Public API: `Renderer`, `Engine`, `Frame`, `Time` | `app/studio-core/src/render/` |
 | Video folder, component lookup, timeline, lint | `app/studio-core/src/project/` |
+| Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
+| Magic move: matching and blending two laid-out trees, OKLab colour | `app/studio-core/src/morph/` |
+| Easings shared by transitions and the morph (the prelude's, in Rust) | `app/studio-core/src/easing/` |
 | TSX → JS (oxc), the QuickJS sandbox, the prelude every component sees | `app/studio-core/src/host/` (`prelude/*.js`, one module scope, concatenated in order) |
 | The element tree and its style keys | `app/studio-core/src/scene/` |
 | Layout (taffy, parley) and paint (vello_cpu); Path trim and Text reveal | `app/studio-core/src/layout/`, `app/studio-core/src/paint/` (`path/`, `text/`) |
@@ -34,8 +37,10 @@ assets/       images, named by <Image src>
 {
   "size": { "width": 1920, "height": 1080 },
   "theme": "default",
+  "motion": { "transition": { "kind": "push", "dur": 0.6 }, "magicMove": "auto" },
   "scenes": [
-    { "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 4.0 }
+    { "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 4.0 },
+    { "component": "Steps", "hold": 6.0, "transition": { "kind": "wipe", "direction": "up" } }
   ]
 }
 ```
@@ -44,6 +49,9 @@ assets/       images, named by <Image src>
   scene-relative `t` by summing holds (`Timeline`); a `t` past the end is an
   error that states the video's length.
 - `theme` is a bundled theme's name or a `.json` path relative to the folder.
+- `motion` (optional) overrides the theme's transition defaults for this
+  video; a scene's `transition` (optional) overrides both. See
+  "Transitions".
 - `video.json` refuses unknown keys, an empty `scenes`, a non-positive `hold`
   and sides outside 1–8192 px.
 - Component names are PascalCase letters and digits and resolve to
@@ -85,10 +93,11 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
 
 ## Four primitives and a closed set of style keys
 
-`Box`, `Text`, `Image` and `Path` are the host elements; `Stack` (a column)
-and `Row` are `Box` with `gap`, `align`, `justify` and `wrap` shorthands.
-Elements take only `style`, `key`, children, `src` on `Image`, and `d`,
-`viewBox`, `fill`, `stroke` and `trim` on `Path`.
+`Box`, `Text`, `Image` and `Path` are the host elements, and `Morph` holds
+two layouts of one place (see "Magic move"); `Stack` (a column) and `Row`
+are `Box` with `gap`, `align`, `justify` and `wrap` shorthands. Elements take
+only `style`, `key`, children, `src` on `Image`, `d`, `viewBox`, `fill`,
+`stroke` and `trim` on `Path`, and `p` on `Morph`.
 
 - `flexDirection` defaults to `row`, as in CSS. Use `Stack` for a column.
 - `Text` children must be strings or numbers; to mix styles put several
@@ -181,6 +190,102 @@ carries the element's TSX line.
   full-frame Paths with the frame as viewBox, so its parent must fill the
   frame.
 
+## Transitions play over the incoming scene's head
+
+A scene after the first comes in through a transition: `{ kind, dur,
+easing, direction, morphColor }`, where `kind` is `cut`, `dissolve`, `push`, `wipe`,
+`zoom` or `magic`, `dur` is seconds, `easing` is a theme easing name, a
+prelude easing (`linear`, `easeOutCubic`, `easeInOutCubic`) or `[x1, y1,
+x2, y2]`, and `direction` (`left`, `right`, `up`, `down`) is where the
+incoming scene comes from for `push` and `wipe` (`left` pushes the old scene
+out to the left). `morphColor` is under "Magic move". `video.json`'s
+`motion` block takes `transition`, `magicMove` and `morphColor`.
+
+- **Timing.** It plays over `[0, dur)` of the incoming scene B, with the
+  outgoing scene A held at its last moment (the left limit of its hold,
+  since Sequence and Stagger windows are half-open). The video's length
+  stays the sum of holds, and past `dur` a frame is B alone. `p =
+  easing(t / dur)`. Each frame calls both components, each in its own fresh
+  context, so a transition frame is seekable like any other. A's logs come
+  first, prefixed `scene N:`.
+- **Cascade, field by field:** the scene's `transition`, then `video.json`'s
+  `motion.transition`, then the theme's `motion.transition`, then dissolve,
+  0.7 s, easeInOutCubic, left. The bundled theme ships exactly that.
+- **Automatic magic move.** When the incoming scene sets no `transition`
+  of its own, `magicMove` (video `motion`, else theme `motion`, else
+  `auto`) is `auto`, and A's and B's trees share a key, the transition is
+  `magic` instead, with the cascade's `dur` and `easing`. `"off"` keeps the
+  cascade's kind.
+- **Compositing.** Both scenes are laid out and painted onto one canvas,
+  each wrapped in a full-frame node whose style carries the effect: `cut` is
+  B; `dissolve` draws B over A at opacity `p` on the theme background, so A
+  never shows through B's transparent areas; `push` moves A out by `p` of
+  the frame and B in from the other side; `wipe` reveals B (on the theme
+  background) from its edge; `zoom` grows A to 1.08 as it fades and settles
+  B in from 0.94, fading in over A from `p = 0.3`, with B's root left
+  full-frame so only its contents scale; `magic` draws the morph of the two
+  trees.
+- A bad value fails every frame of its scene, with an error naming the level
+  it came from (`scene 3 transition.kind`, `video.json
+  motion.transition.dur`, `theme motion.transition.easing`); lint reports
+  it once.
+
+## Magic move morphs laid-out trees
+
+The morph engine (`app/studio-core/src/morph/`) takes two laid-out trees (A
+at `p = 0`, B at `p = 1`) and returns one, which paint draws like any other.
+
+- **Matching.** Roots match. A key matches the same key anywhere in the
+  other tree, at any depth, which is how a card moves from one row to
+  another. Inside a matched pair the unkeyed children match by index only
+  when both sides have the same unkeyed children (count and kinds);
+  otherwise they are unmatched. Keys are unique per scene tree, not just
+  among siblings as in React: a key on two nodes is an error when a morph
+  needs the tree, and lint reports it either way.
+- **Matched pairs** blend per property: the border box (children ride along,
+  since rects are absolute), radius, fill, border, shadow, opacity,
+  translate, scale, rotate, transformOrigin, clipInset, blur, text colour and
+  reveal progress. Two fills that are not both colours become gradients on
+  the union of their stops (a colour is a flat gradient, no fill a clear
+  one) and blend stop by stop, the angle turning the short way, so nothing
+  is cross-faded. A side without a border or shadow grows it from zero width
+  or fades it in.
+- **Colour** (fills, gradient stops, borders, shadows, text and strokes)
+  blends in OKLab with alpha premultiplied, along the path the `morphColor`
+  motion token picks. `oklch`, the default, is polar between two saturated
+  colours (chroma interpolates, the hue turns the short way), because the
+  straight OKLab line between near-complementary colours such as indigo and
+  orange passes close to grey; with a near-grey end it is the straight line.
+  `oklab` is always the straight line. A scene's `transition.morphColor`
+  sets it for the magic move into that scene, over `video.json`'s
+  `motion.morphColor`, over the theme's; an in-scene `<Morph>` uses the
+  video's, else the theme's. An unknown value is an error naming its level,
+  like the other motion values.
+- **Unmatched** A nodes fade out over `p` 0 to 0.4 and unmatched B nodes in
+  over 0.4 to 1 (easeInOutCubic), at their own tree's place, carried by
+  their nearest matched ancestor's move. A new or removed box that holds
+  matched nodes fades its own fill, border and shadow only, so what moves
+  through it stays fully visible. The output follows B's paint order, each
+  unmatched A node just before its nearest following matched sibling, else
+  last.
+- **Content.** The same string in the same family and line count re-shapes
+  at the interpolated size, weight, line height and letter spacing, broken
+  at the interpolated width (no bitmap scaling). Different strings or line
+  counts swap in halves: A's text fades out over 0 to 0.5 and B's in over
+  0.5 to 1, so they are never visible together, while the box still morphs.
+  The same image morphs its geometry, a different one swaps in halves; the
+  same path data morphs viewBox, fill, stroke and trim, different data swaps
+  in halves.
+
+`<Morph p={...}>{a}{b}</Morph>` uses the same engine inside one scene, which
+also gives FLIP-style layout animation. The tree lays out twice, once with
+every Morph replaced by its first child and once by its second, and the two
+layouts morph: inside each Morph at its own `p`, matching by key within that
+Morph; outside every Morph, nodes match by tree path and move at the first
+Morph's `p`, so siblings that shift because a Morph changes size glide too.
+`p` is clamped to 0 to 1. A Morph takes exactly two elements, and a Morph
+inside another is an error for now.
+
 ## Blur means what it means in CSS
 
 - An element's `blur` is `filter: blur()`: the value is the gaussian sigma.
@@ -192,8 +297,9 @@ Glyphs draw with vello's atlas cache and hinting off, parley does not quantise,
 and taffy's rounding is disabled; no transform rounds either, nor does a
 reveal's rise. Text that glides must not step a whole pixel at a time, and
 `tests/subpixel.rs` measures that: a line moving 0.25 px a frame, a word
-rising in through `reveal`, and text under a panning Camera must each move
-their ink centroid smoothly.
+rising in through `reveal`, text under a panning Camera, text pushed in by a
+transition and text carried by a magic move must each move their ink
+centroid smoothly.
 
 ## Fonts and themes are bundled, never the system's
 
@@ -203,8 +309,9 @@ their ink centroid smoothly.
   `fontFamily` is an error naming the bundled families.
 - A theme is tokens only: `color`, `font` (`heading` and `body` families),
   `type` (style fragments to spread into `style`), `space`, `radius` and
-  `motion` (`duration`, `easing` as cubic-bezier points, `spring` presets).
-  Components read it as `ctx.theme` and it is frozen.
+  `motion` (`duration`, `easing` as cubic-bezier points, `spring` presets,
+  and optionally `transition`, `magicMove` and `morphColor`, the bottom of
+  the transition cascade; the bundled theme sets `morphColor: "oklch"`). Components read it as `ctx.theme` and it is frozen.
 - `color.bg` is the canvas under every frame, `color.text` the colour and
   `font.body` the family of `Text` that sets none.
 - The bundled `default` theme is neutral greys with the app's indigo
@@ -253,13 +360,19 @@ gallery drive `Engine` directly.
 - `scale` draws the same layout under a root transform: 0.5 is a 540p proxy
   of a 1080p video, identical in layout.
 
-## Lint renders every scene at both ends
+## Lint renders every scene at both ends and mid-transition
 
 `Project::lint` loads each component once, checks every scene's props and
 every component's `examples`, and renders each scene at `t = 0` and just
-before `hold`, at scale 0.25, writing nothing. It collects every problem
-with its scene and component instead of stopping at the first; an error is
-reported once even if both ends hit it.
+before `hold`, at scale 0.25, writing nothing; a key on two nodes of a
+scene's tree is reported there too. When a scene and the one before it both
+render cleanly, it also renders the middle of the transition between them,
+so a morph error shows. It checks the transition values through the cascade
+(reported at the first scene that uses a bad one, naming its level), a
+`transition` on the first scene, and a `dur` longer than the incoming
+scene's hold. It collects every problem with its scene and component instead
+of stopping at the first; an error is reported once even if several renders
+hit it.
 
 ## `oculus studio` renders and lints from the terminal
 
@@ -281,8 +394,11 @@ more than 2 off, and at most 0.1% may differ. A failure writes the actual
 frame and a diff image to `app/studio-core/target/golden-failures/`.
 `STUDIO_BLESS=1 cargo test` rewrites the goldens. `tests/determinism.rs`
 checks two renderers produce identical bytes, and `tests/isolation.rs` that
-a frame (a sequenced timeline included) is the same whatever the engine
-rendered before it.
+a frame (a sequenced timeline, a transition and a Morph included) is the
+same whatever the engine rendered before it. `tests/transitions.rs` covers
+timing, the cascade, automatic magic move, the changed-text halves and
+lint's transition checks. The transition goldens are 640x360 to keep the
+repo small.
 
 From `app/studio-core`: `cargo test`, `cargo clippy --all-targets -- -D
 warnings`, `cargo fmt`. CI runs these in the `studio-core` job on macOS.
@@ -297,6 +413,10 @@ warnings`, `cargo fmt`. CI runs these in the `studio-core` job on macOS.
 - A component element is not a host node until it resolves: `<Text>` still
   rejects a component child, and a component returning a string or a
   function is an error at its element's line.
+- The theme's default dissolve lasts 0.7 s, so a scene held shorter than
+  that is a lint error naming `theme motion.transition.dur` until the scene
+  sets a shorter `dur` or a `cut`, or the video's `motion` a shorter `dur`.
 - Enter, Exit and a hidden Sequence change their children's root styles, so
   a root's own `opacity`, `translateX/Y`, `scale` and `blur` combine with
-  theirs rather than being replaced.
+  theirs rather than being replaced. A root that is a `Morph` passes them
+  to both of its layouts.

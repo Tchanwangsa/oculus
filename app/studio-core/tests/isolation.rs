@@ -2,8 +2,11 @@
 //! mutates does not carry from one call to the next.
 #![allow(clippy::unwrap_used, clippy::panic)] // helpers outside #[test] fns
 
+mod common;
+
+use common::fixture;
 use serde_json::Map;
-use studio_core::{Engine, RenderOptions, SceneCall, Size, Theme};
+use studio_core::{Engine, Project, RenderOptions, Renderer, SceneCall, Size, Theme, Time};
 
 const COUNTER: &str = r##"
 let frames = 0;
@@ -104,4 +107,33 @@ fn sequenced_frames_are_seekable() {
         );
     }
     assert!(sweep[0] != sweep[21], "the timeline moves");
+}
+
+#[test]
+fn transition_and_morph_frames_are_seekable() {
+    // Times in transitions of every kind, in an in-scene Morph and in an
+    // automatic magic move, plus frames outside them.
+    let cases: [(&str, &[f64]); 3] = [
+        (
+            "transitions",
+            &[1.0, 2.25, 4.5, 6.75, 8.5, 10.6, 12.4, 13.0],
+        ),
+        ("morph", &[0.1, 0.5, 0.9, 1.5]),
+        ("magic", &[1.0, 2.2, 2.5, 2.8, 3.5]),
+    ];
+    for (name, times) in cases {
+        let project = Project::load(fixture(name)).unwrap();
+        let renderer = || Renderer::new(&project, RenderOptions::default()).unwrap();
+        let mut warm = renderer();
+        let sweep: Vec<Vec<u8>> = times
+            .iter()
+            .map(|&t| warm.frame(Time::Global(t)).unwrap().rgba)
+            .collect();
+        for (i, &t) in times.iter().enumerate().rev() {
+            let cold = renderer().frame(Time::Global(t)).unwrap().rgba;
+            assert!(cold == sweep[i], "{name}: cold t={t}");
+            let again = warm.frame(Time::Global(t)).unwrap().rgba;
+            assert!(again == sweep[i], "{name}: warm t={t}");
+        }
+    }
 }

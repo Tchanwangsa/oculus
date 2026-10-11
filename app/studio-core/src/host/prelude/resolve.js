@@ -27,6 +27,13 @@ const resolveHost = (node, ctx) => {
   if (node[RESOLVED]) return node;
   const copy = Object.assign({}, node);
   if (node.k === 'box') copy.children = resolveInto(node.children || [], ctx, []);
+  if (node.k === 'morph') {
+    copy.children = resolveInto(node.children, ctx, []);
+    if (copy.children.length !== 2) {
+      const n = copy.children.length;
+      throw tagLoc(new TypeError(`<Morph> takes exactly two elements, the layout at p = 0 and the layout at p = 1; its children resolved to ${n}`), node.loc);
+    }
+  }
   copy[RESOLVED] = true;
   return copy;
 };
@@ -69,6 +76,8 @@ const resolveNow = (children, ctx) => resolveInto(children, ctx, []);
 // would change flex layout): opacity and scale multiply, translate and blur
 // add, clipInset takes the larger inset per side.
 const compose = (node, fx) => {
+  // A Morph is replaced by one of its layouts before layout: compose onto both.
+  if (node.k === 'morph') return Object.assign({}, node, { children: node.children.map((c) => compose(c, fx)) });
   const s = Object.assign({}, node.style);
   if (fx.opacity !== undefined) s.opacity = (s.opacity ?? 1) * fx.opacity;
   if (fx.translateX) s.translateX = (s.translateX ?? 0) + fx.translateX;

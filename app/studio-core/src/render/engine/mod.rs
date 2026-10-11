@@ -2,15 +2,19 @@
 //! -> frame. `Renderer` drives it for a video; the Components playground
 //! and `gallery` drive it for one component.
 
+mod prepare;
+mod transition;
+
 use super::{Frame, RenderOptions, Size};
 use crate::error::{Result, StudioError};
-use crate::host::{CallCtx, ComponentInfo, Host, seed, tsx_loc};
+use crate::host::{ComponentInfo, Host};
 use crate::images::ImageCache;
-use crate::layout::{LayoutError, Layouter, Typeset};
+use crate::layout::{LNode, Typeset};
+use crate::morph::{Ink, MorphColor, duplicate_key};
 use crate::paint::{Canvas, paint};
-use crate::scene::parse_tree;
 use crate::schema::validate_props;
 use crate::theme::Theme;
+use crate::transition::{MotionSpec, morph_color};
 use serde_json::{Map, Value};
 use std::path::PathBuf;
 use vello_cpu::kurbo::Affine;
@@ -37,6 +41,9 @@ pub struct Engine {
     size: Size,
     scale: f64,
     pixels: (u16, u16),
+    /// How `<Morph>` blends colours: the video's `morphColor`, else the
+    /// theme's (a bad theme value falls back to oklch here; lint reports it).
+    morph_color: MorphColor,
 }
 
 impl Engine {
@@ -64,7 +71,9 @@ impl Engine {
             }
         };
         let pixels = (px(size.width, "width")?, px(size.height, "height")?);
+        let morph_color = morph_color(None, &MotionSpec::default(), &theme).unwrap_or_default();
         Ok(Engine {
+            morph_color,
             host: Host::new(&theme.tokens)?,
             typeset: Typeset::new(),
             images: ImageCache::new(assets),
@@ -78,6 +87,18 @@ impl Engine {
 
     pub fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    pub(crate) fn set_morph_color(&mut self, c: MorphColor) {
+        self.morph_color = c;
+    }
+
+    /// The morph's colours: the theme's text colour and `c`.
+    pub(crate) fn ink(&self, c: MorphColor) -> Ink {
+        Ink {
+            text: self.theme.text_color,
+            colour: c,
+        }
     }
 
     /// Compiles a component (replacing an earlier version of it) and returns
@@ -105,74 +126,50 @@ impl Engine {
     /// `host`), so the frame never depends on what this engine rendered
     /// before it.
     pub fn render(&mut self, call: SceneCall<'_>) -> Result<Frame> {
-        let name = call.component;
-        let props = self.check_props(name, call.props)?;
-        let (json, logs) = self.host.call(
-            name,
-            &props,
-            CallCtx {
-                t: call.t,
-                duration: call.duration,
-                width: f64::from(self.size.width),
-                height: f64::from(self.size.height),
-                seed: seed(name, call.index),
-            },
-        )?;
-        let tsx = self.host.source(name).unwrap_or_default();
-        let loc = |l: Option<(u32, u32)>| l.map(|l| tsx_loc(tsx, l));
-        let tree = parse_tree(&json).map_err(|e| {
-            if e.is_style {
-                StudioError::Style {
-                    component: name.to_owned(),
-                    node: e.path,
-                    message: e.message,
-                    loc: loc(e.loc),
-                }
-            } else {
-                StudioError::Component {
-                    component: name.to_owned(),
-                    message: format!("{}: {}", e.path, e.message),
-                    loc: loc(e.loc),
-                }
-            }
-        })?;
-        let mut layouter = Layouter {
-            typeset: &mut self.typeset,
-            images: &mut self.images,
-            default_family: &self.theme.body_font,
-        };
-        let laid = layouter.layout(tree, self.size.width as f32, self.size.height as f32);
-        let laid = laid.map_err(|e| match e {
-            LayoutError::Font { family, loc: l } => StudioError::Font {
-                component: name.to_owned(),
-                family,
-                available: self.typeset.families.clone(),
-                loc: loc(l),
-            },
-            LayoutError::Image {
-                src,
-                message,
-                loc: l,
-            } => StudioError::Image {
-                component: name.to_owned(),
-                src,
-                message,
-                loc: loc(l),
-            },
-            LayoutError::Taffy(m) => StudioError::Render(format!("{name}: layout failed: {m}")),
-        })?;
+        let prepared = self.prepare(call)?;
+        self.compose(vec![prepared.tree], prepared.logs, call.component)
+    }
+
+    /// `render`, also refusing a tree with a key on two nodes (which only
+    /// breaks a morph, so plain renders allow it): lint's render.
+    pub(crate) fn render_checked(&mut self, call: SceneCall<'_>) -> Result<Frame> {
+        let prepared = self.prepare(call)?;
+        if let Some(e) = duplicate_key(&prepared.tree) {
+            self.typeset.reclaim(prepared.tree);
+            return Err(self.morph_error(call.component, call.component, e));
+        }
+        self.compose(vec![prepared.tree], prepared.logs, call.component)
+    }
+
+    /// Paints laid-out trees in order onto one frame over the theme
+    /// background, then returns their text layouts to the pool. `label`
+    /// names the frame in a paint error.
+    pub(crate) fn compose(
+        &mut self,
+        layers: Vec<LNode>,
+        logs: Vec<String>,
+        label: &str,
+    ) -> Result<Frame> {
         self.canvas.begin(self.theme.background);
-        let painted = paint(
-            &mut self.canvas,
-            &laid,
-            Affine::scale(self.scale),
-            self.theme.text_color,
-        );
+        let mut painted = Ok(());
+        for layer in &layers {
+            painted = paint(
+                &mut self.canvas,
+                layer,
+                Affine::scale(self.scale),
+                self.theme.text_color,
+            );
+            if painted.is_err() {
+                break;
+            }
+        }
         // Always rasterise, so the context is reset with no open layers.
         let rgba = self.canvas.finish();
-        painted.map_err(|m| StudioError::Render(format!("{name}: {m}")))?;
-        self.typeset.reclaim(laid);
+        for layer in layers {
+            self.typeset.reclaim(layer);
+        }
         self.typeset.end_frame();
+        painted.map_err(|m| StudioError::Render(format!("{label}: {m}")))?;
         Ok(Frame {
             width: u32::from(self.pixels.0),
             height: u32::from(self.pixels.1),
