@@ -263,9 +263,9 @@ aligner at a copy elsewhere instead, for development and the parity tests.
   its own session and drops it, since a reused one keeps growing (two
   windows of a 57 s clip: 1.8 GB on one session, 1.3 GB on one each); a
   load is about 0.2 s. Threads: half the cores, at most 4. No timeouts.
-- **The Viterbi** keeps a byte of backpointer per frame and state (two per
-  letter or word break, plus one): about 6 MB per minute squared of
-  speech, 150 MB at 5 minutes, 240 MB at 6.
+- **The Viterbi** keeps two bits of backpointer per frame and state (two
+  states per letter or word break, plus one), four to a byte: about 1.5 MB
+  per minute squared of speech, 40 MB at 5 minutes, 155 MB at 10.
 - **Measured** (debug build, Kokoro `af_heart`): a 170 s clip timed in
   9.2 s and a 371 s clip (13 windows) in 22.5 s, both at a 1.6 GB peak,
   no word under -4.2, no gaps, and the last word ending within 40 ms of

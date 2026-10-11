@@ -55,12 +55,11 @@ pub(super) fn force_align(em: &[f32], words: &[String]) -> Result<Vec<Span>, Nar
 
     let mut prev = vec![NEG; s_len];
     let mut cur = vec![NEG; s_len];
-    let mut back = vec![0u8; t_len * s_len];
+    let mut back = Steps::new(t_len, s_len);
     prev[0] = em[BLANK] as f64;
     prev[1] = em[lab[1]] as f64;
     for t in 1..t_len {
         let row = &em[t * VOCAB..(t + 1) * VOCAB];
-        let back_row = &mut back[t * s_len..(t + 1) * s_len];
         for s in 0..s_len {
             let mut best = prev[s];
             let mut k = 0u8;
@@ -73,7 +72,7 @@ pub(super) fn force_align(em: &[f32], words: &[String]) -> Result<Vec<Span>, Nar
                 k = 2;
             }
             cur[s] = best + row[lab[s]] as f64;
-            back_row[s] = k;
+            back.set(t, s, k);
         }
         std::mem::swap(&mut prev, &mut cur);
     }
@@ -90,7 +89,7 @@ pub(super) fn force_align(em: &[f32], words: &[String]) -> Result<Vec<Span>, Nar
     let mut path = vec![0usize; t_len];
     for t in (0..t_len).rev() {
         path[t] = s;
-        s -= back[t * s_len + s] as usize;
+        s -= back.get(t, s);
     }
 
     let mut first = vec![usize::MAX; words.len()];
@@ -115,4 +114,31 @@ pub(super) fn force_align(em: &[f32], words: &[String]) -> Result<Vec<Span>, Nar
             mean_logp: logp_sum[w] / logp_count[w] as f64,
         })
         .collect())
+}
+
+/// Each frame and state's step into it (0 stay, 1 advance, 2 skip), four to
+/// a byte: a byte each is about 6 MB per minute squared of speech.
+struct Steps {
+    bits: Vec<u8>,
+    states: usize,
+}
+
+impl Steps {
+    fn new(frames: usize, states: usize) -> Steps {
+        Steps {
+            bits: vec![0; (frames * states).div_ceil(4)],
+            states,
+        }
+    }
+
+    /// Each `(t, s)` is set once, over the zeroed start.
+    fn set(&mut self, t: usize, s: usize, step: u8) {
+        let i = t * self.states + s;
+        self.bits[i / 4] |= step << (2 * (i % 4));
+    }
+
+    fn get(&self, t: usize, s: usize) -> usize {
+        let i = t * self.states + s;
+        usize::from((self.bits[i / 4] >> (2 * (i % 4))) & 3)
+    }
 }
