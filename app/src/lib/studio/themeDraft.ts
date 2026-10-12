@@ -128,3 +128,39 @@ export function setFontRole(tokens: Tokens, role: FontRole, family: string): Tok
   }
   return next;
 }
+
+/** A run of related `color.*` tokens under one heading. */
+export interface ColorGroup {
+  id: string;
+  title: string;
+  keys: string[];
+}
+
+// First match wins, so `onAccent` is an accent and `onInk` an ink before any
+// `on…` could read as text.
+const COLOR_GROUPS: ReadonlyArray<{ id: string; title: string; match: RegExp }> = [
+  { id: "accent", title: "Accent", match: /^(accent|onAccent|brand|primary|onPrimary)/i },
+  { id: "ink", title: "Ink", match: /^(ink|onInk|shadow)/i },
+  { id: "status", title: "Status", match: /^(positive|warning|negative|success|danger|error|info)/i },
+  { id: "text", title: "Text", match: /^(text|muted|faint|subtle|dim|fg|foreground|onSurface|onBg)/i },
+  { id: "surface", title: "Surfaces", match: /^(bg|background|canvas|surface|card|border|divider|line)/i },
+];
+
+/** Display order: surfaces and text first, as a theme reads from the canvas
+ *  up. */
+const COLOR_ORDER = ["surface", "text", "accent", "ink", "status", "other"];
+
+/** The `color.*` token names grouped by what they colour (surfaces, text,
+ *  accent, ink, status), file order kept inside a group; a name that fits
+ *  none lands in "Other". Empty groups are left out. */
+export function colorGroups(keys: readonly string[]): ColorGroup[] {
+  const groups = new Map<string, ColorGroup>();
+  for (const key of keys) {
+    const found = COLOR_GROUPS.find((g) => g.match.test(key));
+    const id = found?.id ?? "other";
+    const group = groups.get(id) ?? { id, title: found?.title ?? "Other", keys: [] };
+    group.keys.push(key);
+    groups.set(id, group);
+  }
+  return COLOR_ORDER.flatMap((id) => groups.get(id) ?? []);
+}
