@@ -10,7 +10,7 @@ pub use text::{TextKey, TextLayout, Typeset, finish};
 use crate::images::ImageCache;
 use crate::scene::{Dim, Kind, Node, PathSpec, Scope, Style};
 use std::sync::Arc;
-use taffy::{AvailableSpace, NodeId, Size, TaffyTree};
+use taffy::{AvailableSpace, NodeId, ResolveOrZero, Size, TaffyTree};
 use vello_cpu::Pixmap;
 use vello_cpu::kurbo::Rect;
 
@@ -74,13 +74,26 @@ impl Layouter<'_> {
             width: AvailableSpace::Definite(width),
             height: AvailableSpace::Definite(height),
         };
-        tree.compute_layout_with_measure(id, available, |inputs, _id, leaf, style| {
-            taffy::compute_leaf_layout(
+        tree.compute_layout_with_measure(id, available, |inputs, _id, mut leaf, style| {
+            let width = inputs.parent_size.width;
+            let mut out = taffy::compute_leaf_layout(
                 inputs,
                 style,
                 |_, _| 0.0,
-                |known, avail| measure(known, avail, leaf),
-            )
+                |known, avail| measure(known, avail, leaf.as_deref_mut()),
+            );
+            // Text's first baseline, so `alignItems: "baseline"` lines
+            // texts (and Math, whose strut gives its own) up on their
+            // baselines rather than their bottoms.
+            if let Some(Leaf::Text(Some(layout), _)) = leaf.as_deref()
+                && let Some(line) = layout.lines().next()
+            {
+                let calc = |_: *const (), _: f32| 0.0;
+                let top = style.padding.top.resolve_or_zero(width, calc)
+                    + style.border.top.resolve_or_zero(width, calc);
+                out.baselines.first = Some(top + line.metrics().baseline);
+            }
+            out
         })
         .map_err(|e| LayoutError::Taffy(e.to_string()))?;
         extract(&mut tree, id, root, (0.0, 0.0))
@@ -127,8 +140,9 @@ impl Layouter<'_> {
                 tree.new_leaf_with_context(style, Leaf::Path(w, h))
                     .map_err(taffy)
             }
-            // `select` replaces every Morph before layout.
-            Kind::Box | Kind::Morph => {
+            // `select` replaces every Morph, and `math::expand` every Math,
+            // before layout.
+            Kind::Box | Kind::Morph | Kind::Math => {
                 let kids = n
                     .children
                     .iter()

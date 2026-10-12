@@ -83,7 +83,18 @@ fn check(
 ) -> Result<Value, StudioError> {
     let wrong = || err(path, spec.kind.describe(), describe(v));
     match &spec.kind {
-        PropKind::Str | PropKind::Latex => v.is_string().then(|| v.clone()).ok_or_else(wrong),
+        PropKind::Str => v.is_string().then(|| v.clone()).ok_or_else(wrong),
+        PropKind::Latex => {
+            let tex = v.as_str().ok_or_else(wrong)?;
+            crate::math::check(tex, theme.section("color")).map_err(|m| {
+                err(
+                    path,
+                    format!("{}; KaTeX: {m}", spec.kind.describe()),
+                    describe(v),
+                )
+            })?;
+            Ok(v.clone())
+        }
         PropKind::Num => v.is_number().then(|| v.clone()).ok_or_else(wrong),
         PropKind::Bool => v.is_boolean().then(|| v.clone()).ok_or_else(wrong),
         PropKind::OneOf(values) => values.contains(v).then(|| v.clone()).ok_or_else(wrong),

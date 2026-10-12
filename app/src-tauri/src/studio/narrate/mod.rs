@@ -24,9 +24,10 @@ use studio_core::{
 
 use super::audio::resample_to_16k;
 use super::timing::{self, Alignment};
-use super::voice::Voice;
-use super::{tts, NarrationError};
-pub use key::cache_key;
+use super::tts::{self, Speech};
+use super::voice::ServerVoice;
+use super::NarrationError;
+pub use key::{cache_key, server_key};
 pub use report::{GapReport, Outcome, Progress, Report, SceneReport};
 
 /// Times a clip's words. [`ModelAligner`] runs the wav2vec2 model; tests
@@ -49,6 +50,38 @@ impl Aligner for ModelAligner {
 
     fn align(&self, pcm: &[f32], words: &[String]) -> Result<Alignment, NarrationError> {
         timing::align(pcm, words)
+    }
+}
+
+/// Makes a scene's clip. [`ServerSpeaker`] asks a TTS server,
+/// `tts::kokoro::KokoroSpeaker` runs Kokoro; tests stub it.
+pub trait Speaker {
+    /// Ok when [`Speaker::speak`] can run; asked once, beside
+    /// [`Aligner::ready`], before the first clip.
+    fn ready(&self) -> Result<(), String>;
+    /// What a clip of `text` is made from besides the text and the aligner,
+    /// engine first, for its cache key ([`cache_key`]); asked for every
+    /// scene, cached or not.
+    fn key(&self, text: &str) -> Result<Vec<String>, String>;
+    /// One clip of `text`: a WAV and its decoded samples, never silent.
+    fn speak(&self, text: &str) -> Result<Speech, String>;
+}
+
+/// The OpenAI-compatible TTS server `voice` names (`studio::tts`).
+pub struct ServerSpeaker<'a>(pub &'a ServerVoice);
+
+impl Speaker for ServerSpeaker<'_> {
+    /// A server is only known to answer by asking it for a clip.
+    fn ready(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn key(&self, _text: &str) -> Result<Vec<String>, String> {
+        Ok(server_key(self.0))
+    }
+
+    fn speak(&self, text: &str) -> Result<Speech, String> {
+        tts::synthesise(self.0, text)
     }
 }
 
@@ -94,14 +127,14 @@ impl fmt::Display for NarrateError {
 
 impl std::error::Error for NarrateError {}
 
-/// Narrate the video in `dir` with `voice`, loading it over `library` (the
-/// app's are `studio::libraries::libraries`), so a library theme or
-/// component resolves as it does for every other command; see the module
-/// doc.
+/// Narrate the video in `dir` with `speaker`, which also keys the clips,
+/// loading it over `library` (the app's are `studio::libraries::libraries`),
+/// so a library theme or component resolves as it does for every other
+/// command; see the module doc.
 pub fn narrate(
     dir: &Path,
     library: &Library,
-    voice: &Voice,
+    speaker: &dyn Speaker,
     aligner: &dyn Aligner,
     options: &Options,
     progress: &mut dyn FnMut(Progress),
@@ -151,7 +184,10 @@ pub fn narrate(
             n: n + 1,
             of: todo.len(),
         });
-        let key = cache_key(text, voice);
+        let key = speaker
+            .key(text)
+            .map(|parts| cache_key(text, &parts))
+            .map_err(|e| NarrateError::scene(id, e))?;
         let cached = manifest
             .scenes
             .get(id)
@@ -160,12 +196,13 @@ pub fn narrate(
             Some(clip) => SceneReport::new(id, Outcome::Cached, clip, None),
             None => {
                 if !ready {
+                    speaker.ready().map_err(NarrateError::video)?;
                     aligner
                         .ready()
                         .map_err(|e| NarrateError::video(e.to_string()))?;
                     ready = true;
                 }
-                let (clip, timings) = make_clip(&clips, id, text, &key, voice, aligner)?;
+                let (clip, timings) = make_clip(&clips, id, text, &key, speaker, aligner)?;
                 let scene = SceneReport::new(id, Outcome::Narrated, &clip, Some(timings));
                 manifest.scenes.insert(id.clone(), clip);
                 write_manifest(dir, &manifest)?;
@@ -213,12 +250,12 @@ fn make_clip(
     id: &str,
     text: &str,
     key: &str,
-    voice: &Voice,
+    speaker: &dyn Speaker,
     aligner: &dyn Aligner,
 ) -> Result<(ManifestScene, Timings), NarrateError> {
     let fail = |message: String| NarrateError::scene(id, message);
     let started = Instant::now();
-    let speech = tts::synthesise(voice, text).map_err(fail)?;
+    let speech = speaker.speak(text).map_err(fail)?;
     let synth_ms = started.elapsed().as_millis() as u64;
     let duration = speech.decoded.duration;
     let started = Instant::now();

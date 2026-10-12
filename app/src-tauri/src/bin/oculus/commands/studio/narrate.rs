@@ -1,11 +1,13 @@
-//! `oculus studio narrate` and `oculus studio tts`: the TTS server, through
-//! `app_lib::studio` (docs/studio.md, "Narration is made by `oculus studio
-//! narrate`").
+//! `oculus studio narrate` and `oculus studio tts`: the TTS server or Kokoro,
+//! through `app_lib::studio` (docs/studio.md, "Narration is made by `oculus
+//! studio narrate`").
 
 use crate::*;
 use app_lib::studio::libraries;
-use app_lib::studio::narrate::{self, ModelAligner, Outcome, Progress, SceneReport};
-use app_lib::studio::tts;
+use app_lib::studio::narrate::{
+    self, ModelAligner, Outcome, Progress, SceneReport, ServerSpeaker, Speaker,
+};
+use app_lib::studio::tts::kokoro::{KokoroSpeaker, LexiconFiles, Packs};
 use app_lib::studio::voice::{self, Voice, VoiceOverrides};
 use studio_core::{Project, LOW_CONFIDENCE};
 
@@ -21,28 +23,20 @@ impl Ctx {
             .map(VoiceOverrides::from)
             .unwrap_or_default();
         let voice = voice::resolve(&flags(&args.voice), &video, &voice::settings())?;
+        let speaker = speaker(&voice, project.video.subject.as_deref());
         let options = narrate::Options {
             scene: args.scene.clone(),
             force: args.force,
         };
         let quiet = self.json;
         if !quiet {
-            println!(
-                "{}",
-                paint(
-                    &format!(
-                        "voice {} · {} · speed {} · {}",
-                        voice.voice, voice.model, voice.speed, voice.base_url
-                    ),
-                    DIM
-                )
-            );
+            println!("{}", paint(&describe(&voice), DIM));
         }
         let started = std::time::Instant::now();
         let report = narrate::narrate(
             &args.dir,
             &library,
-            &voice,
+            speaker.as_ref(),
             &ModelAligner,
             &options,
             &mut |p| {
@@ -106,8 +100,10 @@ impl Ctx {
             &VoiceOverrides::default(),
             &voice::settings(),
         )?;
+        let speaker = speaker(&voice, None);
+        speaker.ready()?;
         let started = std::time::Instant::now();
-        let speech = tts::synthesise(&voice, &args.text)?;
+        let speech = speaker.speak(&args.text)?;
         let ms = started.elapsed().as_millis();
         std::fs::write(&args.out, &speech.wav)
             .map_err(|e| format!("cannot write {}: {e}", args.out.display()))?;
@@ -126,8 +122,10 @@ impl Ctx {
             "{}",
             paint(
                 &format!(
-                    "  {:.2} s at {} Hz · {} · {} · speed {} · {ms} ms",
-                    d.duration, d.sample_rate, voice.voice, voice.model, voice.speed
+                    "  {:.2} s at {} Hz · {} · {ms} ms",
+                    d.duration,
+                    d.sample_rate,
+                    describe(&voice)
                 ),
                 DIM
             )
@@ -136,8 +134,33 @@ impl Ctx {
     }
 }
 
+/// The speaker `voice`'s engine makes clips with; Kokoro reads the
+/// lexicon of `subject` over the library's.
+fn speaker<'a>(voice: &'a Voice, subject: Option<&str>) -> Box<dyn Speaker + 'a> {
+    match voice {
+        Voice::Server(v) => Box::new(ServerSpeaker(v)),
+        Voice::Kokoro(v) => Box::new(KokoroSpeaker::new(
+            v.clone(),
+            Packs::app(),
+            LexiconFiles::app(subject),
+        )),
+    }
+}
+
+/// `voice af_heart · kokoro · speed 1`, or the server's model and URL.
+fn describe(voice: &Voice) -> String {
+    match voice {
+        Voice::Server(v) => format!(
+            "voice {} · {} · speed {} · {}",
+            v.voice, v.model, v.speed, v.base_url
+        ),
+        Voice::Kokoro(v) => format!("voice {} · kokoro · speed {}", v.voice, v.speed),
+    }
+}
+
 fn flags(args: &StudioVoiceArgs) -> VoiceOverrides {
     VoiceOverrides {
+        engine: None,
         base_url: args.server.clone(),
         model: args.model.clone(),
         voice: args.voice.clone(),
@@ -146,12 +169,20 @@ fn flags(args: &StudioVoiceArgs) -> VoiceOverrides {
 }
 
 fn voice_json(voice: &Voice) -> serde_json::Value {
-    serde_json::json!({
-        "server": voice.base_url,
-        "model": voice.model,
-        "voice": voice.voice,
-        "speed": voice.speed,
-    })
+    match voice {
+        Voice::Server(v) => serde_json::json!({
+            "engine": "server",
+            "server": v.base_url,
+            "model": v.model,
+            "voice": v.voice,
+            "speed": v.speed,
+        }),
+        Voice::Kokoro(v) => serde_json::json!({
+            "engine": "kokoro",
+            "voice": v.voice,
+            "speed": v.speed,
+        }),
+    }
 }
 
 fn print_progress(p: &Progress) {

@@ -1,13 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
 
 // The `voice` settings row Studio narrates with, read and written by Rust
-// (`app/src-tauri/src/studio/commands/voice.rs`). Keyless OpenAI-compatible
-// TTS servers only. Nothing here synthesises: listing models is free.
+// (`app/src-tauri/src/studio/commands/voice.rs`): the engine (Kokoro in the
+// app, or a keyless OpenAI-compatible TTS server), the voice and speed, and
+// the server's URL and model. Nothing here synthesises: listing models is free.
+
+/** `server` asks a TTS server; `kokoro` runs Kokoro inside the app. */
+export type VoiceEngine = "server" | "kokoro";
 
 /** Mirrors `VoiceRow`; an unset field is null. */
 export interface VoiceSettings {
-  /** Normalised: no trailing slash or `/v1`. */
+  /** No default: narration fails until one is chosen. A stored row with a
+   *  URL and no engine reads as `server`. */
+  engine: VoiceEngine | null;
+  /** The server engine's only; normalised: no trailing slash or `/v1`. */
   baseUrl: string | null;
+  /** The server engine's only. */
   model: string | null;
   voice: string | null;
   /** Positive; 1.0 when unset. */

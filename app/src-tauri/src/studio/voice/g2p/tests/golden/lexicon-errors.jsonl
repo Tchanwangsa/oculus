@@ -1,0 +1,3 @@
+{"key": "Snowman", "value": "/sn☃/", "error": "bad-phoneme", "oracle_message": "lexicon 'Snowman': phoneme characters not in Kokoro's vocabulary: ['☃']"}
+{"key": "Frob", "value": "ZZYZX-blap", "error": "unknown-part", "oracle_message": "lexicon 'Frob': respelling part 'ZZYZX' is not in the dictionary"}
+{"key": "Mixed", "value": "SOFT-qqxj", "error": "unknown-part", "oracle_message": "lexicon 'Mixed': respelling part 'qqxj' is not in the dictionary"}

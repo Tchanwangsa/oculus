@@ -24,7 +24,7 @@ pub use narration::{
 pub use script::{Script, ScriptSection};
 pub use timeline::Timeline;
 pub use video::valid_subject;
-pub use video::{FRAME_RATES, SceneSpec, Video, Voice};
+pub use video::{FRAME_RATES, SceneSpec, Video, Voice, VoiceEngine};
 
 pub(crate) use scenes::Staged;
 

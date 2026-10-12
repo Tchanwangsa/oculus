@@ -4,6 +4,7 @@
 //! `strip` and `lint` read only the folder and write only the PNG; the
 //! other commands are in their own files.
 
+mod agents;
 mod aligner;
 mod components;
 mod gallery;
@@ -37,6 +38,7 @@ impl Ctx {
             StudioAction::Render(a) => self.studio_render(&a),
             StudioAction::Narrate(a) => self.studio_narrate(&a),
             StudioAction::Tts(a) => self.studio_tts(&a),
+            StudioAction::Agents(a) => self.studio_agents(&a),
             StudioAction::Aligner { action } => self.studio_aligner(&action),
         }
     }

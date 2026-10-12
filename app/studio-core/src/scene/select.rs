@@ -83,6 +83,7 @@ fn pick(
         text: n.text.clone(),
         src: n.src.clone(),
         path: n.path.clone(),
+        math: n.math.clone(),
         children,
         key: n.key.clone(),
         loc: n.loc,

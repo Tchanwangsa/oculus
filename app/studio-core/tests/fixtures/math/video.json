@@ -1,0 +1,8 @@
+{
+  "size": { "width": 1280, "height": 720 },
+  "theme": "default",
+  "scenes": [
+    { "component": "Corpus", "props": {}, "hold": 1.0 },
+    { "component": "Factor", "props": {}, "hold": 2.0, "transition": { "kind": "cut" } }
+  ]
+}

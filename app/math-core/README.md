@@ -1,7 +1,11 @@
 # math-core
 
-The app's maths engine, in Rust: a Cargo workspace of its own, never a
-dependency of `app/src-tauri` (so `tauri dev` never rebuilds it).
+The app's maths engine, in Rust: a Cargo workspace of its own. Only
+`katex/` reaches `app/src-tauri`, as a path dependency of Studio's renderer
+(`app/studio-core`, whose `<Math>` typesets with it), so an edit under
+`katex/` rebuilds the app; the binding, the edit model and the oracle never
+do. Built that way, `katex/` takes the depending crate's profiles, not the
+ones below.
 
 | Member | What it is |
 | --- | --- |

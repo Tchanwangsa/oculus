@@ -67,6 +67,7 @@ fn a_real_opencode_runs_a_v1_thread_end_to_end() {
             writer: "You complete notes.",
             lecture_end: "You find where lectures end.",
         },
+        "",
     )
     .expect("the agent config");
     let server = OpencodeServer::spawn(OpencodeSpawn {

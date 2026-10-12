@@ -19,7 +19,7 @@ pub use auth::connect;
 pub use ffmpeg::{find_ffmpeg, lead_in_secs, trim_video};
 pub use media::{
     cleanup_partial_downloads, download_url, lecture_dir, partial_path, source_path,
-    stream_to_file, transcript, CANCELLED,
+    stream_to_file, transcript,
 };
 pub use syllabus::syllabus;
 

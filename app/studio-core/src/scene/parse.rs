@@ -4,7 +4,7 @@
 
 use super::path::parse_path;
 use super::style::Style;
-use super::{Kind, Node};
+use super::{Kind, MathSpec, Node};
 use serde_json::{Map, Value};
 
 /// A bad node: what is wrong, the node's tree path and its TSX position.
@@ -30,7 +30,7 @@ fn parse(v: &Value, parent: &str, index: Option<usize>) -> Result<Node, NodeErro
     };
     let Some(obj) = v.as_object() else {
         return Err(fail(
-            "expected an element (Box, Text, Image, Path, Stack or Row)".to_owned(),
+            "expected an element (Box, Text, Image, Path, Math, Stack or Row)".to_owned(),
             parent,
             None,
             false,
@@ -42,9 +42,10 @@ fn parse(v: &Value, parent: &str, index: Option<usize>) -> Result<Node, NodeErro
         Some("image") => Kind::Image,
         Some("path") => Kind::Path,
         Some("morph") => Kind::Morph,
+        Some("math") => Kind::Math,
         _ => {
             return Err(fail(
-                "expected an element (Box, Text, Image, Path, Stack or Row)".to_owned(),
+                "expected an element (Box, Text, Image, Path, Math, Stack or Row)".to_owned(),
                 parent,
                 None,
                 false,
@@ -91,6 +92,12 @@ fn parse(v: &Value, parent: &str, index: Option<usize>) -> Result<Node, NodeErro
         text: str_field(obj, "text"),
         src: str_field(obj, "src"),
         path: path_spec,
+        math: (kind == Kind::Math).then(|| {
+            Box::new(MathSpec {
+                tex: str_field(obj, "tex"),
+                display: obj.get("display").and_then(Value::as_bool).unwrap_or(true),
+            })
+        }),
         children,
         key: obj.get("key").and_then(Value::as_str).map(str::to_owned),
         loc,
