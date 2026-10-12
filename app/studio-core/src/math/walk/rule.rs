@@ -56,6 +56,7 @@ pub fn piece<'a>(label: &str, rect: Rect, cx: Ctx<'a>) -> Piece<'a> {
     Piece {
         label: label.to_owned(),
         groups: cx.groups,
+        script: cx.script,
         rect,
         shape: Shape::Rule,
         colour: cx.colour,

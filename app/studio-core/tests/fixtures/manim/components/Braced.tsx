@@ -13,6 +13,6 @@ export default (_p, { theme }) => (
     <Surround target="eq/1" at={0.6} dur={0.6} />
     <Underline target="eq/2" at={0.6} />
     <Indicate target="eq/−" at={0.9} dur={1.0} />
-    <Arrow from={[260, 140]} to="eq/4" bend={-30} at={0.3} dur={0.7} />
+    <Arrow from={[260, 140]} to="eq/4^" bend={-30} at={0.3} dur={0.7} />
   </Stack>
 );

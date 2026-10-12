@@ -53,7 +53,9 @@ function Brace(props, ctx) {
   if (!['below', 'above', 'left', 'right'].includes(side)) {
     throw new TypeError(`<Brace> side must be "below", "above", "left" or "right", got ${describe(side)}`);
   }
-  return overlayNode('Brace', 'brace', { target: needTarget('Brace', target), side, gap, size, color }, props, ctx, label);
+  // A string label is set at 0.7 of the target's em once layout knows it.
+  const labelEm = typeof label === 'string' || typeof label === 'number' ? 0.7 : undefined;
+  return overlayNode('Brace', 'brace', { target: needTarget('Brace', target), side, gap, size, color, labelEm }, props, ctx, label);
 }
 
 function Surround(props, ctx) {

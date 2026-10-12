@@ -315,6 +315,7 @@ declare const Brace: Component<
     target: Target;
     /** Default `"below"`. */
     side?: 'below' | 'above' | 'left' | 'right';
+    /** A string is set at 0.7 of the target's em; an element keeps its own size. */
     label?: string | StudioElement;
     /** px between the target and the brace; default 0.12 em. */
     gap?: number;
@@ -365,8 +366,10 @@ declare const Indicate: Component<{
  * children are refused. `\color{accent}` takes a theme colour name or hex. In a JSX attribute
  * (`tex="\frac{a}{b}"`) a backslash is itself; in a JS string (`tex={"\\frac{a}{b}"}`) write it twice.
  *
- * Every glyph, rule and root sign is keyed `<key>/<term>` for magic move: by character and occurrence
- * (`eq/x`, `eq/x#2`), or `\k{name}{…}` names a group (`eq/name`, `eq/name.1`, … in reading order). Two
+ * Every glyph, rule and root sign is keyed `<key>/<term>` for magic move: by character, `^` or `_` per script
+ * it sits in (exponents, limits above and root indices are `^`; subscripts and limits below `_`), then
+ * occurrence (`eq/x`, `eq/2^`, `eq/x#2`), so an exponent never matches a baseline digit; or `\k{name}{…}`
+ * names a group (`eq/name`, `eq/name.1`, … in reading order), which overrides. Two
  * Math elements with one key in a `<Morph>` glide the terms they share and fade the rest. Without a key, a
  * Math inside a Morph is keyed by its place there; elsewhere its terms have no keys. A key shared by consecutive
  * scenes makes their transition a magic move, so a formula carries across scenes term by term.

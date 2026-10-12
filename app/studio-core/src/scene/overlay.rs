@@ -48,6 +48,8 @@ pub enum OverlayKind {
         gap: Option<f64>,
         /// The brace's em, which sets its thickness.
         size: Option<f64>,
+        /// A string label's font size in the target's em.
+        label_em: Option<f64>,
     },
     Surround {
         target: String,
@@ -132,6 +134,7 @@ pub fn parse(obj: &Map<String, Value>) -> Result<OverlaySpec, String> {
             },
             gap: num("gap")?,
             size: num("size")?,
+            label_em: num("labelEm")?,
         },
         "surround" => OverlayKind::Surround {
             target: target()?,
