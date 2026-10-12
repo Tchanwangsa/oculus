@@ -8,7 +8,7 @@
 //! reason in the snapshot: it is never retried in a loop.
 
 mod link;
-mod policy;
+pub(super) mod policy;
 #[cfg(test)]
 mod tests;
 
@@ -29,7 +29,7 @@ use tokio::sync::{watch, Notify};
 use super::audio::{Note, Switching};
 use super::credentials::{self, Loaded, Saved};
 use super::state::{self, from_percent, Begun, DEVICE_NAME};
-use super::{devices, events, logs, resume};
+use super::{devices, events, logs, netwatch, resume};
 use crate::runtime::blocking;
 use link::Unlinked;
 use policy::{Backoff, Stamp};
@@ -63,6 +63,7 @@ pub(super) fn start(app: &AppHandle, how: Start) -> bool {
         return false;
     };
     logs::install(app);
+    netwatch::start(app);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let id = begun.id;

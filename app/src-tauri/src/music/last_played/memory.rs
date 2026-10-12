@@ -1,10 +1,13 @@
 //! The in-memory side: what Oculus played last and where it stood, a resume
 //! waiting on a reconnect, and when the row is due a write. Positions advance
-//! by `Instant`, which stops while the Mac sleeps, as the player does.
+//! by `Instant` while playing, re-based every poll tick; a step longer than
+//! `SLEPT_AFTER` is a sleep, when the player was suspended, and adds nothing
+//! (`Instant` keeps counting through suspend on Windows).
 
 use std::time::{Duration, Instant};
 
 use super::LastPlayed;
+use crate::music::session::policy::SLEPT_AFTER;
 use crate::music::state::Snapshot;
 
 /// How often the row is written while a track plays; track changes, pauses,
@@ -57,14 +60,15 @@ struct Written {
 }
 
 /// The position `elapsed` after `position_ms`: moved on only while playing,
-/// and never past the track's end (a duration of 0 is unknown).
+/// not at all across a sleep (more than `SLEPT_AFTER`), and never past the
+/// track's end (a duration of 0 is unknown).
 pub(in crate::music) fn advanced(
     position_ms: u32,
     duration_ms: u32,
     playing: bool,
     elapsed: Duration,
 ) -> u32 {
-    if !playing {
+    if !playing || elapsed > SLEPT_AFTER {
         return position_ms;
     }
     let at = (position_ms as u64).saturating_add(elapsed.as_millis() as u64);
@@ -155,8 +159,13 @@ impl Memory {
         self.due(now, false)
     }
 
-    /// The periodic write while a track plays.
+    /// The poll tick: re-bases the position, so only a sleep makes a step
+    /// longer than `SLEPT_AFTER`, and writes periodically while a track plays.
     pub(in crate::music) fn tick(&mut self, now: Instant) -> Option<LastPlayed> {
+        if let Some(last) = self.last.as_mut() {
+            last.row.position_ms = last.position_at(now);
+            last.at = now;
+        }
         self.due(now, false)
     }
 

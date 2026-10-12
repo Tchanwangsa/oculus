@@ -40,19 +40,22 @@ fn a_connection_that_keeps_dropping_at_once_backs_off() {
 }
 
 #[test]
-fn a_tick_whose_wall_time_ran_ahead_of_its_awake_time_means_the_mac_just_woke() {
-    // One poll tick apart: a second on both clocks is no sleep.
+fn a_long_gap_between_ticks_on_either_clock_means_the_machine_just_woke() {
     let tick = Duration::from_secs(1);
+    let night = Duration::from_secs(8 * 3600);
+    // Normal ticks, a second apart on both clocks, or a few seconds late.
     assert!(!slept(tick, tick));
-    // A night between two ticks, about a second of it awake.
-    assert!(slept(Duration::from_secs(8 * 3600), tick));
-    // A tick held up while awake is late on both clocks: no sleep.
-    let late = Duration::from_secs(100);
-    assert!(!slept(late, late));
-    // Clocks drift by a few seconds; that is not sleep.
-    assert!(!slept(tick + Duration::from_secs(5), tick));
-    assert!(!slept(tick + SLEPT_AFTER, tick));
-    assert!(slept(tick + SLEPT_AFTER + Duration::from_secs(1), tick));
-    // A wall clock set back is not sleep.
+    assert!(!slept(
+        tick + Duration::from_secs(5),
+        tick + Duration::from_secs(5)
+    ));
+    assert!(!slept(SLEPT_AFTER, SLEPT_AFTER));
+    // macOS: `Instant` stopped through the sleep, the wall clock did not.
+    assert!(slept(night, tick));
+    assert!(slept(SLEPT_AFTER + tick, tick));
+    // Windows: `Instant` counted through suspend too.
+    assert!(slept(night, night));
+    // A wall clock set back reads as no wall time, and is no sleep by itself.
     assert!(!slept(Duration::ZERO, tick));
+    assert!(slept(Duration::ZERO, night));
 }

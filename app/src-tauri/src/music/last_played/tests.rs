@@ -89,6 +89,25 @@ fn a_position_moves_on_only_while_playing_and_stops_at_the_end() {
     assert_eq!(advanced(195_000, 200_000, true, ten), 200_000);
     // An unknown duration does not clamp.
     assert_eq!(advanced(5_000, 0, true, ten), 15_000);
+    // A step longer than a poll tick can be is a sleep: the player was
+    // suspended, so nothing is added.
+    assert_eq!(
+        advanced(5_000, 200_000, true, Duration::from_secs(3600)),
+        5_000
+    );
+}
+
+#[test]
+fn a_sleep_that_instant_counted_through_adds_nothing_to_the_position() {
+    // Windows: `Instant` keeps counting through suspend.
+    let t0 = Instant::now();
+    let mut memory = Memory::default();
+    memory.follow(&playing(SONG, 30_000, 10), t0);
+    memory.tick(t0 + Duration::from_secs(1));
+    memory.tick(t0 + Duration::from_secs(2));
+    let woke = t0 + Duration::from_secs(2 + 8 * 3600);
+    let written = memory.lose(true, woke).unwrap();
+    assert_eq!(written.position_ms, 32_000);
 }
 
 #[test]

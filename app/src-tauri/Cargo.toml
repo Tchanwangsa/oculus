@@ -137,6 +137,11 @@ sha2 = "0.10"
 # The G2P guesser's NFKD and combining-mark stripping (`src/studio/voice/g2p/guess/`).
 # Already in the lock tree.
 unicode-normalization = "0.1.25"
+# A network coming back cuts the music session's reconnect backoff short
+# (`src/music/netwatch.rs`): if-watch over netwatcher because on macOS it
+# builds on the system-configuration already in the lock (SCDynamicStore),
+# with the same address-change stream on Windows and Linux.
+if-watch = { version = "3.2.2", features = ["tokio"] }
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_sessions` in src/shell/browser/seed.rs). WebKit cookie ordering uses

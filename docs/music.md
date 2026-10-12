@@ -14,6 +14,7 @@ is on, or from `music_wake` when the player is opened with none running.
 | --- | --- |
 | The module and its rules | `app/src-tauri/src/music/mod.rs` |
 | The session task: player, connect, reconnect, stop; a link's watch and end; backoff and the sleep check | `app/src-tauri/src/music/session/` |
+| The network watcher that cuts a backoff short | `app/src-tauri/src/music/netwatch.rs` |
 | The snapshot, the `music-state` event, the Spirc, run and login handles, `music_wake`'s nudge | `app/src-tauri/src/music/state/` |
 | What Oculus last played: in memory, its settings row, its writer | `app/src-tauri/src/music/last_played/`, `app/src-tauri/src/music/state/remembered.rs` |
 | Loading it back: after a reconnect, and from Play with nothing playing | `app/src-tauri/src/music/resume.rs` |
@@ -234,11 +235,14 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    Spirc checks only on its next wake (a push, a player event, a command).
    So while a link is up the task polls `is_invalid()` every second
    (`session/link.rs`), and also ends the link when the Spirc's task ends by
-   itself. The same tick sees the Mac wake: more than 30 s more wall-clock
-   time than `Instant` time (which stops during macOS sleep) since the tick
-   before ends the link at once, since a socket dead across sleep is
-   otherwise noticed only after up to 80 s awake. A link that has lived
-   through a sleep and stayed up is never torn down for it later.
+   itself. The same tick sees the machine wake: a gap of more than 30 s
+   since the tick before, on the wall clock or on `Instant`, ends the link
+   at once, since a socket dead across sleep is otherwise noticed only
+   after up to 80 s awake. Both clocks, because `Instant` stops during
+   sleep on macOS (only the wall clock jumps) but keeps counting through
+   suspend on Windows (both jump, and the interval fires late); a wall
+   clock set back counts as no time. A link that has lived through a sleep
+   and stayed up is never torn down for it later.
 5. **A drop reconnects at once.** The link's end keeps what Oculus played for
    the resume (below), pauses the player there, shuts the session down and
    wakes a Spirc still running with `disconnect(false)` (an inactive one
@@ -247,7 +251,8 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    whose state it would otherwise clear. The first attempt after a
    connection that lived a minute comes at once; one that kept dropping
    sooner, and every attempt that fails, waits 2 s doubling to 60 s
-   (`session/policy.rs`). The log says `the Spotify connection dropped
+   (`session/policy.rs`). A network address appearing cuts that wait short
+   (`netwatch.rs`, below). The log says `the Spotify connection dropped
    after <n> s (<why>); reconnecting now` (or `in <n> s`).
 6. **"Reconnecting…", not an error.** The snapshot's `reconnecting` is true
    from the drop until the next connect: `error` stays empty and the track
@@ -278,9 +283,18 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    stored login while Settings → Music is on, unless a login is needed or
    waiting, or the user pressed Disconnect. Otherwise it does nothing and
    makes no network call.
-9. `PermissionDenied` or `Unauthenticated` ends the task with `needs_login`
-   and the reason in `error`. It is never retried.
-10. A stop (disconnect, sign-out, a new login, app exit) sends the Spirc its
+9. **A network coming back retries at once.** One watcher per app run
+   (`netwatch.rs`, the `if-watch` crate: SCDynamicStore on macOS, the IP
+   helper on Windows, netlink on Linux), started with the first session,
+   sends `music_wake`'s nudge when an address appears: a wait in backoff
+   ends and the next attempt goes now, while an up link only checks its
+   session, so a healthy one is never torn down for a network change. A
+   burst (Wi-Fi joining flaps several times) is one nudge, and one more if
+   it is still going after 1 s. An address going away nudges nothing. A
+   watcher that cannot start is logged once, and backoff works without it.
+10. `PermissionDenied` or `Unauthenticated` ends the task with `needs_login`
+    and the reason in `error`. It is never retried.
+11. A stop (disconnect, sign-out, a new login, app exit) sends the Spirc its
     shutdown, which pauses and leaves Spotify's device list, gives it 10 s,
     then shuts the session down.
 
@@ -288,9 +302,11 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
 
 - **`Memory` follows the snapshot on every change while Oculus is the device
   playing a track** (`last_played/memory.rs`): the account, context, track,
-  position and its shuffle and repeat. Positions move on by `Instant`, which
-  stops while the Mac sleeps, as the player does; once Oculus stops being
-  the device playing, what it played stops where it was.
+  position and its shuffle and repeat. Positions move on by `Instant` while
+  playing, re-based every poll tick; a step longer than 30 s is a sleep,
+  when the player was suspended, and adds nothing (`Instant` stops in sleep
+  on macOS but counts through it on Windows). Once Oculus stops being the
+  device playing, what it played stops where it was.
 - **The `music_last_played` settings row keeps it across launches**, a JSON
   object: `account` (the canonical username), `context_uri`, `track` (the
   snapshot's `Track` fields), `position_ms`, `saved_at_ms`, `shuffle`,
@@ -534,7 +550,7 @@ session.
 - A command sent right after `transfer` is still dropped — wait for `active` (`control.rs`).
 - A Session whose Spirc ended cannot connect again — make a new one and `set_session`.
 - A closed Session is seen by the Spirc only on its next wake — the link polls `is_invalid()` every second (`session/link.rs`).
-- `Instant` stops while the Mac sleeps — the per-tick sleep check compares it with the wall clock; positions advance by it on purpose.
+- `Instant` stops during sleep on macOS but counts through suspend on Windows — the per-tick sleep check takes a long gap on either clock, and a position never advances across one.
 - `Playing` is not proof of audio — a missing audio key plays silence; watch `error`.
 - Constructing librespot's `Cache` writes the account's credentials to disk in plain text — never use it.
 - `music_play_pause` from the exclusive-playback rule would start music it meant to stop, and `music_pause_player` would pause a phone — the rule uses `music_pause`.

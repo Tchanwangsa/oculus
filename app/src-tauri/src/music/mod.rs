@@ -6,7 +6,8 @@
 //!   (`startup.rs`). It notices a dropped connection within a second,
 //!   rebuilds it at once (backing off only attempts that fail), resumes what
 //!   Oculus was playing (`resume.rs`), and stops for good on an auth error.
-//!   `music_wake`, sent whenever the player is opened, makes it check now.
+//!   `music_wake`, sent whenever the player is opened, makes it check now,
+//!   and a network address appearing cuts a backoff short (`netwatch.rs`).
 //! - **What Oculus last played** is remembered in memory and in the
 //!   `music_last_played` settings row (`last_played/`), shown paused after a
 //!   relaunch, and what Play plays when nothing plays anywhere.
@@ -40,6 +41,7 @@ mod last_played;
 mod library;
 mod login;
 mod logs;
+mod netwatch;
 mod queue;
 mod remote;
 mod resume;
