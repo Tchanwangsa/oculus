@@ -13,8 +13,9 @@ mod request;
 #[cfg(test)]
 mod tests;
 
+use crate::runtime::multipart::{boundary, content_type};
 pub use probe::{probe, LocalHealth};
-use request::{boundary, envelope, http_failure};
+use request::{envelope, http_failure};
 
 use std::fs;
 use std::io::{BufReader, BufWriter, Cursor, Read, Write};
@@ -116,10 +117,7 @@ impl MinerULocal {
             .build();
         let sent = agent
             .post(&format!("{}{PARSE_PATH}", self.base_url))
-            .set(
-                "Content-Type",
-                &format!("multipart/form-data; boundary={boundary}"),
-            )
+            .set("Content-Type", &content_type(&boundary))
             .set("Content-Length", &length.to_string())
             .send(body);
 

@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use crate::providers::credentials::{Credentialed, KeydError, RawResponse};
+use crate::runtime::multipart::{self, FilePart};
 
 use crate::transcribe::{audio, Engine, EngineError, Segment};
 
@@ -132,11 +133,7 @@ impl Engine for Groq {
     fn transcribe(&self, audio: &Path) -> Result<Vec<Segment>, EngineError> {
         let bytes = std::fs::read(audio)
             .map_err(|e| EngineError::Failed(format!("could not read the extracted audio: {e}")))?;
-        let boundary = format!(
-            "oculus-{:x}-{:x}",
-            std::process::id(),
-            crate::runtime::clock::now_nanos()
-        );
+        let boundary = multipart::boundary();
         let mut fields = vec![
             ("model", MODEL),
             ("response_format", "verbose_json"),
@@ -146,18 +143,18 @@ impl Engine for Groq {
         if let Some(language) = &self.language {
             fields.push(("language", language.as_str()));
         }
-        let body = multipart(
+        let body = multipart::body(
             &boundary,
             &fields,
-            &File {
+            &FilePart {
                 field: "file",
-                name: &format!("audio{}", audio::EXTENSION),
+                filename: &format!("audio{}", audio::EXTENSION),
                 content_type: audio::CONTENT_TYPE,
-                bytes: &bytes,
             },
+            &bytes,
         );
 
-        let response = self.post(&format!("multipart/form-data; boundary={boundary}"), &body)?;
+        let response = self.post(&multipart::content_type(&boundary), &body)?;
         if response.status >= 400 {
             return Err(refusal(
                 response.status,
@@ -170,42 +167,6 @@ impl Engine for Groq {
             .map_err(|e| EngineError::Failed(format!("Groq's reply could not be read: {e}")))?;
         parse_segments(&text)
     }
-}
-
-pub(in crate::transcribe) struct File<'a> {
-    pub field: &'a str,
-    pub name: &'a str,
-    pub content_type: &'a str,
-    pub bytes: &'a [u8],
-}
-
-/// A `multipart/form-data` body: text fields, then one file. ureq 2 has no
-/// multipart support, and this is all of it Groq needs.
-pub(in crate::transcribe) fn multipart(
-    boundary: &str,
-    fields: &[(&str, &str)],
-    file: &File,
-) -> Vec<u8> {
-    let mut body = Vec::with_capacity(file.bytes.len() + 1024);
-    for (name, value) in fields {
-        body.extend_from_slice(
-            format!(
-                "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
-            )
-            .as_bytes(),
-        );
-    }
-    body.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\n\
-             Content-Type: {}\r\n\r\n",
-            file.field, file.name, file.content_type
-        )
-        .as_bytes(),
-    );
-    body.extend_from_slice(file.bytes);
-    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-    body
 }
 
 /// `verbose_json`'s segments. A chunk of silence has none, which is not an
@@ -286,29 +247,6 @@ mod tests {
     use super::*;
     use crate::test_support::{FakeServer, Reply, Scratch};
     use serde_json::json;
-
-    #[test]
-    fn the_multipart_body_has_each_field_then_the_file() {
-        let body = multipart(
-            "B",
-            &[("model", "whisper-large-v3-turbo"), ("temperature", "0")],
-            &File {
-                field: "file",
-                name: "audio.ogg",
-                content_type: "audio/ogg",
-                bytes: b"\x00OggS\xff",
-            },
-        );
-        let mut expected = b"--B\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n\
-whisper-large-v3-turbo\r\n\
---B\r\nContent-Disposition: form-data; name=\"temperature\"\r\n\r\n0\r\n\
---B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.ogg\"\r\n\
-Content-Type: audio/ogg\r\n\r\n"
-            .to_vec();
-        expected.extend_from_slice(b"\x00OggS\xff");
-        expected.extend_from_slice(b"\r\n--B--\r\n");
-        assert_eq!(body, expected);
-    }
 
     #[test]
     fn verbose_json_segments_are_read_and_extra_fields_ignored() {
@@ -483,7 +421,7 @@ Content-Type: audio/ogg\r\n\r\n"
         assert!(headers[0][1]
             .as_str()
             .unwrap()
-            .starts_with("multipart/form-data; boundary=oculus-"));
+            .starts_with("multipart/form-data; boundary=oculus"));
         assert!(
             !header.to_string().to_lowercase().contains("authorization"),
             "{header}"

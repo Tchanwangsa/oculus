@@ -132,26 +132,7 @@ fn slides_md(lesson: &Value, extras: HashMap<i64, SlideExtras>) -> String {
 /// Front matter read the way the frontend reads it (`frontmatter.ts`):
 /// `key: <json>`, or `key:` then `  - <json>` items.
 fn front_of(md: &str) -> (serde_json::Map<String, Value>, &str) {
-    let rest = md.strip_prefix("---\n").expect("front matter");
-    let end = rest.find("\n---\n").expect("closing fence");
-    let mut map = serde_json::Map::new();
-    let mut list: Option<String> = None;
-    for line in rest[..end].lines() {
-        if let (Some(item), Some(key)) = (line.strip_prefix("  - "), &list) {
-            let item: Value = serde_json::from_str(item).expect(line);
-            map[key.as_str()].as_array_mut().unwrap().push(item);
-            continue;
-        }
-        let (key, value) = line.split_once(':').expect(line);
-        if value.is_empty() {
-            map.insert(key.into(), json!([]));
-            list = Some(key.into());
-        } else {
-            map.insert(key.into(), serde_json::from_str(value.trim()).expect(line));
-            list = None;
-        }
-    }
-    (map, &rest[end + "\n---\n".len()..])
+    super::front::read_front_matter(md).expect("front matter")
 }
 
 fn fixture_extras() -> HashMap<i64, SlideExtras> {

@@ -20,6 +20,8 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Rate limiting both cloud clients share | `app/src-tauri/src/providers/ratelimit/` |
 | Shared parse/embed event payload and channels | `app/src-tauri/src/runtime/pipeline_events.rs` |
 | Blocking-command adapter | `app/src-tauri/src/runtime/blocking.rs` |
+| Hand-built `multipart/form-data` (ureq 2 has none), shared by Groq, local MinerU and Ed's workspace uploads | `app/src-tauri/src/runtime/multipart.rs` |
+| An Ed challenge workspace open in the app: one socket thread per challenge ([sync.md](./sync.md#an-open-challenge-workspace-is-a-live-session)) | `app/src-tauri/src/sources/ed/workspace_session/` |
 | Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/runtime/atomic_write.rs`, `app/src-tauri/src/runtime/clock.rs`, `app/src-tauri/src/test_support/` |
 | Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/auth/keyd/` |
 | Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/providers/credentials/`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/voyage.rs`, `app/src-tauri/src/providers/groq.rs`, `app/src-tauri/src/auth/okta/` |
@@ -326,8 +328,9 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
 - `ed-courses.json` — the Ed course each Canvas course's LTI launch named
   ([sync.md](./sync.md#ed-content-is-a-custom-xml-dialect)).
 - `ed-workspaces/<challenge_id>.json` — what Oculus last synced of an Ed
-  challenge workspace; a sync leaves a workspace with one alone
-  ([sync.md](./sync.md#ed-lessons-are-an-index-per-lesson-and-a-file-per-slide)).
+  challenge workspace, written by its session in the app; a sync leaves a
+  workspace with one alone
+  ([sync.md](./sync.md#an-open-challenge-workspace-is-a-live-session)).
 - `canvas-session/`: the authenticated flag, the signed-out marker and the
   sign-in attempt record, with `okta-sign-in.log` beside it
   ([auth.md](./auth.md)). The sessions themselves are in the vault.

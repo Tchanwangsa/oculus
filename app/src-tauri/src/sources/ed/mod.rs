@@ -1,6 +1,6 @@
 //! Ed access: token auth, course mapping, Discussion threads, Lessons (slides,
-//! quizzes, challenge workspaces and their local sync state), and the `<document>` XML → Markdown
-//! converter both share.
+//! quizzes, challenge workspaces, their local sync state and the editor's live
+//! session on one), and the `<document>` XML → Markdown converter both share.
 //!
 //! Ed authenticates API calls with an `x-token` JWT that oculus-keyd holds and
 //! attaches to its `ed` route; this module never reads it back. The token is
@@ -20,9 +20,12 @@ mod lti;
 mod palette;
 mod region;
 mod render;
+pub mod sahara;
 mod threads;
 pub mod views;
 mod workspace;
+pub mod workspace_api;
+pub mod workspace_session;
 pub mod workspace_state;
 
 #[cfg(test)]
@@ -38,8 +41,8 @@ use crate::providers::credentials::Credentialed;
 
 pub use document::document_md;
 pub use lesson_md::{
-    challenge_id, lesson_index_md, lesson_url, slide_md, slide_url, sorted_slides, LessonPlace,
-    LinkedFile, SlideExtras, SlideFile,
+    challenge_id, lesson_index_md, lesson_url, slide_md, slide_url, slide_workspace_dir,
+    sorted_slides, LessonPlace, LinkedFile, SlideExtras, SlideFile,
 };
 pub use lessons::LessonList;
 pub use live::open_live_workspace;

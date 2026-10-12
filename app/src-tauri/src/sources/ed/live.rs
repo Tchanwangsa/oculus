@@ -1,7 +1,7 @@
-//! Holding a challenge workspace live while it is downloaded. Ed's workspace
-//! server only hands out a download for a workspace someone has open, so the
-//! sync opens the web app's WebSocket with the connect ticket, waits for its
-//! `init` frame, and closes it once the zip is in.
+//! The workspace server's WebSocket: TLS, the handshake and the wait for
+//! `init`, shared by the sync and the editor's session (`workspace_session`).
+//! Ed's workspace server only hands out a download for a workspace someone
+//! has open, so the sync holds a [`LiveWorkspace`] while its zip comes in.
 //!
 //! The socket goes straight to the workspace host over rustls: the ticket is
 //! the credential, so it is never sent through keyd and never logged.
@@ -21,10 +21,13 @@ const ORIGIN: &str = "https://edstem.org";
 const INIT_WAIT: Duration = Duration::from_secs(30);
 
 type Tls = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
+/// A socket to the workspace server. Every read and write is bounded by
+/// `INIT_WAIT` until its owner sets its own read timeout ([`set_read_timeout`]).
+pub(super) type Socket = WebSocket<Tls>;
 
 /// An open workspace session; dropping it closes the socket.
 pub struct LiveWorkspace {
-    socket: WebSocket<Tls>,
+    socket: Socket,
 }
 
 impl Drop for LiveWorkspace {
@@ -37,6 +40,13 @@ impl Drop for LiveWorkspace {
 /// Open the workspace socket on `host` (`lessons::workspace_host`) with a
 /// connect ticket and wait for `init`.
 pub fn open_live_workspace(host: &str, ticket: &str) -> Result<LiveWorkspace, String> {
+    let mut socket = open_socket(host, "connect", ticket)?;
+    wait_for_init(&mut socket)?;
+    Ok(LiveWorkspace { socket })
+}
+
+/// Open `wss://<host>/<route>?ticket=` with the web app's origin.
+pub(super) fn open_socket(host: &str, route: &str, ticket: &str) -> Result<Socket, String> {
     let tcp = connect_tcp(host)?;
     let name = rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|_| "the workspace host is not a valid name".to_string())?;
@@ -45,7 +55,7 @@ pub fn open_live_workspace(host: &str, ticket: &str) -> Result<LiveWorkspace, St
     let stream = rustls::StreamOwned::new(tls, tcp);
 
     let ticket: String = url::form_urlencoded::byte_serialize(ticket.as_bytes()).collect();
-    let mut request = format!("wss://{host}/connect?ticket={ticket}")
+    let mut request = format!("wss://{host}/{route}?ticket={ticket}")
         .into_client_request()
         .map_err(|_| "the workspace ticket does not make a valid URL".to_string())?;
     request.headers_mut().insert(
@@ -58,42 +68,48 @@ pub fn open_live_workspace(host: &str, ticket: &str) -> Result<LiveWorkspace, St
             "the workspace server did not finish the handshake".to_string()
         }
     })?;
-    let mut live = LiveWorkspace { socket };
-    live.wait_for_init()?;
-    Ok(live)
+    Ok(socket)
 }
 
-impl LiveWorkspace {
-    /// Read frames until `init`, ignoring every other kind. tungstenite
-    /// queues the pong for a ping and sends it on the next read.
-    fn wait_for_init(&mut self) -> Result<(), String> {
-        let deadline = Instant::now() + INIT_WAIT;
-        while Instant::now() < deadline {
-            match self.socket.read() {
-                Ok(Message::Text(text)) => {
-                    let frame: serde_json::Value =
-                        serde_json::from_str(text.as_str()).unwrap_or_default();
-                    if frame["type"] == "init" {
-                        return Ok(());
-                    }
+/// Read frames until `init` and return its `data`, ignoring every other
+/// kind. tungstenite queues the pong for a ping and sends it on the next read.
+pub(super) fn wait_for_init(socket: &mut Socket) -> Result<serde_json::Value, String> {
+    let deadline = Instant::now() + INIT_WAIT;
+    while Instant::now() < deadline {
+        match socket.read() {
+            Ok(Message::Text(text)) => {
+                let mut frame: serde_json::Value =
+                    serde_json::from_str(text.as_str()).unwrap_or_default();
+                if frame["type"] == "init" {
+                    return Ok(frame["data"].take());
                 }
-                Ok(Message::Close(_)) => {
-                    return Err("the workspace server closed the session before it opened".into())
-                }
-                Ok(_) => {}
-                Err(tungstenite::Error::Io(e))
-                    if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
-                {
-                    break;
-                }
-                Err(e) => return Err(socket_error(&e)),
             }
+            Ok(Message::Close(_)) => {
+                return Err("the workspace server closed the session before it opened".into())
+            }
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(e))
+                if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+            {
+                break;
+            }
+            Err(e) => return Err(socket_error(&e)),
         }
-        Err(format!(
-            "the workspace server did not open the session within {} s",
-            INIT_WAIT.as_secs()
-        ))
     }
+    Err(format!(
+        "the workspace server did not open the session within {} s",
+        INIT_WAIT.as_secs()
+    ))
+}
+
+/// Bound each read on `socket` by `wait`, so its owner can do other work
+/// between frames.
+pub(super) fn set_read_timeout(socket: &mut Socket, wait: Duration) -> Result<(), String> {
+    socket
+        .get_mut()
+        .sock
+        .set_read_timeout(Some(wait))
+        .map_err(|e| format!("the workspace session failed: {}", e.kind()))
 }
 
 fn connect_tcp(host: &str) -> Result<TcpStream, String> {
@@ -126,7 +142,7 @@ fn tls_config() -> rustls::ClientConfig {
 }
 
 /// A socket failure in words. Never the request URL: it carries the ticket.
-fn socket_error(e: &tungstenite::Error) -> String {
+pub(super) fn socket_error(e: &tungstenite::Error) -> String {
     match e {
         tungstenite::Error::Http(response) => format!(
             "the workspace server refused the session (HTTP {})",
