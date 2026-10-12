@@ -111,4 +111,8 @@ impl crate::vault::LegacySource for NoLegacy {
     fn remove(&self, _service: &str, _account: &str) -> Result<bool, KeyError> {
         Ok(false)
     }
+    // WebView2 keeps no WebKit keychain item to import.
+    fn read_webcrypto(&self, _key: &crate::names::WebCrypto) -> Result<Option<Vec<u8>>, KeyError> {
+        Ok(None)
+    }
 }
