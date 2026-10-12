@@ -184,3 +184,48 @@ fn a_token_colour_prop_takes_a_theme_name_but_not_a_css_name() {
     assert!(m[0].contains("colour `purple` is a literal"), "{}", m[0]);
     assert!(with_props(src, &[]).is_empty());
 }
+
+#[test]
+fn a_unitless_style_key_is_never_checked_for_spacing() {
+    for src in [
+        "export default () => <Box style={{ opacity: clamp(pop * 4, 0, 1) }} />;",
+        "export default () => <Box style={{ opacity: 1, scale: 4, rotate: 16 }} />;",
+        "export default () => <Box style={{ flexGrow: 8, flexShrink: 4, zIndex: 24 }} />;",
+        "export default () => <Text style={{ fontWeight: 4, lineHeight: 8 }} />;",
+        "export default () => <Box style={{ transformOrigin: [4, 8], clipInset: [0, 4, 0, 4] }} />;",
+        "export default () => <Text style={{ reveal: { progress: 4 } }} />;",
+    ] {
+        assert!(messages(src).is_empty(), "{src}: {:?}", messages(src));
+    }
+}
+
+#[test]
+fn a_factor_or_a_call_argument_is_not_a_style_value() {
+    for src in [
+        "export default () => <Box style={{ width: 24 * s, height: s * 16 }} />;",
+        "export default () => <Box style={{ padding: Math.max(16, p), gap: x > 8 ? a : b }} />;",
+        "export default () => <Box style={{ translateY: (1 - pop) * 40 }} />;",
+    ] {
+        assert!(messages(src).is_empty(), "{src}: {:?}", messages(src));
+    }
+}
+
+#[test]
+fn a_length_value_is_checked_through_ternaries_fallbacks_and_arrays() {
+    let m = messages(
+        "export default () => <Box style={{ padding: big ? 24 : 16, gap: g ?? 8, margin: [(40), 0] }} />;",
+    );
+    assert_eq!(m.len(), 4, "{m:?}");
+    // A term of a sum or difference is a length too; a negative is not.
+    let m = messages(
+        "export default () => <Box style={{ padding: [8, space.s + 4], width: w - 16, left: -24, top: 64 + x * 2 }} />;",
+    );
+    assert_eq!(m.len(), 4, "{m:?}");
+    // Each style key's own value is checked; a ternary's `:` is not a key.
+    let m = messages(
+        "export default () => <Box style={{ opacity: on ? x : 4, width: 24, color: \"#fff\" }} />;",
+    );
+    assert_eq!(m.len(), 2, "{m:?}");
+    assert!(m[0].contains("theme.space.m"), "{m:?}");
+    assert!(m[1].contains("colour `#fff`"), "{m:?}");
+}

@@ -802,13 +802,24 @@ guessed }`. Notes never fail lint; check each as "Pronunciation" says.
 - A font is a bundled family's name as a string, or any string after
   `fontFamily:`.
 - A number is checked only inside a `style={{ … }}` (or `style: { … }`)
-  object, at any depth of brackets or calls, so the `8` in `width:
-  Math.max(8, w)` and both numbers in `padding: [0, 16]` count. It is an
-  error only when it equals a theme `space` or `radius` value (4, 8, 16,
-  24, 28, 40, 44, 64, 112, 999 in the bundled themes; space is named
-  first). Numbers inside a nested object (`shadow`, `border`, a gradient
-  `fill`), after a minus sign, outside `style` (a `const`, `Arrow` points,
-  a `stroke` prop) and every other value, such as 56 or 18, pass.
+  object, as the value of a length key: `width`, `height`, `minWidth`,
+  `minHeight`, `maxWidth`, `maxHeight`, `gap`, `padding`, `margin`,
+  `left`, `top`, `right`, `bottom`, `radius`, `blur`, `translateX`,
+  `translateY`, `fontSize` or `letterSpacing`. It counts when it is the
+  value itself, a branch of it (an array element, as both numbers in
+  `padding: [0, 16]`; a ternary's arm, `gap: big ? 24 : 16`; a side of
+  `||`, `??` or `&&`) or a term added or subtracted (the `4` in `space.s
+  + 4`). It is an error only when it equals a theme `space` or `radius`
+  value (4, 8, 16, 24, 28, 40, 44, 64, 112, 999 in the bundled themes;
+  space is named first). A unitless key (`opacity`, `scale`, `rotate`,
+  `flexGrow`, `flexShrink`, `fontWeight`, `lineHeight`,
+  `transformOrigin`, `clipInset`) is never checked, so the `4` in
+  `opacity: clamp(pop * 4, 0, 1)` passes. So does a factor (`width: 24 *
+  s`), a side of a comparison, a call's argument (`Math.max(8, w)`), a
+  number inside a nested object (`shadow`, `border`, a gradient `fill`,
+  `reveal`), a negative number, a number outside `style` (a `const`,
+  `Arrow` points, a `stroke` prop), and every other value, such as 56 or
+  18.
 
 A broken `video.json` or `script.md` is not an issue but a failure: the
 command prints the file, the line and the reason, and nothing else runs.
