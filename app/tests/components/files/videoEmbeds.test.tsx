@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 import { fileMarkdownPlugins } from "@/components/files/FileMarkdown";
 import { tagSource, videoDisplayName } from "@/components/markdown/embed/card/tagSource";
-import { canvasFileUrl } from "@/lib/files/canvasLinks";
 import { webVideoUrl } from "@/stores/lectures/webVideoStore";
 
 // The components' imports reach modules that listen on `window` and
@@ -15,6 +14,7 @@ afterAll(() => {
   for (const k of stubbed) delete globals[k];
 });
 const { MD_COMPONENTS } = await import("@/components/markdown/MdComponents");
+const { canvasFileUrl } = await import("@/lib/files/canvasLinks");
 
 /** The library chain, with no components: the sanitized tree as React writes it. */
 function sanitized(text: string) {
