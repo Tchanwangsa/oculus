@@ -32,9 +32,10 @@ export interface ProviderInfo {
   /** The `window` event that says the CLI has since started, so a dormant
    *  `peekModels` answer is asked again. */
   runningEvent?: string;
-  /** How the CLI's sign-in ends: `"code"` blocks on a pasted code (Claude),
-   *  `"callback"` finishes via a loopback server (Codex). `null`: nothing to
-   *  drive here — opencode signs in per provider in Settings → opencode. */
+  /** How the CLI's sign-in ends: `"code"` blocks on a pasted code (Claude,
+   *  and Antigravity driven over a pseudo-terminal), `"callback"` finishes via a
+   *  loopback server (Codex). `null`: nothing to drive here — opencode signs
+   *  in per provider in Settings → opencode. */
   signIn: "code" | "callback" | null;
   /** What the picker says when an installed CLI's list is empty because of a
    *  step the student can take. */
@@ -92,10 +93,8 @@ export const PROVIDERS: ProviderInfo[] = [
     staticModels: null,
     // `agy models` lists the account's own entitlements, so no filter.
     fetchModels: () => harnessAntigravityModels().then(antigravityAsModels),
-    // `agy` has no login subcommand; signing in is its interactive CLI.
-    signIn: null,
-    emptyNote:
-      "Run agy in a terminal and finish its Google sign-in, then its models appear here.",
+    signIn: "code",
+    emptyNote: "Sign in to Antigravity in Settings → Agents to get models here.",
     emptyNotePage: "agents",
     rewind: false,
   },

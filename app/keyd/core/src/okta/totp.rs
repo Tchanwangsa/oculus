@@ -123,9 +123,11 @@ pub fn totp_at(secret: &[u8], unix_seconds: u64, step: u64, digits: u32) -> Stri
     format!("{code:0width$}", width = digits as usize)
 }
 
-/// The code an authenticator app would be showing right now.
-pub fn totp_now(secret_b32: &str) -> Result<String, String> {
-    totp_code(secret_b32, crate::clock::now_secs())
+/// The code an authenticator app would be showing right now, for a key as
+/// the user pasted it (`oculus auth setup` passes it straight through, so an
+/// `otpauth://` link works here as it does in the save).
+pub fn totp_now(pasted_key: &str) -> Result<String, String> {
+    totp_code(&super::setup_key(pasted_key)?, crate::clock::now_secs())
 }
 
 /// The code an authenticator app shows at `unix_seconds`.

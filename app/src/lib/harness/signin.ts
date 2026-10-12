@@ -16,8 +16,13 @@ export const SIGNIN_EVENT = "harness-signin";
 export interface SignInLine {
   provider: Provider;
   line: string | null;
-  /** Rust opens it too; shown with Copy in case that `open` failed. */
+  /** Opened in the browser already (by Rust, or by `agy` itself); shown
+   *  with Copy and Open in case that failed. Antigravity sends a new one
+   *  each time it goes round again after a refused code. */
   url: string | null;
+  /** A problem the student must see while the run carries on: the
+   *  sentence Antigravity refused a pasted code with. */
+  notice: string | null;
   done: boolean;
   ok: boolean | null;
   status: string | null;

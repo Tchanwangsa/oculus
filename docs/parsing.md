@@ -30,6 +30,7 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 | Live job state, per-file failures, the app-wide latch | `app/src/stores/sync/parseStore.ts` |
 | Background recovery sweep | `app/src/hooks/sync/useQualitySweep.ts` |
 | Settings UI (engine, token, expired-certificate switch, endpoint, server status) | `app/src/components/settings/library/ParserSection.tsx` |
+| The token field, shared by Settings and onboarding's Library step | `app/src/hooks/keys/useMineruKey.ts` (on `app/src/hooks/keys/useCloudKey.ts`) |
 
 ## MinerU's result CDN and its expired certificate
 
@@ -79,6 +80,12 @@ must say so. `ParseError` keeps the answers distinguishable:
 - **The sweep reads the same discriminants**: `retryable === false` is never
   re-kicked, and a latch stands it down (one probe file after
   `LATCH_PROBE_AFTER_MS`).
+- **Saving a token re-queues what only the token failed.**
+  `useMineruKey` calls `parseStore.tokenSaved()`, which lifts the latch and
+  drops this session's `missing_credentials` and `rejected_credentials`
+  failures (and only those — a file MinerU couldn't read stays failed), then `sweepNow()` runs the sweep at once
+  instead of at its next 15-minute tick. The sweep's usual budget applies, so
+  a large backlog drains a few files per sweep.
 - **An Office file LibreOffice could not convert is `Document`** with code
   `parse::CONVERSION_FAILED`, whose sentence names the conversion, not MinerU;
   an unreadable spreadsheet is `Document` with `parse::SHEET_UNREADABLE`.
@@ -321,7 +328,8 @@ first, in the app with the token just typed, by GETting a non-existent task:
 401/403 is a refusal (`A0202` invalid, `A0211` expired), anything else passed,
 and an unreachable MinerU stores it as `unverified`. Only then is it stored,
 through keyd when keyd is installed. The client keeps no rejection latch;
-`parseStore`'s session-scoped `ParseLatch` does, and saving a token lifts it.
+`parseStore`'s session-scoped `ParseLatch` does, and saving a token lifts it
+([above](#nothing-falls-back-so-a-failed-parse-must-surface)).
 `parse_settings` reports a refused check as `credentials_error`, which Settings
 shows in place of "no token".
 
