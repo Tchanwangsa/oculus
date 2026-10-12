@@ -347,7 +347,7 @@ built-in `default` under a name asked for. Three columns:
 - **The inspector** (`inspector/`, in `InspectorColumn` as on the Components
   page: the header's toggle folds it, the seam resizes it, both remembered
   under `oculus-studio-themes-inspector`) edits the draft in sections that
-  fold (`oculus-studio-themes-sections`; Type, Shape, Motion, Transition and
+  fold (`oculus-studio-themes-sections`; Typography, Shape, Motion, Transition and
   Narration start folded). **Default for**: chips (Global, and the browsed
   subject) that make the theme that library's default or clear it
   (`studio_theme_set_default`, the library's `library.json`; a subject's own

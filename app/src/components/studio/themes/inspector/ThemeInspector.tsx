@@ -78,7 +78,7 @@ export function ThemeInspector({
               <ColorTokens tokens={tokens} onChange={onChange} />
             </Part>
           )}
-          <Part id="type" title="Type" count={3 + sizes.length} sections={sections}>
+          <Part id="type" title="Typography" count={3 + sizes.length} sections={sections}>
             <TypeTokens tokens={tokens} sizes={sizes} onChange={onChange} />
           </Part>
           {radii > 0 && (
