@@ -65,6 +65,11 @@ test("beforeBuildCommand produces every sidecar and keyd's helper", () => {
   }
 });
 
+test("beforeBuildCommand's CLI reference reads the CLI stage-cli just staged", () => {
+  // Rebuilding it after staging would compile the app again.
+  expect(before).toContain("bun run stage-cli && bun run docs:cli --staged");
+});
+
 test("every producer is a package script over a script that exists", () => {
   for (const command of Object.values(producers)) {
     const script = command.replace("bun run ", "");
