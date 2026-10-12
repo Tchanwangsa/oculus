@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use studio_core::Library;
 
+use crate::studio::libraries::default_theme;
 use crate::studio::videos::{self, NewVideo};
 
 /// Mirrors `NewVideoOptions` in `app/src/lib/studio/videos.ts`, plus the
@@ -37,7 +38,8 @@ pub struct Made {
     pub dir: PathBuf,
 }
 
-/// Scaffold a video under `videos` with a unique slug from the title. A
+/// Scaffold a video under `videos` with a unique slug from the title, in the
+/// theme asked for or else its subject's default (`default_theme`). A
 /// scaffold that does not load over `library` (a theme it cannot find, for
 /// one) is removed again and the reason returned.
 pub fn create_in(
@@ -56,14 +58,19 @@ pub fn create_in(
         voice: v.voice.filter(|s| !s.trim().is_empty()),
         speed: v.speed,
     });
+    let subject = options.subject.filter(|s| !s.trim().is_empty());
+    let theme = match options.theme.filter(|s| !s.trim().is_empty()) {
+        Some(theme) => theme,
+        None => default_theme(library, subject.as_deref())?,
+    };
     let dir = videos::create_in(
         videos,
         &NewVideo {
             slug: slug.clone(),
-            subject: options.subject.filter(|s| !s.trim().is_empty()),
+            subject,
             title: title.map(str::to_owned),
             portrait: options.portrait,
-            theme: options.theme.filter(|s| !s.trim().is_empty()),
+            theme: Some(theme),
             voice,
         },
     )?;
