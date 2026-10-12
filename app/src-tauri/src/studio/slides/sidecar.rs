@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use studio_core::{LintIssue, LintLevel, Project, StudioError};
 
 use super::geometry::{fmt_box, Frac};
+use super::snap::Edges;
 
 /// The folder under a video's `assets/` that slides go in.
 pub const SLIDES_DIR: &str = "slides";
@@ -29,6 +30,12 @@ pub struct Sidecar {
     pub bbox: Frac,
     pub select: Select,
     pub pad: f64,
+    /// `--exact`: the padded box as it is, no edge moved off ink.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exact: bool,
+    /// What each edge did to stay off ink (`snap`); none with `exact`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edges: Option<Edges>,
     /// The `--width` asked for, if one was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<u32>,
@@ -81,8 +88,9 @@ impl Sidecar {
         let width = self
             .width
             .map_or(String::new(), |w| format!(" --width {w}"));
+        let exact = if self.exact { " --exact" } else { "" };
         format!(
-            "oculus studio slide {} {} --page {} {how} --pad {} --name {name}{width}",
+            "oculus studio slide {} {} --page {} {how} --pad {} --name {name}{width}{exact}",
             quote(&dir.to_string_lossy()),
             quote(&self.source),
             self.page,

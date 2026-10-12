@@ -14,6 +14,7 @@ fn request<'a>(s: &'a Setup, video: &'a std::path::Path, select: Select) -> Requ
         pad: 0.02,
         width: None,
         replace: false,
+        exact: false,
     }
 }
 
@@ -43,7 +44,8 @@ fn find_crops_the_figure_with_its_caption() {
     let sc = &made.sidecar;
     assert_eq!(sc.page, 1);
     assert_eq!(sc.page_size, [720.0, 405.0]);
-    // The union of figure and caption, padded by 0.02 x 405 pt.
+    // The union of figure and caption, padded by 0.02 x 405 pt; the panel's
+    // frame is stroked on its box, so the edges it crosses move out a point.
     let pad = (8.1 / 720.0, 8.1 / 405.0);
     let want = [
         FIGURE[0] - pad.0,
@@ -52,7 +54,7 @@ fn find_crops_the_figure_with_its_caption() {
         CAPTION[3] + pad.1,
     ];
     for (got, want) in sc.bbox.iter().zip(want) {
-        assert!((got - want).abs() < 1e-3, "{:?}", sc.bbox);
+        assert!((got - want).abs() < 3e-3, "{:?}", sc.bbox);
     }
     // 2x what fills a 1920x1080 frame's height, capped at 6 megapixels.
     let pixels = u64::from(sc.image.width) * u64::from(sc.image.height);

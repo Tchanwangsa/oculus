@@ -36,10 +36,10 @@ export const props = {
 export const examples = {
   zoom: {
     src: "starter:slide-figure.png",
-    aspect: 1.3144,
+    aspect: 1.318,
     page: "starter:slide-page.png",
     pageAspect: 1.7778,
-    bbox: [0.447, 0.1775, 0.9695, 0.8842],
+    bbox: [0.4455, 0.1762, 0.9704, 0.8842],
     source: "Lecture 4, p. 12",
     caption: "Each step goes downhill, and the steps shrink as the slope flattens.",
     highlight: [[0.4, 0.66, 0.56, 0.8]],
@@ -47,7 +47,7 @@ export const examples = {
   },
   steps: {
     src: "starter:slide-figure.png",
-    aspect: 1.3144,
+    aspect: 1.318,
     source: "Lecture 4, p. 12",
     highlight: [[0.14, 0.24, 0.24, 0.37], [0.4, 0.66, 0.56, 0.8]],
     highlightAt: [1.6, 2.8],

@@ -642,7 +642,11 @@ pub(crate) struct StudioGalleryArgs {
 /// that is its own block brings the figure beside it; a tie or no match
 /// lists the candidates), `--block` indices from `oculus studio blocks`, or
 /// `--bbox`. Blocks come from the parse record, so `--find` and `--block`
-/// need a parsed PDF. The same inputs write the same bytes; lint warns when
+/// need a parsed PDF. No edge slices ink: where the box cuts a line (a
+/// caption under a figure's box) the edge moves out to take it in, up to 6%
+/// of the page; a caption or label in the margin joins a figure, other text
+/// there is left out; the sidecar's `edges` says what moved, and `--exact`
+/// keeps the box as given. The same inputs write the same bytes; lint warns when
 /// the PDF changes after.
 ///
 ///     oculus studio slide momentum lecture-04.pdf --find "Figure 3" --name descent
@@ -686,6 +690,10 @@ pub(crate) struct StudioSlideArgs {
     /// Overwrite a slide of the same name cropped from another PDF
     #[arg(long)]
     pub(crate) replace: bool,
+    /// Keep the padded box as it is; by default each edge moves off any ink
+    /// it would cut (out over a caption, back before other text)
+    #[arg(long)]
+    pub(crate) exact: bool,
     /// Disambiguate FILE by subject; prefix codes are fine
     #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
     pub(crate) subject: Option<String>,

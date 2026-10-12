@@ -3,6 +3,7 @@ mod fixture;
 mod geometry;
 mod lint;
 mod make;
+mod snap;
 
 use std::path::{Path, PathBuf};
 

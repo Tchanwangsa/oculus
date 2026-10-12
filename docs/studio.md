@@ -48,7 +48,7 @@ crops library PDF pages into slides (`slide`), and narrates.
 | The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
 | The playground's commands: `studio_themes`, the component list, source, frame, validated write, history and restore | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
-| Slides: a region of a library PDF page as a video asset, the blocks to pick it by, the sidecar and its lint; the bundled sample crop | `app/src-tauri/src/studio/slides/` (`blocks.rs`, `geometry.rs`, `raster.rs`, `sidecar.rs`, `preview.rs`), `app/studio-core/library/components/Slide.tsx`, `app/studio-core/src/images/`, `app/studio-core/library/assets/` |
+| Slides: a region of a library PDF page as a video asset, the blocks to pick it by, edges moved off ink, the sidecar and its lint; the bundled sample crop | `app/src-tauri/src/studio/slides/` (`blocks.rs`, `geometry.rs`, `snap.rs`, `raster.rs`, `sidecar.rs`, `preview.rs`), `app/studio-core/library/components/Slide.tsx`, `app/studio-core/src/images/`, `app/studio-core/library/assets/` |
 | `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `lint.rs`, `brief.rs`, `beats.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `pronounce.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`, `slide.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
@@ -1738,7 +1738,8 @@ with the `Narration` error before any frame renders.
   file under `components/` and `assets/`, the render settings (quality,
   scale, size, fps, blur, filter, codec and tag arguments) and
   `STUDIO_RENDER_BUILD`, which `app/src-tauri/build.rs` hashes from
-  studio-core's `src/`, `fonts/` and `themes/`, the KaTeX port's `src/`,
+  studio-core's `src/`, `fonts/`, `themes/` and `library/assets/` (the
+  bundled `starter:` images), the KaTeX port's `src/`,
   `data/` and `build.rs` (`app/math-core/katex/`), `src/studio/render/` and
   `app/src-tauri/Cargo.lock` (the versions of vello_cpu, parley, taffy and
   the rest), so a renderer, font or dependency change in development never
@@ -1975,6 +1976,24 @@ the `Slide` starter animates it in. Rendering never opens a PDF.
   under it, so the crop is worth a look. `--pad` (default 0.02 of the
   page's shorter side, the same in points on every side) grows the union
   of the boxes, clamped to the page; under 2 pt a side is refused.
+- **No edge slices ink** (`snap.rs`, unless `--exact`). A probe render of
+  the region with 6% of the page round it marks each row and column that
+  holds ink (a pixel more than 40 a channel from the background, the
+  commonest colour on the probe's border). Then each edge: where the
+  blocks' box itself cuts ink (ink on both sides of it, past a row of
+  anti-aliasing), it moves out to the next blank row within 6% of the page
+  and then checks its pad as below, else pulls back to the middle of the
+  blank before the ink, else stays and is a `cut`. Where ink lies in the
+  pad, it moves out over that ink to the next blank row when it is a
+  figure's caption or label (the pick holds a figure, chart or table, the
+  ink starts within 34 pt, about two lines, and the nearest block to it
+  along that axis is a picked one, so another block's text never joins),
+  else pulls back halfway to it. After moving out it keeps as much pad as
+  fits before the next ink. Top and bottom are decided over the padded
+  columns, then left and right over the rows decided. The sidecar's
+  `edges` says what each did (`pad`, `trim`, `extend`, `cut`); an edge
+  left at its pad keeps the exact padded value. `--bbox` follows the same
+  rule, with no picked blocks, so only a cut line moves its edge out.
 - **`oculus studio blocks FILE [--page N] [--png OUT]`** lists each page's
   size in points and its blocks: index, kind, box, and the block's text on
   one line (`blocks::plain`: an image's `![caption](...)` as its caption,
@@ -2001,7 +2020,8 @@ the `Slide` starter animates it in. Rendering never opens a PDF.
   name already holding a crop of another PDF is refused unless
   `--replace`. The sidecar (`sidecar::Sidecar`) holds `source` (the PDF's
   data-relative path), `sha256` of its bytes, `page`, `pageSize` (points),
-  `bbox` (the padded crop), `select` (`find`, `blocks` or `bbox`), `pad`,
+  `bbox` (the crop as made), `select` (`find`, `blocks` or `bbox`), `pad`,
+  `exact` when set, `edges`,
   `width` when one was asked, `image` and `pageImage` (`src`, `width`,
   `height`), `blocks` (each block at least half inside the crop: index,
   kind, box as fractions of the crop, text) and `props`, the `Slide`

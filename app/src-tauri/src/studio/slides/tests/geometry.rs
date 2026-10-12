@@ -88,3 +88,13 @@ fn an_inner_box_is_a_fraction_of_the_crop() {
         Some([0.1, 0.1, 0.4, 0.6])
     );
 }
+
+#[test]
+fn the_default_crop_never_passes_the_pixel_cap() {
+    for k in 1..400 {
+        let h = 0.05 + f64::from(k) * 0.0023;
+        let b = [0.0, 0.0, 1.0, h.min(1.0)];
+        let (w, h) = crop_pixels(&b, (720.0, 405.0), (1920, 1080), None).unwrap();
+        assert!(u64::from(w) * u64::from(h) <= MAX_CROP_PIXELS, "{w}x{h}");
+    }
+}

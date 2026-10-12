@@ -153,3 +153,62 @@ pub fn write(path: &Path) {
     )
     .unwrap();
 }
+
+/// One block of a page's record: kind, box, markdown.
+pub type Block = (&'static str, [f64; 4], &'static str);
+
+/// A PDF of 600x400 pt pages, each a content stream (Helvetica is `/F1`)
+/// with its record's blocks, and the `.pages.json` beside it.
+pub fn write_pages(path: &Path, pages: &[(String, Vec<Block>)]) {
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let f1 = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+    });
+    let resources = doc.add_object(dictionary! { "Font" => dictionary! { "F1" => f1 } });
+    let mut kids: Vec<Object> = Vec::new();
+    let mut records = Vec::new();
+    for (n, (content, blocks)) in pages.iter().enumerate() {
+        let stream = doc.add_object(Stream::new(dictionary! {}, content.clone().into_bytes()));
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 600.into(), 400.into()],
+            "Resources" => resources,
+            "Contents" => stream,
+        });
+        kids.push(page.into());
+        let mut markdown = String::new();
+        let mut spans = Vec::new();
+        for (kind, bbox, text) in blocks {
+            if !markdown.is_empty() {
+                markdown.push_str("\n\n");
+            }
+            let start = markdown.encode_utf16().count();
+            markdown.push_str(text);
+            let end = markdown.encode_utf16().count();
+            spans.push(json!({ "kind": kind, "bbox": bbox, "start": start, "end": end }));
+        }
+        records.push(json!({ "page_no": n + 1, "markdown": markdown, "blocks": spans }));
+    }
+    let count = kids.len() as i64;
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => count }),
+    );
+    let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog);
+    doc.save(path).unwrap();
+    let record = json!({
+        "pdf": path.file_name().unwrap().to_string_lossy(),
+        "mode": "quality",
+        "parser_version": 3,
+        "page_count": count,
+        "pages": records,
+    });
+    std::fs::write(
+        crate::parse::pages_path(path),
+        serde_json::to_string_pretty(&record).unwrap(),
+    )
+    .unwrap();
+}
