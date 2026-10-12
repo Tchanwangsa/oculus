@@ -10,7 +10,7 @@ mod tests;
 
 use std::path::Path;
 
-use studio_core::{LintIssue, Project, ScriptSection, StudioError};
+use studio_core::{LintIssue, LintLevel, Project, ScriptSection, StudioError};
 
 use super::g2p::{Phonemized, Source};
 use super::Voice;
@@ -56,6 +56,8 @@ pub fn lint(project: &Project, voice: &Voice, g2p: &Path, lexicon: &LexiconFiles
         Ok(reader) => reader,
         Err(e) => {
             out.issues.push(LintIssue {
+                level: LintLevel::Error,
+                group: None,
                 scene: None,
                 id: None,
                 component: None,
@@ -72,6 +74,8 @@ pub fn lint(project: &Project, voice: &Voice, g2p: &Path, lexicon: &LexiconFiles
         match read {
             Ok(p) => out.notes.extend(section_notes(index, section, &p)),
             Err(message) => out.issues.push(LintIssue {
+                level: LintLevel::Error,
+                group: None,
                 scene: Some(index),
                 id: Some(section.id.clone()),
                 component: Some(project.video.scenes[index].component.clone()),

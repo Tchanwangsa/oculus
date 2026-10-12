@@ -17,6 +17,36 @@ pub fn entry(src: &str, id: &str) -> Option<String> {
     Some(body[..=last].join("\n"))
 }
 
+/// `entry` less its narration paragraph: from a line starting `Narration:`
+/// (any case, `**`, `__` or a list marker around the label) to a blank
+/// line, a table row, a heading or the end, outside code fences.
+pub fn without_narration(entry: &str) -> String {
+    let lines: Vec<&str> = entry.lines().collect();
+    let outside = classify(&lines);
+    let mut out: Vec<&str> = Vec::new();
+    let mut dropping = false;
+    for (i, line) in lines.iter().enumerate() {
+        let t = line.trim();
+        if dropping && (t.is_empty() || t.starts_with('|') || t.starts_with('#') || !outside[i]) {
+            dropping = false;
+        }
+        if outside[i] && is_narration(t) {
+            dropping = true;
+        }
+        if !dropping {
+            out.push(line);
+        }
+    }
+    out.join("\n")
+}
+
+fn is_narration(line: &str) -> bool {
+    let bare = line.trim_start_matches(['-', '*', '+', '_', ' ']);
+    bare.get(..9)
+        .is_some_and(|head| head.eq_ignore_ascii_case("narration"))
+        && bare[9..].trim_start_matches(['*', '_']).starts_with(':')
+}
+
 /// What an entry's `Carries in:` and `Hands on:` say, each up to the other
 /// label or the end of its line; `**` and `__` around the labels are
 /// dropped.

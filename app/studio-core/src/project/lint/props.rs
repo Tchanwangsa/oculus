@@ -2,7 +2,7 @@
 //! be in every `examples` entry, so the gallery can show it. With no
 //! examples at all, every required prop is reported once.
 
-use super::{LintIssue, LintReport};
+use super::{Level, LintIssue, LintReport};
 use crate::error::StudioError;
 use crate::host::ComponentInfo;
 
@@ -18,6 +18,8 @@ pub(super) fn check(name: &str, info: &ComponentInfo, report: &mut LintReport) {
     }
     if info.examples.is_empty() {
         report.issues.push(LintIssue {
+            level: Level::Error,
+            group: None,
             scene: None,
             id: None,
             component: Some(name.to_owned()),
@@ -36,6 +38,8 @@ pub(super) fn check(name: &str, info: &ComponentInfo, report: &mut LintReport) {
         for prop in &required {
             if !given.contains_key(*prop) {
                 report.issues.push(LintIssue {
+                    level: Level::Error,
+                    group: None,
                     scene: None,
                     id: None,
                     component: Some(name.to_owned()),

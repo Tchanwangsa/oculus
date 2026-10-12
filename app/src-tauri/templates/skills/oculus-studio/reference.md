@@ -758,19 +758,37 @@ element you want to carry across; `"motion": { "magicMove": "off" }` in
 
 ## Lint
 
-`oculus studio lint <slug> --json` prints every problem as `{ level:
-"issue", scene, id, component, example, kind, message, loc }` and `[]`
-when clean. It exits 1 on any problem. Read `message`: it says what is
-wrong and what is valid.
+`oculus studio lint <slug>` checks the whole video; `--scene <id|N>`
+checks one scene, its component and the video settings it renders with.
+Each issue has a level:
 
-With the Kokoro engine it also prints a note per guessed word, `{ level:
-"note", scene, id, line, kind: "guessed", message, word, phonemes,
-guessed }`. Notes never fail lint; check each as "Pronunciation" says.
+- `error`: lint exits 1. Fix every one; "lint until no errors" is the bar.
+- `warning`: how the scene looks over time (below). Lint still passes; fix
+  it, or know why the scene wants it.
+- `note`: a word the aligner was unsure of, or a word Kokoro guessed. Check
+  each as "Pronunciation" says.
+
+Text output prints errors one a line in full; several warnings or notes of
+one kind in a scene share a line with a count and the first three.
+`--json` prints every issue in full as `{ level, scene, id, component,
+example, kind, message, loc }` (`[]` when there is nothing), and each
+guessed word as `{ level: "note", scene, id, line, kind: "guessed",
+message, word, phonemes, guessed }`. Read `message`: it says what is wrong
+and what is valid.
+
+Warnings name the time span and the words said in it:
+
+| `kind` | What it means | What to do |
+| --- | --- | --- |
+| `off_frame` | A node sits more than 4 px past the frame's edge (not while sliding in or out, not under a `Camera` zoom) | Move or shrink it inside the frame. |
+| `still` | Narration plays over more than 2.5 s where nothing on screen changes, or nothing is on screen by 0.5 s | Cue something to those words: a highlight, a rewrite, the next element. |
+| `half_frame` | For more than 3 s, everything sits in one half of the frame | Spread the picture, or put the next element in the empty half. |
+| `fragment` | At the end, a Math shows only one or two of its pieces (a stray `= .` from a rewrite), or a tiny mark sits alone | Hide the whole Math, or finish the rewrite; remove the mark. |
 
 | `kind` | What it means | What to do |
 | --- | --- | --- |
 | `narration` | "no narration for its current text": the scene's script changed or was never narrated | Run `oculus studio narrate <slug>`. |
-| `narration` | "the aligner is unsure of `word`" | Reword the sentence around it (a rare name, an acronym, a spelled-out symbol), then narrate again. |
+| `narration` (note) | "the aligner is unsure of `word`" | Listen; if it is mangled, reword the sentence around it (a rare name, an acronym, a spelled-out symbol), then narrate again. |
 | `narration` | "unscripted speech" | The voice said something the script lacks; reword, then narrate again. |
 | `script` | A section no scene's `id` matches | Rename the heading or the scene id. |
 | `script` | Text not in spoken form, with `say … as …` | Write the words it suggests. |
@@ -848,8 +866,23 @@ Each command prints the PNG's absolute path.
 its index, component and props; what the scenes either side carry in and
 hand on, and whether their components exist yet; its storyboard entry; the
 notes it names; its words at the times `word()` returns; and its exact
-`strip`, `frame` and `gallery` calls. Read it instead of `storyboard.md` or
-the manifest.
+`lint`, `beats`, `strip`, `frame` and `gallery` calls. Read it instead of
+`storyboard.md` or the manifest.
+
+`oculus studio beats <slug> --scene <id|N>` prints what changes on screen,
+as text, with the words said then:
+
+```
+  0.20  appear   d0-d15  (centre (960,540))  "Fifteen is …"
+  5.10  vanish   d15  "… loses a corner"
+  6.20  move     d12-d14  → (1180,420)…(1180,660) over 0.8 s  "… stands up"
+  7.40  move+resize+rewrite eq  (1248,349) → (1346,349); 390x66 → 577x65; +lap +plus -add over 0.8 s  "… one whole lap …"
+```
+
+Each line is a key (or a Math under its key, or `Box:12` for nodes with no
+key, by TSX line): `appear`, `vanish`, `move`, `resize`, `recolour`,
+`rewrite`. Check the beat table against it before you look at a strip, and
+spend strips on how it looks.
 
 `frame` and `strip` stop when any narrated scene's narration is stale, even
 with `--scene` on another scene; lint lists it. A missing component in
