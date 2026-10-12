@@ -51,8 +51,9 @@ const codeStyle = HighlightStyle.define([
   { tag: tags.strong, fontWeight: "600" },
 ]);
 
-/** Fenced code's colouring, for every grammar except the note's own. */
-const codeHighlight: Extension = [
+/** Fenced code's colouring, for every grammar except the note's own; also
+ *  `CodeEditor`'s (`components/code/`). */
+export const codeHighlight: Extension = [
   syntaxHighlighting({
     style: (t) => codeStyle.style(t),
     scope: (type) => type.prop(languageDataProp) !== noteLanguage.data,

@@ -235,3 +235,17 @@ export const codeTextFont = ViewPlugin.fromClass(
   },
   { decorations: (v) => v.decorations },
 );
+
+/** Extensions whose grammar `matchFilename` would pick wrongly: `.m` is
+ *  MATLAB in a course, not Mathematica. */
+const EXT_LANGUAGE: Record<string, string> = { m: "octave" };
+
+/** A file's grammar from its name (`tally.py` → Python), or null. The
+ *  grammar loads on demand (`desc.load()`). */
+export function fileLanguage(filename: string): LanguageDescription | null {
+  const name = (filename.split("/").pop() ?? filename).replace(/\.[^.]+$/, (e) => e.toLowerCase());
+  const ext = /\.([^.]+)$/.exec(name)?.[1];
+  const named = ext ? EXT_LANGUAGE[ext] : undefined;
+  if (named) return LanguageDescription.matchLanguageName(languages, named, true);
+  return LanguageDescription.matchFilename(languages, name);
+}

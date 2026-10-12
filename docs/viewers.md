@@ -1,8 +1,9 @@
-# Viewers: markdown, PDFs, lectures and web pages
+# Viewers: markdown, PDFs, code, lectures and web pages
 
 How a pane shows content: library markdown (with maths, diagrams and a
-lightbox) and PDFs, an Ed lesson's slides, a lecture or a library video in
-the media player, a video's transcript, and a web page.
+lightbox), PDFs and source files, an Ed lesson's slides and a challenge's
+workspace, a lecture or a library video in the media player, a video's
+transcript, and a web page.
 
 ## Where
 
@@ -13,6 +14,8 @@ the media player, a video's transcript, and a web page.
 | The maths engine: loading, rendering, `rehypeMaths`, the visual field's edit model (`field.ts`) and the geometry of source-mapped maths (`geometry/`: where each caret stop is drawn, which stop a press lands on, a selection's bands); KaTeX's CSS and fonts | `app/src/lib/maths/`, `app/src/styles/katex/` |
 | A parsed PDF's faces: PDF, Markdown | `app/src/components/files/FileViewer.tsx`, `app/src/components/files/FileMarkdown.tsx`, `app/src/components/files/pdf/pdfMdLink.ts`, `app/src/lib/pdf/pdfBlocks.ts` |
 | An Ed lesson's view: the slide sidebar and pane, the index reader | `app/src/components/lessons/`, `app/src/hooks/data/useLessonIndex.ts`, `app/src/lib/ed/lessons.ts` |
+| A challenge's workspace: the pane, its commands and events, the save loop, the shared session | `app/src/components/lessons/workspace/`, `app/src/lib/ed/workspace.ts`, `app/src/lib/ed/workspaceSaver.ts`, `app/src/lib/ed/workspaceHandles.ts`, `app/src/lib/ed/workspaceStatus.ts` |
+| The code editor and a library source file's read-only view | `app/src/components/code/`, `app/src/components/files/CodeFileViewer.tsx`, `fileLanguage` in `app/src/components/documents/editor/syntax/codeLanguages.ts`, `CODE_EXTS` in `app/src/lib/files/fileTypes.ts` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/lectures/media/`, `app/src/stores/lectures/playerPrefsStore.ts`, `app/src/hooks/lectures/useTranscriptDock.ts` |
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lectures/playback/`, `app/src/lib/lectures/playbackOwner.ts` |
 | Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectures/end.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/lectures/chapters/app.rs` |
@@ -163,6 +166,9 @@ classes work even when there are no dollar delimiters.
 - **A spreadsheet opens as its text** (`marks.xlsx.md`, a table per sheet),
   in-app like a PDF rather than in the system viewer (`lib/files/openFile.ts`), with no
   PDF ↔ Markdown toggle.
+- **A source file opens read-only in `CodeEditor`** (`CodeFileViewer`), not
+  as markdown: any extension in `CODE_EXTS`, each held by a test to a grammar
+  `fileLanguage` knows. See [the code editor](#one-code-editor-for-source-files).
 - **A file with a web `source_url` has an Open in Canvas / Open in Ed button**
   (`OpenOriginal` in `FilePage`'s header, ⌘-click for a new tab). A synced
   Canvas page or Ed thread is our markdown of it; the button opens the
@@ -352,13 +358,68 @@ whose list has slides (`useLessonIndex`), its body is `LessonView`
 - **The pane shows the selected slide through `FileViewer`**: a PDF slide's
   PDF, any other slide's `.md`, both found by path beside the index
   (`slideFiles`). A slide whose rows a sync has not stored yet says so
-  quietly. Links inside a slide open beside the page, as any file's do.
+  quietly. Links inside a slide open beside the page, as any file's do. A
+  `code` slide with a `challenge_id` is its
+  [workspace](#a-code-challenge-opens-as-its-workspace) instead; `jupyter`
+  and other challenges keep the read-only view.
 - **The slide rides in the URL** (`&slide=<Ed id>`, written with
   `replace`), so a restored tab or Back reopens it; without one the view
   opens on the first slide not completed. Showing a slide stamps its rows
   accessed, as opening a file does; the page stamps the index.
 - **A lesson file without front matter** (every slide in one file) renders
   as plain markdown, like any library file.
+
+## A code challenge opens as its workspace
+
+`WorkspacePane` (`app/src/components/lessons/workspace/`) is Ed's challenge
+layout: the slide's `.md` (the brief, its Files list included) through
+`FileViewer` in a left column, drag-resizable and remembered
+(`useResizablePanel`), and the challenge's files on the right as `PillTabs`
+over `CodeEditor`, the first file open. The library copy under the slide's
+folder is the working copy; Rust owns the session
+([sync.md](./sync.md) has the state file), the pane only calls the
+commands typed in `app/src/lib/ed/workspace.ts`.
+
+- **One session per challenge, shared by every pane on it**
+  (`holdWorkspace` in `workspaceHandles.ts`). The first hold calls
+  `ed_workspace_open`, which returns the file list, the challenge's settings
+  and `connecting` at once; the last release writes what is unsaved, then
+  calls `ed_workspace_close` a tick later, so a remount keeps the session. A
+  new open waits for its challenge's close still in flight.
+- **Files are read on first open** (`ed_workspace_read`) into the saver's
+  buffers, which keep them across tab switches; each tab keeps its undo
+  history and caret for as long as the pane is up.
+- **Saving mirrors notes' loop** (`createWorkspaceSaver`): 600 ms after
+  typing stops the file goes to `ed_workspace_save`, one write in flight
+  across the workspace, looping until every buffer matches what was written.
+  A tab switch, closing the pane and `pagehide` write at once. A rejected
+  save is an inline `Alert` ("Not saved to Ed") and is retried by the next
+  edit; nothing retries on a timer.
+- **The status line is Ed's** (`workspaceStatusText`): "Saving…", "Not
+  saved to Ed", "Offline — saved on this Mac" (a save that landed only on
+  disk, or the socket down; "PC" on Windows, with Rust's reason as the
+  tooltip), "Connecting…", else "All changes saved".
+- **`ed-workspace` events for this challenge**: `status` updates the line;
+  `files` replaces the tabs (when the open file leaves the list, the first opens)
+  and drops buffers no longer listed unless unsaved; a `commit` with
+  `ours: false` (Ed's web app saved) re-reads the open file unless it has
+  unsaved edits, and forgets the other clean buffers so they read again;
+  `error` shows as a warning `Alert` until the socket is back online.
+
+## One code editor for source files
+
+`CodeEditor` (`app/src/components/code/CodeEditor.tsx`, loaded on demand
+through `LazyCodeEditor`) is a CodeMirror view that fills its box and
+scrolls itself, with a fixed gutter on the card's fill. It borrows the note
+editor's Raw look and line numbers (`rawCodeChrome` in
+`components/documents/editor/chrome/rawMode.ts`) and its code colours
+(`codeHighlight`), and takes the grammar from the file name
+(`fileLanguage`: language-data's extensions, `.m` as MATLAB), loaded on
+first use. The indent unit is the one the file uses (`detectIndent`: tabs,
+or the commonest step of 2–8 spaces, else 4); Tab indents. A new `text`
+prop it does not hold is applied as one minimal change outside the undo
+history (`textChange`), so another copy's edit keeps the caret. `readOnly`
+turns editing off; the Edit menu's Undo and Redo reach it while focused.
 
 ## One media player plays lectures and library videos
 

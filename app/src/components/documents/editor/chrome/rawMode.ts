@@ -263,13 +263,16 @@ const rawSpans = Prec.highest(
 
 /** Raw mode's extension, swapped in by `modeExtension` in `extensions.ts`. */
 export function rawMode(): Extension {
-  return [
-    gutters({ fixed: false }),
-    lineNumbers(),
-    highlightActiveLine(),
-    highlightActiveLineGutter(),
-    rawHighlight,
-    rawSpans,
-    rawTheme,
-  ];
+  return [gutters({ fixed: false }), rawLines(), rawHighlight, rawSpans, rawTheme];
+}
+
+/** Line numbers and the focused line's tint, with the monospace look but no
+ *  markdown colouring: what `CodeEditor` (`components/code/`) borrows. The
+ *  caller sets up the gutter. */
+export function rawCodeChrome(): Extension {
+  return [rawLines(), rawTheme];
+}
+
+function rawLines(): Extension {
+  return [lineNumbers(), highlightActiveLine(), highlightActiveLineGutter()];
 }
