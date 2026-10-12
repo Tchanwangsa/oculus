@@ -12,13 +12,14 @@ export function ExamplePills({
 }) {
   if (names.length === 0) return null;
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[11px] font-medium tracking-wide text-muted-foreground">Example</span>
+    <div className="flex min-w-0 items-center gap-2">
+      <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground">Example</span>
       <PillTabs
         tabs={names.map((n) => ({ value: n, label: n }))}
         value={value ?? names[0]}
         onChange={onChange}
-        className="flex-wrap gap-1"
+        className="gap-1"
+        scroll
       />
     </div>
   );
