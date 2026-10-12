@@ -11,7 +11,7 @@ use super::{broadcast, channel, focus, label, title, with_state, DockPageInfo};
 #[cfg(not(target_os = "windows"))]
 use crate::shell::browser::PAGE_USER_AGENT;
 use crate::shell::browser::{content_size, MAIN};
-use crate::shell::native_layer::put_below_app;
+use crate::shell::native_layer::adopt_page;
 
 /// Opens the service's page parked, or in its slot if the frontend already
 /// placed it. Called only when the service is enabled and has no page.
@@ -91,7 +91,7 @@ pub(super) fn create(app: &AppHandle, service: &'static DockService) -> Result<(
             return Err(format!("failed to open dock page {id}: {e}"));
         }
     };
-    put_below_app(&webview);
+    adopt_page(&webview);
     configure_store(&webview, service);
     channel::install(&webview, app, service);
     if with_state(app, |s| s.shown.as_deref() == Some(id)) {

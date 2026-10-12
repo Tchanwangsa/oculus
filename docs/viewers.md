@@ -607,8 +607,8 @@ recording on a large model takes minutes.
 
 A browser tab is `/browse/<id>`, naming a native child webview (WKWebView on
 macOS, WebView2 on Windows) that
-`app/src-tauri/src/shell/browser/` places under an empty slot in `BrowserPage`, seen
-through a hole in the app ([architecture.md](./architecture.md#native-pages-sit-under-the-app-seen-through-holes-in-root)).
+`app/src-tauri/src/shell/browser/` places at an empty slot in `BrowserPage`, seen
+through a hole the app opens ([architecture.md](./architecture.md#native-pages-show-through-holes-the-app-opens)).
 Canvas refuses iframes.
 
 - **Rust owns the tab list** and pushes `browser-state` on every change;

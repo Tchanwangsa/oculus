@@ -280,8 +280,8 @@ closed panel opens one on `/new`.
   (half, `SIDE_RATIO`, before any drag). A stored `split` pane restores as a
   one-item panel.
 - **Nothing floats over a pane**: a native browser or dock page shows through
-  a hole in `#root`, which cuts away anything inside it drawn over the page
-  ([architecture.md](./architecture.md#native-pages-sit-under-the-app-seen-through-holes-in-root)),
+  a hole the app opens, which hides anything inside `#root` drawn over the page
+  ([architecture.md](./architecture.md#native-pages-show-through-holes-the-app-opens)),
   so the controls sit in the header and the focus marker on the seam.
 - **Shell navigation leaves the panel open**: the sidebar, ⌘K and crumbs go to
   the focused pane.

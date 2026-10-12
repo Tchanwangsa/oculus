@@ -70,8 +70,8 @@ pub fn run() {
 
             sources::echo360::cleanup_partial_downloads(&library::paths::data_dir());
 
-            // The app's webview goes transparent and routes clicks to the
-            // pages under it. Before any page exists.
+            // How pages share the window with the app: under its transparent
+            // webview on macOS, clipped to holes on Windows. Before any page.
             shell::native_layer::init(app.handle());
             // Seeds WebKit with the Canvas session and follows window resizes.
             shell::browser::init(app.handle());
@@ -247,6 +247,8 @@ pub fn run() {
             shell::browser::commands::browser_set_viewport,
             shell::browser::commands::browser_hide_tab,
             shell::native_layer::native_set_blocked,
+            #[cfg(windows)]
+            shell::native_layer::windows::native_set_holes,
             shell::browser::commands::browser_hide,
             shell::browser::commands::browser_navigate,
             shell::browser::commands::browser_history,

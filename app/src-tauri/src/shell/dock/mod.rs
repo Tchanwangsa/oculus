@@ -1,6 +1,6 @@
 //! The messaging dock: WhatsApp, Instagram, Messenger and Discord as native
 //! child WKWebViews of the main window, one persistent WebKit data store each.
-//! They sit under the app's transparent webview (`shell/native_layer`).
+//! Each shows through a hole the app opens over its slot (`shell/native_layer`).
 //!
 //! - **A page lives from enable to disable.** It is never recreated to show
 //!   it, and the frontend owns the enabled set (it calls `dock_set_enabled`).

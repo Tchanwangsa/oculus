@@ -4,7 +4,7 @@ import { useNativeHole } from "@/hooks/shell/useNativeHole";
 import { measure } from "./viewport";
 
 /**
- * Where the native page sits: placed under the slot while the tab is in
+ * Where the native page sits: placed at the slot while the tab is in
  * front, with a hole cut over it once Rust has placed it; hidden otherwise,
  * the hole closed first. Portals draw over the live page, so nothing else
  * hides it.

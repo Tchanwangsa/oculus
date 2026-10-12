@@ -7,7 +7,7 @@ use super::seed::{is_sso_app_entry, recover_sso, wants_sessions};
 #[cfg(not(target_os = "windows"))]
 use super::PAGE_USER_AGENT;
 use super::{broadcast, label, seed_sessions, with_state, Tab, Viewport, LABEL_PREFIX, MAIN};
-use crate::shell::native_layer::put_below_app;
+use crate::shell::native_layer::{adopt_page, refresh_page};
 
 /// Seeds the cookie jar and hooks the main window's resize. From `setup`.
 pub fn init(app: &AppHandle) {
@@ -97,6 +97,7 @@ fn layout(app: &AppHandle) {
         let (position, size) = rect(bounds, Some(vp));
         page.set_position(position).ok();
         page.set_size(size).ok();
+        refresh_page(&page);
     }
 }
 
@@ -108,6 +109,7 @@ pub(super) fn layout_tab(app: &AppHandle, id: u32) {
     let (position, size) = rect(content_size(&window), viewport);
     page.set_position(position).ok();
     page.set_size(size).ok();
+    refresh_page(&page);
 }
 
 /// Attaches a page webview to a tab. It starts hidden until the frontend
@@ -190,7 +192,7 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
         .map_err(|e| format!("failed to open page webview: {e}"))?;
     #[cfg(target_os = "windows")]
     crate::shell::menu::windows::install(&webview, true);
-    put_below_app(&webview);
+    adopt_page(&webview);
     if with_state(app, |s| s.shown.contains(&id)) {
         webview.show().ok();
         webview.set_focus().ok();

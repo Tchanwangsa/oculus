@@ -7,9 +7,8 @@
 //!   `browser-state`. The route for a tab is `/browse/<id>`, never the page URL.
 //! - **The frontend reports each page's slot as insets** (`Viewport`), so a
 //!   window resize is laid out here with no JavaScript in the loop.
-//! - **Pages sit under the app's transparent webview**, which leaves a hole
-//!   where each one shows, so popovers draw over a live page
-//!   (`shell/native_layer`).
+//! - **A page shows only through a hole the app opens over its slot**, so
+//!   popovers draw over a live page (`shell/native_layer`).
 //! - Back/forward and find go through the WKWebView directly;
 //!   `with_webview` returns nothing, so answers are pushed as events.
 //!
