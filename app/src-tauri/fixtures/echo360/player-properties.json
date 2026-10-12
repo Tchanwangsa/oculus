@@ -1,0 +1,35 @@
+{
+  "status": "ok",
+  "message": "",
+  "data": {
+    "mediaId": "11111111-2222-3333-4444-555555555555",
+    "mediaName": "WWW_WOTWHYWHO_2024.mp4",
+    "lastPlayedToSeconds": 0,
+    "sessionDurationSecondsSoft": 57600,
+    "sessionDurationSecondsHard": 86400,
+    "copyrightData": { "restrictDownload": false },
+    "captions": "https://content.echo360.net.au/0000.inst/11111111-2222-3333-4444-555555555555/1/captions.vtt",
+    "posterMedia": [
+      { "uri": "https://content.echo360.net.au/0000.inst/11111111-2222-3333-4444-555555555555/1/poster1.jpg", "width": 1280, "height": 720 }
+    ],
+    "thumbnailMedia": [
+      { "baseUri": "https://content.echo360.net.au/0000.inst/11111111-2222-3333-4444-555555555555/1/thumbnails1", "times": [0, 10, 20] }
+    ],
+    "playableAudioVideo": {
+      "duration": "PT1358.393S",
+      "playableMedias": [
+        { "uri": "https://content.echo360.net.au/0000.inst/11111111-2222-3333-4444-555555555555/1/s1_av.m3u8", "sourceIndex": 1, "trackType": ["Audio", "Video"], "isHls": true },
+        { "uri": "https://content.echo360.net.au/0000.inst/11111111-2222-3333-4444-555555555555/1/s0_a.m3u8", "sourceIndex": 0, "trackType": ["Audio"], "isHls": true },
+        { "uri": "https://content.echo360.net.au/0000.inst/11111111-2222-3333-4444-555555555555/1/s1_v.m3u8", "sourceIndex": 1, "trackType": ["Video"], "isHls": true }
+      ]
+    },
+    "sourceQueryStrings": {
+      "queryStrings": [
+        {
+          "uriPattern": "https://content.echo360.net.au/0000.inst/11111111-2222-3333-4444-555555555555/*",
+          "queryString": "Policy=POLICY&Signature=SIG&Key-Pair-Id=KEY&x-uid=UID&x-instid=INST&x-src=SRC"
+        }
+      ]
+    }
+  }
+}

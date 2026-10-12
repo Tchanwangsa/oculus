@@ -54,9 +54,11 @@ pub(super) fn score_blob(blob: &[u8], qvec: &[f32]) -> Option<f32> {
         return None;
     }
     Some(
-        blob.chunks_exact(2)
+        blob.as_chunks::<2>()
+            .0
+            .iter()
             .zip(qvec)
-            .map(|(bytes, query)| half::f16::from_le_bytes([bytes[0], bytes[1]]).to_f32() * query)
+            .map(|(&bytes, query)| half::f16::from_le_bytes(bytes).to_f32() * query)
             .sum(),
     )
 }

@@ -3,7 +3,6 @@ use tauri::AppHandle;
 use super::layout::{hide_all, layout_tab, page, parse};
 use super::page::{find_string, go_history, reload_page, ZOOM_MAX, ZOOM_MIN};
 use super::seed::wants_sessions;
-use super::still::snapshot_page;
 use super::{broadcast, open_tab, seed_sessions, snapshot, with_state, Snapshot, Viewport};
 
 #[tauri::command]
@@ -46,18 +45,6 @@ pub fn browser_hide_tab(app: AppHandle, id: u32) {
     with_state(&app, |s| s.shown.remove(&id));
     if let Some(page) = page(&app, id) {
         page.hide().ok();
-    }
-}
-
-/// PNG bytes (raw, not base64 — a 2x still is megabytes). On error the
-/// caller hides the page instead.
-#[tauri::command]
-pub async fn browser_snapshot(app: AppHandle, id: u32) -> Result<tauri::ipc::Response, String> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    snapshot_page(&app, id, tx);
-    match rx.await {
-        Ok(Some(png)) => Ok(tauri::ipc::Response::new(png)),
-        _ => Err("no snapshot".into()),
     }
 }
 

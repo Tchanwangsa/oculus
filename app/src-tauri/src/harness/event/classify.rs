@@ -106,7 +106,7 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
         _ => {
             if let Some(rest) = name.strip_prefix("mcp__") {
                 // `mcp__server__tool`: title by the tool.
-                let tool = rest.splitn(2, "__").nth(1).unwrap_or(rest);
+                let tool = rest.split_once("__").map(|x| x.1).unwrap_or(rest);
                 return (ToolKind::Other, tool.to_string());
             }
             (ToolKind::Other, String::new())

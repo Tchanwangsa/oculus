@@ -4,9 +4,11 @@ export const COLS =
 
 export const PAGE_SIZE = 50;
 
-export const ALL = "all";
+/** The maker filter's value for a model `makerOf` can't place. */
+export const UNKNOWN_MAKER = "~unknown";
 
-export type Scope = "all" | "offered" | "hidden";
+/** *Unavailable* is the blocked models: never offered, whatever their tick. */
+export type Scope = "all" | "offered" | "hidden" | "unavailable";
 export type SortKey = "id" | "provider" | "input" | "output" | "context" | "maxOutput" | "released";
 
 /** Where the Providers tab sends the table: a provider to filter to (or none),

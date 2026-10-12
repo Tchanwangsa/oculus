@@ -71,7 +71,7 @@ impl Engine {
                 .get(&file_id.to_string())
                 .is_some_and(|(m, s)| *m == modified && *s == meta_size);
         let on_disk = self.data_dir.join(&rel).is_file()
-            && paths::doc_pdf_rel(&rel).map_or(true, |p| self.data_dir.join(p).is_file());
+            && paths::doc_pdf_rel(&rel).is_none_or(|p| self.data_dir.join(p).is_file());
         let unchanged = || {
             self.reporter.file(&FileEvent {
                 subject_id: c.id,

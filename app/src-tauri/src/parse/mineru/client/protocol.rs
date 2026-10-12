@@ -160,7 +160,7 @@ impl MinerUCloud {
             let attempted = agent
                 .get(url)
                 .call()
-                .and_then(|response| Ok((response.status(), response.into_reader())));
+                .map(|response| (response.status(), response.into_reader()));
             match attempted {
                 Ok((status, mut reader)) if (200..300).contains(&status) => {
                     let file = fs::File::create(destination).map_err(|e| {

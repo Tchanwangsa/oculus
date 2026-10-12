@@ -1,0 +1,11 @@
+/* The whole left nav column, Messages included: the dock only shows
+   messages, and the column widens over the inbox on hover. It is the
+   data-visualcompletion wrapper around the nav items; the content's 72px
+   gutter for it is padding on main's section, released here. Selectors read
+   attributes and structure, not the hashed class names. */
+div[data-visualcompletion="ignore-dynamic"]:has(a[role="link"][href="/explore/"]) {
+  display: none !important;
+}
+main > section > div > div {
+  padding-left: 0 !important;
+}

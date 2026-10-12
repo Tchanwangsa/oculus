@@ -96,8 +96,8 @@ fn warn_if_stale(bin: &Path) {
             return;
         };
         if newest > built {
-            eprintln!("[oculus] {} is older than {}", bin.display(), src.display());
-            eprintln!("[oculus] agents this session will run a stale CLI — `bun run cli:dev`");
+            elog!("[oculus] {} is older than {}", bin.display(), src.display());
+            elog!("[oculus] agents this session will run a stale CLI — `bun run cli:dev`");
         }
     });
 }

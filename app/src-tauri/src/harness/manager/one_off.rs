@@ -106,7 +106,7 @@ impl Harness {
         let handle = match provider {
             Provider::Claude => Handle::Claude(ClaudeSession::spawn(
                 ClaudeSpawn {
-                    base: base(cwd)?,
+                    base: self.claude_base(base(cwd)?)?,
                     oculus: discover::oculus_cli(),
                     // `default` auto-allows no tool; with prompts routed to
                     // `none` a stray call is refused rather than hanging.

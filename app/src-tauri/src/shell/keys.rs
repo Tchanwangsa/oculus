@@ -70,6 +70,12 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
     std::mem::forget(monitor);
 }
 
+/// The app's own `WKWebView` as an address, 0 until `install` has run. A
+/// parked dock page hands first responder back to it (`shell/dock/focus.rs`).
+pub(crate) fn app_webview() -> usize {
+    APP_WEBVIEW.load(Ordering::Relaxed)
+}
+
 /// The browser page holding keyboard focus: the key window's first responder
 /// when it is a `WKWebView` other than the app's own.
 pub fn focused_page(mtm: MainThreadMarker) -> Option<Retained<NSResponder>> {

@@ -62,12 +62,12 @@ fn webview_header(app: &AppHandle, base: &str) -> String {
         Ok(cookies) => {
             let header = cookie_header(cookies.iter().map(|c| (c.name(), c.value())));
             if header.is_empty() {
-                eprintln!("[oculus] no {host} cookies to save yet");
+                elog!("[oculus] no {host} cookies to save yet");
             }
             header
         }
         Err(e) => {
-            eprintln!("[oculus] cookies() failed for {host}: {e}");
+            elog!("[oculus] cookies() failed for {host}: {e}");
             String::new()
         }
     }

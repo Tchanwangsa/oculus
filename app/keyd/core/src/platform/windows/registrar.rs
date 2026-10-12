@@ -236,7 +236,4 @@ impl Registrar for Resident {
             Err(e) => Err(e.to_string()),
         }
     }
-    fn retire(&self, _label: &str) -> Result<Vec<PathBuf>, String> {
-        Ok(vec![])
-    }
 }

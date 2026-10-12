@@ -27,7 +27,7 @@ pub(super) async fn touch_project(
 
 pub async fn task(pool: &SqlitePool, id: i64) -> Result<Option<Task>, String> {
     let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
-    task_on(&mut *conn, id).await
+    task_on(&mut conn, id).await
 }
 
 pub(super) async fn task_on(conn: &mut SqliteConnection, id: i64) -> Result<Option<Task>, String> {

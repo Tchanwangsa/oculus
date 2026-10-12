@@ -4,7 +4,9 @@ use crate::test_support::{Answer, FakeOrigin, OldItems, Reads, Scratch, BUILD};
 use crate::vault::{NoLegacy, StaticKey};
 
 mod forward_op;
+mod get_op;
 mod import_on_first_use;
+mod webcrypto_op;
 
 struct Counting(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
@@ -111,6 +113,8 @@ fn every_op() -> Vec<(&'static str, Value)> {
         ("has", json!({"secret": "voyage"})),
         ("store", json!({"secret": "voyage", "value": "pa-x"})),
         ("delete", json!({"secret": "voyage"})),
+        ("get", json!({"secret": "music.spotify"})),
+        ("webcrypto_key", json!({"app": "app"})),
         (
             "forward",
             json!({"secret": "voyage", "method": "POST", "path": "/v1/x"}),
@@ -174,17 +178,23 @@ fn the_app_and_the_cli_get_past_the_role_gate_for_every_op() {
     for role in [Role::App, Role::Cli] {
         let dir = Scratch::new("with-role");
         let state = state_in(&dir);
+        // The application the dev app is, which `webcrypto_key` checks.
+        let caller = Caller {
+            application: Some("app".into()),
+            ..as_role(role)
+        };
         for (op, req) in every_op() {
             // Whatever else the op says, it is not a refusal of the caller,
-            // except that lifting a lockout pause and reading a cookie
-            // back are the app's alone.
+            // except that lifting a lockout pause and reading a cookie or a
+            // value back are the app's alone.
             let refused = matches!(
-                state.dispatch(&as_role(role), op, &req, b""),
+                state.dispatch(&caller, op, &req, b""),
                 Err(OpError { kind: "caller", .. })
             );
             assert_eq!(
                 refused,
-                role == Role::Cli && matches!(op, "okta_resume" | "session_get"),
+                role == Role::Cli
+                    && matches!(op, "okta_resume" | "session_get" | "get" | "webcrypto_key"),
                 "{role:?} {op}"
             );
         }
@@ -196,7 +206,7 @@ fn malformed_requests_are_request_errors() {
     let dir = Scratch::new("bad");
     let state = state_in(&dir);
     for (op, req, body) in [
-        ("get", json!({"secret": "voyage"}), &b""[..]),
+        ("read", json!({"secret": "voyage"}), &b""[..]),
         ("has", json!({}), b""),
         ("has", json!({"secret": "session.nope"}), b""),
         ("store", json!({"secret": "voyage"}), b""),

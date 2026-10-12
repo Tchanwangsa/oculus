@@ -14,6 +14,7 @@ import { courseFileHasContent } from "@/lib/files/courseFiles";
 import { FileMarkdown } from "@/components/files/FileMarkdown";
 import { createPdfMdLink, type PdfMdLink } from "@/components/files/pdf/pdfMdLink";
 import { VideoFileViewer } from "@/components/files/VideoFileViewer";
+import { EmbedSubjectProvider } from "@/components/markdown/embed/EmbedSubject";
 import { useParseStore } from "@/stores/sync/parseStore";
 
 /** Which face of a parsed PDF shows: the PDF or its markdown. */
@@ -134,6 +135,12 @@ export function FileViewer({
   };
 
   const components = useLibraryMdComponents(file, files, onOpenFile);
+  // The subject lets an Echo360 embed in the page resolve and download.
+  const markdown = (relPath: string, link?: PdfMdLink) => (
+    <EmbedSubjectProvider subjectId={file.subject_id}>
+      <FileMarkdown relPath={relPath} components={components} link={link} />
+    </EmbedSubjectProvider>
+  );
 
   if (file.category === "image") {
     return (
@@ -151,14 +158,14 @@ export function FileViewer({
 
   // A spreadsheet is shown as the text Rust converted it to, a table per sheet.
   if (isSheetFile(file.filename) && mdRelPath) {
-    return <FileMarkdown relPath={mdRelPath} components={components} />;
+    return markdown(mdRelPath);
   }
 
   if (pdfRelPath) {
     return (
       <div className="flex flex-col h-full">
         {pdfViewMode === "markdown" && mdRelPath ? (
-          <FileMarkdown relPath={mdRelPath} components={components} link={pdfLink} />
+          markdown(mdRelPath, pdfLink)
         ) : (
           <PDFViewer
             path={pdfRelPath}
@@ -171,7 +178,7 @@ export function FileViewer({
     );
   }
 
-  return <FileMarkdown relPath={file.relative_path} components={components} />;
+  return markdown(file.relative_path);
 }
 
 /**

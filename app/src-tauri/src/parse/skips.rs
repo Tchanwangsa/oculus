@@ -12,6 +12,12 @@ pub struct Skips {
     marked: Mutex<BTreeSet<PathBuf>>,
 }
 
+impl Default for Skips {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Skips {
     pub const fn new() -> Self {
         Self {

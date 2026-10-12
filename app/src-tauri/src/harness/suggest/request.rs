@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::harness::jobs::JobSelection;
+use crate::harness::jobs::{try_each, Job, JobSelection};
 use crate::harness::manager::{Harness, OneOff};
 use crate::harness::opencode;
 
@@ -13,12 +13,13 @@ use super::{warmable, Key, Warm, INSTRUCTIONS};
 
 impl Harness {
     /// One completion for the caret between `before` and `after` in the note
-    /// at `path` (library-relative). Empty when there is nothing to add, or
-    /// when a newer request or a cancel superseded this one.
+    /// at `path` (library-relative), from the job's models in turn. Empty when
+    /// there is nothing to add, or when a newer request or a cancel superseded
+    /// this one; a superseded request starts no further model.
     pub fn suggest(
         self: &Arc<Self>,
         request_id: u64,
-        sel: &JobSelection,
+        chain: &[JobSelection],
         path: &str,
         before: &str,
         after: &str,
@@ -41,29 +42,57 @@ impl Harness {
             return Ok(String::new());
         };
 
+        let primary = chain.first();
+        let outcome = try_each(Job::DocumentSuggestions, chain, |sel| {
+            let is_primary = primary.is_some_and(|p| std::ptr::eq(p, sel));
+            self.attempt(request_id, sel, is_primary, &prompt)
+        });
+        self.release(request_id);
+        Ok(match outcome? {
+            Some(raw) => clean(&raw, before, after),
+            None => String::new(),
+        })
+    }
+
+    /// One model's turn for `request_id`: its raw reply, or None once the
+    /// request is superseded. Only the primary uses and refills the spare, so
+    /// a fallback never closes it.
+    fn attempt(
+        self: &Arc<Self>,
+        request_id: u64,
+        sel: &JobSelection,
+        is_primary: bool,
+        prompt: &str,
+    ) -> Result<Option<String>, String> {
+        if self.suggest.lock().unwrap().wanted != Some(request_id) {
+            return Ok(None);
+        }
         let key = Key::of(sel);
-        let turn = match self.take_warm(&key) {
+        let spare = if is_primary {
+            self.take_warm(&key)
+        } else {
+            None
+        };
+        let turn = match spare {
             Some(t) => t,
-            None => match self.one_off(sel, INSTRUCTIONS, opencode::WRITER_AGENT) {
-                Ok(t) => t,
-                Err(e) => {
-                    self.release(request_id);
-                    return Err(e);
-                }
-            },
+            None => self.one_off(sel, INSTRUCTIONS, opencode::WRITER_AGENT)?,
         };
         {
             let mut s = self.suggest.lock().unwrap();
             if s.wanted != Some(request_id) {
                 // Never prompted, so it is still a spare.
                 drop(s);
-                self.keep_warm(key, turn);
-                return Ok(String::new());
+                if is_primary {
+                    self.keep_warm(key, turn);
+                } else {
+                    turn.close();
+                }
+                return Ok(None);
             }
             s.running = Some((request_id, turn.handle.clone()));
         }
 
-        let sent = turn.handle.send(&prompt);
+        let sent = turn.handle.send(prompt);
         // A cancel that landed while the prompt was going out can miss a
         // turn the server had not started yet, so it is repeated here.
         if self.suggest.lock().unwrap().wanted != Some(request_id) {
@@ -78,21 +107,22 @@ impl Harness {
             }
             s.wanted == Some(request_id)
         };
-        self.release(request_id);
-        self.refill_warm(sel);
+        if is_primary {
+            self.refill_warm(sel);
+        }
         if !current {
-            return Ok(String::new());
+            return Ok(None);
         }
         let reply = reply?;
         if let Some(e) = reply.failed {
             return Err(e);
         }
         let raw = if reply.streamed.trim().is_empty() {
-            &reply.message
+            reply.message
         } else {
-            &reply.streamed
+            reply.streamed
         };
-        Ok(clean(raw, before, after))
+        Ok(Some(raw))
     }
 
     /// Stop whatever suggestion is in flight; its call answers empty. The
@@ -172,7 +202,7 @@ impl Harness {
         std::thread::spawn(
             move || match h.one_off(&sel, INSTRUCTIONS, opencode::WRITER_AGENT) {
                 Ok(turn) => h.keep_warm(key, turn),
-                Err(e) => eprintln!("[oculus] suggestion warm-up: {e}"),
+                Err(e) => elog!("[oculus] suggestion warm-up: {e}"),
             },
         );
     }

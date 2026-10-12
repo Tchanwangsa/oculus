@@ -17,7 +17,7 @@ pub(crate) fn report(what: &str, error: &KeydError) {
     if matches!(error, KeydError::Absent) && ABSENT_LOGGED.swap(true, Ordering::SeqCst) {
         return;
     }
-    eprintln!("[oculus] {what}: {error}");
+    elog!("[oculus] {what}: {error}");
 }
 
 /// What keyd says about the sessions, or `None` (logged) when it cannot be
@@ -45,7 +45,7 @@ pub(crate) fn store_snapshot(keyd: &Credentialed, snapshot: &[(Kind, String)]) -
         match keyd.session_put(*kind, header) {
             Ok(()) => {
                 canvas |= *kind == Kind::Canvas;
-                eprintln!(
+                elog!(
                     "[oculus] saved {} cookies ({} bytes)",
                     kind.wire(),
                     header.len()

@@ -29,7 +29,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
 | Model picker and its catalogue hook | `app/src/components/harness/composer/ModelPicker.tsx`, `app/src/hooks/agents/useProviderModels.ts` |
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/integrations/OpencodePage.tsx`, `app/src/components/settings/agents/opencode/`, `app/src/components/settings/agents/OpencodeConnectDialog.tsx`, `app/src/lib/harness/opencodeCatalogue.ts` |
-| Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db/jobModels.ts`, `app/src/pages/settings/library/JobsPage.tsx` |
+| Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db/jobModels.ts`, `app/src/components/settings/jobs/`, `app/src/hooks/agents/useJobAudit.ts` |
 | One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends | `app/src-tauri/src/harness/manager/one_off.rs`, `app/src-tauri/src/harness/app/suggest.rs`, `app/src-tauri/src/harness/suggest/`, `app/src-tauri/src/lectures/lecture_end/` |
 | `@` menu and mention input | `app/src/components/harness/mentions/useMentionMenu.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
@@ -240,10 +240,32 @@ are in the table under [Four dialects](#four-dialects-become-one-event-stream).
 **Sign-in.** `signin::is_auth_failure` (via `HarnessEvent::error_for`) matches
 whole clauses only — a false positive sends a student to re-authenticate over
 an unrelated error — and marks the error row's `meta` for a sign-in card.
-`ProviderInfo.signIn` is `"code"` (`claude auth login` blocks on a pasted
-code), `"callback"` (`codex login` finishes on its own listener) or `null`
-(opencode signs in [per provider](#opencode-providers-go-through-its-own-server);
-`agy` only in a terminal). No deadline is imposed on a sign-in.
+`ProviderInfo.signIn` is `"code"` (`claude auth login` and `agy` block on a
+pasted code), `"callback"` (`codex login` finishes on its own listener) or
+`null` (opencode signs in [per provider](#opencode-providers-go-through-its-own-server)).
+No deadline is imposed on a sign-in.
+
+`agy` has no login subcommand and refuses a pipe, so `signin/agy/` runs bare
+`agy` on a pseudo-terminal (`signin/pty.rs`: `openpty`, a 1000-column window
+so the URL never wraps, `login_tty` for a session of its own). Its TUI's
+redraws are cut into lines at cursor moves and each distinct line is sent
+once per round. Enter answers the login-method menu (Google OAuth); `agy`
+opens the authorize URL itself, so Rust does not open it again, and the URL
+is read from its OSC 8 hyperlink. Google redirects to
+`antigravity.google/oauth-callback`, a page that shows the code — there is no
+loopback listener to finish on — and the pasted code is typed into the TUI.
+A refused code shows `agy`'s sentence as the dialog's notice; Enter on
+"Press any key to go back" and again on the menu starts a new round with a
+new URL, so one run takes as many codes as the student pastes. An error
+before any code ends the run instead of looping. Signed in, `agy` moves on
+to a chat rather than exiting, so once a code is in and either its success
+line shows or the screen has been still for 1.5 s, `agy models` is asked (at
+most every 5 s); a yes — or no answer either way after the success line —
+ends the run and kills `agy`'s process group, never before the check, so
+`agy` has stored the token first. A code typed outside the code box is
+refused, since in the menu or on the error screen the keys mean something
+else. The live check of this route is the ignored test in
+`signin/agy/smoke.rs`, which refuses to run without a scratch `HOME`.
 
 ## The timeline never re-renders per token
 
@@ -435,7 +457,11 @@ compile without one.
   `initialize` response of a throwaway `claude -p` (no API call), cached on the
   binary's path and mtime and dropped on sign-in. A mounted picker re-asks when
   its CLI's path or version changes (an update from Settings → Agents). Aliases are stored as the
-  concrete model, since an alias changes meaning next release.
+  concrete model, since an alias changes meaning next release. Claude's
+  "Default (recommended)" row is dropped (`claudeAsModels`), since it hides
+  which model a run gets; the model it resolves to keeps the default mark. No
+  Claude spawn passes it either: `claude::concrete_model` swaps a missing
+  model or the `default` alias for what the catalogue resolves it to.
 - **Levels belong to the model.** Haiku declares none (no `--effort`);
   opencode's are variants; `agy` bakes them into the slug (`parse_models`
   splits, `model_slug` rejoins). `sortReasoning` orders by
@@ -450,11 +476,24 @@ compile without one.
 bridge's connection into opencode's own store (shared with the student's
 terminal). A method spec is data rendered by one dialog; providers declaring
 nothing take an API key. Opening the opencode page starts it; Settings opens
-on another page, so opening Settings alone does not. The page is two tables,
+on another page, so opening Settings alone does not, and nor does Settings →
+Jobs (see [Per-job models](#per-job-models)). The one other start is
+onboarding's opencode card, on its *Connect OpenRouter* click
+([onboarding.md](./onboarding.md#the-agent-step-lists-every-agent-as-an-equal)). The page is two tables,
 Providers and Models, the second one row per model with opencode's own price,
 limits and capabilities (`ModelFacts`, a free catalogue read; a missing figure
 draws "—", never $0).
 
+- **Recommended providers are pinned.** OpenRouter and OpenCode Go
+  (`RECOMMENDED_PROVIDERS` in `opencodeCatalogue.ts`) sit first in both Providers
+  tabs with a star, connected or not.
+- **Models filter by provider, maker and status.** Maker is who built the
+  model, not who serves it (`makerOf` in `models/maker.ts`: the author slug in
+  an OpenRouter id, else the family or name). The header checkbox offers or
+  hides every filtered model; a blocked model says why on hover.
+- **Zen is greyed out.** Its provider (`opencode`) shows only under *All*, marked
+  Unavailable with no Connect action; it never counts as connected, and none of its
+  models is listed in Models.
 - **`connected` goes stale** after `PUT /auth` until `POST /instance/dispose`,
   which is skipped while a turn is open.
 - **A key is never held**: field → `PUT /auth/{id}` only. Errors are redacted,
@@ -488,12 +527,50 @@ selection resolves to its Windows default in memory without rewriting the
 stored setting; supported provider selections keep their saved model and level.
 
 Chaptering, the lecture end, thread naming and document suggestions each
-name their agent, model and level in a Settings → Jobs row
-using `ModelPicker`. The registry is one
-`settings` value, `job_models`, read by `jobs.rs` and written by `jobModels.ts`; both
-carry the defaults and must agree (a new job is a `Job` variant plus entries in
-`JOBS` and `DEFAULT_JOB_MODELS`). A bad value costs the configuration, not the
-run; CLI flags override for one run.
+name an ordered list of models (agent, model and level) in a Settings → Jobs
+row using `ModelPicker`. The first runs; when its run fails for any reason —
+the CLI won't start, the turn errors, the reply is empty or rejected (an empty
+suggestion is an answer, not a failure) — the next one runs (`jobs::try_each`), and when all fail the error names each
+model's failure. Only the model's turn is retried: chaptering does not detect
+or grab frames again, and document suggestions keep their warm spare for the
+first model only.
+
+An empty list switches the job off: it fails with "No model is set", and thread
+naming is skipped. It never falls back to the default, which can be an
+expensive model. The registry is one `settings` value, `job_models`, read by
+`jobs.rs` and written by `jobModels.ts`, which must parse it alike: each job's
+key holds an array (entries that don't parse are dropped one by one), or a
+single selection object, still read as a one-model list. A missing or unreadable
+value or key is the job's default; both sides carry the defaults and must agree
+(a new job is a `Job` variant plus entries in `JOBS` and `DEFAULT_JOB_MODELS`).
+On the CLI, `--provider`/`--model`/`--effort` override the first model and drop
+the fallbacks for one run.
+
+In Settings the row's picker is the first model; its fallbacks are ordered in
+a dialog (`JobModelsDialog`) by dragging a row or by the arrow keys on its
+handle (`ChainList`). Browsing another agent's tab changes nothing until
+a model is picked (`ChainPicker`), so no entry is ever an agent without a model.
+The dialog's add menu stays open on the model it just appended, so its level
+is set in the same menu.
+
+- **A model that leaves its agent's list is removed, never replaced.**
+  `useJobAudit`, mounted in `AppLayout` and asking for catalogues only after
+  10 s, drops it in place (later fallbacks move up) and records a notice under
+  `job_model_notices`. It removes only on a definite answer: the agent's list
+  arrived non-empty and lacks the model — for opencode, the model's own
+  provider still lists others — so a failed fetch or a signed-out provider
+  removes nothing. A model whose CLI is missing is flagged, not removed.
+- **Notices and flags badge Settings** (a dot on the rail item and the Jobs
+  row, `useJobAttention`) and print on the job's row until dismissed or the
+  job's list is edited.
+
+Neither the Jobs pickers nor the audit starts opencode: both call
+`useProviderModels(…, { start: false })`, which asks it through `peekModels`,
+reading only a server already up (`harness_opencode_models_if_running`). Found
+down, it answers an empty list (so the audit removes nothing) and the picker's
+opencode tab links to Settings → opencode, whose opening starts it. It is asked
+again when `harnessOpencodeModels` next answers (`OPENCODE_RUNNING_EVENT`) —
+the composer or the opencode page starting it.
 
 ## Memory
 
@@ -620,7 +697,7 @@ chapter list inline — rebuilt on every send and before any spawn.
 - Never pass `agy` `--dangerously-skip-permissions` — its file tools then write outside the library.
 - Never put an `Edit` deny on `oculus.db*` in Claude's settings — it cancels the write grant and every board write fails readonly.
 - Never grant the library folder instead of the three database files — it exposes keyd's vault.
-- Never let Settings make a billed call, or start opencode anywhere but its own page — see [No model is ever probed](#no-model-is-ever-probed).
+- Never let Settings make a billed call, or start opencode anywhere but its own page or the onboarding opencode card's Connect button — see [No model is ever probed](#no-model-is-ever-probed).
 - Read opencode models from `/config/providers`, never `/api/model` — the latter lists the instance's providers, not the signed-in ones.
 - Every opencode call carries `?directory=<agents>` except `/auth/{id}` — unscoped, it binds to the server's launch cwd and another instance.
 - Never drive opencode's v2 API (`/api/*`) — on 1.18.31 a prompt on an `auth.json` provider fails with no event.

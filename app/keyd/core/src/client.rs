@@ -1,7 +1,8 @@
-//! The client side of `oculus-keyd`: `has`, `store`, `delete` and `forward`
+//! The client side of `oculus-keyd`: `has`, `store`, `get`, `delete` and `forward`
 //! (buffered with `send`, streamed with `send_stream`), `okta_*` and
 //! `ensure_signed_in` for the Okta sign-in, `session_*` for the login
-//! sessions (`session`), one connection per call, and the `ping` that
+//! sessions (`session`), `webcrypto_key` for WebKit's master key
+//! (`webcrypto`), one connection per call, and the `ping` that
 //! `oculus keyd status` sends. The app re-exports it as
 //! `credentials::Credentialed`.
 //!
@@ -42,12 +43,16 @@ pub const SESSION_TIMEOUT: Option<Duration> = Some(Duration::from_secs(600));
 
 mod session;
 mod stream;
+mod webcrypto;
 
 #[cfg(all(test, feature = "server"))]
 mod against_session;
+#[cfg(all(test, feature = "server"))]
+mod against_webcrypto;
 
 pub use session::{SessionCookies, SessionStatus};
 pub use stream::{StreamBody, StreamedResponse};
+pub use webcrypto::ServedKey;
 
 pub use crate::session::Kind as SessionKind;
 
@@ -156,6 +161,22 @@ impl Client {
             Some(OP_TIMEOUT),
         )
         .map(|_| ())
+    }
+
+    /// The stored value of a name keyd reads back (`names::READABLE`: only
+    /// `music.spotify`), or `None` when nothing is stored. App only: any other
+    /// caller gets `KeydError::Caller`, and any other name `KeydError::Request`.
+    pub fn get(&self, secret: &str) -> Result<Option<String>, KeydError> {
+        let (reply, _) = self.exchange(
+            &json!({"op": "get", "secret": secret}),
+            &[],
+            Some(OP_TIMEOUT),
+        )?;
+        match reply.get("value") {
+            Some(Value::String(v)) => Ok(Some(v.clone())),
+            Some(Value::Null) => Ok(None),
+            _ => Err(KeydError::Broken("get: no answer".into())),
+        }
     }
 
     /// True when a value was there.
@@ -370,9 +391,9 @@ fn forward_header(
 }
 
 /// A `forward` reply's status, headers and refused sign-in, if any.
-fn forward_head(
-    reply: &Value,
-) -> Result<(u16, Vec<(String, String)>, Option<LoginError>), KeydError> {
+type ForwardHead = (u16, Vec<(String, String)>, Option<LoginError>);
+
+fn forward_head(reply: &Value) -> Result<ForwardHead, KeydError> {
     let status = reply
         .get("status")
         .and_then(Value::as_u64)
@@ -432,9 +453,12 @@ mod tests {
     use std::io::Write;
     use std::sync::Mutex;
 
+    /// Every request a stand-in keyd saw: header, then body.
+    type Seen = Arc<Mutex<Vec<(Value, Vec<u8>)>>>;
+
     /// A client of a stand-in keyd that answers each request with `handler`,
-    /// and every request it saw: header, then body.
-    fn fake_keyd<H>(handler: H) -> (Client, Arc<Mutex<Vec<(Value, Vec<u8>)>>>)
+    /// and every request it saw.
+    fn fake_keyd<H>(handler: H) -> (Client, Seen)
     where
         H: Fn(&Value, &[u8]) -> (Value, Vec<u8>) + Send + Sync + 'static,
     {
@@ -443,9 +467,7 @@ mod tests {
     }
 
     /// `fake_keyd`, and every timeout the client set on its connections.
-    fn fake_keyd_timed<H>(
-        handler: H,
-    ) -> (Client, Arc<Mutex<Vec<(Value, Vec<u8>)>>>, memory::Timeouts)
+    fn fake_keyd_timed<H>(handler: H) -> (Client, Seen, memory::Timeouts)
     where
         H: Fn(&Value, &[u8]) -> (Value, Vec<u8>) + Send + Sync + 'static,
     {
@@ -519,6 +541,76 @@ mod tests {
         assert_eq!(
             seen.lock().unwrap()[1].0,
             json!({"op": "store", "secret": "voyage", "value": "pa-x"})
+        );
+    }
+
+    #[test]
+    fn get_reads_a_value_or_its_absence() {
+        let (broker, seen) = fake_keyd(|req, _| match req["secret"].as_str().unwrap() {
+            "music.spotify" => (json!({"value": "{\"u\":1}"}), vec![]),
+            "voyage" => (
+                json!({"error": "request", "detail": "voyage is never read back"}),
+                vec![],
+            ),
+            _ => (json!({"value": null}), vec![]),
+        });
+        assert_eq!(
+            broker.get("music.spotify").unwrap().as_deref(),
+            Some("{\"u\":1}")
+        );
+        assert_eq!(broker.get("other").unwrap(), None);
+        assert!(matches!(broker.get("voyage"), Err(KeydError::Request(_))));
+        assert_eq!(
+            seen.lock().unwrap()[0].0,
+            json!({"op": "get", "secret": "music.spotify"})
+        );
+    }
+
+    #[test]
+    fn webcrypto_key_returns_the_16_bytes_or_an_error_never_a_bad_key() {
+        let (broker, seen) = fake_keyd(|req, _| match req["app"].as_str().unwrap() {
+            "app" => (
+                json!({"key": "Zm9vYmFyZm9vYmFyZm9vYg==", "source": "keychain"}),
+                vec![],
+            ),
+            "denied" => (
+                json!({"error": "keychain", "detail": "reading x: OSStatus -128"}),
+                vec![],
+            ),
+            "other" => (
+                json!({"error": "caller", "detail": "not that application"}),
+                vec![],
+            ),
+            "short" => (json!({"key": "Zm9vYmFy", "source": "vault"}), vec![]),
+            "number" => (json!({"key": 7}), vec![]),
+            _ => (json!({"source": "vault"}), vec![]),
+        });
+        let served = broker.webcrypto_key("app").unwrap();
+        assert_eq!(served.key.bytes(), b"foobarfoobarfoob");
+        assert_eq!(served.source, "keychain");
+        assert!(!format!("{served:?}").contains("foob"));
+        assert_eq!(
+            seen.lock().unwrap()[0].0,
+            json!({"op": "webcrypto_key", "app": "app"})
+        );
+        assert_eq!(
+            broker.webcrypto_key("denied").unwrap_err(),
+            KeydError::Keychain("reading x: OSStatus -128".into())
+        );
+        assert!(matches!(
+            broker.webcrypto_key("other"),
+            Err(KeydError::Caller(_))
+        ));
+        for bad in ["short", "number", "missing"] {
+            let err = broker.webcrypto_key(bad).unwrap_err();
+            assert!(matches!(err, KeydError::Broken(_)), "{bad}");
+            assert!(!err.to_string().contains("Zm9v"), "{err}");
+        }
+        assert_eq!(
+            unreachable(ConnectError::Absent("ENOENT".into()))
+                .webcrypto_key("app")
+                .unwrap_err(),
+            KeydError::Absent
         );
     }
 

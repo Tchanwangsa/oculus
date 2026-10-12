@@ -17,7 +17,7 @@ pub struct TaskPatch {
 
 pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let existing = task_on(&mut *tx, id)
+    let existing = task_on(&mut tx, id)
         .await?
         .ok_or_else(|| format!("task {id} does not exist"))?;
 
@@ -25,8 +25,8 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
         if parent == id {
             return Err("a task cannot be its own parent".to_string());
         }
-        assert_can_parent(&mut *tx, parent, existing.project_id).await?;
-        if has_children(&mut *tx, id).await? {
+        assert_can_parent(&mut tx, parent, existing.project_id).await?;
+        if has_children(&mut tx, id).await? {
             return Err(
                 "subtasks are one level deep: a task with children cannot have a parent"
                     .to_string(),
@@ -86,14 +86,14 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
         .await
         .map_err(|e| e.to_string())?;
 
-    touch_project(&mut *tx, existing.project_id).await?;
+    touch_project(&mut tx, existing.project_id).await?;
     tx.commit().await.map_err(|e| e.to_string())
 }
 
 /// Deletes the task and (by cascade) its subtasks; returns how many rows went.
 pub async fn delete_task(pool: &SqlitePool, id: i64) -> Result<u64, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let existing = task_on(&mut *tx, id)
+    let existing = task_on(&mut tx, id)
         .await?
         .ok_or_else(|| format!("task {id} does not exist"))?;
     let children: i64 =
@@ -107,7 +107,7 @@ pub async fn delete_task(pool: &SqlitePool, id: i64) -> Result<u64, String> {
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
-    touch_project(&mut *tx, existing.project_id).await?;
+    touch_project(&mut tx, existing.project_id).await?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(children as u64 + 1)
 }

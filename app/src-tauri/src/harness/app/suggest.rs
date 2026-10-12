@@ -18,9 +18,9 @@ pub async fn document_suggest(
     after: String,
 ) -> Result<String, String> {
     let pool = crate::db::store::open_pool().await?;
-    let sel = jobs::selection(&pool, jobs::Job::DocumentSuggestions).await;
+    let chain = jobs::chain(&pool, jobs::Job::DocumentSuggestions).await;
     let h = state.harness.clone();
-    blocking(move || h.suggest(request_id, &sel, &path, &before, &after)).await
+    blocking(move || h.suggest(request_id, &chain, &path, &before, &after)).await
 }
 
 /// Stop the suggestion in flight, if any; its call answers empty.

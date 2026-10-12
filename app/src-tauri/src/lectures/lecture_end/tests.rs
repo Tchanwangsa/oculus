@@ -125,8 +125,8 @@ fn the_prompt_carries_the_length_the_hint_and_the_lines() {
 
 fn luma(picture: usize, black: usize, tail_picture: usize) -> Vec<f32> {
     let mut out = vec![120.0; picture];
-    out.extend(std::iter::repeat(3.0).take(black));
-    out.extend(std::iter::repeat(90.0).take(tail_picture));
+    out.extend(std::iter::repeat_n(3.0, black));
+    out.extend(std::iter::repeat_n(90.0, tail_picture));
     out
 }
 

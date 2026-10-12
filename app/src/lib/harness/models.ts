@@ -115,13 +115,20 @@ export interface ClaudeModel {
 /** "Opus 5.5 with 1M context · Best for…" → "Opus 5.5". */
 const CLAUDE_NAME = /^([A-Za-z]+)\s+(\d+(?:\.\d+)*)/;
 
+/** The CLI's "Default (recommended)" row: an alias for whichever model the
+ *  account defaults to, so it hides which model a run gets. */
+const isDefaultRow = (m: ClaudeModel) => m.value?.toLowerCase() === "default";
+
 /** The id is a real model name, never a moving alias — a stored `sonnet`
  *  would change model under a saved thread. A full-name `value` is kept for
- *  its `[1m]`, which `resolvedModel` drops. Defaults to medium like `/model`. */
+ *  its `[1m]`, which `resolvedModel` drops. Defaults to medium like `/model`.
+ *  The default row is dropped; the model it resolves to keeps the mark. */
 export function claudeAsModels(models: ClaudeModel[]): HarnessModel[] {
+  const fallback = models.find(isDefaultRow)?.resolvedModel;
   const out: HarnessModel[] = [];
   const seen = new Set<string>();
   for (const m of models) {
+    if (isDefaultRow(m)) continue;
     const id = m.value?.startsWith("claude-") ? m.value : m.resolvedModel;
     if (!id || seen.has(id)) continue;
     seen.add(id);
@@ -135,7 +142,7 @@ export function claudeAsModels(models: ClaudeModel[]): HarnessModel[] {
       description: sep === -1 ? description : description.slice(sep + 3),
       reasoningEfforts: efforts,
       defaultReasoningEffort: efforts.includes("medium") ? "medium" : (efforts[0] ?? null),
-      isDefault: m.value === "default",
+      isDefault: !!fallback && (m.resolvedModel === fallback || id === fallback),
     });
   }
   return out;
@@ -217,6 +224,18 @@ export function harnessCodexModels(): Promise<CodexModel[]> {
   return invoke<CodexModel[]>("harness_codex_models");
 }
 
-export function harnessOpencodeModels(): Promise<OpencodeModel[]> {
-  return invoke<OpencodeModel[]>("harness_opencode_models");
+/** Fired on `window` when `harnessOpencodeModels` answers, i.e. the server
+ *  is up, so a picker that found it dormant can read it now. */
+export const OPENCODE_RUNNING_EVENT = "oculus:opencode-running";
+
+/** Starts the server if it is down. */
+export async function harnessOpencodeModels(): Promise<OpencodeModel[]> {
+  const models = await invoke<OpencodeModel[]>("harness_opencode_models");
+  window.dispatchEvent(new Event(OPENCODE_RUNNING_EVENT));
+  return models;
+}
+
+/** The running server's catalogue, or null when it is down — never a start. */
+export function harnessOpencodeModelsIfRunning(): Promise<OpencodeModel[] | null> {
+  return invoke<OpencodeModel[] | null>("harness_opencode_models_if_running");
 }

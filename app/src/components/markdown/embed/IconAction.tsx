@@ -9,7 +9,7 @@ export function IconAction({
   children,
 }: {
   label: string;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   size?: "icon-xs" | "icon-sm";
   children: React.ReactNode;

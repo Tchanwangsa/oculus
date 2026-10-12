@@ -143,7 +143,7 @@ pub(super) fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'stati
             *super::seed::SSO_SEEDED
                 .lock()
                 .unwrap_or_else(|e| e.into_inner()) = None;
-            eprintln!("[oculus] browser: could not seed WebView2 sessions: {e}");
+            elog!("[oculus] browser: could not seed WebView2 sessions: {e}");
             return;
         }
         // The continuation may create a WebView2 child, which must stay
@@ -159,7 +159,7 @@ pub(super) fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'stat
     std::thread::spawn(move || {
         let _work = COOKIE_WORK.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(e) = shared_jar(&app).and_then(|mut jar| clear_jar(&mut jar)) {
-            eprintln!("[oculus] browser: could not clear WebView2 sessions: {e}");
+            elog!("[oculus] browser: could not clear WebView2 sessions: {e}");
             return;
         }
         *super::seed::SSO_SEEDED

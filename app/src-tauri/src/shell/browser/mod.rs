@@ -6,9 +6,11 @@
 //! - **Rust owns the tab list**; every change goes out whole as
 //!   `browser-state`. The route for a tab is `/browse/<id>`, never the page URL.
 //! - **The frontend reports each page's slot as insets** (`Viewport`), so a
-//!   window resize is laid out here with no JavaScript in the loop. It asks for
-//!   a page to be hidden when it must draw over it.
-//! - Back/forward, find and snapshots go through the WKWebView directly;
+//!   window resize is laid out here with no JavaScript in the loop.
+//! - **Pages sit under the app's transparent webview**, which leaves a hole
+//!   where each one shows, so popovers draw over a live page
+//!   (`shell/native_layer`).
+//! - Back/forward and find go through the WKWebView directly;
 //!   `with_webview` returns nothing, so answers are pushed as events.
 //!
 //! `canvas_session` is HttpOnly and session-scoped, so the browser loses it on quit;
@@ -21,12 +23,12 @@ mod favicon;
 mod layout;
 mod page;
 mod seed;
-mod still;
 #[cfg(test)]
 mod tests;
 #[cfg(any(target_os = "windows", test))]
 mod windows;
 
+pub(crate) use layout::{content_size, rect};
 pub use layout::{init, open_tab};
 pub use seed::{clear_sessions, seed_sessions};
 
@@ -47,8 +49,10 @@ pub const CANVAS_HOST: &str = "canvas.lms.unimelb.edu.au";
 /// WKWebView's default UA has no `Version/… Safari/…` suffix, and UA-sniffing
 /// sites (google.com) serve their no-JavaScript fallback to it. Keep the
 /// version roughly current. Deliberately separate from `auth/okta/`'s string.
+/// The messaging dock (`shell/dock/`) sends it too. WebView2 keeps its own
+/// Edge UA.
 #[cfg(not(target_os = "windows"))]
-const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15";
+pub(crate) const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15";
 
 fn label(id: u32) -> String {
     format!("{LABEL_PREFIX}{id}")
@@ -87,15 +91,13 @@ pub struct Snapshot {
     pub tabs: Vec<Tab>,
 }
 
-/// Insets from the window's content edges in logical points, plus the
-/// bottom-corner radius of the card the page sits in.
+/// Insets from the window's content edges in logical points.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct Viewport {
     pub left: f64,
     pub top: f64,
     pub right: f64,
     pub bottom: f64,
-    pub radius: f64,
 }
 
 #[derive(Default)]

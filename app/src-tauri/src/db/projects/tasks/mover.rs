@@ -56,12 +56,12 @@ pub async fn move_task(
     below: Option<i64>,
 ) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let existing = task_on(&mut *tx, id)
+    let existing = task_on(&mut tx, id)
         .await?
         .ok_or_else(|| format!("task {id} does not exist"))?;
     let project = match existing.project_id {
         Some(id) => Some(
-            project_on(&mut *tx, id)
+            project_on(&mut tx, id)
                 .await?
                 .ok_or_else(|| format!("project {id} does not exist"))?,
         ),
@@ -70,7 +70,7 @@ pub async fn move_task(
     let done = require_column(project.as_ref(), column_id)?.kind == "done";
 
     for neighbour in [above, below].into_iter().flatten() {
-        let row = task_on(&mut *tx, neighbour)
+        let row = task_on(&mut tx, neighbour)
             .await?
             .ok_or_else(|| format!("task {neighbour} does not exist"))?;
         if row.project_id != existing.project_id {
@@ -86,10 +86,10 @@ pub async fn move_task(
         }
     }
 
-    let mut position = midpoint(&mut *tx, above, below).await?;
+    let mut position = midpoint(&mut tx, above, below).await?;
     if position.is_none() {
-        renumber_column(&mut *tx, existing.project_id, column_id).await?;
-        position = midpoint(&mut *tx, above, below).await?;
+        renumber_column(&mut tx, existing.project_id, column_id).await?;
+        position = midpoint(&mut tx, above, below).await?;
     }
     let position = position.ok_or("could not find a position for the task")?;
 
@@ -109,7 +109,7 @@ pub async fn move_task(
     .await
     .map_err(|e| e.to_string())?;
 
-    touch_project(&mut *tx, existing.project_id).await?;
+    touch_project(&mut tx, existing.project_id).await?;
     tx.commit().await.map_err(|e| e.to_string())
 }
 

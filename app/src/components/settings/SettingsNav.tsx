@@ -18,6 +18,7 @@ import {
   type SettingsJump,
 } from "@/lib/search/settings";
 import { cn } from "@/lib/utils";
+import { useJobAttention } from "@/stores/agents/jobAttentionStore";
 
 /**
  * Settings' own column: a search over `SETTINGS_ENTRIES`, and the pages in
@@ -30,6 +31,7 @@ export default function SettingsNav() {
   const [query, setQuery] = useState("");
   const results = useMemo(() => searchSettings(query), [query]);
   const searching = query.trim() !== "";
+  const jobsNeedAttention = useJobAttention((s) => s.attention);
 
   const open = (entry: SettingsEntry) => {
     const jump: SettingsJump = { section: entry.section ?? null };
@@ -87,7 +89,17 @@ export default function SettingsNav() {
             <div key={group}>
               <SideNavGroupLabel>{group}</SideNavGroupLabel>
               {SETTINGS_PAGES.filter((p) => p.group === group).map((page) => (
-                <SideNavLink key={page.id} to={page.id} icon={page.icon} label={page.label} />
+                <SideNavLink
+                  key={page.id}
+                  to={page.id}
+                  icon={page.icon}
+                  label={page.label}
+                  trailing={
+                    page.id === "jobs" && jobsNeedAttention ? (
+                      <span className="size-1.5 rounded-full bg-destructive" />
+                    ) : null
+                  }
+                />
               ))}
             </div>
           ))}

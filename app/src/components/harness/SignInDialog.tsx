@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ArrowSquareOut,
   CaretRight,
   CheckCircle,
   CircleNotch,
   Copy,
   Warning,
 } from "@phosphor-icons/react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import {
   harnessSignInCancel,
@@ -35,8 +37,11 @@ import {
 export interface SignInRun {
   provider: Provider;
   lines: string[];
-  /** The authorize URL, once the CLI has printed one. */
+  /** The authorize URL, once the CLI has printed one; the latest, when
+   *  Antigravity goes round again after a refused code. */
   url: string | null;
+  /** Why the last pasted code was refused; cleared by the next one. */
+  notice: string | null;
   result: { ok: boolean; status: string } | null;
   error: string | null;
 }
@@ -66,7 +71,8 @@ export function useSignIn(onFinished: () => void): {
     setRun((prev) => {
       if (!prev || prev.provider !== ev.provider) return prev;
       let next = prev;
-      if (ev.url && !next.url) next = { ...next, url: ev.url };
+      if (ev.url) next = { ...next, url: ev.url };
+      if (ev.notice) next = { ...next, notice: ev.notice };
       if (ev.line !== null) next = { ...next, lines: [...next.lines, ev.line] };
       if (ev.done) {
         next = { ...next, result: { ok: ev.ok ?? false, status: ev.status ?? "finished" } };
@@ -82,7 +88,7 @@ export function useSignIn(onFinished: () => void): {
 
   const start = useCallback((provider: Provider) => {
     active.current = provider;
-    setRun({ provider, lines: [], url: null, result: null, error: null });
+    setRun({ provider, lines: [], url: null, notice: null, result: null, error: null });
     harnessSignInStart(provider).catch((e) =>
       setRun((prev) => (prev && prev.provider === provider ? { ...prev, error: String(e) } : prev)),
     );
@@ -91,6 +97,9 @@ export function useSignIn(onFinished: () => void): {
   const submitCode = useCallback((code: string) => {
     const provider = active.current;
     if (!provider) return;
+    setRun((prev) =>
+      prev && prev.provider === provider ? { ...prev, notice: null, error: null } : prev,
+    );
     harnessSignInCode(provider, code).catch((e) =>
       setRun((prev) => (prev && prev.provider === provider ? { ...prev, error: String(e) } : prev)),
     );
@@ -114,10 +123,11 @@ export function useSignIn(onFinished: () => void): {
 /**
  * Signs a CLI agent in via its own login subcommand, which writes the CLI's own
  * store — Oculus never sees the token. The flow is the provider's
- * (`ProviderInfo.signIn` in `app/src/lib/harness/index.ts`): `code` (Claude: paste the
- * callback code to stdin), `callback` (Codex: loopback server, nothing to type),
- * or null (opencode: per-provider credentials live in Settings → opencode).
- * The URL gets a Copy button in case Rust's browser `open` silently failed.
+ * (`ProviderInfo.signIn` in `app/src/lib/harness/registry.ts`): `code` (Claude and
+ * Antigravity: paste the code the callback page shows), `callback` (Codex: loopback
+ * server, nothing to type), or null (opencode only: per-provider credentials live in
+ * Settings → opencode). The URL gets Copy and Open buttons in case the browser
+ * `open` silently failed.
  */
 export function SignInDialog({
   provider,
@@ -164,6 +174,7 @@ export function SignInDialog({
     onCode(c);
   };
 
+  // Only opencode has no flow of its own (`registry.ts`).
   if (flow === null) {
     return (
       <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -218,10 +229,26 @@ export function SignInDialog({
                   {copied ? <CheckCircle size={12} /> : <Copy size={12} />}
                   {copied ? "Copied" : "Copy"}
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="shrink-0"
+                  onClick={() => void openUrl(url).catch(() => {})}
+                >
+                  <ArrowSquareOut size={12} />
+                  Open
+                </Button>
               </div>
             )}
 
-            {/* The CLI waits on stdin for the code the callback page shows. */}
+            {flow === "code" && live && url && run?.notice && (
+              <div className="flex items-start gap-2 text-xs text-destructive">
+                <Warning size={13} className="mt-px shrink-0" />
+                <span>{run.notice}</span>
+              </div>
+            )}
+
+            {/* The CLI waits for the code the callback page shows. */}
             {flow === "code" && live && url && (
               <div className="flex items-center gap-2">
                 <Input
@@ -234,7 +261,11 @@ export function SignInDialog({
                       submit();
                     }
                   }}
-                  placeholder="Paste the code from the browser"
+                  placeholder={
+                    provider === "antigravity"
+                      ? "Copy the code from the Antigravity page and paste it here"
+                      : "Paste the code the page shows once you approve"
+                  }
                   aria-label="Authorization code"
                 />
                 <Button size="sm" className="shrink-0" disabled={!code.trim()} onClick={submit}>

@@ -7,7 +7,7 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tiny_http::{Header, Method, Response, Server};
@@ -44,7 +44,7 @@ pub fn start_media_server(data_dir: PathBuf) -> MediaServer {
         .port();
     let token = random_token();
 
-    eprintln!("[oculus] media HTTP server on 127.0.0.1:{port}");
+    elog!("[oculus] media HTTP server on 127.0.0.1:{port}");
 
     let server = Arc::new(server);
     for _ in 0..MEDIA_WORKERS {
@@ -61,7 +61,7 @@ pub fn start_media_server(data_dir: PathBuf) -> MediaServer {
     MediaServer { port, token }
 }
 
-fn handle(request: tiny_http::Request, data_dir: &PathBuf, token: &str) {
+fn handle(request: tiny_http::Request, data_dir: &Path, token: &str) {
     let respond_status = |request: tiny_http::Request, code: u16| {
         let _ = request.respond(Response::empty(code));
     };

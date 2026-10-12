@@ -41,8 +41,8 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
     .center()
     .visible(true)
     .on_navigation(move |url| {
-        eprintln!("[oculus] nav: {url}");
-        if is_authenticated_url(&url) {
+        elog!("[oculus] nav: {url}");
+        if is_authenticated_url(url) {
             let was_resolved = resolved_nav.swap(true, Ordering::SeqCst);
             if !was_resolved {
                 // Now, so closing the window meanwhile is not a cancel.
@@ -54,7 +54,7 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(2));
                     if !cookies::save_session_cookie(&app_delayed) {
-                        eprintln!("[oculus] auth: the Canvas session was not stored");
+                        elog!("[oculus] auth: the Canvas session was not stored");
                         app_delayed.emit("canvas-auth-cancelled", "cancelled").ok();
                         return;
                     }
@@ -62,7 +62,7 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
                     if let Some(w) = app_delayed.get_webview_window("canvas-auth") {
                         w.hide().ok();
                     }
-                    eprintln!("[oculus] auth success");
+                    elog!("[oculus] auth success");
                 });
             }
         }
@@ -77,7 +77,7 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
     let win = match result {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("[oculus] failed to open canvas window: {e}");
+            elog!("[oculus] failed to open canvas window: {e}");
             return;
         }
     };

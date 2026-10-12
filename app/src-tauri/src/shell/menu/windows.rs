@@ -142,7 +142,7 @@ pub(crate) fn install(webview: &tauri::Webview<tauri::Wry>, page: bool) {
                             if action.focuses_shell(page) {
                                 if let Some(main) = app.get_webview("main") {
                                     if let Err(error) = main.set_focus() {
-                                        eprintln!("[oculus] could not focus the shell: {error}");
+                                        elog!("[oculus] could not focus the shell: {error}");
                                     }
                                 }
                             }
@@ -163,12 +163,12 @@ pub(crate) fn install(webview: &tauri::Webview<tauri::Wry>, page: bool) {
                 .controller()
                 .add_AcceleratorKeyPressed(&handler, &mut token)
         } {
-            eprintln!("[oculus] {label}: could not register Windows shortcuts: {error}");
+            elog!("[oculus] {label}: could not register Windows shortcuts: {error}");
         }
         // The controller owns the callback until the webview closes.
     });
     if let Err(error) = result {
-        eprintln!("[oculus] could not access WebView2 for shortcuts: {error}");
+        elog!("[oculus] could not access WebView2 for shortcuts: {error}");
     }
 }
 

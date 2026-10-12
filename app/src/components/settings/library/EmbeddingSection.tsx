@@ -1,4 +1,5 @@
 import { Section, StatRow } from "@/components/settings/shared/section";
+import { useVoyageKey } from "@/hooks/keys/useVoyageKey";
 import { CredentialField } from "../shared/CredentialField";
 import { EngineSelect } from "../shared/EngineSelect";
 import { ReindexConfirmDialog } from "./ReindexConfirmDialog";
@@ -28,20 +29,18 @@ export function EmbeddingSection() {
     loadEstimate,
     runRunning,
   } = useEmbedSettings();
-  const {
-    prompt,
-    setPrompt,
-    switching,
-    key,
-    setKey,
-    keyNote,
-    checkingKey,
-    apply,
-    choose,
-    setBudget,
-    saveKey,
-    deleteKey,
-  } = useEmbedActions({ settings, setSettings, setError, loadEstimate });
+  const { prompt, setPrompt, switching, apply, choose, setBudget } = useEmbedActions({
+    settings,
+    setSettings,
+    setError,
+    loadEstimate,
+  });
+  const keyField = useVoyageKey({
+    onSaved: () =>
+      setSettings((prev) => (prev ? { ...prev, credentials_ready: true, credentials_error: null } : prev)),
+    onRemoved: () =>
+      setSettings((prev) => (prev ? { ...prev, credentials_ready: false, credentials_error: null } : prev)),
+  });
 
   const selected = settings?.engines.find((engine) => engine.id === settings.engine) ?? null;
 
@@ -81,14 +80,14 @@ export function EmbeddingSection() {
 
         <CredentialField
           label="Voyage API key"
-          value={key}
+          value={keyField.key}
           connected={settings?.credentials_ready ?? false}
-          busy={checkingKey}
+          busy={keyField.busy}
           placeholder="Paste key"
-          onChange={setKey}
-          onSave={() => void saveKey()}
-          onRemove={() => void deleteKey()}
-          note={keyNote}
+          onChange={keyField.setKey}
+          onSave={() => void keyField.save()}
+          onRemove={() => void keyField.remove()}
+          note={keyField.note}
         />
 
         <StatRow

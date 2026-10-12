@@ -14,8 +14,11 @@ use crate::providers::ratelimit::hold;
 pub struct FakeKeyd {
     #[cfg(windows)]
     _registration: keyd_core::platform::TestBrokerRegistration,
-    requests: Arc<Mutex<Vec<(Value, Vec<u8>)>>>,
+    requests: Requests,
 }
+
+/// Each request's header and body, in arrival order.
+type Requests = Arc<Mutex<Vec<(Value, Vec<u8>)>>>;
 
 impl FakeKeyd {
     pub fn start<H>(dir: &Path, handler: H) -> Self
@@ -28,7 +31,7 @@ impl FakeKeyd {
         let listener = keyd_core::platform::Listener::bind(&endpoint).unwrap();
         #[cfg(windows)]
         let registration = keyd_core::platform::register_test_broker(&endpoint).unwrap();
-        let requests: Arc<Mutex<Vec<(Value, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let requests: Requests = Arc::new(Mutex::new(Vec::new()));
         let log = requests.clone();
         std::thread::spawn(move || {
             while let Ok(conn) = listener.accept() {

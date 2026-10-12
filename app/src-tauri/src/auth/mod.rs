@@ -6,7 +6,6 @@
 pub(crate) mod commands;
 mod cookies;
 pub mod keyd;
-pub mod legacy_agent;
 mod login_window;
 pub mod okta;
 mod session;
@@ -53,9 +52,9 @@ pub fn saved_session_probe() -> AuthProbe {
     let probe = crate::sources::canvas::Canvas::open(&crate::library::paths::data_dir()).probe();
 
     match &probe {
-        AuthProbe::Valid(name) => eprintln!("[oculus] session check: valid ({name})"),
-        AuthProbe::Rejected(why) => eprintln!("[oculus] session check: rejected — {why}"),
-        AuthProbe::Unreachable(why) => eprintln!("[oculus] session check: inconclusive — {why}"),
+        AuthProbe::Valid(name) => elog!("[oculus] session check: valid ({name})"),
+        AuthProbe::Rejected(why) => elog!("[oculus] session check: rejected — {why}"),
+        AuthProbe::Unreachable(why) => elog!("[oculus] session check: inconclusive — {why}"),
     }
     probe
 }

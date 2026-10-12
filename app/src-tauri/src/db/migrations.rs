@@ -790,6 +790,29 @@ UPDATE settings SET value = json_remove(value, '$.lectureReading')
                         "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 44,
+            description: "echo embeds: Echo360 videos in Canvas pages",
+            // A cache keyed by the page tag's link id, written only by Rust
+            // (`db::store::upsert_echo_embed`), so it cascades. Paths are data-dir-relative.
+            sql: r#"
+CREATE TABLE IF NOT EXISTS echo_embeds (
+    link_id           TEXT    PRIMARY KEY,
+    subject_id        INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    media_id          TEXT    NOT NULL,
+    secure_link_id    TEXT    NOT NULL,
+    name              TEXT    NOT NULL,
+    duration_s        REAL,
+    restrict_download INTEGER NOT NULL DEFAULT 0,
+    has_captions      INTEGER NOT NULL DEFAULT 0,
+    poster_rel        TEXT,
+    file_rel          TEXT,
+    extra_sources     INTEGER NOT NULL DEFAULT 0,
+    resolved_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+                        "#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

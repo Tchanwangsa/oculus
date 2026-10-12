@@ -75,6 +75,21 @@ changed), and runs `oculus docs` to refresh the library's agent docs. The last
 two are non-fatal: a machine whose app has never run has no library to fill.
 `OCULUS_SKIP_PREDEV=1` skips it all for a vite-only session.
 
+There is one preflight per checkout. A stopped `tauri dev` leaves its
+preflight's synchronous cargo builds running and holding cargo's lock, so a new
+preflight first ends any other preflight of the same checkout (recorded in
+`target/.oculus-predev.pid`, or found by its cwd) and orphaned cargo builds of
+this checkout's CLI or keyd, and this checkout's CLI watcher, each with its
+whole process tree. The watcher goes because predev rebuilds the CLI and starts
+a new one, and a quick restart never trips its dev-server probe. It also ends
+this checkout's orphaned vite (adopted by launchd, alone or under its
+`bun run dev`), which would otherwise hold port 1420 and stop the new dev
+server; one under a live `tauri dev` is left alone. Other checkouts, editors'
+`cargo check` and builds run from a shell are left alone.
+Before each cargo build it names whoever else holds that target's lock rather
+than leaving cargo's "Blocking waiting for file lock" unexplained.
+`app/scripts/stale-builds.mjs` does both, fail-open, and skips Windows.
+
 The scripts share target detection and artifact paths through `app/scripts/runtime.mjs`;
 the ffmpeg fetcher rejects failed HTTP responses, truncated downloads and,
 where a SHA-256 is pinned, any other bytes before installing anything.
@@ -146,7 +161,8 @@ PATH. Four pieces keep it current:
 - `app/scripts/watch-cli.mjs` rebuilds it on Rust changes through the session,
   since `tauri dev` never re-runs `beforeDevCommand`. Its debounce is longer
   than tauri's, so the app build takes cargo's lock first. It exits when the
-  vite port (probed on `localhost`, which is `::1` on macOS) stops answering.
+  vite port (probed on `localhost`, which is `::1` on macOS) stops answering,
+  and takes an in-flight build down with it.
 - Both, and `bun run cli`/`cli:dev`, copy each build over the
   `binaries/oculus-<triple>` sidecar. tauri-build copies every `externalBin`
   into `target/<profile>/` whenever the app's build script runs, so `tauri
@@ -192,7 +208,10 @@ keyd core and `app/math-core`'s own crates), `bun run test`, `bun run build`
 (both build the maths wasm, so the runner gets the wasm target and the locked
 `wasm-bindgen`), the ffmpeg fetch, the
 speech helper and `whisper-cli`, `stage-keyd` (a real release build and signature
-of keyd, as the bundle carries it), `stage-cli`, `cargo test --release --locked`,
+of keyd, as the bundle carries it), `stage-cli`, clippy with `-D warnings` over
+every target of the app, keyd core (every feature), keyd (with and without
+`dev`) and the maths engine's own crates (`--no-deps`, so not the vendored
+`katex/`; the bridge for `wasm32-unknown-unknown` too), `cargo test --release --locked`,
 keyd core's tests with every feature and keyd's with and without `dev`, the
 maths engine's `cargo test --locked`, then
 `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
@@ -202,9 +221,9 @@ checks keyd on Ubuntu, where only the unsupported adapter exists
 through an OS adapter, so the macOS and Windows jobs run them. `stage-cli`
 comes before any cargo call of the app because tauri-build refuses to compile
 until every `externalBin` exists, and it is what writes the CLI's on a clean
-tree. The macOS helper app is not an `externalBin`; Windows keyd is a sidecar,
-so it is staged before the CLI. The release profile is shared with that
-CLI build, so the tests reuse its artifacts. sccache is installed because
+tree. keyd's macOS helper is no `externalBin`, so no cargo build waits on it;
+Windows keyd is a sidecar, so it is staged before the CLI. The release profile is shared with that
+CLI build, so clippy reuses its build scripts and the tests its artifacts. sccache is installed because
 `app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
 
 The app's Windows dev-dependency enables keyd core's `test-support` for scripted
@@ -537,10 +556,13 @@ without keyd — neither is an environment variable.
 
 ## Gotchas
 
+- A Rust build sitting at 0% CPU is macOS scanning each new build script and proc-macro (`syspolicyd`). Add every app that starts builds (terminal, editor) under System Settings → Privacy & Security → Developer Tools, then relaunch it. Claude Code runs its agents under its own bundle, not Claude.app: add `~/Library/Application Support/Claude/claude-code/<version>/<hash>/claude.app` (⌘⇧G in the picker). A build with no `GK evaluateScanResult` line for its `build_script_build` in `/usr/bin/log show --predicate 'process == "syspolicyd"'` is exempt. Every compile runs under one shared sccache server, which belongs to whichever app started it, so restart it (`sccache --stop-server`) after adding one.
 - Any build of the crate copies the `binaries/` sidecar to `target/<profile>/oculus` — a stale sidecar means a stale CLI.
 - `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
+- rust-analyzer sharing `app/src-tauri/target/` takes cargo's build lock and stalls the preflight's builds. The repo's `.zed/settings.json` sets rust-analyzer's `cargo.targetDir` to `true`, which moves it to `target/rust-analyzer`; other editors need the same setting.
 - Anything under `app/src-tauri/` changing, templates included, rebuilds and relaunches the dev app.
 - A dev rebuild SIGTERMs the app past Tauri's Exit event, so agent subprocesses can outlive it ([harness.md](./harness.md)).
+- `eprintln!` panics once stderr is a closed pipe, as it is for an app a dead `tauri dev` left running, and a panic inside a WebKit or Objective-C callback aborts the app. The app crate logs with `elog!` (`app/src-tauri/src/elog.rs`), which drops the write error; tests and the CLI binary keep `eprintln!`.
 - Adding `app/keyd` to a workspace, or building it outside `app/keyd`, changes its bytes and brings back the keychain prompt.
 - An OS call outside `app/keyd/core/src/platform/` in keyd's or the app's keyd code fails `bun run test`, and on Linux CI fails the build.
 - Deleting `~/Library/Application Support/com.tchan.oculus` is a full reset, sign-in included.

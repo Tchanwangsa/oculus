@@ -74,9 +74,10 @@ pub async fn transcribe_video(app: AppHandle, path: String) -> Result<String, St
         let (chunk, chunks) = seen.get();
         match &result {
             Ok(done) => {
-                eprintln!(
+                elog!(
                     "[oculus] transcribed {path} with {}: {} cue(s)",
-                    done.engine, done.cues
+                    done.engine,
+                    done.cues
                 );
                 emit(
                     "complete",
@@ -87,7 +88,7 @@ pub async fn transcribe_video(app: AppHandle, path: String) -> Result<String, St
                 );
             }
             Err(e) => {
-                eprintln!("[oculus] transcription failed for {path}: {e}");
+                elog!("[oculus] transcription failed for {path}: {e}");
                 emit("error", None, chunk, chunks, Some(e));
             }
         }
@@ -172,7 +173,7 @@ pub async fn whisper_download_model(app: AppHandle, id: String) -> Result<(), St
         let (received, total) = seen.get();
         match &result {
             Ok(path) => {
-                eprintln!(
+                elog!(
                     "[oculus] downloaded Whisper model {id} to {}",
                     path.display()
                 );
@@ -180,7 +181,7 @@ pub async fn whisper_download_model(app: AppHandle, id: String) -> Result<(), St
             }
             Err(e) if e == whisper_models::CANCELLED => emit("cancelled", received, total, None),
             Err(e) => {
-                eprintln!("[oculus] Whisper model {id} failed to download: {e}");
+                elog!("[oculus] Whisper model {id} failed to download: {e}");
                 emit("error", received, total, Some(e));
             }
         }

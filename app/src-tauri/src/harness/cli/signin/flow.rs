@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 
+use super::agy;
 use super::output::{extract_url, strip_ansi};
 use crate::harness::cli::discover;
 use crate::harness::cli::install::{drain_lines, exit_text};
@@ -23,22 +24,79 @@ pub struct SignInLine {
     pub provider: Provider,
     /// One line of the child's output, stdout and stderr both.
     pub line: Option<String>,
-    /// The authorize URL, emitted once, the first time a line carries one.
+    /// The authorize URL: once for Claude and Codex, once per round for
+    /// Antigravity, whose every attempt has its own.
     pub url: Option<String>,
+    /// Something the student must see while the run carries on — the
+    /// sentence Antigravity refused a pasted code with.
+    pub notice: Option<String>,
     /// The last event of a run.
     pub done: bool,
     pub ok: Option<bool>,
     pub status: Option<String>,
 }
 
-/// A login in flight: [`submit_code`] writes to its stdin, [`cancel`] kills it.
-struct Run {
-    child: Arc<Mutex<Child>>,
-    job: Arc<crate::runtime::platform::ProcessJob>,
-    /// `None` only if the pipe could not be taken.
-    stdin: Arc<Mutex<Option<ChildStdin>>>,
+impl SignInLine {
+    fn empty(provider: Provider) -> Self {
+        SignInLine {
+            provider,
+            line: None,
+            url: None,
+            notice: None,
+            done: false,
+            ok: None,
+            status: None,
+        }
+    }
+
+    pub(super) fn line(provider: Provider, line: String, url: Option<String>) -> Self {
+        SignInLine {
+            line: Some(line),
+            url,
+            ..Self::empty(provider)
+        }
+    }
+
+    pub(super) fn url(provider: Provider, url: String) -> Self {
+        SignInLine {
+            url: Some(url),
+            ..Self::empty(provider)
+        }
+    }
+
+    pub(super) fn notice(provider: Provider, notice: String) -> Self {
+        SignInLine {
+            notice: Some(notice),
+            ..Self::empty(provider)
+        }
+    }
+
+    pub(super) fn done(provider: Provider, ok: bool, status: String) -> Self {
+        SignInLine {
+            done: true,
+            ok: Some(ok),
+            status: Some(status),
+            ..Self::empty(provider)
+        }
+    }
+}
+
+/// A login in flight: [`submit_code`] writes to it, [`cancel`] kills it.
+pub(super) struct Run {
+    pub(super) child: Arc<Mutex<Child>>,
+    /// The Windows job object holding the child's tree, for piped runs.
+    pub(super) job: Option<Arc<crate::runtime::platform::ProcessJob>>,
+    pub(super) input: Input,
     /// Set by [`cancel`], so a killed child reports "cancelled", not a signal.
-    cancelled: Arc<AtomicBool>,
+    pub(super) cancelled: Arc<AtomicBool>,
+}
+
+/// Where a pasted code goes.
+pub(super) enum Input {
+    /// Claude's stdin; `None` only if the pipe could not be taken.
+    Pipe(Arc<Mutex<Option<ChildStdin>>>),
+    /// Antigravity's terminal.
+    Terminal(Arc<agy::Terminal>),
 }
 
 /// One login at a time per provider: a second `codex login` would find port
@@ -46,6 +104,26 @@ struct Run {
 fn running() -> &'static Mutex<HashMap<Provider, Run>> {
     static R: OnceLock<Mutex<HashMap<Provider, Run>>> = OnceLock::new();
     R.get_or_init(Default::default)
+}
+
+/// Register the run `spawn` starts, under the map's lock so two concurrent
+/// invokes cannot both pass the check; `T` is what the supervisor keeps.
+pub(super) fn claim<T>(
+    provider: Provider,
+    spawn: impl FnOnce() -> Result<(Run, T), String>,
+) -> Result<T, String> {
+    let mut r = running().lock().unwrap();
+    if r.contains_key(&provider) {
+        return Err(format!("{} is already signing in", provider.label()));
+    }
+    let (run, keep) = spawn()?;
+    r.insert(provider, run);
+    Ok(keep)
+}
+
+/// Drop a finished run, so the next `start` may begin.
+pub(super) fn release(provider: Provider) {
+    running().lock().unwrap().remove(&provider);
 }
 
 pub(super) fn login_args(provider: Provider) -> Result<&'static [&'static str], String> {
@@ -58,33 +136,25 @@ pub(super) fn login_args(provider: Provider) -> Result<&'static [&'static str], 
              command"
                 .into(),
         ),
-        // `agy` signs in only interactively, in a terminal.
-        Provider::Antigravity => Err(
-            "Antigravity has no sign-in command: run `agy` in a terminal and finish the Google \
-             sign-in it walks you through, then come back"
-                .into(),
-        ),
+        // Bare `agy`, in a terminal: see `agy::start`.
+        Provider::Antigravity => Ok(&[]),
     }
 }
 
 /// Start the provider's login flow, streaming its output to `emit`; returns
 /// once the child is spawned. stdin is piped (unlike `install`) because
-/// Claude's flow ends in a pasted code.
+/// Claude's flow ends in a pasted code; Antigravity's runs in a terminal.
 pub fn start<F>(provider: Provider, emit: F) -> Result<(), String>
 where
     F: Fn(SignInLine) + Send + 'static,
 {
     let args = login_args(provider)?;
+    if provider == Provider::Antigravity {
+        return agy::start(emit);
+    }
     let bin = discover::binary(provider)?;
 
-    // Spawn under the map's lock so two concurrent invokes cannot both pass
-    // the check.
-    let (stdout, stderr, stdin, cancelled, child) = {
-        let mut r = running().lock().unwrap();
-        if r.contains_key(&provider) {
-            return Err(format!("{} is already signing in", provider.label()));
-        }
-
+    let (stdout, stderr, stdin, cancelled, child) = claim(provider, || {
         let mut command = crate::runtime::platform::cli_command(&bin)?;
         command
             .args(args)
@@ -101,18 +171,14 @@ where
         let stdin = Arc::new(Mutex::new(child.stdin.take()));
         let cancelled = Arc::new(AtomicBool::new(false));
         let child = Arc::new(Mutex::new(child));
-
-        r.insert(
-            provider,
-            Run {
-                child: child.clone(),
-                job,
-                stdin: stdin.clone(),
-                cancelled: cancelled.clone(),
-            },
-        );
-        (stdout, stderr, stdin, cancelled, child)
-    };
+        let run = Run {
+            child: child.clone(),
+            job: Some(job),
+            input: Input::Pipe(stdin.clone()),
+            cancelled: cancelled.clone(),
+        };
+        Ok((run, (stdout, stderr, stdin, cancelled, child)))
+    })?;
 
     std::thread::spawn(move || {
         let mut sent_url = false;
@@ -120,14 +186,7 @@ where
             let line = strip_ansi(&raw);
             let url = if sent_url { None } else { extract_url(&line) };
             sent_url |= url.is_some();
-            emit(SignInLine {
-                provider,
-                line: Some(line),
-                url,
-                done: false,
-                ok: None,
-                status: None,
-            });
+            emit(SignInLine::line(provider, line, url));
         });
 
         // Polled: a blocking `wait` under the child's mutex would deadlock
@@ -149,29 +208,30 @@ where
         };
 
         drop(stdin.lock().unwrap().take());
-        running().lock().unwrap().remove(&provider);
-        emit(SignInLine {
-            provider,
-            line: None,
-            url: None,
-            done: true,
-            ok: Some(ok),
-            status: Some(status),
-        });
+        release(provider);
+        emit(SignInLine::done(provider, ok, status));
     });
 
     Ok(())
 }
 
-/// Write a pasted authorization code to a waiting child's stdin (Claude only).
-/// The newline commits it; without one the CLI waits forever.
+/// Hand a pasted authorization code to a waiting login: Claude's stdin, or
+/// Antigravity's code box. The newline commits it; without one the CLI
+/// waits forever.
 pub fn submit_code(provider: Provider, code: &str) -> Result<(), String> {
     let stdin = {
         let r = running().lock().unwrap();
         let run = r
             .get(&provider)
             .ok_or_else(|| format!("{} is not signing in", provider.label()))?;
-        run.stdin.clone()
+        match &run.input {
+            Input::Pipe(stdin) => stdin.clone(),
+            Input::Terminal(t) => {
+                let t = t.clone();
+                drop(r);
+                return t.submit(code);
+            }
+        }
     };
     let mut guard = stdin.lock().unwrap();
     let pipe = guard
@@ -191,7 +251,12 @@ pub fn cancel(provider: Provider) -> Result<(), String> {
         .get(&provider)
         .ok_or_else(|| format!("{} is not signing in", provider.label()))?;
     run.cancelled.store(true, Ordering::SeqCst);
-    run.job.terminate();
+    if let Some(job) = &run.job {
+        job.terminate();
+    }
+    if let Input::Terminal(t) = &run.input {
+        t.kill();
+    }
     let mut child = run.child.lock().unwrap();
     let _ = child.kill();
     Ok(())

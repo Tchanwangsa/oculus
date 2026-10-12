@@ -128,7 +128,7 @@ impl Ctx {
             }
         }
 
-        let selection = self.job_selection(
+        let chain = self.job_chain(
             &pool,
             jobs::Job::LectureChapters,
             [&args.provider, &args.model, &args.effort],
@@ -143,7 +143,7 @@ impl Ctx {
             &app_lib::lectures::chapters::Run {
                 data_dir: &self.data_dir,
                 lecture_id: &id,
-                selection: &selection,
+                selections: &chain,
                 force: args.force,
                 source: args.source,
             },
@@ -189,9 +189,9 @@ impl Ctx {
                 lecture: &id,
                 title: &outcome.title,
                 duration_seconds: outcome.duration_seconds,
-                provider: selection.provider.as_str(),
-                model: &selection.model,
-                effort: selection.effort(),
+                provider: outcome.selection.provider.as_str(),
+                model: &outcome.selection.model,
+                effort: outcome.selection.effort(),
                 source: outcome.source,
                 candidates: outcome.candidates,
                 chapters: &outcome.chapters,
@@ -269,7 +269,7 @@ impl Ctx {
             return Ok(());
         }
 
-        let selection = self.job_selection(
+        let chain = self.job_chain(
             &pool,
             jobs::Job::LectureEnd,
             [&args.provider, &args.model, &args.effort],
@@ -332,7 +332,7 @@ impl Ctx {
                     row.black_from = prepared.black_from;
                     row.window_cues = prepared.lines.len();
                     row.prompt_chars = prepared.prompt.chars().count();
-                    lecture_end::find(&harness, &selection, &prepared)
+                    lecture_end::find(&harness, &chain, &prepared)
                 });
                 if !args.dry_run {
                     marked_done = self.rt.block_on(lecture_end::record(&pool, id, &outcome))?;
@@ -404,33 +404,63 @@ impl Ctx {
         }
     }
 
-    /// The job's configured model, with `[provider, model, effort]` flags
-    /// overriding what they name; the choice is printed unless `--json`.
-    fn job_selection(
+    /// The job's configured models in the order tried. Any of the
+    /// `[provider, model, effort]` flags makes this run one explicit model: they
+    /// override what they name on the first, and the fallbacks are dropped.
+    /// The choice is printed unless `--json`.
+    fn job_chain(
         &self,
         pool: &SqlitePool,
         job: jobs::Job,
         [provider, model, effort]: [&Option<String>; 3],
-    ) -> Result<jobs::JobSelection, String> {
-        let mut selection = self.rt.block_on(jobs::selection(pool, job));
-        if let Some(p) = provider {
-            selection.provider = Provider::parse(p).ok_or("unknown provider")?;
+    ) -> Result<Vec<jobs::JobSelection>, String> {
+        let mut chain = self.rt.block_on(jobs::chain(pool, job));
+        if provider.is_some() || model.is_some() || effort.is_some() {
+            let mut selection = match chain.into_iter().next() {
+                Some(first) => first,
+                // Nothing configured to patch, so the flags must name it all.
+                None => {
+                    let (Some(p), Some(m)) = (provider, model) else {
+                        return Err(format!(
+                            "{} Or pass `--provider` and `--model` for this run.",
+                            jobs::off(job)
+                        ));
+                    };
+                    jobs::JobSelection {
+                        provider: Provider::parse(p).ok_or("unknown provider")?,
+                        model: m.clone(),
+                        reasoning_effort: None,
+                    }
+                }
+            };
+            if let Some(p) = provider {
+                selection.provider = Provider::parse(p).ok_or("unknown provider")?;
+            }
+            if let Some(m) = model {
+                selection.model = m.clone();
+            }
+            if let Some(e) = effort {
+                selection.reasoning_effort = Some(e.clone());
+            }
+            chain = vec![selection];
         }
-        if let Some(m) = model {
-            selection.model = m.clone();
-        }
-        if let Some(e) = effort {
-            selection.reasoning_effort = Some(e.clone());
-        }
+        let Some(first) = chain.first() else {
+            return Err(jobs::off(job));
+        };
         if !self.json {
+            let fallbacks = match chain.len() - 1 {
+                0 => String::new(),
+                1 => " (+1 fallback)".into(),
+                n => format!(" (+{n} fallbacks)"),
+            };
             println!(
                 "{}",
                 paint(
                     &format!(
-                        "{} · {}{}",
-                        selection.provider.label(),
-                        selection.model,
-                        match selection.effort() {
+                        "{} · {}{}{fallbacks}",
+                        first.provider.label(),
+                        first.model,
+                        match first.effort() {
                             Some(e) => format!(" · {e} reasoning"),
                             None => String::new(),
                         }
@@ -439,7 +469,7 @@ impl Ctx {
                 )
             );
         }
-        Ok(selection)
+        Ok(chain)
     }
 
     /// A lecture by id or unique id prefix; an ambiguous prefix is an error.

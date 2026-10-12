@@ -63,7 +63,7 @@ fn probe_health(provider: Provider) -> BridgeHealth {
                     // `2.1.267 (Claude Code)` / `codex-cli 0.153.4` — keep the number.
                     let num = v
                         .split_whitespace()
-                        .find(|w| w.chars().next().map_or(false, |c| c.is_ascii_digit()))
+                        .find(|w| w.chars().next().is_some_and(|c| c.is_ascii_digit()))
                         .unwrap_or(&v);
                     h.version = Some(num.to_string());
                 }

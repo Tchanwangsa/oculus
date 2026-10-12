@@ -4,7 +4,7 @@ use super::picture::black_from;
 use super::prompt::{prompt, Prompt, INSTRUCTIONS};
 use super::reply::{ask, Found};
 use super::window::{recording_length, window, Line};
-use crate::harness::jobs::JobSelection;
+use crate::harness::jobs::{try_each, Job, JobSelection};
 use crate::harness::{opencode, Harness};
 use std::path::{Path, PathBuf};
 
@@ -107,17 +107,21 @@ pub fn prepare(lecture: &Lecture) -> Result<Prepared, String> {
     })
 }
 
-/// Ask the job's agent where `prepared`'s lecture ends.
+/// Ask the job's models in turn where `prepared`'s lecture ends. A model whose
+/// turn fails, or whose reply is rejected twice, hands over to the next; no end
+/// found is an answer, not a failure.
 pub fn find(
     harness: &Harness,
-    selection: &JobSelection,
+    chain: &[JobSelection],
     prepared: &Prepared,
 ) -> Result<Option<Found>, String> {
-    ask(
-        |text| harness.one_turn(selection, INSTRUCTIONS, opencode::LECTURE_END_AGENT, text),
-        &prepared.prompt,
-        &prepared.lines,
-    )
+    try_each(Job::LectureEnd, chain, |selection| {
+        ask(
+            |text| harness.one_turn(selection, INSTRUCTIONS, opencode::LECTURE_END_AGENT, text),
+            &prepared.prompt,
+            &prepared.lines,
+        )
+    })
 }
 
 /// Write a run's outcome; answers whether a found end marked the lecture Done.

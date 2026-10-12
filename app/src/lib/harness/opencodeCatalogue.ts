@@ -150,7 +150,8 @@ export function unusableReason(m: ModelCapabilities): string | null {
 const ZEN_PROVIDER = "opencode";
 
 /** opencode's free Zen models refuse every request not from the opencode TUI
- *  (HTTP 400), so none can run here. Settings still lists them, with why. */
+ *  (HTTP 400), so none can run here. Settings greys the provider out and lists
+ *  none of its models. */
 export function isZen(modelId: string): boolean {
   return isZenProvider(providerOf(modelId));
 }
@@ -158,6 +159,10 @@ export function isZen(modelId: string): boolean {
 export function isZenProvider(providerId: string): boolean {
   return providerId === ZEN_PROVIDER;
 }
+
+/** Pinned first in Settings → opencode → Providers, in this order: OpenRouter
+ *  for reach, OpenCode Go for a flat monthly price. */
+export const RECOMMENDED_PROVIDERS = ["openrouter", "opencode-go"];
 
 /** Everything before the **first** `/`, like Rust's `split_model`: model ids
  *  contain slashes of their own. No slash answers `""`. */

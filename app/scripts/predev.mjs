@@ -3,8 +3,9 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { buildKeyd, installFromMainCheckout } from "./keyd-build.mjs";
-import { app, buildCli, cliPath, stageCli } from "./runtime.mjs";
+import { buildKeyd, crate as keydCrate, installFromMainCheckout } from "./keyd-build.mjs";
+import { app, buildCli, cliPath, rust, stageCli } from "./runtime.mjs";
+import { endStaleBuilds, nameLockHolder } from "./stale-builds.mjs";
 
 const cli = cliPath("debug");
 
@@ -15,6 +16,10 @@ if (process.env.OCULUS_SKIP_PREDEV) {
   log("OCULUS_SKIP_PREDEV is set — nothing built");
   process.exit(0);
 }
+
+// One preflight per checkout: a stopped `tauri dev` leaves its preflight's
+// cargo builds running and holding the lock this one needs.
+endStaleBuilds({ app, pidFile: join(rust, "target", ".oculus-predev.pid"), log });
 
 function mtime(p) {
   try {
@@ -56,6 +61,7 @@ try {
 // `keyd/target/signed/`, which is the keyd a debug app and CLI offer to
 // install. Installing it needs the CLI, so that comes after.
 let keyd = null;
+nameLockHolder(join(keydCrate, "target", "release"), "keyd's build lock", log);
 try {
   keyd = buildKeyd("dev");
 } catch (e) {
@@ -63,6 +69,7 @@ try {
   process.exit(1);
 }
 
+nameLockHolder(join(rust, "target", "debug"), "the build lock", log);
 const started = Date.now();
 try {
   buildCli("debug");

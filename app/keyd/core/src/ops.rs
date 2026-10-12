@@ -26,6 +26,7 @@ pub struct Build {
 }
 
 mod forward;
+mod get;
 mod legacy;
 mod okta;
 #[cfg(test)]
@@ -36,6 +37,7 @@ mod session_import;
 mod testing;
 #[cfg(test)]
 mod tests;
+mod webcrypto;
 
 /// Secrets whose old keychain item keyd copies into the vault the first time
 /// an op touches them (`State::import_once`): the three cloud keys and the
@@ -55,7 +57,8 @@ pub struct State {
     keys: Box<dyn KeySource>,
     master: Mutex<Option<MasterKey>>,
     legacy: Box<dyn LegacySource>,
-    /// Held across one import, so racing first requests read the old item once.
+    /// Held across one import, so racing first requests read the old item
+    /// once; `webcrypto_key` takes it too.
     importing: Mutex<()>,
     routes: Routes,
     upstream: Upstream,
@@ -77,8 +80,9 @@ pub struct State {
 /// An op's failure as it goes on the wire: `{"error": kind, "detail": …}`.
 /// Kinds: `request` (malformed, unknown op or name, a refused path or header),
 /// `caller` (refused: the peer check, or any op but `ping` asked by a program
-/// that is neither the app nor the CLI), `keychain` (the master key, or an old item
-/// being imported, was refused or failed), `vault`, `record` (`okta_resume`:
+/// that is neither the app nor the CLI, or `webcrypto_key` asked for another
+/// build's key), `keychain` (the master key, an old item being imported, or
+/// WebKit's WebCrypto item was refused, failed or held no key), `vault`, `record` (`okta_resume`:
 /// the sign-in attempt record could not be replaced; `session_mark` and
 /// `sign_out` use it for a marker file they could not write; a client reads
 /// it as `Broken`), `missing` (`forward` for a key or session the vault does not hold),
@@ -236,9 +240,11 @@ impl State {
     }
 
     /// One request. `body` is the raw bytes after the header line; only
-    /// `forward` takes any. No reply carries a secret value. `caller` is who
-    /// asked: the peer check admits any executable in the install (ffmpeg
-    /// ships in it), so every op but `ping` also needs the app or the CLI.
+    /// `forward` takes any. No reply carries a secret value but `get`'s, for
+    /// the one name in `names::READABLE`, `session_get`'s cookies and
+    /// `webcrypto_key`'s key, all to the app only. `caller` is who asked: the peer check admits any
+    /// executable in the install (ffmpeg ships in it), so every op but `ping`
+    /// also needs the app or the CLI.
     pub fn dispatch(
         &self,
         caller: &Caller,
@@ -293,6 +299,8 @@ impl State {
                     ..json!({"existed": existed, "legacy": legacy.as_str()}).into()
                 })
             }
+            "get" => self.get(req),
+            "webcrypto_key" => self.webcrypto_key(caller, req),
             "forward" => self.forward(caller, req, body),
             "okta_save" => self.okta_save(req),
             "okta_forget" => self.okta_forget(),
@@ -355,12 +363,13 @@ impl State {
 /// The one place an op's caller is judged, so a new op cannot forget it.
 /// `ping` answers whoever the peer check admitted, for diagnostics; the rest
 /// are for the app and the CLI, except `okta_resume`, which lifts a lockout
-/// pause, and `session_get`, the one reply that carries a cookie, so both are
-/// for the app alone.
+/// pause, `session_get`, the one reply that carries a cookie, and `get` and
+/// `webcrypto_key`, which carry a stored value, so those four are for the app
+/// alone.
 fn require_role(op: &str, role: Role) -> Result<(), OpError> {
     let (allowed, who) = match op {
         "ping" => return Ok(()),
-        "okta_resume" | "session_get" => (role == Role::App, "app"),
+        "okta_resume" | "session_get" | "get" | "webcrypto_key" => (role == Role::App, "app"),
         _ => (matches!(role, Role::App | Role::Cli), "app and CLI"),
     };
     if allowed {
@@ -378,8 +387,8 @@ fn imported_marker(name: &str) -> Option<String> {
         .then(|| names::imported(name))
 }
 
-/// The generic `store` and `delete` leave the Okta values and the sessions to
-/// their own ops, which validate what they write.
+/// The generic `store` and `delete` leave the Okta values, the sessions and
+/// WebKit's keys to their own ops, which validate what they write.
 fn refuse_managed(name: &str, saving: bool) -> Result<(), OpError> {
     let how = if names::OKTA.contains(&name) {
         if saving {
@@ -393,6 +402,8 @@ fn refuse_managed(name: &str, saving: bool) -> Result<(), OpError> {
         } else {
             "removed with session_clear"
         }
+    } else if names::WEBCRYPTO_NAMES.contains(&name) {
+        "kept by webcrypto_key"
     } else {
         return Ok(());
     };

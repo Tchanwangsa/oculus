@@ -4,8 +4,8 @@
 //!
 //! keyd links it with `server`; the app and CLI link it with `client`, so
 //! neither links the other and an app edit never changes keyd's bytes. The
-//! framing, the secret names, the paths, the clock and the platform's base
-//! types are always on; `okta` is the headless sign-in, which only keyd runs.
+//! framing, the secret names, the paths, the clock, WebKit's WebCrypto key
+//! format and the platform's base types are always on; `okta` is the headless sign-in, which only keyd runs.
 //! `client` includes it, for the `LoginError` keyd's replies carry.
 
 pub mod clock;
@@ -13,6 +13,7 @@ pub mod framing;
 pub mod names;
 pub mod paths;
 pub mod platform;
+pub mod webcrypto;
 
 #[cfg(feature = "client")]
 pub mod client;

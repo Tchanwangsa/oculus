@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::harness::antigravity;
+use crate::harness::child::ThreadSpawn;
 use crate::harness::claude;
 use crate::harness::codex::{CodexServer, CodexSpawn, ModelInfo};
 use crate::harness::discover;
@@ -44,7 +45,7 @@ impl Harness {
             let s = server.clone();
             std::thread::spawn(move || {
                 if let Err(e) = s.read_rate_limits() {
-                    eprintln!("[oculus] codex rate limits: {e}");
+                    elog!("[oculus] codex rate limits: {e}");
                 }
             });
         }
@@ -60,7 +61,7 @@ impl Harness {
         };
         if let Some(s) = server {
             if let Err(e) = s.read_rate_limits() {
-                eprintln!("[oculus] codex rate limits: {e}");
+                elog!("[oculus] codex rate limits: {e}");
             }
         }
     }
@@ -101,6 +102,15 @@ impl Harness {
         Ok(models)
     }
 
+    /// Every Claude spawn goes through here, so no run is left to the CLI's
+    /// "Default (recommended)" alias or to no `--model` at all.
+    pub(super) fn claude_base(&self, mut base: ThreadSpawn) -> Result<ThreadSpawn, String> {
+        base.model = Some(claude::concrete_model(base.model.as_deref(), || {
+            self.claude_models()
+        })?);
+        Ok(base)
+    }
+
     /// A sign-in may change the account, and with it the catalogue.
     pub fn forget_claude_models(&self) {
         *self.claude_models.lock().unwrap() = None;
@@ -139,6 +149,19 @@ impl Harness {
 
     pub fn opencode_models(&self) -> Result<Vec<opencode::ModelInfo>, String> {
         self.opencode_server()?.list_models()
+    }
+
+    /// The catalogue of a server that is already up, or `None` — never a
+    /// start. For Settings → Jobs: only Settings → opencode starts it.
+    pub fn opencode_models_if_running(&self) -> Result<Option<Vec<opencode::ModelInfo>>, String> {
+        let server = self
+            .opencode
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|s| s.is_alive())
+            .cloned();
+        server.map(|s| s.list_models()).transpose()
     }
 
     // opencode's credentials go through the server's own auth endpoints, so

@@ -97,16 +97,19 @@ pub async fn harness_sign_in_status(provider: Provider) -> signin::SignInStatus 
 }
 
 /// Run the provider's own login flow. Output streams on
-/// `signin::SIGNIN_EVENT`; the first URL opens in the *system* browser,
-/// where the student is already signed in, and rides the event too so
-/// the dialog can offer it to copy.
+/// `signin::SIGNIN_EVENT`; the URL opens in the *system* browser, where
+/// the student is already signed in, and rides the event too so the dialog
+/// can offer it to copy or open again. `agy` opens its URL itself, so
+/// opening it here too would mean two tabs.
 #[tauri::command]
 pub async fn harness_sign_in_start(app: AppHandle, provider: Provider) -> Result<(), String> {
     blocking(move || {
         let emitter = app.clone();
         signin::start(provider, move |line| {
             if let Some(url) = line.url.as_deref() {
-                tauri_plugin_opener::open_url(url, None::<&str>).ok();
+                if provider != Provider::Antigravity {
+                    tauri_plugin_opener::open_url(url, None::<&str>).ok();
+                }
             }
             emitter.emit(signin::SIGNIN_EVENT, line).ok();
         })
@@ -114,7 +117,8 @@ pub async fn harness_sign_in_start(app: AppHandle, provider: Provider) -> Result
     .await
 }
 
-/// The code Claude's flow ends on, pasted back from the browser.
+/// The code Claude's and Antigravity's flows end on, pasted back from the
+/// browser.
 #[tauri::command]
 pub async fn harness_sign_in_code(
     state: State<'_, HarnessState>,

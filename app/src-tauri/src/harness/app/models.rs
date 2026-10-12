@@ -119,6 +119,15 @@ pub async fn harness_opencode_models(
     blocking(move || h.opencode_models()).await
 }
 
+/// opencode's catalogue if its server is up; `None` instead of starting it.
+#[tauri::command]
+pub async fn harness_opencode_models_if_running(
+    state: State<'_, HarnessState>,
+) -> Result<Option<Vec<opencode::ModelInfo>>, String> {
+    let h = state.harness.clone();
+    blocking(move || h.opencode_models_if_running()).await
+}
+
 // opencode's credentials: each starts the server if it is down, so none is
 // called on a page opening. A credential never comes back out: there is no
 // read side.

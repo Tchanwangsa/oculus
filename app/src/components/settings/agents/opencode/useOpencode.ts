@@ -10,7 +10,6 @@ import {
 } from "@/lib/harness/opencodeAuth";
 import {
   forgetProvider,
-  isZen,
   providerOf,
   unusableReason,
   useCatalogue,
@@ -145,12 +144,8 @@ export function useOpencode(enabled: boolean) {
   };
 }
 
-/** Why this model is never offered, or null (see `lib/harness/opencodeCatalogue.ts`).
- *  Zen first: those models claim every capability and still refuse. */
+/** Why this model is never offered, or null (see `lib/harness/opencodeCatalogue.ts`). */
 export function blockedBecause(model: HarnessModel): string | null {
-  if (isZen(model.id)) {
-    return "opencode’s free tier only runs inside opencode itself, so Chat cannot use it.";
-  }
   const reason = unusableReason(model);
   return reason === null ? null : `This model ${reason}.`;
 }
