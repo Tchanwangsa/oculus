@@ -208,8 +208,8 @@ impl Course {
     }
 }
 
-/// Which content categories a sync fetches; all on by default (the CLI
-/// always syncs everything).
+/// Which content categories a sync fetches; all on by default (the CLI's
+/// `run --ed` turns the Canvas ones off).
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct SyncOptions {

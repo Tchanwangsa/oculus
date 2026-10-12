@@ -344,6 +344,10 @@ Options:
       --all
           Include subjects from past terms, not just the current one
 
+      --ed
+          Fetch only Ed (Discussion threads and Lessons), not Canvas announcements,
+          assignments or modules
+
       --no-parse
           Skip PDF processing entirely: no parsing and no embedding
 

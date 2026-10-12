@@ -14,7 +14,7 @@ use app_lib::agents;
 use app_lib::db::projects;
 use app_lib::db::store;
 use app_lib::library::paths;
-use app_lib::sync::{self, Engine, FileEvent, Progress, Reporter};
+use app_lib::sync::{self, Engine, FileEvent, Progress, Reporter, SyncOptions};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
