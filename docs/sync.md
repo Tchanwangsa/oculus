@@ -76,16 +76,20 @@ gives each term a `YYYY-MM` key, `subjects.term_sort`:
 
 - From the term's `start_at` when Canvas has one.
 - Otherwise from the name: the first 19xx/20xx anywhere in it, and the month
-  its words name — numbered semesters, trimesters, terms and quarters first
-  (as whole words, so the year in `"Fall Term 2026"` is no term number),
-  then seasons, then month names. Seasons follow the hemisphere
-  (`Institution::southern_hemisphere`, from the hosts' country code): Summer
-  opens a southern year and sits mid-year in a northern one. A month-named
-  southern intensive (`"2026 June"`, July) ranks with Winter, and an
-  unrecognised term sorts after every real one in its year.
-- Rows from before the column are UniMelb's; migration 45 backfilled them
-  from UniMelb's names. Every reader — the frontend, the CLI — sorts by the
-  column and ranks no names itself.
+  its words name — a season first (`"Summer Term 1"` is a summer term), then
+  numbered semesters, trimesters, terms and quarters (as whole words, so the
+  year in `"Fall Term 2026"` is no term number), then month names. Seasons
+  follow the hemisphere (`Institution::southern_hemisphere`, from the hosts'
+  country code): Summer opens a southern year and sits mid-year in a northern
+  one. A month-named southern intensive (`"2026 June"`, July) ranks with
+  Winter, and an unrecognised term sorts after every real one in its year.
+- An academic-year range (`"2025-26"`, `"2025/2026"`) puts a term opening in
+  the first half of a year — winter, spring, summer, or any numbered term —
+  in the later year, so `"Spring 2025-26"` follows `"Fall 2025"`.
+- Migration 45 fills the column for rows that have none from UniMelb's term
+  names, since an install that predates the institution profile is UniMelb's;
+  every course fetch rewrites it. Every reader — the frontend, the CLI —
+  sorts by the column and ranks no names itself.
 
 ## Modules drive the scrape, and every body feeds one link crawl
 

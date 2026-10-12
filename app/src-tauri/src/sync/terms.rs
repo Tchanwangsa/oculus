@@ -5,8 +5,9 @@
 //! else read from the name. Stored as `subjects.term_sort`, which the frontend
 //! and the CLI sort by; neither ranks names itself.
 
-/// Named terms by the month they open in, tested in order: semesters before
-/// seasons and months, so `"Semester 2 (July start)"` stays a semester.
+/// Numbered terms by the month they open in. A season in the same name wins
+/// (`"Summer Term 1"` is a summer term); a month does not, so
+/// `"Semester 2 (July start)"` stays a semester.
 const NUMBERED: &[(&str, u8)] = &[
     ("semester 1", 3),
     ("semester 2", 7),
@@ -53,40 +54,54 @@ const MONTHS: &[&str] = &[
 /// of its year.
 const UNKNOWN_MONTH: u8 = 13;
 
-/// The month a term opens in, from its name. A month-named intensive runs
-/// inside a southern term, so June and July rank with Winter there.
-fn month_of(name: &str, southern: bool) -> Option<u8> {
-    let lower = name.to_lowercase();
-    let words: Vec<&str> = lower
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect();
-    // Whole words in sequence, so the year in "Fall Term 2026" is not "term 2".
-    let numbered = |name: &str| {
-        let want: Vec<&str> = name.split(' ').collect();
-        words.windows(want.len()).any(|w| w == want.as_slice())
-    };
-    if let Some((_, m)) = NUMBERED.iter().find(|(n, _)| numbered(n)) {
-        return Some(*m);
-    }
+/// The month a term opens in, read from its name's lower-cased words, and
+/// whether a term number gave it. A month-named intensive runs inside a
+/// southern term, so June and July rank with Winter there.
+fn month_of(words: &[&str], southern: bool) -> Option<(u8, bool)> {
     let seasons = if southern {
         SOUTHERN_SEASONS
     } else {
         NORTHERN_SEASONS
     };
     if let Some((_, m)) = seasons.iter().find(|(s, _)| words.contains(s)) {
-        return Some(*m);
+        return Some((*m, false));
+    }
+    // Whole words in sequence, so the year in "Fall Term 2026" is not "term 2".
+    let numbered = |name: &str| {
+        let want: Vec<&str> = name.split(' ').collect();
+        words.windows(want.len()).any(|w| w == want.as_slice())
+    };
+    if let Some((_, m)) = NUMBERED.iter().find(|(n, _)| numbered(n)) {
+        return Some((*m, true));
     }
     let month = MONTHS.iter().position(|m| words.contains(m))? as u8 + 1;
-    Some(if southern && month == 7 { 6 } else { month })
+    Some((if southern && month == 7 { 6 } else { month }, false))
 }
 
-/// The first four-digit 19xx or 20xx in a term name.
-fn year_of(name: &str) -> Option<u16> {
-    name.split(|c: char| !c.is_ascii_digit())
-        .filter(|run| run.len() == 4)
-        .filter_map(|run| run.parse::<u16>().ok())
-        .find(|y| (1900..2100).contains(y))
+/// The first four-digit 19xx or 20xx in a term name, and the year after it
+/// when the name spans an academic year (`"2025-26"`, `"2025/2026"`).
+fn years_of(name: &str) -> Option<(u16, Option<u16>)> {
+    let mut rest = name;
+    while let Some(start) = rest.find(|c: char| c.is_ascii_digit()) {
+        let run = &rest[start..];
+        let len = run.find(|c: char| !c.is_ascii_digit()).unwrap_or(run.len());
+        let (digits, after) = run.split_at(len);
+        rest = after;
+        let Some(year) = digits
+            .parse::<u16>()
+            .ok()
+            .filter(|y| len == 4 && (1900..2100).contains(y))
+        else {
+            continue;
+        };
+        let next = year + 1;
+        let later = after.strip_prefix(['-', '/', '–']).and_then(|r| {
+            let to = &r[..r.find(|c: char| !c.is_ascii_digit()).unwrap_or(r.len())];
+            (to == format!("{:02}", next % 100) || to == next.to_string()).then_some(next)
+        });
+        return Some((year, later));
+    }
+    None
 }
 
 /// `YYYY-MM` from an ISO `start_at`, if it starts with a date.
@@ -99,13 +114,25 @@ fn month_of_date(start_at: &str) -> Option<String> {
 }
 
 /// The term's sort key, `YYYY-MM`; later terms sort higher. `None` when
-/// neither the start date nor the name gives a year.
+/// neither the start date nor the name gives a year. In an academic-year
+/// range the terms that open in the first half of a year (spring, summer, a
+/// numbered term) take the later year, so "Spring 2025-26" follows "Fall 2025".
 pub fn term_sort(name: &str, start_at: Option<&str>, southern: bool) -> Option<String> {
     if let Some(ym) = start_at.and_then(month_of_date) {
         return Some(ym);
     }
-    let year = year_of(name)?;
-    let month = month_of(name, southern).unwrap_or(UNKNOWN_MONTH);
+    let (first, later) = years_of(name)?;
+    let lower = name.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let named = month_of(&words, southern);
+    let year = match (later, named) {
+        (Some(later), Some((month, numbered))) if numbered || month <= 7 => later,
+        _ => first,
+    };
+    let month = named.map_or(UNKNOWN_MONTH, |(m, _)| m);
     Some(format!("{year}-{month:02}"))
 }
 
@@ -194,6 +221,52 @@ mod tests {
         assert_eq!(north("Spring Term 2027").as_deref(), Some("2027-03"));
         assert_eq!(north("Winter Term 2019").as_deref(), Some("2019-01"));
         assert_eq!(north("2026FA Term 3").as_deref(), Some("2026-08"));
+    }
+
+    #[test]
+    fn unimelb_names_read_as_their_months() {
+        assert_eq!(key("2026 Semester 1").as_deref(), Some("2026-03"));
+        assert_eq!(key("2026 Semester 2").as_deref(), Some("2026-07"));
+        assert_eq!(key("2026 June").as_deref(), Some("2026-06"));
+        assert_eq!(key("Summer Term 2026").as_deref(), Some("2026-01"));
+        assert_eq!(key("2026 Term 3").as_deref(), Some("2026-08"));
+    }
+
+    #[test]
+    fn northern_names_read_as_their_months() {
+        let north = |n: &str| term_sort(n, None, false);
+        assert_eq!(north("Fall 2026").as_deref(), Some("2026-09"));
+        assert_eq!(north("Winter 2027").as_deref(), Some("2027-01"));
+        assert_eq!(north("2026 Term 3").as_deref(), Some("2026-08"));
+    }
+
+    #[test]
+    fn a_season_beats_a_term_number() {
+        assert_eq!(key("Summer Term 1 2026").as_deref(), Some("2026-01"));
+        assert_eq!(
+            term_sort("Summer Term 1 2026", None, false).as_deref(),
+            Some("2026-06")
+        );
+        assert_eq!(
+            term_sort("Fall Term 2 2026", None, false).as_deref(),
+            Some("2026-09")
+        );
+    }
+
+    #[test]
+    fn an_academic_year_puts_spring_and_summer_in_its_second_year() {
+        let north = |n: &str| term_sort(n, None, false);
+        assert_eq!(north("Fall 2025-26").as_deref(), Some("2025-09"));
+        assert_eq!(north("Spring 2025-26").as_deref(), Some("2026-03"));
+        assert_eq!(north("Summer 2025/2026").as_deref(), Some("2026-06"));
+        assert_eq!(north("Winter 2025–26").as_deref(), Some("2026-01"));
+        assert!(north("Spring 2025-26") > north("Fall 2025"));
+        assert!(north("Spring 2025-26") < north("Fall 2026"));
+        assert!(north("Term 1 2025-26") < north("Term 3 2025-26"));
+        assert!(north("Term 1 2025-26") > north("Fall 2025"));
+        // Two years that are not consecutive are no range.
+        assert_eq!(north("Spring 2025-2027").as_deref(), Some("2025-03"));
+        assert_eq!(north("2025-03 Intake").as_deref(), Some("2025-13"));
     }
 
     #[test]
