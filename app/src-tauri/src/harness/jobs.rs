@@ -100,7 +100,7 @@ pub fn default_chain(job: Job) -> Vec<JobSelection> {
         }
         // Small and fast: notes from a slice of a lecture.
         Job::StudioResearch => vec![
-            one(Provider::Claude, "claude-haiku-4-5-20251001", None),
+            one(Provider::Claude, "claude-haiku-5-5", None),
             one(Provider::Codex, "gpt-6-luna", Some("medium")),
         ],
         // Strong: a scene's animation is the hard part of a video.
@@ -371,7 +371,7 @@ mod tests {
         let r = default_chain(Job::StudioResearch);
         assert_eq!(
             (r[0].model.as_str(), r[0].effort()),
-            ("claude-haiku-4-5-20251001", None)
+            ("claude-haiku-5-5", None)
         );
         let s = default_chain(Job::StudioScene);
         assert_eq!(

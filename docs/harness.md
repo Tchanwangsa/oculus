@@ -558,7 +558,7 @@ Nothing tries them in order: an agent's subagents take the first entry for
 that agent (`jobs::for_agent`), and an agent with none does the work itself.
 Their `JOBS` rows carry `perAgent`, which offers only the agents whose
 subagents take a model (not agy) and words the row and dialog for it ("Add a
-model for another agent"). The defaults name Claude and Codex (Haiku and
+model for another agent"). The defaults name Claude and Codex (Haiku 5.5 and
 GPT-6-Luna for research; Opus 5.5 and GPT-6.1-Sol at high for scenes);
 opencode's models depend on the student's providers, so opencode has none
 until one is picked.
