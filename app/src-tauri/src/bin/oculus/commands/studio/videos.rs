@@ -3,10 +3,13 @@
 
 use crate::*;
 use app_lib::library::paths::iso8601_utc;
+use app_lib::studio::libraries::{default_theme, libraries};
 use app_lib::studio::videos::{self, NewVideo, VideoRow};
 
 impl Ctx {
     pub(crate) fn studio_new(&self, args: &StudioNewArgs) -> Result<(), String> {
+        let library = libraries(false).map_err(|e| e.to_string())?;
+        let theme = default_theme(&library, args.subject.as_deref())?;
         let dir = videos::create_in(
             &videos::videos_dir(),
             &NewVideo {
@@ -14,6 +17,7 @@ impl Ctx {
                 subject: args.subject.clone(),
                 title: args.title.clone(),
                 portrait: args.portrait,
+                theme: Some(theme),
                 ..NewVideo::default()
             },
         )?;

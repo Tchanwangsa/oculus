@@ -2,7 +2,7 @@
 //! snapshots the old text first.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
-use super::{seed_files, write};
+use super::{LibrarySettings, remove, seed_files, write};
 use std::path::PathBuf;
 
 fn scratch(name: &str) -> PathBuf {
@@ -160,5 +160,53 @@ fn a_starter_dropped_from_the_set_leaves_the_users_copy_alone() {
         std::fs::read_to_string(root.join("components/Steps.tsx")).unwrap(),
         "my steps"
     );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn remove_snapshots_then_deletes() {
+    let root = scratch("remove");
+    write(&root, "themes/chalk.json", "chalk text").unwrap();
+    remove(&root, "themes/chalk.json").unwrap();
+    assert!(!root.join("themes/chalk.json").exists());
+    let snaps = history(&root);
+    assert_eq!(snaps.len(), 1, "{snaps:?}");
+    let kept = std::fs::read_to_string(root.join(".history").join(&snaps[0])).unwrap();
+    assert_eq!(kept, "chalk text");
+    let e = remove(&root, "themes/chalk.json").unwrap_err().to_string();
+    assert!(e.contains("no "), "{e}");
+    assert!(remove(&root, "../x.json").is_err());
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn settings_round_trip_and_refuse_unknown_keys() {
+    let root = scratch("settings");
+    assert_eq!(
+        LibrarySettings::read(&root).unwrap(),
+        LibrarySettings::default()
+    );
+    let warm = LibrarySettings {
+        default_theme: Some("warm".into()),
+    };
+    warm.write(&root).unwrap();
+    let text = std::fs::read_to_string(root.join("library.json")).unwrap();
+    assert!(text.contains("\"defaultTheme\": \"warm\""), "{text}");
+    assert_eq!(LibrarySettings::read(&root).unwrap(), warm);
+
+    LibrarySettings::default().write(&root).unwrap();
+    assert!(!root.join("library.json").exists());
+    LibrarySettings::default().write(&root).unwrap();
+
+    std::fs::write(root.join("library.json"), r#"{"theme": "warm"}"#).unwrap();
+    let e = LibrarySettings::read(&root).unwrap_err().to_string();
+    assert!(e.contains("library.json") && e.contains("theme"), "{e}");
+    std::fs::write(root.join("library.json"), r#"{"defaultTheme": "../x"}"#).unwrap();
+    let e = LibrarySettings::read(&root).unwrap_err().to_string();
+    assert!(e.contains("not a theme name"), "{e}");
+    let bad = LibrarySettings {
+        default_theme: Some("Chalk".into()),
+    };
+    assert!(bad.write(&root).is_err());
     std::fs::remove_dir_all(&root).ok();
 }
