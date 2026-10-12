@@ -1,4 +1,4 @@
-use super::auth::{extract_section_id, launch_form, parse_lti_form, tool_candidates};
+use super::auth::{extract_section_id, first_launch, parse_lti_form, tool_candidates, LaunchForm};
 use super::syllabus::{duration_between, second_source_hint};
 use super::{trim_video, NO_TOOL};
 
@@ -27,6 +27,14 @@ fn pulls_hidden_fields_out_of_the_lti_form() {
             ("lti_version".to_string(), "LTI-1p0".to_string()),
         ]
     );
+}
+
+/// The first launch form, taken as it is.
+fn launch_form(
+    canvas: &crate::sources::canvas::Canvas,
+    course_id: i64,
+) -> Result<LaunchForm, String> {
+    first_launch(canvas, course_id, |form| Ok(form.clone()))
 }
 
 fn keyd_serving(
@@ -99,6 +107,40 @@ fn a_tab_labelled_for_lecture_capture_comes_before_the_profiles_tool() {
     let (lti_url, action, _) = launch_form(&canvas, 5).unwrap();
     assert!(lti_url.ends_with("/courses/5/external_tools/55"));
     assert_eq!(action, "https://echo360.org/lti");
+}
+
+#[test]
+fn a_tab_that_opens_no_section_falls_back_to_the_profiles_tool() {
+    const TAB: &str = r#"<form action="https://echo360.org/lti/tab"><input type="hidden" name="a" value="1"/></form>"#;
+    const PROFILE: &str = r#"<form action="https://echo360.org/lti/profile"><input type="hidden" name="a" value="1"/></form>"#;
+    let (dir, _keyd) = keyd_serving(&[
+        (
+            "/api/v1/courses/5/tabs",
+            200,
+            "",
+            r#"[{"label": "Echo360", "html_url": "/courses/5/external_tools/55"}]"#,
+        ),
+        ("/courses/5/external_tools/55", 200, "", TAB),
+        ("/courses/5/external_tools/701", 200, "", PROFILE),
+    ]);
+    let canvas = crate::sources::canvas::Canvas::open(&dir);
+    let landed = |(_, action, _): &LaunchForm| match action.as_str() {
+        "https://echo360.org/lti/profile" => {
+            extract_section_id("https://echo360.org/section/s-1/home")
+        }
+        _ => extract_section_id("https://echo360.org/home"),
+    };
+    assert_eq!(first_launch(&canvas, 5, landed).unwrap(), "s-1");
+
+    // When every candidate fails, every failure surfaces.
+    let err = first_launch(&canvas, 5, |_: &LaunchForm| -> Result<(), String> {
+        Err("no section".to_string())
+    })
+    .unwrap_err();
+    assert_eq!(
+        err,
+        "/courses/5/external_tools/55: no section; /courses/5/external_tools/701: no section"
+    );
 }
 
 #[test]
