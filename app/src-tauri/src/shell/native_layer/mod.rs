@@ -9,12 +9,16 @@
 //! would take every click. `init` overrides `hitTest:` on the window's
 //! content view (`hit_test.rs`): a click inside a visible page's frame goes
 //! to that page, unless the frontend has said an overlay is open
-//! (`native_set_blocked`).
+//! (`native_set_blocked`). The window also refuses first responder to a page
+//! nobody can see, so a hidden page's script can't take the keyboard
+//! (`focus_guard.rs`).
 //!
 //! On Windows pages stay on top and the app's webview stays opaque; each
 //! page is clipped to the frontend's holes minus the portals over them by a
 //! window region (`windows.rs`, `native_set_holes`), and clicks follow it.
 
+#[cfg(target_os = "macos")]
+mod focus_guard;
 #[cfg(windows)]
 mod gdi;
 #[cfg(target_os = "macos")]
@@ -48,8 +52,8 @@ fn blocked() -> bool {
     BLOCKED.load(Ordering::Relaxed)
 }
 
-/// Makes the app's webview transparent and installs the click routing.
-/// From `setup`, before any page exists.
+/// Makes the app's webview transparent and installs the click routing and
+/// the focus guard. From `setup`, before any page exists.
 #[cfg(target_os = "macos")]
 pub fn init(app: &AppHandle) {
     use tauri::Manager;
@@ -61,7 +65,11 @@ pub fn init(app: &AppHandle) {
         return;
     };
     if let Err(e) = webview.with_webview(|platform| unsafe {
-        hit_test::install(platform.inner().cast());
+        let view: *mut objc2::runtime::AnyObject = platform.inner().cast();
+        hit_test::install(view);
+        if !view.is_null() {
+            focus_guard::install(objc2::msg_send![view, window]);
+        }
     }) {
         elog!("[oculus] native layer: {e}");
     }

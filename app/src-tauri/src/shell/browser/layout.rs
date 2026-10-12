@@ -121,6 +121,9 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     let title_app = app.clone();
     let popup_app = app.clone();
     let builder = WebviewBuilder::new(label(id), WebviewUrl::External(url))
+        // A tab opened in the background must not take the keyboard; a shown
+        // one is focused below.
+        .focused(false)
         // A child webview reports `outerWidth`/`outerHeight` as 0, and canvas
         // renderers (Google Docs) read `outerWidth / innerWidth` as zoom and
         // drop to minimum resolution. Report the viewport's size instead.
@@ -185,6 +188,9 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
 
     #[cfg(not(target_os = "windows"))]
     let builder = builder.user_agent(PAGE_USER_AGENT);
+    // ⌘-keys the page leaves go to the menu (`shell/keys/fallback.rs`).
+    #[cfg(target_os = "macos")]
+    let builder = builder.initialization_script_for_all_frames(crate::shell::keys::FALLBACK_SCRIPT);
     let viewport = with_state(app, |s| s.viewports.get(&id).copied());
     let (position, size) = rect(content_size(&window), viewport);
     let webview = window
@@ -193,6 +199,8 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     crate::shell::menu::windows::install(&webview, true);
     adopt_page(&webview);
+    #[cfg(target_os = "macos")]
+    crate::shell::keys::install_fallback(&webview);
     if with_state(app, |s| s.shown.contains(&id)) {
         webview.show().ok();
         webview.set_focus().ok();

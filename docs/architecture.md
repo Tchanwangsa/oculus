@@ -450,6 +450,13 @@ overlay inside `#root`, suspends every hole. `adopt_page`
   frontend has reported a portal over an open hole (`native_set_blocked`).
   Then the app keeps the click, so clicking the page under a popover
   dismisses it.
+- **macOS: the keyboard never goes to a page nobody can see.** WebKit makes a
+  page first responder whenever its script focuses an element, so a parked
+  dock page focusing its composer would take every key and ⌘C from the page
+  in front, which also loses its selection. The main window refuses
+  `makeFirstResponder:` for a hidden or off-window page (`focus_guard.rs`),
+  and browser pages are built unfocused, so a background tab never takes it
+  either.
 - **Windows: pages sit over an opaque app, clipped.** A transparent WebView2
   shows the app's own background, never a sibling under it, so the macOS
   layering cannot work. `adopt_page` raises each page's wry container (the
