@@ -16,15 +16,16 @@ pub fn intra_threads() -> usize {
 
 /// A session over the model at `path`, on the CPU execution provider only.
 /// Naming the CPU provider replaces ort's default policy, which prefers an
-/// NPU (CoreML on a Mac). The default arena stays on: turning it off raised
-/// peak memory at the same speed.
+/// NPU (CoreML on a Mac). The arena is turned on by hand: ort's `CPU::default()`
+/// disables it, and on Kokoro that costs ~25% speed and raises peak memory
+/// (1.28 GB on, 1.41-1.93 GB off).
 pub fn session(path: &Path) -> Result<Session, String> {
     let fail = |e: &dyn std::fmt::Display| format!("{}: {e}", path.display());
     Session::builder()
         .map_err(|e| fail(&e))?
         .with_intra_threads(intra_threads())
         .map_err(|e| fail(&e))?
-        .with_execution_providers([ort::ep::CPU::default().build()])
+        .with_execution_providers([ort::ep::CPU::default().with_arena_allocator(true).build()])
         .map_err(|e| fail(&e))?
         .commit_from_file(path)
         .map_err(|e| fail(&e))
