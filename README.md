@@ -107,8 +107,13 @@ signs in from it. [docs/development.md](docs/development.md) has the rest.
 
 ## License
 
-Not picked yet. The plan is to open the source up for non-commercial use, with
-credit. Until a license lands, all rights are reserved.
+Oculus is licensed under the [Apache License 2.0](LICENSE). Copyright 2026
+Tanat Chanwangsa.
+
+The downloads also carry other people's software under their own licences.
+The bundled ffmpeg is [FFmpeg](https://ffmpeg.org/), under the GNU LGPL, built
+from unmodified upstream source that is published beside each build
+([docs/development.md](docs/development.md#ffmpeg-is-our-own-lgpl-build)).
 
 ## Use it sensibly
 
