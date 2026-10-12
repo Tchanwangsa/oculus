@@ -3,15 +3,15 @@ import { create } from "zustand";
 import {
   cancelRender,
   renderVideo,
+  type RenderPreset,
   type RenderProgress,
-  type RenderQuality,
 } from "@/lib/studio/render";
 import { useVideosStore } from "@/stores/studio/videosStore";
 
 /** A render in flight, keyed by the video's absolute folder. */
 export interface ActiveRender {
   slug: string;
-  quality: RenderQuality;
+  preset: RenderPreset;
   /** 0 to 1, or null while the plan is still being made. */
   fraction: number | null;
   /** What the render is doing, for the line under the bar. */
@@ -25,7 +25,7 @@ interface RenderState {
   /** Bumped when a render for the folder ends, however it ended: a page
    *  showing its files reloads on it. */
   settled: Record<string, number>;
-  start: (dir: string, slug: string, quality: RenderQuality) => Promise<void>;
+  start: (dir: string, slug: string, preset: RenderPreset) => Promise<void>;
   cancel: (dir: string) => void;
   apply: (progress: RenderProgress) => void;
 }
@@ -64,15 +64,15 @@ export const useRenderStore = create<RenderState>((set, get) => {
     errors: {},
     settled: {},
 
-    start: async (dir, slug, quality) => {
+    start: async (dir, slug, preset) => {
       if (dir in get().active) return;
       set((s) => {
         const { [dir]: _cleared, ...errors } = s.errors;
-        return { errors, active: { ...s.active, [dir]: { slug, quality, fraction: null, phase: "planning" } } };
+        return { errors, active: { ...s.active, [dir]: { slug, preset, fraction: null, phase: "planning" } } };
       });
       try {
         // Null is a cancel; a failure rejects with a sentence fit to show.
-        await renderVideo(dir, quality);
+        await renderVideo(dir, preset);
         settle(dir);
       } catch (e) {
         settle(dir, e instanceof Error ? e.message : String(e));
@@ -98,7 +98,7 @@ export const useRenderStore = create<RenderState>((set, get) => {
           const prev = get().active[p.dir];
           const next: ActiveRender = {
             slug: prev?.slug ?? slugOf(p.dir),
-            quality: prev?.quality ?? "draft",
+            preset: prev?.preset ?? p.preset,
             fraction: p.phase === "rendering" ? fractionOf(p) : p.phase === "muxing" ? 1 : (prev?.fraction ?? null),
             phase: p.phase,
           };

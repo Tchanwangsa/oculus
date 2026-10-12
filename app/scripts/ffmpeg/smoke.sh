@@ -2,7 +2,8 @@
 # Runs every ffmpeg command shape the app uses against fixtures.sh's files and
 # checks exit codes and outputs, then records the binary's -version,
 # -buildconf and -L in the report directory. The shapes mirror the call sites
-# in app/src-tauri/src (sources/echo360/, transcribe/, the frame readers).
+# in app/src-tauri/src (sources/echo360/, transcribe/, the frame readers,
+# studio/render/).
 #
 # Usage: smoke.sh <ffmpeg> <fixtures-dir> <report-dir>
 set -uo pipefail
@@ -91,6 +92,32 @@ for input in h264-aac.mp4 h264-aac.mov vp9-opus.webm hevc-ac3.mkv av1-opus.mp4 m
     { fail "$input: -sseof scan $end bytes: $(tail -3 end.err)"; continue; }
   pass "$input: thumbnail $(size out.jpg) bytes, frame, $((all / FRAME)) scan frames, $((end / FRAME)) tail frames"
 done
+
+# Studio: raw RGBA frames on stdin encoded by h264_mf as two segments, joined
+# by the concat demuxer beside AAC narration, and the narration alone as m4a.
+studio_ok=1
+for seg in 1 2; do
+  "$ff" -v error -nostdin -ss "$seg" -i "$fixtures/h264-aac.mp4" -frames:v 30 -vf scale=320:180,format=rgba \
+    -f rawvideo - 2> raw.err |
+    "$ff" -hide_banner -v error -y -f rawvideo -pix_fmt rgba -s 320x180 -r 30 -i - -an \
+      -vf scale=out_color_matrix=bt709:out_range=tv -pix_fmt yuv420p -c:v h264_mf -rate_control u_vbr -b:v 2000k \
+      -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -f mp4 "seg$seg.mp4" 2> seg.err ||
+    { fail "studio: segment $seg: $(tail -3 seg.err) $(tail -3 raw.err)"; studio_ok=0; }
+done
+if [ "$studio_ok" = 1 ]; then
+  printf "file '%s'\nfile '%s'\n" "$PWD/seg1.mp4" "$PWD/seg2.mp4" > concat.txt
+  if "$ff" -hide_banner -v error -y -f concat -safe 0 -i concat.txt -i "$fixtures/speech.wav" -map 0:v -c:v copy \
+    -map 1:a -c:a aac -b:a 160k -movflags +faststart -f mp4 joined.mp4 2> join.err; then
+    frames=$("$ff" -v error -nostdin -i joined.mp4 -vf scale=160:90,format=gray -f rawvideo - 2> joined.err | wc -c)
+    [ "$frames" -eq $((60 * FRAME)) ] && pass "studio: h264_mf segments joined with AAC, 60 frames" ||
+      fail "studio: joined.mp4 decodes to $((frames / FRAME)) frames: $(tail -3 joined.err)"
+  else
+    fail "studio: concat and AAC mux: $(tail -3 join.err)"
+  fi
+fi
+"$ff" -hide_banner -v error -y -i "$fixtures/speech.wav" -map 0:a -c:a aac -b:a 160k -movflags +faststart \
+  -f mp4 narration.m4a 2> m4a.err && [ "$(size narration.m4a)" -gt 0 ] && pass "studio: narration as m4a" ||
+  fail "studio: narration as m4a: $(tail -3 m4a.err)"
 
 echo "binary: $(size "$ff") bytes"
 cd / && rm -rf "$scratch"

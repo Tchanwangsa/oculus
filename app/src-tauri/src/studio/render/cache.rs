@@ -1,8 +1,8 @@
 //! `<dir>/.cache/`: encoded segments (`segments/<key>.mp4`), mixed
 //! narration tracks (`narration-<key>.wav`), the concat lists, and
-//! `renders.json`, which records what each quality's last successful render
-//! used. After a render, segments and tracks neither quality's last render
-//! used are deleted, as are interrupted `.part` files.
+//! `renders.json`, which records what each preset's last successful render
+//! used and wrote. After a render, segments and tracks no preset's last
+//! render used are deleted, as are interrupted `.part` files.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::error::RenderError;
-use super::quality::Quality;
+use super::preset::Preset;
 
 pub(super) fn root(dir: &Path) -> PathBuf {
     dir.join(".cache")
@@ -28,35 +28,53 @@ pub(super) fn track(dir: &Path, key: &str) -> PathBuf {
     root(dir).join(format!("narration-{key}.wav"))
 }
 
-pub(super) fn concat_list(dir: &Path, quality: Quality) -> PathBuf {
-    root(dir).join(format!("concat-{}.txt", quality.name()))
+pub(super) fn concat_list(dir: &Path, preset: Preset) -> PathBuf {
+    root(dir).join(format!("concat-{}.txt", preset.name()))
+}
+
+/// A cache file's name, as `Used` records it.
+pub(super) fn file_name(path: &Path) -> Option<String> {
+    path.file_name().map(|n| n.to_string_lossy().into_owned())
 }
 
 fn record_path(dir: &Path) -> PathBuf {
     root(dir).join("renders.json")
 }
 
-/// What one render used, by file name.
+/// What one render used, by file name, and what it wrote. Two equal
+/// records mean a render now would make the same file.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(super) struct Used {
     pub segments: Vec<String>,
     pub track: Option<String>,
+    /// The file written.
+    #[serde(default)]
+    pub out: Option<String>,
+    /// sha256 of the subtitles' text, for the `subtitles` preset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cues: Option<String>,
 }
 
-/// Record `used` as `quality`'s last render, then delete every segment and
-/// track no quality's record names, and every `.part`; the names deleted,
-/// sorted. An unreadable record counts as empty.
+/// Each preset's last render, by name. An unreadable record counts as
+/// empty.
+pub(super) fn records(dir: &Path) -> BTreeMap<String, Used> {
+    std::fs::read(record_path(dir))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// Record `used` as `preset`'s last render, then delete every segment and
+/// track no preset's record names, and every `.part`; the names deleted,
+/// sorted.
 pub(super) fn record_and_prune(
     dir: &Path,
-    quality: Quality,
+    preset: Preset,
     used: Used,
 ) -> Result<Vec<String>, RenderError> {
     let path = record_path(dir);
-    let mut record: BTreeMap<String, Used> = std::fs::read(&path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
-    record.insert(quality.name().to_owned(), used);
+    let mut record = records(dir);
+    record.insert(preset.name().to_owned(), used);
     crate::runtime::atomic_write::json(&path, &record).map_err(|e| RenderError::io(&path, e))?;
 
     let keep: BTreeSet<&str> = record

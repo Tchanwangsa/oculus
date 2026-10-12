@@ -1,9 +1,10 @@
 use super::super::key::{segment_key, tree_hash, Trees};
-use super::super::quality::{Quality, Settings};
+use super::super::preset::Preset;
+use super::super::settings::Settings;
 use crate::test_support::Scratch;
 
-fn settings(q: Quality) -> Settings {
-    Settings::new(q, (640, 360), 30, None).unwrap()
+fn settings(p: Preset) -> Settings {
+    super::settings(p, (640, 360), 30)
 }
 
 #[test]
@@ -12,21 +13,21 @@ fn a_segment_key_changes_with_each_input() {
         components: "c".into(),
         assets: "a".into(),
     };
-    let base = segment_key(b"scene", &trees, &settings(Quality::Final));
+    let base = segment_key(b"scene", &trees, &settings(Preset::Final));
     assert_eq!(
         base,
-        segment_key(b"scene", &trees, &settings(Quality::Final))
+        segment_key(b"scene", &trees, &settings(Preset::Final))
     );
     let others = [
-        segment_key(b"scene!", &trees, &settings(Quality::Final)),
-        segment_key(b"scene", &trees, &settings(Quality::Draft)),
+        segment_key(b"scene!", &trees, &settings(Preset::Final)),
+        segment_key(b"scene", &trees, &settings(Preset::Draft)),
         segment_key(
             b"scene",
             &Trees {
                 components: "c2".into(),
                 ..trees.clone()
             },
-            &settings(Quality::Final),
+            &settings(Preset::Final),
         ),
         segment_key(
             b"scene",
@@ -34,12 +35,12 @@ fn a_segment_key_changes_with_each_input() {
                 assets: "a2".into(),
                 ..trees.clone()
             },
-            &settings(Quality::Final),
+            &settings(Preset::Final),
         ),
         segment_key(
             b"scene",
             &trees,
-            &Settings::new(Quality::Final, (640, 360), 60, None).unwrap(),
+            &super::settings(Preset::Final, (640, 360), 60),
         ),
     ];
     for other in others {

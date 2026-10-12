@@ -24,6 +24,7 @@ crops library PDF pages into slides (`slide`), and narrates.
 | `script.md`, the narration manifest, scene lengths and word cues | `app/studio-core/src/project/` (`script/`, `narration/`, `scenes.rs`), `app/studio-core/src/host/prelude/words.js` |
 | Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
 | Magic move: matching and blending two laid-out trees, OKLab colour, lag and fades | `app/studio-core/src/morph/` (`clock.rs`, `fade.rs`) |
+| Captions from the word timings: phrasing, timing, the subtitle files | `app/studio-core/src/captions/` (`phrase.rs`, `timing.rs`, `subtitles.rs`) |
 | Overlays bound to keys (Brace, Surround, Underline, Indicate, a keyed Arrow), drawn after layout and morphing | `app/studio-core/src/overlay/`, `app/studio-core/src/host/prelude/overlays.js` |
 | Easings shared by transitions and the morph (the prelude's, in Rust) | `app/studio-core/src/easing/` |
 | TSX → JS (oxc), the QuickJS sandbox, the prelude every component sees | `app/studio-core/src/host/` (`prelude/*.js`, one module scope, concatenated in order) |
@@ -43,8 +44,8 @@ crops library PDF pages into slides (`slide`), and narrates.
 | Text to Kokoro phonemes (the G2P), the lexicon, the guesser and its pack; the lint of a video's narration that needs them | `app/src-tauri/src/studio/voice/g2p/` (`guess/`, `lexicon.rs`), `app/src-tauri/src/studio/voice/lint/` |
 | The pronunciation review: suggestions stored one file each, the lexicon writer, finding a word in a video's narration; its Tauri commands and wrappers | `app/src-tauri/src/studio/voice/review/` (`key.rs`, `lexicon.rs`, `locate.rs`), `app/src-tauri/src/studio/commands/pronunciations.rs`, `app/src/lib/studio/pronunciations.ts` |
 | Settings -> Voice: the `voice` row and its engine, the server's model list, Kokoro's packs and sample, the pronunciation review, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/` (`pronunciations/`), `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
-| Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
-| Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
+| Rendering a video: the export presets, ffmpeg's toolkit and the encoder choice, plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, the audio and subtitle exports, each preset's status, one render per folder | `app/src-tauri/src/studio/render/` (`preset.rs`, `toolkit.rs`, `settings.rs`, `export.rs`, `status.rs`), `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
+| Rendering from the app: `studio_render`, `studio_render_cancel`, `studio_exports`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
 | The playground's and Themes page's commands: the theme and component lists, source, frame, validated write, history, restore and removal, each library's default theme; the shared snapshot listing; a new video's default theme | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `commands/history.rs`, `app/src-tauri/src/studio/libraries/defaults.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
@@ -1377,6 +1378,35 @@ between their two targets' boxes.
   so its Paths morph like any others: a Surround or Underline whose box
   changed, or a Brace of a new width, swaps in halves rather than gliding.
 
+## Captions come from the word timings
+
+`src/captions/` turns the narration's word timings into subtitle cues: the
+`.vtt` beside every narrated render, which the Studio player offers as CC,
+and the `subtitles` export (see "Rendering a video"). Nothing is drawn into
+the frames.
+
+- **Phrases** (`phrase.rs`) come from one scene's words (`cued_words`, the
+  script's spelling and punctuation as said, spoken forms such as "thirteen
+  mod twelve" included), never across scenes, at most two lines of 42
+  characters (`LINE_CHARS`, `MAX_LINES`). A `[pause]`, a silence of 0.6 s
+  or more, and a sentence's end (`.`, `!`, `?`, `…`) always end a phrase.
+  Longer stretches take as many words as fit the lines, ending at the last
+  clause break (`,` `;` `:` a dash, or a 0.25 s silence) that leaves the
+  phrase at least half full, and give a word back rather than leave one
+  word alone at the end. A phrase is set in as few lines as hold it, cut so
+  the longest line is shortest (a tie puts more on the later line), then
+  each cut moves to the nearest clause break that keeps every line within
+  the limit and the longest at most 9 characters longer ("eleven, / wrap
+  round", not "eleven, wrap / round"); a word longer than a line gets a
+  phrase to itself.
+- **Timing** (`timing.rs`): a phrase shows 0.15 s before its first word
+  (never before the one before it hides) and stays until the next shows;
+  before a silence of 0.6 s or more, and at the scene's end, it hides 0.4 s
+  after its last word, so a long pause has no caption.
+- **Cues.** `Project::caption_cues()` is every phrase in video seconds, a
+  cue never past its scene's end, and `captions::vtt` and `captions::srt`
+  write them.
+
 ## Motion blur averages sub-frames, off unless asked
 
 `RenderOptions::motion_blur` (`MotionBlur { fps, shutter, max_samples }`;
@@ -1730,18 +1760,45 @@ one."`.
 
 ## Rendering a video
 
-`render` (`app/src-tauri/src/studio/render/`) turns a video folder into an
-mp4: H.264, yuv420p, BT.709, 48 kHz AAC narration, `+faststart`. It never
-narrates and never touches the network: stale or missing narration fails
-with the `Narration` error before any frame renders.
+`render` (`app/src-tauri/src/studio/render/`) turns a video folder into
+one export preset's file. A video preset writes an mp4: H.264, yuv420p,
+BT.709, 48 kHz AAC narration, `+faststart`. It never narrates and never
+touches the network: stale or missing narration fails with the `Narration`
+error before any frame renders.
 
-- **Two qualities.** `draft` renders at the scale that makes the frame 540
-  px high (never above 1) on the hardware encoder (`h264_videotoolbox -q:v
-  65`); `final` renders full size on `libx264 -preset medium -crf 18
-  -threads 8`. Motion blur follows the `motionBlur` token for the purpose
-  (`Draft` or `Final`): with the bundled `finals`, only `final` blurs. An
-  odd output side is an error naming the size and scale, since yuv420p
-  needs even sides; nothing is padded.
+- **Presets** (`preset.rs`), each written to `<dir>/renders/<name>.<ext>`:
+
+  | Preset | Writes |
+  | --- | --- |
+  | `draft` | mp4, 540 px on the shorter side (never upscaled), on the fast encoder |
+  | `final` | mp4 at the video's size, crf 18 |
+  | `small` | mp4, 720 px on the shorter side, crf 23 |
+  | `2x` | mp4 at twice the video's size (3840x2160 for 1080p) over the same layout |
+  | `audio` | `audio.m4a`: the narration track alone, AAC 160 kb/s |
+  | `subtitles` | `subtitles.vtt` and `subtitles.srt`: the captions' phrases (see "Captions") |
+
+  Motion blur follows the `motionBlur` token for the purpose: `draft` is
+  `Draft`, every other video preset `Final`, so with the bundled `finals`
+  only `draft` is sharp. An odd output side is an error naming the size and
+  scale, since yuv420p needs even sides (nothing is padded), and so is a
+  side over 8192 px. `2x` has four times the pixels, so the worker cap below
+  allows fewer threads; x264 at 3840x2160 holds more memory than at 1080p.
+  Portrait and square are a different video size, not a preset.
+- **Encoders** (`toolkit.rs`). Before anything renders, the ffmpeg is asked
+  once per binary and process for its `-encoders`, `-decoders` and
+  `-demuxers`. A video preset needs the `rawvideo` demuxer and decoder and
+  the `concat` demuxer; narration needs the `wav` demuxer, the `pcm_s16le`
+  decoder and the `aac` encoder. A missing one fails at once, naming it
+  ("this ffmpeg was built without the `concat` demuxer, ..."). `draft`
+  takes the first of `h264_videotoolbox -q:v 65`, `h264_mf` (Windows Media
+  Foundation, at 0.1 bits a pixel a frame) and `libx264 -preset veryfast
+  -crf 23 -threads 8`; the others take the first of `libx264 -preset medium
+  -crf <18|23> -threads 8`, `h264_mf` (0.3 or 0.15 bits a pixel, `-rate_control
+  u_vbr`) and `h264_videotoolbox` (`-q:v` 80 or 65). The chosen encoder
+  and its arguments are part of every segment's key. macOS's ffmpeg has
+  VideoToolbox and libx264; the Windows LGPL build has only `h264_mf` (see
+  [windows.md](./windows.md)). The hardware encoders can soften the
+  gradients' dither, which x264 at crf 18 keeps.
 - **Colour.** Frames go to ffmpeg as raw RGBA on stdin (`-f rawvideo
   -pix_fmt rgba -s WxH -r fps -i -`), converted with `-vf
   scale=out_color_matrix=bt709:out_range=tv -pix_fmt yuv420p` and tagged
@@ -1771,13 +1828,13 @@ with the `Narration` error before any frame renders.
   current segment's ffmpeg, one process per segment. The earliest failing
   frame stops the render with `StudioError::Frame` (its time and scene).
   `--threads` bounds only these renderers. The encoder runs beside them on
-  its own threads: `final`'s x264 always on 8 (see "Two qualities"), so a
+  its own threads: x264 always on 8 (see "Encoders"), so a
   `--final --threads 3` render was measured at 553% CPU. The fixed count
   keeps x264's memory known and its output, and so the segment cache, the
   same at any `--threads`.
 - **Joining.** The segments are joined by the concat demuxer as a stream
   copy (`-f concat -safe 0 -c:v copy`, absolute paths in
-  `.cache/concat-<quality>.txt`). x264's B-frames do not drop or repeat a
+  `.cache/concat-<preset>.txt`). x264's B-frames do not drop or repeat a
   frame at the joins: the joined file decodes (`-f framemd5`) to each
   segment's frames in turn, and a render that reused cached segments
   decodes to the same frames as a cold one.
@@ -1788,11 +1845,24 @@ with the `Narration` error before any frame renders.
   `.cache/narration-<key>.wav` (keyed by the clips and their offsets) and
   encoded with `-c:a aac -b:a 160k`. A video without narration has no audio
   stream.
-- **Output.** `<dir>/renders/draft.mp4` or `final.mp4` (`-o` for another
-  path). Segments, the track and the output are written as `.part` and
-  renamed. After a render, `.cache/renders.json` records what that quality
-  used, and segments and tracks neither quality's last render used, and
-  any `.part`, are deleted.
+- **Output.** `Preset::default_out` (`-o` for another path). A narrated
+  video's render also writes its captions as WebVTT beside the mp4, the
+  same name with `.vtt` (`renders/draft.vtt`), which the app's player
+  shows as CC.
+  Segments, the track and the output are written as `.part` and renamed.
+  After a render, `.cache/renders.json` records, under the preset's name,
+  the segments and track it used, the file it wrote and, for `subtitles`,
+  the sha256 of the text; segments and tracks no preset's last render used,
+  and any `.part`, are deleted. `audio` reuses the video presets' cached
+  track; `subtitles` runs no ffmpeg. A video with no narration has nothing
+  for `audio` or `subtitles` and is refused (``... has no narration to
+  export; run `oculus studio narrate` first``).
+- **Status** (`status.rs`, `render::exports`). For each preset: the file
+  at its default path, if any, its mtime, `current` when the file is there
+  and the record a render would write now (the segment keys, track and
+  file, planned without rendering) equals the recorded one, and `problem`
+  when the preset cannot render now (stale narration, nothing to export,
+  an encoder ffmpeg lacks, a size too large).
 - **Failure and cancel.** ffmpeg's non-zero exit is an error quoting its
   last stderr lines. Cancel (an `&AtomicBool`, checked before every frame
   and while joining) kills ffmpeg, deletes the partial segment and returns
@@ -1800,19 +1870,19 @@ with the `Narration` error before any frame renders.
 - **Progress.** A sync `&mut dyn FnMut(Progress)`: `Planned` (segments,
   cached, frames to render, threads), `Segment`, `Frame` (frame of frames
   and frames a second), `Done` per segment in video order, `Muxing`.
-- **From the app.** `studio_render(dir, quality)` (`"draft"` or `"final"`,
-  to `<dir>/renders/<quality>.mp4`, half the cores) runs `render` on a
+- **From the app.** `studio_render(dir, preset)` (a preset's name, to its
+  default path, half the cores) runs `render` on a
   blocking thread, finding ffmpeg like the CLI does plus the app's
   resources. It resolves to the report (`--json`'s `report`), or `null`
   when cancelled; it rejects with the failure's message. One render per
   folder (a slug or a video's folder; any other folder is refused, see "The
-  Studio page's commands"): `render::RENDERS` maps each canonical folder to its quality and
+  Studio page's commands"): `render::RENDERS` maps each canonical folder to its preset and
   an `Arc<AtomicBool>` cancel flag, and a second start for the same folder
   is refused at once ("a draft render of <dir> is already running"), with
   no event. A guard frees the folder however the render ends, before the
   last event. `studio_render_cancel(dir)` sets the flag (false when none
-  runs). Each step is a `studio-render-progress` event `{ dir, phase, ...
-  }`, `dir` as given: `planning` at the start and again with `plan:
+  runs). Each step is a `studio-render-progress` event `{ dir, preset,
+  phase, ... }`, `dir` as given: `planning` at the start and again with `plan:
   {segments, cached, frames, threads}`; `rendering` with `{segment, of,
   scene, frame, frames, fps}` (1-based segment and frame), at most one per
   100 ms besides each segment's first and last frame; `muxing`; then
@@ -1844,9 +1914,11 @@ on disk now; nothing is cached but thumbnails.
 | `studio_videos(subject?)` | `videos::list_in` plus `title` and `threadId`, newest change first (a video whose video.json does not load sorts last and carries `problem`) |
 | `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to the subject's default theme (see "Libraries cascade"); `voice` is video.json's `voice` block (`{engine?, model?, voice?, speed?}`, `engine` being `kokoro` or `server`). The scaffold is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
 | `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `scenes` and `renders` |
+| `studio_render_captions(slug, preset)` | the WebVTT text beside that preset's render (`renders/<preset>.vtt`), for the player's CC |
+| `studio_exports(dir)` | each preset's status (`render::exports`, see "Rendering a video") as `{preset, path, modified, current, problem}`; it asks ffmpeg for its toolkit, renders nothing and makes no network call |
 | `studio_frame(slug, at, width)` | a PNG `width` px wide (1 to 4096), the layout of the full-size frame, as bytes through `tauri::ipc::Response` |
 | `studio_thumbnail(slug)` | the video's cached thumbnail PNG |
-| `studio_render`, `studio_render_cancel` | see "Rendering a video"; they take a slug or a video's folder and refuse any other |
+| `studio_render`, `studio_render_cancel`, `studio_exports` | see "Rendering a video"; they take a slug or a video's folder and refuse any other |
 
 - **The detail's voice** is video.json's `voice.voice`, else Settings ->
   Voice's voice, else null. **Scenes** are `{id, component, start, duration,
@@ -1854,8 +1926,10 @@ on disk now; nothing is cached but thumbnails.
   has none). `start` and `duration` are seconds from `Project::timeline`, so
   they are known once every scene has a length (a hold, or narration that
   matches the script) and null for every scene until then, stale narration
-  included. **Renders** are the `draft.mp4` and `final.mp4` that exist, with
-  their absolute path and mtime in Unix seconds.
+  included. **Renders** are each preset's file that exists (`draft.mp4`,
+  `audio.m4a`, `subtitles.vtt`, ...), as `{preset, path, modified,
+  captions}` with the absolute path, mtime in Unix seconds, and whether a
+  video render's `.vtt` is beside it.
 - **A frame is of the video as narrated.** `at` is `{scene, t}` (seconds into
   a scene, counting from 0) or `{global}`. Stale or missing narration makes
   `Renderer::new` fail, and the command rejects with studio-core's message
@@ -2148,13 +2222,16 @@ the `Slide` starter animates it in. Rendering never opens a PDF.
   on and the call that starts one (`--json`: `[{agent, roles: [{role, job,
   model, effort, spawn}]}]`). It reads only the settings; see
   [harness.md](./harness.md#subagents).
-- `oculus studio render <DIR>` writes an mp4 (`--draft`, the default, or
-  `--final`; `-o`, `--threads` for the frame renderers, not the encoder). It prints the plan, then per scene
-  `rendered` with its frames, seconds and frames a second, or `cached`,
-  then the path and a summary; `--json` gives `{dir, report: {path,
-  quality, width, height, fps, frames, duration, audio, threads, segments:
-  [{scene, id, outcome, frames, ms, fps}], pruned, ms}}`. See "Rendering a
-  video".
+- `oculus studio render <DIR>` writes one export preset's file:
+  `--preset draft|final|small|2x|audio|subtitles`, with `--draft` (the
+  default) and `--final` for the first two; `-o`, `--threads` for the frame
+  renderers, not the encoder. It prints the plan, then per scene `rendered`
+  with its frames, seconds and frames a second, or `cached`, then the paths
+  written (the file, then its `.vtt` or `.srt`) and a summary; `--json`
+  gives `{dir, report: {path, preset, width, height, fps, frames, duration,
+  audio, threads, segments: [{scene, id, outcome, frames, ms, fps}],
+  sidecars, pruned, ms}}` (`width` and `height` null for `audio` and
+  `subtitles`). See "Rendering a video".
 - `oculus studio lint <DIR>` (`--scene <ID|N>` for `lint_scene`; the
   voice checks are cut to that scene too) prints each error in full, one a
   line, then the warnings, then the notes, and exits 1 if there is any
@@ -2270,10 +2347,18 @@ end-to-end narrate (`STUDIO_KOKORO`, `STUDIO_G2P_GUESSER`,
 `STUDIO_ALIGN_MODEL`), which prints its real-time factor and peak memory,
 and the review's two samples differing (`STUDIO_KOKORO`,
 `STUDIO_G2P_GUESSER`).
-`cargo test --lib studio::render` covers the render plan, segment keys and
-tree hashes, the audio placement, the reorder buffer and pruning, and,
-through the real ffmpeg (skipped without one), the join and cache check
-above, a narrated fixture's audio onset, cancel and a failing frame.
+`cargo test --lib studio::render` covers the presets' sizes and names,
+the encoder choice from canned `-encoders` lists (macOS's build, the
+Windows LGPL build before and after Studio's additions, VideoToolbox or
+x264 alone), the render plan, segment keys and tree hashes, the audio
+placement, the reorder buffer and pruning, and, through the real ffmpeg
+(each test skipped, saying why, without one or when it lacks the encoder,
+demuxer or libx264 the test needs), the join and cache check above, a
+narrated fixture's audio onset, cancel, a failing frame, and every export
+with its sidecars and `current` status.
+
+`tests/subtitles.rs` pins the `narrated` fixture's cues, and
+`src/captions/tests/` covers phrasing, timing and the VTT and SRT text.
 
 `tests/math.rs` pins a corpus of KaTeX constructs beside text labels on
 their baselines (`math-corpus`) and a Morph from `2^4 - 1` to

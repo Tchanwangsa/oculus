@@ -60,6 +60,19 @@ pub async fn studio_video_detail(slug: String) -> Result<VideoDetail, String> {
     .await
 }
 
+/// The WebVTT captions beside the video's `preset` render
+/// (`renders/<preset>.vtt`), for the player's CC.
+#[tauri::command]
+pub async fn studio_render_captions(slug: String, preset: String) -> Result<String, String> {
+    crate::runtime::blocking::run(move || {
+        let preset = crate::studio::render::Preset::parse(&preset)?;
+        let dir = crate::studio::videos::video_in(&videos_dir(), &slug)?;
+        let path = preset.default_out(&dir).with_extension("vtt");
+        std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
+    })
+    .await
+}
+
 /// A PNG `width` pixels wide. Rejects with the reason when the narration is
 /// stale.
 #[tauri::command]

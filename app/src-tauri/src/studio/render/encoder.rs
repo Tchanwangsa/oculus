@@ -4,11 +4,11 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 
 use super::error::RenderError;
 use super::ffmpeg::{self, Tail, QUIET};
-use super::quality::Settings;
+use super::settings::Settings;
 
 pub(super) struct Encoder {
     child: Child,
@@ -24,7 +24,7 @@ impl Encoder {
     pub fn spawn(ffmpeg: &Path, settings: &Settings, out: &Path) -> Result<Self, RenderError> {
         let part = part_path(out);
         let mut child = ffmpeg::spawn(
-            Command::new(ffmpeg)
+            crate::runtime::platform::command(ffmpeg)
                 .args(QUIET)
                 .args(settings.encoder_args(&part))
                 .stdin(Stdio::piped()),

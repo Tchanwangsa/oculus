@@ -63,7 +63,7 @@ pub(super) fn run(
     cancel: &AtomicBool,
 ) -> Result<(), Stop> {
     let mut child = spawn(
-        Command::new(ffmpeg)
+        crate::runtime::platform::command(ffmpeg)
             .args(QUIET)
             .args(args)
             .stdin(Stdio::null()),

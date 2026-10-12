@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use studio_core::Project;
 
 use super::error::RenderError;
-use super::quality::Settings;
+use super::settings::Settings;
 
 /// Bumped when how a segment is made changes in a way its inputs do not
 /// show, so every segment renders again.
