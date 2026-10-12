@@ -989,10 +989,8 @@ is said; you suggest, and never edit a `lexicon.json`.
 `oculus studio render <slug>` writes `renders/draft.mp4`: 540 px and
 fast. `--final` writes `renders/final.mp4` at full size, with motion blur
 (by the default `motionBlur`, only drafts are sharp). `--preset small`
-(720 px), `--preset 2x` (twice the size), `--preset audio` (the narration
-as `audio.m4a`) and `--preset subtitles` (`subtitles.vtt` and `.srt`) are
-for when the student asks for them. A narrated video's mp4 gets its
-captions beside it as a `.vtt`. Each scene is cached, so a second render
+(720 px) is for when the student asks for a file to share. A narrated
+video's mp4 gets its captions beside it as a `.vtt`. Each scene is cached, so a second render
 redoes only the scenes an edit touched. It never narrates: stale narration
 stops it, naming the scene. Report the path it prints.
 

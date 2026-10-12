@@ -1,4 +1,4 @@
-use super::super::{Cue, srt, vtt};
+use super::super::{Cue, vtt};
 
 fn cues() -> Vec<Cue> {
     vec![
@@ -16,13 +16,9 @@ fn cues() -> Vec<Cue> {
 }
 
 #[test]
-fn vtt_and_srt_carry_the_same_cues() {
+fn vtt_numbers_its_cues_in_hours_minutes_and_seconds() {
     assert_eq!(
         vtt(&cues()),
         "WEBVTT\n\n00:00:00.100 --> 00:00:02.500\nWe follow the gradient\ndownhill,\n\n01:01:01.001 --> 01:01:02.250\none step.\n"
-    );
-    assert_eq!(
-        srt(&cues()),
-        "1\n00:00:00,100 --> 00:00:02,500\nWe follow the gradient\ndownhill,\n\n2\n01:01:01,001 --> 01:01:02,250\none step.\n"
     );
 }

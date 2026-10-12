@@ -11,7 +11,7 @@ use studio_core::{Library, Project};
 
 use super::rows::VideoView;
 use crate::db::store::StudioLink;
-use crate::studio::render::{Output, Preset};
+use crate::studio::render::Preset;
 use crate::studio::videos;
 
 /// Mirrors `VideoDetail` in `app/src/lib/studio/videos.ts`.
@@ -110,8 +110,7 @@ fn renders(dir: &Path) -> Vec<RenderFile> {
                 .duration_since(UNIX_EPOCH)
                 .ok()?
                 .as_secs();
-            let captions =
-                matches!(preset.output(), Output::Video(_)) && path.with_extension("vtt").is_file();
+            let captions = path.with_extension("vtt").is_file();
             Some(RenderFile {
                 preset,
                 captions,
