@@ -205,6 +205,7 @@ list(token("color"))`, read together by index.
 | `Steps` | `at`, `dur`, `ease`, `lag`, `fade`, two or more children | States of one place, the pair picked by time ("Moving maths"). |
 | `Write` | `at`, `dur`, `lag`, `stroke`, children | Writes the Math inside it on ("Moving maths"). |
 | `Brace`, `Surround`, `Underline`, `Indicate` | `target`, `at`, `dur`, `ease`, `progress`, and their own | Overlays on a key, drawn after layout ("Moving maths"). |
+| `Arrow` (with `from` and `to`) | `from`, `to`, `bend`, `head`, `gap`, `stroke`, `at`, `dur`, `ease`, `progress` | An overlay between two keys or `[x, y]` points in its parent's px, drawn after layout; without `from` and `to` it is the points arrow ("Moving maths"). |
 
 An element takes only these props; anything else is an error that names
 the allowed ones. Style keys go inside `style`.
