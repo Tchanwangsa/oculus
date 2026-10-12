@@ -143,7 +143,8 @@ for seg in 1 2; do
   fi
 done
 if [ "$studio_ok" = 1 ]; then
-  printf "file '%s'\nfile '%s'\n" "$PWD/seg1.mp4" "$PWD/seg2.mp4" > concat.txt
+  # Relative to the list, which a native Windows exe resolves; $PWD is an MSYS path.
+  printf "file 'seg1.mp4'\nfile 'seg2.mp4'\n" > concat.txt
   if "$ff" -hide_banner -v error -y -f concat -safe 0 -i concat.txt -i "$fixtures/speech.wav" -map 0:v -c:v copy \
     -map 1:a -c:a aac -b:a 160k -movflags +faststart -f mp4 joined.mp4 2> join.err; then
     frames=$("$ff" -v error -nostdin -i joined.mp4 -vf scale=160:90,format=gray -f rawvideo - 2> joined.err | wc -c)
