@@ -374,16 +374,27 @@ sheet, `starter-<Component>.png`, a row per example and a column per
 moment of the 6 s preview (laid out at 1920x1080, drawn at a quarter), so
 the draw-on is pinned too. A load copies each starter
 file the global library has never been offered, then lists it in the
-library's `.seeded`; a listed file is never copied again, so a deleted
-starter stays deleted, while one added to a later build still arrives. An
-existing file is never replaced, so an edit is the user's. A starter
-dropped from the set is neither copied nor deleted: a library's existing
-copy stays, edited or not, and its `.seeded` line is harmless. Such a copy
+library's `.seeded` as `path<TAB>sha256 of the text written` (a legacy line
+has no tab and no hash). A listed file is never copied again, so a deleted
+starter stays deleted, while one added to a later build still arrives. A copy
+whose bytes still hash to the recorded text was never edited: when the
+starter has changed, the load rewrites it (the old text goes to `.history/`)
+and records the new hash. Any other text is the user's edit, left alone, and
+its hash is never recorded, so no later update can overwrite it. A legacy
+line has no hash to compare, so its copy counts as untouched only if it
+equals a version the repo has ever shipped (`library/shipped.rs`, SHA-256 of
+every blob in the starter files' git history; `bun run studio:hashes` in
+`app/` regenerates it, and a unit test fails until a starter edit's hash is
+in it); any other text stays hashless and is never updated. A copy
+that equals the current starter gets the current hash recorded. A starter
+dropped from the set is neither updated nor deleted: a library's existing
+copy stays, edited or not, and its `.seeded` line stays as it was, so a
+video that uses it keeps rendering. Such a copy
 named like a prelude element (`Steps.tsx`) shadows nothing: each
 component is its own module and is called only by name from video.json,
 so inside every component `<Steps>` is still the element. `oculus studio
 components seed --reset` writes the starter text over every file that
-differs or is missing. Every write
+differs or is missing, recording the hashes it writes. Every write
 to a library file first copies the previous text to `.history/` beside it
 (`<Name>.<unix-ms>.tsx` or `.json`, the millisecond moved on past any
 snapshot already there); nothing prunes `.history`. `oculus studio
