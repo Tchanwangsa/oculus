@@ -95,7 +95,7 @@ export const DEFAULT_JOB_MODELS: JobModels = {
   threadNaming: [{ provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null }],
   documentSuggestions: [{ provider: "claude", model: "claude-sonnet-5-5", reasoningEffort: "medium" }],
   studioResearch: [
-    { provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null },
+    { provider: "claude", model: "claude-haiku-5-5", reasoningEffort: null },
     { provider: "codex", model: "gpt-6-luna", reasoningEffort: "medium" },
   ],
   studioScene: [
