@@ -45,8 +45,10 @@ pub fn assert_golden(name: &str, frame: &Frame) {
     let mut diff = vec![0u8; frame.rgba.len()];
     for (i, (a, b)) in frame
         .rgba
-        .chunks_exact(4)
-        .zip(expected.as_raw().chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(expected.as_raw().as_chunks::<4>().0.iter())
         .enumerate()
     {
         let d = a
