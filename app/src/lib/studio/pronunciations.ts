@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 // readings the Studio agent suggested for words Kokoro guessed, each kept
 // until the student decides. Deciding writes the word into the subject's (or
 // the global library's) lexicon.json; it applies at the video's next narrate.
-// The samples are synthesised by Kokoro on this Mac, never a billed call.
+// The samples are synthesised by Kokoro on this computer, never a billed call.
 
 export type PronunciationStatus = "pending" | "wrong";
 
