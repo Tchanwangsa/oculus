@@ -13,6 +13,7 @@ and stable Rust, plus the MSVC toolchain, Windows SDK and WebView2.
 | Cargo CLI build, target paths and host detection | `app/scripts/runtime.mjs`, `app/scripts/build-cli.mjs` |
 | Shared cached native download and installation | `app/scripts/native-binary.mjs` |
 | The dev wrapper, preflight and cross-shell test runner | `app/scripts/dev.mjs`, `app/scripts/predev.mjs`, `app/scripts/test.mjs` |
+| The dev profile, and pruning what `target/debug` no longer uses | `[profile.dev]` in `app/src-tauri/Cargo.toml`, `app/scripts/prune-target.mjs` |
 | Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
 | Native binary fetcher (ffmpeg) | `app/scripts/fetch-ffmpeg.mjs` |
 | Builds and smoke-tests the Windows LGPL ffmpeg, and stages its release | `app/scripts/ffmpeg/`, `.github/workflows/ffmpeg.yml` |
@@ -67,7 +68,7 @@ runs `bun install`, fetches ffmpeg, compiles the speech helper,
 (skipped with one line without the `wasm32-unknown-unknown` target or the
 pinned `wasm-bindgen` CLI, and never fatal), builds and signs the dev
 `oculus-keyd` helper app (failing like the CLI build does), builds the debug
-`oculus`, installs
+`oculus`, [prunes `target/debug`](#every-build-shares-one-profile-and-the-preflight-prunes-the-rest), installs
 keyd only as
 [below](#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source),
 regenerates [cli-reference.md](./cli-reference.md) (written only when the help
@@ -97,6 +98,26 @@ where a SHA-256 is pinned, any other bytes before installing anything.
 `cargo test` and `bun run cli` go through neither Tauri nor `predev`, so on a
 fresh checkout run `bun run ffmpeg` and (on macOS)
 `bun run speech` and `bun run whisper` yourself.
+
+## Every build shares one profile, and the preflight prunes the rest
+
+Cargo keeps a copy of each crate per profile, feature set and dependency set,
+and a build under another profile rebuilds every crate. So the dev profile
+(dependencies at `opt-level = 3` without debug info, our crates at `debug = 1`)
+is in `app/src-tauri/Cargo.toml`, which applies wherever cargo runs, not
+`.cargo/config.toml`, which cargo reads from its working directory. The scripts
+still run cargo from `app/src-tauri` so the config's sccache wrapper applies
+too. The app crate is an `rlib` only: `staticlib` and `cdylib` are for Tauri's
+mobile targets.
+
+Cargo never deletes a superseded copy, so each `Cargo.lock` change leaves one
+behind. The preflight's CLI build reports every unit it used, fresh or rebuilt
+(`--message-format=json`); `tauri dev` uses the same ones. Then
+`app/scripts/prune-target.mjs` deletes the `deps/` and `build/` copies it did
+not use that nothing has rewritten for 14 days, and incremental caches that old
+except the newest of each crate. A copy only `cargo test` or clippy uses goes
+too and is rebuilt on their next run, mostly from sccache. It goes by
+modification time because APFS does not keep access times. Fail-open.
 
 ## The speech helper is compiled, not fetched
 

@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { usedHashes } from "./prune-target.mjs";
 
 export const app = dirname(dirname(fileURLToPath(import.meta.url)));
 export const rust = join(app, "src-tauri");
@@ -15,11 +16,26 @@ export const cliBuildArgs = (profile = "release") => [
   "--manifest-path", manifest, "--bin", "oculus",
 ];
 
-/** Remove the previous binary so a build that produces none cannot pass on it. */
-export function buildCli(profile = "release") {
+/**
+ * Remove the previous binary so a build that produces none cannot pass on it.
+ * `used`, when given, collects the unit hashes the build relied on
+ * (`prune-target.mjs`).
+ */
+export function buildCli(profile = "release", used = null) {
   const binary = cliPath(profile);
   rmSync(binary, { force: true });
-  execFileSync("cargo", cliBuildArgs(profile), { stdio: "inherit" });
+  // From the crate, so cargo reads src-tauri/.cargo/config.toml as tauri does.
+  if (used) {
+    const json = execFileSync("cargo", [...cliBuildArgs(profile), "--message-format=json-render-diagnostics"], {
+      cwd: rust,
+      stdio: ["inherit", "pipe", "inherit"],
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+    });
+    for (const hash of usedHashes(json)) used.add(hash);
+  } else {
+    execFileSync("cargo", cliBuildArgs(profile), { cwd: rust, stdio: "inherit" });
+  }
   if (!existsSync(binary)) throw new Error(`cargo reported success but ${binary} is not there`);
   return binary;
 }
