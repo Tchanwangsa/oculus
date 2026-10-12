@@ -75,5 +75,21 @@
     "lead": 0.25,
     "tail": 1.0,
     "pause": 1.0
+  },
+  "captions": {
+    "fontFamily": "Inter",
+    "fontSize": 44,
+    "fontWeight": 600,
+    "color": "onInk",
+    "upcoming": 0.6,
+    "highlight": "accent",
+    "highlightText": "onAccent",
+    "highlightStyle": "pill",
+    "plate": "ink",
+    "plateOpacity": 0.72,
+    "position": "bottom",
+    "margin": 0.05,
+    "maxChars": 42,
+    "maxLines": 2
   }
 }

@@ -57,7 +57,7 @@ From your working directory (`agents/`):
   assets/                     images, named by <Image src>
   narration/                  made by narrate
   out/                        made by frame, strip and gallery: PNGs
-  renders/                    made by render: draft.mp4, final.mp4
+  renders/                    made by render: draft.mp4, final.mp4, other exports
 ../studio/library/            the global library: read, never edit
 ../studio/subjects/<CODE>/    a subject's library: read, never edit
 ../studio/subjects/<CODE>/lexicon.json   pronunciations: never edit; suggest with `oculus studio pronounce suggest` (step 5)

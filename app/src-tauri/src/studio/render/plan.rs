@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use super::audio::Clip;
 use super::cache;
 use super::key::{segment_key, Trees};
-use super::quality::Settings;
+use super::settings::Settings;
 use super::workers::Job;
 
 /// What a scene contributes to the plan, from studio-core.

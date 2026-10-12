@@ -734,7 +734,7 @@ pub(crate) struct StudioThemesPromoteArgs {
     pub(crate) to: StudioLibraryArg,
 }
 
-/// Render a video to an mp4
+/// Render a video to an mp4, or export its narration or subtitles
 ///
 /// Each scene is rendered frame by frame (in parallel, one renderer per
 /// thread) and encoded by ffmpeg as its own segment, which is kept in
@@ -743,14 +743,32 @@ pub(crate) struct StudioThemesPromoteArgs {
 /// `components/` and `assets/` folders and the render settings. A second
 /// render only renders the scenes an edit touched and prints `cached` for
 /// the rest. The segments are joined without re-encoding, beside the
-/// narration clips mixed into one track (AAC). Segments neither quality's
-/// last render used are deleted afterwards.
+/// narration clips mixed into one track (AAC). Segments no preset's last
+/// render used are deleted afterwards.
 ///
-/// `--draft` (the default) is a 540 px-high proxy on the hardware encoder,
-/// without motion blur unless the theme's `motionBlur` says `always`;
-/// `--final` is full size on libx264 (crf 18), blurred unless `motionBlur`
-/// is `off`. Both are H.264, yuv420p, BT.709. The mp4 goes to
-/// `<DIR>/renders/draft.mp4` or `final.mp4` unless `-o` names another file.
+/// The preset says what to write, to `<DIR>/renders/<preset>.<ext>` unless
+/// `-o` names another file:
+///
+/// `draft` (the default, also `--draft`): a 540 px proxy on the fastest
+/// encoder, without motion blur unless the theme's `motionBlur` says
+/// `always`.
+///
+/// `final` (also `--final`): the video's size at crf 18, blurred unless
+/// `motionBlur` is `off`.
+///
+/// `small`: 720 px at crf 23, a smaller file to share.
+///
+/// `2x`: twice the video's size (3840x2160 for a 1080p video).
+///
+/// `audio`: the narration track alone, as AAC in an m4a.
+///
+/// `subtitles`: the captions as WebVTT, with SubRip (`.srt`) beside it.
+///
+/// Video presets are H.264, yuv420p, BT.709, and write the captions as a
+/// `.vtt` beside the mp4 when the video is narrated. With video.json's
+/// `"captions": true` the captions are also burned into the frames.
+/// Before anything renders, ffmpeg is asked what it was built with: a
+/// missing encoder or demuxer is an error naming it.
 ///
 /// Render never narrates: run `oculus studio narrate` first, or it stops
 /// with the stale narration's scene. A frame that fails stops the render,
@@ -759,24 +777,29 @@ pub(crate) struct StudioThemesPromoteArgs {
 ///     oculus studio render lectures/week-4
 ///
 ///     oculus studio render lectures/week-4 --final -o ~/Desktop/week-4.mp4
+///
+///     oculus studio render lectures/week-4 --preset subtitles
 #[derive(Args)]
-#[command(group(clap::ArgGroup::new("quality").args(["draft", "final_"]).multiple(false)))]
+#[command(group(clap::ArgGroup::new("which").args(["draft", "final_", "preset"]).multiple(false)))]
 pub(crate) struct StudioRenderArgs {
     /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
-    /// A 540 px-high proxy on the hardware encoder (the default)
+    /// The `draft` preset (the default)
     #[arg(long)]
     pub(crate) draft: bool,
-    /// Full size on libx264, with the theme's motion blur
+    /// The `final` preset
     #[arg(long = "final")]
     pub(crate) final_: bool,
-    /// Where to write the mp4 (default: `<DIR>/renders/<quality>.mp4`)
-    #[arg(short, long, value_name = "OUT.mp4")]
+    /// The export preset: draft, final, small, 2x, audio or subtitles
+    #[arg(long, value_name = "NAME")]
+    pub(crate) preset: Option<String>,
+    /// Where to write the file (default: `<DIR>/renders/<preset>.<ext>`)
+    #[arg(short, long, value_name = "OUT")]
     pub(crate) out: Option<PathBuf>,
     /// Frame-rendering threads (default: half the cores, capped to keep
-    /// their memory under 2 GB). The encoder runs its own: `--final`'s
-    /// libx264 always uses 8, so its output is the same at any `--threads`
+    /// their memory under 2 GB). The encoder runs its own: libx264 always
+    /// uses 8, so its output is the same at any `--threads`
     #[arg(long, value_name = "T")]
     pub(crate) threads: Option<usize>,
 }
@@ -846,7 +869,7 @@ mod tests {
     }
 
     #[test]
-    fn render_takes_one_quality() {
+    fn render_takes_one_preset() {
         let ok = |args: &[&str]| {
             let argv = ["oculus", "studio", "render", "video"].iter().chain(args);
             Cli::try_parse_from(argv).is_ok()
@@ -854,7 +877,9 @@ mod tests {
         assert!(ok(&[]));
         assert!(ok(&["--draft", "-o", "x.mp4", "--threads", "3"]));
         assert!(ok(&["--final"]));
+        assert!(ok(&["--preset", "subtitles"]));
         assert!(!ok(&["--draft", "--final"]));
+        assert!(!ok(&["--final", "--preset", "small"]));
     }
 
     #[test]

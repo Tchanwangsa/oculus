@@ -13,6 +13,7 @@
 //! # Ok::<(), studio_core::StudioError>(())
 //! ```
 
+pub mod captions;
 mod easing;
 mod error;
 mod fonts;

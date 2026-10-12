@@ -11,7 +11,7 @@ use super::encoder::Encoder;
 use super::error::Stop;
 use super::plan::Segment;
 use super::progress::{Outcome, Progress, SegmentReport};
-use super::quality::Settings;
+use super::settings::Settings;
 use super::workers::{self, Job};
 use super::Options;
 
