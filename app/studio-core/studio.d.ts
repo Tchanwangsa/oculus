@@ -30,7 +30,8 @@ interface Theme {
     negative: string;
     [name: string]: string;
   };
-  font: { heading: string; body: string };
+  /** `mono` is for code only; numbers take `fontVariantNumeric: "tabular-nums"`. */
+  font: { heading: string; body: string; mono: string };
   /** Style fragments to spread into `style`: `{ ...theme.type.h1, color: theme.color.text }`. */
   type: {
     display: TypeToken;
@@ -40,6 +41,8 @@ interface Theme {
     body: TypeToken;
     label: TypeToken;
     caption: TypeToken;
+    /** Monospace, for code. */
+    code: TypeToken;
     [name: string]: TypeToken;
   };
   space: { xxs: number; xs: number; s: number; m: number; l: number; xl: number; xxl: number; [name: string]: number };
@@ -159,7 +162,7 @@ interface Style {
   transformOrigin?: Origin;
   /** `[top, right, bottom, left]` fractions of the border box; clips the node's whole paint. */
   clipInset?: [number, number, number, number];
-  /** A bundled family (Inter, Manrope). Read it from `theme.font` or a `theme.type` token; lint refuses literals. */
+  /** A bundled family (Inter, Manrope, JetBrains Mono). Read it from `theme.font` or a `theme.type` token; lint refuses literals. */
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: number;

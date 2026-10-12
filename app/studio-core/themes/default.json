@@ -20,7 +20,8 @@
   },
   "font": {
     "heading": "Manrope",
-    "body": "Inter"
+    "body": "Inter",
+    "mono": "JetBrains Mono"
   },
   "type": {
     "display": { "fontFamily": "Manrope", "fontSize": 104, "fontWeight": 750, "lineHeight": 1.02, "letterSpacing": -3.2 },
@@ -29,7 +30,8 @@
     "h3": { "fontFamily": "Manrope", "fontSize": 38, "fontWeight": 600, "lineHeight": 1.2, "letterSpacing": -0.5 },
     "body": { "fontFamily": "Inter", "fontSize": 32, "fontWeight": 420, "lineHeight": 1.45, "letterSpacing": -0.2 },
     "label": { "fontFamily": "Inter", "fontSize": 24, "fontWeight": 600, "lineHeight": 1.2, "letterSpacing": 0.2 },
-    "caption": { "fontFamily": "Inter", "fontSize": 22, "fontWeight": 450, "lineHeight": 1.35, "letterSpacing": 0 }
+    "caption": { "fontFamily": "Inter", "fontSize": 22, "fontWeight": 450, "lineHeight": 1.35, "letterSpacing": 0 },
+    "code": { "fontFamily": "JetBrains Mono", "fontSize": 28, "fontWeight": 400, "lineHeight": 1.5, "letterSpacing": 0 }
   },
   "space": {
     "xxs": 4,

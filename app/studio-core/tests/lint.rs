@@ -255,3 +255,60 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
     );
     assert_eq!(orphan.error.kind(), "script");
 }
+
+/// Reading `theme.font.mono` in a component not named for code is a note
+/// (never an error); a theme written before the monospace tokens existed
+/// still loads and still gives components them.
+#[test]
+fn monospace_outside_a_code_component_is_a_note() {
+    let dir = std::env::temp_dir().join(format!("studio-lint-mono-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("components")).unwrap();
+    let component = |name: &str| {
+        let src = format!(
+            "export const props = {{}};\nexport const examples = {{ a: {{}} }};\nexport default (_p, {{ theme }}) => <Text style={{{{ ...theme.type.code, fontFamily: theme.font.mono, color: theme.color.text }}}}>{name}</Text>;\n"
+        );
+        std::fs::write(dir.join(format!("components/{name}.tsx")), src).unwrap();
+    };
+    component("Listing");
+    component("CodeBlock");
+    let mut theme: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture("../../themes/default.json")).unwrap(),
+    )
+    .unwrap();
+    theme["font"].as_object_mut().unwrap().remove("mono");
+    theme["type"].as_object_mut().unwrap().remove("code");
+    std::fs::write(dir.join("old.json"), theme.to_string()).unwrap();
+    std::fs::write(
+        dir.join("video.json"),
+        json!({
+            "size": { "width": 320, "height": 180 },
+            "theme": "old.json",
+            "scenes": [
+                { "component": "Listing", "props": {}, "hold": 1 },
+                { "component": "CodeBlock", "props": {}, "hold": 1 },
+            ],
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let report = Project::load(&dir).unwrap().lint().unwrap();
+    assert!(report.is_clean(), "{report}");
+    let notes: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| i.level == LintLevel::Note)
+        .collect();
+    assert_eq!(notes.len(), 1, "{report}");
+    assert_eq!(notes[0].component.as_deref(), Some("Listing"));
+    assert_eq!(
+        notes[0].group,
+        Some(("monospace outside code", "Listing".to_owned()))
+    );
+    let text = notes[0].to_string();
+    assert!(
+        text.contains("theme.type.code is used outside a Code component; monospace is for code, and numbers take fontVariantNumeric: \"tabular-nums\""),
+        "{text}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}

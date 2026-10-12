@@ -1,7 +1,7 @@
 //! The token-use rules on small sources, against the bundled theme.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
-use super::check;
+use super::{check, mono_note};
 use crate::error::StudioError;
 use crate::theme::Theme;
 
@@ -78,9 +78,57 @@ fn a_font_family_string_is_refused_with_the_token() {
         body,
         ["font family `Inter` is a literal; use theme.font.body"]
     );
+    let mono = messages(r##"const s = { fontFamily: "JetBrains Mono" };"##);
+    assert_eq!(
+        mono,
+        ["font family `JetBrains Mono` is a literal; use theme.font.mono"]
+    );
     let other = messages(r##"const s = { fontFamily: "Arial" };"##);
     assert_eq!(other.len(), 1, "{other:?}");
     assert!(messages("const s = { fontFamily: theme.font.body };").is_empty());
+    assert!(messages("const s = { fontFamily: theme.font.mono };").is_empty());
+}
+
+fn note(component: &str, src: &str) -> Option<String> {
+    mono_note(component, src).map(|e| e.to_string())
+}
+
+#[test]
+fn monospace_outside_a_code_component_is_a_note() {
+    let src = "export default (_p, { theme }) => <Text style={{ fontFamily: theme.font.mono }}>42</Text>;";
+    let n = note("Table", src).unwrap();
+    assert!(
+        n.contains(
+            "theme.font.mono is used outside a Code component; monospace is for code, and numbers take fontVariantNumeric: \"tabular-nums\""
+        ),
+        "{n}"
+    );
+    assert!(n.contains(":1:"), "{n}");
+    let src = "const t = { ...theme.type.code, color: theme.color.text };";
+    assert!(note("Table", src).unwrap().contains("theme.type.code"));
+}
+
+#[test]
+fn a_code_component_may_use_monospace() {
+    let src = "export default (_p, { theme }) => <Text style={{ ...theme.type.code, fontFamily: theme.font.mono }}>x</Text>;";
+    for name in ["Code", "CodeBlock", "CodeListing", "TraceCode", "Code2"] {
+        assert!(note(name, src).is_none(), "{name}");
+    }
+    // A name that only contains the word does not count.
+    assert!(note("Decoder", src).is_some());
+    assert!(note("Barcodes", src).is_some());
+}
+
+#[test]
+fn other_font_tokens_and_look_alikes_draw_no_monospace_note() {
+    for src in [
+        "const s = { fontFamily: theme.font.body, ...theme.type.body };",
+        "const s = { fontVariantNumeric: \"tabular-nums\" };",
+        "const mono = 1; const code = 2; const x = mono + code;",
+        "const s = a.font; const t = font.monospace; const u = type.coded;",
+    ] {
+        assert!(note("Table", src).is_none(), "{src}");
+    }
 }
 
 #[test]

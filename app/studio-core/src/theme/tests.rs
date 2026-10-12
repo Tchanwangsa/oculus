@@ -69,3 +69,31 @@ fn narration_tokens_are_required_and_non_negative() {
     let e = parse(&v).unwrap_err().to_string();
     assert!(e.contains("missing field `narration`"), "{e}");
 }
+
+#[test]
+fn the_mono_tokens_are_in_the_bundled_themes_and_default_for_older_ones() {
+    let t = Theme::bundled("default").unwrap();
+    assert_eq!(t.tokens["font"]["mono"], "JetBrains Mono");
+    assert_eq!(t.tokens["type"]["code"]["fontFamily"], "JetBrains Mono");
+    let base: Value = serde_json::from_str(BUNDLED[0].1).unwrap();
+    let parse = |v: &Value| Theme::parse(&v.to_string(), Path::new("t.json"));
+    // A theme written before the monospace face existed still loads, and
+    // components still read the tokens from it.
+    let mut v = base.clone();
+    v["font"].as_object_mut().unwrap().remove("mono");
+    v["type"].as_object_mut().unwrap().remove("code");
+    let older = parse(&v).unwrap();
+    assert_eq!(older.tokens["font"]["mono"], "JetBrains Mono");
+    assert_eq!(older.tokens["type"]["code"], t.tokens["type"]["code"]);
+    // A theme's own values win over the defaults.
+    let mut v = base.clone();
+    v["type"]["code"]["fontSize"] = 40.into();
+    assert_eq!(parse(&v).unwrap().tokens["type"]["code"]["fontSize"], 40);
+    let mut v = base;
+    v["font"]["mono"] = "Courier".into();
+    let e = parse(&v).unwrap_err().to_string();
+    assert!(
+        e.contains("font.mono: unknown font family `Courier`"),
+        "{e}"
+    );
+}
