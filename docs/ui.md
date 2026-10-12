@@ -20,6 +20,7 @@ Read this before any UI work.
 | Table chrome | `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
 | Toolbar filters: pill popovers, checklists, applied-filter chips | `app/src/components/ui/filter/` |
 | The colour control: a swatch that opens a pad, hue and opacity strips and hex text | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
+| A titled block that folds, its state kept by the caller | `app/src/components/ui/CollapsibleSection.tsx` |
 
 ## One colour, two fonts, and a floating card
 

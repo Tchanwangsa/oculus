@@ -33,7 +33,7 @@ export function ThemeColumn({
   draft: Tokens | null;
 }) {
   return (
-    <nav aria-label="Themes" className="min-h-0 overflow-y-auto border-r border-border-subtle px-2 pb-4 pt-2">
+    <nav aria-label="Themes" className="min-h-0 w-[208px] shrink-0 overflow-y-auto border-r border-border-subtle px-2 pb-4 pt-2">
       {state.loading && state.themes.length === 0 ? (
         <div className="space-y-2 p-1">
           {Array.from({ length: 4 }, (_, i) => (

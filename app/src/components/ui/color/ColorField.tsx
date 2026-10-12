@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { ColorPicker } from "@/components/ui/color/ColorPicker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { parseHex } from "@/lib/ui/color";
@@ -6,6 +8,55 @@ import { cn } from "@/lib/utils";
 /** The checkerboard a see-through colour is drawn over. */
 const CHECKER =
   "repeating-conic-gradient(var(--color-border) 0% 25%, transparent 0% 50%) 0 0 / 6px 6px";
+
+/** A colour as a round dot, over the checkerboard so alpha shows. */
+export function ColorSwatch({ value, className }: { value: string; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn("size-5 shrink-0 overflow-hidden rounded-full ring-1 ring-border", className)}
+      style={{ background: CHECKER }}
+    >
+      <span className="block size-full" style={{ backgroundColor: parseHex(value) != null ? value : "transparent" }} />
+    </span>
+  );
+}
+
+/**
+ * A button that opens the colour picker in a popover. `children` is the
+ * button's face (`ColorField` draws a swatch and the hex, a tile may draw
+ * more); edits come back as `#rrggbb`, or `#rrggbbaa` when not opaque.
+ */
+export function ColorPopover({
+  value,
+  onChange,
+  label,
+  align = "end",
+  className,
+  children,
+}: {
+  value: string;
+  onChange: (hex: string) => void;
+  /** What the colour is, for the button's accessible name. */
+  label: string;
+  align?: "start" | "center" | "end";
+  className?: string;
+  children: ReactNode;
+}) {
+  const ok = parseHex(value) != null;
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" aria-label={`${label}: ${value}`} className={cn("cursor-pointer text-left", className)}>
+          {children}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align={align} className="w-60 p-3">
+        <ColorPicker value={ok ? value : "#000000"} onChange={onChange} />
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /**
  * A colour as a round swatch that opens the picker in a popover, with its hex
@@ -20,37 +71,24 @@ export function ColorField({
 }: {
   value: string;
   onChange: (hex: string) => void;
-  /** What the colour is, for the swatch's accessible name. */
   label: string;
   className?: string;
 }) {
   const ok = parseHex(value) != null;
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={`${label}: ${value}`}
-          className={cn(
-            "group flex min-w-0 cursor-pointer items-center gap-2 rounded-full py-0.5 pl-0.5 pr-2 text-left transition-colors hover:bg-accent",
-            className,
-          )}
-        >
-          <span
-            aria-hidden
-            className="size-5 shrink-0 overflow-hidden rounded-full ring-1 ring-border"
-            style={{ background: CHECKER }}
-          >
-            <span className="block size-full" style={{ backgroundColor: ok ? value : "transparent" }} />
-          </span>
-          <span className={cn("truncate text-[12px] uppercase tabular-nums", ok ? "text-muted-foreground" : "text-destructive")}>
-            {value}
-          </span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-60 p-3">
-        <ColorPicker value={ok ? value : "#000000"} onChange={onChange} />
-      </PopoverContent>
-    </Popover>
+    <ColorPopover
+      value={value}
+      onChange={onChange}
+      label={label}
+      className={cn(
+        "group flex min-w-0 items-center gap-2 rounded-full py-0.5 pl-0.5 pr-2 transition-colors hover:bg-accent",
+        className,
+      )}
+    >
+      <ColorSwatch value={value} />
+      <span className={cn("truncate text-[12px] uppercase tabular-nums", ok ? "text-muted-foreground" : "text-destructive")}>
+        {value}
+      </span>
+    </ColorPopover>
   );
 }

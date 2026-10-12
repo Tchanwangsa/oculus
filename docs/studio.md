@@ -2040,7 +2040,7 @@ there. Nothing is cached.
 | `studio_theme_history(name, level, subject?)`, `studio_theme_restore(name, level, subject?, id)` | as for components, over `<name>.<unix-ms>.json` |
 | `studio_theme_defaults(subject?)` | `{global, subject, effective}`: each library's `defaultTheme` as written, and the theme a new video there takes |
 | `studio_theme_set_default(level, subject?, name?)` | writes (or with no name clears) that library's `defaultTheme`; returns the defaults |
-| `studio_components(subject?)` | one row per component name: `{name, level, kind, props, examples, problem, shadows}` |
+| `studio_components(subject?)` | one row per component name: `{name, level, kind, props, examples, problem, shadows, starter}` |
 | `studio_component_source(name, subject?)` | `{level, text}` from the nearest level that has it |
 | `studio_component_frame(name, subject?, theme, themeText?, props?, example?, t, width, duration?)` | a PNG `width` px wide (1 to 4096), as bytes through `tauri::ipc::Response` |
 | `studio_component_write(name, level, subject?, text)` | writes once the text loads; returns `{level, text}` |
@@ -2069,7 +2069,9 @@ there. Nothing is cached.
   the name ends in `Shell` (a library's own; no starter is one), else
   `component`: nothing in a component's code
   says which, so the name does. `shadows` is true for a subject's file that
-  replaces a global component, the subject's own version.
+  replaces a global component, the subject's own version. `starter` is true
+  when the name is in the starter set (`STARTER_COMPONENTS`), whichever level
+  holds the file and whether it was edited.
 - **A frame** draws the component alone in a 1920x1080 frame scaled to
   `width`, in the theme `theme` names (resolved through the same levels).
   `t` is seconds into the component and must be in `[0, duration)`;

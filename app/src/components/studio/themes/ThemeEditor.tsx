@@ -3,6 +3,7 @@ import { CircleNotch } from "@phosphor-icons/react";
 
 import { CodeText } from "@/components/markdown/MdComponents";
 import { ChangeBox } from "@/components/studio/components/ChangeBox";
+import { InspectorColumn, stageMaxWidth, type InspectorPanel } from "@/components/studio/panel/InspectorColumn";
 import { DuplicateDialog } from "@/components/studio/themes/DuplicateDialog";
 import { ThemeInspector } from "@/components/studio/themes/inspector/ThemeInspector";
 import { SceneStage } from "@/components/studio/themes/SceneStage";
@@ -16,6 +17,7 @@ import { useThemeHistory, useThemeSource } from "@/hooks/studio/useThemeSource";
 import type { ComponentLevel } from "@/lib/studio/components";
 import { copyName, formatTheme, parseThemeText, sameTokens, type Tokens } from "@/lib/studio/themeDraft";
 import { deleteTheme, restoreTheme, writeTheme, type ThemeInfo } from "@/lib/studio/themes";
+import { cn } from "@/lib/utils";
 
 type Tab = "change" | "source";
 const TABS: ReadonlyArray<{ value: Tab; label: string }> = [
@@ -28,7 +30,8 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /**
  * One theme open: the centre column (its name and actions, the sample scene
  * in the theme, the timeline, the change box and the file) and the token
- * inspector beside it, as the two grid cells they fill. Edits make a draft
+ * inspector beside it, which folds away (`panel`) and lets the stage grow.
+ * Edits make a draft
  * the stage and the list's thumbnail draw at once; Save writes it to the
  * theme's own library, and Undo writes back the snapshot that save kept.
  * The page keys it by library and theme.
@@ -44,6 +47,7 @@ export function ThemeEditor({
   onDraft,
   onLibraryChanged,
   onOpen,
+  panel,
 }: {
   info: ThemeInfo;
   /** The library's course code; null is the global library. */
@@ -61,6 +65,8 @@ export function ThemeEditor({
   onLibraryChanged: () => void;
   /** Opens another theme (a new copy) or the list (after a delete). */
   onOpen: (name: string | null) => void;
+  /** The token inspector's width and fold, held by the page for its header. */
+  panel: InspectorPanel;
 }) {
   const source = useThemeSource(info.name, subject, revision);
   const level: ComponentLevel | null = info.level === "bundled" ? null : info.level;
@@ -119,8 +125,13 @@ export function ThemeEditor({
 
   return (
     <>
-      <section className="page-scroll min-h-0">
-        <div className="mx-auto flex w-full max-w-[920px] flex-col gap-4 px-6 py-5">
+      <section className="page-scroll min-h-0 min-w-0 flex-1">
+        <div
+          className={cn(
+            "mx-auto flex w-full flex-col gap-4 px-6 py-5 transition-[max-width] duration-200 ease-out",
+            stageMaxWidth(panel),
+          )}
+        >
           <ThemeHead
             info={info}
             subject={subject}
@@ -174,13 +185,13 @@ export function ThemeEditor({
           </div>
         </div>
       </section>
-      <aside aria-label="Theme tokens" className="min-h-0 overflow-y-auto border-l border-border-subtle px-5 py-4">
+      <InspectorColumn panel={panel} label="Theme tokens" title="Tokens">
         {source.error ? (
-          <p data-selectable className="text-[12.5px] leading-snug text-destructive">
+          <p data-selectable className="py-3 text-[12.5px] leading-snug text-destructive">
             {source.error}
           </p>
         ) : !source.source ? (
-          <Skeleton className="h-64 w-full rounded-lg" />
+          <Skeleton className="mt-3 h-64 w-full rounded-lg" />
         ) : (
           <ThemeInspector
             name={info.name}
@@ -193,7 +204,7 @@ export function ThemeEditor({
             onDefault={(lvl, name) => void defaults.set(lvl, name)}
           />
         )}
-      </aside>
+      </InspectorColumn>
       <DuplicateDialog
         open={copying}
         title={dirty ? `Save ${info.name} as a copy` : `Duplicate ${info.name}`}
