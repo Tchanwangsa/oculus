@@ -388,9 +388,8 @@ Login5's `INVALID_CREDENTIALS`) into the snapshot's `error`. The player's
 with nothing loaded ("Player::seek called from invalid state: Stopped") is
 printed but is not a failure; a load from an invalid state still is.
 
-Every line the music module prints goes through `elog!` (`music/mod.rs`),
-which drops the line rather than panicking when stderr is a closed pipe, as
-`eprintln!` does.
+Every line the music module prints goes through the crate's `elog!`
+([development.md](./development.md#gotchas)).
 
 ## Covers come from Spotify's image CDN
 
@@ -445,4 +444,3 @@ session.
 - The snapshot's `track`, `playing` and `volume` are Oculus's even while a phone plays — the player reads `shownPlayback`, the exclusive rule and the duck read the snapshot's own.
 - librespot's rodio sink `unwrap`s a named device that is gone and hangs on a dead stream — the sink in `audio/` replaces it.
 - `.gitignore` ignores every `output/` directory — the output module is `audio/`.
-- `eprintln!` panics on a closed stderr — use `elog!` in the music module.

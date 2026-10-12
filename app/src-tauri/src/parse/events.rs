@@ -36,9 +36,9 @@ pub fn skipped(relative_path: &str, subject_id: i64) {
 pub fn failed(relative_path: &str, subject_id: i64, error: &ParseError) {
     // The UI keeps only the status, so the sentence also goes to stderr.
     if matches!(error, ParseError::Cancelled) {
-        eprintln!("[oculus] parse skipped: {relative_path}");
+        elog!("[oculus] parse skipped: {relative_path}");
     } else {
-        eprintln!("[oculus] parse failed: {relative_path}: {error}");
+        elog!("[oculus] parse failed: {relative_path}: {error}");
     }
     CHANNEL.emit(failure_status(relative_path, subject_id, error));
 }

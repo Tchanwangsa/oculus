@@ -127,7 +127,7 @@ pub fn cleanup_partial_downloads(data_dir: &Path) {
             let name = file.file_name();
             let name = name.to_string_lossy();
             if name.starts_with("raw") && name.ends_with(".mp4") {
-                eprintln!(
+                elog!(
                     "[oculus] cleanup: removing orphaned {}",
                     file.path().display()
                 );
