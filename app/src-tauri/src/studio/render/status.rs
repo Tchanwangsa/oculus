@@ -1,20 +1,19 @@
 //! Each preset's export as the Export menu shows it: the file, if one is
 //! there, and whether it is current, meaning a render now would make the
-//! same file. That is planned without rendering: the same segment keys,
-//! track and captions a render would record in renders.json.
+//! same file. That is planned without rendering: the same segment keys and
+//! track a render would record in renders.json.
 
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
-use studio_core::{captions, Library, Project};
+use studio_core::{Library, Project};
 
 use super::cache::{self, Used};
 use super::error::RenderError;
-use super::export::cues_hash;
-use super::preset::{Output, Preset};
+use super::preset::Preset;
 use super::toolkit::Toolkit;
-use super::{audio, plan, plan_video, scenes};
+use super::{audio, plan_video};
 
 /// Mirrors `ExportStatus` in `app/src/lib/studio/render.ts`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -27,8 +26,8 @@ pub struct ExportStatus {
     pub modified: Option<u64>,
     /// The file is there and a render now would make the same file.
     pub current: bool,
-    /// Why this preset cannot render now (stale narration, no encoder, no
-    /// narration to export, a size too large).
+    /// Why this preset cannot render now (stale narration, no encoder, a
+    /// size too large).
     pub problem: Option<String>,
 }
 
@@ -74,52 +73,21 @@ fn planned(
     preset: Preset,
     toolkit: &Toolkit,
 ) -> Result<Used, String> {
-    let out = Some(preset.default_out(dir).to_string_lossy().into_owned());
     let fail = |e: RenderError| e.to_string();
-    let track = |clips: &[audio::Clip], frames: u64| {
-        let samples = audio::length(frames, project.fps());
-        cache::file_name(&cache::track(dir, &audio::key(clips, samples)))
-    };
-    match preset.output() {
-        Output::Video(_) => {
-            let plan = plan_video(dir, project, preset, toolkit).map_err(fail)?;
-            Ok(Used {
-                segments: plan
-                    .segments
-                    .iter()
-                    .map(|s| format!("{}.mp4", s.key))
-                    .collect(),
-                track: (!plan.clips.is_empty())
-                    .then(|| track(&plan.clips, plan.frames))
-                    .flatten(),
-                out,
-                cues: None,
-            })
-        }
-        Output::Audio => {
-            let scenes = scenes(project).map_err(|e| e.to_string())?;
-            let clips = plan::clips(&scenes, project.fps(), project.theme.narration.lead);
-            if clips.is_empty() {
-                return Err("the video has no narration".to_owned());
-            }
-            toolkit.check_audio().map_err(fail)?;
-            let frames = scenes.last().map_or(0, |s| s.frames.end);
-            Ok(Used {
-                track: track(&clips, frames),
-                out,
-                ..Used::default()
-            })
-        }
-        Output::Subtitles => {
-            let cues = project.caption_cues().map_err(|e| e.to_string())?;
-            if cues.is_empty() {
-                return Err("the video has no narration".to_owned());
-            }
-            Ok(Used {
-                out,
-                cues: Some(cues_hash(&captions::vtt(&cues))),
-                ..Used::default()
-            })
-        }
-    }
+    let plan = plan_video(dir, project, preset, toolkit).map_err(fail)?;
+    let track = (!plan.clips.is_empty())
+        .then(|| {
+            let samples = audio::length(plan.frames, project.fps());
+            cache::file_name(&cache::track(dir, &audio::key(&plan.clips, samples)))
+        })
+        .flatten();
+    Ok(Used {
+        segments: plan
+            .segments
+            .iter()
+            .map(|s| format!("{}.mp4", s.key))
+            .collect(),
+        track,
+        out: Some(preset.default_out(dir).to_string_lossy().into_owned()),
+    })
 }

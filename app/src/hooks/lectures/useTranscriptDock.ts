@@ -4,6 +4,12 @@ import { isVertical, usePlayerPrefs, type Dock, type DockTab } from "@/stores/le
 
 export { type Dock };
 
+/** A side of the dock kept by the caller instead of in `playerPrefsStore`. */
+export interface DockSide {
+  value: Dock;
+  set: (dock: Dock) => void;
+}
+
 const MIN_H = 88;
 const MIN_W = 220;
 /** A higher floor while Chat is in front: replies and the composer need room. */
@@ -34,13 +40,19 @@ function nearestEdge(rect: DOMRect, x: number, y: number, sides: boolean): Dock 
 /**
  * Dock side + size for the media player's panel: drag the header to an edge,
  * drag the divider to resize. Stored in `playerPrefsStore`. `dockTab` is the
- * tab whose floor applies.
+ * tab whose floor applies; `keepW` is the width the video keeps beside a side
+ * dock, below which the dock draws at the bottom. `side` keeps the dock's side
+ * in the caller's own state (the Studio page's, so lectures keep theirs); the
+ * size and the folded state stay the player's.
  */
 export function useTranscriptDock(
   containerRef: RefObject<HTMLDivElement | null>,
   dockTab: DockTab,
+  keepW = KEEP_W,
+  side?: DockSide,
 ) {
-  const dock = usePlayerPrefs((s) => s.dock);
+  const prefDock = usePlayerPrefs((s) => s.dock);
+  const dock = side ? side.value : prefDock;
   const height = usePlayerPrefs((s) => s.height);
   const width = usePlayerPrefs((s) => s.width);
   const setPrefs = usePlayerPrefs((s) => s.set);
@@ -75,7 +87,7 @@ export function useTranscriptDock(
   }, [containerRef]);
 
   // A side dock that doesn't fit draws at the bottom; the preference is kept.
-  const fitsBeside = area.width === 0 || area.width >= minSize(dockTab, false) + KEEP_W;
+  const fitsBeside = area.width === 0 || area.width >= minSize(dockTab, false) + keepW;
   const drawnDock: Dock = fitsBeside ? dock : "bottom";
   const vertical = isVertical(drawnDock);
 
@@ -86,7 +98,7 @@ export function useTranscriptDock(
     const measured = vertical ? area.height : area.width;
     const cap =
       measured > 0
-        ? Math.max(min, measured - (vertical ? KEEP_H : KEEP_W))
+        ? Math.max(min, measured - (vertical ? KEEP_H : keepW))
         : Number.POSITIVE_INFINITY;
     return Math.min(Math.max(min, vertical ? height : width), cap);
   })();
@@ -122,7 +134,7 @@ export function useTranscriptDock(
           const dx = e.clientX - r.x;
           const next = r.size + (r.dock === "right" ? -dx : dx);
           setPrefs({
-            width: Math.min(Math.max(min, next), Math.max(min, rect.width - KEEP_W)),
+            width: Math.min(Math.max(min, next), Math.max(min, rect.width - keepW)),
           });
         }
         return;
@@ -153,7 +165,8 @@ export function useTranscriptDock(
       }
       if (drag.current) {
         if (drag.current.moved && dropTargetRef.current) {
-          setPrefs({ dock: dropTargetRef.current });
+          if (side) side.set(dropTargetRef.current);
+          else setPrefs({ dock: dropTargetRef.current });
         }
         dropTargetRef.current = null;
         setDropTarget(null);

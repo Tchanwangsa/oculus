@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { WarningCircle } from "@phosphor-icons/react";
 
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
-import { useStill } from "@/hooks/studio/useStill";
+import { useSceneStill } from "@/hooks/studio/useSceneStill";
 import type { VideoPlayback } from "@/hooks/studio/useVideoPlayback";
 import { fmtClockSecs } from "@/lib/lectures/media";
-import { studioFrame, type SceneInfo, type VideoDetail } from "@/lib/studio/videos";
+import type { SceneInfo, VideoDetail } from "@/lib/studio/videos";
 import { cn } from "@/lib/utils";
 
 const TILE_HEIGHT = 64;
@@ -16,7 +16,8 @@ const FRAME_WIDTH = 256;
  * One tile per scene, in order, each a still from the scene (`studio_frame`),
  * lit while the playhead is in it. A press seeks to the scene's start; a
  * scene that is not narrated has none, so its tile is only a picture. A
- * still that cannot be made (a stale narration) says why once, below.
+ * still that cannot be made (a stale narration) says why once, below. The
+ * thread page's strip; the detail page's dock has the grid (`SceneGrid`).
  */
 export function SceneStrip({ detail, playback }: { detail: VideoDetail; playback: VideoPlayback }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -30,8 +31,7 @@ export function SceneStrip({ detail, playback }: { detail: VideoDetail; playback
         {detail.scenes.map((scene, i) => (
           <SceneTile
             key={i}
-            slug={detail.row.slug}
-            version={detail.row.modified}
+            detail={detail}
             index={i}
             scene={scene}
             aspect={aspect}
@@ -47,8 +47,7 @@ export function SceneStrip({ detail, playback }: { detail: VideoDetail; playback
 }
 
 function SceneTile({
-  slug,
-  version,
+  detail,
   index,
   scene,
   aspect,
@@ -56,8 +55,7 @@ function SceneTile({
   onSeek,
   onProblem,
 }: {
-  slug: string;
-  version: number | null;
+  detail: VideoDetail;
   index: number;
   scene: SceneInfo;
   aspect: number;
@@ -65,17 +63,9 @@ function SceneTile({
   onSeek: (seconds: number) => void;
   onProblem: (message: string) => void;
 }) {
-  // Near the scene's end, where its content has arrived; a second in when
-  // there is no narration to say how long it lasts.
-  const t = scene.duration != null ? scene.duration * 0.8 : 1;
-  const still = useStill(`frame:${slug}:${version}:${index}:${FRAME_WIDTH}`, () =>
-    studioFrame(slug, { scene: index, t }, FRAME_WIDTH),
-  );
+  const still = useSceneStill(detail, index, scene, FRAME_WIDTH, onProblem);
   const start = scene.start;
   const failure = still.error;
-  useEffect(() => {
-    if (failure) onProblem(failure);
-  }, [failure, onProblem]);
 
   return (
     <button

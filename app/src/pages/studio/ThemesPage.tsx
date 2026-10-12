@@ -4,6 +4,7 @@ import { Plus } from "@phosphor-icons/react";
 
 import { LibrarySelect } from "@/components/studio/components/LibrarySelect";
 import { StudioHeader } from "@/components/studio/StudioHeader";
+import { InspectorToggle, useInspectorPanel } from "@/components/studio/panel/InspectorColumn";
 import { DuplicateDialog } from "@/components/studio/themes/DuplicateDialog";
 import { ThemeColumn } from "@/components/studio/themes/ThemeColumn";
 import { ThemeEditor } from "@/components/studio/themes/ThemeEditor";
@@ -32,6 +33,7 @@ export default function ThemesPage() {
   const themes = useThemes(code);
   const defaults = useThemeDefaults(code);
   const components = useComponents(code);
+  const panel = useInspectorPanel("oculus-studio-themes-inspector");
   const [revision, setRevision] = useState(0);
   const [draft, setDraft] = useState<Tokens | null>(null);
   const [fresh, setFresh] = useState<string | null>(null);
@@ -81,10 +83,11 @@ export default function ThemesPage() {
               New theme
             </Button>
             <LibrarySelect subjects={subjects} value={code} onChange={setCode} />
+            <InspectorToggle panel={panel} />
           </>
         }
       />
-      <div className="grid min-h-0 flex-1 grid-cols-[208px_minmax(0,1fr)_296px]">
+      <div className="flex min-h-0 flex-1">
         <ThemeColumn state={themes} defaults={defaults.defaults} subject={code} open={name ?? null} draft={draft} />
         {selected ? (
           <ThemeEditor
@@ -99,9 +102,10 @@ export default function ThemesPage() {
             onDraft={setDraft}
             onLibraryChanged={onSettled}
             onOpen={(next) => navigate(next ? themeHref(next) : THEMES_HREF)}
+            panel={panel}
           />
         ) : (
-          <div className="col-span-2 flex items-center justify-center px-6 text-center text-[13px] text-muted-foreground">
+          <div className="flex min-w-0 flex-1 items-center justify-center px-6 text-center text-[13px] text-muted-foreground">
             {themes.loading ? (
               <LoadingFill />
             ) : name ? (

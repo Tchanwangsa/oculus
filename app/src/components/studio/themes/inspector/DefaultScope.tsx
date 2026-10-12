@@ -1,7 +1,6 @@
 import { Check, GlobeSimple } from "@phosphor-icons/react";
 
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { Section } from "@/components/studio/themes/inspector/Fields";
 import { displayCode } from "@/lib/format/format";
 import type { ComponentLevel } from "@/lib/studio/components";
 import type { ThemeDefaults, ThemeLevel } from "@/lib/studio/themes";
@@ -32,10 +31,7 @@ export function DefaultScope({
   const globalOn = defaults?.global === name;
   const subjectOn = defaults?.subject === name;
   return (
-    <Section
-      title="Default for"
-      note="A new video takes its subject's default, else the global one. Any video can still pick another theme from its style chip."
-    >
+    <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5">
         <ScopeChip
           on={globalOn}
@@ -71,12 +67,16 @@ export function DefaultScope({
           New videos here use <span className="text-foreground">{defaults.effective}</span>.
         </p>
       )}
+      <p className="text-[11.5px] leading-snug text-muted-foreground">
+        A new video takes its subject's default, else the global one. Any video can still pick another theme from its
+        style chip.
+      </p>
       {error && (
         <p data-selectable className="text-[12px] leading-snug text-destructive">
           {error}
         </p>
       )}
-    </Section>
+    </div>
   );
 }
 

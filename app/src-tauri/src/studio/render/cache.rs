@@ -50,9 +50,6 @@ pub(super) struct Used {
     /// The file written.
     #[serde(default)]
     pub out: Option<String>,
-    /// sha256 of the subtitles' text, for the `subtitles` preset.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cues: Option<String>,
 }
 
 /// Each preset's last render, by name. An unreadable record counts as
@@ -74,6 +71,8 @@ pub(super) fn record_and_prune(
 ) -> Result<Vec<String>, RenderError> {
     let path = record_path(dir);
     let mut record = records(dir);
+    // A preset since removed keeps no segments or track alive.
+    record.retain(|name, _| Preset::parse(name).is_ok());
     record.insert(preset.name().to_owned(), used);
     crate::runtime::atomic_write::json(&path, &record).map_err(|e| RenderError::io(&path, e))?;
 

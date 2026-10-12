@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useNavigate } from "react-router-dom";
+
 import { Composer } from "@/components/harness/composer/Composer";
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { StyleChip } from "@/components/studio/style/StyleChip";
@@ -17,6 +19,7 @@ import { useHarnessStore } from "@/stores/chat/harnessStore";
  * (`useNewVideo`). The subject is this page's own choice, not Chat's.
  */
 export function NewVideo() {
+  const navigate = useNavigate();
   const store = useHarnessStore;
   const subjects = useHarnessStore((s) => s.subjects);
   const provider = useHarnessStore((s) => s.provider);
@@ -42,7 +45,7 @@ export function NewVideo() {
   }, [subjects, subjectId]);
   const themes = useThemes(code);
   const { defaults } = useThemeDefaults(code);
-  const { start, error } = useNewVideo(subjectId, code, style);
+  const { start, error, problems } = useNewVideo(subjectId, code, style);
 
   const onStyle = useCallback(
     (next: StudioStyle) => {
@@ -96,7 +99,28 @@ export function NewVideo() {
               placeholder="Describe it, and type @ to add a lecture, assignment or file"
               leading={<StyleChip style={style} onChange={onStyle} themes={themes} defaultTheme={defaults?.effective ?? null} />}
             />
-            {error && <p className="px-0.5 text-[12px] text-destructive">{error}</p>}
+            {error && (
+              <p role="alert" className="px-0.5 text-[12px] text-destructive">
+                {error}
+              </p>
+            )}
+            {problems.length > 0 && (
+              <div role="alert" className="space-y-1 px-0.5 text-[12px] text-destructive">
+                {problems.map((p) => (
+                  <p key={p.id}>
+                    {p.message}{" "}
+                    <button
+                      type="button"
+                      data-tab-href={p.href}
+                      onClick={() => navigate(p.href)}
+                      className="cursor-pointer text-brand underline-offset-2 hover:underline"
+                    >
+                      Open settings
+                    </button>
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

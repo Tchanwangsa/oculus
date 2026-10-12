@@ -122,7 +122,7 @@ fn no_server_anywhere_says_where_to_set_one() {
     )
     .unwrap_err();
     assert!(
-        e.contains("Settings -> Voice") && e.contains("--server"),
+        e.contains("Settings -> Studio -> Narration") && e.contains("--server"),
         "{e}"
     );
     let flags = VoiceOverrides {
@@ -252,7 +252,7 @@ fn no_engine_anywhere_says_where_to_choose_one() {
         ..Default::default()
     };
     assert_eq!(resolve(&none, &none, &settings).unwrap_err(), NO_ENGINE);
-    assert!(NO_ENGINE.contains("Settings -> Voice"));
+    assert!(NO_ENGINE.contains("Settings -> Studio -> Narration"));
 }
 
 #[test]

@@ -55,7 +55,7 @@ fn a_sample_needs_a_voice_in_settings_and_the_packs() {
         LexiconFiles::default(),
     )
     .unwrap_err();
-    assert!(e.contains("Settings -> Voice"), "{e}");
+    assert!(e.contains("Settings -> Studio -> Narration"), "{e}");
 }
 
 #[test]

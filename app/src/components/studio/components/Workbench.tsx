@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CircleNotch } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, CircleNotch } from "@phosphor-icons/react";
 
 import { ChangeBox } from "@/components/studio/components/ChangeBox";
 import { ExamplePills } from "@/components/studio/components/ExamplePills";
@@ -9,6 +9,9 @@ import { SourceView } from "@/components/studio/components/SourceView";
 import { StageView } from "@/components/studio/components/StageView";
 import { ThemeSelect } from "@/components/studio/components/ThemeSelect";
 import { DURATIONS, TimeBar } from "@/components/studio/components/TimeBar";
+import { StarterMark } from "@/components/studio/LevelMark";
+import { InspectorColumn, stageMaxWidth, type InspectorPanel } from "@/components/studio/panel/InspectorColumn";
+import { Button } from "@/components/ui/button";
 import { PillTabs } from "@/components/ui/table/PillTabs";
 import type { useLibraryChange } from "@/hooks/studio/useLibraryChange";
 import { useComponentSource } from "@/hooks/studio/useComponentSource";
@@ -19,6 +22,7 @@ import type { ThemesState } from "@/hooks/studio/useThemes";
 import { displayCode } from "@/lib/format/format";
 import type { ComponentInfo } from "@/lib/studio/components";
 import type { PropValues } from "@/lib/studio/props";
+import { cn } from "@/lib/utils";
 
 type Tab = "change" | "source";
 const TABS: ReadonlyArray<{ value: Tab; label: string }> = [
@@ -32,9 +36,9 @@ const sameProps = (a: PropValues, b: PropValues) => JSON.stringify(a) === JSON.s
 /**
  * One component on the stage: the centre column (theme, examples, the frame,
  * the timeline, the change box and the source) and the props inspector
- * beside it, as the two grid cells they fill. The page keys it by component,
- * so a new one starts from its first example; a reload after a change (a new
- * `info`) starts the examples over too.
+ * beside it, which folds away (`panel`) and lets the stage grow. The page
+ * keys it by component, so a new one starts from its first example; a reload
+ * after a change (a new `info`) starts the examples over too.
  */
 export function Workbench({
   info,
@@ -45,6 +49,7 @@ export function Workbench({
   revision,
   change,
   onLibraryChanged,
+  panel,
 }: {
   info: ComponentInfo;
   /** The library's course code; null is the global library. */
@@ -58,6 +63,8 @@ export function Workbench({
   change: ReturnType<typeof useLibraryChange>;
   /** The component was copied into or removed from the subject's library. */
   onLibraryChanged: () => void;
+  /** The props inspector's width and fold, held by the page for its header. */
+  panel: InspectorPanel;
 }) {
   const names = Object.keys(info.examples);
   const [example, setExample] = useState<string | null>(names[0] ?? null);
@@ -97,11 +104,19 @@ export function Workbench({
 
   return (
     <>
-      <section className="page-scroll min-h-0">
-        <div className="mx-auto flex w-full max-w-[920px] flex-col gap-4 px-6 py-5">
+      <section className="page-scroll min-h-0 min-w-0 flex-1">
+        <div
+          className={cn(
+            "mx-auto flex w-full flex-col gap-4 px-6 py-5 transition-[max-width] duration-200 ease-out",
+            stageMaxWidth(panel),
+          )}
+        >
           <div className="flex items-center gap-3">
             <div className="min-w-0 flex-1">
-              <h2 className="truncate text-[18px] font-semibold leading-tight text-foreground">{info.name}</h2>
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="truncate text-[18px] font-semibold leading-tight text-foreground">{info.name}</h2>
+                {info.starter && <StarterMark />}
+              </div>
               <p className="text-[12px] text-muted-foreground">
                 {info.kind === "shell" ? "Shell" : "Component"} · {levelText(info, subject)}
               </p>
@@ -154,22 +169,35 @@ export function Workbench({
           </div>
         </div>
       </section>
-      <aside aria-label="Props" className="min-h-0 overflow-y-auto border-l border-border-subtle px-5 py-4">
+      <InspectorColumn
+        panel={panel}
+        label="Props"
+        title="Props"
+        actions={
+          info.problem == null ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Reset to example"
+              title="Reset to example"
+              disabled={sameProps(values, exampleProps ?? {})}
+              onClick={() => setValues(clone(exampleProps))}
+              className="text-muted-foreground"
+            >
+              <ArrowCounterClockwise size={13} />
+            </Button>
+          ) : null
+        }
+      >
         {info.problem != null ? (
-          <p className="text-[12.5px] leading-snug text-muted-foreground">
+          <p className="py-3 text-[12.5px] leading-snug text-muted-foreground">
             The props are known once the component loads. Ask for a change to fix it.
           </p>
         ) : (
-          <Inspector
-            props={info.props}
-            values={values}
-            tokens={tokens}
-            onChange={setValues}
-            onReset={() => setValues(clone(exampleProps))}
-            canReset={!sameProps(values, exampleProps ?? {})}
-          />
+          <Inspector props={info.props} values={values} tokens={tokens} onChange={setValues} />
         )}
-      </aside>
+      </InspectorColumn>
     </>
   );
 }

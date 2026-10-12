@@ -1,4 +1,5 @@
 mod phrasing;
+mod style;
 mod subtitles;
 mod timing;
 

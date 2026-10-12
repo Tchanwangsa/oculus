@@ -1,6 +1,7 @@
-//! Kokoro in Settings -> Voice: its two packs' status, one download for both
-//! that reports progress as `studio-voice-progress` events (`progress`), and
-//! a sample clip synthesised on this Mac, never a billed call.
+//! Kokoro in Settings -> Studio -> Narration: the model and pronunciation
+//! packs' status, one download for both that reports progress as
+//! `studio-voice-progress` events (`progress`), and a sample clip
+//! synthesised on this Mac, never a billed call. The voices are `voices`.
 
 use std::path::Path;
 
@@ -29,9 +30,6 @@ pub struct VoicePacks {
     /// Both packs' download size.
     pub bytes: u64,
     pub packs: Vec<PackRow>,
-    /// The pack's voices, downloaded or not, then any other voice file in
-    /// the folder (`kokoro::voices`).
-    pub voices: Vec<VoiceFile>,
 }
 
 #[derive(Debug, Serialize)]
@@ -42,13 +40,7 @@ pub struct PackRow {
     pub bytes: u64,
 }
 
-#[derive(Debug, Serialize)]
-pub struct VoiceFile {
-    pub id: String,
-    pub downloaded: bool,
-}
-
-/// The packs and voices in `dir`, from the disk alone.
+/// The packs in `dir`, from the disk alone.
 pub(super) fn packs_status(dir: &Path) -> VoicePacks {
     let downloading = kokoro::downloading();
     let packs: Vec<PackRow> = kokoro::packs()
@@ -69,10 +61,6 @@ pub(super) fn packs_status(dir: &Path) -> VoicePacks {
         status: kokoro::status(dir),
         bytes: packs.iter().map(|p| p.bytes).sum(),
         packs,
-        voices: kokoro::voices(dir)
-            .into_iter()
-            .map(|(id, downloaded)| VoiceFile { id, downloaded })
-            .collect(),
     }
 }
 
@@ -111,7 +99,7 @@ pub(super) fn sample(
     Ok(speaker.speak(text)?.wav)
 }
 
-/// Both packs' status and the voices on disk. Local only.
+/// Both packs' status. Local only.
 #[tauri::command]
 pub async fn studio_voice_packs_status() -> Result<VoicePacks, String> {
     crate::runtime::blocking::run(|| Ok(packs_status(&kokoro::dir()))).await
@@ -127,6 +115,7 @@ pub async fn studio_voice_packs_download(app: AppHandle) -> Result<(), String> {
         download_with_events(
             &app,
             PROGRESS_EVENT,
+            None,
             "Kokoro's packs",
             &dir,
             total,
@@ -143,7 +132,7 @@ pub fn studio_voice_packs_cancel() -> bool {
 }
 
 /// Delete both packs and any partial download, stopping a download if one
-/// runs; another voice's file stays. Returns the bytes freed.
+/// runs; every voice's file stays. Returns the bytes freed.
 #[tauri::command]
 pub async fn studio_voice_packs_delete() -> Result<u64, String> {
     crate::runtime::blocking::run(|| kokoro::delete(&kokoro::dir())).await

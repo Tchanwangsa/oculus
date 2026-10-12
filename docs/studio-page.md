@@ -14,14 +14,15 @@ page is the frontend over them.
 | The nav column: New video, Videos, Components, Themes, the Recent list and its search | `app/src/components/studio/nav/` |
 | Pages | `app/src/pages/studio/` (`NewVideoPage`, `VideosPage`, `VideoPage`, `VideoThreadPage`, `ComponentsPage`, `ThemesPage`) |
 | New video: the box and its start-up | `app/src/components/studio/new/NewVideo.tsx`, `app/src/hooks/studio/useNewVideo.ts`, `app/src/lib/studio/title.ts` |
-| The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/hooks/studio/useThemeDefaults.ts`, `app/src/lib/studio/themes.ts` |
+| The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/hooks/studio/useThemeDefaults.ts`, `app/src/lib/studio/themes.ts`, `app/src/lib/studio/length.ts`, `app/src/lib/studio/voice.ts`, `app/src/lib/studio/setup.ts` |
 | The thread column | `app/src/components/studio/thread/ThreadColumn.tsx` |
-| Player, render bar, scene strip, script, facts, the Export menu | `app/src/components/studio/video/` (`ExportMenu.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
+| Player, render bar, scene strip, the detail's dock (script, scene grid), facts, Render draft, the Export menu | `app/src/components/studio/video/` (`VideoDetailStage.tsx`, `VideoDock.tsx`, `RenderDraftButton.tsx`, `ExportMenu.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useDockedFrameHeight.ts`, `app/src/hooks/studio/useSceneStill.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
 | The Videos grid, its cards and subject pills | `app/src/components/studio/videos/`, `app/src/components/ui/layout/MediaGrid.tsx` |
 | Stills (`studio_frame`, `studio_thumbnail`) as object URLs | `app/src/lib/studio/stills.ts`, `app/src/hooks/studio/useStill.ts` |
 | Render state, the video list, the event bridge | `app/src/stores/studio/` (`renderStore.ts`, `videosStore.ts`), `app/src/hooks/backend/useStudioEvents.ts` |
 | The Components playground: list, stage, timeline, inspector, source, change box | `app/src/pages/studio/ComponentsPage.tsx`, `app/src/components/studio/components/` (`inspector/` for the props form) |
-| The playground's hooks: component list, source, stage frames, playhead, change flow | `app/src/hooks/studio/` (`useComponents`, `useComponentSource`, `useStageFrame`, `useStageWidth`, `usePlayhead`, `useLibraryChange`, `useDefaultModel`), `app/src/lib/studio/props.ts`, `app/src/lib/studio/changeRequest.ts` |
+| The inspector column both editors share: fold, width, sections, compact fields | `app/src/components/studio/panel/` (`InspectorColumn.tsx`, `fields.tsx`), `app/src/components/ui/CollapsibleSection.tsx`, `app/src/hooks/studio/useInspectorSections.ts` |
+| The playground's hooks: component list, source, stage frames, playhead, change flow | `app/src/hooks/studio/` (`useComponents`, `useComponentSource`, `useStageFrame`, `useStageWidth`, `usePlayhead`, `useLibraryChange`, `useDefaultModel`), `app/src/lib/studio/props.ts` (the form's sections, tooltips and changed-from-default), `app/src/lib/studio/changeRequest.ts` |
 | The library choice both pages share, where an item comes from, own versions | `app/src/hooks/studio/useStudioLibrary.ts`, `app/src/components/studio/LevelMark.tsx`, `app/src/components/studio/components/OwnVersionActions.tsx` |
 | The Themes page: list, sample scenes, header actions, token inspector, copies | `app/src/pages/studio/ThemesPage.tsx`, `app/src/components/studio/themes/` (`inspector/` for the token form), `app/src/hooks/studio/useThemeSource.ts`, `app/src/lib/studio/themeDraft.ts` |
 | The colour control | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
@@ -52,22 +53,39 @@ there are no toasts or bars ([ui.md](./ui.md)).
 Chat's "next thread" scope) and the style chip. Sending runs
 `useNewVideo`:
 
-1. `newVideo({title, subject, theme?, portrait})`. The title is the prompt's
+1. Read what narration needs (`readSetupProblems`: the saved voice settings,
+   Kokoro's pack and voice status and the aligner's status, all local and
+   free: nothing synthesises or downloads) and check it with `setupProblems`. A
+   video needs a configured voice (an engine and a voice; for the server
+   engine also a URL and model), and when Kokoro is the engine its model and
+   pronunciation pack and the chosen voice downloaded, and the word-timing
+   model installed (a download still running counts as missing). With any
+   missing it stops here: no folder is made, and each missing piece shows
+   under the box with an "Open settings" link to the page that fixes it
+   (Settings → Studio → Narration, or Word timing). `voiceProblem` and
+   `setupProblems` mirror Rust's `voice::resolve` and the narrate checks,
+   which stay the source of truth and refuse the same cases at narrate time.
+2. `newVideo({title, subject, theme?, portrait})`. The title is the prompt's
    first line without its `@` paths, cut at 60 characters; the thread names
    itself later and the slug comes from the title. The subject is the course
    code without its term (`displayCode`), the name of its folder under
    `studio/subjects/`.
-2. `harnessSend(null, provider, text, {model, reasoningEffort, subjectId,
-   studio: {slug, lengthSecs, format}})`, which links the new thread to the
+3. `harnessSend(null, provider, text, {model, reasoningEffort, subjectId,
+   studio: {slug, lengthSecs?, format}})`, which links the new thread to the
    video ([studio.md](./studio.md#a-video-has-a-thread)).
-3. Reload the thread and video lists, and open `/studio/videos/:slug/thread`.
+4. Reload the thread and video lists, and open `/studio/videos/:slug/thread`.
 
-A failure at either step shows its sentence under the box and gives the text
-back (`Composer`'s `restore`). One after step 1 leaves the scaffold behind, a
-video with no thread in the grid.
+`lengthSecs` is left out when the length is Auto, and the brief then has no
+length line. A failure at any step shows its sentence under the box and gives
+the text back (`Composer`'s `restore`). One after step 1 leaves the
+scaffold behind, a video with no thread in the grid.
 
 **The style chip** holds the theme, the format (Video or Reels, which is
-`portrait`) and the length target (30 s, 60 s, 2 min, 5 min). Until a theme
+`portrait`) and the length. The length is Auto (the default: no target, the
+agent decides), 30 s, 60 s, 2 min, 5 min, or Custom, a field that takes `45`,
+`90s`, `3m` or `1:30` (`parseLength`; whole seconds, at least 5, else a
+sentence under the field). The chip reads "Video · Auto", "Video · 90 s" or
+"Video · 2:30". Until a theme
 is picked by hand the chip shows the subject's default
 (`studio_theme_defaults`' `effective`, marked "Default" in the list) and
 sends none, so the backend gives the video that default by name; choosing a
@@ -75,10 +93,11 @@ subject brings its default. A theme picked by hand holds across a subject
 change, and picking the marked default again goes back to following it.
 Each theme row says where it comes from (an own version, the subject's,
 global, built in). The format and length are remembered
-(`oculus-studio-style`). Themes come from `studio_themes` for the chosen
+(`oculus-studio-style`), a custom length as typed. Themes come from `studio_themes` for the chosen
 subject; if the command rejects, the list is only "Default" and the popover
-prints the reason. The voice is shown read-only
-from Settings → Voice with a link there. There is no sample button: a sample
+prints the reason. The popover's last line is the narration voice with a link to
+Settings → Studio → Narration; while `setupProblems` finds anything missing it
+is instead one warning line per missing piece, each with its Settings link. There is no sample button: a sample
 would be a billed TTS call, and nothing in Settings makes one.
 
 ## The thread page: the conversation beside the video
@@ -89,15 +108,18 @@ the lecture dock does and releasing them on leaving. When a turn ends it
 re-reads the video's detail and the list, since the agent may have changed
 files. A video with no thread redirects to its detail.
 
-The right column loads `studio_video_detail` and then renders `VideoStage`:
+The right column loads `studio_video_detail` and then renders `VideoStage`
+(the player, the render bar and the scene strip; the detail page composes the
+player and render bar itself):
 
-- **The player** is the app's `MediaPlayer` with no dock (`dock` is
-  optional) over the newest video render (`draft`, `final`, `small` or `2x`;
+- **The player** is the app's `MediaPlayer` with no dock (the detail page
+  gives it one) over the newest video render (`draft`, `final` or `small`;
   `playableRenders`), `mediaSrc(path)` plus `&v=<mtime>` so a re-render of
   the same path is a new file to the element. With several, pills choose.
   When the render has its `.vtt` beside it, `studio_render_captions` reads it, `parseVtt` makes the cues
-  and the bar gets its captions button; otherwise there is none. No render
-  shows "Not rendered yet" and Render draft. The scrub bar's notches
+  and the bar gets its captions button; otherwise there is none (and none
+  when the video's captions are drawn into the picture, `detail.captions`).
+  No render shows "Not rendered yet", and the header offers Render draft. The scrub bar's notches
   are the scene starts. The element shares the app's one sound with lectures
   and library videos (`useLibraryPlayback`).
 - **The scene strip** has a tile per scene, a still from `studio_frame` at
@@ -105,11 +127,15 @@ The right column loads `studio_video_detail` and then renders `VideoStage`:
   seeks to the scene's start; a scene with no start is only a picture, and
   the scene under the playhead is lit. A still that cannot be made, a stale
   narration, says so once under the strip with the command's own sentence.
-- **The render bar** starts `studio_render` through `renderStore`. A render
-  in flight, of any preset (the Export menu starts the others), swaps Render
-  final for a bar naming the preset, the percentage and Cancel; a failure
-  stays until the next render starts. Rendering is local (ffmpeg),
-  so unlike Settings it may start here.
+  The detail page has no strip: its Scenes tab draws the same stills
+  (`useSceneStill`) as a grid.
+- **The render bar** is under the player and has no buttons: the render
+  pills when there are several, and when the shown one was made. A render in
+  flight, of any preset (the header starts them through `renderStore`), takes
+  its place with a bar naming the preset, the percentage and Cancel; a failure
+  stays until the next render starts. Rendering is local (ffmpeg), so unlike
+  Settings it may start from the page. The thread page has no render button
+  either: its video is rendered from the detail page.
 
 ## Renders live in a store, not in the page
 
@@ -133,22 +159,59 @@ the problem in place of its facts. Pills over the grid narrow by subject
 (shown when two or more subjects have videos; the choice is remembered in
 `oculus-studio-subject`). With no video the page offers New video.
 
-The detail is the same `VideoStage` beside the facts (subject, theme, voice,
-length, shape) and the script split by scene; a press on a scene seeks the
-player. **Continue in chat** opens the thread page.
+The detail (`VideoDetailStage`) is the player with a dock, and under it a row
+of the facts (subject, theme, voice, length, shape) beside the render bar.
+**Continue in chat** opens the thread page. The header's last button is
+**Render draft** while the video has no playable render (it starts
+`studio_render` for `draft` through `renderStore`, and spins, disabled, while
+any render of the folder runs), and **Export** once it has one.
 
-- **Export** (`ExportMenu`) is a pill over a popover of the presets
-  ([studio.md](./studio.md#rendering-a-video)): each row names the preset and
-  what it makes for this video's shape (`presetHint`), and its state from
-  `studio_exports`, read when the menu opens and again when a render of the
-  folder ends: a check when its file is current, "out of date" when the file
-  is from an older version, the reason when it cannot render now. Render (or
-  Re-render) closes the menu and starts it through `renderStore`, so its
-  progress is the render bar's; while any render of the video runs the
-  buttons are off and the running row spins. A row with a file has Show in
-  Finder (Show in Explorer on Windows, `revealItemInDir`). A failure to read
-  the statuses shows in the popover; a render's failure, under the render
-  bar.
+- **The dock** is the lecture player's (`MediaDock`, `useTranscriptDock`):
+  the player's dock button, T and the dock's × fold it, its header drags it to
+  an edge, its divider resizes it, and the side, size and open state are
+  `playerPrefsStore`'s, shared with lectures ([viewers.md](./viewers.md)),
+  except the side: a video's dock keeps its own (`oculus-studio-video-dock-side`,
+  `DockSide` passed to `useMediaPlayer`), on the right until moved. Its
+  tabs, **Script** and **Scenes** (the tab is remembered in
+  `oculus-studio-video-dock-tab`), take the place of the lecture's Transcript:
+  - **Script** (`ScriptPanel`) is the narration split by scene, with each
+    scene's length. The scene under the playhead is lit, and the list follows
+    it as the lecture transcript does (`FollowList`: nudge, Back to live,
+    idle re-sync). A press seeks to the scene's start.
+  - **Scenes** (`SceneGrid`) is a grid of the scenes' stills, as many columns
+    as the dock's width allows, each with its number and length. The scene
+    under the playhead is lit and scrolled into view when the playhead enters
+    it, unless the pointer is on the grid. A press seeks.
+  - Both are inert while there is no render, since there is no video to move;
+    the Script still reads and the stills still draw.
+- **The picture** is 16:9 beside or above the dock whatever its width
+  (`useDockedFrameHeight` sets the frame's height from the frame's width, the
+  dock's drawn size and the dock side), within `100vh - 14rem` and no shorter
+  than 18rem; folding the dock gives the picture the whole width, and the
+  height eases with the dock's slide. The page is the content's width up to
+  1440px. The picture keeps 480px beside a side dock (`dockKeepWidth`): a
+  narrower page draws the dock at the bottom without rewriting the preference.
+  With no render the picture says "Not rendered yet" under the control bar,
+  with no button of its own.
+- **Export** (`ExportMenu`) is a pill over a popover of the presets, Draft,
+  Final and Small ([studio.md](./studio.md#rendering-a-video)): each row names
+  the preset and what it makes for this video's shape (`presetHint`), and its
+  state from `studio_exports`, read when the menu opens and again when a
+  render of the folder ends: a check when its file is current, "out of date"
+  when the file is from an older version, the reason when it cannot render
+  now. Render (or Re-render) closes the menu and starts it through
+  `renderStore`, so its progress is the render bar's; while any render of the
+  video runs the buttons are off and the running row spins. A row with a file
+  has Show in Finder (Show in Explorer on Windows, `revealItemInDir`). A
+  failure to read the statuses shows in the popover; a render's failure,
+  under the render bar.
+- **Captions in the picture** is the switch under the presets (hint: "Drawn
+  into the frames, so every player shows them"), per video: `detail.captions`
+  is video.json's `captions` and `setCaptions` writes it
+  (`studio_set_captions`). A change re-reads the detail and the statuses, so
+  the files made the other way show "out of date". With the switch on the
+  player has no CC button, since the words are in the frames; with it off the
+  CC button shows the render's `.vtt`. A failed write shows under the switch.
 
 ## The Components playground
 
@@ -164,7 +227,12 @@ columns:
   a row says where it comes from (`LevelMark`): "Own version" when the
   subject's file replaces a global one (`shadows`), "Subject" when only the
   subject has it, "Global" when it is inherited. A component that does not
-  load is marked (`problem`, its sentence in the row's tooltip).
+  load is marked (`problem`, its sentence in the row's tooltip). A **Starter**
+  pill (`StarterMark`) marks a name in studio-core's starter set
+  (`STARTER_COMPONENTS`; `ComponentRow.starter`, `ComponentInfo.starter`),
+  in the global library and in a subject's alike, whichever level holds the
+  file and whether it was edited; a component the user made has none. The
+  stage's header shows it beside the name.
 - **Own versions.** In a subject's library the stage's header offers **Own
   version** on an inherited component, which copies the global text into
   the subject's library (`studio_component_write` at the subject level), and
@@ -178,18 +246,49 @@ columns:
   `oculus-studio-components-theme`), the example pills pick a named example,
   and the frame is `studio_component_frame` at the playhead `t`, for a scene
   length of 2, 4 or 8 s, at the stage's width in device pixels (a step of 80,
-  320 to 1920). The props it sends are always the inspector's whole set, not
+  320 to 2160). The props it sends are always the inspector's whole set, not
   an example name, so an edit is just a new request.
-- **The inspector** is generated from `props`: `str` and `latex` a text
-  field, `num` a number field, `bool` a switch, `oneOf` a select of the
-  schema's values, `token` a select of the names in the chosen theme's
-  `tokens` section (`color`, or a dotted path; a colour shows its dot; a theme
-  without the section leaves a plain text field), and `list` rows of the inner
-  kind with Add and remove. A prop that is not set takes its default, which
-  shows as the placeholder (a switch shows the default's state); an optional
-  prop or one with a default has an unset button, and an empty text field on
-  an optional prop unsets it. Reset to example restores the chosen example's
-  props. Nothing here edits the component.
+- **The inspector** is generated from `props` and is a column on the
+  stage's right (below). `str` and `latex` are a text field, `num` a number
+  field, `bool` a switch, `oneOf` a select of the schema's values, `token` a
+  select of the names in the chosen theme's `tokens` section (`color`, or a
+  dotted path; a colour shows its dot; a theme without the section leaves a
+  plain text field), and `list` an add control over items of the inner kind.
+  A prop that is not set takes its default, which shows as the placeholder
+  (a switch shows the default's state); an emptied number or an emptied text
+  field on an optional prop unsets it. Nothing here edits the component.
+
+**The inspector column** (`InspectorColumn`, the same on the Themes page)
+holds a header row (a title and its actions: here the icon that resets the
+props to the chosen example) over a scroller. The header's last button
+(`InspectorToggle`, beside the library select) folds the whole column and the
+stage takes its width; dragging the seam resizes it (264 to 420 px; dragging
+it narrow folds it, as the nav column). The fold and width are remembered per page
+(`oculus-studio-components-inspector`, `oculus-studio-themes-inspector`). The
+column's content keeps its unfolded width while it eases shut, so it is
+clipped, not reflowed. The stage's column may grow from 920 to 1080 px with
+the inspector folded, and `useStageWidth` measures the stage, so the frame
+request follows (up to 2160 device pixels).
+
+**The props form** is in sections (`CollapsibleSection`, a caret, a name, a
+count, and a brand dot while a folded section holds a change) that fold, each
+remembered in `oculus-studio-components-sections` (`useInspectorSections`).
+`groupProps` (`lib/studio/props.ts`) derives them from the schema and the
+names, never from a component: a name that ends in a moment (`at`, `plotAt`,
+`revealEach`, `zoomDur`) is **Timing**; a colour (`token`), a closed choice
+(`oneOf`) or a switch (`bool`), alone or as a list, is **Style**; the rest is
+**Content**. Fewer than six props, or only one non-empty group, is a single
+"Props" section.
+
+Fields are 28 px. A prop is its name on one line, with a small number,
+switch or select beside it and text and lists under it. What it takes and
+its default (`describeProp`, "List of numbers - default [-1,4,1]") is the
+name's tooltip, not text beside it. A brand dot before the name means the
+value differs from the default (`changed`; a required prop never does), and
+an icon at the row's end, shown on hover, puts the prop back to its default
+(or unsets it). A list of numbers is a grid of small fields, four to a line,
+each with a remove badge on hover; any other list is a row per item with its
+remove at the end on hover; an empty list is its name and an add icon.
 
 **One frame in flight.** `useStageFrame` keeps at most one
 `studio_component_frame` call running and, behind it, only the newest request,
@@ -246,19 +345,28 @@ built-in `default` under a name asked for. Three columns:
   `useStageFrame` (one in flight, edits wait 150 ms, as the playground) with
   the timeline to play or scrub its motion. Under it, Ask for a change and
   the theme file (the draft's text while there is one).
-- **The inspector** (`inspector/`) edits the draft: **Default for** chips
-  (Global, and the browsed subject) that make the theme that library's
-  default or clear it (`studio_theme_set_default`, the library's
-  `library.json`; a subject's own theme cannot be the global default), then
-  every `color.*` token with the colour control, the heading, body and code
-  fonts (the families studio-core bundles), each `type.*` font size,
-  `radius.*`, the motion durations, easings (four cubic-bezier numbers),
-  spring presets (a preset choice, then its stiffness, damping and mass),
-  the scene transition's kind, length and direction, magic move, colour
-  blend and motion blur, and the narration's lead, tail and pause. There is
-  no texture token. A new heading or body font also moves the `type.*`
-  entries that used the old family (`setFontRole`, by entry name when two
-  roles share one), since components spread `type.*`.
+- **The inspector** (`inspector/`, in `InspectorColumn` as on the Components
+  page: the header's toggle folds it, the seam resizes it, both remembered
+  under `oculus-studio-themes-inspector`) edits the draft in sections that
+  fold (`oculus-studio-themes-sections`; Typography, Shape, Motion, Transition and
+  Narration start folded). **Default for**: chips (Global, and the browsed
+  subject) that make the theme that library's default or clear it
+  (`studio_theme_set_default`, the library's `library.json`; a subject's own
+  theme cannot be the global default); its header says which are on.
+  **Colours**: every `color.*` token as a tile of a swatch, the name and the
+  hex, two to a line, under a small heading for what it colours
+  (`colorGroups` in `lib/studio/themeDraft.ts`, by name: Surfaces, Text,
+  Accent, Ink, Status, Other); a tile opens the colour control. **Type**: the
+  heading, body and code fonts (the families studio-core bundles) and each
+  `type.*` font size. **Shape**: `radius.*`. **Motion**: the durations, the
+  easings (four cubic-bezier numbers) and the spring presets (a preset
+  choice, then its stiffness, damping and mass). **Transition**: the scene
+  transition's kind, length and direction, then magic move, colour blend and
+  motion blur. **Narration**: the lead, tail and pause. A section whose
+  tokens the theme lacks is left out. There is no texture token. A new
+  heading or body font also moves the `type.*` entries that used the old
+  family (`setFontRole`, by entry name when two roles share one), since
+  components spread `type.*`.
 
 **Edits are a draft until saved.** Each edit replaces the draft
 (`lib/studio/themeDraft.ts`, key order kept), and the stage draws it at once
@@ -286,8 +394,9 @@ the built-in theme (duplicate it first) and while the draft has unsaved
 edits.
 
 **The colour control** (`components/ui/color/`) is a round swatch and its
-hex that opens a popover: a saturation and brightness pad, a hue strip, an
-opacity strip and the hex text. It is pointer-driven (`useFractionDrag`
+hex that opens a popover (`ColorField`; `ColorPopover` is the same popover
+behind any face, as the inspector's tiles): a saturation and brightness pad,
+a hue strip, an opacity strip and the hex text. It is pointer-driven (`useFractionDrag`
 reports positions as fractions of the element's box, so page zoom does not
 matter) and the arrow keys move each part. It holds the hue itself, so
 dragging through grey keeps it, and hands back `#rrggbb`, or `#rrggbbaa`

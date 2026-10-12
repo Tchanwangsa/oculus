@@ -25,7 +25,7 @@ import { KokoroFields } from "./KokoroFields";
 import { ServerFields } from "./ServerFields";
 import { SettingRow } from "./SettingRow";
 import { usePackDownload, type PackApi } from "./usePackDownload";
-import { VoiceSampleRow } from "./VoiceSampleRow";
+import { useKokoroVoices } from "./voices/useKokoroVoices";
 
 type Field = "engine" | "baseUrl" | "model" | "voice" | "speed";
 
@@ -49,7 +49,7 @@ const VOICE_PACKS: PackApi<VoicePacksStatus> = {
 const fmtSpeed = (s: number) => `${Number(s.toFixed(2))}×`;
 
 /**
- * Settings → Voice: the engine Studio narrates with (Kokoro in the app, or a
+ * Settings → Studio → Narration: the engine Studio narrates with (Kokoro in the app, or a
  * keyless OpenAI-compatible TTS server), its voice and the speed, written to
  * the `voice` row by Rust, which validates it and answers with what it
  * stored. Nothing here is billed: listing a server's models is free, and
@@ -61,6 +61,7 @@ export function NarrationVoiceSection() {
   const [errors, setErrors] = useState<VoiceErrors>({});
   const [note, setNote] = useState<string | null>(null);
   const packs = usePackDownload(VOICE_PACKS);
+  const files = useKokoroVoices();
   // The row as last stored; each write sends all of it, one at a time.
   const saved = useRef<VoiceSettings | null>(null);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
@@ -113,7 +114,7 @@ export function NarrationVoiceSection() {
     kokoro: !packs.status
       ? ""
       : packs.download
-        ? `Downloading the packs · ${percent(packs.download)}%`
+        ? `Downloading the model and pronunciation pack · ${percent(packs.download)}%`
         : ready
           ? "Runs on this Mac, offline"
           : `Runs on this Mac, offline, after a ${modelSize(packs.status.bytes)} download`,
@@ -152,7 +153,14 @@ export function NarrationVoiceSection() {
       {settings && engine ? (
         <div className="mt-3 space-y-1">
           {engine === "kokoro" ? (
-            <KokoroFields settings={settings} errors={errors} save={save} packs={packs} />
+            <KokoroFields
+              settings={settings}
+              errors={errors}
+              save={save}
+              packs={packs}
+              files={files}
+              speed={speed}
+            />
           ) : (
             <ServerFields
               settings={settings}
@@ -180,13 +188,10 @@ export function NarrationVoiceSection() {
           </SettingRow>
 
           {engine === "kokoro" ? (
-            <>
-              <VoiceSampleRow voice={settings.voice} speed={speed} ready={ready} />
-              <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
-                hexgrad/Kokoro-82M (onnx-community's int8 export), misaki's dictionary and
-                PeterReid/graphemes_to_phonemes_en_us, Apache-2.0
-              </p>
-            </>
+            <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
+              hexgrad/Kokoro-82M (onnx-community's int8 export), misaki's dictionary and
+              PeterReid/graphemes_to_phonemes_en_us, Apache-2.0
+            </p>
           ) : (
             <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
               API keys aren't supported yet: use a server that needs none. A server has no sample

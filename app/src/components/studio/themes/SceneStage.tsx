@@ -67,9 +67,9 @@ export function SceneStage({
   return (
     <div className="space-y-3">
       {scenes.length > 0 && shown && (
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-medium tracking-wide text-muted-foreground">Scene</span>
-          <PillTabs tabs={scenes} value={shown.value} onChange={setScene} className="flex-wrap gap-1" />
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground">Scene</span>
+          <PillTabs tabs={scenes} value={shown.value} onChange={setScene} className="gap-1" scroll />
         </div>
       )}
       {components.loaded && scenes.length === 0 ? (

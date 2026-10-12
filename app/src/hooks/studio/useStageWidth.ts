@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
  *  the stage for every pixel. */
 const STEP = 80;
 const MIN = 320;
-/** `studio_component_frame` draws up to 4096 px; the frame is 1920 wide at
- *  most, which the stage never shows larger than. */
-const MAX = 1920;
+/** `studio_component_frame` draws up to 4096 px; the stage is 1080 css px
+ *  wide at most (its widest, with the inspector folded), 2160 device pixels
+ *  at 2x. */
+const MAX = 2160;
 
 /** A ref for the stage's box and the PNG width to ask for: its width in
  *  device pixels, rounded to a step. 0 until it is measured. */

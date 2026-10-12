@@ -1,4 +1,4 @@
-//! The pronunciation review in Settings -> Voice (`studio::voice::review`):
+//! The pronunciation review in Settings -> Studio -> Pronunciation (`studio::voice::review`):
 //! the agent's suggestions, the student's three verdicts, and a sample of
 //! the word's sentence read either way, synthesised by Kokoro on this computer.
 
@@ -72,7 +72,7 @@ pub async fn studio_pronunciation_wrong(id: String, note: Option<String>) -> Res
     crate::runtime::blocking::run(move || Store::app().mark_wrong(&id, note)).await
 }
 
-/// The item's sentence with the word read as `which`, in Settings -> Voice's
+/// The item's sentence with the word read as `which`, in Settings -> Studio -> Pronunciation's
 /// Kokoro voice and speed, as WAV bytes.
 #[tauri::command]
 pub async fn studio_pronunciation_sample(

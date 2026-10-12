@@ -1,4 +1,4 @@
-//! The narration aligner's model in Settings -> Voice: its status, and a
+//! The narration aligner's model in Settings -> Studio -> Word timing: its status, and a
 //! download that reports progress as `studio-aligner-progress` events
 //! (`progress`).
 
@@ -39,6 +39,7 @@ pub async fn studio_aligner_download(app: AppHandle) -> Result<(), String> {
         download_with_events(
             &app,
             PROGRESS_EVENT,
+            None,
             "the aligner model",
             &dir,
             PACK.bytes(),

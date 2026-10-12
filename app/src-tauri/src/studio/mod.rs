@@ -4,7 +4,7 @@
 //! the data directory's libraries and videos, `brief`, a scene builder's
 //! input in one read, `slides`, crops of library PDF pages as video assets,
 //! and the Tauri commands behind
-//! Settings -> Voice and rendering
+//! Settings -> Studio and rendering
 //! (docs/studio.md, "Narration is made by `oculus studio narrate`",
 //! "Narration timing" and "Rendering a video").
 

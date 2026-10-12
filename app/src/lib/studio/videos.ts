@@ -16,7 +16,7 @@ export interface VideoRow {
   scenes: number | null;
   /** A narration manifest exists; it may be stale. */
   narrated: boolean;
-  /** File names in `renders/`: `draft.mp4`, `audio.m4a`, … */
+  /** File names in `renders/`: `draft.mp4`, `final.mp4`, … */
   renders: string[];
   /** Seconds since the epoch. */
   modified: number | null;
@@ -72,15 +72,22 @@ export interface VideoDetail {
   width: number;
   height: number;
   theme: string;
-  /** The narration voice id, from video.json or Settings -> Voice; null if
+  /** The narration voice id, from video.json or Settings -> Studio -> Narration; null if
    *  neither names one. */
   voice: string | null;
+  /** video.json's `captions`: the renders have captions drawn into the picture. */
+  captions: boolean;
   scenes: SceneInfo[];
   renders: RenderFile[];
 }
 
 export function videoDetail(slug: string): Promise<VideoDetail> {
   return invoke<VideoDetail>("studio_video_detail", { slug });
+}
+
+/** Turns the captions in the picture on or off (video.json's `captions`). */
+export function setCaptions(slug: string, on: boolean): Promise<void> {
+  return invoke("studio_set_captions", { slug, on });
 }
 
 /** The WebVTT text beside the video's `preset` render. */

@@ -30,7 +30,7 @@ fn packs(dir: &Path) -> Packs {
 }
 
 #[test]
-fn the_status_reports_both_packs_and_the_voices_on_disk() {
+fn the_status_reports_both_packs() {
     let _turn = DOWNLOAD_FLAG.lock().unwrap_or_else(|e| e.into_inner());
     let dir = Scratch::new("voice-packs-status");
     let missing = packs_status(&dir);
@@ -44,36 +44,18 @@ fn the_status_reports_both_packs_and_the_voices_on_disk() {
             ("g2p-en-us", Status::Missing)
         ]
     );
-    let voices: Vec<_> = missing
-        .voices
-        .iter()
-        .map(|v| (v.id.as_str(), v.downloaded))
-        .collect();
-    assert_eq!(voices, [("af_heart", false), ("am_michael", false)]);
-
     fake_pack(&dir, &guess::PACK);
     let half = packs_status(&dir);
     assert_eq!(half.status, Status::Missing, "one pack is not enough");
     assert_eq!(half.packs[1].status, Status::Present);
 
     fake_pack(&dir, &PACK);
-    std::fs::File::create(dir.join("bf_emma.bin"))
-        .unwrap()
-        .set_len(kokoro::VOICE_BYTES)
-        .unwrap();
     let all = packs_status(&dir);
-    assert_eq!(all.status, Status::Present);
+    assert_eq!(all.status, Status::Present, "no voice file is needed");
     let json = serde_json::to_value(&all).unwrap();
     assert_eq!(json["status"], "present");
     assert_eq!(json["packs"][0]["id"], "voice-kokoro");
-    assert_eq!(
-        json["voices"],
-        serde_json::json!([
-            { "id": "af_heart", "downloaded": true },
-            { "id": "am_michael", "downloaded": true },
-            { "id": "bf_emma", "downloaded": true },
-        ])
-    );
+    assert!(json.get("voices").is_none());
 }
 
 #[test]
@@ -109,7 +91,7 @@ fn a_sample_refuses_a_bad_voice_or_speed_and_missing_packs() {
     }
     let e = sample("af_heart", 1.0, None, packs(&dir), lexicon.clone()).unwrap_err();
     assert!(
-        e.contains("voice pack") && e.contains("Settings -> Voice"),
+        e.contains("model (voice-kokoro)") && e.contains("Settings -> Studio -> Narration"),
         "{e}"
     );
     fake_pack(&dir, &PACK);

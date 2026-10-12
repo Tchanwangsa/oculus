@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import {
   THEME_FONTS,
+  colorGroups,
   copyName,
   formatTheme,
   parseThemeText,
@@ -119,5 +120,25 @@ describe("fonts", () => {
     expect(tokenAt(next, ["type", "label", "fontFamily"])).toBe("Manrope");
     expect(tokenAt(next, ["type", "h1", "fontFamily"])).toBe("Inter");
     expect(sameTokens(setFontRole(next, "body", "Manrope"), next)).toBe(true);
+  });
+});
+
+describe("colorGroups", () => {
+  test("sorts the bundled colours by what they colour, file order kept", () => {
+    const groups = colorGroups(sectionKeys(bundled(), "color"));
+    expect(groups.map((g) => [g.title, g.keys])).toEqual([
+      ["Surfaces", ["bg", "surface", "surfaceAlt", "border"]],
+      ["Text", ["text", "muted", "faint"]],
+      ["Accent", ["accent", "accentStrong", "accentSoft", "onAccent"]],
+      ["Ink", ["ink", "onInk", "shadow"]],
+      ["Status", ["positive", "warning", "negative"]],
+    ]);
+  });
+
+  test("a name that fits no group lands in Other, and empty groups are left out", () => {
+    const groups = colorGroups(["text", "glow", "sparkle"]);
+    expect(groups.map((g) => g.id)).toEqual(["text", "other"]);
+    expect(groups[1].keys).toEqual(["glow", "sparkle"]);
+    expect(colorGroups([])).toEqual([]);
   });
 });

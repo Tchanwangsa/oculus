@@ -42,7 +42,9 @@ export const PLACES: { label: string; path: string; icon: PhosphorIcon }[] = [
   { label: "Settings · Parsing", path: "/settings/parsing", icon: GearSix },
   { label: "Settings · Embeddings", path: "/settings/embeddings", icon: GearSix },
   { label: "Settings · Transcription", path: "/settings/transcription", icon: GearSix },
-  { label: "Settings · Voice", path: "/settings/voice", icon: GearSix },
+  { label: "Settings · Narration", path: "/settings/narration", icon: GearSix },
+  { label: "Settings · Pronunciation", path: "/settings/pronunciation", icon: GearSix },
+  { label: "Settings · Word timing", path: "/settings/word-timing", icon: GearSix },
 ];
 
 /** Per-kind caps for a typed query, so no one kind pushes the others off. */

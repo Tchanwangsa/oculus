@@ -1,4 +1,4 @@
-//! `oculus studio render`: a video folder to an export preset's file
+//! `oculus studio render`: a video folder to an export preset's mp4
 //! through `app_lib::studio::render` (docs/studio.md, "Rendering a video").
 
 use super::studio_error;
@@ -55,21 +55,6 @@ impl Ctx {
         for path in &report.sidecars {
             println!("{} {}", paint("wrote", GREEN), path.display());
         }
-        if report.segments.is_empty() {
-            println!(
-                "{}",
-                paint(
-                    &format!(
-                        "  {} · {:.2} s · {:.1} s",
-                        report.preset.name(),
-                        report.duration,
-                        report.ms as f64 / 1000.0
-                    ),
-                    DIM
-                )
-            );
-            return Ok(());
-        }
         let frames: u64 = rendered.iter().map(|s| s.frames).sum();
         let ms: u64 = rendered.iter().map(|s| s.ms).sum();
         let rate = if ms > 0 {
@@ -83,8 +68,8 @@ impl Ctx {
                 &format!(
                     "  {} · {}×{} at {} fps · {} frames, {:.2} s{} · {} rendered{rate}, {} cached · {} thread{} · {:.1} s",
                     report.preset.name(),
-                    report.width.unwrap_or_default(),
-                    report.height.unwrap_or_default(),
+                    report.width,
+                    report.height,
                     report.fps,
                     report.frames,
                     report.duration,

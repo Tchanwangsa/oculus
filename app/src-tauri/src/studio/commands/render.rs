@@ -71,8 +71,8 @@ struct Plan {
 }
 
 /// Render the video in `dir` (its folder or slug) to export `preset`
-/// (`draft`, `final`, `small`, `2x`, `audio` or `subtitles`), written to
-/// `<dir>/renders/<preset>.<ext>`. Resolves to the report, or `null` when
+/// (`draft`, `final` or `small`), written to
+/// `<dir>/renders/<preset>.mp4`. Resolves to the report, or `null` when
 /// cancelled; rejects with the reason a render failed, when `dir` is not a
 /// video, or when it already has a render running.
 #[tauri::command]
