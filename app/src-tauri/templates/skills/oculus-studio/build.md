@@ -46,7 +46,11 @@ is written, so make the fixes, then check and look as below.
    spelled as the brief prints them. The first element is on screen at a
    fixed time under half a second, so the scene never opens on an empty
    frame.
-4. Keys in and out are the ones the brief's neighbours name, so the magic
+4. A pause (`4.10 [pause 1.0 s]` in the brief) is where an idea lands.
+   Time the landing visual (the rewrite's last state, the highlight, the
+   value in its slot) to settle just before `pause()`, then start no new
+   motion until the next word: the frame holds through the silence.
+5. Keys in and out are the ones the brief's neighbours name, so the magic
    move carries them.
 
 `skills/oculus-studio/studio.d.ts` has every global's exact signature:
@@ -135,7 +139,8 @@ file.
    calls.
 2. Run its `strip` once, then at most three `frame`s at the moments the
    strip leaves in doubt, each Read the way Look says.
-3. Check: every row of the beat table lands on its words; the frame is
+3. Check: every row of the beat table lands on its words; nothing new
+   moves during a `pause` line of `beats`; the frame is
    filled and centred; nothing breaks the bar above; the keys out sit where
    the next scene's entry expects them; every lint warning is fixed or
    explained in the builder's reply.

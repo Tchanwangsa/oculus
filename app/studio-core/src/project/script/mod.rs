@@ -42,13 +42,6 @@ pub struct ScriptPause {
     pub seconds: Option<f64>,
 }
 
-/// A piece of a section's clip, in order: words said, or a silence.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ClipPart {
-    Say(String),
-    Pause(f64),
-}
-
 impl Script {
     /// Parses `script.md`. Text before the first heading, a heading that is
     /// not an id, a repeated id and an empty section are errors naming
@@ -101,36 +94,23 @@ impl ScriptSection {
     /// bare one at `pause` (the theme's): what a clip is made from, and
     /// so what its manifest entry must match. Without pauses, `text`.
     pub fn clip_text(&self, pause: f64) -> String {
-        if self.pauses.is_empty() {
-            return self.text.clone();
-        }
-        self.parts(pause)
-            .iter()
-            .map(|p| match p {
-                ClipPart::Say(text) => text.clone(),
-                ClipPart::Pause(s) => pause::written(*s),
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-
-    /// The clip in order: runs of words cut at each pause, and each pause
-    /// at its seconds (a bare one at `pause`).
-    pub fn parts(&self, pause: f64) -> Vec<ClipPart> {
-        let words: Vec<&str> = self.text.split_whitespace().collect();
-        let mut out = Vec::new();
-        let mut from = 0;
-        for p in &self.pauses {
-            if p.words > from {
-                out.push(ClipPart::Say(words[from..p.words].join(" ")));
-                from = p.words;
+        let mut out: Vec<String> = Vec::new();
+        let mut pauses = self.pauses.iter().peekable();
+        for (i, word) in self.text.split_whitespace().enumerate() {
+            while let Some(p) = pauses.next_if(|p| p.words == i) {
+                out.push(pause::written(p.length(pause)));
             }
-            out.push(ClipPart::Pause(p.seconds.unwrap_or(pause)));
+            out.push(word.to_owned());
         }
-        if from < words.len() {
-            out.push(ClipPart::Say(words[from..].join(" ")));
-        }
-        out
+        out.extend(pauses.map(|p| pause::written(p.length(pause))));
+        out.join(" ")
+    }
+}
+
+impl ScriptPause {
+    /// Its seconds: its own, or `pause` (the theme's) for a bare one.
+    pub fn length(&self, pause: f64) -> f64 {
+        self.seconds.unwrap_or(pause)
     }
 }
 

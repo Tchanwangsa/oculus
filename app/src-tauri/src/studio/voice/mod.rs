@@ -19,7 +19,9 @@ pub use studio_core::VoiceEngine as Engine;
 /// The settings row's key.
 pub const SETTINGS_KEY: &str = "voice";
 
-pub const DEFAULT_SPEED: f64 = 1.0;
+/// A little under the voice's own pace: a lecture is easier to follow
+/// slow, and a player speeds it up.
+pub const DEFAULT_SPEED: f64 = 0.9;
 
 /// What `narrate` says when no engine is chosen anywhere. There is no
 /// default: Kokoro needs a download, a server needs a URL.
@@ -36,9 +38,9 @@ pub const NO_VOICE: &str =
     "no TTS voice: set a voice in Settings -> Voice or video.json's voice block, or pass --voice";
 
 /// The `voice` row, `{ "engine", "baseUrl", "model", "voice", "speed" }`.
-/// A missing or ill-typed field reads as unset (speed: 1.0), except that a
-/// row with a `baseUrl` and no `engine` key reads as the server engine, the
-/// only one a URL is for.
+/// A missing or ill-typed field reads as unset (speed: `DEFAULT_SPEED`),
+/// except that a row with a `baseUrl` and no `engine` key reads as the
+/// server engine, the only one a URL is for.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoiceSettings {
     pub engine: Option<Engine>,

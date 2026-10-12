@@ -51,7 +51,8 @@ pub(super) fn validated(row: VoiceRow) -> Result<VoiceSettings, String> {
     })
 }
 
-/// The `voice` row, with unset fields null and speed defaulted to 1.0.
+/// The `voice` row, with unset fields null and speed defaulted to 0.9
+/// (`voice::DEFAULT_SPEED`).
 #[tauri::command]
 pub async fn studio_voice_settings() -> Result<VoiceRow, String> {
     crate::runtime::blocking::run(|| Ok(voice::settings().into())).await

@@ -18,9 +18,12 @@ export interface VoiceSettings {
   /** The server engine's only. */
   model: string | null;
   voice: string | null;
-  /** Positive; 1.0 when unset. */
+  /** Positive; `DEFAULT_SPEED` when unset. */
   speed: number;
 }
+
+/** Rust's `voice::DEFAULT_SPEED`: a little under the voice's own pace. */
+export const DEFAULT_SPEED = 0.9;
 
 /** The slider's range; Rust accepts any positive speed. */
 export const SPEED_MIN = 0.5;

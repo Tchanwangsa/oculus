@@ -58,18 +58,8 @@ fn pauses_are_cut_from_the_text_and_placed_by_word() {
         a.clip_text(1.0),
         "[pause 0.5] It lands on one. [pause 1] Keep [pause 2] the rest. [pause 1]"
     );
-    assert_eq!(
-        a.parts(0.75),
-        [
-            ClipPart::Pause(0.5),
-            ClipPart::Say("It lands on one.".into()),
-            ClipPart::Pause(0.75),
-            ClipPart::Say("Keep".into()),
-            ClipPart::Pause(2.0),
-            ClipPart::Say("the rest.".into()),
-            ClipPart::Pause(0.75),
-        ]
-    );
+    assert_eq!(a.pauses[1].length(0.75), 0.75);
+    assert_eq!(a.pauses[2].length(0.75), 2.0);
 }
 
 #[test]
@@ -78,7 +68,6 @@ fn without_pauses_the_clip_text_is_the_text() {
     let a = &s.sections[0];
     assert!(a.pauses.is_empty());
     assert_eq!(a.clip_text(1.0), a.text);
-    assert_eq!(a.parts(1.0), [ClipPart::Say("One two three.".into())]);
 }
 
 #[test]

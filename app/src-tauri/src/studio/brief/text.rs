@@ -1,7 +1,10 @@
 //! A `Brief` as the compact text `oculus studio brief` prints: no colour,
-//! one line per sentence of narration, each word as `start word`.
+//! one line per sentence of narration, each word as `start word` and each
+//! pause as `start [pause 1.0 s]` after the word it follows.
 
 use std::fmt::{self, Display, Write};
+
+use studio_core::CuedPause;
 
 use super::{Brief, Narration, Neighbour};
 
@@ -106,17 +109,35 @@ fn narration(f: &mut fmt::Formatter<'_>, n: &Narration) -> fmt::Result {
                 None => Ok(()),
             }
         }
-        Narration::Spoken { seconds, sentences } => {
+        Narration::Spoken {
+            seconds,
+            sentences,
+            pauses,
+        } => {
+            let and_pauses = match pauses.is_empty() {
+                true => "",
+                false => ", each [pause] at the time pause() returns",
+            };
             writeln!(
                 f,
-                "Narration: {seconds:.2} s; each word at the time word() returns, in scene seconds"
+                "Narration: {seconds:.2} s; each word at the time word() returns{and_pauses}, in scene seconds"
             )?;
+            let pause = |p: &CuedPause| format!("{:.2} [pause {:.1} s]", p.start, p.end - p.start);
+            let mut line: Vec<String> = pauses
+                .iter()
+                .filter(|p| p.after.is_none())
+                .map(pause)
+                .collect();
+            let mut index = 0;
             for sentence in sentences {
-                let line: Vec<String> = sentence
-                    .iter()
-                    .map(|w| format!("{:.2} {}", w.start, w.text))
-                    .collect();
+                for w in sentence {
+                    line.push(format!("{:.2} {}", w.start, w.text));
+                    let after = pauses.iter().filter(|p| p.after == Some(index));
+                    line.extend(after.map(pause));
+                    index += 1;
+                }
                 writeln!(f, "{}", line.join("  "))?;
+                line.clear();
             }
             Ok(())
         }

@@ -2,11 +2,14 @@
 //! `narration/manifest.json`, which studio-core reads. One scene at a time,
 //! in order: a scene whose cache key is unchanged and whose clip is on disk
 //! is kept; any other is synthesised, timed and saved, and the manifest is
-//! rewritten after each, so a failure keeps the scenes already done.
+//! rewritten after each, so a failure keeps the scenes already done. A
+//! section's `[pause]`s are exact silence spliced into its clip between
+//! the words either side (`clip`).
 //! Afterwards entries for ids no longer narrated, and clips nothing
 //! references, are removed. Rules: docs/studio.md, "Narration is made by
 //! `oculus studio narrate`".
 
+mod clip;
 mod key;
 mod prune;
 mod report;
@@ -16,13 +19,9 @@ mod tests;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
-use studio_core::{
-    Library, Manifest, ManifestGap, ManifestScene, ManifestWord, Project, MANIFEST_PATH,
-};
+use studio_core::{Library, Manifest, ManifestScene, Project, MANIFEST_PATH};
 
-use super::audio::resample_to_16k;
 use super::timing::{self, Alignment};
 use super::tts::{self, Speech};
 use super::voice::ServerVoice;
@@ -151,9 +150,9 @@ pub fn narrate(
     let todo = match &options.scene {
         None => narrated.clone(),
         Some(id) => {
-            let one: Vec<_> = narrated.iter().filter(|(s, _)| s == id).cloned().collect();
+            let one: Vec<_> = narrated.iter().filter(|s| &s.id == id).cloned().collect();
             if one.is_empty() {
-                let ids: Vec<_> = narrated.iter().map(|(s, _)| format!("`{s}`")).collect();
+                let ids: Vec<_> = narrated.iter().map(|s| format!("`{}`", s.id)).collect();
                 return Err(NarrateError::video(format!(
                     "no narrated scene `{id}`; the narrated scenes are {}",
                     if ids.is_empty() {
@@ -178,16 +177,14 @@ pub fn narrate(
     let clips = dir.join("narration");
     let mut report = Report::default();
     let mut ready = false;
-    for (n, (id, text)) in todo.iter().enumerate() {
+    for (n, said) in todo.iter().enumerate() {
+        let id = &said.id;
         progress(Progress::Start {
             id,
             n: n + 1,
             of: todo.len(),
         });
-        let key = speaker
-            .key(text)
-            .map(|parts| cache_key(text, &parts))
-            .map_err(|e| NarrateError::scene(id, e))?;
+        let key = said.key(speaker).map_err(|e| NarrateError::scene(id, e))?;
         let cached = manifest
             .scenes
             .get(id)
@@ -202,7 +199,7 @@ pub fn narrate(
                         .map_err(|e| NarrateError::video(e.to_string()))?;
                     ready = true;
                 }
-                let (clip, timings) = make_clip(&clips, id, text, &key, speaker, aligner)?;
+                let (clip, timings) = make_clip(&clips, said, &key, speaker, aligner)?;
                 let scene = SceneReport::new(id, Outcome::Narrated, &clip, Some(timings));
                 manifest.scenes.insert(id.clone(), clip);
                 write_manifest(dir, &manifest)?;
@@ -213,7 +210,7 @@ pub fn narrate(
         report.scenes.push(scene);
     }
 
-    let keep: BTreeSet<&str> = narrated.iter().map(|(id, _)| id.as_str()).collect();
+    let keep: BTreeSet<&str> = narrated.iter().map(|s| s.id.as_str()).collect();
     report.dropped = prune::stale_entries(&mut manifest, &keep);
     if reset || !report.dropped.is_empty() {
         write_manifest(dir, &manifest)?;
@@ -222,11 +219,41 @@ pub fn narrate(
     Ok(report)
 }
 
-/// `(id, text)` of each scene with a script section, in video order.
-fn narrated_scenes(project: &Project) -> Vec<(String, String)> {
+/// A narrated scene as its clip is made: the text its manifest entry
+/// must match (`ScriptSection::clip_text`), the text said, and each pause
+/// as how many words come before it and its seconds.
+#[derive(Debug, Clone)]
+struct Said {
+    id: String,
+    text: String,
+    spoken: String,
+    pauses: Vec<(usize, f64)>,
+}
+
+impl Said {
+    /// The clip's cache key: the text with its pauses and the speaker's
+    /// parts for the words said. Without pauses the two texts are one, so
+    /// the key is the one a clip has always had.
+    fn key(&self, speaker: &dyn Speaker) -> Result<String, String> {
+        Ok(cache_key(&self.text, &speaker.key(&self.spoken)?))
+    }
+}
+
+/// Each scene with a script section, in video order.
+fn narrated_scenes(project: &Project) -> Vec<Said> {
+    let pause = project.theme.narration.pause;
     (0..project.video.scenes.len())
         .filter_map(|i| project.section(i))
-        .map(|s| (s.id.clone(), s.text.clone()))
+        .map(|s| Said {
+            id: s.id.clone(),
+            text: s.clip_text(pause),
+            spoken: s.text.clone(),
+            pauses: s
+                .pauses
+                .iter()
+                .map(|p| (p.words, p.length(pause)))
+                .collect(),
+        })
         .collect()
 }
 
@@ -247,55 +274,25 @@ pub struct Timings {
 /// Synthesise, time and save one scene's clip; its manifest entry.
 fn make_clip(
     clips: &Path,
-    id: &str,
-    text: &str,
+    said: &Said,
     key: &str,
     speaker: &dyn Speaker,
     aligner: &dyn Aligner,
 ) -> Result<(ManifestScene, Timings), NarrateError> {
-    let fail = |message: String| NarrateError::scene(id, message);
-    let started = Instant::now();
-    let speech = speaker.speak(text).map_err(fail)?;
-    let synth_ms = started.elapsed().as_millis() as u64;
-    let duration = speech.decoded.duration;
-    let started = Instant::now();
-    let pcm = resample_to_16k(&speech.decoded.samples, speech.decoded.sample_rate)
-        .map_err(|e| fail(e.to_string()))?;
-    let words: Vec<String> = text.split_whitespace().map(str::to_owned).collect();
-    let alignment = aligner
-        .align(&pcm, &words)
-        .map_err(|e| fail(e.to_string()))?;
-    let align_ms = started.elapsed().as_millis() as u64;
-
+    let fail = |message: String| NarrateError::scene(&said.id, message);
+    let made = clip::make(&said.spoken, &said.pauses, speaker, aligner).map_err(fail)?;
     let audio = format!("{key}.wav");
-    write_clip(&clips.join(&audio), &speech.wav).map_err(fail)?;
+    write_clip(&clips.join(&audio), &made.wav).map_err(fail)?;
     let scene = ManifestScene {
         key: key.to_owned(),
-        text: text.to_owned(),
+        text: said.text.clone(),
         audio,
-        duration,
-        words: alignment
-            .words
-            .iter()
-            .map(|w| ManifestWord {
-                text: w.text.clone(),
-                start: w.start,
-                end: w.end,
-                confidence: w.confidence,
-            })
-            .collect(),
-        gaps: alignment
-            .gaps
-            .iter()
-            .map(|g| ManifestGap {
-                after: g.after,
-                start: g.start,
-                end: g.end,
-                heard: g.heard.clone(),
-            })
-            .collect(),
+        duration: made.duration,
+        words: made.words,
+        gaps: made.gaps,
+        pauses: made.pauses,
     };
-    Ok((scene, Timings { synth_ms, align_ms }))
+    Ok((scene, made.timings))
 }
 
 fn write_clip(path: &Path, wav: &[u8]) -> Result<(), String> {
