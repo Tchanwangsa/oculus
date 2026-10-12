@@ -17,7 +17,7 @@ the root `CLAUDE.md` holds only the rules.
 | [auth.md](./auth.md) | Canvas session in keyd's vault, sign-in on demand, Okta sign-in and its attempt guard, Ed `x-token`, Echo360 LTI |
 | [parsing.md](./parsing.md) | PDFs to markdown: the parser seam, the two MinerU engines, failures |
 | [retrieval.md](./retrieval.md) | Page-image embeddings, the `pages` table, query flow |
-| [harness.md](./harness.md) | Chat as a CLI agent: the four bridges, containment, the timeline |
+| [harness.md](./harness.md) | Chat as a CLI agent: the four bridges, containment, the timeline, per-job models and subagents |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [projects.md](./projects.md) | Projects and tasks: the Overview, board, table, timeline and the universal Tasks view |
 | [chapters.md](./chapters.md) | Lecture chapters and where a lecture ends: the detector and the two model jobs |
@@ -32,7 +32,7 @@ the root `CLAUDE.md` holds only the rules.
 | [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |
 | [editor-maths.md](./editor-maths.md) | Maths in the note editor: the visual field, the toolbox, shorthands |
 | [editor-core.md](./editor-core.md) | The Rust editor core, its oracles, and shadow mode checking it against every note editor in dev |
-| [studio.md](./studio.md) | Studio's renderer: video folders and where they live (`studio new`, `list`, slugs), the agent flow (the `oculus-studio` skill, `studio.d.ts`), the TSX component contract, libraries and `promote`, narration (script.md, the manifest, `narrate` and its TTS server, Settings → Voice, scene lengths, word cues), styles, motion, transitions and magic move, motion blur, contact sheets (`strip`), rendering to mp4 (per-scene cached segments, the narration track, the app's `studio_render` command), dithered gradients, the sandbox, lint and golden frames |
+| [studio.md](./studio.md) | Studio's renderer: video folders and where they live (`studio new`, `list`, slugs), the agent flow (the `oculus-studio` skill's research, direct and build roles, `studio agents`, `studio.d.ts`), the TSX component contract, libraries and `promote`, narration (script.md, the manifest, `narrate` and its TTS server, Settings → Voice, scene lengths, word cues), styles, motion, transitions and magic move, motion blur, contact sheets (`strip`), rendering to mp4 (per-scene cached segments, the narration track, the app's `studio_render` command), dithered gradients, the sandbox, lint and golden frames |
 | [cli.md](./cli.md) | The `oculus` binary: what each command writes, and the agent docs it generates |
 | [cli-reference.md](./cli-reference.md) | Every command and flag — generated from the binary, not hand-kept |
 | [development.md](./development.md) | Building, running and checking each piece |

@@ -16,15 +16,16 @@ the id, open the merged document, read the span.
 oculus list -l MULT20015
 ```
 
-One row per recording: a UUID, the title and the date. Every command and path
-below takes a **unique prefix** of that UUID — `2d2a4a23` is enough, the full
-36 characters are never needed.
+One row per recording: a UUID, the title and the date. An `oculus` command
+takes a **unique prefix** of that UUID (`2d2a4a23` is enough), but a path does
+not: the folder is named by the **full 36-character UUID**, so copy it whole
+from the list.
 
 If the subject is not known yet, `oculus list -l` with no code lists them all.
 
 ## 2. Read `outline.md`, not the `.vtt`
 
-The lecture folder is `../lectures/<uuid>/` from this working directory:
+The lecture folder is `../lectures/<full uuid>/` from this working directory:
 
 ```
 outline.md      the transcript and the slide changes merged, in play order
@@ -57,11 +58,19 @@ refused outright and the turn continues without the answer.
 Find the span, then read it:
 
 ```bash
-grep -n "superposition" ../lectures/2d2a4a23/outline.md
+grep -n "superposition" ../lectures/2d2a4a23-5b1e-4c55-9d0a-6f1c2e7b8a90/outline.md
 ```
 
+```
+412:    725  00:12:05  An equal superposition.
+```
+
+`grep -n` puts the file's **line number** first (`412`), before the outline's
+own first column, which is **seconds** into the recording (`725`). `sed -n`
+takes line numbers, so read around `412`, not `725`:
+
 ```bash
-sed -n '700,760p' ../lectures/2d2a4a23/outline.md
+sed -n '390,450p' ../lectures/2d2a4a23-5b1e-4c55-9d0a-6f1c2e7b8a90/outline.md
 ```
 
 Two calls, each a single command. Widen with a second `sed -n` rather than

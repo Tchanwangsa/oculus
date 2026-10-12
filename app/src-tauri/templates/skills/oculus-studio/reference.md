@@ -1,7 +1,7 @@
 # Studio reference
 
-The authoring rules for a video folder; `SKILL.md` has the workflow and
-the folder's layout. `studio.d.ts` types every global named here. Every
+The authoring rules for a video folder; `SKILL.md` has the roles, the
+workflow and the folder's layout. `studio.d.ts` types every global named here. Every
 command takes the video's slug as `DIR`; `oculus studio <command> --help`
 has the full flags.
 
@@ -11,9 +11,10 @@ has the full flags.
 - script.md: sections, the spoken-form table, acronyms and fusions
 - Components: the file's three exports, prop builders, flat props
 - Elements: element props, layout, the style keys
-- The theme: token names, making a new theme
+- The theme: token names and type sizes, making a new theme
 - Motion: Enter and Exit, Sequence, Stagger, Camera, Arrow, the helpers
-- A diagram scene: a whole component with cards, an arrow and a cued label
+- Moving maths with Morph: states picked by time, a worked derivation,
+  moving a result aside, carrying it into the next scene
 - Word cues: `word()`, `wordEnd()`, cues in props
 - Transitions and magic move
 - Lint: each kind and what to do, the literal rules exactly
@@ -32,7 +33,7 @@ has the full flags.
   "subject": "COMP30027",
   "scenes": [
     { "id": "title", "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 3 },
-    { "id": "idea", "component": "Steps", "props": { "heading": "The idea", "steps": ["Measure the slope", "Step against it"] } },
+    { "id": "factor", "component": "FactorTwelve", "props": { "narrated": true } },
     { "id": "rate", "component": "BigNumber", "props": { "value": "0.01", "label": "a typical step size" },
       "transition": { "kind": "push", "direction": "left" } }
   ]
@@ -119,34 +120,35 @@ It imports nothing and exports three things:
 
 ```tsx
 export const props = {
-  heading: str(),
-  points: list(str()),
+  count: num().default(7),
+  cols: num().default(7),
   cues: list(str()).optional(),
-  accent: token("color").default("accent"),
 };
 
 export const examples = {
-  three: { heading: "Why the slope matters", points: ["It points uphill", "Its size is the steepness", "Zero means flat"] },
-  one: { heading: "In short", points: ["Step against the slope"] },
+  row: { count: 7, cols: 7 },
+  rectangle: { count: 12, cols: 4 },
 };
 
-export default ({ heading, points, cues, accent }, { theme }) => {
-  const { color, space, radius, type } = theme;
-  // With cues, each point enters as its phrase is said; without (gallery), every 0.6 s.
-  const at = (i) => (cues ? word(cues[i]) : 0.4 + i * 0.6);
+export default ({ count, cols, cues }, { theme }) => {
+  const { color, space, radius, motion } = theme;
+  // With cues, the dots start entering as cues[0] is said; without (gallery), at 0.3 s.
+  const start = cues ? word(cues[0]) : 0.3;
+  const rows = Math.ceil(count / cols);
   return (
-    <Stack gap={space.xl} justify="center" style={{ flexGrow: 1, padding: space.xxl, fill: color.bg }}>
-      <Text key="heading" style={{ ...type.h1, color: color.text }}>{heading}</Text>
-      <Stack gap={space.l}>
-        {points.map((point, i) => (
-          <Enter key={`point-${i}`} preset="rise" at={at(i)}>
-            <Row gap={space.m} align="center">
-              <Box style={{ width: 18, height: 18, radius: radius.pill, fill: accent }} />
-              <Text style={{ ...type.h2, color: color.text }}>{point}</Text>
-            </Row>
-          </Enter>
-        ))}
-      </Stack>
+    <Stack align="center" justify="center" gap={space.m} style={{ flexGrow: 1, fill: color.bg }}>
+      {Array.from({ length: rows }, (_, r) => (
+        <Row gap={space.m}>
+          {Array.from({ length: Math.min(cols, count - r * cols) }, (_, c) => {
+            const i = r * cols + c;
+            return (
+              <Enter preset="scale" at={start + i * motion.duration.stagger}>
+                <Box key={`d${i}`} style={{ width: 48, height: 48, radius: radius.pill, fill: color.accent }} />
+              </Enter>
+            );
+          })}
+        </Row>
+      ))}
     </Stack>
   );
 };
@@ -154,8 +156,10 @@ export default ({ heading, points, cues, accent }, { theme }) => {
 
 - **`props`** is required, even when empty (`{}`): lint and the app are
   built from it. A scene's props are checked against it before every call.
-- **`examples`** are named prop sets. Give at least two; each must set
-  every required prop. `gallery` draws each one.
+- **`examples`** are named prop sets; each must set every required prop.
+  `gallery` draws each one. A component made for one scene may take no
+  required props and have no examples (its scene's strip is its check); one
+  meant for several scenes gets at least two.
 - **The default export** is `(props, ctx) => element` and returns exactly
   one element. `ctx` is `{ t, duration, theme, size }`: `t` is seconds into
   the scene, `duration` its length, `size` the frame's `{ width, height }`.
@@ -201,8 +205,7 @@ the allowed ones. Style keys go inside `style`.
 - **Text wraps at its box's width.** A box with `position: "absolute"` and
   no `width` takes its text's width. Give it a `width` and the text wraps
   inside it, so make the width generous: a label centred on a point is a
-  wide box centred on that point with `justifyContent: "center"`, as in the
-  diagram below.
+  wide box centred on that point with `justifyContent: "center"`.
 
 **Style keys** (a closed set; an unknown key names the closest one):
 
@@ -227,7 +230,9 @@ Colours are `#rgb`, `#rrggbb` or `#rrggbbaa`, always read from the theme.
   `border`, `accent`, `accentStrong`, `accentSoft`, `onAccent`, `ink`,
   `onInk`, `shadow`, `positive`, `warning`, `negative`.
 - `type`: `display`, `h1`, `h2`, `h3`, `body`, `label`, `caption`, each a
-  style fragment to spread: `{ ...type.h1, color: color.text }`.
+  style fragment to spread: `{ ...type.h1, color: color.text }`. Sizes in
+  the bundled themes, in px on the 1920x1080 frame: `display` 104, `h1` 72,
+  `h2` 52, `h3` 38, `body` 32, `label` 24, `caption` 22.
 - `space`: `xxs` 4, `xs` 8, `s` 16, `m` 24, `l` 40, `xl` 64, `xxl` 112.
 - `radius`: `s` 8, `m` 16, `l` 28, `xl` 44, `pill` 999.
 - `font`: `heading` (Manrope), `body` (Inter). No other fonts exist.
@@ -275,66 +280,115 @@ Everything moves as a function of `t`.
 `easing` props take a function, `[x1, y1, x2, y2]`, or a theme easing name
 (`"enter"`, `"exit"`, `"standard"`).
 
-## A diagram scene
+## Moving maths with Morph
 
-Cards placed absolutely from `ctx.size`, an arrow between them, and a label
-that enters on a word. `Arrow` draws in frame pixels with the frame as its
-box, so its parent must fill the frame: here the root `Box`, with
-`flexGrow: 1`.
+Here a formula is a `Row` of keyed `Text` runs, one per term, and a
+derivation is a list of **states** of that row. `<Morph p>`
+blends two layouts of one place; picking the pair by time chains any number
+of states, so each line rewrites itself into the next in place:
+
+- **Keys are terms.** A key matches the same key anywhere inside the Morph,
+  at any depth, so `2` can leave a product and become an exponent in a
+  nested `Row`. A matched term moves, resizes and recolours; the same
+  string re-shapes at the new size (no bitmap scaling); a different string
+  cross-fades in halves. A key the next state drops fades out over `p` 0 to
+  0.4; a new key fades in over 0.4 to 1. Keys are unique within one state.
+- **One pair at a time.** Transition i (state i to i + 1) starts on its
+  cue and lasts a fixed time; at its end the next pair starts from the same
+  layout, so the joins are seamless. `p` is clamped to 0 to 1, a Morph takes
+  exactly two children, and a Morph inside another is an error.
+- **Writing the first line** is opacity per term, cued to its word: a term
+  enters as it is said, never the whole line at once.
+- **Moving a result aside** is one more state: the same keyed row laid out
+  again, smaller and `position: "absolute"` in a corner. Every term glides
+  there together and stays visible while the next idea is built.
+- **Carrying it into the next scene**: give the next scene's root the same
+  keyed row in the same corner, at the same sizes, and no `transition` on
+  that scene; the magic move keeps it in place while the rest changes.
+
+The derivation 12 = 2 × 6 → 12 = 2 × 2 × 3 → 12 = 2² × 3, then aside. Its
+`narrated` prop is `true` in the scene (`word()` cues) and false in a
+gallery (fixed times). Checked with `oculus studio strip`:
 
 ```tsx
 export const props = {
-  heading: str(),
-  from: str(),
-  to: str(),
-  label: str(),
-  cues: list(str()).optional(),
+  narrated: bool().default(false),
 };
 
-export const examples = {
-  bank: { heading: "One message, two ends", from: "Your phone", to: "The bank", label: "Encrypted" },
-  chat: { heading: "Same road, any message", from: "Alice", to: "Bob", label: "Private" },
+export const examples = {};
+
+// One state per line of the derivation: [key, text], or [key, base, power]
+// for a raised term. A key is one term across every state, so it glides; a
+// key a state drops fades out, a new one fades in.
+const LINES = [
+  [["n", "12"], ["eq", "="], ["a", "2"], ["x1", "×"], ["six", "6"]],
+  [["n", "12"], ["eq", "="], ["a", "2"], ["x1", "×"], ["b", "2"], ["x2", "×"], ["c", "3"]],
+  [["n", "12"], ["eq", "="], ["sq", ["a", "2"], ["b", "2"]], ["x2", "×"], ["c", "3"]],
+];
+
+// Transition i (state i to i + 1) starts at at[i] and lasts dur: the pair to
+// morph and how far along it is.
+const step = (t, at, dur) => {
+  let i = 0;
+  while (i < at.length - 1 && t >= at[i + 1]) i += 1;
+  return [i, easeInOutCubic(clamp((t - at[i]) / dur, 0, 1))];
 };
 
-export default ({ heading, from, to, label, cues }, { t, theme, size }) => {
-  const { color, space, radius, type } = theme;
-  // cues[0]: when the arrow draws; cues[1]: when the label enters.
-  const tArrow = cues ? word(cues[0]) : 0.6;
-  const tLabel = cues ? word(cues[1]) : 1.6;
-  const cardW = 520;
-  const cardH = 280;
-  const top = (size.height - cardH) / 2 + space.xl;
-  const xs = [space.xxl, size.width - space.xxl - cardW];
-  const midY = top + cardH / 2;
-  const card = (text, x) => (
-    <Box style={{ position: "absolute", left: x, top, width: cardW, height: cardH, radius: radius.l,
-      fill: color.surface, border: { width: 2, color: color.border }, justifyContent: "center", alignItems: "center" }}>
-      <Text style={{ ...type.h1, color: color.text }}>{text}</Text>
-    </Box>
+export default ({ narrated }, { t, theme }) => {
+  const { color, type, space, motion } = theme;
+  const cue = (phrase, fallback) => (narrated ? word(phrase) : fallback);
+  // The first line is written term by term as it is said.
+  const enter = {
+    n: cue("twelve", 0.2),
+    eq: cue("is", 0.5),
+    a: cue("two", 0.8),
+    x1: cue("times", 1.1),
+    six: cue("six", 1.4),
+  };
+  const shown = (key) =>
+    key in enter ? interpolate(t, [enter[key], enter[key] + motion.duration.base], [0, 1]) : 1;
+  // `aside` re-lays the same keyed line small in the top left corner.
+  const term = (key, text, size, tone) => (
+    <Text key={key} style={{ ...size, color: tone, opacity: shown(key) }}>
+      {text}
+    </Text>
   );
+  const line = (terms, aside) => (
+    <Row
+      key="line"
+      gap={aside ? space.s : space.m}
+      align="center"
+      style={aside ? { position: "absolute", left: space.xl, top: space.xl } : {}}
+    >
+      {terms.map(([key, text, power]) =>
+        power ? (
+          <Row key={key} align="flex-start">
+            {term(text[0], text[1], aside ? type.h2 : type.display, color.text)}
+            {term(power[0], power[1], aside ? type.h3 : type.h1, color.accent)}
+          </Row>
+        ) : (
+          term(key, text, aside ? type.h2 : type.display, color.text)
+        ),
+      )}
+    </Row>
+  );
+  const states = [line(LINES[0]), line(LINES[1]), line(LINES[2]), line(LINES[2], true)];
+  const at = [cue("six is", 2.4), cue("together", 4.4), cue("keep", 6.4)];
+  const [i, p] = step(t, at, motion.duration.slow);
   return (
-    <Box style={{ flexGrow: 1, fill: color.bg }}>
-      <Box key="heading" style={{ position: "absolute", left: space.xxl, top: space.xl, width: size.width - 2 * space.xxl }}>
-        <Text style={{ ...type.h1, color: color.text }}>{heading}</Text>
-      </Box>
-      <Enter preset="scale">{card(from, xs[0])}</Enter>
-      <Enter preset="scale" at={0.2}>{card(to, xs[1])}</Enter>
-      <Arrow
-        points={[[xs[0] + cardW + space.m, midY], [xs[1] - space.m, midY]]}
-        progress={interpolate(t, [tArrow, tArrow + 0.8], [0, 1], { easing: easeOutCubic })}
-        stroke={{ width: 10, color: color.accent }}
-      />
-      <Box style={{ position: "absolute", left: 0, top: top - space.xxl, width: size.width, justifyContent: "center" }}>
-        <Enter preset="rise" at={tLabel}>
-          <Box style={{ padding: [space.s, space.l], radius: radius.pill, fill: color.accent }}>
-            <Text style={{ ...type.h2, color: color.onAccent }}>{label}</Text>
-          </Box>
-        </Enter>
-      </Box>
+    <Box style={{ flexGrow: 1, fill: color.bg, alignItems: "center", justifyContent: "center" }}>
+      <Morph p={p}>
+        {states[i]}
+        {states[i + 1]}
+      </Morph>
     </Box>
   );
 };
 ```
+
+Narration it is cued to: "Twelve is two times six. And six is two times
+three, so twelve is two times two times three. Put the two twos together,
+two squared, times three. Keep that line; we will need it."
 
 ## Word cues
 
@@ -342,14 +396,22 @@ export default ({ heading, from, to, label, cues }, { t, theme, size }) => {
 `phrase`; `wordEnd("phrase")` when it finishes. `word("phrase", 2)` is the
 second time. Words match lowercased, letters, digits and apostrophes only,
 consecutive words for a phrase, so cue the words as `script.md` spells
-them: `word("zero point zero one")`.
+them: `word("zero point zero one")`. A hyphen splits a word into parts, in
+the phrase and the narration alike, so `word("ninety one")` and
+`word("ninety-one")` both find a said "ninety-one"; a phrase must start and
+end on whole said words (`word("one")` does not find it).
 
-- A phrase the narration does not say throws, naming the closest one it
-  does say. Lint reports it at the TSX line.
-- `word()` throws in a silent scene, and in `gallery`, which renders
-  without narration. Put the cue phrases in props (an optional `cues:
-  list(str())`, as in the example above) and fall back to fixed times only
-  when they are absent, so the examples still draw.
+- A phrase the narration does not say, or an `nth` past its last
+  occurrence, throws at the call's TSX line and names the said phrase
+  nearest it. Lint reports it there.
+- `word()` throws in a silent scene, and in `gallery`, which never reads
+  the narration. A component used in several scenes takes its cue phrases
+  in props (an optional `cues: list(str())`, as in the example above) and
+  falls back to fixed times without them, so its examples still draw. A
+  component made for one scene can take a `narrated` flag instead, as in
+  "Moving maths with Morph".
+- A letter said alone ("q") may be timed as the word it sounds like
+  ("cue"); cue the word beside it.
 - Cues exist only after `narrate`: a narrated scene is not rendered by
   lint, `frame` or `strip` until its narration is current.
 
@@ -408,9 +470,15 @@ on any problem. Read `message`: it says what is wrong and what is valid.
 
 **The literal rules, exactly.** Lint reads each component's source:
 
-- A colour is a `#` hex string, `rgb(`, `hsl(`, `oklch(` and the like, or a
-  string that is a CSS colour name, anywhere outside `token(...)` and its
-  `.default(...)`.
+- A colour is a `#` hex string, or `rgb(`, `hsl(`, `oklch(` and the other
+  functional notations, in any string. A whole string that is a CSS colour
+  name is a colour only where a colour goes: the value of a `color`,
+  `fill`, `stroke`, `background` or `stops` key or of any key ending in
+  `Color` (an object key or a JSX attribute, including arrays, calls and
+  ternaries inside it), or of a key named after a `token("color")` prop
+  unless the theme has a colour by that name. Elsewhere it is a word on
+  screen (`label: "purple"`) and passes. `token(...)` and a `.default(...)`
+  on it take a token's name, not a literal.
 - A font is a bundled family's name as a string, or any string after
   `fontFamily:`.
 - A number is checked only inside a `style={{ … }}` (or `style: { … }`)
@@ -439,9 +507,15 @@ Each command prints the PNG's absolute path.
   which order, where it settles.
 - `oculus studio gallery <slug> <Component>` draws each example of a
   component to `out/gallery/<Component>-<example>.png`; `--sheet` adds all
-  of them as `<Component>.png`. `--theme warm` tries another theme.
+  of them as `<Component>.png`. `--theme warm` tries another theme. It
+  never reads the narration, so it runs before `narrate`: each still is the
+  middle of the first silent scene that uses the component (its `hold`),
+  else the middle of a 6 s preview, so entrances on fixed fallback times
+  have settled. `--t S` picks another moment inside that length.
 
-`frame` and `strip` stop on stale narration; lint lists it.
+`frame` and `strip` stop when any narrated scene's narration is stale, even
+with `--scene` on another scene; lint lists it. A missing component in
+another scene does not stop them.
 
 ## Narrate
 
@@ -488,12 +562,13 @@ a `subject` in `video.json`. Promote only what the student wants to keep.
 | Component | Props | For |
 | --- | --- | --- |
 | `TitleCard` | `title`; optional `eyebrow`, `subtitle` | The opening card, dark |
-| `Steps` | `steps` (a list); optional `heading` | 3 to 5 steps of a few words. Packed at the top, so fewer leave the lower half empty |
+| `Steps` | `steps` (a list); optional `heading` | A recap list. A heading over lines is a slide, so never a scene's explanation |
 | `BigNumber` | `value`, `label`; optional `unit` | One figure, large |
 | `LowerThird` | `name`; optional `role` | A name caption, bottom left |
-| `SplitShell` | `heading`, `left` and `right` (lists); `leftTitle`, `rightTitle` (default `Left`, `Right`) | 3 to 5 short lines a side. Its body-size text sits in cards that fill the frame, so one or two lines leave them mostly empty |
+| `SplitShell` | `heading`, `left` and `right` (lists); `leftTitle`, `rightTitle` (default `Left`, `Right`) | Two short lists side by side, as a recap |
 
 Each also takes `accent`, a colour token's name (default `"accent"`). All
-five are static and text only: nothing moves and nothing is cued. For
-motion, word cues, a diagram, or a comparison of a few big words, write the
-video's own component.
+five are static and text only: nothing moves and nothing is cued, so they
+are primitives for a title, a caption or a closing recap, never the
+explanation itself. Every scene that explains something is the video's own
+component, written for that scene.

@@ -1,6 +1,6 @@
 ---
 name: oculus-studio
-description: Makes a short video in an Oculus library (an explainer, an animation, a narrated summary of a lecture, a recap of a topic) by writing TSX scenes and a spoken script, then narrating, checking frame by frame and rendering an mp4 with `oculus studio`. Use for "make a video of lecture X", "a 60 second explainer of Y", "animate this idea", "narrate a summary of week 4", or any request whose result is a video.
+description: Makes an explainer video in an Oculus library (an animated lecture topic, a worked derivation, a narrated walk through an idea) in the style of 3Blue1Brown, by directing helpers that read the lecture and build one scene each, writing a storyboard, a spoken script and TSX scenes, then narrating, checking frame by frame and rendering an mp4 with `oculus studio`. Use for "make a video of lecture X", "an explainer of Y", "animate this proof", "narrate a walk through week 4", or any request whose result is a video.
 ---
 
 # Videos
@@ -10,18 +10,35 @@ scenes, `components/` holds the TSX that draws them, and `script.md` holds
 what is said. You write those files; the CLI narrates, checks, draws frames
 and renders the mp4.
 
-## The two files beside this one
+The target is a 3Blue1Brown video, not a slide deck. The picture *is* the
+explanation: a formula is written term by term as each term is said, then
+rewrites itself into the next line in place; a finished result slides
+aside to make room; a definition is shown working on a real example before
+it is named. Nothing is asserted that the picture does not show.
 
-Both are in `skills/oculus-studio/` under your working directory. Do not
-open them before you start writing.
+## Contents
 
-- **`reference.md`**: read it in full at step 3, before you write the first
-  file of a video. Afterwards, go back to the section a lint message or a
-  question points at; its Contents list names every section.
-- **`studio.d.ts`**: open it when you write or fix a component's TSX and
-  need a global's exact signature (an element's props, a style key, a
-  helper's arguments). Search it for the name rather than reading it whole.
-  A component imports nothing; every global it declares is simply there.
+- The files beside this one; where things are; shell rules
+- Helpers: who does what, and how your CLI starts one
+- Making a video: the checklist
+- Research: what a research helper reads and writes
+- Direct: the storyboard, its template and a worked scene
+- Build: what a scene helper gets, writes and returns
+- Assemble: narration, the whole-video check, the render
+- The story; Taste; Moving maths
+
+## The files beside this one
+
+Both are in `skills/oculus-studio/` under your working directory.
+
+- **`reference.md`**: the authoring rules (video.json, script.md, the
+  component format, elements, motion, `Morph`, cues, lint). A scene builder
+  reads it in full before writing TSX; the director reads its "video.json"
+  and "script.md" sections before writing those files. Afterwards, go to the
+  section a lint message or a question points at.
+- **`studio.d.ts`**: open it when you write TSX and need a global's exact
+  signature. Search it for the name rather than reading it whole. A
+  component imports nothing; every global it declares is simply there.
 
 ## Where things are
 
@@ -29,33 +46,68 @@ From your working directory (`agents/`):
 
 ```
 ../studio/videos/<slug>/      one video
-  video.json                  you write: the scenes, in order
-  script.md                   you write: what is said, one section per narrated scene
-  components/<Name>.tsx       you write: the video's own components
-  assets/                     you write: images, named by <Image src>
-  narration/                  made by narrate: manifest.json and the clips
+  storyboard.md               the director writes: the plan, scene by scene
+  notes/<nn>-<topic>.md       research helpers write: notes on the source
+  video.json                  the director writes: the scenes, in order
+  script.md                   the director writes: what is said, per scene
+  components/<Name>.tsx       scene builders write: the video's components
+  assets/                     images, named by <Image src>
+  narration/                  made by narrate
   out/                        made by frame, strip and gallery: PNGs
   renders/                    made by render: draft.mp4, final.mp4
-  .cache/                     render segments; never edit
 ../studio/library/            the global library: read, never edit
 ../studio/subjects/<CODE>/    a subject's library: read, never edit
 ```
 
-Every `oculus studio` command takes the video's **slug** where its usage says
-`DIR`. Your file tools need the folder: `oculus studio new` prints its
-absolute path.
+Every `oculus studio` command takes the video's **slug** where its usage
+says `DIR`. File tools need the folder: `oculus studio new` prints it.
 
 ## Shell rules
 
 - **One command per call.** No `for`, `while`, `$(…)`, backticks, shell
-  variables or `cd`. Write values out: the subject code and the slug are
-  short.
-- `oculus` is on `PATH`. Call it by name.
-- Add `--json` to a command for output you parse; lint with `--json`
+  variables or `cd`. Write values out.
+- `oculus` is on `PATH`. Add `--json` for output you parse; `lint --json`
   prints `[]` when clean.
 - **On opencode, `bash` is allow-listed to `oculus …` and `ls …` only.**
-  Write files with the write and edit tools, and open PNGs with the read
-  tool, by the path the command printed.
+  Write files with the write and edit tools, read text and PNGs with the
+  read tool, search with the grep tool.
+
+## Helpers
+
+Three roles make a video. You are the **director**: you never read the
+whole lecture and you never build every scene yourself.
+
+| Role | Who | Does |
+| --- | --- | --- |
+| Research | one helper per slice of the source, on the research model | reads its slice, writes one notes file |
+| Direct | you, on your own model | writes the storyboard, the script and video.json; assembles; reviews |
+| Build | one helper per scene, on the scene model | writes and checks that scene's components |
+
+The models are the student's choice in Settings → Jobs. Find out yours and
+how your CLI starts a helper:
+
+```bash
+oculus studio agents --agent claude
+```
+
+Pass your own CLI: `claude`, `codex`, `opencode` or `antigravity`. For each
+role it prints the model and the exact call to make. Use it as printed:
+
+- **Claude Code**: the `Agent` tool with the printed `subagent_type` and
+  `run_in_background: false`. Start a batch in one message so they run at
+  once; a background helper would end your turn early.
+- **Codex**: `spawn_agent` with exactly the printed `model` and
+  `reasoning_effort`, `fork_turns: "none"` and the brief as `message`. This
+  skill asks you to set the model, so set it. At most 3 at once; collect each
+  with `wait_agent`, then `close_agent` it before starting another.
+- **opencode**: the `task` tool with the printed `subagent_type`.
+- **A role printed as off, or an agent that cannot start helpers** (agy):
+  do that role's items yourself, one after another, in the same order and
+  to the same standard. If a start is refused, do the same.
+
+A helper starts with nothing but its brief: no memory of this chat, no
+lecture, no storyboard. Every brief names the video's slug and folder, the
+files to read, the file to write and what to reply. Briefs are below.
 
 ## Making a video
 
@@ -63,200 +115,334 @@ Copy this checklist and tick it off as you go:
 
 ```
 Video progress:
-- [ ] 1. Read the lecture and pick the one question the video answers
-- [ ] 2. Make the folder (oculus studio new)
-- [ ] 3. Read reference.md, plan the argument, write video.json, script.md and any component
-- [ ] 4. Check each new component (oculus studio gallery --sheet), look, fix
-- [ ] 5. Lint until only `narration` problems are left
-- [ ] 6. Narrate
-- [ ] 7. Lint until [], then look at a strip and frames; fix and repeat
-- [ ] 8. Render the draft and give the student its path
-- [ ] 9. Render the final when the student is happy or asked for it
+- [ ] 1. Make the folder (oculus studio new)
+- [ ] 2. Map the source and start one research helper per slice
+- [ ] 3. Read the notes; write storyboard.md
+- [ ] 4. Show the student the storyboard and wait for their go-ahead
+- [ ] 5. Write video.json and script.md; lint until only `narration` is left; narrate
+- [ ] 6. Start one scene builder per scene (in batches)
+- [ ] 7. Review each builder's strip; send fixes to a new builder for that scene
+- [ ] 8. Lint until []; strip the whole video and look; fix
+- [ ] 9. Render the draft and give the student its path
+- [ ] 10. Render the final when the student is happy or asked for it
 ```
 
-**Step 1: Read the lecture.** Use the `oculus-lectures` skill: resolve the
-recording with `oculus list -l CODE`, then read `outline.md` by span. For
-the slides, run `oculus files CODE -t pdf`, then `oculus read <file> --pages
-N-M -s CODE`. Pick the one idea the video is about before you write
-anything.
-
-**Step 2: Make the folder.** Run:
+**Step 1.** Pick a slug (lowercase letters, digits, `-`) and run:
 
 ```bash
-oculus studio new gradient-descent --subject COMP30027 --title "Gradient descent"
+oculus studio new shor-breaks-rsa --subject MULT20015 --title "How Shor breaks R S A"
 ```
 
-The slug is lowercase letters, digits and `-`. `--subject` takes the
-subject code you pass to `-s`. It refuses a slug that exists: pick another,
-or run `oculus studio list --subject COMP30027` to see what is there. Add
-`--portrait` only when asked for a vertical video. `new` writes one silent
-`TitleCard` scene (`id` `title`, `hold` 4); keep it or replace it.
+It refuses a slug that exists (`oculus studio list` shows them). `--portrait`
+only when asked for a vertical video. It writes one silent `TitleCard`
+scene; keep or replace it.
 
-**Step 3: Plan, then write.** Read `reference.md`. Then write the argument
-first, as plain sentences in your head or your reply: the question the
-video answers, each step with its *reason*, and how the end answers the
-question. Then cut it into scenes by "The story" below.
+**Step 2.** Map the source cheaply: `oculus list -l CODE` for the recording,
+then only the slide-change lines of its `outline.md` (the `oculus-lectures`
+skill says how), and `oculus files CODE -t pdf` for the deck. Cut it into
+slices of about ten minutes or ten slides, each one topic, and start one
+research helper per slice ("Research" below has the brief).
 
-For about 60 seconds: 5 to 8 scenes and about 150 spoken words in all
-(speech runs at about 2.5 words a second, and each narrated scene adds
-about a second of quiet around its clip). An explained step takes 15 to 20
-seconds; if the idea needs more steps than the length allows, cover less
-ground, or tell the student how long it needs, rather than rushing.
+**Step 4.** Show the student the storyboard's question, ladder and scene
+list (a line each) and the path to the full file. Stop there. Build only
+after they say go, folding in what they change. Skip the stop only when the
+student said to go straight through.
 
-- See what you can use: run `oculus studio components list
-  gradient-descent`, then `oculus studio components show gradient-descent
-  Steps` for one's props and examples. The starter set is at the end of
-  `reference.md`.
-- `video.json`: one scene per idea, each with an `id`, a `component` and
-  its `props`.
-- `script.md`: one `## <id>` section per narrated scene, in spoken form
-  (numbers and symbols as words). A scene with no section is silent and
-  needs a `hold` in seconds.
-- A scene no existing component fits: write one in the video's
-  `components/<Name>.tsx`, where it wins over a library one of the same
-  name. Give it at least two `examples`.
-
-**Step 4: Check each new component.** Skip this when you wrote none. Run:
+Steps 3, 5 to 8 are in "Direct", "Build" and "Assemble". Steps 9 and 10:
 
 ```bash
-oculus studio gallery gradient-descent Takeaway --sheet
+oculus studio render shor-breaks-rsa
 ```
 
-Open the sheet's PNG and look, as in step 7. Fix the component and run it
-again until every example reads.
+writes a fast 540p `renders/draft.mp4`; tell the student its path.
+`--final` writes `renders/final.mp4` at full size.
 
-**Step 5: Lint.** Run:
+## Research
+
+**The brief** (the director fills in the brackets):
+
+> You are a research helper for the Oculus Studio video `[slug]`, folder
+> `[absolute path]`. Your slice: lecture `[full UUID]` from `[mm:ss]` to
+> `[mm:ss]`, and slides `[N-M]` of `[file]` in subject `[CODE]`. Write your
+> notes to `[folder]/notes/[nn]-[topic].md` in the format in
+> `skills/oculus-studio/SKILL.md`, section "Research". Reply with the path
+> and three lines: what the slice teaches, what it assumes, what it leaves
+> for later.
+
+**The notes file**, one per slice, always in this shape:
+
+```markdown
+# [nn] [topic] (lecture [mm:ss]-[mm:ss], slides [N-M])
+
+## Definitions
+- **prime**: a whole number above 1 whose only factors are 1 and itself. (slide 4, 03:12)
+
+## Worked examples
+- Factor 15 with gcd: pick a = 7; 7^4 = 2401 ≡ 1 (mod 15), so r = 4;
+  gcd(7^2 - 1, 15) = gcd(48, 15) = 3 and gcd(7^2 + 1, 15) = gcd(50, 15) = 5.
+  Every number and every step as the lecture gives it. (slide 9, 14:40)
+
+## Figures
+- slide 7: a clock face with 15 marks, powers of 7 landing on 7, 4, 13, 1. (page 7)
+
+## Assumes
+- modular arithmetic (used at 12:05, never defined in this slice)
+
+## Leaves for later
+- how a quantum computer finds r: "next week" (21:30)
+
+## Quotes worth keeping
+- 15:02 "the period is the whole secret"
+```
+
+Read the slice in full, not a summary of it. Copy numbers exactly; never
+fill a gap with your own example and present it as the lecture's. Write
+"not in this slice" rather than guess.
+
+## Direct
+
+Read every notes file (not the lecture), then write `storyboard.md` in the
+video's folder. It is the whole plan: a builder reads only its scene and
+the scenes either side, so each scene must stand on its own page.
+
+**The question.** One sentence the video answers, asked in the first scene
+and answered in the last.
+
+**The viewer.** A first-year who missed the lecture. Every term is defined,
+on screen and in words, before its first use, with an example before the
+name: show seven dots refusing to make a rectangle, then say "prime". The
+**ladder** lists every term in the order the video defines it; a scene may
+use only terms above it. Basics get their own scenes: if the video uses
+gcd, a scene shows what gcd is on two small numbers and another shows how
+Euclid's steps find it, step by step.
+
+**Many short scenes.** One idea each, as many as the explanation needs.
+There is no length budget: never cut a definition or a step to save time,
+and never cram two ideas into one scene to save a scene.
+
+**Each scene** has: its id and component name; what it carries in and hands
+on (the elements and their keys, so the morph between scenes is planned,
+not hoped for); the idea in a sentence; the picture; a narration draft; and
+a **beat list**, one row per sentence or clause, saying exactly what appears
+or moves on screen as those words are said.
+
+**Banned**, because each is a slide, not an explanation:
+
+- a chain of cards joined by arrows;
+- a heading with lines of text appearing under it;
+- a formula that appears whole;
+- a scene that shows only text;
+- a number on screen that no picture explains.
+
+**The maths rule.** Every spoken step of a derivation is a visible change
+to the previous line, cued to its words: terms move to their new places,
+what cancels fades, what is new is written in as it is said. A finished
+result moves aside, smaller, and stays on screen while it is used.
+
+**When the source stops short**, say so in the narration ("the lecture
+leaves how the period is found for next week") rather than invent the step
+or skip it silently.
+
+### The storyboard template
+
+````markdown
+# How Shor breaks R S A
+
+Question: How can finding a repeating pattern break the lock on the internet?
+Viewer: a first-year who missed lecture 11.
+Notes: notes/01-rsa.md, notes/02-period.md, notes/03-shor.md
+Not in the source: how the quantum computer finds the period (lecture 12).
+
+## Ladder
+1. factor: a number that divides another exactly (scene `factors`)
+2. prime: only the factors 1 and itself (scene `prime`)
+3. gcd: the largest factor two numbers share (scene `gcd`)
+
+## Scenes
+
+### prime (component PrimeDots)
+Carries in: twelve dots d0-d11 in a 3 by 4 rectangle, from `factors`.
+Hands on: the row of seven (keys d0-d6, label `seven`), shrunk to the top left, to `gcd`.
+Idea: a prime's dots make no rectangle except one row.
+Picture: a dot grid that regroups into rows as each grouping is said.
+Narration: Some numbers refuse to make a rectangle. Take seven dots. Two rows
+leave one dot over, and three rows leave one over too. Only one row of seven
+works, so seven's only factors are one and itself, and that is what prime
+means. Twelve is different: three rows of four.
+
+| Said | On screen |
+| --- | --- |
+| "refuse to make a rectangle" | the 3 by 4 rectangle stays; dots d7-d11 fade out |
+| "Take seven dots." | d0-d6 glide into one centred row |
+| "Two rows leave one dot over" | the row regroups into rows of 3 and 3; d6 drops below, turns `negative` |
+| "three rows leave one over too" | regroups into 2, 2, 2; d6 again alone |
+| "Only one row of seven works" | back to one row; d6 back to `text` colour |
+| "factors are one and itself" | under the row, `7 = 1 × 7` is written term by term, keys eq7.* |
+| "that is what prime means" | the word `prime` writes in beside the 7, `accent` |
+| "Twelve is different" | row and label shrink to the top left (key `row7`); twelve dots enter at centre |
+| "three rows of four" | the twelve dots fall into 3 rows of 4 |
+````
+
+## Build
+
+Start builders in batches (Claude: one message; Codex: up to 3). Tell each
+builder which scenes share keys with its own, and which keys.
+
+**The brief:**
+
+> You are building scene `[id]` (scene [index from 0] of [count]) of the
+> Oculus Studio video `[slug]`, folder `[absolute path]`. Read
+> `skills/oculus-studio/SKILL.md` section "Build", then `reference.md` in
+> full, then `storyboard.md` (scene `[id]`, and `[previous id]` and
+> `[next id]`) and `[notes files]`. Write `components/[Name].tsx`.
+> Keys in from `[previous id]`: `[keys]`. Keys out to `[next id]`: `[keys]`.
+> The narration is made; `oculus studio strip [slug] --scene [index]`
+> draws your scene. Reply as "Build" says.
+
+**What a builder does:**
+
+1. Writes the scene's components in `components/`. Write your own freely:
+   the library's components are primitives to compose (a title card, a
+   number), never templates to fill. A component made for one scene
+   declares one prop, `narrated: bool().default(false)`: `video.json` sets
+   it `true` on a narrated scene, so the beats cue on `word()`, and without
+   it they fall back to fixed times (`reference.md` "Moving maths with
+   Morph" shows the pattern).
+2. Cues every beat with `word("…")` on the words the beat list names, in
+   the scene's `script.md` section as written. The first element is on
+   screen at a fixed time under half a second, not at a late cue, so no
+   scene opens on an empty frame.
+3. Builds maths term by term ("Moving maths" below, `reference.md` "Moving
+   maths with Morph").
+4. Draws and looks, until every beat reads:
+
+   ```bash
+   oculus studio strip shor-breaks-rsa --scene 3 --n 16 --cols 4
+   ```
+
+   ```bash
+   oculus studio frame shor-breaks-rsa --scene 3 --at 4.5 --scale 0.5
+   ```
+
+   Open each PNG with your image-reading tool. Check every beat lands on
+   its words, nothing overlaps or overflows, text is readable, and the
+   shared keys sit where the neighbours expect them. `lint` is the director's:
+   it covers the whole video, where other builders' scenes are still being
+   written. If `strip` says some scene's narration is stale, tell the
+   director; do not narrate.
+5. Writes only its own components, named after its scene (`PrimeDots`),
+   and asks the director for anything else. A component two scenes share
+   is written by the builder the director names, with at least two
+   `examples`, and checked with `oculus studio gallery <slug> <Name>
+   --sheet` (no narration needed; `reference.md` "Looking").
+
+**The reply**, exactly:
+
+```
+Scene: prime (3)
+Components: PrimeDots (new)
+Props: {"narrated": true} (as in video.json)
+Strip: /…/out/strip-12.4-31.0.png
+Sheet: none (no shared component)
+Keys in: d0-d11 (as planned). Keys out: row7, seven
+Narration changes: none
+```
+
+A narration change is the sentence as it is and as it should be, with why
+("'refuse' has no beat; say 'won't make'"). The director edits
+`script.md`, narrates again, and tells the builder to re-cue.
+
+## Assemble
+
+**Before building** (step 5): write `video.json` (one scene per storyboard
+scene: its `id`, its component name, and `"props": { "narrated": true }`
+on a narrated scene or `{}` and a `hold` on a silent one) and `script.md` (each scene's narration, in spoken form; see
+`reference.md` "script.md"). Then:
 
 ```bash
-oculus studio lint gradient-descent --json
+oculus studio lint shor-breaks-rsa --json
 ```
 
-Before `narrate`, lint always fails: each narrated scene reports kind
-`narration` ("no narration for its current text … run `oculus studio
-narrate`"), and the command exits 1 with `{"error": "N problems in …"}`.
-That is expected. Fix every other kind, above all `script` (each is a word
-the voice would say wrong), and lint again until only `narration` is left.
-`reference.md` ("Lint") says what to do about each kind.
-
-**Step 6: Narrate.** Run:
+Before the components exist, lint reports `component_not_found` for each
+scene and `narration` for each narrated one; fix every other kind, above
+all `script`. Then narrate:
 
 ```bash
-oculus studio narrate gradient-descent
+oculus studio narrate shor-breaks-rsa
 ```
 
-It reads Settings → Voice, so pass no `--server`, `--model` or `--voice`
-unless the student asks for another voice. Per scene it prints the clip's
-length and word count, and warns about words the aligner was unsure of and
-speech the script lacks. Run it again after editing `script.md`: only
-changed scenes are made again.
+It reads Settings → Voice; pass no `--server`, `--model` or `--voice`
+unless the student asks. If it fails for want of a server, model, voice or
+the word-timing model, **stop and tell the student** what to set in
+Settings → Voice. Never run `oculus studio aligner download` (378 MB, their
+call). If the server does not answer, say so; do not retry in a loop.
 
-If it fails because no server, model or voice is set, or the aligner model
-is not downloaded, **stop and tell the student** what to set in Settings →
-Voice (the server, model and voice, or the word-timing model's Download
-button). Do not run `oculus studio aligner download` yourself: it is 378 MB
-and the student's call. If the server does not answer, say so; do not retry
-in a loop.
-
-**Step 7: Lint again, then look.** Lint now renders the narrated scenes and
-checks their word cues. Fix and lint until it prints `[]`. Then run a
-strip (the default is 12 frames, one every 5 s of a 60 s video; take 16):
+**After building** (steps 7 and 8): read each builder's strip as it lands
+and send fixes back: a new scene builder with the same brief plus the fix
+list and the last reply, since the first one is gone. Then lint until `[]` and strip the whole video, about one frame
+every four seconds:
 
 ```bash
-oculus studio strip gradient-descent --n 16 --cols 4
+oculus studio strip shor-breaks-rsa --n 32 --cols 4
 ```
 
-and a frame for a closer look at one moment:
-
-```bash
-oculus studio frame gradient-descent --t 12.5 --scale 0.5
-```
-
-Each prints the PNG's path. **Open that path with your file-reading tool**
-(the one that shows you images) and check:
-
-- Is the text readable?
-- Does anything overflow or overlap?
-- Does each scene say one thing, and keep the taste rules below?
-
-`strip --scene N` covers one scene (N counts from 0). Fix, lint, look
-again, until nothing is wrong.
-
-**Step 8: Render the draft.** Run:
-
-```bash
-oculus studio render gradient-descent
-```
-
-It writes a fast 540p draft to `renders/draft.mp4`. Tell the student its
-path.
-
-**Step 9: Render the final** when the student is happy with the draft, or
-asked for it:
-
-```bash
-oculus studio render gradient-descent --final
-```
+Check the joins: each shared key moves from one scene into the next
+instead of fading; the scene after a magic move has no `transition`.
 
 ## Keeping a component
 
 **Never edit a library file directly.** A component or theme reaches a
 library only through `oculus studio components promote` or `oculus studio
 themes promote`, which keep the old text in `.history/`. Promote only when
-the student wants to keep it for other videos:
+the student wants it kept for other videos:
 
 ```bash
-oculus studio components promote gradient-descent Takeaway --to subject
+oculus studio components promote shor-breaks-rsa PrimeDots --to subject
 ```
 
 ## The story
 
-The student watches to understand, not to be told. Each of these is a
-sentence or a clause, not a recap: do it lightly, but do it.
+The student watches to understand, not to be told.
 
-- **Explain, don't assert.** Every claim gets its reason. Not "factoring
-  is hard", but why: the only general way is to try divisors, and their
-  number grows with the size of the number. A claim you cannot back in one
-  sentence does not belong in the video.
+- **Explain, don't assert.** Every claim gets its reason, shown. Not "gcd
+  is fast", but why: each two steps of Euclid's method at least halve the
+  larger number, so even a 600-digit pair takes a few thousand steps.
 - **Link each scene to the last.** Open each scene's narration with a
-  clause that picks up what was just shown ("That gap is the whole lock:
-  …"), so a new number or picture lands as the next step of the same
-  argument, not a new topic.
-- **Make every number mean something** for the argument. "A 768-bit key"
-  says nothing; "a 768-bit key, a number about two hundred and thirty
-  digits long, was factored in two thousand nine" does.
-- **Define a term the first time**, in passing: "nation states, that is,
-  governments with whole computing centres".
+  clause that picks up what was just shown ("That leftover dot is the whole
+  idea: …").
+- **Make every number mean something.** "A 768-bit key" says nothing; "a
+  768-bit key, a number about two hundred and thirty digits long" does.
 - **Example, then the rule.** After a worked example, say the general rule
-  in one sentence and put it on screen, so the example is not left as a
-  trick that happened to work.
-- **Spell out the payoff.** When a step "gives away" or "breaks"
-  something, show how, in one concrete line.
-- **End on the opening question.** The last scene answers what the first
-  scene raised, naming the steps that got there in a clause each.
+  in one sentence and show it, so the example is not a trick.
+- **Spell out the payoff.** When a step "breaks" something, show how, in
+  one concrete line.
+- **End on the opening question**, naming the steps that got there.
 - **Say it the way the voice will run it.** Speech is one stream, so words
-  fuse across their gaps: "R S A rests" is heard as "RS arrests". Read
-  each sentence as sounds and rephrase a fusion ("R S A depends on…").
-  `reference.md` ("script.md") has the spoken-form table and the acronym
-  rule.
+  fuse: "R S A rests" is heard as "RS arrests". Read each sentence as
+  sounds and rephrase a fusion. A letter said alone ("q") may be timed as a
+  word ("cue"), so a beat cued on it can miss; cue the word beside it
+  ("the prime q": `word("prime")`). `reference.md` ("script.md") has the
+  spoken-form table and the acronym rule.
 
 ## Taste
 
-- **One idea per scene.** A scene that needs two headings is two scenes.
-- **Words on screen summarise; the narration explains.** Never put the
-  script on screen. A heading and three short points at most.
-- **Fill the frame.** The scene's main element is large and centred in the
-  space below the heading, never parked in the top third.
-- **The key number or phrase is display size** (`theme.type.display`).
-- **Something meaningful is on screen within a second** of a scene
-  starting. Do not open on an empty frame or a slowly drawing line.
-- **Cue motion to words.** An element that illustrates a phrase enters as
-  it is said: `at={word("gradient")}`.
-- **Keep magic-move keys stable.** An element that carries across two
-  scenes keeps the same `key` in both, so it moves instead of fading. When
-  consecutive scenes each have a heading, give every heading the same key
-  (`key="heading"`), or the two headings cross-fade on top of each other.
-- **No colour, font or spacing literals.** Read them from `theme`, and
-  cite only token names that exist: "The theme" in `reference.md` and
-  `studio.d.ts` list them.
+- **The picture carries the idea; words on screen are labels.** Never put
+  the script on screen.
+- **Fill the frame.** The scene's main element is large and centred.
+- **Cue every motion to its words.** An element that illustrates a phrase
+  enters or moves as it is said.
+- **Keep magic-move keys stable.** An element that carries across scenes
+  keeps its key in both, so it moves instead of fading.
+- **No colour, font or spacing literals.** Read them from `theme`; "The
+  theme" in `reference.md` lists the token names.
 - **Look before you report.** Never hand over a render you have not seen
   as frames.
+
+## Moving maths
+
+Build a formula from keyed terms, one per term, and move it with
+`<Morph>`: each step of a derivation is a state, picked by time, so terms
+glide into the next line in place and a finished line shrinks into a
+corner by re-laying out its keyed root. `reference.md` "Moving maths with Morph" has the pattern and a
+working three-step example. Write terms as they are said: a term enters on
+its word, never the whole line at once.
