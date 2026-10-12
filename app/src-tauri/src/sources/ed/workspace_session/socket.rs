@@ -176,27 +176,22 @@ fn serve(core: &Context, socket: &mut Socket, queue: &Receiver<Out>) -> Ended {
     }
 }
 
-/// One frame from the server. Another client's file changes wait for
-/// reconcile.
+/// One frame from the server. A commit Run or Mark asked for answers it;
+/// another client's commit is pulled (`Context::commit_arrived`). The
+/// `list_reply` an upload sets off is ignored.
 fn handle(core: &Context, frame: Incoming) {
     match frame {
         Incoming::NewCommit(commit) => {
-            let hash = &commit.commit.hash;
+            let hash = commit.commit.hash;
             let asked = core
                 .shared()
                 .snapshots
-                .answered(commit.context.as_ref(), hash);
+                .answered(commit.context.as_ref(), &hash);
             if asked {
-                core.emit(Body::Commit {
-                    hash: hash.clone(),
-                    ours: true,
-                });
+                core.emit(Body::Commit { hash, ours: true });
                 return;
             }
-            let decided = core.shared().commits.arrived(hash);
-            if let Some((hash, ours)) = decided {
-                core.emit(Body::Commit { hash, ours });
-            }
+            core.commit_arrived(hash);
         }
         Incoming::DisplayError(message) => core.emit(Body::Error { message }),
         Incoming::ProgramInit(_)

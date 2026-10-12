@@ -1,7 +1,8 @@
 //! What Oculus last synced of a challenge workspace, one file per challenge
 //! at `<data_dir>/ed-workspaces/<challenge_id>.json`, outside the library so
 //! no migration and no library scan ever touches it. While a challenge has
-//! one, the lesson sync leaves its files alone (`docs/sync.md`).
+//! one, the lesson sync reconciles its files instead of overwriting them
+//! (`workspace_session::reconcile`, `docs/sync.md`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

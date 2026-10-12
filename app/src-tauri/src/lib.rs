@@ -156,6 +156,7 @@ pub fn run() {
             sources::ed::workspace_session::mark_commands::ed_workspace_mark,
             sources::ed::workspace_session::mark_commands::ed_workspace_submissions,
             sources::ed::workspace_session::mark_commands::ed_challenge_standing,
+            sources::ed::workspace_session::reconcile::command::ed_workspace_resolve,
             auth::okta::commands::okta_credential_status,
             auth::okta::commands::okta_save_credentials,
             auth::okta::commands::okta_clear_credentials,

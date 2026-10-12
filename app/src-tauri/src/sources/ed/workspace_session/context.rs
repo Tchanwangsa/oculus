@@ -12,6 +12,7 @@ use super::commits::Commits;
 use super::events::{Body, Sink, State, Status, WorkspaceEvent};
 use super::paths;
 use super::queue::Queue;
+use super::reconcile::Puller;
 use super::snapshot::Snapshots;
 use super::terminal::Terminals;
 use crate::sources::ed::workspace_state::{self, WorkspaceState};
@@ -46,6 +47,7 @@ pub struct Context {
     /// The workspace server's origin in place of `https://<host>`: tests
     /// point it at a local fake.
     pub sahara_origin: Option<String>,
+    pub puller: Puller,
     shared: Mutex<Shared>,
     sink: Sink,
 }
@@ -65,6 +67,7 @@ impl Context {
             ed,
             queue: Arc::default(),
             sahara_origin: None,
+            puller: Puller::default(),
             shared: Mutex::new(Shared {
                 status: Status::connecting(),
                 online: None,
@@ -141,8 +144,7 @@ impl Context {
         }
     }
 
-    /// Upload one file and return Ed's commit, deciding any `new_commit`
-    /// frame held for it (`commits`).
+    /// Upload one file and return Ed's commit, noted as ours (`commits`).
     pub fn upload(
         &self,
         workspace_id: &str,
@@ -155,11 +157,18 @@ impl Context {
             .ed
             .upload_ticket(workspace_id)
             .and_then(|ticket| sahara::upload(&self.origin(host), &ticket, path, bytes));
-        let decided = self.shared().commits.finish(uploaded.as_deref().ok());
-        for (hash, ours) in decided {
-            self.emit(Body::Commit { hash, ours });
-        }
+        self.shared().commits.finish(uploaded.as_deref().ok());
         uploaded
+    }
+
+    /// A `new_commit` frame: tell the pane, and pull another client's
+    /// change into the library (`reconcile::pull`).
+    pub fn commit_arrived(&self, hash: String) {
+        let ours = self.shared().commits.arrived(&hash);
+        if !ours {
+            self.puller.want(&hash);
+        }
+        self.emit(Body::Commit { hash, ours });
     }
 
     /// Change the sync record and save it. A record that is missing or
@@ -193,14 +202,6 @@ impl Context {
             !state.files.contains_key(path) && state.files.keys().any(|p| p.starts_with(&folder))
         })
     }
-}
-
-/// Drop `path` from the record, and everything under it when it was a folder.
-pub fn forget(state: &mut WorkspaceState, path: &str) {
-    let folder = format!("{path}/");
-    state
-        .files
-        .retain(|p, _| p != path && !p.starts_with(&folder));
 }
 
 /// The SHA-256 of `bytes`, lower-case hex, as the sync record keeps it.

@@ -13,6 +13,7 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Ed Discussion: courses, threads, XML→md; its requests through keyd's `ed` route | `app/src-tauri/src/sources/ed/` |
 | Ed Lessons: lessons, quiz questions, challenge settings, workspace zips, the index and slide renderers | `app/src-tauri/src/sources/ed/lessons.rs`, `app/src-tauri/src/sources/ed/workspace.rs`, `app/src-tauri/src/sources/ed/lesson_md/` |
 | A challenge workspace's local sync record | `app/src-tauri/src/sources/ed/workspace_state.rs` |
+| Reconcile of a recorded workspace with Ed: the decision table, conflict copies, resolve, live pulls, the sync's run | `app/src-tauri/src/sources/ed/workspace_session/reconcile/` |
 | A workspace opened in the app: its socket thread, frames, commands and `ed-workspace` events; the `/api` and workspace-server calls it makes | `app/src-tauri/src/sources/ed/workspace_session/`, `app/src-tauri/src/sources/ed/workspace_api.rs`, `app/src-tauri/src/sources/ed/sahara.rs`, `app/src-tauri/src/sources/ed/live.rs` |
 | Front matter on Ed files; Ed's category colours | `app/src-tauri/src/sources/ed/front.rs`, `app/src-tauri/src/sources/ed/palette.rs` |
 | The Ed phase (one course resolve for threads and lessons) and the lessons phase | `app/src-tauri/src/sync/phases/ed.rs`, `app/src-tauri/src/sync/phases/ed_lessons.rs` |
@@ -408,18 +409,27 @@ leaves the last whole lesson.
   carries one reaches a log.
 - Zip entries are read with `enclosed_name` (an escaping path is refused and
   logged); directories, dotfiles, dot-directories and `__MACOSX` are dropped,
-  and a file over 20 MB is skipped with a log line. Text files up to 20 KB are
+  and a file over 20 MB is skipped with a log line. Each file is stored at
+  Ed's own workspace-relative path (no renaming, unlike other library files),
+  through the open session's guard (`workspace_session/paths.rs`), so the
+  sync and a session name every file alike; a path the guard refuses is
+  skipped with a log line. Text files up to 20 KB are
   also shown inline as fenced code. A workspace is fetched every sync, since
   Ed gives it no version; the byte compare keeps unchanged files unchanged.
 - A workspace with a sync record, `ed-workspaces/<challenge_id>.json` in the
   data dir (`app/src-tauri/src/sources/ed/workspace_state.rs`), holds local
-  work, so the sync leaves it as is: no connect, no download, no write, and
-  an `info` line `workspace has local state, left as is`. The record is
+  work, so the sync reconciles it with Ed instead of overwriting it
+  ([below](#reconcile-brings-a-recorded-workspace-in-step-with-ed)): it
+  connects and holds the workspace live itself, as for a download. It
+  leaves the folder alone, with an `info` line, while the challenge is open
+  in the app (its session reconciles it) or when the record names another
+  folder (the lesson was renamed). A conflict is a `warning` line; a file
+  reconcile wrote is reported `updated`. The record is
   `{"workspace_id", "slide_dir", "base_commit", "files", "submissions"}`,
   `files` mapping each path in the workspace to the SHA-256 (hex) of the
   bytes last synced. The slide's Files list is then those paths, read from
   the slide's folder on disk (one missing there is left out). A record that
-  cannot be read still counts.
+  cannot be read still counts, as an empty one.
 - A PDF slide's `file_url` names its content, so `file-manifest.json` keeps it
   under `ed-slide-<id>`, and a match with the file on disk skips the
   download. The PDF is an ordinary library file: parsed and embedded.
@@ -460,10 +470,11 @@ the working copy; Ed gets each save as an upload.
   (`"."` zip, unpacked as the sync does), writes it into the slide's folder,
   and saves the record: `base_commit` is `init.last_commits[0]`, each file's
   hash is of Ed's bytes. A save or delete made before that (offline, or while
-  connecting) is kept over Ed's copy, then uploaded or removed. From then on
-  the lesson sync leaves the folder alone. A connect with a record goes
-  online without comparing files: offline changes stay local until reconcile
-  compares them.
+  connecting) is kept over Ed's copy, then uploaded or removed. Any other
+  file in the folder is a leftover of an earlier sync and is deleted (logged),
+  or reconcile would upload it as new. Every later connect reconciles
+  ([below](#reconcile-brings-a-recorded-workspace-in-step-with-ed)) before
+  the session goes online.
 - Every path is workspace-relative and goes through one guard
   (`paths::resolve`): no empty, absolute, `.`/`..`, hidden (dot), `\`, `:` or
   NUL component, and nothing a symlink takes outside the folder. The file list
@@ -479,17 +490,24 @@ the working copy; Ed gets each save as an upload.
   they were asked (`queue.rs`).
 - `ed_workspace_delete` removes the file or folder, and while online sends
   `fsop {type: "remove", param1: <path>, param3: "file"|"folder"}` (the
-  server ignores a remove without `param3`) and drops it from the record.
+  server ignores a remove without `param3`). The record keeps the file until
+  a reconcile finds it gone from both sides, so a remove lost with the socket
+  is sent again; an offline delete is found the same way.
   `ed_workspace_read` returns the library copy as UTF-8 (lossy).
 - One event, `ed-workspace`, to the main window: `{challengeId, kind}` with
   `status {state: connecting|online|offline, reason}`, `commit {hash, ours}`,
-  `files {files}` (after the first download writes, and when a save or
-  delete changes the list), `error {message}` (Ed's `display_error`), and
-  the terminal and Run kinds below.
-  A `new_commit` frame is ours when its hash is one an upload of ours
-  answered; the frame can beat that answer, so one that matches nothing
-  while an upload is in flight is held until the uploads finish
-  (`commits.rs`). `ours: false` is another client, such as Ed's web app.
+  `files {files}` (after the first download writes, after each reconcile,
+  and when a save or delete changes the list), `conflict {path, serverPath}`
+  (one per file in conflict, after each reconcile), `error {message}`
+  (Ed's `display_error`, or a pull that failed), and the terminal and Run
+  kinds below.
+  Each upload makes two `new_commit` frames: a snapshot commit whose hash
+  the upload never returns, then its own, which can beat the HTTP answer.
+  So a frame is ours when its hash is one an upload of ours answered or when
+  it arrives while an upload of ours is in flight (`commits.rs`); another
+  client's commit hidden that way is caught by the next reconcile.
+  `ours: false` is another client, such as Ed's web app. The `list_reply` the
+  server sends after an upload is ignored.
 - Frames are `{type, data}` JSON (`frames.rs`); kinds the workspace does not
   use (live editing, cursors, chat) are ignored.
 - Tickets are held in a `Ticket` whose `Debug` hides them, and the workspace
@@ -549,6 +567,59 @@ the working copy; Ed gets each save as an upload.
   `ed_challenge_standing` reads `GET /challenges/<ch>` live for `{score,
   status, attemptsRemaining, dueAt}`, `dueAt` falling back to the slide's
   front matter. Neither read needs the workspace open.
+
+## Reconcile brings a recorded workspace in step with Ed
+
+`app/src-tauri/src/sources/ed/workspace_session/reconcile/` compares, per
+file, its bytes in the slide's folder, the record's hash (the base) and Ed's
+bytes (`download "."`), and acts on the decision table in `table.rs`:
+
+| Here | Ed | Action |
+| --- | --- | --- |
+| = base | changed | take Ed's |
+| changed | = base | upload |
+| changed | changed, same bytes | record |
+| changed | changed, different | **conflict** |
+| new | absent | upload |
+| absent | new | write here |
+| deleted | = base | `fsop remove` on Ed |
+| = base | deleted | delete here |
+| changed | deleted | upload |
+| deleted | changed | write here |
+
+- A conflict keeps the local file and writes Ed's beside it as
+  `<name>.ed-server.<ext>` (`server_copy.rs`: before the last extension,
+  `x.tar.gz` → `x.tar.ed-server.gz`; after a name with none,
+  `Makefile.ed-server`). The record keeps the old base, so each reconcile
+  calls it a conflict again and refreshes the copy; while the copy exists
+  reconcile never uploads the file. Names of that shape are reserved: never
+  uploaded by a save, removed on Ed by a delete, recorded, or taken from Ed.
+- `ed_workspace_resolve {challengeId, path, keep: "mine" | "ed"}` settles one,
+  in the save queue, online or not. `mine` records Ed's version as the base
+  (so the local edit is the only change), deletes the copy and, while
+  online, uploads the file. `ed` writes the copy over the file, drops it from
+  the record (recorded once Ed is found to agree, a conflict again if Ed has
+  moved on) and deletes the copy.
+- `init.last_commits[0]` equal to `base_commit` means Ed has not changed:
+  nothing is downloaded and only local changes go up. A pull that was owed
+  (below) turns that off for the next connect.
+- After a reconcile the record holds the new hashes and `base_commit` is the
+  last upload's commit, else Ed's head. Every step leaves the sides so a
+  second run decides the same or just records, so one cut short (an upload
+  fails, the socket drops) is finished by the next; the record is saved
+  only when the whole run succeeds.
+- A file the zip leaves out (over 20 MB, a name the guard refuses) is left
+  alone, never taken for deleted. A folder missing from the library is an
+  error, never a delete of everything.
+- When: every connect of a session with a record (after the lesson sync
+  lets go of the challenge, if it holds it), every lesson sync of a
+  workspace not open in the app, and while a session is live, each
+  `new_commit` from another client. That pull runs on a worker thread in the
+  save queue, so it lands between saves and never stalls the socket; commits
+  arriving during a pull make one more pull. A pull that fails or finds the
+  session offline is owed to the next connect, which then downloads even at
+  the base commit. The app process keeps the lesson sync and its sessions
+  off the same challenge (`registry.rs`).
 
 ## Echo360 is an LTI launch with up to two streams
 

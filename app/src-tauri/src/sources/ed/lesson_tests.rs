@@ -634,13 +634,13 @@ fn the_workspace_keeps_safe_small_visible_files() {
     assert!(
         skipped
             .iter()
-            .any(|s| s.contains("escape.py") && s.contains("unsafe")),
+            .any(|s| s.path.contains("escape.py") && s.reason == "unsafe path"),
         "{skipped:?}"
     );
     assert!(
         skipped
             .iter()
-            .any(|s| s == "data/big.bin: over 20 MB, skipped"),
+            .any(|s| s.to_string() == "data/big.bin: over 20 MB, skipped"),
         "{skipped:?}"
     );
     assert!(unpack(b"not a zip").is_err());

@@ -110,8 +110,10 @@ fn the_first_connect_records_eds_tree_and_keeps_what_was_saved_before_it() {
     ]));
     let (context, events) = context(&dir, &sahara.origin());
     let root = dir.join(SLIDE_DIR);
-    // Saved and deleted here while the challenge had no record.
+    // Saved and deleted here while the challenge had no record, and a file
+    // an earlier sync left that Ed no longer has.
     std::fs::write(root.join("tally.py"), "count = 1\n").unwrap();
+    std::fs::write(root.join("old.py"), "o").unwrap();
     {
         let mut shared = context.shared();
         shared
@@ -131,16 +133,19 @@ fn the_first_connect_records_eds_tree_and_keeps_what_was_saved_before_it() {
     assert_eq!(std::fs::read(root.join("src/util.py")).unwrap(), b"u\n");
     assert!(!root.join("gone.txt").exists());
     assert!(!root.join(".hidden").exists());
+    assert!(!root.join("old.py").exists());
     assert_eq!(pending, [frames::remove("gone.txt", false)]);
 
     let record = workspace_state::load(&dir, 267880).unwrap();
     assert_eq!(record.workspace_id, "W1");
     assert_eq!(record.slide_dir, SLIDE_DIR);
-    // The local save went up and became the base.
+    // The local save went up and became the base; the removed file stays
+    // recorded until a reconcile finds it gone from Ed.
     assert_eq!(record.base_commit.as_deref(), Some("up1"));
     assert_eq!(
         record.files.into_iter().collect::<Vec<_>>(),
         [
+            ("gone.txt".to_string(), sha256(b"g\n")),
             ("src/util.py".to_string(), sha256(b"u\n")),
             ("tally.py".to_string(), sha256(b"count = 1\n")),
         ]
@@ -172,15 +177,36 @@ fn the_first_connect_records_eds_tree_and_keeps_what_was_saved_before_it() {
         }
     }));
 
-    // With a record, a connect leaves the folder as it is.
+    // With a record, a connect reconciles. Ed (the fake) still serves its
+    // first tree: `tally.py` changed on both sides, `gone.txt` is still there.
     std::fs::write(root.join("tally.py"), "count = 2\n").unwrap();
     let pending = bootstrap::on_connect(&context, "W1", "sahara.test", &init("h9")).unwrap();
-    assert!(pending.is_empty());
+    assert_eq!(pending, [frames::remove("gone.txt", false)]);
     assert_eq!(
         std::fs::read(root.join("tally.py")).unwrap(),
         b"count = 2\n"
     );
-    assert_eq!(sahara.hits().len(), 2);
+    assert_eq!(
+        std::fs::read(root.join("tally.ed-server.py")).unwrap(),
+        b"count = 0\n"
+    );
+    assert!(events.lock().unwrap().contains(&WorkspaceEvent {
+        challenge_id: 267880,
+        body: Body::Conflict {
+            path: "tally.py".into(),
+            server_path: "tally.ed-server.py".into(),
+        }
+    }));
+    let record = workspace_state::load(&dir, 267880).unwrap();
+    assert_eq!(record.base_commit.as_deref(), Some("h9"));
+    assert_eq!(record.files["tally.py"], sha256(b"count = 1\n"));
+    // One download, one upload, then the second download; nothing uploaded.
+    assert_eq!(sahara.hits().len(), 3);
+
+    // Ed still at the base: no download.
+    let pending = bootstrap::on_connect(&context, "W1", "sahara.test", &init("h9")).unwrap();
+    assert_eq!(pending, [frames::remove("gone.txt", false)]);
+    assert_eq!(sahara.hits().len(), 3);
 }
 
 #[test]
@@ -211,10 +237,7 @@ fn an_online_save_uploads_and_moves_the_base() {
     drop(events);
 
     // A frame for our hash after the answer is ours.
-    assert_eq!(
-        context.shared().commits.arrived("up1"),
-        Some(("up1".into(), true))
-    );
+    assert!(context.shared().commits.arrived("up1"));
 }
 
 #[test]
@@ -275,7 +298,7 @@ fn offline_changes_stay_local_and_are_remembered_until_a_record_exists() {
 }
 
 #[test]
-fn an_online_delete_sends_the_remove_and_forgets_the_file() {
+fn an_online_delete_sends_the_remove_and_keeps_the_record_for_reconcile() {
     let dir = Scratch::new("ed-ws-delete");
     let (context, _) = context(&dir, "http://127.0.0.1:1");
     let root = dir.join(SLIDE_DIR);
@@ -296,10 +319,11 @@ fn an_online_delete_sends_the_remove_and_forgets_the_file() {
         Ok(Out::Frame(frame)) => assert_eq!(frame, frames::remove("src", true)),
         _ => panic!("no remove frame"),
     }
+    // Forgotten only once a reconcile finds it gone from Ed too.
     let record = workspace_state::load(&dir, 267880).unwrap();
     assert_eq!(
         record.files.keys().collect::<Vec<_>>(),
-        ["keep.py", "srcfile.py"]
+        ["keep.py", "src/a.py", "srcfile.py"]
     );
 }
 

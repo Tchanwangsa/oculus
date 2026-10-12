@@ -124,34 +124,29 @@ fn outgoing_frames_are_type_and_data() {
 }
 
 #[test]
-fn a_commit_is_ours_when_our_upload_named_it_whichever_comes_first() {
+fn a_commit_is_ours_when_our_upload_named_it_or_one_was_in_flight() {
     let mut c = Commits::default();
     // The HTTP answer first, then the frame.
     c.begin();
-    assert_eq!(c.finish(Some("h1")), []);
-    assert_eq!(c.arrived("h1"), Some(("h1".into(), true)));
+    c.finish(Some("h1"));
+    assert!(c.arrived("h1"));
 
-    // The frame first: held until the upload answers.
+    // While an upload is in flight, its snapshot commit and its own frame
+    // (which beats the answer) are both ours.
     c.begin();
-    assert_eq!(c.arrived("h2"), None);
-    assert_eq!(c.finish(Some("h2")), [("h2".to_string(), true)]);
+    assert!(c.arrived("snapshot"));
+    assert!(c.arrived("h2"));
+    c.finish(Some("h2"));
+    assert!(c.arrived("h2"));
 
-    // Another client's commit during an upload waits for it, then is theirs.
+    // With nothing in flight, an unknown commit is another client's.
+    assert!(!c.arrived("web"));
+
+    // A failed upload still counts what arrived during it as ours.
     c.begin();
-    assert_eq!(c.arrived("theirs"), None);
-    assert_eq!(c.arrived("h3"), None);
-    assert_eq!(
-        c.finish(Some("h3")),
-        [("h3".to_string(), true), ("theirs".to_string(), false)]
-    );
-
-    // With nothing in flight, an unknown commit is decided at once.
-    assert_eq!(c.arrived("web"), Some(("web".into(), false)));
-
-    // A failed upload releases what it held.
-    c.begin();
-    assert_eq!(c.arrived("x"), None);
-    assert_eq!(c.finish(None), [("x".to_string(), false)]);
+    assert!(c.arrived("x"));
+    c.finish(None);
+    assert!(!c.arrived("y"));
 }
 
 #[test]

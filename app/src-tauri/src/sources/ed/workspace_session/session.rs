@@ -7,11 +7,12 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
-use super::context::{forget, sha256, write_file, Context, Unrecorded};
+use super::context::{sha256, write_file, Context, Unrecorded};
 use super::events::{Saved, SavedTo, Sink, WorkspaceInfo};
 use super::frames;
 use super::paths;
 use super::queue::Place;
+use super::reconcile::{self, Keep};
 use super::run::Runs;
 use super::slide::Slide;
 use super::socket::{self, Out};
@@ -43,11 +44,16 @@ impl Session {
             sink,
         ));
         let (out, queue) = mpsc::channel();
+        reconcile::spawn_puller(core.clone(), out.clone())?;
         let thread_core = core.clone();
         std::thread::Builder::new()
             .name(format!("ed-workspace-{challenge_id}"))
             .spawn(move || socket::run(thread_core, queue))
-            .map_err(|e| format!("could not start the workspace session: {e}"))?;
+            .map_err(|e| {
+                core.puller.close();
+                format!("could not start the workspace session: {e}")
+            })?;
+        reconcile::opened(challenge_id);
         Ok(Session::with(core, slide, out))
     }
 
@@ -86,6 +92,8 @@ impl Session {
     pub fn close(&self) {
         let _ = self.out.send(Out::Stop);
         self.runs.stop_current();
+        self.core.puller.close();
+        reconcile::closed(self.core.challenge_id);
     }
 
     /// A place for a save or delete, taken when the pane asks.
@@ -115,6 +123,13 @@ impl Session {
         if new {
             core.emit_files();
         }
+        // Ed's copy of a conflict lives here only.
+        if reconcile::is_server_copy(path) {
+            return Ok(Saved {
+                saved: SavedTo::Local,
+                hash: None,
+            });
+        }
         let Some((workspace_id, host)) = core.online() else {
             if !core.has_record() {
                 core.shared()
@@ -140,8 +155,15 @@ impl Session {
         })
     }
 
+    /// Settle a conflict on `path` (`reconcile::resolve`).
+    pub fn resolve(&self, place: Place, path: &str, keep: Keep) -> Result<(), String> {
+        let _turn = place.wait();
+        reconcile::resolve(&self.core, path, keep)
+    }
+
     /// Remove `path` (a file or a folder) from the library, and from Ed
-    /// while online.
+    /// while online. The record keeps it until a reconcile finds it gone
+    /// from both sides, so a remove lost with the socket is sent again.
     pub fn delete(&self, place: Place, path: &str) -> Result<(), String> {
         let _turn = place.wait();
         let core = &self.core;
@@ -157,18 +179,19 @@ impl Session {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(format!("could not delete {path}: {e}")),
         }
-        let Some((workspace_id, _)) = core.online() else {
+        if reconcile::is_server_copy(path) {
+            return Ok(());
+        }
+        if core.online().is_none() {
             if !core.has_record() {
                 core.shared()
                     .unrecorded
                     .insert(path.to_string(), Unrecorded::Deleted);
             }
             return Ok(());
-        };
+        }
         self.out
             .send(Out::Frame(frames::remove(path, folder)))
-            .map_err(|_| "the workspace session has ended".to_string())?;
-        core.record(&workspace_id, |state| forget(state, path))
-            .map_err(|e| format!("{path} is deleted, but its sync record is not updated: {e}"))
+            .map_err(|_| "the workspace session has ended".to_string())
     }
 }
