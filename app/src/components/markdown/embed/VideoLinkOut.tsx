@@ -1,6 +1,6 @@
 import { VideoCamera } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { openExternal } from "@/lib/browser";
+import { openLinkOut, type LinkOut } from "@/lib/files/canvasLinks";
 
 /**
  * A page's video outside a library file, where there is no subject to
@@ -8,7 +8,7 @@ import { openExternal } from "@/lib/browser";
  * `href` in a browser tab; ⌘-click opens the system browser. A span, as the
  * tag can sit inside a paragraph or a table cell.
  */
-export function VideoLinkOut({ label, href }: { label: string; href: string }) {
+export function VideoLinkOut({ label, href }: { label: string; href: LinkOut }) {
   return (
     <span className="my-3 block">
       <Button
@@ -16,7 +16,7 @@ export function VideoLinkOut({ label, href }: { label: string; href: string }) {
         size="sm"
         className="max-w-full"
         title={label}
-        onClick={(e) => void openExternal(href, e.metaKey)}
+        onClick={(e) => void openLinkOut(href, e.metaKey)}
       >
         <VideoCamera size={14} />
         <span className="truncate">{label}</span>
