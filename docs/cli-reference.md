@@ -28,6 +28,7 @@ Commands:
   memory      Read and write the memory store the agents keep in the library
   lecture     Look inside a downloaded lecture recording
   transcribe  Transcribe a video that has no captions, on Groq or on this Mac
+  studio      Render and check Studio videos: TSX scenes drawn frame by frame
   docs        Write the agent-facing docs into the library
   agent       Run one prompt through a CLI agent (Claude Code, Codex, opencode or
               Antigravity)
@@ -38,8 +39,8 @@ Options:
           Print machine-readable JSON instead of formatted text
 
           Honoured by every command that prints: status, list, search, grep, read,
-          files, calendar, project, task and keyd. On failure the JSON is `{"error":
-          "..."}` on stderr and the exit code is 1.
+          files, calendar, project, task, keyd and studio. On failure the JSON is
+          `{"error": "..."}` on stderr and the exit code is 1.
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1410,6 +1411,167 @@ Options:
       --force
           Transcribe again when the `.vtt` already exists, replacing it
 
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus studio`
+
+```
+Render and check Studio videos: TSX scenes drawn frame by frame
+
+Usage: oculus studio <COMMAND>
+
+Commands:
+  frame  Render one frame of a video to a PNG
+  strip  Render frames across a stretch of a video as one contact-sheet PNG
+  lint   Check a whole video without writing anything
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio frame`
+
+```
+Render one frame of a video to a PNG
+
+A video is a folder: `video.json` (size, theme and the scenes in order, each a
+component, its props and how many seconds it holds), `components/<Name>.tsx` (one TSX
+component per file, run in a sandbox) and `assets/` (the images `<Image src>` names).
+Every frame is a pure function of the folder and the time, so the same call always draws
+the same pixels.
+
+Time is either global, `--t` seconds from the start of the video, or scene-relative,
+`--scene N --at S` (scenes count from 0). With neither it draws the first frame. The PNG
+goes to `<DIR>/out/frame-<t>.png`, `t` global, unless `-o` names another file. Anything
+a component passes to `console.log` is printed after the path.
+
+oculus studio frame lectures/week-4 --t 12.4
+
+oculus studio frame lectures/week-4 --scene 2 --at 0.5 -o /tmp/check.png --scale 0.5
+
+Usage: oculus studio frame [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json`
+
+Options:
+      --t <SECONDS>
+          Seconds from the start of the video (default: 0)
+
+      --scene <N>
+          Which scene, counting from 0; the time is then `--at` within it
+
+      --at <SECONDS>
+          Seconds from the start of `--scene` (default: 0)
+
+  -o, --out <OUT.png>
+          Where to write the PNG (default: `<DIR>/out/frame-<t>.png`)
+
+      --scale <F>
+          Pixel scale over the same layout: 0.5 draws a 1080p video at 540p
+
+          [default: 1]
+
+      --motion-blur
+          Average sub-frames over a 30 fps, 180° shutter, as many as the motion needs
+          (off unless given, whatever the theme's motionBlur says)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio strip`
+
+```
+Render frames across a stretch of a video as one contact-sheet PNG
+
+Draws `--n` frames evenly spaced from `--from` to `--to` (both included, global
+seconds), tiled `--cols` a row, each labelled under the frame with its time and, in a
+video of several scenes, its scene and the time within it. It is how to check a motion
+without a video: what moves, in which order, and where it settles. `--scene N` covers
+that scene alone. A `--to` at or past the end is the video's last moment.
+
+Frames render in parallel, one renderer per thread (default half the cores, capped to
+keep memory under 2 GB); the sheet is the same at any thread count. A frame that fails
+fails the sheet, naming its time and scene. The PNG goes to
+`<DIR>/out/strip-<from>-<to>.png` unless `-o` names another file.
+
+oculus studio strip lectures/week-4
+
+oculus studio strip lectures/week-4 --scene 2 --n 8 --cols 8 --scale 0.2
+
+oculus studio strip lectures/week-4 --from 3 --to 4 --n 6 -o /tmp/motion.png
+
+Usage: oculus studio strip [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json`
+
+Options:
+      --from <SECONDS>
+          First frame, in seconds from the start of the video (default: 0)
+
+      --to <SECONDS>
+          Last frame, in seconds from the start of the video (default: the end)
+
+      --scene <N>
+          Cover only this scene, counting from 0
+
+      --n <K>
+          How many frames
+
+          [default: 12]
+
+      --cols <C>
+          Frames per row
+
+          [default: 4]
+
+      --scale <F>
+          Each frame's scale over the video's size: 0.25 makes 480x270 tiles of a 1080p
+          video
+
+          [default: 0.25]
+
+      --threads <T>
+          Render threads (default: half the cores, at most one per frame)
+
+      --motion-blur
+          Blur each frame over a 30 fps, 180° shutter (see `frame --help`)
+
+  -o, --out <OUT.png>
+          Where to write the PNG (default: `<DIR>/out/strip-<from>-<to>.png`)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio lint`
+
+```
+Check a whole video without writing anything
+
+Loads every component the video uses, checks each scene's props and each component's
+`examples` against its `props` schema, and renders every scene at its first and last
+moment. Every problem is reported, not just the first, each with its scene, component
+and, where there is one, the TSX line. Exits 1 when there is any problem, so it can gate
+a render.
+
+See `oculus studio frame --help` for what a video folder holds.
+
+Usage: oculus studio lint <DIR>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json`
+
+Options:
   -h, --help
           Print help (see a summary with '-h')
 ```

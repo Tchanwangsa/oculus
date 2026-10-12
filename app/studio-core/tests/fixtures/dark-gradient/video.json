@@ -1,0 +1,7 @@
+{
+  "size": { "width": 1920, "height": 1080 },
+  "theme": "default",
+  "scenes": [
+    { "component": "DarkGradient", "hold": 1.0 }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "size": {
+    "width": 1920,
+    "height": 1080
+  },
+  "theme": "default",
+  "scenes": [
+    {
+      "component": "ThreeCards",
+      "props": {
+        "heading": "Three ways to pick a step size",
+        "cards": [
+          "Fixed",
+          "Decaying",
+          "Adaptive"
+        ],
+        "points": [
+          "Start large while far from the minimum",
+          "Shrink it as the loss flattens",
+          "Or let each weight learn its own rate"
+        ],
+        "notes": [
+          "One rate for the whole run. Simple, but it either crawls or overshoots.",
+          "Large early, smaller later, on a schedule fixed before training starts.",
+          "Each weight scales its own step from the history of its gradients."
+        ]
+      },
+      "hold": 3.0
+    }
+  ]
+}

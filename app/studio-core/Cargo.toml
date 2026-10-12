@@ -1,0 +1,44 @@
+[package]
+name = "oculus-studio-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Its own root (like keyd/core): `cargo test` here never resolves into
+# src-tauri's lock. src-tauri links it by path.
+[workspace]
+
+[lib]
+name = "studio_core"
+
+[dependencies]
+rquickjs = "0.14.0"
+oxc = { version = "0.153.0", features = ["transformer", "codegen", "semantic"] }
+taffy = "0.14.0"
+vello_cpu = { version = "0.3.0", default-features = false, features = ["std", "text", "u8_pipeline"] }
+parley = "0.12.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[dev-dependencies]
+# The version parley and vello_cpu already lock (and src-tauri), for reading
+# font axes in tests.
+skrifa = "=0.44.0"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
+[profile.release]
+opt-level = 3
+
+# Goldens and the subpixel test render 1080p frames; unoptimised rasterising
+# makes `cargo test` crawl.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1

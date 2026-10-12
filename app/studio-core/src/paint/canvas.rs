@@ -1,0 +1,214 @@
+//! A vello_cpu render context, one per renderer and reused every frame.
+//! Single-threaded on purpose: vello's own threads panic with filter
+//! layers; renders parallelise across frames instead. Glyphs are drawn as
+//! unhinted outlines with the atlas off, so text keeps sub-pixel positions.
+
+use super::gradient::ramp;
+use crate::scene::{Color, Fill};
+use std::sync::Arc;
+use vello_cpu::filter_effects::{Filter, FilterFunction};
+use vello_cpu::kurbo::{Affine, BezPath, Rect, RoundedRect, Shape, Stroke};
+use vello_cpu::peniko::{Extend, ImageQuality, ImageSampler};
+use vello_cpu::{
+    Glyph, Image, ImageSource, Level, Pixmap, RasterizerSettings, RenderContext, RenderSettings,
+    Resources,
+};
+
+/// Flattening tolerance for rounded corners, in px.
+const TOLERANCE: f64 = 0.05;
+
+pub struct Canvas {
+    ctx: RenderContext,
+    res: Resources,
+    /// Scratch for a run's variation coordinates.
+    coords: Vec<i16>,
+    width: u16,
+    height: u16,
+}
+
+pub fn rounded(r: Rect, radius: f64) -> BezPath {
+    let radius = radius
+        .min(r.width().abs() / 2.0)
+        .min(r.height().abs() / 2.0)
+        .max(0.0);
+    RoundedRect::from_rect(r, radius).to_path(TOLERANCE)
+}
+
+impl Canvas {
+    pub fn new(width: u16, height: u16) -> Canvas {
+        Canvas {
+            ctx: RenderContext::new_with(
+                width,
+                height,
+                RenderSettings {
+                    level: Level::new(),
+                    num_threads: 0,
+                },
+            ),
+            res: Resources::new(),
+            coords: Vec::new(),
+            width,
+            height,
+        }
+    }
+
+    pub fn begin(&mut self, background: Color) {
+        self.ctx.reset();
+        self.ctx.set_transform(Affine::IDENTITY);
+        self.ctx.set_paint(background.to_vello());
+        self.ctx.fill_rect(&Rect::new(
+            0.0,
+            0.0,
+            f64::from(self.width),
+            f64::from(self.height),
+        ));
+    }
+
+    /// An isolated group, composited on `pop` with opacity and a gaussian
+    /// blur (`sigma` px in local units).
+    pub fn push_group(&mut self, t: Affine, opacity: f32, sigma: f32) {
+        self.ctx.set_transform(t);
+        let filter =
+            (sigma > 0.0).then(|| Filter::from_function(FilterFunction::Blur { radius: sigma }));
+        self.ctx.push_layer(None, None, Some(opacity), None, filter);
+    }
+
+    pub fn push_clip(&mut self, t: Affine, shape: &BezPath) {
+        self.ctx.set_transform(t);
+        self.ctx.push_clip_layer(shape);
+    }
+
+    pub fn pop(&mut self) {
+        self.ctx.pop_layer();
+    }
+
+    pub fn fill(&mut self, t: Affine, r: Rect, radius: f64, fill: &Fill, alpha: f32) {
+        let shape = (radius > 0.0).then(|| rounded(r, radius));
+        if !self.set_fill(t, fill, r, r, alpha) {
+            return;
+        }
+        match &shape {
+            None => self.ctx.fill_rect(&r),
+            Some(s) => self.ctx.fill_path(s),
+        }
+        self.ctx.reset_paint_transform();
+    }
+
+    /// Sets `fill` as the paint under `t`; a gradient spans `bounds` and is
+    /// rasterised over `covers` (see `gradient`). False when a gradient
+    /// has nothing on the canvas to draw.
+    fn set_fill(&mut self, t: Affine, fill: &Fill, bounds: Rect, covers: Rect, alpha: f32) -> bool {
+        self.ctx.set_transform(t);
+        match fill {
+            Fill::Solid(c) => self.ctx.set_paint(c.with_alpha_mul(alpha).to_vello()),
+            Fill::Linear { angle_deg, stops } => {
+                let size = (self.width, self.height);
+                let Some((img, place)) = ramp(t, bounds, *angle_deg, stops, alpha, covers, size)
+                else {
+                    return false;
+                };
+                self.ctx.set_paint(Image {
+                    image: ImageSource::Pixmap(img),
+                    sampler: ImageSampler {
+                        x_extend: Extend::Pad,
+                        y_extend: Extend::Pad,
+                        quality: ImageQuality::Low,
+                        alpha: 1.0,
+                    },
+                });
+                self.ctx.set_paint_transform(place);
+            }
+        }
+        true
+    }
+
+    /// A `box-shadow` under a rounded rect: analytic gaussian, `sigma` px.
+    pub fn shadow(&mut self, t: Affine, r: Rect, radius: f64, sigma: f32, color: Color) {
+        self.ctx.set_transform(t);
+        self.ctx.set_paint(color.to_vello());
+        self.ctx
+            .fill_blurred_rounded_rect(&r, radius as f32, sigma.max(0.01), false);
+    }
+
+    pub fn stroke(&mut self, t: Affine, r: Rect, radius: f64, width: f64, color: Color) {
+        self.ctx.set_transform(t);
+        self.ctx.set_paint(color.to_vello());
+        self.ctx.set_stroke(vello_cpu::kurbo::Stroke::new(width));
+        let inner = r.inset(-width / 2.0);
+        self.ctx
+            .stroke_path(&rounded(inner, (radius - width / 2.0).max(0.0)));
+    }
+
+    /// Draws `img` scaled by `place` (image px -> local px), clipped to
+    /// `shape`.
+    pub fn image(
+        &mut self,
+        t: Affine,
+        img: &Arc<Pixmap>,
+        place: Affine,
+        shape: &BezPath,
+        alpha: f32,
+    ) {
+        self.ctx.set_transform(t);
+        self.ctx.set_paint(Image {
+            image: ImageSource::Pixmap(Arc::clone(img)),
+            sampler: ImageSampler {
+                x_extend: Extend::Pad,
+                y_extend: Extend::Pad,
+                quality: ImageQuality::High,
+                alpha,
+            },
+        });
+        self.ctx.set_paint_transform(place);
+        self.ctx.fill_path(shape);
+        self.ctx.reset_paint_transform();
+    }
+
+    /// Fills any path; a gradient spans `bounds` (local units).
+    pub fn fill_shape(&mut self, t: Affine, shape: &BezPath, fill: &Fill, bounds: Rect) {
+        if self.set_fill(t, fill, bounds, shape.bounding_box(), 1.0) {
+            self.ctx.fill_path(shape);
+            self.ctx.reset_paint_transform();
+        }
+    }
+
+    /// Strokes a path; vello keeps the stroke as state, so it is set whole.
+    pub fn stroke_shape(&mut self, t: Affine, shape: &BezPath, stroke: Stroke, color: Color) {
+        self.ctx.set_transform(t);
+        self.ctx.set_paint(color.to_vello());
+        self.ctx.set_stroke(stroke);
+        self.ctx.stroke_path(shape);
+    }
+
+    /// Draws glyphs of one parley run, positioned in local units under `t`.
+    pub fn glyphs(
+        &mut self,
+        t: Affine,
+        run: &parley::Run<'_, ()>,
+        glyphs: impl Iterator<Item = Glyph> + Clone,
+        color: Color,
+    ) -> Result<(), String> {
+        self.ctx.set_transform(t);
+        self.ctx.set_paint(color.to_vello());
+        self.coords.clear();
+        self.coords
+            .extend(run.normalized_coords().iter().map(|c| c.to_bits()));
+        self.ctx
+            .glyph_run(&mut self.res, run.font())
+            .font_size(run.font_size())
+            .hint(false)
+            .normalized_coords(&self.coords)
+            .atlas_cache(false)
+            .fill_glyphs(glyphs)
+            .map_err(|e| format!("drawing glyphs failed: {e:?}"))
+    }
+
+    /// Rasterises the frame into straight-alpha RGBA8.
+    pub fn finish(&mut self) -> Vec<u8> {
+        let mut pm = Pixmap::new(self.width, self.height);
+        self.ctx.flush();
+        self.ctx
+            .render_with(&mut pm, &mut self.res, RasterizerSettings::default());
+        pm.take_rgba8(vello_cpu::peniko::ImageAlphaType::Alpha)
+    }
+}

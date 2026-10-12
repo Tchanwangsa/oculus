@@ -1,0 +1,5 @@
+{
+  "size": { "width": 1920, "height": 1080 },
+  "theme": "default",
+  "scenes": [{ "component": "Presets", "props": {}, "hold": 2.0 }]
+}
