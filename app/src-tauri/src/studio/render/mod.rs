@@ -1,10 +1,9 @@
-//! `render`: a Studio video folder to one export preset's file. A video
+//! `render`: a Studio video folder to one export preset's mp4. A
 //! preset renders each scene as its own segment, encoded by its own ffmpeg
 //! from frames rendered in parallel and written in order, and cached under
 //! its content address, so a re-render only renders the scenes an edit
 //! touched; the segments are joined by a stream copy beside the narration
 //! track, mixed here, and the captions are written beside it as WebVTT.
-//! `audio` and `subtitles` export the track and the captions alone (`export`).
 //! `RENDERS` keeps the app to one render per folder. Rules: docs/studio.md,
 //! "Rendering a video".
 
@@ -39,7 +38,7 @@ pub use error::RenderError;
 use error::Stop;
 pub use key::still_key;
 use plan::Scene;
-pub use preset::{Output, Preset};
+pub use preset::Preset;
 pub use progress::{Outcome, Progress, Report, SegmentReport};
 pub use running::{Renders, Running, RENDERS};
 use settings::Settings;
@@ -102,11 +101,7 @@ fn run(
     if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| RenderError::io(parent, e))?;
     }
-    let mut report = match options.preset.output() {
-        Output::Video(_) => video(dir, &project, &out, options, cancel, progress)?,
-        Output::Audio => export::audio(dir, &project, &out, options, cancel, progress)?,
-        Output::Subtitles => export::subtitles(dir, &project, &out, options.preset)?,
-    };
+    let mut report = video(dir, &project, &out, options, cancel, progress)?;
     report.ms = started.elapsed().as_millis() as u64;
     Ok(report)
 }
@@ -129,18 +124,12 @@ fn plan_video(
     preset: Preset,
     toolkit: &Toolkit,
 ) -> Result<VideoPlan, RenderError> {
-    let Output::Video(video) = preset.output() else {
-        return Err(RenderError::Render(format!(
-            "{} is not a video preset",
-            preset.name()
-        )));
-    };
     toolkit.check_frames()?;
     let fps = project.fps();
     let size = project.video.size;
     let settings = Settings::new(
         preset,
-        video,
+        preset.video(),
         (size.width, size.height),
         fps,
         project.motion_blur(preset.purpose())?,
@@ -230,14 +219,13 @@ fn video(
         segments: segments.iter().map(|s| format!("{}.mp4", s.key)).collect(),
         track: track.as_deref().and_then(cache::file_name),
         out: Some(out.to_string_lossy().into_owned()),
-        cues: None,
     };
     let pruned = cache::record_and_prune(dir, options.preset, used)?;
     Ok(Report {
         path: out.to_owned(),
         preset: options.preset,
-        width: Some(settings.width),
-        height: Some(settings.height),
+        width: settings.width,
+        height: settings.height,
         fps,
         frames,
         duration: frames as f64 / f64::from(fps),

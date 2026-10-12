@@ -1,10 +1,12 @@
 //! `Renderer`: a project's frames by time. It loads each component on first
 //! use and plays scene transitions; with `motion_blur` set it averages
-//! sub-frames over the shutter (`blur`).
+//! sub-frames over the shutter (`blur`). When video.json turns `captions`
+//! on, each frame ends with the caption at its moment (`crate::captions`).
 
 use super::blur::{self, MotionBlur};
 use super::engine::{Engine, SceneCall};
 use super::{Frame, RenderOptions, Time};
+use crate::captions::SceneCaptions;
 use crate::error::{Result, StudioError};
 use crate::layout::LNode;
 use crate::project::{ComponentSource, Project, Staged, Timeline};
@@ -21,6 +23,9 @@ pub struct Renderer {
     timeline: Timeline,
     components: Arc<dyn ComponentSource>,
     motion_blur: Option<MotionBlur>,
+    /// Each scene's captions when video.json burns them in; `None` for a
+    /// silent scene. Empty when captions are off.
+    captions: Vec<Option<SceneCaptions>>,
 }
 
 impl Renderer {
@@ -42,6 +47,13 @@ impl Renderer {
             options,
         )?;
         let morph_color = project.morph_color().map(|c| engine.set_morph_color(c));
+        let captions = if project.video.captions {
+            (0..scenes.len())
+                .map(|i| project.scene_captions(i))
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
         Ok(Renderer {
             engine,
             morph_color,
@@ -50,7 +62,15 @@ impl Renderer {
             timeline,
             components: project.components.clone(),
             motion_blur: options.motion_blur,
+            captions,
         })
+    }
+
+    /// The same renderer without burned-in captions, for contact sheets and
+    /// stills that show the scene itself.
+    pub fn without_captions(mut self) -> Renderer {
+        self.captions.clear();
+        self
     }
 
     /// The engine underneath, e.g. to inspect a loaded component's schema.
@@ -72,7 +92,7 @@ impl Renderer {
         self.ready(index)?;
         match self.motion_blur {
             Some(mb) => blur::frame(self, index, t, mb),
-            None => self.sharp(index, t),
+            None => self.sharp(index, t, t),
         }
     }
 
@@ -115,11 +135,35 @@ impl Renderer {
         }
     }
 
-    /// The frame at scene-relative `t`, without motion blur. `ready` first.
-    pub(super) fn sharp(&mut self, index: usize, t: f64) -> Result<Frame> {
+    /// The frame at scene-relative `t`, without motion blur, captioned as
+    /// at `caption_t` (the frame's own time, so a blurred frame's sub-frames
+    /// share one caption and the caption never blurs). `ready` first.
+    pub(super) fn sharp(&mut self, index: usize, t: f64, caption_t: f64) -> Result<Frame> {
         let before = self.draws_before(index, t)?;
         let (a, b, into) = calls(&self.scenes, &self.transitions, index, t, before);
-        scene_frame(&mut self.engine, a, b, into)
+        let (mut layers, logs) = scene_layers(&mut self.engine, a, b, into)?;
+        let caption = self
+            .captions
+            .get(index)
+            .and_then(Option::as_ref)
+            .and_then(|c| {
+                let size = self.engine.size();
+                c.tree_at(
+                    &self.engine.theme().captions,
+                    caption_t,
+                    (size.width, size.height),
+                )
+            });
+        if let Some(tree) = caption {
+            match self.engine.lay_out_json("captions", &tree) {
+                Ok(layer) => layers.push(layer),
+                Err(e) => {
+                    self.engine.discard(layers);
+                    return Err(e);
+                }
+            }
+        }
+        self.engine.compose(layers, logs, b.component)
     }
 
     /// What `sharp` would paint, laid out but not painted. Hand the trees

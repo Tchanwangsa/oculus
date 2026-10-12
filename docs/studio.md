@@ -24,7 +24,7 @@ crops library PDF pages into slides (`slide`), and narrates.
 | `script.md`, the narration manifest, scene lengths and word cues | `app/studio-core/src/project/` (`script/`, `narration/`, `scenes.rs`), `app/studio-core/src/host/prelude/words.js` |
 | Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
 | Magic move: matching and blending two laid-out trees, OKLab colour, lag and fades | `app/studio-core/src/morph/` (`clock.rs`, `fade.rs`) |
-| Captions from the word timings: phrasing, timing, the subtitle files | `app/studio-core/src/captions/` (`phrase.rs`, `timing.rs`, `subtitles.rs`) |
+| Burned-in captions: phrasing, timing, the caption's element tree, the WebVTT file, the theme's `captions` tokens | `app/studio-core/src/captions/` (`phrase.rs`, `timing.rs`, `tree.rs`, `subtitles.rs`, `style.rs`) |
 | Overlays bound to keys (Brace, Surround, Underline, Indicate, a keyed Arrow), drawn after layout and morphing | `app/studio-core/src/overlay/`, `app/studio-core/src/host/prelude/overlays.js` |
 | Easings shared by transitions and the morph (the prelude's, in Rust) | `app/studio-core/src/easing/` |
 | TSX → JS (oxc), the QuickJS sandbox, the prelude every component sees | `app/studio-core/src/host/` (`prelude/*.js`, one module scope, concatenated in order) |
@@ -44,7 +44,7 @@ crops library PDF pages into slides (`slide`), and narrates.
 | Text to Kokoro phonemes (the G2P), the lexicon, the guesser and its pack; the lint of a video's narration that needs them | `app/src-tauri/src/studio/voice/g2p/` (`guess/`, `lexicon.rs`), `app/src-tauri/src/studio/voice/lint/` |
 | The pronunciation review: suggestions stored one file each, the lexicon writer, finding a word in a video's narration; its Tauri commands and wrappers | `app/src-tauri/src/studio/voice/review/` (`key.rs`, `lexicon.rs`, `locate.rs`), `app/src-tauri/src/studio/commands/pronunciations.rs`, `app/src/lib/studio/pronunciations.ts` |
 | Settings -> Voice: the `voice` row and its engine, the server's model list, Kokoro's packs and sample, the pronunciation review, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/` (`pronunciations/`), `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
-| Rendering a video: the export presets, ffmpeg's toolkit and the encoder choice, plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, the audio and subtitle exports, each preset's status, one render per folder | `app/src-tauri/src/studio/render/` (`preset.rs`, `toolkit.rs`, `settings.rs`, `export.rs`, `status.rs`), `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
+| Rendering a video: the export presets, ffmpeg's toolkit and the encoder choice, plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, the `.vtt` beside each narrated render, each preset's status, one render per folder | `app/src-tauri/src/studio/render/` (`preset.rs`, `toolkit.rs`, `settings.rs`, `export.rs`, `status.rs`), `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, `studio_exports`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
 | The playground's and Themes page's commands: the theme and component lists, source, frame, validated write, history, restore and removal, each library's default theme; the shared snapshot listing; a new video's default theme | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `commands/history.rs`, `app/src-tauri/src/studio/libraries/defaults.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
@@ -95,6 +95,9 @@ narration/    manifest.json and the clips it names
   folder name (letters, digits, `-` and `_`, up to 64 characters), whose
   library (`<app data>/studio/subjects/<CODE>/`) is read before the global
   one.
+- `captions` (optional, default `false`) burns word-highlight captions into
+  every frame of a render (see "Captions are burned in from the word
+  timings"). `oculus studio new` and the app write `true`.
 - `motion` (optional) overrides the theme's transition and motion-blur
   defaults for this video; a scene's `transition` (optional) overrides
   both. See "Transitions" and "Motion blur".
@@ -127,7 +130,8 @@ transitions) reads that one timeline.
 - `Project::scene_fingerprint(i)` is what in the folder scene `i`'s frames
   depend on, as canonical JSON bytes (keys sorted, so key order in a file
   never matters), for a per-scene segment cache key: the size and fps, the
-  theme's tokens and `video.json`'s `motion`, and for scene `i` and scene
+  theme's tokens (its `captions` block included), `video.json`'s `motion`
+  and `captions`, and for scene `i` and scene
   `i - 1` (whose last moment the transition into `i` shows) the scene spec
   (`id` included), the narration words as components see them (`text`,
   `start`, `end`), the frame count and, for a scene without an `id` only,
@@ -191,7 +195,7 @@ one folder besides `agents/` and the database an agent thread may write
 - `oculus studio new <slug> [--subject CODE] [--title T] [--portrait]`
   (`studio::videos::create_in`) makes `videos/<slug>/`: `video.json` at
   1920x1080 (1080x1920 with `--portrait`), 30 fps, the default theme, the
-  subject, and one silent `TitleCard` scene (`id` `title`, 4 s) whose title
+  subject, `"captions": true`, and one silent `TitleCard` scene (`id` `title`, 4 s) whose title
   is `--title` or the slug with spaces; an empty `script.md`; and empty
   `components/` and `assets/`. The default theme is the subject library's
   `library.json` `defaultTheme`, else the global library's, else `default`
@@ -1389,18 +1393,21 @@ between their two targets' boxes.
   so its Paths morph like any others: a Surround or Underline whose box
   changed, or a Brace of a new width, swaps in halves rather than gliding.
 
-## Captions come from the word timings
+## Captions are burned in from the word timings
 
-`src/captions/` turns the narration's word timings into subtitle cues: the
-`.vtt` beside every narrated render, which the Studio player offers as CC,
-and the `subtitles` export (see "Rendering a video"). Nothing is drawn into
-the frames.
+With video.json's `captions` on, `Renderer` ends every frame of a narrated
+scene with a caption: the phrase being said on a rounded plate, the word
+being said highlighted, the words still to come faded (`src/captions/`).
+`renderer.without_captions()` leaves them out; `strip` and the app's stills
+(thumbnails, the scene strip) use it, and `gallery`, lint and the
+playground draw through `Engine` and never have them. `oculus studio frame`
+shows them, so a builder can check what a frame will look like.
 
 - **Phrases** (`phrase.rs`) come from one scene's words (`cued_words`, the
   script's spelling and punctuation as said, spoken forms such as "thirteen
-  mod twelve" included), never across scenes, at most two lines of 42
-  characters (`LINE_CHARS`, `MAX_LINES`). A `[pause]`, a silence of 0.6 s
-  or more, and a sentence's end (`.`, `!`, `?`, `…`) always end a phrase.
+  mod twelve" included), never across scenes, so a scene's captions depend
+  on its own words and the theme only. A `[pause]`, a silence of 0.6 s or
+  more, and a sentence's end (`.`, `!`, `?`, `…`) always end a phrase.
   Longer stretches take as many words as fit the lines, ending at the last
   clause break (`,` `;` `:` a dash, or a 0.25 s silence) that leaves the
   phrase at least half full, and give a word back rather than leave one
@@ -1413,10 +1420,35 @@ the frames.
 - **Timing** (`timing.rs`): a phrase shows 0.15 s before its first word
   (never before the one before it hides) and stays until the next shows;
   before a silence of 0.6 s or more, and at the scene's end, it hides 0.4 s
-  after its last word, so a long pause has no caption.
-- **Cues.** `Project::caption_cues()` is every phrase in video seconds, a
-  cue never past its scene's end, and `captions::vtt` and `captions::srt`
-  write them.
+  after its last word, so a long pause has no caption. The current word is
+  the last one that has started, lit until 0.3 s after it ends; before the
+  first word nothing is lit.
+- **Drawing** (`tree.rs`): the caption is an element tree like a
+  component's, laid out at the frame's size and painted as the last layer,
+  each word its own `Text` in a padded box so the highlight moves without
+  reflowing the line. Under motion blur every sub-frame takes the caption
+  of the frame's own time, so it is drawn once and sharp.
+- **Style** is the theme's `captions` block (`style.rs`). A theme without
+  one gets it filled from its own tokens, so it is in `ctx.theme` too:
+  `fontFamily` (default the theme's body font), `fontSize` 44 and
+  `fontWeight` 600, `color` (`onInk`), `upcoming` (0.6, the opacity of
+  words not yet said), `highlight` (`accent`), `highlightText`
+  (`onAccent`), `highlightStyle` (`pill`, a pill of the highlight behind
+  the word in `highlightText`, or `color`, the word in the highlight),
+  `plate` (`ink`, or `"none"`) at `plateOpacity` (0.8), `position`
+  (`bottom` or `top`), `margin` (0.05 of the height from that edge),
+  `maxChars` (42 a line) and `maxLines` (2). A colour is a `color` token's
+  name or a `#hex`. Sizes are px on a 1080 px short side and scale with the
+  frame's shorter side, so portrait text is as big as landscape; a line on
+  a frame narrower than 16:9 holds proportionally fewer characters (24 on
+  9:16, never under 12). Each value is checked when the theme loads, and a
+  bad one is named (``captions.position = `middle`: must be `bottom` or `top` ``).
+- **Subtitles.** `Project::caption_cues()` is the same phrases in video
+  seconds, captions on or not, and `captions::vtt` writes them as each
+  narrated render's `.vtt` (see "Rendering a video").
+- **Not linted.** Lint does not check what a scene draws under the caption
+  band; the skill tells builders to keep key content above the bottom
+  sixth of the frame when captions are on.
 
 ## Motion blur averages sub-frames, off unless asked
 
@@ -1533,8 +1565,10 @@ centroid smoothly.
   `motion` (`duration`, `easing` as cubic-bezier points, `spring` presets,
   and optionally `transition`, `magicMove`, `morphColor` and `motionBlur`,
   the bottom of the motion cascade; the bundled theme sets `morphColor:
-  "oklch"` and `motionBlur: "finals"`) and `narration` (`lead` and `tail`,
-  non-negative seconds; see "Narration"). Components read it as
+  "oklch"` and `motionBlur: "finals"`), `narration` (`lead` and `tail`,
+  non-negative seconds; see "Narration") and `captions` (how burned-in
+  captions look; see "Captions are burned in from the word timings").
+  Components read it as
   `ctx.theme` and it is frozen.
 - `color.bg` is the canvas under every frame, `color.text` the colour and
   `font.body` the family of `Text` that sets none.
@@ -1772,32 +1806,28 @@ one."`.
 ## Rendering a video
 
 `render` (`app/src-tauri/src/studio/render/`) turns a video folder into
-one export preset's file. A video preset writes an mp4: H.264, yuv420p,
-BT.709, 48 kHz AAC narration, `+faststart`. It never narrates and never
+one export preset's mp4: H.264, yuv420p, BT.709, 48 kHz AAC narration,
+`+faststart`. It never narrates and never
 touches the network: stale or missing narration fails with the `Narration`
 error before any frame renders.
 
-- **Presets** (`preset.rs`), each written to `<dir>/renders/<name>.<ext>`:
+- **Presets** (`preset.rs`), each written to `<dir>/renders/<name>.mp4`:
 
   | Preset | Writes |
   | --- | --- |
   | `draft` | mp4, 540 px on the shorter side (never upscaled), on the fast encoder |
   | `final` | mp4 at the video's size, crf 18 |
   | `small` | mp4, 720 px on the shorter side, crf 23 |
-  | `2x` | mp4 at twice the video's size (3840x2160 for 1080p) over the same layout |
-  | `audio` | `audio.m4a`: the narration track alone, AAC 160 kb/s |
-  | `subtitles` | `subtitles.vtt` and `subtitles.srt`: the captions' phrases (see "Captions") |
 
   Motion blur follows the `motionBlur` token for the purpose: `draft` is
-  `Draft`, every other video preset `Final`, so with the bundled `finals`
-  only `draft` is sharp. An odd output side is an error naming the size and
+  `Draft`, every other preset `Final`, so with the bundled `finals` only
+  `draft` is sharp. An odd output side is an error naming the size and
   scale, since yuv420p needs even sides (nothing is padded), and so is a
-  side over 8192 px. `2x` has four times the pixels, so the worker cap below
-  allows fewer threads; x264 at 3840x2160 holds more memory than at 1080p.
-  Portrait and square are a different video size, not a preset.
+  side over 8192 px. Portrait and square are a different video size, not a
+  preset.
 - **Encoders** (`toolkit.rs`). Before anything renders, the ffmpeg is asked
   once per binary and process for its `-encoders`, `-decoders` and
-  `-demuxers`. A video preset needs the `rawvideo` demuxer and decoder and
+  `-demuxers`. A preset needs the `rawvideo` demuxer and decoder and
   the `concat` demuxer; narration needs the `wav` demuxer, the `pcm_s16le`
   decoder and the `aac` encoder. A missing one fails at once, naming it
   ("this ffmpeg was built without the `concat` demuxer, ..."). `draft`
@@ -1858,22 +1888,19 @@ error before any frame renders.
   stream.
 - **Output.** `Preset::default_out` (`-o` for another path). A narrated
   video's render also writes its captions as WebVTT beside the mp4, the
-  same name with `.vtt` (`renders/draft.vtt`), which the app's player
-  shows as CC.
-  Segments, the track and the output are written as `.part` and renamed.
-  After a render, `.cache/renders.json` records, under the preset's name,
-  the segments and track it used, the file it wrote and, for `subtitles`,
-  the sha256 of the text; segments and tracks no preset's last render used,
-  and any `.part`, are deleted. `audio` reuses the video presets' cached
-  track; `subtitles` runs no ffmpeg. A video with no narration has nothing
-  for `audio` or `subtitles` and is refused (``... has no narration to
-  export; run `oculus studio narrate` first``).
+  same name with `.vtt` (`renders/draft.vtt`), whether or not they are
+  burned in, for the player's CC. Segments, the track and the output are
+  written as `.part` and renamed. After a render, `.cache/renders.json`
+  records, under the preset's name, the segments and track it used and the
+  file it wrote; segments and tracks no preset's last render used, and any
+  `.part`, are deleted. A record of a preset since removed is dropped with
+  them.
 - **Status** (`status.rs`, `render::exports`). For each preset: the file
   at its default path, if any, its mtime, `current` when the file is there
   and the record a render would write now (the segment keys, track and
   file, planned without rendering) equals the recorded one, and `problem`
-  when the preset cannot render now (stale narration, nothing to export,
-  an encoder ffmpeg lacks, a size too large).
+  when the preset cannot render now (stale narration, an encoder ffmpeg
+  lacks, a size too large).
 - **Failure and cancel.** ffmpeg's non-zero exit is an error quoting its
   last stderr lines. Cancel (an `&AtomicBool`, checked before every frame
   and while joining) kills ffmpeg, deletes the partial segment and returns
@@ -1923,9 +1950,10 @@ on disk now; nothing is cached but thumbnails.
 | Command | Does |
 | --- | --- |
 | `studio_videos(subject?)` | `videos::list_in` plus `title` and `threadId`, newest change first (a video whose video.json does not load sorts last and carries `problem`) |
-| `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to the subject's default theme (see "Libraries cascade"); `voice` is video.json's `voice` block (`{engine?, model?, voice?, speed?}`, `engine` being `kokoro` or `server`). The scaffold is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
-| `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `scenes` and `renders` |
+| `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to the subject's default theme (see "Libraries cascade"); `voice` is video.json's `voice` block (`{engine?, model?, voice?, speed?}`, `engine` being `kokoro` or `server`). The scaffold has `"captions": true`. It is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
+| `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `captions`, `scenes` and `renders` |
 | `studio_render_captions(slug, preset)` | the WebVTT text beside that preset's render (`renders/<preset>.vtt`), for the player's CC |
+| `studio_set_captions(slug, on)` | sets video.json's `captions`: the `true`/`false` literal is replaced in the text, or the key is added before `scenes` on a line of its own, so the rest of the file keeps its formatting (`videos::set_captions`) |
 | `studio_exports(dir)` | each preset's status (`render::exports`, see "Rendering a video") as `{preset, path, modified, current, problem}`; it asks ffmpeg for its toolkit, renders nothing and makes no network call |
 | `studio_frame(slug, at, width)` | a PNG `width` px wide (1 to 4096), the layout of the full-size frame, as bytes through `tauri::ipc::Response` |
 | `studio_thumbnail(slug)` | the video's cached thumbnail PNG |
@@ -1938,9 +1966,9 @@ on disk now; nothing is cached but thumbnails.
   they are known once every scene has a length (a hold, or narration that
   matches the script) and null for every scene until then, stale narration
   included. **Renders** are each preset's file that exists (`draft.mp4`,
-  `audio.m4a`, `subtitles.vtt`, ...), as `{preset, path, modified,
-  captions}` with the absolute path, mtime in Unix seconds, and whether a
-  video render's `.vtt` is beside it.
+  `final.mp4`, `small.mp4`), as `{preset, path, modified, captions}` with
+  the absolute path, mtime in Unix seconds, and whether the render's `.vtt`
+  is beside it.
 - **A frame is of the video as narrated.** `at` is `{scene, t}` (seconds into
   a scene, counting from 0) or `{global}`. Stale or missing narration makes
   `Renderer::new` fail, and the command rejects with studio-core's message
@@ -2233,16 +2261,15 @@ the `Slide` starter animates it in. Rendering never opens a PDF.
   on and the call that starts one (`--json`: `[{agent, roles: [{role, job,
   model, effort, spawn}]}]`). It reads only the settings; see
   [harness.md](./harness.md#subagents).
-- `oculus studio render <DIR>` writes one export preset's file:
-  `--preset draft|final|small|2x|audio|subtitles`, with `--draft` (the
+- `oculus studio render <DIR>` writes one export preset's mp4:
+  `--preset draft|final|small`, with `--draft` (the
   default) and `--final` for the first two; `-o`, `--threads` for the frame
   renderers, not the encoder. It prints the plan, then per scene `rendered`
   with its frames, seconds and frames a second, or `cached`, then the paths
-  written (the file, then its `.vtt` or `.srt`) and a summary; `--json`
+  written (the mp4, then its `.vtt`) and a summary; `--json`
   gives `{dir, report: {path, preset, width, height, fps, frames, duration,
   audio, threads, segments: [{scene, id, outcome, frames, ms, fps}],
-  sidecars, pruned, ms}}` (`width` and `height` null for `audio` and
-  `subtitles`). See "Rendering a video".
+  sidecars, pruned, ms}}`. See "Rendering a video".
 - `oculus studio lint <DIR>` (`--scene <ID|N>` for `lint_scene`; the
   voice checks are cut to that scene too) prints each error in full, one a
   line, then the warnings, then the notes, and exits 1 if there is any
@@ -2365,11 +2392,16 @@ x264 alone), the render plan, segment keys and tree hashes, the audio
 placement, the reorder buffer and pruning, and, through the real ffmpeg
 (each test skipped, saying why, without one or when it lacks the encoder,
 demuxer or libx264 the test needs), the join and cache check above, a
-narrated fixture's audio onset, cancel, a failing frame, and every export
-with its sidecars and `current` status.
+narrated fixture's audio onset, cancel, a failing frame, and the exports'
+`.vtt` sidecar and `current` status, including captions turned on.
+`studio::videos` covers the captions edit of video.json.
 
-`tests/subtitles.rs` pins the `narrated` fixture's cues, and
-`src/captions/tests/` covers phrasing, timing and the VTT and SRT text.
+`tests/captions.rs` pins two captioned frames of the `captions` fixture
+(the `narrated` one with `captions` on: a word lit mid-phrase and late in
+it), that captions are off without the switch and on no silent scene, that
+a blurred frame's caption matches the sharp frame's, the fingerprint, and
+the subtitle cues. `src/captions/tests/` covers phrasing, timing, the style
+tokens and the VTT text.
 
 `tests/math.rs` pins a corpus of KaTeX constructs beside text labels on
 their baselines (`math-corpus`) and a Morph from `2^4 - 1` to

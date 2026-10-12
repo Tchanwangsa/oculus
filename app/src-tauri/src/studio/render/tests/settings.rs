@@ -1,15 +1,12 @@
 use std::path::Path;
 
 use super::super::error::RenderError;
-use super::super::preset::{Output, Preset};
+use super::super::preset::Preset;
 use super::super::settings::Settings;
 use super::{mac, settings};
 
 fn try_settings(preset: Preset, size: (u32, u32)) -> Result<Settings, RenderError> {
-    let Output::Video(video) = preset.output() else {
-        unreachable!()
-    };
-    Settings::new(preset, video, size, 30, None, &mac())
+    Settings::new(preset, preset.video(), size, 30, None, &mac())
 }
 
 #[test]
@@ -22,7 +19,6 @@ fn each_video_preset_has_its_size() {
     assert_eq!(size(Preset::Draft, (640, 360)), (1.0, 640, 360));
     assert_eq!(size(Preset::Final, (1920, 1080)), (1.0, 1920, 1080));
     assert_eq!(size(Preset::Small, (1920, 1080)).1, 1280);
-    assert_eq!(size(Preset::Double, (1920, 1080)), (2.0, 3840, 2160));
     // Portrait scales by its shorter side, so its draft is as sharp.
     assert_eq!(size(Preset::Draft, (1080, 1920)), (0.5, 540, 960));
     assert_eq!(size(Preset::Small, (1080, 1920)).2, 1280);
@@ -41,11 +37,11 @@ fn an_odd_or_oversized_side_is_an_error_naming_the_size() {
     assert!(e.contains("961x540") && e.contains("scale 0.5"), "{e}");
     // 1366 * 540 / 768 = 960.47, drawn 960 wide.
     assert!(try_settings(Preset::Draft, (1366, 768)).is_ok());
-    let e = try_settings(Preset::Double, (4800, 2700))
+    let e = try_settings(Preset::Final, (9600, 5400))
         .unwrap_err()
         .to_string();
     assert!(
-        e.contains("2x render") && e.contains("9600x5400") && e.contains("8192"),
+        e.contains("final render") && e.contains("9600x5400") && e.contains("8192"),
         "{e}"
     );
 }
@@ -79,22 +75,12 @@ fn presets_parse_by_name_and_write_to_renders() {
         assert_eq!(Preset::parse(p.name()), Ok(p));
     }
     let e = Preset::parse("4k").unwrap_err();
-    assert!(
-        e.contains("draft, final, small, 2x, audio, subtitles"),
-        "{e}"
-    );
+    assert!(e.contains("draft, final, small"), "{e}");
     let dir = Path::new("/v");
     assert_eq!(
         Preset::Final.default_out(dir),
         Path::new("/v/renders/final.mp4")
     );
-    assert_eq!(
-        Preset::Audio.default_out(dir),
-        Path::new("/v/renders/audio.m4a")
-    );
-    assert_eq!(
-        Preset::Subtitles.default_out(dir),
-        Path::new("/v/renders/subtitles.vtt")
-    );
-    assert_eq!(serde_json::to_value(Preset::Double).unwrap(), "2x");
+    assert_eq!(serde_json::to_value(Preset::Small).unwrap(), "small");
+    assert!(Preset::parse("2x").is_err() && Preset::parse("audio").is_err());
 }

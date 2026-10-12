@@ -838,7 +838,7 @@ pub(crate) struct StudioThemesPromoteArgs {
     pub(crate) to: StudioLibraryArg,
 }
 
-/// Render a video to an mp4, or export its narration or subtitles
+/// Render a video to an mp4
 ///
 /// Each scene is rendered frame by frame (in parallel, one renderer per
 /// thread) and encoded by ffmpeg as its own segment, which is kept in
@@ -850,8 +850,8 @@ pub(crate) struct StudioThemesPromoteArgs {
 /// narration clips mixed into one track (AAC). Segments no preset's last
 /// render used are deleted afterwards.
 ///
-/// The preset says what to write, to `<DIR>/renders/<preset>.<ext>` unless
-/// `-o` names another file:
+/// The preset says what size and quality to write, to
+/// `<DIR>/renders/<preset>.mp4` unless `-o` names another file:
 ///
 /// `draft` (the default, also `--draft`): a 540 px proxy on the fastest
 /// encoder, without motion blur unless the theme's `motionBlur` says
@@ -862,14 +862,9 @@ pub(crate) struct StudioThemesPromoteArgs {
 ///
 /// `small`: 720 px at crf 23, a smaller file to share.
 ///
-/// `2x`: twice the video's size (3840x2160 for a 1080p video).
-///
-/// `audio`: the narration track alone, as AAC in an m4a.
-///
-/// `subtitles`: the captions as WebVTT, with SubRip (`.srt`) beside it.
-///
-/// Video presets are H.264, yuv420p, BT.709, and write the captions as a
-/// `.vtt` beside the mp4 when the video is narrated.
+/// Presets are H.264, yuv420p, BT.709, and write the captions as a
+/// `.vtt` beside the mp4 when the video is narrated. With video.json's
+/// `"captions": true` the captions are also burned into the frames.
 /// Before anything renders, ffmpeg is asked what it was built with: a
 /// missing encoder or demuxer is an error naming it.
 ///
@@ -881,7 +876,7 @@ pub(crate) struct StudioThemesPromoteArgs {
 ///
 ///     oculus studio render lectures/week-4 --final -o ~/Desktop/week-4.mp4
 ///
-///     oculus studio render lectures/week-4 --preset subtitles
+///     oculus studio render lectures/week-4 --preset small
 #[derive(Args)]
 #[command(group(clap::ArgGroup::new("which").args(["draft", "final_", "preset"]).multiple(false)))]
 pub(crate) struct StudioRenderArgs {
@@ -894,10 +889,10 @@ pub(crate) struct StudioRenderArgs {
     /// The `final` preset
     #[arg(long = "final")]
     pub(crate) final_: bool,
-    /// The export preset: draft, final, small, 2x, audio or subtitles
+    /// The export preset: draft, final or small
     #[arg(long, value_name = "NAME")]
     pub(crate) preset: Option<String>,
-    /// Where to write the file (default: `<DIR>/renders/<preset>.<ext>`)
+    /// Where to write the file (default: `<DIR>/renders/<preset>.mp4`)
     #[arg(short, long, value_name = "OUT")]
     pub(crate) out: Option<PathBuf>,
     /// Frame-rendering threads (default: half the cores, capped to keep
@@ -980,7 +975,7 @@ mod tests {
         assert!(ok(&[]));
         assert!(ok(&["--draft", "-o", "x.mp4", "--threads", "3"]));
         assert!(ok(&["--final"]));
-        assert!(ok(&["--preset", "subtitles"]));
+        assert!(ok(&["--preset", "small"]));
         assert!(!ok(&["--draft", "--final"]));
         assert!(!ok(&["--final", "--preset", "small"]));
     }

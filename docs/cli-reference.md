@@ -1436,7 +1436,7 @@ Commands:
   blocks      List a parsed PDF's blocks: what `slide` can crop
   components  List, show, promote or seed a video's components
   themes      Promote a video's own theme file into a library
-  render      Render a video to an mp4, or export its narration or subtitles
+  render      Render a video to an mp4
   narrate     Synthesise and time a video's narration, writing narration/manifest.json
   tts         Synthesise one clip of text to a WAV, to hear a voice
   g2p         Show how Kokoro reads text: each word's phonemes and who read it
@@ -2073,7 +2073,7 @@ Options:
 ### `oculus studio render`
 
 ```
-Render a video to an mp4, or export its narration or subtitles
+Render a video to an mp4
 
 Each scene is rendered frame by frame (in parallel, one renderer per thread) and encoded
 by ffmpeg as its own segment, which is kept in `<DIR>/.cache/segments/` under a hash of
@@ -2083,8 +2083,8 @@ only renders the scenes an edit touched and prints `cached` for the rest. The se
 are joined without re-encoding, beside the narration clips mixed into one track (AAC).
 Segments no preset's last render used are deleted afterwards.
 
-The preset says what to write, to `<DIR>/renders/<preset>.<ext>` unless `-o` names
-another file:
+The preset says what size and quality to write, to `<DIR>/renders/<preset>.mp4` unless
+`-o` names another file:
 
 `draft` (the default, also `--draft`): a 540 px proxy on the fastest encoder, without
 motion blur unless the theme's `motionBlur` says `always`.
@@ -2094,15 +2094,10 @@ motion blur unless the theme's `motionBlur` says `always`.
 
 `small`: 720 px at crf 23, a smaller file to share.
 
-`2x`: twice the video's size (3840x2160 for a 1080p video).
-
-`audio`: the narration track alone, as AAC in an m4a.
-
-`subtitles`: the captions as WebVTT, with SubRip (`.srt`) beside it.
-
-Video presets are H.264, yuv420p, BT.709, and write the captions as a `.vtt` beside the
-mp4 when the video is narrated. Before anything renders, ffmpeg is asked what it was
-built with: a missing encoder or demuxer is an error naming it.
+Presets are H.264, yuv420p, BT.709, and write the captions as a `.vtt` beside the mp4
+when the video is narrated. With video.json's `"captions": true` the captions are also
+burned into the frames. Before anything renders, ffmpeg is asked what it was built with:
+a missing encoder or demuxer is an error naming it.
 
 Render never narrates: run `oculus studio narrate` first, or it stops with the stale
 narration's scene. A frame that fails stops the render, naming its time and scene; an
@@ -2112,7 +2107,7 @@ oculus studio render lectures/week-4
 
 oculus studio render lectures/week-4 --final -o ~/Desktop/week-4.mp4
 
-oculus studio render lectures/week-4 --preset subtitles
+oculus studio render lectures/week-4 --preset small
 
 Usage: oculus studio render [OPTIONS] <DIR>
 
@@ -2128,10 +2123,10 @@ Options:
           The `final` preset
 
       --preset <NAME>
-          The export preset: draft, final, small, 2x, audio or subtitles
+          The export preset: draft, final or small
 
   -o, --out <OUT>
-          Where to write the file (default: `<DIR>/renders/<preset>.<ext>`)
+          Where to write the file (default: `<DIR>/renders/<preset>.mp4`)
 
       --threads <T>
           Frame-rendering threads (default: half the cores, capped to keep their memory

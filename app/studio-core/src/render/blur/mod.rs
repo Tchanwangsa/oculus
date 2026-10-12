@@ -90,13 +90,13 @@ pub(super) fn frame(r: &mut Renderer, index: usize, t: f64, mb: MotionBlur) -> R
         1
     };
     if n == 1 {
-        return r.sharp(index, t);
+        return r.sharp(index, t, t);
     }
     let mut acc: Option<Accumulator> = None;
     let mut logs = Vec::new();
     for i in 0..n {
         let at = t0 + (f64::from(i) + 0.5) / f64::from(n) * (t1 - t0);
-        let f = r.sharp(index, at)?;
+        let f = r.sharp(index, at, t)?;
         if i == n / 2 {
             logs = f.logs;
         }

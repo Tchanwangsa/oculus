@@ -212,7 +212,7 @@ fn the_detail_of_a_narrated_video_has_scene_times_and_words() {
     let dir = narrated(&videos);
     std::fs::create_dir_all(dir.join("renders")).unwrap();
     std::fs::write(dir.join("renders/draft.mp4"), "x").unwrap();
-    std::fs::write(dir.join("renders/audio.m4a"), "x").unwrap();
+    std::fs::write(dir.join("renders/small.mp4"), "x").unwrap();
     std::fs::write(dir.join("renders/notes.txt"), "x").unwrap();
 
     let detail = detail_in(
@@ -254,8 +254,9 @@ fn the_detail_of_a_narrated_video_has_scene_times_and_words() {
 
     let json = serde_json::to_value(&detail).unwrap();
     assert_eq!(json["renders"][0]["preset"], "draft");
-    assert_eq!(json["renders"][1]["preset"], "audio");
+    assert_eq!(json["renders"][1]["preset"], "small");
     assert_eq!(json["renders"][0]["captions"], false);
+    assert_eq!(json["captions"], false);
     assert_eq!(json["scenes"][1]["duration"], 1.5);
     assert_eq!(json["row"]["slug"], "narrated");
 }

@@ -19,21 +19,21 @@ use crate::test_support::Scratch;
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../studio-core/tests/fixtures");
 
 /// The ffmpeg to test with, if there is one that can render `preset`
-/// (frames, an encoder and AAC for a video preset; AAC for `audio`).
+/// (frames, an encoder and AAC).
 fn ffmpeg(preset: Preset) -> Option<PathBuf> {
     let Some(found) = crate::sources::echo360::find_ffmpeg(None) else {
         eprintln!("skipped: no ffmpeg");
         return None;
     };
     let toolkit = Toolkit::of(&found).unwrap();
-    let ready = match preset.output() {
-        super::super::Output::Video(video) => toolkit
-            .check_frames()
-            .and_then(|()| toolkit.check_audio())
-            .and_then(|()| toolkit.codec(video.class, (640, 360), 30).map(drop)),
-        super::super::Output::Audio => toolkit.check_audio(),
-        super::super::Output::Subtitles => Ok(()),
-    };
+    let ready = toolkit
+        .check_frames()
+        .and_then(|()| toolkit.check_audio())
+        .and_then(|()| {
+            toolkit
+                .codec(preset.video().class, (640, 360), 30)
+                .map(drop)
+        });
     match ready.and_then(|()| checkable(&found)) {
         Ok(()) => Some(found),
         Err(e) => {
@@ -381,62 +381,15 @@ fn each_export_writes_its_file_and_knows_when_it_is_current() {
     assert!(status(Preset::Draft).current);
     assert!(!status(Preset::Final).current);
 
-    let subtitles = complete(&dir, &options(&ffmpeg, Preset::Subtitles, None));
-    assert_eq!(subtitles.path, dir.join("renders/subtitles.vtt"));
-    assert_eq!(std::fs::read_to_string(&subtitles.path).unwrap(), text);
-    let srt = std::fs::read_to_string(dir.join("renders/subtitles.srt")).unwrap();
-    assert!(
-        srt.starts_with("1\n00:00:00,100 --> 00:00:03,650\n"),
-        "{srt}"
-    );
-    assert!(status(Preset::Subtitles).current);
-
-    if Toolkit::of(&ffmpeg).unwrap().check_audio().is_ok() {
-        let audio = complete(&dir, &options(&ffmpeg, Preset::Audio, None));
-        assert_eq!(audio.path, dir.join("renders/audio.m4a"));
-        let out = Command::new(&ffmpeg)
-            .args(["-v", "error", "-i"])
-            .arg(&audio.path)
-            .args(["-map", "0:a", "-f", "null", "-"])
-            .output()
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert!(status(Preset::Audio).current);
-        // The audio export's track is the draft's: neither was pruned.
-        assert!(status(Preset::Draft).current);
-    }
-
-    // A longer silent outro changes the frames, not the words.
+    // Turning captions on changes the frames, not the words.
     let video = std::fs::read_to_string(dir.join("video.json")).unwrap();
-    std::fs::write(
-        dir.join("video.json"),
-        video.replace("\"hold\": 1.5", "\"hold\": 2.0"),
-    )
-    .unwrap();
+    let on = crate::studio::videos::with_captions(&video, true).unwrap();
+    std::fs::write(dir.join("video.json"), on).unwrap();
     assert!(!status(Preset::Draft).current);
-    assert!(status(Preset::Subtitles).current);
-    let longer = complete(&dir, &options(&ffmpeg, Preset::Draft, None));
-    let outcomes: Vec<Outcome> = longer.segments.iter().map(|s| s.outcome).collect();
-    assert_eq!(outcomes, [Outcome::Cached, Outcome::Rendered]);
-    assert_eq!(framemd5(&ffmpeg, &longer.path).len(), plain.len() + 15);
-}
-
-#[test]
-fn an_export_with_nothing_to_say_is_refused() {
-    let dir = Scratch::new("render-e2e-silent");
-    panels(&dir, ["One", "Two", "Three", "Four"]);
-    let ffmpeg = PathBuf::from("ffmpeg-is-not-needed");
-    let e = render(
-        &dir,
-        &options(&ffmpeg, Preset::Subtitles, None),
-        &AtomicBool::new(false),
-        &mut |_| {},
-    )
-    .unwrap_err()
-    .to_string();
-    assert!(e.contains("has no narration to export"), "{e}");
+    let captioned = complete(&dir, &options(&ffmpeg, Preset::Draft, None));
+    let outcomes: Vec<Outcome> = captioned.segments.iter().map(|s| s.outcome).collect();
+    assert_eq!(outcomes, [Outcome::Rendered, Outcome::Rendered]);
+    let burned = framemd5(&ffmpeg, &captioned.path);
+    assert_eq!(burned.len(), plain.len());
+    assert_ne!(burned, plain);
 }

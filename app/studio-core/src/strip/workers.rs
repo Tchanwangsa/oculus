@@ -111,8 +111,9 @@ fn work(
     (k, step): (usize, usize),
     first_bad: &AtomicUsize,
 ) -> Vec<(usize, Result<Frame>)> {
+    // A contact sheet shows the motion, so it leaves captions out.
     let mut renderer = match Renderer::new(project, options) {
-        Ok(r) => r,
+        Ok(r) => r.without_captions(),
         Err(e) => {
             first_bad.fetch_min(k, Ordering::Relaxed);
             return vec![(k, Err(e))];
