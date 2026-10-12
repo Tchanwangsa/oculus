@@ -5,9 +5,9 @@ import type { DbFile } from "@/lib/db";
 import { scrapedRow } from "@/lib/files/scrapedRow";
 
 /**
- * On-demand downloads of module videos, which a sync lists but never fetches
- * (`docs/sync.md`). Global so a download outlives the Modules page that
- * started it. Keyed by Canvas file id.
+ * On-demand downloads of Canvas videos — module videos and a page's
+ * `<canvas-video>` — which a sync never fetches (`docs/sync.md`). Global so a
+ * download outlives the page that started it. Keyed by Canvas file id.
  */
 
 /** `canvas-video-progress`, exactly as `sync/scrape/videos.rs` emits it. */

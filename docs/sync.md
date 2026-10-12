@@ -99,19 +99,71 @@ the output is markdown plus this contract:
 
 - **Text never reads as HTML.** Every text node turns `&` into `&amp;` and
   `<` into `&lt;` (`app/src-tauri/src/pages/md/escape.rs`), so prose like
-  `your <head> section` stays text. Code spans and `<pre>` fences are literal.
+  `your <head> section` stays text. Code spans and `<pre>` fences are literal;
+  so is an `amber-pre` code block, which becomes a fence even with no `<pre>`.
+- **A `$` in text is always `\$`**, so remark-math never pairs currency
+  (`$10 … $15`). Maths comes from two places only
+  (`app/src-tauri/src/pages/md/maths.rs`): a Canvas equation image
+  (`img.equation_image`) becomes `$<LaTeX>$` from its
+  `data-equation-content` (else `title`, the twice-encoded src path, or `alt`
+  minus `LaTeX: `), or a `$$` block on its own lines when it is all its
+  `<p>`/`<div>` holds; and MathJax `\(…\)` / `\[…\]` in text become `$…$`
+  and a `$$` block that splits its paragraph. Nothing is fetched, and
+  equation images are never downloaded as images. A table cell keeps maths
+  inline.
 - **`<details>` stays HTML around markdown**:
   `<details>\n<summary>text</summary>\n\n…\n\n</details>`. The summary is
   plain text, since it shares the open tag's HTML block; the blank lines are
   what make CommonMark parse the body. Nested ones nest.
-- **An Echo360 iframe becomes `<echo-video link-id src>`** with its open tag
-  alone on a line after a blank one (a CommonMark HTML block), splitting any
-  paragraph or indented under a list item. `src` is the Canvas
-  `external_tools/retrieve` URL made absolute, `link-id` the `linkId` inside
-  its `url` parameter (`app/src-tauri/src/pages/md/embeds.rs`). A table cell
-  keeps it on one line.
-- **Any other iframe becomes `[Embedded: <host>](<src>)`**; one without an
-  http(s) `src` is dropped.
+- **Show/hide widgets are collapsed `<details>`**, as the page shows them
+  (`app/src-tauri/src/pages/md/widgets/`): a `uom-ui-accordion` /
+  `uom-mspace-accordion` trigger with its panel, a `uom-ui-reveal` button with
+  the `uom-ui-hidden-content` after it, each tab of a `uom-ui-tablist` with its
+  panel (by `aria-controls`, else in order), and a Canvas `element_toggler`
+  with the element its `aria-controls` names, rendered at the toggler. The
+  paired body is not rendered again where it sits.
+- **Other widgets:** consecutive `p.uom-ui-checkbox` become one task list
+  (`- [ ] text`); a `table.uom-ui-tiles` becomes its cells' blocks, not a
+  table; a `uom-ui-notice`, a Bootstrap `alert` or a block with
+  `uom-ui-emphasise` becomes a blockquote, headed `> **Note**`
+  (info/primary), `> **Warning**` (warning/danger) or `> **Tip**` (success)
+  when the class names a kind. A `div` whose inline style has both a real
+  border and a background and that holds block elements is an unlabelled
+  blockquote; inline styles are otherwise ignored.
+- **Videos Oculus can play become tags**, each with its open tag alone on a
+  line after a blank one (a CommonMark HTML block), splitting any paragraph or
+  indented under a list item; a table cell keeps one on one line. Every
+  `title` is the iframe's, whitespace-collapsed, and left out when empty or a
+  player's name (`Kaltura Player`, `YouTube video player`, …)
+  (`app/src-tauri/src/pages/md/embeds.rs`):
+  - `<echo-video link-id src title>` for an Echo360 LTI launch: `src` is the
+    Canvas `external_tools/retrieve` URL made absolute, `link-id` the
+    `linkId` inside its `url` parameter.
+  - `<canvas-video file-id title>` for a Canvas
+    `/media_attachments_iframe/<id>` player, whose id is an ordinary Canvas
+    file; `title` drops the leading `Video player for `. The link crawl never
+    follows it: the video is downloaded only on request.
+  - `<web-video provider video-id hash title>` for a YouTube `/embed/<id>`
+    or `player.vimeo.com/video/<id>` player with a well-formed id; `provider`
+    is `youtube` or `vimeo`, and `hash` is Vimeo's `h` parameter, present only
+    for an unlisted video.
+- **Any other iframe becomes a named link**, `[<Label>: <title>](<src>)` or
+  `[<Label>](<src>)` when the title is a player's name or the label itself
+  (`app/src-tauri/src/pages/md/labels.rs`). A Canvas LTI launch is labelled by
+  the tool in its `url` parameter (`H5P`, `Kaltura`, else `Canvas tool`;
+  `Readings Online` for an `ERES_` title with no `url`); other hosts by
+  provider (`Padlet`, `Survey`, `Google Form`, `Mentimeter`, `SharePoint`,
+  `Echo360`, `Canvas media` for a legacy `/media_objects_iframe/`, …), else by
+  the host without `www.`. One without an http(s) `src` is dropped.
+- **Links are repaired** (`app/src-tauri/src/pages/md/links.rs`), and the link
+  crawl reads the same repaired href: a `google.<tld>/url?q=` redirect becomes
+  its target, a `mailto:` behind Canvas's origin loses the origin, and an
+  unresolved `$CANVAS_…_REFERENCE$` takes the `data-api-endpoint` beside it
+  when that names a course file or page (as a relative `/courses/…` path).
+  A dead placeholder, or an `<a>` with no href, leaves only its text.
+- **Pasted noise is dropped**: PDF.js text layers (`pdf-page-container`,
+  `plv-text-layer`, `textLayer`), Ally score badges, Canvas's own
+  `data-testid="message_title"` heading, and any image without a `src`.
 
 A sync never resolves an embed: the tag in the page is the only record of it.
 

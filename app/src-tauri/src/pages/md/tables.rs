@@ -1,8 +1,8 @@
-use super::escape::escape_html;
-use super::inline::inline_md;
-use super::lists::inline_md_self;
-use super::tree::{dropped, element_children, is_heading, tag, Ref};
-use super::{is_tag, Ctx, ImageMap, NBSP};
+use super::escape::escape_loose;
+use super::inline::{inline_md, inline_md_self};
+use super::maths::text_md;
+use super::tree::{dropped, element_children, is_heading, squeeze, tag, Ref};
+use super::{is_tag, Ctx, NBSP};
 
 const CELL_BLOCKS: &[&str] = &["p", "div", "blockquote", "section", "article", "li"];
 
@@ -12,10 +12,10 @@ fn is_cell_block(name: &str) -> bool {
 
 /// A GFM cell must be a single line. Block children become segments joined by
 /// " · "; lists collapse to "; "-joined items.
-fn cell_md(cell: Ref<'_>, images: &ImageMap) -> String {
+fn cell_md(cell: Ref<'_>, ctx: &Ctx) -> String {
     let ctx = Ctx {
-        images,
         in_cell: true,
+        ..*ctx
     };
     let mut segs: Vec<String> = Vec::new();
     let mut cur = String::new();
@@ -30,11 +30,11 @@ fn cell_md(cell: Ref<'_>, images: &ImageMap) -> String {
 
     for n in cell.children() {
         if let Some(t) = n.value().as_text() {
-            cur.push_str(&escape_html(t));
+            cur.push_str(&text_md(t, &ctx, escape_loose));
             continue;
         }
         let Some(name) = tag(&n) else { continue };
-        if dropped(&n, true) {
+        if dropped(&n, &ctx) {
             continue;
         }
         match name {
@@ -67,19 +67,13 @@ fn cell_md(cell: Ref<'_>, images: &ImageMap) -> String {
         .to_string()
 }
 
-fn squeeze(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-pub(super) fn table_md(node: Ref<'_>, images: &ImageMap) -> String {
+pub(super) fn table_md(node: Ref<'_>, ctx: &Ctx) -> String {
     let rows: Vec<Ref<'_>> = node.descendants().filter(|d| is_tag(d, "tr")).collect();
     let Some(first) = rows.first() else {
         return String::new();
     };
 
-    let head: Vec<String> = element_children(*first)
-        .map(|c| cell_md(c, images))
-        .collect();
+    let head: Vec<String> = element_children(*first).map(|c| cell_md(c, ctx)).collect();
     let cols = head.len();
     if cols == 0 {
         return String::new();
@@ -92,7 +86,7 @@ pub(super) fn table_md(node: Ref<'_>, images: &ImageMap) -> String {
     let mut out = format!("| {} |\n", pad(head.clone()).join(" | "));
     out.push_str(&format!("| {} |\n", vec!["---"; cols].join(" | ")));
     for r in &rows[1..] {
-        let cells: Vec<String> = element_children(*r).map(|c| cell_md(c, images)).collect();
+        let cells: Vec<String> = element_children(*r).map(|c| cell_md(c, ctx)).collect();
         out.push_str(&format!("| {} |\n", pad(cells).join(" | ")));
     }
     out

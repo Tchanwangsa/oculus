@@ -128,6 +128,20 @@ export async function getFileByRelativePath(
   return rows[0] ?? null;
 }
 
+/** A subject's file by its Canvas file id: a `<canvas-video>` card's
+ *  downloaded video. */
+export async function getFileByCanvasId(
+  subjectId: number,
+  canvasId: number,
+): Promise<DbFile | null> {
+  const db = await getDb();
+  const rows = await db.select<DbFile[]>(
+    `SELECT * FROM files WHERE subject_id = $1 AND canvas_id = $2 LIMIT 1`,
+    [subjectId, canvasId],
+  );
+  return rows[0] ?? null;
+}
+
 /** Files whose library path ends in `/<tail>` — a course-relative path or a
  *  bare filename an agent cited. At most two, so a caller can tell a unique
  *  hit from an ambiguous one. */

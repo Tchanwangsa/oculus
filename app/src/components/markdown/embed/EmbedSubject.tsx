@@ -2,10 +2,10 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { useSubjects } from "@/hooks/data/useSubjects";
 
 /**
- * The subject whose library file is on screen, for `EmbedVideoCard`'s commands.
- * `"loading"` until the subjects list answers; null outside a library file
- * (chat replies, any surface without a provider), where an embed is only a
- * link out.
+ * The subject whose library file is on screen, for the commands of the
+ * Echo360 and Canvas video cards. `"loading"` until the subjects list
+ * answers; null without a provider or for a subject no longer listed, where
+ * those cards are only a link out.
  */
 export type EmbedSubject = { subjectId: number; subjectCode: string } | "loading" | null;
 

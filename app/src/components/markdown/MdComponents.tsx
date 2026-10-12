@@ -4,7 +4,9 @@ import remarkMath from "remark-math";
 import { isValidElement, memo } from "react";
 import { ArrowSquareOut, CaretRight } from "@phosphor-icons/react";
 import { CitationCode, CitationLink, linkCitation } from "@/components/markdown/Citation";
+import { CanvasVideoCard } from "@/components/markdown/embed/CanvasVideoCard";
 import { EmbedVideoCard } from "@/components/markdown/embed/EmbedVideoCard";
+import { WebVideoCard } from "@/components/markdown/embed/WebVideoCard";
 import { FileChip } from "@/components/markdown/FileChip";
 import { Mermaid } from "@/components/markdown/Mermaid";
 import { OutputEmbed, embedKind } from "@/components/markdown/OutputEmbed";
@@ -184,13 +186,31 @@ export const MD_COMPONENTS: Components = {
       </a>
     );
   },
-  ul: (p: any) => (
-    <ul className="list-disc pl-5 my-3 space-y-1 text-sm text-foreground/90" {...p} />
+  // remark-gfm marks a task list `contains-task-list`, its items
+  // `task-list-item`; merged, not spread over, so the list keeps its styles.
+  // A task list drops its bullets and hangs each box in the indent.
+  ul: ({ className, ...p }: any) => (
+    <ul
+      className={cn(
+        isTaskList(className) ? "list-none pl-6" : "list-disc pl-5",
+        "my-3 space-y-1 text-sm text-foreground/90",
+        className,
+      )}
+      {...p}
+    />
   ),
-  ol: (p: any) => (
-    <ol className="list-decimal pl-5 my-3 space-y-1 text-sm text-foreground/90" {...p} />
+  ol: ({ className, ...p }: any) => (
+    <ol className={cn("list-decimal pl-5 my-3 space-y-1 text-sm text-foreground/90", className)} {...p} />
   ),
-  li: (p: any) => <li className="leading-relaxed" {...p} />,
+  li: ({ className, ...p }: any) => <li className={cn("leading-relaxed", className)} {...p} />,
+  // remark-gfm's task box, always disabled: it pulls back into the list's
+  // indent and sits on the first line's x-height.
+  input: ({ className, ...p }: any) =>
+    p.type === "checkbox" ? (
+      <input className={cn("-ml-5 mr-1.5 mb-0.5 size-3.5 align-middle accent-primary", className)} {...p} />
+    ) : (
+      <input className={className} {...p} />
+    ),
   // Deliberately not italic: long quotes read slowly in italic.
   blockquote: (p: any) => (
     <blockquote className="border-l-2 border-border pl-4 my-3 text-sm text-muted-foreground" {...p} />
@@ -235,13 +255,20 @@ export const MD_COMPONENTS: Components = {
       {children}
     </summary>
   ),
-  // Not an HTML tag, so `Components` doesn't list it. hast keeps the attribute
-  // name, so the prop is `link-id`. A card inside a library file, a link out
-  // anywhere else (`EmbedSubjectProvider`).
+  // The sync's video tags (docs/viewers.md). Not HTML tags, so `Components`
+  // doesn't list them; hast keeps the attribute names, so the props are
+  // `link-id`, `file-id`, `video-id`. Only library files parse raw HTML.
   ...({
-    "echo-video": (p: any) => <EmbedVideoCard linkId={p["link-id"]} src={p.src} />,
+    "echo-video": (p: any) => <EmbedVideoCard linkId={p["link-id"]} src={p.src} title={p.title} />,
+    "canvas-video": (p: any) => <CanvasVideoCard fileId={p["file-id"]} title={p.title} />,
+    "web-video": (p: any) => (
+      <WebVideoCard provider={p.provider} videoId={p["video-id"]} hash={p.hash} title={p.title} />
+    ),
   } as Components),
 };
+
+const isTaskList = (className: unknown) =>
+  typeof className === "string" && className.split(" ").includes("contains-task-list");
 
 /** Hoisted for stable array identity across re-renders. */
 const PLAIN = [remarkGfm, remarkProsePaths];
