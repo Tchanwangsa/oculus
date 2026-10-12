@@ -22,6 +22,8 @@ library files; the rest of the frontend has its own pages:
 | The first-run gate: onboarding or the shell ([onboarding.md](./onboarding.md)) | `app/src/App.tsx`, `app/src/hooks/shell/useOnboardingGate.ts` |
 | Backend events → SQLite and stores | `app/src/hooks/backend/useBackendEvents.ts`, `app/src/hooks/backend/useEvents.ts`, `app/src/lib/pipeline/parseStatusWriter.ts`, `app/src/lib/db/connection.ts` |
 | Files tab: uploads and documents | `app/src/pages/subject/files/FilesPage.tsx`, `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src-tauri/src/library/files/commands.rs` |
+| Subject file rows and category icons | `app/src/components/files/DownloadRow.tsx`, `app/src/pages/subject/files/DocumentsPage.tsx` |
+| Weekly lecture groups and collapsible Canvas modules | `app/src/pages/subject/content/LecturesPage.tsx`, `app/src/components/lectures/LectureRow.tsx`, `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/pages/subject/content/modules/` |
 | Tasks section (`/projects`, `/tasks`) | `app/src/components/projects/`, `app/src/pages/work/TasksPage.tsx`, `app/src/lib/planning/projects/`, `app/src/stores/planning/projectsStore.ts` |
 | Chat | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/chat/harnessStore.ts` |
 | Settings → Parsing, Embeddings, Transcription: parser, embedding, index run, transcription (the language, the engine order and switches, a dialog per engine: Groq key, local Whisper models, on-device speech) | `app/src/pages/settings/library/ParsingPage.tsx`, `app/src/components/settings/library/ParserSection.tsx`, `app/src/components/settings/library/EmbeddingSection.tsx`, `app/src/stores/sync/indexStore.ts`, `app/src/components/settings/transcription/TranscriptionSection.tsx`, `app/src/components/settings/transcription/GroqDialog.tsx`, `app/src/components/settings/transcription/LocalWhisper.tsx`, `app/src/components/settings/transcription/OnDeviceSpeech.tsx` |
@@ -54,6 +56,23 @@ Credential descriptions and parse errors say credential store across platforms.
   adding banner comments to a long file.
 - Tests live under `app/tests/` at the same path as the file they cover and
   import it through the `@/` alias (`tests/lib/ui/scrollFade.test.ts`).
+
+## Subject lists keep content flat and distinguish file types by colour
+
+Subject file and content rows use flat divided lists without a surrounding
+card. Downloaded files and Canvas module items use a single list level. Module
+rows stay individually collapsible; the newest TOC for each Canvas position
+wins when an old position path remains, and exact repeated TOCs appear once.
+Lecture recordings are grouped by local Monday–Sunday weeks from the first
+available lecture date (`app/src/lib/lectures/weeks.ts`). Gaps inside the
+subject's synced class timetable render grey as **Break** and do not advance
+the teaching-week number; recordings in those gaps remain accessible. Named
+lecture events take precedence over other class types. Without a timetable,
+missing recordings do not imply a break. Undated recordings stay in their own
+group. File glyphs use
+the `reference-*` tokens: PDFs red, Office documents blue, notes purple,
+spreadsheets teal, and lecture videos pink. Search remains in the subject
+sidebar rather than being duplicated above each list.
 
 ## Backend events are the write path
 

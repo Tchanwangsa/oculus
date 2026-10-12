@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { CheckCircle, CircleNotch, Clock, DownloadSimple, Trash, X } from "@phosphor-icons/react";
+import { CheckCircle, CircleNotch, Clock, DownloadSimple, Trash, VideoCamera, X } from "@phosphor-icons/react";
 import { cancelLectureDownload, dlKey, isDownloading, useLectureDownloads } from "@/stores/lectures/lectureDownloadStore";
 import { fmtDurationSecs, fmtLectureDate, lecturePagePath } from "@/lib/lectures";
 import { progressLabel } from "@/lib/lectures/end";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 export const LectureRow = memo(function LectureRow({
   lecture: lec,
   active,
+  muted = false,
   onSelect,
   onDownload,
   onDelete,
@@ -18,6 +19,7 @@ export const LectureRow = memo(function LectureRow({
 }: {
   lecture: Lecture;
   active: boolean;
+  muted?: boolean;
   onSelect: (lecture: Lecture) => void;
   onDownload: (lecture: Lecture) => void;
   onDelete: (lecture: Lecture) => void;
@@ -58,8 +60,9 @@ export const LectureRow = memo(function LectureRow({
           </>
         )}
       </RowAction>
+      <VideoCamera size={14} className={cn("shrink-0", muted ? "text-muted-foreground" : "text-reference-lecture")} aria-hidden />
       <div className="min-w-0 flex-1">
-        <p className="text-[12px] font-medium text-foreground truncate leading-tight">
+        <p className={cn("text-[12px] font-medium truncate leading-tight", muted ? "text-muted-foreground" : "text-foreground")}>
           {lec.title}
         </p>
       </div>

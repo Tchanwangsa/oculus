@@ -19,7 +19,7 @@ Read this before any UI work.
 | A page's nav column (Settings, subjects, Chat) | `app/src/components/ui/layout/SideNav.tsx` |
 | Drag gestures | `app/src/hooks/gestures/usePointerDrag.ts`, `app/src/hooks/gestures/useCardDrag.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
-| Table chrome | `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
+| Flat divided lists, table chrome | `app/src/components/ui/layout/PageParts.tsx`, `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
 | Toolbar filters: pill popovers, checklists, applied-filter chips | `app/src/components/ui/filter/` |
 | The colour control: a swatch that opens a pad, hue and opacity strips and hex text (`opaque` drops the opacity strip) | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
 | A titled block that folds, its state kept by the caller | `app/src/components/ui/CollapsibleSection.tsx` |
@@ -76,8 +76,8 @@ themes are opt-in and keep the same structure.
   `app/src/components/icons/` on its `IconBase`, so it takes the same `size`
   and `weight` props.
 - **Inline references have content colours** through `reference-*` tokens:
-  red PDFs, purple pages and notes, green tasks, amber projects, blue
-  discussions, pink lectures and teal lessons. These glyphs identify linked
+  red PDFs, purple pages and notes, blue documents and discussions, green
+  tasks, amber projects, pink lectures and teal lessons. These glyphs identify linked
   content; the shell keeps its indigo accent ([viewers.md](./viewers.md)).
 - **Colours go through the semantic tokens in `app/src/styles/colors.css`** (dark values in `dark.css`). In
   shadcn's vocabulary `accent` is the quiet hover surface, not the brand. The
@@ -135,6 +135,8 @@ themes are opt-in and keep the same structure.
 - **Tables are full-bleed in `GridTable`**, header outside the scroller (or the
   bar runs down it). Alternate views are sibling `ViewTabs`/`PillTabs`, not a
   dropdown, over a fixed-height toolbar so switching never jolts the rows.
+- **Row lists use `ListCard` as a flat divided stack**, without a card border
+  around the rows. A page adds a card only when the content itself calls for one.
 - **Filters are pills over popovers** (`FilterPopover`, brand-tinted while
   narrowing); a multi-select is a `FilterChecklist`, and the applied values sit
   under the toolbar as `FilterChips` — one line that scrolls with faded edges,

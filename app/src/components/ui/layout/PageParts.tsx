@@ -3,10 +3,10 @@ import type { ReactNode } from "react";
 import { CircleNotch } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 
-/** The bordered, hairline-divided card a page's row list sits in. */
+/** A flat, hairline-divided list of rows without a surrounding card. */
 export function ListCard({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <div className={cn("overflow-hidden rounded-lg border border-border divide-y divide-border-subtle", className)}>
+    <div className={cn("divide-y divide-border-subtle", className)}>
       {children}
     </div>
   );

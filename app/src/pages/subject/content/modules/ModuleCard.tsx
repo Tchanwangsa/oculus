@@ -14,28 +14,28 @@ export function ModuleCard({
   onToggle: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-border overflow-hidden">
+    <div className="border-b border-border-subtle last:border-b-0">
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3 py-2.5 bg-surface hover:bg-surface-raised transition-colors text-left"
+        className="w-full flex items-center gap-2 py-2.5 text-left hover:text-foreground transition-colors"
       >
         {open ? (
           <CaretDown size={11} className="text-muted-foreground shrink-0" />
         ) : (
           <CaretRight size={11} className="text-muted-foreground shrink-0" />
         )}
-        <span className="text-[12px] font-semibold text-foreground truncate flex-1">
+        <span className="text-[13px] font-medium text-foreground truncate flex-1">
           {mod.title}
         </span>
       </button>
 
       {open && (
-        <div className="divide-y divide-border-subtle">
+        <div className="pb-1">
           {mod.sections.map((section, i) => (
             <div key={i}>
               {section.heading && (
-                <div className="px-3 pt-2.5 pb-1">
-                  <span className="font-display text-[11px] font-semibold text-muted-foreground">
+                <div className="pt-2 pb-1">
+                  <span className="text-[11px] font-medium text-muted-foreground">
                     {section.heading}
                   </span>
                 </div>

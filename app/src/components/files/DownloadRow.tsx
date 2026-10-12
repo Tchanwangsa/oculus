@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { filePageHref, openFileSmart } from "@/lib/files/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { ParseStateBadge } from "@/components/files/ParseState";
-import { fileIconFor } from "@/lib/files/fileTypes";
+import { fileIconFor, isSheetFile, isVideoFile } from "@/lib/files/fileTypes";
 import { fmtSize } from "@/lib/format/format";
 import type { DbFile } from "@/lib/db";
 
@@ -13,6 +13,17 @@ import type { DbFile } from "@/lib/db";
  */
 export function DownloadRow({ file, mark }: { file: DbFile; mark?: ReactNode }) {
   const Icon = fileIconFor(file.filename);
+  const iconTone = file.category === "document"
+    ? "text-reference-page"
+    : /\.pdf$/i.test(file.filename)
+      ? "text-reference-pdf"
+      : /\.(docx?|pptx?)$/i.test(file.filename)
+        ? "text-reference-document"
+      : isVideoFile(file.filename)
+        ? "text-reference-lecture"
+        : isSheetFile(file.filename)
+          ? "text-reference-lesson"
+          : "text-muted-foreground";
 
   return (
     <div className="flex items-center gap-3 px-3 py-2 hover:bg-surface transition-colors">
@@ -21,7 +32,7 @@ export function DownloadRow({ file, mark }: { file: DbFile; mark?: ReactNode }) 
         onClick={() => openFileSmart(file)}
         className="flex items-center gap-3 flex-1 min-w-0 text-left"
       >
-        <Icon size={14} className="shrink-0 opacity-60" />
+        <Icon size={14} className={`shrink-0 ${iconTone}`} />
         <span className="text-[12px] text-foreground truncate flex-1">
           {file.filename}
         </span>

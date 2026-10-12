@@ -155,7 +155,7 @@ function DocumentRow({ file, onDelete }: { file: DbFile; onDelete: () => void })
         onClick={() => navigateActive(path)}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
-        <NotePencil size={14} className="shrink-0 opacity-60" aria-hidden />
+        <NotePencil size={14} className="shrink-0 text-reference-page" aria-hidden />
         <span className="flex-1 truncate text-[12px] text-foreground">{fileTitle(file)}</span>
         <span className="w-17 shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">
           {fmtSize(file.size_bytes)}
