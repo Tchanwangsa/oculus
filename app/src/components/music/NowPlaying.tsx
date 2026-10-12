@@ -26,7 +26,8 @@ export function NowPlaying({
 }: {
   snapshot: MusicSnapshot;
   error: string | null;
-  onOpenPlayer: () => void;
+  /** `newTab` is a ⌘-click: the player as a tab of its own, not beside the page. */
+  onOpenPlayer: (newTab: boolean) => void;
 }) {
   const { track, device } = shownPlayback(snapshot);
   return (
@@ -47,7 +48,7 @@ export function NowPlaying({
       <VolumeRow snapshot={snapshot} />
       <PlayingElsewhere snapshot={snapshot} />
       <MusicNotice snapshot={snapshot} error={error} />
-      <Button variant="ghost" size="xs" className="self-center" onClick={onOpenPlayer}>
+      <Button variant="ghost" size="xs" className="self-center" onClick={(e) => onOpenPlayer(e.metaKey || e.ctrlKey)}>
         Open player
       </Button>
     </div>

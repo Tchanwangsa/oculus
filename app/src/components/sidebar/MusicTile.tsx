@@ -8,7 +8,7 @@ import { openBeside } from "@/lib/shell/tabRouters";
 import { cn } from "@/lib/utils";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
 import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
-import { useActivePath } from "@/stores/shell/tabStore";
+import { useActivePath, useTabStore } from "@/stores/shell/tabStore";
 import { railButton, railIdle } from "./RailItem";
 
 /**
@@ -78,9 +78,10 @@ export function MusicTile() {
         <NowPlaying
           snapshot={snapshot}
           error={error}
-          onOpenPlayer={() => {
+          onOpenPlayer={(newTab) => {
             setOpen(false);
-            openBeside("/music");
+            if (newTab) useTabStore.getState().addTab("/music");
+            else openBeside("/music");
           }}
         />
       </PopoverContent>

@@ -93,7 +93,8 @@ is on, or from `music_wake` when the player is opened with none running.
   on release, not as it moves, since each change is a request to Spotify; a
   device that takes no volume disables the slider.
 - **"Open player" opens `/music` as a new side-panel item** on the tab in
-  front, focused (`openBeside`), leaving whatever the panel held in its stack;
+  front, focused (`openBeside`), leaving whatever the panel held in its stack,
+  or with ⌘-click as a tab of its own;
   its `recentKey` is `music`, so there is one player item however it is opened.
   The page adds the album, elapsed and total, shuffle and repeat, a queue
   button for what plays next, the account's playlists with their tracks and
