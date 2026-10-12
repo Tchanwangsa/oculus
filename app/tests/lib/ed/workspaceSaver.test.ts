@@ -134,4 +134,43 @@ describe("workspace saver", () => {
     expect(saver.text("b.py")).toBe("b2");
     expect(saver.text("c.py")).toBe("c");
   });
+
+  test("taking Ed's version replaces even unsaved text and clears a failed write", async () => {
+    const { saver, writes } = fakeRust();
+    const seen: string[] = [];
+    saver.subscribe({ text: (path, text) => seen.push(`${path}:${text}`) });
+    saver.loaded("a.py", "base");
+    saver.edit("a.py", "mine");
+    const run = saver.flush();
+    writes[0].done.reject(new Error("upload failed"));
+    await run;
+    expect(saver.status.state).toBe("error");
+
+    saver.replace("a.py", "eds");
+    expect(saver.text("a.py")).toBe("eds");
+    expect(saver.dirty()).toBe(false);
+    expect(saver.status).toEqual({ state: "idle" });
+    expect(seen.at(-1)).toBe("a.py:eds");
+    await saver.flush();
+    expect(writes.length).toBe(1);
+  });
+
+  test("back online, work saved only on disk counts as saved to Ed", async () => {
+    const { saver, writes } = fakeRust();
+    saver.loaded("a.py", "");
+    saver.edit("a.py", "x");
+    const run = saver.flush();
+    writes[0].done.resolve("local");
+    await run;
+    expect(saver.status).toEqual({ state: "saved", where: "local" });
+
+    saver.edit("a.py", "xy");
+    saver.synced();
+    expect(saver.status).toEqual({ state: "saved", where: "local" });
+    const again = saver.flush();
+    writes[1].done.resolve("local");
+    await again;
+    saver.synced();
+    expect(saver.status).toEqual({ state: "saved", where: "ed" });
+  });
 });

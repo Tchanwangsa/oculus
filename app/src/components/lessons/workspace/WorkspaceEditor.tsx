@@ -12,7 +12,8 @@ import type { WorkspaceSaver } from "@/lib/ed/workspaceSaver";
  * through `ed_workspace_read` the first time, kept while the tab is away,
  * and mirrored here so a change from elsewhere (another pane on the same
  * slide, a re-read) reaches the view. `remote` counts commits from another
- * client; each re-reads the file unless it has unsaved edits.
+ * client; each re-reads the file unless it has unsaved edits. `readOnly`
+ * holds it while a conflict is being resolved.
  */
 export function WorkspaceEditor({
   challengeId,
@@ -20,12 +21,14 @@ export function WorkspaceEditor({
   path,
   remote,
   memory,
+  readOnly,
 }: {
   challengeId: number;
   saver: WorkspaceSaver;
   path: string;
   remote: number;
   memory: EditorMemory;
+  readOnly?: boolean;
 }) {
   const [text, setText] = useState<string | null>(() => saver.text(path) ?? null);
   const [err, setErr] = useState<string | null>(null);
@@ -76,6 +79,7 @@ export function WorkspaceEditor({
       text={text}
       filename={path}
       memory={memory}
+      readOnly={readOnly}
       onChange={(next) => saver.edit(path, next)}
     />
   );

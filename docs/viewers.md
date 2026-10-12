@@ -15,6 +15,7 @@ transcript, and a web page.
 | A parsed PDF's faces: PDF, Markdown | `app/src/components/files/FileViewer.tsx`, `app/src/components/files/FileMarkdown.tsx`, `app/src/components/files/pdf/pdfMdLink.ts`, `app/src/lib/pdf/pdfBlocks.ts` |
 | An Ed lesson's view: the slide sidebar and pane, the index reader | `app/src/components/lessons/`, `app/src/hooks/data/useLessonIndex.ts`, `app/src/lib/ed/lessons.ts` |
 | A challenge's workspace: the pane, its commands and events, the save loop, the shared session | `app/src/components/lessons/workspace/`, `app/src/lib/ed/workspace.ts`, `app/src/lib/ed/workspaceSaver.ts`, `app/src/lib/ed/workspaceHandles.ts`, `app/src/lib/ed/workspaceStatus.ts` |
+| A workspace file in conflict with Ed: the bar, Compare, Keep mine and Take Ed's | `app/src/components/lessons/workspace/conflict/`, `app/src/lib/ed/conflicts.ts`, `app/src/lib/ed/lineDiff.ts` |
 | The workspace's terminal drawer, Run, Mark and Feedback | `app/src/components/lessons/workspace/terminal/`, `app/src/components/lessons/workspace/mark/`, `app/src/components/lessons/workspace/feedback/`, `app/src/lib/ed/termOutput.ts`, `app/src/lib/ed/flushForEd.ts`, `app/src/lib/ed/markPrompts.ts`, `app/src/lib/ed/feedback.ts` |
 | The code editor and a library source file's read-only view | `app/src/components/code/`, `app/src/components/files/CodeFileViewer.tsx`, `fileLanguage` in `app/src/components/documents/editor/syntax/codeLanguages.ts`, `CODE_EXTS` in `app/src/lib/files/fileTypes.ts` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/lectures/media/`, `app/src/stores/lectures/playerPrefsStore.ts`, `app/src/hooks/lectures/useTranscriptDock.ts` |
@@ -400,14 +401,37 @@ commands typed in `app/src/lib/ed/workspace.ts`.
   edit; nothing retries on a timer.
 - **The status line is Ed's** (`workspaceStatusText`): "Saving…", "Not
   saved to Ed", "Offline — saved on this Mac" (a save that landed only on
-  disk, or the socket down; "PC" on Windows, with Rust's reason as the
-  tooltip), "Connecting…", else "All changes saved".
+  disk, or the socket down; "PC" on Windows, with Rust's reason under it in
+  dim text), "Connecting…", else "All changes saved".
+- **Offline, the editor keeps saving to the library copy.** Rust reconciles
+  with Ed on every connect before it reports `online`, so `online` with
+  nothing unsaved turns "saved on this Mac" back into "All changes saved"
+  (`saver.synced`), and the open file reads again unless it has unsaved
+  edits, the other clean buffers on next open.
 - **`ed-workspace` events for this challenge**: `status` updates the line;
   `files` replaces the tabs (when the open file leaves the list, the first opens)
   and drops buffers no longer listed unless unsaved; a `commit` with
   `ours: false` (Ed's web app saved) re-reads the open file unless it has
   unsaved edits, and forgets the other clean buffers so they read again;
-  `error` shows as a warning `Alert` until the socket is back online.
+  `conflict` marks a file in conflict; `error` shows as a warning `Alert`
+  until the socket is back online.
+- **A conflict** is a file both sides changed since the last sync: Rust
+  keeps the library copy and writes Ed's beside it as
+  `<name>.ed-server.<ext>` (`<name>.ed-server` without an extension).
+  `splitListing` (`lib/ed/conflicts.ts`) reads conflicts off the file list,
+  so they survive a reload, adds those `conflict` events named, and hides
+  the server copies from the tabs. A file in conflict has a warning dot on
+  its tab and a bar over its editor (`conflict/ConflictFrame.tsx`): "Ed has
+  a different version of this file" with Compare, Keep mine and Take Ed's.
+  Compare swaps the editor for a read-only line diff of the buffer against
+  Ed's copy (`lineDiff`: LCS of lines, unchanged runs folded), yours red and
+  Ed's green as in Feedback. Editing stays open and saves as usual. Keep
+  mine writes pending saves and calls `ed_workspace_resolve` with
+  `keep: "mine"`; Take Ed's asks first in an in-app dialog, then resolves
+  with `keep: "ed"` and reads the replaced file into the buffer over
+  anything typed (`saver.replace`). The editor is read-only while a resolve
+  runs, both need Ed (disabled offline with the reason), and a failure is
+  an inline `Alert`.
 - **The terminal drawer** (`terminal/TerminalDrawer.tsx`) is Ed's bottom
   drawer: a Terminal tab when `features.terminal`, a Run tab when Run
   exists, each an xterm.js view (`XtermView`, loaded on demand) kept

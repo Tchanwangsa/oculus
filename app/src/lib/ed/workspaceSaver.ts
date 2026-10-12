@@ -136,6 +136,26 @@ export function createWorkspaceSaver(io: SaverIO) {
       }
       return true;
     },
+    /** The file was replaced on purpose (Ed's version taken): its buffer takes
+     *  `text` even over unsaved edits. Call it with no write in flight. */
+    replace(path: string, text: string) {
+      const buffer = buffers.get(path);
+      if (!buffer) return;
+      buffer.disk = text;
+      if (buffer.text !== text) {
+        buffer.text = text;
+        notify(path, text);
+      }
+      // A failed write of the discarded text no longer stands.
+      if (status.state === "error" && !nextDirty()) emit({ state: "idle" });
+    },
+    /** The socket is back and Rust's reconcile has uploaded what was kept on
+     *  disk: "saved locally" becomes saved to Ed, unless something is pending. */
+    synced() {
+      if (status.state === "saved" && status.where === "local" && !nextDirty() && !writing) {
+        emit({ state: "saved", where: "ed" });
+      }
+    },
     /** Drops the buffers with nothing unsaved, except those in `keep`, so the
      *  next open reads them from disk again. */
     forgetClean(keep: (path: string) => boolean = () => false) {

@@ -50,6 +50,9 @@ export type WorkspaceEvent =
   | { challengeId: number; kind: "commit"; hash: string; ours: boolean }
   | { challengeId: number; kind: "files"; files: string[] }
   | { challengeId: number; kind: "error"; message: string }
+  /** Both sides changed `path`: ours stays, Ed's is written beside it at
+   *  `serverPath` (`lib/ed/conflicts.ts`). */
+  | { challengeId: number; kind: "conflict"; path: string; serverPath: string }
   /** Base64 PTY output of terminal `id`. */
   | { challengeId: number; kind: "term"; id: string; data: string }
   | { challengeId: number; kind: "termState"; id: string; state: "running" | "exited" }
@@ -83,6 +86,11 @@ export const readWorkspaceFile = (challengeId: number, path: string) =>
  *  while online rejects, though the disk write still happened. */
 export const saveWorkspaceFile = (challengeId: number, path: string, text: string) =>
   invoke<WorkspaceSaved>("ed_workspace_save", { challengeId, path, text });
+
+/** Ends a conflict: `mine` uploads the library copy, `ed` replaces it with
+ *  Ed's; either way the server copy goes and a `files` event follows. */
+export const resolveConflict = (challengeId: number, path: string, keep: "mine" | "ed") =>
+  invoke<void>("ed_workspace_resolve", { challengeId, path, keep });
 
 export const deleteWorkspaceFile = (challengeId: number, path: string) =>
   invoke<void>("ed_workspace_delete", { challengeId, path });
