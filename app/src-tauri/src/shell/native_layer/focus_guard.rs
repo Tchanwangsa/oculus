@@ -73,7 +73,7 @@ unsafe extern "C-unwind" fn make_first_responder(
 }
 
 /// `responder` is, or is inside, a page (a content-view subview other than the
-/// app's webview) that is hidden or lies off the window.
+/// app's webview and the glass) that is hidden or lies off the window.
 unsafe fn in_unseen_page(window: &AnyObject, responder: *mut AnyObject) -> bool {
     if responder.is_null() {
         return false;
@@ -91,10 +91,11 @@ unsafe fn in_unseen_page(window: &AnyObject, responder: *mut AnyObject) -> bool 
         return false;
     }
     let app_view = crate::shell::keys::app_webview() as *mut AnyObject;
+    let glass = super::glass::view();
     let count: usize = msg_send![subviews, count];
     for i in 0..count {
         let page: *mut AnyObject = msg_send![subviews, objectAtIndex: i];
-        if page.is_null() || page == app_view {
+        if page.is_null() || page == app_view || page == glass {
             continue;
         }
         let inside = responder == page || {

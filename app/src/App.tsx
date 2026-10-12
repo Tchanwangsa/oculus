@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { applyTheme, getStoredTheme, watchSystemTheme } from "@/lib/ui/theme";
+import { watchSystemTheme } from "@/lib/ui/themes";
 import { applyZoom, storedZoom } from "@/lib/ui/pageZoom";
 import { getDb, reconcileStaleSyncRuns } from "@/lib/db";
 import { useBackendEvents } from "@/hooks/backend/useBackendEvents";
@@ -26,13 +26,13 @@ function EventBridge() {
  *  window while the gate decides, so neither flashes. */
 function Shell() {
   const onboarding = useOnboardingGate();
-  if (onboarding === null) return <div className="h-full w-full bg-background" />;
+  if (onboarding === null) return <div className="h-full w-full" />;
   return onboarding ? <Onboarding /> : <AppLayout />;
 }
 
 export default function App() {
   useEffect(() => {
-    applyTheme(getStoredTheme());
+    // The appearance is applied in main.tsx, before the first paint.
     applyZoom(storedZoom());
 
     // tauri-plugin-sql migrates on first load, and a page may never query it

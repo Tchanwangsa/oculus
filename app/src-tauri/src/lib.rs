@@ -303,6 +303,7 @@ pub fn run() {
             shell::browser::commands::browser_set_viewport,
             shell::browser::commands::browser_hide_tab,
             shell::native_layer::native_set_blocked,
+            shell::native_layer::native_set_glass,
             #[cfg(windows)]
             shell::native_layer::windows::native_set_holes,
             shell::browser::commands::browser_hide,

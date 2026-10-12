@@ -457,10 +457,16 @@ by the page. A fullscreen media player, a fixed
 overlay inside `#root`, suspends every hole. `adopt_page`
 (`app/src-tauri/src/shell/native_layer/`) runs right after every `add_child`.
 
-- **macOS: pages sit under the app.** `init` turns off the app webview's
-  background, `adopt_page` moves each page to the bottom of the window's
-  views, and the holes are one `clip-path` on `#root`, which paints the
-  background. Clicks go through a `hitTest:` override on the window's content
+- **macOS: pages sit under the app, over the glass.** The window's views
+  run, bottom to top: an `NSVisualEffectView` blurring the desktop behind the
+  window (`glass.rs`), the pages, the app's webview. `init` makes the window
+  non-opaque, adds the glass and turns off the app webview's background;
+  `adopt_page` moves each page to just above the glass. The holes are one
+  `clip-path` on `#root`, which paints the ground: translucent for a glass
+  frame, so the blur shows through, opaque for a solid one. The frontend
+  calls `native_set_glass` with the frame and the app's theme; it hides the
+  glass for a solid frame and gives it the app's light or dark appearance,
+  which can differ from the OS's. Clicks go through a `hitTest:` override on the window's content
   view: a point inside a shown page's frame goes to that page, unless the
   frontend has reported a portal over an open hole (`native_set_blocked`).
   Then the app keeps the click, so clicking the page under a popover
@@ -486,8 +492,9 @@ overlay inside `#root`, suspends every hole. `adopt_page`
   popover moves focus out of the app, and that `blur` sends Escape so the
   popover closes, as switching apps does.
 - **Ordering**: a hole opens only after its page is placed, and closes before
-  the page is hidden or parked, or the bare window (macOS) or a page in the
-  wrong place (Windows) shows for a frame.
+  the page is hidden or parked, or the glass (macOS; under a solid frame,
+  the desktop itself) or a page in the wrong place (Windows) shows for a
+  frame.
 
 ## Gotchas
 

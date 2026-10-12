@@ -1,10 +1,13 @@
-import { AppearanceSection } from "@/components/settings/AppearanceSection";
-import { Section } from "@/components/settings/shared/section";
+import { CodeSection } from "@/components/settings/appearance/CodeSection";
+import { ThemeSection } from "@/components/settings/appearance/ThemeSection";
+import { Separator } from "@/components/ui/separator";
 
 export default function SettingsAppearancePage() {
   return (
-    <Section title="Appearance" description="How Oculus looks on this machine.">
-      <AppearanceSection />
-    </Section>
+    <>
+      <ThemeSection />
+      <Separator className="my-7" />
+      <CodeSection />
+    </>
   );
 }

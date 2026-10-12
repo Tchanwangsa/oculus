@@ -119,6 +119,8 @@ unsafe extern "C-unwind" fn hit_test(
 /// browser pages are `isHidden`; parked dock pages sit off the window.
 unsafe fn page_at(this: &AnyObject, point: NSPoint) -> Option<*mut AnyObject> {
     let app_view = APP_VIEW.load(Ordering::Relaxed);
+    // The glass covers the window too, but it is never a page.
+    let glass = super::glass::view();
     let parent: *mut AnyObject = msg_send![this, superview];
     let local: NSPoint = msg_send![this, convertPoint: point, fromView: parent];
     let subviews: *mut AnyObject = msg_send![this, subviews];
@@ -128,7 +130,7 @@ unsafe fn page_at(this: &AnyObject, point: NSPoint) -> Option<*mut AnyObject> {
     let count: usize = msg_send![subviews, count];
     for i in (0..count).rev() {
         let sub: *mut AnyObject = msg_send![subviews, objectAtIndex: i];
-        if sub.is_null() || sub == app_view {
+        if sub.is_null() || sub == app_view || sub == glass {
             continue;
         }
         let hidden: bool = msg_send![sub, isHidden];
