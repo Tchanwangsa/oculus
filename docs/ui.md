@@ -61,7 +61,8 @@ themes are opt-in and keep the same structure.
   `app/src/components/markdown/MdComponents.tsx` and the code-font field
   (`app/src/components/settings/appearance/CodeFontRow.tsx`); the note editor's theme
   (`app/src/components/documents/editor/theme/`) gives `--font-mono` to code
-  and LaTeX source. A command's output (`AnsiText`, the one-line
+  and LaTeX source, and `CodeEditor` (`app/src/components/code/`) is
+  monospace throughout. A command's output (`AnsiText`, the one-line
   `TerminalLine` on a running install or update) keeps its colours via
   `app/src/lib/format/ansi.ts`, which drops every escape but SGR. Timestamps, counts, IDs and badges take the body font,
   with `tabular-nums` when digits hold a column.
@@ -97,7 +98,7 @@ themes are opt-in and keep the same structure.
   `user-select: none`; text selects again only inside a `data-selectable`
   block — a file's Markdown or PDF pages, a chat message (`CompactMd`, the
   question bubble, thinking), `CodeText`, a note's editor (maths fields
-  included), a document version, an error's
+  included), `CodeEditor`, a document version, an error's
   detail — and never on a button or tab inside one. Page chrome (titles,
   cards, lists, tables, the sidebar) never highlights. Mark a new surface
   `data-selectable` only if its text is worth copying. A drag-select stays in

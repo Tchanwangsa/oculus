@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { codeLanguage } from "@/components/documents/editor/syntax/codeLanguages";
+import { codeLanguage, fileLanguage } from "@/components/documents/editor/syntax/codeLanguages";
+import { CODE_EXTS, isCodeFile } from "@/lib/files/fileTypes";
 
 describe("fenced code language selection", () => {
   test("explicit aliases and unknown tags retain their labels", () => {
@@ -22,5 +23,31 @@ describe("fenced code language selection", () => {
       expect(codeLanguage("", source)).toBeNull();
       expect(codeLanguage("", source)).toBeNull();
     }
+  });
+});
+
+describe("file language by name", () => {
+  test("picks the grammar from the extension, in any case and below folders", () => {
+    expect(fileLanguage("tally.py")?.name).toBe("Python");
+    expect(fileLanguage("src/Main.java")?.name).toBe("Java");
+    expect(fileLanguage("solution.C")?.name).toBe("C");
+    expect(fileLanguage("analysis.R")?.name).toBe("R");
+    expect(fileLanguage("notes.txt")).toBeNull();
+    expect(fileLanguage("Makefile")).toBeNull();
+  });
+
+  test("a course's .m is MATLAB, not Mathematica", () => {
+    expect(fileLanguage("fit.m")?.name).toBe("Octave");
+  });
+
+  test("every extension the code viewer claims has a grammar", () => {
+    for (const ext of CODE_EXTS) expect([ext, fileLanguage(`a.${ext}`)?.name ?? null]).not.toEqual([ext, null]);
+  });
+
+  test("markdown and pages stay with the markdown viewer", () => {
+    expect(isCodeFile("tally.py")).toBe(true);
+    expect(isCodeFile("README.md")).toBe(false);
+    expect(isCodeFile("page.html")).toBe(false);
+    expect(isCodeFile("marks.csv")).toBe(false);
   });
 });
