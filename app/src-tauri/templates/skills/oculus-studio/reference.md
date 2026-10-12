@@ -906,18 +906,25 @@ oculus studio themes promote <slug> themes/chalk.json --to global
 Only a file in the video's own folder can be promoted. `--to subject` needs
 a `subject` in `video.json`. Promote only what the student wants to keep.
 
-**The starter components** (global library):
+**The starter components** (global library) are drawing primitives, not
+scenes. A component cannot import another, so each file holds its primitive
+as a helper function and a default export that demos it: read it with
+`components show <slug> <Name>`, copy the helper (and the small functions
+beside it) into your scene component, and call it there with times from
+`word()`. Every part is keyed under an `id` prop (default the name in the
+table), so two calls with one id in a `Steps` glide part to part, and an
+overlay can target a part (`dots/d3`) or the whole (`dots`).
 
-| Component | Props | For |
+| Primitive | Helper props | What it draws |
 | --- | --- | --- |
-| `TitleCard` | `title`; optional `eyebrow`, `subtitle` | The opening card, dark |
-| `Steps` | `steps` (a list); optional `heading` | A recap list. A heading over lines is a slide, so never a scene's explanation |
-| `BigNumber` | `value`, `label`; optional `unit` | One figure, large |
-| `LowerThird` | `name`; optional `role` | A name caption, bottom left |
-| `SplitShell` | `heading`, `left` and `right` (lists); `leftTitle`, `rightTitle` (default `Left`, `Right`) | Two short lists side by side, as a recap |
+| `NumberLine` | `from`, `to`, `step`, `labelEvery`, `width`, `at`, `dur`, `points: [{ value, name, at, moves: [[t, v]], color }]`, `span: { from, to, at, label, color }`, `id` (`nl`) | A line that draws on with its ticks and numbers, points that pop in and glide along it, an interval drawn on as a bar |
+| `Axes` | `axes({ x: [lo, hi, step], y, width, height })` maps data to px; `<Axes ax at dur id>` (`ax`) holds `<Plot ax f from to at dur color label head key>` and `<Dot ax x y at color label guides key>` | Two axes drawn on with numbers; a function stroked on (breaking off-range), a dot riding its end, points with dashed guides |
+| `DotGrid` | `n`, `cols`, `size`, `gap`, `enter`, `each`, `tone`, `marks: [{ dots, color, at }]`, `leftover` (a colour), `caption`, `id` (`dots`) | n dots in rows, `rows × cols (+ rest)` under them; a Steps over two `cols` re-arranges them (12 as 3 × 4 then 2 × 6; 7 never fills a rectangle) |
+| `Tiles` | `a`, `b`, `width`, `height`, `at`, `each`, `times` or `step`, `grid`, `result`, `id` (`tiles`) | Euclid's gcd: the a × b rectangle tiled by the largest squares, square by square, then `\gcd(a, b) = side` |
+| `ModClock` | `n`, `walk` (residues in order), `at`, `walkAt`, `each`, `times`, `centre` (TeX per step), `radius`, `tone`, `id` (`clock`) | Residues 0 … n−1 round a circle, a walk drawn as arrows from residue to residue (2^k mod 15 closes a loop of 4), the step's label underneath |
+| `Table` | `header`, `rows` (TeX), `at`, `each`, `by` (`row`/`col`), `marks: [{ rows, color, at }]`, `hide`, `colWidth`, `id` (`table`) | Cells of maths revealed row by row, rows banded; a Math elsewhere keyed like a cell (`table/r1c2`) takes its glyphs, so a value lifts out of the table |
+| `TitleCard` | `title`; optional `eyebrow`, `subtitle`, `accent` | The opening card, dark. A scene on its own, the only one |
 
-Each also takes `accent`, a colour token's name (default `"accent"`). All
-five are static and text only: nothing moves and nothing is cued, so they
-are primitives for a title, a caption or a closing recap, never the
-explanation itself. Every scene that explains something is the video's own
-component, written for that scene.
+Each demo's flat props are in `components show`; `gallery` draws its
+examples. A primitive draws; it never explains. The scene around it (what
+is said, what moves on which word, what stays) is yours.

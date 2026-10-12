@@ -141,3 +141,24 @@ fn a_deleted_starter_stays_deleted_and_a_new_one_still_arrives() {
     assert_eq!(reset, ["components/Steps.tsx"]);
     std::fs::remove_dir_all(&root).ok();
 }
+
+#[test]
+fn a_starter_dropped_from_the_set_leaves_the_users_copy_alone() {
+    let root = scratch("dropped");
+    let old = [
+        ("components/Steps.tsx".to_owned(), "starter steps"),
+        ("components/TitleCard.tsx".to_owned(), "starter title"),
+    ];
+    seed_files(&root, old.into_iter(), false).unwrap();
+    write(&root, "components/Steps.tsx", "my steps").unwrap();
+    // A later build no longer ships Steps: it is neither written nor deleted,
+    // edited or not, and a reset only rewrites the starters that still exist.
+    let new = || [("components/TitleCard.tsx".to_owned(), "starter title")].into_iter();
+    assert!(seed_files(&root, new(), false).unwrap().is_empty());
+    assert!(seed_files(&root, new(), true).unwrap().is_empty());
+    assert_eq!(
+        std::fs::read_to_string(root.join("components/Steps.tsx")).unwrap(),
+        "my steps"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}

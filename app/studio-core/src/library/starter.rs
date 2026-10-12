@@ -4,22 +4,25 @@
 use crate::error::{Result, StudioError};
 use crate::project::{ComponentSource, valid_name};
 
-/// `(name, TSX)` for each starter component, in `library/components/`.
-/// `Formula` is not here: it needs the maths primitive (stage 8).
+/// `(name, TSX)` for each starter component, in `library/components/`:
+/// drawing primitives a scene composes (each file's helper is copied into a
+/// scene component), and the title card.
 pub const STARTER_COMPONENTS: &[(&str, &str)] = &[
+    ("Axes", include_str!("../../library/components/Axes.tsx")),
     (
-        "BigNumber",
-        include_str!("../../library/components/BigNumber.tsx"),
+        "DotGrid",
+        include_str!("../../library/components/DotGrid.tsx"),
     ),
     (
-        "LowerThird",
-        include_str!("../../library/components/LowerThird.tsx"),
+        "ModClock",
+        include_str!("../../library/components/ModClock.tsx"),
     ),
     (
-        "SplitShell",
-        include_str!("../../library/components/SplitShell.tsx"),
+        "NumberLine",
+        include_str!("../../library/components/NumberLine.tsx"),
     ),
-    ("Steps", include_str!("../../library/components/Steps.tsx")),
+    ("Table", include_str!("../../library/components/Table.tsx")),
+    ("Tiles", include_str!("../../library/components/Tiles.tsx")),
     (
         "TitleCard",
         include_str!("../../library/components/TitleCard.tsx"),

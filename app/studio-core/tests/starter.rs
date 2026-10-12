@@ -59,3 +59,41 @@ fn the_starter_set_lints_clean_with_each_bundled_theme() {
         std::fs::remove_dir_all(video.parent().unwrap()).ok();
     }
 }
+
+/// A library component named like a prelude element (`Steps`, the slide
+/// starter some libraries still hold) is only a scene name: each component
+/// is its own module, so inside every other component `<Steps>` is still
+/// the element, and the old file still renders as its own scene.
+#[test]
+fn a_component_named_like_an_element_does_not_shadow_it() {
+    let root = std::env::temp_dir().join(format!("studio-shadow-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("components")).unwrap();
+    let steps = r#"export const props = {};
+export default (_p, { theme }) => <Text style={{ color: theme.color.text }}>a slide</Text>;
+"#;
+    let derive = r#"export const props = {};
+export default (_p, { theme }) => (
+  <Stack style={{ flexGrow: 1, fill: theme.color.bg }}>
+    <Steps at={[0.2]}>
+      <Math key="eq" tex="x^2" />
+      <Math key="eq" tex="x \cdot x" />
+    </Steps>
+  </Stack>
+);
+"#;
+    std::fs::write(root.join("components/Steps.tsx"), steps).unwrap();
+    std::fs::write(root.join("components/Derive.tsx"), derive).unwrap();
+    let v = json!({
+        "size": { "width": 320, "height": 180 },
+        "theme": "default",
+        "scenes": [
+            { "component": "Steps", "hold": 1.0 },
+            { "component": "Derive", "hold": 1.0 },
+        ],
+    });
+    std::fs::write(root.join("video.json"), v.to_string()).unwrap();
+    let report = Project::load(&root).unwrap().lint().unwrap();
+    assert!(report.is_clean(), "{report}");
+    std::fs::remove_dir_all(&root).ok();
+}
