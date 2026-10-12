@@ -38,7 +38,7 @@ export function JobsSection() {
   return (
     <Section
       title="Jobs"
-      description="Work the app hands to an agent on its own — no conversation, no timeline. Each job names the agent, the model and the reasoning level it runs on, with fallbacks for a failed run; a CLI flag overrides that for one run."
+      description="Work the app hands to an agent on its own — no conversation, no timeline — and the helpers a chat agent starts. Each job names the agent, the model and the reasoning level it runs on, with fallbacks for a failed run, or a model per agent for a chat agent's helpers; a CLI flag overrides that for one run."
     >
       <div className="divide-y divide-border-subtle">
         {jobs &&
@@ -48,6 +48,7 @@ export function JobsSection() {
               job={job.id}
               label={job.label}
               description={job.description}
+              perAgent={job.perAgent}
               chain={jobs[job.id]}
               providers={providers}
               onChange={(edit) => editChain(job.id, edit)}
@@ -60,6 +61,7 @@ export function JobsSection() {
         <JobModelsDialog
           job={openJob.id}
           label={openJob.label}
+          perAgent={openJob.perAgent}
           chain={jobs[openJob.id]}
           providers={providers}
           onChange={(edit) => editChain(openJob.id, edit)}

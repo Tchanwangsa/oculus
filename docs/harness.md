@@ -29,6 +29,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Model picker and its catalogue hook | `app/src/components/harness/composer/ModelPicker.tsx`, `app/src/hooks/agents/useProviderModels.ts` |
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/integrations/OpencodePage.tsx`, `app/src/components/settings/agents/opencode/`, `app/src/components/settings/agents/OpencodeConnectDialog.tsx`, `app/src/lib/harness/opencodeCatalogue.ts` |
 | Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db/jobModels.ts`, `app/src/components/settings/jobs/`, `app/src/hooks/agents/useJobAudit.ts` |
+| Subagents (Studio's research and scene helpers) | `app/src-tauri/src/harness/studio_agents.rs`, `app/src-tauri/templates/STUDIO_*.template.md`, `oculus studio agents` (`app/src-tauri/src/bin/oculus/commands/studio/agents.rs`) |
 | One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends | `app/src-tauri/src/harness/manager/one_off.rs`, `app/src-tauri/src/harness/app/suggest.rs`, `app/src-tauri/src/harness/suggest/`, `app/src-tauri/src/lectures/lecture_end/` |
 | `@` menu and mention input | `app/src/components/harness/mentions/useMentionMenu.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
@@ -549,6 +550,46 @@ is set in the same menu.
 - **Notices and flags badge Settings** (a dot on the rail item and the Jobs
   row, `useJobAttention`) and print on the job's row until dismissed or the
   job's list is edited.
+
+**The two Studio jobs hold a model per agent, not fallbacks.** "Studio
+research" (`studioResearch`) and "Studio scenes" (`studioScene`) are the
+models a chat agent's [subagents](#subagents) run on while it makes a video.
+Nothing tries them in order: an agent's subagents take the first entry for
+that agent (`jobs::for_agent`), and an agent with none does the work itself.
+Their `JOBS` rows carry `perAgent`, which offers only the agents whose
+subagents take a model (not agy) and words the row and dialog for it ("Add a
+model for another agent"). The defaults name Claude and Codex (Haiku and
+GPT-6-Luna for research; Opus 5.5 and GPT-6.1-Sol at high for scenes);
+opencode's models depend on the student's providers, so opencode has none
+until one is picked.
+
+## Subagents
+
+A chat agent may start helpers: the `oculus-studio` skill has a director
+fan research and scene building out to them. The two roles are
+`harness::studio_agents::ROLES`, `studio-research` and `studio-scene`, each
+with a short system prompt (`templates/STUDIO_RESEARCH.template.md`,
+`STUDIO_SCENE.template.md`) that points at the skill's section for the
+role. Each CLI starts a subagent its own way, so each gets the job's model
+its own way; `oculus studio agents [--agent A]` prints, per agent, the
+model and the exact call, which the skill tells the agent to use as printed.
+
+| CLI | How a subagent starts | Where the model comes from | Measured |
+| --- | --- | --- | --- |
+| Claude | the `Agent` tool, `subagent_type: "studio-scene"` | `--agents` at spawn: one definition per role with a model, its full id and `effort` (the tool's own `model` takes only an alias) | One Haiku turn under `acceptEdits`, `--permission-prompts none` and the sandboxed settings: the definitions loaded and the subagent's `Write` and `Bash` ran under the parent's mode and sandbox, no denial. Subagents run in the background by default: the turn ended with a `result` while the helper ran, and the CLI then started a turn of its own on the completion notice, so the skill asks for `run_in_background: false` |
+| Codex | `spawn_agent` with `model`, `reasoning_effort`, `fork_turns: "none"` | the call itself; Codex sets `model` only when a skill or the user asks, which the skill does | One `gpt-6-luna` turn through `app-server` with the thread's `workspace-write` policy and `approvalPolicy: never`: the child wrote under the writable roots, no server request, the parent waited (`wait`) and answered. 4 slots including the parent; a finished child holds its slot until `close_agent` |
+| opencode | the `task` tool, `subagent_type: "studio-scene"` | named agents in `opencode.json` (`mode: subagent`, `model`, `variant`), written from the jobs at each server start | Not run live. Read from opencode 1.18's task tool: `subagent_depth` counts parents, so 1 lets the thread's session spawn and a subagent not; a subagent session takes its parent's permissions, with `task` and `todowrite` denied unless its agent allows them |
+| agy | none | `invoke_subagent` takes a type name and no model | Not run: with no way to give the job's model, Studio starts none on agy and the agent does the work itself |
+
+opencode's template sets `subagent_depth: 1` and `task: allow` for this; the
+named agents carry no `permission` of their own, so they are never wider
+than the thread. The hidden one-off agents keep `"*": "deny"`, `task`
+included. A role off for an agent is left out of its definitions, and
+`oculus studio agents` says to do that role's work in order.
+
+A change in Settings → Jobs reaches Claude's definitions at the thread's
+next spawn and opencode's at its server's next start; Codex reads it per
+call, from `oculus studio agents`.
 
 ## Memory
 
