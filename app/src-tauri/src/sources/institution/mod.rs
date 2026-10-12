@@ -18,7 +18,7 @@ mod tests;
 
 use serde::{Deserialize, Serialize};
 
-pub use configure::{configure, library_exists, normalise};
+pub use configure::{apply, configure, library_exists, normalise, probe};
 pub use domain::institution_domain;
 pub use keyd::tell_keyd;
 pub use profile::{

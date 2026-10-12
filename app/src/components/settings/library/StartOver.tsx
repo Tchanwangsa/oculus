@@ -38,9 +38,14 @@ export function StartOver() {
   const startOver = async () => {
     setBusy(true);
     setError(null);
+    // Kept until Rust has signed out and queued the wipe: a refusal leaves the
+    // library, so it leaves the tabs and drafts that point into it too.
+    const saved: [string, string][] = [];
     try {
       for (const key of LIBRARY_KEYS) {
         try {
+          const value = localStorage.getItem(key);
+          if (value !== null) saved.push([key, value]);
           localStorage.removeItem(key);
         } catch {
           /* A blocked store has nothing to clear. */
@@ -48,6 +53,13 @@ export function StartOver() {
       }
       await invoke("storage_start_over");
     } catch (e) {
+      for (const [key, value] of saved) {
+        try {
+          localStorage.setItem(key, value);
+        } catch {
+          /* Nothing to put back into a blocked store. */
+        }
+      }
       setError(String(e));
       setBusy(false);
       setConfirming(false);

@@ -89,10 +89,18 @@ each other's writes.
   forgets the Okta credentials, leaves a `start-over` marker and restarts; the
   next launch empties the data dir before any thread or database handle
   exists, keeping the two cloud usage files and keyd's vault, socket and
-  `bin/`. The frontend clears its library-scoped `localStorage` keys first.
-- Saving a different address signs out (`auth::commands::end_session`, while
+  `bin/`. The marker is written only once sign-out has succeeded, so a failed
+  Start over deletes nothing. The frontend clears its library-scoped
+  `localStorage` keys first and puts them back if the command fails.
+- Saving checks the address before changing anything (`institution::probe`),
+  then a different address signs out (`auth::commands::end_session`, while
   the old hosts are still the profile's, so the browser jar loses the old
-  session) and clears the Okta credentials, which belong to the old IdP.
+  session) and clears the Okta credentials, which belong to the old IdP
+  (`institution::apply`).
+- Re-saving the same address re-detects the sign-in, except that a probe
+  that misses Okta at a university already known to use it keeps the stored
+  profile: dropping the Okta origin would be a move to keyd, which forgets
+  the authenticator key.
 
 ## keyd sends the session only to the profile's university
 

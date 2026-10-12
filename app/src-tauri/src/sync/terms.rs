@@ -61,7 +61,12 @@ fn month_of(name: &str, southern: bool) -> Option<u8> {
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|w| !w.is_empty())
         .collect();
-    if let Some((_, m)) = NUMBERED.iter().find(|(n, _)| lower.contains(n)) {
+    // Whole words in sequence, so the year in "Fall Term 2026" is not "term 2".
+    let numbered = |name: &str| {
+        let want: Vec<&str> = name.split(' ').collect();
+        words.windows(want.len()).any(|w| w == want.as_slice())
+    };
+    if let Some((_, m)) = NUMBERED.iter().find(|(n, _)| numbered(n)) {
         return Some(*m);
     }
     let seasons = if southern {
@@ -183,8 +188,11 @@ mod tests {
             names,
             ["Spring 2026", "Summer 2026", "Fall 2026", "Spring 2027"]
         );
-        // The year need not lead the name.
+        // The year need not lead the name, and is never a term number.
         assert_eq!(north("Fall 2026").as_deref(), Some("2026-09"));
+        assert_eq!(north("Fall Term 2026").as_deref(), Some("2026-09"));
+        assert_eq!(north("Spring Term 2027").as_deref(), Some("2027-03"));
+        assert_eq!(north("Winter Term 2019").as_deref(), Some("2019-01"));
         assert_eq!(north("2026FA Term 3").as_deref(), Some("2026-08"));
     }
 

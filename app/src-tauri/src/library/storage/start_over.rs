@@ -64,20 +64,21 @@ pub fn finish_start_over(data_dir: &Path) {
 }
 
 /// Sign out everywhere and forget the university's credentials, then restart
-/// into [`finish_start_over`]. The frontend clears its own library-scoped
-/// storage first.
+/// into [`finish_start_over`]. The marker is written last: a sign-out that
+/// fails leaves the library as it was, not queued for deletion. The frontend
+/// clears its own library-scoped storage first.
 #[tauri::command]
 pub async fn storage_start_over(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
 
-    let dir = crate::library::paths::data_dir();
-    std::fs::write(start_over_marker(&dir), b"1").map_err(|e| e.to_string())?;
     if let Some(cancel) = app.try_state::<crate::sync::scrape::ScrapeCancel>() {
         cancel.0.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     crate::harness::app::shutdown(&app);
     crate::auth::commands::end_session(&app).await?;
     crate::auth::okta::clear_credentials().ok();
+    let dir = crate::library::paths::data_dir();
+    std::fs::write(start_over_marker(&dir), b"1").map_err(|e| e.to_string())?;
     app.restart()
 }
 

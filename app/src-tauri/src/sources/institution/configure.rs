@@ -86,16 +86,33 @@ fn detect_sign_in(base: &str) -> (String, Idp, Option<String>) {
 }
 
 /// Check the address is Canvas, detect how it signs in, and save the
-/// profile. Re-saving the same address keeps what launches have learned.
-/// Callers refuse a new address while a library exists (`library_exists`).
+/// profile. Callers refuse a new address while a library exists
+/// (`library_exists`).
 pub fn configure(data_dir: &Path, input: &str) -> Result<Institution, String> {
+    let inst = probe(data_dir, input)?;
+    apply(data_dir, inst)
+}
+
+/// The profile `input` would save, from the network alone: nothing is signed
+/// out or written, so a mistyped address costs nothing. Re-saving the same
+/// address keeps what launches have learned.
+pub fn probe(data_dir: &Path, input: &str) -> Result<Institution, String> {
     let canvas = normalise(input)?;
     check_is_canvas(&canvas)?;
     let (login_path, idp, sso_host) = detect_sign_in(&canvas);
 
-    let previous = load(data_dir);
-    let same = previous.as_ref().is_some_and(|p| p.canvas == canvas);
-    let mut inst = match previous.filter(|_| same) {
+    let previous = load(data_dir).filter(|p| p.canvas == canvas);
+    // A probe that misses Okta at a university already known to use it is
+    // more likely a network blip or a changed widget than a new IdP, and
+    // keyd treats a lost Okta origin as a move, dropping the saved setup key.
+    if let Some(p) = previous
+        .as_ref()
+        .filter(|p| p.is_okta() && idp != Idp::Okta)
+    {
+        elog!("[oculus] sign-in detection missed Okta at {canvas}; keeping it");
+        return Ok(p.clone());
+    }
+    let mut inst = match previous {
         Some(p) => p,
         // What is known about UniMelb (the lead-in, the Echo360 tool) holds
         // for a student who types its address, not only for an old install.
@@ -115,9 +132,13 @@ pub fn configure(data_dir: &Path, input: &str) -> Result<Institution, String> {
     inst.login_path = login_path;
     inst.idp = idp;
     inst.sso_host = sso_host;
+    Ok(inst)
+}
 
-    if !same {
-        // The old university's session and IdP credentials mean nothing here.
+/// Save `inst`, telling keyd first. A new address signs out and forgets the
+/// old university's IdP credentials.
+pub fn apply(data_dir: &Path, inst: Institution) -> Result<Institution, String> {
+    if load(data_dir).is_none_or(|p| p.canvas != inst.canvas) {
         crate::auth::sign_out(data_dir)?;
         crate::auth::okta::clear_credentials().ok();
     }

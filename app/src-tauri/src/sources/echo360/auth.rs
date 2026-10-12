@@ -66,11 +66,11 @@ pub fn connect(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Resul
 /// The launch page's URL, where its form posts, and the form's fields.
 pub(super) type LaunchForm = (String, String, Vec<(String, String)>);
 
-/// The course's Echo360 tool form: the launch page's URL, where the form
-/// posts and its fields. The tabs labelled for lecture capture come first,
-/// then the profile's fallback tool (a tab can be hidden); the first launch
-/// page carrying an Echo360 form wins, and [`NO_TOOL`] when none does. The
-/// pages are Canvas's, so they come through oculus-keyd with the session.
+/// The course's Echo360 tool form. The tabs labelled for lecture capture come
+/// first, then the profile's fallback tool (a tab can be hidden); the first
+/// launch page carrying an Echo360 form wins, and [`NO_TOOL`] when none does;
+/// a launch page Canvas fails to serve is an error. The pages are Canvas's,
+/// so they come through oculus-keyd with the session.
 pub(super) fn launch_form(
     canvas: &crate::sources::canvas::Canvas,
     course_id: i64,
@@ -86,8 +86,13 @@ pub(super) fn launch_form(
     for path in &candidates {
         elog!("[oculus] echo360 auth: trying {path}");
         let page = canvas.get(path)?;
-        if !page.ok() {
+        // A tool this course or student cannot launch is not a tool; any other
+        // failure is Canvas's, and surfaces rather than reading as "no lectures".
+        if matches!(page.status, 401 | 403 | 404) {
             continue;
+        }
+        if !page.ok() {
+            return Err(format!("Canvas LTI page {path}: HTTP {}", page.status));
         }
         if let Some((action, fields)) = parse_lti_form(&String::from_utf8_lossy(&page.body)) {
             return Ok((format!("{}{path}", canvas.base()?), action, fields));

@@ -8,7 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useInstitution } from "@/stores/sync/institutionStore";
+import { useInstitution, useInstitutionStore } from "@/stores/sync/institutionStore";
 import { signInSummary, useCanvasAddressForm } from "./useCanvasAddressForm";
 
 /**
@@ -18,6 +18,7 @@ import { signInSummary, useCanvasAddressForm } from "./useCanvasAddressForm";
  */
 export function CanvasAddress() {
   const institution = useInstitution();
+  const reload = useInstitutionStore((s) => s.load);
   const [editing, setEditing] = useState(false);
   const { address, setAddress, busy, error, setError, save } = useCanvasAddressForm(() =>
     setEditing(false),
@@ -102,8 +103,11 @@ export function CanvasAddress() {
               <Button
                 variant="ghost"
                 size="xs"
-                onClick={() => {
-                  setAddress(institution.host ?? "");
+                onClick={async () => {
+                  // The first sync since the profile was read locks it.
+                  const fresh = await reload().catch(() => institution);
+                  if (fresh.locked) return;
+                  setAddress(fresh.host ?? "");
                   setEditing(true);
                 }}
               >

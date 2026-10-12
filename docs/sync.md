@@ -76,7 +76,8 @@ gives each term a `YYYY-MM` key, `subjects.term_sort`:
 
 - From the term's `start_at` when Canvas has one.
 - Otherwise from the name: the first 19xx/20xx anywhere in it, and the month
-  its words name — numbered semesters, trimesters, terms and quarters first,
+  its words name — numbered semesters, trimesters, terms and quarters first
+  (as whole words, so the year in `"Fall Term 2026"` is no term number),
   then seasons, then month names. Seasons follow the hemisphere
   (`Institution::southern_hemisphere`, from the hosts' country code): Summer
   opens a southern year and sits mid-year in a northern one. A month-named
@@ -364,7 +365,9 @@ Workers share the course session cache and source-qualified cancellation flags.
   "lecture capture" first, then the profile's `echo360_tool` (UniMelb's, since
   its tab can be hidden). The first page with an `action="https://echo360…"`
   form is the launch. A course with none answers `echo360::NO_TOOL`, which
-  `echo360_sync_lectures` turns into no lectures rather than an error.
+  `echo360_sync_lectures` turns into no lectures rather than an error. A
+  tool page that answers 401, 403 or 404 is skipped; any other failure
+  surfaces.
 - The launch lands on the university's Echo360 region (`echo360.org`,
   `echo360.net.au`, …); `Session::base` keeps it for the syllabus,
   transcripts and downloads.

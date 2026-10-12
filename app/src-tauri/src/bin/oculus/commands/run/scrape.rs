@@ -15,9 +15,9 @@ impl Ctx {
     fn run_lectures(&self, args: &RunArgs) -> Result<(), String> {
         let pool = self.db().ok_or("lectures are stored in the database")?;
         let canvas = app_lib::sources::canvas::Canvas::open(&self.data_dir);
-        if !canvas.has_session() {
-            return Err("not connected — run `oculus auth login`".to_string());
-        }
+        // A missing session is not a stop: keyd signs in on demand.
+        canvas.base()?;
+        canvas.check_keyd()?;
         let lead_in = app_lib::sources::echo360::lead_in_secs(&self.data_dir);
 
         let subjects = self.rt.block_on(store::subjects(&pool))?;

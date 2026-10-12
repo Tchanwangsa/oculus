@@ -120,6 +120,19 @@ fn a_course_whose_pages_carry_no_form_has_no_tool() {
 }
 
 #[test]
+fn a_launch_page_canvas_fails_to_serve_is_an_error_not_no_tool() {
+    let (dir, _keyd) = keyd_serving(&[
+        ("/api/v1/courses/7/tabs", 200, "", "[]"),
+        ("/courses/7/external_tools/701", 500, "", "{}"),
+    ]);
+    let canvas = crate::sources::canvas::Canvas::open(&dir);
+    assert_eq!(
+        launch_form(&canvas, 7).unwrap_err(),
+        "Canvas LTI page /courses/7/external_tools/701: HTTP 500"
+    );
+}
+
+#[test]
 fn candidates_are_the_tabs_labelled_for_lecture_capture() {
     let tabs = serde_json::json!([
         {"label": "Home", "html_url": "/courses/9"},

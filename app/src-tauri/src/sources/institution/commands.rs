@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-use super::{configure, current, host_of, library_exists, normalise, LOCKED};
+use super::{apply, current, host_of, library_exists, normalise, probe, LOCKED};
 
 #[derive(Serialize)]
 pub struct InstitutionView {
@@ -40,12 +40,16 @@ pub async fn institution_configure(
     if changing && library_exists().await? {
         return Err(LOCKED.to_string());
     }
+    let dir = crate::library::paths::data_dir();
+    let probed = {
+        let dir = dir.clone();
+        crate::runtime::blocking::run(move || probe(&dir, &address)).await?
+    };
     if changing {
-        // While the old hosts are still the profile's, so the browser jar
-        // loses the old session rather than keeping it.
+        // Only once the new address checks out, and while the old hosts are
+        // still the profile's, so the browser jar loses the old session.
         crate::auth::commands::end_session(&app).await?;
     }
-    let dir = crate::library::paths::data_dir();
-    crate::runtime::blocking::run(move || configure(&dir, &address)).await?;
+    crate::runtime::blocking::run(move || apply(&dir, probed)).await?;
     view().await
 }
