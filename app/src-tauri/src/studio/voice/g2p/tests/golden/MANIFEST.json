@@ -1,0 +1,18 @@
+{
+  "misaki": "0.9.4",
+  "onnxruntime": "1.31.0",
+  "python": "3.12.13",
+  "sha256": {
+    "misaki_us_gold": "dc414872a49a28ae6c141463d502fd945f3b2fde040484fdc47d00cc4612686f",
+    "misaki_us_silver": "de8f67be911bb6c659187b4a65fd966b6a30e56350e0f790d763210b053ac475",
+    "encoder.onnx": "0a093bf6c0a5085ef1e2acc39c158698c66426a24b9bfe4a72df14e5ab752432",
+    "decoder.onnx": "d8c9ce54d4a5461d1442522a5f408673aebd7aeeba16567c039b1131c8184d60",
+    "guesser_config.json": "8deb3537fb29c63cd9f20d75515ae06e4c92f1b6db0703a2d45bca95b33a53a4",
+    "kokoro_tokenizer.json": "77a02c8e164413299b4b4c403b14f8e0e1c1b727db4d46a09d6327b861060a34",
+    "lexicon.library.json": "491aeaf53a93f47158cbcb26386001b955a237a999ac0f4cc174384e22651860",
+    "lexicon.subject.json": "8b472eadf2d30c032db170a58ed763c878fff4277f08e6412e2d8063e5ca5786",
+    "heteronyms.py": "f88347bd63daf23f5209e8910c36d7ffbb5326aabdcecfba1eab373a358b60c7",
+    "routes.py": "d4aca415b7c91c0bc160b67a9ed8304cbee153b3003746dd0d8c2946849665ea",
+    "a2c.py": "0328c749cec57950fcfbe9b5c8e543f6c01d3091ee319968e2b6774f1a593e08"
+  }
+}
