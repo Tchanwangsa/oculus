@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 
 import { fileMarkdownPlugins } from "@/components/files/FileMarkdown";
 import { useLibraryMdComponents } from "@/components/files/FileViewer";
+import { EmbedSubjectProvider } from "@/components/markdown/embed/EmbedSubject";
 import type { DbFile } from "@/lib/db";
 import { openFileSmart } from "@/lib/files/openFile";
 import { hasMath, normalizeMath } from "@/lib/markdown/math";
@@ -31,9 +32,11 @@ export const VersionPreview = memo(function VersionPreview({
   }
   return (
     <article data-selectable className="md-compact" onCopy={copyAsMarkdown} onDragStart={dragAsMarkdown}>
-      <ReactMarkdown {...fileMarkdownPlugins(source)} components={components}>
-        {hasMath(source) ? normalizeMath(source) : source}
-      </ReactMarkdown>
+      <EmbedSubjectProvider subjectId={file.subject_id}>
+        <ReactMarkdown {...fileMarkdownPlugins(source)} components={components}>
+          {hasMath(source) ? normalizeMath(source) : source}
+        </ReactMarkdown>
+      </EmbedSubjectProvider>
     </article>
   );
 });

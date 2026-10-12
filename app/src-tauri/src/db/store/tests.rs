@@ -432,3 +432,61 @@ async fn reconcile_follows_the_disk_in_both_directions() {
     );
     assert_eq!(status("courses/SUBJ/files/gone.pdf").await, None);
 }
+
+#[tokio::test]
+async fn an_echo_embed_refresh_keeps_its_file_and_poster_and_cascades_with_the_subject() {
+    let pool = migrated_pool().await;
+    sqlx::query("INSERT INTO subjects (id, code, name) VALUES (1, 'SUBJ', 'Subject')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut embed = EchoEmbed {
+        link_id: "link-a".into(),
+        subject_id: 1,
+        media_id: "media-1".into(),
+        secure_link_id: "sl-1".into(),
+        name: "Week 1.mp4".into(),
+        duration_s: Some(1358.393),
+        restrict_download: false,
+        has_captions: true,
+        poster_rel: Some("courses/SUBJ/images/echo-media-1.jpg".into()),
+        file_rel: None,
+        extra_sources: 0,
+    };
+    upsert_echo_embed(&pool, &embed).await.unwrap();
+    assert_eq!(
+        echo_embed(&pool, "link-a").await.unwrap(),
+        Some(embed.clone())
+    );
+
+    set_echo_embed_file(&pool, "link-a", Some("courses/SUBJ/files/Week_1.mp4"))
+        .await
+        .unwrap();
+    embed.name = "Week 1 (renamed).mp4".into();
+    embed.poster_rel = None;
+    upsert_echo_embed(&pool, &embed).await.unwrap();
+    let stored = echo_embed(&pool, "link-a").await.unwrap().unwrap();
+    assert_eq!(stored.name, "Week 1 (renamed).mp4");
+    assert_eq!(
+        stored.file_rel.as_deref(),
+        Some("courses/SUBJ/files/Week_1.mp4")
+    );
+    assert_eq!(
+        stored.poster_rel.as_deref(),
+        Some("courses/SUBJ/images/echo-media-1.jpg")
+    );
+    assert_eq!(
+        echo_embed_file_of_media(&pool, 1, "media-1").await.unwrap(),
+        vec!["courses/SUBJ/files/Week_1.mp4".to_string()]
+    );
+    assert!(echo_embed_file_of_media(&pool, 1, "media-2")
+        .await
+        .unwrap()
+        .is_empty());
+
+    sqlx::query("DELETE FROM subjects WHERE id = 1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(echo_embed(&pool, "link-a").await.unwrap(), None);
+}

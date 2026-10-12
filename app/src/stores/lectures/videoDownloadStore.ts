@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getFileByRelativePath, type DbFile } from "@/lib/db";
-import { FILE_SCRAPED_EVENT } from "@/lib/pipeline/syncRunner";
+import type { DbFile } from "@/lib/db";
+import { scrapedRow } from "@/lib/files/scrapedRow";
 
 /**
  * On-demand downloads of module videos, which a sync lists but never fetches
@@ -57,35 +57,6 @@ function watchProgress() {
 }
 
 /**
- * The row `useBackendEvents` writes from the download's `scrape-file` event.
- * The command can resolve before that write lands, so wait for its
- * FILE_SCRAPED_EVENT; the listener goes on first so the event can't slip by.
- */
-function rowFor(relativePath: string): Promise<DbFile | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (file: DbFile | null) => {
-      if (settled) return;
-      settled = true;
-      window.removeEventListener(FILE_SCRAPED_EVENT, check);
-      clearTimeout(fallback);
-      resolve(file);
-    };
-    const check = () => {
-      getFileByRelativePath(relativePath)
-        .then((file) => { if (file) finish(file); })
-        .catch(() => {});
-    };
-    window.addEventListener(FILE_SCRAPED_EVENT, check);
-    // A row write that failed never raises the event; stop waiting for it.
-    const fallback = setTimeout(() => {
-      getFileByRelativePath(relativePath).then(finish, () => finish(null));
-    }, 10_000);
-    check();
-  });
-}
-
-/**
  * Download one module video into the library and resolve to its file row.
  * Resolves null when it was already running, was cancelled, or failed — a
  * failure stays in the store for the row to show and retry.
@@ -105,7 +76,7 @@ export async function downloadVideo(
       subjectCode: subject.code,
       canvasFileId,
     });
-    const file = await rowFor(rel);
+    const file = await scrapedRow(rel);
     put(canvasFileId, file ? { status: "done", file } : null);
     return file;
   } catch (e) {

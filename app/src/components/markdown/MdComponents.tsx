@@ -2,8 +2,9 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { isValidElement, memo } from "react";
-import { ArrowSquareOut } from "@phosphor-icons/react";
+import { ArrowSquareOut, CaretRight } from "@phosphor-icons/react";
 import { CitationCode, CitationLink, linkCitation } from "@/components/markdown/Citation";
+import { EmbedVideoCard } from "@/components/markdown/embed/EmbedVideoCard";
 import { FileChip } from "@/components/markdown/FileChip";
 import { Mermaid } from "@/components/markdown/Mermaid";
 import { OutputEmbed, embedKind } from "@/components/markdown/OutputEmbed";
@@ -219,6 +220,27 @@ export const MD_COMPONENTS: Components = {
   td: (p: any) => (
     <td className="border border-border px-3 py-1.5 text-foreground/90" {...p} />
   ),
+  // Canvas dropdowns. The caret turns by its own `<details>`'s state, not
+  // `group-open`, which an open outer `<details>` would set for nested ones.
+  details: (p: any) => <details className="my-3 rounded-lg border border-border bg-surface px-3" {...p} />,
+  summary: ({ children, ...p }: any) => (
+    <summary
+      className="-mx-3 flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden"
+      {...p}
+    >
+      <CaretRight
+        size={12}
+        className="shrink-0 text-muted-foreground transition-transform will-change-[opacity,transform] [details[open]>summary>&]:rotate-90"
+      />
+      {children}
+    </summary>
+  ),
+  // Not an HTML tag, so `Components` doesn't list it. hast keeps the attribute
+  // name, so the prop is `link-id`. A card inside a library file, a link out
+  // anywhere else (`EmbedSubjectProvider`).
+  ...({
+    "echo-video": (p: any) => <EmbedVideoCard linkId={p["link-id"]} src={p.src} />,
+  } as Components),
 };
 
 /** Hoisted for stable array identity across re-renders. */
