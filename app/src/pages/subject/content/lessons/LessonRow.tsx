@@ -1,11 +1,15 @@
 import { CheckCircle } from "@phosphor-icons/react";
+import { useNavigate } from "react-router-dom";
 import { FileRecency } from "@/components/files/FileRecency";
-import { filePageHref, openFileSmart } from "@/lib/files/openFile";
+import { filePageHref, filePagePath, recordFileAccess } from "@/lib/files/openFile";
 import { fmtDue } from "@/lib/format/format";
 import { lessonIcon, lessonProgress, type EdLesson } from "@/lib/ed/lessons";
 
-/** A lesson: its type, title, deadline and how many slides are completed. */
+/** A lesson: its type, title, deadline and how many slides are completed.
+ *  It opens full page in this pane, not beside the list: the lesson view
+ *  brings its own slide sidebar. */
 export function LessonRow({ lesson }: { lesson: EdLesson }) {
+  const navigate = useNavigate();
   const { index } = lesson;
   const Icon = lessonIcon(index?.lessonType ?? null);
   const progress = index && index.slides.length > 0 ? lessonProgress(index) : null;
@@ -13,7 +17,10 @@ export function LessonRow({ lesson }: { lesson: EdLesson }) {
     <button
       type="button"
       data-tab-href={filePageHref(lesson.file) ?? undefined}
-      onClick={() => openFileSmart(lesson.file)}
+      onClick={() => {
+        recordFileAccess(lesson.file);
+        navigate(filePagePath(lesson.file.subject_id, lesson.file.relative_path));
+      }}
       className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-surface transition-colors"
     >
       <Icon size={14} className="shrink-0 text-reference-lesson" aria-hidden />

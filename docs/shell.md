@@ -83,6 +83,8 @@ before leaving a playing lecture.
   indexes, `lessons/<id>-<slug>.md` (`isLessonDoc` in `app/src/lib/ed/lessons.ts`),
   under their Ed modules in Ed's order; a row is the lesson type's glyph, the
   title, the due date and the slides completed (`3/8`, a tick when all are).
+  A row opens the lesson full page in its own pane, not beside the list,
+  since the lesson view brings its own slide sidebar.
   Files without front matter sit in a last Other group, newest first. A
   lesson's slides, PDFs and challenge files share the category but sit in its
   folder: they open from the lesson view ([viewers.md](./viewers.md#an-ed-lesson-opens-as-its-slides))
