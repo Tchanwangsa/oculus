@@ -219,6 +219,22 @@ fn the_writer_replaces_a_key_in_place_and_refuses_a_file_that_is_not_an_object()
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "[1]");
 }
 
+#[test]
+fn concurrent_writes_to_one_lexicon_keep_every_entry() {
+    let dir = Scratch::new("review-writer-race");
+    let d = dict();
+    let path = dir.join("lexicon.json");
+    std::thread::scope(|scope| {
+        for i in 0..8 {
+            let (path, d) = (&path, &d);
+            scope.spawn(move || write_entry(path, &format!("word{i}"), "SOFT", d).unwrap());
+        }
+    });
+    let text = std::fs::read_to_string(&path).unwrap();
+    let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&text).unwrap();
+    assert_eq!(map.len(), 8, "{text}");
+}
+
 fn review(status: Status, note: Option<&str>) -> Review {
     Review {
         status,
