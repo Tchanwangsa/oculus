@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const rust = join(app, "src-tauri");
-const distribution = join(rust, "windows", "distribution");
+const distribution = join(rust, "ffmpeg-notices");
 const required = {
   IDENTITY_NAME: "OCULUS_MSIX_IDENTITY_NAME",
   PUBLISHER: "OCULUS_MSIX_PUBLISHER",
@@ -101,9 +101,9 @@ export function stageMsix({ content, release, binaries, distributionDir, assetsD
 
 export function prepareReleaseConfig(rustDir) {
   const resources = JSON.parse(readFileSync(join(rustDir, "tauri.windows.conf.json"), "utf8")).bundle.resources;
-  const offer = join(rustDir, "windows", "distribution", "FFMPEG-SOURCE-OFFER.txt");
+  const offer = join(rustDir, "ffmpeg-notices", "FFMPEG-SOURCE-OFFER.txt");
   const config = { bundle: { resources: { ...resources } } };
-  if (existsSync(offer)) config.bundle.resources["windows/distribution/FFMPEG-SOURCE-OFFER.txt"] = "FFMPEG-SOURCE-OFFER.txt";
+  if (existsSync(offer)) config.bundle.resources["ffmpeg-notices/FFMPEG-SOURCE-OFFER.txt"] = "FFMPEG-SOURCE-OFFER.txt";
   const dest = join(rustDir, "target", "windows-release.conf.json");
   mkdirSync(dirname(dest), { recursive: true });
   writeFileSync(dest, JSON.stringify(config, null, 2) + "\n");

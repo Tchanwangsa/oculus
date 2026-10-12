@@ -32,7 +32,7 @@ and stable Rust, plus the MSVC toolchain, Windows SDK and WebView2.
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
 | How an agent thread finds `oculus` | `app/src-tauri/src/harness/cli/discover/` |
 | Windows native manifest, Store manifest template and MSIX packaging | `app/src-tauri/windows-app-manifest.xml`, `app/src-tauri/windows/AppxManifest.xml`, `app/src-tauri/windows/logo.svg`, `app/scripts/windows-icons.mjs`, `app/scripts/package-msix.mjs`, `app/scripts/package-msix.ps1`, `app/scripts/package-msix.test.mjs` |
-| Windows ffmpeg distribution notices and release gate | `app/src-tauri/windows/distribution/README.md` |
+| ffmpeg licence notices, source offer and the Windows release gate | `app/src-tauri/ffmpeg-notices/README.md` |
 | CI checks and the release bundle | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
 ## Commands
@@ -412,18 +412,18 @@ the toolchain versions, `-buildconf`s and `SHA256SUMS`. It only ever touches a
 draft: once a maintainer publishes the release its assets are fixed, and a
 changed build raises `OCULUS_BUILD` in `build.sh`, which names a new tag.
 
-`fetch-ffmpeg.mjs` downloads the Windows binary from that release and refuses
-it unless it matches the pinned SHA-256, the hash the workflow's summary
-reports; a cached copy with another hash is fetched again. A draft's assets
-are not public, so the Windows fetch fails until the release is published.
-Other targets
-download ffmpeg-static's builds. `app/src-tauri/windows/distribution/` holds
-the notices the Windows packages ship: the LGPL v3 and GPL v3 texts with
-libopus's and dav1d's licences, a README with the versions, hashes and
-configure line, and the written source offer pointing at the release
-([README](../app/src-tauri/windows/distribution/README.md)). Upgrading means
-changing the pins in `build.sh`, the release URL and hash in
-`fetch-ffmpeg.mjs`, and those notices together.
+`fetch-ffmpeg.mjs` downloads each binary from that release and refuses it
+unless it matches the pinned SHA-256, the hash the workflow's summary reports;
+a cached copy with another hash is fetched again. A draft's assets are not
+public, so the fetch fails until the release is published. Targets without a
+build there (Intel Macs, Linux) have no ffmpeg and the fetch says so.
+`app/src-tauri/ffmpeg-notices/` holds the notices both packages ship: the LGPL
+v3 and GPL v3 texts with libopus's and dav1d's licences, a README with the
+versions, hashes and configure lines, and the written source offer pointing at
+the release ([README](../app/src-tauri/ffmpeg-notices/README.md)). The `.app`
+and the installer also carry Oculus's own `LICENSE`. Upgrading means changing
+the pins in `build.sh`, the release URL and hashes in `fetch-ffmpeg.mjs`, and
+those notices together.
 
 ## `oculus-keyd` is built apart so its signature only changes with its source
 

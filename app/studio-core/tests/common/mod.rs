@@ -59,7 +59,7 @@ pub fn assert_golden(name: &str, frame: &Frame) {
         .as_chunks::<4>()
         .0
         .iter()
-        .zip(expected.as_raw().as_chunks::<4>().0)
+        .zip(expected.as_raw().as_chunks::<4>().0.iter())
         .enumerate()
     {
         let d = a
