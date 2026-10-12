@@ -1,10 +1,10 @@
-Licences for ffmpeg.exe
+Licences for the bundled ffmpeg
 
-ffmpeg.exe is FFmpeg 8.1.3, licensed under the GNU Lesser General Public
-License version 3 or later. It is statically linked with libopus 1.6.1
-(BSD 3-Clause licence) and dav1d 1.5.4 (BSD 2-Clause licence).
-FFMPEG-README.txt describes the build; FFMPEG-SOURCE-OFFER.txt says where
-its complete source is.
+The ffmpeg program in Oculus (ffmpeg.exe on Windows, ffmpeg on macOS) is
+FFmpeg 8.1.3, licensed under the GNU Lesser General Public License version 3
+or later. It is statically linked with libopus 1.6.1 (BSD 3-Clause licence)
+and dav1d 1.5.4 (BSD 2-Clause licence). FFMPEG-README.txt describes the
+builds; FFMPEG-SOURCE-OFFER.txt says where their complete source is.
 
 This file contains, in order:
 

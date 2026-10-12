@@ -138,13 +138,13 @@ test("public distribution requires a written offer plus explicit review approval
 
 test("release config includes an available offer beside the bundled notices", () => {
   const root = scratch();
-  mkdirSync(join(root, "windows", "distribution"), { recursive: true });
-  writeFileSync(join(root, "tauri.windows.conf.json"), JSON.stringify({ mainBinaryName: "oculus-app", bundle: { resources: { "windows/distribution/FFMPEG-LICENSE.txt": "FFMPEG-LICENSE.txt" } } }));
-  expect(prepareReleaseConfig(root).bundle.resources).toEqual({ "windows/distribution/FFMPEG-LICENSE.txt": "FFMPEG-LICENSE.txt" });
+  mkdirSync(join(root, "ffmpeg-notices"), { recursive: true });
+  writeFileSync(join(root, "tauri.windows.conf.json"), JSON.stringify({ mainBinaryName: "oculus-app", bundle: { resources: { "ffmpeg-notices/FFMPEG-LICENSE.txt": "FFMPEG-LICENSE.txt" } } }));
+  expect(prepareReleaseConfig(root).bundle.resources).toEqual({ "ffmpeg-notices/FFMPEG-LICENSE.txt": "FFMPEG-LICENSE.txt" });
   // This overlay inherits mainBinaryName from the platform config loaded by Tauri.
   expect(prepareReleaseConfig(root).mainBinaryName).toBeUndefined();
-  writeFileSync(join(root, "windows", "distribution", "FFMPEG-SOURCE-OFFER.txt"), "Fixture offer");
-  expect(prepareReleaseConfig(root).bundle.resources["windows/distribution/FFMPEG-SOURCE-OFFER.txt"]).toBe("FFMPEG-SOURCE-OFFER.txt");
+  writeFileSync(join(root, "ffmpeg-notices", "FFMPEG-SOURCE-OFFER.txt"), "Fixture offer");
+  expect(prepareReleaseConfig(root).bundle.resources["ffmpeg-notices/FFMPEG-SOURCE-OFFER.txt"]).toBe("FFMPEG-SOURCE-OFFER.txt");
 });
 
 test("native app manifest opts into long paths without requesting elevation", () => {
