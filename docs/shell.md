@@ -337,6 +337,10 @@ pane — a tab's main page and its side panel's front item alike.
   searched.
 - **DOM find paints with the CSS Custom Highlight API** (`find-match` /
   `find-current` in `index.css`, shared by every instance), never the DOM.
+  On subject tabs the find scope is the page body, excluding the subject nav
+  and header. Because WebKit does not paint custom highlights beneath
+  `user-select: none`, only matched text parents briefly opt into selection;
+  the range still paints just the query characters.
   Text nodes join into one string with a separator at each block boundary
   (`app/src/lib/menu/findText.ts`), so a match never crosses blocks. It skips
   `[data-find-skip]`, other targets' roots, collapsed `<details>` and

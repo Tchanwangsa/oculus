@@ -50,6 +50,12 @@
     -webkit-user-select: text;
     user-select: text;
   }
+  /* WebKit won't paint CSS Custom Highlights under user-select:none. Make
+     only the matched text's inline parent selectable while that match exists. */
+  :where([data-dom-find-match]) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
   :where([data-selectable])
     :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"]),
   :where([data-selectable])

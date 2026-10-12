@@ -104,7 +104,8 @@ themes are opt-in and keep the same structure.
   the scope it starts in — a pane's root in `TabPane` (`data-select-scope`), a
   dialog, a popover: `app/src/lib/ui/selectScope.ts` turns every other scope off
   while the button is held, so a drag across the split divider stops at its
-  own pane.
+  own pane. DOM find briefly opts only matched text parents into selection so
+  WebKit paints custom highlights without making a whole row selectable.
 - **Appearance is one stored pref** (`AppearancePrefs` in localStorage
   `oculus-appearance`): light/dark/system, a theme per mode, an accent
   override, the frame and a code font.
