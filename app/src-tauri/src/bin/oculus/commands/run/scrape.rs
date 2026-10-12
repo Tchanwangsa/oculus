@@ -196,7 +196,19 @@ impl Ctx {
         // Print a line per artifact and upsert the rows the app's listener would.
         let reporter = TermReporter::new();
         let sink = reporter.sink();
-        let engine = Engine::new(&self.data_dir, Box::new(reporter)).with_pdf_parsing(false);
+        let options = if args.ed {
+            SyncOptions {
+                announcements: false,
+                assignments: false,
+                modules: false,
+                ..SyncOptions::default()
+            }
+        } else {
+            SyncOptions::default()
+        };
+        let engine = Engine::new(&self.data_dir, Box::new(reporter))
+            .with_pdf_parsing(false)
+            .with_options(options);
 
         let started = std::time::Instant::now();
         let done = engine.scrape(&targets);

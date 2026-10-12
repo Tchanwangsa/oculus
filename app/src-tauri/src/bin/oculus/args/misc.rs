@@ -153,6 +153,10 @@ pub(crate) struct RunArgs {
     /// Include subjects from past terms, not just the current one
     #[arg(long)]
     pub(crate) all: bool,
+    /// Fetch only Ed (Discussion threads and Lessons), not Canvas announcements,
+    /// assignments or modules
+    #[arg(long)]
+    pub(crate) ed: bool,
     /// Skip PDF processing entirely: no parsing and no embedding
     #[arg(long)]
     pub(crate) no_parse: bool,
