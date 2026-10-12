@@ -68,16 +68,21 @@ export function StripTab({
             data-tauri-drag-region="false"
             ref={itemRef}
             style={{ flex: "none", width, ...dragStyle }}
+            // Keep border geometry stable: selection must not move the contents
+            // or resize WebKit's clipped paint area at fractional page zoom.
             className={cn(
-              "group relative flex h-7 items-center rounded-lg px-3 overflow-hidden cursor-pointer",
+              "relative flex h-7 items-center rounded-lg border px-3 overflow-hidden cursor-pointer",
               active
-                ? "bg-card text-foreground border border-border shadow-xs"
-                : "text-muted-foreground hover:text-foreground",
+                ? "bg-card text-foreground border-border shadow-xs"
+                : cn(
+                    "border-transparent text-muted-foreground hover:text-foreground",
+                    hovered ? "bg-sidebar-item-hover" : "bg-transparent",
+                  ),
               grabbed
                 ? "z-10 shadow-md"
                 : dragging
                   ? "transition-transform duration-200 ease-out"
-                  : "transition-colors",
+                  : "transition-[color,border-color]",
             )}
             onPointerDown={(e) => {
               if (e.button !== 0) return;
@@ -89,15 +94,6 @@ export function StripTab({
             onMouseEnter={() => onHover(true)}
             onMouseLeave={() => onHover(false)}
           >
-            {!active && (
-              <span
-                aria-hidden
-                className={cn(
-                  "absolute inset-0 rounded-lg transition-colors",
-                  hovered && "bg-sidebar-item-hover",
-                )}
-              />
-            )}
             {icon && (
               <span className="relative mr-1.5 flex shrink-0 items-center">
                 {icon}
@@ -107,21 +103,21 @@ export function StripTab({
             <span
               style={{
                 maskImage:
-                  "linear-gradient(to right, #000 calc(100% - 22px), transparent)",
+                  closable
+                    ? "linear-gradient(to right, #000 calc(100% - 36px), transparent calc(100% - 14px))"
+                    : "linear-gradient(to right, #000 calc(100% - 22px), transparent)",
               }}
               className="relative min-w-0 flex-1 text-[12px] whitespace-nowrap overflow-hidden [text-overflow:clip] py-1"
             >
               {title}
             </span>
             {closable && (
-              /* The × overlays the right edge on hover; its gradient
-                 stays soft since the title mask already fades the text. */
+              /* The title mask leaves the × clear without painting another
+                 surface over the tab's hover fill. */
               <span
                 className={cn(
-                  "absolute flex items-center pl-6 opacity-0 group-hover:opacity-100 transition-opacity will-change-[opacity]",
-                  active
-                    ? "inset-y-px right-px pr-1.5 rounded-r-lg bg-gradient-to-l from-card from-40% via-card/70 via-75% to-transparent"
-                    : "inset-y-0 right-0 pr-1.5 rounded-r-lg bg-gradient-to-l from-sidebar-item-hover from-40% via-sidebar-item-hover/70 via-75% to-transparent",
+                  "absolute inset-y-0 right-0 flex items-center pr-1.5 transition-opacity will-change-[opacity]",
+                  hovered ? "opacity-100" : "opacity-0",
                 )}
               >
                 <button

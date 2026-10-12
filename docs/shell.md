@@ -194,6 +194,13 @@ while Ctrl+Shift+Z is Redo.
   ⇧⌘T always act on the strip.
 - **Strip tabs are fixed-width** (`TAB_W` down to `TAB_MIN_W`), and the column
   between them (`SEPARATOR_W`) always renders because the reorder maths counts it.
+  `StripTab` reserves the same border and close-button inset in both states,
+  so selecting a tab does not move its icon or title. The strip's scrolling
+  layer stays promoted with `will-change: transform` to keep WebKit's clipping
+  stable while borders and shadows change at fractional page zoom.
+  Hover fills the tab itself immediately; only text, border colour and the
+  close-button opacity ease. The title mask leaves room for the close button
+  without a separate gradient surface over the fill.
 - **The history arrows follow the focused pane's own history.** A memory
   router has no `window.history` index, so `track` in `app/src/lib/shell/tabRouters.ts`
   keeps each router's location keys and a cursor for `canBack`/`canForward`;
