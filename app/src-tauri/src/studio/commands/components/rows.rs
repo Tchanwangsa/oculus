@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::{Map, Value};
-use studio_core::{CascadeComponents, ComponentSource, FolderComponents, Library, PropSpec};
+use studio_core::{
+    CascadeComponents, ComponentSource, FolderComponents, Library, PropSpec, STARTER_COMPONENTS,
+};
 
 use super::super::levels::{roots, Level};
 use super::engine;
@@ -23,6 +25,9 @@ pub struct ComponentRow {
     /// A subject's file that replaces a global component of the same name:
     /// the subject's "own version".
     pub shadows: bool,
+    /// The name is one of the starter set studio-core ships, whatever level
+    /// holds the file now and whether it was edited.
+    pub starter: bool,
 }
 
 /// A shell lays out named areas (`SplitShell`); a component is any other
@@ -89,6 +94,7 @@ pub fn list_in(library: &Library, subject: Option<&str>) -> Result<Vec<Component
             .map_err(|e| e.to_string());
         rows.push(match loaded {
             Ok(info) => ComponentRow {
+                starter: is_starter(&name),
                 kind: Kind::of(&name),
                 props: info
                     .props
@@ -102,6 +108,7 @@ pub fn list_in(library: &Library, subject: Option<&str>) -> Result<Vec<Component
                 level,
             },
             Err(problem) => ComponentRow {
+                starter: is_starter(&name),
                 kind: Kind::of(&name),
                 props: Vec::new(),
                 examples: Map::new(),
@@ -113,4 +120,10 @@ pub fn list_in(library: &Library, subject: Option<&str>) -> Result<Vec<Component
         });
     }
     Ok(rows)
+}
+
+fn is_starter(name: &str) -> bool {
+    STARTER_COMPONENTS
+        .iter()
+        .any(|(starter, _)| *starter == name)
 }

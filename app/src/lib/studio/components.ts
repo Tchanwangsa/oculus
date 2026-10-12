@@ -40,6 +40,9 @@ export interface ComponentInfo {
   problem: string | null;
   /** A subject's file that replaces a global component: its "own version". */
   shadows: boolean;
+  /** The name is one of studio-core's starter set, whichever level holds the
+   *  file now and whether it was edited. */
+  starter: boolean;
 }
 
 export interface ComponentText {
