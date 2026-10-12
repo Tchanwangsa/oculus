@@ -65,6 +65,10 @@ headings and Inter for everything else, Notion-style layout.
 - **Icons are Phosphor.** One Phosphor lacks is drawn in
   `app/src/components/icons/` on its `IconBase`, so it takes the same `size`
   and `weight` props.
+- **Inline references have content colours** through `reference-*` tokens:
+  red PDFs, purple pages and notes, green tasks, amber projects, blue
+  discussions, pink lectures and teal lessons. These glyphs identify linked
+  content; the shell keeps its indigo accent ([viewers.md](./viewers.md)).
 - **Colours go through the semantic tokens in `app/src/styles/colors.css`** (dark values in `dark.css`). In
   shadcn's vocabulary `accent` is the quiet hover surface, not the brand. The
   indigo has two tokens: `primary` is the *fill* (buttons, active underline,

@@ -130,6 +130,7 @@ const CATEGORY_FOLDERS: Record<string, string> = {
   "modules/": "module",
   "images/": "image",
   "documents/": "document",
+  "uploads/": "upload",
 };
 
 /** Category and filename derived from a library path — enough for

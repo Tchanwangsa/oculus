@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { ArrowSquareOut, File, FileText } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
+import { File, FileText } from "@phosphor-icons/react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { FileChip } from "@/components/markdown/FileChip";
+import { ReferenceLink } from "@/components/markdown/ReferenceLink";
 import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
 import { PDFViewer } from "@/components/files/pdf/PDFViewer";
 import { docPdfRelPath, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath } from "@/lib/files/fileTypes";
-import { filePageHref, type FileLocate } from "@/lib/files/openFile";
+import { openLibraryPath, type FileLocate } from "@/lib/files/openFile";
 import { libraryImageSrc, libraryLinkTarget } from "@/lib/files/libraryLinks";
 import { useDataDir } from "@/hooks/backend/useDataDir";
 import type { DbFile } from "@/lib/db";
@@ -198,27 +199,19 @@ export function useLibraryMdComponents(
   return useMemo(() => {
     return {
       ...MD_COMPONENTS,
-      a: ({ href, children, ...p }: any) => {
+      a: ({ href, children }: any) => {
         const target = href ? libraryLinkTarget(href, files, file.relative_path) : undefined;
         if (target) {
           return (
-            <Button
-              variant="link"
-              className="h-auto p-0 text-left text-sm font-normal whitespace-normal"
-              data-tab-href={filePageHref(target) ?? undefined}
-              onClick={() => onOpenFile(target)}
-              {...p}
-            >
+            <FileChip path={target.relative_path} onClick={(newTab) => {
+              if (newTab) openLibraryPath(target.relative_path, true);
+              else onOpenFile(target);
+            }}>
               {children}
-            </Button>
+            </FileChip>
           );
         }
-        return (
-          <a href={href} target="_blank" rel="noreferrer" className="text-brand hover:underline" {...p}>
-            {children}
-            <ArrowSquareOut size={12} className="inline shrink-0 ml-0.5 mb-0.5 opacity-60" />
-          </a>
-        );
+        return <ReferenceLink href={href}>{children}</ReferenceLink>;
       },
       img: ({ src, alt, ...p }: any) => {
         const resolved = libraryImageSrc(src || "", file.relative_path, dataDir);
