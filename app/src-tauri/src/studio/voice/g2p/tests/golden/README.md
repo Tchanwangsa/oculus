@@ -2,8 +2,7 @@
 
 Made by `tools/golden.py` (route code in `tools/a2c.py`); deterministic, rerunning gives
 byte-identical files. `MANIFEST.json` has the versions and sha256 of every input.
-Plan: `data/plans/studio-onnx-voice.md`, stage 1. Copy this folder into the studio
-worktree's test fixtures when stage 2 starts.
+Plan: `data/plans/studio-onnx-voice.md`, stage 1.
 
 ## Files
 
@@ -33,7 +32,8 @@ Row: `{id, text, phonemes, words: [{word, phonemes, source, guessed?}], covers?}
 - Lookup order: lexicon (any window of a word, longest first, so `Cauchy-Schwarz` finds
   `Cauchy`; `'s` by misaki's `_s`; exact key, then lower case) -> dictionary + stems +
   the two extra rules -> guesser, **one sub-token at a time**.
-- Whitespace is kept as written (runs of spaces, newlines, leading/trailing).
+- Whitespace is kept as written (runs of spaces, newlines, trailing), except leading
+  whitespace, which misaki's `preprocess` strips (`x098_whitespace`).
 - Nothing is dropped. A word with letters and no phonemes is an error.
 
 ## Tagging without spaCy (part of the spec)

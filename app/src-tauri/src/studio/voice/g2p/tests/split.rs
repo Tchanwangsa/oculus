@@ -1,5 +1,6 @@
 use super::super::split::{retokenize, subtokenize, Word};
 use super::super::tag::tokenize;
+use super::super::Dictionary;
 
 fn parts(word: &str) -> Vec<String> {
     subtokenize(word)
@@ -41,7 +42,13 @@ fn digits_group_with_separators() {
 
 #[test]
 fn punctuation_reads_as_itself_and_parts_stay_together() {
-    let words = retokenize(tokenize("He said, \"x-ray\" (now) – yes…").tokens);
+    let words = retokenize(
+        tokenize(
+            "He said, \"x-ray\" (now) – yes…",
+            &Dictionary::from_json("{}", "{}").unwrap(),
+        )
+        .tokens,
+    );
     let shape: Vec<String> = words
         .iter()
         .map(|w| match w {

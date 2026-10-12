@@ -5,6 +5,7 @@
 //! never a pause (Kokoro answers an unknown voice with 200 and no audio).
 //! `models` lists the server's model ids for Settings -> Voice.
 
+pub mod kokoro;
 mod models;
 #[cfg(test)]
 mod tests;
