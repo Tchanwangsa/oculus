@@ -1,15 +1,26 @@
 // Refresh docs/cli-reference.md from the binary’s clap tree, writing only changes.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { app, buildCli } from "./runtime.mjs";
+import { app, buildCli, cliSidecar } from "./runtime.mjs";
 
 const out = join(dirname(app), "docs", "cli-reference.md");
-// Always rebuilt from the current sources, never read from `target/` as found:
-// a `cargo test` or `cargo check` reruns the app's build script, and tauri-build
+// Rebuilt from the current sources, never read from `target/` as found: a
+// `cargo test` or `cargo check` reruns the app's build script, and tauri-build
 // then copies the staged sidecar (possibly older) over `target/<profile>/oculus`.
 // `buildCli` deletes that file first. This writes nothing under `binaries/`.
-const binary = process.env.OCULUS_BIN ?? buildCli();
+// `--staged` reads the sidecar instead, for beforeBuildCommand, where
+// `stage-cli` has just built it: rebuilding after the new sidecar reruns
+// tauri-build and recompiles the app.
+const binary = process.argv.includes("--staged") ? stagedCli() : process.env.OCULUS_BIN ?? buildCli();
+
+function stagedCli() {
+  const sidecar = cliSidecar();
+  if (!existsSync(sidecar) || statSync(sidecar).size === 0) {
+    throw new Error(`${sidecar} is missing or a placeholder: run \`bun run stage-cli\` first`);
+  }
+  return sidecar;
+}
 
 // `--stdout` renders and returns before touching the data directory, so this
 // works on a machine where the app has never run and no database exists.
