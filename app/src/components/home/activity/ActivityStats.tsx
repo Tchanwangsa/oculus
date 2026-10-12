@@ -16,12 +16,12 @@ export function Stat({
   detail: ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-border px-3.5 py-3">
+    <div className="min-w-0 rounded-lg border border-border px-3.5 py-3">
       <p className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-        <Glyph className="size-3.5" />
+        <Glyph className="size-3.5 shrink-0" />
         {label}
       </p>
-      <p className="mt-1 h-6 text-[20px] font-semibold leading-6 tabular-nums text-foreground">
+      <p className="mt-1 min-h-6 whitespace-nowrap text-[20px] font-semibold leading-6 tabular-nums text-foreground">
         {value}
       </p>
       <div className="mt-0.5 h-4 truncate text-[11px] leading-4 tabular-nums text-muted-foreground">

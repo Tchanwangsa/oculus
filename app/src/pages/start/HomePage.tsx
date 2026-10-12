@@ -8,8 +8,9 @@ import { displayLocale } from "@/lib/format/locale";
 
 /**
  * Home is a dashboard over the library: the date and sync state, then two
- * columns — the month's activity over a row of recent items, beside the next
- * few events over the lectures in progress. Each section owns its read.
+ * columns when the pane has room — the month's activity over a row of recent
+ * items, beside the next few events over the lectures in progress. Each
+ * section owns its read.
  */
 export default function HomePage() {
   // `useNow`, so a window left open overnight updates its heading; the cards
@@ -17,10 +18,10 @@ export default function HomePage() {
   const now = useNow();
 
   return (
-    <div className="page-scroll">
-      <div className="mx-auto max-w-[1200px] space-y-6 px-8 py-6">
+    <div className="page-scroll @container/home">
+      <div className="mx-auto max-w-[1200px] space-y-6 px-4 py-6 @min-[640px]/home:px-8">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-          <h1 className="text-[22px] font-semibold leading-none tracking-tight text-foreground">
+          <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-foreground">
             {now.toLocaleDateString(displayLocale, {
               weekday: "long",
               day: "numeric",
@@ -30,7 +31,7 @@ export default function HomePage() {
           <SyncControl />
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid gap-4 @min-[1024px]/home:grid-cols-[minmax(0,1fr)_340px]">
           <div className="min-w-0 space-y-6">
             <ActivityCard now={now} />
             <RecentRow />

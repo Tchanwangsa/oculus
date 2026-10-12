@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ChartBar, Flame, Sun, Timer } from "@phosphor-icons/react";
 import { PillTabs } from "@/components/ui/table/PillTabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useStoredState } from "@/hooks/ui/useStoredState";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { cn } from "@/lib/utils";
 import {
   bestStreak,
@@ -69,6 +70,9 @@ export function ActivityCard({ now }: { now: Date }) {
     return stacked.series.map((key) => subjectSeries(key, byId, colors));
   }, [stacked, view, subjects, colors]);
 
+  const legendRef = useRef<HTMLDivElement>(null);
+  useScrollFade(legendRef, "x", `${view}:${series.length}`);
+
   /** The hovered day's rows, in stack order, bottom first. */
   const timeSeries: Series[] = [
     { key: "active", label: "Active", color: ACTIVE_FILL, mark: <Swatch color={ACTIVE_FILL} /> },
@@ -100,8 +104,8 @@ export function ActivityCard({ now }: { now: Date }) {
   const empty = stacked !== null && stacked.series.length === 0;
 
   return (
-    <div className="space-y-3 self-start">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="@container/activity min-w-0 space-y-3 self-start">
+      <div className="grid grid-cols-1 gap-3 @min-[280px]/activity:grid-cols-2 @min-[560px]/activity:grid-cols-4">
         <Stat
           icon={Timer}
           label="Total active"
@@ -147,7 +151,7 @@ export function ActivityCard({ now }: { now: Date }) {
 
       <section className="rounded-lg border border-border p-4">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <h2 className="text-[13px] font-semibold text-foreground">Activity</h2>
             <PillTabs tabs={VIEW_TABS} value={view} onChange={setView} />
           </div>
@@ -237,7 +241,11 @@ export function ActivityCard({ now }: { now: Date }) {
               {range.map((d, i) => (
                 <div key={d.key} className="relative flex-1">
                   {(range.length - 1 - i) % LABEL_EVERY === 0 && (
-                    <span className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap">
+                    <span className={cn(
+                      "absolute whitespace-nowrap",
+                      i === range.length - 1 ? "right-0" : "left-1/2 -translate-x-1/2",
+                      (range.length - 1 - i) % (LABEL_EVERY * 2) !== 0 && "hidden @min-[400px]/activity:block",
+                    )}>
                       {shortDate(d.date)}
                     </span>
                   )}
@@ -247,23 +255,22 @@ export function ActivityCard({ now }: { now: Date }) {
           </div>
         </div>
 
-        {/* One row of fixed height whatever the view, so switching never
-            resizes the card; long labels truncate. */}
-        <div className="mt-3 flex h-4 items-center justify-end gap-3 overflow-hidden text-[10px] leading-4 text-muted-foreground">
+        {/* The legend scrolls independently so labels stay readable in narrow panes. */}
+        <div ref={legendRef} className="mt-3 flex h-4 items-center gap-3 overflow-x-auto text-[10px] leading-4 text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {byContext ? (
             series.map((s) => (
-              <span key={s.key} className="flex min-w-0 items-center gap-1" title={s.label}>
+              <span key={s.key} className="flex shrink-0 items-center gap-1 whitespace-nowrap" title={s.label}>
                 {s.legendMark ?? <Swatch color={s.color} />}
-                <span className="truncate">{s.label}</span>
+                <span>{s.label}</span>
               </span>
             ))
           ) : (
             <>
-              <span className="flex items-center gap-1">
+              <span className="flex shrink-0 items-center gap-1">
                 <Swatch color={ACTIVE_FILL} />
                 Active
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex shrink-0 items-center gap-1">
                 <Swatch color={IDLE_FILL} />
                 Idle
               </span>
