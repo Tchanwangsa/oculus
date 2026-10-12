@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isMac } from "@/lib/platform";
 import { accentTokens } from "./accent";
-import { syntaxTokens, themeTokens } from "./derive";
+import { themeTokens } from "./derive";
 import { withAlpha } from "./oklab";
 import type { AppearancePrefs, Frame } from "./prefs";
 import { getTheme } from "./registry";
@@ -29,8 +29,6 @@ export function appearanceTokens(prefs: AppearancePrefs, mode: ThemeMode): Token
   const theme = getTheme(prefs[mode], mode);
   const tokens = { ...themeTokens(theme) };
   if (prefs.accent) Object.assign(tokens, accentTokens(prefs.accent, theme.palette, mode));
-  const code = mode === "light" ? prefs.codeLight : prefs.codeDark;
-  if (code !== "match") Object.assign(tokens, syntaxTokens(getTheme(code, mode).syntax));
   if (prefs.codeFont) tokens["--font-mono"] = `"${prefs.codeFont}", ${MONO_STACK}`;
   const alpha = FRAME_ALPHA[prefs.frame];
   if (alpha < 1) tokens["--color-frame"] = withAlpha(theme.palette.ground, alpha);

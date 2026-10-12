@@ -4,7 +4,7 @@
 
 export type { SyntaxColors, SyntaxSlot, ThemeMode, ThemePalette, ThemeSpec, TokenMap } from "./types";
 export { SYNTAX_SLOTS } from "./types";
-export { derive, syntaxTokens, themeTokens } from "./derive";
+export { derive, themeTokens } from "./derive";
 export { accentTokens, textOn } from "./accent";
 export { contrast, mix } from "./oklab";
 export { BUILTIN, THEMES, getTheme, hasTheme, themesFor } from "./registry";

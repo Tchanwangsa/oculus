@@ -17,9 +17,6 @@ export interface AppearancePrefs {
   frame: Frame;
   /** A font family put ahead of the monospace stack; "" for the stack alone. */
   codeFont: string;
-  /** Another theme of the same mode whose syntax colours code takes. */
-  codeLight: string | "match";
-  codeDark: string | "match";
 }
 
 export const APPEARANCE_KEY = "oculus-appearance";
@@ -39,8 +36,6 @@ export function defaultAppearance(mac = isMac): AppearancePrefs {
     accent: null,
     frame: mac ? "frosted" : "solid",
     codeFont: "",
-    codeLight: "match",
-    codeDark: "match",
   };
 }
 
@@ -67,8 +62,6 @@ export function validateAppearance(raw: unknown, mac = isMac): AppearancePrefs {
     accent: normalizeAccent(v.accent),
     frame: mac ? frame : "solid",
     codeFont: UNSAFE_FONT.test(font) ? "" : font,
-    codeLight: hasTheme(v.codeLight, "light") ? v.codeLight : "match",
-    codeDark: hasTheme(v.codeDark, "dark") ? v.codeDark : "match",
   };
 }
 
