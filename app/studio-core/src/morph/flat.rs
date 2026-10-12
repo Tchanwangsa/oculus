@@ -26,6 +26,8 @@ pub struct Slot {
     pub leaf: bool,
     /// Its border box, kept after the builder takes the node.
     pub rect: Rect,
+    /// The product of its ancestors' opacities in this tree.
+    pub above: f32,
 }
 
 pub struct Tree {
@@ -46,7 +48,7 @@ impl Tree {
             is_a,
             clocks: HashMap::from([(None, outside)]),
         };
-        t.push(root, None, 0, None, scopes);
+        t.push(root, None, 0, None, scopes, 1.0);
         t
     }
 
@@ -57,6 +59,7 @@ impl Tree {
         index: usize,
         scope: Option<u32>,
         scopes: bool,
+        above: f32,
     ) -> usize {
         let own = n.scope.take().filter(|_| scopes);
         let scope_root = own.is_some();
@@ -68,6 +71,7 @@ impl Tree {
             None => scope,
         };
         let kids = std::mem::take(&mut n.children);
+        let below = above * n.style.opacity();
         let i = self.slots.len();
         self.slots.push(Slot {
             kind: n.kind,
@@ -75,6 +79,7 @@ impl Tree {
             loc: n.loc,
             leaf: kids.is_empty() && paints(&n),
             rect: n.rect,
+            above,
             node: Some(n),
             parent,
             index,
@@ -83,7 +88,7 @@ impl Tree {
             scope_root,
         });
         for (k, c) in kids.into_iter().enumerate() {
-            let ci = self.push(c, Some(i), k, scope, scopes);
+            let ci = self.push(c, Some(i), k, scope, scopes, below);
             self.slots[i].kids.push(ci);
         }
         i

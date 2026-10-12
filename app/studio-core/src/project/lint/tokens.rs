@@ -6,14 +6,16 @@
 //!   CSS colour name as a whole string only where a colour goes (`places`);
 //! - a font family string (a bundled family's name, or any string after
 //!   `fontFamily:`);
-//! - a number in a `style` value equal to a theme `space` or `radius`
-//!   entry. Other numbers stay allowed.
+//! - a number that is a length in a `style` object (`style` says which)
+//!   and equals a theme `space` or `radius` entry. Other numbers stay
+//!   allowed.
 //!
 //! The rules read the source through `tsx::scan`, so a literal inside a
 //! template literal's `${...}` is not checked.
 
 mod names;
 mod places;
+mod style;
 
 use super::tsx::{Kind, Tok, line_text, scan};
 use crate::error::{StudioError, TsxLoc};
@@ -22,6 +24,7 @@ use names::CSS_COLOUR_NAMES;
 use places::{Place, places};
 use serde_json::Value;
 use std::collections::HashSet;
+use style::style_numbers;
 
 /// Every error the token rules find in `src`, in source order.
 /// `colour_props` names the component's `token("color")` props.
@@ -35,7 +38,7 @@ pub fn check(
     let toks = scan(src);
     let exempt = exempt_flags(&toks);
     let place = places(&toks, colour_props);
-    let in_style = style_flags(&toks);
+    let checked = style_numbers(&toks);
     let mut out = Vec::new();
     let mut fonts_seen: HashSet<usize> = HashSet::new();
     // The position is the token's, moved right by `within` characters for a
@@ -91,7 +94,7 @@ pub fn check(
                     out.push(err(i, 0, palette.colour_message(&lit)));
                 }
             }
-            Kind::Number(v) if in_style[i] && !(i > 0 && toks[i - 1].kind == Kind::Punct('-')) => {
+            Kind::Number(v) if checked[i] => {
                 if let Some(name) = palette.spacing_name(*v) {
                     out.push(err(
                         i,
@@ -148,55 +151,6 @@ fn exempt_flags(toks: &[Tok]) -> Vec<bool> {
                 }
             }
             _ => {}
-        }
-    }
-    out
-}
-
-/// Which tokens are a direct value of a `style` object: the object after
-/// `style=` or `style:`, and the arrays in it (`padding: [0, 16]`). A
-/// nested object (`shadow: { y: 40 }`, `border`, `fill`) is not a style
-/// value: its numbers are offsets, widths and stops.
-fn style_flags(toks: &[Tok]) -> Vec<bool> {
-    #[derive(Clone, Copy, PartialEq)]
-    enum Brace {
-        /// The JSX expression holding a style object: `style={{ ... }}`.
-        Container,
-        /// A style object, or one of its nested objects.
-        Style,
-        Other,
-    }
-    let mut braces: Vec<Brace> = Vec::new();
-    let mut out = vec![false; toks.len()];
-    for (i, tok) in toks.iter().enumerate() {
-        match tok.kind {
-            Kind::Punct('{') => {
-                let after_style = |sep: char| {
-                    i >= 2
-                        && toks[i - 1].kind == Kind::Punct(sep)
-                        && toks[i - 2].kind == Kind::Ident
-                        && toks[i - 2].text == "style"
-                };
-                // `style={{` opens a container, then its object; `style: {`
-                // is an object.
-                let in_container = i >= 1
-                    && toks[i - 1].kind == Kind::Punct('{')
-                    && braces.last() == Some(&Brace::Container);
-                let kind = if after_style('=') {
-                    Brace::Container
-                } else if after_style(':') || in_container {
-                    Brace::Style
-                } else {
-                    Brace::Other
-                };
-                braces.push(kind);
-                out[i] = kind == Brace::Style;
-            }
-            Kind::Punct('}') => {
-                out[i] = braces.last() == Some(&Brace::Style);
-                braces.pop();
-            }
-            _ => out[i] = braces.last() == Some(&Brace::Style),
         }
     }
     out

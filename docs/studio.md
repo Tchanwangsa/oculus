@@ -63,7 +63,7 @@ narration/    manifest.json and the clips it names
   "voice": { "voice": "af_heart", "speed": 1.0 },
   "scenes": [
     { "id": "title", "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 4.0 },
-    { "id": "steps", "component": "Steps", "transition": { "kind": "wipe", "direction": "up" } }
+    { "id": "dots", "component": "DotGrid", "props": { "n": 12, "cols": [4, 6], "at": [2.2] }, "transition": { "kind": "wipe", "direction": "up" } }
   ]
 }
 ```
@@ -393,8 +393,8 @@ We follow the *gradient* downhill, one small step at a time.
   words have times. A phrase that is not said, an `nth` past the last
   occurrence and a call in a silent scene throw at the call's TSX line. A
   phrase not said names the said run of words nearest it by edit distance,
-  however far, spelt with its hyphens (`suggest::nearest`): ``Steps.tsx:12:20:
-  `word("gradiant")`: no such word in scene `steps`; closest: gradient``.
+  however far, spelt with its hyphens (`suggest::nearest`): ``Descent.tsx:12:20:
+  `word("gradiant")`: no such word in scene `descent`; closest: gradient``.
   Each call gets its own scene's words (`SceneCall::words`, from
   `Project::word_cues`), so in a transition the outgoing scene cues to its
   words and the incoming one to its own.
@@ -1028,7 +1028,11 @@ at `p = 0`, B at `p = 1`) and returns one, which paint draws like any other.
   the union of their stops (a colour is a flat gradient, no fill a clear
   one) and blend stop by stop, the angle turning the short way, so nothing
   is cross-faded. A side without a border or shadow grows it from zero width
-  or fades it in.
+  or fades it in. A pair is drawn under B's ancestors, so when its A
+  ancestors' opacity differs from what B's give it at `p = 0` (a `3` in a
+  table row still at opacity 0, keyed to a formula elsewhere), it starts
+  at its effective opacity in A (its own times its A ancestors') and
+  blends to its own in B; it can never show more than its B ancestors do.
 - **Colour** (fills, gradient stops, borders, shadows, text and strokes)
   blends in OKLab with alpha premultiplied, along the path the `morphColor`
   motion token picks. `oklch`, the default, is polar between two saturated
@@ -1349,12 +1353,22 @@ error at the literal's `file.tsx:line:col`:
 - **Font families.** A bundled family's name as a whole string, or any string
   after `fontFamily:`: ``font family `Manrope` is a literal; use
   theme.font.heading``.
-- **Style numbers.** A number that is a direct value of a `style` object, or
-  an element of an array there (`padding: [0, 16]`), and equals a theme
-  `space` or `radius` entry: ``style value 24 equals theme.space.m; use
-  theme.space.m``. Space is searched before radius, so 16 names `space.s`
-  when `radius.m` is also 16. Numbers inside nested objects (`shadow`,
-  `border`, `fill`), negative numbers and every other number are allowed.
+- **Style numbers.** A number that is a length in a `style` object and
+  equals a theme `space` or `radius` entry: ``style value 24 equals
+  theme.space.m; use theme.space.m``. A length is the value of a length
+  key (`width`, `height`, the `min`/`max` sizes, `gap`, `padding`,
+  `margin`, `left`, `top`, `right`, `bottom`, `radius`, `blur`,
+  `translateX`, `translateY`, `fontSize`, `letterSpacing`): the value
+  itself, a branch of it (an array element as in `padding: [0, 16]`, a
+  ternary's arm, a side of `||`, `??` or `&&`) or a term added or
+  subtracted (`space.s + 4`). Space is searched before radius, so 16 names
+  `space.s` when `radius.m` is also 16. Unitless keys (`opacity`, `scale`,
+  `rotate`, `flexGrow`, `flexShrink`, `fontWeight`, `lineHeight`,
+  `transformOrigin`, `clipInset`) are never checked, so `opacity:
+  clamp(pop * 4, 0, 1)` passes, and neither is a factor (`width: 24 * s`),
+  a side of a comparison, a call's argument, a number inside a nested
+  object (`shadow`, `border`, `fill`, `reveal`), or a negative number
+  (`project/lint/tokens/style.rs`).
 
 The check reads the TSX with a scanner, not a parser: comments are skipped,
 strings and template literals are read as strings (a literal inside a
