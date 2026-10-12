@@ -20,6 +20,7 @@ mod host;
 mod images;
 mod layout;
 mod library;
+mod look;
 mod math;
 mod morph;
 mod overlay;
@@ -40,11 +41,12 @@ pub use host::ComponentInfo;
 pub use library::{
     STARTER_COMPONENTS, STARTER_THEMES, Starter, seed as seed_library, write as write_library,
 };
+pub use look::{Beat, SceneLook, Warning};
 pub use project::{
-    CascadeComponents, ComponentSource, FRAME_RATES, FolderComponents, LOW_CONFIDENCE, Library,
-    LintIssue, LintReport, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene, ManifestWord,
-    Project, SceneSpec, Script, ScriptSection, Timeline, Video, Voice, VoiceEngine, WordCues,
-    valid_subject,
+    CascadeComponents, ComponentSource, CuedWord, FRAME_RATES, FolderComponents, LOW_CONFIDENCE,
+    Library, LintIssue, LintLevel, LintReport, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene,
+    ManifestWord, Project, SceneSpec, Script, ScriptSection, Timeline, Video, Voice, VoiceEngine,
+    WordCues, valid_subject,
 };
 pub use render::{
     Engine, Frame, MotionBlur, Purpose, RenderOptions, Renderer, SceneCall, Size, Time,

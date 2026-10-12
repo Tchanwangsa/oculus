@@ -8,7 +8,9 @@ mod common;
 use common::fixture;
 use serde_json::{Map, Value, json};
 use std::path::PathBuf;
-use studio_core::{Engine, Frame, Project, RenderOptions, Renderer, SceneCall, StudioError, Time};
+use studio_core::{
+    Engine, Frame, LintLevel, Project, RenderOptions, Renderer, SceneCall, StudioError, Time,
+};
 
 /// A throwaway project: `video.json` and its components.
 fn project(name: &str, video: Value, components: &[(&str, &str)]) -> PathBuf {
@@ -188,7 +190,7 @@ fn lint(
     report
         .issues
         .iter()
-        .filter(|i| !common::component_rule(&i.to_string()))
+        .filter(|i| i.level == LintLevel::Error && !common::component_rule(&i.to_string()))
         .map(|i| (i.scene, i.error.kind().to_owned(), i.error.to_string()))
         .collect()
 }
@@ -392,5 +394,58 @@ fn morph_color_oklab_changes_the_magic_move_and_lint_names_a_bad_one() {
             .unwrap()
             .frame(Time::Global(0.5))
             .is_err()
+    );
+}
+
+#[test]
+fn a_scene_whose_previous_component_is_missing_draws_alone() {
+    let mut s = scenes(2, 2.0);
+    s[0]["component"] = json!("Missing");
+    s[1]["transition"] = json!({ "kind": "dissolve", "dur": 1.0 });
+    let dir = project(
+        "missing-before",
+        json!({ "size": { "width": 64, "height": 36 }, "theme": "default", "scenes": s }),
+        &[("Fine", FINE)],
+    );
+    let p = Project::load(&dir).unwrap();
+    let mut r = Renderer::new(&p, RenderOptions::default()).unwrap();
+    let mut engine = Engine::new(
+        p.theme.clone(),
+        p.video.size,
+        None,
+        RenderOptions::default(),
+    )
+    .unwrap();
+    engine.load_component("Fine", FINE).unwrap();
+    let props = Map::new();
+    let mut alone = |t: f64| {
+        engine
+            .render(SceneCall {
+                component: "Fine",
+                props: &props,
+                t,
+                duration: 2.0,
+                index: 1,
+                id: None,
+                words: None,
+            })
+            .unwrap()
+            .rgba
+    };
+    // Inside the transition and after it, scene 1 is drawn as after a cut.
+    for t in [0.4, 1.5] {
+        let f = r.frame(Time::Scene { index: 1, t }).unwrap();
+        assert!(f.rgba == alone(t), "scene 1 at {t}");
+    }
+    // Scene 0 itself still fails, and lint still names the missing file.
+    let e = r.frame(Time::Scene { index: 0, t: 1.0 }).unwrap_err();
+    assert!(matches!(e, StudioError::ComponentNotFound { .. }), "{e}");
+    let issues = p.lint().unwrap().issues;
+    assert!(
+        issues
+            .iter()
+            .any(|i| i.scene == Some(0)
+                && matches!(i.error, StudioError::ComponentNotFound { .. })),
+        "{issues:#?}"
     );
 }

@@ -1,7 +1,8 @@
 //! Arguments of the `studio` commands. `new` and `list` make and list the
 //! videos under `<app data>/studio/videos/`; every command that takes a DIR
-//! also takes a bare slug naming one of them. `frame`, `strip`, `lint` and
-//! `render` read a video folder on disk (no database, no network); `narrate`
+//! also takes a bare slug naming one of them. `frame`, `strip`, `lint`,
+//! `brief`, `beats` and `render` read a video folder on disk (no database,
+//! no network); `narrate`
 //! and `tts` run Kokoro or call the TTS server, `g2p` shows how Kokoro reads
 //! text, `pronounce` puts a reading up for the student's review, and
 //! `voices` and `aligner` manage the downloaded models.
@@ -15,6 +16,8 @@ pub(crate) enum StudioAction {
     Frame(StudioFrameArgs),
     Strip(StudioStripArgs),
     Lint(StudioLintArgs),
+    Brief(StudioBriefArgs),
+    Beats(StudioBeatsArgs),
     Gallery(StudioGalleryArgs),
     Components {
         #[command(subcommand)]
@@ -148,6 +151,8 @@ impl StudioAction {
             StudioAction::Frame(a) => Some(&mut a.dir),
             StudioAction::Strip(a) => Some(&mut a.dir),
             StudioAction::Lint(a) => Some(&mut a.dir),
+            StudioAction::Brief(a) => Some(&mut a.dir),
+            StudioAction::Beats(a) => Some(&mut a.dir),
             StudioAction::Gallery(a) => Some(&mut a.dir),
             StudioAction::Render(a) => Some(&mut a.dir),
             StudioAction::Narrate(a) => Some(&mut a.dir),
@@ -291,11 +296,12 @@ pub(crate) enum StudioEngineArg {
 /// Per scene it prints the id, `narrated` or `cached`, the clip's length,
 /// its word count, and as warnings the words the aligner was unsure of and
 /// any speech the script lacks (a mangled or added word: reword it, or
-/// listen). `lint` fails on the same words. With Kokoro, every word the
-/// guesser read is then a `note: check pronunciation` with its scene and
-/// script.md line, and the state of any suggestion for it: listen to it,
-/// and suggest a reading for a doubtful one with `oculus studio pronounce
-/// suggest`. Notes never change the exit code.
+/// listen). `lint` notes the unsure words and fails on the added speech.
+/// With Kokoro, every word the guesser read is then a `note: check
+/// pronunciation` with its scene and script.md line, and the state of any
+/// suggestion for it: listen to it, and suggest a reading for a doubtful
+/// one with `oculus studio pronounce suggest`. Notes never change the exit
+/// code.
 ///
 ///     oculus studio narrate lectures/week-4
 ///
@@ -475,30 +481,93 @@ pub(crate) struct StudioStripArgs {
     pub(crate) out: Option<PathBuf>,
 }
 
-/// Check a whole video without writing to its folder
+/// Check a whole video, or one scene, without writing to its folder
 ///
 /// Loads every component the video uses, checks each scene's props and each
 /// component's `examples` against its `props` schema, and renders every scene
 /// at its first and last moment. For a narrated video it also checks
 /// `script.md` (sections no scene matches, text not written as it is said)
-/// and the narration (missing or stale clips, words the aligner was unsure
-/// of, unscripted speech). When the video narrates with Kokoro it also
-/// reads every section as `narrate` will: a missing `g2p-en-us` pack, a
-/// lexicon entry that is not valid, a word with no phonemes or a sentence
-/// too long for Kokoro is a problem, and each word the guesser read is a
-/// `note: check pronunciation` with its script.md line. Every problem is
-/// reported, not just the first, each with its scene, component and, where
-/// there is one, the TSX line. Exits 1 when there is any problem, so it can
-/// gate a render; notes never change the exit code. `--json` gives one
-/// entry per problem and per note, each with its `level` (`issue` or
-/// `note`).
+/// and the narration (missing or stale clips, unscripted speech). When the
+/// video narrates with Kokoro it also reads every section as `narrate`
+/// will: a missing `g2p-en-us` pack, a lexicon entry that is not valid, a
+/// word with no phonemes or a sentence too long for Kokoro is an error.
+///
+/// Each scene that renders is then laid out every 0.2 s and at each cue
+/// word (never painted) for warnings: a node past the frame's edge
+/// (`off_frame`), narration over a frame where nothing changes for more
+/// than 2.5 s or an empty opening (`still`), everything kept small in one
+/// half of the frame for more than 3 s (`half_frame`), and a Math down to
+/// a piece or two, or a tiny mark alone, at the end (`fragment`). Each
+/// names its time span and the words said in it.
+///
+/// Three levels: `error` (exits 1, so it can gate a render), `warning`
+/// and `note` (a word the aligner was unsure of, a word Kokoro's guesser
+/// read); warnings and notes never change the exit code. Errors print one
+/// a line in full; repeats of a warning or note in one scene print as one
+/// line with a count and the first few. `--json` gives one entry per
+/// issue with its `level`.
 ///
 /// See `oculus studio frame --help` for what a video folder holds.
+///
+///     oculus studio lint shor --scene mod
 #[derive(Args)]
 pub(crate) struct StudioLintArgs {
     /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
+    /// Only this scene (its id in video.json, or its index counting from
+    /// 0), with its component and the video settings it renders with
+    #[arg(long, value_name = "ID|N")]
+    pub(crate) scene: Option<String>,
+}
+
+/// Print what changes on screen in one scene, as a timeline
+///
+/// Lays the scene out every 0.2 s and at each cue word (never painted)
+/// and lists, per key (or per Math, or per TSX line for nodes with no key
+/// near them), when it appears, vanishes, moves (centre more than 8 px),
+/// resizes, recolours or is rewritten, each with the words said then.
+/// Numbered keys doing the same thing at the same moment share a line
+/// (`d12-d14`). A builder checks a beat table against it as text instead
+/// of reading a strip. At most 80 lines print; `--json` gives every beat
+/// as `{index, id, component, length, beats: [{t, end, event, who,
+/// detail, words}]}`.
+///
+///     oculus studio beats shor --scene squares
+#[derive(Args)]
+pub(crate) struct StudioBeatsArgs {
+    /// The video folder, the one holding `video.json` (or its slug)
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The scene: its id in video.json, or its index counting from 0
+    #[arg(long, value_name = "ID|N")]
+    pub(crate) scene: String,
+}
+
+/// Print one scene builder's whole input
+///
+/// For one scene: its index, component and props; the scenes before and
+/// after it, whether their components exist yet, and what their
+/// storyboard entries say under `Carries in:` and `Hands on:`; its own
+/// `storyboard.md` entry verbatim (from its `### <id>` heading to the next
+/// heading or `---`); the `notes/` files the entry names, else every file
+/// in `notes/`; its narration, one line per sentence, each word with the
+/// time `word()` returns for it (scene seconds, the theme's lead included);
+/// and the exact `strip`, `frame` and `gallery` calls that check it, `-o`
+/// paths absolute. Stale or missing narration prints its error and the
+/// script text instead. Reads only the folder.
+///
+///     oculus studio brief shor --scene squares
+///
+///     oculus studio brief lectures/week-4 --scene 3 --json
+#[derive(Args)]
+pub(crate) struct StudioBriefArgs {
+    /// The video folder, the one holding `video.json` (or its slug)
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The scene: its id in video.json, or its index counting from 0
+    #[arg(long, value_name = "ID|N")]
+    pub(crate) scene: String,
 }
 
 /// Render every example of a component as a still

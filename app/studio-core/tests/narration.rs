@@ -203,7 +203,8 @@ fn a_silent_scene_needs_a_hold() {
         "{e}"
     );
     let report = p.lint().unwrap();
-    assert_eq!(report.issues.len(), 1, "{report}");
+    // Scene `a` also warns that nothing is on screen.
+    assert_eq!(report.errors(), 1, "{report}");
     assert_eq!(report.issues[0].scene, Some(1));
 }
 
@@ -366,6 +367,22 @@ fn word_cues_are_scene_seconds_with_the_lead() {
     for (g, w) in got.iter().zip(want) {
         assert!(near(*g, w), "{got:?} != {want:?}");
     }
+}
+
+#[test]
+fn cued_words_are_the_times_word_returns() {
+    let t = probe(
+        "cued",
+        r#"  console.log(JSON.stringify([word("gradient"), wordEnd("gradient")]));"#,
+    );
+    let p = t.load();
+    let got: Vec<f64> =
+        serde_json::from_str(&logs(&p, Time::Scene { index: 0, t: 1.0 })[0]).unwrap();
+    let words = p.cued_words(0).unwrap().unwrap();
+    let gradient = words.iter().find(|w| w.text == "gradient,").unwrap();
+    assert!(near(gradient.start, got[0]) && near(gradient.end, got[1]));
+    assert_eq!(words.len(), 7);
+    assert!(p.cued_words(2).unwrap().is_none(), "`quiet` is silent");
 }
 
 #[test]

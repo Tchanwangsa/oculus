@@ -23,22 +23,25 @@ it is named. Nothing is asserted that the picture does not show.
 - Making a video: the checklist
 - Research: what a research helper reads and writes
 - Direct: the storyboard, its template and a worked scene
-- Build: what a scene helper gets, writes and returns
+- Build: starting the scene builders, their brief
+- Review: one reviewer per finished scene, its brief, fix passes
 - Assemble: narration, the whole-video check, the render
 - The story; Taste; Moving maths
 
 ## The files beside this one
 
-Both are in `skills/oculus-studio/` under your working directory.
+All three are in `skills/oculus-studio/` under your working directory.
 
 - **`reference.md`**: the authoring rules (video.json, script.md, the
-  component format, elements, maths, motion, cues, lint). A scene builder
-  reads it in full before writing TSX; the director reads its "video.json"
-  and "script.md" sections before writing those files. Afterwards, go to the
-  section a lint message or a question points at.
-- **`studio.d.ts`**: open it when you write TSX and need a global's exact
-  signature. Search it for the name rather than reading it whole. A
-  component imports nothing; every global it declares is simply there.
+  component format, elements, maths, motion, cues, lint). Read its
+  "video.json" and "script.md" sections before writing those files.
+  Afterwards, go to the section a lint message or a question points at.
+- **`build.md`**: how a scene helper builds, fixes and reviews a scene. Its
+  role prompt carries it and the builder's sections of `reference.md`, so
+  your briefs stay short and you need not read it.
+- **`studio.d.ts`**: every global's exact signature, for TSX. Search it for
+  the name rather than reading it whole. A component imports nothing;
+  every global it declares is simply there.
 
 ## Where things are
 
@@ -57,7 +60,7 @@ From your working directory (`agents/`):
   renders/                    made by render: draft.mp4, final.mp4
 ../studio/library/            the global library: read, never edit
 ../studio/subjects/<CODE>/    a subject's library: read, never edit
-../studio/subjects/<CODE>/lexicon.json   pronunciations: never edit; suggest with `oculus studio pronounce suggest` (step 6)
+../studio/subjects/<CODE>/lexicon.json   pronunciations: never edit; suggest with `oculus studio pronounce suggest` (step 5)
 ```
 
 Every `oculus studio` command takes the video's **slug** where its usage
@@ -75,14 +78,15 @@ says `DIR`. File tools need the folder: `oculus studio new` prints it.
 
 ## Helpers
 
-Three roles make a video. You are the **director**: you never read the
+Four roles make a video. You are the **director**: you never read the
 whole lecture and you never build every scene yourself.
 
 | Role | Who | Does |
 | --- | --- | --- |
 | Research | one helper per slice of the source, on the research model | reads its slice, writes one notes file |
-| Direct | you, on your own model | writes the storyboard, the script and video.json; assembles; reviews |
+| Direct | you, on your own model | writes the storyboard, the script and video.json; assembles; reads verdicts |
 | Build | one helper per scene, on the scene model | writes and checks that scene's components |
+| Review | one helper per finished scene, the scene role again | checks the scene, replies `PASS` or a fix list |
 
 The models are the student's choice in Settings → Jobs. Find out yours and
 how your CLI starts a helper:
@@ -100,15 +104,19 @@ role it prints the model and the exact call to make. Use it as printed:
 - **Codex**: `spawn_agent` with exactly the printed `model` and
   `reasoning_effort`, `fork_turns: "none"` and the brief as `message`. This
   skill asks you to set the model, so set it. At most 3 at once; collect each
-  with `wait_agent`, then `close_agent` it before starting another.
+  with `wait_agent`, then `close_agent` it before starting another. Codex
+  gives a helper no role prompt, so begin each brief, a builder's or a
+  reviewer's, with this sentence: Read `skills/oculus-studio/build.md`,
+  then these sections of `skills/oculus-studio/reference.md`:
+  "Components", "Elements", "The theme", "Motion", "Maths", "Moving
+  maths", "Word cues", "Transitions and magic move", "Lint" and "Looking".
 - **opencode**: the `task` tool with the printed `subagent_type`.
 - **A role printed as off, or an agent that cannot start helpers** (agy):
   do that role's items yourself, one after another, in the same order and
   to the same standard. If a start is refused, do the same.
 
-A helper starts with nothing but its brief: no memory of this chat, no
-lecture, no storyboard. Every brief names the video's slug and folder, the
-files to read, the file to write and what to reply. Briefs are below.
+A helper starts with nothing but its brief and its role: no memory of this
+chat, no lecture. Briefs are below.
 
 ## Making a video
 
@@ -120,10 +128,10 @@ Video progress:
 - [ ] 2. Map the source and start one research helper per slice
 - [ ] 3. Read the notes; write storyboard.md
 - [ ] 4. Show the student the storyboard and wait for their go-ahead
-- [ ] 5. Write video.json and script.md; lint until only `narration` is left; narrate
+- [ ] 5. Write video.json and script.md; lint until only `component_not_found` and `narration` are left; narrate
 - [ ] 6. Start one scene builder per scene (in batches)
-- [ ] 7. Review each builder's strip; send fixes to a new builder for that scene
-- [ ] 8. Lint until []; strip the whole video and look; fix
+- [ ] 7. Start one reviewer per finished scene; send each fix list to a new builder
+- [ ] 8. Lint until no errors; strip the whole video and look at the joins; fix
 - [ ] 9. Render the draft and give the student its path
 - [ ] 10. Render the final when the student is happy or asked for it
 ```
@@ -149,7 +157,8 @@ list (a line each) and the path to the full file. Stop there. Build only
 after they say go, folding in what they change. Skip the stop only when the
 student said to go straight through.
 
-Steps 3, 5 to 8 are in "Direct", "Build" and "Assemble". Steps 9 and 10:
+Steps 3, 5 to 8 are in "Direct", "Build", "Review" and "Assemble". Steps 9
+and 10:
 
 ```bash
 oculus studio render shor-breaks-rsa
@@ -286,72 +295,40 @@ means. Twelve is different: three rows of four.
 
 ## Build
 
-Start builders in batches (Claude: one message; Codex: up to 3). Tell each
-builder which scenes share keys with its own, and which keys.
+Start builders in batches (Claude and opencode: one message; Codex: up to
+3). Tell each builder which scenes share keys with its own, and which keys.
+A component two scenes share is written by the builder you name.
 
-**The brief:**
+**The brief** (fill in the brackets; drop a bracketed sentence that does not apply):
 
-> You are building scene `[id]` (scene [index from 0] of [count]) of the
-> Oculus Studio video `[slug]`, folder `[absolute path]`. Read
-> `skills/oculus-studio/SKILL.md` section "Build", then `reference.md` in
-> full, then `storyboard.md` (scene `[id]`, and `[previous id]` and
-> `[next id]`) and `[notes files]`. Write `components/[Name].tsx`.
-> Keys in from `[previous id]`: `[keys]`. Keys out to `[next id]`: `[keys]`.
-> The narration is made; `oculus studio strip [slug] --scene [index]`
-> draws your scene. Reply as "Build" says.
+> Build scene `[id]` of the Oculus Studio video `[slug]`, component
+> `[Name]`. Keys in from `[previous id]`: `[keys]`. Keys out to
+> `[next id]`: `[keys]`. [You write the shared component `[Shared]`, also
+> used by `[other id]`.] [The student's rules for this video.] First run
+> `oculus studio brief [slug] --scene [id]`.
 
-**What a builder does:**
+`brief` prints the rest: the scene's storyboard entry, the neighbours'
+hand-offs, the notes, the word times and the check commands. Do not paste
+any of it. A builder replies with its components, props, strip, lint
+warnings it kept and any narration change.
 
-1. Writes the scene's components in `components/`. Write your own freely:
-   the library's components are primitives to compose (a title card, a
-   number), never templates to fill. A component made for one scene
-   declares one prop, `narrated: bool().default(false)`: `video.json` sets
-   it `true` on a narrated scene, so the beats cue on `word()`, and without
-   it they fall back to fixed times (every recipe in `reference.md`
-   "Moving maths" shows the pattern).
-2. Cues every beat with `word("…")` on the words the beat list names, in
-   the scene's `script.md` section as written. The first element is on
-   screen at a fixed time under half a second, not at a late cue, so no
-   scene opens on an empty frame.
-3. Builds maths term by term as `Math`, never Text ("Moving maths" below,
-   `reference.md` "Maths" and "Moving maths").
-4. Draws and looks, until every beat reads:
+A narration change is the sentence as it is and as it should be, with
+why. Edit `script.md`, narrate again, and tell a new builder to re-cue.
 
-   ```bash
-   oculus studio strip shor-breaks-rsa --scene 3 --n 16 --cols 4
-   ```
+## Review
 
-   ```bash
-   oculus studio frame shor-breaks-rsa --scene 3 --at 4.5 --scale 0.5
-   ```
+When a builder replies, start one reviewer for that scene: the scene
+helper again (the same `subagent_type` or model), with this brief:
 
-   Open each PNG with your image-reading tool. Check every beat lands on
-   its words, nothing overlaps or overflows, text is readable, and the
-   shared keys sit where the neighbours expect them. `lint` is the director's:
-   it covers the whole video, where other builders' scenes are still being
-   written. If `strip` says some scene's narration is stale, tell the
-   director; do not narrate.
-5. Writes only its own components, named after its scene (`PrimeDots`),
-   and asks the director for anything else. A component two scenes share
-   is written by the builder the director names, with at least two
-   `examples`, and checked with `oculus studio gallery <slug> <Name>
-   --sheet` (no narration needed; `reference.md` "Looking").
+> Review scene `[id]` of the Oculus Studio video `[slug]` as `build.md`
+> "Review" says. Edit no file. The builder's reply: [its reply].
 
-**The reply**, exactly:
-
-```
-Scene: prime (3)
-Components: PrimeDots (new)
-Props: {"narrated": true} (as in video.json)
-Strip: /…/out/strip-12.4-31.0.png
-Sheet: none (no shared component)
-Keys in: d0-d11 (as planned). Keys out: row7, seven
-Narration changes: none
-```
-
-A narration change is the sentence as it is and as it should be, with why
-("'refuse' has no beat; say 'won't make'"). The director edits
-`script.md`, narrates again, and tells the builder to re-cue.
+A reviewer runs `brief`, `lint --scene` and `beats --scene`, looks at one
+strip and a few frames, and replies `PASS` or a numbered fix list of at
+most ten (what, when, where). Read the verdict, not the scene's strip.
+Send a fix list to a new builder: the build brief plus the fix list and
+the last builder's reply, since that builder is gone. Then review the
+scene again.
 
 ## Assemble
 
@@ -364,9 +341,9 @@ on a narrated scene or `{}` and a `hold` on a silent one) and `script.md` (each 
 oculus studio lint shor-breaks-rsa --json
 ```
 
-Before the components exist, lint reports `component_not_found` for each
-scene and `narration` for each narrated one; fix every other kind, above
-all `script`. Then narrate:
+Before the components exist, lint reports a `component_not_found` error
+for each scene and a `narration` error for each narrated one; fix every
+other error, above all `script`. Then narrate:
 
 ```bash
 oculus studio narrate shor-breaks-rsa
@@ -407,10 +384,10 @@ decides how a word is said: never edit a `lexicon.json`. For each note:
 A lint problem naming `lexicon.json` is an entry that does not parse: tell
 the student, who fixes it; never edit it yourself.
 
-**After building** (steps 7 and 8): read each builder's strip as it lands
-and send fixes back: a new scene builder with the same brief plus the fix
-list and the last reply, since the first one is gone. Then lint until `[]` and strip the whole video, about one frame
-every four seconds:
+**After review** (step 8): lint the whole video until it has no errors.
+Each warning left is one its builder explained; notes are information
+(check the guessed words as above). Then take your one look: strip the
+whole video, about one frame every four seconds:
 
 ```bash
 oculus studio strip shor-breaks-rsa --n 32 --cols 4

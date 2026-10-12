@@ -8,7 +8,9 @@ words, from clips and timings `oculus studio narrate` makes with Kokoro run
 inside the app or a TTS server, and a local aligner. `oculus studio render`, or the app's `studio_render`
 command, encodes a video to an mp4 with ffmpeg, one cached segment per
 scene. `oculus studio` also renders single
-frames and contact sheets, lints, and narrates.
+frames and contact sheets, lints (errors, and warnings about how a
+scene looks over time), prints a scene's timeline of changes (`beats`),
+and narrates.
 
 ## Where
 
@@ -18,6 +20,7 @@ frames and contact sheets, lints, and narrates.
 | Public API: `Renderer`, `Engine`, `Frame`, `Time`; motion blur | `app/studio-core/src/render/` (`blur/`) |
 | Contact sheets (`strip`): parallel frames, the tiled sheet and its labels | `app/studio-core/src/strip/` |
 | Video folder, component lookup, the whole-frame timeline, scene fingerprints, lint | `app/studio-core/src/project/` (`timeline.rs`, `frames.rs`, `fingerprint.rs`, `lint/`) |
+| What a scene shows over time, from laid-out trees: sampling, the paint-order walker, lint's look warnings and their thresholds, `beats` | `app/studio-core/src/look/` (`sample.rs`, `walk.rs`, `items.rs`, `entities.rs`, `limits.rs`, `warn/`, `beats/`) |
 | `script.md`, the narration manifest, scene lengths and word cues | `app/studio-core/src/project/` (`script/`, `narration/`, `scenes.rs`), `app/studio-core/src/host/prelude/words.js` |
 | Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
 | Magic move: matching and blending two laid-out trees, OKLab colour, lag and fades | `app/studio-core/src/morph/` (`clock.rs`, `fade.rs`) |
@@ -43,7 +46,7 @@ frames and contact sheets, lints, and narrates.
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `pronounce.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `lint.rs`, `brief.rs`, `beats.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `pronounce.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -215,7 +218,7 @@ rewritten in place, every basic defined on an example before it is named,
 no slide shapes (card-and-arrow chains, a heading over lines, a formula
 that appears whole, a text-only scene), and no length budget.
 
-`SKILL.md` splits the work into three roles, each started as a
+`SKILL.md` splits the work into roles, each helper started as a
 [subagent](./harness.md#subagents) on the model Settings → Jobs gives that
 agent (`oculus studio agents` prints it and the call to make):
 
@@ -233,16 +236,30 @@ agent (`oculus studio agents` prints it and the call to make):
   component's only prop, `narrated`, set on narrated scenes) and
   `script.md`, lints and narrates before any scene is built, so builders
   cue to real word times.
-- **Build**, one helper per scene, writes that scene's components, cues
-  each beat with `word()`, and checks it with `strip --scene N` and
-  `frame` (a missing component elsewhere does not stop them; stale
-  narration anywhere does); a component two scenes share gets examples and
-  a `gallery --sheet`. It replies with its components, props, strip and
-  any narration change, which the director makes and re-narrates.
+- **Build**, one helper per scene, works from `build.md`: its first call is
+  `oculus studio brief <slug> --scene <id>`, which stands in for the
+  storyboard, script and manifest; it writes the scene's components, cues
+  each beat with `word()` on the brief's word times, checks as text with
+  `lint --scene` (every error fixed, each warning fixed or explained) and
+  `beats --scene`, then looks with the brief's `strip` or `frame` call,
+  reading the PNG at its fixed `-o` path in the same message (a missing
+  component elsewhere does not stop them; stale narration anywhere does).
+  A component two scenes share gets examples and a `gallery --sheet`. It
+  replies with its components, props, strip, kept warnings and any
+  narration change, which the director makes and re-narrates. The
+  director's brief is a few lines: slug, scene, component, shared keys and
+  the student's rules for the video.
+- **Review**, one helper per finished scene on the same scene role, runs
+  `brief`, `lint --scene` and `beats --scene`, looks at one strip and a few
+  frames, and replies `PASS` or a numbered fix list of at most ten (what,
+  when, where); it edits nothing. The director reads verdicts, not strips,
+  and sends a fix list to a fresh builder with the build brief and the
+  last reply.
 
-The director then lints to `[]`, strips the whole video, sends fixes to a
-fresh builder, and renders a draft, then `--final`. An agent whose role is
-off, or that cannot start helpers (agy), does the items itself in order.
+The director then lints until no errors are left, takes its one look at a
+strip of the whole video for the joins, and renders a draft, then
+`--final`. An agent whose role is off, or that cannot start helpers (agy),
+does the items itself in order.
 When `narrate` fails for want of a voice or the aligner, the agent stops and
 tells the student what to set in Settings -> Voice; it never downloads the
 aligner or the voice packs. After narrating with Kokoro it judges each
@@ -260,6 +277,12 @@ with `Write`, rewritten in place with `Steps`, pointed at with the
 overlays, shrunk into a corner, a value flying into its slot, carried to
 the next scene by key; never a formula appearing whole, stacked lines or
 maths as Text.
+
+`build.md` is the scene helper's procedure (brief, write, check as text,
+look, the bar every scene meets, the reply, review). The `studio-scene`
+role prompt carries it with the builder's sections of `reference.md`; on
+Codex the director's brief has the helper read them by file
+([harness.md](./harness.md#subagents)).
 
 `reference.md` is this page's authoring rules distilled for an agent
 (video.json, spoken form, the component contract, elements and style keys,
@@ -548,7 +571,8 @@ manifest. Scenes run one at a time, in video order.
   from nothing, with a warning.
 - **Output.** Per scene: the id, `narrated` or `cached`, the clip's length,
   its word count, and as warnings each word under `LOW_CONFIDENCE` and each
-  gap (times into the clip; lint fails on the same ones, at scene time),
+  gap (times into the clip; lint notes the same words and fails on the
+  same gaps, at scene time),
   then the notes. `--json` gives `{ dir, voice, scenes: [{ id, outcome,
   audio, duration, words, low_confidence, gaps, timings }], notes: [{
   scene, id, line, word, phonemes, guessed }], dropped, deleted, ms }`,
@@ -1080,6 +1104,10 @@ a magic move. `video.json`'s `motion` block takes `transition`,
   easing(t / dur)`. Each frame calls both components, each in its own fresh
   context, so a transition frame is seekable like any other. A's logs come
   first, prefixed `scene N:`.
+  A frame loads A's component only while the transition covers it; when A
+  has no component file, B is drawn alone, as after a cut, so a scene can
+  be checked before the scene before it is built. Lint still reports the
+  missing file, and a full render fails on A's own frames.
 - **Cascade, field by field:** the scene's `transition`, then `video.json`'s
   `motion.transition`, then the theme's `motion.transition`, then dissolve,
   0.7 s, easeInOutCubic, left. The bundled theme ships exactly that.
@@ -1424,6 +1452,18 @@ with no `hold`) is reported and not rendered. It collects every problem
 with its scene, scene id and component instead of stopping at the first;
 an error is reported once even if several renders hit it.
 
+Each `LintIssue` has a level: `Error` (everything below unless it says
+otherwise; any error makes `oculus studio lint` exit 1), `Warning` (how a
+scene looks over time, below) or `Note`. Notes carry a noun and a short
+form (`group`) so the CLI prints a scene's repeats as one line; warnings
+print one per line in full, since their quoted words say where to fix
+them. `LintReport::is_clean` counts errors only. `Project::lint_scene(i)`
+lints scene `i` alone: it renders that scene and the one before it (for the
+transition's middle) and keeps only scene `i`'s issues, its component's
+own (tokens, props, examples) and the video's `morphColor` and
+`motionBlur`; a component that fails to load is reported at scene `i`
+even when the scene before uses it too.
+
 Lint also reads the source and declared props of each component a scene
 uses (`project/lint/tokens.rs`, `project/lint/props.rs`). Each problem is an
 error at the literal's `file.tsx:line:col`:
@@ -1483,9 +1523,10 @@ For a narrated video lint also reports, each naming the scene id:
   `percent` ``). Letters and `, . ; : ! ? ' " - — ( )` pass, and `*` or `_`
   inside a word is emphasis. The rules are in
   `app/studio-core/src/project/lint/spoken.rs`;
-- each word whose aligner confidence is below `LOW_CONFIDENCE` (-8.0,
-  measured on Kokoro, where clean words stayed above -4.83; re-check it for
-  another TTS engine), since a mangled word smears its neighbours' timing;
+- as a note, not an error, each word whose aligner confidence is below
+  `LOW_CONFIDENCE` (-8.0, measured on Kokoro, where clean words stayed
+  above -4.83; re-check it for another TTS engine), since a mangled word
+  smears its neighbours' timing;
 - each manifest gap: ``the audio has unscripted speech after `word` (heard
   "…")``, or ``before the first word``.
 
@@ -1500,11 +1541,65 @@ server engine has nothing to check):
 - a word with no phonemes, a `$`, or a sentence too long for Kokoro with
   no comma to cut at (kind `script`, at the section's line).
 
-All of these are problems: any of them makes `oculus studio lint` exit 1.
-A voice that does not resolve is left to `narrate` to report. Lint's one
-other level is the note: each word Kokoro's guesser reads, as ``note: scene
-N `id` script.md:<line>: check pronunciation: ...``, with the state of the
-word's suggestion when one is stored. Notes never change the exit code.
+All of these but the unsure words are errors: any of them makes `oculus
+studio lint` exit 1. A voice that does not resolve is left to `narrate` to
+report. Each word Kokoro's guesser reads is a note: ``note: scene N `id`:
+script.md:<line>: check pronunciation: ...``, with the state of the word's
+suggestion when one is stored. Notes never change the exit code.
+
+### Look warnings: what a director would catch on a strip
+
+`crate::look` reads a scene's laid-out trees without painting them. Each
+scene that rendered cleanly is laid out alone (no transition) every 0.2 s
+and at each cue word's start, on worker threads (one `Engine` each, at most
+8, half the cores), and each tree is walked as paint composes it
+(`look/walk.rs`, which motion blur's `measure` shares): transforms,
+effective opacity, and ancestors' `clip` and `clipInset`. A node counts as
+shown when it paints something (fill, border, shadow, text, path, image),
+is above 5% effective opacity, and covers under 90% of the frame (a
+background). A path's box is its own outline as trimmed, stroke included,
+not the box it is fitted into. Shown nodes gather into entities: a key
+with its unkeyed descendants, a Math with all its pieces (the Box
+`math::build` makes, found by its zero-width strut), or a TSX line for
+nodes with no key near them. Every threshold is in `look/limits.rs`. A
+layout that throws mid-scene, which the renders at both ends miss, is an
+error naming its time.
+
+Each warning names the scene, the time span, the entity (its key, or
+`Box at Comp.tsx:line:col`) and the words said in that span:
+
+- **`off_frame`**: an entity more than 4 px past an edge, settled (moved
+  under 1 px) for two samples or more, after the transition in. Nodes
+  under a camera (a frame-filling ancestor with `scale`) are cropped on
+  purpose and skipped.
+- **`still`**: while the narration plays (`lead` to `lead + clip`), more
+  than 2.5 s where no entity's place (to the pixel), opacity (to 2%),
+  colours or shape changes; and nothing on screen by 0.5 s (``nothing is on
+  screen until 3.2 s``, or ``nothing is ever on screen``).
+- **`half_frame`**: for more than 3 s, everything shown sits in one half
+  of the frame (reaching at most 3% past the centre line) and is narrower
+  than half the frame; top and bottom too for a portrait video.
+- **`fragment`**: at the scene's last sample, once the last word is said
+  (and within its last 1.5 s), a Math showing at most 2 of its pieces and
+  under 25% of them (a stray `= .` left from a rewrite), or a node under 6
+  px both ways with nothing shown within 40 px.
+
+Calibration: on a 22-scene lecture video, a scene a reviewer judged good
+drew warnings only for its opening (a lone clock for 4 s, in the left half
+for 6.5 s); lint and its warnings take about 0.2 s a scene.
+
+### `beats` is the same samples as a timeline
+
+`SceneLook::beats` lists, per entity, when it appears, vanishes, moves
+(its centre more than 8 px), resizes (more than 8 px), recolours or is
+rewritten (its text, path, trim, reveal or a Math's shown pieces change),
+with 2-4 words said at that moment. A change over consecutive samples is
+one beat with a start and an end; an entity's changes that start together
+are one beat (`move+resize`); a change starting as it appears is part of
+the appear, which reports where it settles. The same beat at the same
+sample on keys that differ only in a trailing number shares a line
+(`d0-d3,d5`). A Math's rewrite lists the pieces it gains and loses
+(`+val -add`).
 
 ## Rendering a video
 
@@ -1623,7 +1718,26 @@ with the `Narration` error before any frame renders.
   gives `{path, times, width, height, tile: {width, height}, cols, ms,
   threads}`.
 - `frame` and `strip` take `--motion-blur` (a 180° shutter at the video's
-  fps); `frame` then reports the sub-frames it averaged.
+  fps); `frame` then reports the sub-frames it averaged. `-o` is relative
+  to the working directory, and its folder is made.
+- `oculus studio brief <DIR> --scene <ID|N>` prints one scene builder's
+  whole input (`app/src-tauri/src/studio/brief/`): the scene's index,
+  component and props and the folder; for the scenes before and after it,
+  their component, whether it resolves yet, and their storyboard entries'
+  `Carries in:` and `Hands on:`; its own `storyboard.md` entry verbatim
+  (from a `### <id>` heading, then the end of the line, a space or `(`, to
+  the next `#` to `###` heading or `---` line, outside code fences), less
+  its `Narration:` paragraph (to a blank line, a table row or a heading)
+  when the words below are printed; the
+  `notes/` paths the entry names, else every file in `notes/`; its length
+  and words, one line per sentence, each as `start word` at the time
+  `word()` returns (`Project::cued_words`), or the narration error and the
+  script text; and its `lint --scene`, `beats`, `strip`, `frame` (at the
+  scene's middle) and `gallery` calls with absolute `-o` paths, naming the
+  video by slug when it is in the data directory.
+  `--json` gives the same as `{index, count, id, component, props, dir,
+  previous, next, storyboard, storyboard_missing, notes: {named, paths,
+  missing}, narration: {kind: silent|spoken|unavailable, ...}, commands}`.
 - `frame` and `strip` read `script.md` and the narration manifest; stale or
   missing narration stops them with the `Narration` error, while `lint`
   lists it with the rest.
@@ -1653,13 +1767,26 @@ with the `Narration` error before any frame renders.
   quality, width, height, fps, frames, duration, audio, threads, segments:
   [{scene, id, outcome, frames, ms, fps}], pruned, ms}}`. See "Rendering a
   video".
-- `oculus studio lint <DIR>` prints each problem, then each note, and
-  exits 1 if there is any problem. With `--json` it prints one array: each
-  problem as `{level: "issue", scene, id, component, example, kind,
-  message, loc}` (`scene` and `component` null for a script section no
-  scene matches, or for a problem of the whole video), then each note as
-  `{level: "note", scene, id, line, kind: "guessed", message, word,
-  phonemes, guessed, review}`.
+- `oculus studio lint <DIR>` (`--scene <ID|N>` for `lint_scene`; the
+  voice checks are cut to that scene too) prints each error in full, one a
+  line, then the warnings, then the notes, and exits 1 if there is any
+  error. A scene's warnings or notes of one kind (`still span`, `unsure
+  word`, `guessed word`, ...) print as one line when there are several:
+  ``warning: scene 5 `mod` (ClockMod): 4 still spans: 0.9-7.7 s,
+  16.0-19.0 s, 27.8-32.8 s, …``. With no errors it ends `no errors` and the
+  counts, or `no problems`. With `--json` it prints one array: each issue
+  as `{level: "error"|"warning"|"note", scene, id, component, example,
+  kind, message, loc}` (`kind` is `off_frame`, `still`, `half_frame` or
+  `fragment` for a warning; `scene` and `component` null for a script
+  section no scene matches, or for a problem of the whole video), then each
+  guessed word as `{level: "note", scene, id, line, kind: "guessed",
+  message, word, phonemes, guessed, review}`.
+- `oculus studio beats <DIR> --scene <ID|N>` prints the scene's timeline
+  (see "`beats` is the same samples as a timeline"), one beat a line as
+  `  6.20  move     d12-d14  → (1180,420)…(1180,660) over 0.8 s  "… stands
+  up"`, at most 80 lines and how many were cut; `--json` gives every beat
+  as `{index, id, component, length, beats: [{t, end, event, who, detail,
+  words}]}`.
 
 - `oculus studio gallery <DIR> <Component>` renders each example of a
   component as `<DIR>/out/gallery/<Component>-<example>.png` (`--out`),

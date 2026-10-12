@@ -210,9 +210,9 @@ CLI puts the skill index in every turn, headless jobs included.
 
 **A skill is a folder of files.** `agents::docs::SKILLS` lists each skill's
 name and its files, `SKILL.md` first; `oculus-studio` also ships
-`reference.md` and `studio.d.ts` (`app/studio-core/studio.d.ts`), which
-`SKILL.md` tells the agent to open when it needs them, so only the index
-line costs a turn. Every write rewrites each file and deletes anything else
+`reference.md`, `build.md` and `studio.d.ts` (`app/studio-core/studio.d.ts`),
+which `SKILL.md` tells the agent to open when it needs them, so only the
+index line costs a turn. Every write rewrites each file and deletes anything else
 in the skill's folder: the folders are app-owned and agents may not write
 them, so a stray file could only be a stale instruction.
 
@@ -573,17 +573,24 @@ until one is picked.
 
 A chat agent may start helpers: the `oculus-studio` skill has a director
 fan research and scene building out to them. The two roles are
-`harness::studio_agents::ROLES`, `studio-research` and `studio-scene`, each
-with a short system prompt (`templates/STUDIO_RESEARCH.template.md`,
-`STUDIO_SCENE.template.md`) that points at the skill's section for the
-role. Each CLI starts a subagent its own way, so each gets the job's model
-its own way; `oculus studio agents [--agent A]` prints, per agent, the
-model and the exact call, which the skill tells the agent to use as printed.
+`harness::studio_agents::ROLES`, `studio-research` and `studio-scene`.
+`studio-research`'s system prompt (`templates/STUDIO_RESEARCH.template.md`)
+points at the skill's "Research" section. `studio-scene`, which builds,
+fixes and reviews a scene, gets `STUDIO_SCENE.template.md`, then the
+skill's `build.md`, then the builder's sections of `reference.md`
+(`BUILDER_SECTIONS`: Components to Looking, not the director's video.json,
+script.md, Narrate, Pronunciation, Render and Libraries), cut at their
+`## ` headings from the same compiled-in files the skill ships, so a
+builder reads no file for them and every builder starts from the same
+system prompt. A test fails when a named heading is missing. Each CLI starts a
+subagent its own way, so each gets the job's model its own way; `oculus
+studio agents [--agent A]` prints, per agent, the model and the exact call,
+which the skill tells the agent to use as printed.
 
 | CLI | How a subagent starts | Where the model comes from | Measured |
 | --- | --- | --- | --- |
 | Claude | the `Agent` tool, `subagent_type: "studio-scene"` | `--agents` at spawn: one definition per role with a model, its full id and `effort` (the tool's own `model` takes only an alias) | One Haiku turn under `acceptEdits`, `--permission-prompts none` and the sandboxed settings: the definitions loaded and the subagent's `Write` and `Bash` ran under the parent's mode and sandbox, no denial. Subagents run in the background by default: the turn ended with a `result` while the helper ran, and the CLI then started a turn of its own on the completion notice, so the skill asks for `run_in_background: false` |
-| Codex | `spawn_agent` with `model`, `reasoning_effort`, `fork_turns: "none"` | the call itself; Codex sets `model` only when a skill or the user asks, which the skill does | One `gpt-6-luna` turn through `app-server` with the thread's `workspace-write` policy and `approvalPolicy: never`: the child wrote under the writable roots, no server request, the parent waited (`wait`) and answered. 4 slots including the parent; a finished child holds its slot until `close_agent` |
+| Codex | `spawn_agent` with `model`, `reasoning_effort`, `fork_turns: "none"` | the call itself; Codex sets `model` only when a skill or the user asks, which the skill does. No role prompt: the scene brief opens with a sentence naming `build.md` and the builder's sections (`codex_scene_opening`, the same words in `SKILL.md` and `oculus studio agents`) | One `gpt-6-luna` turn through `app-server` with the thread's `workspace-write` policy and `approvalPolicy: never`: the child wrote under the writable roots, no server request, the parent waited (`wait`) and answered. 4 slots including the parent; a finished child holds its slot until `close_agent` |
 | opencode | the `task` tool, `subagent_type: "studio-scene"` | named agents in `opencode.json` (`mode: subagent`, `model`, `variant`), written from the jobs at each server start | Not run live. Read from opencode 1.18's task tool: `subagent_depth` counts parents, so 1 lets the thread's session spawn and a subagent not; a subagent session takes its parent's permissions, with `task` and `todowrite` denied unless its agent allows them |
 | agy | none | `invoke_subagent` takes a type name and no model | Not run: with no way to give the job's model, Studio starts none on agy and the agent does the work itself |
 
