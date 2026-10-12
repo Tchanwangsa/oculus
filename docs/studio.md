@@ -243,13 +243,20 @@ aligner. The story rules (explain with reasons, link each scene to the
 last, numbers given meaning, example then rule, the payoff shown, the end
 answering the opening question, phrasing the voice cannot fuse) and the
 taste rules (the picture carries the idea, the frame filled, every motion
-cued, stable magic-move keys, tokens over literals) close `SKILL.md`.
+cued, stable magic-move keys, tokens over literals) and a map of moving
+maths close `SKILL.md`: every formula a `Math`, written on per `\k` group
+with `Write`, rewritten in place with `Steps`, pointed at with the
+overlays, shrunk into a corner, a value flying into its slot, carried to
+the next scene by key; never a formula appearing whole, stacked lines or
+maths as Text.
 
 `reference.md` is this page's authoring rules distilled for an agent
 (video.json, spoken form, the component contract, elements and style keys,
-type sizes, motion, moving maths with `Morph` as states picked by time with
-a worked derivation, cues, transitions, each lint kind and what to do about
-it, and the commands' outputs). `studio.d.ts` types every prelude global;
+type sizes, motion, `Math` with its backslash rule, `\k` groups, theme
+colours and size, moving maths with `Write`, `Steps` and the overlays as
+five whole components checked with `strip` plus their gotchas, cues,
+transitions, each lint kind and what to do about it, and the commands'
+outputs). `studio.d.ts` types every prelude global;
 `src/host/tests/globals.rs` lists the globals a fresh sandbox context gains
 from the prelude (QuickJS's own `Object.getOwnPropertyNames(globalThis)`
 before and after, less the host's `__studio*` entry points) and fails when
