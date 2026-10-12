@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 fn is_runnable(path: &Path) -> bool {
-    std::process::Command::new(path)
+    crate::runtime::platform::command(path)
         .arg("-version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -45,7 +45,7 @@ pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path, lead_in: u32) -> bool {
     if lead_in == 0 {
         return std::fs::rename(raw, out).is_ok();
     }
-    std::process::Command::new(ffmpeg)
+    crate::runtime::platform::command(ffmpeg)
         .args([
             "-y",
             "-ss",

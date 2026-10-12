@@ -80,6 +80,14 @@ last updated (`modified_at` or the session's last save) and a word count.
   fragments through `frontmatterFragments`, which drops the one from 0 when a
   change in that window could make or unmake the block, as the core's
   `incremental.rs` restarts at 0.
+- **The note parser trims Lezer's fragments by a line at each edit**
+  (`lineSafeFragments`, `app/src/components/documents/editor/core/fragments.ts`,
+  wired in `core/language.ts`): `@lezer/markdown` reuses a block on the
+  edited line though its indentation changed (`    a` losing a space stays
+  code), and keeps a paragraph whose end hung on the line after next (a table
+  header over a just-broken delimiter row). Each fragment touching a change
+  starts a line later and ends a line earlier, so CodeMirror's incremental
+  tree equals a fresh parse, as the core's `incremental.rs` does.
 - **Toolbar buttons and shortcuts are plain CodeMirror commands**
   (`app/src/components/documents/editor/commands/`) that rewrite markdown
   and unwrap when already applied, so they work in both modes. An inline mark

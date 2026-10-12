@@ -7,3 +7,5 @@ pub mod native_layer;
 pub(crate) mod usage;
 #[cfg(target_os = "macos")]
 pub mod webcrypto;
+#[cfg(any(windows, test))]
+pub(crate) mod window;

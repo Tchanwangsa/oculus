@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -47,7 +46,7 @@ pub struct OpencodeServer {
 
 impl OpencodeServer {
     pub fn spawn(cfg: OpencodeSpawn) -> Result<Arc<Self>, String> {
-        let mut cmd = Command::new(&cfg.bin);
+        let mut cmd = crate::runtime::platform::cli_command(&cfg.bin)?;
         cmd.args(SERVE_ARGS)
             .env_clear()
             .envs(cfg.env.iter().map(|(k, v)| (k, v)))

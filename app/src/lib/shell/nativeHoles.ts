@@ -1,4 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isWindows } from "@/lib/platform";
+import { bottomRadii, portalsOver } from "./holeGeometry";
+import { sendRegions } from "./nativeRegions";
 
 /**
  * Holes the app cuts through itself onto the native pages under it. Every
@@ -17,6 +20,10 @@ import { invoke } from "@tauri-apps/api/core";
  *
  * Open a hole only once its page is placed, and close it before the page is
  * hidden or parked, or the bare window shows through for a frame.
+ *
+ * Windows keeps its pages on top instead and writes nothing to `#root`: the
+ * same holes, minus the portals over them, become each page's window region
+ * (`nativeRegions.ts`).
  */
 
 export interface NativeHole {
@@ -64,6 +71,10 @@ export function suspendHoles(): () => void {
 }
 
 function update(): void {
+  if (isWindows) {
+    sendRegions(suspended ? [] : [...holes]);
+    return;
+  }
   const root = document.getElementById("root");
   if (!root) return;
   const path = holes.size && !suspended ? holePath(root, [...holes]) : "";
@@ -99,29 +110,6 @@ function holePath(root: HTMLElement, slots: HTMLElement[]): string {
   return `path(nonzero, "${d}")`;
 }
 
-/** The card's inner radius at each bottom corner the slot shares with it, so
- *  the page takes the card's rounded corners; a corner inside the card (a
- *  split pane's inner edge) stays square. */
-function bottomRadii(slot: HTMLElement, r: DOMRect): [number, number] {
-  const card = slot.closest("main");
-  if (!card) return [0, 0];
-  const c = card.getBoundingClientRect();
-  const cs = getComputedStyle(card);
-  const px = (v: string) => parseFloat(v) || 0;
-  if (Math.abs(r.bottom - (c.bottom - px(cs.borderBottomWidth))) > 1) return [0, 0];
-  const fit = (v: number) =>
-    Math.round(Math.min(Math.max(0, v), r.width / 2, r.height) * 100) / 100;
-  const left =
-    Math.abs(r.left - (c.left + px(cs.borderLeftWidth))) <= 1
-      ? px(cs.borderBottomLeftRadius) - px(cs.borderLeftWidth)
-      : 0;
-  const right =
-    Math.abs(r.right - (c.right - px(cs.borderRightWidth))) <= 1
-      ? px(cs.borderBottomRightRadius) - px(cs.borderRightWidth)
-      : 0;
-  return [fit(left), fit(right)];
-}
-
 function setBlocked(next: boolean): void {
   if (next === blocked) return;
   blocked = next;
@@ -148,6 +136,10 @@ function watch(): void {
     attributeFilter: ["style", "data-state"],
   });
   window.addEventListener("resize", schedule);
+  // A popover's open animation changes no attribute, and its rect mid-way
+  // is scaled and shifted; measure again once it settles.
+  document.addEventListener("animationend", schedule, true);
+  document.addEventListener("transitionend", schedule, true);
 }
 
 function unwatch(): void {
@@ -155,30 +147,13 @@ function unwatch(): void {
   mutations?.disconnect();
   resizes = mutations = null;
   window.removeEventListener("resize", schedule);
+  document.removeEventListener("animationend", schedule, true);
+  document.removeEventListener("transitionend", schedule, true);
   if (frame) cancelAnimationFrame(frame);
   frame = 0;
 }
 
-function overlaps(a: DOMRect, b: DOMRect): boolean {
-  return (
-    a.width > 0 &&
-    a.height > 0 &&
-    a.left < b.right &&
-    a.right > b.left &&
-    a.top < b.bottom &&
-    a.bottom > b.top
-  );
-}
-
-/** Whether a portal (popover, menu, dialog…) lands over the slot. A portal's
- *  wrapper is an unstyled div, so its children are measured too. */
+/** Whether a portal (popover, menu, dialog…) lands over the slot. */
 function coveredBy(slot: HTMLElement): boolean {
-  const page = slot.getBoundingClientRect();
-  for (const portal of document.body.children) {
-    if (portal.id === "root" || !(portal instanceof HTMLElement)) continue;
-    for (const el of [portal, ...portal.children]) {
-      if (overlaps(el.getBoundingClientRect(), page)) return true;
-    }
-  }
-  return false;
+  return portalsOver(slot.getBoundingClientRect()).length > 0;
 }

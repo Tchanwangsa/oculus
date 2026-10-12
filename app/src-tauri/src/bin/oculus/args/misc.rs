@@ -92,32 +92,37 @@ pub(crate) enum AuthAction {
 
 #[derive(Subcommand)]
 pub(crate) enum KeydAction {
-    /// Install oculus-keyd and load its LaunchAgent
+    /// Install oculus-keyd on macOS; on Windows, open Oculus to start it
     ///
-    /// A keyd whose helper app is nested in the Oculus app is registered where
-    /// it is; any other has its helper app copied to `bin/` in the data dir
-    /// first, so the LaunchAgent never points into a build tree. Loading it prompts for nothing: keyd reads the
-    /// keychain only when something first uses a stored key.
+    /// On macOS, a keyd whose signed helper app is nested in Oculus is
+    /// registered in place; any other has its helper app copied to `bin/`
+    /// in the data dir first. Its LaunchAgent never points into a build tree.
+    /// Loading it reads no stored key.
+    ///
+    /// On Windows, only the GUI starts the resident broker. This command
+    /// cannot activate it; open Oculus instead.
     Install {
-        /// The signed keyd to install: its helper app, or the executable
-        /// inside it. Defaults to the one in this binary's app bundle, or, in
-        /// a debug build, `bun run keyd`'s output.
+        /// The signed keyd to install on macOS: its helper app or executable
+        /// inside it. Defaults to this binary's bundled keyd, or, in a debug
+        /// build, `bun run keyd`'s output.
         #[arg(long, value_name = "PATH")]
         from: Option<PathBuf>,
         /// Do nothing when the installed keyd was built from the same source
-        /// and the agent already runs it
+        /// and its registration already runs it
         #[arg(long)]
         if_changed: bool,
     },
-    /// Whether keyd is installed, loaded, current and answering
+    /// Whether keyd is registered, current and answering
     ///
-    /// Sends keyd a `ping`, which starts it if launchd has it loaded. Never
-    /// reads or prints a stored key.
+    /// Sends keyd a `ping`. On macOS, this starts it if launchd has it loaded.
+    /// On Windows, it only checks the existing resident broker; open Oculus
+    /// to start it. Never reads or prints a stored key.
     Status,
-    /// Unload keyd and remove its LaunchAgent, helper app and stamp
+    /// Stop keyd and remove its registration and stamp
     ///
-    /// The vault and the keychain's master key stay, so a reinstall finds
-    /// every stored key again.
+    /// On macOS, unloads its LaunchAgent and removes its copied helper app.
+    /// On Windows, stops the verified resident broker. The vault and its
+    /// master key stay, so a reinstall finds every stored key again.
     Uninstall,
 }
 

@@ -137,7 +137,11 @@ pub(in crate::okta) fn with_record<T>(
 fn save(path: &Path, body: &str) -> Result<(), String> {
     files::replace_file(path, |tmp| {
         files::write_private(tmp, body.as_bytes())?;
-        std::fs::File::open(tmp)?.sync_all()
+        // Windows FlushFileBuffers requires write access on the reopened handle.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(tmp)?
+            .sync_all()
     })?;
     if let Some(dir) = path.parent() {
         files::sync_dir(dir).map_err(|e| e.to_string())?;

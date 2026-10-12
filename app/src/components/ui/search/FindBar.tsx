@@ -146,7 +146,7 @@ export function FindBar({
               if (e.key === "Enter") {
                 e.preventDefault();
                 if (!query) return;
-                if (e.metaKey || e.altKey) replace.onReplaceAll();
+                if (e.metaKey || e.altKey || e.ctrlKey) replace.onReplaceAll();
                 else replace.onReplace();
               }
               if (e.key === "Escape") {

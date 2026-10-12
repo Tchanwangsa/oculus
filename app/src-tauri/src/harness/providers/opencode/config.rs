@@ -38,7 +38,7 @@ fn render_config(library: &Path, prompt: &str, one_off: &OneOffPrompts) -> Strin
     CONFIG_TEMPLATE
         .replace(
             "{{LIBRARY}}",
-            &json_fragment(&library.display().to_string()),
+            &json_fragment(&crate::library::paths::slash_path(library)),
         )
         .replace("\"{{PROMPT}}\"", &json_string(prompt))
         .replace("\"{{NAMING_PROMPT}}\"", &json_string(one_off.naming))

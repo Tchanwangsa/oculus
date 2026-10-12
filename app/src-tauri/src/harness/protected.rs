@@ -73,11 +73,11 @@ mod tests {
         let lib = Path::new("/l");
         let named = named_root_files(lib);
         for file in &named {
-            let path = file.to_str().unwrap();
+            let path = crate::library::paths::slash_path(file);
             assert!(
                 ROOT_FILE_GLOBS
                     .iter()
-                    .any(|g| glob_covers(&format!("/l/{g}"), path)),
+                    .any(|g| glob_covers(&format!("/l/{g}"), &path)),
                 "no root glob covers {path}"
             );
         }

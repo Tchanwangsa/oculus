@@ -25,7 +25,7 @@ const LOCAL_READY: bool = false;
 
 /// Shown under the disabled option, and as the refusal if it is chosen anyway.
 const LOCAL_UNAVAILABLE: &str =
-    "The local embedder is a separate program that runs on this Mac, and Oculus does not ship \
+    "The local embedder is a separate program that runs on this computer, and Oculus does not ship \
      one yet.";
 
 /// One selectable backend. Labels live beside the refusal so they cannot drift.
@@ -130,7 +130,7 @@ fn engines() -> Vec<EngineOption> {
         EngineOption {
             id: Engine::Local.as_str(),
             label: "Local server",
-            detail: "Pages are embedded by a server running on this Mac. Nothing leaves it.",
+            detail: "Pages are embedded by a server running on this computer. Nothing leaves it.",
             available: LOCAL_READY,
             unavailable_reason: (!LOCAL_READY).then_some(LOCAL_UNAVAILABLE),
         },

@@ -1,7 +1,7 @@
 use super::seed::{on_university_hosts, sent_to};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use super::seed::{sessions_from, sso_changed};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::sync::Mutex;
 
 const CANVAS_HOST: &str = "canvas.lms.unimelb.edu.au";
@@ -38,7 +38,7 @@ fn sessions_are_seeded_only_on_the_universitys_hosts() {
     assert!(!native("www.foo.edu"));
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[test]
 fn okta_replaces_the_jar_only_when_the_stored_header_changed() {
     let mut seeded = None;
@@ -59,7 +59,7 @@ fn okta_replaces_the_jar_only_when_the_stored_header_changed() {
     assert!(!sso_changed(&mut seeded, None));
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[test]
 fn sessions_come_from_keyd_and_a_missing_keyd_or_session_seeds_nothing() {
     use crate::providers::credentials::Credentialed;

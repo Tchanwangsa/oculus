@@ -107,7 +107,7 @@ export function useEditorFind(
     });
     // The menu leaves ⌥⌘F to the webview; `code`, since ⌥ turns F into ƒ.
     const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || !e.altKey || e.shiftKey || e.ctrlKey || e.code !== "KeyF") return;
+      if (!(e.metaKey || e.ctrlKey) || !e.altKey || e.shiftKey || e.code !== "KeyF") return;
       e.preventDefault();
       e.stopPropagation();
       handlers.current.openFind(!view.state.readOnly);

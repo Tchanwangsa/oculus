@@ -1,3 +1,4 @@
+import { shortcut } from "@/lib/platform";
 import { useState, useSyncExternalStore } from "react";
 import { AppWindow, ArrowsOutSimple, Plus, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -75,7 +76,7 @@ export function PanelActions({ tabId }: { tabId: number }) {
         </TooltipTrigger>
         <TooltipContent className="flex flex-col items-start gap-0.5">
           Open as full page
-          <span className="text-[11px] text-background/60">⌘-click for a new tab</span>
+          <span className="text-[11px] text-background/60">{shortcut("mod")}+click for a new tab</span>
         </TooltipContent>
       </Tooltip>
 

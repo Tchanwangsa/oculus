@@ -7,7 +7,7 @@ use keyd_core::paths::{self, BINARY};
 /// What `<bin> source-hash` prints. Running it also proves the file is a keyd
 /// that starts.
 pub fn source_hash_of(bin: &Path) -> Result<String, String> {
-    let out = std::process::Command::new(bin)
+    let out = crate::runtime::platform::command(bin)
         .arg("source-hash")
         .output()
         .map_err(|e| format!("running {}: {e}", bin.display()))?;
@@ -34,6 +34,14 @@ pub fn candidate() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
     if let Some(bundled) = paths::bundled_program(&exe).filter(|p| p.is_file()) {
         return Some(bundled);
+    }
+    #[cfg(windows)]
+    if cfg!(debug_assertions) {
+        return Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../keyd/target/signed/oculus-keyd.exe")
+            .canonicalize()
+            .ok()
+            .filter(|p| p.is_file());
     }
     if cfg!(debug_assertions) {
         let built = Path::new(env!("CARGO_MANIFEST_DIR"))

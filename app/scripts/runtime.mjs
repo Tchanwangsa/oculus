@@ -51,7 +51,9 @@ export const keydHelperApp = "Oculus Helper.app";
  * (`keyd_core::paths::helper_program`). The release bundle copies the staged
  * helper to `Contents/Helpers/` (`bundle.macOS.files` in tauri.macos.conf.json).
  */
-export const helperProgram = (helper) => join(helper, "Contents", "MacOS", `Oculus Helper${exe}`);
+export const helperProgram = (helper) => process.platform === "win32"
+  ? join(helper, "oculus-keyd.exe")
+  : join(helper, "Contents", "MacOS", "Oculus Helper");
 
 /**
  * Copy a signed helper app to `dir` (`binaries/` unless a script is pointed
@@ -59,6 +61,12 @@ export const helperProgram = (helper) => join(helper, "Contents", "MacOS", `Ocul
  * place leaves the kernel's cached signature stale.
  */
 export function stageKeyd(helper, dir = binaries) {
+  if (process.platform === "win32") {
+    const dest = join(dir, `oculus-keyd-${hostTriple()}.exe`);
+    mkdirSync(dir, { recursive: true });
+    copyFileSync(helperProgram(helper), dest);
+    return dest;
+  }
   const dest = join(dir, keydHelperApp);
   const partial = join(dir, `.${keydHelperApp}.${process.pid}.part`);
   mkdirSync(dir, { recursive: true });

@@ -21,11 +21,11 @@ import { useBrowserViewport } from "./browser/useBrowserViewport";
 
 /**
  * The `/browse/:id` route: a toolbar over an empty slot. Rust places the tab's
- * native WKWebView under the app's transparent webview there
- * (`app/src-tauri/src/shell/browser/`), and the app cuts a hole over the slot
- * to show it (`lib/shell/nativeHoles.ts`). Portals, the suggestion list among
- * them, draw over the live page; anything inside `#root` over the slot falls
- * in the hole.
+ * native page there (`app/src-tauri/src/shell/browser/`), and the app opens a
+ * hole over the slot to show it (`lib/shell/nativeHoles.ts`): under the app's
+ * transparent webview on macOS, clipped to the hole on Windows. Portals, the
+ * suggestion list among them, draw over the live page; anything inside
+ * `#root` over the slot is hidden by it.
  */
 export default function BrowserPage() {
   const params = useParams();

@@ -1,0 +1,45 @@
+# FFmpeg configure flags shared by every target; build.sh adds the
+# target's toolchain flags. One flag per line; `#` starts a comment.
+# Licence: no --enable-gpl and no --enable-nonfree, so the result is LGPL;
+# --enable-version3 makes it LGPL version 3 or later.
+
+--enable-version3
+--disable-everything
+--disable-autodetect
+--disable-network
+--disable-doc
+--disable-ffplay
+--disable-ffprobe
+--disable-avdevice
+--disable-debug
+--enable-static
+--disable-shared
+
+# Local files and the stdout pipe the frame readers use.
+--enable-protocol=file,pipe
+
+# Containers a student's lecture or module video can arrive in.
+--enable-demuxer=mov,matroska,ogg,mp3,wav,w64,aiff,aac,ac3,eac3,flac,avi,mpegts,mpegps,asf
+
+# Video decoders, for thumbnails and slide-change frames. AV1 goes through
+# libdav1d (BSD-2-Clause).
+--enable-libdav1d
+--enable-decoder=h264,hevc,mpeg4,h263,mpeg1video,mpeg2video,msmpeg4v3,wmv1,wmv2,wmv3,vc1,mjpeg,vp8,vp9,theora,libdav1d
+
+# Audio decoders, for transcription.
+--enable-decoder=aac,aac_latm,mp3,mp3float,mp2,mp2float,opus,vorbis,flac,alac,ac3,eac3,wmav1,wmav2,wmapro
+--enable-decoder=pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_f32le,pcm_f64le,pcm_u8,pcm_alaw,pcm_mulaw,adpcm_ima_wav,adpcm_ms
+
+--enable-parser=h264,hevc,mpeg4video,mpegvideo,h263,vc1,mjpeg,vp8,vp9,av1,aac,aac_latm,mpegaudio,opus,vorbis,flac,ac3
+
+# Speech audio is Opus through libopus (BSD-3-Clause); the rest is native.
+--enable-libopus
+--enable-encoder=libopus,pcm_s16le,mjpeg,rawvideo
+
+--enable-muxer=ogg,wav,mp4,mov,image2,rawvideo
+
+# The app's own filters, plus those the ffmpeg CLI inserts itself: format
+# conversion, -ss/-t trimming, container cropping and display-matrix rotation.
+--enable-filter=scale,fps,format,aformat,aresample,null,anull,copy,trim,atrim,crop,transpose,hflip,vflip,rotate
+
+--enable-bsf=null,aac_adtstoasc,extract_extradata,h264_mp4toannexb,hevc_mp4toannexb,vp9_superframe

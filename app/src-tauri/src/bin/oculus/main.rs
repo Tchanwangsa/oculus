@@ -132,23 +132,10 @@ fn read_input(source: &str, what: &str) -> Result<String, String> {
 
 /// Prompt without echoing; echo is restored even if the read fails.
 fn read_secret(prompt: &str) -> Result<String, String> {
-    use std::io::Write;
-    print!("{prompt}");
-    std::io::stdout().flush().ok();
-
-    let hidden = std::process::Command::new("stty")
-        .arg("-echo")
-        .status()
-        .is_ok();
-    let mut line = String::new();
-    let read = std::io::stdin().read_line(&mut line);
-    if hidden {
-        std::process::Command::new("stty").arg("echo").status().ok();
-        println!();
-    }
-    read.map_err(|e| e.to_string())?;
-
-    let value = line.trim().to_string();
+    let value = rpassword::prompt_password(prompt)
+        .map_err(|e| format!("cannot read hidden input: {e}"))?
+        .trim()
+        .to_string();
     if value.is_empty() {
         return Err("nothing entered".to_string());
     }

@@ -18,7 +18,7 @@ function release(service: DockServiceId, paneId: number) {
 }
 
 /**
- * Where a dock page sits: placed under the slot while its tab is in front,
+ * Where a dock page sits: placed at the slot while its tab is in front,
  * with a hole cut over it once Rust has placed it; parked otherwise, the hole
  * closed first. Parking moves the page off-screen and keeps it running; the
  * browser's hook hides instead, which throttles timers.

@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -9,7 +10,7 @@ use super::page::reload_page;
 use crate::sources::institution;
 
 /// A page on the university's hosts loads only after the saved sessions are
-/// in WebKit's jar: Canvas, the SSO host, and anything in the domain they
+/// in the browser's jar: Canvas, the SSO host, and anything in the domain they
 /// share (the university's single sign-on fronts its other services too).
 pub(super) fn wants_sessions(url: &url::Url) -> bool {
     let Some(canvas) = institution::canvas_host() else {
@@ -30,13 +31,13 @@ pub(super) fn on_university_hosts(host: &str, canvas: &str, sso: Option<&str>) -
 /// browser's own SSO cookies are the freshest, so they are replaced only by a
 /// header oculus-keyd now holds that differs (a headless sign-in); otherwise a
 /// seed fills gaps.
-#[cfg(target_os = "macos")]
-static SSO_SEEDED: Mutex<Option<u64>> = Mutex::new(None);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(super) static SSO_SEEDED: Mutex<Option<u64>> = Mutex::new(None);
 
 /// Whether the SSO host's `now` header replaces the jar's cookies, given the
 /// fingerprint `seeded` of the last one seeded; records `now` as seeded. The
 /// first seed of a run replaces when keyd holds a header at all.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(super) fn sso_changed(seeded: &mut Option<u64>, now: Option<&str>) -> bool {
     use std::hash::{Hash, Hasher};
 
@@ -55,8 +56,8 @@ pub(super) fn sso_changed(seeded: &mut Option<u64>, now: Option<&str>) -> bool {
 /// scraper keeps Canvas's fresh, so it always replaces. Asks oculus-keyd, so
 /// not from the main thread; an absent keyd, one with no session, or no
 /// profile seeds nothing.
-#[cfg(target_os = "macos")]
-fn saved_sessions() -> Vec<(String, String, bool)> {
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(super) fn saved_sessions() -> Vec<(String, String, bool)> {
     let Some(inst) = institution::current() else {
         return Vec::new();
     };
@@ -69,7 +70,7 @@ fn saved_sessions() -> Vec<(String, String, bool)> {
 
 /// `saved_sessions` for the keyd `keyd` reaches and the hosts `canvas` and
 /// `sso`, comparing the SSO header with the fingerprint in `sso_seeded`.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(super) fn sessions_from(
     keyd: &crate::providers::credentials::Credentialed,
     sso_seeded: &Mutex<Option<u64>>,
@@ -79,7 +80,7 @@ pub(super) fn sessions_from(
     let cookies = match keyd.session_get() {
         Ok(cookies) => cookies,
         Err(e) => {
-            crate::auth::report("could not read the stored sessions to seed WebKit", &e);
+            crate::auth::report("could not read the stored sessions to seed the browser", &e);
             return Vec::new();
         }
     };
@@ -341,7 +342,12 @@ pub(super) fn recover_sso(app: &AppHandle, id: u32) {
     });
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
+    super::windows::seed_sessions(app, then);
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn seed_sessions(_app: &AppHandle, then: impl FnOnce() + Send + 'static) {
     then();
 }
@@ -425,7 +431,12 @@ pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
+    super::windows::clear_sessions(app, then);
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn clear_sessions(_app: &AppHandle, then: impl FnOnce() + Send + 'static) {
     then();
 }

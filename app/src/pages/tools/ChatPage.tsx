@@ -1,3 +1,4 @@
+import { shortcut } from "@/lib/platform";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Composer } from "@/components/harness/composer/Composer";
@@ -240,7 +241,7 @@ export default function ChatPage() {
 
       <div ref={columnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
         <PaneHeaderRow className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
-          <SideNavCollapseToggle collapsed={listPanel.collapsed} onToggle={listPanel.toggle} shortcut="⌘⌥B" />
+          <SideNavCollapseToggle collapsed={listPanel.collapsed} onToggle={listPanel.toggle} shortcut={shortcut("mod+alt+B")} />
           <PaneTrail>
             <PaneTitle>{fresh ? "New thread" : thread ? thread.title?.trim() || "Untitled" : ""}</PaneTitle>
           </PaneTrail>

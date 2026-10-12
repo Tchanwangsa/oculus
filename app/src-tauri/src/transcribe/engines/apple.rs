@@ -4,7 +4,6 @@
 //! minute — so they are split into caption-sized cues on their word timings.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::transcribe::{Engine, EngineError, Segment, Settings};
 
@@ -60,7 +59,7 @@ impl Engine for Apple {
     }
 
     fn transcribe(&self, audio: &Path) -> Result<Vec<Segment>, EngineError> {
-        let mut command = Command::new(&self.helper);
+        let mut command = crate::runtime::platform::command(&self.helper);
         command.arg("transcribe");
         if let Some(locale) = &self.locale {
             command.arg("--locale").arg(locale);
@@ -266,7 +265,10 @@ pub(in crate::transcribe) fn status(resource_dir: Option<PathBuf>) -> Status {
         Ok(helper) => helper,
         Err(reason) => return Status::unavailable(reason),
     };
-    let output = match Command::new(&helper).arg("locales").output() {
+    let output = match crate::runtime::platform::command(&helper)
+        .arg("locales")
+        .output()
+    {
         Ok(output) => output,
         Err(e) => {
             return Status::unavailable(format!("could not run the on-device speech helper: {e}"))

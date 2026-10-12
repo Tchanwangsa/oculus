@@ -1,3 +1,4 @@
+import { shortcut } from "@/lib/platform";
 import { useRef, useState } from "react";
 import { MagnifyingGlass, X } from "@phosphor-icons/react";
 import {
@@ -222,7 +223,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         ) : (
           <>
             <Hint keys="↵" label="Open" />
-            <Hint keys="⌘ ↵" label="Open in new tab" />
+            <Hint keys={shortcut("mod+Enter")} label="Open in new tab" />
           </>
         )}
         <Hint keys="esc" label="Close" />

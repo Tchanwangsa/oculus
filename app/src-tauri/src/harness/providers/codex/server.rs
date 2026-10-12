@@ -1,7 +1,6 @@
 //! The `codex app-server` child: spawn, requests and the thread calls.
 
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
@@ -29,7 +28,7 @@ pub struct CodexServer {
 
 impl CodexServer {
     pub fn spawn(cfg: CodexSpawn) -> Result<Arc<Self>, String> {
-        let mut cmd = Command::new(&cfg.bin);
+        let mut cmd = crate::runtime::platform::cli_command(&cfg.bin)?;
         cmd.arg("app-server")
             .env_clear()
             .envs(cfg.env.iter().map(|(k, v)| (k, v)));

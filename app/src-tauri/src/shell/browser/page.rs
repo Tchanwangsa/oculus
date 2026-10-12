@@ -98,7 +98,7 @@ pub(super) fn go_history(app: &AppHandle, id: u32, delta: i32) {
 #[cfg(not(target_os = "macos"))]
 pub(super) fn go_history(app: &AppHandle, id: u32, delta: i32) {
     if let Some(webview) = page(app, id) {
-        webview.eval(&format!("history.go({delta})")).ok();
+        webview.eval(format!("history.go({delta})")).ok();
     }
 }
 
@@ -197,7 +197,7 @@ pub(super) fn find_string(app: &AppHandle, id: u32, query: String, backwards: bo
     if let Some(webview) = page(app, id) {
         let escaped = serde_json::to_string(&query).unwrap_or_else(|_| "\"\"".into());
         webview
-            .eval(&format!("window.find({escaped}, false, {backwards}, true)"))
+            .eval(format!("window.find({escaped}, false, {backwards}, true)"))
             .ok();
     }
     app.emit_to(

@@ -35,6 +35,7 @@ the root `CLAUDE.md` holds only the rules.
 | [editor-core.md](./editor-core.md) | The Rust editor core, its oracles, and shadow mode checking it against every note editor in dev |
 | [cli.md](./cli.md) | The `oculus` binary: what each command writes, and the agent docs it generates |
 | [cli-reference.md](./cli-reference.md) | Every command and flag — generated from the binary, not hand-kept |
+| [windows.md](./windows.md) | Windows platform boundaries, broker security, data paths and release acceptance |
 | [development.md](./development.md) | Building, running and checking each piece |
 
 ## Repo layout

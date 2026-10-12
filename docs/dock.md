@@ -63,7 +63,7 @@ Instagram's page also leaves an open thread when it parks
   sliver would flip these sites to their mobile layouts.
 - A page parks when its tab leaves the front and when the route unmounts;
   popovers draw over the live page
-  ([architecture.md](./architecture.md#native-pages-sit-under-the-app-seen-through-holes-in-root)). Two panes
+  ([architecture.md](./architecture.md#native-pages-show-through-holes-the-app-opens)). Two panes
   on one service share one page; only the pane that last placed it may move
   or park it.
 - Rust re-lays out the shown page on window resize, and resizes parked ones

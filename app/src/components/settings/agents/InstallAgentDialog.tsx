@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CheckCircle, Copy, CircleNotch, Warning } from "@phosphor-icons/react";
 
-import type { Provider } from "@/lib/harness";
+import { providerAvailability, type BridgeHealth, type Provider } from "@/lib/harness";
 import { copyText } from "@/lib/utils";
 import { useTauriEvent } from "@/hooks/backend/useEvents";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,24 @@ interface InstallLine {
 }
 
 const INSTALL_EVENT = "harness-install";
+
+/** Only an actual route offer can expose an Install action in Settings. */
+export function useAgentInstallOffers(health: BridgeHealth[] | null) {
+  const [offers, setOffers] = useState<Partial<Record<Provider, InstallOffer | null>>>({});
+  useEffect(() => {
+    let live = true;
+    const missing = (health ?? []).filter((row) => !row.path && providerAvailability(row.provider).install);
+    void Promise.all(missing.map(async (row) => {
+      const offer = await invoke<InstallOffer | null>("harness_install_offer", { provider: row.provider })
+        .catch(() => null);
+      return [row.provider, offer] as const;
+    })).then((rows) => {
+      if (live) setOffers(Object.fromEntries(rows));
+    });
+    return () => { live = false; };
+  }, [health]);
+  return offers;
+}
 
 export interface AgentInstallRun {
   provider: Provider;
@@ -96,40 +114,28 @@ export function useAgentInstall(onFinished: () => void): {
 
 /**
  * Installs a missing CLI agent without owning the user's package manager.
- * Rust reports which of `brew`/`npm`/`bun`/`curl` a login shell can see (a
- * Dock-launched app lacks the profile PATH); every route shows its literal
- * command with Copy, and *Install* runs exactly that via `$SHELL -lc`. Nothing
+ * Rust reports the available package managers; Settings loads the offer before
+ * exposing Install. Every route shows its literal command with Copy, and
+ * Install uses the native runner (a login shell on Unix). Nothing
  * needing `sudo` is offered — a GUI app cannot prompt for it.
  *
  * The output stream is listened to in `useAgentInstall`, not a store: it is a
  * foreground job with no meaning once Settings is left.
  */
 export function InstallAgentDialog({
-  provider,
   label,
+  offer,
   run,
   onStart,
   onClose,
 }: {
-  provider: Provider;
   label: string;
+  offer: InstallOffer;
   run: AgentInstallRun | null;
   onStart: (route: InstallRoute) => void;
   onClose: () => void;
 }) {
-  const [offer, setOffer] = useState<InstallOffer | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
   const [copied, setCopied] = useState<InstallManager | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    invoke<InstallOffer>("harness_install_offer", { provider })
-      .then((o) => live && setOffer(o))
-      .catch((e) => live && setFailed(String(e)));
-    return () => {
-      live = false;
-    };
-  }, [provider]);
 
   const log = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -147,7 +153,7 @@ export function InstallAgentDialog({
 
   // With something runnable, list only runnable routes; otherwise list every
   // command for copying.
-  const listed = offer ? (offer.runnable ? offer.routes.filter((r) => r.available) : offer.routes) : [];
+  const listed = offer.runnable ? offer.routes.filter((r) => r.available) : offer.routes;
 
   const description = run
     ? run.result
@@ -155,8 +161,8 @@ export function InstallAgentDialog({
         ? `${label} is installed. Its row has been rechecked.`
         : `The command ${run.result.status}. The output is below.`
       : "Running. This usually takes a minute, and the output is live."
-    : offer && !offer.runnable
-      ? "This machine has no Homebrew, node or bun that Oculus can drive, and no curl to fetch an installer with. Copy a command and run it wherever you have a shell."
+    : !offer.runnable
+      ? "Oculus could not find a package manager for these routes. Copy a command and run it in a terminal after installing its package manager."
       : `Oculus runs the command you pick, exactly as it is written here. Nothing here needs your password.`;
 
   return (
@@ -167,14 +173,7 @@ export function InstallAgentDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
-        {!offer && !failed && !run && (
-          <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
-            <CircleNotch size={12} className="animate-spin" />
-            <span>Looking at what this machine has…</span>
-          </div>
-        )}
-
-        {offer && !run && (
+        {!run && (
           <div className="flex flex-col gap-2">
             {listed.map((route) => (
               <div key={route.manager} className="rounded-lg border border-border-subtle p-2.5">
@@ -233,8 +232,6 @@ export function InstallAgentDialog({
             {run.error && <p className="text-xs text-destructive">{run.error}</p>}
           </div>
         )}
-
-        {failed && <p className="text-xs text-destructive">{failed}</p>}
 
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={onClose}>

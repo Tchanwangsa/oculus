@@ -15,6 +15,7 @@ use super::{
 };
 use confirmation::Confirmation;
 
+#[cfg(not(target_os = "windows"))]
 fn canvas_session_dir() -> std::path::PathBuf {
     crate::library::paths::data_dir().join("canvas-session")
 }
@@ -33,19 +34,17 @@ pub fn open_canvas_window(app: AppHandle) -> Result<(), String> {
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
-    let session_dir = canvas_session_dir();
     let dir = crate::library::paths::data_dir();
     let app_nav = app.clone();
     let app_win = app.clone();
     let confirmation = Arc::new(Mutex::new(Confirmation::default()));
     let confirmation_load = Arc::clone(&confirmation);
 
-    let result = WebviewWindowBuilder::new(&app, "canvas-auth", WebviewUrl::External(url))
+    let builder = WebviewWindowBuilder::new(&app, "canvas-auth", WebviewUrl::External(url))
         .title("Sign in to Canvas — Oculus")
         .inner_size(900.0, 700.0)
         .center()
         .visible(true)
-        .data_directory(session_dir)
         .on_page_load(move |_, payload| {
             if !matches!(payload.event(), PageLoadEvent::Finished)
                 || !is_authenticated_url(payload.url())
@@ -88,8 +87,12 @@ pub fn open_canvas_window(app: AppHandle) -> Result<(), String> {
                 app.emit("canvas-auth-cancelled", "cancelled").ok();
                 return;
             });
-        })
-        .build();
+        });
+    // WebView2 environments are keyed by data directory. Use the default
+    // profile shared with the main webview and every browser page.
+    #[cfg(not(target_os = "windows"))]
+    let builder = builder.data_directory(canvas_session_dir());
+    let result = builder.build();
 
     let win = match result {
         Ok(w) => w,
