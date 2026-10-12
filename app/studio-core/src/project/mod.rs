@@ -19,7 +19,8 @@ pub(crate) use components::valid_name;
 pub use components::{CascadeComponents, ComponentSource, FolderComponents};
 pub use lint::{LintIssue, LintReport};
 pub use narration::{
-    LOW_CONFIDENCE, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene, ManifestWord, WordCues,
+    CuedWord, LOW_CONFIDENCE, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene, ManifestWord,
+    WordCues,
 };
 pub use script::{Script, ScriptSection};
 pub use timeline::Timeline;
