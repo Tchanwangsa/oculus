@@ -174,7 +174,8 @@ export default function AppLayout() {
   return (
     /* shadcn's 0ms flashes tooltips on icons the pointer merely crosses. */
     <TooltipProvider delayDuration={500}>
-      <div className="flex flex-col h-full w-full overflow-hidden bg-background">
+      {/* No fill: `#root` paints the frame, which may be see-through. */}
+      <div className="flex flex-col h-full w-full overflow-hidden">
         <TopTabBar sidebarCollapsed={collapsed} onToggleSidebar={toggle} />
         {/* `gap-2` keeps the card's left inset when the sidebar collapses. */}
         <div className="flex flex-1 overflow-hidden gap-2 pb-2 pr-2">

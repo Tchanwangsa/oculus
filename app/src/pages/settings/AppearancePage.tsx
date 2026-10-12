@@ -1,10 +1,5 @@
-import { AppearanceSection } from "@/components/settings/AppearanceSection";
-import { Section } from "@/components/settings/shared/section";
+import { ThemeSection } from "@/components/settings/appearance/ThemeSection";
 
 export default function SettingsAppearancePage() {
-  return (
-    <Section title="Appearance" description="How Oculus looks on this machine.">
-      <AppearanceSection />
-    </Section>
-  );
+  return <ThemeSection />;
 }

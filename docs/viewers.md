@@ -9,6 +9,7 @@ video's transcript, and a web page.
 | Piece | Location |
 | --- | --- |
 | Markdown, maths, mermaid, lightbox, PDF | `app/src/components/markdown/`, `app/src/components/ui/lightbox/Lightbox.tsx`, `app/src/components/files/pdf/`, `app/src/lib/pdf/pdfView.ts`, `app/src/lib/pdf/pdfFind.ts` |
+| Inline file, web and planning references; hover metadata | `app/src/components/markdown/FileChip.tsx`, `app/src/components/markdown/ReferenceLink.tsx`, `app/src/components/markdown/ReferencePreview.tsx`, `app/src/components/markdown/referenceDetails.ts`, `app/src/lib/files/referenceAppearance.ts` |
 | The maths engine: loading, rendering, `rehypeMaths`, the visual field's edit model (`field.ts`) and the geometry of source-mapped maths (`geometry/`: where each caret stop is drawn, which stop a press lands on, a selection's bands); KaTeX's CSS and fonts | `app/src/lib/maths/`, `app/src/styles/katex/` |
 | A parsed PDF's faces: PDF, Markdown | `app/src/components/files/FileViewer.tsx`, `app/src/components/files/FileMarkdown.tsx`, `app/src/components/files/pdf/pdfMdLink.ts`, `app/src/lib/pdf/pdfBlocks.ts` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/lectures/media/`, `app/src/stores/lectures/playerPrefsStore.ts`, `app/src/hooks/lectures/useTranscriptDock.ts` |
@@ -41,6 +42,19 @@ classes work even when there are no dollar delimiters.
   first. An inline `<code>` holding only a citation (`app/src/lib/citations/`)
   renders as `FileChip`. `![alt](path)` naming a library picture or HTML
   page renders it in place (`OutputEmbed.tsx`).
+- **Inline references share a glyph and a hover card.** `FileChip` preserves
+  citation paths for copying and the composer's atomic mentions; clickable
+  references use an understated underline and content-specific Phosphor colours
+  (`reference-*` tokens). Inline glyphs, favicons, spacing and baseline offsets
+  use `em` units so references scale with headings; hover-card icons keep their
+  own fixed size. In prose they have link semantics so they select with
+  the sentence; only composer mentions are non-editable, and a selection drag
+  never opens the reference. `ReferenceLink` handles web URLs and recognised task,
+  project and lecture routes. Web links reuse the browser's cached favicon,
+  falling back to a globe when absent or unreadable. Preview metadata loads
+  only while the portaled card is open; a failed lookup leaves the path and
+  type visible. Library-relative links use the same file reference after
+  `libraryLinkTarget` resolves them, retaining their caller's opener.
 - **A library file's raw HTML is sanitized** (`fileMarkdownPlugins` in
   `FileMarkdown.tsx`). When the text holds a `<`, `rehype-raw` parses its HTML
   and `rehype-sanitize` cleans the tree straight after, before
@@ -75,7 +89,7 @@ classes work even when there are no dollar delimiters.
   library file) and a note's `VersionPreview` wrap the markdown in
   `EmbedSubjectProvider`, which looks the code up in the subjects list by id
   (a course folder is `safe_dir(code)`, not the code). For a subject the list
-  no longer has, those two are `VideoLinkOut`, a button named by the tag's
+  list does not contain, those two are `VideoLinkOut`, a button named by the tag's
   title that opens Canvas. Chat replies don't parse raw HTML, so a tag in one
   shows as its literal text.
 - **`<echo-video>` is an Echo360 video**

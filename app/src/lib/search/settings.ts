@@ -18,6 +18,7 @@ import {
 
 import { OpencodeIcon } from "@/components/icons/OpencodeIcon";
 import { JOBS } from "@/lib/db";
+import { isMac } from "@/lib/platform";
 
 /**
  * The Settings pages and what its search finds on them. The nav
@@ -128,7 +129,16 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   ]),
 
   page("appearance"),
-  ...rows("appearance", "Appearance", [["Theme", ["dark mode", "light mode", "system"]]]),
+  ...rows("appearance", "Appearance", [
+    ["Mode", ["theme", "dark mode", "light mode", "system"]],
+    ["Light theme", ["theme", "colour scheme", "color scheme", "palette"]],
+    ["Dark theme", ["theme", "colour scheme", "color scheme", "palette", "oled", "black"]],
+    ["Accent colour", ["accent color", "colour", "color", "brand", "highlight"]],
+    ...(isMac
+      ? [["Window frame", ["glass", "translucent", "transparent", "vibrancy", "frosted", "blur"]] satisfies Row]
+      : []),
+    ["Code font", ["monospace", "font", "typeface", "terminal", "code"]],
+  ]),
 
   page("browser"),
   ...rows("browser", "Browser", [

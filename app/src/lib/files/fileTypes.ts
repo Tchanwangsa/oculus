@@ -116,6 +116,7 @@ export function categoryIconFor(file: {
     case "lessons": return isLessonAsset(file) ? fileIconFor(file.filename) : ChalkboardTeacher;
     case "module": return Stack;
     case "file":
+    case "upload":
     case "image": return fileIconFor(file.filename);
     case "document": return NotePencil;
     default: return FileText;

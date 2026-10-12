@@ -8,6 +8,8 @@ Read this before any UI work.
 | Piece | Location |
 | --- | --- |
 | Tokens, base resets, utilities (`page-scroll`, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
+| Themes, appearance prefs and the frame | `app/src/lib/ui/themes/` (`samplesLight.ts`, `samplesDark.ts` for the palettes, `derive.ts` for the tokens, `store.ts` for the prefs) |
+| Settings → Appearance: mode, theme cards, accent, window frame, code font | `app/src/pages/settings/AppearancePage.tsx`, `app/src/components/settings/appearance/` |
 | Platform detection and shortcut labels | `app/src/lib/platform.ts` |
 | Text selection scopes | `app/src/styles/base.css`, `app/src/lib/ui/selectScope.ts` |
 | shadcn primitives (flat) | `app/src/components/ui/` |
@@ -19,21 +21,28 @@ Read this before any UI work.
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
 | Table chrome | `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
 | Toolbar filters: pill popovers, checklists, applied-filter chips | `app/src/components/ui/filter/` |
-| The colour control: a swatch that opens a pad, hue and opacity strips and hex text | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
+| The colour control: a swatch that opens a pad, hue and opacity strips and hex text (`opaque` drops the opacity strip) | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
 | A titled block that folds, its state kept by the caller | `app/src/components/ui/CollapsibleSection.tsx` |
 
 ## One colour, two fonts, and a floating card
 
-Quiet and neutral: dead-grey whites (no warm or blue cast — anything else
-fights the accent), muted indigo `#5e6ad2` as the one colour, Manrope for
-headings and Inter for everything else, Notion-style layout.
+Quiet and neutral by default: dead-grey whites (no warm or blue cast —
+anything else fights the accent), muted indigo `#5e6ad2` as the one colour,
+Manrope for headings and Inter for everything else, Notion-style layout. Other
+themes are opt-in and keep the same structure.
 
 - **The shell frames a floating document.** The sidebar's icon rail and the
-  tab strip sit on the window's `background` with no fill or divider; content
-  is an inset rounded `card` with a hairline border
+  tab strip sit on the window's ground with no fill or divider; content is an
+  inset rounded `card` with a hairline border
   (`app/src/layouts/AppLayout.tsx`). Tabs and rail icons are pills and rounded
   squares on that ground. A sidebar divider or a rule under the strip breaks the
   effect — the card's border is the separation.
+- **The ground is `--color-frame`, painted once on `#root`** (`base.css`); the
+  shell and its chrome have no fill of their own. Opaque it is `background`;
+  on macOS the frame pref makes it see-through (`FRAME_ALPHA` in
+  `app/src/lib/ui/themes/apply.ts`) and asks Rust for glass behind the webview
+  with `native_set_glass`. If that call fails the frame goes back to opaque.
+  The card, popovers and dialogs stay opaque.
 - **Shortcut labels follow the desktop platform** through `shortcut` in
   `app/src/lib/platform.ts`: Command glyphs on macOS, Ctrl/Alt/Shift names on
   Windows. The shell reserves the traffic-light inset only on macOS; Windows
@@ -48,8 +57,9 @@ headings and Inter for everything else, Notion-style layout.
   `tooltip.tsx` adds `max-w-64` and `break-words` so a long page title or file
   name wraps. Call sites don't override these — don't restore what
   `shadcn add` generates.
-- **Monospace is for code and terminal output only** — the one `font-mono` file is
-  `app/src/components/markdown/MdComponents.tsx`; the note editor's theme
+- **Monospace is for code and terminal output only** — `font-mono` appears in
+  `app/src/components/markdown/MdComponents.tsx` and the code-font field
+  (`app/src/components/settings/appearance/CodeFontRow.tsx`); the note editor's theme
   (`app/src/components/documents/editor/theme/`) gives `--font-mono` to code
   and LaTeX source. A command's output (`AnsiText`, the one-line
   `TerminalLine` on a running install or update) keeps its colours via
@@ -65,12 +75,24 @@ headings and Inter for everything else, Notion-style layout.
 - **Icons are Phosphor.** One Phosphor lacks is drawn in
   `app/src/components/icons/` on its `IconBase`, so it takes the same `size`
   and `weight` props.
+- **Inline references have content colours** through `reference-*` tokens:
+  red PDFs, purple pages and notes, green tasks, amber projects, blue
+  discussions, pink lectures and teal lessons. These glyphs identify linked
+  content; the shell keeps its indigo accent ([viewers.md](./viewers.md)).
 - **Colours go through the semantic tokens in `app/src/styles/colors.css`** (dark values in `dark.css`). In
   shadcn's vocabulary `accent` is the quiet hover surface, not the brand. The
   indigo has two tokens: `primary` is the *fill* (buttons, active underline,
   today), `brand` is the *accent* (links, selection, in-flight progress,
   new-item chips) — split so the accent can be retuned without restyling every
   button.
+- **A theme is a small palette** (`ThemeSpec`: ground, card, popover, text,
+  muted text, border, accent, nine syntax colours); `derive` mixes it in OKLab
+  into every `--color-*` token but the chart slots and shadows, which stay the
+  stylesheet's per mode. Oculus Light and Oculus Dark are the stylesheet
+  itself and write nothing. Every token value is a resolved hex colour, never
+  `var()` or `color-mix()`: mermaid reads them through `getComputedStyle`.
+  `app/tests/lib/ui/themes.test.ts` holds each theme to 7:1 text, 4.5:1 muted
+  text and button labels, and 3:1 syntax on `surface-raised`.
 - **Only content selects, as in a native app.** The body is
   `user-select: none`; text selects again only inside a `data-selectable`
   block — a file's Markdown or PDF pages, a chat message (`CompactMd`, the
@@ -83,8 +105,22 @@ headings and Inter for everything else, Notion-style layout.
   dialog, a popover: `app/src/lib/ui/selectScope.ts` turns every other scope off
   while the button is held, so a drag across the split divider stops at its
   own pane.
-- **Dark mode is a `.dark` class on `<html>`** written only by `applyTheme`
-  (`app/src/lib/ui/theme.ts`); `@custom-variant dark` (in `app/src/index.css`) follows the class, not the OS.
+- **Appearance is one stored pref** (`AppearancePrefs` in localStorage
+  `oculus-appearance`): light/dark/system, a theme per mode, an accent
+  override, the frame and a code font.
+  `applyAppearance` (`app/src/lib/ui/themes/apply.ts`), run from `main.tsx`
+  before the first render, is the only writer of the `.dark` class and
+  `data-theme` on `<html>`; it writes the theme's tokens inline there and
+  clears the ones it wrote last time. `@custom-variant dark` (in
+  `app/src/index.css`) follows the class, not the OS. Change prefs through
+  `setAppearance`; read them with `useAppearance`. Code that bakes colours in
+  (mermaid) redraws on `subscribeTheme`, not just on `.dark`.
+- **A theme preview sets that theme's tokens inline on its wrapper**
+  (`previewStyle` in `app/src/components/settings/appearance/`) and draws with
+  plain token utilities, never `dark:` variants, so a dark card stays dark on
+  a light page. Settings → Appearance's theme cards do this; each mode's grid
+  shows one row (the chosen theme always in it) until "See all" opens it,
+  remembered per mode.
 - **Full pages scroll through `page-scroll`**, which reserves the scrollbar
   gutter so a page that starts overflowing doesn't jog sideways.
 - **Every scroller fades its overflowing edges through `useScrollFade`**

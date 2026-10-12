@@ -1,5 +1,5 @@
 import type { DiagramSize } from "@/components/markdown/DiagramLightbox";
-import { isDark } from "@/lib/ui/theme";
+import { isDark } from "@/lib/ui/themes";
 import { load } from "@/components/markdown/mermaid/load";
 import {
   LABEL_PX,

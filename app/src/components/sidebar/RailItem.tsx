@@ -51,7 +51,7 @@ export default function RailItem({ to, icon: Icon, label, match, indicator }: Ra
             isActive ? "bg-sidebar-item-active text-foreground" : railIdle,
           )}
         >
-          <Icon size={18} />
+          <Icon size={18} weight={isActive ? "fill" : "regular"} />
           {indicator && (
             <span aria-hidden className="absolute top-1 right-1 flex">
               {indicator}

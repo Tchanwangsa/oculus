@@ -2,12 +2,13 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { isValidElement, memo } from "react";
-import { ArrowSquareOut, CaretRight } from "@phosphor-icons/react";
-import { CitationCode, CitationLink, linkCitation } from "@/components/markdown/Citation";
+import { CaretRight } from "@phosphor-icons/react";
+import { CitationCode } from "@/components/markdown/Citation";
 import { CanvasVideoCard } from "@/components/markdown/embed/CanvasVideoCard";
 import { EmbedVideoCard } from "@/components/markdown/embed/EmbedVideoCard";
 import { WebVideoCard } from "@/components/markdown/embed/WebVideoCard";
 import { FileChip } from "@/components/markdown/FileChip";
+import { ReferenceLink } from "@/components/markdown/ReferenceLink";
 import { Mermaid } from "@/components/markdown/Mermaid";
 import { OutputEmbed, embedKind } from "@/components/markdown/OutputEmbed";
 import { attachmentPath, attachmentSrc } from "@/lib/harness/attachments";
@@ -163,29 +164,7 @@ export const MD_COMPONENTS: Components = {
   p: (p: any) => (
     <p className="text-sm text-foreground/90 leading-relaxed my-3" {...p} />
   ),
-  // Citations open in-app; web URLs stay plain anchors, which `AppLayout`
-  // routes to the in-app browser.
-  a: ({ href, children, ...p }: any) => {
-    const shape = linkCitation(href, children);
-    if (shape) {
-      return (
-        <CitationLink shape={shape} {...p}>
-          {children}
-        </CitationLink>
-      );
-    }
-    // A schemeless non-library path would resolve against the app's origin
-    // and 404, so it stays text.
-    if (!/^[a-z][a-z0-9+.-]*:/i.test(href ?? "")) return <span title={href}>{children}</span>;
-    return (
-      <a href={href} className="text-brand hover:underline" target="_blank" rel="noreferrer" {...p}>
-        {children}
-        {/^https?:/.test(href ?? "") && (
-          <ArrowSquareOut size={12} className="inline shrink-0 ml-0.5 mb-0.5 opacity-60" />
-        )}
-      </a>
-    );
-  },
+  a: ({ href, children }: any) => <ReferenceLink href={href}>{children}</ReferenceLink>,
   // remark-gfm marks a task list `contains-task-list`, its items
   // `task-list-item`; merged, not spread over, so the list keeps its styles.
   // A task list drops its bullets and hangs each box in the indent.

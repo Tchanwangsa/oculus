@@ -8,6 +8,7 @@ import { openBeside } from "@/lib/shell/tabRouters";
 import { cn } from "@/lib/utils";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
 import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
+import { useActivePath } from "@/stores/shell/tabStore";
 import { railButton, railIdle } from "./RailItem";
 
 /**
@@ -22,6 +23,8 @@ export function MusicTile() {
   const snapshot = useMusicStore((s) => s.snapshot);
   const error = useMusicStore(musicError);
   const [open, setOpen] = useState(false);
+  const path = useActivePath().split("?")[0];
+  const isActive = open || path === "/music" || path.startsWith("/music/");
 
   if (!shown || !snapshot) return null;
   const { track, playing } = shownPlayback(snapshot);
@@ -41,7 +44,7 @@ export function MusicTile() {
             <button
               type="button"
               aria-label={label}
-              className={cn(railButton, open ? "bg-sidebar-item-active text-foreground" : railIdle)}
+              className={cn(railButton, isActive ? "bg-sidebar-item-active text-foreground" : railIdle)}
             >
               {track?.cover_url ? (
                 <img
@@ -51,7 +54,7 @@ export function MusicTile() {
                   className="size-6 rounded-[5px] object-cover"
                 />
               ) : (
-                <MusicNotes size={18} />
+                <MusicNotes size={18} weight={isActive ? "fill" : "regular"} />
               )}
               {indicator && (
                 <span aria-hidden className="absolute top-1 right-1 flex">

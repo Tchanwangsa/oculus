@@ -8,6 +8,7 @@ import { loadIconCatalogue } from "./components/subjects/SubjectIcon";
 import { useSubjectIconStore } from "./stores/planning/subjectIconStore";
 import { watchMathSelect, watchMathSelection } from "./lib/markdown/mathSelection";
 import { loadMaths } from "./lib/maths";
+import { applyAppearance, getAppearance } from "./lib/ui/themes";
 
 // A release webview has no console, so paint uncaught errors over the window.
 // Escape dismisses; a later error replaces the box rather than stacking.
@@ -40,6 +41,9 @@ window.addEventListener("unhandledrejection", (ev) => paint("unhandled rejection
 window.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") document.querySelector(`[${OVERLAY_ATTR}]`)?.remove();
 });
+
+// Before the first render, so the default theme never flashes.
+applyAppearance(getAppearance());
 
 watchMathSelection();
 watchMathSelect();

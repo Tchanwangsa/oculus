@@ -1,4 +1,4 @@
-import { useState, type MouseEvent, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { FileChip } from "@/components/markdown/FileChip";
 import { ImageLightbox } from "@/components/ui/lightbox/Lightbox";
 import { attachmentSrc } from "@/lib/harness/attachments";
@@ -51,12 +51,11 @@ export function CitationCode({ shape, code }: { shape: CitationShape; code: Reac
   );
 }
 
-/** A link whose href is a citation: the brand-coloured button. The link
+/** A link whose href is a citation: the shared file reference. The link
  *  text's "page 25" counts when the href has no location. */
 export function CitationLink({
   shape,
   children,
-  ...p
 }: {
   shape: CitationShape;
   children: ReactNode;
@@ -66,18 +65,9 @@ export function CitationLink({
   if (!cite) return <span>{children}</span>;
   return (
     <>
-      <button
-        type="button"
-        title={cite.path}
-        onClick={(e: MouseEvent) => {
-          e.stopPropagation();
-          open(e.metaKey || e.ctrlKey);
-        }}
-        className="text-left text-brand hover:underline"
-        {...p}
-      >
+      <FileChip path={cite.path} cite={cite} onClick={open}>
         {children}
-      </button>
+      </FileChip>
       {lightbox}
     </>
   );

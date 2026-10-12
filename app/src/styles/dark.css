@@ -54,6 +54,14 @@
   --color-success:           #22c55e;
   --color-warning:           #f59e0b;
 
+  --color-reference-pdf:        #ff6b66;
+  --color-reference-page:       #b78af5;
+  --color-reference-task:       #70c8a5;
+  --color-reference-project:    #e2b768;
+  --color-reference-discussion: #79b9e7;
+  --color-reference-lecture:    #e899bc;
+  --color-reference-lesson:     #76c6be;
+
   --color-sidebar:           #171717;
   --color-sidebar-border:    #333333;
   --color-sidebar-item-hover:#262626;

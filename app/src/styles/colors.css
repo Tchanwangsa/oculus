@@ -23,6 +23,10 @@
   --color-background:        #f9f9f9;
   --color-foreground:        #0d0d0d;
 
+  /* The window ground around the card (`#root`). Themes write it with alpha
+     over native glass (lib/ui/themes/apply.ts); opaque, it is the background. */
+  --color-frame:             var(--color-background);
+
   /* The floating content pane, one step lighter than the ground. */
   --color-card:              #ffffff;
   --color-card-foreground:   #0d0d0d;
@@ -68,6 +72,15 @@
 
   --color-success:           #16a34a;
   --color-warning:           #b45309;
+
+  /* Content reference glyphs, kept separate from the shell's brand colour. */
+  --color-reference-pdf:        #d74747;
+  --color-reference-page:       #8654c8;
+  --color-reference-task:       #24876a;
+  --color-reference-project:    #b17b22;
+  --color-reference-discussion: #3682b6;
+  --color-reference-lecture:    #bd628a;
+  --color-reference-lesson:     #388a82;
 
   /* The sidebar shares the ground; the content card's border separates. */
   --color-sidebar:           #f9f9f9;

@@ -124,9 +124,13 @@ pub fn reconcile(app: &AppHandle) {
     let _ = app;
     tauri::async_runtime::spawn(async {
         if let Ok(pool) = crate::db::store::open_pool().await {
-            if let Ok(n) = store::reconcile(&pool).await {
-                if n > 0 {
-                    elog!("[oculus] harness: marked {n} interrupted thread(s) idle");
+            if let Ok(r) = store::reconcile(&pool).await {
+                if r.threads > 0 || r.tools > 0 {
+                    elog!(
+                        "[oculus] harness: marked {} interrupted thread(s) idle, closed {} open tool row(s)",
+                        r.threads,
+                        r.tools
+                    );
                 }
             }
         }

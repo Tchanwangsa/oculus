@@ -107,7 +107,8 @@ sections; the tile opens a popover player rather than navigating ([music.md](./m
 vertical axis, and the order is kept in `localStorage` (`railOrderStore`); a
 section the stored order lacks is appended. A `RailItem` is a button with `data-tab-href` that goes
 through `navigateActive`, since the sidebar sits outside every pane's router,
-and it lights on its path or anything under it. Background jobs show on their
+and it lights on its path or anything under it. Selected rail icons use
+Phosphor's filled weight; idle icons use the regular outline. Background jobs show on their
 item's corner: a spinner on Chat while an agent turn runs, on Sync while
 indexing, a brand dot on Subjects while any subject has never-opened files
 (`newFilesStore`), and a brand dot on Studio while any video renders
@@ -193,6 +194,13 @@ while Ctrl+Shift+Z is Redo.
   ⇧⌘T always act on the strip.
 - **Strip tabs are fixed-width** (`TAB_W` down to `TAB_MIN_W`), and the column
   between them (`SEPARATOR_W`) always renders because the reorder maths counts it.
+  `StripTab` reserves the same border and close-button inset in both states,
+  so selecting a tab does not move its icon or title. The strip's scrolling
+  layer stays promoted with `will-change: transform` to keep WebKit's clipping
+  stable while borders and shadows change at fractional page zoom.
+  Hover fills the tab itself immediately; only text, border colour and the
+  close-button opacity ease. The title mask leaves room for the close button
+  without a separate gradient surface over the fill.
 - **The history arrows follow the focused pane's own history.** A memory
   router has no `window.history` index, so `track` in `app/src/lib/shell/tabRouters.ts`
   keeps each router's location keys and a cursor for `canBack`/`canForward`;
@@ -226,6 +234,10 @@ while Ctrl+Shift+Z is Redo.
   rows from today, within the week, as `EventRow`s, with See more to the
   calendar — over Lectures, the five most recently watched unfinished
   lectures with their time left (`LecturesCard`).
+  Home uses its pane's width for layout: the columns stack below 1024px,
+  with smaller gutters below 640px. Activity's stats use their own available
+  width, showing four across from 560px, two from 280px and one below that,
+  so a side panel or page zoom cannot squeeze four cards into a narrow column.
 - **Activity is the last 30 days of app use**: four stat cards from
   `usage_hours` (total active, today and the daily average, each against the
   period before, then the streak and its highest), then one bar per day under
@@ -234,7 +246,9 @@ while Ctrl+Shift+Z is Redo.
   a fixed order — up to five subjects in their calendar colours (the rest fold
   into Other subjects), or kinds folded into six groups in the chart tokens. Bars
   are solid — tints mix with the card, so gridlines stop behind them — and a
-  hovered day opens a tooltip over its bar with each series' time. Rust counts the time
+  hovered day opens a tooltip over its bar with each series' time. Narrow
+  charts show fortnightly date labels; the legend scrolls with faded edges
+  to keep series names readable. Rust counts the time
   ([architecture.md](./architecture.md#rust-counts-app-usage-the-frontend-only-pings));
   the frontend's part is `useActivityPing`, mounted once in `AppLayout`. A ping
   raises no event, so the card polls every five minutes while its tab is in
