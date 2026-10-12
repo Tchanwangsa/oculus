@@ -45,10 +45,12 @@ case "$target" in
     # for byte.
     # Media Foundation's H.264 encoder (h264_mf) is Studio's encoder here:
     # it is part of Windows, so no GPL x264. --disable-autodetect means it
-    # is named; it loads mfplat.dll at run time.
+    # is named; it loads mfplat.dll at run time. mfenc.c uses Direct3D 11's
+    # types whatever the options, and includes their header only with
+    # d3d11va, whose hardware decoders stay off with --disable-everything.
     target_flags=(--enable-cross-compile --target-os=mingw32 --arch=x86_64
       "--cross-prefix=$host-" --enable-w32threads --disable-stripping
-      --enable-mediafoundation --enable-encoder=h264_mf)
+      --enable-mediafoundation --enable-d3d11va --enable-encoder=h264_mf)
     target_ldflags="-static -s -Wl,--no-insert-timestamp"
     ;;
   macos-arm64)
