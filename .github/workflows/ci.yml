@@ -109,6 +109,10 @@ jobs:
     name: Check (Windows x64)
     runs-on: windows-latest
     timeout-minutes: 120
+    # Write is what lets the token see draft releases; the Windows ffmpeg
+    # release stays a draft until its source offer is approved.
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: app
@@ -153,8 +157,20 @@ jobs:
         run: bun run test
       - name: Type-check and bundle the frontend
         run: bun run build
+      # fetch-ffmpeg.mjs downloads anonymously, which a draft release refuses.
+      # gh fetches the asset with the job's token; the script then checks its
+      # SHA-256 and keeps it.
       - name: Fetch Windows ffmpeg
-        run: bun run ffmpeg
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag=$(grep -o 'releases/download/ffmpeg-[^/"]*' scripts/fetch-ffmpeg.mjs | head -1 | cut -d/ -f3)
+          mkdir -p src-tauri/binaries
+          gh release download "$tag" --pattern ffmpeg-windows-x64.exe \
+            --output src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe --clobber
+          bun run ffmpeg
       - name: Build and stage the Windows credential broker
         run: bun run stage-keyd
       - name: Build and stage the oculus CLI
