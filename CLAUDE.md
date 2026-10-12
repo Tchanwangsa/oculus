@@ -15,7 +15,9 @@ source. This file is only the rules; the reasons behind them live in `docs/`.
 - `bun run math` builds the maths wasm into `app/math-core/pkg/`; it needs the
   `wasm32-unknown-unknown` target and `wasm-bindgen-cli` at the locked version.
 - Checks: `bun run build` (tsc + bundle), `cargo check` / `cargo test` in
-  `app/src-tauri`.
+  `app/src-tauri`. CI also runs `cargo clippy --all-targets -- -D warnings`
+  there and in `app/keyd`, `app/keyd/core` and `app/math-core` (exact flags in
+  `.github/workflows/ci.yml`).
 - Run `cargo fmt` in `app/src-tauri` before committing Rust; CI fails on
   `cargo fmt --check`.
 

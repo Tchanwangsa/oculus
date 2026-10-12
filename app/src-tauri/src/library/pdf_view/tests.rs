@@ -220,10 +220,18 @@ fn pdf_view_renders_exactly_the_requested_size() {
             (width * height * 4) as usize,
             "{width}x{height}"
         );
-        assert!(rgba.chunks_exact(4).all(|px| px[3] == 255), "opaque");
+        assert!(
+            rgba.as_chunks::<4>().0.iter().all(|px| px[3] == 255),
+            "opaque"
+        );
     }
     let rgba = render_page(&pdf, 1, 612, 792).unwrap();
-    let dark = rgba.chunks_exact(4).filter(|px| px[0] < 128).count();
+    let dark = rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|px| px[0] < 128)
+        .count();
     assert!(dark > 100, "the text paints: {dark} dark pixels");
     // The text sits at x 72..~200, baseline y 92 from the top: nothing
     // to its right on that row band.
@@ -393,7 +401,7 @@ fn pdf_view_bench_a_real_deck() {
         .filter(|path| {
             wanted
                 .as_deref()
-                .map_or(true, |w| path.to_string_lossy().contains(w))
+                .is_none_or(|w| path.to_string_lossy().contains(w))
         })
         .find_map(|path| {
             let pdf = Pdf::new(Arc::new(std::fs::read(path).ok()?)).ok()?;

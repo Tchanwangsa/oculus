@@ -76,9 +76,9 @@ fn quote_ends_in(lines: &[Line], at: usize, quote: &str) -> Option<usize> {
     let last = (at + 1).min(lines.len() - 1);
     let mut haystack = String::from(" ");
     let mut spans = Vec::new();
-    for index in first..=last {
+    for (index, line) in (first..).zip(&lines[first..=last]) {
         let start = haystack.len();
-        haystack.push_str(&normalise(&lines[index].text));
+        haystack.push_str(&normalise(&line.text));
         spans.push((index, start, haystack.len()));
         haystack.push(' ');
     }

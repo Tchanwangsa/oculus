@@ -87,7 +87,7 @@ struct Scripted {
 }
 
 impl Scripted {
-    fn new(
+    fn boxed(
         name: &'static str,
         cap: Option<u64>,
         replies: Vec<Result<Vec<Segment>, EngineError>>,
@@ -155,7 +155,7 @@ fn hear(engines: &[Box<dyn Engine>]) -> (Result<Heard, String>, Vec<String>) {
 #[test]
 fn a_rate_limit_mid_run_hands_the_whole_audio_to_the_next_engine() {
     let engines = [
-        Scripted::new(
+        Scripted::boxed(
             "groq",
             Some(12_000_000),
             vec![
@@ -163,7 +163,7 @@ fn a_rate_limit_mid_run_hands_the_whole_audio_to_the_next_engine() {
                 Err(EngineError::RateLimited("Groq's limit".into())),
             ],
         ),
-        Scripted::new("apple", None, vec![said("on device")]),
+        Scripted::boxed("apple", None, vec![said("on device")]),
     ];
     let (result, steps) = hear(&engines);
     let heard = result.unwrap();
@@ -184,14 +184,14 @@ fn a_rate_limit_mid_run_hands_the_whole_audio_to_the_next_engine() {
 #[test]
 fn a_failure_surfaces_and_never_falls_through() {
     let engines = [
-        Scripted::new(
+        Scripted::boxed(
             "groq",
             None,
             vec![Err(EngineError::Failed(
                 "Groq rejected the saved key".into(),
             ))],
         ),
-        Scripted::new("apple", None, vec![said("unreached")]),
+        Scripted::boxed("apple", None, vec![said("unreached")]),
     ];
     let (result, steps) = hear(&engines);
     assert_eq!(result.err().unwrap(), "Groq rejected the saved key");
@@ -201,14 +201,14 @@ fn a_failure_surfaces_and_never_falls_through() {
 #[test]
 fn when_every_engine_declines_each_reason_is_reported() {
     let engines = [
-        Scripted::new(
+        Scripted::boxed(
             "groq",
             None,
             vec![Err(EngineError::RateLimited(
                 "Groq: try again in 5 minutes".into(),
             ))],
         ),
-        Scripted::new(
+        Scripted::boxed(
             "apple",
             None,
             vec![Err(EngineError::NotConfigured("needs macOS 26".into()))],
@@ -220,7 +220,7 @@ fn when_every_engine_declines_each_reason_is_reported() {
         "{message}"
     );
 
-    let alone = [Scripted::new(
+    let alone = [Scripted::boxed(
         "apple",
         None,
         vec![Err(EngineError::NotConfigured("needs macOS 26".into()))],
@@ -231,12 +231,12 @@ fn when_every_engine_declines_each_reason_is_reported() {
 #[test]
 fn an_engine_that_answers_first_is_the_only_one_called() {
     let engines = [
-        Scripted::new(
+        Scripted::boxed(
             "groq",
             Some(12_000_000),
             vec![said("a"), said("b"), said("c")],
         ),
-        Scripted::new("apple", None, vec![]),
+        Scripted::boxed("apple", None, vec![]),
     ];
     let heard = hear(&engines).0.unwrap();
     assert_eq!((heard.engine, heard.chunks), ("groq", 3));

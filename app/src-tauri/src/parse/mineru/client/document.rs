@@ -108,10 +108,10 @@ impl CloudDocument {
                 return Err(ParseError::Cancelled);
             }
             if let Some(now) = state.progress() {
-                if last.map_or(true, |seen| !same_progress(&seen, &now)) {
+                if last.is_none_or(|seen| !same_progress(&seen, &now)) {
                     // Events coalesce here, so an upload this thread last saw
                     // part-way still ends at 100% before processing.
-                    let unfinished = last.map_or(true, |seen| match seen.phase {
+                    let unfinished = last.is_none_or(|seen| match seen.phase {
                         Phase::UploadWait => true,
                         Phase::Uploading => seen.bytes_done < seen.bytes_total,
                         Phase::Processing => false,

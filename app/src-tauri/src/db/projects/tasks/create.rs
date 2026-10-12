@@ -51,7 +51,7 @@ pub async fn create_tasks(
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     let project = match project_id {
         Some(id) => Some(
-            project_on(&mut *tx, id)
+            project_on(&mut tx, id)
                 .await?
                 .ok_or_else(|| format!("project {id} does not exist"))?,
         ),
@@ -83,7 +83,7 @@ pub async fn create_tasks(
         let mut parent_column: Option<String> = None;
         if let Some(parent) = parent_id {
             parent_column = Some(
-                assert_can_parent(&mut *tx, parent, project_id)
+                assert_can_parent(&mut tx, parent, project_id)
                     .await
                     .map_err(|e| format!("{}{e}", where_()))?,
             );
@@ -144,7 +144,7 @@ pub async fn create_tasks(
         ids.push(id);
     }
 
-    touch_project(&mut *tx, project_id).await?;
+    touch_project(&mut tx, project_id).await?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(ids)
 }

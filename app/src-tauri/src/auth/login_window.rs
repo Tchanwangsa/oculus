@@ -43,7 +43,7 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
     .data_directory(session_dir)
     .on_navigation(move |url| {
         elog!("[oculus] nav: {url}");
-        if is_authenticated_url(&url) {
+        if is_authenticated_url(url) {
             let was_resolved = resolved_nav.swap(true, Ordering::SeqCst);
             if !was_resolved {
                 // Now, so closing the window meanwhile is not a cancel.
