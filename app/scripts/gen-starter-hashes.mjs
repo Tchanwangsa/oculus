@@ -44,7 +44,12 @@ const rows = paths.map((rel) => {
 const body = rows
   .map(
     ([rel, hashes]) =>
-      `    (\n        "${rel}",\n        &[\n${hashes.map((h) => `            "${h}",\n`).join("")}        ],\n    ),\n`,
+      // One hash fits rustfmt's single line; several go one to a line.
+      `    (\n        "${rel}",\n        ${
+        hashes.length === 1
+          ? `&["${hashes[0]}"],\n`
+          : `&[\n${hashes.map((h) => `            "${h}",\n`).join("")}        ],\n`
+      }    ),\n`,
   )
   .join("");
 
