@@ -11,7 +11,8 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Canvas scrape engine (modules driver, link crawl, Office conversion) | `app/src-tauri/src/sync/` |
 | Canvas HTTP through keyd's `canvas` route: redirects, retries, pagination, streamed downloads | `app/src-tauri/src/sources/canvas/` |
 | Ed Discussion: courses, threads, XML→md; its requests through keyd's `ed` route | `app/src-tauri/src/sources/ed/` |
-| Ed Lessons: lessons, quiz questions, workspace zips, the index and slide renderers | `app/src-tauri/src/sources/ed/lessons.rs`, `app/src-tauri/src/sources/ed/workspace.rs`, `app/src-tauri/src/sources/ed/lesson_md/` |
+| Ed Lessons: lessons, quiz questions, challenge settings, workspace zips, the index and slide renderers | `app/src-tauri/src/sources/ed/lessons.rs`, `app/src-tauri/src/sources/ed/workspace.rs`, `app/src-tauri/src/sources/ed/lesson_md/` |
+| A challenge workspace's local sync record | `app/src-tauri/src/sources/ed/workspace_state.rs` |
 | Front matter on Ed files; Ed's category colours | `app/src-tauri/src/sources/ed/front.rs`, `app/src-tauri/src/sources/ed/palette.rs` |
 | The Ed phase (one course resolve for threads and lessons) and the lessons phase | `app/src-tauri/src/sync/phases/ed.rs`, `app/src-tauri/src/sync/phases/ed_lessons.rs` |
 | Echo360 core | `app/src-tauri/src/sources/echo360/` |
@@ -362,17 +363,30 @@ leaves the last whole lesson.
   `state`, `available_at`, `due_at`, `locks_at` (Ed's timestamps verbatim),
   `url` (`/courses/<c>/lessons/<l>`) and `slides`: one object per slide in
   `index` order with `id`, `title`, `type`, `status` (Ed's `unseen`, `seen`
-  or `completed`), `file`, `pdf` and `url` (`…/slides/<s>`), paths relative
+  or `completed`), `file`, `pdf`, `url` (`…/slides/<s>`) and `challenge_id`
+  (a `code` or `jupyter` slide's Ed challenge, its workspace), paths relative
   to `lessons/`. Its body is the title, module, dates and Ed link, then a
   numbered link to each slide file (a PDF slide's PDF); it holds no slide
   content.
 - Each slide is `lessons/<lessonId>-<slug>/<NN>-<slide-slug>.md` (`NN` is its
-  position), with front matter `ed_slide_id`, `ed_lesson_id`, `lesson`,
-  `title`, `type`, `status`, `index` (`NN`), `pdf` and `url`, then
+  position), with front matter `ed_slide_id`, `ed_lesson_id`,
+  `ed_challenge_id` (as the index's `challenge_id`), `lesson`, `title`,
+  `type`, `status`, `index` (`NN`), `pdf`, `url` and `challenge`, then
   `# <slide title>` and the slide's content. Its `source_url` is the slide's
   page in Ed. A PDF slide has no file (`file` is `null`): its stem's `.md` is
   where the parser writes the PDF's text ([parsing.md](./parsing.md)). The
   index links the PDF, or Ed's copy with a note when the download failed.
+- A challenge slide's `challenge` is what its workspace needs, from
+  `GET /challenges/<ch>` (one read per challenge slide, before its
+  workspace): `{"type", "run_command", "features": {"run", "mark",
+  "terminal", "feedback", "confirm_submit"}, "due_at"}`. `type` is Ed's
+  (`pyunit`, `code`, `none` …); an empty `run_command` is `null`, and Ed's
+  Run then does nothing; a feature Ed leaves out is `null`; `due_at` is the
+  lesson's when the challenge has none of its own. The student's standing
+  (`score`, `status`, `attempts_remaining`) is left out, since it goes
+  stale. When the read fails the slide logs a warning and `challenge` is
+  `null`; `ed_challenge_id` comes from the slide itself and the workspace is
+  still fetched.
 - A slide's assets share its stem: a PDF slide's `<NN>-<slide-slug>.pdf`, a
   challenge's files under `<NN>-<slide-slug>/`. Links are relative to the
   linking file's folder and percent-encoded, a slide file's led by `./`,
@@ -396,6 +410,15 @@ leaves the last whole lesson.
   and a file over 20 MB is skipped with a log line. Text files up to 20 KB are
   also shown inline as fenced code. A workspace is fetched every sync, since
   Ed gives it no version; the byte compare keeps unchanged files unchanged.
+- A workspace with a sync record, `ed-workspaces/<challenge_id>.json` in the
+  data dir (`app/src-tauri/src/sources/ed/workspace_state.rs`), holds local
+  work, so the sync leaves it as is: no connect, no download, no write, and
+  an `info` line `workspace has local state, left as is`. The record is
+  `{"workspace_id", "slide_dir", "base_commit", "files", "submissions"}`,
+  `files` mapping each path in the workspace to the SHA-256 (hex) of the
+  bytes last synced. The slide's Files list is then those paths, read from
+  the slide's folder on disk (one missing there is left out). A record that
+  cannot be read still counts.
 - A PDF slide's `file_url` names its content, so `file-manifest.json` keeps it
   under `ed-slide-<id>`, and a match with the file on disk skips the
   download. The PDF is an ordinary library file: parsed and embedded.

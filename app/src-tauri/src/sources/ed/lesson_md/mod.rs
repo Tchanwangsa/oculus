@@ -28,6 +28,8 @@ pub struct SlideExtras {
     pub pdf: Option<String>,
     pub questions: Vec<Value>,
     pub files: Vec<LinkedFile>,
+    /// A challenge slide's `GET /challenges/<ch>` answer, when it came.
+    pub challenge: Option<Value>,
     /// Says what could not be fetched for this slide.
     pub note: Option<String>,
 }
@@ -91,6 +93,11 @@ pub struct SlideFile<'a> {
 }
 
 impl SlideFile<'_> {
+    /// The Ed challenge behind a `code` or `jupyter` slide.
+    pub fn challenge_id(&self) -> Option<i64> {
+        challenge_id(self.slide)
+    }
+
     /// Whether the slide gets its own `.md` ([`slide_md`]): every slide but
     /// a PDF.
     pub fn has_file(&self) -> bool {
@@ -119,6 +126,37 @@ pub fn slide_url(region: &str, course_id: i64, lesson_id: i64, slide_id: i64) ->
         "{}/slides/{slide_id}",
         lesson_url(region, course_id, lesson_id)
     )
+}
+
+/// The Ed challenge behind a slide: only `code` and `jupyter` slides have one.
+pub fn challenge_id(slide: &Value) -> Option<i64> {
+    match slide["type"].as_str() {
+        Some("code" | "jupyter") => slide["challenge_id"].as_i64(),
+        _ => None,
+    }
+}
+
+/// What a workspace view needs from a challenge, without the student's
+/// standing (`score`, `status`, `attempts_remaining`), which goes stale. A
+/// challenge with no `due_at` is due with its lesson.
+fn challenge_front(challenge: &Value, lesson: &Value) -> Value {
+    let feature = |name: &str| json!(challenge["features"][name].as_bool());
+    let due = match text_or_null(&challenge["due_at"]) {
+        Value::Null => text_or_null(&lesson["due_at"]),
+        due => due,
+    };
+    json!({
+        "type": text_or_null(&challenge["type"]),
+        "run_command": text_or_null(&challenge["settings"]["run_command"]),
+        "features": {
+            "run": feature("run"),
+            "mark": feature("mark"),
+            "terminal": feature("terminal"),
+            "feedback": feature("feedback"),
+            "confirm_submit": feature("confirm_submit"),
+        },
+        "due_at": due,
+    })
 }
 
 /// A lesson's slides by `index`, then id.
@@ -152,6 +190,7 @@ pub fn lesson_index_md(lesson: &Value, place: &LessonPlace, slides: &[SlideFile]
                 "file": s.has_file().then(|| within(&format!("{}.md", s.stem), index_dir)),
                 "pdf": s.extras.pdf.as_deref().map(|p| within(p, index_dir)),
                 "url": place.slide_url(s.id),
+                "challenge_id": s.challenge_id(),
             })
         })
         .collect();
@@ -231,6 +270,7 @@ pub fn slide_md(lesson: &Value, place: &LessonPlace, slide: &SlideFile) -> Optio
     let front = front_matter(&[
         ("ed_slide_id", json!(slide.id)),
         ("ed_lesson_id", json!(place.lesson_id)),
+        ("ed_challenge_id", json!(slide.challenge_id())),
         (
             "lesson",
             json!(lesson["title"].as_str().unwrap_or("Lesson")),
@@ -242,6 +282,13 @@ pub fn slide_md(lesson: &Value, place: &LessonPlace, slide: &SlideFile) -> Optio
         // Only a PDF slide has one, and it has no file.
         ("pdf", Value::Null),
         ("url", json!(place.slide_url(slide.id))),
+        (
+            "challenge",
+            match (&slide.extras.challenge, slide.challenge_id()) {
+                (Some(challenge), Some(_)) => challenge_front(challenge, lesson),
+                _ => Value::Null,
+            },
+        ),
     ]);
     let body = slide_body(slide.slide, &title, &slide.extras, &place.slide_dir());
     let open = place

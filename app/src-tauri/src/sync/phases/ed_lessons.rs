@@ -3,6 +3,7 @@
 //! challenge workspaces in `lessons/<id>-<slug>/`.
 
 use crate::library::paths;
+use crate::sources::ed::workspace_state::{self, WorkspaceState};
 use crate::sources::ed::{self, LessonPlace, LinkedFile, SlideExtras, SlideFile};
 use crate::sync::render::{rel_within_course, slug};
 use crate::sync::{Engine, FileEvent, FileFailed, FileStart, Progress, Subject};
@@ -80,15 +81,19 @@ impl Engine {
             };
             let slide_title = slide["title"].as_str().unwrap_or("");
             let slide_stem = format!("{stem}/{:02}-{}", i + 1, slug(slide_title));
-            let extras = match slide["type"].as_str().unwrap_or("") {
-                "pdf" => self.lesson_pdf(c, slide, slide_id, &slide_stem),
-                "quiz" => self.lesson_quiz(c, slide_id, slide_title),
-                "code" | "jupyter" => match slide["challenge_id"].as_i64() {
-                    Some(challenge) => {
-                        self.lesson_workspace(c, challenge, slide_title, &slide_stem)
+            let extras = match (
+                slide["type"].as_str().unwrap_or(""),
+                ed::challenge_id(slide),
+            ) {
+                ("pdf", _) => self.lesson_pdf(c, slide, slide_id, &slide_stem),
+                ("quiz", _) => self.lesson_quiz(c, slide_id, slide_title),
+                (_, Some(challenge)) => {
+                    let settings = self.lesson_challenge(c, challenge, slide_title);
+                    SlideExtras {
+                        challenge: settings,
+                        ..self.lesson_workspace(c, challenge, slide_title, &slide_stem)
                     }
-                    None => SlideExtras::default(),
-                },
+                }
                 _ => SlideExtras::default(),
             };
             slides.push(SlideFile {
@@ -209,9 +214,31 @@ impl Engine {
         }
     }
 
+    /// The challenge's settings for the slide's front matter. Without them
+    /// the slide still names its challenge and gets its files.
+    fn lesson_challenge(
+        &self,
+        c: &Subject,
+        challenge_id: i64,
+        slide_title: &str,
+    ) -> Option<serde_json::Value> {
+        self.ed
+            .challenge(challenge_id)
+            .map_err(|e| {
+                self.reporter.log(
+                    "warning",
+                    &c.code,
+                    &format!("ed challenge {slide_title}: {e}"),
+                )
+            })
+            .ok()
+    }
+
     /// The student's current workspace for a challenge, every kept file
     /// stored under the slide's folder. Fetched each sync: Ed gives no version
     /// for a workspace, and the byte compare keeps unchanged files unchanged.
+    /// A workspace with a sync record (`workspace_state`) holds local work, so
+    /// it is not fetched: its files are listed as they are on disk.
     fn lesson_workspace(
         &self,
         c: &Subject,
@@ -230,6 +257,31 @@ impl Engine {
                 ..SlideExtras::default()
             }
         };
+        if workspace_state::has_state(&self.data_dir, challenge_id) {
+            self.reporter.log(
+                "info",
+                &c.code,
+                &format!("ed workspace {slide_title}: workspace has local state, left as is"),
+            );
+            let state = workspace_state::load(&self.data_dir, challenge_id).unwrap_or_default();
+            let kept = kept_files(&self.data_dir, &c.code, slide_stem, &state);
+            for k in &kept {
+                self.reporter.file(&FileEvent {
+                    subject_id: c.id,
+                    code: c.code.clone(),
+                    relative_path: k.rel.clone(),
+                    size_bytes: k.size,
+                    category: paths::category_from_path(&k.rel).to_string(),
+                    canvas_id: None,
+                    source_url: None,
+                    action: "unchanged",
+                });
+            }
+            return SlideExtras {
+                files: kept.into_iter().map(|k| k.linked).collect(),
+                ..SlideExtras::default()
+            };
+        }
         // `fetch_bytes` names neither the URL nor the ticket in its errors.
         let zip = match self
             .ed
@@ -273,10 +325,93 @@ impl Engine {
     }
 }
 
+/// A workspace file kept on disk, as the slide lists it.
+struct KeptFile {
+    /// Data-dir-relative.
+    rel: String,
+    size: u64,
+    linked: LinkedFile,
+}
+
+/// The files a workspace's sync record names, read from the slide's folder
+/// in the library (where a sync stores them), in the record's order. One
+/// missing from disk is left out.
+fn kept_files(
+    data_dir: &std::path::Path,
+    code: &str,
+    slide_stem: &str,
+    state: &WorkspaceState,
+) -> Vec<KeptFile> {
+    state
+        .files
+        .keys()
+        .filter_map(|path| {
+            let rel = paths::course_rel_path(code, &format!("{slide_stem}/{path}"))?;
+            let bytes = std::fs::read(data_dir.join(&rel)).ok()?;
+            Some(KeptFile {
+                size: bytes.len() as u64,
+                linked: LinkedFile {
+                    path: path.clone(),
+                    rel: rel_within_course(&rel),
+                    text: inline_text(&bytes),
+                },
+                rel,
+            })
+        })
+        .collect()
+}
+
 /// A small UTF-8 text file's contents, for showing inline.
 fn inline_text(bytes: &[u8]) -> Option<String> {
     if bytes.len() > INLINE_TEXT_BYTES || bytes.contains(&0) {
         return None;
     }
     std::str::from_utf8(bytes).ok().map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::Scratch;
+
+    #[test]
+    fn a_workspace_with_local_state_is_listed_from_disk() {
+        let dir = Scratch::new("ed-kept-files");
+        let stem = "lessons/1-l/03-q1a";
+        let course = dir.join("courses/COMP30026/lessons/1-l/03-q1a");
+        std::fs::create_dir_all(course.join("src")).unwrap();
+        std::fs::write(course.join("q1a.py"), "dfa = 1\n").unwrap();
+        std::fs::write(course.join("src/data.bin"), [0u8, 1, 2]).unwrap();
+        let state = WorkspaceState {
+            files: [("q1a.py", "aa"), ("src/data.bin", "bb"), ("gone.py", "cc")]
+                .into_iter()
+                .map(|(p, h)| (p.to_string(), h.to_string()))
+                .collect(),
+            ..WorkspaceState::default()
+        };
+
+        let kept = kept_files(&dir, "COMP30026", stem, &state);
+        let listed: Vec<(&str, &str, u64, Option<&str>)> = kept
+            .iter()
+            .map(|k| {
+                (
+                    k.linked.path.as_str(),
+                    k.linked.rel.as_str(),
+                    k.size,
+                    k.linked.text.as_deref(),
+                )
+            })
+            .collect();
+        // In the record's (sorted) order, the missing file left out.
+        assert_eq!(
+            listed,
+            [
+                ("q1a.py", "lessons/1-l/03-q1a/q1a.py", 8, Some("dfa = 1\n")),
+                ("src/data.bin", "lessons/1-l/03-q1a/src/data.bin", 3, None),
+            ]
+        );
+        assert_eq!(kept[0].rel, "courses/COMP30026/lessons/1-l/03-q1a/q1a.py");
+        // Nothing written: the folder holds only what was there.
+        assert!(!course.join("gone.py").exists());
+    }
 }

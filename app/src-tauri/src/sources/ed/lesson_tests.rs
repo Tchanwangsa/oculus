@@ -22,9 +22,16 @@ use std::rc::Rc;
 const LESSON: &str = include_str!("fixtures/lesson.json");
 const LESSONS: &str = include_str!("fixtures/lessons-list.json");
 const QUESTIONS: &str = include_str!("fixtures/quiz-questions.json");
+/// Shaped after the live probe of `GET /challenges/<ch>` (protocol note in
+/// `docs/sync.md`), not a captured answer: its other keys are trimmed.
+const CHALLENGE: &str = include_str!("fixtures/challenge.json");
 
 fn lesson() -> Value {
     serde_json::from_str::<Value>(LESSON).unwrap()["lesson"].clone()
+}
+
+fn challenge() -> Value {
+    serde_json::from_str::<Value>(CHALLENGE).unwrap()["challenge"].clone()
 }
 
 fn questions() -> Vec<Value> {
@@ -213,7 +220,8 @@ fn the_index_lists_every_slide_in_its_front_matter_and_links_them() {
         json!({"id": 739598, "title": "Week 7 - Sockets", "type": "pdf", "status": "unseen",
                "file": null,
                "pdf": "120619-assignment-2/01-week-7-sockets.pdf",
-               "url": "https://edstem.org/au/courses/38775/lessons/120619/slides/739598"})
+               "url": "https://edstem.org/au/courses/38775/lessons/120619/slides/739598",
+               "challenge_id": null})
     );
     assert_eq!(slides[1]["id"], 831114);
     assert_eq!(
@@ -292,6 +300,7 @@ fn a_slide_file_is_its_front_matter_title_and_content() {
         "---\n\
          ed_slide_id: 563686\n\
          ed_lesson_id: 120619\n\
+         ed_challenge_id: null\n\
          lesson: \"Assignment 2\"\n\
          title: \"Lecture 18 Missed Segment\"\n\
          type: \"webpage\"\n\
@@ -299,6 +308,7 @@ fn a_slide_file_is_its_front_matter_title_and_content() {
          index: 6\n\
          pdf: null\n\
          url: \"https://edstem.org/au/courses/38775/lessons/120619/slides/563686\"\n\
+         challenge: null\n\
          ---\n\
          # Lecture 18 Missed Segment\n\n\
          [Open in Ed](https://edstem.org/au/courses/38775/lessons/120619/slides/563686)\n\n\
@@ -369,6 +379,123 @@ fn the_fixture_lesson_renders_every_slide_type() {
         "{}",
         md(582857)
     );
+}
+
+#[test]
+fn a_challenge_slide_names_its_challenge_and_what_its_workspace_needs() {
+    let l = lesson();
+    let place = place(STEM, Some("au"));
+    let mut extras = fixture_extras();
+    extras.get_mut(&831115).unwrap().challenge = Some(challenge());
+    let files = files_of(&l, STEM, extras);
+    let code = files.iter().find(|f| f.id == 831115).unwrap();
+    let md = slide_md(&l, &place, code).unwrap();
+    let (front, _) = front_of(&md);
+
+    assert_eq!(front["ed_challenge_id"], 281410);
+    // Ed's empty run command is no Run; the challenge has no due date of its
+    // own, so it is due with the lesson. The student's score stays out.
+    assert_eq!(
+        front["challenge"],
+        json!({
+            "type": "pyunit",
+            "run_command": null,
+            "features": {"run": true, "mark": true, "terminal": true,
+                         "feedback": true, "confirm_submit": false},
+            "due_at": "2026-10-19T23:59:00+11:00",
+        })
+    );
+    // One JSON line, like every other value.
+    assert!(
+        md.contains(
+            "\nchallenge: {\"type\":\"pyunit\",\"run_command\":null,\"features\":{\"run\":true,"
+        ),
+        "{md}"
+    );
+    assert!(
+        md.contains("\ned_lesson_id: 120619\ned_challenge_id: 281410\n"),
+        "{md}"
+    );
+
+    // Its own due date wins; a missing feature is unknown, not off.
+    let mut own = challenge();
+    own["due_at"] = json!("2026-10-01T12:00:00+10:00");
+    own["settings"]["run_command"] = json!("python3 q1a.py");
+    own["features"]
+        .as_object_mut()
+        .unwrap()
+        .remove("confirm_submit");
+    let mut extras = HashMap::new();
+    extras.insert(
+        831115,
+        SlideExtras {
+            challenge: Some(own),
+            ..SlideExtras::default()
+        },
+    );
+    let files = files_of(&l, STEM, extras);
+    let code = files.iter().find(|f| f.id == 831115).unwrap();
+    let (front, _) = front_of(&slide_md(&l, &place, code).unwrap());
+    assert_eq!(front["challenge"]["due_at"], "2026-10-01T12:00:00+10:00");
+    assert_eq!(front["challenge"]["run_command"], "python3 q1a.py");
+    assert_eq!(
+        front["challenge"]["features"]["confirm_submit"],
+        Value::Null
+    );
+}
+
+#[test]
+fn a_challenge_slide_without_its_settings_still_names_its_challenge() {
+    let l = lesson();
+    let place = place(STEM, Some("au"));
+    let files = files_of(&l, STEM, fixture_extras());
+    let front = |id: i64| {
+        let file = files.iter().find(|f| f.id == id).unwrap();
+        front_of(&slide_md(&l, &place, file).unwrap()).0
+    };
+
+    let code = front(831115);
+    assert_eq!(code["ed_challenge_id"], 281410);
+    assert_eq!(code["challenge"], Value::Null);
+    let jupyter = front(582857);
+    assert_eq!(jupyter["ed_challenge_id"], 202057);
+    assert_eq!(jupyter["challenge"], Value::Null);
+    let document = front(831114);
+    assert_eq!(document["ed_challenge_id"], Value::Null);
+    assert_eq!(document["challenge"], Value::Null);
+
+    // The index says which slides are workspaces.
+    let (index, _) = front_of(&lesson_index_md(&l, &place, &files));
+    let ids: Vec<(i64, &Value)> = index["slides"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| (s["id"].as_i64().unwrap(), &s["challenge_id"]))
+        .filter(|(_, ch)| !ch.is_null())
+        .collect();
+    assert_eq!(ids, [(831115, &json!(281410)), (582857, &json!(202057))]);
+}
+
+#[test]
+fn only_code_and_jupyter_slides_have_a_challenge() {
+    let l = lesson_of(json!([
+        {"id": 1, "type": "document", "title": "A", "index": 0, "challenge_id": 7},
+        {"id": 2, "type": "code", "title": "B", "index": 1, "challenge_id": 8}
+    ]));
+    let mut extras = HashMap::new();
+    extras.insert(
+        1,
+        SlideExtras {
+            challenge: Some(challenge()),
+            ..SlideExtras::default()
+        },
+    );
+    let place = place("lessons/1-l", None);
+    let files = files_of(&l, place.stem, extras);
+    let (doc, _) = front_of(&slide_md(&l, &place, &files[0]).unwrap());
+    assert_eq!(doc["ed_challenge_id"], Value::Null);
+    assert_eq!(doc["challenge"], Value::Null);
+    assert_eq!(files[1].challenge_id(), Some(8));
 }
 
 #[test]
@@ -619,6 +746,7 @@ fn lessons_and_questions_are_plain_reads() {
             "/api/courses/38775/lessons" => LESSONS,
             "/api/lessons/120619" => LESSON,
             "/api/lessons/slides/499780/questions" => QUESTIONS,
+            "/api/challenges/281410" => CHALLENGE,
             _ => "{}",
         };
         (
@@ -632,6 +760,7 @@ fn lessons_and_questions_are_plain_reads() {
     assert_eq!(list.module_name(Some(24732)), Some("Assignments"));
     assert_eq!(ed.lesson(120619).unwrap()["id"], 120619);
     assert_eq!(ed.quiz_questions(499780).unwrap().len(), 3);
+    assert_eq!(ed.challenge(281410).unwrap()["type"], "pyunit");
     for (header, _) in keyd.requests() {
         assert_eq!(header["method"], "GET");
         assert!(
@@ -669,4 +798,49 @@ fn the_workspace_host_and_web_links_follow_eds_region() {
     let md = slide_md(&l, &place, &files[0]).unwrap();
     let (front, _) = front_of(&md);
     assert_eq!(front["url"], Value::Null);
+}
+
+#[test]
+fn a_workspace_sync_record_round_trips_beside_the_library() {
+    use super::workspace_state::{has_state, load, path, save, WorkspaceState};
+
+    let dir = Scratch::new("ed-workspace-state");
+    assert_eq!(
+        path(&dir, 267880),
+        dir.join("ed-workspaces").join("267880.json")
+    );
+    assert!(!has_state(&dir, 267880));
+    assert_eq!(load(&dir, 267880), None);
+
+    let state = WorkspaceState {
+        workspace_id: "W1".into(),
+        slide_dir: "courses/COMP30026/lessons/1-l/03-tally".into(),
+        base_commit: Some("abc123".into()),
+        files: [(
+            "tally.py".to_string(),
+            "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".to_string(),
+        )]
+        .into_iter()
+        .collect(),
+        submissions: vec![42],
+    };
+    save(&dir, 267880, &state).unwrap();
+    assert!(has_state(&dir, 267880));
+    assert_eq!(load(&dir, 267880), Some(state));
+    let raw: Value = serde_json::from_slice(&std::fs::read(path(&dir, 267880)).unwrap()).unwrap();
+    assert_eq!(
+        raw.as_object().unwrap().keys().collect::<Vec<_>>(),
+        [
+            "workspace_id",
+            "slide_dir",
+            "base_commit",
+            "files",
+            "submissions"
+        ]
+    );
+
+    // An unreadable record is still a record: the sync leaves the workspace be.
+    std::fs::write(path(&dir, 1), b"{not json").unwrap();
+    assert!(has_state(&dir, 1));
+    assert_eq!(load(&dir, 1), None);
 }

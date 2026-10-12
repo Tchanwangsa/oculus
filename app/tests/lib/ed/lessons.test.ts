@@ -7,6 +7,7 @@ import {
   lessonProgress,
   parseEdLesson,
   parseLessonIndex,
+  parseSlideChallenge,
   resolveBeside,
   slideFiles,
   slideIcon,
@@ -39,8 +40,8 @@ const A1 = indexText(
     url: '"https://example.org/courses/1/lessons/123"',
   },
   [
-    '{"id":456,"title":"Q1: Group Project","type":"code","status":"completed","file":"123-assignment-1/01-q1-group-project.md","pdf":null,"url":"https://example.org/courses/1/lessons/123/slides/456"}',
-    '{"id":457,"title":"Notes","type":"pdf","status":"unseen","file":"123-assignment-1/02-notes.md","pdf":"123-assignment-1/02-notes.pdf","url":null}',
+    '{"id":456,"title":"Q1: Group Project","type":"code","status":"completed","file":"123-assignment-1/01-q1-group-project.md","pdf":null,"url":"https://example.org/courses/1/lessons/123/slides/456","challenge_id":281410}',
+    '{"id":457,"title":"Notes","type":"pdf","status":"unseen","file":"123-assignment-1/02-notes.md","pdf":"123-assignment-1/02-notes.pdf","url":null,"challenge_id":null}',
   ],
 );
 
@@ -63,6 +64,38 @@ describe("Ed lesson index", () => {
       [457, "pdf", "unseen", "123-assignment-1/02-notes.pdf"],
     ]);
     expect(lessonProgress(index)).toEqual({ done: 1, total: 2 });
+    expect(index.slides.map((s) => s.challengeId)).toEqual([281410, null]);
+  });
+
+  test("reads a challenge slide's challenge and its snapshot", () => {
+    const slide = (lines: string[]) =>
+      ["---", "ed_slide_id: 456", ...lines, "---", "# Q1", ""].join("\n");
+    const full = parseSlideChallenge(
+      slide([
+        "ed_challenge_id: 281410",
+        'challenge: {"type":"pyunit","run_command":null,"features":{"run":true,"mark":true,"terminal":true,"feedback":true,"confirm_submit":false},"due_at":"2026-10-19T23:59:00+11:00"}',
+      ]),
+    )!;
+    expect(full.challengeId).toBe(281410);
+    expect(full.challenge?.type).toBe("pyunit");
+    expect(full.challenge?.runCommand).toBeNull();
+    expect(full.challenge?.features).toEqual({
+      run: true,
+      mark: true,
+      terminal: true,
+      feedback: true,
+      confirmSubmit: false,
+    });
+    expect(full.challenge?.dueAt?.toISOString()).toBe("2026-10-19T12:59:00.000Z");
+
+    // The settings could not be fetched: the id alone.
+    expect(parseSlideChallenge(slide(["ed_challenge_id: 281410", "challenge: null"]))).toEqual({
+      challengeId: 281410,
+      challenge: null,
+    });
+    // Not a challenge slide, or a file from before the key existed.
+    expect(parseSlideChallenge(slide(["ed_challenge_id: null", "challenge: null"]))).toBeNull();
+    expect(parseSlideChallenge(slide([]))).toBeNull();
   });
 
   test("a lesson scraped before the split has no index", () => {
