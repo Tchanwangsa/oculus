@@ -19,6 +19,7 @@ Read this before any UI work.
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
 | Table chrome | `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
 | Toolbar filters: pill popovers, checklists, applied-filter chips | `app/src/components/ui/filter/` |
+| The colour control: a swatch that opens a pad, hue and opacity strips and hex text | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
 
 ## One colour, two fonts, and a floating card
 
@@ -161,6 +162,10 @@ mounts on open and loads through the same cache.
   `webkitUserSelect`. The `select-*` utilities already emit both.
 - **Page zoom, never CSS `zoom`** — in a CSS-zoomed subtree WebKit mixes visual
   pointer coords with layout rects, breaking popups and drags.
+- **No native colour inputs** — `<input type="color">` opens the OS panel
+  and has no alpha; use `ColorField` (`app/src/components/ui/color/`), whose
+  pad and strips measure the pointer as a fraction of their own box, so page
+  zoom cannot skew them.
 - **No native date/time inputs** — segmented hover, an OS picker in Buddhist-era
   years, and a half-typed value reads empty. Use
   `app/src/components/projects/fields/DateTimeField.tsx`; bare `type="time"` is fine.
