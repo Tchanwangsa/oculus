@@ -10,9 +10,10 @@ use std::collections::HashMap;
 use keyd_core::client::SessionKind;
 
 impl Ed {
-    /// The Ed course backing a Canvas course. Ed only enrols an account when a
-    /// board is first opened, so a miss in `/api/user` falls back to the LTI
-    /// launch, which enrols and names the course. `Ok(None)`: no Ed tool.
+    /// The Ed course backing a Canvas course: what its last launch named, else
+    /// a match in `/api/user`. Ed only enrols an account when a board is first
+    /// opened, so a miss falls back to the LTI launch, which enrols and names
+    /// the course. `Ok(None)`: no Ed tool.
     pub fn resolve_course(
         &self,
         canvas: &crate::sources::canvas::Canvas,
@@ -20,12 +21,18 @@ impl Ed {
         canvas_code: &str,
     ) -> Result<Option<i64>, String> {
         if self.has_session() {
+            if let Some(id) = self.launched_course(canvas_course_id) {
+                return Ok(Some(id));
+            }
             if let Ok(Some(id)) = self.course_for(canvas_code) {
                 return Ok(Some(id));
             }
         }
         match self.connect_via_canvas(canvas, canvas_course_id) {
-            Ok(course_id) => Ok(Some(course_id)),
+            Ok(course_id) => {
+                self.remember_launch(canvas_course_id, course_id);
+                Ok(Some(course_id))
+            }
             Err(e) if e.contains("no Ed Discussion tool") => Ok(None),
             Err(e) => Err(e),
         }

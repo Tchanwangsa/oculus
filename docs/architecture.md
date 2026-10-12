@@ -314,6 +314,8 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
   ([retrieval.md](./retrieval.md)).
 - `institution.json` — which university: its Canvas address, how it signs
   in, and what launches learned ([auth.md](./auth.md#one-institution-profile-says-which-university)).
+- `ed-courses.json` — the Ed course each Canvas course's LTI launch named
+  ([sync.md](./sync.md#ed-content-is-a-custom-xml-dialect)).
 - `canvas-session/`: the authenticated flag, the signed-out marker and the
   sign-in attempt record, with `okta-sign-in.log` beside it
   ([auth.md](./auth.md)). The sessions themselves are in the vault.

@@ -416,3 +416,30 @@ fn a_launch_names_eds_region_in_its_first_path_segment() {
     assert_eq!(region("https://edstem.org/AU/courses/1"), None);
     assert_eq!(region("https://edstem.org/../courses/1"), None);
 }
+
+#[test]
+fn a_launched_course_is_reused_while_the_session_is_enrolled_in_it() {
+    let dir = Scratch::new("ed-launched");
+    let _keyd = FakeKeyd::start(&dir, |header, _| match header["op"].as_str().unwrap() {
+        "forward" => match header["path"].as_str().unwrap() {
+            "/api/user" => (
+                json!({"status": 200, "headers": []}),
+                br#"{"user":{"name":"Ada"},"courses":[
+                    {"course":{"id":11,"code":"CS 101","year":"2026","session":"Fall"}},
+                    {"course":{"id":12,"code":"CS 101","year":"2026","session":"Fall"}}]}"#
+                    .to_vec(),
+            ),
+            _ => (json!({"status": 200, "headers": []}), b"{}".to_vec()),
+        },
+        _ => (json!({}), vec![]),
+    });
+    let ed = Ed::open(&dir);
+    assert_eq!(ed.course_for("CS 101 Fall 2026").unwrap(), None);
+    assert_eq!(ed.launched_course(5), None);
+
+    ed.remember_launch(5, 12);
+    assert_eq!(Ed::open(&dir).launched_course(5), Some(12));
+
+    ed.remember_launch(6, 99);
+    assert_eq!(Ed::open(&dir).launched_course(6), None);
+}

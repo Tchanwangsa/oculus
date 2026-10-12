@@ -298,7 +298,10 @@ emits its marker and still recurses. The token is in [auth.md](./auth.md).
   matched to Canvas subjects from `/api/user` on the subject token — the words
   up to the first with a digit — then year, and a UniMelb `SM<n>` or a shared
   season name. A tie that leaves is no match: the course's LTI launch, which
-  names the course exactly, decides instead.
+  names the course exactly, decides instead, and `ed-courses.json` in the data
+  dir keeps what it named (Canvas course id → Ed course id). That answer comes
+  first on later syncs while the session is still enrolled in the course, so
+  a tie costs one launch, not one per sync (`app/src-tauri/src/sources/ed/courses.rs`).
 - The Ed tab is the external tool labelled "Ed Discussion", "Ed" or "EdStem".
 - A launch's landing page names Ed's web region (`edstem.org/<region>/courses/…`,
   or a `<region>.edstem.org` host), and the region names the API: the bare

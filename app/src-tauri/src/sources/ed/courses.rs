@@ -1,5 +1,8 @@
 //! Mapping a Canvas course code to its Ed course.
 
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
 use super::{Ed, EdCourse};
 
 impl Ed {
@@ -49,6 +52,51 @@ impl Ed {
             .collect();
         Ok(pick_course(&scored))
     }
+
+    /// The Ed course an earlier launch of this Canvas course landed on, while
+    /// the session is still enrolled in it. A launch names the course
+    /// exactly, so it settles a tie `course_for` cannot without a new launch
+    /// (and a new Ed session) every sync.
+    pub(super) fn launched_course(&self, canvas_course_id: i64) -> Option<i64> {
+        let id = *read_launched(&self.data_dir).get(&canvas_course_id.to_string())?;
+        self.courses()
+            .is_ok_and(|cs| cs.iter().any(|c| c.id == id))
+            .then_some(id)
+    }
+
+    /// Keep what a launch named for [`Ed::launched_course`]. Best-effort:
+    /// losing it costs one more launch.
+    pub(super) fn remember_launch(&self, canvas_course_id: i64, ed_course_id: i64) {
+        let mut launched = read_launched(&self.data_dir);
+        if launched.insert(canvas_course_id.to_string(), ed_course_id) == Some(ed_course_id) {
+            return;
+        }
+        let target = launched_path(&self.data_dir);
+        let written = serde_json::to_vec_pretty(&launched)
+            .map_err(|e| e.to_string())
+            .and_then(|body| {
+                crate::runtime::atomic_write::write(
+                    &target,
+                    &target.with_extension("json.tmp"),
+                    &body,
+                )
+            });
+        if let Err(e) = written {
+            elog!("[oculus] could not save {}: {e}", target.display());
+        }
+    }
+}
+
+/// Canvas course id → the Ed course its launch landed on.
+fn launched_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("ed-courses.json")
+}
+
+fn read_launched(data_dir: &Path) -> BTreeMap<String, i64> {
+    std::fs::read_to_string(launched_path(data_dir))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
 }
 
 /// The subject code: the words up to and including the first with a digit.
