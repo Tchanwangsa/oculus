@@ -43,8 +43,12 @@ case "$target" in
     # system DLLs only, never the MinGW runtime's. The linker strips it, since
     # strip would stamp the PE header with the time, so rebuilds match byte
     # for byte.
+    # Media Foundation's H.264 encoder (h264_mf) is Studio's encoder here:
+    # it is part of Windows, so no GPL x264. --disable-autodetect means it
+    # is named; it loads mfplat.dll at run time.
     target_flags=(--enable-cross-compile --target-os=mingw32 --arch=x86_64
-      "--cross-prefix=$host-" --enable-w32threads --disable-stripping)
+      "--cross-prefix=$host-" --enable-w32threads --disable-stripping
+      --enable-mediafoundation --enable-encoder=h264_mf)
     target_ldflags="-static -s -Wl,--no-insert-timestamp"
     ;;
   *) die "unknown target '$target'; $usage" ;;

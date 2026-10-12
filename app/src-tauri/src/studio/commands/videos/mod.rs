@@ -60,6 +60,17 @@ pub async fn studio_video_detail(slug: String) -> Result<VideoDetail, String> {
     .await
 }
 
+/// Turns the video's burned-in captions on or off (video.json's
+/// `captions`); the next render re-renders its narrated scenes.
+#[tauri::command]
+pub async fn studio_set_captions(slug: String, on: bool) -> Result<(), String> {
+    crate::runtime::blocking::run(move || {
+        let dir = crate::studio::videos::video_in(&videos_dir(), &slug)?;
+        crate::studio::videos::set_captions(&dir, on)
+    })
+    .await
+}
+
 /// A PNG `width` pixels wide. Rejects with the reason when the narration is
 /// stale.
 #[tauri::command]

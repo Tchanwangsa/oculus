@@ -370,7 +370,10 @@ checks FFmpeg's signature against the committed `ffmpeg-release-key.asc`
 (fingerprint pinned), and builds libopus and dav1d as static libraries, then
 FFmpeg with `configure-flags.txt`: file and pipe protocols, the demuxers and
 decoders for the containers and codecs a student's videos and recordings
-arrive in, libopus, PCM, MJPEG and rawvideo encoders, and the filters the app
+arrive in, libopus, PCM, MJPEG and rawvideo encoders, what Studio renders
+need (the rawvideo and concat demuxers, the rawvideo decoder, the native AAC
+encoder, and for Windows `--enable-mediafoundation` with its `h264_mf`
+encoder, set in `build.sh`'s target flags), and the filters the app
 names plus the ones the ffmpeg CLI inserts for format conversion, `-ss`/`-t`,
 cropping and rotation. It refuses a configuration whose licence is not LGPL v3,
 and for Windows a binary that imports any DLL but Windows' own. The Windows
@@ -383,7 +386,9 @@ or the workflow, and from the Actions tab. It builds on Ubuntu, writes
 fixtures with Ubuntu's full ffmpeg (`fixtures.sh`), and on a Windows runner
 `smoke.sh` runs every command shape the app uses — the Echo360 trim, the Opus
 extraction with its `Duration:` and "matches no streams" stderr, the WAV
-decode and Ogg part copies, thumbnails and 160×90 grey frames — against
+decode and Ogg part copies, thumbnails and 160×90 grey frames, and
+Studio's render (raw RGBA frames encoded by `h264_mf` as two segments, joined
+by the concat demuxer beside AAC, and an m4a) — against
 mp4, mov, webm, mkv, AV1, MPEG-TS, AVI, WMV, MP3, M4A, WAV, FLAC, Ogg, a
 video without audio and a rotated one, and checks that `-L` reports LGPL v3.
 It then creates or updates the draft release `ffmpeg-<version>-oculus<build>`

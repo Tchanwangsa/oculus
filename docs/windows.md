@@ -101,6 +101,19 @@ Windows offers Groq transcription only. Saved local engine preferences are
 filtered against the available backend engine list. Settings hide Apple
 speech and local whisper controls and do not invoke either helper on Windows.
 
+## Studio renders on Media Foundation
+
+The Windows ffmpeg is LGPL, so it has no libx264: Studio's renders encode
+H.264 with Media Foundation's `h264_mf` at a bitrate scaled to the frame
+(see [studio.md](./studio.md#rendering-a-video)), and the native `aac`
+encoder for the narration. Each render first asks ffmpeg what it was built
+with and names a missing encoder or demuxer before any frame renders, so a
+release built before Studio's additions to `configure-flags.txt` fails with
+that sentence. A Windows N edition without the Media Feature Pack has no
+Media Foundation, and its renders fail when ffmpeg opens the encoder. The
+render tests skip, saying why, when the ffmpeg found lacks what they need
+(libx264 for the cache test's byte-identical frames, `framemd5`).
+
 ## WebView2 cookies are queued and verified off the UI thread
 
 Login and browser pages use the same WebView2 environment. Cookie reads run

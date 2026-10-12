@@ -3,12 +3,12 @@
 
 use std::sync::atomic::Ordering;
 
-use super::super::{Quality, Renders};
+use super::super::{Preset, Renders};
 use crate::test_support::Scratch;
 
 /// A render that claims `dir`, then fails or finishes.
 fn job(renders: &Renders, dir: &std::path::Path, fail: bool) -> Result<(), String> {
-    let _running = renders.start(dir, Quality::Final)?;
+    let _running = renders.start(dir, Preset::Final)?;
     if fail {
         return Err("ffmpeg exited 1".into());
     }
@@ -19,9 +19,9 @@ fn job(renders: &Renders, dir: &std::path::Path, fail: bool) -> Result<(), Strin
 fn a_second_start_for_the_same_folder_is_refused_naming_the_first() {
     let dir = Scratch::new("studio-running");
     let renders = Renders::new();
-    let first = renders.start(&dir, Quality::Draft).unwrap();
+    let first = renders.start(&dir, Preset::Draft).unwrap();
     let again = renders
-        .start(&dir.join("."), Quality::Final)
+        .start(&dir.join("."), Preset::Final)
         .err()
         .expect("refused");
     let canonical = std::fs::canonicalize(&*dir).unwrap();
@@ -29,9 +29,9 @@ fn a_second_start_for_the_same_folder_is_refused_naming_the_first() {
     assert!(again.contains(&canonical.display().to_string()), "{again}");
 
     let other = Scratch::new("studio-running-other");
-    drop(renders.start(&other, Quality::Final).unwrap());
+    drop(renders.start(&other, Preset::Final).unwrap());
     drop(first);
-    drop(renders.start(&dir, Quality::Final).unwrap());
+    drop(renders.start(&dir, Preset::Final).unwrap());
 }
 
 #[test]
@@ -39,13 +39,13 @@ fn cancel_sets_the_running_flag_and_the_guard_frees_the_folder() {
     let dir = Scratch::new("studio-running");
     let renders = Renders::new();
     assert!(!renders.cancel(&dir));
-    let running = renders.start(&dir, Quality::Draft).unwrap();
+    let running = renders.start(&dir, Preset::Draft).unwrap();
     assert!(!running.cancel_flag().load(Ordering::Relaxed));
     assert!(renders.cancel(&dir));
     assert!(running.cancel_flag().load(Ordering::Relaxed));
     drop(running);
     assert!(!renders.cancel(&dir));
-    let next = renders.start(&dir, Quality::Draft).unwrap();
+    let next = renders.start(&dir, Preset::Draft).unwrap();
     assert!(!next.cancel_flag().load(Ordering::Relaxed));
 }
 
@@ -57,7 +57,7 @@ fn a_failed_or_panicking_render_frees_the_folder() {
     job(&renders, &dir, false).unwrap();
 
     let panicked = std::panic::catch_unwind(|| {
-        let _running = renders.start(&dir, Quality::Draft).unwrap();
+        let _running = renders.start(&dir, Preset::Draft).unwrap();
         panic!("worker panic");
     });
     assert!(panicked.is_err());
@@ -69,7 +69,7 @@ fn a_missing_folder_is_refused() {
     let dir = Scratch::new("studio-running");
     let renders = Renders::new();
     let e = renders
-        .start(&dir.join("absent"), Quality::Draft)
+        .start(&dir.join("absent"), Preset::Draft)
         .err()
         .expect("refused");
     assert!(e.contains("absent"), "{e}");

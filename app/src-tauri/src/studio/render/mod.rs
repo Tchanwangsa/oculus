@@ -1,25 +1,32 @@
-//! `render`: a Studio video folder to an mp4. Each scene is its own
-//! segment, encoded by its own ffmpeg from frames rendered in parallel and
-//! written in order, and cached under its content address, so a re-render
-//! only renders the scenes an edit touched. The segments are joined by a
-//! stream copy beside the narration track, mixed here. `RENDERS` keeps the
-//! app to one render per folder. Rules: docs/studio.md, "Rendering a video".
+//! `render`: a Studio video folder to one export preset's file. A video
+//! preset renders each scene as its own segment, encoded by its own ffmpeg
+//! from frames rendered in parallel and written in order, and cached under
+//! its content address, so a re-render only renders the scenes an edit
+//! touched; the segments are joined by a stream copy beside the narration
+//! track, mixed here, and the captions are written beside it as WebVTT.
+//! `audio` and `subtitles` export the track and the captions alone (`export`).
+//! `RENDERS` keeps the app to one render per folder. Rules: docs/studio.md,
+//! "Rendering a video".
 
 mod audio;
 mod cache;
 mod encode;
 mod encoder;
 mod error;
+mod export;
 mod ffmpeg;
 mod key;
 mod mux;
 mod plan;
+mod preset;
 mod progress;
-mod quality;
 mod reorder;
 mod running;
+mod settings;
+mod status;
 #[cfg(test)]
 mod tests;
+mod toolkit;
 mod workers;
 
 use std::path::{Path, PathBuf};
@@ -32,18 +39,20 @@ pub use error::RenderError;
 use error::Stop;
 pub use key::still_key;
 use plan::Scene;
+pub use preset::{Output, Preset};
 pub use progress::{Outcome, Progress, Report, SegmentReport};
-pub use quality::Quality;
-use quality::Settings;
 pub use running::{Renders, Running, RENDERS};
+use settings::Settings;
+pub use status::{exports, ExportStatus};
+pub use toolkit::Toolkit;
 
 #[derive(Debug, Clone)]
 pub struct Options {
-    pub quality: Quality,
+    pub preset: Preset,
     /// Frame-rendering threads (default: half the cores), capped by memory.
-    /// The encoder's own threads are fixed (`Quality::codec_args`).
+    /// The encoder's own threads are fixed (`Toolkit::codec`).
     pub threads: Option<usize>,
-    /// The mp4 (default: `<dir>/renders/<quality>.mp4`).
+    /// The file to write (default: `Preset::default_out`).
     pub out: Option<PathBuf>,
     /// The ffmpeg to run (`sources::echo360::find_ffmpeg`).
     pub ffmpeg: PathBuf,
@@ -59,9 +68,9 @@ pub enum Finished {
     Cancelled,
 }
 
-/// Render the video in `dir`. `cancel` is checked before every frame;
-/// `progress` hears each step. No network: stale narration fails with
-/// studio-core's "run `oculus studio narrate`" error.
+/// Render the video in `dir` to `options.preset`. `cancel` is checked
+/// before every frame; `progress` hears each step. No network: stale
+/// narration fails with studio-core's "run `oculus studio narrate`" error.
 pub fn render(
     dir: &Path,
     options: &Options,
@@ -75,11 +84,6 @@ pub fn render(
     }
 }
 
-/// The default output path for `quality`.
-pub fn default_out(dir: &Path, quality: Quality) -> PathBuf {
-    dir.join("renders").join(format!("{}.mp4", quality.name()))
-}
-
 fn run(
     dir: &Path,
     options: &Options,
@@ -91,18 +95,92 @@ fn run(
     // the list's folder, so every path is made absolute here.
     let dir = &std::path::absolute(dir).map_err(|e| RenderError::io(dir, e))?;
     let project = Project::load_with(dir, &options.library)?;
+    let out = options
+        .out
+        .clone()
+        .unwrap_or_else(|| options.preset.default_out(dir));
+    if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| RenderError::io(parent, e))?;
+    }
+    let mut report = match options.preset.output() {
+        Output::Video(_) => video(dir, &project, &out, options, cancel, progress)?,
+        Output::Audio => export::audio(dir, &project, &out, options, cancel, progress)?,
+        Output::Subtitles => export::subtitles(dir, &project, &out, options.preset)?,
+    };
+    report.ms = started.elapsed().as_millis() as u64;
+    Ok(report)
+}
+
+/// A video preset's plan: its settings, segments, frames to render and
+/// narration clips.
+struct VideoPlan {
+    settings: Settings,
+    segments: Vec<plan::Segment>,
+    jobs: Vec<workers::Job>,
+    clips: Vec<audio::Clip>,
+    frames: u64,
+}
+
+/// What a render of `preset` would make of `project` now, checking first
+/// that the ffmpeg `toolkit` can make it.
+fn plan_video(
+    dir: &Path,
+    project: &Project,
+    preset: Preset,
+    toolkit: &Toolkit,
+) -> Result<VideoPlan, RenderError> {
+    let Output::Video(video) = preset.output() else {
+        return Err(RenderError::Render(format!(
+            "{} is not a video preset",
+            preset.name()
+        )));
+    };
+    toolkit.check_frames()?;
     let fps = project.fps();
     let size = project.video.size;
     let settings = Settings::new(
-        options.quality,
+        preset,
+        video,
         (size.width, size.height),
         fps,
-        project.motion_blur(options.quality.purpose())?,
+        project.motion_blur(preset.purpose())?,
+        toolkit,
     )?;
-    let scenes = scenes(&project)?;
-    let trees = key::Trees::of(dir, &project)?;
+    let scenes = scenes(project)?;
+    let trees = key::Trees::of(dir, project)?;
     let segments = plan::segments(dir, &scenes, &trees, &settings);
     let jobs = plan::jobs(&segments, fps);
+    let clips = plan::clips(&scenes, fps, project.theme.narration.lead);
+    if !clips.is_empty() {
+        toolkit.check_audio()?;
+    }
+    let frames = segments.last().map_or(0, |s| s.frames.end);
+    Ok(VideoPlan {
+        settings,
+        segments,
+        jobs,
+        clips,
+        frames,
+    })
+}
+
+fn video(
+    dir: &Path,
+    project: &Project,
+    out: &Path,
+    options: &Options,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<Report, Stop> {
+    let toolkit = Toolkit::of(&options.ffmpeg)?;
+    let VideoPlan {
+        settings,
+        segments,
+        jobs,
+        clips,
+        frames,
+    } = plan_video(dir, project, options.preset, &toolkit)?;
+    let fps = project.fps();
     let frame_bytes = u64::from(settings.width) * u64::from(settings.height) * 4;
     let threads = workers::threads(
         options.threads,
@@ -125,7 +203,7 @@ fn run(
         motion_blur: settings.motion_blur,
     };
     let reports = encode::encode(
-        &project,
+        project,
         render_options,
         &segments,
         &jobs,
@@ -136,47 +214,39 @@ fn run(
         progress,
     )?;
 
-    let frames = segments.last().map_or(0, |s| s.frames.end);
-    let clips = plan::clips(&scenes, fps, project.theme.narration.lead);
     let track = audio::track(dir, &clips, audio::length(frames, fps))?;
     if cancel.load(Ordering::Relaxed) {
         return Err(Stop::Cancelled);
     }
 
     progress(Progress::Muxing);
-    let list = cache::concat_list(dir, options.quality);
+    let list = cache::concat_list(dir, options.preset);
     let paths: Vec<PathBuf> = segments.iter().map(|s| s.path.clone()).collect();
     std::fs::write(&list, mux::concat_list(&paths)).map_err(|e| RenderError::io(&list, e))?;
-    let out = options
-        .out
-        .clone()
-        .unwrap_or_else(|| default_out(dir, options.quality));
-    if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent).map_err(|e| RenderError::io(parent, e))?;
-    }
-    mux::mux(&options.ffmpeg, &list, track.as_deref(), &out, cancel)?;
+    mux::mux(&options.ffmpeg, &list, track.as_deref(), out, cancel)?;
+    let sidecars = export::captions_beside(project, out)?.into_iter().collect();
 
     let used = cache::Used {
         segments: segments.iter().map(|s| format!("{}.mp4", s.key)).collect(),
-        track: track
-            .as_ref()
-            .and_then(|t| t.file_name())
-            .map(|n| n.to_string_lossy().into_owned()),
+        track: track.as_deref().and_then(cache::file_name),
+        out: Some(out.to_string_lossy().into_owned()),
+        cues: None,
     };
-    let pruned = cache::record_and_prune(dir, options.quality, used)?;
+    let pruned = cache::record_and_prune(dir, options.preset, used)?;
     Ok(Report {
-        path: out,
-        quality: options.quality,
-        width: settings.width,
-        height: settings.height,
+        path: out.to_owned(),
+        preset: options.preset,
+        width: Some(settings.width),
+        height: Some(settings.height),
         fps,
         frames,
         duration: frames as f64 / f64::from(fps),
         audio: track.is_some(),
         threads,
         segments: reports,
+        sidecars,
         pruned,
-        ms: started.elapsed().as_millis() as u64,
+        ms: 0,
     })
 }
 

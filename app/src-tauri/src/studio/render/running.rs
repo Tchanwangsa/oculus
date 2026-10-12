@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use super::quality::Quality;
+use super::preset::Preset;
 
 /// The app's renders.
 pub static RENDERS: Renders = Renders::new();
@@ -18,7 +18,7 @@ pub struct Renders {
 }
 
 struct Entry {
-    quality: Quality,
+    preset: Preset,
     cancel: Arc<AtomicBool>,
 }
 
@@ -30,13 +30,13 @@ impl Renders {
     }
 
     /// Claim `dir` for a render, or refuse naming the render that holds it.
-    pub fn start(&self, dir: &Path, quality: Quality) -> Result<Running<'_>, String> {
+    pub fn start(&self, dir: &Path, preset: Preset) -> Result<Running<'_>, String> {
         let key = std::fs::canonicalize(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let mut running = self.lock();
         if let Some(entry) = running.get(&key) {
             return Err(format!(
                 "a {} render of {} is already running; wait for it or cancel it",
-                entry.quality.name(),
+                entry.preset.name(),
                 key.display()
             ));
         }
@@ -44,7 +44,7 @@ impl Renders {
         running.insert(
             key.clone(),
             Entry {
-                quality,
+                preset,
                 cancel: cancel.clone(),
             },
         );
