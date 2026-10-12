@@ -92,7 +92,7 @@ pub(crate) fn fill_defaults(root: &mut Map<String, Value>) {
         "highlightText": token_or("onAccent", "#ffffff"),
         "highlightStyle": "pill",
         "plate": token_or("ink", "#101018"),
-        "plateOpacity": 0.72,
+        "plateOpacity": 0.8,
         "position": "bottom",
         "margin": 0.05,
         "maxChars": 42,

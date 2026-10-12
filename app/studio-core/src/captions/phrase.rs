@@ -90,7 +90,7 @@ pub fn phrases(
     let mut out: Vec<Phrase> = cuts
         .into_iter()
         .map(|r| Phrase {
-            lines: lines(words, r.clone(), line_chars, max_lines),
+            lines: lines(words, pauses, r.clone(), line_chars, max_lines),
             words: r,
             show: 0.0,
             hide: 0.0,
@@ -159,11 +159,19 @@ fn split(
     }
 }
 
+/// How much longer, in characters, the longest line may get when a cut
+/// moves to a clause break: "eleven, / wrap round" reads better than
+/// "eleven, wrap / round" even when less even.
+const CLAUSE_SLACK: usize = 9;
+
 /// Words `phrase` as at most `max_lines` lines: as few as hold it at
 /// `line_chars` a line, the cut points chosen so the longest line is as
-/// short as it can be; a tie puts more on the later line.
+/// short as it can be (a tie puts more on the later line), then each cut
+/// moved to the nearest clause break that keeps every line within
+/// `line_chars` and the longest within `CLAUSE_SLACK` of that.
 fn lines(
     words: &[CuedWord],
+    pauses: &[CuedPause],
     phrase: Range<usize>,
     line_chars: usize,
     max_lines: usize,
@@ -199,5 +207,29 @@ fn lines(
         cuts.push(j);
     }
     cuts.reverse();
+    let longest = |cuts: &[usize]| {
+        cuts.windows(2)
+            .map(|w| chars(words, at(w[0])..at(w[1])))
+            .max()
+            .unwrap_or(0)
+    };
+    let limit = (longest(&cuts) + CLAUSE_SLACK).min(line_chars.max(longest(&cuts)));
+    for k in 1..cuts.len() - 1 {
+        let clause = |c: usize| break_after(words, pauses, at(c) - 1) >= Break::Clause;
+        if clause(cuts[k]) {
+            continue;
+        }
+        let mut options: Vec<usize> = (cuts[k - 1] + 1..cuts[k + 1])
+            .filter(|&c| clause(c))
+            .collect();
+        options.sort_by_key(|&c| c.abs_diff(cuts[k]));
+        if let Some(c) = options.into_iter().find(|&c| {
+            let mut moved = cuts.clone();
+            moved[k] = c;
+            longest(&moved) <= limit
+        }) {
+            cuts[k] = c;
+        }
+    }
     cuts.windows(2).map(|w| at(w[0])..at(w[1])).collect()
 }

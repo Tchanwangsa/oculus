@@ -89,3 +89,14 @@ fn spoken_forms_keep_the_scripts_spelling() {
     let p = phrases(&w, &[], 42, 2);
     assert_eq!(shown(&w, &p), ["thirteen mod twelve is one."]);
 }
+
+#[test]
+fn a_line_ends_at_a_clause_when_that_stays_near_even() {
+    let text = "Seven, eight, nine, ten, eleven, wrap round through zero, and land on one.";
+    let w = spoken(text, 0.0, 0.2, &[]);
+    let p = phrases(&w, &[], 42, 2);
+    assert_eq!(
+        shown(&w, &p),
+        ["Seven, eight, nine, ten, eleven, / wrap round through zero, and land on one."]
+    );
+}

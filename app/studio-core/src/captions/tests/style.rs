@@ -22,7 +22,7 @@ fn the_default_theme_resolves_its_caption_tokens() {
     assert_eq!(c.placement, Placement::Bottom);
     assert_eq!(c.highlight, Color::parse("#5e6ad2").unwrap());
     let plate = c.plate.unwrap();
-    assert!((plate.a - 0.72).abs() < 1e-6);
+    assert!((plate.a - 0.8).abs() < 1e-6);
     assert_eq!((c.max_chars, c.max_lines), (42, 2));
 }
 

@@ -1379,8 +1379,11 @@ shows them, so a builder can check what a frame will look like.
   clause break (`,` `;` `:` a dash, or a 0.25 s silence) that leaves the
   phrase at least half full, and give a word back rather than leave one
   word alone at the end. A phrase is set in as few lines as hold it, cut so
-  the longest line is shortest (a tie puts more on the later line); a word
-  longer than a line gets a phrase to itself.
+  the longest line is shortest (a tie puts more on the later line), then
+  each cut moves to the nearest clause break that keeps every line within
+  the limit and the longest at most 9 characters longer ("eleven, / wrap
+  round", not "eleven, wrap / round"); a word longer than a line gets a
+  phrase to itself.
 - **Timing** (`timing.rs`): a phrase shows 0.15 s before its first word
   (never before the one before it hides) and stays until the next shows;
   before a silence of 0.6 s or more, and at the scene's end, it hides 0.4 s
@@ -1399,7 +1402,7 @@ shows them, so a builder can check what a frame will look like.
   words not yet said), `highlight` (`accent`), `highlightText`
   (`onAccent`), `highlightStyle` (`pill`, a pill of the highlight behind
   the word in `highlightText`, or `color`, the word in the highlight),
-  `plate` (`ink`, or `"none"`) at `plateOpacity` (0.72), `position`
+  `plate` (`ink`, or `"none"`) at `plateOpacity` (0.8), `position`
   (`bottom` or `top`), `margin` (0.05 of the height from that edge),
   `maxChars` (42 a line) and `maxLines` (2). A colour is a `color` token's
   name or a `#hex`. Sizes are px on a 1080 px short side and scale with the
