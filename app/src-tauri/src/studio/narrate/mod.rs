@@ -25,9 +25,9 @@ use studio_core::{
 use super::audio::resample_to_16k;
 use super::timing::{self, Alignment};
 use super::tts::{self, Speech};
-use super::voice::Voice;
+use super::voice::ServerVoice;
 use super::NarrationError;
-pub use key::cache_key;
+pub use key::{cache_key, server_key};
 pub use report::{GapReport, Outcome, Progress, Report, SceneReport};
 
 /// Times a clip's words. [`ModelAligner`] runs the wav2vec2 model; tests
@@ -53,23 +53,31 @@ impl Aligner for ModelAligner {
     }
 }
 
-/// Makes a scene's clip. [`ServerSpeaker`] asks a TTS server; tests stub
-/// it.
+/// Makes a scene's clip. [`ServerSpeaker`] asks a TTS server,
+/// `tts::kokoro::KokoroSpeaker` runs Kokoro; tests stub it.
 pub trait Speaker {
     /// Ok when [`Speaker::speak`] can run; asked once, beside
     /// [`Aligner::ready`], before the first clip.
     fn ready(&self) -> Result<(), String>;
+    /// What a clip of `text` is made from besides the text and the aligner,
+    /// engine first, for its cache key ([`cache_key`]); asked for every
+    /// scene, cached or not.
+    fn key(&self, text: &str) -> Result<Vec<String>, String>;
     /// One clip of `text`: a WAV and its decoded samples, never silent.
     fn speak(&self, text: &str) -> Result<Speech, String>;
 }
 
 /// The OpenAI-compatible TTS server `voice` names (`studio::tts`).
-pub struct ServerSpeaker<'a>(pub &'a Voice);
+pub struct ServerSpeaker<'a>(pub &'a ServerVoice);
 
 impl Speaker for ServerSpeaker<'_> {
     /// A server is only known to answer by asking it for a clip.
     fn ready(&self) -> Result<(), String> {
         Ok(())
+    }
+
+    fn key(&self, _text: &str) -> Result<Vec<String>, String> {
+        Ok(server_key(self.0))
     }
 
     fn speak(&self, text: &str) -> Result<Speech, String> {
@@ -119,14 +127,13 @@ impl fmt::Display for NarrateError {
 
 impl std::error::Error for NarrateError {}
 
-/// Narrate the video in `dir` with `speaker`, keying clips on `voice`,
+/// Narrate the video in `dir` with `speaker`, which also keys the clips,
 /// loading it over `library` (the app's are `studio::libraries::libraries`),
 /// so a library theme or component resolves as it does for every other
 /// command; see the module doc.
 pub fn narrate(
     dir: &Path,
     library: &Library,
-    voice: &Voice,
     speaker: &dyn Speaker,
     aligner: &dyn Aligner,
     options: &Options,
@@ -177,7 +184,10 @@ pub fn narrate(
             n: n + 1,
             of: todo.len(),
         });
-        let key = cache_key(text, voice);
+        let key = speaker
+            .key(text)
+            .map(|parts| cache_key(text, &parts))
+            .map_err(|e| NarrateError::scene(id, e))?;
         let cached = manifest
             .scenes
             .get(id)

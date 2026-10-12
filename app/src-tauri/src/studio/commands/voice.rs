@@ -5,12 +5,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::store::open_pool;
 use crate::studio::tts::{list_models, normalise_base};
-use crate::studio::voice::{self, VoiceSettings};
+use crate::studio::voice::{self, Engine, VoiceSettings};
 
-/// The row as the page sees it; an unset field is null.
+/// The row as the page sees it; an unset field is null. `engine` is
+/// `"server"`, `"kokoro"` or null, and may be left out (null).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceRow {
+    #[serde(default)]
+    pub engine: Option<Engine>,
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub voice: Option<String>,
@@ -20,6 +23,7 @@ pub struct VoiceRow {
 impl From<VoiceSettings> for VoiceRow {
     fn from(s: VoiceSettings) -> Self {
         Self {
+            engine: s.engine,
             base_url: s.base_url,
             model: s.model,
             voice: s.voice,
@@ -37,6 +41,7 @@ pub(super) fn validated(row: VoiceRow) -> Result<VoiceSettings, String> {
         return Err(format!("speed {} must be a positive number", row.speed));
     }
     Ok(VoiceSettings {
+        engine: row.engine,
         base_url: text(row.base_url)
             .map(|url| normalise_base(&url))
             .transpose()?,

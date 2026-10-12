@@ -77,13 +77,42 @@ fn check_fps(fps: f64) -> Result<u32, String> {
 }
 
 /// `video.json`'s `voice`: each field overrides the same Settings -> Voice
-/// field for this video.
+/// field for this video. `model` is the server engine's only.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Voice {
+    pub engine: Option<VoiceEngine>,
     pub model: Option<String>,
     pub voice: Option<String>,
     pub speed: Option<f64>,
+}
+
+/// What makes a narration clip: an OpenAI-compatible TTS server, or Kokoro
+/// run inside the app.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum VoiceEngine {
+    Server,
+    Kokoro,
+}
+
+impl VoiceEngine {
+    /// The name video.json, the settings row and the CLI use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VoiceEngine::Server => "server",
+            VoiceEngine::Kokoro => "kokoro",
+        }
+    }
+
+    /// The engine `name` names, if any.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "server" => Some(VoiceEngine::Server),
+            "kokoro" => Some(VoiceEngine::Kokoro),
+            _ => None,
+        }
+    }
 }
 
 /// A scene or script section id: lowercase letters, digits and `-`.

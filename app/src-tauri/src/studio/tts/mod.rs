@@ -15,7 +15,7 @@ use std::io::Read;
 use serde_json::json;
 
 use super::audio::{decode_wav, silence, Decoded};
-use super::voice::Voice;
+use super::voice::ServerVoice;
 use crate::providers::ratelimit::{transport_detail, Retry};
 pub use models::list_models;
 
@@ -52,14 +52,14 @@ pub fn normalise_base(url: &str) -> Result<String, String> {
 }
 
 /// One clip of `text` in `voice`.
-pub fn synthesise(voice: &Voice, text: &str) -> Result<Speech, String> {
+pub fn synthesise(voice: &ServerVoice, text: &str) -> Result<Speech, String> {
     synthesise_scaled(voice, text, 1.0)
 }
 
 /// [`synthesise`] with the 429 back-off's sleeps scaled by `time_scale`
 /// (tests pass ~0).
 pub(crate) fn synthesise_scaled(
-    voice: &Voice,
+    voice: &ServerVoice,
     text: &str,
     time_scale: f64,
 ) -> Result<Speech, String> {
@@ -110,7 +110,7 @@ pub(crate) fn synthesise_scaled(
 }
 
 /// The clip, decoded, or why it is not narration.
-fn check(wav: &[u8], status: u16, voice: &Voice) -> Result<Decoded, String> {
+fn check(wav: &[u8], status: u16, voice: &ServerVoice) -> Result<Decoded, String> {
     if wav.is_empty() {
         return Err(format!(
             "the TTS server answered {status} with an empty body for voice `{}`; check the voice name (Kokoro answers an unknown voice this way)",

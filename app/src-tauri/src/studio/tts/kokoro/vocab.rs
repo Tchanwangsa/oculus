@@ -4,6 +4,10 @@
 //! is the pad that frames every sequence. A character outside the table is
 //! an error wherever it is met: Kokoro itself drops it silently.
 
+/// The pad: every sequence starts and ends with it, and nothing else may
+/// hold it.
+pub const PAD: char = '$';
+
 /// Every symbol and its id, in id order.
 pub const VOCAB: [(char, i64); 115] = [
     ('$', 0),
