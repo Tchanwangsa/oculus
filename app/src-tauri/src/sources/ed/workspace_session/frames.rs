@@ -34,6 +34,8 @@ pub struct Init {
     pub last_commits: Vec<CommitRef>,
     /// Terminals and other programs that outlive a session, by id.
     pub program_state: Value,
+    /// The programs the server is running (`terminal::listed_in`).
+    pub programs: Value,
 }
 
 impl Init {
@@ -170,11 +172,13 @@ pub fn keep_alive() -> String {
     json!({ "type": "keep_alive" }).to_string()
 }
 
-/// Remove a file or a folder, workspace-relative like an upload's path.
-pub fn remove(path: &str) -> String {
+/// Remove a file or a folder, workspace-relative like an upload's path. The
+/// server ignores a remove whose `param3` does not say which it is.
+pub fn remove(path: &str, folder: bool) -> String {
+    let kind = if folder { "folder" } else { "file" };
     json!({
         "type": "fsop",
-        "data": { "type": "remove", "param1": path, "param2": "", "param3": "" },
+        "data": { "type": "remove", "param1": path, "param3": kind },
     })
     .to_string()
 }

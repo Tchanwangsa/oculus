@@ -18,12 +18,12 @@ use crate::sources::ed::Ed;
 pub struct EdWorkspaces(Mutex<HashMap<i64, Arc<Session>>>);
 
 impl EdWorkspaces {
-    fn sessions(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Arc<Session>>> {
+    pub(super) fn sessions(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Arc<Session>>> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
-fn session(app: &AppHandle, challenge_id: i64) -> Result<Arc<Session>, String> {
+pub(super) fn session(app: &AppHandle, challenge_id: i64) -> Result<Arc<Session>, String> {
     app.state::<EdWorkspaces>()
         .sessions()
         .get(&challenge_id)

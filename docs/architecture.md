@@ -21,7 +21,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Shared parse/embed event payload and channels | `app/src-tauri/src/runtime/pipeline_events.rs` |
 | Blocking-command adapter | `app/src-tauri/src/runtime/blocking.rs` |
 | Hand-built `multipart/form-data` (ureq 2 has none), shared by Groq, local MinerU and Ed's workspace uploads | `app/src-tauri/src/runtime/multipart.rs` |
-| An Ed challenge workspace open in the app: one socket thread per challenge ([sync.md](./sync.md#an-open-challenge-workspace-is-a-live-session)) | `app/src-tauri/src/sources/ed/workspace_session/` |
+| An Ed challenge workspace open in the app: one socket thread per challenge (its terminals ride on it), plus a thread per Run on the run socket ([sync.md](./sync.md#an-open-challenge-workspace-is-a-live-session)) | `app/src-tauri/src/sources/ed/workspace_session/` |
 | Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/runtime/atomic_write.rs`, `app/src-tauri/src/runtime/clock.rs`, `app/src-tauri/src/test_support/` |
 | Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/auth/keyd/` |
 | Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/providers/credentials/`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/voyage.rs`, `app/src-tauri/src/providers/groq.rs`, `app/src-tauri/src/auth/okta/` |

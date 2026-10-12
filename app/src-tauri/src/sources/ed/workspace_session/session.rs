@@ -5,21 +5,25 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::context::{forget, sha256, write_file, Context, Unrecorded};
 use super::events::{Saved, SavedTo, Sink, WorkspaceInfo};
 use super::frames;
 use super::paths;
 use super::queue::Place;
+use super::run::Runs;
 use super::slide::Slide;
 use super::socket::{self, Out};
 use crate::sources::ed::Ed;
 
 pub struct Session {
-    core: Arc<Context>,
-    slide: Slide,
-    out: Sender<Out>,
+    pub(super) core: Arc<Context>,
+    pub(super) slide: Slide,
+    pub(super) out: Sender<Out>,
+    pub(super) runs: Arc<Runs>,
+    /// Held while a Mark is in flight, so a second click cannot submit twice.
+    pub(super) marking: Mutex<()>,
 }
 
 impl Session {
@@ -44,7 +48,17 @@ impl Session {
             .name(format!("ed-workspace-{challenge_id}"))
             .spawn(move || socket::run(thread_core, queue))
             .map_err(|e| format!("could not start the workspace session: {e}"))?;
-        Ok(Session { core, slide, out })
+        Ok(Session::with(core, slide, out))
+    }
+
+    fn with(core: Arc<Context>, slide: Slide, out: Sender<Out>) -> Self {
+        Session {
+            core,
+            slide,
+            out,
+            runs: Arc::default(),
+            marking: Mutex::new(()),
+        }
     }
 
     /// A session on `core` with no socket thread: the frames it would send
@@ -52,7 +66,7 @@ impl Session {
     #[cfg(test)]
     pub fn detached(core: Arc<Context>, slide: Slide) -> (Self, mpsc::Receiver<Out>) {
         let (out, queue) = mpsc::channel();
-        (Session { core, slide, out }, queue)
+        (Session::with(core, slide, out), queue)
     }
 
     pub fn info(&self) -> WorkspaceInfo {
@@ -67,9 +81,11 @@ impl Session {
         }
     }
 
-    /// End the socket thread; it closes the socket on its next turn.
+    /// End the socket thread, which closes the socket on its next turn, and
+    /// stop a run in progress.
     pub fn close(&self) {
         let _ = self.out.send(Out::Stop);
+        self.runs.stop_current();
     }
 
     /// A place for a save or delete, taken when the pane asks.
@@ -130,7 +146,8 @@ impl Session {
         let _turn = place.wait();
         let core = &self.core;
         let target = paths::resolve(&core.root(), path)?;
-        let removed = if target.is_dir() {
+        let folder = target.is_dir() || (!target.exists() && core.recorded_folder(path));
+        let removed = if folder {
             std::fs::remove_dir_all(&target)
         } else {
             std::fs::remove_file(&target)
@@ -149,7 +166,7 @@ impl Session {
             return Ok(());
         };
         self.out
-            .send(Out::Frame(frames::remove(path)))
+            .send(Out::Frame(frames::remove(path, folder)))
             .map_err(|_| "the workspace session has ended".to_string())?;
         core.record(&workspace_id, |state| forget(state, path))
             .map_err(|e| format!("{path} is deleted, but its sync record is not updated: {e}"))
