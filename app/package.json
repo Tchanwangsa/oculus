@@ -23,7 +23,8 @@
     "cli:dev": "bun scripts/build-cli.mjs --debug",
     "cli:install": "bun run cli && mkdir -p \"$HOME/.local/bin\" && ln -sf \"$PWD/src-tauri/target/release/oculus\" \"$HOME/.local/bin/oculus\" && \"$PWD/src-tauri/target/release/oculus\" docs",
     "stage-cli": "node scripts/stage-cli.mjs",
-    "docs:cli": "node scripts/gen-cli-docs.mjs"
+    "docs:cli": "node scripts/gen-cli-docs.mjs",
+    "studio:hashes": "node scripts/gen-starter-hashes.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

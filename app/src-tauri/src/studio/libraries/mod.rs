@@ -1,10 +1,11 @@
 //! The app's Studio libraries, under `<data dir>/studio/`: the global
 //! library at `library/` and each subject's at `subjects/<CODE>/`, beside
 //! the videos (`super::videos`). The starter set is seeded into the global
-//! library on every load, missing files only, so an edited file is never
-//! replaced. `--reset` (the CLI's `components seed --reset`) writes the
-//! starter text over the edits, with each old text kept in `.history`
-//! first. `promote` copies a video's own component or theme into a library
+//! library on every load: a missing file is copied once and a copy the user
+//! never edited is brought up to the current starter, but an edited file is
+//! never replaced (`studio_core::library`). `--reset` (the CLI's
+//! `components seed --reset`) writes the starter text over the edits, with
+//! each old text kept in `.history` first. `promote` copies a video's own component or theme into a library
 //! through the same snapshotting write. `defaults` picks the theme a new
 //! video takes from the libraries' `library.json`.
 
