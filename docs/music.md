@@ -5,16 +5,18 @@ through librespot, with audio out of CoreAudio and no Spotify app running.
 The same session lists the account's playlists, searches and lists its
 Connect devices ([music-library.md](./music-library.md)).
 Premium only, and off until Settings → Music turns it on. A session starts
-from `music_connect`, a finished `music_login`, or at startup while that
-switch is on.
+from `music_connect`, a finished `music_login`, at startup while that switch
+is on, or from `music_wake` when the player is opened with none running.
 
 ## Where
 
 | Piece | Location |
 | --- | --- |
 | The module and its rules | `app/src-tauri/src/music/mod.rs` |
-| The session task: player, connect, reconnect, stop | `app/src-tauri/src/music/session.rs` |
-| The snapshot, the `music-state` event, the Spirc, run and login handles | `app/src-tauri/src/music/state.rs` |
+| The session task: player, connect, reconnect, stop; a link's watch and end; backoff and the sleep check | `app/src-tauri/src/music/session/` |
+| The snapshot, the `music-state` event, the Spirc, run and login handles, `music_wake`'s nudge | `app/src-tauri/src/music/state/` |
+| What Oculus last played: in memory, its settings row, its writer | `app/src-tauri/src/music/last_played/`, `app/src-tauri/src/music/state/remembered.rs` |
+| Loading it back: after a reconnect, and from Play with nothing playing | `app/src-tauri/src/music/resume.rs` |
 | Player events folded into the snapshot | `app/src-tauri/src/music/events.rs` |
 | Where a command goes: here, the device playing elsewhere, a pull, an activate or nothing | `app/src-tauri/src/music/control.rs` |
 | Remote control of another device: its commands' requests, its playback for the snapshot | `app/src-tauri/src/music/remote/` |
@@ -33,6 +35,7 @@ switch is on.
 | Music against lecture audio | `app/src/lib/music/exclusive/rule.ts`, `app/src/lib/music/exclusive/index.ts`, `app/src/lib/lectures/media/library.ts` |
 | Settings → Music | `app/src/pages/settings/integrations/MusicPage.tsx`, `app/src/components/settings/music/` |
 | The rail tile and its popover | `app/src/components/sidebar/MusicTile.tsx`, `app/src/components/music/NowPlaying.tsx` |
+| The player's error or "Reconnecting…" line | `app/src/components/music/MusicNotice.tsx` |
 | The full player (`/music`) and its parts | `app/src/pages/tools/MusicPage.tsx`, `app/src/components/music/` |
 | Up next, playlists and their tracks, and search under the player | `app/src/components/music/library/` |
 | The device menu (Spotify devices, output on this Mac) | `app/src/components/music/devices/`, `app/src/components/music/VolumeRow.tsx`, `app/src/components/music/PlayingElsewhere.tsx` |
@@ -50,8 +53,8 @@ switch is on.
   applies `output` whatever the switch says, and starts a session when it is
   on. Anything but `"enabled": true` connects nothing.
 - **The page draws the session while the switch is on**: a status dot and
-  line (connected as the account, connecting, not signed in, could not
-  connect), "Log in with Spotify" when `needs_login`, else Connect or
+  line (connected as the account, reconnecting, connecting, not signed in,
+  could not connect), "Log in with Spotify" when `needs_login`, else Connect or
   Disconnect, and Sign out, which deletes the stored login. The device name is
   read-only, and the latest error sits under it.
 - **Nothing on the page plays.** Its buttons are logins and connections; a
@@ -71,7 +74,9 @@ switch is on.
   pane is on `/music`; without a cover, its selected note glyph is filled.
   A click opens a popover below and to its right: the track,
   seek, previous / play-pause / next, volume with the device button, and
-  "Open player".
+  "Open player". Opening it sends `music_wake`
+  ([below](#one-session-task-reconnects-at-once-and-stops-on-an-auth-error)),
+  and so does `/music` each time it comes into view.
 - **The device button** (`DeviceMenu`, ending the volume row here and on
   `/music`) opens "Spotify devices" (active checked, a click transfers) and
   "Output on this Mac" ("System default (<device>)", then each output). Both
@@ -94,6 +99,10 @@ switch is on.
   a search, in two columns when the page is wide
   ([music-library.md](./music-library.md)), and,
   with no session or track, a "Not connected" view linking to Settings → Music.
+- **One status line under the player** (`MusicNotice`): the error when there
+  is one, else "Reconnecting…" with a spinner while a dropped connection is
+  made again. Without a track the title says "Reconnecting…" or
+  "Connecting…" meanwhile; with one, the track stays.
 - **Space plays and pauses on `/music`** while it is the focused pane
   (`useMusicSpaceKey`), sending the same play or pause as the button. It is
   taken from a focused button too, so it never re-clicks the track or toggle
@@ -199,7 +208,7 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
 - `music_sign_out` deletes the item; `music_disconnect` keeps it. Canvas
   sign-out (`sign_out`, `session_clear`) never touches it.
 
-## One session task reconnects with backoff and stops on an auth error
+## One session task reconnects at once and stops on an auth error
 
 1. `session::start` registers a run, or does nothing while one is running.
    Each run has an id, and the snapshot ignores writes from a run that is no
@@ -213,14 +222,81 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    `set_session`: a Session cannot be reused once its Spirc has ended. Each
    session subscribes to the Connect cluster before its Spirc starts
    ([music-library.md](./music-library.md#the-device-list-is-spotifys-pushed-cluster)).
-4. A connection that drops without a stop is rebuilt after a backoff of 2 s
-   doubling to 60 s, reset once a connection has lived a minute; the snapshot
-   says it is reconnecting.
-5. `PermissionDenied` or `Unauthenticated` ends the task with `needs_login`
+4. **A drop is noticed within a second.** Spotify's access point closes the
+   connection now and then (the official apps reconnect silently), and
+   librespot then marks the Session invalid, but it has no notifier and the
+   Spirc checks only on its next wake (a push, a player event, a command).
+   So while a link is up the task polls `is_invalid()` every second
+   (`session/link.rs`), and also ends the link when the Spirc's task ends by
+   itself.
+5. **A drop reconnects at once.** The link's end keeps what Oculus played for
+   the resume (below), pauses the player there, shuts the session down and
+   wakes a Spirc still running with `disconnect(false)` (an inactive one
+   ignores it; either way its loop then sees the dead session), giving it 3 s
+   to clear its device state and close its dealer before the next attempt,
+   whose state it would otherwise clear. The first attempt after a
+   connection that lived a minute comes at once; one that kept dropping
+   sooner, and every attempt that fails, waits 2 s doubling to 60 s
+   (`session/policy.rs`). The log says `the Spotify connection dropped
+   after <n> s (<why>); reconnecting now` (or `in <n> s`).
+6. **"Reconnecting…", not an error.** The snapshot's `reconnecting` is true
+   from the drop until the next connect: `error` stays empty and the track
+   stays on show (`set_unlinked` keeps `track` and its position). `error`
+   is set only when an attempt fails ("Could not connect to Spotify (…);
+   retrying in <n> s").
+7. **What Oculus was playing resumes.** When Oculus was the device playing
+   at the drop (or stopped being it under 30 s before: a Spirc that ends by
+   itself says it disconnected before its task ends), the new connection
+   waits up to 2 s for its first cluster push, then, unless that push names
+   another device playing or Oculus is active again, activates and loads the track in its context at its position,
+   with its shuffle and repeat, playing if it was playing and paused
+   otherwise (`resume.rs`). A pause from the player or the exclusive rule
+   while it reconnects makes it load paused. Tracks added to the queue are
+   lost: the load starts the context afresh. Nothing is taken back from
+   another device.
+8. **`music_wake`**, sent whenever the rail popover opens or `/music` comes
+   into view, makes the connection sound when the user looks: the running
+   task checks its link at once and reconnects when the session is invalid
+   or when the Mac slept since it connected (wall-clock time ahead of
+   `Instant`, which stops during macOS sleep, by more than 30 s; a socket
+   dead across sleep is otherwise noticed only after up to 80 s awake), and
+   a backoff in progress is cut short. With no run it starts one from the
+   stored login while Settings → Music is on, unless a login is needed or
+   waiting, or the user pressed Disconnect. Otherwise it does nothing and
+   makes no network call.
+9. `PermissionDenied` or `Unauthenticated` ends the task with `needs_login`
    and the reason in `error`. It is never retried.
-6. A stop (disconnect, sign-out, a new login, app exit) sends the Spirc its
-   shutdown, which pauses and leaves Spotify's device list, gives it 10 s,
-   then shuts the session down.
+10. A stop (disconnect, sign-out, a new login, app exit) sends the Spirc its
+    shutdown, which pauses and leaves Spotify's device list, gives it 10 s,
+    then shuts the session down.
+
+## What Oculus last played is remembered
+
+- **`Memory` follows the snapshot on every change while Oculus is the device
+  playing a track** (`last_played/memory.rs`): the account, context, track,
+  position and its shuffle and repeat. Positions move on by `Instant`, which
+  stops while the Mac sleeps, as the player does; once Oculus stops being
+  the device playing, what it played stops where it was.
+- **The `music_last_played` settings row keeps it across launches**, a JSON
+  object: `account` (the canonical username), `context_uri`, `track` (the
+  snapshot's `Track` fields), `position_ms`, `saved_at_ms`, `shuffle`,
+  `repeat_context`, `repeat_track`. A plain `settings` row, so no migration.
+  It is written on a new track, context or mode, on a pause, on a drop, on a
+  stop and at exit (the exit waits for it), and every 15 s while playing
+  (the link's one-second tick), never per position event. Writes run on
+  threads of their own (`set_setting_blocking`), numbered when queued so a
+  late older one is skipped.
+- **Read back once the account is known** (the stored login's username at
+  the run's start, then each connect): when nothing is remembered and no
+  track is shown, a row for that account becomes the snapshot's `track`,
+  paused at its position, with its context and modes. A row for another
+  account is ignored, and what another account left in memory is forgotten
+  with the track it showed. Sign-out forgets it in memory; the row stays for
+  that account.
+- **Play with nothing playing anywhere plays what the player shows**: that
+  track, loaded here in its context at its position (`Restore` in the table
+  below). With nothing remembered, Play pulls Spotify's last playback here.
+  Another device playing wins the display (`remote`).
 
 ## Commands control the device playing, wherever it is
 
@@ -233,7 +309,8 @@ pure function, picks what the command does:
 
 | Command | Here | Another device plays | Nothing plays |
 | --- | --- | --- | --- |
-| `music_play`, `music_play_pause`, `music_next`, `music_prev`, `music_seek`, `music_shuffle`, `music_repeat`, `music_volume` | Spirc | Remote | Pull, then Spirc |
+| `music_play`, `music_play_pause` | Spirc | Remote | Restore what the player shows; with nothing remembered, pull, then Spirc |
+| `music_next`, `music_prev`, `music_seek`, `music_shuffle`, `music_repeat`, `music_volume` | Spirc | Remote | Pull, then Spirc |
 | `music_pause_player` (the player's pause) | Spirc | Remote | Nothing |
 | `music_play_context`, `music_play_track` | Spirc | Remote `play` | Activate, then Spirc |
 | `music_add_to_queue` | Spirc | Remote `add_to_queue` | Refused |
@@ -272,6 +349,10 @@ pure function, picks what the command does:
 - **Activate** (a load with nothing active): `activate` alone. The Spirc
   handles commands in order and `activate` makes it active at once, so the
   load after it is kept.
+- **Restore** (Play with nothing active while the player shows what Oculus
+  last played, `At::Remembered`): `activate`, then a load of that track in
+  its context at its position, playing ([above](#what-oculus-last-played-is-remembered)).
+  Nothing else is sent: the load plays.
 - **Refused**: with nothing playing anywhere there is no queue, so
   `music_add_to_queue` fails with "Play something first, then add to the
   queue".
@@ -354,6 +435,7 @@ the music module.
 `state::Snapshot` is sent whole to the main webview on every change that
 alters it; `music_state` is the mount-time read. Fields, snake_case:
 `connected`, `connecting` (a login, connect or reconnect is under way),
+`reconnecting` (a dropped connection is being made again),
 `needs_login`, `account`, `device_name`, `active` (Oculus is the active
 Connect device), `playing_on` (the active device's name when it is another,
 from the cluster), `output` (the chosen output, null for the system
@@ -375,8 +457,9 @@ cleared) and `error`.
   (`positionNow` in `app/src/lib/music/index.ts`). Rust sends no per-second
   events.
 - **`error` is the latest failure** (keyd, connect, auth, a track that cannot
-  play, an output missing) and stays until the next connect or load; the
-  sink takes back only its own message.
+  play, an output missing, a resume that could not load) and stays until the
+  next connect or load; the sink takes back only its own message. A drop
+  itself is not a failure: it sets `reconnecting`.
 
 ## A track that cannot play is often only a log line
 
@@ -408,9 +491,10 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_state` | The snapshot |
 | `music_login` | Stops any session, opens the login, connects once it is approved |
 | `music_connect` | Connects from keyd's credentials; `needs_login` when there are none |
-| `music_disconnect` | Stops the session and any waiting login; keeps the credentials |
+| `music_wake` | Sent when the player opens: reconnects a dead or slept link, cuts a backoff short, or starts a session while the switch is on ([above](#one-session-task-reconnects-at-once-and-stops-on-an-auth-error)) |
+| `music_disconnect` | Stops the session and any waiting login; keeps the credentials; nothing reconnects by itself until a connect |
 | `music_sign_out` | Disconnects and deletes `music.spotify` from keyd |
-| `music_play_pause`, `music_play`, `music_pause_player`, `music_next`, `music_prev` | Playback of the device playing, here or another ([routing](#commands-control-the-device-playing-wherever-it-is)); `music_prev` sends nothing to a device that forbids it |
+| `music_play_pause`, `music_play`, `music_pause_player`, `music_next`, `music_prev` | Playback of the device playing, here or another ([routing](#commands-control-the-device-playing-wherever-it-is)); with nothing playing, play loads what the player shows; `music_prev` sends nothing to a device that forbids it |
 | `music_pause` | Pauses Oculus only; never starts, pulls or touches another device (the exclusive rule's) |
 | `music_shuffle(on)`, `music_repeat(on)` | Shuffle; repeat the context (off also clears a repeated track) |
 | `music_seek(position_ms)`, `music_volume(percent)` | Seek; volume 0–100, which here drops a held duck |
@@ -434,6 +518,8 @@ session.
 - Every Spirc command but `activate` and `transfer` is dropped by an inactive device — go through `control::send` or `control::route`.
 - A command sent right after `transfer` is still dropped — wait for `active` (`control.rs`).
 - A Session whose Spirc ended cannot connect again — make a new one and `set_session`.
+- A closed Session is seen by the Spirc only on its next wake — the link polls `is_invalid()` every second (`session/link.rs`).
+- `Instant` stops while the Mac sleeps — the sleep check compares it with the wall clock; positions advance by it on purpose.
 - `Playing` is not proof of audio — a missing audio key plays silence; watch `error`.
 - Constructing librespot's `Cache` writes the account's credentials to disk in plain text — never use it.
 - `music_play_pause` from the exclusive-playback rule would start music it meant to stop, and `music_pause_player` would pause a phone — the rule uses `music_pause`.

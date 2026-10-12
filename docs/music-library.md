@@ -20,7 +20,7 @@ itself is [music.md](./music.md).
 | The pathfinder `searchDesktop` request and its answer | `app/src-tauri/src/music/library/search.rs` |
 | Queueing, here or on the device playing elsewhere | `app/src-tauri/src/music/commands.rs` (`music_add_to_queue`), `app/src-tauri/src/music/control.rs`, `app/src-tauri/src/music/remote/` |
 | Skipping to and removing a track up next | `app/src-tauri/src/music/queue.rs` (`music_skip_to`, `music_queue_remove` in `commands.rs`), `app/src-tauri/src/music/remote/command.rs` |
-| Up next and the context in the snapshot | `app/src-tauri/src/music/state.rs`, `app/src-tauri/src/music/events.rs`, `app/src-tauri/src/music/devices.rs` |
+| Up next and the context in the snapshot | `app/src-tauri/src/music/state/`, `app/src-tauri/src/music/events.rs`, `app/src-tauri/src/music/devices.rs` |
 | The Connect cluster, the device list and transfer | `app/src-tauri/src/music/devices.rs` |
 | Up next, playlists, a playlist's tracks and search under the player | `app/src/components/music/library/` (up next: `UpNext.tsx`, `RemoveAction.tsx`; search: `SearchGroups.tsx`, `SearchPages.tsx`; an opened playlist or album: `PlaylistView.tsx`) |
 | Track rows fetched a page at a time | `app/src/hooks/music/useTrackRows.ts` |

@@ -50,6 +50,9 @@ export interface MusicSnapshot {
   connected: boolean;
   /** A login, a connect or a reconnect is under way. */
   connecting: boolean;
+  /** The connection dropped and is being made again: `track` stays, and
+   *  `error` stays empty until an attempt fails. */
+  reconnecting: boolean;
   /** No stored login, or Spotify refused it: `music.login()` next. */
   needs_login: boolean;
   account: string | null;
@@ -235,13 +238,19 @@ export const music = {
   login: () => invoke("music_login"),
   /** From the stored login; `needs_login` when there is none. */
   connect: () => invoke("music_connect"),
+  /** Sent whenever the player opens (the rail popover, `/music`): Rust
+   *  checks the connection now and reconnects one that died or slept,
+   *  cuts a backoff short, or starts a session while Settings → Music is on.
+   *  Otherwise nothing, and no network call. */
+  wake: () => invoke("music_wake"),
   /** Keeps the stored login. */
   disconnect: () => invoke("music_disconnect"),
   /** Also deletes the stored login. */
   signOut: () => invoke("music_sign_out"),
   playPause: () => invoke("music_play_pause"),
   /** The player's play: resumes the device playing elsewhere, else plays
-   *  here (pulling playback here when nothing plays). */
+   *  here: what the player shows when Oculus remembers it, else pulling
+   *  Spotify's last playback here. */
   play: () => invoke("music_play"),
   /** This device only: never starts playback, never pulls it, never touches
    *  another device. What the exclusive-playback rule sends. */

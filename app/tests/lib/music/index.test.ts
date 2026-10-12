@@ -12,6 +12,7 @@ import {
 const base: MusicSnapshot = {
   connected: true,
   connecting: false,
+  reconnecting: false,
   needs_login: false,
   account: "a",
   device_name: "Oculus",

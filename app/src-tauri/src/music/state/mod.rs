@@ -1,23 +1,34 @@
 //! What the frontend mirrors (`Snapshot`, sent whole as `music-state` on every
 //! change) and the handles behind it: the live `Spirc` and `Session`, the
-//! running session task, a pending login and a held duck. A session task tags
+//! running session task, a pending login, a held duck and what Oculus last
+//! played (`remembered.rs`, followed on every change). A session task tags
 //! its writes with its run id, so a stopped one cannot change what the user
-//! sees. The library's caches sit beside it (`library::Library`), under their
-//! own lock.
+//! sees (`run.rs`). The library's caches sit beside it (`library::Library`),
+//! under their own lock.
+
+mod remembered;
+mod run;
+
+pub(super) use remembered::{
+    forget_last, hold_resume_paused, needs_recall, recall, remembered, resume_pending, take_resume,
+};
+pub(super) use run::{hold, lose_link, may_start, tick, wake};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread::JoinHandle;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use librespot_connect::Spirc;
 use librespot_core::Session;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, EventTarget, Manager};
-use tokio::sync::watch;
+use tokio::sync::{watch, Notify};
 
 use super::audio::Choice;
 use super::devices::Cluster;
 use super::duck::Duck;
+use super::last_played::{LastPlayed, Memory, Saver};
 use super::library::{Library, TrackRow};
 use super::remote::{self, RemotePlayback};
 use crate::shell::browser::MAIN;
@@ -29,7 +40,7 @@ pub const DEVICE_NAME: &str = "Oculus";
 /// −30 dB. At 100% the Mac's own volume sets the loudness.
 pub const INITIAL_VOLUME: u8 = 100;
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     pub uri: String,
     pub name: String,
@@ -53,6 +64,10 @@ pub struct Snapshot {
     pub connected: bool,
     /// A login, a connect or a reconnect is under way.
     pub connecting: bool,
+    /// The connection dropped and is being made again: the player keeps
+    /// showing the last track, and `error` stays empty until an attempt
+    /// fails.
+    pub reconnecting: bool,
     /// No stored credentials, or Spotify refused them: `music_login` next.
     pub needs_login: bool,
     pub account: Option<String>,
@@ -104,6 +119,7 @@ impl Default for Snapshot {
         Self {
             connected: false,
             connecting: false,
+            reconnecting: false,
             needs_login: false,
             account: None,
             device_name: DEVICE_NAME.to_string(),
@@ -138,6 +154,7 @@ impl Snapshot {
     pub(super) fn set_idle(&mut self) {
         self.connected = false;
         self.connecting = false;
+        self.reconnecting = false;
         self.set_unlinked();
     }
 
@@ -214,6 +231,8 @@ pub(super) fn from_percent(percent: u8) -> u16 {
 struct Run {
     id: u64,
     stop: watch::Sender<bool>,
+    /// `music_wake`'s nudge to the session task (`session/`).
+    wake: Arc<Notify>,
 }
 
 #[derive(Default)]
@@ -230,6 +249,11 @@ struct Inner {
     next_run: u64,
     /// Set to cancel the pending login's callback listener.
     login: Option<Arc<AtomicBool>>,
+    /// What Oculus last played, and its settings row's writer.
+    memory: Memory,
+    saver: Saver,
+    /// The user disconnected: `music_wake` starts nothing until they connect.
+    held: bool,
 }
 
 pub struct MusicState {
@@ -268,7 +292,13 @@ pub(super) fn library(app: &AppHandle) -> &Library {
 fn change(app: &AppHandle, f: impl FnOnce(&mut Inner) -> bool) {
     let changed = with(app, |inner| {
         let before = inner.snapshot.clone();
-        if !f(inner) || inner.snapshot == before {
+        if !f(inner) {
+            return None;
+        }
+        if let Some(row) = inner.memory.follow(&inner.snapshot, Instant::now()) {
+            inner.save(row);
+        }
+        if inner.snapshot == before {
             return None;
         }
         Some(inner.snapshot.clone())
@@ -296,7 +326,7 @@ pub(super) fn update(app: &AppHandle, f: impl FnOnce(&mut Snapshot)) {
 /// `update`, only while run `id` is the current one.
 pub(super) fn update_run(app: &AppHandle, id: u64, f: impl FnOnce(&mut Snapshot)) {
     change(app, |inner| {
-        if inner.run.as_ref().map(|r| r.id) != Some(id) {
+        if !inner.is_run(id) {
             return false;
         }
         f(&mut inner.snapshot);
@@ -304,20 +334,35 @@ pub(super) fn update_run(app: &AppHandle, id: u64, f: impl FnOnce(&mut Snapshot)
     });
 }
 
+/// A session task's handles: its run id, the stop signal and `music_wake`'s
+/// nudge.
+pub(super) struct Begun {
+    pub id: u64,
+    pub stop: watch::Receiver<bool>,
+    pub wake: Arc<Notify>,
+}
+
 /// Registers a new session task, or `None` when one is already running.
-pub(super) fn begin_run(app: &AppHandle) -> Option<(u64, watch::Receiver<bool>)> {
+pub(super) fn begin_run(app: &AppHandle) -> Option<Begun> {
     let mut started = None;
     change(app, |inner| {
         if inner.run.is_some() {
             return false;
         }
         inner.next_run += 1;
+        inner.held = false;
         let (stop, rx) = watch::channel(false);
+        let wake = Arc::new(Notify::new());
         inner.run = Some(Run {
             id: inner.next_run,
             stop,
+            wake: wake.clone(),
         });
-        started = Some((inner.next_run, rx));
+        started = Some(Begun {
+            id: inner.next_run,
+            stop: rx,
+            wake,
+        });
         let s = &mut inner.snapshot;
         s.connecting = true;
         s.needs_login = false;
@@ -330,7 +375,7 @@ pub(super) fn begin_run(app: &AppHandle) -> Option<(u64, watch::Receiver<bool>)>
 /// The task's own end: unregisters run `id` and applies `f`.
 pub(super) fn end_run(app: &AppHandle, id: u64, f: impl FnOnce(&mut Snapshot)) {
     change(app, |inner| {
-        if inner.run.as_ref().map(|r| r.id) != Some(id) {
+        if !inner.is_run(id) {
             return false;
         }
         inner.run = None;
@@ -341,6 +386,16 @@ pub(super) fn end_run(app: &AppHandle, id: u64, f: impl FnOnce(&mut Snapshot)) {
 }
 
 impl Inner {
+    fn is_run(&self, id: u64) -> bool {
+        self.run.as_ref().map(|r| r.id) == Some(id)
+    }
+
+    /// Queues the last-played row's write, stamped now.
+    fn save(&mut self, mut row: LastPlayed) -> JoinHandle<()> {
+        row.saved_at_ms = now_ms();
+        self.saver.save(&row)
+    }
+
     /// Forgets the connection: its device handle, its session and any duck.
     fn drop_link(&mut self) -> Option<Spirc> {
         self.session = None;
@@ -358,7 +413,7 @@ pub(super) fn set_link(
     link: Option<(Spirc, Session)>,
 ) -> Result<(), Spirc> {
     with(app, |inner| {
-        if inner.run.as_ref().map(|r| r.id) != Some(id) {
+        if !inner.is_run(id) {
             return link.map_or(Ok(()), |(spirc, _)| Err(spirc));
         }
         inner.drop_link();
@@ -379,7 +434,12 @@ pub(super) fn session(app: &AppHandle) -> Option<Session> {
 /// and the task shuts its session down on its own. Its later writes are
 /// ignored. True when one was running.
 pub(super) fn stop_run(app: &AppHandle) -> bool {
-    let mut stopped = false;
+    stop(app).0
+}
+
+/// `stop_run`, with the last-played row's write when there was one.
+fn stop(app: &AppHandle) -> (bool, Option<JoinHandle<()>>) {
+    let mut stopped = (false, None);
     change(app, |inner| {
         let Some(run) = inner.run.take() else {
             return false;
@@ -388,7 +448,8 @@ pub(super) fn stop_run(app: &AppHandle) -> bool {
             spirc.shutdown().ok();
         }
         run.stop.send_replace(true);
-        stopped = true;
+        let write = inner.memory.stop(Instant::now()).map(|row| inner.save(row));
+        stopped = (true, write);
         inner.snapshot.set_idle();
         true
     });
@@ -454,7 +515,7 @@ pub(super) fn set_cluster(app: &AppHandle, id: u64, session_id: &str, mut cluste
             .session
             .as_ref()
             .is_some_and(|s| s.session_id() == session_id);
-        if inner.run.as_ref().map(|r| r.id) != Some(id) || !current {
+        if !inner.is_run(id) || !current {
             return false;
         }
         cluster.keep_queue(inner.cluster.take());
@@ -486,7 +547,7 @@ pub(super) fn apply_cluster(s: &mut Snapshot, cluster: &mut Cluster) {
 /// the push that named it; dropped when that device has moved on.
 pub(super) fn set_remote_row(app: &AppHandle, id: u64, row: &TrackRow) {
     change(app, |inner| {
-        if inner.run.as_ref().map(|r| r.id) != Some(id) {
+        if !inner.is_run(id) {
             return false;
         }
         match inner.snapshot.remote.as_mut() {
@@ -575,8 +636,11 @@ pub(super) fn end_login(app: &AppHandle, flag: &Arc<AtomicBool>) -> bool {
     })
 }
 
-/// On app exit: the device leaves Spotify's list rather than lingering.
+/// On app exit: the device leaves Spotify's list rather than lingering, and
+/// what played is written before the process ends.
 pub fn shutdown(app: &AppHandle) {
     cancel_login(app);
-    stop_run(app);
+    if let (_, Some(write)) = stop(app) {
+        write.join().ok();
+    }
 }

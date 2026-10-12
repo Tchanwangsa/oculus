@@ -317,6 +317,7 @@ pub fn run() {
             music::commands::music_state,
             music::commands::music_login,
             music::commands::music_connect,
+            music::commands::music_wake,
             music::commands::music_disconnect,
             music::commands::music_sign_out,
             music::commands::music_play_pause,

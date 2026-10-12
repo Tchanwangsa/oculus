@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { MusicNotes } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/layout/PageParts";
 import { useTabActive } from "@/components/tabs/TabContext";
 import { MusicCover } from "@/components/music/MusicCover";
+import { connectingTitle, MusicNotice } from "@/components/music/MusicNotice";
 import { RepeatToggle, ShuffleToggle } from "@/components/music/MusicModes";
 import { MusicSeek } from "@/components/music/MusicSeek";
 import { MusicTransport } from "@/components/music/MusicTransport";
@@ -15,7 +16,7 @@ import { VolumeRow } from "@/components/music/VolumeRow";
 import { useMusicSpaceKey } from "@/hooks/music/useMusicSpaceKey";
 import { MusicLibrary } from "@/components/music/library/MusicLibrary";
 import { UpNext } from "@/components/music/library/UpNext";
-import { shownPlayback, type MusicSnapshot } from "@/lib/music";
+import { music, shownPlayback, type MusicSnapshot } from "@/lib/music";
 import { cn } from "@/lib/utils";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
 import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
@@ -37,7 +38,9 @@ const NOTHING_PLAYING = "Play a song here or from any device.";
  * player sits left and the list fills the height on the right, the list
  * being the only scroller. Spotify's state is Rust's (`useMusicState`); this
  * only draws it and sends commands. Without a session or a track it points
- * to Settings → Music. Space plays and pauses (`useMusicSpaceKey`).
+ * to Settings → Music. Space plays and pauses (`useMusicSpaceKey`). Coming
+ * into view sends `music.wake`, so a connection that died meanwhile is made
+ * again at once.
  */
 export default function MusicPage() {
   const active = useTabActive();
@@ -46,6 +49,9 @@ export default function MusicPage() {
   const error = useMusicStore(musicError);
   const [queueOpen, setQueueOpen] = useState(false);
   useMusicSpaceKey(snapshot);
+  useEffect(() => {
+    if (active) music.wake().catch(() => {});
+  }, [active]);
 
   if (!enabled || !snapshot || !(snapshot.connected || snapshot.connecting || snapshot.track)) {
     return (
@@ -79,7 +85,7 @@ export default function MusicPage() {
               />
               <div className="min-w-0 text-center">
                 <h1 className="truncate text-lg font-semibold text-foreground">
-                  {track?.name ?? (snapshot.connecting ? "Connecting…" : nothingNamed(device))}
+                  {track?.name ?? connectingTitle(snapshot) ?? nothingNamed(device)}
                 </h1>
                 <p className="truncate text-[13px] text-foreground/80">
                   {track ? track.artists.join(", ") : device ? "" : NOTHING_PLAYING}
@@ -98,7 +104,7 @@ export default function MusicPage() {
                 <QueueToggle open={queueOpen} onToggle={() => setQueueOpen((o) => !o)} />
               </VolumeRow>
               <PlayingElsewhere snapshot={snapshot} />
-              {error && <p className="text-xs text-destructive">{error}</p>}
+              <MusicNotice snapshot={snapshot} error={error} />
             </div>
           </div>
           <div className="flex min-w-0 flex-col @3xl:min-h-0 @3xl:flex-1">

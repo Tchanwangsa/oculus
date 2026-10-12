@@ -117,6 +117,39 @@ pub fn setting_blocking(key: &str) -> Option<String> {
     .flatten()
 }
 
+/// Upsert one `settings` row from a **synchronous** caller, from any context,
+/// the way `setting_blocking` reads one: on a thread of its own with a
+/// current-thread runtime. Blocks until the write lands or fails.
+pub fn set_setting_blocking(key: &str, value: &str) -> Result<(), String> {
+    let database = db_path();
+    if !database.is_file() {
+        return Err(format!("no database at {}", database.display()));
+    }
+    let (key, value) = (key.to_string(), value.to_string());
+
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        runtime.block_on(async move {
+            use sqlx::Connection;
+            let options = SqliteConnectOptions::new()
+                .filename(&database)
+                .create_if_missing(false)
+                .busy_timeout(Duration::from_secs(15));
+            let mut connection = sqlx::SqliteConnection::connect_with(&options)
+                .await
+                .map_err(|e| e.to_string())?;
+            let written = set_setting(&mut connection, &key, &value).await;
+            connection.close().await.ok();
+            written
+        })
+    })
+    .join()
+    .map_err(|_| "the settings write panicked".to_string())?
+}
+
 pub async fn open(data_dir: &Path) -> Result<SqlitePool, String> {
     let path = crate::library::paths::db_path(data_dir);
     if !path.exists() {
