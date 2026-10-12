@@ -67,7 +67,7 @@ narration/    manifest.json and the clips it names
   "voice": { "voice": "af_heart", "speed": 1.0 },
   "scenes": [
     { "id": "title", "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 4.0 },
-    { "id": "dots", "component": "DotGrid", "props": { "n": 12, "cols": [4, 6], "at": [2.2] }, "transition": { "kind": "wipe", "direction": "up" } }
+    { "id": "sorts", "component": "Bars", "props": { "labels": ["\\text{bubble}", "\\text{insertion}", "\\text{merge}"], "values": [500, 250, 9], "diff": [0, 2], "diffLabel": "\\times 55", "diffAt": 2.2 }, "transition": { "kind": "wipe", "direction": "up" } }
   ]
 }
 ```
@@ -319,17 +319,25 @@ video.json's for that load. A component that no level has is an error
 listing every name in every level.
 
 The starter set (`app/studio-core/library/`) is compiled into the crate:
-drawing primitives, `NumberLine`, `Axes` (with `Plot` and `Dot`), `DotGrid`,
-`Tiles` (Euclid's gcd as squares), `ModClock` (residues on a circle and a
-walk between them) and `Table` (keyed cells), plus `TitleCard`, and the
-theme `warm` beside `default`. Components cannot import one another, so
+drawing primitives: `NumberLine`, `Axes` (any formula string, several
+curves, `Scatter` with a regression line, `Area`, `Riemann` rectangles, a
+`Tangent` or shrinking secant, `Dot`), `Graph` (nodes and edges laid out
+on a circle, as a tree, in columns or by hand; a traversal and a walk),
+`Grid` (a matrix, DP table or board of cells with fills, marks and
+pointers), `Bars` (a bar chart or histogram), `Code` (highlighted source
+on a fixed column grid) and `Table` (keyed cells), plus `TitleCard`, and
+the theme `warm` beside `default`. Components cannot import one another, so
 each primitive file holds the primitive as a helper function (keys under
 an `id` prefix, times as numbers a scene passes from `word()`) and a
 default export that demos it; a scene copies the helper into its own
 component. The starters are primitives, never scene templates: a heading
 over lines, two text columns or a stat card is the slide shape the
-Studio skill bans, so none ships. Each takes its colours and fonts from
-the theme and has at least two examples. `tests/starter.rs` lints the set
+Studio skill bans, so none ships. A primitive earns its place when it
+solves a layout or mapping problem a scene would otherwise redo (data to
+px, a fitted grid, columns of characters) and keys every piece it draws,
+so two with one `id` glide in a `Steps` and an overlay can point at a
+part. Each takes its colours and fonts from the theme and has at least
+two examples; only `Code` reads `font.mono`. `tests/starter.rs` lints the set
 in both themes, and `tests/gallery_golden.rs` pins each starter as one
 sheet, `starter-<Component>.png`, a row per example and a column per
 moment of the 6 s preview (laid out at 1920x1080, drawn at a quarter), so
@@ -1371,14 +1379,21 @@ centroid smoothly.
 
 ## Fonts and themes are bundled, never the system's
 
-- The fonts are Inter (variable: `opsz`, `wght`) and Manrope (variable:
-  `wght`), compiled in with their OFL licences beside them, and the twenty
-  KaTeX faces (`fonts/katex/`, OFL, from the katex npm package the app
+- The fonts are Inter (variable: `opsz`, `wght`), Manrope (variable:
+  `wght`) and JetBrains Mono (variable: `wght`, upright only), compiled in
+  with their OFL licences beside them, and the twenty KaTeX faces (`fonts/katex/`, OFL, from the katex npm package the app
   uses), which only `Math` reads; `Text` cannot name them. System fonts are
   never loaded, so a frame is the same on every machine; an unknown
   `fontFamily` is an error naming the bundled families.
-- A theme is tokens only: `color`, `font` (`heading` and `body` families),
-  `type` (style fragments to spread into `style`), `space`, `radius`,
+- Monospace is for code. JetBrains Mono's advance is 0.6 em, so a column
+  of characters is a fixed number of px; the typesetter turns off its `calt`
+  feature (ligatures), so `<=` and `!=` show as typed (`layout/text.rs`).
+  Numbers, even in a table, take `fontVariantNumeric: "tabular-nums"`, not
+  the mono face.
+- A theme is tokens only: `color`, `font` (`heading`, `body` and `mono`
+  families), `type` (style fragments to spread into `style`; the bundled
+  themes have `display`, `h1`, `h2`, `h3`, `body`, `label`, `caption` and
+  `code`, the monospace fragment, 28 px), `space`, `radius`,
   `motion` (`duration`, `easing` as cubic-bezier points, `spring` presets,
   and optionally `transition`, `magicMove`, `morphColor` and `motionBlur`,
   the bottom of the motion cascade; the bundled theme sets `morphColor:
@@ -1387,6 +1402,10 @@ centroid smoothly.
   `ctx.theme` and it is frozen.
 - `color.bg` is the canvas under every frame, `color.text` the colour and
   `font.body` the family of `Text` that sets none.
+- `font.mono` and `type.code` are optional in a theme file: a file without
+  them gets `JetBrains Mono` and the bundled `code` fragment before it is
+  validated (`theme/schema.rs`, `fill_defaults`), so a theme written before
+  the face existed still loads, and a component can always read them.
 - The bundled `default` theme is neutral greys with the app's indigo
   `#5e6ad2` accent, Manrope headings and Inter body.
 
@@ -1485,7 +1504,7 @@ error at the literal's `file.tsx:line:col`:
   theme.color.accent (nearest: accent, accentStrong, muted)``.
 - **Font families.** A bundled family's name as a whole string, or any string
   after `fontFamily:`: ``font family `Manrope` is a literal; use
-  theme.font.heading``.
+  theme.font.heading`` (`JetBrains Mono` names `theme.font.mono`).
 - **Style numbers.** A number that is a length in a `style` object and
   equals a theme `space` or `radius` entry: ``style value 24 equals
   theme.space.m; use theme.space.m``. A length is the value of a length
@@ -1502,6 +1521,12 @@ error at the literal's `file.tsx:line:col`:
   a side of a comparison, a call's argument, a number inside a nested
   object (`shadow`, `border`, `fill`, `reveal`), or a negative number
   (`project/lint/tokens/style.rs`).
+
+One more check is a note, not an error (`mono_note`): a component whose
+name neither starts nor ends with `Code` that reads `theme.font.mono` or
+`theme.type.code` gets ``theme.font.mono is used outside a Code component;
+monospace is for code, and numbers take fontVariantNumeric:
+"tabular-nums"`` at the first place, grouped as `monospace outside code`.
 
 The check reads the TSX with a scanner, not a parser: comments are skipped,
 strings and template literals are read as strings (a literal inside a
