@@ -10,7 +10,6 @@ import { useNewVideo } from "@/hooks/studio/useNewVideo";
 import { useThemeDefaults } from "@/hooks/studio/useThemeDefaults";
 import { useThemes } from "@/hooks/studio/useThemes";
 import { useStoredState } from "@/hooks/ui/useStoredState";
-import { VOICE_SETTINGS_HREF } from "@/lib/studio/voice";
 import { draftKey } from "@/stores/chat/draftStore";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 
@@ -46,7 +45,7 @@ export function NewVideo() {
   }, [subjects, subjectId]);
   const themes = useThemes(code);
   const { defaults } = useThemeDefaults(code);
-  const { start, error, needsVoice } = useNewVideo(subjectId, code, style);
+  const { start, error, problems } = useNewVideo(subjectId, code, style);
 
   const onStyle = useCallback(
     (next: StudioStyle) => {
@@ -103,20 +102,24 @@ export function NewVideo() {
             {error && (
               <p role="alert" className="px-0.5 text-[12px] text-destructive">
                 {error}
-                {needsVoice && (
-                  <>
-                    {" "}
+              </p>
+            )}
+            {problems.length > 0 && (
+              <div role="alert" className="space-y-1 px-0.5 text-[12px] text-destructive">
+                {problems.map((p) => (
+                  <p key={p.id}>
+                    {p.message}{" "}
                     <button
                       type="button"
-                      data-tab-href={VOICE_SETTINGS_HREF}
-                      onClick={() => navigate(VOICE_SETTINGS_HREF)}
+                      data-tab-href={p.href}
+                      onClick={() => navigate(p.href)}
                       className="cursor-pointer text-brand underline-offset-2 hover:underline"
                     >
-                      Open voice settings
+                      Open settings
                     </button>
-                  </>
-                )}
-              </p>
+                  </p>
+                ))}
+              </div>
             )}
           </div>
         </div>

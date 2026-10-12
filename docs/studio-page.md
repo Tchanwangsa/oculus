@@ -14,7 +14,7 @@ page is the frontend over them.
 | The nav column: New video, Videos, Components, Themes, the Recent list and its search | `app/src/components/studio/nav/` |
 | Pages | `app/src/pages/studio/` (`NewVideoPage`, `VideosPage`, `VideoPage`, `VideoThreadPage`, `ComponentsPage`, `ThemesPage`) |
 | New video: the box and its start-up | `app/src/components/studio/new/NewVideo.tsx`, `app/src/hooks/studio/useNewVideo.ts`, `app/src/lib/studio/title.ts` |
-| The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/hooks/studio/useThemeDefaults.ts`, `app/src/lib/studio/themes.ts`, `app/src/lib/studio/length.ts`, `app/src/lib/studio/voice.ts` |
+| The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/hooks/studio/useThemeDefaults.ts`, `app/src/lib/studio/themes.ts`, `app/src/lib/studio/length.ts`, `app/src/lib/studio/voice.ts`, `app/src/lib/studio/setup.ts` |
 | The thread column | `app/src/components/studio/thread/ThreadColumn.tsx` |
 | Player, render bar, scene strip, the detail's dock (script, scene grid), facts, Render draft, the Export menu | `app/src/components/studio/video/` (`VideoDetailStage.tsx`, `VideoDock.tsx`, `RenderDraftButton.tsx`, `ExportMenu.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useDockedFrameHeight.ts`, `app/src/hooks/studio/useSceneStill.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
 | The Videos grid, its cards and subject pills | `app/src/components/studio/videos/`, `app/src/components/ui/layout/MediaGrid.tsx` |
@@ -53,12 +53,17 @@ there are no toasts or bars ([ui.md](./ui.md)).
 Chat's "next thread" scope) and the style chip. Sending runs
 `useNewVideo`:
 
-1. Read the saved voice settings (`readVoiceSettings`, free: nothing
-   synthesises) and check them with `voiceProblem`. A video needs a usable
-   voice, so with none (no engine; no voice; for the server engine also no URL
-   or model) it stops here: no folder is made and the sentence is the error.
-   `voiceProblem` mirrors the requirements of Rust's `voice::resolve`, which
-   stays the source of truth.
+1. Read what narration needs (`readSetupProblems`: the saved voice settings,
+   Kokoro's pack status and the aligner's status, all local and free: nothing
+   synthesises or downloads) and check it with `setupProblems`. A video needs
+   a configured voice (an engine and a voice; for the server engine also a URL
+   and model), Kokoro's packs when Kokoro is the engine, and the word-timing
+   model installed (a download still running counts as missing). With any
+   missing it stops here: no folder is made, and each missing piece shows
+   under the box with an "Open settings" link to the page that fixes it
+   (Settings → Studio → Narration, or Word timing). `voiceProblem` and
+   `setupProblems` mirror Rust's `voice::resolve` and the narrate checks,
+   which stay the source of truth and refuse the same cases at narrate time.
 2. `newVideo({title, subject, theme?, portrait})`. The title is the prompt's
    first line without its `@` paths, cut at 60 characters; the thread names
    itself later and the slug comes from the title. The subject is the course
@@ -71,8 +76,7 @@ Chat's "next thread" scope) and the style chip. Sending runs
 
 `lengthSecs` is left out when the length is Auto, and the brief then has no
 length line. A failure at any step shows its sentence under the box and gives
-the text back (`Composer`'s `restore`); the missing-voice sentence carries an
-"Open voice settings" link to `/settings/voice`. One after step 1 leaves the
+the text back (`Composer`'s `restore`). One after step 1 leaves the
 scaffold behind, a video with no thread in the grid.
 
 **The style chip** holds the theme, the format (Video or Reels, which is
@@ -90,9 +94,9 @@ Each theme row says where it comes from (an own version, the subject's,
 global, built in). The format and length are remembered
 (`oculus-studio-style`), a custom length as typed. Themes come from `studio_themes` for the chosen
 subject; if the command rejects, the list is only "Default" and the popover
-prints the reason. The voice is shown read-only
-from Settings → Voice with a link there, and the line is a warning that says
-what is missing while `voiceProblem` finds the voice unusable. There is no sample button: a sample
+prints the reason. The popover's last line is the narration voice with a link to
+Settings → Studio → Narration; while `setupProblems` finds anything missing it
+is instead one warning line per missing piece, each with its Settings link. There is no sample button: a sample
 would be a billed TTS call, and nothing in Settings makes one.
 
 ## The thread page: the conversation beside the video

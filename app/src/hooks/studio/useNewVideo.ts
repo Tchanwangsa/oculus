@@ -6,33 +6,32 @@ import { harnessSend } from "@/lib/harness";
 import { videoHref } from "@/lib/studio/routes";
 import { titleFromPrompt } from "@/lib/studio/title";
 import { newVideo } from "@/lib/studio/videos";
-import { readVoiceSettings, voiceProblem } from "@/lib/studio/voice";
+import { readSetupProblems, type SetupProblem } from "@/lib/studio/setup";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { useVideosStore } from "@/stores/studio/videosStore";
 
 /**
  * Starts a video: scaffolds its folder, then sends the first message with the
- * `studio` link so the thread is the video's. A video needs a usable narration
- * voice, so the saved voice settings are checked first (`voiceProblem`) and,
- * lacking one, no folder is made. Resolves to false, with `error` set, when
- * that or either step fails; the caller hands the words back to the box.
- * `needsVoice` says the error is the missing voice, fixed in Settings.
+ * `studio` link so the thread is the video's. A video needs a configured
+ * narration voice and the word-timing model (`setupProblems`), so those are
+ * checked first and, lacking one, no folder is made: `problems` lists what to
+ * fix in Settings. Resolves to false when that or either step fails, with
+ * `error` set for a failure; the caller hands the words back to the box.
  */
 export function useNewVideo(subjectId: number | null, subjectCode: string | null, style: StudioStyle) {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
-  const [needsVoice, setNeedsVoice] = useState(false);
+  const [problems, setProblems] = useState<SetupProblem[]>([]);
 
   const start = useCallback(
     async (text: string): Promise<boolean> => {
       setError(null);
-      setNeedsVoice(false);
+      setProblems([]);
       const store = useHarnessStore.getState();
       try {
-        const problem = voiceProblem(await readVoiceSettings());
-        if (problem) {
-          setError(problem);
-          setNeedsVoice(true);
+        const missing = (await readSetupProblems()).problems;
+        if (missing.length > 0) {
+          setProblems(missing);
           return false;
         }
         const title = titleFromPrompt(text);
@@ -59,5 +58,5 @@ export function useNewVideo(subjectId: number | null, subjectCode: string | null
     [navigate, subjectId, subjectCode, style],
   );
 
-  return { start, error, needsVoice };
+  return { start, error, problems };
 }
