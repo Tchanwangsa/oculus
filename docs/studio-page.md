@@ -16,7 +16,7 @@ page is the frontend over them.
 | New video: the box and its start-up | `app/src/components/studio/new/NewVideo.tsx`, `app/src/hooks/studio/useNewVideo.ts`, `app/src/lib/studio/title.ts` |
 | The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/hooks/studio/useThemeDefaults.ts`, `app/src/lib/studio/themes.ts` |
 | The thread column | `app/src/components/studio/thread/ThreadColumn.tsx` |
-| Player, render bar, scene strip, script, facts, the Export menu | `app/src/components/studio/video/` (`ExportMenu.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
+| Player, render bar, scene strip, the detail's dock (script, scene grid), facts, the Export menu | `app/src/components/studio/video/` (`VideoDetailStage.tsx`, `VideoDock.tsx`, `ExportMenu.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useDockedFrameHeight.ts`, `app/src/hooks/studio/useSceneStill.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
 | The Videos grid, its cards and subject pills | `app/src/components/studio/videos/`, `app/src/components/ui/layout/MediaGrid.tsx` |
 | Stills (`studio_frame`, `studio_thumbnail`) as object URLs | `app/src/lib/studio/stills.ts`, `app/src/hooks/studio/useStill.ts` |
 | Render state, the video list, the event bridge | `app/src/stores/studio/` (`renderStore.ts`, `videosStore.ts`), `app/src/hooks/backend/useStudioEvents.ts` |
@@ -89,10 +89,12 @@ the lecture dock does and releasing them on leaving. When a turn ends it
 re-reads the video's detail and the list, since the agent may have changed
 files. A video with no thread redirects to its detail.
 
-The right column loads `studio_video_detail` and then renders `VideoStage`:
+The right column loads `studio_video_detail` and then renders `VideoStage`
+(the player, the render bar and the scene strip; the detail page composes the
+player and render bar itself):
 
-- **The player** is the app's `MediaPlayer` with no dock (`dock` is
-  optional) over the newest video render (`draft`, `final`, `small` or `2x`;
+- **The player** is the app's `MediaPlayer` with no dock (the detail page
+  gives it one) over the newest video render (`draft`, `final`, `small` or `2x`;
   `playableRenders`), `mediaSrc(path)` plus `&v=<mtime>` so a re-render of
   the same path is a new file to the element. With several, pills choose.
   When the render has its `.vtt` beside it, `studio_render_captions` reads it, `parseVtt` makes the cues
@@ -105,6 +107,8 @@ The right column loads `studio_video_detail` and then renders `VideoStage`:
   seeks to the scene's start; a scene with no start is only a picture, and
   the scene under the playhead is lit. A still that cannot be made, a stale
   narration, says so once under the strip with the command's own sentence.
+  The detail page has no strip: its Scenes tab draws the same stills
+  (`useSceneStill`) as a grid.
 - **The render bar** starts `studio_render` through `renderStore`. A render
   in flight, of any preset (the Export menu starts the others), swaps Render
   final for a bar naming the preset, the percentage and Cancel; a failure
@@ -133,10 +137,35 @@ the problem in place of its facts. Pills over the grid narrow by subject
 (shown when two or more subjects have videos; the choice is remembered in
 `oculus-studio-subject`). With no video the page offers New video.
 
-The detail is the same `VideoStage` beside the facts (subject, theme, voice,
-length, shape) and the script split by scene; a press on a scene seeks the
-player. **Continue in chat** opens the thread page.
+The detail (`VideoDetailStage`) is the player with a dock, and under it a row
+of the facts (subject, theme, voice, length, shape) beside the render bar.
+**Continue in chat** opens the thread page.
 
+- **The dock** is the lecture player's (`MediaDock`, `useTranscriptDock`):
+  the player's dock button, T and the dock's × fold it, its header drags it to
+  an edge, its divider resizes it, and the side, size and open state are
+  `playerPrefsStore`'s, shared with lectures ([viewers.md](./viewers.md)). Its
+  tabs, **Script** and **Scenes** (the tab is remembered in
+  `oculus-studio-video-dock-tab`), take the place of the lecture's Transcript:
+  - **Script** (`ScriptPanel`) is the narration split by scene, with each
+    scene's length. The scene under the playhead is lit, and the list follows
+    it as the lecture transcript does (`FollowList`: nudge, Back to live,
+    idle re-sync). A press seeks to the scene's start.
+  - **Scenes** (`SceneGrid`) is a grid of the scenes' stills, as many columns
+    as the dock's width allows, each with its number and length. The scene
+    under the playhead is lit and scrolled into view when the playhead enters
+    it, unless the pointer is on the grid. A press seeks.
+  - Both are inert while there is no render, since there is no video to move;
+    the Script still reads and the stills still draw.
+- **The picture** is 16:9 beside or above the dock whatever its width
+  (`useDockedFrameHeight` sets the frame's height from the frame's width, the
+  dock's drawn size and the dock side), within `100vh - 14rem` and no shorter
+  than 18rem; folding the dock gives the picture the whole width, and the
+  height eases with the dock's slide. The page is the content's width up to
+  1440px. The picture keeps 480px beside a side dock (`dockKeepWidth`): a
+  narrower page draws the dock at the bottom without rewriting the preference.
+  With no render the picture says "Not rendered yet" under the control bar,
+  and the render bar offers Render draft.
 - **Export** (`ExportMenu`) is a pill over a popover of the presets
   ([studio.md](./studio.md#rendering-a-video)): each row names the preset and
   what it makes for this video's shape (`presetHint`), and its state from

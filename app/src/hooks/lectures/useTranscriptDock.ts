@@ -34,11 +34,13 @@ function nearestEdge(rect: DOMRect, x: number, y: number, sides: boolean): Dock 
 /**
  * Dock side + size for the media player's panel: drag the header to an edge,
  * drag the divider to resize. Stored in `playerPrefsStore`. `dockTab` is the
- * tab whose floor applies.
+ * tab whose floor applies; `keepW` is the width the video keeps beside a side
+ * dock, below which the dock draws at the bottom.
  */
 export function useTranscriptDock(
   containerRef: RefObject<HTMLDivElement | null>,
   dockTab: DockTab,
+  keepW = KEEP_W,
 ) {
   const dock = usePlayerPrefs((s) => s.dock);
   const height = usePlayerPrefs((s) => s.height);
@@ -75,7 +77,7 @@ export function useTranscriptDock(
   }, [containerRef]);
 
   // A side dock that doesn't fit draws at the bottom; the preference is kept.
-  const fitsBeside = area.width === 0 || area.width >= minSize(dockTab, false) + KEEP_W;
+  const fitsBeside = area.width === 0 || area.width >= minSize(dockTab, false) + keepW;
   const drawnDock: Dock = fitsBeside ? dock : "bottom";
   const vertical = isVertical(drawnDock);
 
@@ -86,7 +88,7 @@ export function useTranscriptDock(
     const measured = vertical ? area.height : area.width;
     const cap =
       measured > 0
-        ? Math.max(min, measured - (vertical ? KEEP_H : KEEP_W))
+        ? Math.max(min, measured - (vertical ? KEEP_H : keepW))
         : Number.POSITIVE_INFINITY;
     return Math.min(Math.max(min, vertical ? height : width), cap);
   })();
@@ -122,7 +124,7 @@ export function useTranscriptDock(
           const dx = e.clientX - r.x;
           const next = r.size + (r.dock === "right" ? -dx : dx);
           setPrefs({
-            width: Math.min(Math.max(min, next), Math.max(min, rect.width - KEEP_W)),
+            width: Math.min(Math.max(min, next), Math.max(min, rect.width - keepW)),
           });
         }
         return;
