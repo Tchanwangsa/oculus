@@ -1,8 +1,9 @@
 # Auth & sessions
 
 Three services, three credentials — all derived from one Canvas session
-cookie. Spotify's login, kept in keyd for the music player, is the one
-credential that is not ([below](#spotifys-credentials-are-the-one-value-keyd-reads-back)).
+cookie. Two secrets keyd keeps are not: Spotify's login, for the music player
+([below](#spotifys-credentials-are-read-back-with-get)), and WebKit's
+WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-build)).
 
 ## Where
 
@@ -15,7 +16,6 @@ credential that is not ([below](#spotifys-credentials-are-the-one-value-keyd-rea
 | keyd's Okta ops: the vault entries, the old-item import, one sign-in at a time; the role check every op passes | `app/keyd/core/src/ops/okta.rs`, `app/keyd/core/src/ops.rs` |
 | Staging the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Startup probe | `app/src-tauri/src/auth/startup.rs` |
-| Removing a leftover keep-alive agent at startup | `app/src-tauri/src/auth/legacy_agent.rs`, `app/keyd/core/src/platform/macos/registrar.rs` |
 | Ed token minting via LTI | `app/src-tauri/src/sources/ed/lti.rs` |
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/sources/echo360/auth.rs`, `app/src-tauri/src/lectures/mod.rs` |
 | Echo360 page embeds: per-link launch, Bearer, CDN signing; the shared Bearer | `app/src-tauri/src/sources/echo360/embed/`, `app/src-tauri/src/sync/scrape/embeds/state.rs` |
@@ -27,6 +27,8 @@ credential that is not ([below](#spotifys-credentials-are-the-one-value-keyd-rea
 | The `oculus-keyd` client, which the Voyage, MinerU and Groq keys and the Okta credentials and sign-in go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/providers/credentials/mod.rs` (`CloudKey`) |
 | Credential entry UI | `app/src/components/settings/web/AutoSignIn.tsx` |
 | Spotify's stored credentials: the `music.spotify` vault entry, keyd's app-only `get`, and the music module that writes and reads it | `app/keyd/core/src/names.rs` (`READABLE`), `app/keyd/core/src/ops/get.rs`, `app/src-tauri/src/music/credentials.rs` ([music.md](./music.md)) |
+| WebKit's WebCrypto master key: the per-build names and items, the key's text form, keyd's `webcrypto_key` and its import, the client call | `app/keyd/core/src/names.rs` (`WEBCRYPTO`), `app/keyd/core/src/webcrypto.rs`, `app/keyd/core/src/ops/webcrypto.rs`, `app/keyd/core/src/client/webcrypto.rs`, the app's reader `app/src-tauri/src/shell/webcrypto/mod.rs` (`fetch`) |
+| Handing the key to WebKit: the data-store delegate, its once-per-process cache, where it is installed | `app/src-tauri/src/shell/webcrypto/delegate.rs`, `app/src-tauri/src/shell/webcrypto/cache.rs`, `install_default` in `app/src-tauri/src/shell/webcrypto/mod.rs` (called first in `app/src-tauri/src/lib.rs`'s setup), `configure_store` in `app/src-tauri/src/shell/dock/page.rs` |
 
 ## Canvas authenticates by session cookie only
 
@@ -151,10 +153,6 @@ attempt (`LoginError::UnsupportedFactor`).
   `binaries/`. `tauri-build` validates every `externalBin`
   path even while building `oculus` itself, so the script writes an empty
   placeholder for that build and removes it on failure.
-- Startup removes the session keep-alive LaunchAgent
-  (`com.tchan.oculus.session-keepalive`) and its data-dir files, if an earlier
-  version installed them (`app/src-tauri/src/auth/legacy_agent.rs`). The unload goes
-  through the platform registrar's `retire`, which refuses keyd's own label.
 - No sign-in beats an absolute session cap or a forced IdP re-auth.
 
 ## Okta sign-in runs headless in Rust
@@ -189,8 +187,9 @@ every sign-in a client starts (Settings, the startup probe, the browser,
 `oculus auth auto`) are requests to `oculus-keyd` through
 `credentials::Credentialed` (ops `okta_save`, `okta_forget`, `okta_status`,
 `ensure_signed_in`, and `okta_resume` for the guard). Neither process reads the password or the seed back: no
-op returns one (keyd's one read-back, `get`, serves only Spotify's
-credentials, [below](#spotifys-credentials-are-the-one-value-keyd-reads-back)),
+op returns one (keyd's read-backs are `get`, which serves only Spotify's
+credentials, [below](#spotifys-credentials-are-read-back-with-get), and
+`webcrypto_key`, which serves only WebKit's master key),
 and `oculus auth setup` prints the code from the seed just typed.
 
 - **Only `KeydError::Absent` takes the old route, and only for the
@@ -292,7 +291,7 @@ rotation, and read by `forward`, `session_get` and `session_status`.
   (`keyd.imported.session.<kind>` records it). `session_clear` and `sign_out`
   import first, so a cleared session is never brought back from an old file.
 
-## Spotify's credentials are the one value keyd reads back
+## Spotify's credentials are read back with `get`
 
 librespot logs in to Spotify with a stored-credentials blob it must hold
 itself; there is no HTTP request keyd could attach it to, as `forward` does
@@ -309,6 +308,75 @@ Connect device id, as JSON) has a read-back of its own.
   leave it alone, so signing out of Canvas keeps Spotify signed in.
 - With keyd absent there is no keychain fallback for it: the music module
   reports the error and keeps nothing ([music.md](./music.md#the-credentials-live-in-keyd-read-back-by-an-app-only-get)).
+
+## WebKit's WebCrypto master key comes from keyd, per build
+
+WebKit wraps every `CryptoKey` a page saves to IndexedDB (WhatsApp's and
+Messenger's logins among them) with one 16-byte master key, which it keeps in
+a login-keychain item of its own. An ad-hoc signed dev build is a new program
+to that item's access list after every rebuild, so its prompt comes back each
+time. keyd keeps a copy of the key and serves it to the app, and the app
+hands it to WebKit through each data store's delegate, so WebKit never reads
+its item.
+
+- **One key per WebKit application.** WebKit files the key under the app's
+  bundle identifier, or else its executable's name: account
+  `com.apple.WebKit.WebCrypto.master+app` for the dev build and
+  `…+com.tchan.oculus` for the bundle, a generic password with no service.
+  Both builds share one vault, so each has its own entry,
+  `webkit.webcrypto.app` and `webkit.webcrypto.com.tchan.oculus`
+  (`names::WEBCRYPTO`).
+- **`webcrypto_key {app}` replies `{"key", "source"}`, to the app only**, and
+  only for the application the caller is: the peer check names it
+  (`Caller::application`: the bundle's `CFBundleIdentifier`, or the dev
+  executable's file name), and any other `app` is `caller`. A wrong key fails
+  silently (IndexedDB returns `undefined` and those services sign out), so
+  neither build can be handed the other's. An `app` with no entry is `request`.
+- **The key travels as text**: the padded standard base64 of the 16 bytes,
+  24 characters, as WebKit's item holds it (`crate::webcrypto`). keyd stores
+  and sends exactly that; the client decodes it to 16 bytes. A value that does
+  not decode to exactly 16 bytes is never served, stored or replaced.
+- **The first request copies WebKit's item in.** `source` says where the key
+  came from: `vault`, `keychain` (WebKit's item, read as WebKit reads it, by
+  account alone, and left in place, never changed) or `minted` (16 fresh
+  bytes). keyd makes a key only when the keychain says no such item exists; a
+  refused prompt, a denied read or any other failure is `keychain`, stores
+  nothing, and is asked again next time. Racing first requests wait on one
+  read (the import lock) and get the same key; the vault keeps whichever key
+  it held first.
+- **The generic ops never touch it.** `store` and `delete` refuse the two
+  names, `get` does not read them back, and `sign_out` leaves them. `has`
+  reports presence.
+- **Any error leaves the key to WebKit.** Whatever `Client::webcrypto_key`
+  returns other than a key (`Absent`, `Keychain`, `Caller`, …), the caller
+  hands WebKit nothing and WebKit reads its own item. The app's reader,
+  `shell::webcrypto::fetch`, names the application as WebKit does (the main
+  bundle's identifier, else the process name), returns the 16 bytes or `None`,
+  and logs a failure or a first copy with `elog!`, never the key. It blocks on
+  keyd, which can wait on a keychain prompt, so it runs off the main thread.
+- **The app hands WebKit the key through a website data store delegate.**
+  Before it reads its keychain item, WebKit asks the store's delegate (private
+  `-[WKWebsiteDataStore set_delegate:]`, macOS 15+) with
+  `webCryptoMasterKey:`, for page, dedicated-worker and service-worker
+  IndexedDB alike. One delegate (`shell/webcrypto/delegate.rs`) is set on
+  every store the app's webviews use: the default store (the main webview,
+  browser tabs and the Canvas sign-in window, whose `data_directory` WKWebView
+  ignores) first thing in setup, and each dock store in `configure_store`, in
+  the same main-thread turn that creates its page. Both run before the run
+  loop turns, and WebKit asks only when a web process does, over the run
+  loop, so no page can ask first. The delegate answers the 16 raw bytes, or
+  nil, which sends WebKit to its own item. A store without `set_delegate:` is
+  left to WebKit, logged once.
+- **keyd is asked once per process.** WebKit asks on the main thread, on
+  every wrap and unwrap, and keeps nothing. The first ask runs `fetch` on a
+  thread of its own and queues WebKit's completion handler; asks meanwhile
+  queue theirs. The answer comes back to the main thread
+  (`run_on_main_thread`), calls each handler exactly once, and is kept for
+  every later ask (`cache.rs`), `None` included: a failed first read leaves
+  WebKit on its keychain item until the app restarts. The log says
+  `webcrypto: store <uuid|default> asks Oculus for the master key` per store,
+  then `WebKit asked for its master key; asking oculus-keyd` and `answered N
+  waiting request(s) with keyd's key` (or `with nothing; …`).
 
 ## A rejected Canvas request signs in once and is sent once more
 
@@ -473,4 +541,8 @@ existing query 403s, as does the bare URL.
 - `setCookies:completionHandler:` must get a real block — nil segfaults the app seconds later from a WebKit-only stack.
 - WebKit drops an API-set cookie that would replace an HttpOnly one a server set, with no error. Once Canvas hands the browser an anonymous `canvas_session`, re-seeding does nothing until the old cookie is deleted — so seeding deletes same-named cookies first.
 - `/login/session_token` answers 403 to a cookie session; it wants an access token, which is disabled here.
+- The data store's delegate setter is `set_delegate:`; `_setDelegate:` does not exist and throws.
+- The navigation delegate's `_webCryptoMasterKeyForWebView:` misses service workers, which read WebKit's keychain item (and create it if absent); only the data store's delegate covers every IndexedDB.
+- A wrong WebCrypto master key fails silently: IndexedDB `get` resolves `undefined`, the records stay, and WhatsApp and Messenger sign out. Answer keyd's key or nil, nothing else.
+- WebKit holds the data store's delegate weakly, so the delegate lives for the process; and it checks each `webCryptoMasterKey:` handler is called exactly once.
 - Ed's LTI redirect walk jars cookies per host, and Canvas's legs go through keyd, which attaches the cookie only to Canvas; it must never reach edstem.org.

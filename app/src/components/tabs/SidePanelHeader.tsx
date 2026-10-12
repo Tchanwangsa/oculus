@@ -22,7 +22,7 @@ const STACKED = 3;
  * the front item's title, expand and close. A page whose own top row takes the
  * slot (`PaneHeader.tsx`) hides it and draws the same controls. Tooltips keep
  * their default side, upward, clear of a browser item's native page below,
- * which a portal over it hides.
+ * whose clicks a portal over it holds back.
  */
 export function SidePanelHeader({
   tabId,

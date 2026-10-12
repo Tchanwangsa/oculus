@@ -1,0 +1,184 @@
+import { invoke } from "@tauri-apps/api/core";
+
+/**
+ * Holes the app cuts through itself onto the native pages under it. Every
+ * browser tab and dock page is a WKWebView Rust places below the app's
+ * transparent webview (`app/src-tauri/src/shell/`); a slot shows its page only
+ * while a hole is open over it. The holes are one `clip-path` on `#root`, so
+ * portals, which are children of `body`, still draw over a page.
+ *
+ * Rust sends clicks inside a shown page's frame to the page. While a portal
+ * overlaps an open hole the app reports itself blocked and keeps them, so a
+ * click on the page under a popover just dismisses the popover.
+ *
+ * An overlay inside `#root` that must cover the pages (the fullscreen media
+ * player) suspends the holes: no clip-path, and the app reports itself
+ * blocked. Holes still open and close meanwhile and come back on release.
+ *
+ * Open a hole only once its page is placed, and close it before the page is
+ * hidden or parked, or the bare window shows through for a frame.
+ */
+
+export interface NativeHole {
+  open: () => void;
+  close: () => void;
+}
+
+const holes = new Set<HTMLElement>();
+let written = "";
+let blocked = false;
+let frame = 0;
+let suspended = 0;
+let resizes: ResizeObserver | null = null;
+let mutations: MutationObserver | null = null;
+
+export function openHole(slot: HTMLElement): void {
+  if (holes.has(slot)) return;
+  holes.add(slot);
+  if (holes.size === 1) watch();
+  resizes?.observe(slot);
+  update();
+}
+
+/** Synchronous, so the hole is gone before the caller asks Rust to move the
+ *  page away. */
+export function closeHole(slot: HTMLElement): void {
+  if (!holes.delete(slot)) return;
+  resizes?.unobserve(slot);
+  if (holes.size === 0) unwatch();
+  update();
+}
+
+/** Paints the app over every page and keeps its clicks until the returned
+ *  release runs. Suspensions nest; the holes return once all are released. */
+export function suspendHoles(): () => void {
+  suspended++;
+  update();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    suspended--;
+    update();
+  };
+}
+
+function update(): void {
+  const root = document.getElementById("root");
+  if (!root) return;
+  const path = holes.size && !suspended ? holePath(root, [...holes]) : "";
+  if (path !== written) {
+    written = path;
+    if (path) root.style.clipPath = path;
+    else root.style.removeProperty("clip-path");
+  }
+  setBlocked(suspended > 0 || [...holes].some(coveredBy));
+}
+
+/** `#root`'s rect clockwise, then each hole anticlockwise: under `nonzero` a
+ *  hole winds to zero and drops out, and nothing else changes. CSS px from
+ *  `#root`'s own box; page zoom scales both alike. */
+function holePath(root: HTMLElement, slots: HTMLElement[]): string {
+  const box = root.getBoundingClientRect();
+  const n = (v: number) => Math.round(v * 100) / 100;
+  let d = `M0 0H${n(box.width)}V${n(box.height)}H0Z`;
+  for (const slot of slots) {
+    const r = slot.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    const [bl, br] = bottomRadii(slot, r);
+    const left = n(r.left - box.left);
+    const top = n(r.top - box.top);
+    const right = n(r.right - box.left);
+    const bottom = n(r.bottom - box.top);
+    d += `M${left} ${top}V${n(bottom - bl)}`;
+    if (bl) d += `A${bl} ${bl} 0 0 0 ${n(left + bl)} ${bottom}`;
+    d += `H${n(right - br)}`;
+    if (br) d += `A${br} ${br} 0 0 0 ${right} ${n(bottom - br)}`;
+    d += `V${top}Z`;
+  }
+  return `path(nonzero, "${d}")`;
+}
+
+/** The card's inner radius at each bottom corner the slot shares with it, so
+ *  the page takes the card's rounded corners; a corner inside the card (a
+ *  split pane's inner edge) stays square. */
+function bottomRadii(slot: HTMLElement, r: DOMRect): [number, number] {
+  const card = slot.closest("main");
+  if (!card) return [0, 0];
+  const c = card.getBoundingClientRect();
+  const cs = getComputedStyle(card);
+  const px = (v: string) => parseFloat(v) || 0;
+  if (Math.abs(r.bottom - (c.bottom - px(cs.borderBottomWidth))) > 1) return [0, 0];
+  const fit = (v: number) =>
+    Math.round(Math.min(Math.max(0, v), r.width / 2, r.height) * 100) / 100;
+  const left =
+    Math.abs(r.left - (c.left + px(cs.borderLeftWidth))) <= 1
+      ? px(cs.borderBottomLeftRadius) - px(cs.borderLeftWidth)
+      : 0;
+  const right =
+    Math.abs(r.right - (c.right - px(cs.borderRightWidth))) <= 1
+      ? px(cs.borderBottomRightRadius) - px(cs.borderRightWidth)
+      : 0;
+  return [fit(left), fit(right)];
+}
+
+function setBlocked(next: boolean): void {
+  if (next === blocked) return;
+  blocked = next;
+  invoke("native_set_blocked", { blocked: next }).catch(() => {});
+}
+
+/** Measured a frame after the change, once a popper has positioned. */
+function schedule(): void {
+  if (!frame) {
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      update();
+    });
+  }
+}
+
+function watch(): void {
+  resizes = new ResizeObserver(schedule);
+  mutations = new MutationObserver(schedule);
+  mutations.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["style", "data-state"],
+  });
+  window.addEventListener("resize", schedule);
+}
+
+function unwatch(): void {
+  resizes?.disconnect();
+  mutations?.disconnect();
+  resizes = mutations = null;
+  window.removeEventListener("resize", schedule);
+  if (frame) cancelAnimationFrame(frame);
+  frame = 0;
+}
+
+function overlaps(a: DOMRect, b: DOMRect): boolean {
+  return (
+    a.width > 0 &&
+    a.height > 0 &&
+    a.left < b.right &&
+    a.right > b.left &&
+    a.top < b.bottom &&
+    a.bottom > b.top
+  );
+}
+
+/** Whether a portal (popover, menu, dialog…) lands over the slot. A portal's
+ *  wrapper is an unstyled div, so its children are measured too. */
+function coveredBy(slot: HTMLElement): boolean {
+  const page = slot.getBoundingClientRect();
+  for (const portal of document.body.children) {
+    if (portal.id === "root" || !(portal instanceof HTMLElement)) continue;
+    for (const el of [portal, ...portal.children]) {
+      if (overlaps(el.getBoundingClientRect(), page)) return true;
+    }
+  }
+  return false;
+}

@@ -16,7 +16,6 @@
   body {
     height: 100%;
     margin: 0;
-    background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     font-size: 14px;
@@ -28,9 +27,13 @@
     user-select: none;
   }
 
+  /* The background is here, not on body: a body or html background paints
+     the whole canvas, and the webview must stay see-through where
+     `lib/shell/nativeHoles.ts` clips #root over a native page. */
   #root {
     height: 100%;
     display: flex;
+    background-color: var(--color-background);
   }
 
   /* Phosphor glyphs (256 viewBox) such as VideoCamera run flush to the box

@@ -10,7 +10,7 @@ import {
 import { suggestHistory, type HistoryEntry } from "@/lib/browser/history";
 
 /** The typed row (always first, selected by default), then history matches. */
-interface Suggestion {
+export interface Suggestion {
   key: string;
   url: string;
   label: string;
@@ -18,23 +18,15 @@ interface Suggestion {
   kind: "typed" | "search" | "history";
 }
 
-/**
- * The address field and its suggestion list. `still` is the page snapshot the
- * list is drawn over; the list waits on it so the page is never hidden with
- * nothing behind it.
- */
-export function useBrowserAddressBar(
-  tab: BrowserTab | undefined,
-  id: number,
-  still: string | null | undefined,
-) {
+/** The address field and its suggestion list. */
+export function useBrowserAddressBar(tab: BrowserTab | undefined, id: number) {
   const addressRef = useRef<HTMLInputElement>(null);
   const [address, setAddress] = useState(tab?.url ?? "");
   const [editing, setEditing] = useState(false);
   const [matches, setMatches] = useState<HistoryEntry[]>([]);
   const [picked, setPicked] = useState(0);
 
-  // Typing opens the list, focusing does not — or ⌘L would hide the page.
+  // Typing opens the list, focusing does not: ⌘L shows the page's own URL.
   const draft = address.trim();
   const suggesting = editing && draft !== "" && draft !== tab?.url;
 
@@ -69,15 +61,7 @@ export function useBrowserAddressBar(
     return [typed, ...rest];
   }, [suggesting, draft, matches]);
 
-  // The list waits on the still so the page is never hidden with nothing
-  // behind the list; `null` counts as settled.
-  const listOpen = suggesting && suggestions.length > 0 && still !== undefined;
-
-  // The page stays parked behind its still for as long as the field is being
-  // edited, not just while the list shows: `browser_place` focuses the native
-  // page, so re-placing it when the list closes (a backspace to empty) would
-  // steal the caret from the field.
-  const holding = editing && typeof still === "string";
+  const listOpen = suggesting && suggestions.length > 0;
 
   useEffect(() => {
     if (!editing) setAddress(tab?.url ?? "");
@@ -156,7 +140,6 @@ export function useBrowserAddressBar(
     setPicked,
     suggestions,
     listOpen,
-    holding,
     goTo,
     onAddressKeyDown,
   };

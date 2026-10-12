@@ -9,6 +9,7 @@ use super::scripts::{init_scripts, leave_script};
 use super::services::DockService;
 use super::{broadcast, channel, focus, label, title, with_state, DockPageInfo};
 use crate::shell::browser::{content_size, MAIN, PAGE_USER_AGENT};
+use crate::shell::native_layer::put_below_app;
 
 /// Opens the service's page parked, or in its slot if the frontend already
 /// placed it. Called only when the service is enabled and has no page.
@@ -86,6 +87,7 @@ pub(super) fn create(app: &AppHandle, service: &'static DockService) -> Result<(
             return Err(format!("failed to open dock page {id}: {e}"));
         }
     };
+    put_below_app(&webview);
     configure_store(&webview, service);
     channel::install(&webview, app, service);
     if with_state(app, |s| s.shown.as_deref() == Some(id)) {
@@ -179,27 +181,35 @@ pub(super) fn close(app: &AppHandle, id: &str) {
     });
 }
 
-/// Logs which store the page got and exempts the service's sites from ITP.
-/// `data_store_identifier` needs macOS 14; below that wry silently uses the
-/// shared default store, which is left untouched. `_setPersistedSites:` is
-/// private SPI from macOS 15.2: without it WebKit wipes a site's script
-/// storage (the WhatsApp and Discord logins) 30 operating days after the
-/// last click or key press in it.
+/// Gives the page's store the WebCrypto key delegate (`shell::webcrypto`),
+/// logs which store the page got and exempts the service's sites from ITP.
+/// `create` runs on the main thread, where `add_child` and this run inline
+/// in one turn, before the page can ask for the key. `data_store_identifier`
+/// needs macOS 14; below that wry silently uses the shared default store,
+/// whose ITP is left untouched. `_setPersistedSites:` is private SPI from
+/// macOS 15.2: without it WebKit wipes a site's script storage (the WhatsApp
+/// and Discord logins) 30 operating days after the last click or key press
+/// in it.
 #[cfg(target_os = "macos")]
 fn configure_store(page: &Webview<tauri::Wry>, service: &'static DockService) {
     use objc2::rc::Retained;
-    use objc2::{msg_send, sel};
+    use objc2::{msg_send, sel, MainThreadMarker};
     use objc2_foundation::{NSArray, NSString, NSURL};
     use objc2_web_kit::WKWebView;
 
     use super::services::uuid_string;
 
+    let app = page.app_handle().clone();
     page.with_webview(move |platform| unsafe {
         let ptr = platform.inner() as *mut WKWebView;
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
         if ptr.is_null() {
             return;
         }
         let store = (*ptr).configuration().websiteDataStore();
+        crate::shell::webcrypto::install(&app, &store, mtm);
         let wanted = uuid_string(&service.store_id);
         match store.identifier().map(|u| u.UUIDString().to_string()) {
             Some(got) if got == wanted => {

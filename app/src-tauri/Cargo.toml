@@ -54,9 +54,9 @@ half = "2"
 # platform store is an opt-in feature in keyring 3.
 keyring = { version = "3", features = ["apple-native"] }
 
-# `sync` is the browser's: a WKWebView snapshot answers on a completion
-# block, and the command awaits a oneshot for it (see src/shell/browser/still.rs). `time`
-# is the usage ticker's interval (src/shell/usage/ticker.rs).
+# `sync` is for the oneshots, watches and semaphores commands await (e.g.
+# src/library/pdf_render/render.rs). `time` is the usage ticker's interval
+# (src/shell/usage/ticker.rs).
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 # Local time for the usage table's hour keys.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -121,7 +121,9 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSHTTPCookie", "NSString", "NSURL", "NSUUID"] }
+# `NSBundle`, `NSProcessInfo` and `NSData` name WebKit's application and hand
+# it the WebCrypto master key (`src/shell/webcrypto/`).
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSData", "NSDictionary", "NSHTTPCookie", "NSProcessInfo", "NSString", "NSURL", "NSUUID"] }
 # A local key-down monitor gives a focused browser page ⌘-keys before the
 # menu, and Undo/Redo/Select All reach it as AppKit actions (see `src/shell/keys.rs`).
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSResponder", "NSWindow"] }

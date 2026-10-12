@@ -49,6 +49,11 @@ pub fn run() {
         .manage(shell::usage::UsageState::default())
         .manage(music::MusicState::default())
         .setup(|app| {
+            // WebKit's WebCrypto master key comes from keyd. First, so the
+            // default store has its delegate before any page can ask.
+            #[cfg(target_os = "macos")]
+            shell::webcrypto::install_default(app.handle());
+
             // Give the parse and embed seams a window to emit progress to;
             // headless (CLI) runs never bind, so their emits are no-ops.
             parse::events::bind(app.handle().clone());
@@ -61,6 +66,9 @@ pub fn run() {
 
             sources::echo360::cleanup_partial_downloads(&library::paths::data_dir());
 
+            // The app's webview goes transparent and routes clicks to the
+            // pages under it. Before any page exists.
+            shell::native_layer::init(app.handle());
             // Seeds WebKit with the Canvas session and follows window resizes.
             shell::browser::init(app.handle());
             // Dock pages follow resizes; the frontend creates them (`dock_set_enabled`).
@@ -94,9 +102,6 @@ pub fn run() {
                 // Replay the stored session with a server-side ping.
                 auth::restore_session(&restore);
             });
-
-            // The session keep-alive agent an earlier version installed.
-            auth::legacy_agent::retire_in_background();
 
             Ok(())
         })
@@ -236,7 +241,7 @@ pub fn run() {
             shell::browser::commands::browser_place,
             shell::browser::commands::browser_set_viewport,
             shell::browser::commands::browser_hide_tab,
-            shell::browser::commands::browser_snapshot,
+            shell::native_layer::native_set_blocked,
             shell::browser::commands::browser_hide,
             shell::browser::commands::browser_navigate,
             shell::browser::commands::browser_history,
