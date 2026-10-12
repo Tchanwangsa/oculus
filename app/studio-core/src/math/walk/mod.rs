@@ -29,13 +29,17 @@ pub struct Piece<'a> {
     /// What keys it outside a `\k` group: its character, `frac` for a
     /// fraction bar, `sqrt` for a root sign, and so on.
     pub label: String,
-    /// The innermost `\k` group it is in.
-    pub group: Option<&'a str>,
+    /// The `\k` groups it is in, innermost first.
+    pub groups: Groups<'a>,
     pub rect: Rect,
     pub shape: Shape,
     /// The CSS colour KaTeX gave it (`\color`), as written.
     pub colour: Option<&'a str>,
 }
+
+/// `\k` groups around a piece, innermost first; past four deep the
+/// outermost are dropped.
+pub type Groups<'a> = [Option<&'a str>; 4];
 
 /// What an element inherits, and what its parent gives it.
 #[derive(Clone, Copy)]
@@ -46,7 +50,7 @@ pub struct Ctx<'a> {
     pub colour: Option<&'a str>,
     /// `text-align`: 0 left, 0.5 centre, 1 right.
     pub align: f64,
-    pub group: Option<&'a str>,
+    pub groups: Groups<'a>,
     /// The containing block's width, which `width: 100%` fills; `None`
     /// while a vlist is still measuring its rows.
     pub avail: Option<f64>,
@@ -90,7 +94,7 @@ pub fn walk(root: &DomSpan) -> Result<(Formula, Vec<Piece<'_>>), String> {
         font: Font::MAIN,
         colour: None,
         align: 0.0,
-        group: None,
+        groups: [None; 4],
         avail: None,
         family: None,
     };
@@ -139,7 +143,10 @@ fn inside<'a>(s: &'a DomSpan, cx: Ctx<'a>) -> Ctx<'a> {
         font,
         colour: s.style.get(CssProperty::Color).or(cx.colour),
         align: classes::align(&s.classes).unwrap_or(cx.align),
-        group: s.attributes.get("data-k").map(String::as_str).or(cx.group),
+        groups: match s.attributes.get("data-k") {
+            Some(k) => [Some(k.as_str()), cx.groups[0], cx.groups[1], cx.groups[2]],
+            None => cx.groups,
+        },
         avail: cx.avail,
         family: classes::child_family(&s.classes),
     }

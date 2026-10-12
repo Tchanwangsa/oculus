@@ -15,7 +15,8 @@ pub fn assign(pieces: Vec<Piece<'_>>) -> Result<Vec<Item>, String> {
     let mut seen: HashMap<String, String> = HashMap::new();
     let mut out = Vec::with_capacity(pieces.len());
     for p in pieces {
-        let key = match p.group {
+        let group = p.groups[0];
+        let key = match group {
             Some(g) => {
                 let n = groups.entry(g).or_default();
                 *n += 1;
@@ -35,7 +36,7 @@ pub fn assign(pieces: Vec<Piece<'_>>) -> Result<Vec<Item>, String> {
                 }
             }
         };
-        let what = match p.group {
+        let what = match group {
             Some(g) => format!("a term of \\k{{{g}}}"),
             None => format!("the {} drawn", p.label),
         };
@@ -46,6 +47,7 @@ pub fn assign(pieces: Vec<Piece<'_>>) -> Result<Vec<Item>, String> {
         }
         out.push(Item {
             key,
+            groups: p.groups.iter().flatten().map(|g| (*g).to_owned()).collect(),
             rect: p.rect,
             shape: p.shape,
             colour: p.colour.map(str::to_owned),

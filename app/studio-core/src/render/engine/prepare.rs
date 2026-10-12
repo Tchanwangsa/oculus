@@ -9,7 +9,9 @@ use crate::host::{CallCtx, seed, tsx_loc};
 use crate::layout::{LNode, LayoutError, Layouter};
 use crate::math::{MathEnv, expand};
 use crate::morph::{self, MorphError};
+use crate::overlay::{self, OverlayInk};
 use crate::project::WordCues;
+use crate::scene::Color;
 use crate::scene::{Node, NodeError, parse_tree, select};
 
 /// A laid-out tree, not yet painted; its text layouts go back to the pool
@@ -57,7 +59,31 @@ impl Engine {
                     .map_err(|e| self.morph_error(name, name, e))?
             }
         };
+        let mut tree = tree;
+        if let Err(e) = overlay::resolve(&mut tree, self.overlay_ink()) {
+            self.typeset.reclaim(tree);
+            return Err(StudioError::Component {
+                component: name.to_owned(),
+                message: e.message,
+                loc: self.loc(name, e.loc),
+            });
+        }
         Ok(Prepared { tree, logs })
+    }
+
+    /// The theme's text and accent colours, which overlays default to.
+    fn overlay_ink(&self) -> OverlayInk {
+        let accent = self
+            .theme
+            .section("color")
+            .and_then(|c| c.get("accent"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| Color::parse(s).ok())
+            .unwrap_or(self.theme.text_color);
+        OverlayInk {
+            text: self.theme.text_color,
+            accent,
+        }
     }
 
     fn lay_out(&mut self, name: &str, tree: Node) -> Result<LNode> {

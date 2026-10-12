@@ -238,8 +238,125 @@ declare const Path: Component<{
   trim?: [number, number];
   style?: Style;
 }>;
-/** Two layouts of one place, blended at `p` (0 to 1): FLIP-style layout animation. Exactly two element children; takes no key. */
-declare const Morph: Component<{ p: number; children: [StudioElement, StudioElement] }>;
+/** How a Morph (or Steps) spends its `p`: stagger, fades and each piece's easing. */
+interface MorphTiming {
+  /**
+   * 0 to 1, manim's lag_ratio: pieces start in reading order (A's leaves, then B's arrivals), each `lag` of a piece's
+   * run after the last. Default 0, all together. With lag, pass a linear `p` and an `ease`.
+   */
+  lag?: number;
+  /**
+   * `"overlap"` (default): unmatched pieces fade out over 0 to 0.6 of their run and in over 0.4 to 1, each riding
+   * beside its nearest matched neighbour, as TransformMatchingTex does. `"sequential"`: out over 0 to 0.4, in over
+   * 0.4 to 1, in place.
+   */
+  fade?: 'overlap' | 'sequential';
+  /** Each piece's own easing (sampled): a function, cubic-bezier points or a theme easing name. Default linear. */
+  ease?: Easing;
+}
+/**
+ * Two layouts of one place, blended at `p` (0 to 1; an overshooting easing may pass either end, and geometry follows
+ * while opacity and colour stop there): FLIP-style layout animation. Exactly two element children; takes no key.
+ */
+declare const Morph: Component<MorphTiming & { p: number; children: [StudioElement, StudioElement] }>;
+/**
+ * N states of one place, a derivation rewritten in place: a Morph between the pair the time picks. Before `at[0]` the
+ * first state shows; transition k runs from `at[k]` for `dur` (default `theme.motion.duration.base`), cut short by
+ * the next cue, so each cue is continuous. `ease` defaults to easeInOutCubic. A key in states 0 and 2 but not 1
+ * fades out over the first transition and back in, at its state-2 place, over the second. States may be render
+ * props, `(ctx) => element`.
+ */
+declare const Steps: Component<
+  MorphTiming & {
+    at: number[];
+    dur?: number;
+    children: (StudioElement | ((ctx: Ctx) => StudioElement))[];
+  }
+>;
+/**
+ * Writes every `<Math>` inside it on, manim's Write: each piece's outline is stroked on, then its fill fades in, the
+ * pieces of a group one after another in reading order. `at` is seconds (the whole formula) or `{ group: seconds }`
+ * naming `\k` groups, each cued on its own word; a piece in no listed group writes with the nearest listed group
+ * before it, else the first. Math only (for words, `\text{…}` inside a Math).
+ */
+declare const Write: Component<{
+  at?: number | Record<string, number>;
+  /** Each group's length; default `theme.motion.duration.slow`. */
+  dur?: number | Record<string, number>;
+  /** 0 to 1 within a group; default manim's `min(4 / (n + 1), 0.2)`. */
+  lag?: number;
+  /** Outline width in em. Default 0.025. */
+  stroke?: number;
+  children?: Children | ((ctx: Ctx) => StudioElement);
+}>;
+/**
+ * When an overlay draws on: `progress` 0 to 1, or from `at` for `dur` (default `theme.motion.duration.base`) eased
+ * by `ease` (default easeInOutCubic); with neither it is drawn.
+ */
+interface OverlayTiming {
+  at?: number;
+  dur?: number;
+  ease?: Easing;
+  progress?: number;
+  style?: Style;
+}
+/**
+ * A key or a key prefix: `"eq/lhs"` covers `eq/lhs`, `eq/lhs.1`, … and `eq/lhs/…`. Its box is the union of the
+ * nodes it covers after layout and after any morph, so an overlay follows its target while it moves (a fading term
+ * counts by its opacity, and an overlay on terms that have faded out fades too).
+ */
+type Target = string;
+/**
+ * KaTeX's brace along one side of a target, `label` (a string or an element) beyond it; grows from its centre, then
+ * the label fades in. Size and gaps default to the target's maths size.
+ */
+declare const Brace: Component<
+  OverlayTiming & {
+    target: Target;
+    /** Default `"below"`. */
+    side?: 'below' | 'above' | 'left' | 'right';
+    label?: string | StudioElement;
+    /** px between the target and the brace; default 0.12 em. */
+    gap?: number;
+    /** px per em of the brace (its thickness); default the target's. */
+    size?: number;
+    /** Default `theme.color.text`. */
+    color?: Color;
+  }
+>;
+/** A rounded rectangle round a target, drawn on clockwise from its top left. */
+declare const Surround: Component<
+  OverlayTiming & {
+    target: Target;
+    /** px; defaults 0.2 em, corners 0.12 em, stroke 0.045 em. */
+    pad?: number;
+    radius?: number;
+    width?: number;
+    /** Default `theme.color.accent`. */
+    color?: Color;
+  }
+>;
+/** A line under a target, drawn on from the left. */
+declare const Underline: Component<
+  OverlayTiming & {
+    target: Target;
+    /** px below the target; default 0.1 em. */
+    gap?: number;
+    width?: number;
+    /** Default `theme.color.accent`. */
+    color?: Color;
+  }
+>;
+/** The target's own terms pulse: scale to `scale` (default 1.2) about their joint centre and flash to `color` (default the accent), then back. */
+declare const Indicate: Component<{
+  target: Target;
+  scale?: number;
+  color?: Color;
+  /** One of `at` or `progress` is required. `dur` defaults to `theme.motion.duration.slow`. */
+  at?: number;
+  dur?: number;
+  progress?: number;
+}>;
 /**
  * `<Math tex="…">`: LaTeX typeset by KaTeX as one glyph per term. Its box is the formula's size and its
  * baseline the formula's, so it sits in a Row with `align: "baseline"`. `style` takes `fontSize` (the size of the
@@ -313,19 +430,34 @@ declare const Camera: Component<{
  * A stroke through `points` (frame px) drawn up to `progress` (0 to 1), with a head riding the drawn end along the
  * shaft's tangent there (it grows in over the first head length of shaft), so the arrow reads as being drawn.
  * Two absolute full-frame Paths: its parent must fill the frame.
+ *
+ * With `from` and `to` instead, each a Target or a point in its parent's px, it is an overlay: a keyed end starts
+ * `gap` (default 0.1 em) off its target's box on the line between the ends, and it follows the target as it moves.
  */
-declare const Arrow: Component<{
-  points: [number, number][];
-  /** 0 is straight segments; otherwise a smooth curve. Default 0. */
-  curve?: number;
-  /** Default 1. */
-  progress?: number;
-  /** Head size in px; 0 for none. Default 4.5 x the stroke width. */
-  head?: number;
-  /** Defaults: width 4, colour `theme.color.text`, round cap and join. */
-  stroke?: Partial<Stroke>;
-  style?: Style;
-}>;
+declare const Arrow: Component<
+  | {
+      points: [number, number][];
+      /** 0 is straight segments; otherwise a smooth curve. Default 0. */
+      curve?: number;
+      /** Default 1. */
+      progress?: number;
+      /** Head size in px; 0 for none. Default 4.5 x the stroke width. */
+      head?: number;
+      /** Defaults: width 4, colour `theme.color.text`, round cap and join. */
+      stroke?: Partial<Stroke>;
+      style?: Style;
+    }
+  | (OverlayTiming & {
+      from: Target | [number, number];
+      to: Target | [number, number];
+      /** Degrees the shaft turns through, an arc; 0 is straight. */
+      bend?: number;
+      head?: number;
+      gap?: number;
+      /** `width` and `color` only. */
+      stroke?: Partial<Stroke>;
+    })
+>;
 
 /** A string prop. */
 declare function str(): PropBuilder<string>;

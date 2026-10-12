@@ -22,6 +22,7 @@ mod layout;
 mod library;
 mod math;
 mod morph;
+mod overlay;
 mod paint;
 mod project;
 mod render;

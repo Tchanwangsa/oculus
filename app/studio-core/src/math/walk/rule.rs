@@ -55,7 +55,7 @@ pub fn rule<'a>(s: &'a DomSpan, cx: Ctx<'a>) -> Laid<'a> {
 pub fn piece<'a>(label: &str, rect: Rect, cx: Ctx<'a>) -> Piece<'a> {
     Piece {
         label: label.to_owned(),
-        group: cx.group,
+        groups: cx.groups,
         rect,
         shape: Shape::Rule,
         colour: cx.colour,

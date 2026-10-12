@@ -7,6 +7,7 @@
 use super::spec::{MotionSpec, TransitionSpec};
 use crate::easing::{Easing, NAMED};
 use crate::morph::MorphColor;
+use crate::scene::{Curve, FADES, Fade, Timing};
 use crate::suggest::did_you_mean;
 use crate::theme::Theme;
 use serde_json::Value;
@@ -86,9 +87,24 @@ pub struct Transition {
     pub dur_level: Level,
     /// How a `magic` transition blends colours.
     pub morph_color: MorphColor,
+    /// A `magic` transition's stagger and fades.
+    pub lag: f32,
+    pub fade: Fade,
 }
 
 impl Transition {
+    /// Linear progress at `t`, and the timing a magic move spends it with:
+    /// the easing applies per piece, so `lag` staggers eased pieces.
+    pub fn magic(&self, t: f64) -> (f32, Timing) {
+        let p = (t / self.dur).clamp(0.0, 1.0) as f32;
+        let timing = Timing {
+            lag: self.lag,
+            fade: self.fade,
+            ease: Curve::Easing(self.easing),
+        };
+        (p, timing)
+    }
+
     /// `p` at `t` seconds into the incoming scene.
     pub fn progress(&self, t: f64) -> f32 {
         self.easing
@@ -187,11 +203,24 @@ pub fn resolve(
             ));
         }
     };
+    let lag = match pick(&levels, |s| s.lag.as_ref()) {
+        None => 0.0,
+        Some((_, &l)) if (0.0..=1.0).contains(&l) => l as f32,
+        Some((l, v)) => {
+            return Err(fail(l, "lag", format!("{v} is not a number from 0 to 1")));
+        }
+    };
+    let fade = match pick(&levels, |s| s.fade.as_ref()) {
+        None => Fade::default(),
+        Some((l, f)) => keyword(f, FADES, "fade").map_err(|m| fail(l, "fade", m))?,
+    };
     Ok(Some(Transition {
         look,
         dur,
         easing,
         direction,
+        lag,
+        fade,
         auto_magic: auto && scene.is_none(),
         dur_level,
         morph_color: morph_color(scene.map(|s| (index, s)), video, theme)?,
