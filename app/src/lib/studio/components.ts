@@ -38,6 +38,8 @@ export interface ComponentInfo {
   examples: Record<string, Record<string, unknown>>;
   /** Why the component does not load. */
   problem: string | null;
+  /** A subject's file that replaces a global component: its "own version". */
+  shadows: boolean;
 }
 
 export interface ComponentText {
@@ -68,6 +70,9 @@ export interface ComponentFrameOptions {
   subject?: string | null;
   /** A theme name, resolved through the same levels. */
   theme: string;
+  /** A theme file's text to draw in instead of the saved `theme` (an
+   *  unsaved edit); `theme` then only names it in errors. */
+  themeText?: string | null;
   /** The props to draw; else `example`'s; else the first example's. */
   props?: Record<string, unknown>;
   example?: string;
@@ -86,6 +91,7 @@ export async function componentFrame(name: string, options: ComponentFrameOption
     name,
     subject: options.subject ?? null,
     theme: options.theme,
+    themeText: options.themeText ?? null,
     props: options.props ?? null,
     example: options.example ?? null,
     t: options.t,
@@ -140,4 +146,10 @@ export function restoreComponent(
     subject: subject ?? null,
     id,
   });
+}
+
+/** Removes the subject's own version of a component, so the subject uses the
+ *  global one again. Its text goes to the history first. */
+export function deleteComponent(name: string, subject: string): Promise<void> {
+  return invoke<void>("studio_component_delete", { name, subject });
 }

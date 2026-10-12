@@ -1,7 +1,9 @@
 //! One component drawn at a moment: the playground's stage.
 
+use std::path::Path;
+
 use serde_json::{Map, Value};
-use studio_core::{Library, SceneCall};
+use studio_core::{Library, SceneCall, Theme};
 
 use super::super::themes;
 use super::{engine, source};
@@ -16,6 +18,9 @@ pub struct FrameRequest {
     pub name: String,
     pub subject: Option<String>,
     pub theme: String,
+    /// A theme file's text to draw in instead of the saved `theme`: the
+    /// Themes page's unsaved draft. `theme` then only names it in messages.
+    pub theme_text: Option<String>,
     pub props: Option<Map<String, Value>>,
     pub example: Option<String>,
     pub t: f64,
@@ -32,6 +37,7 @@ pub fn frame_png(library: &Library, request: FrameRequest) -> Result<Vec<u8>, St
         name,
         subject,
         theme,
+        theme_text,
         props,
         example,
         t,
@@ -54,7 +60,10 @@ pub fn frame_png(library: &Library, request: FrameRequest) -> Result<Vec<u8>, St
     let (_, path) = source::find(library, subject, &name)?;
     let tsx = std::fs::read_to_string(&path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    let theme = themes::resolve(library, subject, &theme)?;
+    let theme = match theme_text {
+        Some(text) => draft_theme(&theme, &text)?,
+        None => themes::resolve(library, subject, &theme)?,
+    };
     let scale = f64::from(width) / f64::from(engine::WIDTH);
     let mut engine = engine::new(theme, scale)?;
     let info = engine
@@ -80,6 +89,12 @@ pub fn frame_png(library: &Library, request: FrameRequest) -> Result<Vec<u8>, St
         })
         .map_err(|e| e.to_string())?;
     frame.encode_png().map_err(|e| e.to_string())
+}
+
+/// A theme from unsaved text, checked as a write would check it.
+fn draft_theme(name: &str, text: &str) -> Result<Theme, String> {
+    themes::check_size(name, text)?;
+    Theme::parse(text, Path::new(&format!("themes/{name}.json"))).map_err(|e| e.to_string())
 }
 
 fn example_props(

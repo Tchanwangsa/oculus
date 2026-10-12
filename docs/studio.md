@@ -31,7 +31,7 @@ crops library PDF pages into slides (`slide`), and narrates.
 | Layout (taffy, parley) and paint (vello_cpu); Path trim and Text reveal | `app/studio-core/src/layout/`, `app/studio-core/src/paint/` (`path/`, `text/`) |
 | `<Math>`: KaTeX through math-core, the layout of its HTML tree, keys, the expansion into glyphs, `<Write>`, KaTeX's brace; the KaTeX fonts | `app/studio-core/src/math/` (`walk/` one file per construct, `write.rs`, `brace.rs`), `app/studio-core/fonts/katex/` |
 | Props schemas and their validation | `app/studio-core/src/schema/` |
-| Component and theme libraries: the starter set, seeding, the snapshot write path, promoting a video's own file | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots, `promote.rs`) |
+| Component and theme libraries: the starter set, seeding, the snapshot write path and removal, `library.json` (a library's default theme), promoting a video's own file | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots, `promote.rs`, `defaults.rs`) |
 | Videos in the data directory: `new`, `list`, slug resolution, slugs from titles, the app's scope | `app/src-tauri/src/studio/videos/` (`slug.rs`), `app/src-tauri/src/library/paths/studio.rs` (`studio_dir`, `agent_write_dirs`) |
 | Galleries: each example of a component as a still, and its contact sheet | `app/studio-core/src/gallery/` |
 | Themes and bundled fonts | `app/studio-core/themes/`, `app/studio-core/fonts/`, `app/studio-core/src/theme/`, `app/studio-core/src/fonts/` |
@@ -46,7 +46,7 @@ crops library PDF pages into slides (`slide`), and narrates.
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
-| The playground's commands: `studio_themes`, the component list, source, frame, validated write, history and restore | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
+| The playground's and Themes page's commands: the theme and component lists, source, frame, validated write, history, restore and removal, each library's default theme; the shared snapshot listing; a new video's default theme | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `commands/history.rs`, `app/src-tauri/src/studio/libraries/defaults.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
 | Slides: a region of a library PDF page as a video asset, the blocks to pick it by, edges moved off ink, the sidecar and its lint; the bundled sample crop | `app/src-tauri/src/studio/slides/` (`blocks.rs`, `geometry.rs`, `snap.rs`, `raster.rs`, `sidecar.rs`, `preview.rs`), `app/studio-core/library/components/Slide.tsx`, `app/studio-core/src/images/`, `app/studio-core/library/assets/` |
 | `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `lint.rs`, `brief.rs`, `beats.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `pronounce.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`, `slide.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
@@ -189,12 +189,13 @@ one folder besides `agents/` and the database an agent thread may write
 
 - `oculus studio new <slug> [--subject CODE] [--title T] [--portrait]`
   (`studio::videos::create_in`) makes `videos/<slug>/`: `video.json` at
-  1920x1080 (1080x1920 with `--portrait`), 30 fps, theme `default`, the
+  1920x1080 (1080x1920 with `--portrait`), 30 fps, the default theme, the
   subject, and one silent `TitleCard` scene (`id` `title`, 4 s) whose title
   is `--title` or the slug with spaces; an empty `script.md`; and empty
-  `components/` and `assets/`. A subject's library holding
-  `themes/default.json` gives its videos its own look through the cascade,
-  with no setting. A slug is lowercase letters, digits and `-`, at most 64
+  `components/` and `assets/`. The default theme is the subject library's
+  `library.json` `defaultTheme`, else the global library's, else `default`
+  (see "Libraries cascade"), and video.json names it, so a later change of
+  default leaves the video as it was. A slug is lowercase letters, digits and `-`, at most 64
   characters; one that exists is refused and left alone. It prints the
   folder (`--json`: `{dir, slug}`).
 - `oculus studio list [--subject CODE]` prints each video's slug, subject,
@@ -388,6 +389,22 @@ snapshot already there); nothing prunes `.history`. `oculus studio
 components list <DIR>` prints each name with the level it resolves from, and
 `components show <DIR> <Name>` its source.
 
+**A library's default theme** is `library.json` at its root
+(`<app data>/studio/library/library.json`, `<app data>/studio/subjects/<CODE>/library.json`),
+`{"defaultTheme": "<name>"}` and nothing else (`studio_core::LibrarySettings`,
+`deny_unknown_fields`); a library without the file has no default. A new
+video that names no theme (`oculus studio new`, the app's New video with no
+theme picked) takes its subject library's default, else the global
+library's, else the bundled `default`
+(`studio::libraries::default_theme`), and video.json gets that name. A
+default naming a theme its cascade no longer has is passed over; a
+`library.json` that does not parse stops the video being made, naming the
+file. Agents may edit the file by hand; the Themes page sets it with
+`studio_theme_set_default`. A theme's name is its file stem, lowercase
+letters, digits and `-`, at most 64 characters
+(`studio_core::valid_theme_name`), the one rule for a scaffold's theme, a
+library write, a promote and a lookup.
+
 A library grows through a video: a component is written and tuned in the
 video's own `components/`, where it wins the cascade, checked with
 `gallery` and `strip`, then copied into a library with `oculus studio
@@ -397,8 +414,8 @@ has (level `project`) can be promoted; `--to subject` writes to the subject
 in video.json and fails when there is none. `oculus studio themes promote
 <DIR> <FILE> --to global|subject` does the same for a theme file inside the
 video (a `.json` path such as `themes/chalk.json`, checked to load as a
-theme) as `themes/<stem>.json`, the stem being lowercase letters, digits
-and `-`, so any video can name it. Both go through the snapshotting write,
+theme) as `themes/<stem>.json`, the stem following the theme name rule, so
+any video can name it. Both go through the snapshotting write,
 write nothing when the library already has the same text, and leave the
 video's copy in place.
 
@@ -1825,7 +1842,7 @@ on disk now; nothing is cached but thumbnails.
 | Command | Does |
 | --- | --- |
 | `studio_videos(subject?)` | `videos::list_in` plus `title` and `threadId`, newest change first (a video whose video.json does not load sorts last and carries `problem`) |
-| `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to `default`, which a subject's `themes/default.json` replaces through the cascade; `voice` is video.json's `voice` block (`{engine?, model?, voice?, speed?}`, `engine` being `kokoro` or `server`). The scaffold is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
+| `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to the subject's default theme (see "Libraries cascade"); `voice` is video.json's `voice` block (`{engine?, model?, voice?, speed?}`, `engine` being `kokoro` or `server`). The scaffold is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
 | `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `scenes` and `renders` |
 | `studio_frame(slug, at, width)` | a PNG `width` px wide (1 to 4096), the layout of the full-size frame, as bytes through `tauri::ipc::Response` |
 | `studio_thumbnail(slug)` | the video's cached thumbnail PNG |
@@ -1889,8 +1906,9 @@ studio new`. See
 ### The playground's commands
 
 `studio::commands::components` and `studio::commands::themes` serve the
-Components page and the style chip (`app/src/lib/studio/components.ts` and
-`themes.ts` are the typed wrappers; JSON is camelCase). They read and write
+Components and Themes pages and the style chip
+(`app/src/lib/studio/components.ts` and `themes.ts` are the typed wrappers;
+JSON is camelCase). They read and write
 only the two libraries, `<data>/studio/library/` and
 `<data>/studio/subjects/<CODE>/`: a command takes a component name, a level
 (`subject` or `global`) and a subject code, never a path
@@ -1902,13 +1920,20 @@ there. Nothing is cached.
 
 | Command | Does |
 | --- | --- |
-| `studio_themes(subject?)` | one row per theme name: `{name, level, swatch, tokens, problem}` |
-| `studio_components(subject?)` | one row per component name: `{name, level, kind, props, examples, problem}` |
+| `studio_themes(subject?)` | one row per theme name: `{name, level, swatch, tokens, problem, shadows}` |
+| `studio_theme_source(name, subject?)` | `{level, text}` from the level that wins; a bundled theme's text as compiled in |
+| `studio_theme_write(name, level, subject?, text)` | writes once the text parses as a theme; returns `{level, text}` |
+| `studio_theme_delete(name, level, subject?)` | removes a library theme, snapshotting it first |
+| `studio_theme_history(name, level, subject?)`, `studio_theme_restore(name, level, subject?, id)` | as for components, over `<name>.<unix-ms>.json` |
+| `studio_theme_defaults(subject?)` | `{global, subject, effective}`: each library's `defaultTheme` as written, and the theme a new video there takes |
+| `studio_theme_set_default(level, subject?, name?)` | writes (or with no name clears) that library's `defaultTheme`; returns the defaults |
+| `studio_components(subject?)` | one row per component name: `{name, level, kind, props, examples, problem, shadows}` |
 | `studio_component_source(name, subject?)` | `{level, text}` from the nearest level that has it |
-| `studio_component_frame(name, subject?, theme, props?, example?, t, width, duration?)` | a PNG `width` px wide (1 to 4096), as bytes through `tauri::ipc::Response` |
+| `studio_component_frame(name, subject?, theme, themeText?, props?, example?, t, width, duration?)` | a PNG `width` px wide (1 to 4096), as bytes through `tauri::ipc::Response` |
 | `studio_component_write(name, level, subject?, text)` | writes once the text loads; returns `{level, text}` |
 | `studio_component_history(name, level, subject?)` | `[{id, savedAt}]`, newest first |
 | `studio_component_restore(name, level, subject?, id)` | writes snapshot `id` back; returns `{level, text}` |
+| `studio_component_delete(name, subject)` | removes the subject's own version, snapshotting it first |
 
 - **Themes** are the bundled names, `themes/*.json` in the global library and
   in the subject's, resolved as a video resolves its theme: the subject's
@@ -1917,7 +1942,9 @@ there. Nothing is cached.
   `tokens` is the parsed theme file and `swatch` up to four CSS colours from
   its `color` tokens in the order `bg`, `text`, `accent`, `surface`. A file
   that does not parse is a row with `problem` (the `Theme::parse` message),
-  no `tokens` and an empty `swatch`, not a failed call.
+  no `tokens` and an empty `swatch`, not a failed call. `shadows` is the
+  level a library file replaces under the same name (a subject's own
+  version of a global theme is `global`), else null.
 - **Components** are read through the cascade without a video: the subject's
   `components/` over the global one, `level` being the one that won. Every
   one is loaded in a single engine for its `props` (the builders' own JSON
@@ -1928,7 +1955,8 @@ there. Nothing is cached.
   `PropSpec` serialises to that JSON in studio-core. `kind` is `shell` when
   the name ends in `Shell` (a library's own; no starter is one), else
   `component`: nothing in a component's code
-  says which, so the name does.
+  says which, so the name does. `shadows` is true for a subject's file that
+  replaces a global component, the subject's own version.
 - **A frame** draws the component alone in a 1920x1080 frame scaled to
   `width`, in the theme `theme` names (resolved through the same levels).
   `t` is seconds into the component and must be in `[0, duration)`;
@@ -1940,7 +1968,9 @@ there. Nothing is cached.
   narration, so `word()` finds no cues. It takes a render slot
   (`videos/slot.rs`) and builds one `Engine` for the call, since QuickJS is
   not Send: a 480 px frame took about 3 ms and a 1920 px one about 6 ms
-  (a starter component, test build).
+  (a starter component, test build). With `themeText` the theme is that
+  text instead (at most 256 KB), parsed as a write would parse it, so the
+  Themes page draws an unsaved edit; `theme` then only names it in errors.
 - **A write** loads the text as the component first (a fresh engine; at most
   512 KB), so a text with a syntax error, no default export or a bad
   `props` is refused with the engine's message and the file, its history and
@@ -1954,6 +1984,16 @@ there. Nothing is cached.
   the same number. `restore` takes an id from that list, loads the old text
   (it must still load) and writes it through the same path, so the text it
   replaces is snapshotted as the newest entry and an Undo can be undone.
+  `.history` is shared by both kinds of file; a component's snapshots are
+  `.tsx` and a theme's `.json`, so one name never sees the other's.
+- **A theme write** checks the text with `Theme::parse` (at most 256 KB) and
+  goes through the same snapshotting write. A bundled theme's name
+  (`default`) is refused: a library file of that name would replace it for
+  every video, so the page saves a copy under a new name instead.
+- **Removing** (`studio_theme_delete` at either level,
+  `studio_component_delete` only at the subject level, the global library
+  being what a subject falls back to) copies the file to `.history` first
+  (`studio_core::remove_library_file`), so restore brings it back.
 
 ## Slides crop a library PDF page
 

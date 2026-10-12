@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { WarningCircle } from "@phosphor-icons/react";
 
+import { LevelMark } from "@/components/studio/LevelMark";
 import { SIDE_NAV_ROW, SIDE_NAV_ROW_ACTIVE, SIDE_NAV_ROW_IDLE } from "@/components/ui/layout/SideNav";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ComponentInfo } from "@/lib/studio/components";
@@ -8,18 +9,22 @@ import { componentHref } from "@/lib/studio/routes";
 import { cn } from "@/lib/utils";
 
 /**
- * The components, shells (which lay out named areas) then the rest. A row
- * says when the subject has its own version and when the component does not
- * load.
+ * The components, shells (which lay out named areas) then the rest. In a
+ * subject's library a row says whether it is the subject's own version of a
+ * global component, the subject's alone, or the global one inherited; any
+ * row says when the component does not load.
  */
 export function ComponentList({
   components,
   loaded,
   error,
+  subject,
 }: {
   components: ComponentInfo[];
   loaded: boolean;
   error: string | null;
+  /** The library's course code; null is the global library. */
+  subject: string | null;
 }) {
   const shells = components.filter((c) => c.kind === "shell");
   const rest = components.filter((c) => c.kind !== "shell");
@@ -39,15 +44,15 @@ export function ComponentList({
         <p className="px-2 py-1.5 text-[12px] text-muted-foreground">No components in this library.</p>
       ) : (
         <>
-          <Group label="Shells" items={shells} />
-          <Group label="Components" items={rest} />
+          <Group label="Shells" items={shells} inSubject={subject != null} />
+          <Group label="Components" items={rest} inSubject={subject != null} />
         </>
       )}
     </nav>
   );
 }
 
-function Group({ label, items }: { label: string; items: ComponentInfo[] }) {
+function Group({ label, items, inSubject }: { label: string; items: ComponentInfo[]; inSubject: boolean }) {
   if (items.length === 0) return null;
   return (
     <div className="mb-3">
@@ -64,11 +69,7 @@ function Group({ label, items }: { label: string; items: ComponentInfo[] }) {
             {c.problem != null && (
               <WarningCircle size={13} weight="fill" aria-label="Does not load" className="shrink-0 text-destructive" />
             )}
-            {c.level === "subject" && (
-              <span className="shrink-0 rounded-full bg-brand-muted px-1.5 py-px text-[10px] font-medium text-brand">
-                Own version
-              </span>
-            )}
+            <LevelMark level={c.level} shadows={c.shadows} inSubject={inSubject} />
           </NavLink>
         ))}
       </div>

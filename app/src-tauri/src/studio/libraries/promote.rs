@@ -5,7 +5,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use studio_core::{write_library, Library, Project, Theme};
+use studio_core::{valid_theme_name, write_library, Library, Project, Theme};
 
 /// Which library a promote writes to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,13 +104,6 @@ pub fn promote_theme(
         &format!("themes/{stem}.json"),
         &text,
     )
-}
-
-fn valid_theme_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Writes `text` at `rel` in the target library, unless it is there already.

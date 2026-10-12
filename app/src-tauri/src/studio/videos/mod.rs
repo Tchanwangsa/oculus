@@ -14,7 +14,7 @@ use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
 use serde_json::json;
-use studio_core::{valid_subject, Video};
+use studio_core::{valid_subject, valid_theme_name, Video};
 
 use crate::library::paths::{data_dir, studio_dir};
 
@@ -117,8 +117,9 @@ pub struct NewVideo {
     pub title: Option<String>,
     /// 1080x1920 instead of 1920x1080.
     pub portrait: bool,
-    /// A bundled or library theme name; `default` when unset, which a
-    /// subject's own `themes/default.json` replaces through the cascade.
+    /// A bundled or library theme name, never a `.json` path. Callers fill
+    /// it from `libraries::default_theme` when the user named none; `default`
+    /// when still unset.
     pub theme: Option<String>,
     /// Written as video.json's `voice` block when any field is set.
     pub voice: Option<studio_core::Voice>,
@@ -140,9 +141,9 @@ pub fn create_in(videos: &Path, new: &NewVideo) -> Result<PathBuf, String> {
             "subject `{s}` must be a course code's folder name: letters, digits, `-` and `_`"
         ));
     }
-    if let Some(t) = new.theme.as_deref().filter(|t| !valid_theme(t)) {
+    if let Some(t) = new.theme.as_deref().filter(|t| !valid_theme_name(t)) {
         return Err(format!(
-            "theme `{t}` must be a theme's name: letters, digits, `-` and `_`"
+            "theme `{t}` must be a theme's name: lowercase letters, digits and `-`"
         ));
     }
     let speed = new.voice.as_ref().and_then(|v| v.speed);
@@ -206,16 +207,6 @@ fn video_json(new: &NewVideo) -> String {
     }
     lines.push(format!("  \"scenes\": [\n    {scene}\n  ]"));
     format!("{{\n{}\n}}\n", lines.join("\n"))
-}
-
-/// A theme name, not a `.json` path: a scaffold names a theme the cascade
-/// finds.
-fn valid_theme(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 64
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// The `voice` block of the fields that are set, or `None` when none is.
