@@ -107,7 +107,8 @@ sections; the tile opens a popover player rather than navigating ([music.md](./m
 vertical axis, and the order is kept in `localStorage` (`railOrderStore`); a
 section the stored order lacks is appended. A `RailItem` is a button with `data-tab-href` that goes
 through `navigateActive`, since the sidebar sits outside every pane's router,
-and it lights on its path or anything under it. Background jobs show on their
+and it lights on its path or anything under it. Selected rail icons use
+Phosphor's filled weight; idle icons use the regular outline. Background jobs show on their
 item's corner: a spinner on Chat while an agent turn runs, on Sync while
 indexing, a brand dot on Subjects while any subject has never-opened files
 (`newFilesStore`), and a brand dot on Studio while any video renders
