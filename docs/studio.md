@@ -40,10 +40,10 @@ crops library PDF pages into slides (`slide`), and narrates.
 | Fixture videos and golden frames | `app/studio-core/tests/fixtures/`, `app/studio-core/tests/golden/` |
 | Narration audio decode and word timing (the aligner, its model download) | `app/src-tauri/src/studio/` (`audio/`, `timing/`), `app/src-tauri/src/runtime/onnx/` |
 | Narrating a video: the `Speaker` trait, the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
-| The Kokoro engine: its pack, reader, chunking and synthesis | `app/src-tauri/src/studio/tts/kokoro/` |
+| The Kokoro engine: its model pack, the 20 voices (`voices/`), reader, chunking and synthesis | `app/src-tauri/src/studio/tts/kokoro/` |
 | Text to Kokoro phonemes (the G2P), the lexicon, the guesser and its pack; the lint of a video's narration that needs them | `app/src-tauri/src/studio/voice/g2p/` (`guess/`, `lexicon.rs`), `app/src-tauri/src/studio/voice/lint/` |
 | The pronunciation review: suggestions stored one file each, the lexicon writer, finding a word in a video's narration; its Tauri commands and wrappers | `app/src-tauri/src/studio/voice/review/` (`key.rs`, `lexicon.rs`, `locate.rs`), `app/src-tauri/src/studio/commands/pronunciations.rs`, `app/src/lib/studio/pronunciations.ts` |
-| Settings -> Studio (Narration, Pronunciation, Word timing): the `voice` row and its engine, the server's model list, Kokoro's packs and sample, the pronunciation review, the aligner download; its Tauri commands | `app/src/pages/settings/studio/`, `app/src/components/settings/voice/` (`pronunciations/`), `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
+| Settings -> Studio (Narration, Pronunciation, Word timing): the `voice` row and its engine, the server's model list, Kokoro's packs, voices and sample, the pronunciation review, the aligner download; its Tauri commands | `app/src/pages/settings/studio/`, `app/src/components/settings/voice/` (`pronunciations/`, `voices/`), `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `kokoroVoices.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `voice_files.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: the export presets, ffmpeg's toolkit and the encoder choice, plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, the `.vtt` beside each narrated render, each preset's status, one render per folder | `app/src-tauri/src/studio/render/` (`preset.rs`, `toolkit.rs`, `settings.rs`, `export.rs`, `status.rs`), `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, `studio_exports`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
@@ -700,7 +700,7 @@ manifest. Scenes run one at a time, in video order.
   global library's lexicon only. `oculus studio g2p "<text>"` shows how
   Kokoro reads text without synthesising. `oculus studio voices` and
   `oculus studio aligner status|download|delete` manage the downloaded
-  models.
+  models and voices.
 - **Measured** on the server engine (mlx-audio Kokoro, `af_heart`,
   M-series Mac, debug build): three scenes of 4 to 8 s narrated in 1.8 s
   with a 0.67 GB peak; a re-run after one paragraph edit took 0.5 s.
@@ -712,24 +712,37 @@ manifest. Scenes run one at a time, in video order.
 
 The `kokoro` engine (`app/src-tauri/src/studio/tts/kokoro/`) runs
 Kokoro-82M on the ONNX Runtime the aligner uses, with no server and no
-side process. It needs two packs, downloaded together on request (Settings
--> Voice, or `oculus studio voices download`; one download at a time, and a
-cancel between the packs stops the second) to `<app data>/models/voice/`,
-checked against their
-pinned sizes and sha256 before they get their names, and never bundled:
+side process. It needs two packs and a voice, downloaded on request to
+`<app data>/models/voice/`, checked against their pinned sizes and sha256
+before they get their names, and never bundled. The two packs download
+together (Settings -> Studio -> Narration, or `oculus studio voices
+download`; one download at a time, and a cancel between the packs stops
+the second); each voice downloads on its own:
 
 | Pack | Files | Size |
 | --- | --- | --- |
-| `voice-kokoro` | `kokoro-v1.0-int8.onnx` (onnx-community/Kokoro-82M-v1.0-ONNX's `model_quantized.onnx`, Apache-2.0) and the voices `af_heart.bin` and `am_michael.bin`, at commit `1939ad2a` | 93 MB |
+| `voice-kokoro` | `kokoro-v1.0-int8.onnx` (onnx-community/Kokoro-82M-v1.0-ONNX's `model_quantized.onnx`, Apache-2.0), at commit `1939ad2a` | 92 MB |
 | `g2p-en-us` | misaki's `us_gold.json` and `us_silver.json` (Apache-2.0, commit `e820629b`), and the guesser's `g2p-encoder.onnx`, `g2p-decoder.onnx` and `g2p-config.json` (PeterReid/graphemes_to_phonemes_en_us, PR #1 at `9470bafd`) | 9 MB |
+| `voice-<id>`, one per voice | `<id>.bin` from the model's repository and commit, 522,240 bytes (510 rows of 256 f32s) | 510 KB |
 
-The voices are US English, as the dictionary and the guesser are. Another
-voice is one more `<id>.bin` in the folder at a voice file's size (510
-rows of 256 f32s); `oculus studio voices` lists it. The model is int8:
-fp16 and q4f16 exports come out silent with no error.
+The model is int8: fp16 and q4f16 exports come out silent with no error.
 
-- **One speaker per run.** `KokoroSpeaker::ready` checks both packs and
-  the voice's file. The reader (the dictionary, the video's lexicon and
+- **The voices** (`tts/kokoro/voices/`) are the 20 US English ones, as the
+  dictionary and the guesser are: `af_` Alloy, Aoede, Bella, Heart,
+  Jessica, Kore, Nicole, Nova, River, Sarah, Sky and `am_` Adam, Echo,
+  Eric, Fenrir, Liam, Michael, Onyx, Puck, Santa. `catalogue.rs` holds each
+  one's id, name, accent, gender, Kokoro's overall grade (the "Overall
+  Grade" column of hexgrad/Kokoro-82M's VOICES.md, which rates its training
+  data's quality and quantity, not how it sounds), URL, size and sha256.
+  A voice is its own one-file pack, so it downloads, cancels and deletes
+  alone and two can download at once. `af_heart` and `am_michael` are the
+  starters, the two a bare `oculus studio voices download` fetches. A voice
+  counts as downloaded when `<id>.bin` is in the folder at 522,240 bytes,
+  so a voice an earlier version downloaded needs nothing again. Any other
+  `<id>.bin` at that size, put there by hand, narrates with `--voice` but
+  is not listed.
+- **One speaker per run.** `KokoroSpeaker::ready` checks the model, the
+  G2P pack and the chosen voice's file, and no other voice. The reader (the dictionary, the video's lexicon and
   the guesser; `reader.rs`) loads on the first key and the model session
   on the first clip; both are dropped with the speaker when the run ends,
   never held idle. No timeouts on either.
@@ -901,17 +914,31 @@ free, and the only sample is Kokoro's, made on this Mac.
   then Speed (a slider, 0.5 to 2.0 in 0.05 steps), which both share.
   Switching engine keeps the other's fields stored; Voice is one field for
   both.
-  - **Kokoro**: the packs' row, "Kokoro voice packs", with each pack's size
-    (Voice model 93 MB, Pronunciation 9 MB) and one Download for both, then
-    a percentage, a progress bar and Cancel, or Delete behind a
-    confirmation, as Word timing's row has; a Voice select listing
-    `kokoro::voices` by name ("Heart · American, female" for `af_heart`):
-    the pack's two, then any other voice file in the folder (a voice
-    stored for the server that is not one stays in the select, flagged);
-    and **Sample**, which plays a fixed sentence in the chosen voice at the
-    slider's speed. It is disabled until both packs and a voice are there,
-    shows "Making…" while the clip is made (a few seconds: the model loads
-    each time) and Stop while it plays; the credit line follows.
+  - **Kokoro**: the packs' row, "Model and pronunciation pack", with each
+    pack's size (Model 92 MB, Pronunciation 9 MB) and one "Download model
+    and pronunciation pack" for both, then a percentage, a progress bar and
+    Cancel, or Delete behind a confirmation, as Word timing's row has;
+    deleting it leaves the voices. Beneath it the **Voices** table
+    (`voices/`, in `SyncHistoryTable`'s grammar): a row for each of the 20
+    voices in catalogue order, with the columns Voice (its name, marked "In
+    use" when it is the `voice` row's), Accent (American, female), Grade
+    (Kokoro's, A to F), Size (510 KB) and Status (Downloaded, Not
+    downloaded, or the percentage with a progress bar under the row), then
+    **Sample** and Download (Cancel while it downloads, Delete once it is
+    on disk). A voice deletes at once, except the one in use, which asks
+    first. The header counts "N of 20 downloaded" and has **Download all**,
+    which downloads the missing voices one after another (Cancel stops at
+    the voice in flight; a failure stops the rest and shows on its row).
+    Sample plays a fixed sentence in that voice at the slider's speed, one
+    clip at a time across the table; it is disabled until the model and
+    pronunciation pack and that voice are on disk, shows "Making…" while
+    the clip is made (a few seconds: the model loads each time) and Stop
+    while it plays. Download and Delete work before the packs are there. Then a
+    Voice select listing only the downloaded voices ("Heart · American,
+    female"); a stored voice that is not downloaded (deleted since, or set
+    for the server) stays in it, flagged under the field. With none
+    downloaded the hint suggests the starters, Heart and Michael. The credit
+    line follows.
   - **TTS server**: Server URL, Model and Voice (typed: the OpenAI API
     cannot list voices), and the note that API keys are not supported. "List
     models" calls `studio_voice_models` with the URL as typed: `GET
@@ -952,20 +979,27 @@ free, and the only sample is Kokoro's, made on this Mac.
   percentage, a progress bar and Cancel) or Delete behind a confirmation,
   and the credit line.
 
-Both downloads run the same way (`commands/progress.rs`;
-`usePackDownload` and `PackDownloadRow` on the page). The status commands
-read the disk alone: `studio_aligner_status` gives `{ status: missing |
-downloading | present, bytes }`, and `studio_voice_packs_status` gives the
-same for both packs together (present only when both are) plus `packs: [{
-id, status, bytes }]` and `voices: [{ id, downloaded }]`. The download
-commands (`studio_aligner_download`, `studio_voice_packs_download`) resolve
-when the files are on disk, reject `cancelled` on the matching cancel
-command, and emit `studio-aligner-progress` or `studio-voice-progress` `{
-phase: downloading | complete | cancelled | error, received, total, error?
-}` about every 150 ms; Kokoro's counts bytes over both packs. The delete
-commands stop a download and return the bytes freed; Kokoro's leaves any
-other voice file. A download started on an earlier visit shows at 0 %
-until its next event.
+All three downloads run the same way (`commands/progress.rs`;
+`usePackDownload` and `PackDownloadRow` on the page, `useKokoroVoices` for
+the voices). The status commands read the disk alone:
+`studio_aligner_status` gives `{ status: missing | downloading | present,
+bytes }`, and `studio_voice_packs_status` gives the same for the model and
+pronunciation pack together (present only when both are) plus `packs: [{
+id, status, bytes }]`. `studio_voices_status` (`commands/voice_files.rs`)
+gives the 20 voices in catalogue order, `[{ id, name, accent, gender,
+grade, bytes, status }]`. The download commands (`studio_aligner_download`,
+`studio_voice_packs_download`, `studio_voice_download(id)`) resolve when
+the files are on disk, reject `cancelled` on the matching cancel command
+(`studio_aligner_cancel`, `studio_voice_packs_cancel`,
+`studio_voice_cancel(id)`), and emit `studio-aligner-progress`,
+`studio-voice-progress` or `studio-voice-file-progress` `{ id?, phase:
+downloading | complete | cancelled | error, received, total, error? }`
+about every 150 ms; the voice event carries the voice's `id`, and the
+packs' counts bytes over both. The delete commands stop a download and
+return the bytes freed; the packs' leaves every voice, and
+`studio_voice_delete(id)` leaves everything else. An id outside the
+catalogue is refused by name. A download started on an earlier visit shows
+at 0 % until its next event.
 
 `studio_voice_sample(voice, speed, text?)` (`commands/kokoro.rs`) checks the
 voice id and speed as narrate does, makes a `KokoroSpeaker` reading the
@@ -2254,11 +2288,17 @@ the `Slide` starter animates it in. Rendering never opens a PDF.
   readings"); `oculus studio aligner` manages the aligner model. See
   "Narration is made by `oculus studio narrate`".
 - `oculus studio voices` lists each Kokoro pack's status and size and each
-  voice, downloaded or not, marking the one Settings -> Studio -> Narration names;
-  `voices download` fetches both packs with the aligner's progress lines,
-  `voices delete` removes them. `--json` gives `{ dir, packs: [{ id,
-  status, bytes }], voices: [{ id, downloaded, chosen }] }`, `{ status,
-  dir, seconds }` and `{ deleted_bytes }`.
+  of the 20 voices with its accent, gender, grade and status, marking the
+  one Settings -> Studio -> Narration names. `voices download` with no
+  argument fetches the model, the pronunciation pack and the starter
+  voices; `voices download ID...` or `--all` fetches only those voices; each
+  prints progress lines about every two seconds, one stream per download.
+  `voices delete` removes the model and pronunciation pack, and
+  `voices delete ID...` or `--all` those voices. An id outside the
+  catalogue fails, naming it. `--json` gives `{ dir, packs: [{ id, status,
+  bytes }], voices: [{ id, name, accent, gender, grade, bytes, status,
+  chosen }] }`, `{ dir, downloaded: [ids], seconds }` and `{ deleted_bytes
+  }`.
 - `oculus studio agents [--agent A]` prints, for each agent or one, the
   model and effort its `studio-research` and `studio-scene` subagents run
   on and the call that starts one (`--json`: `[{agent, roles: [{role, job,

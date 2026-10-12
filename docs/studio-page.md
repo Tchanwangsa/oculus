@@ -54,10 +54,11 @@ Chat's "next thread" scope) and the style chip. Sending runs
 `useNewVideo`:
 
 1. Read what narration needs (`readSetupProblems`: the saved voice settings,
-   Kokoro's pack status and the aligner's status, all local and free: nothing
-   synthesises or downloads) and check it with `setupProblems`. A video needs
-   a configured voice (an engine and a voice; for the server engine also a URL
-   and model), Kokoro's packs when Kokoro is the engine, and the word-timing
+   Kokoro's pack and voice status and the aligner's status, all local and
+   free: nothing synthesises or downloads) and check it with `setupProblems`. A
+   video needs a configured voice (an engine and a voice; for the server
+   engine also a URL and model), and when Kokoro is the engine its model and
+   pronunciation pack and the chosen voice downloaded, and the word-timing
    model installed (a download still running counts as missing). With any
    missing it stops here: no folder is made, and each missing piece shows
    under the box with an "Open settings" link to the page that fixes it

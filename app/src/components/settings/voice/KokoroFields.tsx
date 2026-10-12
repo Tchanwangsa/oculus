@@ -1,45 +1,47 @@
 import { modelSize } from "@/components/settings/transcription/LocalWhisper";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { kokoroVoiceName, type VoicePacksStatus } from "@/lib/studio/voicePacks";
+import { kokoroVoiceLabel, STARTER_VOICES } from "@/lib/studio/kokoroVoices";
+import type { VoicePacksStatus } from "@/lib/studio/voicePacks";
 import type { VoiceSettings } from "@/lib/studio/voice";
 import { PackDownloadRow, packState } from "./PackDownloadRow";
 import { SettingRow } from "./SettingRow";
 import type { PackDownload } from "./usePackDownload";
 import type { SaveVoice, VoiceErrors } from "./NarrationVoiceSection";
+import { KokoroVoicesTable } from "./voices/KokoroVoicesTable";
+import type { KokoroVoices } from "./voices/useKokoroVoices";
 
 const PACK_NAMES: Record<VoicePacksStatus["packs"][number]["id"], string> = {
-  "voice-kokoro": "Voice model",
+  "voice-kokoro": "Model",
   "g2p-en-us": "Pronunciation",
 };
 
-/** `Heart · American, female`, or the bare id. */
-function voiceLabel(id: string): string {
-  const { name, detail } = kokoroVoiceName(id);
-  return detail ? `${name} · ${detail}` : name;
-}
-
 /**
- * The Kokoro engine's fields: its two packs as one download (the model and
- * voices, and the G2P that reads text to phonemes), and the voice, from the
- * pack's and any other voice file in the folder.
+ * The Kokoro engine's fields: the model and the pronunciation pack that
+ * reads text to phonemes as one download, the voices (each its own small
+ * download, with a sample), and the voice narration uses, chosen from the
+ * ones downloaded.
  */
-export function KokoroFields({ settings, errors, save, packs }: {
+export function KokoroFields({ settings, errors, save, packs, files, speed }: {
   settings: VoiceSettings;
   errors: VoiceErrors;
   save: SaveVoice;
   packs: PackDownload<VoicePacksStatus>;
+  files: KokoroVoices;
+  speed: number;
 }) {
   const { status, download } = packs;
-  const voices = status?.voices ?? [];
-  // A voice set for the server, or a file since removed, stays in the list
-  // so the select shows what is stored.
+  const downloaded = files.voices?.filter((v) => v.status === "present") ?? [];
+  // A voice deleted since it was chosen, or one set for the server, stays in
+  // the list so the select shows what is stored.
   const stored = settings.voice;
-  const unknown = stored !== null && status !== null && !voices.some((v) => v.id === stored);
+  const unlisted = stored !== null && files.voices !== null && !downloaded.some((v) => v.id === stored);
+  const known = files.voices?.find((v) => v.id === stored);
+  const starters = (files.voices ?? []).filter((v) => STARTER_VOICES.includes(v.id)).map((v) => v.name);
 
   return (
     <>
       <PackDownloadRow
-        name="Kokoro voice packs"
+        name="Model and pronunciation pack"
         detail={
           status ? (
             <>
@@ -48,39 +50,55 @@ export function KokoroFields({ settings, errors, save, packs }: {
               {packState(status.status, download !== null)}
             </>
           ) : (
-            " "
+            " "
           )
         }
         pack={packs}
-        missing="Kokoro can't narrate until both packs are downloaded."
-        deleteDescription="Kokoro can't narrate until they are downloaded again from here. Other voice files in the folder stay."
+        downloadLabel="Download model and pronunciation pack"
+        missing="Kokoro can't narrate until the model and pronunciation pack are downloaded."
+        deleteDescription="Kokoro can't narrate until they are downloaded again from here. Voices stay."
+      />
+
+      <KokoroVoicesTable
+        files={files}
+        chosen={stored}
+        speed={speed}
+        canSample={status?.status === "present"}
       />
 
       <SettingRow
         label="Voice"
-        hint="Kokoro's US English voices."
+        hint={
+          files.voices && downloaded.length === 0
+            ? `Download a voice above first: ${starters.join(" and ")} are the suggested starters.`
+            : "One of the voices you have downloaded."
+        }
         error={
           errors.voice ??
-          (unknown ? `${stored} is not a Kokoro voice in the voice folder: choose one of these.` : null)
+          (unlisted && stored
+            ? known
+              ? `${known.name} is not downloaded: download it above or choose one of these.`
+              : `${stored} is not one of Kokoro's voices: choose one of these.`
+            : null)
         }
       >
         <Select
           value={stored ?? ""}
-          disabled={status === null}
+          disabled={files.voices === null}
           onValueChange={(voice) => void save("voice", { voice })}
         >
           <SelectTrigger aria-label="Kokoro voice" size="sm" className="h-7 w-80 text-xs">
             <SelectValue placeholder="Choose a voice" />
           </SelectTrigger>
           <SelectContent>
-            {unknown && stored ? (
+            {unlisted && stored ? (
               <SelectItem value={stored} className="text-xs">
-                {stored}
+                {known ? kokoroVoiceLabel(known) : stored}
               </SelectItem>
             ) : null}
-            {voices.map((v) => (
+            {downloaded.map((v) => (
               <SelectItem key={v.id} value={v.id} className="text-xs">
-                {voiceLabel(v.id)}
+                {kokoroVoiceLabel(v)}
               </SelectItem>
             ))}
           </SelectContent>
