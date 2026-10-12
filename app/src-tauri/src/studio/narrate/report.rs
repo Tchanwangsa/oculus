@@ -23,6 +23,8 @@ pub struct SceneReport {
     /// Seconds.
     pub duration: f64,
     pub words: usize,
+    /// `[pause]` silences spliced into the clip.
+    pub pauses: usize,
     /// Words below `studio_core::LOW_CONFIDENCE`: lint fails on each.
     pub low_confidence: Vec<ManifestWord>,
     /// Unscripted speech: lint fails on each.
@@ -44,6 +46,7 @@ impl SceneReport {
             audio: clip.audio.clone(),
             duration: clip.duration,
             words: clip.words.len(),
+            pauses: clip.pauses.len(),
             low_confidence: clip
                 .words
                 .iter()

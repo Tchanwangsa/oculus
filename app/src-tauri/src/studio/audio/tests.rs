@@ -140,3 +140,16 @@ fn silence_is_a_quiet_clip_or_a_second_of_exact_zeros() {
     paused.splice(8_000..8_000, vec![0.0; rate as usize - 1]);
     assert_eq!(silence(&paused, rate), None);
 }
+
+#[test]
+fn an_encoded_clip_decodes_to_its_16_bit_samples() {
+    let samples: Vec<f32> = [-32768i16, -1, 0, 1, 16_384, 32_767]
+        .iter()
+        .map(|&v| f32::from(v) / 32768.0)
+        .collect();
+    let back = decode_wav(&encode_wav(&samples, 24_000).unwrap()).unwrap();
+    assert_eq!(back.sample_rate, 24_000);
+    assert_eq!(back.samples, samples);
+    let loud = decode_wav(&encode_wav(&[2.0, -2.0], 24_000).unwrap()).unwrap();
+    assert_eq!(loud.samples, [32_767.0 / 32768.0, -1.0], "clamped");
+}

@@ -1,12 +1,14 @@
 //! Studio's half that studio-core may not do: the TTS client, audio decode,
 //! word timing against a local ONNX model, `narrate`, which writes the
 //! manifest studio-core reads, `render`, which encodes a video with ffmpeg,
-//! the data directory's libraries and videos, and the Tauri commands behind
+//! the data directory's libraries and videos, `brief`, a scene builder's
+//! input in one read, and the Tauri commands behind
 //! Settings -> Voice and rendering
 //! (docs/studio.md, "Narration is made by `oculus studio narrate`",
 //! "Narration timing" and "Rendering a video").
 
 pub mod audio;
+pub mod brief;
 pub mod commands;
 pub mod error;
 pub mod libraries;

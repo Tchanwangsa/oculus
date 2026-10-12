@@ -1,8 +1,10 @@
 //! Spoken form: narration is read aloud, so the script says notation
 //! instead of writing it. Digits, maths and other symbols, Greek letters
 //! and dotted abbreviations are flagged with what to write instead;
-//! letters and plain punctuation pass.
+//! letters, plain punctuation and `[pause]` markers pass, and a malformed
+//! marker is flagged with the forms there are.
 
+use crate::project::script::markers;
 use std::collections::HashSet;
 
 /// A word of script text that is not spoken form.
@@ -13,6 +15,8 @@ pub struct Unspoken {
     pub token: String,
     /// What to write instead, one entry per problem in the word.
     pub hints: Vec<String>,
+    /// A malformed `[pause]` marker, whose one hint says it all.
+    pub marker: bool,
 }
 
 /// Punctuation a voice reads as pauses or intonation.
@@ -89,7 +93,25 @@ pub fn scan(text: &str) -> Vec<Unspoken> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for (line, l) in text.lines().enumerate() {
-        for word in l.split_whitespace() {
+        let found = markers(l);
+        for m in &found {
+            let token = &l[m.start..m.end];
+            if let Err(hint) = &m.seconds
+                && seen.insert(token.to_owned())
+            {
+                out.push(Unspoken {
+                    line,
+                    token: token.to_owned(),
+                    hints: vec![hint.clone()],
+                    marker: true,
+                });
+            }
+        }
+        let mut said = l.to_owned();
+        for m in found.iter().rev() {
+            said.replace_range(m.start..m.end, " ");
+        }
+        for word in said.split_whitespace() {
             let abbreviation = abbreviation(word);
             let mut hints: Vec<String> = abbreviation.iter().cloned().collect();
             hints.extend(symbols(word));
@@ -98,7 +120,12 @@ pub fn scan(text: &str) -> Vec<Unspoken> {
             }
             let token = token(word, abbreviation.is_some());
             if seen.insert(token.clone()) {
-                out.push(Unspoken { line, token, hints });
+                out.push(Unspoken {
+                    line,
+                    token,
+                    hints,
+                    marker: false,
+                });
             }
         }
     }

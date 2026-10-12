@@ -6,7 +6,7 @@
 
 mod cues;
 
-pub use cues::WordCues;
+pub use cues::{CuedPause, CuedWord, WordCues};
 
 use crate::error::{Result, StudioError};
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,8 @@ pub struct ManifestScene {
     /// The clip's content address: sha256 of the text, server, model,
     /// voice, speed and aligner model.
     pub key: String,
-    /// The script text the clip says (`ScriptSection::text`).
+    /// The script text the clip says, each pause written `[pause
+    /// <seconds>]` (`ScriptSection::clip_text`).
     pub text: String,
     /// The clip's file, relative to `narration/`.
     pub audio: String,
@@ -47,6 +48,10 @@ pub struct ManifestScene {
     /// Speech the aligner heard that the script does not have.
     #[serde(default)]
     pub gaps: Vec<ManifestGap>,
+    /// The silences `[pause]` markers put in the clip, in order. Left out
+    /// when there are none, so a clip without pauses reads as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pauses: Vec<ManifestPause>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -74,6 +79,18 @@ pub struct ManifestGap {
     pub end: f64,
     /// What the aligner heard there.
     pub heard: String,
+}
+
+/// Exact silence spliced into a clip for a `[pause]`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ManifestPause {
+    /// The index in `words` of the word it follows; `None` (`null`) for a
+    /// pause before the first word.
+    pub after: Option<usize>,
+    /// Seconds from the clip's start.
+    pub start: f64,
+    pub end: f64,
 }
 
 impl Manifest {
@@ -131,6 +148,20 @@ impl Manifest {
                         s.words.len(),
                         g.start,
                         g.end
+                    ));
+                }
+            }
+            for (i, p) in s.pauses.iter().enumerate() {
+                if p.after.is_some_and(|a| a >= s.words.len())
+                    || !(p.start.is_finite() && p.end.is_finite())
+                    || p.start > p.end
+                {
+                    let after = p.after.map_or("null".to_owned(), |a| a.to_string());
+                    return Err(format!(
+                        "scenes.{id}.pauses[{i}] follows word {after} of {} and runs {} to {} s; `after` must be a word's index or null (before the first word), with finite times and start <= end",
+                        s.words.len(),
+                        p.start,
+                        p.end
                     ));
                 }
             }

@@ -3,6 +3,7 @@ import { Section } from "@/components/settings/shared/section";
 import { modelSize, percent } from "@/components/settings/transcription/LocalWhisper";
 import { Slider } from "@/components/ui/slider";
 import {
+  DEFAULT_SPEED,
   readVoiceSettings,
   SPEED_MAX,
   SPEED_MIN,
@@ -56,7 +57,7 @@ const fmtSpeed = (s: number) => `${Number(s.toFixed(2))}×`;
  */
 export function NarrationVoiceSection() {
   const [settings, setSettings] = useState<VoiceSettings | null>(null);
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [errors, setErrors] = useState<VoiceErrors>({});
   const [note, setNote] = useState<string | null>(null);
   const packs = usePackDownload(VOICE_PACKS);
@@ -161,7 +162,7 @@ export function NarrationVoiceSection() {
             />
           )}
 
-          <SettingRow label="Speed" hint="1× is the voice's own pace." error={errors.speed}>
+          <SettingRow label="Speed" hint="1× is the voice's own pace; 0.9× is the default." error={errors.speed}>
             <div className="flex w-80 items-center gap-3">
               <Slider
                 aria-label="Narration speed"

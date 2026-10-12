@@ -43,3 +43,61 @@ fn errors_name_their_line() {
     let e = Script::parse("## a\nhi\n## b\n**\n").unwrap_err();
     assert!(e.contains("line 3: `## b` has no text"), "{e}");
 }
+
+#[test]
+fn pauses_are_cut_from_the_text_and_placed_by_word() {
+    let s = Script::parse(
+        "## a\n[pause 0.5] It *lands* on one.[pause]\nKeep\n[PAUSE  2] the rest. [pause]\n",
+    )
+    .unwrap();
+    let a = &s.sections[0];
+    assert_eq!(a.text, "It lands on one. Keep the rest.");
+    let at: Vec<(usize, Option<f64>)> = a.pauses.iter().map(|p| (p.words, p.seconds)).collect();
+    assert_eq!(at, [(0, Some(0.5)), (4, None), (5, Some(2.0)), (7, None)]);
+    assert_eq!(
+        a.clip_text(1.0),
+        "[pause 0.5] It lands on one. [pause 1] Keep [pause 2] the rest. [pause 1]"
+    );
+    assert_eq!(a.pauses[1].length(0.75), 0.75);
+    assert_eq!(a.pauses[2].length(0.75), 2.0);
+}
+
+#[test]
+fn without_pauses_the_clip_text_is_the_text() {
+    let s = Script::parse("## a\nOne *two*\nthree.\n").unwrap();
+    let a = &s.sections[0];
+    assert!(a.pauses.is_empty());
+    assert_eq!(a.clip_text(1.0), a.text);
+}
+
+#[test]
+fn a_malformed_pause_is_neither_said_nor_held() {
+    let s = Script::parse("## a\nOne [pause x] two [pause 9] three [pause\n").unwrap();
+    let a = &s.sections[0];
+    assert_eq!(a.text, "One two three");
+    assert!(a.pauses.is_empty());
+    let e = Script::parse("## a\n[pause]\n").unwrap_err();
+    assert!(e.contains("`## a` has no text"), "{e}");
+}
+
+#[test]
+fn markers_read_their_seconds() {
+    let read = |line: &str| -> Vec<Result<Option<f64>, String>> {
+        markers(line).into_iter().map(|m| m.seconds).collect()
+    };
+    assert_eq!(
+        read("a [pause] b [pause 1.5] [ pause .5 ]"),
+        [Ok(None), Ok(Some(1.5)), Ok(Some(0.5))]
+    );
+    assert!(read("[note] and [1] are text").is_empty());
+    let bad = |line: &str| read(line).remove(0).unwrap_err();
+    assert!(bad("[pause x]").contains("is not a pause; write `[pause]`"));
+    assert!(bad("[pause 1 2]").contains("is not a pause"));
+    assert!(bad("[pause -1]").contains("is not a pause"));
+    assert!(bad("[pauses]").contains("is not a pause"));
+    assert!(bad("[pause 0]").contains("more than 0 and at most 5 seconds"));
+    assert!(bad("[pause 5.5]").contains("more than 0 and at most 5 seconds"));
+    assert!(bad("[pause 2").contains("no closing `]`"));
+    let m = &markers("ab [pause 2] c")[0];
+    assert_eq!((m.start, m.end), (3, 12));
+}

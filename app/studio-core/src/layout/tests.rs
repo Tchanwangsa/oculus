@@ -81,3 +81,38 @@ fn tabular_digits_share_one_advance() {
     );
     assert!((ones - eights).abs() < 1e-3, "tabular: {ones} vs {eights}");
 }
+
+#[test]
+fn the_mono_family_is_monospaced_and_shows_operators_as_typed() {
+    let mut typeset = Typeset::new();
+    let mut shaped = |text: &str| {
+        let style = Style {
+            font_size: Some(40.0),
+            ..Style::default()
+        };
+        let key = TextKey::new(text, crate::fonts::MONO_FAMILY, &style);
+        let mut layout = typeset.take(&key);
+        layout.break_all_lines(None);
+        let ids: Vec<u32> = layout
+            .lines()
+            .flat_map(|l| l.items().collect::<Vec<_>>())
+            .filter_map(|item| match item {
+                parley::PositionedLayoutItem::GlyphRun(run) => Some(run),
+                _ => None,
+            })
+            .flat_map(|run| run.positioned_glyphs().map(|g| g.id).collect::<Vec<_>>())
+            .collect();
+        (layout.full_width(), ids)
+    };
+    let (i, w, m) = (shaped("iiiiii").0, shaped("WWWWWW").0, shaped("mmmmmm").0);
+    assert!((i - w).abs() < 1e-3 && (i - m).abs() < 1e-3, "{i} {w} {m}");
+    // Ligatures are off: an operator pair is its two characters' glyphs.
+    for pair in ["<=", "!=", "=>", "->", "==", "|>"] {
+        let (_, together) = shaped(pair);
+        let apart: Vec<u32> = pair
+            .chars()
+            .flat_map(|c| shaped(&c.to_string()).1)
+            .collect();
+        assert_eq!(together, apart, "{pair}");
+    }
+}

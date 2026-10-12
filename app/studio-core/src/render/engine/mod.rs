@@ -158,6 +158,13 @@ impl Engine {
         }
     }
 
+    /// `discard`, then ends the frame as `compose` does, so a long run of
+    /// trees that are never painted keeps the text pool small.
+    pub(crate) fn release(&mut self, layers: Vec<LNode>) {
+        self.discard(layers);
+        self.typeset.end_frame();
+    }
+
     /// Output px per layout px.
     pub(crate) fn scale(&self) -> f64 {
         self.scale

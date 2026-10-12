@@ -84,14 +84,14 @@ fn frames(n: u32) -> f64 {
 #[test]
 fn the_fixture_is_narrated_then_silent() {
     let p = Project::load(fixture("narrated")).unwrap();
-    // lead + clip + tail is 0.25 + 3.0 + 0.6 = 3.85 s, 115.5 frames: 116.
-    assert!(near(p.scene_length(0).unwrap(), frames(116)));
+    // lead + clip + tail is 0.25 + 3.0 + 1.0 = 4.25 s, 127.5 frames: 128.
+    assert!(near(p.scene_length(0).unwrap(), frames(128)));
     assert!(near(p.scene_length(1).unwrap(), 1.5));
     let tl = p.timeline().unwrap();
-    assert!(near(tl.length(), frames(161)));
-    assert!(near(tl.start(1), frames(116)));
-    assert!(near(p.length().unwrap(), frames(161)));
-    assert_eq!(p.scene_frames(1).unwrap(), 116..161);
+    assert!(near(tl.length(), frames(173)));
+    assert!(near(tl.start(1), frames(128)));
+    assert!(near(p.length().unwrap(), frames(173)));
+    assert_eq!(p.scene_frames(1).unwrap(), 128..173);
     assert_eq!(
         p.video.voice.as_ref().unwrap().voice.as_deref(),
         Some("af_heart")
@@ -134,7 +134,7 @@ fn hold_is_a_minimum_for_narrated_scenes() {
     let p = t.load();
     let lengths: Vec<f64> = (0..3).map(|i| p.scene_length(i).unwrap()).collect();
     assert!(
-        near(lengths[0], frames(86)),
+        near(lengths[0], frames(98)),
         "the clip outlasts the hold: {lengths:?}"
     );
     assert!(
@@ -145,7 +145,7 @@ fn hold_is_a_minimum_for_narrated_scenes() {
         near(lengths[2], 2.0),
         "a silent scene is its hold: {lengths:?}"
     );
-    assert!(near(p.length().unwrap(), frames(86 + 150 + 60)));
+    assert!(near(p.length().unwrap(), frames(98 + 150 + 60)));
     let e = p.scene_length(3).unwrap_err();
     assert!(matches!(e, StudioError::SceneOutOfRange { .. }), "{e}");
 }
@@ -183,7 +183,7 @@ fn missing_or_stale_narration_fails_renders_not_the_load() {
     check("its clip in narration/manifest.json is for older text");
     // Emphasis and line breaks are not part of the text it must match.
     t.manifest(json!({ "update": clip("The new text.", 1.0, &[]) }));
-    assert!(near(t.load().length().unwrap(), frames(56)));
+    assert!(near(t.load().length().unwrap(), frames(68)));
 }
 
 #[test]
@@ -203,7 +203,8 @@ fn a_silent_scene_needs_a_hold() {
         "{e}"
     );
     let report = p.lint().unwrap();
-    assert_eq!(report.issues.len(), 1, "{report}");
+    // Scene `a` also warns that nothing is on screen.
+    assert_eq!(report.errors(), 1, "{report}");
     assert_eq!(report.issues[0].scene, Some(1));
 }
 
@@ -366,6 +367,22 @@ fn word_cues_are_scene_seconds_with_the_lead() {
     for (g, w) in got.iter().zip(want) {
         assert!(near(*g, w), "{got:?} != {want:?}");
     }
+}
+
+#[test]
+fn cued_words_are_the_times_word_returns() {
+    let t = probe(
+        "cued",
+        r#"  console.log(JSON.stringify([word("gradient"), wordEnd("gradient")]));"#,
+    );
+    let p = t.load();
+    let got: Vec<f64> =
+        serde_json::from_str(&logs(&p, Time::Scene { index: 0, t: 1.0 })[0]).unwrap();
+    let words = p.cued_words(0).unwrap().unwrap();
+    let gradient = words.iter().find(|w| w.text == "gradient,").unwrap();
+    assert!(near(gradient.start, got[0]) && near(gradient.end, got[1]));
+    assert_eq!(words.len(), 7);
+    assert!(p.cued_words(2).unwrap().is_none(), "`quiet` is silent");
 }
 
 #[test]
@@ -534,4 +551,139 @@ fn word_in_a_gallery_says_a_gallery_has_no_narration() {
         e.contains("`word(\"hello\")`: a gallery renders without narration"),
         "{e}"
     );
+}
+
+/// A project whose narrated scene `a` has two pauses: a bare one after
+/// "lands." and a 1.5 s one at the end, and whose `Probe` runs `body`.
+fn paused(name: &str, body: &str) -> Temp {
+    let t = Temp::new(name);
+    t.video(json!([{ "id": "a", "component": "Probe" }]))
+        .file(
+            "components/Probe.tsx",
+            &format!(
+                "export const props = {{}};\nexport default () => {{\n{body}\n  return <Box />;\n}};\n"
+            ),
+        )
+        .file(
+            "script.md",
+            "## a\nIt *lands.* [pause]\nThen it stays. [pause 1.5]\n",
+        );
+    let mut a = clip(
+        "It lands. [pause 1] Then it stays. [pause 1.5]",
+        5.0,
+        &[
+            ("It", 0.0, 0.2),
+            ("lands.", 0.2, 0.8),
+            ("Then", 2.2, 2.5),
+            ("it", 2.5, 2.6),
+            ("stays.", 2.6, 3.2),
+        ],
+    );
+    a["pauses"] = json!([
+        { "after": 1, "start": 1.0, "end": 2.0 },
+        { "after": 4, "start": 3.5, "end": 5.0 }
+    ]);
+    t.manifest(json!({ "a": a }));
+    t
+}
+
+#[test]
+fn pauses_are_cut_from_the_text_and_cue_with_the_lead() {
+    let t = paused(
+        "pauses",
+        "  console.log(JSON.stringify([pause(), pause(2), word(\"then\")]));",
+    );
+    let p = t.load();
+    let s = p.section(0).unwrap();
+    assert_eq!(s.text, "It lands. Then it stays.");
+    assert_eq!(
+        s.clip_text(1.0),
+        "It lands. [pause 1] Then it stays. [pause 1.5]"
+    );
+    let got: Vec<f64> =
+        serde_json::from_str(&logs(&p, Time::Scene { index: 0, t: 0.5 })[0]).unwrap();
+    assert_eq!(got, vec![1.25, 3.75, 2.45]);
+    let pauses = p.cued_pauses(0).unwrap();
+    assert_eq!(pauses.len(), 2);
+    assert_eq!(pauses[0].after, Some(1));
+    // lead + clip (its pauses included) + tail: 0.25 + 5.0 + 1.0 = 6.25 s,
+    // 187.5 frames: 188.
+    assert!(near(p.scene_length(0).unwrap(), frames(188)));
+}
+
+#[test]
+fn a_pause_is_part_of_the_text_its_clip_must_match() {
+    let t = paused("pause-stale", "");
+    t.file(
+        "script.md",
+        "## a\nIt lands. [pause 2]\nThen it stays. [pause 1.5]\n",
+    );
+    let e = t.load().timeline().unwrap_err().to_string();
+    assert!(e.contains("is for older text"), "{e}");
+    t.file("script.md", "## a\nIt lands.\nThen it stays.\n");
+    let e = t.load().timeline().unwrap_err().to_string();
+    assert!(e.contains("is for older text"), "{e}");
+}
+
+#[test]
+fn pause_errors_name_the_call() {
+    let cases = [
+        (
+            "  pause(3);",
+            "`pause(3)`: scene `a` has 2 pauses, so there is no pause 3",
+        ),
+        (
+            "  pause(0);",
+            "`pause(0)`: nth must be a whole number from 1",
+        ),
+    ];
+    for (i, (body, want)) in cases.iter().enumerate() {
+        let t = paused(&format!("pause-err{i}"), body);
+        let p = t.load();
+        let mut r = Renderer::new(&p, RenderOptions::default()).unwrap();
+        let e = r.frame(Time::Scene { index: 0, t: 0.0 }).unwrap_err();
+        assert!(e.to_string().contains(want), "{e}\nwanted: {want}");
+    }
+    let t = probe("no-pause", "  pause();");
+    let p = t.load();
+    let mut r = Renderer::new(&p, RenderOptions::default()).unwrap();
+    let e = r.frame(Time::Scene { index: 0, t: 0.0 }).unwrap_err();
+    assert!(
+        e.to_string()
+            .contains("`pause()`: scene `a` has no `[pause]` in script.md"),
+        "{e}"
+    );
+}
+
+#[test]
+fn a_manifest_checks_its_pauses_and_writes_none_when_there_are_none() {
+    let t = paused("pause-check", "");
+    let mut a = clip("It lands. [pause 1] Then it stays. [pause 1.5]", 5.0, &[]);
+    a["pauses"] = json!([{ "after": 0, "start": 1.0, "end": 2.0 }]);
+    t.manifest(json!({ "a": a }));
+    assert!(
+        t.load_err()
+            .contains("scenes.a.pauses[0] follows word 0 of 0")
+    );
+    let m: studio_core::Manifest = serde_json::from_value(json!({
+        "version": 1,
+        "scenes": { "a": clip("Hello.", 1.0, &[("Hello.", 0.0, 0.5)]) }
+    }))
+    .unwrap();
+    assert!(m.scenes["a"].pauses.is_empty());
+    let back = serde_json::to_value(&m).unwrap();
+    assert!(back["scenes"]["a"].get("pauses").is_none());
+}
+
+#[test]
+fn a_fingerprint_holds_pauses_only_when_there_are_some() {
+    let t = paused("pause-print", "");
+    let bytes = String::from_utf8(t.load().scene_fingerprint(0).unwrap()).unwrap();
+    assert!(
+        bytes.contains("\"pauses\":[[1.0,2.0],[3.5,5.0]]"),
+        "{bytes}"
+    );
+    let p = Project::load(fixture("narrated")).unwrap();
+    let bytes = String::from_utf8(p.scene_fingerprint(0).unwrap()).unwrap();
+    assert!(!bytes.contains("pauses"), "{bytes}");
 }

@@ -6,7 +6,7 @@ mod common;
 
 use common::fixture;
 use serde_json::json;
-use studio_core::{LOW_CONFIDENCE, Project, StudioError};
+use studio_core::{LOW_CONFIDENCE, LintLevel, Project, StudioError};
 
 #[test]
 fn clean_projects_lint_clean() {
@@ -28,10 +28,12 @@ fn clean_projects_lint_clean() {
         let report = Project::load(fixture(name)).unwrap().lint().unwrap();
         // The renderer fixtures paint literal colours on purpose (their
         // goldens pin those pixels); the token rules are checked below.
+        // Warnings are about how a scene looks, which some fixtures
+        // stretch on purpose (a background alone).
         let other: Vec<_> = report
             .issues
             .iter()
-            .filter(|i| !common::component_rule(&i.to_string()))
+            .filter(|i| i.level == LintLevel::Error && !common::component_rule(&i.to_string()))
             .collect();
         assert!(other.is_empty(), "{name}: {report}");
     }
@@ -184,7 +186,7 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
     );
     write(
         "script.md",
-        "## a\nHello, a rate of 0.01, e.g. here.\n\n## b\nNew words.\n\n## outro\nBye.\n",
+        "## a\nHello, a rate of 0.01, e.g. here.\n\n## b\nNew words. [pause x]\n\n## outro\nBye.\n",
     );
     let word = |t: &str, c: f64| json!({ "text": t, "start": 0.1, "end": 0.4, "confidence": c });
     write(
@@ -214,7 +216,11 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
         "scene 0 `a` (Say): script.md:2: `e.g.` is not spoken form: write `for example`, not `e.g.`",
     );
     has("script.md:7: `## outro` matches no scene");
-    has("scene 0 `a` (Say): scene `a`: the aligner is unsure of `rate` at 0.35 s");
+    has(
+        "scene 1 `b` (Say): script.md:5: `[pause x]` is not a pause; write `[pause]` for the theme's pause",
+    );
+    has("note: scene 0 `a` (Say): scene `a`: the aligner is unsure of `rate` at 0.35 s");
+    has("warning: scene 2 `c` (Quiet): nothing is ever on screen");
     has("scene 1 `b` (Say): scene `b`: no narration for its current text");
     has(
         "scene 0 `a` (Say): scene `a`: the audio has unscripted speech after `Hello,` (heard \"um\")",
@@ -227,11 +233,82 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
         text.contains("`word(\"helo\")`: no such word in scene `a`; closest: hello"),
         "{text}"
     );
-    assert_eq!(lines.len(), 8, "{text}");
+    assert_eq!(lines.len(), 10, "{text}");
+    assert_eq!(
+        report.errors(),
+        8,
+        "the note and the warning do not count: {text}"
+    );
+    let note = report
+        .issues
+        .iter()
+        .find(|i| i.level == LintLevel::Note)
+        .unwrap();
+    assert_eq!(
+        note.group,
+        Some(("unsure word", "\"rate\" 0.3 s".to_owned()))
+    );
     let orphan = report.issues.iter().find(|i| i.scene.is_none()).unwrap();
     assert_eq!(
         (orphan.id.as_deref(), orphan.component.as_deref()),
         (Some("outro"), None)
     );
     assert_eq!(orphan.error.kind(), "script");
+}
+
+/// Reading `theme.font.mono` in a component not named for code is a note
+/// (never an error); a theme written before the monospace tokens existed
+/// still loads and still gives components them.
+#[test]
+fn monospace_outside_a_code_component_is_a_note() {
+    let dir = std::env::temp_dir().join(format!("studio-lint-mono-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("components")).unwrap();
+    let component = |name: &str| {
+        let src = format!(
+            "export const props = {{}};\nexport const examples = {{ a: {{}} }};\nexport default (_p, {{ theme }}) => <Text style={{{{ ...theme.type.code, fontFamily: theme.font.mono, color: theme.color.text }}}}>{name}</Text>;\n"
+        );
+        std::fs::write(dir.join(format!("components/{name}.tsx")), src).unwrap();
+    };
+    component("Listing");
+    component("CodeBlock");
+    let mut theme: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture("../../themes/default.json")).unwrap(),
+    )
+    .unwrap();
+    theme["font"].as_object_mut().unwrap().remove("mono");
+    theme["type"].as_object_mut().unwrap().remove("code");
+    std::fs::write(dir.join("old.json"), theme.to_string()).unwrap();
+    std::fs::write(
+        dir.join("video.json"),
+        json!({
+            "size": { "width": 320, "height": 180 },
+            "theme": "old.json",
+            "scenes": [
+                { "component": "Listing", "props": {}, "hold": 1 },
+                { "component": "CodeBlock", "props": {}, "hold": 1 },
+            ],
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let report = Project::load(&dir).unwrap().lint().unwrap();
+    assert!(report.is_clean(), "{report}");
+    let notes: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| i.level == LintLevel::Note)
+        .collect();
+    assert_eq!(notes.len(), 1, "{report}");
+    assert_eq!(notes[0].component.as_deref(), Some("Listing"));
+    assert_eq!(
+        notes[0].group,
+        Some(("monospace outside code", "Listing".to_owned()))
+    );
+    let text = notes[0].to_string();
+    assert!(
+        text.contains("theme.type.code is used outside a Code component; monospace is for code, and numbers take fontVariantNumeric: \"tabular-nums\""),
+        "{text}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
 }

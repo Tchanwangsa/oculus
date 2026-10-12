@@ -20,7 +20,8 @@
   },
   "font": {
     "heading": "Manrope",
-    "body": "Inter"
+    "body": "Inter",
+    "mono": "JetBrains Mono"
   },
   "type": {
     "display": {
@@ -70,6 +71,13 @@
       "fontSize": 22,
       "fontWeight": 450,
       "lineHeight": 1.35,
+      "letterSpacing": 0
+    },
+    "code": {
+      "fontFamily": "JetBrains Mono",
+      "fontSize": 28,
+      "fontWeight": 400,
+      "lineHeight": 1.5,
       "letterSpacing": 0
     }
   },
@@ -145,6 +153,7 @@
   },
   "narration": {
     "lead": 0.25,
-    "tail": 0.6
+    "tail": 1.0,
+    "pause": 1.0
   }
 }

@@ -1,12 +1,13 @@
 //! How far anything moves between two sets of laid-out layers: each node's
 //! transformed bounds, matched across the two by `key` (anywhere in the
 //! tree, as the morph matches) else by its path of child indices from the
-//! nearest keyed ancestor. Nodes paint skips (opacity 0) do not count.
+//! nearest keyed ancestor (`look::walk`). Nodes paint skips (opacity 0)
+//! do not count.
 
 use crate::layout::LNode;
-use crate::paint::local_transform;
+use crate::look::walk;
 use std::collections::HashMap;
-use vello_cpu::kurbo::{Affine, Rect};
+use vello_cpu::kurbo::Rect;
 
 /// The largest corner move of any node present in both, in layout px.
 pub fn displacement(a: &[LNode], b: &[LNode]) -> f64 {
@@ -22,24 +23,9 @@ pub fn displacement(a: &[LNode], b: &[LNode]) -> f64 {
 
 fn bounds(layers: &[LNode]) -> HashMap<String, Rect> {
     let mut out = HashMap::new();
-    for (i, layer) in layers.iter().enumerate() {
-        walk(layer, Affine::IDENTITY, format!("/{i}"), &mut out);
-    }
+    walk(layers, &(), &mut |v, _| {
+        out.entry(v.id.to_owned()).or_insert_with(|| v.bounds());
+        Some(())
+    });
     out
-}
-
-fn walk(n: &LNode, parent: Affine, path: String, out: &mut HashMap<String, Rect>) {
-    if n.style.opacity() <= 0.0 {
-        return;
-    }
-    let t = parent * local_transform(n);
-    let id = match &n.key {
-        Some(k) => format!("#{k}"),
-        None => path,
-    };
-    for (i, c) in n.children.iter().enumerate() {
-        walk(c, t, format!("{id}/{i}"), out);
-    }
-    out.entry(id)
-        .or_insert_with(|| t.transform_rect_bbox(n.rect));
 }

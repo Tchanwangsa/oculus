@@ -4,7 +4,7 @@
 //! rounds up to whole frames.
 
 use super::timeline::whole_frames;
-use super::{ManifestScene, Project, SceneSpec, ScriptSection, WordCues};
+use super::{CuedPause, CuedWord, ManifestScene, Project, SceneSpec, ScriptSection, WordCues};
 use crate::error::{Result, StudioError};
 use crate::render::SceneCall;
 
@@ -41,15 +41,16 @@ impl Project {
 
     /// Scene `index`'s clip: `None` for a silent scene, a `Narration`
     /// error when it has script text but the manifest has no clip for that
-    /// exact text.
+    /// exact text and those pauses (`ScriptSection::clip_text`).
     pub fn narration(&self, index: usize) -> Result<Option<&ManifestScene>> {
         let Some(section) = self.section(index) else {
             self.scene(index)?;
             return Ok(None);
         };
         let clip = self.manifest.as_ref().map(|m| m.scenes.get(&section.id));
+        let said = section.clip_text(self.theme.narration.pause);
         let why = match clip {
-            Some(Some(clip)) if clip.text == section.text => return Ok(Some(clip)),
+            Some(Some(clip)) if clip.text == said => return Ok(Some(clip)),
             Some(Some(_)) => "its clip in narration/manifest.json is for older text",
             Some(None) => "narration/manifest.json has no clip for it",
             None => "there is no narration/manifest.json",
@@ -84,13 +85,28 @@ impl Project {
         Ok(scene.hold.map_or(spoken, |h| h.max(spoken)))
     }
 
-    /// Scene `index`'s words for `SceneCall::words`: `None` for a silent
-    /// scene, an error on stale narration.
-    pub fn word_cues(&self, index: usize) -> Result<Option<WordCues>> {
+    /// Scene `index`'s words at the times `word()` and `wordEnd()` return:
+    /// `None` for a silent scene, an error on stale narration.
+    pub fn cued_words(&self, index: usize) -> Result<Option<Vec<CuedWord>>> {
         let lead = self.theme.narration.lead;
+        Ok(self.narration(index)?.map(|clip| CuedWord::all(clip, lead)))
+    }
+
+    /// Scene `index`'s pauses at the times `pause()` returns: empty for a
+    /// silent scene, an error on stale narration.
+    pub fn cued_pauses(&self, index: usize) -> Result<Vec<CuedPause>> {
+        let lead = self.theme.narration.lead;
+        Ok(self
+            .narration(index)?
+            .map_or_else(Vec::new, |clip| CuedPause::all(clip, lead)))
+    }
+
+    /// Scene `index`'s words and pauses for `SceneCall::words`: `None` for
+    /// a silent scene, an error on stale narration.
+    pub fn word_cues(&self, index: usize) -> Result<Option<WordCues>> {
         let id = self.scene(index)?.id.as_deref();
-        Ok(match (self.narration(index)?, id) {
-            (Some(clip), Some(id)) => Some(WordCues::new(id, clip, lead)),
+        Ok(match (self.cued_words(index)?, id) {
+            (Some(words), Some(id)) => Some(WordCues::new(id, &words, &self.cued_pauses(index)?)),
             _ => None,
         })
     }

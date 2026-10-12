@@ -182,10 +182,10 @@ fn narration_starts_at_its_scenes_lead() {
         Quality::Final
     };
     let report = complete(&dir, &options(&ffmpeg, quality, None));
-    // intro: 0.25 + 3 + 0.6 s = 115.5 frames, rounded up; outro 1.5 s.
-    assert_eq!(report.frames, 116 + 45);
+    // intro: 0.25 + 3 + 1.0 s = 127.5 frames, rounded up; outro 1.5 s.
+    assert_eq!(report.frames, 128 + 45);
     assert!(report.audio);
-    assert_eq!(framemd5(&ffmpeg, &report.path).len(), 161);
+    assert_eq!(framemd5(&ffmpeg, &report.path).len(), 173);
 
     let out = Command::new(&ffmpeg)
         .args(["-v", "error", "-i"])
@@ -211,7 +211,7 @@ fn narration_starts_at_its_scenes_lead() {
     // by a few ms.
     let start = onset(&pcm, 0.05);
     assert!((21_400..=21_700).contains(&start), "onset at {start}");
-    let video = 161.0 / 30.0;
+    let video = 173.0 / 30.0;
     let audio = pcm.len() as f64 / 48_000.0;
     assert!(
         (audio - video).abs() < 0.05,
