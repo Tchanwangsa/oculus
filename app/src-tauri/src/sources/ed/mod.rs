@@ -16,6 +16,7 @@ mod lesson_md;
 mod lessons;
 mod live;
 mod lti;
+mod region;
 mod render;
 mod threads;
 mod workspace;
@@ -43,28 +44,15 @@ fn api_base(data_dir: &std::path::Path) -> String {
         .unwrap_or_else(|| DEFAULT_API.to_string())
 }
 
-/// Ed's web region for `data_dir`, once a launch has named it.
+/// Ed's web region for `data_dir`: what a launch named, else the region of
+/// the API the profile holds. `None` until either is known.
 fn region(data_dir: &std::path::Path) -> Option<String> {
-    crate::sources::institution::load(data_dir).and_then(|i| i.ed_region)
+    let inst = crate::sources::institution::load(data_dir)?;
+    inst.ed_region
+        .or_else(|| inst.ed_api.as_deref().and_then(region::region_of_api))
 }
 
-/// The region a launch landed in: `https://edstem.org/au/courses/1` → `au`.
-fn region_of_landing(landed: &url::Url) -> Option<String> {
-    let mut segments = landed.path_segments()?;
-    let region = segments.next()?;
-    (segments.next() == Some("courses")
-        && (2..=3).contains(&region.len())
-        && region.bytes().all(|b| b.is_ascii_lowercase()))
-    .then(|| region.to_string())
-}
-
-/// The API on the host a launch landed on, when that is not the default's.
-fn api_for_landing(landed: &url::Url) -> Option<String> {
-    let host = landed.host_str()?;
-    (host != "edstem.org").then(|| format!("https://{host}/api"))
-}
-
-/// Ed's API, until a launch lands on another region (`api_for_landing`).
+/// Ed's API, until a launch names the region (`region::api_for_region`).
 const DEFAULT_API: &str = "https://edstem.org/api";
 /// The path prefix oculus-keyd's `ed` route takes.
 const ED_API: &str = "/api";

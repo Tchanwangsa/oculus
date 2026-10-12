@@ -2,8 +2,9 @@ use super::client::store_token;
 use super::courses::{code_token, pick_course, term_score};
 use super::document::document_md;
 use super::lti::{ed_course_in_url, exchange_login_token, is_ed_label, walk_lti_chain};
+use super::region::{api_for_region, is_ed_host, region_of_api, region_of_landing};
 use super::render::fmt_ts;
-use super::{api_for_landing, Ed, EdCourse};
+use super::{Ed, EdCourse};
 use crate::providers::credentials::Credentialed;
 use crate::test_support::{FakeKeyd, FakeServer, Reply, Scratch};
 use serde_json::json;
@@ -53,13 +54,64 @@ fn the_term_picks_the_offering_and_a_tie_picks_none() {
 }
 
 #[test]
-fn the_api_follows_a_launch_off_the_default_host() {
-    let at = |u: &str| api_for_landing(&url::Url::parse(u).unwrap());
-    assert_eq!(at("https://edstem.org/au/courses/38809"), None);
+fn the_api_follows_the_region_a_launch_names() {
+    let landed = |u: &str| region_of_landing(&url::Url::parse(u).unwrap());
+    let api = |u: &str| landed(u).map(|r| api_for_region(&r));
     assert_eq!(
-        at("https://us.edstem.org/courses/1").as_deref(),
+        api("https://edstem.org/au/courses/38809").as_deref(),
+        Some("https://edstem.org/api")
+    );
+    assert_eq!(
+        api("https://edstem.org/us/courses/1").as_deref(),
         Some("https://us.edstem.org/api")
     );
+    assert_eq!(
+        api("https://us.edstem.org/courses/1").as_deref(),
+        Some("https://us.edstem.org/api")
+    );
+    assert_eq!(api("https://edstem.org/courses/1"), None);
+}
+
+#[test]
+fn a_saved_api_names_the_region_when_no_launch_has() {
+    assert_eq!(
+        region_of_api("https://edstem.org/api").as_deref(),
+        Some("au")
+    );
+    assert_eq!(
+        region_of_api("https://us.edstem.org/api").as_deref(),
+        Some("us")
+    );
+    assert_eq!(region_of_api("https://ed.example.com/api"), None);
+    assert_eq!(region_of_api("https://sahara.us.edstem.org/api"), None);
+    for region in ["au", "us", "eu"] {
+        assert_eq!(
+            region_of_api(&api_for_region(region)).as_deref(),
+            Some(region)
+        );
+    }
+}
+
+#[test]
+fn only_eds_hosts_are_ed() {
+    assert!(is_ed_host("edstem.org"));
+    assert!(is_ed_host("us.edstem.org"));
+    assert!(!is_ed_host("notedstem.org"));
+    assert!(!is_ed_host("edstem.org.example.com"));
+    assert!(!is_ed_host("tool.example.edu"));
+}
+
+#[test]
+fn a_profile_without_a_region_takes_it_from_its_api() {
+    let dir = Scratch::new("ed-region");
+    let mut inst = crate::sources::institution::unimelb();
+    inst.ed_region = None;
+    crate::sources::institution::save(&dir, &inst).unwrap();
+    assert_eq!(super::region(&dir).as_deref(), Some("au"));
+
+    inst.ed_api = None;
+    crate::sources::institution::save(&dir, &inst).unwrap();
+    assert_eq!(super::region(&dir), None);
 }
 
 #[test]
@@ -351,7 +403,7 @@ fn rate_limit_waits_follow_retry_after_else_double() {
 
 #[test]
 fn a_launch_names_eds_region_in_its_first_path_segment() {
-    let region = |u: &str| super::region_of_landing(&url::Url::parse(u).unwrap());
+    let region = |u: &str| region_of_landing(&url::Url::parse(u).unwrap());
     assert_eq!(
         region("https://edstem.org/au/courses/38809?_logintoken=x").as_deref(),
         Some("au")

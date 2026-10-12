@@ -300,11 +300,16 @@ emits its marker and still recurses. The token is in [auth.md](./auth.md).
   season name. A tie that leaves is no match: the course's LTI launch, which
   names the course exactly, decides instead.
 - The Ed tab is the external tool labelled "Ed Discussion", "Ed" or "EdStem".
-- The API base is `edstem.org/api` unless a launch lands on another Ed host,
-  which the profile then remembers (`ed_api`). The launch's landing path names
-  Ed's web region (`/au/courses/…`), kept as `ed_region` for the lesson links
-  and the workspace host; until a launch names it, lessons carry no Ed link
-  and a workspace fetch fails saying why.
+- A launch's landing page names Ed's web region (`edstem.org/<region>/courses/…`,
+  or a `<region>.edstem.org` host), and the region names the API: the bare
+  host's `edstem.org/api` for the home region, `<region>.edstem.org/api` for
+  every other (`app/src-tauri/src/sources/ed/region.rs`). The profile keeps both
+  (`ed_region`, `ed_api`), and the login token is exchanged on that API only
+  once the profile and oculus-keyd have taken it. A launch that lands off
+  Ed's hosts — a tab labelled like Ed that runs another tool — fails, and its
+  token goes nowhere. A profile with an `ed_api` and no `ed_region` reads the
+  region from the API host; with neither, lessons carry no Ed link and a
+  workspace fetch fails saying why.
 
 ## Ed Lessons are one file per lesson, with their assets beside it
 

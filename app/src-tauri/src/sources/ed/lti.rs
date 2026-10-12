@@ -2,7 +2,8 @@
 //! launch like a browser.
 
 use super::client::keyd_failure;
-use super::{api_for_landing, region, region_of_landing, Ed, TIMEOUT};
+use super::region::{api_for_region, is_ed_api, is_ed_host, region_of_landing};
+use super::{Ed, TIMEOUT};
 use scraper::Html;
 use std::collections::HashMap;
 
@@ -40,20 +41,40 @@ impl Ed {
     ) -> Result<i64, String> {
         let tool_path = find_ed_tool(canvas, canvas_course_id)?;
         let (login_token, destination) = walk_lti_chain(canvas, &tool_path)?;
-        // The lesson links and workspace host name the region.
-        if let Some(landed) =
-            region_of_landing(&destination).filter(|r| region(&self.data_dir).as_ref() != Some(r))
-        {
-            crate::sources::institution::learn(&self.data_dir, |i| i.ed_region = Some(landed));
+        // The login token goes only to Ed: a tab merely labelled like Ed may
+        // launch another tool.
+        let host = destination.host_str().unwrap_or("");
+        if !is_ed_host(host) {
+            return Err(format!("the Ed launch landed on {host}, which is not Ed"));
         }
-        if let Some(api) = api_for_landing(&destination) {
-            // Before the token is saved: oculus-keyd drops an Ed token when
-            // its origin moves.
-            crate::sources::institution::learn(&self.data_dir, |i| i.ed_api = Some(api.clone()));
-            *self.api.lock().unwrap() = api;
-        }
-
-        let api = self.api.lock().unwrap().clone();
+        // The region names the API host, the lesson links and the workspace
+        // host. Saved before the token: oculus-keyd drops an Ed token when its
+        // origin moves, and the token is exchanged only on a host keyd took.
+        let api = match region_of_landing(&destination) {
+            Some(landed) => {
+                let api = api_for_region(&landed);
+                let taken = crate::sources::institution::learn(&self.data_dir, |i| {
+                    i.ed_region = Some(landed);
+                    i.ed_api = Some(api.clone());
+                });
+                if !taken {
+                    return Err(format!(
+                        "could not save Ed's API host {api} to the institution profile (see the log)"
+                    ));
+                }
+                *self.api.lock().unwrap() = api.clone();
+                api
+            }
+            None => {
+                let api = self.api.lock().unwrap().clone();
+                if !is_ed_api(&api) {
+                    return Err(format!(
+                        "the Ed launch named no region, and the saved API host {api} is not Ed's"
+                    ));
+                }
+                api
+            }
+        };
         let token = exchange_login_token(&api, &login_token)?;
         self.keyd
             .session_put(SessionKind::Ed, &token)

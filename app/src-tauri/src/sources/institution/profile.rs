@@ -109,22 +109,24 @@ pub fn host_of(base: &str) -> Option<String> {
 }
 
 /// Record a fact a launch discovered. oculus-keyd hears first when it moves
-/// an origin keyd sends to, so the two never disagree. Silent: losing it only
-/// costs the next launch rediscovering it.
-pub fn learn(data_dir: &Path, update: impl FnOnce(&mut Institution)) {
+/// an origin keyd sends to, so the two never disagree. Whether the profile
+/// now holds the fact: false with no profile, when keyd refused the move, or
+/// when the file could not be written (each logged).
+pub fn learn(data_dir: &Path, update: impl FnOnce(&mut Institution)) -> bool {
     let Some(mut inst) = load(data_dir) else {
-        return;
+        return false;
     };
     let before = inst.clone();
     update(&mut inst);
     if inst == before {
-        return;
+        return true;
     }
     if inst.site() == before.site() {
         if let Err(e) = save(data_dir, &inst) {
             elog!("[oculus] could not update institution.json: {e}");
+            return false;
         }
-        return;
+        return true;
     }
     let saved = super::keyd::holding(|told| {
         super::keyd::tell_held(told, data_dir, &inst)
@@ -133,5 +135,7 @@ pub fn learn(data_dir: &Path, update: impl FnOnce(&mut Institution)) {
     });
     if let Err(e) = saved {
         elog!("[oculus] {e}");
+        return false;
     }
+    true
 }
