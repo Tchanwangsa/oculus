@@ -110,10 +110,8 @@ fn the_first_connect_records_eds_tree_and_keeps_what_was_saved_before_it() {
     ]));
     let (context, events) = context(&dir, &sahara.origin());
     let root = dir.join(SLIDE_DIR);
-    // Saved and deleted here while the challenge had no record, and a file
-    // an earlier sync left that Ed no longer has.
+    // Saved and deleted here while the challenge had no record.
     std::fs::write(root.join("tally.py"), "count = 1\n").unwrap();
-    std::fs::write(root.join("old.py"), "o").unwrap();
     {
         let mut shared = context.shared();
         shared
@@ -133,7 +131,6 @@ fn the_first_connect_records_eds_tree_and_keeps_what_was_saved_before_it() {
     assert_eq!(std::fs::read(root.join("src/util.py")).unwrap(), b"u\n");
     assert!(!root.join("gone.txt").exists());
     assert!(!root.join(".hidden").exists());
-    assert!(!root.join("old.py").exists());
     assert_eq!(pending, [frames::remove("gone.txt", false)]);
 
     let record = workspace_state::load(&dir, 267880).unwrap();
@@ -207,6 +204,38 @@ fn the_first_connect_records_eds_tree_and_keeps_what_was_saved_before_it() {
     let pending = bootstrap::on_connect(&context, "W1", "sahara.test", &init("h9")).unwrap();
     assert_eq!(pending, [frames::remove("gone.txt", false)]);
     assert_eq!(sahara.hits().len(), 3);
+}
+
+#[test]
+fn the_first_connect_uploads_new_local_files_and_drops_old_sync_names() {
+    let dir = Scratch::new("ed-ws-first-leftovers");
+    let _keyd = fake_ed(&dir);
+    let sahara = fake_sahara(zip_of(&[("my file.py", b"m"), ("a.py", b"a")]));
+    let (context, _) = context(&dir, &sahara.origin());
+    let root = dir.join(SLIDE_DIR);
+    // The old sync's name for `my file.py`, and a file Ed never had.
+    std::fs::write(root.join("my_file.py"), "m").unwrap();
+    std::fs::write(root.join("notes.txt"), "n").unwrap();
+
+    bootstrap::on_connect(&context, "W1", "sahara.test", &init("h0")).unwrap();
+
+    assert!(!root.join("my_file.py").exists());
+    assert_eq!(std::fs::read(root.join("my file.py")).unwrap(), b"m");
+    assert_eq!(std::fs::read(root.join("notes.txt")).unwrap(), b"n");
+    let record = workspace_state::load(&dir, 267880).unwrap();
+    assert_eq!(
+        record.files.keys().collect::<Vec<_>>(),
+        ["a.py", "my file.py", "notes.txt"]
+    );
+    assert_eq!(record.base_commit.as_deref(), Some("up1"));
+    let body = String::from_utf8_lossy(&sahara.hits()[1].body).into_owned();
+    assert!(body.contains("filename=\"notes.txt\""), "{body}");
+
+    let old = bootstrap::old_sync_names(["my file.py", "a.py", "dir/x y.txt"].into_iter());
+    assert_eq!(
+        old.into_iter().collect::<Vec<_>>(),
+        ["dir/x_y.txt", "my_file.py"]
+    );
 }
 
 #[test]
