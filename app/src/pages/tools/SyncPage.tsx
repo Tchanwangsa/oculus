@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { fmtAgo, sqliteUtcToMs } from "@/lib/format/format";
 import { useAuth } from "@/hooks/sync/useAuth";
 import { useSyncStore } from "@/stores/sync/syncStore";
+import { useInstitution } from "@/stores/sync/institutionStore";
 import { usePipelineStore } from "@/stores/sync/pipelineStore";
 import { PipelineTable } from "@/components/sync/PipelineTable";
 import { ResultCertWarning } from "@/components/sync/ResultCertWarning";
@@ -26,6 +27,7 @@ import { useSyncEvents } from "./sync/useSyncEvents";
 
 export default function SyncPage() {
   const { status: authStatus, connect } = useAuth();
+  const institution = useInstitution();
   const active = useTabActive();
   const [loadingSubjects, setLoadingSubjects] = useState(false);
   const [subjectsError, setSubjectsError] = useState<string | null>(null);
@@ -83,6 +85,7 @@ export default function SyncPage() {
   const finishedCount = countFinished(items, embedStage);
   const lastCompleted = runs.find((r) => r.status === "completed" && r.finished_at);
   const needsAuth = authStatus !== "connected";
+  const needsAddress = institution !== undefined && !institution.canvas;
 
   return (
     <div className="flex flex-col h-full">
@@ -154,7 +157,9 @@ export default function SyncPage() {
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {needsAuth
+                  {needsAddress
+                    ? "No Canvas address yet — click to add your university's"
+                    : needsAuth
                     ? authStatus === "expired"
                       ? "Canvas session expired — click to sign in again"
                       : "Not connected to Canvas — click to sign in"

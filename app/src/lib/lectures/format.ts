@@ -1,3 +1,5 @@
+import { displayLocale } from "@/lib/format/locale";
+
 export function fmtDurationSecs(secs: number): string {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
@@ -8,7 +10,7 @@ export function fmtDurationSecs(secs: number): string {
 
 export function fmtLectureDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString("en-AU", {
+  return d.toLocaleDateString(displayLocale, {
     weekday: "short",
     day: "numeric",
     month: "short",

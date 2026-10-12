@@ -4,6 +4,8 @@ import { cn } from "@/lib/utils";
 import { useAuth, type AuthStatus } from "@/hooks/sync/useAuth";
 import { useSyncStore } from "@/stores/sync/syncStore";
 import { AutoSignIn } from "@/components/settings/web/AutoSignIn";
+import { CanvasAddress } from "@/components/settings/web/CanvasAddress";
+import { useInstitution } from "@/stores/sync/institutionStore";
 import { Section } from "@/components/settings/shared/section";
 import { SetupSection } from "@/components/settings/web/SetupSection";
 import { Separator } from "@/components/ui/separator";
@@ -22,11 +24,19 @@ export default function SettingsCanvasPage() {
     disconnect: disconnectCanvas,
   } = useAuth();
   const scraping = useSyncStore((s) => s.scraping);
+  const institution = useInstitution();
+  const configured = !!institution?.canvas;
 
   return (
     <>
-      <Section title="Canvas" description="canvas.lms.unimelb.edu.au">
+      <Section
+        title="Canvas"
+        description="Your university's Canvas, and the session Oculus syncs with."
+      >
         <div>
+          <CanvasAddress />
+
+          {configured && (
           <div className="flex items-center justify-between gap-4 py-2">
             <div className="flex items-center gap-2">
               <span
@@ -84,8 +94,9 @@ export default function SettingsCanvasPage() {
               )}
             </div>
           </div>
+          )}
 
-          <AutoSignIn />
+          {institution?.okta && <AutoSignIn />}
         </div>
       </Section>
       <Separator className="my-7" />

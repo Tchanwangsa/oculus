@@ -5,6 +5,8 @@ use keyd_core::okta::{validate_credentials, CredentialStore, Credentials};
 use super::credentials::CredentialStatus;
 use super::LoginError;
 
+/// A stable identifier, not a description: renaming it would orphan every
+/// saved password and setup key, here and in keyd's import (`names::LEGACY`).
 const KEYCHAIN_SERVICE: &str = "com.oculus.unimelb-sso";
 
 fn secret(account: &str) -> crate::providers::credentials::Secret<'_> {

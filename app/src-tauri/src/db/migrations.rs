@@ -813,6 +813,28 @@ CREATE TABLE IF NOT EXISTS echo_embeds (
                         "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 45,
+            description: "subjects: a term sort key",
+            // `terms::term_sort` writes it on every course fetch. Rows from
+            // before are UniMelb's, so they are backfilled from UniMelb's
+            // term names as `terms.rs` reads them.
+            sql: r#"
+ALTER TABLE subjects ADD COLUMN term_sort TEXT;
+UPDATE subjects SET term_sort = substr(term_name, 1, 4) || '-' || CASE
+    WHEN lower(term_name) LIKE '%semester 1%' THEN '03'
+    WHEN lower(term_name) LIKE '%semester 2%' THEN '07'
+    WHEN lower(term_name) LIKE '%summer%' THEN '01'
+    WHEN lower(term_name) LIKE '%winter%' THEN '06'
+    WHEN lower(term_name) LIKE '%january%' THEN '01'
+    WHEN lower(term_name) LIKE '%february%' THEN '02'
+    WHEN lower(term_name) LIKE '%june%' THEN '06'
+    WHEN lower(term_name) LIKE '%july%' THEN '06'
+    ELSE '13' END
+ WHERE term_name GLOB '[12][0-9][0-9][0-9]*';
+                        "#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

@@ -25,9 +25,11 @@
 
 ## About
 
-Your whole degree in one app. Oculus signs in to Canvas as you, brings in your
-subjects, Ed threads and lecture recordings, and puts an AI assistant right
-next to all of it.
+Your whole degree in one app, at a university that uses Canvas — tested at
+the University of Melbourne and RMIT; elsewhere it usually works, since you
+sign in yourself in a normal window. Oculus
+signs in to Canvas as you, brings in your subjects, Ed threads and lecture
+recordings, and puts an AI assistant right next to all of it.
 
 <img src=".github/assets/overview.svg" alt="Canvas, Ed Discussion and Echo360 flow into Oculus, and your agent — Claude Code, Codex, opencode or Antigravity — works inside it" width="100%">
 
@@ -93,8 +95,11 @@ bun install
 bun run tauri dev
 ```
 
-The first build is slow (a few hundred crates); after that it's quick.
-[docs/development.md](docs/development.md) has the rest.
+The first build is slow (a few hundred crates); after that it's quick. On
+first launch, enter your university's Canvas address in Settings → Canvas
+(the one you open Canvas at, like `canvas.youruni.edu` or
+`youruni.instructure.com`) and sign in. Oculus works out how your university
+signs in from it. [docs/development.md](docs/development.md) has the rest.
 
 ## Docs
 
@@ -107,8 +112,8 @@ credit. Until a license lands, all rights are reserved.
 
 ## Use it sensibly
 
-Oculus isn't affiliated with or endorsed by the University of Melbourne. It
-signs in as you, to material you already have access to, and your session stays
+Oculus isn't affiliated with or endorsed by any university, Instructure, Ed or
+Echo360. It signs in as you, to material you already have access to, and your session stays
 on your own machine.
 
 Use it at your own risk, and in line with your university's rules on AI use

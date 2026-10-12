@@ -50,13 +50,14 @@ pub(super) fn resume_in(broker: &Credentialed, in_process: impl FnOnce() -> Resu
 /// What the sign-in page looks like from here, for when the flow fails. It
 /// only reads the page, so it keeps no session.
 pub fn diagnose() -> String {
-    let env = Env::new(
-        &crate::library::paths::data_dir(),
-        crate::library::paths::CANVAS_BASE,
-        &Keychain,
-        &NoSessions,
-    );
-    keyd_core::okta::diagnose(&env)
+    let Some(inst) = crate::sources::institution::current() else {
+        return format!("{}\n", crate::sources::institution::NOT_CONFIGURED);
+    };
+    let dir = crate::library::paths::data_dir();
+    match Env::new(&dir, &inst.site(), &Keychain, &NoSessions) {
+        Ok(env) => keyd_core::okta::diagnose(&env),
+        Err(e) => format!("{e}\n"),
+    }
 }
 
 pub(super) fn run_sign_in(
@@ -77,11 +78,14 @@ fn signed_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, St
 
 /// Called when a probe finds the session dead: rebuild it silently if
 /// automated sign-in is set up. `false` means ask the user; every reason but
-/// "never set up" and "signed out" is logged, a keychain refusal included.
+/// "never set up", "not Okta" and "signed out" is logged, a keychain refusal
+/// included.
 pub fn try_auto_recover(app: &tauri::AppHandle, trigger: Trigger) -> bool {
     let dir = crate::library::paths::data_dir();
     let outcome = match sign_in(&dir, trigger) {
-        Err(LoginError::NotConfigured | LoginError::SignedOut) => return false,
+        Err(LoginError::NotConfigured | LoginError::NotOkta(_) | LoginError::SignedOut) => {
+            return false
+        }
         Err(e) => Err(e.to_string()),
         Ok(()) => signed_in(app, &dir),
     };

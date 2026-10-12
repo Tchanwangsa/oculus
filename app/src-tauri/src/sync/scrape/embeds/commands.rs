@@ -16,6 +16,7 @@ use crate::db::store::{
 };
 use crate::library::paths;
 use crate::sources::echo360::{self, embed};
+use crate::sources::institution;
 use crate::sync::FileEvent;
 
 pub const RESTRICTED: &str = "Download is turned off for this video";
@@ -31,7 +32,7 @@ pub async fn echo360_embed_info(
     link_id: String,
     src: String,
 ) -> Result<EmbedRow, String> {
-    let retrieve = embed::retrieve_url(&src, &link_id)?;
+    let retrieve = embed::retrieve_url(&institution::canvas_base()?, &src, &link_id)?;
     let data_dir = paths::data_dir();
     let pool = open_pool().await?;
     let row = cached_or_resolved(
@@ -60,7 +61,7 @@ pub async fn echo360_embed_download(
     link_id: String,
     src: String,
 ) -> Result<EmbedRow, String> {
-    let retrieve = embed::retrieve_url(&src, &link_id)?;
+    let retrieve = embed::retrieve_url(&institution::canvas_base()?, &src, &link_id)?;
     let guard = cancels.register(&link_id)?;
     let job = Download {
         app: app.clone(),

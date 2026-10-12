@@ -30,6 +30,10 @@ use sync::subjects::SubjectsState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before anything opens a file in the data dir (`storage::storage_start_over`).
+    library::storage::finish_start_over(&library::paths::data_dir());
+    // No credential goes through keyd until it serves the profile's university.
+    keyd_core::client::bound::bind(sources::institution::bound);
     tauri::Builder::default()
         // ⌘T / ⌘W reach the app as menu events, not key events — see shell/menu.rs.
         .menu(shell::menu::build)
@@ -101,6 +105,8 @@ pub fn run() {
             let restore = app.handle().clone();
             std::thread::spawn(move || {
                 auth::keyd::ensure_installed();
+                // keyd sends the session only to the profile's university.
+                sources::institution::tell_keyd();
                 // Spotify, when Settings → Music is on: its login is keyd's too.
                 music::startup::apply_settings(&restore);
                 // Replay the stored session with a server-side ping.
@@ -129,6 +135,8 @@ pub fn run() {
             auth::commands::check_canvas_session,
             auth::commands::launch_canvas_auth,
             auth::commands::disconnect_canvas,
+            sources::institution::commands::institution_get,
+            sources::institution::commands::institution_configure,
             auth::okta::commands::okta_credential_status,
             auth::okta::commands::okta_save_credentials,
             auth::okta::commands::okta_clear_credentials,
@@ -241,6 +249,7 @@ pub fn run() {
             lectures::chapters::app::lecture_thumbnail,
             lectures::lecture_end::app::lecture_find_end,
             library::storage::storage_report,
+            library::storage::start_over::storage_start_over,
             shell::usage::usage_activity,
             shell::browser::commands::browser_open_url,
             shell::browser::commands::browser_state,

@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use ego_tree::{NodeId, NodeRef};
 use scraper::node::{Element, Node};
+use url::Url;
 
 use super::maths::is_equation_image;
 use super::{ImageMap, SKIP_TAGS};
@@ -12,6 +13,8 @@ pub(super) type Ref<'a> = NodeRef<'a, Node>;
 /// State shared by one document's walk.
 pub(super) struct Walk<'a> {
     pub(super) images: &'a ImageMap,
+    /// The Canvas a relative iframe src is on; `None` keeps only absolute ones.
+    pub(super) canvas: Option<&'a Url>,
     /// `element_toggler` targets by id: each renders at its toggler.
     pub(super) toggles: HashMap<&'a str, Ref<'a>>,
     /// Nodes a widget rendered somewhere else (a reveal's answer, an accordion

@@ -8,7 +8,6 @@ const HOSTS: &[(&str, &str)] = &[
     ("padlet.com", "Padlet"),
     ("padlet.org", "Padlet"),
     ("qualtrics.com", "Survey"),
-    ("q.surveys.unimelb.edu.au", "Survey"),
     ("mentimeter.com", "Mentimeter"),
     ("menti.com", "Mentimeter"),
     ("sharepoint.com", "SharePoint"),
@@ -56,7 +55,13 @@ pub(super) fn embed_label(url: &Url, title: &str) -> String {
         };
         return label.to_string();
     }
-    if host_is(&host, "echo360.net.au") && path.starts_with("/media/") && path.ends_with("/public")
+    // A Qualtrics survey on a university's own domain keeps Qualtrics' path.
+    if path.starts_with("/jfe/form/") {
+        return "Survey".to_string();
+    }
+    if crate::sources::echo360::embed::in_region(&host)
+        && path.starts_with("/media/")
+        && path.ends_with("/public")
     {
         return "Echo360".to_string();
     }

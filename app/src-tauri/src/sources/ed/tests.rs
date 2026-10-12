@@ -1,9 +1,10 @@
 use super::client::store_token;
-use super::courses::code_token;
+use super::courses::{code_token, pick_course, term_score};
 use super::document::document_md;
-use super::lti::{ed_course_in_url, exchange_login_token, walk_lti_chain};
+use super::lti::{ed_course_in_url, exchange_login_token, is_ed_label, walk_lti_chain};
+use super::region::{api_for_region, is_ed_host, region_of_api, region_of_landing};
 use super::render::fmt_ts;
-use super::Ed;
+use super::{Ed, EdCourse};
 use crate::providers::credentials::Credentialed;
 use crate::test_support::{FakeKeyd, FakeServer, Reply, Scratch};
 use serde_json::json;
@@ -14,6 +15,111 @@ fn subject_tokens_ignore_staff_typed_suffixes() {
     assert_eq!(code_token("SWEN20003_2025_S2"), "SWEN20003");
     assert_eq!(code_token("INFO30006"), "INFO30006");
     assert_eq!(code_token("  "), "");
+    assert_eq!(code_token("CS 101-001"), "CS101");
+    assert_eq!(code_token("MATH 221 (Fall 2026)"), "MATH221");
+}
+
+fn ed(id: i64, year: &str, session: &str) -> EdCourse {
+    EdCourse {
+        id,
+        code: "CS 101".into(),
+        year: year.into(),
+        session: session.into(),
+    }
+}
+
+#[test]
+fn the_term_picks_the_offering_and_a_tie_picks_none() {
+    let (y25, y26s1, y26s2) = (
+        ed(1, "2025", "S2"),
+        ed(2, "2026", "S1"),
+        ed(3, "2026", "S2"),
+    );
+    let all = [&y25, &y26s1, &y26s2];
+    let pick = |canvas: &str| {
+        let upper = canvas.to_uppercase();
+        let scored: Vec<_> = all.iter().map(|c| (term_score(&upper, c), *c)).collect();
+        pick_course(&scored)
+    };
+    assert_eq!(pick("COMP30026_2026_SM2"), Some(3));
+    // The year narrows it to two; nothing tells those apart.
+    assert_eq!(pick("CS 101 2026"), None);
+
+    let (fall, spring) = (ed(4, "2026", "Fall"), ed(5, "2026", "Spring"));
+    let scored = [
+        (term_score("CS 101 FALL 2026", &fall), &fall),
+        (term_score("CS 101 FALL 2026", &spring), &spring),
+    ];
+    assert_eq!(pick_course(&scored), Some(4));
+}
+
+#[test]
+fn the_api_follows_the_region_a_launch_names() {
+    let landed = |u: &str| region_of_landing(&url::Url::parse(u).unwrap());
+    let api = |u: &str| landed(u).map(|r| api_for_region(&r));
+    assert_eq!(
+        api("https://edstem.org/au/courses/38809").as_deref(),
+        Some("https://edstem.org/api")
+    );
+    assert_eq!(
+        api("https://edstem.org/us/courses/1").as_deref(),
+        Some("https://us.edstem.org/api")
+    );
+    assert_eq!(
+        api("https://us.edstem.org/courses/1").as_deref(),
+        Some("https://us.edstem.org/api")
+    );
+    assert_eq!(api("https://edstem.org/courses/1"), None);
+}
+
+#[test]
+fn a_saved_api_names_the_region_when_no_launch_has() {
+    assert_eq!(
+        region_of_api("https://edstem.org/api").as_deref(),
+        Some("au")
+    );
+    assert_eq!(
+        region_of_api("https://us.edstem.org/api").as_deref(),
+        Some("us")
+    );
+    assert_eq!(region_of_api("https://ed.example.com/api"), None);
+    assert_eq!(region_of_api("https://sahara.us.edstem.org/api"), None);
+    for region in ["au", "us", "eu"] {
+        assert_eq!(
+            region_of_api(&api_for_region(region)).as_deref(),
+            Some(region)
+        );
+    }
+}
+
+#[test]
+fn only_eds_hosts_are_ed() {
+    assert!(is_ed_host("edstem.org"));
+    assert!(is_ed_host("us.edstem.org"));
+    assert!(!is_ed_host("notedstem.org"));
+    assert!(!is_ed_host("edstem.org.example.com"));
+    assert!(!is_ed_host("tool.example.edu"));
+}
+
+#[test]
+fn a_profile_without_a_region_takes_it_from_its_api() {
+    let dir = Scratch::new("ed-region");
+    let mut inst = crate::sources::institution::unimelb();
+    inst.ed_region = None;
+    crate::sources::institution::save(&dir, &inst).unwrap();
+    assert_eq!(super::region(&dir).as_deref(), Some("au"));
+
+    inst.ed_api = None;
+    crate::sources::institution::save(&dir, &inst).unwrap();
+    assert_eq!(super::region(&dir), None);
+}
+
+#[test]
+fn ed_tabs_go_by_several_names() {
+    assert!(is_ed_label("Ed Discussion"));
+    assert!(is_ed_label("ed"));
+    assert!(is_ed_label("EdStem forum"));
+    assert!(!is_ed_label("Education resources"));
 }
 
 #[test]
@@ -217,6 +323,7 @@ fn the_launch_reaches_canvas_through_keyd_and_other_hosts_without_its_cookie() {
         lti.origin()
     );
     let dir = Scratch::new("ed-lti");
+    crate::sources::institution::save(&dir, &crate::sources::institution::unimelb()).unwrap();
     let keyd = FakeKeyd::start(&dir, move |_, _| {
         (
             json!({"status": 200, "headers": []}),
@@ -242,6 +349,7 @@ fn the_launch_reaches_canvas_through_keyd_and_other_hosts_without_its_cookie() {
 #[test]
 fn a_dead_canvas_session_ends_the_launch_with_the_reason() {
     let dir = Scratch::new("ed-lti-dead");
+    crate::sources::institution::save(&dir, &crate::sources::institution::unimelb()).unwrap();
     let _keyd = FakeKeyd::start(&dir, |_, _| {
         (
             json!({"error": "missing", "detail": "no canvas session is stored",
@@ -291,4 +399,47 @@ fn rate_limit_waits_follow_retry_after_else_double() {
     assert_eq!(rate_limit_wait(None, 0), Duration::from_secs(2));
     assert_eq!(rate_limit_wait(None, 3), Duration::from_secs(16));
     assert_eq!(rate_limit_wait(Some("soon"), 1), Duration::from_secs(4));
+}
+
+#[test]
+fn a_launch_names_eds_region_in_its_first_path_segment() {
+    let region = |u: &str| region_of_landing(&url::Url::parse(u).unwrap());
+    assert_eq!(
+        region("https://edstem.org/au/courses/38809?_logintoken=x").as_deref(),
+        Some("au")
+    );
+    assert_eq!(
+        region("https://edstem.org/us/courses/1").as_deref(),
+        Some("us")
+    );
+    assert_eq!(region("https://edstem.org/courses/1"), None);
+    assert_eq!(region("https://edstem.org/AU/courses/1"), None);
+    assert_eq!(region("https://edstem.org/../courses/1"), None);
+}
+
+#[test]
+fn a_launched_course_is_reused_while_the_session_is_enrolled_in_it() {
+    let dir = Scratch::new("ed-launched");
+    let _keyd = FakeKeyd::start(&dir, |header, _| match header["op"].as_str().unwrap() {
+        "forward" => match header["path"].as_str().unwrap() {
+            "/api/user" => (
+                json!({"status": 200, "headers": []}),
+                br#"{"user":{"name":"Ada"},"courses":[
+                    {"course":{"id":11,"code":"CS 101","year":"2026","session":"Fall"}},
+                    {"course":{"id":12,"code":"CS 101","year":"2026","session":"Fall"}}]}"#
+                    .to_vec(),
+            ),
+            _ => (json!({"status": 200, "headers": []}), b"{}".to_vec()),
+        },
+        _ => (json!({}), vec![]),
+    });
+    let ed = Ed::open(&dir);
+    assert_eq!(ed.course_for("CS 101 Fall 2026").unwrap(), None);
+    assert_eq!(ed.launched_course(5), None);
+
+    ed.remember_launch(5, 12);
+    assert_eq!(Ed::open(&dir).launched_course(5), Some(12));
+
+    ed.remember_launch(6, 99);
+    assert_eq!(Ed::open(&dir).launched_course(6), None);
 }

@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/sync/useAuth";
 import { getSyncRunSummaries, type SyncRun } from "@/lib/db";
 import { fmtSynced, sqliteUtcToMs } from "@/lib/format/format";
 import { triggerSync } from "@/lib/pipeline/syncRunner";
+import { useInstitution } from "@/stores/sync/institutionStore";
 import { useSyncStore } from "@/stores/sync/syncStore";
 import { useHomeSection } from "./useHomeSection";
 
@@ -27,6 +28,7 @@ export function SyncControl() {
   const progress = useSyncStore((s) => s.progress);
   const completedAt = useSyncStore((s) => s.completedAt);
   const { status: authStatus, connect } = useAuth();
+  const institution = useInstitution();
 
   const reload = useCallback(() => {
     // The top `sync_runs` row may be running or interrupted; find a completed one.
@@ -43,7 +45,8 @@ export function SyncControl() {
 
   const start = async () => {
     setError(null);
-    // No live session: open the Canvas sign-in window, as the Sync page does.
+    // No live session: open the Canvas sign-in window (or, with no address
+    // yet, Settings → Canvas), as the Sync page does.
     if (authStatus !== "connected") {
       connect();
       return;
@@ -79,7 +82,7 @@ export function SyncControl() {
       ) : (
         <Button variant="outline" size="xs" onClick={start}>
           <ArrowsClockwise />
-          Sync now
+          {institution && !institution.canvas ? "Set up Canvas" : "Sync now"}
         </Button>
       )}
       {error && !scraping && <span className="text-warning/80">{error}</span>}

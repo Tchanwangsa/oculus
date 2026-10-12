@@ -134,7 +134,8 @@ with the app's icon.
   hash, pid), `has`, `store`, `get`, `delete`, `forward`, `webcrypto_key`, the Okta ops `okta_save`,
   `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`, and the
   session ops `session_get`, `session_put`, `session_clear`, `session_status`,
-  `session_mark` and `sign_out` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
+  `session_mark` and `sign_out` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)),
+  and `site_set` ([auth.md](./auth.md#keyd-sends-the-session-only-to-the-profiles-university)).
   No op returns a key, a password, a seed or a token, with two exceptions,
   both to the app only: `get` returns the stored value of a name in
   `names::READABLE`, which is only `music.spotify`, Spotify's credentials
@@ -149,7 +150,9 @@ with the app's icon.
 - **`forward` sends one request with the credential added; the credential
   never leaves.** The request names a route (`secret`), `method` (GET or
   POST), `path`, `headers`, and optionally `"stream": true`; keyd sends it to
-  the route's fixed origin and attaches the credential from the vault. Routes
+  the route's origin and attaches the credential from the vault. A cloud
+  route's origin is fixed; `canvas` and `ed` go to the site's
+  ([auth.md](./auth.md#keyd-sends-the-session-only-to-the-profiles-university)). Routes
   are `app/keyd/core/src/forward/route.rs`; a name with no route (Okta's, a
   `session.*` name) cannot be forwarded:
 
@@ -158,8 +161,8 @@ with the app's icon.
   | `voyage` | `https://api.voyageai.com` | `/v1/` | `Authorization: Bearer` |
   | `mineru` | `https://mineru.net` | `/api/v4/` | `Authorization: Bearer` |
   | `groq` | `https://api.groq.com` | `/openai/v1/` | `Authorization: Bearer` |
-  | `canvas` | `https://canvas.lms.unimelb.edu.au` | `/` | `Cookie` (`session.canvas`) |
-  | `ed` | `https://edstem.org` | `/api/` | `x-token` (`session.ed`) |
+  | `canvas` | the site's Canvas | `/` | `Cookie` (`session.canvas`) |
+  | `ed` | the site's Ed (`https://edstem.org` by default) | `/api/` | `x-token` (`session.ed`) |
 
   The client may set only `Content-Type` and `Accept`, plus `Range`,
   `If-None-Match` and `If-Modified-Since` on `canvas` and `ed`; `Cookie`,
@@ -309,12 +312,19 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
   spend guard from Settings → Embeddings, kept here rather than in `settings`
   because the reservation that enforces it already reads this file
   ([retrieval.md](./retrieval.md)).
+- `institution.json` — which university: its Canvas address, how it signs
+  in, and what launches learned ([auth.md](./auth.md#one-institution-profile-says-which-university)).
+- `ed-courses.json` — the Ed course each Canvas course's LTI launch named
+  ([sync.md](./sync.md#ed-content-is-a-custom-xml-dialect)).
 - `canvas-session/`: the authenticated flag, the signed-out marker and the
   sign-in attempt record, with `okta-sign-in.log` beside it
   ([auth.md](./auth.md)). The sessions themselves are in the vault.
 - `vault.bin` and its `vault.bin.lock`, `keyd.sock` (launchd's), and `bin/`
   with a dev-installed `Oculus Helper.app` and keyd's `oculus-keyd.stamp`
   ([above](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+- `start-over` — present only between Start over and the next launch, which
+  empties the directory but for the two usage files, `models/` and keyd's
+  own ([auth.md](./auth.md#one-institution-profile-says-which-university)).
 
 ## The database has one schema owner and two writers
 

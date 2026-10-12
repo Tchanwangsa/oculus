@@ -18,7 +18,7 @@ skipped through.
 | The backdrop, progress rail and step names/glyphs | `app/src/components/onboarding/Backdrop.tsx`, `app/src/components/onboarding/StepRail.tsx`, `app/src/components/onboarding/stepMeta.ts` |
 | Pieces step bodies share | `app/src/components/onboarding/OptionCard.tsx`, `app/src/components/onboarding/SetupOverview.tsx`, `app/src/components/onboarding/HeroHalo.tsx` |
 | One file per step | `app/src/components/onboarding/WelcomeStep.tsx`, `app/src/components/onboarding/CanvasStep.tsx`, `app/src/components/onboarding/LibraryStep.tsx`, `app/src/components/onboarding/AgentStep.tsx`, `app/src/components/onboarding/DoneStep.tsx` |
-| The Canvas step's card, its status and the automated sign-in section | `app/src/components/onboarding/canvas/`; the credential form it shares with Settings, `app/src/components/settings/web/AutoSignIn.tsx` |
+| The Canvas step's card, its status and the automated sign-in section | `app/src/components/onboarding/canvas/`; what it shares with Settings, the credential form `app/src/components/settings/web/AutoSignIn.tsx` and the address field's state `app/src/components/settings/web/useCanvasAddressForm.ts` |
 | The Library step's key cards, subject checklist and first sync | `app/src/components/onboarding/library/`; the key fields it shares with Settings, `app/src/hooks/keys/` |
 | The Agent step's cards; prices, links and order (ordering tested) | `app/src/components/onboarding/agent/`, `app/src/lib/onboarding/agentOptions.ts`, `app/tests/lib/onboarding/agentOptions.test.ts` |
 | Settings → Canvas → Setup: *Run setup again* | `app/src/components/settings/web/SetupSection.tsx` |
@@ -93,21 +93,28 @@ Its props are documented in the file.
 Skip adds the step to `skipped`; Next removes it. Next on Done writes
 `completedAt` and the skipped list, and the shell returns.
 
-## The Canvas step: one sign-in, and an optional way to never repeat it
+## The Canvas step: the address, one sign-in, and an optional way to never repeat it
 
-- **One card** for the University of Melbourne's Canvas, its chip from
-  `useAuth` through `useCanvasConnection`: *Connected* (the card selected),
-  *Signing in…* with a line pointing at the Canvas window, *Session expired*,
-  or *Not connected*. `useAuth` starts at "disconnected" before
-  `get_auth_status` answers, so the hook asks once more itself and shows no
-  chip until one of them settles it. *Connect* (or *Sign in again*, or
-  *Reconnect* once connected) is `useAuth().connect()`: the saved
+- **One card** for the student's Canvas. Without an address it holds the
+  address field Settings → Canvas uses (`useCanvasAddressForm`): Rust checks
+  the address is Canvas and detects its sign-in
+  ([auth.md](./auth.md#one-institution-profile-says-which-university)), and a
+  refusal shows under the field. With one, the card names the host, says how
+  it signs in until connected, and offers *Change* unless a synced library
+  pins the address.
+  Its chip comes from `useAuth` through `useCanvasConnection`: *Connected* (the
+  card selected), *Signing in…* with a line pointing at the Canvas window,
+  *Session expired*, or *Not connected*. `useAuth` starts at "disconnected"
+  before `get_auth_status` answers, so the hook asks once more itself and
+  shows no chip until one of them settles it. *Connect* (or *Sign in again*,
+  or *Reconnect* once connected) is `useAuth().connect()`: the saved
   credentials first, then the login window; the finish arrives as
   `canvas-auth-*` events ([auth.md](./auth.md#every-sign-in-ends-in-one-place)).
-- **Never sign in again**, folded by default, says what the automated
+- **Never sign in again** shows only at a university that signs in through
+  Okta, the one sign-in it answers. Folded by default, it says what the automated
   sign-in does, that push-only (Okta Verify) accounts can't use it, and how
   to get the authenticator key by re-enrolling: *Okta settings* opens
-  `sso.unimelb.edu.au/enduser/settings` with `openUrl`, then add Google
+  `<sso host>/enduser/settings` with `openUrl`, then add Google
   Authenticator, *Can't scan?*, scan the QR with the phone too, paste the key
   or the whole `otpauth://` link. Under the guide sits Settings' own
   `AutoSignIn` with `embedded`, which drops its title and guide and keeps the

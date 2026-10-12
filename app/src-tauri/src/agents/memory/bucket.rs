@@ -16,7 +16,7 @@ pub fn bucket_dir(data_dir: &Path, code: Option<&str>) -> PathBuf {
 /// sandbox. A bare code matches the folder it prefixes; a bucket without a
 /// course folder still resolves, so an unsynced subject keeps its memories.
 pub fn resolve_subject(data_dir: &Path, code: &str) -> Result<String, String> {
-    let wanted = code.trim().to_ascii_uppercase();
+    let wanted = crate::library::paths::fold_code(code);
     if wanted.is_empty() {
         return Err("a subject code cannot be empty".into());
     }
@@ -41,7 +41,7 @@ pub fn resolve_subject(data_dir: &Path, code: &str) -> Result<String, String> {
     names.sort();
     let hit: Vec<&String> = names
         .iter()
-        .filter(|n| n.to_ascii_uppercase().starts_with(&wanted))
+        .filter(|n| crate::library::paths::fold_code(n).starts_with(&wanted))
         .collect();
     match hit.len() {
         1 => Ok(hit[0].clone()),

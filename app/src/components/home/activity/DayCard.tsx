@@ -1,9 +1,10 @@
 import { fmtUsage, type ChartDay } from "@/lib/activity/usage";
 import type { Series } from "@/components/home/activity/types";
+import { displayLocale } from "@/lib/format/locale";
 
 /** "Tue 6 Oct" over each series with time that day: its mark, label and time. */
 export function DayCard({ day, series, values }: { day: ChartDay; series: Series[]; values: number[] }) {
-  const date = day.date.toLocaleDateString("en-AU", {
+  const date = day.date.toLocaleDateString(displayLocale, {
     weekday: "short",
     day: "numeric",
     month: "short",

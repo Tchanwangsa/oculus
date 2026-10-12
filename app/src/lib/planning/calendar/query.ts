@@ -1,6 +1,7 @@
 import { startOfDay } from "@/lib/format/format";
 import { weekDays } from "./dates";
 import { isInstant, type CalEvent } from "./model";
+import { displayLocale } from "@/lib/format/locale";
 
 /** Buckets events by the local calendar day they start on. Reuse the result
  *  across grid cells instead of filtering the full event set for each day. */
@@ -78,12 +79,12 @@ export function shortLocation(loc: string): string {
 export function fmtEventTime(e: CalEvent): string {
   if (e.allDay) return "All day";
   const t = (d: Date) =>
-    d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }).replace(" ", "");
+    d.toLocaleTimeString(displayLocale, { hour: "numeric", minute: "2-digit" }).replace(" ", "");
   return e.end && !isInstant(e) ? `${t(e.start)}–${t(e.end)}` : t(e.start);
 }
 
 export function fmtMonth(d: Date): string {
-  return d.toLocaleDateString("en-AU", { month: "long", year: "numeric" });
+  return d.toLocaleDateString(displayLocale, { month: "long", year: "numeric" });
 }
 
 /** "11 – 17 Aug 2026", collapsing the month or year when both ends share it. */
@@ -92,11 +93,11 @@ export function fmtWeekRange(anchor: Date): string {
   const a = days[0];
   const b = days[6];
   const sameMonth = a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
-  const left = a.toLocaleDateString("en-AU", {
+  const left = a.toLocaleDateString(displayLocale, {
     day: "numeric",
     ...(sameMonth ? {} : { month: "short" }),
   });
-  const right = b.toLocaleDateString("en-AU", {
+  const right = b.toLocaleDateString(displayLocale, {
     day: "numeric",
     month: "short",
     year: "numeric",

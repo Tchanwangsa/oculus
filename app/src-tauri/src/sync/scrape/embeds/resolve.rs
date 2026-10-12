@@ -36,7 +36,7 @@ impl Resolved {
 }
 
 /// `known` is the link's cached (media id, secure-link id). With those and a
-/// usable Bearer, no launch runs. Otherwise the link is launched; a Bearer
+/// usable Bearer from the link's region, no launch runs. Otherwise the link is launched; a Bearer
 /// the properties call turns down is replaced once, from that launch's
 /// session, which is redeemed at once because it goes stale in minutes.
 pub(super) fn properties_for(
@@ -45,30 +45,34 @@ pub(super) fn properties_for(
     known: Option<(String, String)>,
     bearer: &EmbedBearer,
 ) -> Result<Resolved, String> {
-    let with = |jwt: &str, media_id: &str, sl: &str| {
-        embed::properties(jwt, sl, media_id).map(|info| Resolved {
+    let with = |b: &embed::Bearer, media_id: &str, sl: &str| {
+        embed::properties(b, sl, media_id).map(|info| Resolved {
             media_id: media_id.to_string(),
             secure_link_id: sl.to_string(),
             info,
         })
     };
-    if let (Some((media_id, sl)), Some(b)) = (&known, bearer.usable()) {
-        match with(&b.jwt, media_id, sl) {
+    let region = embed::region_of(retrieve);
+    let usable = bearer
+        .usable()
+        .filter(|b| region.as_deref() == Some(b.base.as_str()));
+    if let (Some((media_id, sl)), Some(b)) = (&known, usable) {
+        match with(&b, media_id, sl) {
             Err(PropertiesError::Rejected(_)) => bearer.clear(),
             other => return other.map_err(String::from),
         }
     }
     let agent = embed::agent();
     let launch = embed::launch(&Canvas::open(data_dir), &agent, retrieve)?;
-    if let Some(b) = bearer.usable() {
-        match with(&b.jwt, &launch.media_id, &launch.secure_link_id) {
+    if let Some(b) = bearer.usable().filter(|b| b.base == launch.base) {
+        match with(&b, &launch.media_id, &launch.secure_link_id) {
             Err(PropertiesError::Rejected(_)) => bearer.clear(),
             other => return other.map_err(String::from),
         }
     }
-    let fresh = embed::redeem(&agent, &launch.session_id)?;
+    let fresh = embed::redeem(&agent, &launch.base, &launch.session_id)?;
     bearer.set(fresh.clone());
-    with(&fresh.jwt, &launch.media_id, &launch.secure_link_id).map_err(String::from)
+    with(&fresh, &launch.media_id, &launch.secure_link_id).map_err(String::from)
 }
 
 /// Save the poster as `courses/<code>/images/echo-<mediaId>.jpg`, since its

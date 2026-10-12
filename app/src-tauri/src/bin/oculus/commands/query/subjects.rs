@@ -2,9 +2,10 @@
 
 use crate::*;
 
-/// `MULT20015` matches `MULT20015_2026_SM2`.
+/// `MULT20015` matches `MULT20015_2026_SM2`, and `cs-101` matches
+/// `CS 101 Fall 2026` (`paths::fold_code`).
 pub(crate) fn matches_code(code: &str, wanted: &str) -> bool {
-    let (code, wanted) = (code.to_uppercase(), wanted.to_uppercase());
+    let (code, wanted) = (paths::fold_code(code), paths::fold_code(wanted));
     code == wanted || code.starts_with(&format!("{wanted}_"))
 }
 

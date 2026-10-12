@@ -48,7 +48,8 @@ pub fn outcome_to_wire(outcome: &Result<String, LoginError>) -> Value {
             let mut v = json!({"result": "error", "code": e.code()});
             match e {
                 LoginError::NotConfigured | LoginError::SignedOut => {}
-                LoginError::UnreadableCredentials(d)
+                LoginError::NotOkta(d)
+                | LoginError::UnreadableCredentials(d)
                 | LoginError::BadPassword(d)
                 | LoginError::BadTotp(d)
                 | LoginError::Locked(d)
@@ -74,6 +75,7 @@ pub fn outcome_from_wire(v: &Value) -> Option<Result<(), LoginError>> {
             Some(Err(match v.get("code")?.as_str()? {
                 "not_configured" => LoginError::NotConfigured,
                 "signed_out" => LoginError::SignedOut,
+                "not_okta" => LoginError::NotOkta(detail()?),
                 "unreadable_credentials" => LoginError::UnreadableCredentials(detail()?),
                 "bad_password" => LoginError::BadPassword(detail()?),
                 "bad_totp" => LoginError::BadTotp(detail()?),
@@ -110,6 +112,7 @@ impl LoginError {
     pub fn code(&self) -> &'static str {
         match self {
             LoginError::NotConfigured => "not_configured",
+            LoginError::NotOkta(_) => "not_okta",
             LoginError::SignedOut => "signed_out",
             LoginError::UnreadableCredentials(_) => "unreadable_credentials",
             LoginError::BadPassword(_) => "bad_password",
@@ -132,6 +135,7 @@ mod tests {
     fn every_variant() -> Vec<LoginError> {
         vec![
             LoginError::NotConfigured,
+            LoginError::NotOkta("https://canvas.foo.edu".into()),
             LoginError::SignedOut,
             LoginError::UnreadableCredentials("OSStatus -128 \"quoted\"".into()),
             LoginError::BadPassword("Password is incorrect".into()),

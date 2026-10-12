@@ -2,16 +2,18 @@
 //! launch like a browser.
 
 use super::client::keyd_failure;
-use super::{Ed, ED_BASE, TIMEOUT};
+use super::region::{api_for_region, is_ed_api, is_ed_host, region_of_landing};
+use super::{Ed, TIMEOUT};
 use scraper::Html;
 use std::collections::HashMap;
 
 use keyd_core::client::SessionKind;
 
 impl Ed {
-    /// The Ed course backing a Canvas course. Ed only enrols an account when a
-    /// board is first opened, so a miss in `/api/user` falls back to the LTI
-    /// launch, which enrols and names the course. `Ok(None)`: no Ed tool.
+    /// The Ed course backing a Canvas course: what its last launch named, else
+    /// a match in `/api/user`. Ed only enrols an account when a board is first
+    /// opened, so a miss falls back to the LTI launch, which enrols and names
+    /// the course. `Ok(None)`: no Ed tool.
     pub fn resolve_course(
         &self,
         canvas: &crate::sources::canvas::Canvas,
@@ -19,12 +21,18 @@ impl Ed {
         canvas_code: &str,
     ) -> Result<Option<i64>, String> {
         if self.has_session() {
+            if let Some(id) = self.launched_course(canvas_course_id) {
+                return Ok(Some(id));
+            }
             if let Ok(Some(id)) = self.course_for(canvas_code) {
                 return Ok(Some(id));
             }
         }
         match self.connect_via_canvas(canvas, canvas_course_id) {
-            Ok(course_id) => Ok(Some(course_id)),
+            Ok(course_id) => {
+                self.remember_launch(canvas_course_id, course_id);
+                Ok(Some(course_id))
+            }
             Err(e) if e.contains("no Ed Discussion tool") => Ok(None),
             Err(e) => Err(e),
         }
@@ -40,8 +48,41 @@ impl Ed {
     ) -> Result<i64, String> {
         let tool_path = find_ed_tool(canvas, canvas_course_id)?;
         let (login_token, destination) = walk_lti_chain(canvas, &tool_path)?;
-
-        let token = exchange_login_token(ED_BASE, &login_token)?;
+        // The login token goes only to Ed: a tab merely labelled like Ed may
+        // launch another tool.
+        let host = destination.host_str().unwrap_or("");
+        if !is_ed_host(host) {
+            return Err(format!("the Ed launch landed on {host}, which is not Ed"));
+        }
+        // The region names the API host, the lesson links and the workspace
+        // host. Saved before the token: oculus-keyd drops an Ed token when its
+        // origin moves, and the token is exchanged only on a host keyd took.
+        let api = match region_of_landing(&destination) {
+            Some(landed) => {
+                let api = api_for_region(&landed);
+                let taken = crate::sources::institution::learn(&self.data_dir, |i| {
+                    i.ed_region = Some(landed);
+                    i.ed_api = Some(api.clone());
+                });
+                if !taken {
+                    return Err(format!(
+                        "could not save Ed's API host {api} to the institution profile (see the log)"
+                    ));
+                }
+                *self.api.lock().unwrap() = api.clone();
+                api
+            }
+            None => {
+                let api = self.api.lock().unwrap().clone();
+                if !is_ed_api(&api) {
+                    return Err(format!(
+                        "the Ed launch named no region, and the saved API host {api} is not Ed's"
+                    ));
+                }
+                api
+            }
+        };
+        let token = exchange_login_token(&api, &login_token)?;
         self.keyd
             .session_put(SessionKind::Ed, &token)
             .map_err(keyd_failure)?;
@@ -74,22 +115,26 @@ pub(super) fn exchange_login_token(base: &str, login_token: &str) -> Result<Stri
         .ok_or_else(|| "login_token exchange returned no token".to_string())
 }
 
-/// The course's "Ed Discussion" tool path — tool ids differ per sub-account.
+/// The course's Ed tool path — tool ids differ per sub-account.
 fn find_ed_tool(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Result<String, String> {
     let tabs = canvas.get_json(&format!("/api/v1/courses/{course_id}/tabs"))?;
     tabs.as_array()
         .into_iter()
         .flatten()
         .find(|t| {
-            t["label"]
-                .as_str()
-                .is_some_and(|l| l.contains("Ed Discussion"))
+            t["label"].as_str().is_some_and(is_ed_label)
                 && t["html_url"]
                     .as_str()
                     .is_some_and(|u| u.contains("/external_tools/"))
         })
         .and_then(|t| t["html_url"].as_str().map(str::to_string))
         .ok_or_else(|| "course has no Ed Discussion tool".to_string())
+}
+
+/// "Ed Discussion" at most universities; plain "Ed" or "EdStem" at some.
+pub(super) fn is_ed_label(label: &str) -> bool {
+    let l = label.trim().to_lowercase();
+    l.contains("ed discussion") || l == "ed" || l.contains("edstem")
 }
 
 const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
@@ -118,12 +163,12 @@ pub(super) fn walk_lti_chain(
 ) -> Result<(String, url::Url), String> {
     let mut jar: HashMap<String, HashMap<String, String>> = HashMap::new();
     let agent = ureq::AgentBuilder::new().redirects(0).build();
-    let mut url = crate::sources::canvas::resolve(tool_path)?;
+    let mut url = canvas.resolve(tool_path)?;
     let mut form: Option<String> = None;
 
     for _ in 0..12 {
         let sent = form.take();
-        let leg = if crate::sources::canvas::is_canvas(&url) {
+        let leg = if canvas.is_canvas(&url) {
             let hop = match &sent {
                 Some(body) => canvas.hop(
                     "POST",

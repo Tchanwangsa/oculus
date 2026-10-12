@@ -1,7 +1,7 @@
 //! The session half of `Ed`: authenticated GETs through oculus-keyd, token
 //! renewal, and saving a pasted token.
 
-use super::{Ed, ED_API, ED_BASE, TIMEOUT};
+use super::{api_base, Ed, ED_API, TIMEOUT};
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -31,6 +31,8 @@ impl Ed {
     pub fn open(data_dir: &Path) -> Self {
         Ed {
             keyd: Credentialed::at(data_dir),
+            data_dir: data_dir.to_path_buf(),
+            api: Mutex::new(api_base(data_dir)),
             courses: Mutex::new(None),
         }
     }
@@ -44,7 +46,7 @@ impl Ed {
     /// return the name. The check is a direct request: the token is not
     /// stored yet, and a bad paste must not replace a working session.
     pub fn set_token(data_dir: &Path, token: &str) -> Result<String, String> {
-        store_token(&Credentialed::at(data_dir), ED_BASE, token)
+        store_token(&Credentialed::at(data_dir), &api_base(data_dir), token)
     }
 
     pub fn whoami(&self) -> Result<String, String> {

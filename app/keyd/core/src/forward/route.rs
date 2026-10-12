@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use super::{CANVAS, ED};
 use crate::names;
-use crate::paths::CANVAS_BASE;
+use crate::site::Site;
 
 /// Longest a session route waits for one read from its origin.
 pub const SESSION_READ_TIMEOUT: Duration = Duration::from_secs(180);
@@ -43,6 +43,13 @@ impl Auth {
     }
 }
 
+/// Which of the site's origins a route goes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SiteOrigin {
+    Canvas,
+    Ed,
+}
+
 /// Where a credential may be sent: `origin` (scheme and host, no trailing
 /// slash) and the prefix every forwarded path must start with.
 #[derive(Debug, Clone)]
@@ -50,6 +57,9 @@ pub struct Route {
     /// What a client calls it.
     pub name: &'static str,
     pub origin: String,
+    /// The site origin that replaces `origin` when a request is sent
+    /// (`Route::at`); `None` for a cloud route, or one a test pinned.
+    pub follows: Option<SiteOrigin>,
     pub prefix: &'static str,
     pub auth: Auth,
     /// The longest one read from the origin may take; `None` waits for ever.
@@ -61,20 +71,36 @@ impl Route {
         Route {
             name: secret,
             origin: origin.to_string(),
+            follows: None,
             prefix,
             auth: Auth::Bearer(secret),
             read_timeout: None,
         }
     }
 
-    fn session(name: &'static str, origin: &str, prefix: &'static str, auth: Auth) -> Route {
-        Route {
+    fn session(name: &'static str, follows: SiteOrigin, prefix: &'static str, auth: Auth) -> Route {
+        let mut route = Route {
             name,
-            origin: origin.to_string(),
+            origin: String::new(),
+            follows: Some(follows),
             prefix,
             auth,
             read_timeout: Some(SESSION_READ_TIMEOUT),
+        };
+        route.origin = route.at(&Site::unimelb()).origin;
+        route
+    }
+
+    /// This route as sent for `site`: a session route goes to the site's
+    /// origin, unless a test pinned it.
+    pub fn at(&self, site: &Site) -> Route {
+        let mut route = self.clone();
+        match self.follows {
+            Some(SiteOrigin::Canvas) => route.origin = site.canvas.clone(),
+            Some(SiteOrigin::Ed) => route.origin = site.ed.clone(),
+            None => {}
         }
+        route
     }
 
     /// A login session rather than a cloud key: a wider path charset, a few
@@ -111,13 +137,13 @@ impl Routes {
             Route::cloud(names::GROQ, "https://api.groq.com", "/openai/v1/"),
             Route::session(
                 CANVAS,
-                CANVAS_BASE,
+                SiteOrigin::Canvas,
                 "/",
                 Auth::Cookie(names::SESSION_CANVAS),
             ),
             Route::session(
                 ED,
-                "https://edstem.org",
+                SiteOrigin::Ed,
                 "/api/",
                 Auth::Header {
                     name: "x-token",
@@ -141,7 +167,9 @@ impl Routes {
         if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
             return Err("a test origin must be http://127.0.0.1:<port>".to_string());
         }
-        self.route_mut(name)?.origin = origin.to_string();
+        let route = self.route_mut(name)?;
+        route.origin = origin.to_string();
+        route.follows = None;
         Ok(self)
     }
 
@@ -151,6 +179,7 @@ impl Routes {
     pub(crate) fn set_origin(&mut self, name: &str, origin: &str) {
         if let Ok(route) = self.route_mut(name) {
             route.origin = origin.to_string();
+            route.follows = None;
         }
     }
 
@@ -235,6 +264,30 @@ mod tests {
         ] {
             assert!(routes.get(name).is_none(), "{name}");
         }
+    }
+
+    #[test]
+    fn the_session_routes_go_to_the_sites_origins_unless_pinned() {
+        let site = Site {
+            canvas: "https://canvas.foo.edu".to_string(),
+            login_path: "/login".to_string(),
+            sso: None,
+            ed: "https://us.edstem.org".to_string(),
+        };
+        let routes = Routes::compiled();
+        assert_eq!(routes.get("canvas").unwrap().at(&site).origin, site.canvas);
+        assert_eq!(routes.get("ed").unwrap().at(&site).origin, site.ed);
+        assert_eq!(
+            routes.get("voyage").unwrap().at(&site).origin,
+            "https://api.voyageai.com"
+        );
+        let pinned = Routes::compiled()
+            .with_origin("canvas", "http://127.0.0.1:4321")
+            .unwrap();
+        assert_eq!(
+            pinned.get("canvas").unwrap().at(&site).origin,
+            "http://127.0.0.1:4321"
+        );
     }
 
     #[test]

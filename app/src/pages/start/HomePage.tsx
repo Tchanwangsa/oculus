@@ -4,6 +4,7 @@ import { RecentRow } from "@/components/home/RecentRow";
 import { SyncControl } from "@/components/home/SyncControl";
 import { UpcomingCard } from "@/components/home/UpcomingCard";
 import { useNow } from "@/hooks/ui/useNow";
+import { displayLocale } from "@/lib/format/locale";
 
 /**
  * Home is a dashboard over the library: the date and sync state, then two
@@ -20,7 +21,7 @@ export default function HomePage() {
       <div className="mx-auto max-w-[1200px] space-y-6 px-8 py-6">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <h1 className="text-[22px] font-semibold leading-none tracking-tight text-foreground">
-            {now.toLocaleDateString("en-AU", {
+            {now.toLocaleDateString(displayLocale, {
               weekday: "long",
               day: "numeric",
               month: "long",

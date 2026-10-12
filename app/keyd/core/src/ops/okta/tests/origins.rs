@@ -16,6 +16,5 @@ fn a_test_origin_must_be_loopback_http() {
         assert!(built.with_origins(None, Some(bad)).is_err(), "{bad}");
     }
     let built = state_with(&dir, None, Box::new(NoLegacy));
-    assert_eq!(built.canvas_base, crate::paths::CANVAS_BASE);
-    assert!(built.sso_base.is_none());
+    assert!(built.canvas_base.is_none() && built.sso_base.is_none());
 }

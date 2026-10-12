@@ -32,9 +32,9 @@ pub struct LinkedFile {
     pub text: Option<String>,
 }
 
-/// The web app's page for a lesson (AU region).
-pub fn lesson_url(course_id: i64, lesson_id: i64) -> String {
-    format!("https://edstem.org/au/courses/{course_id}/lessons/{lesson_id}")
+/// The web app's page for a lesson in Ed's `region`.
+pub fn lesson_url(region: &str, course_id: i64, lesson_id: i64) -> String {
+    format!("https://edstem.org/{region}/courses/{course_id}/lessons/{lesson_id}")
 }
 
 /// A lesson's slides by `index`, then id.
@@ -50,9 +50,10 @@ pub fn sorted_slides(lesson: &serde_json::Value) -> Vec<&serde_json::Value> {
     slides
 }
 
+/// The lesson as markdown; `url` is its page in Ed, linked when known.
 pub fn lesson_md(
     lesson: &serde_json::Value,
-    course_id: i64,
+    url: Option<&str>,
     module: Option<&str>,
     extras: &HashMap<i64, SlideExtras>,
 ) -> String {
@@ -76,11 +77,10 @@ pub fn lesson_md(
     if !dates.is_empty() {
         md.push_str(&format!("{}  \n", dates.join(" · ")));
     }
-    let id = lesson["id"].as_i64().unwrap_or(0);
-    md.push_str(&format!(
-        "[Open in Ed]({})\n\n---\n\n",
-        lesson_url(course_id, id)
-    ));
+    if let Some(url) = url {
+        md.push_str(&format!("[Open in Ed]({url})\n\n"));
+    }
+    md.push_str("---\n\n");
 
     let none = SlideExtras::default();
     for (i, slide) in sorted_slides(lesson).into_iter().enumerate() {

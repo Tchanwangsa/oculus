@@ -12,7 +12,7 @@ impl Engine {
     ) -> Result<(), String> {
         let list = self.canvas.get_all(&format!(
             "{}/api/v1/courses/{}/discussion_topics?only_announcements=true&per_page=100&include[]=author",
-            crate::sources::canvas::CANVAS_BASE,
+            self.canvas.base()?,
             c.id
         ))?;
 

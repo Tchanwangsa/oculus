@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { displayLocale } from "@/lib/format/locale";
 
 /** Mirrors `CertState` in `app/src-tauri/src/parse/mineru/result_tls.rs`. */
 export interface ResultCertState {
@@ -18,5 +19,5 @@ export function resultCertState(probe = false): Promise<ResultCertState> {
 export function expiryDate(state: ResultCertState): string {
   return state.expired_at == null
     ? "recently"
-    : `on ${new Date(state.expired_at * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
+    : `on ${new Date(state.expired_at * 1000).toLocaleDateString(displayLocale, { day: "numeric", month: "short", year: "numeric" })}`;
 }

@@ -7,7 +7,7 @@ import { tagSource, videoDisplayName } from "@/components/markdown/embed/card/ta
 import { useEmbedSubject } from "@/components/markdown/embed/EmbedSubject";
 import { useLibraryVideo } from "@/components/markdown/embed/useLibraryVideo";
 import { VideoLinkOut } from "@/components/markdown/embed/VideoLinkOut";
-import { canvasFileUrl } from "@/lib/files/canvasLinks";
+import { canvasFileLink } from "@/lib/files/canvasLinks";
 import { filePageHref, openFileSmart } from "@/lib/files/openFile";
 import { fmtSize } from "@/lib/format/format";
 import { cancelVideoDownload, downloadVideo, useVideoDownloads } from "@/stores/lectures/videoDownloadStore";
@@ -25,7 +25,7 @@ export function CanvasVideoCard({ fileId, title }: { fileId?: string; title?: st
   const subject = useEmbedSubject();
   if (!fileId || !/^\d+$/.test(fileId)) return null;
   const name = videoDisplayName(title, FALLBACK);
-  if (subject === null) return <VideoLinkOut label={name} href={canvasFileUrl(fileId)} />;
+  if (subject === null) return <VideoLinkOut label={name} href={canvasFileLink(fileId)} />;
   const md = tagSource("canvas-video", [["file-id", fileId], ["title", title?.trim()]]);
   if (subject === "loading") return <CardSkeleton md={md} title={name} />;
   return (
@@ -54,7 +54,7 @@ function ResolvedCard({
 }) {
   const { file, recheck } = useLibraryVideo(subject.id, canvasId);
   const download = useVideoDownloads((s) => s.downloads[canvasId]);
-  const canvasIcon = <OpenInCanvasIcon href={canvasFileUrl(String(canvasId), subject.id)} />;
+  const canvasIcon = <OpenInCanvasIcon href={canvasFileLink(String(canvasId), subject.id)} />;
 
   if (file === undefined) return <CardSkeleton md={md} title={name} />;
 

@@ -9,7 +9,6 @@ use super::escape::{escape_attr, escape_html, escape_md};
 use super::labels::{embed_label, host_is};
 use super::tree::{attr, is_tag, plain_text, squeeze, Ref};
 use super::Ctx;
-use crate::library::paths::CANVAS_BASE;
 
 /// Iframe titles that name the player rather than what it plays.
 const JUNK_TITLES: &[&str] = &[
@@ -24,7 +23,7 @@ const JUNK_TITLES: &[&str] = &[
 /// everything stays on one line.
 pub(super) fn iframe_md(n: Ref<'_>, ctx: &Ctx) -> Option<String> {
     let src = attr(&n, "src")?.trim();
-    let url = Url::parse(CANVAS_BASE).ok()?.join(src).ok()?;
+    let url = Url::options().base_url(ctx.walk.canvas).parse(src).ok()?;
     if !matches!(url.scheme(), "http" | "https") {
         return None;
     }
@@ -90,14 +89,16 @@ fn video_tag(name: &str, attrs: &[(&str, Option<String>)], ctx: &Ctx) -> String 
 }
 
 /// The Echo360 `linkId` of a Canvas LTI launch
-/// (`/courses/<c>/external_tools/retrieve?url=https://echo360.net.au/lti/<tool>?linkId=<id>`).
+/// (`/courses/<c>/external_tools/retrieve?url=https://<region>/lti/<tool>?linkId=<id>`).
 fn echo_link_id(url: &Url) -> Option<String> {
     if !url.path().ends_with("/external_tools/retrieve") {
         return None;
     }
     let (_, inner) = url.query_pairs().find(|(k, _)| k == "url")?;
     let inner = Url::parse(&inner).ok()?;
-    if !host_is(inner.host_str()?, "echo360.net.au") || !inner.path().starts_with("/lti/") {
+    if !crate::sources::echo360::embed::in_region(inner.host_str()?)
+        || !inner.path().starts_with("/lti/")
+    {
         return None;
     }
     let (_, id) = inner.query_pairs().find(|(k, _)| k == "linkId")?;

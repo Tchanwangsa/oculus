@@ -33,6 +33,7 @@ mod okta;
 mod resign_tests;
 mod session;
 mod session_import;
+mod site;
 #[cfg(test)]
 mod testing;
 #[cfg(test)]
@@ -62,10 +63,9 @@ pub struct State {
     importing: Mutex<()>,
     routes: Routes,
     upstream: Upstream,
-    /// Canvas's origin for the sign-in; production's unless a debug build
-    /// moved it.
-    canvas_base: String,
-    /// Okta's origin; `None` is production's (`okta::Env::new`).
+    /// Canvas's and Okta's origins as a debug build moved them; `None` is the
+    /// site's (`State::site`).
+    canvas_base: Option<String>,
     sso_base: Option<String>,
     /// One sign-in at a time; see `okta::Flight`.
     flight: okta::Flight,
@@ -87,7 +87,9 @@ pub struct State {
 /// `sign_out` use it for a marker file they could not write; a client reads
 /// it as `Broken`), `missing` (`forward` for a key or session the vault does not hold),
 /// `upstream` (`forward` got no answer: DNS, connect, TLS, a reset, or a
-/// session route's origin stalled). A `missing` session may also carry the
+/// session route's origin stalled), `site` (a `session_put` or `forward` for
+/// a Canvas origin that is not the site's, or a `forward` whose site moved
+/// while it was in flight). A `missing` session may also carry the
 /// `signin` outcome of the attempt to make one.
 #[derive(Debug)]
 pub struct OpError {
@@ -178,7 +180,7 @@ impl State {
             importing: Mutex::new(()),
             routes: Routes::compiled(),
             upstream: Upstream::new(),
-            canvas_base: crate::paths::CANVAS_BASE.to_string(),
+            canvas_base: None,
             sso_base: None,
             flight: okta::Flight::default(),
             clock: crate::clock::system(),
@@ -213,7 +215,7 @@ impl State {
     #[cfg(debug_assertions)]
     pub fn with_origins(mut self, canvas: Option<&str>, sso: Option<&str>) -> Result<Self, String> {
         if let Some(origin) = canvas {
-            self.canvas_base = test_origin(origin)?;
+            self.canvas_base = Some(test_origin(origin)?);
             self.routes.set_origin(crate::forward::CANVAS, origin);
         }
         if let Some(origin) = sso {
@@ -313,6 +315,7 @@ impl State {
             "session_status" => self.session_status(),
             "session_mark" => self.session_mark(req),
             "sign_out" => self.sign_out(),
+            "site_set" => self.site_set(req),
             _ => Err(OpError::new("request", format!("unknown op {op:?}"))),
         }
     }

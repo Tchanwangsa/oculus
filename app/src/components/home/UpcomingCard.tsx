@@ -11,6 +11,7 @@ import {
 import { sameDay, startOfDay } from "@/lib/format/format";
 import { PROJECTS_UPDATED_EVENT } from "@/lib/planning/projects";
 import { useHomeSection } from "./useHomeSection";
+import { displayLocale } from "@/lib/format/locale";
 
 /**
  * Calendar rows change on sync, and tasks (live off `project_tasks`) on any
@@ -98,5 +99,5 @@ export function UpcomingCard({ now }: { now: Date }) {
 function dayLabel(day: Date, now: Date): string {
   if (sameDay(day, now)) return "Today";
   if (sameDay(day, new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1))) return "Tomorrow";
-  return day.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "short" });
+  return day.toLocaleDateString(displayLocale, { weekday: "long", day: "numeric", month: "short" });
 }

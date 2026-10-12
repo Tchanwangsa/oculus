@@ -11,6 +11,7 @@ use crate::session::Kind;
 mod diagnosis;
 mod http;
 mod idx_state;
+mod probe;
 #[cfg(test)]
 mod tests;
 
@@ -20,6 +21,7 @@ use idx_state::{
     challenged_factor, check_messages, option_labels, remediation, remediation_names,
     select_payload, summarise, Factor,
 };
+pub use probe::probe_sign_in_page;
 
 /// Sign in headlessly and persist the resulting Canvas session cookie,
 /// returning the cookie header. Driven by whichever remediations Okta offers,

@@ -7,12 +7,15 @@ use url::Url;
 
 use super::super::auth::{parse_lti_form, UA};
 use super::link::is_safe_id;
+use super::region::is_region;
 use crate::sources::canvas::Canvas;
 
 /// What one launch learns. The media and secure-link ids are stable per link;
 /// the session id goes stale within minutes, so it is redeemed at once.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Launch {
+    /// `https://host` of the Echo360 region the player is on.
+    pub base: String,
     pub media_id: String,
     pub secure_link_id: String,
     pub session_id: String,
@@ -44,7 +47,7 @@ pub fn launch(canvas: &Canvas, agent: &ureq::Agent, retrieve: &str) -> Result<La
         })?;
     let action_url = Url::parse(&action)
         .map_err(|e| format!("The Echo360 launch form's target is not a URL: {e}"))?;
-    if action_url.scheme() != "https" || action_url.host_str() != Some("echo360.net.au") {
+    if action_url.scheme() != "https" || !action_url.host_str().is_some_and(is_region) {
         return Err("The Canvas launch form does not post to Echo360".to_string());
     }
 
@@ -79,7 +82,7 @@ pub fn launch(canvas: &Canvas, agent: &ureq::Agent, retrieve: &str) -> Result<La
     parse_player_url(&player)
 }
 
-/// `https://echo360.net.au/ui/player/<mediaId>?sessionId=<s>&secureLinkAccessDataId=<sl>&…`
+/// `https://<region>/ui/player/<mediaId>?sessionId=<s>&secureLinkAccessDataId=<sl>&…`
 pub(super) fn parse_player_url(url: &Url) -> Result<Launch, String> {
     let segments: Vec<&str> = url
         .path_segments()
@@ -98,6 +101,7 @@ pub(super) fn parse_player_url(url: &Url) -> Result<Launch, String> {
             .unwrap_or_default()
     };
     let launch = Launch {
+        base: url.origin().ascii_serialization(),
         media_id,
         secure_link_id: param("secureLinkAccessDataId"),
         session_id: param("sessionId"),

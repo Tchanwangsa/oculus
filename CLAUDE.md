@@ -35,6 +35,12 @@ source. This file is only the rules; the reasons behind them live in `docs/`.
 - No work in hidden WebViews — scraping lives in Rust. (`docs/architecture.md`)
 - Canvas auth is the session cookie; API tokens are disabled by the
   university. (`docs/auth.md`)
+- Oculus works at any university. App code never names a university's host
+  or one region of a regional service (Echo360, Ed): it reads the institution
+  profile, and what a launch learns is saved to it. UniMelb is a test fixture
+  and the profile for pre-profile installs, nothing more;
+  `app/tests/repo/uniAgnostic.test.ts` fails the build otherwise.
+  (`docs/auth.md`)
 - Parses and embeds take minutes. Don't layer timeouts on top. Never add a
   fallback between parse engines, and a failed parse must surface.
   (`docs/parsing.md`, `docs/retrieval.md`)

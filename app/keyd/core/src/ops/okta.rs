@@ -13,6 +13,7 @@ use std::sync::{Condvar, Mutex, MutexGuard};
 
 use serde_json::{json, Value};
 
+use super::legacy::Removal;
 use super::{OpError, Reply, State};
 use crate::names;
 use crate::okta::{
@@ -193,11 +194,12 @@ impl State {
     /// one is the guard's.
     pub(super) fn sign_in(&self, trigger: Trigger, role: Role) -> Outcome {
         self.flight.run(|| {
+            let site = self
+                .vault()
+                .and_then(|vault| self.site(&vault))
+                .map_err(|e| LoginError::UnreadableCredentials(describe(e)))?;
             let (creds, sessions) = (VaultStore(self), VaultSessions(self));
-            let mut env = Env::new(&self.data_dir, &self.canvas_base, &creds, &sessions);
-            if let Some(sso) = &self.sso_base {
-                env.sso_base = sso.clone();
-            }
+            let mut env = Env::new(&self.data_dir, &site, &creds, &sessions)?;
             env.now = self.clock.clone();
             okta::sign_in(&env, trigger, role)
         })
@@ -252,7 +254,17 @@ impl State {
     /// what became of the old items (`legacy::Removal`). Their markers are
     /// set, so nothing is imported afterwards.
     pub(super) fn okta_forget(&self) -> Result<Reply, OpError> {
-        let existed = self.vault()?.update(|e| {
+        let (existed, legacy) = self.forget_okta(&self.vault()?)?;
+        Ok(Reply {
+            note: Some(format!("legacy={}", legacy.as_str())),
+            ..json!({"existed": existed, "legacy": legacy.as_str()}).into()
+        })
+    }
+
+    /// `okta_forget`'s work, which `site_set` does too: whether any value was
+    /// there, and what became of the old items.
+    pub(super) fn forget_okta(&self, vault: &Vault) -> Result<(bool, Removal), OpError> {
+        let existed = vault.update(|e| {
             let mut any = false;
             for name in names::OKTA {
                 any |= e.remove(name);
@@ -260,11 +272,7 @@ impl State {
             }
             any
         })?;
-        let legacy = self.remove_legacy(names::OKTA);
-        Ok(Reply {
-            note: Some(format!("legacy={}", legacy.as_str())),
-            ..json!({"existed": existed, "legacy": legacy.as_str()}).into()
-        })
+        Ok((existed, self.remove_legacy(names::OKTA)))
     }
 
     /// What is on file: the username, and whether a password and a seed are.

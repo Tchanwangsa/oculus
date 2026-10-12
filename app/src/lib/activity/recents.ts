@@ -1,3 +1,5 @@
+import { displayLocale } from "@/lib/format/locale";
+
 /** Per-subject "recently visited" trail. In localStorage, not SQLite, so the
  *  subject home can read it synchronously on first paint. */
 
@@ -68,7 +70,7 @@ export function relativeTime(ts: number): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(ts).toLocaleDateString("en-AU", {
+  return new Date(ts).toLocaleDateString(displayLocale, {
     day: "numeric",
     month: "short",
   });

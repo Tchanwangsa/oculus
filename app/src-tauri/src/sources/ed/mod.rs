@@ -16,6 +16,7 @@ mod lesson_md;
 mod lessons;
 mod live;
 mod lti;
+mod region;
 mod render;
 mod threads;
 mod workspace;
@@ -35,10 +36,24 @@ pub use lessons::LessonList;
 pub use live::open_live_workspace;
 pub use workspace::{unpack as unpack_workspace, WorkspaceFile};
 
-/// Ed's API origin, for the two requests that do not go through oculus-keyd:
-/// the one-shot `login_token` exchange (it has no session yet) and checking a
-/// token a person just pasted.
-const ED_BASE: &str = "https://edstem.org/api";
+/// Ed's API base for `data_dir`: what a launch landed on (`institution.json`),
+/// else the default.
+fn api_base(data_dir: &std::path::Path) -> String {
+    crate::sources::institution::load(data_dir)
+        .and_then(|i| i.ed_api)
+        .unwrap_or_else(|| DEFAULT_API.to_string())
+}
+
+/// Ed's web region for `data_dir`: what a launch named, else the region of
+/// the API the profile holds. `None` until either is known.
+fn region(data_dir: &std::path::Path) -> Option<String> {
+    let inst = crate::sources::institution::load(data_dir)?;
+    inst.ed_region
+        .or_else(|| inst.ed_api.as_deref().and_then(region::region_of_api))
+}
+
+/// Ed's API, until a launch names the region (`region::api_for_region`).
+const DEFAULT_API: &str = "https://edstem.org/api";
 /// The path prefix oculus-keyd's `ed` route takes.
 const ED_API: &str = "/api";
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
@@ -51,11 +66,15 @@ struct EdCourse {
     code: String,
     year: String,
     session: String,
-    created_at: String,
 }
 
 pub struct Ed {
     keyd: Credentialed,
+    data_dir: std::path::PathBuf,
+    /// Ed's API base, from the institution profile, for the two requests that
+    /// do not go through oculus-keyd: the one-shot `login_token` exchange (it
+    /// has no session yet) and checking a token a person just pasted.
+    api: Mutex<String>,
     /// `/api/user` enrolments, fetched once per process.
     courses: Mutex<Option<Vec<EdCourse>>>,
 }

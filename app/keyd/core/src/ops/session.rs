@@ -13,6 +13,7 @@
 
 use serde_json::{json, Value};
 
+use super::site::check_claim;
 use super::{OpError, Reply, State};
 use crate::session::{check_value, markers, store, Kind};
 
@@ -37,6 +38,9 @@ impl State {
     }
 
     /// Replaces the whole session `kind`. `value` rides in the header line.
+    /// With `"canvas"`, the Canvas origin the session was made for, it is
+    /// refused unless that is the site's, checked under the write's lock so a
+    /// `site_set` cannot slip between (`site::check_claim`).
     pub(super) fn session_put(&self, req: &Value) -> Result<Reply, OpError> {
         let kind = kind_of(req.get("kind").unwrap_or(&Value::Null))?;
         let value = req
@@ -46,7 +50,9 @@ impl State {
         check_value(value).map_err(|why| OpError::new("request", why))?;
         let vault = self.vault()?;
         self.import_sessions(&vault)?;
-        store::put(&vault, &self.generation, kind, value)?;
+        store::put_if(&vault, &self.generation, kind, value, |entries| {
+            check_claim(&self.site_in(entries)?, req)
+        })??;
         Ok(json!({"stored": true}).into())
     }
 
@@ -442,6 +448,47 @@ mod tests {
             std::fs::read_to_string(crate::paths::sign_in_record(&dir.0)).unwrap(),
             "{\"x\":1}"
         );
+    }
+
+    #[test]
+    fn a_put_for_a_canvas_that_is_not_the_sites_is_refused() {
+        let dir = Scratch::new("session-claim");
+        let state = state_in(&dir);
+        let unimelb = crate::site::Site::unimelb();
+        let rmit = crate::site::Site {
+            canvas: "https://rmit.instructure.com".to_string(),
+            login_path: "/login".to_string(),
+            sso: None,
+            ed: "https://edstem.org".to_string(),
+        };
+        let put_for = |canvas: &str| {
+            call(
+                &state,
+                "session_put",
+                json!({"kind": "canvas", "value": CANVAS, "canvas": canvas}),
+            )
+        };
+        // A keyd never told the site serves UniMelb: RMIT's cookie stays out.
+        let err = put_for(&rmit.canvas).unwrap_err();
+        assert_eq!(err.kind, "site");
+        assert!(err.detail.contains(&unimelb.canvas), "{}", err.detail);
+        assert_eq!(state.session_generation(), 0);
+        assert!(!vault(&dir).has("session.canvas").unwrap());
+
+        call(&state, "site_set", json!({"site": rmit.to_wire()})).unwrap();
+        put_for(&rmit.canvas).unwrap();
+        assert_eq!(put_for(&unimelb.canvas).unwrap_err().kind, "site");
+        assert_eq!(
+            vault(&dir).get("session.canvas").unwrap().as_deref(),
+            Some(CANVAS)
+        );
+        let err = call(
+            &state,
+            "session_put",
+            json!({"kind": "canvas", "value": CANVAS, "canvas": 5}),
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, "request");
     }
 
     #[test]
