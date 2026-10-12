@@ -1,5 +1,5 @@
 //! Ed Lessons: a course's lessons, one lesson's slides, a quiz's questions,
-//! and a challenge's workspace as a zip.
+//! a challenge's settings, and a challenge's workspace as a zip.
 //!
 //! Every call is a read except `workspace_zip`, whose POSTs and live session
 //! attach the student's own workspace the way opening the slide does. No request sends
@@ -69,6 +69,20 @@ impl Ed {
         let mut questions = reply["questions"].as_array().cloned().unwrap_or_default();
         questions.sort_by_key(|q| q["index"].as_i64().unwrap_or(i64::MAX));
         Ok(questions)
+    }
+
+    /// A challenge's settings (`type`, `settings.run_command`, `features`,
+    /// `due_at`) and the student's standing on it. The answer wraps it in
+    /// `challenge`; a bare object is taken as it is.
+    pub fn challenge(&self, challenge_id: i64) -> Result<serde_json::Value, String> {
+        let reply = self.get(&format!("/challenges/{challenge_id}"))?;
+        match &reply["challenge"] {
+            serde_json::Value::Object(_) => Ok(reply["challenge"].clone()),
+            _ if reply.is_object() => Ok(reply),
+            _ => Err(format!(
+                "no challenge in the answer for challenge {challenge_id}"
+            )),
+        }
     }
 
     /// Ed's web region, once a launch has named it.
