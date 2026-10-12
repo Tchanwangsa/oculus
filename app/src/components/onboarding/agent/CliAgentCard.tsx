@@ -14,7 +14,8 @@ const CHIP: Record<Exclude<CliCardState, "ready" | "unknown">, string> = {
 
 /** Claude Code, Codex or Antigravity: one account each, so the card is
  *  Install → Sign in → Ready. `installing` / `signingIn`: that run is live,
- *  with or without its dialog open. */
+ *  with or without its dialog open. No `onInstall`: the agent installs from a
+ *  terminal on this platform. */
 export function CliAgentCard({
   provider,
   state,
@@ -29,7 +30,7 @@ export function CliAgentCard({
   account: string | null;
   installing: boolean;
   signingIn: boolean;
-  onInstall: () => void;
+  onInstall: (() => void) | null;
   onSignIn: () => void;
 }) {
   const chip =
@@ -43,8 +44,10 @@ export function CliAgentCard({
     );
 
   const action =
-    state === "missing" ? (
-      <Button variant="outline" size="xs" onClick={onInstall}>
+    state === "missing" && !onInstall ? (
+      <span className="text-xs text-muted-foreground">Install it in a terminal</span>
+    ) : state === "missing" ? (
+      <Button variant="outline" size="xs" onClick={onInstall ?? undefined}>
         {installing && <CircleNotch className="animate-spin" />}
         {installing ? "Installing…" : "Install"}
       </Button>

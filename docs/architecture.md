@@ -260,7 +260,8 @@ with the app's icon.
   logs the failure when that file is missing or is not a keyd
   ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
 - **One data dir.** `keyd_core::paths::data_dir` (the OS data dir plus
-  `com.tchan.oculus`) is the only definition; the app's `paths::data_dir`
+  `com.tchan.oculus` on macOS; the Windows profile folder is described in
+  [windows.md](./windows.md)) is the only definition; the app's `paths::data_dir`
   and keyd's `main` both call it. Only a debug keyd reads an override.
 
 ## Scraping lives in Rust because hidden WebViews freeze
@@ -283,7 +284,8 @@ port with a per-launch token and Range support, scoped to `lectures/` and
 
 `library::paths::data_dir()` computes the directory Tauri would
 (`~/Library/Application Support/com.tchan.oculus`) with no `AppHandle`, and is
-the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
+the only way Rust reaches it — so the CLI and the app cannot disagree. Windows
+uses the shared profile folder described in [windows.md](./windows.md). Inside:
 
 - `oculus.db` — SQLite, everything structured.
 - `courses/<code>/…` — scraped files in Canvas's layout, with the parser's
@@ -420,27 +422,40 @@ webview, laid out the same way.
   load and emits `browser-favicon`; the frontend owns the `browser_favicons`
   rows. Rust sees events, the frontend owns rows — the same split as history.
 
-## Native pages sit under the app, seen through holes in `#root`
+## Native pages show through holes the app opens
 
-The app's own webview is on top and transparent; every page is below it, so
-popovers, menus and dialogs draw over a live page and nothing is hidden for
-them.
+The frontend opens a hole over each shown page's slot
+(`app/src/lib/shell/nativeHoles.ts`), rounded where the slot meets the card's
+bottom corners. Popovers, menus and dialogs are portals (children of `body`),
+so they draw over a live page; anything inside `#root` over a slot is hidden
+by the page. A fullscreen media player, a fixed
+overlay inside `#root`, suspends every hole. `adopt_page`
+(`app/src-tauri/src/shell/native_layer/`) runs right after every `add_child`.
 
-- **Rust** (`app/src-tauri/src/shell/native_layer/`): `init` turns off the app
-  webview's background, and `put_below_app` moves each page to the bottom of
-  the window's views right after `add_child`.
-- **The holes** (`app/src/lib/shell/nativeHoles.ts`): `#root` paints the
-  background, and one `clip-path` on it cuts a hole over each shown page,
-  rounded where the slot meets the card's bottom corners. Portals are
-  children of `body`, so they draw over the page; anything inside `#root`
-  over a slot falls in the hole. A fullscreen media player suspends every
-  hole, since it is a fixed overlay inside `#root`.
-- **Clicks** go through a `hitTest:` override on the window's content view: a
-  point inside a shown page's frame goes to that page, unless the frontend
-  has reported a portal over an open hole (`native_set_blocked`). Then the
-  app keeps the click, so clicking the page under a popover dismisses it.
+- **macOS: pages sit under the app.** `init` turns off the app webview's
+  background, `adopt_page` moves each page to the bottom of the window's
+  views, and the holes are one `clip-path` on `#root`, which paints the
+  background. Clicks go through a `hitTest:` override on the window's content
+  view: a point inside a shown page's frame goes to that page, unless the
+  frontend has reported a portal over an open hole (`native_set_blocked`).
+  Then the app keeps the click, so clicking the page under a popover
+  dismisses it.
+- **Windows: pages sit over an opaque app, clipped.** A transparent WebView2
+  shows the app's own background, never a sibling under it, so the macOS
+  layering cannot work. `adopt_page` raises each page's wry container (the
+  HWND `ICoreWebView2Controller::ParentWindow` returns) to the top and gives
+  it the current window region, empty until a hole opens over it. The frontend sends the holes and every portal
+  over them in logical window points (`native_set_holes`, from
+  `app/src/lib/shell/nativeRegions.ts`), and each page's region becomes the
+  holes over it minus those portals (`SetWindowRgn`, in container pixels).
+  Rust re-applies it after moving or resizing a page itself. A page with no
+  hole over it is hidden, and so is the page under a dialog's full-window
+  overlay. Clicks follow the region natively; a click on the page beside a
+  popover moves focus out of the app, and that `blur` sends Escape so the
+  popover closes, as switching apps does.
 - **Ordering**: a hole opens only after its page is placed, and closes before
-  the page is hidden or parked, or the bare window shows through.
+  the page is hidden or parked, or the bare window (macOS) or a page in the
+  wrong place (Windows) shows for a frame.
 
 ## Gotchas
 
@@ -448,7 +463,7 @@ them.
 - Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
 - A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
 - A background on `html` or `body` paints the whole canvas and hides every native page — keep it on `#root`.
-- A strip or menu drawn over a native page from inside `#root` is cut away — portal it ([above](#native-pages-sit-under-the-app-seen-through-holes-in-root)).
+- A strip or menu drawn over a native page from inside `#root` is hidden by the page — portal it ([above](#native-pages-show-through-holes-the-app-opens)).
 - Reaching the data dir any way but `library::paths::data_dir()` (itself `keyd_core::paths::data_dir`) lets the CLI, the app and keyd diverge.
 - A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process; `get` is app-only and limited to `names::READABLE` for that reason, and `webcrypto_key` is app-only and serves each build only its own key.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.

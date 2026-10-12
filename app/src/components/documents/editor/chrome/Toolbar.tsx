@@ -1,3 +1,4 @@
+import { shortcut } from "@/lib/platform";
 import { useState, type ComponentType, type ReactNode } from "react";
 import type { StateCommand } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
@@ -124,19 +125,19 @@ export function Toolbar({
       </Select>
 
       <Divider />
-      <Tool label="Bold" keys="⌘B" on={active.bold} onRun={() => run(toggleBold)}>
+      <Tool label="Bold" keys={shortcut("mod+B")} on={active.bold} onRun={() => run(toggleBold)}>
         <TextB weight="bold" />
       </Tool>
-      <Tool label="Italic" keys="⌘I" on={active.italic} onRun={() => run(toggleItalic)}>
+      <Tool label="Italic" keys={shortcut("mod+I")} on={active.italic} onRun={() => run(toggleItalic)}>
         <TextItalic />
       </Tool>
-      <Tool label="Strikethrough" keys="⌘⇧X" on={active.strike} onRun={() => run(toggleStrike)}>
+      <Tool label="Strikethrough" keys={shortcut("mod+shift+X")} on={active.strike} onRun={() => run(toggleStrike)}>
         <TextStrikethrough />
       </Tool>
-      <Tool label="Inline code" keys="⌘E" on={active.code} onRun={() => run(toggleCode)}>
+      <Tool label="Inline code" keys={shortcut("mod+E")} on={active.code} onRun={() => run(toggleCode)}>
         <CodeSimple />
       </Tool>
-      <Tool label="Link" keys="⌘K" on={active.link} onRun={() => run(toggleLink)}>
+      <Tool label="Link" keys={shortcut("mod+K")} on={active.link} onRun={() => run(toggleLink)}>
         <LinkSimple />
       </Tool>
 
@@ -160,7 +161,7 @@ export function Toolbar({
       </Tool>
       <Tool
         label={active.math ? "Maths tools" : "Equation"}
-        keys={active.math ? "⌘⇧Space" : undefined}
+        keys={active.math ? shortcut("mod+shift+Space") : undefined}
         on={active.math}
         onRun={() => view && (toggleMathTools(view) || (!active.math && run(insertMath)))}
       >

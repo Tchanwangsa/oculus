@@ -277,14 +277,24 @@ fn a_denied_action_with_no_step_is_still_reported() {
 
 #[test]
 fn a_refused_file_write_suggests_its_folder() {
+    let dir = crate::test_support::Scratch::new("agy-refused-file");
+    let folder = dir.join("some folder");
+    let file = folder.join("notes.md");
+    let path = file.to_str().unwrap();
     let (action, target, rule) = refusal(
-            "write_to_file",
-            &serde_json::json!({ "TargetFile": "/Users/s/elsewhere/notes.md" }),
-            "permission check failed for write_file \"/Users/s/elsewhere/notes.md\": user denied permission",
-        );
+        "write_to_file",
+        &serde_json::json!({ "TargetFile": path }),
+        &format!("permission check failed for write_file \"{path}\": user denied permission"),
+    );
     assert_eq!(action, "write_file");
-    assert_eq!(target.as_deref(), Some("/Users/s/elsewhere/notes.md"));
-    assert_eq!(rule.as_deref(), Some("write_file(/Users/s/elsewhere)"));
+    assert_eq!(target.as_deref(), Some(path));
+    assert_eq!(
+        rule,
+        Some(format!(
+            "write_file({})",
+            crate::library::paths::slash_path(folder)
+        ))
+    );
 }
 
 #[test]

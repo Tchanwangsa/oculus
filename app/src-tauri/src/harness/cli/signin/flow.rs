@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -84,6 +84,8 @@ impl SignInLine {
 /// A login in flight: [`submit_code`] writes to it, [`cancel`] kills it.
 pub(super) struct Run {
     pub(super) child: Arc<Mutex<Child>>,
+    /// The Windows job object holding the child's tree, for piped runs.
+    pub(super) job: Option<Arc<crate::runtime::platform::ProcessJob>>,
     pub(super) input: Input,
     /// Set by [`cancel`], so a killed child reports "cancelled", not a signal.
     pub(super) cancelled: Arc<AtomicBool>,
@@ -153,15 +155,16 @@ where
     let bin = discover::binary(provider)?;
 
     let (stdout, stderr, stdin, cancelled, child) = claim(provider, || {
-        let mut child = Command::new(&bin)
+        let mut command = crate::runtime::platform::cli_command(&bin)?;
+        command
             .args(args)
             .env_clear()
             .envs(discover::child_env())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("cannot run {}: {e}", bin.display()))?;
+            .stderr(Stdio::piped());
+        let (mut child, job) = crate::runtime::platform::spawn_agent(&mut command)?;
+        let job = Arc::new(job);
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -170,6 +173,7 @@ where
         let child = Arc::new(Mutex::new(child));
         let run = Run {
             child: child.clone(),
+            job: Some(job),
             input: Input::Pipe(stdin.clone()),
             cancelled: cancelled.clone(),
         };
@@ -247,6 +251,9 @@ pub fn cancel(provider: Provider) -> Result<(), String> {
         .get(&provider)
         .ok_or_else(|| format!("{} is not signing in", provider.label()))?;
     run.cancelled.store(true, Ordering::SeqCst);
+    if let Some(job) = &run.job {
+        job.terminate();
+    }
     if let Input::Terminal(t) = &run.input {
         t.kill();
     }

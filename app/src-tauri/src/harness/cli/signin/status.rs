@@ -1,6 +1,6 @@
 //! Whether each CLI has credentials, asked of the CLI itself.
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use serde::Serialize;
 
@@ -59,12 +59,14 @@ pub fn status(provider: Provider) -> SignInStatus {
         Provider::Opencode | Provider::Antigravity => unreachable!("returned above"),
     };
 
-    let out = Command::new(&bin)
-        .args(args)
-        .env_clear()
-        .envs(discover::child_env())
-        .stdin(Stdio::null())
-        .output();
+    let out = crate::runtime::platform::cli_command(&bin).and_then(|mut cmd| {
+        cmd.args(args)
+            .env_clear()
+            .envs(discover::child_env())
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| e.to_string())
+    });
 
     let out = match out {
         Ok(o) => o,

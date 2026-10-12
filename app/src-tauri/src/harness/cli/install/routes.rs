@@ -54,6 +54,7 @@ pub(super) struct Route {
 /// Claude Code: <https://code.claude.com/docs/en/setup> (script, brew, npm).
 /// No bun route: bun skips the npm package's postinstall, which is what
 /// links the real binary.
+#[cfg(not(windows))]
 const CLAUDE: &[Route] = &[
     Route {
         manager: Manager::Curl,
@@ -120,12 +121,14 @@ const OPENCODE: &[Route] = &[
 
 /// Antigravity: the vendor ships only its install script — no formula, no
 /// npm package.
+#[cfg(not(windows))]
 const ANTIGRAVITY: &[Route] = &[Route {
     manager: Manager::Curl,
     command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
     lands_in: "~/.local/bin",
 }];
 
+#[cfg(not(windows))]
 pub(super) fn routes(provider: Provider) -> &'static [Route] {
     match provider {
         Provider::Claude => CLAUDE,
@@ -219,4 +222,13 @@ pub fn command_for(provider: Provider, manager: Manager) -> Option<&'static str>
         .iter()
         .find(|r| r.manager == manager)
         .map(|r| r.command)
+}
+
+#[cfg(windows)]
+pub(super) fn routes(provider: Provider) -> &'static [Route] {
+    match provider {
+        Provider::Codex => &CODEX[2..],
+        Provider::Opencode => &OPENCODE[2..],
+        Provider::Claude | Provider::Antigravity => &[],
+    }
 }

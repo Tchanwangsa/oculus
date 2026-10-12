@@ -1,3 +1,4 @@
+#![cfg(target_os = "macos")]
 //! The helper app's Info.plist (`bundle/Info.plist`, which keyd-build.mjs
 //! puts in `Oculus Helper.app`) agrees with the names keyd and its installer
 //! use, so a keychain prompt names the helper and launchd's label is its

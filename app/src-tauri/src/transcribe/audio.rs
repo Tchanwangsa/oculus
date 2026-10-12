@@ -2,7 +2,6 @@
 //! cut by time when it is larger than one upload may be.
 
 use std::path::Path;
-use std::process::Command;
 
 /// Ogg Opus. Speech needs nothing past 16 kHz mono (Whisper resamples to it),
 /// and Opus at 24 kbit/s keeps an hour near 11 MB — one upload for most
@@ -27,7 +26,7 @@ pub(super) struct Span {
 
 /// Decode `video`'s first audio stream into `out`.
 pub(super) fn extract(ffmpeg: &Path, video: &Path, out: &Path) -> Result<Extracted, String> {
-    let output = Command::new(ffmpeg)
+    let output = crate::runtime::platform::command(ffmpeg)
         .args(["-nostdin", "-hide_banner", "-nostats", "-y", "-i"])
         .arg(video)
         .args([
@@ -70,7 +69,7 @@ pub(super) fn extract(ffmpeg: &Path, video: &Path, out: &Path) -> Result<Extract
 /// Decode `audio` to 16 kHz mono 16-bit PCM WAV, for an engine that cannot
 /// read Ogg Opus (whisper-cli). About 115 MB an hour, so only in the scratch dir.
 pub(super) fn to_wav(ffmpeg: &Path, audio: &Path, out: &Path) -> Result<(), String> {
-    let output = Command::new(ffmpeg)
+    let output = crate::runtime::platform::command(ffmpeg)
         .args(["-nostdin", "-hide_banner", "-nostats", "-y", "-i"])
         .arg(audio)
         .args(["-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le"])
@@ -89,7 +88,7 @@ pub(super) fn to_wav(ffmpeg: &Path, audio: &Path, out: &Path) -> Result<(), Stri
 
 /// Copy one span of `audio` into `out`, without re-encoding.
 pub(super) fn cut(ffmpeg: &Path, audio: &Path, out: &Path, span: &Span) -> Result<(), String> {
-    let mut command = Command::new(ffmpeg);
+    let mut command = crate::runtime::platform::command(ffmpeg);
     command
         .args(["-nostdin", "-hide_banner", "-nostats", "-y", "-ss"])
         .arg(format!("{:.3}", span.start))

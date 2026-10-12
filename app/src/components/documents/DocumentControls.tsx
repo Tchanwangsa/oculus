@@ -1,3 +1,4 @@
+import { shortcut } from "@/lib/platform";
 import { useEffect, useRef, useState } from "react";
 import { BookmarkSimple, CircleNotch, ClockCounterClockwise } from "@phosphor-icons/react";
 
@@ -192,7 +193,7 @@ function SaveVersionButton({
         <Button
           variant="ghost"
           size="xs"
-          title="Save version (⇧⌘S)"
+          title={`Save version (${shortcut("shift+mod+S")})`}
           className="text-muted-foreground hover:text-foreground"
         >
           <BookmarkSimple size={13} />

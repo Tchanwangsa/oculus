@@ -8,7 +8,11 @@ pub const UPLOADS_DIR: &str = "uploads";
 /// user's to throw away.
 pub fn is_upload_rel(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').collect();
-    !rel.contains("..") && parts.len() > 3 && parts[0] == "courses" && parts[2] == UPLOADS_DIR
+    !rel.contains("..")
+        && !rel.contains(['\\', ':'])
+        && parts.len() > 3
+        && parts[0] == "courses"
+        && parts[2] == UPLOADS_DIR
 }
 
 /// The student's own notes, written in the app as markdown; the other folder
@@ -29,6 +33,7 @@ pub const DOCUMENT_ASSETS_DIR: &str = "assets";
 pub fn is_document_rel(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').collect();
     !rel.contains("..")
+        && !rel.contains(['\\', ':'])
         && parts.len() == 4
         && parts[0] == "courses"
         && !parts[1].is_empty()

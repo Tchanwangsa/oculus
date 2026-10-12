@@ -1,22 +1,37 @@
-//! Native pages (browser tabs, dock services) sit under the app's webview.
+//! How native pages (browser tabs, dock services) share the window with the
+//! app's webview, so popovers draw over a live page.
 //!
-//! Every page is a child WKWebView of the main window, a sibling of the app's
-//! own. `put_below_app` moves each new page to the bottom of that stack, and
-//! `init` stops the app's webview drawing a background, so the frontend can
-//! cut a hole in its DOM where a page sits and its popovers draw over the
-//! live page.
+//! On macOS every page is a child WKWebView of the main window, a sibling of
+//! the app's own, and pages sit under the app. `adopt_page` moves each new
+//! page to the bottom of that stack, and `init` stops the app's webview
+//! drawing a background, so the frontend can cut a hole in its DOM where a
+//! page sits. The app's webview covers the whole window, so on its own it
+//! would take every click. `init` overrides `hitTest:` on the window's
+//! content view (`hit_test.rs`): a click inside a visible page's frame goes
+//! to that page, unless the frontend has said an overlay is open
+//! (`native_set_blocked`).
 //!
-//! The app's webview covers the whole window, so on its own it would take
-//! every click. `init` overrides `hitTest:` on the window's content view
-//! (`hit_test.rs`): a click inside a visible page's frame goes to that page,
-//! unless the frontend has said an overlay is open (`native_set_blocked`).
+//! On Windows pages stay on top and the app's webview stays opaque; each
+//! page is clipped to the frontend's holes minus the portals over them by a
+//! window region (`windows.rs`, `native_set_holes`), and clicks follow it.
 
+#[cfg(windows)]
+mod gdi;
 #[cfg(target_os = "macos")]
 mod hit_test;
+#[cfg(any(windows, test))]
+mod region;
+#[cfg(windows)]
+pub(crate) mod windows;
+
+#[cfg(windows)]
+pub use windows::{adopt_page, init, refresh_page};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(not(windows))]
 use tauri::webview::Webview;
+#[cfg(not(windows))]
 use tauri::AppHandle;
 
 /// An overlay covers the pages: the app's webview keeps every click.
@@ -28,6 +43,7 @@ pub fn native_set_blocked(blocked: bool) {
     BLOCKED.store(blocked, Ordering::Relaxed);
 }
 
+#[cfg(target_os = "macos")]
 fn blocked() -> bool {
     BLOCKED.load(Ordering::Relaxed)
 }
@@ -51,13 +67,13 @@ pub fn init(app: &AppHandle) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn init(_app: &AppHandle) {}
 
 /// Moves a just-added page to the bottom of the window's views, under the
 /// app's webview. Called right after `add_child`.
 #[cfg(target_os = "macos")]
-pub fn put_below_app(webview: &Webview<tauri::Wry>) {
+pub fn adopt_page(webview: &Webview<tauri::Wry>) {
     use objc2::msg_send;
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
@@ -90,5 +106,9 @@ pub fn put_below_app(webview: &Webview<tauri::Wry>) {
         .ok();
 }
 
-#[cfg(not(target_os = "macos"))]
-pub fn put_below_app(_webview: &Webview<tauri::Wry>) {}
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn adopt_page(_webview: &Webview<tauri::Wry>) {}
+
+/// After Rust moves or resizes a page. Only Windows clips pages itself.
+#[cfg(not(windows))]
+pub fn refresh_page(_webview: &Webview<tauri::Wry>) {}

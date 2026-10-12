@@ -1,3 +1,4 @@
+import { shortcut } from "@/lib/platform";
 import { useEffect, useState } from "react";
 import {
   Dialog,
@@ -53,7 +54,7 @@ export function Lightbox({
       >
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <DialogDescription className="sr-only">
-          Scroll or drag to pan, ⌘-scroll or pinch to zoom, Escape to close.
+          Scroll or drag to pan, {shortcut("mod")}+scroll or pinch to zoom, Escape to close.
         </DialogDescription>
         <Viewer
           size={size}

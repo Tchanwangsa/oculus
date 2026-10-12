@@ -77,7 +77,9 @@ fn the_binary_saves_credentials_and_signs_in_for_the_cli_only() {
     assert_eq!(refused["error"], "caller", "{refused}");
     assert!(fake.hits().is_empty());
 
-    let cli = keyd.dir.join("oculus");
+    let cli = keyd
+        .dir
+        .join(format!("oculus{}", std::env::consts::EXE_SUFFIX));
     std::fs::copy(std::env::current_exe().unwrap(), &cli).unwrap();
     // Output goes to files, so a full pipe cannot stall the child while this
     // side polls for its exit.

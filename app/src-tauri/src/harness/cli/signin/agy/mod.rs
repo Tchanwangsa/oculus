@@ -122,6 +122,7 @@ where
         let cancelled = Arc::new(AtomicBool::new(false));
         let run = Run {
             child: child.clone(),
+            job: None,
             input: Input::Terminal(term.clone()),
             cancelled: cancelled.clone(),
         };

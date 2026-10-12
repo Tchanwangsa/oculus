@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Runs every ffmpeg command shape the app uses against fixtures.sh's files and
+# checks exit codes and outputs, then records the binary's -version,
+# -buildconf and -L in the report directory. The shapes mirror the call sites
+# in app/src-tauri/src (sources/echo360/, transcribe/, the frame readers).
+#
+# Usage: smoke.sh <ffmpeg> <fixtures-dir> <report-dir>
+set -uo pipefail
+
+usage="usage: smoke.sh <ffmpeg> <fixtures-dir> <report-dir>"
+ff=$(cd "$(dirname "${1:?$usage}")" && pwd)/$(basename "$1")
+fixtures=$(cd "${2:?$usage}" && pwd)
+mkdir -p "${3:?$usage}"
+report=$(cd "$3" && pwd)
+scratch=$(mktemp -d)
+cd "$scratch"
+
+FRAME=$((160 * 90))
+failures=0
+pass() { echo "ok   $*"; }
+fail() { echo "FAIL $*"; failures=$((failures + 1)); }
+size() { if [ -f "$1" ]; then wc -c < "$1" | tr -d ' '; else echo 0; fi; }
+
+"$ff" -version > "$report/version.txt" 2>&1 && pass "-version" || fail "-version exited $?"
+"$ff" -hide_banner -buildconf > "$report/buildconf.txt" 2>&1 || fail "-buildconf exited $?"
+"$ff" -hide_banner -L > "$report/license.txt" 2>&1 || fail "-L exited $?"
+if grep -Eq -- '--enable-(gpl|nonfree)' "$report/version.txt" "$report/buildconf.txt"; then
+  fail "configuration enables GPL or nonfree code"
+else
+  pass "configuration has no --enable-gpl or --enable-nonfree"
+fi
+if grep -q "GNU Lesser General Public License" "$report/license.txt" && grep -q "either version 3" "$report/license.txt"; then
+  pass "-L reports LGPL version 3 or later"
+else
+  fail "-L does not report LGPL version 3: $(head -3 "$report/license.txt")"
+fi
+
+# Echo360's lead-in trim: a stream copy into mp4.
+if "$ff" -y -ss 14 -i "$fixtures/h264-aac.mp4" -c copy source.mp4 2> trim.err; then
+  bytes=$("$ff" -v error -nostdin -ss 1 -i source.mp4 -frames:v 1 -vf scale=160:90,format=gray -f rawvideo - | wc -c)
+  [ "$bytes" -eq "$FRAME" ] && pass "trim: source.mp4 decodes" || fail "trim: frame read $bytes bytes"
+else
+  fail "trim exited nonzero: $(tail -3 trim.err)"
+fi
+
+# Transcription: extract speech-rate Opus, decode it to PCM, cut parts.
+for input in h264-aac.mp4 h264-aac.mov vp9-opus.webm hevc-ac3.mkv av1-opus.mp4 mpeg2-mp2.ts \
+  avi-mpeg4-mp3.avi wmv2-wmav2.wmv speech.mp3 speech.m4a speech.wav speech.flac speech.ogg; do
+  rm -f audio.ogg audio.wav part.ogg tail.ogg
+  if ! "$ff" -nostdin -hide_banner -nostats -y -i "$fixtures/$input" -map 0:a:0 -vn -ac 1 -ar 16000 \
+    -c:a libopus -b:a 24k -vbr constrained -application voip audio.ogg 2> extract.err; then
+    fail "$input: extract exited nonzero: $(tail -3 extract.err)"; continue
+  fi
+  grep -q "Duration: " extract.err || fail "$input: no Duration: in stderr"
+  [ "$(head -c 4 audio.ogg)" = OggS ] || fail "$input: audio.ogg is not Ogg"
+  "$ff" -i audio.ogg -ac 1 -ar 16000 -c:a pcm_s16le audio.wav 2> wav.err || fail "$input: ogg to wav: $(tail -3 wav.err)"
+  # At least 4 s of 16 kHz mono 16-bit PCM from each 5 s or longer fixture.
+  wav=$(size audio.wav)
+  [ "$wav" -ge $((16000 * 2 * 4)) ] || fail "$input: audio.wav is $wav bytes"
+  "$ff" -y -ss 1 -i audio.ogg -t 2 -c copy part.ogg 2> part.err && [ "$(size part.ogg)" -gt 0 ] ||
+    fail "$input: part copy: $(tail -3 part.err)"
+  "$ff" -y -ss 2 -i audio.ogg -c copy tail.ogg 2> tail.err && [ "$(size tail.ogg)" -gt 0 ] ||
+    fail "$input: tail copy: $(tail -3 tail.err)"
+  pass "$input: extract, wav ($wav bytes), part copies"
+done
+
+if "$ff" -nostdin -hide_banner -nostats -y -i "$fixtures/no-audio.mp4" -map 0:a:0 -vn -ac 1 -ar 16000 \
+  -c:a libopus -b:a 24k -vbr constrained -application voip audio.ogg 2> none.err; then
+  fail "no-audio.mp4: extract succeeded"
+elif grep -q "matches no streams" none.err; then
+  pass "no-audio.mp4: extract fails with 'matches no streams'"
+else
+  fail "no-audio.mp4: unexpected error: $(tail -3 none.err)"
+fi
+
+# Thumbnails and slide-change frames.
+for input in h264-aac.mp4 h264-aac.mov vp9-opus.webm hevc-ac3.mkv av1-opus.mp4 mpeg2-mp2.ts \
+  avi-mpeg4-mp3.avi wmv2-wmav2.wmv no-audio.mp4 rotated.mp4; do
+  rm -f out.jpg
+  "$ff" -v error -nostdin -y -ss 2 -i "$fixtures/$input" -frames:v 1 -vf 'scale=min(768\,iw):-2' -q:v 3 out.jpg 2> jpg.err
+  if [ "$(size out.jpg)" -gt 0 ] && [ "$(head -c 2 out.jpg | od -An -tx1 | tr -d ' \n')" = ffd8 ]; then :; else
+    fail "$input: thumbnail: $(tail -3 jpg.err)"; continue
+  fi
+  one=$("$ff" -v error -nostdin -ss 2 -i "$fixtures/$input" -frames:v 1 -vf scale=160:90,format=gray -f rawvideo - 2> one.err | wc -c)
+  [ "$one" -eq "$FRAME" ] || { fail "$input: single frame $one bytes: $(tail -3 one.err)"; continue; }
+  all=$("$ff" -v info -nostdin -hide_banner -nostats -i "$fixtures/$input" -vf fps=1,scale=160:90,format=gray -f rawvideo - 2> all.err | wc -c)
+  grep -q "Duration: " all.err || fail "$input: no Duration: in frame scan stderr"
+  [ $((all % FRAME)) -eq 0 ] && [ $((all / FRAME)) -ge 4 ] || { fail "$input: fps=1 scan $all bytes: $(tail -3 all.err)"; continue; }
+  end=$("$ff" -v info -nostdin -hide_banner -nostats -sseof -3 -i "$fixtures/$input" -vf fps=1,scale=160:90,format=gray -f rawvideo - 2> end.err | wc -c)
+  [ $((end % FRAME)) -eq 0 ] && [ $((end / FRAME)) -ge 2 ] && [ $((end / FRAME)) -le 4 ] ||
+    { fail "$input: -sseof scan $end bytes: $(tail -3 end.err)"; continue; }
+  pass "$input: thumbnail $(size out.jpg) bytes, frame, $((all / FRAME)) scan frames, $((end / FRAME)) tail frames"
+done
+
+echo "binary: $(size "$ff") bytes"
+cd / && rm -rf "$scratch"
+if [ "$failures" -gt 0 ]; then
+  echo "$failures check(s) failed"
+  exit 1
+fi
+echo "all checks passed"

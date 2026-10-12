@@ -55,7 +55,8 @@ base64 = "0.22"
 half = "2"
 # LLM provider API keys live in the macOS keychain, never in SQLite — the
 # platform store is an opt-in feature in keyring 3.
-keyring = { version = "3", features = ["apple-native"] }
+keyring = "3"
+rpassword = "7"
 
 # `sync` is for the oneshots, watches and semaphores commands await (e.g.
 # src/library/pdf_render/render.rs). `time` is the usage ticker's interval
@@ -72,6 +73,7 @@ libc = "0.2.189"
 # `oculus grep` searches PDF page text, which lives only in the database —
 # ripgrep over the library on disk cannot see it. Already in the lock tree.
 regex = "1"
+ring = "0.17"
 
 # The MinerU cloud client, ported from the Python sidecar (see src/parse/).
 # `zip` reads the result archive, and `imagesize` replaces PIL's one use:
@@ -118,10 +120,11 @@ rodio = { version = "0.21", default-features = false, features = ["playback"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
-# `seed_sessions` in src/shell/browser/seed.rs) — Tauri exposes no cookie setter, so
-# that goes through WKHTTPCookieStore directly. These are the same crates wry
+# `seed_sessions` in src/shell/browser/seed.rs). WebKit cookie ordering uses
+# WKHTTPCookieStore directly; Windows uses Tauri cookie APIs. These are the same crates wry
 # already builds on.
 [target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
 block2 = "0.6"
 objc2 = "0.6"
 # `NSBundle`, `NSProcessInfo` and `NSData` name WebKit's application and hand
@@ -142,6 +145,17 @@ objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "W
 [dev-dependencies]
 # Writes the synthetic PDFs the tests parse and rasterise.
 lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+dunce = "1"
+junction = "1"
+webview2-com = "0.38.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# Enables explicitly registered in-process fake brokers in Windows release tests.
+keyd_core = { package = "oculus-keyd-core", path = "../keyd/core", features = ["test-support"] }
 
 # librespot-connect with Spirc::skip_to and Spirc::remove_next, which act on
 # the Spirc's own queue (`vendor/librespot-connect`, docs/music-library.md).

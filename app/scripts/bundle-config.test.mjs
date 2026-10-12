@@ -53,7 +53,7 @@ test("keyd ships on macOS only, as a helper app nested in the bundle", () => {
 test("the helper's name and identifier match keyd's own", () => {
   const helper = paths.match(/pub const HELPER: &str = "([^"]+)";/)?.[1];
   expect(`${helper}.app`).toBe(keydHelperApp);
-  const plist = readFileSync(join(app, "keyd", "bundle", "Info.plist"), "utf8");
+  const plist = readFileSync(join(app, "keyd", "bundle", "Info.plist"), "utf8").replaceAll("\r\n", "\n");
   expect(plist).toContain(`<key>CFBundleIdentifier</key>\n    <string>${KEYD_IDENTIFIER}</string>`);
   expect(plist).toContain(`<key>CFBundleName</key>\n    <string>${helper}</string>`);
 });

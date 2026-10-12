@@ -65,10 +65,10 @@ try {
 } catch {
   fail("rustup is not on PATH — install Rust with rustup (https://rustup.rs)");
 }
-if (!targets.split("\n").includes(target)) fail(`the ${target} target is missing — run \`rustup target add ${target}\``);
+if (!targets.split(/\r?\n/).includes(target)) fail(`the ${target} target is missing — run \`rustup target add ${target}\``);
 
 const lock = readFileSync(join(core, "Cargo.lock"), "utf8");
-const locked = lock.match(/^name = "wasm-bindgen"\nversion = "([^"]+)"/m)?.[1];
+const locked = lock.match(/^name = "wasm-bindgen"\r?\nversion = "([^"]+)"/m)?.[1];
 if (!locked) fail("math-core/Cargo.lock names no wasm-bindgen version");
 const install = `cargo install wasm-bindgen-cli --version ${locked} --locked`;
 let cli = "";
@@ -79,7 +79,8 @@ try {
 }
 if (cli !== `wasm-bindgen ${locked}`) fail(`${cli} does not match the crate's wasm-bindgen ${locked} — run \`${install}\``);
 
-const wasmOpt = join(app, "node_modules", ".bin", "wasm-opt");
+// Invoke Binaryen's JavaScript entry directly; Windows .bin shims are batch files.
+const wasmOpt = join(app, "node_modules", "binaryen", "bin", "wasm-opt");
 if (!existsSync(wasmOpt)) fail("wasm-opt is missing — run `bun install` in app/");
 
 const started = Date.now();
@@ -90,7 +91,7 @@ try {
   });
   run("wasm-bindgen", ["--target", "web", "--out-dir", staging, "--out-name", "oculus_math", built], { stdio: "inherit" });
   const optimised = join(staging, "oculus_math_bg.opt.wasm");
-  run(wasmOpt, ["-Oz", join(staging, "oculus_math_bg.wasm"), "-o", optimised], { stdio: "inherit" });
+  run(process.execPath, [wasmOpt, "-Oz", join(staging, "oculus_math_bg.wasm"), "-o", optimised], { stdio: "inherit" });
 
   // The .wasm goes last: its mtime is what marks the whole output current.
   mkdirSync(pkg, { recursive: true });

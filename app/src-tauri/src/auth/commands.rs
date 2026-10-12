@@ -61,7 +61,8 @@ pub async fn disconnect_canvas(
     crate::shell::browser::clear_sessions(&app, move || {
         cleared.send(()).ok();
     });
-    done.await.ok();
+    done.await
+        .map_err(|_| "Could not clear the browser’s Canvas and Okta cookies".to_string())?;
     tauri::async_runtime::spawn_blocking(|| {
         session::sign_out(&Credentialed::at(&crate::library::paths::data_dir()))
     })

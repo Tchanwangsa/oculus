@@ -8,8 +8,10 @@ use super::rules::{allows, Place, Rules};
 use super::scripts::{init_scripts, leave_script};
 use super::services::DockService;
 use super::{broadcast, channel, focus, label, title, with_state, DockPageInfo};
-use crate::shell::browser::{content_size, MAIN, PAGE_USER_AGENT};
-use crate::shell::native_layer::put_below_app;
+#[cfg(not(target_os = "windows"))]
+use crate::shell::browser::PAGE_USER_AGENT;
+use crate::shell::browser::{content_size, MAIN};
+use crate::shell::native_layer::adopt_page;
 
 /// Opens the service's page parked, or in its slot if the frontend already
 /// placed it. Called only when the service is enabled and has no page.
@@ -23,8 +25,10 @@ pub(super) fn create(app: &AppHandle, service: &'static DockService) -> Result<(
 
     let load_app = app.clone();
     let title_app = app.clone();
-    let mut builder = WebviewBuilder::new(label(id), WebviewUrl::External(home.clone()))
-        .user_agent(PAGE_USER_AGENT)
+    let builder = WebviewBuilder::new(label(id), WebviewUrl::External(home.clone()));
+    #[cfg(not(target_os = "windows"))]
+    let builder = builder.user_agent(PAGE_USER_AGENT);
+    let mut builder = builder
         .data_store_identifier(service.store_id)
         .focused(false)
         // Main frame only; `on_navigation` would also see every iframe.
@@ -87,7 +91,7 @@ pub(super) fn create(app: &AppHandle, service: &'static DockService) -> Result<(
             return Err(format!("failed to open dock page {id}: {e}"));
         }
     };
-    put_below_app(&webview);
+    adopt_page(&webview);
     configure_store(&webview, service);
     channel::install(&webview, app, service);
     if with_state(app, |s| s.shown.as_deref() == Some(id)) {

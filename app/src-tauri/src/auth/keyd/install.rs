@@ -32,8 +32,24 @@ fn resolve(from: &Path) -> Result<PathBuf, String> {
     } else {
         from.to_path_buf()
     };
-    from.canonicalize()
-        .map_err(|e| format!("{}: {e}", from.display()))
+    crate::runtime::platform::canonicalize(&from).map_err(|e| format!("{}: {e}", from.display()))
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn resolved_broker_path_matches_the_registrars_native_path() {
+    let scratch = crate::test_support::Scratch::new("keyd-native-path");
+    let executable = scratch.join("oculus-keyd.exe");
+    std::fs::write(&executable, "test executable").unwrap();
+    let extended = std::fs::canonicalize(&executable).unwrap();
+    assert_eq!(
+        resolve(&extended).unwrap(),
+        dunce::canonicalize(&executable).unwrap()
+    );
+    assert!(!resolve(&extended)
+        .unwrap()
+        .to_string_lossy()
+        .starts_with(r"\\?\"));
 }
 
 /// Installs `from` (keyd's executable or its helper app) and (re)loads its
@@ -58,9 +74,25 @@ pub fn install_if_changed(data_dir: &Path, from: &Path) -> Result<Option<Install
 }
 
 fn is_current(data_dir: &Path, from: &Path, source_hash: &str) -> Result<bool, String> {
-    let program = platform::registrar().status()?.program;
+    let status = platform::registrar().status()?;
+    let program = status.program;
     let wanted = program_for(data_dir, from);
-    Ok(installed_stamp(data_dir).as_deref() == Some(source_hash)
+    #[cfg(windows)]
+    if keyd_core::client::Client::at(data_dir)
+        .ping()
+        .ok()
+        .and_then(|ping| {
+            ping.get("source_hash")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .as_deref()
+        != Some(source_hash)
+    {
+        return Ok(false);
+    }
+    Ok(status.loaded
+        && installed_stamp(data_dir).as_deref() == Some(source_hash)
         && program.as_deref() == Some(wanted.to_string_lossy().as_ref()))
 }
 
@@ -145,6 +177,7 @@ pub fn uninstall(data_dir: &Path) -> Result<Vec<PathBuf>, String> {
         paths::installed_helper(data_dir),
         paths::bare_installed_bin(data_dir),
         paths::stamp(data_dir),
+        #[cfg(not(windows))]
         paths::socket(data_dir),
     ] {
         if remove_if_present(&p)? {
@@ -161,7 +194,7 @@ pub fn uninstall(data_dir: &Path) -> Result<Vec<PathBuf>, String> {
 /// reports a missing bundled keyd as well). Runs on the calling thread, which
 /// may wait on launchd.
 pub fn ensure_installed() {
-    if cfg!(debug_assertions) {
+    if cfg!(debug_assertions) && !cfg!(windows) {
         return;
     }
     match ensure_bundled(&crate::library::paths::data_dir()) {
@@ -194,7 +227,7 @@ fn ensure_bundled_beside(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
 

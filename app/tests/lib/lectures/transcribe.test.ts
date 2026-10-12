@@ -109,7 +109,8 @@ test("the language list puts English first and shows a region only where a langu
   expect(options.map((o) => o.name)).toEqual([
     "Auto-detect",
     "English (Australia)",
-    "English (UK)",
+    // ICU versions use either the short or full English name for this region.
+    expect.stringMatching(/^English \((UK|United Kingdom)\)$/),
     "French (Canada)",
     "French (France)",
     "German",

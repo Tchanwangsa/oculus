@@ -30,6 +30,15 @@ library files; the rest of the frontend has its own pages:
 | Spotify ([music.md](./music.md)): the `music-state` snapshot type and the command wrappers; the snapshot mirror and Settings → Music's switch; the listener mounted in `AppLayout` | `app/src/lib/music/index.ts`, `app/src/stores/music/musicStore.ts`, `app/src/stores/music/musicPrefsStore.ts`, `app/src/hooks/music/useMusicState.ts` |
 | Module videos and page embeds downloaded on demand; YouTube/Vimeo metadata | `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/stores/lectures/videoDownloadStore.ts`, `app/src/stores/lectures/embedDownloadStore.ts`, `app/src/stores/lectures/webVideoStore.ts`, `app/src/lib/files/scrapedRow.ts` |
 
+## Windows transcription settings expose Groq only
+
+`TranscriptionSection` keeps the shared language and Groq key controls on
+Windows, hides the local Whisper and on-device speech dialogs, and skips
+their model and OS-status reads. The stored settings retain every engine's
+preferences; Windows only renders the Groq row. Backend selection follows
+the same platform limit ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)).
+Credential descriptions and parse errors say credential store across platforms.
+
 ## Source is grouped by feature, and tests mirror it
 
 - `app/src/{lib,hooks,stores,components,pages}/` hold grouped folders

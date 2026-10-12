@@ -76,6 +76,7 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
 
+#[cfg(unix)]
 fn peak_rss_bytes() -> u64 {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
     // SAFETY: getrusage fills the struct it is handed.
@@ -89,6 +90,33 @@ fn peak_rss_bytes() -> u64 {
     } else {
         usage.ru_maxrss as u64 * 1024
     }
+}
+
+#[cfg(windows)]
+fn peak_rss_bytes() -> u64 {
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    let mut counters = std::mem::MaybeUninit::<PROCESS_MEMORY_COUNTERS>::zeroed();
+    // SAFETY: the current-process pseudo-handle is valid and the buffer has
+    // the size passed to the API. A successful call initializes its fields.
+    let result = unsafe {
+        GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            counters.as_mut_ptr(),
+            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        )
+    };
+    assert_ne!(
+        result,
+        0,
+        "reading peak working set: {}",
+        std::io::Error::last_os_error()
+    );
+    // SAFETY: GetProcessMemoryInfo succeeded for the complete buffer.
+    unsafe { counters.assume_init().PeakWorkingSetSize as u64 }
 }
 
 fn find_pdfs(dir: &Path, out: &mut Vec<PathBuf>) {

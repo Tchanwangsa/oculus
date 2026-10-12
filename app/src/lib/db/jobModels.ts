@@ -1,5 +1,6 @@
 import { getSetting, setSetting } from "./settings";
 import { isProvider, type Provider } from "@/lib/harness/providers";
+import { providerAvailability } from "@/lib/harness/availability";
 
 // Each non-chat model job names an ordered list of models: the first, then
 // fallbacks tried when a run fails. One JSON value, read back in Rust by
@@ -67,6 +68,13 @@ export const DEFAULT_JOB_MODELS: JobModels = {
   documentSuggestions: [{ provider: "claude", model: "claude-sonnet-5-5", reasoningEffort: "medium" }],
 };
 
+if (!providerAvailability("claude").supported) {
+  for (const job of JOBS) {
+    if (DEFAULT_JOB_MODELS[job.id].every((s) => providerAvailability(s.provider).supported)) continue;
+    DEFAULT_JOB_MODELS[job.id] = [{ provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" }];
+  }
+}
+
 const JOB_MODELS_KEY = "job_models";
 const JOB_NOTICES_KEY = "job_model_notices";
 
@@ -78,12 +86,13 @@ function announce() {
 }
 
 /** One stored entry, or null when its model is blank or its provider unknown
- *  (checked against `PROVIDERS`, not a hardcoded list that falls behind). */
+ *  (checked against `PROVIDERS`, not a hardcoded list that falls behind) or
+ *  unsupported on this platform. */
 function parseSelection(row: unknown): JobSelection | null {
   if (!row || typeof row !== "object") return null;
   const r = row as Record<string, unknown>;
   if (typeof r.model !== "string" || !r.model.trim()) return null;
-  if (!isProvider(r.provider)) return null;
+  if (!isProvider(r.provider) || !providerAvailability(r.provider).supported) return null;
   // Rust's serde rejects a level that is neither a string nor null/absent.
   const effort = r.reasoningEffort;
   if (effort !== undefined && effort !== null && typeof effort !== "string") return null;

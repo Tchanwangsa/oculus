@@ -58,7 +58,7 @@ pub(super) fn settings_json(library: &Path, cwd: &Path, oculus: Option<&Path>) -
     .to_string()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

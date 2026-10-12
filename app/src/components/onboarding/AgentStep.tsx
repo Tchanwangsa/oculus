@@ -4,12 +4,13 @@ import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
 import {
   InstallAgentDialog,
   useAgentInstall,
+  useAgentInstallOffers,
 } from "@/components/settings/agents/InstallAgentDialog";
 import { OpencodeConnectDialog } from "@/components/settings/agents/OpencodeConnectDialog";
 import { Button } from "@/components/ui/button";
 import { providerHealth, useBridgeHealth } from "@/hooks/agents/useBridgeHealth";
 import { signInAccount, signInState, useSignInStatus } from "@/hooks/agents/useSignInStatus";
-import { providerLabel, type Provider } from "@/lib/harness";
+import { providerAvailability, providerLabel, type Provider } from "@/lib/harness";
 import { rememberProviders } from "@/lib/harness/opencodeAuth";
 import { AGENT_ORDER, orderAgents } from "@/lib/onboarding/agentOptions";
 import { isAgentReady } from "@/lib/onboarding/gate";
@@ -38,6 +39,7 @@ export function AgentStep({ onNext, onSkip }: StepProps) {
   }, [recheckHealth, recheckSignIn]);
 
   const install = useAgentInstall(recheck);
+  const offers = useAgentInstallOffers(health);
   const signIn = useSignIn(recheck);
   const [installFor, setInstallFor] = useState<Provider | null>(null);
   const [signInFor, setSignInFor] = useState<Provider | null>(null);
@@ -61,7 +63,9 @@ export function AgentStep({ onNext, onSkip }: StepProps) {
   const [order, setOrder] = useState<Provider[] | null>(null);
   if (order === null && health !== null && statuses !== null) setOrder(orderAgents(isReady));
 
-  const anyReady = AGENT_ORDER.some(isReady);
+  // Windows has no native Claude Code (docs/harness.md).
+  const offered = (order ?? AGENT_ORDER).filter((p) => providerAvailability(p).supported);
+  const anyReady = offered.some(isReady);
   const rechecking = checking || checkingSignIn;
   const liveInstall = (p: Provider) => install.run?.provider === p && !install.run.result;
 
@@ -77,7 +81,7 @@ export function AgentStep({ onNext, onSkip }: StepProps) {
       <SyncProgressLine />
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2.5">
-          {(order ?? AGENT_ORDER).map((p) =>
+          {offered.map((p) =>
             p === "opencode" ? (
               <OpencodeCard
                 key={p}
@@ -95,7 +99,12 @@ export function AgentStep({ onNext, onSkip }: StepProps) {
                 account={signInAccount(statuses, p)}
                 installing={liveInstall(p)}
                 signingIn={signIn.run?.provider === p && !signIn.run.result}
-                onInstall={() => setInstallFor(p)}
+                onInstall={
+                  // `undefined` is an offer still loading; `null` has no route.
+                  providerAvailability(p).install && offers[p] !== null
+                    ? () => offers[p] && setInstallFor(p)
+                    : null
+                }
                 onSignIn={() => setSignInFor(p)}
               />
             ),
@@ -115,9 +124,9 @@ export function AgentStep({ onNext, onSkip }: StepProps) {
         </div>
       </div>
 
-      {installFor && (
+      {installFor && offers[installFor] && (
         <InstallAgentDialog
-          provider={installFor}
+          offer={offers[installFor]}
           label={providerLabel(installFor)}
           run={install.run?.provider === installFor ? install.run : null}
           onStart={(route) => install.start(installFor, route)}

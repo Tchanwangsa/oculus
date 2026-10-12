@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getOnboarding, setOnboarding } from "@/lib/db/onboarding";
 import { PROVIDER_IDS } from "@/lib/harness/providers";
+import { providerAvailability } from "@/lib/harness/availability";
 import { gateFromRow, isExistingSetup } from "@/lib/onboarding/gate";
 import { loadBridgeHealth, providerHealth } from "@/hooks/agents/useBridgeHealth";
 import { loadSignInStatus, signInState } from "@/hooks/agents/useSignInStatus";
@@ -16,7 +17,7 @@ async function looksSetUp(): Promise<boolean> {
   const [health, signIn] = await Promise.all([loadBridgeHealth(), loadSignInStatus()]);
   return isExistingSetup(
     canvas,
-    PROVIDER_IDS.map((provider) => ({
+    PROVIDER_IDS.filter((provider) => providerAvailability(provider).supported).map((provider) => ({
       provider,
       installed: providerHealth(health, provider) === "installed",
       signIn: signInState(signIn, provider),

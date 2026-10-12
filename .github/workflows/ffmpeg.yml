@@ -1,0 +1,142 @@
+# Builds the LGPL ffmpeg the Windows app ships from pinned upstream tarballs,
+# smoke-tests every command shape the app runs on Windows, and stages the
+# binary with its exact sources in a draft release for a maintainer to
+# publish. Pushes that touch the build trigger it as well as the Actions tab,
+# so a branch can run it before the file reaches master. See
+# docs/development.md#windows-ffmpeg-is-our-own-lgpl-build.
+name: ffmpeg
+
+on:
+  push:
+    paths:
+      - app/scripts/ffmpeg/**
+      - .github/workflows/ffmpeg.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (Windows x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the MinGW-w64 cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mingw-w64 nasm meson ninja-build pkg-config gnupg
+      - name: Build
+        env:
+          FFMPEG_WORK_DIR: ${{ runner.temp }}/ffmpeg-work
+        run: app/scripts/ffmpeg/build.sh windows-x64 "$RUNNER_TEMP/ffmpeg-windows-x64"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-windows-x64
+          if-no-files-found: error
+          path: ${{ runner.temp }}/ffmpeg-windows-x64
+      - name: Retain the build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-windows-x64-logs
+          path: |
+            ${{ runner.temp }}/ffmpeg-work/windows-x64/build/*.log
+            ${{ runner.temp }}/ffmpeg-work/windows-x64/build/ffmpeg/ffbuild/config.log
+            ${{ runner.temp }}/ffmpeg-work/windows-x64/build/ffmpeg/*.out
+            ${{ runner.temp }}/ffmpeg-work/windows-x64/build/ffmpeg/*.log
+
+  fixtures:
+    name: Smoke-test fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install a full ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: app/scripts/ffmpeg/fixtures.sh "$RUNNER_TEMP/fixtures"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-fixtures
+          if-no-files-found: error
+          path: ${{ runner.temp }}/fixtures
+
+  smoke:
+    name: Smoke test (Windows x64)
+    needs: [build, fixtures]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-windows-x64
+          path: build
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-fixtures
+          path: fixtures
+      - name: Run every command shape the app uses
+        run: app/scripts/ffmpeg/smoke.sh build/ffmpeg-windows-x64.exe fixtures report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ffmpeg-windows-x64-smoke
+          path: report
+
+  draft-release:
+    name: Stage the draft release
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-windows-x64
+          path: assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-windows-x64-smoke
+          path: smoke
+      # Only a draft is ever created or replaced. Once a maintainer publishes
+      # the release its assets are fixed: changing the build means raising
+      # OCULUS_BUILD in build.sh, which names a new tag.
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag=$(cat assets/release-tag.txt)
+          rm assets/release-tag.txt assets/SHA256SUMS
+          for f in buildconf license version; do cp "smoke/$f.txt" "assets/$f-windows-x64.txt"; done
+          (cd assets && sha256sum * > SHA256SUMS)
+          {
+            echo "FFmpeg for Oculus on Windows x64, built from commit $GITHUB_SHA by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
+            echo
+            echo "\`ffmpeg-windows-x64.exe\` is FFmpeg under the GNU LGPL version 3 or later, statically linked with libopus (BSD-3-Clause) and dav1d (BSD-2-Clause)."
+            echo "This release is its complete corresponding source: the unmodified upstream tarballs, the build script \`build.sh\` with \`configure-flags.txt\`, the full configure line, \`config.log\` and the toolchain versions."
+            echo "Rebuild with \`build.sh windows-x64 <out-dir>\` on Ubuntu with the packages listed in \`toolchain-windows-x64.txt\`."
+            echo
+            echo '```'
+            cat assets/SHA256SUMS
+            echo '```'
+          } > notes.md
+          if draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "::error::$tag is already published; raise OCULUS_BUILD in app/scripts/ffmpeg/build.sh to stage a new build"
+              exit 1
+            fi
+            gh release edit "$tag" --draft --target "$GITHUB_SHA" --notes-file notes.md
+          else
+            gh release create "$tag" --draft --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
+          fi
+          gh release upload "$tag" assets/* --clobber
+          echo "Draft release $tag staged; ffmpeg-windows-x64.exe $(sha256sum assets/ffmpeg-windows-x64.exe | cut -d' ' -f1)" >> "$GITHUB_STEP_SUMMARY"

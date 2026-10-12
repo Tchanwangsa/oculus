@@ -19,6 +19,10 @@ mod agy;
 mod classify;
 mod flow;
 mod output;
+#[cfg(not(unix))]
+#[path = "no_pty.rs"]
+mod pty;
+#[cfg(unix)]
 mod pty;
 mod status;
 #[cfg(test)]

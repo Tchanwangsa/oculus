@@ -55,7 +55,9 @@ fn probe_health(provider: Provider) -> BridgeHealth {
     match binary(provider) {
         Ok(p) => {
             h.path = Some(p.display().to_string());
-            match std::process::Command::new(&p).arg("--version").output() {
+            match crate::runtime::platform::cli_command(&p)
+                .and_then(|mut cmd| cmd.arg("--version").output().map_err(|e| e.to_string()))
+            {
                 Ok(out) if out.status.success() => {
                     let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
                     // `2.1.267 (Claude Code)` / `codex-cli 0.153.4` — keep the number.

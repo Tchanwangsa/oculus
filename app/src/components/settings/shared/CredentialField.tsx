@@ -25,7 +25,7 @@ export function CredentialField({
         <div>
           <p className="text-xs text-foreground">{label}</p>
           <p className="text-[11px] text-muted-foreground">
-            Stored in your Mac keychain, never in the library database.
+            Stored in your operating system’s credential store, never in the library database.
           </p>
         </div>
         <div className="flex items-center gap-2">

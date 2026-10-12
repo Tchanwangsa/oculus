@@ -32,7 +32,10 @@ sweep and the index queue run during setup. While the gate decides, `App`
 paints a blank `bg-background` window, so neither onboarding nor a
 "not connected" state flashes. `App` applies the stored page zoom at boot
 (`app/src/lib/ui/pageZoom.ts`), so setup renders at the shell's size; the
-zoom shortcuts live in `AppLayout` and don't work during setup.
+zoom shortcuts live in `AppLayout` and don't work during setup. Onboarding
+owns its 44px drag header while the shell is unmounted. On Windows it reuses
+`app/src/components/tabs/WindowControls.tsx` for minimize, maximize/restore and
+close; native fullscreen hides the caption controls just as the shell does.
 
 ## The settings row decides, and existing setups never see it
 
@@ -46,10 +49,13 @@ One `settings` row, `onboarding`, JSON `{ completedAt, skipped }`, where
    least one agent ready → write `completedAt` silently and show the shell.
    Otherwise → onboarding.
 
-An agent is ready when installed and signed in. opencode's sign-in can't be
-asked from outside its own page, so installed is enough for it, and the gate
-never starts opencode ([harness.md](./harness.md)). The probe asks Canvas
-first and skips the agents when it is not signed in, because the sign-in
+An agent is ready when supported on the current platform, installed and
+signed in. opencode's sign-in can't be asked from outside its own page, so installed is enough for it, and the gate
+never starts opencode ([harness.md](./harness.md)). Native Claude does not
+count as ready on Windows, even when installed and signed in. The probe and
+Agent step read the shared capabilities in `app/src/lib/harness/availability.ts`;
+the step names supported agents and directs terminal-only setup to a terminal.
+The probe asks Canvas first and skips the agents when it is not signed in, because the sign-in
 check spawns every CLI. It reads through `loadBridgeHealth` and
 `loadSignInStatus`, filling the same caches `useBridgeHealth` and
 `useSignInStatus` read, so the shell's pickers don't ask again. A gate that

@@ -20,7 +20,7 @@ WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/sources/echo360/auth.rs`, `app/src-tauri/src/lectures/mod.rs` |
 | Echo360 page embeds: per-link launch, Bearer, CDN signing; the shared Bearer | `app/src-tauri/src/sources/echo360/embed/`, `app/src-tauri/src/sync/scrape/embeds/state.rs` |
 | Frontend auth state | `app/src/hooks/sync/useAuth.ts` |
-| Handing the session to the in-app browser | `app/src-tauri/src/shell/browser/seed.rs` |
+| Handing the session to the in-app browser; WebView2 write/readback sequencing | `app/src-tauri/src/shell/browser/seed.rs`, `app/src-tauri/src/shell/browser/windows.rs` |
 | Keychain entry lifecycle (the fallback for the Okta credentials and for MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/providers/credentials/keychain.rs` (`Secret`), `app/src-tauri/src/providers/credentials/mod.rs` |
 | keyd's login sessions: the vault entries, the cookie rule shared with the sign-in's jar, the two markers, the `session_*` ops and `sign_out`, the one-time import of the old session files | `app/keyd/core/src/session/`, `app/keyd/core/src/ops/session.rs`, `app/keyd/core/src/ops/legacy.rs` |
 | The `canvas` and `ed` routes of `forward` (cookie and `x-token` attached by keyd), its path rules and streaming; the Canvas route's sign-in on a rejected request | `app/keyd/core/src/forward/`, `app/keyd/core/src/ops/forward.rs` ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)) |
@@ -65,25 +65,33 @@ is on the page either way; only its `disabled` attribute tells you.)
 - The marker keeps every automatic sign-in off (`LoginError::SignedOut`)
   until a session is established again: `session_mark(true)` removes it, and
   so does every sign-in keyd runs.
-- Settings' sign-out first deletes every cookie WebKit would send to Canvas
+- Settings' sign-out first deletes every cookie the browser would send to Canvas
   or Okta (`shell::browser::clear_sessions`), or a tab still signed in would save the
   session straight back. `oculus auth logout` cannot reach a running app's
   jar, so a Canvas tab open there can still re-save the cookie.
 
 ## The in-app browser is seeded with the same sessions
 
-`canvas_session` is HttpOnly and session-scoped, so WebKit keeps it in memory
-only and keyd's copy is the one that survives a restart. Okta's cookies for
+`canvas_session` is HttpOnly and session-scoped; keyd's copy is the one
+that survives a restart. Okta's cookies for
 `sso.unimelb.edu.au` are kept beside it (written by a headless sign-in and by
 the browser), so a page that redirects to SSO passes straight through.
 
 - `shell::browser::seed_sessions` asks keyd for both (`session_get`, app only) on a
   thread of its own, because the first call after an update can wait on the
-  keychain prompt, then writes them into WebKit's shared jar through
-  `WKHTTPCookieStore` (Tauri has no cookie setter) at startup and before any
-  `*.unimelb.edu.au` tab, navigation or reload, re-scoping every bare
-  `name=value` pair to its host. The load waits for the write to land. With
-  keyd absent, or holding no session, it seeds nothing and the load goes on.
+  credential prompt. At startup and before any `*.unimelb.edu.au` tab,
+  navigation or reload, every bare `name=value` pair is scoped to its host
+  in the shared browser jar. macOS uses `WKHTTPCookieStore` with completion
+  handlers; Windows uses Tauri's `set_cookie`, then reads `cookies_for_url`
+  on the worker thread until the queued writes are confirmed. The load waits
+  for that confirmation; a failed write leaves it stopped and logs the error.
+  With keyd absent, or holding no session, it seeds nothing and the load goes on.
+- Windows uses WebView2's default profile for the main view, browser tabs and
+  the login window. A separate login `data_directory` would split their jars.
+  WebView2's `AddOrUpdateCookie` overwrites same-scoped HttpOnly cookies;
+  macOS deletes the old same-named cookie before setting its replacement.
+  Windows seeding and clearing are serialized, and clearing reads back the
+  jar before sign-out continues. Cookies for unrelated hosts remain intact.
 - Canvas cookies always replace the jar's; Okta's only fill gaps, unless keyd's
   header differs from the last one seeded this run (compared by hash) — while
   the app runs, the browser's own Okta session is the freshest.
@@ -96,8 +104,8 @@ the browser), so a page that redirects to SSO passes straight through.
 - A signed-in Canvas page (`auth::is_authenticated_url`) hands both cookie
   sets to keyd, deduped by name, so the scraper inherits the fresher cookie. A
   signed-out page never does: it would store Canvas's anonymous cookie over the
-  good one. The jar is read on the page-load callback and the keyd calls run on
-  another thread.
+  good one. The page-load callback starts a worker thread for both the jar
+  snapshot and keyd calls; WebView2 cookie reads deadlock on the event loop.
 - If the app is not connected when that happens, someone signed in by hand in
   the tab. `auth::tab::confirm_browser_sign_in` checks the stored session with
   Canvas and, if Canvas accepts it, connects the app.
@@ -146,8 +154,9 @@ A sign-in only works for an account whose factors are a password and TOTP;
 an org that offers only push or WebAuthn pauses automatic sign-in at the first
 attempt (`LoginError::UnsupportedFactor`).
 
-- The CLI is bundled into `Contents/MacOS/` beside the app, because keyd's
-  caller check admits only executables in the app its helper is nested in. It is listed under
+- The CLI ships beside the app (`Contents/MacOS/` on macOS; the install
+  directory on Windows), because keyd's caller check admits only executables
+  from the install. It is listed under
   `externalBin` in `tauri.conf.json` ("external" means prebuilt, not left out
   of the bundle), and `app/scripts/stage-cli.mjs` builds and stages it in
   `binaries/`. `tauri-build` validates every `externalBin`
@@ -195,15 +204,16 @@ and `oculus auth setup` prints the code from the seed just typed.
 - **Only `KeydError::Absent` takes the old route, and only for the
   credentials.** The keychain items (`com.oculus.unimelb-sso`: `username`,
   `password`, `totp_secret`) answer status, save and forget only when nothing
-  is listening on `keyd.sock`. A sign-in with keyd absent is
+  is listening on keyd's endpoint (`keyd.sock` on macOS; a user-scoped named
+  pipe on Windows). A sign-in with keyd absent is
   `LoginError::Broker` ("oculus-keyd is not running …"): the session it would
   mint is one only keyd can use. Every other keyd error surfaces and starts
   no second route.
 - **Failures map to the sign-in's own errors.** `ensure_signed_in` carries a
   failed sign-in as its `LoginError`, variant for variant, so callers act on
   it as they do in-process. A `keychain` error is
-  `LoginError::UnreadableCredentials` (macOS refused either this program or
-  keyd's master key); any other keyd error is `LoginError::Broker` with the
+  `LoginError::UnreadableCredentials` (the operating system refused either
+  this program or keyd's master key); any other keyd error is `LoginError::Broker` with the
   client's description of it ("The sign-in request to oculus-keyd failed: …"),
   which is not a sign-in step.
 - **keyd validates a save.** The app sends the values as typed, and
@@ -220,12 +230,13 @@ and `oculus auth setup` prints the code from the seed just typed.
   `totp_now` takes the key as pasted too, so `oculus auth setup` prints the
   right code from a link.
 - **The vault holds `okta.username`, `okta.password` and `okta.totp_secret`.**
-  The first `okta_status` or sign-in copies the old keychain items in, one
-  keychain prompt each, once; the items stay in the keychain after an import,
+  On macOS the first `okta_status` or sign-in copies the old keychain items
+  in, one keychain prompt each, once; the items stay in the keychain after an import,
   and a save or a forget marks all three imported, so an old item is never
   copied back over either. `okta_forget` also deletes the three old items
   (best effort), so the keychain fallback cannot sign in with a forgotten
   login; it replies `legacy`: `removed`, `absent`, `failed` or `refused`.
+  Windows has no legacy credential source to import.
 - **The app and the CLI only.** keyd's caller check admits any executable
   in the install, so every op but `ping` (not just the Okta ones) also
   requires the `app` or `cli` role; ffmpeg, which ships in the bundle, is
@@ -233,7 +244,7 @@ and `oculus auth setup` prints the code from the seed just typed.
   `okta_resume` is the app's alone, because it lifts a lockout pause.
 - **One sign-in runs at a time.** A request that arrives while keyd is
   signing in waits for that attempt and returns its outcome, rather than
-  starting another or being held off by the guard. The socket has no timeout
+  starting another or being held off by the guard. The connection has no timeout
   on this op: the flow can wait for the next TOTP window.
 - **The sessions a sign-in mints go to keyd's vault**, through the `SessionStore`
   the flow is given (`okta::Env`), after Canvas has accepted the cookie. A
@@ -537,7 +548,7 @@ existing query 403s, as does the bare URL.
 
 - Never POST Echo360's `last-played-to-seconds`: an embed launch already records a view under the student's name, and Oculus reports no playback.
 - Every sign-in by a person must end in `auth::session_established` (`session_mark(true)`), and keyd's own sign-ins mark themselves — the startup probe reads the flag first, and without it a valid session opens disconnected.
-- keyd calls (`session_get`, `session_status`, `session_put`) can wait on the keychain prompt for 60 s: never from the main thread or a WebKit callback.
+- keyd calls (`session_get`, `session_status`, `session_put`) can wait on the keychain prompt for 60 s: never from the main thread or a webview callback.
 - Holding a `canvas_session` is not success: Canvas issues an anonymous one before auth, so `complete_saml` accepts one only after posting an assertion and `sign_in` verifies it against `/api/v1/users/self` before writing it.
 - Answer `currentAuthenticator`'s challenge before reading the chooser — OIE offers `select-authenticator-authenticate` beside every challenge, and taking it loops forever.
 - The login page names `stateToken` several times; the first is a fragment introspect rejects as "session has expired", so `state_token_candidates` tries every plausible one.
@@ -547,6 +558,7 @@ existing query 403s, as does the bare URL.
 - A rejected password is cleared and automatic sign-in paused, or every automatic path would replay it until Okta locks the account.
 - A TOTP seed cannot be recovered from codes; getting it means re-enrolling the factor.
 - `setCookies:completionHandler:` must get a real block — nil segfaults the app seconds later from a WebKit-only stack.
+- WebView2 cookie reads must run on a worker thread, and queued writes/deletes must be read back before navigation or sign-out.
 - WebKit drops an API-set cookie that would replace an HttpOnly one a server set, with no error. Once Canvas hands the browser an anonymous `canvas_session`, re-seeding does nothing until the old cookie is deleted — so seeding deletes same-named cookies first.
 - `/login/session_token` answers 403 to a cookie session; it wants an access token, which is disabled here.
 - The data store's delegate setter is `set_delegate:`; `_setDelegate:` does not exist and throws.

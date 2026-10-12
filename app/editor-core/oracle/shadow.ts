@@ -13,7 +13,9 @@
 // fails the run. Each case ends by replaying its report payload through a
 // fresh `Shadow` and comparing it with CodeMirror. Self-tests first corrupt
 // the shadow on purpose and require exactly one report, so a silent shadow
-// cannot pass. Corpus notes (read at run time) get a case each.
+// cannot pass. Corpus notes (read at run time) get a case each, and so does
+// each fixed note: a document and the edits once found to part CodeMirror's
+// incremental tree from a fresh parse.
 //
 //   bun editor-core/oracle/shadow.ts [cases] [seed] [only]     (from app/)
 
@@ -26,6 +28,7 @@ import {
   EditorState,
   Transaction,
   type Annotation,
+  type ChangeSpec,
   type Extension,
   type TransactionSpec,
 } from "@codemirror/state";
@@ -363,8 +366,39 @@ if (args.only === null) {
   }
 }
 
+/** Lezer drops a fragment before an edit under 128 characters in, so a
+ *  fixed note that needs one starts with this. */
+const LEAD = `${"word ".repeat(30)}\n\n`;
+const tableNote = `${LEAD}p\n| a | b |\n|:--|-|\n| c | d |\n\nlast\n`;
+
+/** Fixed notes for `core/fragments.ts`: each edit once left CodeMirror's
+ *  incremental tree apart from a fresh parse. */
+const FIXED: { name: string; doc: string; edits: ChangeSpec[] }[] = [
+  // Shadow seed 71 case 155: Lezer kept the `CodeBlock`.
+  { name: "indented code loses a space", doc: "    a b\nc\n", edits: [{ from: 0, to: 1 }] },
+  // Shadow seed 71 case 174: Lezer kept `p` as a paragraph of its own.
+  {
+    name: "a delimiter row breaks under a paragraph",
+    doc: tableNote,
+    edits: [{ from: tableNote.indexOf(":--") + 1, insert: "é" }],
+  },
+];
+let fixed = 0;
+if (args.only === null) {
+  for (const note of FIXED) {
+    const driver = new Driver(EditorState.create({ doc: note.doc, extensions: [history(), language, shadow.extension] }), shadow, 1000);
+    driver.full();
+    for (const changes of note.edits) driver.tr({ changes, userEvent: "input" });
+    finish(`fixed note "${note.name}"`, script, driver);
+    steps += driver.steps;
+    fullChecks += driver.fullChecks;
+    treeChecks += driver.treeChecks;
+    fixed++;
+  }
+}
+
 console.log(
-  `shadow oracle: ${cases} random cases (${starts.fresh} fresh, ${starts.restored} restored, ${starts.late} late) + ${notes} corpus notes, ` +
+  `shadow oracle: ${cases} random cases (${starts.fresh} fresh, ${starts.restored} restored, ${starts.late} late) + ${notes} corpus notes + ${fixed} fixed notes, ` +
     `${steps} transactions, ${fullChecks} full checks (${treeChecks} with a tree), seed ${args.seed}, ${failures} mismatches`,
 );
 if (cases === 0 || treeChecks === 0) {

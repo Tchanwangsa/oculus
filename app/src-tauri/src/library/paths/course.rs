@@ -5,7 +5,8 @@ use super::{doc_pdf_rel, is_sheet};
 /// Canvas titles become filenames, so every component of a course artifact
 /// path is sanitised.
 pub fn safe_dir(s: &str) -> String {
-    s.chars()
+    let filename = s
+        .chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '-' || c == '_' {
                 c
@@ -13,11 +14,13 @@ pub fn safe_dir(s: &str) -> String {
                 '_'
             }
         })
-        .collect()
+        .collect::<String>();
+    safe_filename(&filename)
 }
 
 pub fn safe_filename(s: &str) -> String {
-    s.chars()
+    let filename = s
+        .chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
                 c
@@ -26,7 +29,30 @@ pub fn safe_filename(s: &str) -> String {
             }
         })
         .collect::<String>()
-        .replace("..", "_")
+        .replace("..", "_");
+    let filename = filename.trim_end_matches(['.', ' ']);
+    let stem = filename
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    let device = matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || stem
+        .strip_prefix("COM")
+        .or_else(|| stem.strip_prefix("LPT"))
+        .is_some_and(|suffix| {
+            matches!(
+                suffix,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        });
+    if device {
+        format!("_{filename}")
+    } else {
+        filename.to_owned()
+    }
 }
 
 pub fn safe_rel_path(rel: &str) -> Option<String> {

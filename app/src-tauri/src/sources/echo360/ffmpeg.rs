@@ -5,7 +5,7 @@ use super::TRIM_SECS;
 use std::path::{Path, PathBuf};
 
 fn is_runnable(path: &Path) -> bool {
-    std::process::Command::new(path)
+    crate::runtime::platform::command(path)
         .arg("-version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -35,7 +35,7 @@ pub fn find_ffmpeg(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
 
 /// Drop the lead-in with a stream copy (no re-encode).
 pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path) -> bool {
-    std::process::Command::new(ffmpeg)
+    crate::runtime::platform::command(ffmpeg)
         .args([
             "-y",
             "-ss",

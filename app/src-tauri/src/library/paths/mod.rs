@@ -40,3 +40,8 @@ pub use keyd_core::clock::iso8601_utc;
 pub fn keyd_socket_path(data_dir: &std::path::Path) -> PathBuf {
     keyd_core::paths::socket(data_dir)
 }
+
+/// Relative paths in database rows and IPC always use forward slashes.
+pub fn slash_path(path: impl AsRef<std::path::Path>) -> String {
+    path.as_ref().to_string_lossy().replace('\\', "/")
+}

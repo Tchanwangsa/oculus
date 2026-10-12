@@ -182,6 +182,14 @@ impl RateGate {
         wait
     }
 
+    #[cfg(test)]
+    pub(super) fn elapse_calm(&self) {
+        let past = Instant::now() - self.calm;
+        let mut state = hold(&self.inner);
+        state.last_throttle = past;
+        state.last_raise = past;
+    }
+
     /// A request came back: settle the bill and maybe raise the ceiling.
     pub fn succeeded(&self, estimated_tokens: u64, billed_tokens: Option<u64>) {
         if let Some(billed) = billed_tokens {

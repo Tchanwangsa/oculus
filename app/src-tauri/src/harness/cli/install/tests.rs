@@ -11,9 +11,11 @@ const ALL: [Provider; 4] = [
 ];
 
 /// The agents a package manager can install (not Antigravity).
+#[cfg(not(windows))]
 const PACKAGED: [Provider; 3] = [Provider::Claude, Provider::Codex, Provider::Opencode];
 
 /// `curl` is gated like every other manager, though macOS always has it.
+#[cfg(not(windows))]
 #[test]
 fn brew_only_machine_runs_the_brew_route() {
     let have = Managers {
@@ -39,7 +41,11 @@ fn npm_only_machine_runs_the_npm_route() {
         npm: true,
         ..Default::default()
     };
-    for p in PACKAGED {
+    #[cfg(not(windows))]
+    let packaged = PACKAGED.to_vec();
+    #[cfg(windows)]
+    let packaged = vec![Provider::Codex, Provider::Opencode];
+    for p in packaged {
         let runnable: Vec<Manager> = offer(p, have)
             .routes
             .into_iter()
@@ -58,6 +64,7 @@ fn npm_only_machine_runs_the_npm_route() {
     assert!(!offer(Provider::Codex, bun).runnable);
 }
 
+#[cfg(not(windows))]
 #[test]
 fn antigravity_is_curl_only() {
     let managers: Vec<Manager> = routes(Provider::Antigravity)
@@ -93,6 +100,7 @@ fn antigravity_is_curl_only() {
 }
 
 /// No manager at all still leaves every command to copy.
+#[cfg(not(windows))]
 #[test]
 fn no_manager_offers_copy_only() {
     for p in ALL {
@@ -139,13 +147,13 @@ fn routes_are_keyed_by_manager() {
 #[test]
 fn runner_streams_then_reports_the_exit() {
     let (tx, rx) = mpsc::channel::<Line>();
-    run_command(
-        "echo hello; echo trouble 1>&2; exit 3",
-        "installed",
-        move |l| {
-            let _ = tx.send(l);
-        },
-    )
+    #[cfg(not(windows))]
+    let command = "echo hello; echo trouble 1>&2; exit 3";
+    #[cfg(windows)]
+    let command = "Write-Output hello; [Console]::Error.WriteLine('trouble'); exit 3";
+    run_command(command, "installed", move |l| {
+        let _ = tx.send(l);
+    })
     .unwrap();
     let lines: Vec<Line> = rx.iter().collect();
     let (last, body) = lines.split_last().expect("at least the done line");
@@ -161,4 +169,25 @@ fn runner_streams_then_reports_the_exit() {
 #[test]
 fn runner_refuses_sudo() {
     assert!(run_command("sudo make me a sandwich", "installed", |_| {}).is_err());
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_offers_only_native_managers_for_supported_providers() {
+    let have = Managers {
+        curl: true,
+        brew: true,
+        npm: true,
+        bun: true,
+    };
+    assert!(offer(Provider::Claude, have).routes.is_empty());
+    assert!(offer(Provider::Antigravity, have).routes.is_empty());
+    for provider in [Provider::Codex, Provider::Opencode] {
+        let offer = offer(provider, have);
+        assert!(offer.runnable);
+        assert!(offer
+            .routes
+            .iter()
+            .all(|r| matches!(r.manager, Manager::Npm | Manager::Bun)));
+    }
 }

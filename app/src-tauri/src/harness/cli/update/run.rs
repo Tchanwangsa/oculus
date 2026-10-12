@@ -28,13 +28,15 @@ pub struct UpdateInfo {
 }
 
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    dirs::home_dir()
 }
 
 /// The binary, its source and its update command; `None` when not installed.
 fn plan(provider: Provider) -> Option<(PathBuf, Source, String)> {
     let bin = discover::binary(provider).ok()?;
-    let real = bin.canonicalize().unwrap_or_else(|_| bin.clone());
+    let real = crate::runtime::platform::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
+    #[cfg(windows)]
+    let real = crate::runtime::platform::npm_script(&bin).unwrap_or(real);
     let source = source_of(&real, home().as_deref());
     let cmd = command(provider, source, &bin);
     Some((bin, source, cmd))
@@ -42,6 +44,10 @@ fn plan(provider: Provider) -> Option<(PathBuf, Source, String)> {
 
 /// The update check for one provider, `None` when its CLI is missing.
 pub fn check(provider: Provider) -> Option<UpdateInfo> {
+    #[cfg(windows)]
+    if provider == Provider::Antigravity {
+        return None;
+    }
     let (_, source, command) = plan(provider)?;
     let installed = discover::health(provider).version;
     let home = home();
@@ -91,6 +97,10 @@ pub fn start<F>(provider: Provider, emit: F) -> Result<(), String>
 where
     F: Fn(InstallLine) + Send + 'static,
 {
+    #[cfg(windows)]
+    if provider == Provider::Antigravity {
+        return Err("Antigravity updates are not available on Windows".into());
+    }
     let (_, _, command) =
         plan(provider).ok_or_else(|| format!("{} is not installed", provider.label()))?;
     {

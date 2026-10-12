@@ -5,7 +5,7 @@
 // files belongs in the adapter or in docs/.
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { app } from "./runtime.mjs";
 
 const FORBIDDEN = [
@@ -27,6 +27,7 @@ const FORBIDDEN = [
 const ALLOWED = new Map([["src-tauri/src/providers/credentials/keychain.rs", ["keyring::"]]]);
 
 const platform = join(app, "keyd", "core", "src", "platform");
+const repoPath = (file) => relative(app, file).split(sep).join("/");
 
 function rustFiles(path) {
   if (!existsSync(path)) return [];
@@ -45,7 +46,7 @@ const scoped = [
 ].flatMap(rustFiles);
 
 test("the scope covers keyd's main, core's logic and the app's keyd code", () => {
-  const names = scoped.map((f) => relative(app, f));
+  const names = scoped.map(repoPath);
   for (const f of [
     "keyd/src/main.rs",
     "keyd/core/src/server.rs",
@@ -62,13 +63,13 @@ test("the scope covers keyd's main, core's logic and the app's keyd code", () =>
 test("no OS call outside platform/", () => {
   const hits = [];
   for (const file of scoped) {
-    const allowed = ALLOWED.get(relative(app, file)) ?? [];
+    const allowed = ALLOWED.get(repoPath(file)) ?? [];
     readFileSync(file, "utf8")
       .split("\n")
       .forEach((line, i) => {
         for (const word of FORBIDDEN) {
           if (line.includes(word) && !allowed.includes(word)) {
-            hits.push(`${relative(app, file)}:${i + 1}: ${word}`);
+            hits.push(`${repoPath(file)}:${i + 1}: ${word}`);
           }
         }
       });
