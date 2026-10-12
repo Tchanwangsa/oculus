@@ -1,0 +1,26 @@
+{
+  "hosts": ["www.instagram.com", "instagram.com"],
+  "home": [["direct"]],
+  "pass": [
+    ["accounts"],
+    ["challenge"],
+    ["auth_platform"],
+    ["two_factor"],
+    ["oauth"],
+    ["api"],
+    ["ajax"],
+    ["static"],
+    ["legal"],
+    ["emails"]
+  ],
+  "items": [
+    { "kind": "post", "path": ["p", ":key"] },
+    { "kind": "post", "path": ["reel", ":key"] },
+    { "kind": "post", "path": ["reels", ":key"] },
+    { "kind": "post", "path": ["tv", ":key"] },
+    { "kind": "post", "path": [":_", "p", ":key"] },
+    { "kind": "post", "path": [":_", "reel", ":key"] },
+    { "kind": "highlight", "path": ["stories", "highlights", ":key"] },
+    { "kind": "story", "path": ["stories", ":key"] }
+  ]
+}

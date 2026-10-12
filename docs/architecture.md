@@ -29,6 +29,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | PDF viewer's render, text and links | `app/src-tauri/src/library/pdf_view/` |
 | In-app browser | `app/src-tauri/src/shell/browser/`, `app/src-tauri/capabilities/default.json` |
 | Spotify playback ([music.md](./music.md)) | `app/src-tauri/src/music/`, `app/src/lib/music/index.ts` |
+| Messaging dock ([dock.md](./dock.md)) | `app/src-tauri/src/shell/dock/` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes | `app/src-tauri/src/db/store/`, `app/src-tauri/src/db/projects/` |
 | App-usage ticker and its pinger | `app/src-tauri/src/shell/usage/`, `app/src/hooks/backend/useActivityPing.ts`, `app/src/lib/activity/usageContext.ts` |
@@ -382,7 +383,7 @@ context when input made it active, which wins over media, else the media
 context; with none reported yet, it credits `other`. Ticks before the frontend
 has applied the migrations fail quietly and later ones retry.
 
-## The main window holds one webview per browser tab
+## The main window holds one webview per browser tab and messaging service
 
 External links open as in-app browser tabs: each is a child webview of remote
 content stacked over the slot the `/browse/:id` route leaves in the content
@@ -390,9 +391,20 @@ card ([viewers.md](./viewers.md#the-in-app-browser-is-a-native-page-per-tab-owne
 insets and Rust lays pages out from them, so a resize never waits on
 JavaScript.
 
-- `app/src-tauri/capabilities/default.json` is scoped to the `main` *webview*,
-  not the window: window and webview scopes match by OR, so a window scope
-  would hand every Tauri command to whatever page the user browsed to.
+The messaging dock's pages ([dock.md](./dock.md)) are the same kind of child
+webview, laid out the same way.
+
+- Tauri injects its IPC bridge into every child webview, remote pages
+  included, so the capability ACL is the only guard. IPC from a remote origin
+  is refused unless a capability's `remote.urls` matches it; app commands are
+  not ACL-gated for local pages (`build.rs` declares no app manifest).
+- There are two capabilities. `app/src-tauri/capabilities/default.json` is
+  scoped to the `main` *webview*, not the window: window and webview scopes
+  match by OR, so a window scope would hand every Tauri command to whatever
+  page the user browsed to. `app/src-tauri/capabilities/canvas-auth.json`
+  gives `core:default` to the Canvas sign-in windows. The dock's
+  `capabilities_test.rs` fails the build on any capability that could reach a
+  remote page.
 - Back-list state, find matches and zoom live only in the page, and
   `with_webview` dispatches to the main thread and returns nothing. So
   `shell::browser` *pushes* each answer as an event rather than returning it.
