@@ -71,7 +71,7 @@ export function RunDetail({ run }: { run: SyncRunSummary }) {
       {files.length === 0 ? (
         <p className="text-xs text-muted-foreground py-1.5">
           {run.status === "running"
-            ? "Nothing touched yet…"
+            ? "Nothing checked yet…"
             : "No per-file records for this run."}
         </p>
       ) : (
@@ -81,6 +81,16 @@ export function RunDetail({ run }: { run: SyncRunSummary }) {
               {shown.map((f) => (
                 <FileLine key={f.id} file={f} />
               ))}
+              {/* The rest of the preview, as its last row: opens the full list. */}
+              {changed.length > shown.length && (
+                <button
+                  type="button"
+                  onClick={() => setModalOpen(true)}
+                  className="flex w-full items-center rounded-sm py-1 pl-[23px] text-left text-[11px] text-muted-foreground hover:bg-surface/60 hover:text-foreground"
+                >
+                  +{changed.length - shown.length} more changed
+                </button>
+              )}
             </div>
           ) : (
             <p className="text-xs text-muted-foreground py-1.5">
@@ -89,11 +99,6 @@ export function RunDetail({ run }: { run: SyncRunSummary }) {
           )}
 
           <div className="flex items-center gap-3 pt-2">
-            {changed.length > shown.length && (
-              <span className="text-[11px] text-muted-foreground">
-                +{changed.length - shown.length} more changed
-              </span>
-            )}
             {skipped > 0 && shown.length > 0 && (
               <span className="text-[11px] text-muted-foreground">
                 {skipped} unchanged file{skipped === 1 ? "" : "s"} skipped
