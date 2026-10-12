@@ -2,7 +2,7 @@
 //! videos under `<app data>/studio/videos/`; every command that takes a DIR
 //! also takes a bare slug naming one of them. `frame`, `strip`, `lint`,
 //! `brief`, `beats` and `render` read a video folder on disk (no database,
-//! no network); `narrate`
+//! no network); `slide` and `blocks` read a library PDF; `narrate`
 //! and `tts` run Kokoro or call the TTS server, `g2p` shows how Kokoro reads
 //! text, `pronounce` puts a reading up for the student's review, and
 //! `voices` and `aligner` manage the downloaded models.
@@ -19,6 +19,8 @@ pub(crate) enum StudioAction {
     Brief(StudioBriefArgs),
     Beats(StudioBeatsArgs),
     Gallery(StudioGalleryArgs),
+    Slide(StudioSlideArgs),
+    Blocks(StudioBlocksArgs),
     Components {
         #[command(subcommand)]
         action: StudioComponentsAction,
@@ -154,6 +156,7 @@ impl StudioAction {
             StudioAction::Brief(a) => Some(&mut a.dir),
             StudioAction::Beats(a) => Some(&mut a.dir),
             StudioAction::Gallery(a) => Some(&mut a.dir),
+            StudioAction::Slide(a) => Some(&mut a.dir),
             StudioAction::Render(a) => Some(&mut a.dir),
             StudioAction::Narrate(a) => Some(&mut a.dir),
             StudioAction::G2p(a) => a.video.as_mut(),
@@ -173,6 +176,7 @@ impl StudioAction {
             StudioAction::New(_)
             | StudioAction::List(_)
             | StudioAction::Tts(_)
+            | StudioAction::Blocks(_)
             | StudioAction::Voices { .. }
             | StudioAction::Agents(_)
             | StudioAction::Aligner { .. } => None,
@@ -622,6 +626,97 @@ pub(crate) struct StudioGalleryArgs {
     /// Render threads (default: half the cores, at most one per example)
     #[arg(long, value_name = "T")]
     pub(crate) threads: Option<usize>,
+}
+
+/// Crop a region of a library PDF page into a video's assets
+///
+/// Renders the region with the app's PDF renderer and writes
+/// `<DIR>/assets/slides/<NAME>.png` (sharp at up to 2x the video's frame),
+/// `<NAME>.page.png` (the whole page fitted to the frame, for a zoom in from
+/// the page) and `<NAME>.json`: the PDF's library path and sha256, the page,
+/// the crop as fractions of the page, how it was chosen, the blocks inside it
+/// as fractions of the crop (kind and text, for highlight boxes), and the
+/// props for the `Slide` starter, which it also prints. FILE resolves as for
+/// `oculus read`. Name the region one way: `--find` text in a block (a
+/// figure, chart or table that holds it wins over running text; a caption
+/// that is its own block brings the figure beside it; a tie or no match
+/// lists the candidates), `--block` indices from `oculus studio blocks`, or
+/// `--bbox`. Blocks come from the parse record, so `--find` and `--block`
+/// need a parsed PDF. The same inputs write the same bytes; lint warns when
+/// the PDF changes after.
+///
+///     oculus studio slide momentum lecture-04.pdf --find "Figure 3" --name descent
+///
+///     oculus studio slide momentum lecture-04.pdf --page 12 --block 3,4
+///
+///     oculus studio slide momentum lecture-04.pdf --page 12 --bbox 0.5,0.2,0.95,0.8
+#[derive(Args)]
+pub(crate) struct StudioSlideArgs {
+    /// The video folder, the one holding `video.json` (or its slug)
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// Library path, filename, or a fragment of either
+    #[arg(value_name = "FILE")]
+    pub(crate) file: String,
+    /// The page, from 1 (needed by --block and --bbox; --find without it
+    /// searches every page)
+    #[arg(short = 'p', long, value_name = "N")]
+    pub(crate) page: Option<u32>,
+    /// Text in the block to crop, any case, e.g. "Figure 3"
+    #[arg(long, value_name = "TEXT")]
+    pub(crate) find: Option<String>,
+    /// Block indices on the page; several are cropped as one region round
+    /// them all
+    #[arg(long, value_name = "I[,J…]", value_delimiter = ',')]
+    pub(crate) block: Vec<usize>,
+    /// A box as fractions of the page from its top left
+    #[arg(long, value_name = "X0,Y0,X1,Y1")]
+    pub(crate) bbox: Option<String>,
+    /// The files' name under assets/slides/ (default: from the page and
+    /// what was asked, e.g. `p12-figure-3`)
+    #[arg(long, value_name = "NAME")]
+    pub(crate) name: Option<String>,
+    /// Margin round the region, as a fraction of the page's shorter side
+    #[arg(long, value_name = "FRACTION", default_value_t = 0.02)]
+    pub(crate) pad: f64,
+    /// The crop's width in pixels (default: 2x what fills the frame, at
+    /// most 6 megapixels)
+    #[arg(long, value_name = "PX")]
+    pub(crate) width: Option<u32>,
+    /// Overwrite a slide of the same name cropped from another PDF
+    #[arg(long)]
+    pub(crate) replace: bool,
+    /// Disambiguate FILE by subject; prefix codes are fine
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    pub(crate) subject: Option<String>,
+}
+
+/// List a parsed PDF's blocks: what `slide` can crop
+///
+/// For each page (or only `--page`): its size in points, then each block of
+/// its parse record: index, kind (`text`, `image`, `chart`, `table`,
+/// `equation`, …), box as fractions of the page from its top left, and its
+/// text on one line (an image's caption). `--png` also writes that page with
+/// every block's box and index drawn on it (figures in indigo, the rest in
+/// grey), to look at before picking.
+///
+///     oculus studio blocks lecture-04.pdf --page 12
+///
+///     oculus studio blocks lecture-04.pdf --page 12 --png out/p12.png
+#[derive(Args)]
+pub(crate) struct StudioBlocksArgs {
+    /// Library path, filename, or a fragment of either
+    #[arg(value_name = "FILE")]
+    pub(crate) file: String,
+    /// Only this page, from 1
+    #[arg(short = 'p', long, value_name = "N")]
+    pub(crate) page: Option<u32>,
+    /// With --page: write the page, its blocks drawn on, as this PNG
+    #[arg(long, value_name = "OUT", requires = "page")]
+    pub(crate) png: Option<PathBuf>,
+    /// Disambiguate FILE by subject; prefix codes are fine
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    pub(crate) subject: Option<String>,
 }
 
 /// List, show, promote or seed a video's components

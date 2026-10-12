@@ -1,12 +1,31 @@
 //! Images from the project's `assets/`, decoded once per renderer (not per
 //! frame) into premultiplied pixmaps. A missing or undecodable file is an
-//! error, never a placeholder.
+//! error, never a placeholder. A `src` under the reserved `starter:` prefix
+//! is one of the images bundled in the crate ([`BUNDLED`]), so a starter's
+//! examples render with no assets folder (a gallery, the playground).
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use vello_cpu::peniko::ImageAlphaType;
 use vello_cpu::{PixelMetadata, Pixmap};
+
+/// The prefix that names a bundled image instead of a file in `assets/`.
+pub const BUNDLED_PREFIX: &str = "starter:";
+
+/// `(src, PNG)` for each bundled image, in `library/assets/`: the `Slide`
+/// starter's sample crop and its page (made by `oculus studio slide` from
+/// the app's test fixture; see docs/studio.md, "Slides crop a library PDF page").
+pub const BUNDLED: &[(&str, &[u8])] = &[
+    (
+        "starter:slide-figure.png",
+        include_bytes!("../../library/assets/slide-figure.png"),
+    ),
+    (
+        "starter:slide-page.png",
+        include_bytes!("../../library/assets/slide-page.png"),
+    ),
+];
 
 #[derive(Default)]
 pub struct ImageCache {
@@ -27,14 +46,18 @@ impl ImageCache {
         if let Some(p) = self.decoded.get(src) {
             return Ok(Arc::clone(p));
         }
-        let path = self.resolve(src)?;
-        let bytes = std::fs::read(&path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                format!("not found: no file {}", path.display())
-            } else {
-                format!("could not be read ({}): {e}", path.display())
-            }
-        })?;
+        let bytes = if src.starts_with(BUNDLED_PREFIX) {
+            bundled(src)?.to_vec()
+        } else {
+            let path = self.resolve(src)?;
+            std::fs::read(&path).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    format!("not found: no file {}", path.display())
+                } else {
+                    format!("could not be read ({}): {e}", path.display())
+                }
+            })?
+        };
         let img = image::load_from_memory(&bytes)
             .map_err(|e| format!("could not be decoded as PNG or JPEG: {e}"))?
             .to_rgba8();
@@ -72,3 +95,21 @@ impl ImageCache {
         Ok(dir.join(rel))
     }
 }
+
+/// The bundled image `src` names.
+fn bundled(src: &str) -> Result<&'static [u8], String> {
+    BUNDLED
+        .iter()
+        .find(|(name, _)| *name == src)
+        .map(|(_, bytes)| *bytes)
+        .ok_or_else(|| {
+            let names: Vec<&str> = BUNDLED.iter().map(|(n, _)| *n).collect();
+            format!(
+                "is not a bundled image; `{BUNDLED_PREFIX}` names one of {}",
+                names.join(", ")
+            )
+        })
+}
+
+#[cfg(test)]
+mod tests;

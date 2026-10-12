@@ -230,6 +230,9 @@ order (after the header sort): `{kind, bbox, start, end}`.
   `ParseOutput::new` gap-fills, spreadsheets and records written before
   version 3 have none, and the key is omitted when empty.
 - Tracking blocks never changes the markdown; `render.rs`'s tests pin it.
+- Readers: the PDF↔Markdown sync ([viewers.md](./viewers.md)) and Studio's
+  slides, which crop a block's box from the page
+  ([studio.md](./studio.md#slides-crop-a-library-pdf-page)).
 
 A result with no content list writes **nothing**. Changed bytes purge the
 artifacts (`library::paths::purge_parse_artifacts`) before re-parsing, or a stale

@@ -26,6 +26,7 @@ video's slug as `DIR`; `oculus studio <command> --help` has the full flags.
 - Narrate
 - Pronunciation: guessed words, `oculus studio g2p`, suggesting a reading with `oculus studio pronounce`
 - Render
+- Slides: a real crop of a lecture PDF page, `blocks`, `slide`, `Slide`
 - Libraries: how a name resolves, promoting, the starter components
 
 ## video.json
@@ -217,7 +218,7 @@ list(token("color"))`, read together by index.
 | `Stack` | `gap`, `align`, `justify`, `wrap`, `style`, `key`, children | A column Box. |
 | `Row` | the same | A row Box. |
 | `Text` | `style`, `key`, children | Children are strings or numbers. To mix styles, several Text in a Row. Wraps at its box's width. |
-| `Image` | `src`, `style`, `key` | `src` is relative to `assets/`. A missing file is an error. |
+| `Image` | `src`, `style`, `key` | `src` is relative to `assets/`. A missing file is an error. `starter:` names an image bundled for examples. |
 | `Path` | `d`, `viewBox`, `fill`, `stroke`, `trim`, `style`, `key` | SVG path data fitted into its box. `stroke` is `{ width, color, cap, join, dash, dashOffset }`; `trim: [start, end]` draws that fraction of the length. |
 | `Math` | `tex`, `display`, `style`, `key` | LaTeX as one keyed piece per glyph ("Maths"). |
 | `Morph` | `p`, `lag`, `fade`, `ease`, two children | Two layouts of one place, blended at `p` (0 to 1). No `key`. |
@@ -990,6 +991,38 @@ fast. `--final` writes `renders/final.mp4` at full size, with motion blur
 second render redoes only the scenes an edit touched. It never narrates:
 stale narration stops it, naming the scene. Report the path it prints.
 
+## Slides
+
+When the lecture's own figure is the point, show it, cropped from the
+library PDF, rather than redraw it.
+
+```bash
+oculus studio blocks lecture-04.pdf --page 12                       # each block: index, kind, box, text
+oculus studio blocks lecture-04.pdf --page 12 --png out/p12.png     # the page, blocks boxed and numbered
+oculus studio slide <slug> lecture-04.pdf --find "Figure 3" --name descent
+oculus studio slide <slug> lecture-04.pdf --page 12 --block 3,4 --name descent
+oculus studio slide <slug> lecture-04.pdf --page 12 --bbox 0.5,0.2,0.95,0.8 --name descent
+```
+
+- FILE is found as `oculus read` finds it. `--find` picks the figure, chart
+  or table whose text holds the words, with its caption when the caption is
+  its own block; a tie or a miss lists the candidates, so pick one with
+  `--page` and `--block`. `--bbox` is fractions of the page from its top
+  left. `--pad` (0.02) adds a margin.
+- It writes `assets/slides/<name>.png` (sharp at 2x the frame),
+  `<name>.page.png` (the whole page) and `<name>.json`, and prints the
+  `Slide` props and the blocks inside the crop as boxes in fractions of the
+  crop. Paste the props; take `highlight` boxes from those blocks.
+- **Look at the crop** (`frame` the scene). A figure's box can leave out a
+  caption printed under it, or a label beside it: widen it with `--bbox`.
+- Use `Slide` as the scene (props in `video.json`), or copy the helper into
+  a component to put the crop beside other elements: `area: [x, y, w, h]`
+  places it. Cue `zoomAt` and `highlightAt` with `word()`. Without `page`
+  it enters with `enter` (an Enter preset) at `at`.
+- The sandbox reads no files, so never compute a crop's size: `aspect`
+  comes from the props printed. Lint warns when the PDF has changed since
+  the crop; re-run the command it prints.
+
 ## Libraries
 
 A component name resolves through three levels; the first hit wins:
@@ -1035,6 +1068,7 @@ value and what is allowed.
 | `Bars` | `bars({ labels, series, to, changeAt, orientation, histogram, stacked, sort, unit, width, height, ... })` maps data to px; `<Bars ch id at barsAt each names tones line lineLabel lineAt lineTone highlight highlightAt highlightTone dim diff diffLabel diffAt>` (`bars`) | A bar chart or histogram, grouped or stacked, vertical or horizontal: nice value axis (reaches `max` at least and always the data; ticks thinned to fit, crowded category labels thinned), bars growing (stagger capped), value labels counting up, states gliding to the next (`sort` re-ranks), a reference line, a highlighted subset (`highlightTone`, `dim`), a difference arrow (`diff`: a guide and arrow in clear space). A bare `\\` in a label starts a second line. Keys `bars/b<i>`, `bars/l<i>`, `bars/v<i>` |
 | `Code` | `tokenize(lines, lang)`; `<Code lines lang keys numbers first fontSize focus caret reveal notes trace added removed diffAt marks id maxWidth maxHeight>` (`code`) | Source on a panel, every character on a fixed column grid, coloured for `python`, `javascript`, `c`, `sql` or `plain`; a focus band that dims the rest, a caret, lines revealed one by one, notes beside lines, a trace table of variable values, a diff (`marks` reserves the +/- gutter so a Steps from a diff to clean code keeps the panel size). Short code grows to 1.5x the theme's size unless `fontSize` is set. `keys` keep a line's identity across versions, so a Steps slides the lines that persist with their numbers, cross-fades a changed line and glides diff bands (`code/l<key>`). In `c` a single quote starts a char literal only (`'x'`), in `javascript` a template literal runs over lines; characters outside the bundled fonts (CJK, emoji) draw as boxes. The one starter in monospace |
 | `Table` | `header`, `rows` (TeX), `at`, `each`, `by` (`row`/`col`), `marks: [{ rows, color, at }]`, `hide`, `colWidth`, `id` (`table`) | Cells of maths revealed row by row, rows banded; a Math elsewhere keyed like a cell (`table/r1c2`) takes its glyphs, so a value lifts out of the table |
+| `Slide` | `<Slide src aspect page pageAspect bbox caption source highlight highlightAt tone at zoomAt zoomDur enter area id>` (`slide`); the props `oculus studio slide` prints | A crop of a lecture PDF page on a paper card that fills the frame, a caption beside or below it and the source under it; given the page, it opens on the whole page and zooms into the crop; highlight boxes (fractions of the crop) draw on. Keys `slide/card`, `slide/img`, `slide/h<k>` ("Slides") |
 | `TitleCard` | `title`; optional `eyebrow`, `subtitle`, `accent` | The opening card, dark. A scene on its own, the only one |
 
 Each demo's flat props are in `components show`; `gallery` draws its

@@ -55,6 +55,7 @@ From your working directory (`agents/`):
   script.md                   the director writes: what is said, per scene
   components/<Name>.tsx       scene builders write: the video's components
   assets/                     images, named by <Image src>
+  assets/slides/              made by `oculus studio slide`: page crops for Slide
   narration/                  made by narrate
   out/                        made by frame, strip and gallery: PNGs
   renders/                    made by render: draft.mp4, final.mp4
@@ -109,7 +110,8 @@ role it prints the model and the exact call to make. Use it as printed:
   reviewer's, with this sentence: Read `skills/oculus-studio/build.md`,
   then these sections of `skills/oculus-studio/reference.md`:
   "Components", "Elements", "The theme", "Motion", "Maths", "Moving
-  maths", "Word cues", "Transitions and magic move", "Lint" and "Looking".
+  maths", "Word cues", "Transitions and magic move", "Lint", "Looking"
+  and "Slides".
 - **opencode**: the `task` tool with the printed `subagent_type`.
 - **A role printed as off, or an agent that cannot start helpers** (agy):
   do that role's items yourself, one after another, in the same order and
@@ -193,7 +195,7 @@ writes a fast 540p `renders/draft.mp4`; tell the student its path.
   Every number and every step as the lecture gives it. (slide 9, 14:40)
 
 ## Figures
-- slide 7: a clock face with 15 marks, powers of 7 landing on 7, 4, 13, 1. (page 7)
+- slide 7: a clock face with 15 marks, powers of 7 landing on 7, 4, 13, 1. (page 7, block 2, "Figure 4")
 
 ## Assumes
 - modular arithmetic (used at 12:05, never defined in this slice)
@@ -205,7 +207,8 @@ writes a fast 540p `renders/draft.mp4`; tell the student its path.
 - 15:02 "the period is the whole secret"
 ```
 
-Read the slice in full, not a summary of it. Copy numbers exactly; never
+For each figure, `oculus studio blocks [file] --page N` gives its block
+index and caption. Read the slice in full, not a summary of it. Copy numbers exactly; never
 fill a gap with your own example and present it as the lecture's. Write
 "not in this slice" rather than guess.
 
@@ -248,6 +251,13 @@ or moves on screen as those words are said.
 to the previous line, cued to its words: terms move to their new places,
 what cancels fades, what is new is written in as it is said. A finished
 result moves aside, smaller, and stays on screen while it is used.
+
+**Real figures.** When the lecture's own figure is the point (the diagram
+the student will meet in the exam, a plot of real data, a photo), show the
+crop instead of redrawing it: the scene uses the `Slide` starter, and its
+storyboard entry names the file, page and block or `--find` text. Redraw
+it as a component when the scene must move its parts. `reference.md`
+("Slides") has the commands.
 
 **When the source stops short**, say so in the narration ("the lecture
 leaves how the period is found for next week") rather than invent the step

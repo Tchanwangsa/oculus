@@ -78,6 +78,7 @@ fn the_list_has_the_nearest_level_per_name_and_marks_shells() {
             "Graph",
             "Grid",
             "NumberLine",
+            "Slide",
             "Table",
             "TitleCard"
         ]
@@ -89,7 +90,7 @@ fn the_list_has_the_nearest_level_per_name_and_marks_shells() {
     assert_eq!(level("Banner"), Level::Subject);
     assert_eq!(level("Grid"), Level::Subject);
     assert_eq!(level("TitleCard"), Level::Global);
-    assert_eq!(subject.len(), 11);
+    assert_eq!(subject.len(), 12);
 
     let kind = |name: &str| subject.iter().find(|r| r.name == name).unwrap().kind;
     assert_eq!(kind("SplitShell"), Kind::Shell);
@@ -97,7 +98,7 @@ fn the_list_has_the_nearest_level_per_name_and_marks_shells() {
 
     let broken = subject.iter().find(|r| r.name == "Broken").unwrap();
     assert!(broken.problem.is_some() && broken.props.is_empty());
-    assert!(subject.iter().filter(|r| r.problem.is_none()).count() == 10);
+    assert!(subject.iter().filter(|r| r.problem.is_none()).count() == 11);
 }
 
 #[test]

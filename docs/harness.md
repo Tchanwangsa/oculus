@@ -640,7 +640,7 @@ fan research and scene building out to them. The two roles are
 points at the skill's "Research" section. `studio-scene`, which builds,
 fixes and reviews a scene, gets `STUDIO_SCENE.template.md`, then the
 skill's `build.md`, then the builder's sections of `reference.md`
-(`BUILDER_SECTIONS`: Components to Looking, not the director's video.json,
+(`BUILDER_SECTIONS`: Components to Looking, and Slides, not the director's video.json,
 script.md, Narrate, Pronunciation, Render and Libraries), cut at their
 `## ` headings from the same compiled-in files the skill ships, so a
 builder reads no file for them and every builder starts from the same

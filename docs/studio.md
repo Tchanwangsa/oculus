@@ -10,7 +10,7 @@ command, encodes a video to an mp4 with ffmpeg, one cached segment per
 scene. `oculus studio` also renders single
 frames and contact sheets, lints (errors, and warnings about how a
 scene looks over time), prints a scene's timeline of changes (`beats`),
-and narrates.
+crops library PDF pages into slides (`slide`), and narrates.
 
 ## Where
 
@@ -48,7 +48,8 @@ and narrates.
 | The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
 | The playground's commands: `studio_themes`, the component list, source, frame, validated write, history and restore | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `lint.rs`, `brief.rs`, `beats.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `pronounce.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| Slides: a region of a library PDF page as a video asset, the blocks to pick it by, the sidecar and its lint; the bundled sample crop | `app/src-tauri/src/studio/slides/` (`blocks.rs`, `geometry.rs`, `raster.rs`, `sidecar.rs`, `preview.rs`), `app/studio-core/library/components/Slide.tsx`, `app/studio-core/src/images/`, `app/studio-core/library/assets/` |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `lint.rs`, `brief.rs`, `beats.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `pronounce.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`, `slide.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -345,7 +346,8 @@ curves, `Scatter` with a regression line, `Area`, `Riemann` rectangles, a
 on a circle, as a tree, in columns or by hand; a traversal and a walk),
 `Grid` (a matrix, DP table or board of cells with fills, marks and
 pointers), `Bars` (a bar chart or histogram), `Code` (highlighted source
-on a fixed column grid) and `Table` (keyed cells), plus `TitleCard`, and
+on a fixed column grid) and `Table` (keyed cells), plus `Slide` (a crop of
+a lecture PDF page; see "Slides crop a library PDF page") and `TitleCard`, and
 the theme `warm` beside `default`. Components cannot import one another, so
 each primitive file holds the primitive as a helper function (keys under
 an `id` prefix, times as numbers a scene passes from `word()`) and a
@@ -960,7 +962,10 @@ and `tex` and `display` on `Math`.
   with `alignItems: "baseline"` lines texts of different sizes (and `Math`)
   up on it.
 - `Image src` is relative to `assets/`. A missing or undecodable file is an
-  error, never a placeholder. Decoded images are cached per renderer.
+  error, never a placeholder. Decoded images are cached per renderer. A
+  `src` starting `starter:` is an image bundled in the crate
+  (`images::BUNDLED`, files in `app/studio-core/library/assets/`), so a
+  starter's examples render with no assets folder.
 - Style keys are `STYLE_KEYS` in `app/studio-core/src/scene/style.rs`: size
   and min/max, flex, `gap`, `padding`/`margin` (`n`, `[v, h]` or four
   sides), `position` with `left`/`top`/`right`/`bottom`, `fill`, `radius`,
@@ -1949,6 +1954,81 @@ there. Nothing is cached.
   (it must still load) and writes it through the same path, so the text it
   replaces is snapshotted as the newest entry and an Undo can be undone.
 
+## Slides crop a library PDF page
+
+A scene shows "page 12, Figure 3" as the real thing: `oculus studio slide`
+crops a region of a library PDF page into the video's `assets/`, once, and
+the `Slide` starter animates it in. Rendering never opens a PDF.
+
+- **Picking the region.** FILE resolves as for `oculus read` (an Office
+  document means its converted PDF). `--find TEXT` matches, in any case,
+  the text of each block in the parse record's `blocks`
+  ([parsing.md](./parsing.md#blocks-where-each-rendered-item-sits)), on
+  `--page` or every page: one figure (`image`, `chart`, `table`) among the
+  matches wins; else one text block next to a figure is its caption and
+  both are taken (the nearer neighbour by vertical gap); else one match is
+  taken alone. No match, or a tie at the tier that decided, is an error
+  listing each candidate as `page P block I (kind): text`. `--block I,J`
+  takes blocks by index, `--bbox x0,y0,x1,y1` any box. Boxes are the
+  record's convention, fractions of the rendered page (crop box, rotated)
+  from its top left; a MinerU figure box can leave out a caption printed
+  under it, so the crop is worth a look. `--pad` (default 0.02 of the
+  page's shorter side, the same in points on every side) grows the union
+  of the boxes, clamped to the page; under 2 pt a side is refused.
+- **`oculus studio blocks FILE [--page N] [--png OUT]`** lists each page's
+  size in points and its blocks: index, kind, box, and the block's text on
+  one line (`blocks::plain`: an image's `![caption](...)` as its caption,
+  tags and heading marks dropped, cut to 80 characters). `--png` writes
+  the page 1600 px wide with each box outlined (figures indigo, the rest
+  grey) and its index in a tab, drawn with a 3x5 bitmap font
+  (`preview.rs`). `--json` gives `{path, png, pages: [{page, width,
+  height, blocks: [{index, kind, bbox, text}]}]}`.
+- **Rendering.** `slides::make` runs hayro on a thread with the
+  renderer's stack (`RENDER_STACK`), every call guarded, each raster under
+  a render-budget reservation (the viewer's lane). Only the region is
+  interpreted, into a context its size (`hayro::render_into` with a
+  translate and scale before the page's own transform), so a small figure
+  at 2x never rasterises the whole page at that scale. The crop's default
+  width is twice what fills the video's frame (`video.json`'s size), at
+  most 6 megapixels; `--width` asks for one and is refused past 8192 px a
+  side or 6 megapixels. The whole page is also rendered fitted to the
+  frame at 1x, for the zoom. PNGs are RGB, opaque on white, encoded at
+  best compression: the same inputs write the same bytes, so the segment
+  cache, which hashes `assets/`, keeps its segments.
+- **Files.** `assets/slides/<name>.png`, `<name>.page.png` and
+  `<name>.json`. The name is `--name` (letters, digits, `-`, `_`) or made
+  from the page and the ask (`p12-figure-3`, `p12-b3-4`, `p12-region`). A
+  name already holding a crop of another PDF is refused unless
+  `--replace`. The sidecar (`sidecar::Sidecar`) holds `source` (the PDF's
+  data-relative path), `sha256` of its bytes, `page`, `pageSize` (points),
+  `bbox` (the padded crop), `select` (`find`, `blocks` or `bbox`), `pad`,
+  `width` when one was asked, `image` and `pageImage` (`src`, `width`,
+  `height`), `blocks` (each block at least half inside the crop: index,
+  kind, box as fractions of the crop, text) and `props`, the `Slide`
+  props for the crop (`src`, `aspect`, `page`, `pageAspect`, `bbox`, and a
+  `source` label from the file name), which the command also prints.
+- **Lint.** `oculus studio lint` reads every sidecar under
+  `assets/slides/` and warns when the PDF at `source` no longer has the
+  sidecar's sha256, naming the scene whose props hold the crop's `src`
+  (else the video) and the `oculus studio slide` call that makes it again.
+  A PDF it cannot read is not checked (`slides::lint`).
+- **`Slide`** (`library/components/Slide.tsx`) draws the crop on a paper
+  card as large as the frame allows, a caption beside a crop that would
+  leave a third of the width empty and below a wide one, the source label
+  under it. With `page`, `pageAspect` and `bbox` it opens on the whole page
+  fitted to the frame and zooms into the crop: the card's rect goes from
+  the crop's place on the page to its own (size by powers, centre
+  linearly), the page drawn round it fading out while the card's edge and
+  shadow grow, so the crop is seamless at first. Without them the card
+  comes in with an `Enter` preset. `highlight` boxes, in fractions of the
+  crop (the sidecar's `blocks` give them), draw on as a rounded outline
+  with a tint at `highlightAt`. The sandbox reads no files, so the props
+  carry the aspect ratios and boxes. Keys are under `id`, so two Slides in
+  a `Steps` morph one crop's card into the other's. Its examples use
+  `starter:slide-figure.png` and `starter:slide-page.png`, a crop of a
+  lecture slide the app's tests build with lopdf; the ignored test
+  `slides::tests::make::write_the_starter_sample` remakes them.
+
 ## `oculus studio` renders and lints from the terminal
 
 - `oculus studio frame <DIR>` writes one PNG, by default to
@@ -2026,7 +2106,8 @@ there. Nothing is cached.
   as `{level: "error"|"warning"|"note", scene, id, component, example,
   kind, message, loc}` (`kind` is `off_frame`, `still`, `half_frame` or
   `fragment` for a warning; `scene` and `component` null for a script
-  section no scene matches, or for a problem of the whole video), then each
+  section no scene matches, or for a problem of the whole video, such as a
+  slide no scene shows whose PDF changed), then each
   guessed word as `{level: "note", scene, id, line, kind: "guessed",
   message, word, phonemes, guessed, review}`.
 - `oculus studio beats <DIR> --scene <ID|N>` prints the scene's timeline
@@ -2049,6 +2130,9 @@ there. Nothing is cached.
   `components promote` and `themes promote` copy a video's own file into a
   library, and `components seed [--reset]` copies the starter set into the
   global library.
+- `oculus studio slide <DIR> <FILE>` crops a region of a library PDF page
+  into the video's `assets/slides/`, and `oculus studio blocks <FILE>`
+  lists the blocks to pick it by (see "Slides crop a library PDF page").
 - `oculus studio new` and `list` make and list the videos in the data
   directory, and every command above takes a video's slug in place of its
   folder (see "Videos live in the data directory").

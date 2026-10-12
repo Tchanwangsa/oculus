@@ -15,6 +15,7 @@ mod lint;
 mod narrate;
 mod pronounce;
 mod render;
+mod slide;
 mod themes;
 mod videos;
 mod voices;
@@ -40,6 +41,8 @@ impl Ctx {
             StudioAction::Brief(a) => self.studio_brief(&a),
             StudioAction::Beats(a) => self.studio_beats(&a),
             StudioAction::Gallery(a) => self.studio_gallery(&a),
+            StudioAction::Slide(a) => self.studio_slide(&a),
+            StudioAction::Blocks(a) => self.studio_blocks(&a),
             StudioAction::Components { action } => self.studio_components(&action),
             StudioAction::Themes { action } => self.studio_themes(&action),
             StudioAction::Render(a) => self.studio_render(&a),
