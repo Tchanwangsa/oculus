@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { workspaceStatusText } from "@/lib/ed/workspaceStatus";
+import { edUnavailableReason, workspaceStatusText } from "@/lib/ed/workspaceStatus";
 
 describe("workspace status line", () => {
   test("a write in flight, then a failed one, come first", () => {
@@ -18,5 +18,14 @@ describe("workspace status line", () => {
     expect(workspaceStatusText("connecting", { state: "saved", where: "ed" }, "Mac")).toBe("Connecting…");
     expect(workspaceStatusText("online", { state: "idle" }, "Mac")).toBe("All changes saved");
     expect(workspaceStatusText("online", { state: "saved", where: "ed" }, "Mac")).toBe("All changes saved");
+  });
+});
+
+describe("why Run and Mark are off", () => {
+  test("online has no reason; otherwise the connection says why", () => {
+    expect(edUnavailableReason({ state: "online", reason: null })).toBeNull();
+    expect(edUnavailableReason({ state: "connecting", reason: null })).toBe("Connecting to Ed…");
+    expect(edUnavailableReason({ state: "offline", reason: "no network" })).toBe("Offline: no network");
+    expect(edUnavailableReason({ state: "offline", reason: null })).toBe("Offline — this needs a connection to Ed");
   });
 });

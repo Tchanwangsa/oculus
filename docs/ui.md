@@ -61,7 +61,8 @@ themes are opt-in and keep the same structure.
   `app/src/components/markdown/MdComponents.tsx` and the code-font field
   (`app/src/components/settings/appearance/CodeFontRow.tsx`); the note editor's theme
   (`app/src/components/documents/editor/theme/`) gives `--font-mono` to code
-  and LaTeX source, and `CodeEditor` (`app/src/components/code/`) is
+  and LaTeX source, and `CodeEditor` (`app/src/components/code/`) and the Ed workspace's terminal
+  (`XtermView` in `app/src/components/lessons/workspace/terminal/`) are
   monospace throughout. A command's output (`AnsiText`, the one-line
   `TerminalLine` on a running install or update) keeps its colours via
   `app/src/lib/format/ansi.ts`, which drops every escape but SGR. Timestamps, counts, IDs and badges take the body font,
