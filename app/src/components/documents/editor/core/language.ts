@@ -5,6 +5,7 @@ import { Autolink, Strikethrough, Table, TaskList, type MarkdownParser } from "@
 
 import { CodeLanguages, codeTextFont } from "../syntax/codeLanguages";
 import { FrontmatterSyntax, frontmatterFragments } from "../syntax/frontmatter";
+import { lineSafeFragments } from "./fragments";
 import { MathSyntax } from "../math/mathSyntax";
 
 /**
@@ -27,11 +28,12 @@ const noteParser = (commonmarkLanguage.parser as MarkdownParser).configure([
   CodeLanguages,
 ]);
 
-// Frontmatter's lookahead invalidates fragments a markdown config cannot
-// filter, so the filter wraps this one parser; it stays a `MarkdownParser`.
+// Frontmatter's lookahead and Lezer's own reuse invalidate fragments a
+// markdown config cannot filter, so the filters wrap this one parser; it
+// stays a `MarkdownParser`.
 const createParse = noteParser.createParse.bind(noteParser);
 noteParser.createParse = (input: Input, fragments: readonly TreeFragment[], ranges): PartialParse =>
-  createParse(input, frontmatterFragments(input, fragments), ranges);
+  createParse(input, lineSafeFragments(input, frontmatterFragments(input, fragments)), ranges);
 
 export const noteLanguage = new Language(commonmarkLanguage.data, noteParser, [], "markdown");
 

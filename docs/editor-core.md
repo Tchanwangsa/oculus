@@ -86,8 +86,12 @@ Without them the console says the shadow is off and why.
 
 - **A tree report with `shadowMatchesFreshLezerParse: true` is CodeMirror's**
   — its incremental tree, not the core, parted from a fresh parse, as
-  frontmatter's lookahead would make it without `frontmatterFragments`
-  ([editor.md](./editor.md)). The shadow oracle fails on it all the same.
+  frontmatter's lookahead or Lezer's own block reuse would make it without
+  `frontmatterFragments` and `lineSafeFragments` ([editor.md](./editor.md)).
+  The shadow oracle fails on it all the same: the fix belongs in the note
+  parser's fragment filters, never in the core, whose tree always equals a
+  fresh parse. Each such fix adds a fixed note to `oracle/shadow.ts` (a
+  document and the edits that parted the trees), run every time.
 - **`noEditorShadowInBuild` in `app/vite.config.ts` looks removable and isn't**
   — Rollup loads the wasm glue from the dead dev branch anyway, and the glue's
   `new URL(wasm, import.meta.url)` would ship the wasm in a release bundle.
