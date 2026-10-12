@@ -20,6 +20,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { SubjectRow } from "@/components/subjects/SubjectRow";
+import { groupByTerm } from "./groupByTerm";
 import type { Subject } from "@/lib/db";
 
 interface SubjectPickerProps {
@@ -45,11 +46,7 @@ export function SubjectPicker({
   const current = subjects.filter((s) => s.is_current);
   const past = subjects.filter((s) => !s.is_current);
 
-  const pastBySemester = past.reduce<Record<string, Subject[]>>((acc, s) => {
-    const key = s.term_name ?? "Unknown term";
-    (acc[key] ??= []).push(s);
-    return acc;
-  }, {});
+  const pastBySemester = groupByTerm(past);
 
   return (
     <Popover>
@@ -135,8 +132,7 @@ export function SubjectPicker({
                     Past subjects ({past.length})
                   </CollapsibleTrigger>
                   <CollapsibleContent className="space-y-2 pt-1">
-                    {/* `getSubjects` returns newest term first; groups keep that order. */}
-                    {Object.entries(pastBySemester).map(([term, courses]) => (
+                    {[...pastBySemester].map(([term, courses]) => (
                         <div key={term}>
                           <p className="text-[11px] text-muted-foreground mb-1 px-1">
                             {term}
