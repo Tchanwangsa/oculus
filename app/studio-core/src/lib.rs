@@ -42,7 +42,8 @@ pub use library::{
 pub use project::{
     CascadeComponents, ComponentSource, FRAME_RATES, FolderComponents, LOW_CONFIDENCE, Library,
     LintIssue, LintReport, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene, ManifestWord,
-    Project, SceneSpec, Script, ScriptSection, Timeline, Video, Voice, WordCues, valid_subject,
+    Project, SceneSpec, Script, ScriptSection, Timeline, Video, Voice, VoiceEngine, WordCues,
+    valid_subject,
 };
 pub use render::{
     Engine, Frame, MotionBlur, Purpose, RenderOptions, Renderer, SceneCall, Size, Time,

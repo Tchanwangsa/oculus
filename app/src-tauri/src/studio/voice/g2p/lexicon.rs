@@ -5,15 +5,16 @@
 //! - `<data dir>/studio/library/lexicon.json` (`libraries::global_dir()`)
 //! - `<data dir>/studio/subjects/<CODE>/lexicon.json` (`libraries::subjects_dir()`)
 //!
-//! A value in slashes is raw phonemes in Kokoro's alphabet (`"/kˈOʃi/"`);
-//! any other value is a respelling in dictionary words (`"SOFT-max"`), each
+//! A value in slashes is raw phonemes in Kokoro's alphabet (`"/kˈOʃi/"`),
+//! less its pad `$`; any other value is a respelling in dictionary words (`"SOFT-max"`), each
 //! `-` or space part read through the dictionary, an all-caps part longer
 //! than one letter taking primary stress and the rest secondary. Keys
 //! starting `_` are comments. Every entry is checked on load, so a bad
 //! phoneme or an unknown respelling part fails the load naming the file and
 //! key. A word finds its entry by exact key, then its lower case; a word
 //! ending `'s` takes its stem's entry plus `-s`; then any key matching in
-//! lower case.
+//! lower case. A curly apostrophe (`’`) reads as `'` in keys and in the
+//! words looked up, since script.md's typography curls them.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -160,6 +161,7 @@ impl Lexicon {
                 error: e.to_string(),
             })?;
             for (key, value) in entries {
+                let key = straighten(&key);
                 if key.starts_with('_') {
                     continue;
                 }
@@ -195,6 +197,7 @@ impl Lexicon {
 
     /// The phonemes for `word` as written, or `None` to read it on.
     pub fn phonemes(&self, word: &str) -> Option<String> {
+        let word = &straighten(word);
         let found = self
             .exact
             .get(word)
@@ -225,6 +228,11 @@ impl Bad {
     }
 }
 
+/// `’` as `'`; the dictionary path keeps it, as the oracle does.
+fn straighten(word: &str) -> String {
+    word.replace('’', "'")
+}
+
 /// `str.isupper()`: a cased letter, and no lower-case one.
 fn all_caps(s: &str) -> bool {
     s.chars().any(is_upper) && !s.chars().any(is_lower)
@@ -234,7 +242,10 @@ fn all_caps(s: &str) -> bool {
 fn respell(dict: &Dictionary, value: &str) -> Result<String, Bad> {
     if value.starts_with('/') {
         let ps = value.trim_matches('/');
-        let mut bad: Vec<char> = ps.chars().filter(|&c| !vocab::contains(c)).collect();
+        let mut bad: Vec<char> = ps
+            .chars()
+            .filter(|&c| !vocab::contains(c) || c == vocab::PAD)
+            .collect();
         bad.sort_unstable();
         bad.dedup();
         return if bad.is_empty() {

@@ -92,6 +92,13 @@ impl Speaker for FakeSpeaker {
         }
     }
 
+    fn key(&self, text: &str) -> Result<Vec<String>, String> {
+        if text.contains("unkeyable") {
+            return Err("no phonemes for \"unkeyable\"".into());
+        }
+        Ok(server_key(&voice()))
+    }
+
     fn speak(&self, text: &str) -> Result<Speech, String> {
         self.texts.borrow_mut().push(text.to_owned());
         if text.contains("broken") {
@@ -103,9 +110,9 @@ impl Speaker for FakeSpeaker {
     }
 }
 
-/// The voice clips are keyed on; the fake speaker ignores it.
-fn voice() -> Voice {
-    Voice {
+/// The voice the fake speaker keys clips on.
+fn voice() -> ServerVoice {
+    ServerVoice {
         base_url: "http://127.0.0.1:8880".into(),
         model: "kokoro".into(),
         voice: "af_heart".into(),
@@ -137,7 +144,6 @@ fn run(dir: &Path, speaker: &FakeSpeaker, aligner: &dyn Aligner, options: &Optio
     narrate(
         dir,
         &Library::default(),
-        &voice(),
         speaker,
         aligner,
         options,
@@ -254,7 +260,6 @@ fn a_failure_keeps_the_scenes_before_it() {
     let error = narrate(
         &dir,
         &Library::default(),
-        &voice(),
         &speaker,
         &Stub::new(),
         &Options::default(),
@@ -320,7 +325,6 @@ fn a_missing_aligner_fails_before_any_tts_request() {
     let error = narrate(
         &dir,
         &Library::default(),
-        &voice(),
         &speaker,
         &stub,
         &Options::default(),
@@ -346,7 +350,6 @@ fn a_speaker_that_is_not_ready_fails_before_any_clip() {
     let error = narrate(
         &dir,
         &Library::default(),
-        &voice(),
         &speaker,
         &stub,
         &Options::default(),
@@ -392,7 +395,6 @@ fn an_unknown_scene_or_no_script_is_an_error() {
     let e = narrate(
         &dir,
         &Library::default(),
-        &voice(),
         &speaker,
         &Stub::new(),
         &options,
@@ -404,7 +406,6 @@ fn an_unknown_scene_or_no_script_is_an_error() {
     let e = narrate(
         &dir,
         &Library::default(),
-        &voice(),
         &speaker,
         &Stub::new(),
         &Options::default(),
@@ -425,7 +426,6 @@ fn an_unreadable_manifest_is_rebuilt() {
     narrate(
         &dir,
         &Library::default(),
-        &voice(),
         &speaker,
         &Stub::new(),
         &Options::default(),
@@ -442,37 +442,71 @@ fn an_unreadable_manifest_is_rebuilt() {
 
 #[test]
 fn the_cache_key_changes_with_every_input() {
-    let base = Voice {
-        base_url: "http://127.0.0.1:8880".into(),
-        model: "kokoro".into(),
-        voice: "af_heart".into(),
-        speed: 1.0,
-    };
-    let key = cache_key("Hello there.", &base);
+    let base = voice();
+    let key = cache_key("Hello there.", &server_key(&base));
     assert_eq!(key.len(), 64);
-    assert_eq!(key, cache_key("Hello there.", &base.clone()));
-    let mut variants = vec![cache_key("Hello there!", &base)];
+    assert_eq!(key, cache_key("Hello there.", &server_key(&base.clone())));
+    let mut variants = vec![cache_key("Hello there!", &server_key(&base))];
     for change in [
-        |v: &mut Voice| v.base_url = "http://127.0.0.1:8881".into(),
-        |v: &mut Voice| v.model = "tts-1".into(),
-        |v: &mut Voice| v.voice = "bf_emma".into(),
-        |v: &mut Voice| v.speed = 1.1,
+        |v: &mut ServerVoice| v.base_url = "http://127.0.0.1:8881".into(),
+        |v: &mut ServerVoice| v.model = "tts-1".into(),
+        |v: &mut ServerVoice| v.voice = "bf_emma".into(),
+        |v: &mut ServerVoice| v.speed = 1.1,
     ] {
         let mut v = base.clone();
         change(&mut v);
-        variants.push(cache_key("Hello there.", &v));
+        variants.push(cache_key("Hello there.", &server_key(&v)));
     }
-    let ambiguous = Voice {
+    let ambiguous = ServerVoice {
         model: "kokoroaf".into(),
         voice: "_heart".into(),
         ..base.clone()
     };
-    variants.push(cache_key("Hello there.", &ambiguous));
+    variants.push(cache_key("Hello there.", &server_key(&ambiguous)));
+    let kokoro = |voice: &str, speed: &str, phonemes: &str| {
+        ["kokoro", "kokoro-model", voice, speed, phonemes].map(String::from)
+    };
+    let k = cache_key("Hello there.", &kokoro("af_heart", "1.0", "həlˈO ðˈɛɹ."));
+    assert_eq!(
+        k,
+        cache_key("Hello there.", &kokoro("af_heart", "1.0", "həlˈO ðˈɛɹ.")),
+        "stable"
+    );
+    variants.push(k);
+    for (voice, speed, phonemes) in [
+        ("am_michael", "1.0", "həlˈO ðˈɛɹ."),
+        ("af_heart", "1.1", "həlˈO ðˈɛɹ."),
+        ("af_heart", "1.0", "hɛlˈO ðˈɛɹ."),
+    ] {
+        variants.push(cache_key("Hello there.", &kokoro(voice, speed, phonemes)));
+    }
     for v in &variants {
         assert_ne!(v, &key);
     }
     let distinct: BTreeSet<_> = variants.iter().collect();
     assert_eq!(distinct.len(), variants.len());
+}
+
+#[test]
+fn a_scene_the_speaker_cannot_key_fails_naming_it() {
+    let dir = Scratch::new("narrate-unkeyable");
+    video(
+        &dir,
+        "## a\nWe follow the gradient.\n\n## b\nAn unkeyable word.\n",
+    );
+    let speaker = FakeSpeaker::new();
+    let error = narrate(
+        &dir,
+        &Library::default(),
+        &speaker,
+        &Stub::new(),
+        &Options::default(),
+        &mut |_| {},
+    )
+    .unwrap_err();
+    assert_eq!(error.scene.as_deref(), Some("b"));
+    assert!(error.message.contains("unkeyable"), "{}", error.message);
+    assert_eq!(speaker.spoken(), ["We follow the gradient."]);
 }
 
 /// A video whose theme lives in a library (the starter `warm`) narrates:
@@ -493,7 +527,6 @@ fn a_library_theme_narrates() {
     let bare = narrate(
         &dir,
         &Library::default(),
-        &voice(),
         &speaker,
         &Stub::new(),
         &options,
@@ -508,7 +541,6 @@ fn a_library_theme_narrates() {
     let report = narrate(
         &dir,
         &library,
-        &voice(),
         &speaker,
         &Stub::new(),
         &options,

@@ -295,6 +295,27 @@ fn script_ids_and_manifest_errors_fail_the_load() {
     let voice = t.load().video.voice.unwrap();
     assert_eq!(voice.model.as_deref(), Some("kokoro"));
     assert_eq!(voice.speed, Some(1.1));
+    assert_eq!(
+        voice.engine, None,
+        "a block without `engine` leaves it unset"
+    );
+    t.file(
+        "video.json",
+        &video(json!({ "engine": "kokoro", "voice": "am_michael" })),
+    );
+    let voice = t.load().video.voice.unwrap();
+    assert_eq!(voice.engine, Some(studio_core::VoiceEngine::Kokoro));
+    t.file("video.json", &video(json!({ "engine": "server" })));
+    assert_eq!(
+        t.load().video.voice.unwrap().engine,
+        Some(studio_core::VoiceEngine::Server)
+    );
+    t.file("video.json", &video(json!({ "engine": "piper" })));
+    assert!(
+        t.load_err().contains("unknown variant `piper`"),
+        "{}",
+        t.load_err()
+    );
 }
 
 /// A project whose two narrated scenes call `Probe`, which runs `body`.

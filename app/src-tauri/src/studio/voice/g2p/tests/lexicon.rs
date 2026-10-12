@@ -57,3 +57,18 @@ fn a_missing_file_is_an_empty_layer_and_a_bad_one_is_named() {
     let e = Lexicon::from_json(&[("lexicon.json", r#"{"Foo": 3}"#)], &d).unwrap_err();
     assert!(e.to_string().contains("\"Foo\""), "{e}");
 }
+
+#[test]
+fn the_pad_is_a_bad_phoneme() {
+    let e = Lexicon::from_json(&[("lexicon.json", r#"{"Cash":"/kˈæ$/"}"#)], &dict()).unwrap_err();
+    assert_eq!(e.kind(), "bad-phoneme");
+    assert!(e.to_string().contains("'$'"), "{e}");
+}
+
+#[test]
+fn a_curly_apostrophe_reads_as_a_straight_one() {
+    let l = lex(&[r#"{"Euler":"/ˈYləɹ/","Bayes’":"/bˈAz/"}"#]);
+    assert_eq!(l.phonemes("Euler’s").unwrap(), "ˈYləɹz");
+    assert_eq!(l.phonemes("Bayes'").unwrap(), "bˈAz");
+    assert_eq!(l.phonemes("Bayes’").unwrap(), "bˈAz");
+}
