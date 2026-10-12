@@ -21,7 +21,7 @@ import { EventMark } from "./EventMark";
 import { EventPopover } from "./EventPopover";
 import { displayLocale } from "@/lib/format/locale";
 
-/** Short day names in the locale's week order (`WEEK_START`). */
+/** Short day names in week order, from Monday (`WEEK_START`). */
 const WEEKDAYS = weekDays(new Date()).map((d) =>
   d.toLocaleDateString(displayLocale, { weekday: "short" }),
 );

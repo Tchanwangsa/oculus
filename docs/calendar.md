@@ -114,17 +114,19 @@ In `app/src/components/calendar/WeekView.tsx`, with `hourRange` in `app/src/lib/
 - Past hours carry a wash mixed from `muted-foreground`, finished events turn
   `chart-other`, and today gets a time line — all from `useNow`.
 
-## Dates and weeks follow the system locale
+## Dates follow the system locale; weeks and clocks do not
 
-Every date is formatted in `displayLocale` (`app/src/lib/format/locale.ts`): the
-system locale, never a fixed one, unless a test pins one with
-`pinDisplayLocale` so its expected strings hold anywhere. Its calendar is
-always Gregorian (`-u-ca-gregory`): a Thai region (en-TH, th-TH) would
-otherwise print Buddhist-era years ("October 2569 BE"). Weeks start on the
-locale's first day:
-`WEEK_START` in `app/src/lib/planning/calendar/dates.ts` reads `Intl.Locale`'s week info
-(Monday when the engine has none), and `startOfWeek`, `monthGrid` and the
-month view's day names all follow it.
+Every date and time is formatted in `displayLocale`
+(`app/src/lib/format/locale.ts`): the system locale, so word order and month
+and day names are the student's, unless a test pins one with
+`pinDisplayLocale` so its expected strings hold anywhere. Two things are the
+same for everyone: the calendar is Gregorian (`-u-ca-gregory`; a Thai region,
+en-TH or th-TH, would otherwise print "October 2569 BE"), and the clock is
+12-hour (`-u-hc-h12`). Formats name their fields rather than using
+`dateStyle`/`timeStyle`, whose patterns can add an era or pad the hour. Weeks
+start on Monday whatever the locale: `WEEK_START` in
+`app/src/lib/planning/calendar/dates.ts`, which `startOfWeek`, `monthGrid` and
+the month view's day names follow.
 
 ## Gotchas
 

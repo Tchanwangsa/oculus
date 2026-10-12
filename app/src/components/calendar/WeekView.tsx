@@ -29,7 +29,7 @@ import { StripPill } from "@/components/calendar/week/StripPill";
 import { displayLocale } from "@/lib/format/locale";
 
 /**
- * The timetable: a week's hour grid of classes, from the locale's first day
+ * The timetable: a week's hour grid of classes, from Monday
  * (`WEEK_START`), with deadlines in a strip above it — most land at 11:59pm
  * and would otherwise pin the grid to midnight.
  */

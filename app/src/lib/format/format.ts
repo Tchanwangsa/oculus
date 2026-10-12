@@ -151,7 +151,14 @@ export function fmtRecent(ms: number, now: Date = new Date()): string {
 
 /** The whole stamp, for a tooltip: "Friday 2 October 2026 at 2:18 pm". */
 export function fmtFullStamp(ms: number): string {
-  return new Date(ms).toLocaleString(displayLocale, { dateStyle: "full", timeStyle: "short" });
+  return new Date(ms).toLocaleString(displayLocale, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 /** Elapsed time between two epoch-ms stamps: "34s", "2m 10s", "1h 4m". */
