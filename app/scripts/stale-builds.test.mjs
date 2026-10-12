@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test as bunTest } from "bun:test";
 import {
   checkoutPaths,
   describeHolder,
@@ -8,6 +8,10 @@ import {
   parsePs,
   planCleanup,
 } from "./stale-builds.mjs";
+
+// The cleanup is a no-op on Windows (`unsupported` in stale-builds.mjs), and
+// these fixtures are POSIX paths and `ps` output.
+const test = bunTest.skipIf(process.platform === "win32");
 
 const app = "/u/gh/oculus/app";
 const tree = "/u/gh/oculus/.claude/worktrees/w1/app";
