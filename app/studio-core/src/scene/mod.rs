@@ -1,7 +1,7 @@
 //! The element tree a component returns: `Box`, `Text`, `Image` and `Path`
-//! nodes with a typed `style`, and `Morph` nodes holding two layouts. It
-//! arrives from JS as JSON and is checked here, so layout and paint only see
-//! valid trees.
+//! nodes with a typed `style`, `Morph` nodes holding two layouts and `Math`
+//! nodes holding LaTeX. It arrives from JS as JSON and is checked here, so
+//! layout and paint only see valid trees.
 
 mod color;
 mod motion;
@@ -31,6 +31,8 @@ pub enum Kind {
     /// Two layouts and a `p` between them; replaced by one of them before
     /// layout (see `select`).
     Morph,
+    /// LaTeX; replaced by a Box of glyphs before layout (`crate::math`).
+    Math,
 }
 
 impl Kind {
@@ -41,8 +43,18 @@ impl Kind {
             Kind::Image => "Image",
             Kind::Path => "Path",
             Kind::Morph => "Morph",
+            Kind::Math => "Math",
         }
     }
+}
+
+/// `<Math tex display>`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MathSpec {
+    pub tex: String,
+    /// Display style (big operators, limits above and below), the default;
+    /// `false` sets it as inline maths.
+    pub display: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -55,6 +67,8 @@ pub struct Node {
     pub src: String,
     /// A `Path` node's geometry and paint.
     pub path: Option<Box<PathSpec>>,
+    /// A `Math` node's source.
+    pub math: Option<Box<MathSpec>>,
     pub children: Vec<Node>,
     /// The element's `key`, kept so a later frame or scene can match it.
     pub key: Option<String>,

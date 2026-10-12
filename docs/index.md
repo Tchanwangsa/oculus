@@ -46,7 +46,7 @@ the root `CLAUDE.md` holds only the rules.
 | `app/src-tauri/src/bin/oculus/` | The headless CLI over the same engine |
 | `app/keyd/` | `oculus-keyd`, the credential broker, and `core/`, its OS-free logic and OS adapters — a separate cargo root |
 | `app/editor-core/` | A standalone Rust port of the note editor's text model and markdown parser, checked against CodeMirror and Lezer; in dev builds, as WebAssembly, against every note editor |
-| `app/studio-core/` | Studio's scene renderer: TSX components in a QuickJS sandbox, laid out with taffy and parley and drawn with vello_cpu — a separate cargo root the CLI links |
+| `app/studio-core/` | Studio's scene renderer: TSX components in a QuickJS sandbox, laid out with taffy and parley and drawn with vello_cpu, maths typeset by `app/math-core`'s KaTeX port — a separate cargo root the CLI links |
 | `app/src-tauri/templates/` | The agent-facing docs and skills written into the library |
 | `app/scripts/` | Dev preflight, native-binary fetchers, CLI staging and reference generation |
 | `docs/` | These pages |

@@ -1,5 +1,5 @@
 //! One component call -> one laid-out tree: check props, run the component,
-//! parse its element tree and lay it out. A tree with `<Morph>` lays out
+//! parse its element tree, typeset its maths and lay it out. A tree with `<Morph>` lays out
 //! twice (every Morph at its first child, then its second) and the morph
 //! engine blends the two at each Morph's `p`.
 
@@ -7,6 +7,7 @@ use super::{Engine, SceneCall};
 use crate::error::{Result, StudioError};
 use crate::host::{CallCtx, seed, tsx_loc};
 use crate::layout::{LNode, LayoutError, Layouter};
+use crate::math::{MathEnv, expand};
 use crate::morph::{self, MorphError};
 use crate::project::WordCues;
 use crate::scene::{Node, NodeError, parse_tree, select};
@@ -34,7 +35,12 @@ impl Engine {
                 words: call.words.map(WordCues::json),
             },
         )?;
-        let tree = parse_tree(&json).map_err(|e| self.node_error(name, e))?;
+        let mut tree = parse_tree(&json).map_err(|e| self.node_error(name, e))?;
+        let env = MathEnv {
+            text: self.theme.text_color,
+            colours: self.theme.section("color"),
+        };
+        expand(&mut tree, &env, &mut self.math).map_err(|e| self.node_error(name, e))?;
         let tree = match select(&tree).map_err(|e| self.node_error(name, e))? {
             None => self.lay_out(name, tree)?,
             Some(sides) => {

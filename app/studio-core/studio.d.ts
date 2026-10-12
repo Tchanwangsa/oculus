@@ -4,7 +4,9 @@
 // names below are exactly the prelude's globals.
 //
 // Box, Text, Image, Path and Morph are host element tags (plain strings at
-// run time); they are typed as components so JSX checks their props.
+// run time); they are typed as components so JSX checks their props. Math is
+// JS's own Math object, which the JSX factory knows as the maths element; a
+// call signature merged into its interface types `<Math>`.
 
 /** The scene's theme: tokens only. Section names are fixed; token names are the theme's own (these are the bundled themes'). */
 interface Theme {
@@ -238,6 +240,28 @@ declare const Path: Component<{
 }>;
 /** Two layouts of one place, blended at `p` (0 to 1): FLIP-style layout animation. Exactly two element children; takes no key. */
 declare const Morph: Component<{ p: number; children: [StudioElement, StudioElement] }>;
+/**
+ * `<Math tex="…">`: LaTeX typeset by KaTeX as one glyph per term. Its box is the formula's size and its
+ * baseline the formula's, so it sits in a Row with `align: "baseline"`. `style` takes `fontSize` (the size of the
+ * text it sits with; maths is set 1.21 times larger, as KaTeX does) and `color`, plus a Box's placement and paint
+ * keys; other text keys are ignored, so `{ ...theme.type.body }` works, and keys that size, pad or lay out
+ * children are refused. `\color{accent}` takes a theme colour name or hex. In a JSX attribute
+ * (`tex="\frac{a}{b}"`) a backslash is itself; in a JS string (`tex={"\\frac{a}{b}"}`) write it twice.
+ *
+ * Every glyph, rule and root sign is keyed `<key>/<term>` for magic move: by character and occurrence
+ * (`eq/x`, `eq/x#2`), or `\k{name}{…}` names a group (`eq/name`, `eq/name.1`, … in reading order). Two
+ * Math elements with one key in a `<Morph>` glide the terms they share and fade the rest. Without a key, a
+ * Math inside a Morph is keyed by its place there; elsewhere its terms have no keys. A key shared by consecutive
+ * scenes makes their transition a magic move, so a formula carries across scenes term by term.
+ */
+interface Math {
+  (props: {
+    tex: string;
+    /** Display style (limits above and below, big operators), the default; `false` for inline maths. */
+    display?: boolean;
+    style?: Style;
+  }): StudioElement;
+}
 /** A Box with `flexDirection: "column"`. */
 declare const Stack: Component<FlexProps>;
 /** A Box with `flexDirection: "row"`. */

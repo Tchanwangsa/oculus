@@ -20,6 +20,7 @@ mod host;
 mod images;
 mod layout;
 mod library;
+mod math;
 mod morph;
 mod paint;
 mod project;
