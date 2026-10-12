@@ -234,6 +234,10 @@ while Ctrl+Shift+Z is Redo.
   rows from today, within the week, as `EventRow`s, with See more to the
   calendar — over Lectures, the five most recently watched unfinished
   lectures with their time left (`LecturesCard`).
+  Home uses its pane's width for layout: the columns stack below 1024px,
+  with smaller gutters below 640px. Activity's stats use their own available
+  width, showing four across from 560px, two from 280px and one below that,
+  so a side panel or page zoom cannot squeeze four cards into a narrow column.
 - **Activity is the last 30 days of app use**: four stat cards from
   `usage_hours` (total active, today and the daily average, each against the
   period before, then the streak and its highest), then one bar per day under
@@ -242,7 +246,9 @@ while Ctrl+Shift+Z is Redo.
   a fixed order — up to five subjects in their calendar colours (the rest fold
   into Other subjects), or kinds folded into six groups in the chart tokens. Bars
   are solid — tints mix with the card, so gridlines stop behind them — and a
-  hovered day opens a tooltip over its bar with each series' time. Rust counts the time
+  hovered day opens a tooltip over its bar with each series' time. Narrow
+  charts show fortnightly date labels; the legend scrolls with faded edges
+  to keep series names readable. Rust counts the time
   ([architecture.md](./architecture.md#rust-counts-app-usage-the-frontend-only-pings));
   the frontend's part is `useActivityPing`, mounted once in `AppLayout`. A ping
   raises no event, so the card polls every five minutes while its tab is in
