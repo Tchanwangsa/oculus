@@ -38,6 +38,15 @@
 
 --enable-muxer=ogg,wav,mp4,mov,image2,rawvideo
 
+# Studio renders (docs/studio.md, "Rendering a video"): raw RGBA frames on
+# stdin, per-scene mp4 segments joined by the concat demuxer (which adds the
+# h264_mp4toannexb filter below), and the narration as AAC. The H.264
+# encoder is the target's own: build.sh enables Media Foundation's h264_mf
+# for Windows.
+--enable-demuxer=rawvideo,concat
+--enable-decoder=rawvideo
+--enable-encoder=aac
+
 # The app's own filters, plus those the ffmpeg CLI inserts itself: format
 # conversion, -ss/-t trimming, container cropping and display-matrix rotation.
 --enable-filter=scale,fps,format,aformat,aresample,null,anull,copy,trim,atrim,crop,transpose,hflip,vflip,rotate
