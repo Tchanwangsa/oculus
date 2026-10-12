@@ -1,11 +1,16 @@
-//! ⌘-keys reach a focused browser page before the menu, as in Safari.
+//! ⌘-keys reach a focused browser or dock page before the menu, as in Safari.
 //!
 //! Every webview is a child webview, and wry's `WryWebView` answers NO to
-//! `performKeyEquivalent:` for those, so WebKit's own implementation (page
-//! first, then re-send to the menu if the page doesn't handle the key) never
-//! runs. A local key-down monitor calls that implementation itself when a
-//! browser page (`shell/browser/`) is first responder. The app's own webview is
-//! left alone, and so are the `RESERVED` chrome keys.
+//! `performKeyEquivalent:` for those, so a page never sees a ⌘-key. A local
+//! key-down monitor calls WebKit's own implementation when a page is first
+//! responder. WebKit answers YES and never hands a key the page leaves back
+//! to the menu, so `fallback.rs` does: the page reports the keydown it didn't
+//! cancel, and the menu gets that event. The app's own webview is left alone,
+//! and so are the `RESERVED` chrome keys.
+
+mod fallback;
+
+pub(crate) use fallback::{install as install_fallback, SCRIPT as FALLBACK_SCRIPT};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -51,13 +56,13 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
         let Some(page) = focused_page(mtm) else {
             return event.as_ptr();
         };
-        // WebKit hands the key to the page and answers YES; if the page
-        // leaves it, WebKit re-sends it flagged, answers NO, and the menu
-        // gets it.
+        // WebKit hands the key to the page and answers YES; a key the page
+        // leaves comes back through `fallback`.
         let handled: Bool = unsafe {
             msg_send![super(&*page, WKWebView::class()), performKeyEquivalent: event_ref]
         };
         if handled.as_bool() {
+            fallback::remember(event_ref, &page);
             std::ptr::null_mut()
         } else {
             event.as_ptr()

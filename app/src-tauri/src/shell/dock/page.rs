@@ -66,6 +66,11 @@ pub(super) fn create(app: &AppHandle, service: &'static DockService) -> Result<(
     for script in init_scripts(service) {
         builder = builder.initialization_script(script);
     }
+    // ⌘-keys the page leaves go to the menu (`shell/keys/fallback.rs`).
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.initialization_script_for_all_frames(crate::shell::keys::FALLBACK_SCRIPT);
+    }
     if let Some(rules) = service.rules {
         match Rules::parse(rules) {
             Ok(rules) => builder = builder.on_navigation(navigation_guard(app, service, rules)),
@@ -94,6 +99,8 @@ pub(super) fn create(app: &AppHandle, service: &'static DockService) -> Result<(
     adopt_page(&webview);
     configure_store(&webview, service);
     channel::install(&webview, app, service);
+    #[cfg(target_os = "macos")]
+    crate::shell::keys::install_fallback(&webview);
     if with_state(app, |s| s.shown.as_deref() == Some(id)) {
         place(app, id);
     }

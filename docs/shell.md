@@ -157,7 +157,10 @@ while Ctrl+Shift+Z is Redo.
   own ⌘Z/⌘A/⌘F (Google Docs) work; a key the page doesn't take falls through
   to the menu. The app's tab and window keys (⌘T, ⌘W, ⌘N, ⌘K, ⌘L, ⌘1–9 and
   their ⇧/⌥ variants) never go to the page. The monitor is Rust's
-  (`app/src-tauri/src/shell/keys.rs`).
+  (`app/src-tauri/src/shell/keys/`). WebKit never hands an unhandled key back,
+  so the fall-through is ours: a script in every frame of every browser and
+  dock page reports a ⌘-keydown the page didn't cancel, and the menu gets
+  the key the user just sent that page (`keys/fallback.rs`).
 - **Undo and Redo are menu items that emit, not the predefined ones.** The
   predefined items hand ⌘Z to WebKit's own undo stack, which a note's
   CodeMirror history never fills. While a browser page holds focus Rust sends
