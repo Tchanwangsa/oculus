@@ -19,7 +19,8 @@ export function JobsSection() {
   const [open, setOpen] = useState<JobId | null>(null);
 
   // Catalogues are asked only of agents a chain names or a picker tab has
-  // shown, so an agent nobody uses never has its CLI spawned.
+  // shown, so an agent nobody uses never has its CLI spawned. opencode is
+  // never started here, only read if running (docs/harness.md).
   const [viewed, setViewed] = useState<ReadonlySet<Provider>>(new Set());
   const onView = useCallback(
     (p: Provider) => setViewed((s) => (s.has(p) ? s : new Set(s).add(p))),
@@ -31,7 +32,7 @@ export function JobsSection() {
     ],
     [jobs, viewed],
   );
-  const { providers } = useProviderModels(needed);
+  const { providers } = useProviderModels(needed, { start: false });
 
   const openJob = open ? JOBS.find((j) => j.id === open) : undefined;
 
