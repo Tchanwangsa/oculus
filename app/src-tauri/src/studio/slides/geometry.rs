@@ -99,7 +99,12 @@ pub fn crop_pixels(
                 .min(f64::from(MAX_SIDE) * aspect)
                 .floor()
                 .max(1.0);
-            Ok((w as u32, side(w)))
+            // The height rounds, so step down until the pair is under the cap.
+            let mut w = w as u32;
+            while w > 1 && u64::from(w) * u64::from(side(f64::from(w))) > MAX_CROP_PIXELS {
+                w -= 1;
+            }
+            Ok((w, side(f64::from(w))))
         }
     }
 }

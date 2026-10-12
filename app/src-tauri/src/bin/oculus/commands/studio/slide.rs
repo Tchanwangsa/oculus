@@ -4,6 +4,7 @@
 //! page").
 
 use crate::*;
+use app_lib::studio::slides::snap::Edge;
 use app_lib::studio::slides::{self, blocks::snippet, geometry, Request, Select};
 
 /// How wide `blocks --png` draws the page.
@@ -33,6 +34,7 @@ impl Ctx {
             pad: args.pad,
             width: args.width,
             replace: args.replace,
+            exact: args.exact,
         })?;
         let sc = &made.sidecar;
         if self.json {
@@ -75,6 +77,24 @@ impl Ctx {
                 DIM
             )
         );
+        if let Some(e) = &sc.edges {
+            let moved: Vec<String> = [
+                ("top", e.top),
+                ("right", e.right),
+                ("bottom", e.bottom),
+                ("left", e.left),
+            ]
+            .into_iter()
+            .filter(|(_, edge)| *edge != Edge::Pad)
+            .map(|(side, edge)| format!("{side} {}", edge_word(edge)))
+            .collect();
+            if !moved.is_empty() {
+                println!(
+                    "{}",
+                    paint(&format!("  off ink: {}", moved.join(", ")), DIM)
+                );
+            }
+        }
         println!("  props: {}", sc.props);
         if !sc.blocks.is_empty() {
             println!("  blocks inside, as fractions of the crop (for highlight boxes):");
@@ -138,5 +158,14 @@ impl Ctx {
             println!("{} {}", paint("wrote", GREEN), out.display());
         }
         Ok(())
+    }
+}
+
+fn edge_word(edge: Edge) -> &'static str {
+    match edge {
+        Edge::Pad => "padded",
+        Edge::Trim => "pulled back before ink",
+        Edge::Extend => "moved out over ink it would cut",
+        Edge::Cut => "cuts ink (no blank row within reach)",
     }
 }

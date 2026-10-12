@@ -1050,8 +1050,10 @@ oculus studio slide <slug> lecture-04.pdf --page 12 --bbox 0.5,0.2,0.95,0.8 --na
   `<name>.page.png` (the whole page) and `<name>.json`, and prints the
   `Slide` props and the blocks inside the crop as boxes in fractions of the
   crop. Paste the props; take `highlight` boxes from those blocks.
-- **Look at the crop** (`frame` the scene). A figure's box can leave out a
-  caption printed under it, or a label beside it: widen it with `--bbox`.
+- No edge cuts through ink: a caption or label next to a figure is taken
+  in, other text near it is left out, and the sidecar's `edges` says what
+  moved (`--exact` keeps the box as given). **Look at the crop** anyway
+  (`frame` the scene); widen or narrow it with `--bbox`.
 - Use `Slide` as the scene (props in `video.json`), or copy the helper into
   a component to put the crop beside other elements: `area: [x, y, w, h]`
   places it. Cue `zoomAt` and `highlightAt` with `word()`. Without `page`

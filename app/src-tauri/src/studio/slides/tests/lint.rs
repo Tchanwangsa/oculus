@@ -23,6 +23,7 @@ fn a_changed_pdf_is_a_warning_with_the_command_to_rerun() {
         pad: 0.02,
         width: Some(300),
         replace: false,
+        exact: false,
     })
     .unwrap();
     let project = Project::load(&video).unwrap();

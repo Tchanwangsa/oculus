@@ -1,9 +1,9 @@
 //! Slides: a region of a library PDF page as a video asset, so a scene can
 //! show "page 12, Figure 3" for real (docs/studio.md, "Slides crop a library
 //! PDF page"). `make` resolves the region from the parse record's blocks
-//! (`--find`, `--block`) or a box, renders it and the whole page with hayro,
-//! and writes `assets/slides/<name>.png`, `<name>.page.png` and the
-//! `<name>.json` sidecar; `pages` lists the blocks an agent picks from. A crop
+//! (`--find`, `--block`) or a box, moves its edges off ink (`snap`), renders
+//! it and the whole page with hayro, and writes `assets/slides/<name>.png`,
+//! `<name>.page.png` and the `<name>.json` sidecar; `pages` lists the blocks an agent picks from. A crop
 //! is made once, never at render time, and the segment cache hashes `assets/`.
 
 pub mod blocks;
@@ -11,6 +11,7 @@ pub mod geometry;
 pub mod preview;
 pub mod raster;
 pub mod sidecar;
+pub mod snap;
 #[cfg(test)]
 mod tests;
 
@@ -43,6 +44,8 @@ pub struct Request<'a> {
     pub width: Option<u32>,
     /// Overwrite a slide of the same name cropped from another PDF.
     pub replace: bool,
+    /// Keep the padded box as it is, ink at its edges or not (`snap`).
+    pub exact: bool,
 }
 
 /// What `make` wrote.
@@ -120,16 +123,44 @@ pub fn make(req: &Request<'_>) -> Result<Made, String> {
     }
 
     let frame = frame_size(req.video);
-    let (pad, width) = (req.pad, req.width);
-    let (size, region, crop, whole) = with_pdf(bytes, move |pdf| {
+    let (pad, width, exact) = (req.pad, req.width, req.exact);
+    let picked_at: Vec<usize> = picked.iter().map(|b| b.index).collect();
+    let page_boxes: Vec<(geometry::Frac, bool)> = record
+        .as_ref()
+        .map(|r| page_blocks(r, page))
+        .unwrap_or_default()
+        .iter()
+        .map(|b| (b.bbox, picked_at.contains(&b.index)))
+        .collect();
+    let figure = picked.iter().any(|b| blocks::is_figure(&b.kind));
+    let (size, region, edges, crop, whole) = with_pdf(bytes, move |pdf| {
         let p = page_of(pdf, page)?;
         let size = page_size(p);
-        let region = padded(wanted, pad, size)?;
+        let mut region = padded(wanted, pad, size)?;
+        let mut edges = None;
+        if !exact {
+            let ctx = snap::Context {
+                page: size,
+                wanted,
+                padded: region,
+                blocks: &page_boxes,
+                figure,
+            };
+            let probe_at = snap::probe_region(&ctx);
+            let (w, h) = snap::probe_pixels(&probe_at, size);
+            let probe = render_region(p, &probe_at, w, h)?;
+            let (snapped, moved) = snap::snap(&probe, &probe_at, &ctx);
+            // A snap that would leave next to nothing keeps the pad.
+            if padded(snapped, 0.0, size).is_ok() {
+                region = snapped;
+                edges = Some(moved);
+            }
+        }
         let (cw, ch) = crop_pixels(&region, size, frame, width)?;
         let crop = render_region(p, &region, cw, ch)?;
         let (pw, ph) = page_pixels(size, frame);
         let whole = render_region(p, &[0.0, 0.0, 1.0, 1.0], pw, ph)?;
-        Ok((size, region, crop, whole))
+        Ok((size, region, edges, crop, whole))
     })?;
 
     let inside: Vec<Inner> = record
@@ -165,6 +196,8 @@ pub fn make(req: &Request<'_>) -> Result<Made, String> {
         bbox: region,
         select: req.select.clone(),
         pad: req.pad,
+        exact: req.exact,
+        edges,
         width: req.width,
         image: image_ref(&src, &crop),
         page_image: image_ref(&page_src, &whole),
