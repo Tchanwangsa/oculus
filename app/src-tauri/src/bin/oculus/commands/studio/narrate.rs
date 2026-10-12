@@ -147,24 +147,24 @@ impl Ctx {
 fn speaker<'a>(voice: &'a Voice, subject: Option<&str>) -> Speakers<'a> {
     match voice {
         Voice::Server(v) => Speakers::Server(ServerSpeaker(v)),
-        Voice::Kokoro(v) => Speakers::Kokoro(KokoroSpeaker::new(
+        Voice::Kokoro(v) => Speakers::Kokoro(Box::new(KokoroSpeaker::new(
             v.clone(),
             Packs::app(),
             LexiconFiles::app(subject),
-        )),
+        ))),
     }
 }
 
 enum Speakers<'a> {
     Server(ServerSpeaker<'a>),
-    Kokoro(KokoroSpeaker),
+    Kokoro(Box<KokoroSpeaker>),
 }
 
 impl Speakers<'_> {
     fn speaker(&self) -> &dyn Speaker {
         match self {
             Speakers::Server(s) => s,
-            Speakers::Kokoro(s) => s,
+            Speakers::Kokoro(s) => &**s,
         }
     }
 

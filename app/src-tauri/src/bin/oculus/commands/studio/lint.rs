@@ -8,6 +8,7 @@ use super::studio_error;
 use crate::*;
 use app_lib::studio::tts::kokoro::{self, LexiconFiles};
 use app_lib::studio::voice::lint::{Note, VoiceLint};
+use app_lib::studio::voice::review::Store;
 use app_lib::studio::voice::{self, VoiceOverrides};
 use app_lib::studio::{brief, libraries, slides};
 use studio_core::{LintIssue, LintLevel, Project};
@@ -32,6 +33,7 @@ impl Ctx {
             spoken.issues.retain(|x| x.scene.is_none_or(|s| s == i));
             spoken.notes.retain(|n| n.scene == i);
         }
+        Store::app().annotate(project.video.subject.as_deref(), &mut spoken.notes);
         report.issues.extend(spoken.issues);
         let mut stale = slides::lint(&project, &self.data_dir);
         if let Some(i) = scope {
@@ -142,7 +144,10 @@ fn print_report(issues: &[LintIssue], notes: &[Note]) {
                 place: format!("scene {} `{}`", n.scene, n.id),
                 level: "note",
                 noun: "guessed word",
-                short: format!("\"{}\" script.md:{}", n.word, n.line),
+                short: match &n.review {
+                    Some(r) => format!("\"{}\" script.md:{} {}", n.word, n.line, r.suffix()),
+                    None => format!("\"{}\" script.md:{}", n.word, n.line),
+                },
                 full: format!("script.md:{}: {}", n.line, n.message()),
             }));
         }
@@ -226,6 +231,7 @@ fn note_json(note: &Note) -> serde_json::Value {
         "word": note.word,
         "phonemes": note.phonemes,
         "guessed": note.guessed,
+        "review": note.review,
     })
 }
 

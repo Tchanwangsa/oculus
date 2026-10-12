@@ -216,6 +216,9 @@ fn video_json(new: &NewVideo) -> String {
 /// The `voice` block of the fields that are set, or `None` when none is.
 fn voice_json(voice: &studio_core::Voice) -> Option<String> {
     let mut fields = serde_json::Map::new();
+    if let Some(engine) = voice.engine {
+        fields.insert("engine".into(), json!(engine.as_str()));
+    }
     if let Some(model) = &voice.model {
         fields.insert("model".into(), json!(model));
     }

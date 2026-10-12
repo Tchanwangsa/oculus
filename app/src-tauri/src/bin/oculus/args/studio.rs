@@ -1,9 +1,11 @@
 //! Arguments of the `studio` commands. `new` and `list` make and list the
 //! videos under `<app data>/studio/videos/`; every command that takes a DIR
-//! also takes a bare slug naming one of them. `frame`, `strip`, `lint` and
-//! `render` read a video folder on disk (no database, no network); `narrate`
+//! also takes a bare slug naming one of them. `frame`, `strip`, `lint`,
+//! `brief`, `beats` and `render` read a video folder on disk (no database,
+//! no network); `slide` and `blocks` read a library PDF; `narrate`
 //! and `tts` run Kokoro or call the TTS server, `g2p` shows how Kokoro reads
-//! text, and `voices` and `aligner` manage the downloaded models.
+//! text, `pronounce` puts a reading up for the student's review, and
+//! `voices` and `aligner` manage the downloaded models.
 
 use crate::*;
 
@@ -14,7 +16,11 @@ pub(crate) enum StudioAction {
     Frame(StudioFrameArgs),
     Strip(StudioStripArgs),
     Lint(StudioLintArgs),
+    Brief(StudioBriefArgs),
+    Beats(StudioBeatsArgs),
     Gallery(StudioGalleryArgs),
+    Slide(StudioSlideArgs),
+    Blocks(StudioBlocksArgs),
     Components {
         #[command(subcommand)]
         action: StudioComponentsAction,
@@ -28,15 +34,30 @@ pub(crate) enum StudioAction {
     Narrate(StudioNarrateArgs),
     Tts(StudioTtsArgs),
     G2p(StudioG2pArgs),
-    /// List Kokoro's voices, or download or delete its packs (103 MB)
+    /// Suggest how Kokoro should say a word, for the student to review
     ///
-    /// The Kokoro engine narrates inside the app from two packs, both kept
-    /// in `<app data>/models/voice/`, downloaded on request, checked against
-    /// a pinned size and sha256 and never bundled: `voice-kokoro` (the int8
-    /// model and the voices `af_heart` and `am_michael`, 93 MB) and
-    /// `g2p-en-us` (misaki's US dictionary and the guesser that reads the
-    /// words it lacks, 9 MB). With no action it lists each pack's status
-    /// and each voice, marking the one Settings -> Voice names.
+    /// The lexicon (`lexicon.json`) is written only by the app: an agent
+    /// that doubts a guessed word suggests a reading with `suggest`, and the
+    /// student hears the word's sentence both ways in Settings -> Studio -> Pronunciation and
+    /// accepts the suggestion, keeps the guess, or marks it wrong with a
+    /// note. An accepted reading or a kept guess goes into the subject's
+    /// lexicon (the global library's for a video with no subject) and
+    /// applies at the next `narrate`. `list` shows what is still waiting
+    /// and what was marked wrong.
+    Pronounce {
+        #[command(subcommand)]
+        action: StudioPronounceAction,
+    },
+    /// List Kokoro's voices, or download or delete them and its packs
+    ///
+    /// The Kokoro engine narrates inside the app from two packs and a voice,
+    /// all kept in `<app data>/models/voice/`, downloaded on request,
+    /// checked against a pinned size and sha256 and never bundled:
+    /// `voice-kokoro` (the int8 model, 92 MB), `g2p-en-us` (misaki's US
+    /// dictionary and the guesser that reads the words it lacks, 9 MB) and
+    /// one of the 20 US English voices (0.5 MB each, graded A to F by
+    /// Kokoro's authors). With no action it lists each pack's status and
+    /// each voice, marking the one Settings -> Studio -> Narration names.
     Voices {
         #[command(subcommand)]
         action: Option<StudioVoicesAction>,
@@ -66,15 +87,103 @@ pub(crate) enum StudioAlignerAction {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum StudioPronounceAction {
+    Suggest(StudioPronounceSuggestArgs),
+    List(StudioPronounceListArgs),
+}
+
+/// Put a reading of a word up for the student's review
+///
+/// Checks `READING` as a lexicon value: a respelling in dictionary words
+/// joined by `-` or spaces, an all-caps part taking the main stress
+/// (`NESS-ter-off`), or raw phonemes in Kokoro's alphabet in slashes
+/// (`/nˈɛstəɹˌɔf/`). A part the dictionary lacks or a symbol Kokoro lacks
+/// fails, naming it. Then reads the video's narration with Kokoro's G2P to
+/// find `WORD` (any case; `Word's` counts): its first guessed place, else
+/// its first place, recording how Kokoro reads it now, its sentence, scene
+/// and script.md line. A word the narration never says fails. The
+/// suggestion is stored as pending under the video's subject, replacing an
+/// earlier one for the same word; it prints the reading's phonemes. The
+/// student reviews it in Settings -> Studio -> Pronunciation. Needs the `g2p-en-us` pack.
+///
+///     oculus studio pronounce suggest momentum Nesterov NESS-ter-off
+#[derive(Args)]
+pub(crate) struct StudioPronounceSuggestArgs {
+    /// The video folder (or its slug) whose narration says the word
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The word, as the script spells it
+    #[arg(value_name = "WORD")]
+    pub(crate) word: String,
+    /// How to say it: `RE-spell-ing` or `/phonemes/`
+    #[arg(value_name = "READING")]
+    pub(crate) reading: String,
+}
+
+/// List the suggestions waiting for the student, and the ones marked wrong
+///
+/// Newest first: the status (`pending`, or `wrong` with the student's note
+/// on how the word is said), the word, the suggested reading, the subject,
+/// video, scene and line. A wrong one wants another suggestion that follows
+/// the note. Decided suggestions are gone: their reading is in the lexicon.
+///
+///     oculus studio pronounce list --video momentum
+#[derive(Args)]
+pub(crate) struct StudioPronounceListArgs {
+    /// Only this video's (a folder or slug)
+    #[arg(long, value_name = "DIR")]
+    pub(crate) video: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
 pub(crate) enum StudioVoicesAction {
-    /// Each pack's status and size, and each voice and whether it is
-    /// downloaded (the default)
+    /// Each pack's status and size, and each voice with its grade, size
+    /// and whether it is downloaded (the default)
     List,
-    /// Download both packs, printing progress; files already there are
-    /// kept
-    Download,
-    /// Delete both packs and any partial download
-    Delete,
+    Download(StudioVoicesDownloadArgs),
+    Delete(StudioVoicesDeleteArgs),
+}
+
+/// Download Kokoro's packs and starter voices, or the voices named
+///
+/// With no ID and no `--all`, downloads what a fresh install needs to
+/// narrate: the model, the pronunciation pack and the starter voices
+/// `af_heart` and `am_michael`. With IDs, or with `--all` (all 20), downloads
+/// only those voices. Prints progress as it goes; files already there are
+/// kept.
+///
+///     oculus studio voices download
+///
+///     oculus studio voices download am_puck af_bella
+///
+///     oculus studio voices download --all
+#[derive(Args)]
+pub(crate) struct StudioVoicesDownloadArgs {
+    /// Voice ids, as `oculus studio voices` lists them
+    #[arg(value_name = "ID", conflicts_with = "all")]
+    pub(crate) ids: Vec<String>,
+    /// Every voice
+    #[arg(long)]
+    pub(crate) all: bool,
+}
+
+/// Delete Kokoro's packs, or the voices named
+///
+/// With no ID, deletes the model and the pronunciation pack and any partial
+/// download of them; the voices stay. With IDs, or with `--all`, deletes
+/// only those voices.
+///
+///     oculus studio voices delete
+///
+///     oculus studio voices delete am_puck
+#[derive(Args)]
+pub(crate) struct StudioVoicesDeleteArgs {
+    /// Voice ids, as `oculus studio voices` lists them
+    #[arg(value_name = "ID", conflicts_with = "all")]
+    pub(crate) ids: Vec<String>,
+    /// Every voice
+    #[arg(long)]
+    pub(crate) all: bool,
 }
 
 impl StudioAction {
@@ -84,10 +193,17 @@ impl StudioAction {
             StudioAction::Frame(a) => Some(&mut a.dir),
             StudioAction::Strip(a) => Some(&mut a.dir),
             StudioAction::Lint(a) => Some(&mut a.dir),
+            StudioAction::Brief(a) => Some(&mut a.dir),
+            StudioAction::Beats(a) => Some(&mut a.dir),
             StudioAction::Gallery(a) => Some(&mut a.dir),
+            StudioAction::Slide(a) => Some(&mut a.dir),
             StudioAction::Render(a) => Some(&mut a.dir),
             StudioAction::Narrate(a) => Some(&mut a.dir),
             StudioAction::G2p(a) => a.video.as_mut(),
+            StudioAction::Pronounce { action } => match action {
+                StudioPronounceAction::Suggest(a) => Some(&mut a.dir),
+                StudioPronounceAction::List(a) => a.video.as_mut(),
+            },
             StudioAction::Components { action } => match action {
                 StudioComponentsAction::List(a) => Some(&mut a.dir),
                 StudioComponentsAction::Show(a) => Some(&mut a.dir),
@@ -100,6 +216,7 @@ impl StudioAction {
             StudioAction::New(_)
             | StudioAction::List(_)
             | StudioAction::Tts(_)
+            | StudioAction::Blocks(_)
             | StudioAction::Voices { .. }
             | StudioAction::Agents(_)
             | StudioAction::Aligner { .. } => None,
@@ -110,10 +227,11 @@ impl StudioAction {
 /// Make a new video under `<app data>/studio/videos/<SLUG>/`
 ///
 /// Writes `video.json` (1920x1080, or 1080x1920 with `--portrait`, 30 fps,
-/// theme `default`, the subject, and one silent `TitleCard` scene holding
+/// the default theme, the subject, and one silent `TitleCard` scene holding
 /// `--title`), an empty `script.md`, and empty `components/` and `assets/`,
-/// then prints the folder. A subject's library can replace the `default`
-/// theme with its own `themes/default.json`. Every other `oculus studio`
+/// then prints the folder. The default theme is the `defaultTheme` in the
+/// subject library's `library.json`, else the global library's, else
+/// `default`, and video.json names it. Every other `oculus studio`
 /// command takes the slug in place of the folder. Refuses a slug that
 /// exists.
 ///
@@ -167,7 +285,7 @@ pub(crate) struct StudioListArgs {
 
 /// Which engine, voice and speed to use, and the server and model for the
 /// server engine. Each flag overrides the video.json `voice` block, which
-/// overrides Settings -> Voice.
+/// overrides Settings -> Studio -> Narration.
 #[derive(Args)]
 pub(crate) struct StudioVoiceArgs {
     /// `kokoro` runs Kokoro inside the app (`oculus studio voices download`
@@ -186,7 +304,8 @@ pub(crate) struct StudioVoiceArgs {
     /// voices`)
     #[arg(long, value_name = "VOICE")]
     pub(crate) voice: Option<String>,
-    /// Speaking rate; 1.0 is normal, 1.25 is a quarter faster
+    /// Speaking rate; 1.0 is the voice's own pace, 1.25 is a quarter
+    /// faster (unset anywhere: 0.9)
     #[arg(long, value_name = "S")]
     pub(crate) speed: Option<f64>,
 }
@@ -209,11 +328,13 @@ pub(crate) enum StudioEngineArg {
 /// WAV), the clip is saved as `narration/<key>.wav`, and its words are timed
 /// against the script with the aligner model (`oculus studio aligner
 /// download` fetches it once). The manifest then gives each narrated scene its
-/// length and its `word()` cues; `frame`, `strip` and `lint` read it.
+/// length and its `word()` cues; `frame`, `strip` and `lint` read it. A
+/// section is said and timed whole, then each `[pause]` is spliced in as
+/// exact silence between the words either side of it.
 ///
-/// A clip's key hashes its text, the engine, the voice and speed, the
-/// server and model or Kokoro's model and the text's phonemes, and the
-/// aligner model, so a run only makes scenes whose text, voice or reading
+/// A clip's key hashes its text with its pauses, the engine, the voice and
+/// speed, the server and model or Kokoro's model and the text's phonemes,
+/// and the aligner model, so a run only makes scenes whose text, voice or reading
 /// changed (a lexicon edit re-narrates the scenes it changes); the rest
 /// print `cached`. Scenes run one at a time in video order and the
 /// manifest is saved after each, so a failure keeps the scenes before it;
@@ -221,12 +342,14 @@ pub(crate) enum StudioEngineArg {
 /// for scenes no longer narrated and clips nothing names are deleted.
 ///
 /// Per scene it prints the id, `narrated` or `cached`, the clip's length,
-/// its word count, and as warnings the words the aligner was unsure of and
+/// its word count and pauses, and as warnings the words the aligner was unsure of and
 /// any speech the script lacks (a mangled or added word: reword it, or
-/// listen). `lint` fails on the same words. With Kokoro, every word the
-/// guesser read is then a `note: check pronunciation` with its scene and
-/// script.md line: listen to it, try a lexicon entry with `oculus studio
-/// g2p`, and narrate again. Notes never change the exit code.
+/// listen). `lint` notes the unsure words and fails on the added speech.
+/// With Kokoro, every word the guesser read is then a `note: check
+/// pronunciation` with its scene and script.md line, and the state of any
+/// suggestion for it: listen to it, and suggest a reading for a doubtful
+/// one with `oculus studio pronounce suggest`. Notes never change the exit
+/// code.
 ///
 ///     oculus studio narrate lectures/week-4
 ///
@@ -251,7 +374,7 @@ pub(crate) struct StudioNarrateArgs {
 /// Speaks `TEXT` as `narrate` would, with Kokoro or the TTS server, and
 /// writes the WAV, then prints its path and length. An empty, non-WAV or
 /// silent clip is an error (a Kokoro server answers an unknown voice with
-/// silence). Uses Settings -> Voice unless the flags say otherwise; no
+/// silence). Uses Settings -> Studio -> Narration unless the flags say otherwise; no
 /// video is involved, so Kokoro reads only the global library's lexicon.
 ///
 ///     oculus studio tts "We follow the gradient downhill." --voice bf_emma -o /tmp/emma.wav
@@ -406,30 +529,95 @@ pub(crate) struct StudioStripArgs {
     pub(crate) out: Option<PathBuf>,
 }
 
-/// Check a whole video without writing to its folder
+/// Check a whole video, or one scene, without writing to its folder
 ///
 /// Loads every component the video uses, checks each scene's props and each
 /// component's `examples` against its `props` schema, and renders every scene
 /// at its first and last moment. For a narrated video it also checks
 /// `script.md` (sections no scene matches, text not written as it is said)
-/// and the narration (missing or stale clips, words the aligner was unsure
-/// of, unscripted speech). When the video narrates with Kokoro it also
-/// reads every section as `narrate` will: a missing `g2p-en-us` pack, a
-/// lexicon entry that is not valid, a word with no phonemes or a sentence
-/// too long for Kokoro is a problem, and each word the guesser read is a
-/// `note: check pronunciation` with its script.md line. Every problem is
-/// reported, not just the first, each with its scene, component and, where
-/// there is one, the TSX line. Exits 1 when there is any problem, so it can
-/// gate a render; notes never change the exit code. `--json` gives one
-/// entry per problem and per note, each with its `level` (`issue` or
-/// `note`).
+/// and the narration (missing or stale clips, unscripted speech). When the
+/// video narrates with Kokoro it also reads every section as `narrate`
+/// will: a missing `g2p-en-us` pack, a lexicon entry that is not valid, a
+/// word with no phonemes or a sentence too long for Kokoro is an error.
+///
+/// Each scene that renders is then laid out every 0.2 s and at each cue
+/// word (never painted) for warnings: a node past the frame's edge
+/// (`off_frame`), narration over a frame where nothing changes for more
+/// than 2.5 s or an empty opening (`still`), everything kept small in one
+/// half of the frame for more than 3 s (`half_frame`), and a Math down to
+/// a piece or two, or a tiny mark alone, at the end (`fragment`). Each
+/// names its time span and the words said in it.
+///
+/// Three levels: `error` (exits 1, so it can gate a render), `warning`
+/// and `note` (a word the aligner was unsure of, a word Kokoro's guesser
+/// read); warnings and notes never change the exit code. Errors print one
+/// a line in full; repeats of a warning or note in one scene print as one
+/// line with a count and the first few. `--json` gives one entry per
+/// issue with its `level`.
 ///
 /// See `oculus studio frame --help` for what a video folder holds.
+///
+///     oculus studio lint shor --scene mod
 #[derive(Args)]
 pub(crate) struct StudioLintArgs {
     /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
+    /// Only this scene (its id in video.json, or its index counting from
+    /// 0), with its component and the video settings it renders with
+    #[arg(long, value_name = "ID|N")]
+    pub(crate) scene: Option<String>,
+}
+
+/// Print what changes on screen in one scene, as a timeline
+///
+/// Lays the scene out every 0.2 s and at each cue word (never painted)
+/// and lists, per key (or per Math, or per TSX line for nodes with no key
+/// near them), when it appears, vanishes, moves (centre more than 8 px),
+/// resizes, recolours or is rewritten, each with the words said then, and
+/// each `[pause]` with its length.
+/// Numbered keys doing the same thing at the same moment share a line
+/// (`d12-d14`). A builder checks a beat table against it as text instead
+/// of reading a strip. At most 80 lines print; `--json` gives every beat
+/// as `{index, id, component, length, beats: [{t, end, event, who,
+/// detail, words}]}`.
+///
+///     oculus studio beats shor --scene squares
+#[derive(Args)]
+pub(crate) struct StudioBeatsArgs {
+    /// The video folder, the one holding `video.json` (or its slug)
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The scene: its id in video.json, or its index counting from 0
+    #[arg(long, value_name = "ID|N")]
+    pub(crate) scene: String,
+}
+
+/// Print one scene builder's whole input
+///
+/// For one scene: its index, component and props; the scenes before and
+/// after it, whether their components exist yet, and what their
+/// storyboard entries say under `Carries in:` and `Hands on:`; its own
+/// `storyboard.md` entry verbatim (from its `### <id>` heading to the next
+/// heading or `---`); the `notes/` files the entry names, else every file
+/// in `notes/`; its narration, one line per sentence, each word with the
+/// time `word()` returns for it (scene seconds, the theme's lead included)
+/// and each pause after its word at the time `pause()` returns; and the
+/// exact `strip`, `frame` and `gallery` calls that check it, `-o` paths
+/// absolute. Stale or missing narration prints its error and the
+/// script text instead. Reads only the folder.
+///
+///     oculus studio brief shor --scene squares
+///
+///     oculus studio brief lectures/week-4 --scene 3 --json
+#[derive(Args)]
+pub(crate) struct StudioBriefArgs {
+    /// The video folder, the one holding `video.json` (or its slug)
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The scene: its id in video.json, or its index counting from 0
+    #[arg(long, value_name = "ID|N")]
+    pub(crate) scene: String,
 }
 
 /// Render every example of a component as a still
@@ -445,9 +633,9 @@ pub(crate) struct StudioLintArgs {
 /// theme the same way. `--sheet` also writes all the stills as one contact
 /// sheet, `--cols` a row. Stills are named `<Component>-<example>.png`.
 ///
-///     oculus studio gallery lectures/week-4 DotGrid
+///     oculus studio gallery lectures/week-4 Bars
 ///
-///     oculus studio gallery lectures/week-4 DotGrid --subject COMP2011 --sheet --cols 2
+///     oculus studio gallery lectures/week-4 Bars --subject COMP2011 --sheet --cols 2
 #[derive(Args)]
 pub(crate) struct StudioGalleryArgs {
     /// The video folder, the one holding `video.json` (or its slug)
@@ -479,6 +667,105 @@ pub(crate) struct StudioGalleryArgs {
     /// Render threads (default: half the cores, at most one per example)
     #[arg(long, value_name = "T")]
     pub(crate) threads: Option<usize>,
+}
+
+/// Crop a region of a library PDF page into a video's assets
+///
+/// Renders the region with the app's PDF renderer and writes
+/// `<DIR>/assets/slides/<NAME>.png` (sharp at up to 2x the video's frame),
+/// `<NAME>.page.png` (the whole page fitted to the frame, for a zoom in from
+/// the page) and `<NAME>.json`: the PDF's library path and sha256, the page,
+/// the crop as fractions of the page, how it was chosen, the blocks inside it
+/// as fractions of the crop (kind and text, for highlight boxes), and the
+/// props for the `Slide` starter, which it also prints. FILE resolves as for
+/// `oculus read`. Name the region one way: `--find` text in a block (a
+/// figure, chart or table that holds it wins over running text; a caption
+/// that is its own block brings the figure beside it; a tie or no match
+/// lists the candidates), `--block` indices from `oculus studio blocks`, or
+/// `--bbox`. Blocks come from the parse record, so `--find` and `--block`
+/// need a parsed PDF. No edge slices ink: where the box cuts a line (a
+/// caption under a figure's box) the edge moves out to take it in, up to 6%
+/// of the page; a caption or label in the margin joins a figure, other text
+/// there is left out; the sidecar's `edges` says what moved, and `--exact`
+/// keeps the box as given. The same inputs write the same bytes; lint warns when
+/// the PDF changes after.
+///
+///     oculus studio slide momentum lecture-04.pdf --find "Figure 3" --name descent
+///
+///     oculus studio slide momentum lecture-04.pdf --page 12 --block 3,4
+///
+///     oculus studio slide momentum lecture-04.pdf --page 12 --bbox 0.5,0.2,0.95,0.8
+#[derive(Args)]
+pub(crate) struct StudioSlideArgs {
+    /// The video folder, the one holding `video.json` (or its slug)
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// Library path, filename, or a fragment of either
+    #[arg(value_name = "FILE")]
+    pub(crate) file: String,
+    /// The page, from 1 (needed by --block and --bbox; --find without it
+    /// searches every page)
+    #[arg(short = 'p', long, value_name = "N")]
+    pub(crate) page: Option<u32>,
+    /// Text in the block to crop, any case, e.g. "Figure 3"
+    #[arg(long, value_name = "TEXT")]
+    pub(crate) find: Option<String>,
+    /// Block indices on the page; several are cropped as one region round
+    /// them all
+    #[arg(long, value_name = "I[,J…]", value_delimiter = ',')]
+    pub(crate) block: Vec<usize>,
+    /// A box as fractions of the page from its top left
+    #[arg(long, value_name = "X0,Y0,X1,Y1")]
+    pub(crate) bbox: Option<String>,
+    /// The files' name under assets/slides/ (default: from the page and
+    /// what was asked, e.g. `p12-figure-3`)
+    #[arg(long, value_name = "NAME")]
+    pub(crate) name: Option<String>,
+    /// Margin round the region, as a fraction of the page's shorter side
+    #[arg(long, value_name = "FRACTION", default_value_t = 0.02)]
+    pub(crate) pad: f64,
+    /// The crop's width in pixels (default: 2x what fills the frame, at
+    /// most 6 megapixels)
+    #[arg(long, value_name = "PX")]
+    pub(crate) width: Option<u32>,
+    /// Overwrite a slide of the same name cropped from another PDF
+    #[arg(long)]
+    pub(crate) replace: bool,
+    /// Keep the padded box as it is; by default each edge moves off any ink
+    /// it would cut (out over a caption, back before other text)
+    #[arg(long)]
+    pub(crate) exact: bool,
+    /// Disambiguate FILE by subject; prefix codes are fine
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    pub(crate) subject: Option<String>,
+}
+
+/// List a parsed PDF's blocks: what `slide` can crop
+///
+/// For each page (or only `--page`): its size in points, then each block of
+/// its parse record: index, kind (`text`, `image`, `chart`, `table`,
+/// `equation`, …), box as fractions of the page from its top left, and its
+/// text on one line (an image's caption). `--png` also writes that page with
+/// every block's box and index drawn on it (figures in indigo, the rest in
+/// grey), to look at before picking.
+///
+///     oculus studio blocks lecture-04.pdf --page 12
+///
+///     oculus studio blocks lecture-04.pdf --page 12 --png out/p12.png
+#[derive(Args)]
+pub(crate) struct StudioBlocksArgs {
+    /// Library path, filename, or a fragment of either
+    #[arg(value_name = "FILE")]
+    pub(crate) file: String,
+    /// Only this page, from 1
+    #[arg(short = 'p', long, value_name = "N")]
+    pub(crate) page: Option<u32>,
+    /// With --page: write the page, its blocks drawn on, as this PNG
+    #[arg(long, value_name = "OUT", requires = "page")]
+    pub(crate) png: Option<PathBuf>,
+    /// Disambiguate FILE by subject; prefix codes are fine
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    pub(crate) subject: Option<String>,
 }
 
 /// List, show, promote or seed a video's components
@@ -600,14 +887,26 @@ pub(crate) struct StudioThemesPromoteArgs {
 /// `components/` and `assets/` folders and the render settings. A second
 /// render only renders the scenes an edit touched and prints `cached` for
 /// the rest. The segments are joined without re-encoding, beside the
-/// narration clips mixed into one track (AAC). Segments neither quality's
-/// last render used are deleted afterwards.
+/// narration clips mixed into one track (AAC). Segments no preset's last
+/// render used are deleted afterwards.
 ///
-/// `--draft` (the default) is a 540 px-high proxy on the hardware encoder,
-/// without motion blur unless the theme's `motionBlur` says `always`;
-/// `--final` is full size on libx264 (crf 18), blurred unless `motionBlur`
-/// is `off`. Both are H.264, yuv420p, BT.709. The mp4 goes to
-/// `<DIR>/renders/draft.mp4` or `final.mp4` unless `-o` names another file.
+/// The preset says what size and quality to write, to
+/// `<DIR>/renders/<preset>.mp4` unless `-o` names another file:
+///
+/// `draft` (the default, also `--draft`): a 540 px proxy on the fastest
+/// encoder, without motion blur unless the theme's `motionBlur` says
+/// `always`.
+///
+/// `final` (also `--final`): the video's size at crf 18, blurred unless
+/// `motionBlur` is `off`.
+///
+/// `small`: 720 px at crf 23, a smaller file to share.
+///
+/// Presets are H.264, yuv420p, BT.709, and write the captions as a
+/// `.vtt` beside the mp4 when the video is narrated. With video.json's
+/// `"captions": true` the captions are also burned into the frames.
+/// Before anything renders, ffmpeg is asked what it was built with: a
+/// missing encoder or demuxer is an error naming it.
 ///
 /// Render never narrates: run `oculus studio narrate` first, or it stops
 /// with the stale narration's scene. A frame that fails stops the render,
@@ -616,24 +915,29 @@ pub(crate) struct StudioThemesPromoteArgs {
 ///     oculus studio render lectures/week-4
 ///
 ///     oculus studio render lectures/week-4 --final -o ~/Desktop/week-4.mp4
+///
+///     oculus studio render lectures/week-4 --preset small
 #[derive(Args)]
-#[command(group(clap::ArgGroup::new("quality").args(["draft", "final_"]).multiple(false)))]
+#[command(group(clap::ArgGroup::new("which").args(["draft", "final_", "preset"]).multiple(false)))]
 pub(crate) struct StudioRenderArgs {
     /// The video folder, the one holding `video.json` (or its slug)
     #[arg(value_name = "DIR")]
     pub(crate) dir: PathBuf,
-    /// A 540 px-high proxy on the hardware encoder (the default)
+    /// The `draft` preset (the default)
     #[arg(long)]
     pub(crate) draft: bool,
-    /// Full size on libx264, with the theme's motion blur
+    /// The `final` preset
     #[arg(long = "final")]
     pub(crate) final_: bool,
-    /// Where to write the mp4 (default: `<DIR>/renders/<quality>.mp4`)
-    #[arg(short, long, value_name = "OUT.mp4")]
+    /// The export preset: draft, final or small
+    #[arg(long, value_name = "NAME")]
+    pub(crate) preset: Option<String>,
+    /// Where to write the file (default: `<DIR>/renders/<preset>.mp4`)
+    #[arg(short, long, value_name = "OUT")]
     pub(crate) out: Option<PathBuf>,
     /// Frame-rendering threads (default: half the cores, capped to keep
-    /// their memory under 2 GB). The encoder runs its own: `--final`'s
-    /// libx264 always uses 8, so its output is the same at any `--threads`
+    /// their memory under 2 GB). The encoder runs its own: libx264 always
+    /// uses 8, so its output is the same at any `--threads`
     #[arg(long, value_name = "T")]
     pub(crate) threads: Option<usize>,
 }
@@ -662,12 +966,48 @@ mod tests {
             "oculus", "studio", "tts", "Hello.", "-o", "x.wav", "--voice", "v"
         ]));
         assert!(ok(&["oculus", "studio", "aligner", "status"]));
+        assert!(ok(&[
+            "oculus",
+            "studio",
+            "pronounce",
+            "suggest",
+            "v",
+            "Nesterov",
+            "NESS-ter-off"
+        ]));
+        assert!(ok(&[
+            "oculus",
+            "studio",
+            "pronounce",
+            "suggest",
+            "v",
+            "Cauchy",
+            "/kˈOʃi/"
+        ]));
+        assert!(!ok(&[
+            "oculus",
+            "studio",
+            "pronounce",
+            "suggest",
+            "v",
+            "Nesterov"
+        ]));
+        assert!(ok(&["oculus", "studio", "pronounce", "list"]));
+        assert!(ok(&[
+            "oculus",
+            "studio",
+            "pronounce",
+            "list",
+            "--video",
+            "v"
+        ]));
+        assert!(!ok(&["oculus", "studio", "pronounce"]));
         assert!(!ok(&["oculus", "studio", "aligner"]));
         assert!(!ok(&["oculus", "studio", "narrate"]));
     }
 
     #[test]
-    fn render_takes_one_quality() {
+    fn render_takes_one_preset() {
         let ok = |args: &[&str]| {
             let argv = ["oculus", "studio", "render", "video"].iter().chain(args);
             Cli::try_parse_from(argv).is_ok()
@@ -675,7 +1015,9 @@ mod tests {
         assert!(ok(&[]));
         assert!(ok(&["--draft", "-o", "x.mp4", "--threads", "3"]));
         assert!(ok(&["--final"]));
+        assert!(ok(&["--preset", "small"]));
         assert!(!ok(&["--draft", "--final"]));
+        assert!(!ok(&["--final", "--preset", "small"]));
     }
 
     #[test]

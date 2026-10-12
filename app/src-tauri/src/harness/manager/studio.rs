@@ -82,8 +82,8 @@ pub fn section(video: &StudioBrief) -> String {
         ));
     }
     s.push_str(&format!(
-        "\nUse the `oculus-studio` skill. Write the scenes and the script, lint, narrate, \
-         then render a draft with `oculus studio render {slug}` and say it is ready: the \
+        "\nUse the `oculus-studio` skill as its director; the folder is its step 1, done. \
+         Render the draft with `oculus studio render {slug}` and say it is ready: the \
          app plays `renders/draft.mp4` beside this conversation. Ask before rendering \
          the final with `--final`.\n"
     ));

@@ -234,6 +234,7 @@ fn a_new_video_takes_a_theme_and_a_voice_block() {
             slug: "warm-one".into(),
             theme: Some("warm".into()),
             voice: Some(studio_core::Voice {
+                engine: Some(studio_core::VoiceEngine::Kokoro),
                 model: None,
                 voice: Some("af_heart".into()),
                 speed: Some(1.1),
@@ -249,6 +250,7 @@ fn a_new_video_takes_a_theme_and_a_voice_block() {
     assert_eq!(voice.voice.as_deref(), Some("af_heart"));
     assert_eq!(voice.speed, Some(1.1));
     assert_eq!(voice.model, None);
+    assert_eq!(voice.engine, Some(studio_core::VoiceEngine::Kokoro));
 
     let plain = create_in(&root, &new("plain")).unwrap();
     let text = std::fs::read_to_string(plain.join("video.json")).unwrap();

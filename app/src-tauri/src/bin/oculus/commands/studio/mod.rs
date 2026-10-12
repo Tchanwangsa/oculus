@@ -1,29 +1,30 @@
 //! `oculus studio`: make, render and check a Studio video folder with
 //! `studio_core` (docs/studio.md). A DIR argument that is not a folder but
-//! a bare slug names a video under `<app data>/studio/videos/`. `frame`,
-//! `strip` and `lint` read only the folder and write only the PNG; the
-//! other commands are in their own files.
+//! a bare slug names a video under `<app data>/studio/videos/`. `frame`
+//! and `strip` read only the folder and write only the PNG (`-o` makes its
+//! folder); the other commands are in their own files.
 
 mod agents;
 mod aligner;
+mod beats;
+mod brief;
 mod components;
 mod g2p;
 mod gallery;
+mod lint;
 mod narrate;
+mod pronounce;
 mod render;
+mod slide;
 mod themes;
 mod videos;
 mod voices;
 
 use crate::*;
-use app_lib::studio::tts::kokoro::{self, LexiconFiles};
-use app_lib::studio::voice::lint::{Note, VoiceLint};
-use app_lib::studio::voice::{self, VoiceOverrides};
 use app_lib::studio::{libraries, videos as video_dirs};
+use std::path::Path;
 use std::time::Instant;
-use studio_core::{
-    LintIssue, MotionBlur, RenderOptions, Renderer, StripOptions, StudioError, Time,
-};
+use studio_core::{MotionBlur, RenderOptions, Renderer, StripOptions, StudioError, Time};
 
 impl Ctx {
     /// Resolves the command's DIR (a folder, or a video's slug), then runs it.
@@ -37,13 +38,18 @@ impl Ctx {
             StudioAction::Frame(a) => self.studio_frame(&a),
             StudioAction::Strip(a) => self.studio_strip(&a),
             StudioAction::Lint(a) => self.studio_lint(&a),
+            StudioAction::Brief(a) => self.studio_brief(&a),
+            StudioAction::Beats(a) => self.studio_beats(&a),
             StudioAction::Gallery(a) => self.studio_gallery(&a),
+            StudioAction::Slide(a) => self.studio_slide(&a),
+            StudioAction::Blocks(a) => self.studio_blocks(&a),
             StudioAction::Components { action } => self.studio_components(&action),
             StudioAction::Themes { action } => self.studio_themes(&action),
             StudioAction::Render(a) => self.studio_render(&a),
             StudioAction::Narrate(a) => self.studio_narrate(&a),
             StudioAction::Tts(a) => self.studio_tts(&a),
             StudioAction::G2p(a) => self.studio_g2p(&a),
+            StudioAction::Pronounce { action } => self.studio_pronounce(&action),
             StudioAction::Voices { action } => self.studio_voices(&action),
             StudioAction::Agents(a) => self.studio_agents(&a),
             StudioAction::Aligner { action } => self.studio_aligner(&action),
@@ -64,15 +70,9 @@ impl Ctx {
         let global = timeline.start(scene) + t;
         let component = project.video.scenes[scene].component.clone();
 
-        let out = match &args.out {
-            Some(path) => path.clone(),
-            None => {
-                let dir = args.dir.join("out");
-                std::fs::create_dir_all(&dir)
-                    .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-                dir.join(format!("frame-{}.png", seconds(global)))
-            }
-        };
+        let out = png_out(args.out.as_ref(), &args.dir, || {
+            format!("frame-{}.png", seconds(global))
+        })?;
 
         let options = RenderOptions {
             scale: args.scale,
@@ -140,16 +140,10 @@ impl Ctx {
         let strip = studio_core::strip(&project, options).map_err(studio_error)?;
         let ms = started.elapsed().as_millis();
 
-        let out = match &args.out {
-            Some(path) => path.clone(),
-            None => {
-                let dir = args.dir.join("out");
-                std::fs::create_dir_all(&dir)
-                    .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-                let last = strip.times.last().copied().unwrap_or(from);
-                dir.join(format!("strip-{}-{}.png", seconds(from), seconds(last)))
-            }
-        };
+        let out = png_out(args.out.as_ref(), &args.dir, || {
+            let last = strip.times.last().copied().unwrap_or(from);
+            format!("strip-{}-{}.png", seconds(from), seconds(last))
+        })?;
         strip.write_png(&out).map_err(studio_error)?;
 
         if self.json {
@@ -185,129 +179,25 @@ impl Ctx {
         );
         Ok(())
     }
-
-    pub(crate) fn studio_lint(&self, args: &StudioLintArgs) -> Result<(), String> {
-        let project = libraries::open(&args.dir, None, None).map_err(studio_error)?;
-        let mut report = project.lint().map_err(studio_error)?;
-        let spoken = voice_lint(&project);
-        report.issues.extend(spoken.issues);
-        let count = report.issues.len();
-
-        if self.json {
-            let entries: Vec<serde_json::Value> = report
-                .issues
-                .iter()
-                .map(issue_json)
-                .chain(spoken.notes.iter().map(note_json))
-                .collect();
-            self.emit(&entries)?;
-        } else if report.is_clean() {
-            println!(
-                "{} {} ({} scenes, {:.3} s)",
-                paint("no problems", GREEN),
-                args.dir.display(),
-                project.video.scenes.len(),
-                project.length().map_err(studio_error)?
-            );
-        } else {
-            for issue in &report.issues {
-                print_issue(issue);
-            }
-        }
-        if !self.json {
-            for note in &spoken.notes {
-                narrate::print_note(note);
-            }
-        }
-        if count == 0 {
-            return Ok(());
-        }
-        Err(format!(
-            "{count} problem{} in {}",
-            if count == 1 { "" } else { "s" },
-            args.dir.display()
-        ))
-    }
-}
-
-/// The checks that need the narration engine (`voice::lint`), with the
-/// voice `narrate` would resolve without flags. A voice that does not
-/// resolve is `narrate`'s to report.
-fn voice_lint(project: &studio_core::Project) -> VoiceLint {
-    let block = project
-        .video
-        .voice
-        .as_ref()
-        .map(VoiceOverrides::from)
-        .unwrap_or_default();
-    match voice::resolve(&VoiceOverrides::default(), &block, &voice::settings()) {
-        Ok(v) => voice::lint::lint(
-            project,
-            &v,
-            &kokoro::dir(),
-            &LexiconFiles::app(project.video.subject.as_deref()),
-        ),
-        Err(_) => VoiceLint::default(),
-    }
-}
-
-fn note_json(note: &Note) -> serde_json::Value {
-    serde_json::json!({
-        "level": "note",
-        "scene": note.scene,
-        "id": note.id,
-        "line": note.line,
-        "kind": "guessed",
-        "message": note.message(),
-        "word": note.word,
-        "phonemes": note.phonemes,
-        "guessed": note.guessed,
-    })
-}
-
-/// One issue: where it is, then what is wrong. A script issue with no
-/// scene names its own place (`script.md:7: ...`).
-fn print_issue(issue: &LintIssue) {
-    let id = issue
-        .id
-        .as_ref()
-        .map(|id| format!(" `{id}`"))
-        .unwrap_or_default();
-    let component = issue.component.as_deref();
-    let place = match (issue.scene, &issue.example, component) {
-        (Some(i), _, Some(c)) => format!("scene {i}{id} ({c})"),
-        (Some(i), _, None) => format!("scene {i}{id}"),
-        (None, Some(e), Some(c)) => format!("{c} example `{e}`"),
-        (None, _, Some(c)) => c.to_owned(),
-        (None, _, None) => {
-            println!("{}", issue.error);
-            return;
-        }
-    };
-    println!("{} {}", paint(&place, BOLD), issue.error);
-}
-
-fn issue_json(issue: &LintIssue) -> serde_json::Value {
-    let e = &issue.error;
-    serde_json::json!({
-        "level": "issue",
-        "scene": issue.scene,
-        "id": issue.id,
-        "component": issue.component,
-        "example": issue.example,
-        "kind": e.kind(),
-        "message": e.to_string(),
-        "loc": e.loc().map(|l| serde_json::json!({
-            "line": l.line,
-            "col": l.col,
-            "snippet": l.snippet.trim(),
-        })),
-    })
 }
 
 /// An error's own message: studio-core writes them for agents to act on.
 fn studio_error(e: StudioError) -> String {
     e.to_string()
+}
+
+/// `-o`'s path, else `<DIR>/out/<name>`, with its folder made.
+fn png_out(
+    out: Option<&PathBuf>,
+    dir: &Path,
+    name: impl FnOnce() -> String,
+) -> Result<PathBuf, String> {
+    let path = out.cloned().unwrap_or_else(|| dir.join("out").join(name()));
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    Ok(path)
 }
 
 /// Seconds for a filename: up to three decimals, trailing zeros dropped.
