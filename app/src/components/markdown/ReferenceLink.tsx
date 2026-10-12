@@ -25,8 +25,8 @@ function WebReference({ href, children }: { href: string; children: ReactNode })
   const favicon = useBrowserStore((s) => faviconFor(href, s.favicons));
   const [failed, setFailed] = useState<string | null>(null);
   const icon = favicon && failed !== favicon
-    ? <img src={favicon} alt="" onError={() => setFailed(favicon)} className="mr-1.5 inline size-3.5 rounded-[2px] object-contain align-[-2px]" />
-    : <Globe size={16} aria-hidden className="mr-1.5 inline align-[-3px] text-brand" />;
+    ? <img src={favicon} alt="" onError={() => setFailed(favicon)} className="mr-[0.35em] inline size-[1em] rounded-[2px] object-contain align-[-0.125em]" />
+    : <Globe size="1.15em" aria-hidden className="mr-[0.35em] inline align-[-0.18em] text-brand" />;
   return (
     <ReferencePreview icon={icon} title={linkText(children) || hostOf(href)} kind="Website" detail={href}>
       <a href={href} className={cn(referenceClass, "text-brand")} target="_blank" rel="noreferrer">{icon}{children}</a>
@@ -41,7 +41,7 @@ function RouteReference({ href, appearance, children }: {
 }) {
   const { Icon, tone, kind, id } = appearance;
   const load = useCallback(() => id == null ? Promise.resolve(null) : routeReferenceDetails(kind, id), [kind, id]);
-  const icon = <Icon size={16} aria-hidden className={`mr-1.5 inline align-[-3px] ${tone}`} />;
+  const icon = <Icon size="1.15em" aria-hidden className={`mr-[0.35em] inline align-[-0.18em] ${tone}`} />;
   return (
     <ReferencePreview icon={icon} title={linkText(children) || kind} kind={kind} detail={href} load={load}>
       <a href={href} className={referenceClass} onClick={(e) => {
