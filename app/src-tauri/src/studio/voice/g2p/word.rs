@@ -1,7 +1,8 @@
 //! One word (or merged sub-tokens) to phonemes through the dictionary:
 //! misaki's `Lexicon.__call__`, `get_word`, `is_known` and `lookup`, plus
-//! the British `-ise` family read as `-ize` when misaki finds nothing
-//! ("renormalise", "factorisation"). Numbers and currency are not ported:
+//! two rules for when misaki finds nothing: an `-izer` agent noun read as
+//! its `-ize` verb + `əɹ` ("optimizers"), and the British `-ise` family
+//! read as `-ize` ("renormalise", "factorisation", "optimisers"). Numbers and currency are not ported:
 //! narration reaches here in spoken form.
 
 use std::sync::LazyLock;
@@ -12,7 +13,7 @@ use unicode_normalization::UnicodeNormalization;
 use super::chars::{char_len, has_letter, is_alpha, lower, tail, upper};
 use super::dict::{Dictionary, Entry};
 use super::special::{nnp, special_case};
-use super::stem::{stem_ed, stem_ing, stem_s};
+use super::stem::{plural, stem_ed, stem_ing, stem_s};
 use super::stress::{apply_stress, PRIMARY};
 use super::token::Ctx;
 
@@ -22,6 +23,10 @@ pub const SYMBOLS: [(&str, &str); 4] = [("%", "percent"), ("&", "and"), ("+", "p
 /// `-ise` endings with a `-ize` twin in the dictionary.
 static ISE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"is(?:e|es|ed|ing|ation|ations|er|ers|able|ability)$").unwrap());
+
+/// `-izer` agent nouns: 177 of the dictionary's 181 `-izer` entries that
+/// have an `-ize` entry read as it + `əɹ`.
+static IZER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"izers?$").unwrap());
 
 /// A word's tag as misaki's dictionary keys readings: `VB*` reads `VERB`,
 /// `NN*` `NOUN`, `RB*` `ADV`, `JJ*` `ADJ`.
@@ -53,7 +58,8 @@ pub fn word_phonemes(dict: &Dictionary, text: &str, tag: &str, ctx: &Ctx) -> Opt
     get_word(dict, &word, tag, stress, ctx)
 }
 
-/// misaki's `get_word`, then the same with an `-ise` ending read as `-ize`.
+/// misaki's `get_word`, then the `-izer` rule, then both again with an
+/// `-ise` ending read as `-ize`.
 fn get_word(
     dict: &Dictionary,
     word: &str,
@@ -61,12 +67,40 @@ fn get_word(
     stress: Option<f64>,
     ctx: &Ctx,
 ) -> Option<String> {
-    if let Some(ps) = misaki_get_word(dict, word, tag, stress, ctx) {
+    if let Some(ps) = misaki_get_word(dict, word, tag, stress, ctx)
+        .or_else(|| stem_izer(dict, word, tag, stress, ctx))
+    {
         return Some(ps);
     }
     let m = ISE.find(word)?;
     let alt = format!("{}iz{}", &word[..m.start()], &word[m.start() + 2..]);
     misaki_get_word(dict, &alt, tag, stress, ctx)
+        .or_else(|| stem_izer(dict, &alt, tag, stress, ctx))
+}
+
+/// `-izer(s)` as the `-ize` verb + `əɹ` (+ the plural); the verb in lower
+/// case when only that is known ("Tokenizers").
+fn stem_izer(
+    dict: &Dictionary,
+    word: &str,
+    tag: &str,
+    stress: Option<f64>,
+    ctx: &Ctx,
+) -> Option<String> {
+    let m = IZER.find(word)?;
+    let mut stem = format!("{}ize", &word[..m.start()]);
+    if !is_known(dict, &stem) && is_known(dict, &lower(&stem)) {
+        stem = lower(&stem);
+    }
+    if !is_known(dict, &stem) {
+        return None;
+    }
+    let ps = lookup(dict, &stem, tag, stress, Some(ctx))? + "əɹ";
+    if word.ends_with('s') {
+        plural(&ps)
+    } else {
+        Some(ps)
+    }
 }
 
 fn misaki_get_word(

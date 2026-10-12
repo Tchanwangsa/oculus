@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use super::super::Dictionary;
-use super::fixtures::check;
+use super::fixtures::{check, ROWS};
 
 #[test]
 #[ignore]
@@ -17,5 +17,5 @@ fn the_full_dictionary_matches_the_oracle() {
     );
     let (matched, failures) = check(&Dictionary::load(&dir).unwrap());
     assert!(failures.is_empty(), "{} rows differ", failures.len());
-    assert_eq!(matched, 1026);
+    assert_eq!(matched, ROWS);
 }

@@ -153,7 +153,9 @@ connect, so a chat agent's `oculus search` works with the app closed.
 studio narrate` calls the server in Settings → Voice. At each spawn the
 bridges read the `voice` row (`studio::voice::server_host`: the base URL's
 host and port, or nothing without a row, a URL or a host; never a
-wildcard), so a changed server reaches the next spawn:
+wildcard), so a changed server reaches the next spawn. The Kokoro engine
+needs no grant: it reads its packs from `<app data>/models/voice/` and
+makes no request.
 
 | CLI | Grant | What reaches the server |
 | --- | --- | --- |

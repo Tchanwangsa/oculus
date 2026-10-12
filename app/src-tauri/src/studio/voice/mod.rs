@@ -5,6 +5,7 @@
 //! runs in the app (`studio::tts::kokoro`).
 
 pub mod g2p;
+pub mod lint;
 #[cfg(test)]
 mod tests;
 
@@ -22,7 +23,7 @@ pub const DEFAULT_SPEED: f64 = 1.0;
 /// What `narrate` says when no engine is chosen anywhere. There is no
 /// default: Kokoro needs a download, a server needs a URL.
 pub const NO_ENGINE: &str =
-    "no narration engine: choose Kokoro or a TTS server in Settings -> Voice";
+    "no narration engine: choose Kokoro or a TTS server in Settings -> Voice, or pass --engine";
 /// What `narrate` says when the server engine has no server set anywhere.
 pub const NO_SERVER: &str =
     "no TTS server: set a TTS server in Settings -> Voice, or pass --server";

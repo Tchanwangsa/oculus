@@ -5,8 +5,7 @@ lecture1       136 units  1792 words  dict 1738  rule 44  lexicon 10  guess 0
 lecture2       120 units  1498 words  dict 1439  rule 52  lexicon 7  guess 0
 lecture3       103 units  1480 words  dict 1442  rule 34  lexicon 4  guess 0
 heteronyms30    30 units   238 words  dict 213  rule 25  lexicon 0  guess 0
-nolex/script163   11 units   163 words  dict 161  rule 1  lexicon 0  guess 1
-    guess  'optimizers'                 ˈɑptəmˌIzəɹz   parts ['optimizers']
+nolex/script163   11 units   163 words  dict 162  rule 1  lexicon 0  guess 0
 nolex/maths16   16 units   268 words  dict 260  rule 1  lexicon 0  guess 7
     guess  "Euler's"                    jˈuləɹz   parts ["Euler's"]
     guess  'Cauchy'                     kˈɔʃi   parts ['Cauchy']
@@ -72,7 +71,7 @@ nolex/lecture3  103 units  1480 words  dict 1443  rule 34  lexicon 0  guess 3
     guess  'waitlist'                   wˈAtlɪst   parts ['waitlist']
     guess  'Skynet'                     skˈInət   parts ['Skynet']
 nolex/heteronyms30   30 units   238 words  dict 213  rule 25  lexicon 0  guess 0
-special        104 units  1064 words  dict 890  rule 116  lexicon 35  guess 23
+special        108 units  1102 words  dict 928  rule 116  lexicon 35  guess 23
     guess  "O'Brien"                    ˌObɹˈin   parts ['rien', "O'B"]
     guess  "d'Alembert"                 dˌilˈɛmbəɹt   parts ['lembert', "d'A"]
     guess  'scikit-image'               sˈIkɪtˌɪmɪʤ   parts ['scikit']
@@ -97,10 +96,10 @@ special        104 units  1064 words  dict 890  rule 116  lexicon 35  guess 23
     guess  'Lovelace'                   lˈʌvələs   parts ['Lovelace']
     guess  'Babbage'                    bæbˈɑʒ   parts ['Babbage']
 
-guesser golden: 375 words (305 verify, 72 guessed by A2C)
+guesser golden: 374 words (305 verify, 71 guessed by A2C)
 
-no lexicon: A2C guesses 46 distinct words; C's fallback was 50
-  C fell back, A2C resolves without the guesser (dict/rule): authorisation, factorisation, multiplied, renormalise
+no lexicon: A2C guesses 45 distinct words; C's fallback was 50
+  C fell back, A2C resolves without the guesser (dict/rule): authorisation, factorisation, multiplied, optimizers, renormalise
   A2C guesses, C did not (sub-token split): 
   both guess, different phonemes: Kullback-Leibler, NumPy, PostgreSQL, PyTorch, scikit-learn
 units equal to A2: 461/461

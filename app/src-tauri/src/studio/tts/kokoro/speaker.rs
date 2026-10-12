@@ -6,14 +6,13 @@ use std::path::PathBuf;
 
 use super::chunk::chunks;
 use super::model::{self, MODEL_FILE, MODEL_ID, PACK, VOICES};
+use super::reader::{missing, no_pad, LexiconFiles, Reader};
 use super::synth::{render, wav, Kokoro};
-use super::vocab::PAD;
 use crate::runtime::onnx;
 use crate::studio::audio::decode_wav;
 use crate::studio::narrate::Speaker;
 use crate::studio::tts::Speech;
-use crate::studio::voice::g2p::guess::{self, Guesser};
-use crate::studio::voice::g2p::{self, Dictionary, Lexicon, Phonemized};
+use crate::studio::voice::g2p::{guess, Phonemized};
 use crate::studio::voice::KokoroVoice;
 
 /// Where the two packs are: the voice (`voice-kokoro`) and the G2P
@@ -32,33 +31,6 @@ impl Packs {
             g2p: guess::dir(),
         }
     }
-}
-
-/// The lexicon layers a video reads (`g2p::Lexicon`); a missing file is an
-/// empty layer.
-#[derive(Debug, Clone, Default)]
-pub struct LexiconFiles {
-    pub library: Option<PathBuf>,
-    pub subject: Option<PathBuf>,
-}
-
-impl LexiconFiles {
-    /// The global library's `lexicon.json`, and `subject`'s when the video
-    /// has one.
-    pub fn app(subject: Option<&str>) -> Self {
-        use crate::studio::libraries::{global_dir, subjects_dir};
-        Self {
-            library: Some(global_dir().join("lexicon.json")),
-            subject: subject.map(|code| subjects_dir().join(code).join("lexicon.json")),
-        }
-    }
-}
-
-/// What reads text: the dictionary, the video's lexicon and the guesser.
-struct Reader {
-    dict: Dictionary,
-    lexicon: Lexicon,
-    guesser: Guesser,
 }
 
 /// Kokoro run in the app for one narrate run. The reader loads on the
@@ -91,49 +63,22 @@ impl KokoroSpeaker {
         self.read.borrow().get(text).cloned()
     }
 
-    fn g2p_ready(&self) -> Result<(), String> {
-        if onnx::is_present(&self.packs.g2p, &guess::PACK) {
-            Ok(())
-        } else {
-            Err(missing("G2P pack (g2p-en-us)", guess::PACK.bytes()))
-        }
-    }
-
     /// `text` read to phonemes, once per text.
     fn read(&self, text: &str) -> Result<Phonemized, String> {
         if let Some(done) = self.read.borrow().get(text) {
             return Ok(done.clone());
         }
-        if text.contains(PAD) {
-            return Err("`$` is Kokoro's pad and cannot be said; spell it out".to_owned());
-        }
+        no_pad(text)?;
         let mut slot = self.reader.borrow_mut();
         let reader = match &mut *slot {
             Some(r) => r,
-            empty @ None => empty.insert(self.load_reader()?),
+            empty @ None => empty.insert(Reader::load(&self.packs.g2p, &self.lexicon)?),
         };
-        let phonemized = g2p::phonemize(text, &reader.dict, &reader.lexicon, &mut reader.guesser)?;
+        let phonemized = reader.read(text)?;
         self.read
             .borrow_mut()
             .insert(text.to_owned(), phonemized.clone());
         Ok(phonemized)
-    }
-
-    fn load_reader(&self) -> Result<Reader, String> {
-        self.g2p_ready()?;
-        let dict = Dictionary::load(&self.packs.g2p)?;
-        let lexicon = Lexicon::load(
-            self.lexicon.library.as_deref(),
-            self.lexicon.subject.as_deref(),
-            &dict,
-        )
-        .map_err(|e| e.to_string())?;
-        let guesser = Guesser::load(&self.packs.g2p)?;
-        Ok(Reader {
-            dict,
-            lexicon,
-            guesser,
-        })
     }
 
     fn load_kokoro(&self) -> Result<Kokoro, String> {
@@ -151,20 +96,14 @@ impl KokoroSpeaker {
     }
 }
 
-/// `what` (`bytes` big) is not on disk.
-fn missing(what: &str, bytes: u64) -> String {
-    format!(
-        "Kokoro's {what}, {} MB, is not downloaded: download it in Settings -> Voice",
-        bytes.div_ceil(1_000_000)
-    )
-}
-
 impl Speaker for KokoroSpeaker {
     fn ready(&self) -> Result<(), String> {
         if !onnx::is_present(&self.packs.voice, &PACK) {
             return Err(missing("voice pack (voice-kokoro)", PACK.bytes()));
         }
-        self.g2p_ready()?;
+        if !onnx::is_present(&self.packs.g2p, &guess::PACK) {
+            return Err(missing("G2P pack (g2p-en-us)", guess::PACK.bytes()));
+        }
         model::voice_file(&self.packs.voice, &self.voice.voice)
             .map(drop)
             .ok_or_else(|| self.no_voice())

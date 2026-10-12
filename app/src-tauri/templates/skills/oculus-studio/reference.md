@@ -19,6 +19,7 @@ has the full flags.
 - Lint: each kind and what to do, the literal rules exactly
 - Looking: frame, strip and gallery
 - Narrate
+- Pronunciation: guessed words, `oculus studio g2p`, lexicon.json
 - Render
 - Libraries: how a name resolves, promoting, the starter components
 
@@ -384,9 +385,14 @@ element you want to carry across; `"motion": { "magicMove": "off" }` in
 
 ## Lint
 
-`oculus studio lint <slug> --json` prints every problem as `{ scene, id,
-component, example, kind, message, loc }` and `[]` when clean. It exits 1
-on any problem. Read `message`: it says what is wrong and what is valid.
+`oculus studio lint <slug> --json` prints every problem as `{ level:
+"issue", scene, id, component, example, kind, message, loc }` and `[]`
+when clean. It exits 1 on any problem. Read `message`: it says what is
+wrong and what is valid.
+
+With the Kokoro engine it also prints a note per guessed word, `{ level:
+"note", scene, id, line, kind: "guessed", message, word, phonemes,
+guessed }`. Notes never fail lint; check each as "Pronunciation" says.
 
 | `kind` | What it means | What to do |
 | --- | --- | --- |
@@ -405,6 +411,9 @@ on any problem. Read `message`: it says what is wrong and what is valid.
 | `component_not_found` | No component by that name | Use one the message lists, or write it in `components/`. |
 | `transpile` | The TSX does not compile, or uses `import` | Fix the syntax at `loc`. |
 | `image`, `font`, `budget` | A missing asset, an unknown font, or a component doing too much work | Add the file; use `theme.font`; remove the loop. |
+| `lint` | Kokoro's G2P pack is not downloaded | Stop and tell the student (`oculus studio voices download`). |
+| `lint` | A `lexicon.json` entry names a phoneme Kokoro lacks, or a respelling part the dictionary lacks | Fix the entry the message names ("Pronunciation"). |
+| `script` | Kokoro: a word with no phonemes, a `$`, or a sentence too long to say in one go | Reword: spell it out, or split the sentence or add a comma. |
 
 **The literal rules, exactly.** Lint reads each component's source:
 
@@ -452,6 +461,35 @@ does one scene (an id, unlike `strip --scene`, which takes an index);
 `--force` makes it again. A failure keeps the scenes before it and names
 the failed one: `no TTS server`, `no TTS model` and `no TTS voice` mean
 Settings → Voice is unset (`SKILL.md` step 6 says what to do).
+
+The engine is Kokoro, run inside the app, or a TTS server; Settings →
+Voice or the video's `voice` block (`"engine": "kokoro"`) picks it. With
+Kokoro, narrate ends with a `note:` per guessed word.
+
+## Pronunciation
+
+Kokoro reads each word from the lexicon, then its dictionary, then a
+guesser. A guessed word is worth checking.
+
+- `oculus studio g2p "<text>" --video <slug>` prints each word, its
+  phonemes and who read it: `lexicon`, `dict`, `rule` (a word like "read"
+  or "lead" read by its neighbours) or `guess`. It does not synthesise.
+- Two `lexicon.json` files, the subject's over the global one:
+  `../studio/subjects/<CODE>/lexicon.json` (write here) and
+  `../studio/library/lexicon.json` (read only). Each is one JSON object
+  from a word to its reading; keys starting `_` are comments.
+- **A respelling** is dictionary words joined by `-` or spaces:
+  `"softmax": "SOFT-max"`, `"Nesterov": "NESS-ter-off"`. Every part must
+  be in the dictionary (else the load fails naming it); an all-caps part
+  longer than one letter takes the main stress, the others a lighter one.
+- **Raw phonemes** go in slashes, in Kokoro's alphabet: `"Cauchy":
+  "/kˈOʃi/"`. `ˈ` marks the main stress, `ˌ` a lighter one; copy symbols
+  from words `g2p` prints rather than guessing them. A symbol Kokoro lacks,
+  or `$`, fails the load naming the entry.
+- A word finds its entry by exact key, then lower case; `Cauchy's` takes
+  `Cauchy`'s entry plus `-s`.
+- After an edit, run `g2p` again, then `narrate`: only scenes whose
+  reading changed are made again.
 
 ## Render
 

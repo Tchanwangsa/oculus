@@ -38,6 +38,26 @@ impl Pack {
     }
 }
 
+/// Where a pack is, for a status line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Status {
+    Missing,
+    Downloading,
+    Present,
+}
+
+/// Whether `pack` is in `dir`, or being downloaded. Local only.
+pub fn status(dir: &Path, pack: &Pack) -> Status {
+    if is_present(dir, pack) {
+        Status::Present
+    } else if downloading(pack.id) {
+        Status::Downloading
+    } else {
+        Status::Missing
+    }
+}
+
 /// Every file of `pack` is in `dir` at its pinned size. Reads metadata only:
 /// the checksum was checked before the file got its name.
 pub fn is_present(dir: &Path, pack: &Pack) -> bool {

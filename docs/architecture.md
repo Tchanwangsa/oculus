@@ -27,6 +27,8 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/runtime/bundled.rs` |
 | ONNX Runtime (static): the CPU session and pinned, checksummed model-pack downloads | `app/src-tauri/src/runtime/onnx/` |
+| Studio's text to Kokoro phonemes: misaki's dictionary path, heteronym rules, the lexicon, the neural guesser ([studio.md](./studio.md#kokoro-reads-text-through-the-g2p)) | `app/src-tauri/src/studio/voice/g2p/` |
+| Studio's Kokoro engine: the voice pack, the reader, chunking, synthesis, the `Speaker` ([studio.md](./studio.md#kokoro-narrates-inside-the-app)) | `app/src-tauri/src/studio/tts/kokoro/` |
 | PDF viewer's render, text and links | `app/src-tauri/src/library/pdf_view/` |
 | In-app browser | `app/src-tauri/src/shell/browser/`, `app/src-tauri/capabilities/default.json` |
 | Spotify playback ([music.md](./music.md)) | `app/src-tauri/src/music/`, `app/src/lib/music/index.ts` |
@@ -296,8 +298,9 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   working directory and only writable root of every chat thread, with raw
   provider output in `agents/threads/<id>.ndjson` ([harness.md](./harness.md)).
 - `models/` — downloaded local models, never bundled: `whisper/` for local
-  transcription ([viewers.md](./viewers.md#local-whisper-whispercpp-with-a-downloaded-model)) and `align/` for Studio's
-  narration aligner ([studio.md](./studio.md#narration-timing-is-forced-alignment-on-the-cpu)).
+  transcription ([viewers.md](./viewers.md#local-whisper-whispercpp-with-a-downloaded-model)), `align/` for Studio's
+  narration aligner ([studio.md](./studio.md#narration-timing-is-forced-alignment-on-the-cpu))
+  and `voice/` for its Kokoro engine and G2P ([studio.md](./studio.md#kokoro-narrates-inside-the-app)).
 - `mineru-usage.json`, `voyage-usage.json` — each cloud's daily reservations
   and quota latch. Voyage's also holds the learned rate-limit tier and the
   spend guard from Settings → Embeddings, kept here rather than in `settings`
@@ -348,8 +351,8 @@ never creates the database, so a fresh machine opens the app once first.
 - Parse and embed settings are the `parse` and `embed` rows of `settings`, read
   by `parse_config` and `embed_config`. `db::store::edit_setting` preserves unknown
   keys when changing either object; malformed records start from defaults.
-- Studio's narration voice is the `voice` row (`{ baseUrl, model, voice,
-  speed }`), read by `studio::voice::settings` and written through
+- Studio's narration voice is the `voice` row (`{ engine, baseUrl, model,
+  voice, speed }`), read by `studio::voice::settings` and written through
   `edit_setting` by `studio::voice::save` ([studio.md](./studio.md#narration-is-made-by-oculus-studio-narrate)).
 
 ## Rust counts app usage; the frontend only pings

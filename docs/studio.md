@@ -4,8 +4,8 @@ Studio makes lecture videos from scenes written as TSX components.
 `app/studio-core/` is its renderer: a video folder plus a time in, one RGBA
 frame out, the same pixels on every machine, scene transitions included.
 A narrated scene lasts as long as its narration and can cue elements to its
-words, from clips and timings `oculus studio narrate` makes with a TTS server
-and a local aligner. `oculus studio render`, or the app's `studio_render`
+words, from clips and timings `oculus studio narrate` makes with Kokoro run
+inside the app or a TTS server, and a local aligner. `oculus studio render`, or the app's `studio_render`
 command, encodes a video to an mp4 with ffmpeg, one cached segment per
 scene. `oculus studio` also renders single
 frames and contact sheets, lints, and narrates.
@@ -34,12 +34,14 @@ frames and contact sheets, lints, and narrates.
 | Every error and its message | `app/studio-core/src/error.rs` |
 | Fixture videos and golden frames | `app/studio-core/tests/fixtures/`, `app/studio-core/tests/golden/` |
 | Narration audio decode and word timing (the aligner, its model download) | `app/src-tauri/src/studio/` (`audio/`, `timing/`), `app/src-tauri/src/runtime/onnx/` |
-| Narrating a video: the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
+| Narrating a video: the `Speaker` trait, the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
+| The Kokoro engine: its pack, reader, chunking and synthesis | `app/src-tauri/src/studio/tts/kokoro/` |
+| Text to Kokoro phonemes (the G2P), the lexicon, the guesser and its pack; the lint of a video's narration that needs them | `app/src-tauri/src/studio/voice/g2p/` (`guess/`, `lexicon.rs`), `app/src-tauri/src/studio/voice/lint/` |
 | Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `render.rs`, `narrate.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -76,8 +78,8 @@ narration/    manifest.json and the clips it names
 - `id` (`[a-z0-9-]+`, unique) names the scene's section in `script.md`. It
   is required on every scene once the folder has a `script.md`; a scene
   whose id has no section is silent and needs a `hold`.
-- `voice` (optional: `model`, `voice`, `speed`) overrides Settings -> Voice
-  for this video. studio-core only stores it; the app's narrator reads it.
+- `voice` (optional: `engine` (`kokoro` or `server`), `model`, `voice`,
+  `speed`) overrides Settings -> Voice for this video. studio-core only stores it; the app's narrator reads it.
 - `theme` is a bundled theme's name, a library theme's name (see "Libraries
   cascade") or a `.json` path relative to the folder.
 - `subject` (optional) is the course the video belongs to: a course code's
@@ -221,7 +223,10 @@ figure at display size, something on screen within a second, motion cued
 with `word()`, one shared key for consecutive headings, tokens over
 literals). When `narrate` fails for want of a
 voice or the aligner, the agent stops and tells the student what to set in
-Settings -> Voice; it never downloads the aligner. `reference.md` is this
+Settings -> Voice; it never downloads the aligner or the voice packs.
+After narrating with Kokoro it checks each guessed-word note, tries a
+reading with `oculus studio g2p`, adds a lexicon entry for a wrong one
+and narrates again. `reference.md` is this
 page's authoring rules distilled for an agent (video.json, spoken form, the
 component contract, elements and style keys, motion, cues, transitions,
 each lint kind and what to do about it, and the commands' outputs).
@@ -312,8 +317,8 @@ We follow the *gradient* downhill, one small step at a time.
   duration, words: [{ text, start, end, confidence }], gaps: [{ after,
   start, end, heard }] } } }` (`Manifest`). `text` is the section text the
   clip says, `audio` the clip's file name in `narration/`, `key` its content
-  address (sha256 of the text, server, model, voice, speed and aligner
-  model), times are seconds from the clip's start, `confidence` is the
+  address (see "Cache" under "Narration is made by `oculus studio
+  narrate`"), times are seconds from the clip's start, `confidence` is the
   aligner's (mean log-probability of the word's letter frames; higher is
   surer), and `gaps` (optional) is speech the aligner heard that the
   script does not have, after word index `after` (`null`: before the first
@@ -418,39 +423,69 @@ aligner at a copy elsewhere instead, for development and the parity tests.
 `script.md` section into a clip and its word times, and writes the
 manifest. Scenes run one at a time, in video order.
 
-- **Voice.** Each of server, model, voice and speed comes from the first
-  that sets it: the CLI flags, the video's `voice` block, then the `voice`
-  settings row (`{ baseUrl, model, voice, speed }`, which Settings -> Voice
-  writes; `studio::voice`). A missing or ill-typed field in the row
-  reads as unset; only speed has a default (1.0). Server, model and voice
-  have none, since ids differ per server (Kokoro-FastAPI `kokoro`, mlx-audio
+- **Voice.** Each of engine, voice and speed, and for the server engine
+  the server and model, comes from the first that sets it: the CLI flags
+  (`--engine`, `--voice`, `--speed`, `--server`, `--model`), the video's
+  `voice` block, then the `voice` settings row (`{ engine, baseUrl, model,
+  voice, speed }`; `studio::voice`). A missing or ill-typed field in the
+  row reads as unset, and so does an engine other than `server` or
+  `kokoro` (in video.json it fails the load); a row with a `baseUrl` and
+  no `engine` key reads as `server`. Only speed has a default (1.0).
+  There is no default engine, since Kokoro needs a download and a server
+  a URL: narrate fails with ``choose Kokoro or a TTS server in Settings ->
+  Voice, or pass --engine``. The server engine needs a server, model and
+  voice, whose ids differ per server (Kokoro-FastAPI `kokoro`, mlx-audio
   `mlx-community/Kokoro-82M-bf16`, OpenAI `tts-1`): narrate fails with
   ``set a TTS server in Settings -> Voice, or pass --server`` and the same
-  for `--model` and `--voice`.
+  for `--model` and `--voice`. The Kokoro engine needs only a voice, an id
+  of lower-case letters, digits and `_` (it names a file in the voice
+  pack); it ignores the server fields, which stay set for when the server
+  engine is chosen again.
+- **Engines.** `narrate` asks for clips through the `Speaker` trait
+  (`narrate::Speaker`): `ready()` is asked once, beside the aligner's,
+  before the first clip; `key(text)` is asked for every scene, cached or
+  not, and gives the parts of its cache key, engine first; `speak(text)`
+  gives a WAV and its decoded samples, never silent. `ServerSpeaker` is
+  the TTS client below and has no readiness check of its own;
+  `KokoroSpeaker` runs Kokoro inside the app (see "Kokoro narrates inside
+  the app"). A video has one engine: when it fails, the narrate fails and
+  says why, with no fallback to the other.
 - **The TTS server** is OpenAI-compatible (Kokoro-FastAPI, mlx-audio):
   `POST <base>/v1/audio/speech` with `{ model, input, voice,
   response_format: "wav", speed }`, one request per clip, no timeout
-  (`studio::tts`). `narrate` asks for clips through the `Speaker` trait
-  (`ready`, `speak`), whose `ServerSpeaker` is this client; the server
-  has no readiness check of its own. The base URL is accepted with or
+  (`studio::tts`). The base URL is accepted with or
   without a trailing `/v1`, normalised once. Keyless servers only: no API
   key is sent. A non-2xx answer fails with its status and a short excerpt of the body; a
   429 is retried with back-off (1, 2, 4, 8 s; five tries). A 200 whose body
   is empty, is not a WAV, or is digitally silent (see "Input" above) is a
-  failure, never a pause: Kokoro answers an unknown voice with 200 and
-  nothing.
-- **Cache.** A clip's `key` is the sha256 hex of the section text, the
-  normalised server URL, model, voice, speed and the aligner's `MODEL_ID`,
-  each length-prefixed. A scene whose manifest entry has the same key and
-  whose `narration/<key>.wav` exists is kept (`cached`) unless `--force`;
-  editing one paragraph re-requests that one scene.
-- **A new clip** is saved byte for byte as the server sent it to
+  failure, never a pause: Kokoro-FastAPI answers an unknown voice with 200
+  and nothing.
+- **Cache.** A clip's `key` is the sha256 hex of `oculus-narration-2`, the
+  section text, the speaker's key parts and the aligner's `MODEL_ID`, each
+  length-prefixed (`narrate/key.rs`). The server's parts are `server`, the
+  normalised URL, model, voice and speed. Kokoro's are `kokoro`, its model
+  id (`kokoro-82m-v1.0-onnx-int8@1939ad2a`), voice, speed and the text's
+  phoneme string, so a lexicon edit re-narrates only the scenes whose
+  phonemes it changes. The text is in every key because a manifest entry
+  is current only for the text it was timed against. A scene whose
+  manifest entry has the same key and whose `narration/<key>.wav` exists
+  is kept (`cached`) unless `--force`; editing one paragraph re-makes that
+  one scene. A scene whose key cannot be made (Kokoro: the G2P pack is
+  missing, a lexicon entry is bad, a word has no phonemes) fails naming
+  the scene.
+- **A new clip** is saved byte for byte as the speaker made it to
   `narration/<key>.wav`; its duration comes from the decoded samples, and
   it is resampled to 16 kHz and timed against the section's
-  whitespace-separated words, at any length. The aligner model is checked before
-  the first TTS request, so a missing one costs no synthesis and fails with
-  ``download it in Settings -> Voice or run `oculus studio aligner
-  download` ``.
+  whitespace-separated words, at any length. The speaker and the aligner
+  model are checked before the first clip, so a missing one costs no
+  synthesis; the aligner fails with ``download it in Settings -> Voice or
+  run `oculus studio aligner download` ``.
+- **Guessed words.** With Kokoro, each word the guesser read in the scenes
+  the run keyed is printed after the scenes as ``note: scene 1 `momentum`
+  script.md:9: check pronunciation: "Nesterov" is guessed as
+  /nˈɛstəɹɔv/; ...`` (`voice::lint::notes`). A note never changes the exit
+  code; the fix is a lexicon entry (see "Kokoro reads text through the
+  G2P") and another `narrate`.
 - **Writes.** The manifest is rewritten atomically after each scene, so a
   failure keeps the scenes before it; the error names the scene and the
   command exits 1. After the last scene, entries whose id is no longer a
@@ -460,21 +495,140 @@ manifest. Scenes run one at a time, in video order.
   from nothing, with a warning.
 - **Output.** Per scene: the id, `narrated` or `cached`, the clip's length,
   its word count, and as warnings each word under `LOW_CONFIDENCE` and each
-  gap (times into the clip; lint fails on the same ones, at scene time).
-  `--json` gives `{ dir, voice, scenes: [{ id, outcome, audio, duration,
-  words, low_confidence, gaps, timings }], dropped, deleted, ms }`.
+  gap (times into the clip; lint fails on the same ones, at scene time),
+  then the notes. `--json` gives `{ dir, voice, scenes: [{ id, outcome,
+  audio, duration, words, low_confidence, gaps, timings }], notes: [{
+  scene, id, line, word, phonemes, guessed }], dropped, deleted, ms }`,
+  `voice` being `{ engine: "server", server, model, voice, speed }` or `{
+  engine: "kokoro", voice, speed }`.
 - `oculus studio tts "<text>"` makes one clip the same way and writes it
-  (`tts.wav` unless `-o`), for hearing a voice. `oculus studio aligner
-  status|download|delete` manages the aligner model.
-- **Measured** on Kokoro (mlx-audio, `af_heart`, M-series Mac, debug
-  build): three scenes of 4 to 8 s narrated in 1.8 s with a 0.67 GB peak;
-  a re-run after one paragraph edit took 0.5 s. Kokoro's clips start with
-  about 0.2 s and end with about 0.4 s of exact zeros, well under the 1 s
-  zero-run limit.
+  (`tts.wav` unless `-o`), for hearing a voice; with Kokoro it reads the
+  global library's lexicon only. `oculus studio g2p "<text>"` shows how
+  Kokoro reads text without synthesising. `oculus studio voices` and
+  `oculus studio aligner status|download|delete` manage the downloaded
+  models.
+- **Measured** on the server engine (mlx-audio Kokoro, `af_heart`,
+  M-series Mac, debug build): three scenes of 4 to 8 s narrated in 1.8 s
+  with a 0.67 GB peak; a re-run after one paragraph edit took 0.5 s.
+  Kokoro's clips start with about 0.2 s and end with about 0.4 s of exact
+  zeros, well under the 1 s zero-run limit. The Kokoro engine's numbers
+  are in the next section.
+
+## Kokoro narrates inside the app
+
+The `kokoro` engine (`app/src-tauri/src/studio/tts/kokoro/`) runs
+Kokoro-82M on the ONNX Runtime the aligner uses, with no server and no
+side process. It needs two packs, downloaded on request by `oculus studio
+voices download` to `<app data>/models/voice/`, checked against their
+pinned sizes and sha256 before they get their names, and never bundled:
+
+| Pack | Files | Size |
+| --- | --- | --- |
+| `voice-kokoro` | `kokoro-v1.0-int8.onnx` (onnx-community/Kokoro-82M-v1.0-ONNX's `model_quantized.onnx`, Apache-2.0) and the voices `af_heart.bin` and `am_michael.bin`, at commit `1939ad2a` | 93 MB |
+| `g2p-en-us` | misaki's `us_gold.json` and `us_silver.json` (Apache-2.0, commit `e820629b`), and the guesser's `g2p-encoder.onnx`, `g2p-decoder.onnx` and `g2p-config.json` (PeterReid/graphemes_to_phonemes_en_us, PR #1 at `9470bafd`) | 9 MB |
+
+The voices are US English, as the dictionary and the guesser are. Another
+voice is one more `<id>.bin` in the folder at a voice file's size (510
+rows of 256 f32s); `oculus studio voices` lists it. The model is int8:
+fp16 and q4f16 exports come out silent with no error.
+
+- **One speaker per run.** `KokoroSpeaker::ready` checks both packs and
+  the voice's file. The reader (the dictionary, the video's lexicon and
+  the guesser; `reader.rs`) loads on the first key and the model session
+  on the first clip; both are dropped with the speaker when the run ends,
+  never held idle. No timeouts on either.
+- **Reading.** Each section's text is read to phonemes by the G2P (next
+  section). A `$` is refused: it is Kokoro's pad.
+- **Chunking** (`chunk.rs`). An input holds at most 509 tokens, since the
+  voice file has a style row per input length. The phoneme string is cut
+  after each sentence end (`.`, `!`, `?`, `…`, with any closing quote or
+  bracket) that whitespace follows, and sentences are packed greedily
+  under the limit; a sentence too long alone is cut at `,`, `;` and `:`
+  the same way, and a part still too long fails naming its sentence's
+  words. Whitespace runs read as one space. A character outside Kokoro's
+  115-symbol vocabulary (`vocab.rs`) fails naming its word, since Kokoro
+  would drop it silently.
+- **Synthesis** (`synth.rs`). Each input runs as `[0, ids..., 0]` with the
+  voice's style row `len(ids)` and the speed, on the shared CPU session
+  (`runtime::onnx::session`, arena on, half the cores up to 4). An input
+  that comes out digitally silent fails naming its words. The samples join
+  with no gap and are written as a 16-bit mono 24 kHz WAV, the shape a
+  server's clip has; the silence check runs on the float samples first.
+- **Measured** (`tts/kokoro/tests/e2e.rs`: two scenes, 19.3 s of audio,
+  `af_heart`, M-series Mac with other builds running, debug build around
+  a static ORT 1.28): synthesis at a real-time factor of 0.40 (0.61 on a
+  busier run), the first clip's figure including the session load; 0.9 s
+  of alignment; 0 unsure words and no gaps; a 1.12 GB peak for the whole
+  run, aligner included, and 1.27 GB after two more runs in the same
+  process. Synthesis and alignment therefore share one pass per scene. On
+  ORT 1.28 most of the time is one op, `ConvInteger`; ORT 1.31 runs the
+  same model about four times faster.
+
+## Kokoro reads text through the G2P
+
+`app/src-tauri/src/studio/voice/g2p/` turns a section's text into
+Kokoro's phonemes and one record per word, `{ word, phonemes, source,
+guessed }`. The text is already spoken form (lint forbids digits and
+symbols), so numbers and currency are not read. It is a port of misaki
+0.9.4's dictionary path without spaCy or espeak, and matches its oracle's
+golden files byte for byte (`tests/golden/`, with a dictionary trimmed to
+the entries they touch). Each word, or each part of a merged word
+(`PyTorch`, `scikit-learn`, of which only the unknown part is guessed), is
+read by the first of:
+
+1. **The lexicon** (`source: lexicon`), below.
+2. **misaki's dictionary** (`dict`): `us_gold.json`, then `us_silver.json`,
+   grown as misaki's `grow_dictionary` does, with its special cases (a, an,
+   the, to, I, by, in, used, dotted acronyms), case handling (an unknown
+   all-caps word is spelt out), possessives, the `-s`, `-ed` and `-ing`
+   stems, and three rules misaki lacks: `-ied` read from `-y`
+   ("multiplied"), an `-izer` agent noun read as its `-ize` verb + `əɹ`
+   ("optimizers"), and the British `-ise` family read as `-ize`
+   ("renormalise", "factorisation", "optimisers").
+3. **The heteronym table** (`rule`, `heteronym.rs`): read, lead, live,
+   content, used, that and close, and the generic verb, noun or adjective
+   reading, picked from the neighbouring words without a tagger; `lead`
+   also has the metal reading the dictionary lacks.
+4. **The guesser** (`guess`, `guess/`): a 3 MB BART (one encoder and one
+   decoder layer) run as two ONNX sessions, greedy, at most 63 steps.
+
+Stress is applied as misaki does, and `ɾ` and `ʔ` become `T` and `t`. A
+word with a letter in it and no phonemes is an error naming it: a dropped
+word would wreck its neighbours' timing.
+
+**The lexicon** is a `lexicon.json` object from a word to its reading, in
+two layers, the subject's over the library's:
+`<app data>/studio/library/lexicon.json` and
+`<app data>/studio/subjects/<CODE>/lexicon.json` for the video's
+`subject`. A value in slashes is raw phonemes in Kokoro's alphabet
+(`"Cauchy": "/kˈOʃi/"`), any of the 115 symbols but the pad `$`. Any other
+value is a respelling in dictionary words (`"softmax": "SOFT-max"`): each
+`-` or space part is read through the dictionary, an all-caps part longer
+than one letter takes primary stress and the rest secondary. Keys starting
+`_` are comments. A word finds its entry by exact key, then its lower
+case, then (ending `'s`) its stem's entry plus `-s`, then any key equal in
+lower case; `’` reads as `'` in keys and in the words looked up. Every
+entry is checked on load, and a bad phoneme or a respelling part the
+dictionary lacks fails naming the file and the key.
+
+**Guessed words are notes.** A guess never stops narration, but every
+guessed word is printed by `narrate` and `lint` as a `check pronunciation`
+note with its scene and script.md line. The loop is: listen to the word
+in the clip, try a reading with `oculus studio g2p "<text>"` (which reads
+the video's lexicon with `--video`, or in the video's folder), add the
+entry to the subject's or the library's `lexicon.json`, and narrate again;
+only the scenes whose phonemes changed are made again.
+
+`oculus studio g2p "<text>"` prints each word, its phonemes and its
+source, marking guesses, then the phoneme string; `--json` gives `{ text,
+phonemes, subject, lexicon: [<files>], words: [{ word, phonemes, source,
+guessed }] }`. It needs only the `g2p-en-us` pack.
 
 ## Settings -> Voice sets the server and holds the aligner model
 
-Settings -> Voice (Library group) has two sections. Nothing on it
+Settings -> Voice (Library group) has two sections. It does not show the
+engine or Kokoro's packs yet: every save sends back the row's stored
+`engine`, so a row set to Kokoro stays so. Nothing on it
 synthesises, so it has no sample button: Settings never makes a billed
 call. Its one network call is listing models, which is free.
 
@@ -1017,8 +1171,22 @@ For a narrated video lint also reports, each naming the scene id:
 - each manifest gap: ``the audio has unscripted speech after `word` (heard
   "…")``, or ``before the first word``.
 
-All of these are errors: lint has no warning level, so any of them makes
-`oculus studio lint` exit 1.
+When the voice `narrate` would resolve (without flags) is Kokoro, lint
+also reads every section as `narrate` will (`studio::voice::lint`; the
+server engine has nothing to check):
+
+- the `g2p-en-us` pack missing, as one problem (kind `lint`) saying how to
+  download it;
+- a lexicon entry that is not valid (kind `lint`, naming the file and the
+  key);
+- a word with no phonemes, a `$`, or a sentence too long for Kokoro with
+  no comma to cut at (kind `script`, at the section's line).
+
+All of these are problems: any of them makes `oculus studio lint` exit 1.
+A voice that does not resolve is left to `narrate` to report. Lint's one
+other level is the note: each word Kokoro's guesser reads, as ``note: scene
+N `id` script.md:<line>: check pronunciation: ...``. Notes never change
+the exit code.
 
 ## Rendering a video
 
@@ -1142,10 +1310,17 @@ with the `Narration` error before any frame renders.
   missing narration stops them with the `Narration` error, while `lint`
   lists it with the rest.
 - `oculus studio narrate <DIR>` makes the narration (`--scene ID`,
-  `--force`, and `--server`, `--model`, `--voice`, `--speed` over the
-  video's and Settings' voice); `oculus studio tts` makes one clip; `oculus
-  studio aligner` manages the aligner model. See "Narration is made by
-  `oculus studio narrate`".
+  `--force`, and `--engine`, `--voice`, `--speed`, `--server`, `--model`
+  over the video's and Settings' voice); `oculus studio tts` makes one
+  clip; `oculus studio g2p` shows how Kokoro reads text; `oculus studio
+  aligner` manages the aligner model. See "Narration is made by `oculus
+  studio narrate`".
+- `oculus studio voices` lists each Kokoro pack's status and size and each
+  voice, downloaded or not, marking the one Settings -> Voice names;
+  `voices download` fetches both packs with the aligner's progress lines,
+  `voices delete` removes them. `--json` gives `{ dir, packs: [{ id,
+  status, bytes }], voices: [{ id, downloaded, chosen }] }`, `{ status,
+  dir, seconds }` and `{ deleted_bytes }`.
 - `oculus studio render <DIR>` writes an mp4 (`--draft`, the default, or
   `--final`; `-o`, `--threads` for the frame renderers, not the encoder). It prints the plan, then per scene
   `rendered` with its frames, seconds and frames a second, or `cached`,
@@ -1153,10 +1328,13 @@ with the `Narration` error before any frame renders.
   quality, width, height, fps, frames, duration, audio, threads, segments:
   [{scene, id, outcome, frames, ms, fps}], pruned, ms}}`. See "Rendering a
   video".
-- `oculus studio lint <DIR>` prints each problem and exits 1 if there is
-  any. With `--json` it prints the issues as an array of `{scene, id,
-  component, example, kind, message, loc}`; `scene` and `component` are
-  null for a script section no scene matches.
+- `oculus studio lint <DIR>` prints each problem, then each note, and
+  exits 1 if there is any problem. With `--json` it prints one array: each
+  problem as `{level: "issue", scene, id, component, example, kind,
+  message, loc}` (`scene` and `component` null for a script section no
+  scene matches, or for a problem of the whole video), then each note as
+  `{level: "note", scene, id, line, kind: "guessed", message, word,
+  phonemes, guessed}`.
 
 - `oculus studio gallery <DIR> <Component>` renders each example of a
   component as `<DIR>/out/gallery/<Component>-<example>.png` (`--out`),
@@ -1235,7 +1413,14 @@ the `/v1/models` listing (parsing, 404, non-JSON, unreachable), the Settings
 row's validation (`studio::commands`),
 the voice resolution, the cache key and `narrate` with a stubbed speaker
 and aligner (caching, one-paragraph edits, per-scene writes, pruning,
-failures).
+failures). `studio::voice::g2p` matches every golden row (1030) on the
+trimmed dictionary; `studio::tts::kokoro` covers chunking, the vocabulary
+and pad refusals, silence, the WAV and the pack; `studio::voice::lint`
+covers the missing pack, a bad lexicon entry and the notes' lines. Ignored
+tests run the real models: the full dictionary (`STUDIO_G2P_DATA`), the
+guesser's goldens and a real lint (`STUDIO_G2P_GUESSER`), and Kokoro's
+end-to-end narrate (`STUDIO_KOKORO`, `STUDIO_G2P_GUESSER`,
+`STUDIO_ALIGN_MODEL`), which prints its real-time factor and peak memory.
 `cargo test --lib studio::render` covers the render plan, segment keys and
 tree hashes, the audio placement, the reorder buffer and pruning, and,
 through the real ffmpeg (skipped without one), the join and cache check

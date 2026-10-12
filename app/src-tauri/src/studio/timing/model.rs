@@ -3,8 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
-
+pub use crate::runtime::onnx::Status;
 use crate::runtime::onnx::{self, Pack, PackFile};
 use crate::studio::NarrationError;
 
@@ -32,23 +31,9 @@ pub fn dir() -> PathBuf {
         .join("align")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Status {
-    Missing,
-    Downloading,
-    Present,
-}
-
 /// Whether the model is in `dir`. Local only.
 pub fn status(dir: &Path) -> Status {
-    if onnx::is_present(dir, &PACK) {
-        Status::Present
-    } else if onnx::downloading(PACK.id) {
-        Status::Downloading
-    } else {
-        Status::Missing
-    }
+    onnx::status(dir, &PACK)
 }
 
 /// The model file, when it is downloaded.

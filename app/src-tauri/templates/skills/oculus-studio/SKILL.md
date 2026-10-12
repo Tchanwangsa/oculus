@@ -39,6 +39,7 @@ From your working directory (`agents/`):
   .cache/                     render segments; never edit
 ../studio/library/            the global library: read, never edit
 ../studio/subjects/<CODE>/    a subject's library: read, never edit
+../studio/subjects/<CODE>/lexicon.json   the one library file you edit: pronunciations (step 6)
 ```
 
 Every `oculus studio` command takes the video's **slug** where its usage says
@@ -144,8 +145,8 @@ the voice would say wrong), and lint again until only `narration` is left.
 oculus studio narrate gradient-descent
 ```
 
-It reads Settings → Voice, so pass no `--server`, `--model` or `--voice`
-unless the student asks for another voice. Per scene it prints the clip's
+It reads Settings → Voice, so pass no `--engine`, `--server`, `--model` or
+`--voice` unless the student asks for another voice. Per scene it prints the clip's
 length and word count, and warns about words the aligner was unsure of and
 speech the script lacks. Run it again after editing `script.md`: only
 changed scenes are made again.
@@ -156,6 +157,32 @@ Voice (the server, model and voice, or the word-timing model's Download
 button). Do not run `oculus studio aligner download` yourself: it is 378 MB
 and the student's call. If the server does not answer, say so; do not retry
 in a loop.
+
+If it says Kokoro's voice pack or G2P pack is not downloaded, **stop and
+tell the student** the same way: `oculus studio voices download` fetches
+both (103 MB), and that is their call too.
+
+**Check the guessed words.** With the Kokoro engine, narrate ends with a
+`note: … check pronunciation: "Nesterov" is guessed as /nˈɛstəɹɔv/` line
+for each word its dictionary lacks (lint prints the same notes). A note
+does not fail anything, but the guess may be wrong. For each one:
+
+1. Run `oculus studio g2p "Nesterov" --video <slug>` to see the reading,
+   and listen to that scene's clip if you can play audio; otherwise judge
+   from the phonemes and tell the student which words were guessed.
+2. If it is wrong, add an entry to the subject's
+   `../studio/subjects/<CODE>/lexicon.json` (a JSON object; create it
+   when missing). Prefer a respelling in dictionary words, `"Nesterov":
+   "NESS-ter-off"`: each `-` or space part is a dictionary word, and an
+   all-caps part takes the stress. Use raw phonemes in slashes,
+   `"Nesterov": "/nɛstˈɛɹɔf/"`, only when no respelling works.
+   `reference.md` ("Pronunciation") has the rules.
+3. Run `oculus studio g2p` again until the word reads `lexicon` with the
+   reading you want, then `narrate` again: only scenes whose reading
+   changed are made again.
+
+A lint problem naming `lexicon.json` is an entry you wrote that does not
+parse: fix it before narrating.
 
 **Step 7: Lint again, then look.** Lint now renders the narrated scenes and
 checks their word cues. Fix and lint until it prints `[]`. Then run a

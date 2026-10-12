@@ -81,6 +81,9 @@ impl Guess for TableGuess {
 /// A golden file and the lexicon layers the oracle ran it with: the 7
 /// bake-off inputs with the library's, the same with none (`nolex/`), and
 /// the special cases with the subject's over the library's.
+/// Rows across [`FILES`]; every one must match whole.
+pub const ROWS: usize = 1030;
+
 pub const FILES: [(&str, &[&str]); 15] = [
     ("script163.jsonl", LIBRARY),
     ("maths16.jsonl", LIBRARY),

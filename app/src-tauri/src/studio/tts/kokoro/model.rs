@@ -4,7 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::runtime::onnx::{Pack, PackFile};
+use crate::runtime::onnx::{self, Pack, PackFile};
+use crate::studio::voice::g2p::guess;
 
 /// Names the model in a narration cache key, so changing it re-narrates.
 pub const MODEL_ID: &str = "kokoro-82m-v1.0-onnx-int8@1939ad2a";
@@ -58,4 +59,64 @@ pub fn voice_file(dir: &Path, voice: &str) -> Option<PathBuf> {
     std::fs::metadata(&path)
         .is_ok_and(|m| m.is_file() && m.len() == VOICE_BYTES)
         .then_some(path)
+}
+
+/// The packs Kokoro narration needs, both kept in [`dir`]: the model and
+/// voices, and the G2P.
+pub fn packs() -> [&'static Pack; 2] {
+    [&PACK, &guess::PACK]
+}
+
+/// Every voice in `dir`: the pack's, downloaded or not, then any other
+/// `<id>.bin` at a voice file's size, by id. `true` when it is on disk.
+pub fn voices(dir: &Path) -> Vec<(String, bool)> {
+    let mut out: Vec<(String, bool)> = VOICES
+        .iter()
+        .map(|v| (v.to_string(), voice_file(dir, v).is_some()))
+        .collect();
+    let mut extra: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let id = name.strip_suffix(".bin")?;
+            (!VOICES.contains(&id) && voice_file(dir, id).is_some()).then(|| id.to_owned())
+        })
+        .collect();
+    extra.sort();
+    out.extend(extra.into_iter().map(|id| (id, true)));
+    out
+}
+
+/// Download both packs into `dir`, the files already there skipped,
+/// reporting `(received, total)` bytes over both. Ends in
+/// `Err(CANCELLED)` when cancelled or when `stop` returns true.
+pub fn download(
+    dir: &Path,
+    progress: impl Fn(u64, u64),
+    stop: impl Fn() -> bool,
+) -> Result<(), String> {
+    let total: u64 = packs().iter().map(|p| p.bytes()).sum();
+    let mut before = 0;
+    for pack in packs() {
+        onnx::download(
+            dir,
+            pack,
+            |received, _| progress(before + received, total),
+            &stop,
+        )?;
+        before += pack.bytes();
+    }
+    Ok(())
+}
+
+/// Delete both packs, any partial download and nothing else (another
+/// voice's file stays); returns the bytes freed.
+pub fn delete(dir: &Path) -> Result<u64, String> {
+    let mut freed = 0;
+    for pack in packs() {
+        freed += onnx::delete(dir, pack)?;
+    }
+    Ok(freed)
 }

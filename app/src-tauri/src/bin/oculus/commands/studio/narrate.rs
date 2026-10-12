@@ -8,7 +8,8 @@ use app_lib::studio::narrate::{
     self, ModelAligner, Outcome, Progress, SceneReport, ServerSpeaker, Speaker,
 };
 use app_lib::studio::tts::kokoro::{KokoroSpeaker, LexiconFiles, Packs};
-use app_lib::studio::voice::{self, Voice, VoiceOverrides};
+use app_lib::studio::voice::lint::{notes, Note};
+use app_lib::studio::voice::{self, Engine, Voice, VoiceOverrides};
 use studio_core::{Project, LOW_CONFIDENCE};
 
 impl Ctx {
@@ -36,7 +37,7 @@ impl Ctx {
         let report = narrate::narrate(
             &args.dir,
             &library,
-            speaker.as_ref(),
+            speaker.speaker(),
             &ModelAligner,
             &options,
             &mut |p| {
@@ -47,17 +48,22 @@ impl Ctx {
         )
         .map_err(|e| e.to_string())?;
         let ms = started.elapsed().as_millis();
+        let notes = speaker.notes(&project);
 
         if self.json {
             return self.emit(&serde_json::json!({
                 "dir": args.dir.to_string_lossy(),
                 "voice": voice_json(&voice),
                 "scenes": report.scenes,
+                "notes": notes,
                 "dropped": report.dropped,
                 "deleted": report.deleted,
                 "low_confidence_below": LOW_CONFIDENCE,
                 "ms": ms,
             }));
+        }
+        for note in &notes {
+            print_note(note);
         }
         for id in &report.dropped {
             println!(
@@ -101,9 +107,9 @@ impl Ctx {
             &voice::settings(),
         )?;
         let speaker = speaker(&voice, None);
-        speaker.ready()?;
+        speaker.speaker().ready()?;
         let started = std::time::Instant::now();
-        let speech = speaker.speak(&args.text)?;
+        let speech = speaker.speaker().speak(&args.text)?;
         let ms = started.elapsed().as_millis();
         std::fs::write(&args.out, &speech.wav)
             .map_err(|e| format!("cannot write {}: {e}", args.out.display()))?;
@@ -136,15 +142,53 @@ impl Ctx {
 
 /// The speaker `voice`'s engine makes clips with; Kokoro reads the
 /// lexicon of `subject` over the library's.
-fn speaker<'a>(voice: &'a Voice, subject: Option<&str>) -> Box<dyn Speaker + 'a> {
+fn speaker<'a>(voice: &'a Voice, subject: Option<&str>) -> Speakers<'a> {
     match voice {
-        Voice::Server(v) => Box::new(ServerSpeaker(v)),
-        Voice::Kokoro(v) => Box::new(KokoroSpeaker::new(
+        Voice::Server(v) => Speakers::Server(ServerSpeaker(v)),
+        Voice::Kokoro(v) => Speakers::Kokoro(KokoroSpeaker::new(
             v.clone(),
             Packs::app(),
             LexiconFiles::app(subject),
         )),
     }
+}
+
+enum Speakers<'a> {
+    Server(ServerSpeaker<'a>),
+    Kokoro(KokoroSpeaker),
+}
+
+impl Speakers<'_> {
+    fn speaker(&self) -> &dyn Speaker {
+        match self {
+            Speakers::Server(s) => s,
+            Speakers::Kokoro(s) => s,
+        }
+    }
+
+    /// A note per word Kokoro guessed in the scenes it read.
+    fn notes(&self, project: &Project) -> Vec<Note> {
+        match self {
+            Speakers::Server(_) => Vec::new(),
+            Speakers::Kokoro(k) => notes(project, |text| k.phonemized(text)),
+        }
+    }
+}
+
+/// `note: scene 2 `momentum` script.md:9: check pronunciation: ...`
+pub(super) fn print_note(note: &Note) {
+    println!(
+        "{} {} {}",
+        paint("note:", BOLD),
+        paint(
+            &format!(
+                "scene {} `{}` script.md:{}:",
+                note.scene, note.id, note.line
+            ),
+            BOLD
+        ),
+        note.message()
+    );
 }
 
 /// `voice af_heart · kokoro · speed 1`, or the server's model and URL.
@@ -160,7 +204,10 @@ fn describe(voice: &Voice) -> String {
 
 fn flags(args: &StudioVoiceArgs) -> VoiceOverrides {
     VoiceOverrides {
-        engine: None,
+        engine: args.engine.map(|e| match e {
+            StudioEngineArg::Kokoro => Engine::Kokoro,
+            StudioEngineArg::Server => Engine::Server,
+        }),
         base_url: args.server.clone(),
         model: args.model.clone(),
         voice: args.voice.clone(),

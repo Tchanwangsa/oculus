@@ -9,8 +9,8 @@ Plan: `data/plans/studio-onnx-voice.md`, stage 1.
 | file | what |
 | --- | --- |
 | `<input>.jsonl` (7) | the bake-off inputs, **library lexicon only** (`lexicon.library.json`) |
-| `nolex/<input>.jsonl` (7) | same inputs, **empty lexicon**: exercises the guesser and the `-ied`/`-ise` rules on real prose |
-| `special.jsonl` | 104 units, one per rule or edge case (`covers` names it), **library + subject lexicon** (subject over library) |
+| `nolex/<input>.jsonl` (7) | same inputs, **empty lexicon**: exercises the guesser and the `-ied`/`-ise`/`-izer` rules on real prose |
+| `special.jsonl` | 108 units, one per rule or edge case (`covers` names it), **library + subject lexicon** (subject over library) |
 | `lexicon.library.json`, `lexicon.subject.json` | the two lexicon layers the runs used |
 | `lexicon-errors.jsonl` | entries the port must reject: `bad-phoneme` (char not in Kokoro's vocab), `unknown-part` (respelling part not in the dictionary) |
 | `guesser.jsonl` | the guesser alone: the 305 verify words (`verify`), every word or sub-token A2C guessed (`guessed`), with the encoder `input_ids` and the greedy phonemes |
@@ -28,10 +28,11 @@ Row: `{id, text, phonemes, words: [{word, phonemes, source, guessed?}], covers?}
   with a `guess` word, where only the guessed words may differ (see the ORT note).
 - A2C equals A2 on all 461 bake-off units (the lexicon covers every unknown word), so
   the library-only files also pin the dictionary path, stems, heteronym table and the
-  two extra rules (`multiplied`, `renormalise`, `factorisation`, `authorisation`).
+  three extra rules (`multiplied`, `renormalise`, `factorisation`, `authorisation`;
+  `-izer(s)` as the `-ize` verb + əɹ in `optimizers` and `special.jsonl`'s `rule-izer` rows).
 - Lookup order: lexicon (any window of a word, longest first, so `Cauchy-Schwarz` finds
   `Cauchy`; `'s` by misaki's `_s`; exact key, then lower case) -> dictionary + stems +
-  the two extra rules -> guesser, **one sub-token at a time**.
+  the three extra rules -> guesser, **one sub-token at a time**.
 - Whitespace is kept as written (runs of spaces, newlines, trailing), except leading
   whitespace, which misaki's `preprocess` strips (`x098_whitespace`).
 - Nothing is dropped. A word with letters and no phonemes is an error.

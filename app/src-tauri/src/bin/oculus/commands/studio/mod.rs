@@ -6,13 +6,18 @@
 
 mod aligner;
 mod components;
+mod g2p;
 mod gallery;
 mod narrate;
 mod render;
 mod themes;
 mod videos;
+mod voices;
 
 use crate::*;
+use app_lib::studio::tts::kokoro::{self, LexiconFiles};
+use app_lib::studio::voice::lint::{Note, VoiceLint};
+use app_lib::studio::voice::{self, VoiceOverrides};
 use app_lib::studio::{libraries, videos as video_dirs};
 use std::time::Instant;
 use studio_core::{
@@ -37,6 +42,8 @@ impl Ctx {
             StudioAction::Render(a) => self.studio_render(&a),
             StudioAction::Narrate(a) => self.studio_narrate(&a),
             StudioAction::Tts(a) => self.studio_tts(&a),
+            StudioAction::G2p(a) => self.studio_g2p(&a),
+            StudioAction::Voices { action } => self.studio_voices(&action),
             StudioAction::Aligner { action } => self.studio_aligner(&action),
         }
     }
@@ -179,12 +186,19 @@ impl Ctx {
 
     pub(crate) fn studio_lint(&self, args: &StudioLintArgs) -> Result<(), String> {
         let project = libraries::open(&args.dir, None, None).map_err(studio_error)?;
-        let report = project.lint().map_err(studio_error)?;
+        let mut report = project.lint().map_err(studio_error)?;
+        let spoken = voice_lint(&project);
+        report.issues.extend(spoken.issues);
         let count = report.issues.len();
 
         if self.json {
-            let issues: Vec<serde_json::Value> = report.issues.iter().map(issue_json).collect();
-            self.emit(&issues)?;
+            let entries: Vec<serde_json::Value> = report
+                .issues
+                .iter()
+                .map(issue_json)
+                .chain(spoken.notes.iter().map(note_json))
+                .collect();
+            self.emit(&entries)?;
         } else if report.is_clean() {
             println!(
                 "{} {} ({} scenes, {:.3} s)",
@@ -198,6 +212,11 @@ impl Ctx {
                 print_issue(issue);
             }
         }
+        if !self.json {
+            for note in &spoken.notes {
+                narrate::print_note(note);
+            }
+        }
         if count == 0 {
             return Ok(());
         }
@@ -207,6 +226,41 @@ impl Ctx {
             args.dir.display()
         ))
     }
+}
+
+/// The checks that need the narration engine (`voice::lint`), with the
+/// voice `narrate` would resolve without flags. A voice that does not
+/// resolve is `narrate`'s to report.
+fn voice_lint(project: &studio_core::Project) -> VoiceLint {
+    let block = project
+        .video
+        .voice
+        .as_ref()
+        .map(VoiceOverrides::from)
+        .unwrap_or_default();
+    match voice::resolve(&VoiceOverrides::default(), &block, &voice::settings()) {
+        Ok(v) => voice::lint::lint(
+            project,
+            &v,
+            &kokoro::dir(),
+            &LexiconFiles::app(project.video.subject.as_deref()),
+        ),
+        Err(_) => VoiceLint::default(),
+    }
+}
+
+fn note_json(note: &Note) -> serde_json::Value {
+    serde_json::json!({
+        "level": "note",
+        "scene": note.scene,
+        "id": note.id,
+        "line": note.line,
+        "kind": "guessed",
+        "message": note.message(),
+        "word": note.word,
+        "phonemes": note.phonemes,
+        "guessed": note.guessed,
+    })
 }
 
 /// One issue: where it is, then what is wrong. A script issue with no
@@ -234,6 +288,7 @@ fn print_issue(issue: &LintIssue) {
 fn issue_json(issue: &LintIssue) -> serde_json::Value {
     let e = &issue.error;
     serde_json::json!({
+        "level": "issue",
         "scene": issue.scene,
         "id": issue.id,
         "component": issue.component,
