@@ -22,6 +22,7 @@ export function PackDownloadRow<S extends { status: AlignerState; bytes: number 
   name,
   detail,
   pack,
+  downloadLabel = "Download",
   missing,
   deleteDescription,
 }: {
@@ -29,6 +30,8 @@ export function PackDownloadRow<S extends { status: AlignerState; bytes: number 
   /** The line under the name; a space until the status is read. */
   detail: ReactNode;
   pack: PackDownload<S>;
+  /** The Download button's text. */
+  downloadLabel?: string;
   /** Shown while it is not downloaded. */
   missing: string;
   /** The confirmation's text after "Frees N MB." */
@@ -75,7 +78,7 @@ export function PackDownloadRow<S extends { status: AlignerState; bytes: number 
             </Button>
           ) : (
             <Button variant="outline" size="xs" disabled={!status} onClick={start}>
-              Download
+              {downloadLabel}
             </Button>
           )}
         </div>

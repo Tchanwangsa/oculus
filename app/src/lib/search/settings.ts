@@ -205,12 +205,12 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   page("narration", ["studio", "voice", "tts", "text to speech", "speech"]),
   ...rows("narration", "Narration voice", [
     ["Engine", ["narration engine", "kokoro", "built in", "tts server"]],
-    ["Kokoro voice packs", ["kokoro", "download", "delete", "offline", "g2p", "pronunciation"]],
+    ["Model and pronunciation pack", ["kokoro", "download", "delete", "offline", "g2p", "pronunciation", "model"]],
+    ["Voices", ["kokoro", "download all", "grade", "accent", "sample", "preview", "listen", "play", "hear"]],
     ["Server URL", ["address", "base url", "tts server", "openai compatible"]],
     ["Model", ["list models", "tts model"]],
-    ["Voice", ["speaker", "af_heart", "am_michael"]],
+    ["Voice", ["speaker", "af_heart", "am_michael", "downloaded"]],
     ["Speed", ["rate", "pace"]],
-    ["Sample", ["preview", "listen", "play", "hear"]],
   ]),
 
   page("pronunciation", ["studio", "lexicon", "review", "suggestion", "guessed words", "pronunciations"]),
