@@ -3,11 +3,14 @@
 //! edit takes, which snapshots the old text into `.history` first.
 //!
 //! A library folder holds `components/<Name>.tsx`, `themes/<name>.json`,
-//! `.history/` (snapshots named `<stem>.<unix-ms>.<ext>`, never pruned) and
-//! `.seeded` (the starter files already offered, one path a line).
+//! `library.json` (its settings: `settings.rs`), `.history/` (snapshots
+//! named `<stem>.<unix-ms>.<ext>`, never pruned) and `.seeded` (the starter
+//! files already offered, one path a line).
 
+mod settings;
 mod starter;
 
+pub use settings::{LibrarySettings, SETTINGS_FILE};
 pub use starter::{STARTER_COMPONENTS, STARTER_THEMES, Starter};
 
 use crate::error::{Result, StudioError};
@@ -82,13 +85,7 @@ const SEEDED: &str = ".seeded";
 /// `root/.history`, so the previous text is always recoverable. The new
 /// text lands through a temporary file and a rename.
 pub fn write(root: &Path, rel: &str, text: &str) -> Result<()> {
-    let valid = matches!(rel.split_once('/'), Some(("components" | "themes", file))
-        if !file.is_empty() && !file.contains('/') && !file.starts_with('.'));
-    if !valid {
-        return Err(StudioError::Render(format!(
-            "library path `{rel}` must be components/<Name>.tsx or themes/<name>.json"
-        )));
-    }
+    check_rel(rel)?;
     let path = root.join(rel);
     let parent = path.parent().unwrap_or(root);
     std::fs::create_dir_all(parent).map_err(|e| StudioError::io(parent, e))?;
@@ -98,6 +95,36 @@ pub fn write(root: &Path, rel: &str, text: &str) -> Result<()> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, text).map_err(|e| StudioError::io(&tmp, e))?;
     std::fs::rename(&tmp, &path).map_err(|e| StudioError::io(&path, e))
+}
+
+/// Removes `root/rel` after copying it to `root/.history`, so a removed
+/// file can be written back from its snapshot. A file that is not there is
+/// an error naming it.
+pub fn remove(root: &Path, rel: &str) -> Result<()> {
+    check_rel(rel)?;
+    let path = root.join(rel);
+    if !path.try_exists().map_err(|e| StudioError::io(&path, e))? {
+        return Err(StudioError::Render(format!(
+            "there is no {} to remove",
+            path.display()
+        )));
+    }
+    snapshot(root, rel, &path)?;
+    std::fs::remove_file(&path).map_err(|e| StudioError::io(&path, e))
+}
+
+/// A library file's path: `components/<file>` or `themes/<file>`, one level
+/// deep and not hidden.
+fn check_rel(rel: &str) -> Result<()> {
+    let valid = matches!(rel.split_once('/'), Some(("components" | "themes", file))
+        if !file.is_empty() && !file.contains('/') && !file.starts_with('.'));
+    if valid {
+        Ok(())
+    } else {
+        Err(StudioError::Render(format!(
+            "library path `{rel}` must be components/<Name>.tsx or themes/<name>.json"
+        )))
+    }
 }
 
 /// Copies `path` to `root/.history/<stem>.<unix-ms>.<ext>`, moving the

@@ -16,3 +16,10 @@ export const COMPONENTS_HREF = "/studio/components";
 export function componentHref(name: string): string {
   return `${COMPONENTS_HREF}/${encodeURIComponent(name)}`;
 }
+
+export const THEMES_HREF = "/studio/themes";
+
+/** The Themes page with one theme selected. */
+export function themeHref(name: string): string {
+  return `${THEMES_HREF}/${encodeURIComponent(name)}`;
+}

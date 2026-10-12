@@ -51,7 +51,7 @@ video's slug as `DIR`; `oculus studio <command> --help` has the full flags.
 | --- | --- |
 | `size` | `{ width, height }` in px. `new` writes 1920x1080 (1080x1920 with `--portrait`). |
 | `fps` | 24, 25, 30, 50 or 60. Default 30. |
-| `theme` | A theme name (`default`, `warm`, or one in a library), or a `.json` path in the folder. A subject library's `themes/default.json` replaces `default` for that subject's videos. |
+| `theme` | A theme name (`default`, `warm`, or one in a library), or a `.json` path in the folder. `new` writes the subject's default theme (see "Libraries"). |
 | `subject` | The subject code. Its library is read before the global one. |
 | `scenes` | The scenes in order (below). At least one. |
 | `motion` | Optional: `transition`, `magicMove`, `morphColor`, `motionBlur` for the whole video (see "Transitions"). |
@@ -1016,6 +1016,15 @@ oculus studio themes promote <slug> themes/chalk.json --to global
 
 Only a file in the video's own folder can be promoted. `--to subject` needs
 a `subject` in `video.json`. Promote only what the student wants to keep.
+
+**A library's default theme** is the one library file you write directly:
+`library.json` at the library's root (`../studio/library/library.json`,
+`../studio/subjects/<CODE>/library.json`), exactly
+`{"defaultTheme": "<name>"}`, any other key refused. `oculus studio new`
+gives a video its subject's default, else the global one, else `default`,
+and writes that name into `video.json`. Set it only when the student asks
+for a default look; the name must be a theme that library reaches (its own
+`themes/`, the global one, or `default`).
 
 **The starter components** (global library) are drawing primitives, not
 scenes. A component cannot import another, so each file holds its primitive

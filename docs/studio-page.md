@@ -1,8 +1,8 @@
 # The Studio page
 
 The rail's Studio section: describe a video, watch an agent make it in a
-thread beside its player, render the final, browse every video, and try the
-components a video is built from. The
+thread beside its player, render the final, browse every video, try the
+components a video is built from, and edit the themes it is drawn in. The
 renderer, the commands and the thread link are [studio.md](./studio.md); this
 page is the frontend over them.
 
@@ -11,28 +11,32 @@ page is the frontend over them.
 | Piece | Location |
 | --- | --- |
 | Routes, the nav column's width and fold, the page header row | `app/src/routes.tsx`, `app/src/layouts/StudioLayout.tsx`, `app/src/components/studio/StudioHeader.tsx` |
-| The nav column: New video, Videos, Components, the Recent list and its search | `app/src/components/studio/nav/` |
-| Pages | `app/src/pages/studio/` (`NewVideoPage`, `VideosPage`, `VideoPage`, `VideoThreadPage`, `ComponentsPage`) |
+| The nav column: New video, Videos, Components, Themes, the Recent list and its search | `app/src/components/studio/nav/` |
+| Pages | `app/src/pages/studio/` (`NewVideoPage`, `VideosPage`, `VideoPage`, `VideoThreadPage`, `ComponentsPage`, `ThemesPage`) |
 | New video: the box and its start-up | `app/src/components/studio/new/NewVideo.tsx`, `app/src/hooks/studio/useNewVideo.ts`, `app/src/lib/studio/title.ts` |
-| The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/lib/studio/themes.ts` |
+| The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/hooks/studio/useThemeDefaults.ts`, `app/src/lib/studio/themes.ts` |
 | The thread column | `app/src/components/studio/thread/ThreadColumn.tsx` |
 | Player, render bar, scene strip, script, facts, the captions switch, the Export menu | `app/src/components/studio/video/` (`ExportMenu.tsx`, `CaptionsSwitch.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
 | The Videos grid, its cards and subject pills | `app/src/components/studio/videos/`, `app/src/components/ui/layout/MediaGrid.tsx` |
 | Stills (`studio_frame`, `studio_thumbnail`) as object URLs | `app/src/lib/studio/stills.ts`, `app/src/hooks/studio/useStill.ts` |
 | Render state, the video list, the event bridge | `app/src/stores/studio/` (`renderStore.ts`, `videosStore.ts`), `app/src/hooks/backend/useStudioEvents.ts` |
 | The Components playground: list, stage, timeline, inspector, source, change box | `app/src/pages/studio/ComponentsPage.tsx`, `app/src/components/studio/components/` (`inspector/` for the props form) |
-| The playground's hooks: component list, source, stage frames, playhead, change flow | `app/src/hooks/studio/` (`useComponents`, `useComponentSource`, `useStageFrame`, `useStageWidth`, `usePlayhead`, `useComponentChange`, `useDefaultModel`), `app/src/lib/studio/props.ts`, `app/src/lib/studio/changeRequest.ts` |
+| The playground's hooks: component list, source, stage frames, playhead, change flow | `app/src/hooks/studio/` (`useComponents`, `useComponentSource`, `useStageFrame`, `useStageWidth`, `usePlayhead`, `useLibraryChange`, `useDefaultModel`), `app/src/lib/studio/props.ts`, `app/src/lib/studio/changeRequest.ts` |
+| The library choice both pages share, where an item comes from, own versions | `app/src/hooks/studio/useStudioLibrary.ts`, `app/src/components/studio/LevelMark.tsx`, `app/src/components/studio/components/OwnVersionActions.tsx` |
+| The Themes page: list, sample scenes, header actions, token inspector, copies | `app/src/pages/studio/ThemesPage.tsx`, `app/src/components/studio/themes/` (`inspector/` for the token form), `app/src/hooks/studio/useThemeSource.ts`, `app/src/lib/studio/themeDraft.ts` |
+| The colour control | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
 | Paths | `app/src/lib/studio/routes.ts` |
 
-## Six routes under one nav column
+## Eight routes under one nav column
 
 `/studio` is New video, `/studio/videos` the grid, `/studio/videos/:slug` a
 video's detail, `/studio/videos/:slug/thread` the conversation that made it,
-and `/studio/components` and `/studio/components/:name` the playground. `StudioLayout` owns the nav column's panel (`useResizablePanel`, ⌘⌥B and
+`/studio/components` and `/studio/components/:name` the playground, and
+`/studio/themes` and `/studio/themes/:name` the Themes page. `StudioLayout` owns the nav column's panel (`useResizablePanel`, ⌘⌥B and
 each page header's toggle, as Chat's column) and reads the video list once;
 a page puts its own `StudioHeader` row over its body. A video's title rides
 in `?n=` (`videoHref`) because `tabInfo` titles a tab from its path alone,
-and falls back to the slug. There is no Reels or Themes page.
+and falls back to the slug. There is no Reels page.
 
 The Recent list is the newest eight videos, or every title the column's
 search matches. A row opens the thread when the video has one, else the
@@ -63,12 +67,17 @@ back (`Composer`'s `restore`). One after step 1 leaves the scaffold behind, a
 video with no thread in the grid.
 
 **The style chip** holds the theme, the format (Video or Reels, which is
-`portrait`) and the length target (30 s, 60 s, 2 min, 5 min). The theme is
-null until picked by hand, which sends none, so the backend gives the video
-its subject's default theme; picking one holds across a subject change. The
-format and length are remembered (`oculus-studio-style`). Themes come from
-`studio_themes` for the chosen subject; if the command rejects, the list is
-only "Default" and the popover prints the reason. The voice is shown read-only
+`portrait`) and the length target (30 s, 60 s, 2 min, 5 min). Until a theme
+is picked by hand the chip shows the subject's default
+(`studio_theme_defaults`' `effective`, marked "Default" in the list) and
+sends none, so the backend gives the video that default by name; choosing a
+subject brings its default. A theme picked by hand holds across a subject
+change, and picking the marked default again goes back to following it.
+Each theme row says where it comes from (an own version, the subject's,
+global, built in). The format and length are remembered
+(`oculus-studio-style`). Themes come from `studio_themes` for the chosen
+subject; if the command rejects, the list is only "Default" and the popover
+prints the reason. The voice is shown read-only
 from Settings → Voice with a link there. There is no sample button: a sample
 would be a billed TTS call, and nothing in Settings makes one.
 
@@ -149,14 +158,24 @@ on a scene seeks the player. **Continue in chat** opens the thread page.
 
 `/studio/components/:name` shows one component of a library; the bare route
 opens the first. The page's library select (global, or a subject by course
-code, remembered in `oculus-studio-components-library`) decides whose
-cascade `studio_components`, `studio_themes` and the frames read
-([studio.md](./studio.md#the-playgrounds-commands)); a name the library lacks
-says so. Three columns:
+code) decides whose cascade `studio_components`, `studio_themes` and the
+frames read ([studio.md](./studio.md#the-playgrounds-commands)); a name the
+library lacks says so. The choice is one for this page and the Themes page
+(`useStudioLibrary`, remembered in `oculus-studio-components-library`). Three
+columns:
 
-- **The list** groups the shells and the components. A row marks a subject's
-  own version of a component (`level` is `subject`) and a component that does
-  not load (`problem`, its sentence in the row's tooltip).
+- **The list** groups the shells and the components. In a subject's library
+  a row says where it comes from (`LevelMark`): "Own version" when the
+  subject's file replaces a global one (`shadows`), "Subject" when only the
+  subject has it, "Global" when it is inherited. A component that does not
+  load is marked (`problem`, its sentence in the row's tooltip).
+- **Own versions.** In a subject's library the stage's header offers **Own
+  version** on an inherited component, which copies the global text into
+  the subject's library (`studio_component_write` at the subject level), and
+  **Remove own version** on one that replaces a global component, which
+  deletes the copy after a confirm (`studio_component_delete`; the text is
+  kept in the library's history) so the subject falls back to the global
+  one. Both reload the list and the stage.
 - **The stage** (`Workbench`) is one component's centre column and inspector.
   The theme select lists `studio_themes` with each one's swatch (a theme that
   does not parse is listed but cannot be picked; the choice is remembered in
@@ -189,7 +208,7 @@ when the next lands.
 **Source and Ask for a change** share the area under the timeline. Source is
 `studio_component_source` in a read-only `CodeText`, with the level it came
 from. Ask for a change is one box that sends the request to the agent
-(`useComponentChange`): the first send of a page session creates a Chat
+(`useLibraryChange`): the first send of a page session creates a Chat
 harness thread (provider and model from the harness store, filled from the
 provider's list as the composer does, `useDefaultModel`; `subjectId` from the
 library select), later sends continue it, and a different subject starts a
@@ -198,7 +217,7 @@ new one since a thread's subject is fixed at creation. The text is
 component and its level, the request, then the instruction to use the
 oculus-studio skill, make a scratch video, change the component in its
 `components/` folder, check it with `gallery` and `promote` it to the same
-level. The thread is an ordinary one, so it shows in Chat ("Open thread").
+level. The Themes page sends a theme's version of the same text. The thread is an ordinary one, so it shows in Chat ("Open thread").
 While its turn runs the box shows a spinner and refuses another send; when
 the turn ends the page reads the component's source and history again,
 reloads the list (so props and examples follow the new text) and redraws
@@ -208,6 +227,75 @@ was kept and **Undo** writes that snapshot back with
 snapshot; the page offers no redo). A change at
 a level that had no file (a first subject version) has no snapshot to undo to
 and says so; a turn that left the text alone says the thread shows why.
+
+## The Themes page
+
+`/studio/themes/:name` opens one theme of the browsed library (the same
+library select and choice as the Components page); the bare route opens the
+theme new videos there take. **New theme** in the header saves a copy of the
+built-in `default` under a name asked for. Three columns:
+
+- **The list** is every theme in effect for the library (`studio_themes`), a
+  thumbnail each drawn in CSS from its tokens (`ThemeThumb`: the canvas, a
+  heading in the heading font, the muted and accent colours, a surface card
+  with its corner), so the open theme's thumbnail follows its unsaved draft.
+  "Default" marks the theme a new video here takes
+  (`studio_theme_defaults`' `effective`), and in a subject's library
+  `LevelMark` says where each comes from.
+- **The stage** (`ThemeEditor`): the name and where it lives, the actions,
+  then the theme on a sample scene. The scene pills are starter components
+  the library has and that load (Title, Graph, Diagram, Code, Chart, Table,
+  Grid: `TitleCard`, `Axes`, `Graph`, `Code`, `Bars`, `Table`, `Grid`),
+  each in its first example, drawn by `studio_component_frame` through
+  `useStageFrame` (one in flight, edits wait 150 ms, as the playground) with
+  the timeline to play or scrub its motion. Under it, Ask for a change and
+  the theme file (the draft's text while there is one).
+- **The inspector** (`inspector/`) edits the draft: **Default for** chips
+  (Global, and the browsed subject) that make the theme that library's
+  default or clear it (`studio_theme_set_default`, the library's
+  `library.json`; a subject's own theme cannot be the global default), then
+  every `color.*` token with the colour control, the heading, body and code
+  fonts (the families studio-core bundles), each `type.*` font size,
+  `radius.*`, the motion durations, easings (four cubic-bezier numbers),
+  spring presets (a preset choice, then its stiffness, damping and mass),
+  the scene transition's kind, length and direction, magic move, colour
+  blend and motion blur, and the narration's lead, tail and pause. There is
+  no texture token. A new heading or body font also moves the `type.*`
+  entries that used the old family (`setFontRole`, by entry name when two
+  roles share one), since components spread `type.*`.
+
+**Edits are a draft until saved.** Each edit replaces the draft
+(`lib/studio/themeDraft.ts`, key order kept), and the stage draws it at once
+by sending the draft's text as `themeText` in place of the saved theme. The
+header then offers **Revert** and **Save**, which writes
+`formatTheme(draft)` (two-space JSON) to the theme's own level with
+`studio_theme_write`: a global theme browsed from a subject is saved for
+every subject, and says so. The built-in `default` cannot change: its Save
+is **Save as a copy**, which asks for a name. With no unsaved edit and a
+snapshot at the theme's level, **Undo** writes the newest one back
+(`studio_theme_restore`; that restore is itself snapshotted). **Duplicate**
+saves the text (or the draft) under a new name in the browsed library and
+opens it. In a subject's library **Own version** and **Remove own version**
+work as on the Components page; **Delete** removes a library theme that
+replaces nothing, after a confirm, its text kept in the history. Any write,
+an agent's turn or a default change reloads the list, the defaults, the
+source and the stage, and a new saved text replaces the draft.
+
+**Ask for a change** is the playground's box over `useLibraryChange` with
+the theme's level: the text names the theme's file in its library
+(`../studio/library/themes/<name>.json` or the subject's), and tells the
+agent to change a copy in a scratch video, check it with `gallery --theme`
+and promote it back, so the old text is kept for Undo. It is closed for
+the built-in theme (duplicate it first) and while the draft has unsaved
+edits.
+
+**The colour control** (`components/ui/color/`) is a round swatch and its
+hex that opens a popover: a saturation and brightness pad, a hue strip, an
+opacity strip and the hex text. It is pointer-driven (`useFractionDrag`
+reports positions as fractions of the element's box, so page zoom does not
+matter) and the arrow keys move each part. It holds the hue itself, so
+dragging through grey keeps it, and hands back `#rrggbb`, or `#rrggbbaa`
+when not opaque ([ui.md](./ui.md) on native colour inputs).
 
 ## Stills are shared and queued
 

@@ -1454,11 +1454,12 @@ Options:
 ```
 Make a new video under `<app data>/studio/videos/<SLUG>/`
 
-Writes `video.json` (1920x1080, or 1080x1920 with `--portrait`, 30 fps, theme `default`,
-the subject, and one silent `TitleCard` scene holding `--title`), an empty `script.md`,
-and empty `components/` and `assets/`, then prints the folder. A subject's library can
-replace the `default` theme with its own `themes/default.json`. Every other `oculus
-studio` command takes the slug in place of the folder. Refuses a slug that exists.
+Writes `video.json` (1920x1080, or 1080x1920 with `--portrait`, 30 fps, the default
+theme, the subject, and one silent `TitleCard` scene holding `--title`), an empty
+`script.md`, and empty `components/` and `assets/`, then prints the folder. The default
+theme is the `defaultTheme` in the subject library's `library.json`, else the global
+library's, else `default`, and video.json names it. Every other `oculus studio` command
+takes the slug in place of the folder. Refuses a slug that exists.
 
 oculus studio new gradient-descent --subject COMP30027 --title "Gradient descent"
 

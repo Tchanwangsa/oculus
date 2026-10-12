@@ -1,6 +1,6 @@
 //! A component written to a library, once it loads.
 
-use studio_core::{write_library, Library};
+use studio_core::{remove_library_file, write_library, Library};
 
 use super::super::levels::{root_of, Level};
 use super::source::ComponentText;
@@ -48,4 +48,13 @@ pub fn write_in(
         level,
         text: text.to_owned(),
     })
+}
+
+/// Removes `name` from `subject`'s library, snapshotting it first. Only a
+/// subject's file is removed: the global library is the floor every subject
+/// falls back to.
+pub fn delete_in(library: &Library, subject: &str, name: &str) -> Result<(), String> {
+    name::check(name)?;
+    let root = root_of(library, Level::Subject, Some(subject))?;
+    remove_library_file(&root, &name::rel(name)).map_err(|e| e.to_string())
 }

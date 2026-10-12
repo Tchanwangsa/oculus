@@ -17,6 +17,18 @@ use std::path::Path;
 
 const BUNDLED: &[(&str, &str)] = &[("default", include_str!("../../themes/default.json"))];
 
+/// A library theme's name, which is its file stem: lowercase letters, digits
+/// and `-`, at most 64 characters. Every name the app writes, promotes or
+/// scaffolds into a video follows it, and it keeps `themes/<name>.json`
+/// inside its library.
+pub fn valid_theme_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 /// A validated theme.
 #[derive(Clone, Debug)]
 pub struct Theme {
@@ -53,6 +65,14 @@ impl Theme {
             });
         };
         Self::parse(json, Path::new(&format!("themes/{name}.json")))
+    }
+
+    /// A bundled theme's file text, as compiled in.
+    pub fn bundled_text(name: &str) -> Option<&'static str> {
+        BUNDLED
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, json)| *json)
     }
 
     pub fn bundled_names() -> Vec<&'static str> {

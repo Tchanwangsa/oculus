@@ -16,9 +16,8 @@ export const math: ThemeSpec = {
   ".cm-math-error": { color: "var(--color-destructive)", fontFamily: mono, fontSize: "13px" },
   // Its source while the maths engine loads (`MathWidget`).
   ".cm-math-pending": { color: muted, fontFamily: mono, fontSize: "13px", whiteSpace: "pre-wrap" },
-  // The empty-line hint (`syncHint`, `math/field/rustField/hint.ts`): in flow
-  // after an inline field, inside its tint; in a block centred, at the
-  // line's `top`.
+  // A block's empty-line hint (`syncHint`, `math/field/rustField/hint.ts`),
+  // centred at the line's `top`.
   ".cm-math-hint": {
     padding: "0 2px",
     borderRadius: "4px",
@@ -42,11 +41,6 @@ export const math: ThemeSpec = {
     backgroundColor: "transparent",
     overflow: "hidden",
     textOverflow: "ellipsis",
-  },
-  // An inline field holds the hint inside its tint, at the note's text size.
-  ".cm-math-view:not(.cm-math-view-block) > .cm-math-hint": {
-    fontSize: "calc(1em / 1.21)",
-    backgroundColor: "transparent",
   },
   // On a block's empty line the caret is drawn just before the centred
   // hint; the field's own would sit under it.

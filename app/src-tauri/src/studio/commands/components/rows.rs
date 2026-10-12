@@ -20,6 +20,9 @@ pub struct ComponentRow {
     pub props: Vec<NamedProp>,
     pub examples: Map<String, Value>,
     pub problem: Option<String>,
+    /// A subject's file that replaces a global component of the same name:
+    /// the subject's "own version".
+    pub shadows: bool,
 }
 
 /// A shell lays out named areas (a library's own `SplitShell`; no starter
@@ -54,7 +57,12 @@ pub struct NamedProp {
 /// Every component in `subject`'s library and the global one, one row per
 /// name from the nearest level, sorted by name.
 pub fn list_in(library: &Library, subject: Option<&str>) -> Result<Vec<ComponentRow>, String> {
-    let sources: Vec<(String, Arc<dyn ComponentSource>)> = roots(library, subject)?
+    let roots = roots(library, subject)?;
+    let global = roots
+        .iter()
+        .find(|(level, _)| *level == Level::Global)
+        .map(|(_, root)| root.join("components"));
+    let sources: Vec<(String, Arc<dyn ComponentSource>)> = roots
         .into_iter()
         .map(|(level, root)| {
             let source: Arc<dyn ComponentSource> =
@@ -71,6 +79,10 @@ pub fn list_in(library: &Library, subject: Option<&str>) -> Result<Vec<Component
         } else {
             Level::Global
         };
+        let shadows = level == Level::Subject
+            && global
+                .as_ref()
+                .is_some_and(|dir| dir.join(format!("{name}.tsx")).is_file());
         let loaded = cascade
             .read(&name)
             .and_then(|tsx| loader.load_component(&name, &tsx).cloned())
@@ -85,6 +97,7 @@ pub fn list_in(library: &Library, subject: Option<&str>) -> Result<Vec<Component
                     .collect(),
                 examples: info.examples,
                 problem: None,
+                shadows,
                 name,
                 level,
             },
@@ -93,6 +106,7 @@ pub fn list_in(library: &Library, subject: Option<&str>) -> Result<Vec<Component
                 props: Vec::new(),
                 examples: Map::new(),
                 problem: Some(problem),
+                shadows,
                 name,
                 level,
             },

@@ -4,12 +4,13 @@ import { CircleNotch } from "@phosphor-icons/react";
 import { ChangeBox } from "@/components/studio/components/ChangeBox";
 import { ExamplePills } from "@/components/studio/components/ExamplePills";
 import { Inspector } from "@/components/studio/components/inspector/Inspector";
+import { OwnVersionActions } from "@/components/studio/components/OwnVersionActions";
 import { SourceView } from "@/components/studio/components/SourceView";
 import { StageView } from "@/components/studio/components/StageView";
 import { ThemeSelect } from "@/components/studio/components/ThemeSelect";
 import { DURATIONS, TimeBar } from "@/components/studio/components/TimeBar";
 import { PillTabs } from "@/components/ui/table/PillTabs";
-import type { useComponentChange } from "@/hooks/studio/useComponentChange";
+import type { useLibraryChange } from "@/hooks/studio/useLibraryChange";
 import { useComponentSource } from "@/hooks/studio/useComponentSource";
 import { usePlayhead } from "@/hooks/studio/usePlayhead";
 import { useStageFrame, type FrameRequest } from "@/hooks/studio/useStageFrame";
@@ -43,6 +44,7 @@ export function Workbench({
   onTheme,
   revision,
   change,
+  onLibraryChanged,
 }: {
   info: ComponentInfo;
   /** The library's course code; null is the global library. */
@@ -53,7 +55,9 @@ export function Workbench({
   onTheme: (name: string) => void;
   /** Bumped when the component's files changed under the page. */
   revision: number;
-  change: ReturnType<typeof useComponentChange>;
+  change: ReturnType<typeof useLibraryChange>;
+  /** The component was copied into or removed from the subject's library. */
+  onLibraryChanged: () => void;
 }) {
   const names = Object.keys(info.examples);
   const [example, setExample] = useState<string | null>(names[0] ?? null);
@@ -99,12 +103,23 @@ export function Workbench({
             <div className="min-w-0 flex-1">
               <h2 className="truncate text-[18px] font-semibold leading-tight text-foreground">{info.name}</h2>
               <p className="text-[12px] text-muted-foreground">
-                {info.kind === "shell" ? "Shell" : "Component"} ·{" "}
-                {info.level === "subject" && subject ? `Own version in ${displayCode(subject)}` : "Global library"}
+                {info.kind === "shell" ? "Shell" : "Component"} · {levelText(info, subject)}
               </p>
             </div>
             <ThemeSelect state={themes} value={theme ?? ""} onChange={onTheme} />
           </div>
+          {subject && (
+            <div className="-mt-2 flex flex-wrap items-center gap-2">
+              <OwnVersionActions
+                kind="component"
+                name={info.name}
+                level={info.level}
+                shadows={info.shadows}
+                subject={subject}
+                onDone={onLibraryChanged}
+              />
+            </div>
+          )}
           {themes.error && (
             <p data-selectable className="text-[12px] leading-snug text-destructive">
               Themes could not be listed: {themes.error}
@@ -157,4 +172,10 @@ export function Workbench({
       </aside>
     </>
   );
+}
+
+function levelText(info: ComponentInfo, subject: string | null): string {
+  if (info.level === "global") return subject ? "From the global library" : "Global library";
+  const code = subject ? displayCode(subject) : "the subject";
+  return info.shadows ? `Own version in ${code}` : `${code}'s library`;
 }

@@ -314,13 +314,11 @@ field's (`spaceFree` is false there), and after a term in a matrix or bracket gr
 the field drops the preview, its cells insert into the field (`insertTemplate`:
 slots become empty slots, the first taking the selection) and its TeX control
 switches to TeX mode; there a Visual control switches back. Neither toolbox
-ever takes focus. The field says so on any empty line (`syncHint` in
-`rustField/hint.ts`): an empty inline field
-shows "Space (␣) for math tools" in flow after it, inside its tint; an
-empty block, or one empty row of its lines, centres "Start typing or Space
-(␣) for math tools" on that line with the caret drawn just before it (the
-hint's `::before`; the view's own is hidden). It goes once the
-line has anything in it.
+ever takes focus. A block's field says so on any empty line (`syncHint` in
+`rustField/hint.ts`): an empty block, or one empty row of its lines, centres
+"Start typing or 'Space'" on that line with the caret drawn
+just before it (the hint's `::before`; the view's own is hidden). It goes
+once the line has anything in it. An inline field shows no prompt.
 
 A block's field writes its LaTeX with no blank line at either end and never
 two in a row (`squeezeBlankLines`, `math/field/mathFieldEdits.ts`), and the break after
