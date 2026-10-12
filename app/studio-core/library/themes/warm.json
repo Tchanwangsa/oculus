@@ -145,6 +145,7 @@
   },
   "narration": {
     "lead": 0.25,
-    "tail": 0.6
+    "tail": 1.0,
+    "pause": 1.0
   }
 }

@@ -186,7 +186,7 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
     );
     write(
         "script.md",
-        "## a\nHello, a rate of 0.01, e.g. here.\n\n## b\nNew words.\n\n## outro\nBye.\n",
+        "## a\nHello, a rate of 0.01, e.g. here.\n\n## b\nNew words. [pause x]\n\n## outro\nBye.\n",
     );
     let word = |t: &str, c: f64| json!({ "text": t, "start": 0.1, "end": 0.4, "confidence": c });
     write(
@@ -216,6 +216,9 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
         "scene 0 `a` (Say): script.md:2: `e.g.` is not spoken form: write `for example`, not `e.g.`",
     );
     has("script.md:7: `## outro` matches no scene");
+    has(
+        "scene 1 `b` (Say): script.md:5: `[pause x]` is not a pause; write `[pause]` for the theme's pause",
+    );
     has("note: scene 0 `a` (Say): scene `a`: the aligner is unsure of `rate` at 0.35 s");
     has("warning: scene 2 `c` (Quiet): nothing is ever on screen");
     has("scene 1 `b` (Say): scene `b`: no narration for its current text");
@@ -230,10 +233,10 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
         text.contains("`word(\"helo\")`: no such word in scene `a`; closest: hello"),
         "{text}"
     );
-    assert_eq!(lines.len(), 9, "{text}");
+    assert_eq!(lines.len(), 10, "{text}");
     assert_eq!(
         report.errors(),
-        7,
+        8,
         "the note and the warning do not count: {text}"
     );
     let note = report

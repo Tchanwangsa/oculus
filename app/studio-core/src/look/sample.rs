@@ -6,7 +6,7 @@
 use super::items::{Item, items};
 use super::limits::STEP;
 use crate::error::{Result, StudioError};
-use crate::project::{ComponentSource, CuedWord, Project, Staged};
+use crate::project::{ComponentSource, CuedPause, CuedWord, Project, Staged};
 use crate::render::{Engine, RenderOptions};
 use std::collections::HashSet;
 
@@ -24,6 +24,8 @@ pub struct SceneLook {
     pub words: Vec<CuedWord>,
     /// While the narration plays, scene seconds.
     pub narration: Option<(f64, f64)>,
+    /// Its `[pause]` silences, at the times `pause()` returns.
+    pub pauses: Vec<CuedPause>,
     pub(crate) samples: Vec<Sample>,
 }
 
@@ -154,6 +156,7 @@ impl Project {
             size: (f64::from(size.width), f64::from(size.height)),
             words: self.cued_words(index)?.unwrap_or_default(),
             narration,
+            pauses: self.cued_pauses(index)?,
             samples,
         })
     }

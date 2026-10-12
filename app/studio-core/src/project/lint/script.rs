@@ -1,5 +1,5 @@
 //! The script's lint: sections no scene matches, and text that is not
-//! spoken form (`spoken`). Scenes with an id and no section are silent,
+//! spoken form or a malformed `[pause]` (`spoken`). Scenes with an id and no section are silent,
 //! which needs a `hold`; `Project::scene_length` reports that.
 
 use super::{Level, LintIssue, LintReport, spoken};
@@ -43,10 +43,13 @@ pub(super) fn lint(project: &Project, report: &mut LintReport) {
             ));
         }
         for u in spoken::scan(&section.raw) {
-            report.issues.push(issue(
-                section.line + 1 + u.line,
-                format!("`{}` is not spoken form: {}", u.token, u.hints.join("; ")),
-            ));
+            let message = match u.marker {
+                true => u.hints.join("; "),
+                false => format!("`{}` is not spoken form: {}", u.token, u.hints.join("; ")),
+            };
+            report
+                .issues
+                .push(issue(section.line + 1 + u.line, message));
         }
     }
 }

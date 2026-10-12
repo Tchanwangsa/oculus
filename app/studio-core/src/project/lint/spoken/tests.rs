@@ -38,3 +38,14 @@ fn dotted_abbreviations_are_flagged() {
 fn each_token_is_reported_once() {
     assert_eq!(tokens("2 and 2 make 4"), ["2", "4"]);
 }
+
+#[test]
+fn pause_markers_pass_and_malformed_ones_are_flagged() {
+    assert_eq!(scan("It lands. [pause] Then [pause 1.5] more."), vec![]);
+    let found = scan("One [pause x] two [Pause 7]\n[pause 2");
+    let t: Vec<&str> = found.iter().map(|u| u.token.as_str()).collect();
+    assert_eq!(t, ["[pause x]", "[Pause 7]", "[pause 2"]);
+    assert!(found.iter().all(|u| u.marker));
+    assert!(found[1].hints[0].contains("at most 5 seconds"));
+    assert_eq!(found[2].line, 1);
+}

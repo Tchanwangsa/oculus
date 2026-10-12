@@ -1,8 +1,14 @@
 //! `script.md`: a video's narration, one `## <id>` section per narrated
 //! scene, written as it is said. A section's text is its prose with the
-//! emphasis markers (`*`, `_`, backticks) removed and whitespace collapsed;
-//! nothing else is interpreted. That text is what the narration manifest
-//! must match.
+//! emphasis markers (`*`, `_`, backticks) and pause markers (`[pause]`)
+//! removed and whitespace collapsed; nothing else is interpreted. That text,
+//! with its pauses written back at their lengths (`clip_text`), is what the
+//! narration manifest must match.
+
+mod pause;
+
+pub use pause::MAX_PAUSE;
+pub(crate) use pause::markers;
 
 use super::video::valid_id;
 
@@ -16,12 +22,31 @@ pub struct Script {
 pub struct ScriptSection {
     /// The heading's id, matching a scene's `id` in video.json.
     pub id: String,
-    /// What is said: the prose, emphasis stripped and whitespace collapsed.
+    /// What is said: the prose, emphasis and pause markers stripped and
+    /// whitespace collapsed.
     pub text: String,
+    /// Its pauses, in order.
+    pub pauses: Vec<ScriptPause>,
     /// The prose as written: the lines after the heading, joined by `\n`.
     pub raw: String,
     /// The heading's line (1-based); `raw`'s first line is the next one.
     pub line: usize,
+}
+
+/// A `[pause]` in a section.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScriptPause {
+    /// How many of the text's whitespace-separated words come before it.
+    pub words: usize,
+    /// Its seconds, or `None` for the theme's `narration.pause`.
+    pub seconds: Option<f64>,
+}
+
+/// A piece of a section's clip, in order: words said, or a silence.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ClipPart {
+    Say(String),
+    Pause(f64),
 }
 
 impl Script {
@@ -57,6 +82,7 @@ impl Script {
             sections.push(ScriptSection {
                 id: id.to_owned(),
                 text: String::new(),
+                pauses: Vec::new(),
                 raw: String::new(),
                 line: n,
             });
@@ -67,6 +93,44 @@ impl Script {
 
     pub fn section(&self, id: &str) -> Option<&ScriptSection> {
         self.sections.iter().find(|s| s.id == id)
+    }
+}
+
+impl ScriptSection {
+    /// The text with each pause written back as `[pause <seconds>]`, a
+    /// bare one at `pause` (the theme's): what a clip is made from, and
+    /// so what its manifest entry must match. Without pauses, `text`.
+    pub fn clip_text(&self, pause: f64) -> String {
+        if self.pauses.is_empty() {
+            return self.text.clone();
+        }
+        self.parts(pause)
+            .iter()
+            .map(|p| match p {
+                ClipPart::Say(text) => text.clone(),
+                ClipPart::Pause(s) => pause::written(*s),
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// The clip in order: runs of words cut at each pause, and each pause
+    /// at its seconds (a bare one at `pause`).
+    pub fn parts(&self, pause: f64) -> Vec<ClipPart> {
+        let words: Vec<&str> = self.text.split_whitespace().collect();
+        let mut out = Vec::new();
+        let mut from = 0;
+        for p in &self.pauses {
+            if p.words > from {
+                out.push(ClipPart::Say(words[from..p.words].join(" ")));
+                from = p.words;
+            }
+            out.push(ClipPart::Pause(p.seconds.unwrap_or(pause)));
+        }
+        if from < words.len() {
+            out.push(ClipPart::Say(words[from..].join(" ")));
+        }
+        out
     }
 }
 
@@ -83,7 +147,7 @@ fn close(sections: &mut [ScriptSection], raw: &mut Vec<&str>) -> Result<(), Stri
         return Ok(());
     };
     s.raw = lines.join("\n");
-    s.text = spoken(&s.raw);
+    (s.text, s.pauses) = spoken_with_pauses(&s.raw);
     if s.text.is_empty() {
         return Err(format!(
             "line {}: `## {}` has no text; write what is said, or remove the heading to keep the scene silent",
@@ -91,6 +155,29 @@ fn close(sections: &mut [ScriptSection], raw: &mut Vec<&str>) -> Result<(), Stri
         ));
     }
     Ok(())
+}
+
+/// Prose as it is narrated, and its pauses. Every pause marker, malformed
+/// ones too, is cut from the text and splits the words either side of it;
+/// lint names the malformed ones.
+fn spoken_with_pauses(raw: &str) -> (String, Vec<ScriptPause>) {
+    let mut plain = String::new();
+    let mut pauses = Vec::new();
+    for line in raw.lines() {
+        let mut from = 0;
+        for m in markers(line) {
+            plain.push_str(&line[from..m.start]);
+            plain.push(' ');
+            from = m.end;
+            if let Ok(seconds) = m.seconds {
+                let words = spoken(&plain).split_whitespace().count();
+                pauses.push(ScriptPause { words, seconds });
+            }
+        }
+        plain.push_str(&line[from..]);
+        plain.push('\n');
+    }
+    (spoken(&plain), pauses)
 }
 
 /// Prose as it is narrated: emphasis markers removed, whitespace collapsed.

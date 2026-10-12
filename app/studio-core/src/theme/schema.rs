@@ -2,6 +2,7 @@
 //! section names and each token's shape are fixed.
 
 use crate::fonts::bundled_families;
+use crate::project::MAX_PAUSE;
 use crate::scene::{Color, Style};
 use crate::transition::{MotionSpec, TransitionSpec};
 use serde::Deserialize;
@@ -56,13 +57,25 @@ struct Spring {
     mass: f64,
 }
 
-/// Seconds of silence around a scene's narration clip: the clip starts
-/// `lead` into the scene, and the scene lasts at least `tail` past its end.
+/// Seconds of silence in a scene's narration: the clip starts `lead` into
+/// the scene, the scene lasts at least `tail` past its end, and a bare
+/// `[pause]` in script.md is `pause` long.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct NarrationTokens {
     pub lead: f64,
     pub tail: f64,
+    /// Optional in a file, so a theme copied out before pauses existed
+    /// still loads.
+    #[serde(default = "default_pause")]
+    pub pause: f64,
+}
+
+/// A bare `[pause]`'s seconds when a theme sets none.
+pub const DEFAULT_PAUSE: f64 = 1.0;
+
+fn default_pause() -> f64 {
+    DEFAULT_PAUSE
 }
 
 /// Type-scale entries are style fragments, spread into `style`.
@@ -128,6 +141,12 @@ pub fn check(tokens: &Value) -> Result<Checked, String> {
                 "narration.{k} = {v}: must be a non-negative number of seconds"
             ));
         }
+    }
+    if !(n.pause > 0.0 && n.pause <= MAX_PAUSE) {
+        return Err(format!(
+            "narration.pause = {}: must be more than 0 and at most {MAX_PAUSE} seconds",
+            n.pause
+        ));
     }
     let background = *file
         .color

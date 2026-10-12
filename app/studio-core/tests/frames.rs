@@ -24,14 +24,14 @@ fn fps_defaults_to_30_and_sets_the_frame_ranges() {
     assert_eq!(p.fps(), 30);
     assert_eq!(p.frames().unwrap(), 7 * 60);
     assert_eq!(p.scene_frames(3).unwrap(), 180..240);
-    // The narrated scene's 3.85 s rounds up to 116 frames at 30 fps, 97
+    // The narrated scene's 4.25 s rounds up to 128 frames at 30 fps, 107
     // at 25.
     let narrated = Project::load(fixture("narrated")).unwrap();
-    assert_eq!(narrated.scene_frames(0).unwrap(), 0..116);
+    assert_eq!(narrated.scene_frames(0).unwrap(), 0..128);
     let narrated = at_fps("narrated", 25);
-    assert_eq!(narrated.scene_frames(0).unwrap(), 0..97);
-    assert_eq!(narrated.scene_length(0).unwrap(), 97.0 / 25.0);
-    assert_eq!(narrated.frames().unwrap(), 97 + 38);
+    assert_eq!(narrated.scene_frames(0).unwrap(), 0..107);
+    assert_eq!(narrated.scene_length(0).unwrap(), 107.0 / 25.0);
+    assert_eq!(narrated.frames().unwrap(), 107 + 38);
 }
 
 #[test]

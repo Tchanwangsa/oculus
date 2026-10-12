@@ -5,7 +5,7 @@
 
 mod schema;
 
-pub use schema::NarrationTokens;
+pub use schema::{DEFAULT_PAUSE, NarrationTokens};
 
 use crate::error::{Result, StudioError};
 use crate::scene::Color;
@@ -32,7 +32,8 @@ pub struct Theme {
     pub motion: MotionSpec,
     /// `motion.easing`: named cubic-bezier points.
     pub easings: BTreeMap<String, [f64; 4]>,
-    /// `narration`: the silence before and after a scene's narration.
+    /// `narration`: the silence before and after a scene's narration, and
+    /// a bare `[pause]`'s length.
     pub narration: NarrationTokens,
 }
 

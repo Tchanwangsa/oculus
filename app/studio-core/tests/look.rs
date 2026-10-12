@@ -291,3 +291,39 @@ fn beats_group_numbered_keys_and_merge_a_move() {
     );
     assert_eq!(lines.len(), 4, "{text}");
 }
+
+#[test]
+fn a_pause_is_not_still_and_is_a_beat() {
+    let t = Temp::new("pause");
+    let manifest = |text: &str, pauses: Value| {
+        let words = json!([
+            { "text": "One.", "start": 0.0, "end": 0.8, "confidence": -0.5 },
+            { "text": "Two.", "start": 3.0, "end": 3.8, "confidence": -0.5 }
+        ]);
+        json!({ "version": 1, "scenes": { "a": {
+            "key": "k", "text": text, "audio": "k.wav", "duration": 4.0, "words": words,
+            "pauses": pauses } } })
+        .to_string()
+    };
+    // Four seconds of narration over one frame, two of them a pause.
+    t.file("script.md", "## a\nOne. [pause 2]\nTwo.\n").file(
+        "narration/manifest.json",
+        &manifest(
+            "One. [pause 2] Two.",
+            json!([{ "after": 0, "start": 1.0, "end": 3.0 }]),
+        ),
+    );
+    let p = t.scene(&spread(""), json!({ "id": "a", "component": "A" }));
+    assert_eq!(kinds(&p), Vec::<&str>::new());
+    let look = p.look(&[0]).pop().unwrap().unwrap();
+    let pause = look
+        .beats()
+        .into_iter()
+        .find(|b| b.event == "pause")
+        .unwrap();
+    assert_eq!(pause.line(), "  1.25  pause    2.0 s  \"One.\"");
+    t.file("script.md", "## a\nOne. Two.\n")
+        .file("narration/manifest.json", &manifest("One. Two.", json!([])));
+    let p = t.scene(&spread(""), json!({ "id": "a", "component": "A" }));
+    assert_eq!(kinds(&p), ["still"], "without the pause it is still");
+}

@@ -3,7 +3,7 @@
 //! key near them): appears, vanishes, moves, resizes, recolours, rewrites.
 //! A change that runs over consecutive samples is one beat with a start
 //! and an end; beats of numbered keys at the same moment are one line
-//! (`group`).
+//! (`group`). Each `[pause]` is a line of its own at its start.
 
 mod group;
 
@@ -11,6 +11,7 @@ use super::entities::{Entity, entities};
 use super::limits::{MOVE_PX, SIZE_PX};
 use super::sample::SceneLook;
 use super::words;
+use crate::project::CuedPause;
 use serde::Serialize;
 use std::collections::HashMap;
 use vello_cpu::kurbo::{Point, Rect};
@@ -117,7 +118,28 @@ impl SceneLook {
             )
             .collect();
         beats.sort_by_key(|(start, _)| *start);
-        beats.into_iter().map(|(_, b)| b).collect()
+        let mut out: Vec<Beat> = beats.into_iter().map(|(_, b)| b).collect();
+        for p in &self.pauses {
+            let at = out.partition_point(|b| b.t <= p.start);
+            out.insert(at, self.pause_beat(p));
+        }
+        out
+    }
+
+    /// A `[pause]` as a line: `  4.10  pause    1.0 s  "… lands on one."`.
+    fn pause_beat(&self, p: &CuedPause) -> Beat {
+        let before = p
+            .after
+            .map(|i| words::ending(&self.words, i))
+            .unwrap_or_default();
+        Beat {
+            t: p.start,
+            end: p.end,
+            event: "pause".to_owned(),
+            who: format!("{:.1} s", p.end - p.start),
+            detail: String::new(),
+            words: before,
+        }
     }
 }
 
