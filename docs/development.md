@@ -13,6 +13,7 @@ and stable Rust, plus the MSVC toolchain, Windows SDK and WebView2.
 | Cargo CLI build, target paths and host detection | `app/scripts/runtime.mjs`, `app/scripts/build-cli.mjs` |
 | Shared cached native download and installation | `app/scripts/native-binary.mjs` |
 | The dev wrapper, preflight and cross-shell test runner | `app/scripts/dev.mjs`, `app/scripts/predev.mjs`, `app/scripts/test.mjs` |
+| The app and CLI dev profile | `[profile.dev]` in `app/src-tauri/Cargo.toml` |
 | Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
 | Native binary fetcher (ffmpeg) | `app/scripts/fetch-ffmpeg.mjs` |
 | Builds and smoke-tests the Windows LGPL ffmpeg, and stages its release | `app/scripts/ffmpeg/`, `.github/workflows/ffmpeg.yml` |
@@ -97,6 +98,19 @@ where a SHA-256 is pinned, any other bytes before installing anything.
 `cargo test` and `bun run cli` go through neither Tauri nor `predev`, so on a
 fresh checkout run `bun run ffmpeg` and (on macOS)
 `bun run speech` and `bun run whisper` yourself.
+
+## The app and CLI share one dev profile
+
+The app and CLI use the dev profile in `app/src-tauri/Cargo.toml`:
+dependencies at `opt-level = 3` without debug info, and the app crate at
+`debug = 1` without optimisation. The manifest profile applies wherever
+Cargo runs. The CLI scripts also run Cargo from `app/src-tauri` so they
+read the same config and sccache wrapper as Tauri's app build.
+The app library emits only an `rlib` for the desktop app and CLI.
+
+To reclaim this checkout's build cache, run `cargo clean` from
+`app/src-tauri`; Cargo coordinates deletion with its build locks. The next
+build recreates those artifacts.
 
 ## The speech helper is compiled, not fetched
 

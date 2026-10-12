@@ -16,7 +16,7 @@ default-run = "app"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -156,6 +156,17 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [target.'cfg(windows)'.dev-dependencies]
 # Enables explicitly registered in-process fake brokers in Windows release tests.
 keyd_core = { package = "oculus-keyd-core", path = "../keyd/core", features = ["test-support"] }
+
+# The manifest profile applies to the app and CLI from every working directory.
+[profile.dev]
+# Limited debug info (no variables) is enough for backtraces and links faster.
+debug = 1
+
+[profile.dev.package."*"]
+# Dependencies optimised once and cached; our own crate stays unoptimised so
+# incremental rebuilds stay quick.
+opt-level = 3
+debug = false
 
 # librespot-connect with Spirc::skip_to and Spirc::remove_next, which act on
 # the Spirc's own queue (`vendor/librespot-connect`, docs/music-library.md).

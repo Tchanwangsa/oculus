@@ -19,7 +19,8 @@ export const cliBuildArgs = (profile = "release") => [
 export function buildCli(profile = "release") {
   const binary = cliPath(profile);
   rmSync(binary, { force: true });
-  execFileSync("cargo", cliBuildArgs(profile), { stdio: "inherit" });
+  // Read the same Cargo config (including sccache) as Tauri's app build.
+  execFileSync("cargo", cliBuildArgs(profile), { cwd: rust, stdio: "inherit" });
   if (!existsSync(binary)) throw new Error(`cargo reported success but ${binary} is not there`);
   return binary;
 }

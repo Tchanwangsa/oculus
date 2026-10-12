@@ -73,7 +73,7 @@ function build() {
   building = execFile(
     "cargo",
     cliBuildArgs("debug"),
-    { maxBuffer: 32 * 1024 * 1024 },
+    { cwd: rust, maxBuffer: 32 * 1024 * 1024 },
     (err, _out, stderr) => {
       building = null;
       if (err) {
