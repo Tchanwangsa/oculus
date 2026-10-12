@@ -84,9 +84,9 @@ switch is on.
   library and `useMusicPosition` all read it. Another device's volume is sent
   on release, not as it moves, since each change is a request to Spotify; a
   device that takes no volume disables the slider.
-- **"Open player" opens `/music` as the page** in the focused pane of the
-  tab in front (`navigateActive`, as the rail's sections do); its
-  `recentKey` is `music`, so there is one player item however it is opened.
+- **"Open player" opens `/music` as a new side-panel item** on the tab in
+  front, focused (`openBeside`), leaving whatever the panel held in its stack;
+  its `recentKey` is `music`, so there is one player item however it is opened.
   The page adds the album, elapsed and total, shuffle and repeat, a queue
   button for what plays next, the account's playlists with their tracks and
   a search, in two columns when the page is wide
