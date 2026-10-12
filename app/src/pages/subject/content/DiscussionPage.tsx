@@ -1,154 +1,67 @@
-import { useMemo } from "react";
-import {
-  ChatCircle,
-  ChatsCircle,
-  CheckCircle,
-  Circle,
-  Megaphone,
-} from "@phosphor-icons/react";
-import { SubjectLoading, SubjectPage, SubjectEmpty } from "@/components/subjects/SubjectPage";
+import { useDeferredValue, useMemo, useRef, useState } from "react";
+import { ChatsCircle } from "@phosphor-icons/react";
+import { SubjectLoading, SubjectEmpty } from "@/components/subjects/SubjectPage";
 import { useSubjectFiles } from "@/hooks/data/useSubjectFiles";
 import { useSubject } from "@/layouts/SubjectLayout";
-import { filePageHref, openFileSmart } from "@/lib/files/openFile";
-import { FileRecency } from "@/components/files/FileRecency";
-import { fmtShortDate, humanizeSlug } from "@/lib/format/format";
-import type { DbFile } from "@/lib/db";
 import { useCourseFileData } from "@/hooks/data/useCourseFileData";
-import { ListCard } from "@/components/ui/layout/PageParts";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
+import { filterEdThreads, parseEdThread, queryWords, type ThreadFilters as Filters } from "@/lib/ed/threads";
+import { ThreadFilters } from "./discussion/ThreadFilters";
+import { THREAD_COLUMNS, ThreadRow } from "./discussion/ThreadRow";
 
-/** Header metadata parsed from a scraped thread doc (see sources/ed/). */
-interface ThreadMeta {
-  /** From the `**By:** name · 2026-08-07 15:42` line. */
-  posted: Date | null;
-  /** Ed's three thread types; resolved only applies to questions. */
-  kind: "question" | "post" | "announcement" | null;
-  /** true/false for questions (resolved/unresolved), null otherwise. */
-  resolved: boolean | null;
-  /** Board category path, e.g. "Assignments / A1". */
-  category: string | null;
-}
-
-/** The header sources/ed/ writes: `# title`, a `**#31 · question · Category ·
- *  resolved**` meta line, then the By-line. */
-function parseThreadMeta(md: string): ThreadMeta {
-  const head = md.slice(0, 500);
-
-  const by = /^\*\*By:\*\* .* · (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})\s*$/m.exec(head);
-  // Ed timestamps are written in the course's local timezone.
-  const posted = by ? new Date(`${by[1]}T${by[2]}:00`) : null;
-
-  const metaLine = /^\*\*(#\d+ ·[^*]*)\*\*\s*$/m.exec(head)?.[1] ?? "";
-  const tokens = metaLine.split(" · ").map((t) => t.trim());
-  const kind =
-    (["question", "post", "announcement"] as const).find((k) => tokens.includes(k)) ?? null;
-  const resolved = tokens.includes("resolved")
-    ? true
-    : tokens.includes("unresolved")
-      ? false
-      : null;
-  // The rest of the meta line is the category path.
-  const category =
-    tokens.find(
-      (t) =>
-        !t.startsWith("#") &&
-        !["question", "post", "announcement", "resolved", "unresolved"].includes(t),
-    ) ?? null;
-
-  return {
-    posted: posted && !Number.isNaN(posted.getTime()) ? posted : null,
-    kind,
-    resolved,
-    category,
-  };
-}
-
-function parseThreadEntry(md: string, file: DbFile) {
-  return [file.id, parseThreadMeta(md)] as const;
-}
-
-/**
- * The subject's Ed Discussion board, as scraped to `ed/NNNN-slug.md` — one
- * file per thread, replies included. Rows open in the side panel.
- */
+/** The synced Ed board: local keyword search includes the thread's replies. */
 export default function SubjectDiscussionPage() {
   const subject = useSubject();
   const { byCategory, loading } = useSubjectFiles(subject.id);
+  const files = useMemo(() => [...byCategory.ed].sort((a, b) =>
+    b.filename.localeCompare(a.filename, undefined, { numeric: true })), [byCategory.ed]);
+  const entries = useCourseFileData(files, loading, parseEdThread);
+  const threads = useMemo(() => {
+    const byId = new Map(entries?.map((thread) => [thread.file.id, thread]));
+    return files.map((file) => byId.get(file.id) ?? parseEdThread("", file));
+  }, [entries, files]);
+  const [filters, setFilters] = useState<Filters>(() => ({
+    query: "", types: new Set(), statuses: new Set(), categories: new Set(),
+  }));
+  const query = useDeferredValue(filters.query);
+  const shown = useMemo(() => filterEdThreads(threads, { ...filters, query }), [threads, filters, query]);
+  const words = useMemo(() => queryWords(query), [query]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useScrollFade(scrollRef, "y", shown.length > 0);
+  const reading = loading || entries == null;
 
-  const threads = useMemo(
-    () =>
-      // Filenames are number-prefixed with Ed's per-course thread number, so
-      // descending name order is newest first.
-      [...byCategory.ed].sort((a, b) => b.filename.localeCompare(a.filename)),
-    [byCategory.ed],
+  if (loading && files.length === 0) return <SubjectLoading count={5} />;
+  if (files.length === 0) return (
+    <SubjectEmpty icon={<ChatsCircle size={24} className="text-muted-foreground/40" />} title="No Ed threads scraped.">
+      <p className="max-w-sm text-center text-xs text-muted-foreground/70">
+        Run a sync — Ed connects automatically through your Canvas session
+        when the subject has an Ed Discussion board.
+      </p>
+    </SubjectEmpty>
   );
-  const entries = useCourseFileData(threads, loading, parseThreadEntry);
-  const metas = useMemo(() => Object.fromEntries(entries ?? []), [entries]);
-
-  if (loading && threads.length === 0) {
-    return <SubjectLoading count={5} />;
-  }
-
-  if (threads.length === 0) {
-    return (
-      <SubjectEmpty icon={<ChatsCircle size={24} className="text-muted-foreground/40" />} title="No Ed threads scraped.">
-        <p className="text-xs text-muted-foreground/70 max-w-sm text-center">
-          Run a sync — Ed connects automatically through your Canvas session
-          when the subject has an Ed Discussion board.
-        </p>
-      </SubjectEmpty>
-    );
-  }
 
   return (
-    <SubjectPage>
-      <ListCard>
-        {threads.map((f) => {
-          const number = /^(\d+)-/.exec(f.filename)?.[1];
-          const meta = metas[f.id];
-          return (
-            <button
-              key={f.id}
-              data-tab-href={filePageHref(f) ?? undefined}
-              onClick={() => openFileSmart(f)}
-              className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-surface transition-colors"
-            >
-              {/* One icon per row so titles align: questions show resolved
-                  state, the other two types show what they are. */}
-              <span className="shrink-0 w-3 flex items-center justify-center">
-                {meta?.resolved === true ? (
-                  <CheckCircle size={11} weight="fill" className="text-success" />
-                ) : meta?.resolved === false ? (
-                  <Circle size={11} className="text-warning" />
-                ) : meta?.kind === "announcement" ? (
-                  <Megaphone size={11} className="text-muted-foreground/60" />
-                ) : meta?.kind === "question" ? (
-                  // Doc predates the status token — unknown until a re-sync.
-                  <Circle size={11} className="text-muted-foreground/40" />
-                ) : (
-                  <ChatCircle size={11} className="text-muted-foreground/60" />
-                )}
-              </span>
-              <span className="text-[12px] text-foreground truncate flex-1">
-                {humanizeSlug(f.filename)}
-              </span>
-              {meta?.category && (
-                <span className="shrink-0 max-w-40 truncate text-[10px] text-muted-foreground">
-                  {meta.category}
-                </span>
-              )}
-              <span className="shrink-0 w-12 text-right text-[11px] text-muted-foreground">
-                {meta?.posted ? fmtShortDate(meta.posted) : ""}
-              </span>
-              <span className="shrink-0 w-10 text-right text-[11px] text-muted-foreground tabular-nums">
-                {number ? `#${Number(number)}` : ""}
-              </span>
-              <span className="shrink-0 w-13 flex items-center justify-end">
-                <FileRecency file={f} />
-              </span>
-            </button>
-          );
-        })}
-      </ListCard>
-    </SubjectPage>
+    <div className="@container flex h-full min-w-0 flex-col">
+      <ThreadFilters threads={threads} filters={filters} onChange={setFilters} shown={shown.length} loading={reading} />
+      <div className="shrink-0 px-6 pr-[30px]">
+        <div className={`${THREAD_COLUMNS} border-b border-border-subtle py-2 text-[11px] font-medium text-muted-foreground`}>
+          <span>Thread</span>
+          <span className="hidden @[800px]:block">Category</span>
+          <span className="hidden @[600px]:block">Status</span>
+          <span className="text-right">Posted</span>
+          <span className="hidden text-right @[600px]:block">Activity</span>
+        </div>
+      </div>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-scroll px-6 pb-5">
+        {shown.map((thread) => <ThreadRow key={thread.file.id} thread={thread} words={words} />)}
+        {!reading && shown.length === 0 && (
+          <div className="flex flex-col items-center gap-2 py-16 text-center">
+            <p className="text-sm text-foreground">No matching threads</p>
+            <p className="text-xs text-muted-foreground">Try different keywords or clear your filters.</p>
+            <button type="button" onClick={() => setFilters({ query: "", types: new Set(), statuses: new Set(), categories: new Set() })} className="mt-2 rounded-full px-3 py-1.5 text-xs text-brand hover:bg-brand/10">Clear search and filters</button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

@@ -11,7 +11,8 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Canvas scrape engine (modules driver, link crawl, Office conversion) | `app/src-tauri/src/sync/` |
 | Canvas HTTP through keyd's `canvas` route: redirects, retries, pagination, streamed downloads | `app/src-tauri/src/sources/canvas/` |
 | Ed Discussion: courses, threads, XML→md; its requests through keyd's `ed` route | `app/src-tauri/src/sources/ed/` |
-| Ed Lessons: lessons, quiz questions, workspace zips, the lesson renderer | `app/src-tauri/src/sources/ed/lessons.rs`, `app/src-tauri/src/sources/ed/workspace.rs`, `app/src-tauri/src/sources/ed/lesson_md.rs` |
+| Ed Lessons: lessons, quiz questions, workspace zips, the index and slide renderers | `app/src-tauri/src/sources/ed/lessons.rs`, `app/src-tauri/src/sources/ed/workspace.rs`, `app/src-tauri/src/sources/ed/lesson_md/` |
+| Front matter on Ed files; Ed's category colours | `app/src-tauri/src/sources/ed/front.rs`, `app/src-tauri/src/sources/ed/palette.rs` |
 | The Ed phase (one course resolve for threads and lessons) and the lessons phase | `app/src-tauri/src/sync/phases/ed.rs`, `app/src-tauri/src/sync/phases/ed_lessons.rs` |
 | Echo360 core | `app/src-tauri/src/sources/echo360/` |
 | Echo360 Tauri commands, session cache, downloads | `app/src-tauri/src/lectures/commands.rs`, `app/src-tauri/src/lectures/mod.rs`, `app/src-tauri/src/lectures/downloads.rs` |
@@ -314,7 +315,34 @@ emits its marker and still recurses. The token is in [auth.md](./auth.md).
   region from the API host; with neither, lessons carry no Ed link and a
   workspace fetch fails saying why.
 
-## Ed Lessons are one file per lesson, with their assets beside it
+## Ed files open with front matter of JSON literals
+
+Every Ed thread and lesson file starts with `---`-fenced front matter for the
+board and Lessons views to read (`app/src-tauri/src/sources/ed/front.rs`; the
+frontend's reader is `app/src/lib/markdown/frontmatter.ts`). Each line is
+`key: <json>`, or `key:` followed by `  - <json>` items for a non-empty list:
+every value is a JSON literal, which is also valid YAML. Missing data is
+`null`, never an omitted key, and no other YAML form appears. Web links go to
+`https://edstem.org/<region>/…` from the profile's Ed region, and are `null`
+(with no `source_url`) while it is unknown.
+
+A thread, `ed/NNNN-<slug>.md` (`NNNN` is Ed's per-course number), keeps its
+Markdown below the front matter: `ed_thread_id`, `number`, `type`
+(question, post, announcement), `answered` (a question's resolved state, the
+same one its `**#46 · question · resolved …**` meta line shows; `null` for
+other kinds), `category`, `subcategory`, `subsubcategory`, `category_color`
+and `url` (`/courses/<c>/discussion/<t>`, also the file's `source_url`). A
+top-level category takes Ed's colour for its position among the course's
+`settings.discussion.categories`, from the `/api/user` enrolment; past Ed's 16
+colours, or with no list, it is `null` (`app/src-tauri/src/sources/ed/palette.rs`).
+
+The sync reads threads and slides without `?view=1`, so a scrape never counts
+as reading them in Ed. Opening a thread or a lesson slide in the app sends the
+web app's own view request once per app session (`ed_mark_viewed`,
+`app/src-tauri/src/sources/ed/views.rs`; `app/src/lib/ed/views.ts`): a thread
+gains the view and a slide is marked seen, never completed.
+
+## Ed Lessons are an index per lesson and a file per slide
 
 The Ed phase resolves the subject's Ed course once and runs lessons, threads or
 both (`ed_lessons`, `ed`), so a course costs at most one LTI walk. Lessons run
@@ -322,13 +350,31 @@ first: the board re-reads every thread and is what meets Ed's rate limit. Every
 Ed request that gets a 429 waits (`Retry-After`, capped at a minute, else 2, 4,
 8 … seconds) and is sent again, up to six times (`sources/ed/client.rs`). Lessons go
 in sidebar order (module, then `index` with unset ones last, then id), each to
-`lessons/<lessonId>-<slug>.md` with its slides in `index` order; the id leads
-so a renamed lesson keeps its prefix. Progress reports the phase `ed_lessons`.
+an index, `lessons/<lessonId>-<slug>.md`; the id leads so a renamed lesson
+keeps its prefix. Progress reports the phase `ed_lessons`. A lesson's slides
+are all fetched before any of its files is written, so a cancelled sync
+leaves the last whole lesson.
 
-- Assets sit in `lessons/<lessonId>-<slug>/`: a PDF slide as
-  `<NN>-<slide-slug>.pdf`, a challenge's files under `<NN>-<slide-slug>/`
-  (`NN` is the slide's position). The lesson file links them relative to its
-  own folder, percent-encoded, which is the form the viewer resolves.
+- The index's front matter is `ed_lesson_id`, `title`, `lesson_type` (Ed's
+  lesson `type`), `module`, `order` (the 0-based sidebar position),
+  `state`, `available_at`, `due_at`, `locks_at` (Ed's timestamps verbatim),
+  `url` (`/courses/<c>/lessons/<l>`) and `slides`: one object per slide in
+  `index` order with `id`, `title`, `type`, `status` (Ed's `unseen`, `seen`
+  or `completed`), `file`, `pdf` and `url` (`…/slides/<s>`), paths relative
+  to `lessons/`. Its body is the title, module, dates and Ed link, then a
+  numbered link to each slide file (a PDF slide's PDF); it holds no slide
+  content.
+- Each slide is `lessons/<lessonId>-<slug>/<NN>-<slide-slug>.md` (`NN` is its
+  position), with front matter `ed_slide_id`, `ed_lesson_id`, `lesson`,
+  `title`, `type`, `status`, `index` (`NN`), `pdf` and `url`, then
+  `# <slide title>` and the slide's content. Its `source_url` is the slide's
+  page in Ed. A PDF slide has no file (`file` is `null`): its stem's `.md` is
+  where the parser writes the PDF's text ([parsing.md](./parsing.md)). The
+  index links the PDF, or Ed's copy with a note when the download failed.
+- A slide's assets share its stem: a PDF slide's `<NN>-<slide-slug>.pdf`, a
+  challenge's files under `<NN>-<slide-slug>/`. Links are relative to the
+  linking file's folder and percent-encoded, a slide file's led by `./`,
+  which is the form the viewer resolves.
 - Every request is a read without `?view=1`, which would mark the slide seen,
   except a challenge's workspace (`app/src-tauri/src/sources/ed/live.rs`):
   1. `POST /challenges/<ch>/connect` attaches the student's own workspace
@@ -357,11 +403,11 @@ so a renamed lesson keeps its prefix. Progress reports the phase `ed_lessons`.
   the explanation.
 - Slide bodies are Ed's `<document>` XML ([above](#ed-content-is-a-custom-xml-dialect)), except `html` slides,
   which go through `app/src-tauri/src/pages/md/` as they are. A slide's own
-  headings are pushed two levels down (h1 → h3, capped at h6), below its
-  `## <slide title>`. Images stay remote, as in threads. An unknown slide type renders a one-line note.
+  headings are pushed two levels down (h1 → h3, capped at h6), below the
+  file's `# <slide title>` and level with a quiz's `### Question` headings. Images stay remote, as in threads. An unknown slide type renders a one-line note.
 - A lesson Ed refuses (a password-gated quiz answers 403) is a warning and the
   course carries on; a slide whose PDF, questions or workspace fails is a
-  warning and a note in the lesson file.
+  warning and a note in the slide's file (in the index, for a PDF).
 
 ## Echo360 is an LTI launch with up to two streams
 

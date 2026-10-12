@@ -25,6 +25,7 @@ fn ed(id: i64, year: &str, session: &str) -> EdCourse {
         code: "CS 101".into(),
         year: year.into(),
         session: session.into(),
+        categories: Vec::new(),
     }
 }
 
@@ -442,4 +443,25 @@ fn a_launched_course_is_reused_while_the_session_is_enrolled_in_it() {
 
     ed.remember_launch(6, 99);
     assert_eq!(Ed::open(&dir).launched_course(6), None);
+}
+
+#[test]
+fn a_courses_discussion_categories_come_from_its_enrolment() {
+    let dir = Scratch::new("ed-categories");
+    let _keyd = FakeKeyd::start(&dir, |header, _| match header["path"].as_str() {
+        Some("/api/user") if header["op"] == "forward" => (
+            json!({"status": 200, "headers": []}),
+            br#"{"user":{"name":"Ada"},"courses":[
+                {"course":{"id":11,"code":"CS 101","settings":{"discussion":{"categories":[
+                    {"name":"General","subcategories":[]},{"name":"Assignments"}]}}}},
+                {"course":{"id":12,"code":"CS 102"}}]}"#
+                .to_vec(),
+        ),
+        Some(_) => (json!({"status": 200, "headers": []}), b"{}".to_vec()),
+        None => (json!({}), vec![]),
+    });
+    let ed = Ed::open(&dir);
+    assert_eq!(ed.discussion_categories(11), ["General", "Assignments"]);
+    assert!(ed.discussion_categories(12).is_empty());
+    assert!(ed.discussion_categories(13).is_empty());
 }

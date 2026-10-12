@@ -11,6 +11,7 @@ import { SANITIZE_SCHEMA } from "@/lib/markdown/sanitizeSchema";
 import { rehypeMaths, useMathsReady } from "@/lib/maths";
 import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { readCourseFile } from "@/lib/files/courseFiles";
+import { stripFrontmatter } from "@/lib/markdown/frontmatter";
 import { loadPagesRecord } from "@/lib/citations";
 import { layoutTop } from "@/lib/citations/locateQuote";
 import { blockAnchorPlugins, refOfElement } from "@/lib/pdf/blockAnchors";
@@ -79,11 +80,12 @@ export const FileMarkdown = memo(function FileMarkdown({
     setContent(null);
     setErr(null);
     let live = true;
+    // Front matter on a scraped thread or lesson is data for its list, not page text.
     const load: Promise<Content> = parsed
       ? loadPagesRecord(relPath, true).then(async (record) =>
           record ? { doc: buildBlockDoc(record) } : { text: await readCourseFile(relPath) },
         )
-      : readCourseFile(relPath).then((text) => ({ text }));
+      : readCourseFile(relPath).then((text) => ({ text: stripFrontmatter(text) }));
     load.then((value) => live && setContent(value)).catch((e) => live && setErr(String(e)));
     return () => {
       live = false;

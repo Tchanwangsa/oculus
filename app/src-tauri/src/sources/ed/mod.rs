@@ -12,28 +12,37 @@
 mod client;
 mod courses;
 mod document;
+mod front;
 mod lesson_md;
 mod lessons;
 mod live;
 mod lti;
+mod palette;
 mod region;
 mod render;
 mod threads;
+pub mod views;
 mod workspace;
 
 #[cfg(test)]
 mod lesson_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod thread_tests;
 
 use std::sync::Mutex;
 
 use crate::providers::credentials::Credentialed;
 
 pub use document::document_md;
-pub use lesson_md::{lesson_md, lesson_url, sorted_slides, LinkedFile, SlideExtras};
+pub use lesson_md::{
+    lesson_index_md, lesson_url, slide_md, slide_url, sorted_slides, LessonPlace, LinkedFile,
+    SlideExtras, SlideFile,
+};
 pub use lessons::LessonList;
 pub use live::open_live_workspace;
+pub use threads::{thread_url, Board};
 pub use workspace::{unpack as unpack_workspace, WorkspaceFile};
 
 /// Ed's API base for `data_dir`: what a launch landed on (`institution.json`),
@@ -66,6 +75,8 @@ struct EdCourse {
     code: String,
     year: String,
     session: String,
+    /// Top-level Discussion category names, in Ed's order (their colours).
+    categories: Vec<String>,
 }
 
 pub struct Ed {

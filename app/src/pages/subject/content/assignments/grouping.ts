@@ -1,6 +1,5 @@
 import { humanizeSlug } from "@/lib/format/format";
 import type { DbFile } from "@/lib/db";
-import { displayLocale } from "@/lib/format/locale";
 
 export interface TaskDoc {
   file: DbFile;
@@ -57,14 +56,4 @@ export function parseTaskDoc(md: string, file: DbFile): TaskDoc {
     submitted: /^\*\*Status:\*\* (submitted|graded)\s*$/m.test(md),
     points: /^\*\*Points:\*\* (.+?)\s*$/m.exec(md)?.[1] ?? null,
   };
-}
-
-export function fmtDue(d: Date): string {
-  return d.toLocaleString(displayLocale, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }

@@ -1,8 +1,10 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Globe } from "@phosphor-icons/react";
+import { ArrowSquareOut, Globe } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { isWebUrl, openExternal } from "@/lib/browser";
+import { edThreadId, isEdUrl } from "@/lib/ed/links";
+import { markEdViewed } from "@/lib/ed/views";
 import {
   DocumentControls,
   SUGGEST_IDLE,
@@ -14,6 +16,8 @@ import {
 import { FileViewer, PdfMdToggle, usePdfMd } from "@/components/files/FileViewer";
 import { MarkdownUnavailable } from "@/components/files/ParseState";
 import { SubjectCrumbs, fileCrumbTab } from "@/components/subjects/SubjectCrumbs";
+import { LessonView } from "@/components/lessons/LessonView";
+import { useLessonIndex } from "@/hooks/data/useLessonIndex";
 import { useSubjectFiles } from "@/hooks/data/useSubjectFiles";
 import {
   filePagePath,
@@ -75,6 +79,9 @@ export default function SubjectFilePage() {
 
   const pdf = usePdfMd(file);
   const isDocument = file?.category === "document";
+  // An Ed lesson whose index lists its slides opens as the lesson view.
+  const lesson = useLessonIndex(file);
+  const isLessonView = !!lesson.index && lesson.index.slides.length > 0;
 
   // A cited page is in the PDF: the Markdown face gives way to it.
   const { setViewMode } = pdf;
@@ -114,6 +121,11 @@ export default function SubjectFilePage() {
   useEffect(() => {
     if (fileId != null) recordFileAccess({ id: fileId, subject_id: fileSubjectId });
   }, [fileId, fileSubjectId]);
+  // Opening an Ed thread here counts as reading it in Ed.
+  const threadId = edThreadId(file?.source_url);
+  useEffect(() => {
+    if (threadId != null) markEdViewed("thread", threadId);
+  }, [threadId]);
 
   if (!Number.isFinite(id) || !relPath) return <Navigate to="/subjects" replace />;
 
@@ -160,18 +172,19 @@ export default function SubjectFilePage() {
             <MarkdownUnavailable file={file} openSeq={parseDetails} />
           ))
         )}
-        {/* A synced page is our markdown of a Canvas page; this opens the
-            original, embeds and styling included, in a browser tab. */}
-        {!isDocument && isWebUrl(file.source_url) && (
+        {/* A synced page is our markdown of a Canvas page or an Ed thread;
+            this opens the original, embeds and styling included, in a
+            browser tab. The lesson view has its own, for the shown slide. */}
+        {!isDocument && !isLessonView && isWebUrl(file.source_url) && (
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label="Open in browser"
-            title="Open in browser"
+            aria-label={isEdUrl(file.source_url) ? "Open in Ed" : "Open in browser"}
+            title={isEdUrl(file.source_url) ? "Open in Ed" : "Open in browser"}
             onClick={(e) => void openExternal(file.source_url!, e.metaKey)}
             className="shrink-0 text-muted-foreground hover:text-foreground"
           >
-            <Globe size={14} />
+            {isEdUrl(file.source_url) ? <ArrowSquareOut size={14} /> : <Globe size={14} />}
           </Button>
         )}
       </PaneHeaderRow>
@@ -192,6 +205,15 @@ export default function SubjectFilePage() {
               actions={documentActions}
             />
           </Suspense>
+        ) : isLessonView && lesson.index ? (
+          <LessonView
+            file={file}
+            index={lesson.index}
+            files={files}
+            title={lesson.index.title ?? fileTitle(file)}
+          />
+        ) : !lesson.checked ? (
+          <LoadingFill />
         ) : (
           /* In-document links open the linked file beside this page. */
           <FileViewer

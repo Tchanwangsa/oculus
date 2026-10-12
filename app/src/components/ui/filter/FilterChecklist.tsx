@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FilterRow } from "./FilterPopover";
@@ -8,6 +8,8 @@ export interface FilterOption {
   label: string;
   /** Rows it holds, drawn to the right. */
   count?: number;
+  /** A small glyph before the label, as the rows draw the value. */
+  icon?: ReactNode;
 }
 
 /** Past this many options the checklist gets its own search field. */
@@ -72,6 +74,7 @@ export function FilterChecklist({
             className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-foreground transition-colors hover:bg-accent"
           >
             <Checkbox checked={selected.has(o.value)} onCheckedChange={() => toggle(o.value)} />
+            {o.icon && <span className="flex size-3.5 shrink-0 items-center justify-center">{o.icon}</span>}
             <span className="min-w-0 flex-1 truncate">{o.label}</span>
             {o.count !== undefined && (
               <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">

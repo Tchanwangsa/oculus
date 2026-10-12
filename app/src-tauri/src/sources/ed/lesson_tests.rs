@@ -1,10 +1,16 @@
-//! Ed Lessons: ordering, the lesson renderer, the workspace zip and its calls.
+//! Ed Lessons: ordering, the index and slide renderers, the workspace zip and
+//! its calls.
 //! The fixtures are trimmed answers from the live API.
 
-use super::lesson_md::{lesson_md, lesson_url, sorted_slides, LinkedFile, SlideExtras};
+use super::lesson_md::{
+    lesson_index_md, lesson_url, slide_md, slide_url, sorted_slides, LessonPlace, LinkedFile,
+    SlideExtras, SlideFile,
+};
 use super::lessons::{order_lessons, workspace_host};
+use super::threads::thread_url;
 use super::workspace::{unpack, MAX_ENTRY_BYTES};
 use super::Ed;
+use crate::sync::slug;
 use crate::test_support::{FakeKeyd, Scratch};
 use serde_json::{json, Value};
 
@@ -65,13 +71,88 @@ fn slides_go_by_index_then_id() {
     assert_eq!(ids, [8, 7, 9, 4]);
 }
 
-#[test]
-fn the_fixture_lesson_renders_every_slide_type() {
+const STEM: &str = "lessons/120619-assignment-2";
+
+/// Where the fixture lesson goes, linked to Ed's `au` region unless `region`
+/// says otherwise.
+fn place<'a>(stem: &'a str, region: Option<&'a str>) -> LessonPlace<'a> {
+    LessonPlace {
+        stem,
+        course_id: 38775,
+        lesson_id: 120619,
+        module: Some("Assignments"),
+        order: 4,
+        region,
+    }
+}
+
+/// The lesson's slide files as the sync lays them out under `stem`, each
+/// with its entry from `extras`.
+fn files_of<'a>(
+    lesson: &'a Value,
+    stem: &str,
+    mut extras: HashMap<i64, SlideExtras>,
+) -> Vec<SlideFile<'a>> {
+    sorted_slides(lesson)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, slide)| {
+            let id = slide["id"].as_i64()?;
+            Some(SlideFile {
+                slide,
+                id,
+                index: i + 1,
+                stem: format!(
+                    "{stem}/{:02}-{}",
+                    i + 1,
+                    slug(slide["title"].as_str().unwrap_or(""))
+                ),
+                extras: extras.remove(&id).unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+/// Every slide file of `lesson`, one after the other, with no Ed links.
+fn slides_md(lesson: &Value, extras: HashMap<i64, SlideExtras>) -> String {
+    let place = place("lessons/1-l", None);
+    files_of(lesson, place.stem, extras)
+        .iter()
+        .filter_map(|f| slide_md(lesson, &place, f))
+        .collect()
+}
+
+/// Front matter read the way the frontend reads it (`frontmatter.ts`):
+/// `key: <json>`, or `key:` then `  - <json>` items.
+fn front_of(md: &str) -> (serde_json::Map<String, Value>, &str) {
+    let rest = md.strip_prefix("---\n").expect("front matter");
+    let end = rest.find("\n---\n").expect("closing fence");
+    let mut map = serde_json::Map::new();
+    let mut list: Option<String> = None;
+    for line in rest[..end].lines() {
+        if let (Some(item), Some(key)) = (line.strip_prefix("  - "), &list) {
+            let item: Value = serde_json::from_str(item).expect(line);
+            map[key.as_str()].as_array_mut().unwrap().push(item);
+            continue;
+        }
+        let (key, value) = line.split_once(':').expect(line);
+        if value.is_empty() {
+            map.insert(key.into(), json!([]));
+            list = Some(key.into());
+        } else {
+            map.insert(key.into(), serde_json::from_str(value.trim()).expect(line));
+            list = None;
+        }
+    }
+    (map, &rest[end + "\n---\n".len()..])
+}
+
+fn fixture_extras() -> HashMap<i64, SlideExtras> {
     let mut extras = HashMap::new();
     extras.insert(
         739598,
         SlideExtras {
-            pdf: Some("lessons/120619-assignment-2/01-week-7-sockets.pdf".into()),
+            pdf: Some(format!("{STEM}/01-week-7-sockets.pdf")),
             ..SlideExtras::default()
         },
     );
@@ -80,7 +161,7 @@ fn the_fixture_lesson_renders_every_slide_type() {
         SlideExtras {
             files: vec![LinkedFile {
                 path: "q1a.py".into(),
-                rel: "lessons/120619-assignment-2/03-q1a-tutorial-dfa/q1a.py".into(),
+                rel: format!("{STEM}/03-q1a-tutorial-dfa/q1a.py"),
                 text: Some("dfa = DFA(\n    states={'q0'},\n)\n".into()),
             }],
             ..SlideExtras::default()
@@ -100,68 +181,190 @@ fn the_fixture_lesson_renders_every_slide_type() {
             ..SlideExtras::default()
         },
     );
-    let url = lesson_url("au", 38775, 120619);
-    let md = lesson_md(&lesson(), Some(&url), Some("Assignments"), &extras);
+    extras
+}
+
+#[test]
+fn the_index_lists_every_slide_in_its_front_matter_and_links_them() {
+    let l = lesson();
+    let place = place(STEM, Some("au"));
+    let files = files_of(&l, STEM, fixture_extras());
+    let md = lesson_index_md(&l, &place, &files);
+    let (front, body) = front_of(&md);
+
+    assert_eq!(front["ed_lesson_id"], 120619);
+    assert_eq!(front["title"], "Assignment 2");
+    assert_eq!(front["lesson_type"], "general");
+    assert_eq!(front["module"], "Assignments");
+    assert_eq!(front["order"], 4);
+    assert_eq!(front["state"], "scheduled");
+    assert_eq!(front["available_at"], "2026-10-05T10:00:00+11:00");
+    assert_eq!(front["due_at"], "2026-10-19T23:59:00+11:00");
+    assert_eq!(front["locks_at"], Value::Null);
+    assert_eq!(
+        front["url"],
+        "https://edstem.org/au/courses/38775/lessons/120619"
+    );
+    let slides = front["slides"].as_array().unwrap();
+    assert_eq!(slides.len(), 8);
+    // In index order: pdf (2) < document (2, larger id) < code (4) < …
+    assert_eq!(
+        slides[0],
+        json!({"id": 739598, "title": "Week 7 - Sockets", "type": "pdf", "status": "unseen",
+               "file": null,
+               "pdf": "120619-assignment-2/01-week-7-sockets.pdf",
+               "url": "https://edstem.org/au/courses/38775/lessons/120619/slides/739598"})
+    );
+    assert_eq!(slides[1]["id"], 831114);
+    assert_eq!(
+        slides[1]["file"],
+        "120619-assignment-2/02-q1-tutorial-3-marks.md"
+    );
+    assert_eq!(slides[1]["pdf"], Value::Null);
+    assert_eq!(slides[1]["status"], "seen");
+    let kinds: Vec<&str> = slides.iter().map(|s| s["type"].as_str().unwrap()).collect();
+    assert_eq!(
+        kinds,
+        ["pdf", "document", "code", "html", "jupyter", "webpage", "video", "quiz"]
+    );
+    // Every line of the encoding is one JSON value: no YAML forms beyond it.
+    assert!(
+        md.contains("\nslides:\n  - {\"id\":739598,\"title\":"),
+        "{md}"
+    );
 
     assert!(
-        md.starts_with("# Assignment 2\n\n**Module:** Assignments  \n"),
-        "{md}"
+        body.starts_with(
+            "# Assignment 2\n\n**Module:** Assignments  \n\
+             **Available:** 2026-10-05 10:00 · **Due:** 2026-10-19 23:59  \n\
+             [Open in Ed](https://edstem.org/au/courses/38775/lessons/120619)\n\n\
+             1. [Week 7 - Sockets](120619-assignment-2/01-week-7-sockets.pdf) · pdf\n\
+             2. [Q1: Tutorial \\[3 marks\\]](120619-assignment-2/02-q1-tutorial-3-marks.md) · document\n"
+        ),
+        "{body}"
     );
     assert!(
-        md.contains("**Available:** 2026-10-05 10:00 · **Due:** 2026-10-19 23:59  \n"),
-        "{md}"
+        body.ends_with(
+            "8. [W1.9.1: gdb - Crosswords Quiz \\[Homework\\]](120619-assignment-2/08-w1-9-1-gdb-crosswords-quiz-homework.md) · quiz\n"
+        ),
+        "{body}"
     );
+    assert!(!body.contains("**Locks:**"), "an unset date is left out");
+    assert!(!body.contains("The player starts"), "no slide content");
+}
+
+#[test]
+fn a_pdf_slide_has_no_file_and_the_index_links_its_pdf() {
+    // `<NN>-<slug>.md` beside the PDF is where the parser writes its text.
+    let l = lesson();
+    let place = place(STEM, Some("au"));
+    let files = files_of(&l, STEM, fixture_extras());
+    assert!(!files[0].has_file());
+    assert_eq!(slide_md(&l, &place, &files[0]), None);
+
+    // Not downloaded: the index links Ed's copy and says why.
+    let mut extras = HashMap::new();
+    extras.insert(
+        739598,
+        SlideExtras {
+            note: Some("The PDF was not downloaded.".into()),
+            ..SlideExtras::default()
+        },
+    );
+    let files = files_of(&l, STEM, extras);
+    let md = lesson_index_md(&l, &place, &files);
+    let (front, body) = front_of(&md);
+    assert_eq!(front["slides"][0]["file"], Value::Null);
+    assert_eq!(front["slides"][0]["pdf"], Value::Null);
     assert!(
-        !md.contains("**Locks:**"),
-        "an unset date is left out: {md}"
+        body.contains("1. [Week 7 - Sockets](https://static.edusercontent.com/files/czEebPI1jIf5vRtDZrV0f3Zt) · pdf · _The PDF was not downloaded._\n"),
+        "{body}"
     );
-    assert!(md.contains("[Open in Ed](https://edstem.org/au/courses/38775/lessons/120619)"));
+}
+
+#[test]
+fn a_slide_file_is_its_front_matter_title_and_content() {
+    let l = lesson();
+    let place = place(STEM, Some("au"));
+    let files = files_of(&l, STEM, fixture_extras());
+    assert_eq!(
+        slide_md(&l, &place, &files[5]).unwrap(),
+        "---\n\
+         ed_slide_id: 563686\n\
+         ed_lesson_id: 120619\n\
+         lesson: \"Assignment 2\"\n\
+         title: \"Lecture 18 Missed Segment\"\n\
+         type: \"webpage\"\n\
+         status: \"completed\"\n\
+         index: 6\n\
+         pdf: null\n\
+         url: \"https://edstem.org/au/courses/38775/lessons/120619/slides/563686\"\n\
+         ---\n\
+         # Lecture 18 Missed Segment\n\n\
+         [Lecture 18 Missed Segment](https://echo360.net.au/media/57d34ab4-6eeb-41cd-bb8d-08f47ea8f441/public)\n"
+    );
+}
+
+#[test]
+fn the_fixture_lesson_renders_every_slide_type() {
+    let l = lesson();
+    let place = place(STEM, Some("au"));
+    let files = files_of(&l, STEM, fixture_extras());
+    let md = |id: i64| {
+        let file = files.iter().find(|f| f.id == id).unwrap();
+        slide_md(&l, &place, file).unwrap()
+    };
+
     // document
-    assert!(
-        md.contains("## Q1: Tutorial [3 marks]\n\nThe player starts"),
-        "{md}"
-    );
-    assert!(md.contains("![](https://static.au.edusercontent.com/files/Sv7OzG2sHzY0oggSqIfjiPfM)"));
-    // pdf, linked from the lesson's folder
-    assert!(
-        md.contains("[Week 7 - Sockets (PDF)](120619-assignment-2/01-week-7-sockets.pdf)"),
-        "{md}"
-    );
-    // code: the brief, the file list, the file inline
-    assert!(md.contains("Fill in the given scaffold"), "{md}");
-    assert!(
-        md.contains("- [q1a.py](120619-assignment-2/03-q1a-tutorial-dfa/q1a.py)"),
-        "{md}"
+    let doc = md(831114);
+    let (front, body) = front_of(&doc);
+    assert_eq!(front["index"], 2);
+    assert_eq!(front["type"], "document");
+    assert_eq!(front["status"], "seen");
+    assert_eq!(front["pdf"], Value::Null);
+    assert_eq!(
+        front["url"],
+        "https://edstem.org/au/courses/38775/lessons/120619/slides/831114"
     );
     assert!(
-        md.contains("```python\ndfa = DFA(\n    states={'q0'},\n)\n```"),
-        "{md}"
+        body.starts_with("# Q1: Tutorial [3 marks]\n\nThe player starts"),
+        "{body}"
+    );
+    assert!(
+        body.contains("![](https://static.au.edusercontent.com/files/Sv7OzG2sHzY0oggSqIfjiPfM)")
+    );
+    // code: the brief, the file list beside the slide, the file inline
+    let code = md(831115);
+    assert!(code.contains("Fill in the given scaffold"), "{code}");
+    assert!(
+        code.contains("- [q1a.py](./03-q1a-tutorial-dfa/q1a.py)"),
+        "{code}"
+    );
+    assert!(
+        code.contains("```python\ndfa = DFA(\n    states={'q0'},\n)\n```"),
+        "{code}"
     );
     // video, webpage
-    assert!(md.contains("[▶ W1.3: Introduction to gdb \\[Solution Video\\]](https://www.youtube.com/watch?v=1s5bXPqEcIE)"), "{md}");
-    assert!(md.contains("[Lecture 18 Missed Segment](https://echo360.net.au/media/"));
+    assert!(md(499766).contains("[▶ W1.3: Introduction to gdb \\[Solution Video\\]](https://www.youtube.com/watch?v=1s5bXPqEcIE)"));
+    assert!(md(563686).contains("[Lecture 18 Missed Segment](https://echo360.net.au/media/"));
     // html, through the page converter
-    assert!(md.contains("\n### Week 2 Workshop\n"), "{md}");
-    assert!(!md.contains("MathJax"), "{md}");
+    let html = md(499794);
+    assert!(html.contains("\n### Week 2 Workshop\n"), "{html}");
+    assert!(!html.contains("MathJax"), "{html}");
     // quiz
+    let quiz = md(499780);
     assert!(
-        md.contains("\n### 9.1. gdb - Crosswords - Questions\n"),
-        "{md}"
+        quiz.contains("\n### 9.1. gdb - Crosswords - Questions\n"),
+        "{quiz}"
     );
-    assert!(md.contains("### Question 1"), "{md}");
+    assert!(quiz.contains("### Question 1"), "{quiz}");
     // jupyter with no files: the note
     assert!(
-        md.contains("## Text Processing & BoW\n\n_The challenge's files could not be fetched._"),
-        "{md}"
+        md(582857)
+            .contains("# Text Processing & BoW\n\n_The challenge's files could not be fetched._"),
+        "{}",
+        md(582857)
     );
-
-    // In index order: pdf (2) < document (2, larger id) < code (4) < …
-    let at = |s: &str| md.find(s).unwrap();
-    assert!(at("## Week 7 - Sockets") < at("## Q1: Tutorial"));
-    assert!(at("## Q1: Tutorial") < at("## Q1a: Tutorial DFA"));
-    assert!(at("## Tutorial Questions") < at("## Text Processing"));
-    assert!(at("## Lecture 18") < at("## W1.3"));
-    assert!(at("## W1.3") < at("## W1.9.1"));
 }
 
 #[test]
@@ -176,7 +379,7 @@ fn a_released_quiz_shows_its_answers_collapsed() {
             ..SlideExtras::default()
         },
     );
-    let md = lesson_md(&quiz, None, None, &extras);
+    let md = slides_md(&quiz, extras);
 
     assert!(md.contains("- [ ] Yes, the solved crossword was found.\n- [ ] No, the program terminated incorrectly."), "{md}");
     assert!(
@@ -208,7 +411,7 @@ fn a_short_answer_solution_may_be_text() {
             ..SlideExtras::default()
         },
     );
-    let md = lesson_md(&quiz, None, None, &extras);
+    let md = slides_md(&quiz, extras);
     assert!(md.contains("**Answers:**\n\n- 4\n- four"), "{md}");
     assert!(!md.contains("- [ ]"), "{md}");
 }
@@ -231,10 +434,10 @@ fn unknown_slides_say_so_and_links_are_percent_encoded() {
             ..SlideExtras::default()
         },
     );
-    let md = lesson_md(&l, None, None, &extras);
+    let md = slides_md(&l, extras);
     assert!(md.contains("_Unsupported Ed slide type surprise._"), "{md}");
     assert!(
-        md.contains("- [my (draft).py](1-l/02-b/my%20%28draft%29.py)"),
+        md.contains("- [my (draft).py](./02-b/my%20%28draft%29.py)"),
         "{md}"
     );
 }
@@ -247,19 +450,18 @@ fn a_slides_own_headings_sit_below_its_title() {
         {"id": 2, "type": "html", "title": "Sheet", "index": 1,
             "html": "<html><body><h1>Week 2</h1><h2>Part A</h2></body></html>"}
     ]));
-    let md = lesson_md(&l, None, None, &HashMap::new());
+    let md = slides_md(&l, HashMap::new());
     let headings: Vec<&str> = md.lines().filter(|l| l.starts_with('#')).collect();
     assert_eq!(
         headings,
         [
-            "# L",
-            "## Intro",
+            "# Intro",
             "### Fireboy",
             "#### Submission",
             "###### Fine print",
             "# not a heading",
             "## nor this",
-            "## Sheet",
+            "# Sheet",
             "### Week 2",
             "#### Part A",
         ],
@@ -269,6 +471,18 @@ fn a_slides_own_headings_sit_below_its_title() {
         md.contains("```\n# not a heading\n## nor this\n```"),
         "{md}"
     );
+}
+
+#[test]
+fn an_untitled_slide_is_named_by_its_position() {
+    let l = lesson_of(json!([{"id": 1, "type": "document", "title": " ", "index": 0}]));
+    let place = place("lessons/1-l", None);
+    let files = files_of(&l, place.stem, HashMap::new());
+    assert_eq!(files[0].stem, "lessons/1-l/01-untitled");
+    let md = slide_md(&l, &place, &files[0]).unwrap();
+    let (front, body) = front_of(&md);
+    assert_eq!(front["title"], "Slide 1");
+    assert!(body.starts_with("# Slide 1\n"), "{body}");
 }
 
 fn zip_of(entries: &[(&str, Option<&[u8]>)]) -> Vec<u8> {
@@ -424,12 +638,31 @@ fn lessons_and_questions_are_plain_reads() {
 }
 
 #[test]
-fn the_workspace_host_and_lesson_link_follow_eds_region() {
+fn the_workspace_host_and_web_links_follow_eds_region() {
     assert_eq!(workspace_host("us"), "sahara.us.edstem.org");
     assert_eq!(
         lesson_url("us", 1, 2),
         "https://edstem.org/us/courses/1/lessons/2"
     );
-    let md = lesson_md(&json!({"id": 2, "title": "L"}), None, None, &HashMap::new());
+    assert_eq!(
+        slide_url("us", 1, 2, 3),
+        "https://edstem.org/us/courses/1/lessons/2/slides/3"
+    );
+    assert_eq!(
+        thread_url("us", 1, 4),
+        "https://edstem.org/us/courses/1/discussion/4"
+    );
+
+    // An unknown region: no link in the body, `null` in the front matter.
+    let l = lesson_of(json!([{"id": 9, "type": "document", "title": "A", "index": 0}]));
+    let place = place("lessons/1-l", None);
+    let files = files_of(&l, place.stem, HashMap::new());
+    let md = lesson_index_md(&l, &place, &files);
     assert!(!md.contains("Open in Ed"), "{md}");
+    let (front, _) = front_of(&md);
+    assert_eq!(front["url"], Value::Null);
+    assert_eq!(front["slides"][0]["url"], Value::Null);
+    let md = slide_md(&l, &place, &files[0]).unwrap();
+    let (front, _) = front_of(&md);
+    assert_eq!(front["url"], Value::Null);
 }

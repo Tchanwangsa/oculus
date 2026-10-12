@@ -1,10 +1,9 @@
-//! Phase: the subject's Ed Lessons, one `lessons/<id>-<slug>.md` per lesson
-//! with its PDFs and challenge workspaces in `lessons/<id>-<slug>/`.
-
-use std::collections::HashMap;
+//! Phase: the subject's Ed Lessons, an index `lessons/<id>-<slug>.md` per
+//! lesson with a file per slide (a PDF slide is its PDF), its PDFs and its
+//! challenge workspaces in `lessons/<id>-<slug>/`.
 
 use crate::library::paths;
-use crate::sources::ed::{self, LinkedFile, SlideExtras};
+use crate::sources::ed::{self, LessonPlace, LinkedFile, SlideExtras, SlideFile};
 use crate::sync::render::{rel_within_course, slug};
 use crate::sync::{Engine, FileEvent, FileFailed, FileStart, Progress, Subject};
 
@@ -38,7 +37,7 @@ impl Engine {
                 continue;
             };
             let module = list.module_name(listing["module_id"].as_i64());
-            if let Err(e) = self.scrape_lesson(c, course_id, id, module) {
+            if let Err(e) = self.scrape_lesson(c, course_id, id, module, i) {
                 self.reporter
                     .log("warning", &c.code, &format!("ed lesson {title}: {e}"));
             }
@@ -46,21 +45,33 @@ impl Engine {
         Ok(())
     }
 
+    /// The lesson's slide files, then its index. Every slide is fetched
+    /// before anything is written, so a cancelled sync leaves the last whole
+    /// lesson in place.
     fn scrape_lesson(
         &self,
         c: &Subject,
         course_id: i64,
         lesson_id: i64,
         module: Option<&str>,
+        order: usize,
     ) -> Result<(), String> {
         let lesson = self.ed.lesson(lesson_id)?;
         let title = lesson["title"].as_str().unwrap_or("Lesson");
         // The id leads, so a renamed lesson keeps its prefix.
         let stem = format!("lessons/{lesson_id}-{}", slug(title));
+        let region = self.ed.region();
+        let place = LessonPlace {
+            stem: &stem,
+            course_id,
+            lesson_id,
+            module,
+            order,
+            region: region.as_deref(),
+        };
 
-        let mut extras = HashMap::new();
+        let mut slides = Vec::new();
         for (i, slide) in ed::sorted_slides(&lesson).into_iter().enumerate() {
-            // A half-fetched lesson is not written over the last whole one.
             if self.reporter.cancelled() {
                 return Ok(());
             }
@@ -69,7 +80,7 @@ impl Engine {
             };
             let slide_title = slide["title"].as_str().unwrap_or("");
             let slide_stem = format!("{stem}/{:02}-{}", i + 1, slug(slide_title));
-            let extra = match slide["type"].as_str().unwrap_or("") {
+            let extras = match slide["type"].as_str().unwrap_or("") {
                 "pdf" => self.lesson_pdf(c, slide, slide_id, &slide_stem),
                 "quiz" => self.lesson_quiz(c, slide_id, slide_title),
                 "code" | "jupyter" => match slide["challenge_id"].as_i64() {
@@ -80,15 +91,24 @@ impl Engine {
                 },
                 _ => SlideExtras::default(),
             };
-            extras.insert(slide_id, extra);
+            slides.push(SlideFile {
+                slide,
+                id: slide_id,
+                index: i + 1,
+                stem: slide_stem,
+                extras,
+            });
         }
 
-        let url = self
-            .ed
-            .region()
-            .map(|region| ed::lesson_url(&region, course_id, lesson_id));
-        let md = ed::lesson_md(&lesson, url.as_deref(), module, &extras);
-        self.write_from(c, &format!("{stem}.md"), md.as_bytes(), None, url)?;
+        for slide in &slides {
+            let Some(md) = ed::slide_md(&lesson, &place, slide) else {
+                continue;
+            };
+            let path = format!("{}.md", slide.stem);
+            self.write_from(c, &path, md.as_bytes(), None, place.slide_url(slide.id))?;
+        }
+        let md = ed::lesson_index_md(&lesson, &place, &slides);
+        self.write_from(c, &format!("{stem}.md"), md.as_bytes(), None, place.url())?;
         Ok(())
     }
 

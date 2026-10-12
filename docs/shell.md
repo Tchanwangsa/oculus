@@ -79,11 +79,18 @@ before leaving a playing lecture.
   `useSubject()` lie. Downloads and Media split the `file` rows: Media lists the
   videos (`isVideoFile`), Downloads everything else, so no file shows twice; the
   student's own videos stay in Uploads. Lessons
-  (`app/src/pages/subject/content/LessonsPage.tsx`) lists only the lesson docs,
-  `lessons/<id>-<slug>.md`, of the `lessons` rows. A lesson's PDFs and
-  challenge files share the category but sit in its folder: they open from its
-  links, open and title like downloads (`isLessonAsset` in
-  `app/src/lib/files/fileTypes.ts`), and stay out of the tab's never-opened count.
+  (`app/src/pages/subject/content/LessonsPage.tsx`) lists only the lesson
+  indexes, `lessons/<id>-<slug>.md` (`isLessonDoc` in `app/src/lib/ed/lessons.ts`),
+  under their Ed modules in Ed's order; a row is the lesson type's glyph, the
+  title, the due date and the slides completed (`3/8`, a tick when all are).
+  A row opens the lesson full page in its own pane, not beside the list,
+  since the lesson view brings its own slide sidebar.
+  Files without front matter sit in a last Other group, newest first. A
+  lesson's slides, PDFs and challenge files share the category but sit in its
+  folder: they open from the lesson view ([viewers.md](./viewers.md#an-ed-lesson-opens-as-its-slides))
+  or its links, PDFs and challenge files open and title like downloads
+  (`isLessonAsset` in `app/src/lib/files/fileTypes.ts`), and none counts toward
+  the tab's never-opened count.
 - **`/subjects` is a redirect, not a page** (`SubjectsRedirect`): it replaces
   itself with the Overview of the last subject `SubjectLayout` resolved
   (`localStorage`, `oculus-last-subject`), else the first current subject,

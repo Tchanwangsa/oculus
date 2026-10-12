@@ -138,9 +138,10 @@ themes are opt-in and keep the same structure.
 - **Row lists use `ListCard` as a flat divided stack**, without a card border
   around the rows. A page adds a card only when the content itself calls for one.
 - **Filters are pills over popovers** (`FilterPopover`, brand-tinted while
-  narrowing); a multi-select is a `FilterChecklist`, and the applied values sit
-  under the toolbar as `FilterChips` — one line that scrolls with faded edges,
-  never wraps.
+  narrowing); a multi-select is a `FilterChecklist` (an option may carry the
+  glyph its rows draw, before the label, with the count on the right), and the
+  applied values sit under the toolbar as `FilterChips` — one line that scrolls
+  with faded edges, never wraps.
 - **Settings, subjects and Chat share one nav column**, `SideNav`: a 208px column
   on the window's `background` beside the page, a pinned header, rows with a
   16px icon and the active row filled, never an underline strip, and

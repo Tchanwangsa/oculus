@@ -103,6 +103,17 @@ export function sameDay(a: Date, b: Date): boolean {
   );
 }
 
+/** A deadline: "Thu 4 Sept, 11:59 pm". */
+export function fmtDue(d: Date): string {
+  return d.toLocaleString(displayLocale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 /** "12 Aug". */
 export function fmtShortDate(d: Date): string {
   return d.toLocaleDateString(displayLocale, { day: "numeric", month: "short" });

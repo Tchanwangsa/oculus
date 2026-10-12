@@ -10,7 +10,7 @@ library files; the rest of the frontend has its own pages:
 | [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, window shortcuts, ⌘F, search |
 | [ui.md](./ui.md) | The design rules, and the WebKit and CSS traps |
 | [studio-page.md](./studio-page.md) | The Studio page: New video, a video's thread and player, the Videos grid |
-| [viewers.md](./viewers.md) | Markdown, PDFs, the media player (lectures and library videos) and the in-app browser |
+| [viewers.md](./viewers.md) | Markdown, PDFs, an Ed lesson's slides, the media player (lectures and library videos) and the in-app browser |
 | [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |
 | [editor-maths.md](./editor-maths.md) | Maths in the note editor: the visual field, the toolbox, shorthands |
 
@@ -23,6 +23,8 @@ library files; the rest of the frontend has its own pages:
 | Backend events → SQLite and stores | `app/src/hooks/backend/useBackendEvents.ts`, `app/src/hooks/backend/useEvents.ts`, `app/src/lib/pipeline/parseStatusWriter.ts`, `app/src/lib/db/connection.ts` |
 | Files tab: uploads and documents | `app/src/pages/subject/files/FilesPage.tsx`, `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src-tauri/src/library/files/commands.rs` |
 | Subject file rows and category icons | `app/src/components/files/DownloadRow.tsx`, `app/src/pages/subject/files/DocumentsPage.tsx` |
+| Ed board, keyword search and filters | `app/src/pages/subject/content/DiscussionPage.tsx`, `app/src/pages/subject/content/discussion/`, `app/src/lib/ed/threads.ts` |
+| Ed lessons under their modules; the lesson index reader | `app/src/pages/subject/content/LessonsPage.tsx`, `app/src/pages/subject/content/lessons/`, `app/src/lib/ed/lessons.ts` |
 | Weekly lecture groups and collapsible Canvas modules | `app/src/pages/subject/content/LecturesPage.tsx`, `app/src/components/lectures/LectureRow.tsx`, `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/pages/subject/content/modules/` |
 | Tasks section (`/projects`, `/tasks`) | `app/src/components/projects/`, `app/src/pages/work/TasksPage.tsx`, `app/src/lib/planning/projects/`, `app/src/stores/planning/projectsStore.ts` |
 | Chat | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/chat/harnessStore.ts` |
@@ -72,7 +74,42 @@ missing recordings do not imply a break. Undated recordings stay in their own
 group. File glyphs use
 the `reference-*` tokens: PDFs red, Office documents blue, notes purple,
 spreadsheets teal, and lecture videos pink. Search remains in the subject
-sidebar rather than being duplicated above each list.
+sidebar rather than being duplicated above each list, except the Ed board's
+thread-specific search.
+
+The Ed board uses aligned thread, category, answer status, posted date and
+activity columns, in rows the height of the lecture list's. Numbers belong to
+the title (`#46: Question 4 A2`); titles come from the scraped heading, with the
+filename as a fallback. Narrow panes fold category and answer status into the
+title cell and hide activity. Each value draws one glyph wherever it appears, in
+the row and in its filter's options (`discussion/ThreadIcons.tsx`): a Phosphor
+icon per thread type, a filled tick for answered and a hollow circle for
+unanswered questions, and Ed's own colour square before a category (muted when
+the colour is unknown). A row with an Ed link shows *Open in Ed* on hover
+(⌘ opens the system browser); a thread's file page offers the same in its
+header, decided by the `source_url` host (`isEdUrl`, `app/src/lib/ed/links.ts`).
+
+`parseEdThread` reads a thread's JSON front matter (number, type, answered,
+category path, category colour, URL) and falls back to the
+`**#46 · question · …**` meta line for files scraped before it; the parser is
+`app/src/lib/markdown/frontmatter.ts`, which only takes a block whose every line
+is a key with a JSON value, so a page opening with a `---` rule stays whole.
+`FileMarkdown` strips the front matter before rendering a library file.
+
+Its keyword search reads the whole synced Markdown thread, including replies;
+every whitespace-separated keyword must match, regardless of case or order.
+While searching, keywords are marked in each title, and a line under it shows
+the post or reply prose where one first occurs (`matchSnippet`), marked too.
+Type, question answer status and exact category-path filters combine, with
+multiple selections within each filter matching any selected value. Answer
+status filters apply only to questions; older scrapes without a status remain
+unknown. Search runs over the metadata loader's cached reads, so typing makes
+no network calls or file reads.
+
+A file row's recency slot (`FileRecency`) shows an indigo dot and *NEW* while
+the file has never been opened (new, or rewritten by a sync before then), the
+dot alone once it changed since it was last opened, and otherwise its
+last-opened time.
 
 ## Backend events are the write path
 

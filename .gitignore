@@ -17,9 +17,7 @@ Thumbs.db
 .env.local
 
 # Data / knowledge base (user-generated, not committed)
-data/
-# The vendored katex fork's build script reads these tables.
-!app/math-core/katex/data/
+/data/
 *.db
 
 # ffmpeg sidecar (fetched by app/scripts/fetch-ffmpeg.mjs)

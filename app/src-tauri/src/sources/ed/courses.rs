@@ -24,6 +24,7 @@ impl Ed {
                             code: c["code"].as_str().unwrap_or("").to_string(),
                             year: c["year"].as_str().unwrap_or("").to_string(),
                             session: c["session"].as_str().unwrap_or("").to_string(),
+                            categories: category_names(c),
                         })
                     })
                     .collect()
@@ -31,6 +32,16 @@ impl Ed {
             .unwrap_or_default();
         *guard = Some(list.clone());
         Ok(list)
+    }
+
+    /// The names of a course's top-level Discussion categories in Ed's order,
+    /// as its `/api/user` enrolment lists them; empty when Ed sent none.
+    pub fn discussion_categories(&self, course_id: i64) -> Vec<String> {
+        self.courses()
+            .ok()
+            .and_then(|cs| cs.into_iter().find(|c| c.id == course_id))
+            .map(|c| c.categories)
+            .unwrap_or_default()
     }
 
     /// The Ed course matching a Canvas course code. Ed codes are staff-typed
@@ -85,6 +96,16 @@ impl Ed {
             elog!("[oculus] could not save {}: {e}", target.display());
         }
     }
+}
+
+/// `course.settings.discussion.categories[*].name`, in order.
+fn category_names(course: &serde_json::Value) -> Vec<String> {
+    course["settings"]["discussion"]["categories"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| c["name"].as_str().unwrap_or("").to_string())
+        .collect()
 }
 
 /// Canvas course id → the Ed course its launch landed on.
