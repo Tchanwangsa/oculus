@@ -67,7 +67,8 @@ impl Theme {
             path: path.to_path_buf(),
             message,
         };
-        let tokens: Value = serde_json::from_str(json).map_err(|e| fail(e.to_string()))?;
+        let mut tokens: Value = serde_json::from_str(json).map_err(|e| fail(e.to_string()))?;
+        schema::fill_defaults(&mut tokens);
         let checked = schema::check(&tokens).map_err(fail)?;
         Ok(Theme {
             tokens,

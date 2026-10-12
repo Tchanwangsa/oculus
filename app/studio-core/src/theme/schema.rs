@@ -1,7 +1,7 @@
 //! The theme file's shape. Sections are open maps of named tokens, but the
 //! section names and each token's shape are fixed.
 
-use crate::fonts::bundled_families;
+use crate::fonts::{MONO_FAMILY, bundled_families};
 use crate::project::MAX_PAUSE;
 use crate::scene::{Color, Style};
 use crate::transition::{MotionSpec, TransitionSpec};
@@ -27,6 +27,9 @@ struct ThemeFile {
 struct Fonts {
     heading: String,
     body: String,
+    /// Optional in a file: `fill_defaults` supplies it first, so a theme
+    /// written before the monospace face existed still loads.
+    mono: String,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +81,29 @@ fn default_pause() -> f64 {
     DEFAULT_PAUSE
 }
 
+/// Adds the tokens a theme written before they existed lacks, so components
+/// can always read `theme.font.mono` and `theme.type.code`. Called on the
+/// parsed file before `check`, so the filled values are validated too.
+pub fn fill_defaults(tokens: &mut Value) {
+    let Some(root) = tokens.as_object_mut() else {
+        return;
+    };
+    if let Some(font) = root.get_mut("font").and_then(Value::as_object_mut) {
+        font.entry("mono").or_insert_with(|| MONO_FAMILY.into());
+    }
+    if let Some(types) = root.get_mut("type").and_then(Value::as_object_mut) {
+        types.entry("code").or_insert_with(|| {
+            serde_json::json!({
+                "fontFamily": MONO_FAMILY,
+                "fontSize": 28,
+                "fontWeight": 400,
+                "lineHeight": 1.5,
+                "letterSpacing": 0
+            })
+        });
+    }
+}
+
 /// Type-scale entries are style fragments, spread into `style`.
 const TYPE_KEYS: &[&str] = &[
     "fontFamily",
@@ -112,6 +138,7 @@ pub fn check(tokens: &Value) -> Result<Checked, String> {
     };
     font_ok(&file.font.heading, "font.heading")?;
     font_ok(&file.font.body, "font.body")?;
+    font_ok(&file.font.mono, "font.mono")?;
     for (name, entry) in &file.type_scale {
         for k in entry.keys() {
             if !TYPE_KEYS.contains(&k.as_str()) {

@@ -39,7 +39,9 @@ video's slug as `DIR`; `oculus studio <command> --help` has the full flags.
   "scenes": [
     { "id": "title", "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 3 },
     { "id": "factor", "component": "FactorTwelve", "props": { "narrated": true } },
-    { "id": "dots", "component": "DotGrid", "props": { "n": 12, "cols": [4, 6], "at": [2.2] },
+    { "id": "sorts", "component": "Bars",
+      "props": { "labels": ["\\text{bubble}", "\\text{insertion}", "\\text{merge}"],
+                 "values": [500, 250, 9], "diff": [0, 2], "diffLabel": "\\times 55", "diffAt": 2.2 },
       "transition": { "kind": "push", "direction": "left" } }
   ]
 }
@@ -256,13 +258,19 @@ Colours are `#rgb`, `#rrggbb` or `#rrggbbaa`, always read from the theme.
 - `color`: `bg`, `surface`, `surfaceAlt`, `text`, `muted`, `faint`,
   `border`, `accent`, `accentStrong`, `accentSoft`, `onAccent`, `ink`,
   `onInk`, `shadow`, `positive`, `warning`, `negative`.
-- `type`: `display`, `h1`, `h2`, `h3`, `body`, `label`, `caption`, each a
-  style fragment to spread: `{ ...type.h1, color: color.text }`. Sizes in
-  the bundled themes, in px on the 1920x1080 frame: `display` 104, `h1` 72,
-  `h2` 52, `h3` 38, `body` 32, `label` 24, `caption` 22.
+- `type`: `display`, `h1`, `h2`, `h3`, `body`, `label`, `caption`, `code`,
+  each a style fragment to spread: `{ ...type.h1, color: color.text }`.
+  Sizes in the bundled themes, in px on the 1920x1080 frame: `display` 104,
+  `h1` 72, `h2` 52, `h3` 38, `body` 32, `label` 24, `caption` 22, `code`
+  28 (monospace).
 - `space`: `xxs` 4, `xs` 8, `s` 16, `m` 24, `l` 40, `xl` 64, `xxl` 112.
 - `radius`: `s` 8, `m` 16, `l` 28, `xl` 44, `pill` 999.
-- `font`: `heading` (Manrope), `body` (Inter). No other fonts exist.
+- `font`: `heading` (Manrope), `body` (Inter), `mono` (JetBrains Mono). No
+  other fonts exist. Mono is for code only: set it with `font.mono` or
+  `type.code` in a `Code`-named component, never for numbers (they take
+  `fontVariantNumeric: "tabular-nums"`). Lint notes `monospace outside
+  code` otherwise. A theme without `font.mono` or `type.code` gets the
+  bundled values.
 - `motion`: `duration` (`fast`, `base`, `slow`, `stagger`), `easing`
   (`standard`, `enter`, `exit`), `spring` (`gentle`, `snappy`, `bouncy`).
 
@@ -787,8 +795,10 @@ Each issue has a level:
 - `error`: lint exits 1. Fix every one; "lint until no errors" is the bar.
 - `warning`: how the scene looks over time (below). Lint still passes; fix
   it, or know why the scene wants it.
-- `note`: a word the aligner was unsure of, or a word Kokoro guessed. Check
-  each as "Pronunciation" says.
+- `note`: a word the aligner was unsure of, or a word Kokoro guessed (check
+  each as "Pronunciation" says), or a component that reads `font.mono` or
+  `type.code` without `Code` at the start or end of its name ("monospace
+  outside code": use the body face, and `tabular-nums` for numbers).
 
 Text output prints errors one a line in full; several warnings or notes of
 one kind in a scene share a line with a count and the first three.
@@ -817,6 +827,7 @@ Warnings name the time span and the words said in it:
 | `script` | Text not in spoken form, with `say … as …` | Write the words it suggests. |
 | `script` | `[pause x]` is not a pause, or longer than 5 seconds | Write `[pause]` or `[pause <seconds>]`. |
 | `component` | A colour, font or spacing literal (`colour #5e6ad2 is a literal; use theme.color.accent`) | Use the token it names. |
+| `component` (note) | "theme.font.mono is used outside a Code component" | Mono is for code; use `theme.font.body` and `fontVariantNumeric: "tabular-nums"`. |
 | `component` | The component threw, or a key is on two nodes | Fix the TSX at `loc`. A bad `word()` phrase names the closest one said. |
 | `lint` | An example omits a required prop | Add it to the example, or give the prop a `.default()`. |
 | `props` | A scene's props do not match the schema | Fix the scene's props in `video.json` (path, expected, got). |
@@ -842,7 +853,7 @@ Warnings name the time span and the words said in it:
   screen (`label: "purple"`) and passes. `token(...)` and a `.default(...)`
   on it take a token's name, not a literal.
 - A font is a bundled family's name as a string, or any string after
-  `fontFamily:`.
+  `fontFamily:`; the message names `theme.font.heading`, `.body` or `.mono`.
 - A number is checked only inside a `style={{ … }}` (or `style: { … }`)
   object, as the value of a length key: `width`, `height`, `minWidth`,
   `minHeight`, `maxWidth`, `maxHeight`, `gap`, `padding`, `margin`,
@@ -1008,15 +1019,21 @@ as a helper function and a default export that demos it: read it with
 beside it) into your scene component, and call it there with times from
 `word()`. Every part is keyed under an `id` prop (default the name in the
 table), so two calls with one id in a `Steps` glide part to part, and an
-overlay can target a part (`dots/d3`) or the whole (`dots`).
+overlay can target a part (`bars/b2`) or the whole (`dots`). The default
+export of `Axes`, `Graph`, `Grid`, `Bars` and `Code` sizes itself from
+`ctx.size`, so it fits 1280x720, 1920x1080 and 1080x1920; their helpers take
+explicit `width` and `height` (`Code`: `maxWidth`, `maxHeight`), so pass your
+scene's own when you copy one. Bad input throws an error naming the prop, the
+value and what is allowed.
 
 | Primitive | Helper props | What it draws |
 | --- | --- | --- |
 | `NumberLine` | `from`, `to`, `step`, `labelEvery`, `width`, `at`, `dur`, `points: [{ value, name, at, moves: [[t, v]], color }]`, `span: { from, to, at, label, color }`, `id` (`nl`) | A line that draws on with its ticks and numbers, points that pop in and glide along it, an interval drawn on as a bar |
-| `Axes` | `axes({ x: [lo, hi, step], y, width, height })` maps data to px; `<Axes ax at dur id>` (`ax`) holds `<Plot ax f from to at dur color label head key>` and `<Dot ax x y at color label guides key>` | Two axes drawn on with numbers; a function stroked on (breaking off-range), a dot riding its end, points with dashed guides |
-| `DotGrid` | `n`, `cols`, `size`, `gap`, `enter`, `each`, `tone`, `marks: [{ dots, color, at }]`, `leftover` (a colour), `caption`, `id` (`dots`) | n dots in rows, `rows × cols (+ rest)` under them; a Steps over two `cols` re-arranges them (12 as 3 × 4 then 2 × 6; 7 never fills a rectangle) |
-| `Tiles` | `a`, `b`, `width`, `height`, `at`, `each`, `times` or `step`, `grid`, `result`, `id` (`tiles`) | Euclid's gcd: the a × b rectangle tiled by the largest squares, square by square, then `\gcd(a, b) = side` |
-| `ModClock` | `n`, `walk` (residues in order), `at`, `walkAt`, `each`, `times`, `centre` (TeX per step), `radius`, `tone`, `id` (`clock`) | Residues 0 … n−1 round a circle, a walk drawn as arrows from residue to residue (2^k mod 15 closes a loop of 4), the step's label underneath |
+| `Axes` | `formula("sin(x)/x")` makes a function from text; `axes({ x: [lo, hi, step], y, origin, width, height })` maps data to px (lo < hi and step > 0, else it throws); `endLabels(ax, [{ f, label }])` gives each curve's `nudge`; `<Axes ax at dur id>` (`ax`) holds `<Plot ax f from to at dur color label head nudge key>`, `<Dot ax x y at color label guides place key>`, `<Scatter ax xs ys at each color fit fitAt key>`, `<Area ax f g from to at dur color label key>`, `<Riemann ax f from to counts at refineAt color label key>` and `<Tangent ax f x0 x1 h h1 at moveAt dur color label key>` | Two axes drawn on with numbers; curves stroked on (breaking off-range), a dot riding the end, points with dashed guides, a scatter with its least-squares line (clipped to the plot, none under two distinct x, no r² when flat) and r², a shaded area, rectangles refined count by count (a rectangle splits in place), a tangent or shrinking secant with its slope; tick decimals follow the step, and curve names are kept apart. A formula's implicit product binds like `*`: `1/2x` is `(1/2)*x`, so write `1/(2x)`. Flat props: `fns` (formula strings), `tones`, `labels`, `marks`, `px`/`py`, `fit`, `shade`, `rects`, `tangent`, `secant` |
+| `Graph` | `layout(kind, nodes, edges, { width, height, root, columns, xs, ys, pad })` gives node px; `<Graph width height nodes edges weights directed kind root columns xs ys tones at edgesAt visit visitAt visitStart each via trace path walkAt walkEach radius tone pathTone id>` (`graph`) | Nodes and edges on a `circle`, `tree`, `layers` or `manual` layout, directed edges with heads, weights, self-loops, several edges between a pair fanned out as parallel curves; a plain-text label too long for its node is wrapped and set beside it, a TeX label stays inside; `visit` recolours nodes in order and lights the edge each came by, `path` walks a marker along nodes and must follow edges. Keys `graph/n<i>`, `graph/e<a>-<b>`, `graph/here` |
+| `Grid` | `<Grid cells keys lift tones appear rowLabels colLabels brackets cell width height fitRows fitCols enter at each marks pointers id>` (`grid`); `marks: [{ kind: "row"/"col"/"cell"/"block", index, tone, at, off, moves }]`, `pointers: [{ label, side, index, at, tone }]` | A matrix, DP table, board or pixel image of TeX cells: fills, row/column/block marks that slide, pointers along a side (two on one side part to stay readable); with `keys` (unique, one per cell) a cell follows its value, so a Steps between two arrangements slides it, and a swap of exactly two cells arcs them to opposite sides (`lift`, which the demo computes). `cells` rows must all be the same length. The font follows the 80th-percentile entry width, so one long entry shrinks alone. A glide takes 0.9 s and must finish before the scene ends. Keys `grid/c<r>_<c>` (or `grid/k<key>`) |
+| `Bars` | `bars({ labels, series, to, changeAt, orientation, histogram, stacked, sort, unit, width, height, ... })` maps data to px; `<Bars ch id at barsAt each names tones line lineLabel lineAt lineTone highlight highlightAt highlightTone dim diff diffLabel diffAt>` (`bars`) | A bar chart or histogram, grouped or stacked, vertical or horizontal: nice value axis (reaches `max` at least and always the data; ticks thinned to fit, crowded category labels thinned), bars growing (stagger capped), value labels counting up, states gliding to the next (`sort` re-ranks), a reference line, a highlighted subset (`highlightTone`, `dim`), a difference arrow (`diff`: a guide and arrow in clear space). A bare `\\` in a label starts a second line. Keys `bars/b<i>`, `bars/l<i>`, `bars/v<i>` |
+| `Code` | `tokenize(lines, lang)`; `<Code lines lang keys numbers first fontSize focus caret reveal notes trace added removed diffAt marks id maxWidth maxHeight>` (`code`) | Source on a panel, every character on a fixed column grid, coloured for `python`, `javascript`, `c`, `sql` or `plain`; a focus band that dims the rest, a caret, lines revealed one by one, notes beside lines, a trace table of variable values, a diff (`marks` reserves the +/- gutter so a Steps from a diff to clean code keeps the panel size). Short code grows to 1.5x the theme's size unless `fontSize` is set. `keys` keep a line's identity across versions, so a Steps slides the lines that persist with their numbers, cross-fades a changed line and glides diff bands (`code/l<key>`). In `c` a single quote starts a char literal only (`'x'`), in `javascript` a template literal runs over lines; characters outside the bundled fonts (CJK, emoji) draw as boxes. The one starter in monospace |
 | `Table` | `header`, `rows` (TeX), `at`, `each`, `by` (`row`/`col`), `marks: [{ rows, color, at }]`, `hide`, `colWidth`, `id` (`table`) | Cells of maths revealed row by row, rows banded; a Math elsewhere keyed like a cell (`table/r1c2`) takes its glyphs, so a value lifts out of the table |
 | `TitleCard` | `title`; optional `eyebrow`, `subtitle`, `accent` | The opening card, dark. A scene on its own, the only one |
 

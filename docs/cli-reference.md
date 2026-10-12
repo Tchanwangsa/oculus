@@ -1717,9 +1717,9 @@ and the PNGs are the same at any thread count. The component is read through the
 theme the same way. `--sheet` also writes all the stills as one contact sheet, `--cols`
 a row. Stills are named `<Component>-<example>.png`.
 
-oculus studio gallery lectures/week-4 DotGrid
+oculus studio gallery lectures/week-4 Bars
 
-oculus studio gallery lectures/week-4 DotGrid --subject COMP2011 --sheet --cols 2
+oculus studio gallery lectures/week-4 Bars --subject COMP2011 --sheet --cols 2
 
 Usage: oculus studio gallery [OPTIONS] <DIR> <COMPONENT>
 

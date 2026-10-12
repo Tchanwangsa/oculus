@@ -288,7 +288,7 @@ impl Project {
 }
 
 /// The checks on a component's own source and declared props: token use
-/// (`tokens`) and required props (`props`).
+/// (`tokens`, with its monospace note) and required props (`props`).
 fn lint_source(engine: &Engine, name: &str, tsx: &str, theme: &Theme, report: &mut LintReport) {
     let colour_props: Vec<String> = engine.component(name).map_or_else(Vec::new, |info| {
         info.props
@@ -301,6 +301,17 @@ fn lint_source(engine: &Engine, name: &str, tsx: &str, theme: &Theme, report: &m
         report.issues.push(LintIssue {
             level: Level::Error,
             group: None,
+            scene: None,
+            id: None,
+            component: Some(name.to_owned()),
+            example: None,
+            error,
+        });
+    }
+    if let Some(error) = tokens::mono_note(name, tsx) {
+        report.issues.push(LintIssue {
+            level: Level::Note,
+            group: Some(("monospace outside code", name.to_owned())),
             scene: None,
             id: None,
             component: Some(name.to_owned()),

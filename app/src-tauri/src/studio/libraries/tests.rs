@@ -77,7 +77,7 @@ mod promote {
         format!("export const props = {{}};\nexport default () => <Text style={{{{ fontSize: 20 }}}}>{label}</Text>;\n")
     }
 
-    /// A video of subject `SUB` with its own `Card` and `DotGrid`, over
+    /// A video of subject `SUB` with its own `Card` and `NumberLine`, over
     /// libraries under the same root.
     fn fixture(name: &str, subject: Option<&str>) -> (Scratch, std::path::PathBuf, Library) {
         let root = Scratch::new(name);
@@ -92,7 +92,7 @@ mod promote {
         }
         std::fs::write(video.join("video.json"), json.to_string()).unwrap();
         std::fs::write(video.join("components/Card.tsx"), tsx("card one")).unwrap();
-        std::fs::write(video.join("components/DotGrid.tsx"), tsx("my dots")).unwrap();
+        std::fs::write(video.join("components/NumberLine.tsx"), tsx("my line")).unwrap();
         let library = libraries_at(&root.join("library"), &root.join("subjects"), false).unwrap();
         (root, video, library)
     }
@@ -137,8 +137,8 @@ mod promote {
 
         // Over a starter file in the global library, the starter text is kept.
         let global = root.join("library");
-        let starter = std::fs::read_to_string(global.join("components/DotGrid.tsx")).unwrap();
-        let p = promote_component(&video, "DotGrid", Target::Global, &library).unwrap();
+        let starter = std::fs::read_to_string(global.join("components/NumberLine.tsx")).unwrap();
+        let p = promote_component(&video, "NumberLine", Target::Global, &library).unwrap();
         assert_eq!(p.level, "global");
         assert_eq!(history(&global), [starter]);
     }

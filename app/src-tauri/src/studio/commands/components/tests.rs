@@ -49,7 +49,7 @@ fn the_list_has_the_nearest_level_per_name_and_marks_shells() {
     let root = Scratch::new("comp-list");
     let library = library(&root);
     write_in(&library, Level::Subject, Some("MAST1"), "Banner", BANNER).unwrap();
-    write_in(&library, Level::Subject, Some("MAST1"), "DotGrid", BANNER).unwrap();
+    write_in(&library, Level::Subject, Some("MAST1"), "Grid", BANNER).unwrap();
     // A library may still hold a shell from before the starters were
     // drawing primitives.
     write_in(
@@ -72,12 +72,13 @@ fn the_list_has_the_nearest_level_per_name_and_marks_shells() {
         names,
         [
             "Axes",
+            "Bars",
             "Broken",
-            "DotGrid",
-            "ModClock",
+            "Code",
+            "Graph",
+            "Grid",
             "NumberLine",
             "Table",
-            "Tiles",
             "TitleCard"
         ]
     );
@@ -86,9 +87,9 @@ fn the_list_has_the_nearest_level_per_name_and_marks_shells() {
     let subject = list_in(&library, Some("MAST1")).unwrap();
     let level = |name: &str| subject.iter().find(|r| r.name == name).unwrap().level;
     assert_eq!(level("Banner"), Level::Subject);
-    assert_eq!(level("DotGrid"), Level::Subject);
+    assert_eq!(level("Grid"), Level::Subject);
     assert_eq!(level("TitleCard"), Level::Global);
-    assert_eq!(subject.len(), 10);
+    assert_eq!(subject.len(), 11);
 
     let kind = |name: &str| subject.iter().find(|r| r.name == name).unwrap().kind;
     assert_eq!(kind("SplitShell"), Kind::Shell);
@@ -96,7 +97,7 @@ fn the_list_has_the_nearest_level_per_name_and_marks_shells() {
 
     let broken = subject.iter().find(|r| r.name == "Broken").unwrap();
     assert!(broken.problem.is_some() && broken.props.is_empty());
-    assert!(subject.iter().filter(|r| r.problem.is_none()).count() == 9);
+    assert!(subject.iter().filter(|r| r.problem.is_none()).count() == 10);
 }
 
 #[test]
@@ -126,12 +127,13 @@ fn the_schema_serialises_as_the_builders_wrote_it() {
     let names: Vec<_> = json["examples"].as_object().unwrap().keys().collect();
     assert_eq!(names, ["short", "long"], "declaration order");
 
-    let grid = rows.iter().find(|r| r.name == "DotGrid").unwrap();
+    let grid = rows.iter().find(|r| r.name == "Grid").unwrap();
     let json = serde_json::to_value(grid).unwrap();
     assert_eq!(
         json["props"][1],
-        json!({ "name": "cols", "kind": "list", "optional": false, "default": [4, 6],
-                "of": { "kind": "num", "optional": false } })
+        json!({ "name": "tones", "kind": "list", "optional": false, "default": [],
+                "of": { "kind": "list", "optional": false,
+                        "of": { "kind": "token", "optional": false, "token": "color" } } })
     );
 }
 
@@ -191,13 +193,13 @@ fn names_levels_and_subjects_that_reach_outside_a_library_are_refused() {
 fn the_source_comes_from_the_nearest_level() {
     let root = Scratch::new("comp-source");
     let library = library(&root);
-    let global = source_in(&library, Some("MAST1"), "DotGrid").unwrap();
+    let global = source_in(&library, Some("MAST1"), "Grid").unwrap();
     assert_eq!(global.level, Level::Global);
     assert!(global.text.contains("export default"));
-    write_in(&library, Level::Subject, Some("MAST1"), "DotGrid", BANNER).unwrap();
-    let own = source_in(&library, Some("MAST1"), "DotGrid").unwrap();
+    write_in(&library, Level::Subject, Some("MAST1"), "Grid", BANNER).unwrap();
+    let own = source_in(&library, Some("MAST1"), "Grid").unwrap();
     assert_eq!((own.level, own.text.as_str()), (Level::Subject, BANNER));
-    assert_eq!(source_in(&library, None, "DotGrid").unwrap(), global);
+    assert_eq!(source_in(&library, None, "Grid").unwrap(), global);
     let e = source_in(&library, None, "Missing").unwrap_err();
     assert!(e.contains("Missing") && e.contains("TitleCard"), "{e}");
 }
@@ -250,7 +252,7 @@ fn a_write_is_snapshotted_and_restore_can_itself_be_undone() {
     assert_eq!(again.text, edited);
 
     // Other levels, other components and made-up ids have no such snapshot.
-    assert!(history(&library, Level::Global, None, "DotGrid")
+    assert!(history(&library, Level::Global, None, "Grid")
         .unwrap()
         .is_empty());
     assert!(
@@ -287,7 +289,7 @@ fn a_starter_component_draws_at_the_width_asked() {
     let grid = FrameRequest {
         width: 1920,
         t: 0.0,
-        ..request("DotGrid")
+        ..request("Grid")
     };
     let png = frame_png(&library, grid).unwrap();
     assert_eq!(png_size(&png), (1920, 1080));

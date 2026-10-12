@@ -14,10 +14,14 @@ fn axes(bytes: &[u8]) -> Vec<(String, f32, f32)> {
 }
 
 #[test]
-fn bundled_families_are_inter_and_manrope() {
+fn bundled_families_are_inter_manrope_and_jetbrains_mono() {
     assert_eq!(
         bundled_families(),
-        vec!["Inter".to_owned(), "Manrope".to_owned()]
+        vec![
+            "Inter".to_owned(),
+            "Manrope".to_owned(),
+            "JetBrains Mono".to_owned()
+        ]
     );
 }
 
@@ -35,4 +39,12 @@ fn inter_is_variable_with_weight_and_optical_size() {
 #[test]
 fn manrope_is_variable_in_weight() {
     assert_eq!(axes(MANROPE), vec![("wght".to_owned(), 200.0, 800.0)]);
+}
+
+#[test]
+fn jetbrains_mono_is_variable_in_weight() {
+    assert_eq!(
+        axes(JETBRAINS_MONO),
+        vec![("wght".to_owned(), 100.0, 800.0)]
+    );
 }

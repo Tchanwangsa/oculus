@@ -6,7 +6,7 @@
 //! a frame takes from what the previous frame returned, and anything not
 //! reused for a frame is dropped, so the pool stays bounded.
 
-use crate::fonts::font_context;
+use crate::fonts::{MONO_FAMILY, font_context};
 use crate::scene::{NumericVariant, Style, TextAlign};
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontFamily, FontFamilyName, FontWeight, Layout,
@@ -123,8 +123,14 @@ impl Typeset {
         b.push_default(StyleProperty::LetterSpacing(f32::from_bits(
             key.letter_spacing,
         )));
-        if key.tabular {
-            b.push_default(StyleProperty::FontFeatures("\"tnum\" 1".into()));
+        let features = match (key.tabular, key.family == MONO_FAMILY) {
+            (true, true) => "\"tnum\" 1, \"calt\" 0",
+            (true, false) => "\"tnum\" 1",
+            (false, true) => "\"calt\" 0",
+            (false, false) => "",
+        };
+        if !features.is_empty() {
+            b.push_default(StyleProperty::FontFeatures(features.into()));
         }
         b.build(&key.text)
     }
