@@ -1,5 +1,6 @@
 //! Dead air: the narration plays while nothing on screen changes, and an
-//! empty frame at the opening.
+//! empty frame at the opening. A `[pause]` is a hold on purpose, so its
+//! silence does not count towards a still span.
 
 use super::super::entities::Entity;
 use super::super::limits::{OPENING, STILL};
@@ -41,7 +42,12 @@ pub(super) fn check(look: &SceneLook, shown: &[Vec<Entity>], out: &mut Vec<Warni
         }
         let (a, b) = (samples[i].t.max(lead), samples[j].t.min(end));
         let empty_opening = shown[i].is_empty() && first.is_none_or(|f| i < f);
-        if b - a > STILL && !empty_opening {
+        let paused: f64 = look
+            .pauses
+            .iter()
+            .map(|p| (p.end.min(b) - p.start.max(a)).max(0.0))
+            .sum();
+        if b - a - paused > STILL && !empty_opening {
             out.push(Warning {
                 kind: "still",
                 noun: "still span",

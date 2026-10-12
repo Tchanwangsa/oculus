@@ -20,10 +20,11 @@ impl Project {
     /// tokens and `video.json`'s `motion` (the transition cascade, morph
     /// colour and blur token), and for scene `index` and the scene before
     /// it, its spec (component, props, hold, transition, id), its narration
-    /// words as components see them, its frame count and, for a scene
-    /// without an `id`, its index (`Math.random` is seeded by component and
-    /// id, or index when there is no id; see `host::seed`). An id'd scene's
-    /// fingerprint therefore survives a move that keeps the scene before it.
+    /// words and pauses as components see them, its frame count and, for a
+    /// scene without an `id`, its index (`Math.random` is seeded by
+    /// component and id, or index when there is no id; see `host::seed`).
+    /// An id'd scene's fingerprint therefore survives a move that keeps the
+    /// scene before it.
     ///
     /// The caller adds what lives outside the folder's JSON: the contents
     /// of `components/` and `assets/`, the render settings (quality, scale,
@@ -45,14 +46,20 @@ impl Project {
         serde_json::to_vec(&canonical(Value::Object(v))).map_err(fail)
     }
 
-    /// One scene's spec, words, frame count and, without an id, index.
+    /// One scene's spec, words, pauses, frame count and, without an id,
+    /// index.
     fn scene_inputs(&self, index: usize) -> Result<Value> {
-        let words = self.narration(index)?.map(|clip| {
+        let clip = self.narration(index)?;
+        let words = clip.map(|clip| {
             let words = clip.words.iter();
             words
                 .map(|w| json!([w.text, w.start, w.end]))
                 .collect::<Vec<_>>()
         });
+        // `pause()` reads these; a scene without them keeps its bytes.
+        let pauses: Vec<Value> = clip
+            .map(|c| c.pauses.iter().map(|p| json!([p.start, p.end])).collect())
+            .unwrap_or_default();
         let frames = whole_frames(self.scene_length(index)?, self.fps());
         let spec = self.scene(index)?;
         let seeded_by_index = match spec.id {
@@ -63,6 +70,9 @@ impl Project {
         v.insert("spec".into(), to_value(spec)?);
         v.insert("index".into(), seeded_by_index);
         v.insert("words".into(), words.map_or(Value::Null, Value::from));
+        if !pauses.is_empty() {
+            v.insert("pauses".into(), pauses.into());
+        }
         v.insert("frames".into(), frames.into());
         Ok(Value::Object(v))
     }

@@ -50,3 +50,14 @@ pub(crate) fn at(words: &[CuedWord], t: f64) -> String {
         if end < words.len() { " …" } else { "" }
     )
 }
+
+/// A few words up to and including word `i`, `…` marking a cut before
+/// them; empty when there is no word `i`.
+pub(crate) fn ending(words: &[CuedWord], i: usize) -> String {
+    if i >= words.len() {
+        return String::new();
+    }
+    let from = (i + 1).saturating_sub(BEAT_WORDS);
+    let text: Vec<&str> = words[from..=i].iter().map(|w| w.text.as_str()).collect();
+    format!("\"{}{}\"", if from > 0 { "… " } else { "" }, text.join(" "))
+}

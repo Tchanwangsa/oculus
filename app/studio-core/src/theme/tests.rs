@@ -42,13 +42,28 @@ fn rejects_unknown_sections_fonts_and_missing_bg() {
 #[test]
 fn narration_tokens_are_required_and_non_negative() {
     let t = Theme::bundled("default").unwrap();
-    assert_eq!((t.narration.lead, t.narration.tail), (0.25, 0.6));
+    let n = t.narration;
+    assert_eq!((n.lead, n.tail, n.pause), (0.25, 1.0, 1.0));
     let base: Value = serde_json::from_str(BUNDLED[0].1).unwrap();
     let parse = |v: &Value| Theme::parse(&v.to_string(), Path::new("t.json"));
     let mut v = base.clone();
     v["narration"]["lead"] = (-0.1).into();
     let e = parse(&v).unwrap_err().to_string();
     assert!(e.contains("narration.lead = -0.1"), "{e}");
+    let mut v = base.clone();
+    v["narration"]["pause"] = 6.into();
+    let e = parse(&v).unwrap_err().to_string();
+    assert!(
+        e.contains("narration.pause = 6: must be more than 0 and at most 5"),
+        "{e}"
+    );
+    let mut v = base.clone();
+    v["narration"].as_object_mut().unwrap().remove("pause");
+    let older = parse(&v).unwrap();
+    assert_eq!(
+        older.narration.pause, DEFAULT_PAUSE,
+        "a theme without pause loads"
+    );
     let mut v = base;
     v.as_object_mut().unwrap().remove("narration");
     let e = parse(&v).unwrap_err().to_string();

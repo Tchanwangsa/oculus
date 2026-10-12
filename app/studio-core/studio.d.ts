@@ -523,6 +523,11 @@ declare function parallel(durations: number[], options?: { at?: number }): numbe
 declare function word(phrase: string, nth?: number): number;
 /** When the nth occurrence of `phrase` ends (its last word's end), in scene seconds. */
 declare function wordEnd(phrase: string, nth?: number): number;
+/**
+ * When the nth `[pause]` in this scene's script.md starts, in scene seconds: the narration is silent from here
+ * for the pause's length. Land a beat just before it and hold it. Throws like `word()`, and past the last pause.
+ */
+declare function pause(nth?: number): number;
 
 /** Goes to the frame's logs (`oculus studio frame` prints them), at most 200 lines a call. */
 declare const console: {
