@@ -6,7 +6,7 @@ mod common;
 
 use common::fixture;
 use serde_json::json;
-use studio_core::{LOW_CONFIDENCE, Project, StudioError};
+use studio_core::{LOW_CONFIDENCE, LintLevel, Project, StudioError};
 
 #[test]
 fn clean_projects_lint_clean() {
@@ -28,10 +28,12 @@ fn clean_projects_lint_clean() {
         let report = Project::load(fixture(name)).unwrap().lint().unwrap();
         // The renderer fixtures paint literal colours on purpose (their
         // goldens pin those pixels); the token rules are checked below.
+        // Warnings are about how a scene looks, which some fixtures
+        // stretch on purpose (a background alone).
         let other: Vec<_> = report
             .issues
             .iter()
-            .filter(|i| !common::component_rule(&i.to_string()))
+            .filter(|i| i.level == LintLevel::Error && !common::component_rule(&i.to_string()))
             .collect();
         assert!(other.is_empty(), "{name}: {report}");
     }
@@ -214,7 +216,8 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
         "scene 0 `a` (Say): script.md:2: `e.g.` is not spoken form: write `for example`, not `e.g.`",
     );
     has("script.md:7: `## outro` matches no scene");
-    has("scene 0 `a` (Say): scene `a`: the aligner is unsure of `rate` at 0.35 s");
+    has("note: scene 0 `a` (Say): scene `a`: the aligner is unsure of `rate` at 0.35 s");
+    has("warning: scene 2 `c` (Quiet): nothing is ever on screen");
     has("scene 1 `b` (Say): scene `b`: no narration for its current text");
     has(
         "scene 0 `a` (Say): scene `a`: the audio has unscripted speech after `Hello,` (heard \"um\")",
@@ -227,7 +230,21 @@ fn narration_lint_reports_the_script_confidence_and_stale_scenes() {
         text.contains("`word(\"helo\")`: no such word in scene `a`; closest: hello"),
         "{text}"
     );
-    assert_eq!(lines.len(), 8, "{text}");
+    assert_eq!(lines.len(), 9, "{text}");
+    assert_eq!(
+        report.errors(),
+        7,
+        "the note and the warning do not count: {text}"
+    );
+    let note = report
+        .issues
+        .iter()
+        .find(|i| i.level == LintLevel::Note)
+        .unwrap();
+    assert_eq!(
+        note.group,
+        Some(("unsure word", "\"rate\" 0.3 s".to_owned()))
+    );
     let orphan = report.issues.iter().find(|i| i.scene.is_none()).unwrap();
     assert_eq!(
         (orphan.id.as_deref(), orphan.component.as_deref()),

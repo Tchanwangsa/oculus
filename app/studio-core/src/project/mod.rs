@@ -17,7 +17,7 @@ mod video;
 
 pub(crate) use components::valid_name;
 pub use components::{CascadeComponents, ComponentSource, FolderComponents};
-pub use lint::{LintIssue, LintReport};
+pub use lint::{Level as LintLevel, LintIssue, LintReport};
 pub use narration::{
     CuedWord, LOW_CONFIDENCE, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene, ManifestWord,
     WordCues,

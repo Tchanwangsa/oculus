@@ -8,7 +8,9 @@ mod common;
 use common::fixture;
 use serde_json::{Map, Value, json};
 use std::path::PathBuf;
-use studio_core::{Engine, Frame, Project, RenderOptions, Renderer, SceneCall, StudioError, Time};
+use studio_core::{
+    Engine, Frame, LintLevel, Project, RenderOptions, Renderer, SceneCall, StudioError, Time,
+};
 
 /// A throwaway project: `video.json` and its components.
 fn project(name: &str, video: Value, components: &[(&str, &str)]) -> PathBuf {
@@ -188,7 +190,7 @@ fn lint(
     report
         .issues
         .iter()
-        .filter(|i| !common::component_rule(&i.to_string()))
+        .filter(|i| i.level == LintLevel::Error && !common::component_rule(&i.to_string()))
         .map(|i| (i.scene, i.error.kind().to_owned(), i.error.to_string()))
         .collect()
 }

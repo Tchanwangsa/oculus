@@ -203,7 +203,8 @@ fn a_silent_scene_needs_a_hold() {
         "{e}"
     );
     let report = p.lint().unwrap();
-    assert_eq!(report.issues.len(), 1, "{report}");
+    // Scene `a` also warns that nothing is on screen.
+    assert_eq!(report.errors(), 1, "{report}");
     assert_eq!(report.issues[0].scene, Some(1));
 }
 

@@ -6,7 +6,7 @@ use std::path::Path;
 use serde_json::json;
 use studio_core::Project;
 
-use super::storyboard::{entry, handoff, note_paths};
+use super::storyboard::{entry, handoff, note_paths, without_narration};
 use super::*;
 use crate::test_support::Scratch;
 
@@ -22,6 +22,9 @@ Carries in: nothing. Hands on: `dots` to `count`.
 ### count
 **Carries in:** `dots` from `intro`.
 **Hands on:** nothing.
+**Narration:** Fifteen is odd.
+Is it?
+
 See notes/01-a.md and (notes/02-b.md), notes/01-a.md again.
 
 ```tsx
@@ -70,6 +73,23 @@ fn handoffs_read_on_one_line_or_two_with_or_without_bold() {
         (Some("`dots` from `intro`.".into()), Some("nothing.".into()))
     );
     assert_eq!(handoff("### x\nIdea: none"), (None, None));
+}
+
+#[test]
+fn the_narration_paragraph_is_dropped_up_to_a_blank_line_table_or_heading() {
+    let entry = "### a\nIdea: x.\nNarration: One two.\nThree four.\n\nPicture: y.";
+    assert_eq!(without_narration(entry), "### a\nIdea: x.\n\nPicture: y.");
+    let table = "### a\n- **Narration**: One.\n| Said | On screen |\n| --- | --- |";
+    assert_eq!(
+        without_narration(table),
+        "### a\n| Said | On screen |\n| --- | --- |"
+    );
+    let fenced = "### a\n```\nNarration: kept\n```\nnarration: gone\n#### Beats";
+    assert_eq!(
+        without_narration(fenced),
+        "### a\n```\nNarration: kept\n```\n#### Beats"
+    );
+    assert_eq!(without_narration("Narrator: kept"), "Narrator: kept");
 }
 
 #[test]
@@ -166,6 +186,24 @@ fn a_brief_has_the_scene_its_neighbours_entry_notes_words_and_commands() {
         out.join("count-strip.png").display()
     )));
     assert!(text.contains("oculus studio gallery counting Count --sheet"));
+    assert!(
+        text.contains("\noculus studio lint counting --scene 1\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\noculus studio beats counting --scene 1\n"),
+        "{text}"
+    );
+    let middle = project.scene_length(1).unwrap() / 2.0;
+    assert!(
+        text.contains(&format!("--scene 1 --at {middle:.1} --scale 0.5")),
+        "the frame command is pasteable: {text}"
+    );
+    let entry = b.storyboard.as_deref().unwrap();
+    assert!(
+        !entry.contains("Narration") && !entry.contains("Is it?") && entry.contains("See notes/"),
+        "the word table replaces the entry's narration: {entry}"
+    );
 
     let silent = build(&project, 0, &dir, "counting");
     assert!(matches!(silent.narration, Narration::Silent { seconds } if seconds == 2.0));

@@ -29,13 +29,15 @@ pub struct Brief {
     pub dir: PathBuf,
     pub previous: Option<Neighbour>,
     pub next: Option<Neighbour>,
-    /// The scene's storyboard entry, verbatim.
+    /// The scene's storyboard entry, verbatim, less its `Narration:`
+    /// paragraph when the words are in `narration`.
     pub storyboard: Option<String>,
     /// Why there is no entry, when there is none.
     pub storyboard_missing: Option<String>,
     pub notes: Notes,
     pub narration: Narration,
-    /// The exact strip, frame and gallery calls for this scene.
+    /// The exact lint, beats, strip, frame (at the scene's middle) and
+    /// gallery calls for this scene.
     pub commands: Vec<String>,
 }
 
@@ -155,6 +157,13 @@ pub fn build(project: &Project, index: usize, dir: &Path, target: &str) -> Brief
         (None, Some(_), None) => Some("the scene has no id to find its entry by".to_owned()),
         (None, Some(_), Some(id)) => Some(format!("storyboard.md has no `### {id}` entry")),
     };
+    let narration = narration(project, index);
+    // The word table carries the words; the entry's own copy is noise then.
+    let entry = match (&narration, entry) {
+        (Narration::Spoken { .. }, Some(e)) => Some(storyboard::without_narration(&e)),
+        (_, e) => e,
+    };
+    let middle = project.scene_length(index).map_or(0.0, |l| l / 2.0);
     let label = scene.id.clone().unwrap_or_else(|| format!("scene{index}"));
     let out = dir.join("out");
     let png = |what: &str| shell_word(&out.join(format!("{label}-{what}.png")).to_string_lossy());
@@ -170,14 +179,16 @@ pub fn build(project: &Project, index: usize, dir: &Path, target: &str) -> Brief
         notes: notes(dir, entry.as_deref()),
         storyboard: entry,
         storyboard_missing,
-        narration: narration(project, index),
+        narration,
         commands: vec![
+            format!("oculus studio lint {target} --scene {index}"),
+            format!("oculus studio beats {target} --scene {index}"),
             format!(
                 "oculus studio strip {target} --scene {index} --n 16 --cols 4 -o {}",
                 png("strip")
             ),
             format!(
-                "oculus studio frame {target} --scene {index} --at <S> --scale 0.5 -o {}",
+                "oculus studio frame {target} --scene {index} --at {middle:.1} --scale 0.5 -o {}",
                 png("frame")
             ),
             format!("oculus studio gallery {target} {} --sheet", scene.component),

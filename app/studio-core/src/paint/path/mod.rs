@@ -41,7 +41,7 @@ pub fn draw(c: &mut Canvas, t: Affine, content: Rect, p: &PathSpec) {
 
 /// viewBox -> content box, scaled uniformly to fit and centred; a zero
 /// side does not constrain the scale.
-fn fit(view: Rect, into: Rect) -> Affine {
+pub(crate) fn fit(view: Rect, into: Rect) -> Affine {
     let sx = (view.width() > 0.0).then(|| into.width() / view.width());
     let sy = (view.height() > 0.0).then(|| into.height() / view.height());
     let s = match (sx, sy) {
