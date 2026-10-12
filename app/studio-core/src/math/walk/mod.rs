@@ -9,6 +9,8 @@
 //! Pieces come out in reading order: tree order, except that a vlist's
 //! rows, which KaTeX lists bottom to top, are read top to bottom (a
 //! numerator before its denominator, a root sign before its radicand).
+//! Each piece knows the scripts it sits in (`Script`), so `keys` can tell a
+//! superscript 2 from a baseline one.
 
 mod classes;
 mod css;
@@ -35,6 +37,51 @@ pub struct Piece<'a> {
     pub shape: Shape,
     /// The CSS colour KaTeX gave it (`\color`), as written.
     pub colour: Option<&'a str>,
+    pub script: Script,
+}
+
+/// The scripts around a piece, outermost first: up (a superscript, a limit
+/// above, a root's index) or down (a subscript, a limit below). A fraction
+/// is not a script: its terms stay on their level, so a numerator `a`
+/// matches a baseline `a` after both sides are multiplied out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Script {
+    /// Bit i set: level i is down.
+    down: u16,
+    depth: u8,
+}
+
+impl Script {
+    /// Deeper than this, levels are not told apart.
+    const MAX: u8 = 16;
+
+    pub fn push(self, up: bool) -> Script {
+        if self.depth >= Script::MAX {
+            return self;
+        }
+        Script {
+            down: self.down | (u16::from(!up) << self.depth),
+            depth: self.depth + 1,
+        }
+    }
+
+    /// `^` per level up and `_` per level down, outermost first: `^`, `^_`.
+    pub fn suffix(self) -> String {
+        (0..self.depth)
+            .map(|i| if self.down >> i & 1 == 0 { '^' } else { '_' })
+            .collect()
+    }
+}
+
+/// A span whose vlist holds scripts: `msupsub` (beside the base, up when
+/// the row's baseline is above the base's) or `op-limits` (above and below
+/// an operator, which is the row KaTeX wraps in a class-less span).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Holder {
+    #[default]
+    None,
+    SupSub,
+    Limits,
 }
 
 /// `\k` groups around a piece, innermost first; past four deep the
@@ -56,6 +103,9 @@ pub struct Ctx<'a> {
     pub avail: Option<f64>,
     /// The family `.delim-sizeN > span` gives this element.
     pub family: Option<Family>,
+    pub script: Script,
+    /// What the next vlist's rows are, until a row is entered.
+    pub holder: Holder,
 }
 
 /// An element laid out: its advance and what it draws, relative to its
@@ -97,6 +147,8 @@ pub fn walk(root: &DomSpan) -> Result<(Formula, Vec<Piece<'_>>), String> {
         groups: [None; 4],
         avail: None,
         family: None,
+        script: Script::default(),
+        holder: Holder::None,
     };
     let laid = span(root, cx)?;
     let formula = Formula {
@@ -149,6 +201,20 @@ fn inside<'a>(s: &'a DomSpan, cx: Ctx<'a>) -> Ctx<'a> {
         },
         avail: cx.avail,
         family: classes::child_family(&s.classes),
+        script: if s.classes.contains("katex-root") {
+            cx.script.push(true)
+        } else {
+            cx.script
+        },
+        holder: if s.classes.contains("msupsub") {
+            Holder::SupSub
+        } else if s.classes.contains("op-limits") {
+            Holder::Limits
+        } else if s.classes.contains("vlist-t") {
+            cx.holder
+        } else {
+            Holder::None
+        },
     }
 }
 

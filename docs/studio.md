@@ -638,9 +638,18 @@ own maths), so a formula looks as it does in the app. `display` (default
   Box.
 - **Keys** make a `<Morph>` between two formulas move term by term, as
   manim's TransformMatchingTex does. Every piece is keyed `<prefix>/<term>`.
-  A term is its character and, from its second appearance, `#n` (`x`,
-  `x#2`; KaTeX's minus is `−`), `frac` for a fraction bar, `sqrt` for a
-  root sign, a box side `box`, and KaTeX's path name for other SVG.
+  A term is its label: its character (KaTeX's minus is `−`), `frac` for a
+  fraction bar, `sqrt` for a root sign, a box side `box`, and KaTeX's path
+  name for other SVG; then `^` or `_` for each script it sits in,
+  outermost first (a superscript, a limit above an operator and a root's
+  index are `^`; a subscript and a limit below are `_`); then, from the
+  term's second appearance, `#n`. So `x^2 - 5x` is `x`, `2^`, `−`, `5`,
+  `x#2`, and `x_{i_0}` ends in `0__`: the exponent of `x^2` never flies
+  into the `2` of `(x - 2)`, and the nth baseline `x` meets the nth.
+  Fraction terms keep their level (no mark), so a numerator `a` meets a
+  baseline `a` when both sides are multiplied out. A script's key is not
+  covered by its base's as an overlay target (`eq/4^` is not under
+  `eq/4`).
   `\k{name}{…}` (a macro over `\htmlData{k=name}`, with trust on) names a
   group: its pieces are `name`, `name.1`, `name.2`, … in reading order, the
   innermost group winning. Reading order is the tree's, with each vlist
@@ -916,8 +925,11 @@ between their two targets' boxes.
   least 1.6 em wide) along `side` (`below`, the default, `above`, `left`,
   `right`), 0.12 em off, its thickness 0.548 of its em (`size`, default
   the target's), text-coloured. It grows from its centre with `progress`
-  and its label (a string, set as `theme.type.body`, or an element) fades
-  in over the second half, 0.15 em beyond it.
+  and its label fades in over the second half, 0.15 em beyond it. A
+  string label is `theme.type.body` text scaled about its centre to 0.7 of
+  the target's em, as manim's brace labels sit beside their formula (it is
+  laid out before the em is known, so `overlay/draw.rs` scales it); an
+  element label keeps its own size.
 - `<Surround target pad radius width color>`: a rounded rectangle 0.2 em
   out with 0.12 em corners, stroked 0.045 em in the accent, drawn on
   clockwise from its top left.

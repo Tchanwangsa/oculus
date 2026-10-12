@@ -231,6 +231,7 @@ fn paths<'a>(
                 out.push(Piece {
                     label: label.to_owned(),
                     groups: cx.groups,
+                    script: cx.script,
                     rect: clip,
                     shape: Shape::Path {
                         d: clamp(&d, t, clip),
@@ -263,6 +264,7 @@ fn paths<'a>(
                 out.push(Piece {
                     label: "cancel".to_owned(),
                     groups: cx.groups,
+                    script: cx.script,
                     rect: clip,
                     shape: Shape::Path {
                         d,

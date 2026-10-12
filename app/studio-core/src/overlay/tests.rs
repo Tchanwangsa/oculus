@@ -86,9 +86,14 @@ fn a_brace_sits_under_its_target_with_its_label_below() {
     assert!(brace.y0 > eq.y1, "{brace:?} under {eq:?}");
     assert!((brace.center().x - eq.center().x).abs() < 0.5);
     assert!((brace.width() - eq.width()).abs() < 1.0, "{brace:?} {eq:?}");
-    let label = b.children[1].rect;
-    assert!(label.y0 > brace.y1);
-    assert!((label.center().x - eq.center().x).abs() < 0.5);
+    let label = &b.children[1];
+    assert!(label.rect.y0 > brace.y1);
+    assert!((label.rect.center().x - eq.center().x).abs() < 0.5);
+    // A string label is set at 0.7 of the formula's em (40 px text, maths
+    // 1.21 times that), scaled from the body size it was laid out at.
+    let body = f64::from(label.style.font_size.unwrap());
+    let k = f64::from(label.style.scale.unwrap());
+    assert!((k * body - 0.7 * 40.0 * 1.21).abs() < 0.01, "{}", k * body);
 }
 
 #[test]

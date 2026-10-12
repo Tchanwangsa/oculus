@@ -2,7 +2,8 @@
 //! the overlay's parent space. Defaults scale with the target's em (a
 //! Math's size, `targets::em`): a brace KaTeX's thickness at that size and
 //! 0.12 em off, a Surround 0.2 em out with 0.12 em corners, an Underline
-//! 0.1 em below; strokes 0.045 em. Brace grows from its centre and its
+//! 0.1 em below; strokes 0.045 em; a string label 0.7 em, as manim's brace
+//! labels sit beside their formula. Brace grows from its centre and its
 //! label fades in over the second half; Surround, Underline and Arrow draw on.
 
 use super::arrow::{Look, arrow, edge};
@@ -47,11 +48,15 @@ pub fn overlay(
     }
     let width = |em: f64| spec.width.unwrap_or(0.045 * em);
     let mut shapes: Vec<LNode> = Vec::new();
-    let mut label_at: Option<(Rect, Side)> = None;
+    let mut label_at: Option<(Rect, Side, Option<f64>)> = None;
     let mut label_alpha = 1.0;
     match &spec.kind {
         OverlayKind::Brace {
-            side, gap, size, ..
+            side,
+            gap,
+            size,
+            label_em,
+            ..
         } => {
             let em = size.unwrap_or(m.em);
             let gap = gap.unwrap_or(0.12 * m.em);
@@ -61,7 +66,8 @@ pub fn overlay(
             if k < 1.0 {
                 node.style.scale = Some(k);
             }
-            label_at = Some((node.rect.inflate(0.15 * m.em, 0.15 * m.em), *side));
+            let around = node.rect.inflate(0.15 * m.em, 0.15 * m.em);
+            label_at = Some((around, *side, label_em.map(|k| k * m.em)));
             label_alpha = in_out_cubic(((m.progress as f32 - 0.4) / 0.6).clamp(0.0, 1.0));
             shapes.push(node);
         }
@@ -104,13 +110,14 @@ pub fn overlay(
     if m.alpha < 1.0 {
         n.style.opacity = Some(n.style.opacity() * m.alpha as f32);
     }
-    if let Some((around, side)) = label_at {
-        place_label(&mut n.children, around, side, label_alpha);
-    }
+    let label = match label_at {
+        Some((around, side, px)) => place_label(&mut n.children, around, side, label_alpha, px),
+        None => n.children.iter().map(|c| c.rect).reduce(|a, b| a.union(b)),
+    };
     let bounds = shapes
         .iter()
-        .chain(n.children.iter())
         .map(|c| c.rect)
+        .chain(label)
         .reduce(|a, b| a.union(b));
     n.children.splice(0..0, shapes);
     if let Some(r) = bounds {
@@ -299,25 +306,45 @@ fn path_node(d: BezPath, fill: Option<Fill>, stroke: Option<StrokeSpec>) -> LNod
 }
 
 /// Moves the label (the overlay's own children) beside `around` on `side`
-/// and fades it to `alpha`.
-fn place_label(kids: &mut [LNode], around: Rect, side: Side, alpha: f32) {
-    let Some(r) = kids.iter().map(|c| c.rect).reduce(|a, b| a.union(b)) else {
-        return;
+/// and fades it to `alpha`. A string label (one Text) is scaled about its
+/// centre to `px` font size; it was laid out before the target's em was
+/// known. Returns the label's drawn box.
+fn place_label(
+    kids: &mut [LNode],
+    around: Rect,
+    side: Side,
+    alpha: f32,
+    px: Option<f64>,
+) -> Option<Rect> {
+    let r = kids.iter().map(|c| c.rect).reduce(|a, b| a.union(b))?;
+    let k = match (px, &*kids) {
+        (Some(px), [only]) if only.kind == Kind::Text => only
+            .style
+            .font_size
+            .filter(|f| *f > 0.0)
+            .map_or(1.0, |f| px / f64::from(f)),
+        _ => 1.0,
     };
+    let size = r.size() * k;
     let c = around.center();
     let at = match side {
-        Side::Below => Point::new(c.x - r.width() / 2.0, around.y1),
-        Side::Above => Point::new(c.x - r.width() / 2.0, around.y0 - r.height()),
-        Side::Left => Point::new(around.x0 - r.width(), c.y - r.height() / 2.0),
-        Side::Right => Point::new(around.x1, c.y - r.height() / 2.0),
+        Side::Below => Point::new(c.x - size.width / 2.0, around.y1),
+        Side::Above => Point::new(c.x - size.width / 2.0, around.y0 - size.height),
+        Side::Left => Point::new(around.x0 - size.width, c.y - size.height / 2.0),
+        Side::Right => Point::new(around.x1, c.y - size.height / 2.0),
     };
-    let d = at - r.origin();
-    for k in kids.iter_mut() {
-        shift(k, d);
+    let shown = Rect::from_origin_size(at, size);
+    let d = shown.center() - r.center();
+    for kid in kids.iter_mut() {
+        shift(kid, d);
+        if k != 1.0 {
+            kid.style.scale = Some(kid.style.scale.unwrap_or(1.0) * k as f32);
+        }
         if alpha < 1.0 {
-            k.style.opacity = Some(k.style.opacity() * alpha);
+            kid.style.opacity = Some(kid.style.opacity() * alpha);
         }
     }
+    Some(shown)
 }
 
 fn shift(n: &mut LNode, d: Vec2) {
