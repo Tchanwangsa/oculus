@@ -443,9 +443,11 @@ manifest. Scenes run one at a time, in video order.
 - **The TTS server** is OpenAI-compatible (Kokoro-FastAPI, mlx-audio):
   `POST <base>/v1/audio/speech` with `{ model, input, voice,
   response_format: "wav", speed }`, one request per clip, no timeout
-  (`studio::tts`). The base URL is accepted with or without a trailing
-  `/v1`, normalised once. Keyless servers only: no API key is sent. A
-  non-2xx answer fails with its status and a short excerpt of the body; a
+  (`studio::tts`). `narrate` asks for clips through the `Speaker` trait
+  (`ready`, `speak`), whose `ServerSpeaker` is this client; the server
+  has no readiness check of its own. The base URL is accepted with or
+  without a trailing `/v1`, normalised once. Keyless servers only: no API
+  key is sent. A non-2xx answer fails with its status and a short excerpt of the body; a
   429 is retried with back-off (1, 2, 4, 8 s; five tries). A 200 whose body
   is empty, is not a WAV, or is digitally silent (see "Input" above) is a
   failure, never a pause: Kokoro answers an unknown voice with 200 and
@@ -1304,8 +1306,9 @@ manifest, no audio) pins a card entering at its word. In the app crate, `cargo t
 against a loopback fake server (WAV, empty, non-WAV, silent, 404, 429),
 the `/v1/models` listing (parsing, 404, non-JSON, unreachable), the Settings
 row's validation (`studio::commands`),
-the voice resolution, the cache key and `narrate` with a stubbed aligner
-(caching, one-paragraph edits, per-scene writes, pruning, failures).
+the voice resolution, the cache key and `narrate` with a stubbed speaker
+and aligner (caching, one-paragraph edits, per-scene writes, pruning,
+failures).
 `cargo test --lib studio::render` covers the render plan, segment keys and
 tree hashes, the audio placement, the reorder buffer and pruning, and,
 through the real ffmpeg (skipped without one), the join and cache check

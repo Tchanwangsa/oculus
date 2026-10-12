@@ -4,7 +4,7 @@
 
 use crate::*;
 use app_lib::studio::libraries;
-use app_lib::studio::narrate::{self, ModelAligner, Outcome, Progress, SceneReport};
+use app_lib::studio::narrate::{self, ModelAligner, Outcome, Progress, SceneReport, ServerSpeaker};
 use app_lib::studio::tts;
 use app_lib::studio::voice::{self, Voice, VoiceOverrides};
 use studio_core::{Project, LOW_CONFIDENCE};
@@ -43,6 +43,7 @@ impl Ctx {
             &args.dir,
             &library,
             &voice,
+            &ServerSpeaker(&voice),
             &ModelAligner,
             &options,
             &mut |p| {

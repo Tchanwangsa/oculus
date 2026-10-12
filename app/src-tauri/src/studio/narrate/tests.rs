@@ -1,13 +1,14 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 
 use serde_json::json;
 
 use super::*;
+use crate::studio::audio::decode_wav;
 use crate::studio::libraries::libraries_at;
 use crate::studio::test_wav::tone;
 use crate::studio::timing::{Gap, WordTime};
-use crate::test_support::{FakeServer, Reply, Scratch};
+use crate::test_support::Scratch;
 
 /// Words spread evenly over the clip; `Cauchy` comes out unsure, and a
 /// script starting `Um` gets a gap before its first word.
@@ -62,21 +63,50 @@ impl Aligner for Stub {
     }
 }
 
-/// A TTS server whose clip lasts 0.1 s per word of input; an input with
-/// `broken` in it gets a 500.
-fn tts() -> FakeServer {
-    FakeServer::start(|hit| {
-        let input = hit.json()["input"].as_str().unwrap_or("").to_owned();
-        if input.contains("broken") {
-            return Reply::status(500, json!({ "detail": "engine exploded" }));
-        }
-        Reply::bytes(tone(0.1 * input.split_whitespace().count() as f64))
-    })
+/// A clip of 0.1 s per word of text; a text with `broken` in it fails.
+/// `texts` is every text it was asked to speak, in order.
+struct FakeSpeaker {
+    ready: bool,
+    texts: RefCell<Vec<String>>,
 }
 
-fn voice(server: &FakeServer) -> Voice {
+impl FakeSpeaker {
+    fn new() -> Self {
+        Self {
+            ready: true,
+            texts: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn spoken(&self) -> Vec<String> {
+        self.texts.borrow().clone()
+    }
+}
+
+impl Speaker for FakeSpeaker {
+    fn ready(&self) -> Result<(), String> {
+        if self.ready {
+            Ok(())
+        } else {
+            Err("the voice is not downloaded".into())
+        }
+    }
+
+    fn speak(&self, text: &str) -> Result<Speech, String> {
+        self.texts.borrow_mut().push(text.to_owned());
+        if text.contains("broken") {
+            return Err("the speaker failed: engine exploded".into());
+        }
+        let wav = tone(0.1 * text.split_whitespace().count() as f64);
+        let decoded = decode_wav(&wav).map_err(String::from)?;
+        Ok(Speech { wav, decoded })
+    }
+}
+
+/// The voice clips are keyed on; the fake speaker ignores it.
+fn voice() -> Voice {
     Voice {
-        base_url: server.origin(),
+        base_url: "http://127.0.0.1:8880".into(),
         model: "kokoro".into(),
         voice: "af_heart".into(),
         speed: 1.0,
@@ -103,11 +133,12 @@ fn video(dir: &Path, script: &str) {
 
 const SCRIPT: &str = "## a\nWe follow the gradient.\n\n## b\nOne small step at a time.\n";
 
-fn run(dir: &Path, server: &FakeServer, aligner: &dyn Aligner, options: &Options) -> Report {
+fn run(dir: &Path, speaker: &FakeSpeaker, aligner: &dyn Aligner, options: &Options) -> Report {
     narrate(
         dir,
         &Library::default(),
-        &voice(server),
+        &voice(),
+        speaker,
         aligner,
         options,
         &mut |_| {},
@@ -131,14 +162,14 @@ fn outcomes(report: &Report) -> Vec<(&str, Outcome)> {
 fn narrates_each_scene_then_keeps_the_cached_clips() {
     let dir = Scratch::new("narrate-cache");
     video(&dir, SCRIPT);
-    let server = tts();
+    let speaker = FakeSpeaker::new();
     let stub = Stub::new();
-    let report = run(&dir, &server, &stub, &Options::default());
+    let report = run(&dir, &speaker, &stub, &Options::default());
     assert_eq!(
         outcomes(&report),
         [("a", Outcome::Narrated), ("b", Outcome::Narrated)]
     );
-    assert_eq!(server.hits().len(), 2);
+    assert_eq!(speaker.spoken().len(), 2);
 
     let m = manifest(&dir);
     let a = &m.scenes["a"];
@@ -149,7 +180,7 @@ fn narrates_each_scene_then_keeps_the_cached_clips() {
     assert_eq!(
         std::fs::read(dir.join("narration").join(&a.audio)).unwrap(),
         tone(0.4),
-        "the server's bytes as sent"
+        "the speaker's bytes as sent"
     );
     let project = studio_core::Project::load(&*dir).unwrap();
     assert!(
@@ -157,19 +188,19 @@ fn narrates_each_scene_then_keeps_the_cached_clips() {
         "studio-core reads it"
     );
 
-    let again = run(&dir, &server, &stub, &Options::default());
+    let again = run(&dir, &speaker, &stub, &Options::default());
     assert_eq!(
         outcomes(&again),
         [("a", Outcome::Cached), ("b", Outcome::Cached)]
     );
-    assert_eq!(server.hits().len(), 2, "nothing requested");
+    assert_eq!(speaker.spoken().len(), 2, "nothing requested");
     assert_eq!(stub.calls.get(), 2);
     assert_eq!(again.scenes[1].words, 6);
     assert_eq!(manifest(&dir), m);
 
     let forced = run(
         &dir,
-        &server,
+        &speaker,
         &stub,
         &Options {
             scene: Some("b".into()),
@@ -177,30 +208,30 @@ fn narrates_each_scene_then_keeps_the_cached_clips() {
         },
     );
     assert_eq!(outcomes(&forced), [("b", Outcome::Narrated)]);
-    assert_eq!(server.hits().len(), 3);
+    assert_eq!(speaker.spoken().len(), 3);
 }
 
 #[test]
 fn editing_one_paragraph_renarrates_that_scene_only() {
     let dir = Scratch::new("narrate-edit");
     video(&dir, SCRIPT);
-    let server = tts();
+    let speaker = FakeSpeaker::new();
     let stub = Stub::new();
-    run(&dir, &server, &stub, &Options::default());
+    run(&dir, &speaker, &stub, &Options::default());
     let before = manifest(&dir);
 
     video(
         &dir,
         "## a\nWe follow the gradient.\n\n## b\nOne smaller step at a time.\n",
     );
-    let report = run(&dir, &server, &stub, &Options::default());
+    let report = run(&dir, &speaker, &stub, &Options::default());
     assert_eq!(
         outcomes(&report),
         [("a", Outcome::Cached), ("b", Outcome::Narrated)]
     );
-    let hits = server.hits();
-    assert_eq!(hits.len(), 3);
-    assert_eq!(hits[2].json()["input"], "One smaller step at a time.");
+    let spoken = speaker.spoken();
+    assert_eq!(spoken.len(), 3);
+    assert_eq!(spoken[2], "One smaller step at a time.");
     let after = manifest(&dir);
     assert_eq!(after.scenes["a"], before.scenes["a"]);
     assert_ne!(after.scenes["b"].key, before.scenes["b"].key);
@@ -218,12 +249,13 @@ fn a_failure_keeps_the_scenes_before_it() {
         &dir,
         "## a\nWe follow the gradient.\n\n## b\nThis one is broken.\n",
     );
-    let server = tts();
+    let speaker = FakeSpeaker::new();
     let mut seen_before_b = None;
     let error = narrate(
         &dir,
         &Library::default(),
-        &voice(&server),
+        &voice(),
+        &speaker,
         &Stub::new(),
         &Options::default(),
         &mut |p| {
@@ -234,12 +266,9 @@ fn a_failure_keeps_the_scenes_before_it() {
     )
     .unwrap_err();
     assert_eq!(error.scene.as_deref(), Some("b"));
-    assert!(
-        error
-            .to_string()
-            .starts_with("scene `b`: the TTS server answered 500")
-            && error.message.contains("engine exploded"),
-        "{error}"
+    assert_eq!(
+        error.to_string(),
+        "scene `b`: the speaker failed: engine exploded"
     );
     let written = seen_before_b.expect("scene b started");
     assert!(
@@ -258,9 +287,9 @@ fn stale_entries_and_orphan_clips_are_pruned() {
         &dir,
         "## a\nWe follow the gradient.\n\n## b\nOne small step.\n",
     );
-    let server = tts();
+    let speaker = FakeSpeaker::new();
     let stub = Stub::new();
-    run(&dir, &server, &stub, &Options::default());
+    run(&dir, &speaker, &stub, &Options::default());
     let gone = manifest(&dir).scenes["b"].audio.clone();
     let clips = dir.join("narration");
     std::fs::write(clips.join("stray.wav"), b"x").unwrap();
@@ -268,7 +297,7 @@ fn stale_entries_and_orphan_clips_are_pruned() {
     std::fs::write(clips.join("notes.txt"), b"keep").unwrap();
 
     video(&dir, "## a\nWe follow the gradient.\n");
-    let report = run(&dir, &server, &stub, &Options::default());
+    let report = run(&dir, &speaker, &stub, &Options::default());
     assert_eq!(outcomes(&report), [("a", Outcome::Cached)]);
     assert_eq!(report.dropped, ["b"]);
     let mut want = vec![gone, "half.wav.part".into(), "stray.wav".into()];
@@ -276,14 +305,14 @@ fn stale_entries_and_orphan_clips_are_pruned() {
     assert_eq!(report.deleted, want);
     assert_eq!(manifest(&dir).scenes.keys().collect::<Vec<_>>(), ["a"]);
     assert!(clips.join("notes.txt").is_file());
-    assert_eq!(server.hits().len(), 2);
+    assert_eq!(speaker.spoken().len(), 2);
 }
 
 #[test]
 fn a_missing_aligner_fails_before_any_tts_request() {
     let dir = Scratch::new("narrate-no-model");
     video(&dir, SCRIPT);
-    let server = tts();
+    let speaker = FakeSpeaker::new();
     let stub = Stub {
         ready: false,
         calls: Cell::new(0),
@@ -291,7 +320,8 @@ fn a_missing_aligner_fails_before_any_tts_request() {
     let error = narrate(
         &dir,
         &Library::default(),
-        &voice(&server),
+        &voice(),
+        &speaker,
         &stub,
         &Options::default(),
         &mut |_| {},
@@ -301,15 +331,41 @@ fn a_missing_aligner_fails_before_any_tts_request() {
         error.message.contains("oculus studio aligner download"),
         "{error}"
     );
-    assert!(server.hits().is_empty());
+    assert!(speaker.spoken().is_empty());
+}
+
+#[test]
+fn a_speaker_that_is_not_ready_fails_before_any_clip() {
+    let dir = Scratch::new("narrate-no-voice");
+    video(&dir, SCRIPT);
+    let speaker = FakeSpeaker {
+        ready: false,
+        texts: RefCell::new(Vec::new()),
+    };
+    let stub = Stub::new();
+    let error = narrate(
+        &dir,
+        &Library::default(),
+        &voice(),
+        &speaker,
+        &stub,
+        &Options::default(),
+        &mut |_| {},
+    )
+    .unwrap_err();
+    assert_eq!(error.scene, None);
+    assert_eq!(error.message, "the voice is not downloaded");
+    assert!(speaker.spoken().is_empty());
+    assert_eq!(stub.calls.get(), 0);
+    assert_eq!(Manifest::read(&dir).unwrap(), None, "nothing written");
 }
 
 #[test]
 fn reports_low_confidence_words_and_leading_gaps() {
     let dir = Scratch::new("narrate-warn");
     video(&dir, "## a\nUm, Cauchy said so.\n\n## b\nOne small step.\n");
-    let server = tts();
-    let report = run(&dir, &server, &Stub::new(), &Options::default());
+    let speaker = FakeSpeaker::new();
+    let report = run(&dir, &speaker, &Stub::new(), &Options::default());
     let a = &report.scenes[0];
     assert_eq!(
         a.low_confidence
@@ -328,7 +384,7 @@ fn reports_low_confidence_words_and_leading_gaps() {
 fn an_unknown_scene_or_no_script_is_an_error() {
     let dir = Scratch::new("narrate-args");
     video(&dir, SCRIPT);
-    let server = tts();
+    let speaker = FakeSpeaker::new();
     let options = Options {
         scene: Some("quiet".into()),
         force: false,
@@ -336,7 +392,8 @@ fn an_unknown_scene_or_no_script_is_an_error() {
     let e = narrate(
         &dir,
         &Library::default(),
-        &voice(&server),
+        &voice(),
+        &speaker,
         &Stub::new(),
         &options,
         &mut |_| {},
@@ -347,7 +404,8 @@ fn an_unknown_scene_or_no_script_is_an_error() {
     let e = narrate(
         &dir,
         &Library::default(),
-        &voice(&server),
+        &voice(),
+        &speaker,
         &Stub::new(),
         &Options::default(),
         &mut |_| {},
@@ -362,12 +420,13 @@ fn an_unreadable_manifest_is_rebuilt() {
     video(&dir, SCRIPT);
     std::fs::create_dir_all(dir.join("narration")).unwrap();
     std::fs::write(dir.join(MANIFEST_PATH), r#"{ "version": 2, "scenes": {} }"#).unwrap();
-    let server = tts();
+    let speaker = FakeSpeaker::new();
     let mut reset = None;
     narrate(
         &dir,
         &Library::default(),
-        &voice(&server),
+        &voice(),
+        &speaker,
         &Stub::new(),
         &Options::default(),
         &mut |p| {
@@ -429,12 +488,13 @@ fn a_library_theme_narrates() {
         .replace("\"default\"", "\"warm\"");
     std::fs::write(dir.join("video.json"), json).unwrap();
     let library = libraries_at(&root.join("library"), &root.join("subjects"), false).unwrap();
-    let server = tts();
+    let speaker = FakeSpeaker::new();
     let options = Options::default();
     let bare = narrate(
         &dir,
         &Library::default(),
-        &voice(&server),
+        &voice(),
+        &speaker,
         &Stub::new(),
         &options,
         &mut |_| {},
@@ -448,7 +508,8 @@ fn a_library_theme_narrates() {
     let report = narrate(
         &dir,
         &library,
-        &voice(&server),
+        &voice(),
+        &speaker,
         &Stub::new(),
         &options,
         &mut |_| {},
