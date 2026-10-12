@@ -57,6 +57,10 @@ persisted the same way. `classify` in `event/classify.rs` is the one tool table.
   writes every event to `harness_threads`/`harness_items`, then emits
   `harness-event` with the row id — a tool's finish never overtakes its start,
   and a reload loses nothing.
+- **Nothing survives a restart as running.** `harness::store::reconcile` runs
+  at startup: threads left `running` go `idle`, and tool rows whose `meta.ok`
+  is still null are closed as failed with "the session ended before this
+  finished" — otherwise the row draws as running forever.
 - **Settings storage is shared.** Job selections, rate limits and Antigravity
   approvals use `db::store::setting` / `db::store::set_setting`; each caller owns its
   JSON shape and fallback policy.
