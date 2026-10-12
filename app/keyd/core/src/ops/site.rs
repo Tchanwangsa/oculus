@@ -215,4 +215,28 @@ mod tests {
         assert_eq!(reply["code"], "not_okta");
         assert_eq!(reply["detail"], "https://rmit.instructure.com");
     }
+
+    #[test]
+    fn a_non_okta_site_keeps_its_sessions_across_a_broker_restart_and_startup_site_set() {
+        let dir = Scratch::new("site-not-okta-restart");
+        {
+            let state = state_in(&dir);
+            set(&state, &rmit()).unwrap();
+            fill(&state);
+        }
+        let state = state_in(&dir);
+        let reply = set(&state, &rmit()).unwrap();
+        assert_eq!(reply["changed"], false);
+        assert_eq!(reply["cleared"], json!([]));
+        let status = held(&state);
+        for field in ["canvas", "sso", "ed", "authenticated"] {
+            assert_eq!(status[field], true, "{field}");
+        }
+        assert_eq!(
+            store::get(&state.vault().unwrap(), Kind::Canvas)
+                .unwrap()
+                .as_deref(),
+            Some("canvas_session=a")
+        );
+    }
 }

@@ -21,6 +21,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::providers::credentials::Credentialed;
 
 pub use crate::sources::canvas::SessionProbe as AuthProbe;
+pub(crate) use cookies::remember_seeded_cookies;
 pub use cookies::{save_browser_session, save_session_cookie};
 pub(crate) use session::report;
 pub use startup::restore_session;
@@ -70,21 +71,35 @@ pub enum Via {
     Headless,
 }
 
-/// Every sign-in in the app ends here once its session is in oculus-keyd: the
+/// Records and announces a sign-in once its session is in oculus-keyd: the
 /// authenticated flag (which also lifts a sign-out), the in-memory state and
 /// the UI event. A headless sign-in is keyd's own and has marked itself; a
 /// person's is marked here, and clears the attempt guard's wait and pause. If
 /// keyd cannot record it, the app is not signed in: the UI is told the
 /// sign-in did not complete.
-pub fn session_established(app: &AppHandle, dir: &std::path::Path, via: Via) {
+pub fn session_established(app: &AppHandle, dir: &std::path::Path, via: Via) -> bool {
+    if !record_sign_in(app, dir, via) {
+        return false;
+    }
+    announce_sign_in(app);
+    true
+}
+
+/// The blocking part of establishment, separated so a login window can
+/// check cancellation before publishing success after the socket answers.
+fn record_sign_in(app: &AppHandle, dir: &std::path::Path, via: Via) -> bool {
     if via != Via::Headless {
         if let Err(e) = session::mark_signed_in(&Credentialed::at(dir)) {
             session::report("could not record the sign-in", &e);
             app.emit("canvas-auth-cancelled", "cancelled").ok();
-            return;
+            return false;
         }
         crate::auth::okta::resume_automatic_sign_in(dir);
     }
+    true
+}
+
+fn announce_sign_in(app: &AppHandle) {
     if let Some(state) = app.try_state::<AuthState>() {
         *state.0.lock().unwrap() = true;
     }

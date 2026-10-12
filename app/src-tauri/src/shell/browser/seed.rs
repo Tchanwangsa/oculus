@@ -211,7 +211,15 @@ fn seed_webkit(
                 .filter(|(_, _, replace, _)| *replace)
                 .map(|(host, name, _, _)| (host.clone(), name.clone()))
                 .collect();
-            let stale: Vec<_> = all.iter().filter(|c| replacing.contains(&key(c))).collect();
+            let stale: Vec<_> = all
+                .iter()
+                .filter(|c| {
+                    let (domain, name) = key(c);
+                    replacing.iter().any(|(host, replacing_name)| {
+                        name == *replacing_name && sent_to(&domain, host)
+                    })
+                })
+                .collect();
             let fresh: Vec<_> = cookies
                 .iter()
                 .filter(|(host, name, replace, _)| {
@@ -220,6 +228,16 @@ fn seed_webkit(
                 .map(|(_, _, _, cookie)| cookie.clone())
                 .collect();
             let count = fresh.len();
+            let seeded: Vec<_> = fresh
+                .iter()
+                .map(|c| {
+                    (
+                        c.domain().to_string(),
+                        c.name().to_string(),
+                        c.value().to_string(),
+                    )
+                })
+                .collect();
             let fresh = NSArray::from_retained_slice(&fresh);
 
             // Never pass a nil completion handler: WebKit invokes it anyway
@@ -227,6 +245,7 @@ fn seed_webkit(
             let finish = finish.clone();
             let done = RcBlock::new(move || {
                 if let Some(finish) = finish.take() {
+                    crate::auth::remember_seeded_cookies(seeded.clone());
                     eprintln!("[oculus] browser: seeded {count} session cookies into WebKit");
                     finish();
                 }

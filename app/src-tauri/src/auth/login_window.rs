@@ -2,12 +2,18 @@
 //! opens at the profile's login path, which hands off to whatever IdP the
 //! university uses.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+mod confirmation;
+
 use std::sync::{Arc, Mutex};
 
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
-use super::{cookies, is_authenticated_url, session_established, Via};
+use super::{
+    announce_sign_in, cookies, is_authenticated_url, record_sign_in, saved_session_probe,
+    AuthProbe, Via,
+};
+use confirmation::Confirmation;
 
 fn canvas_session_dir() -> std::path::PathBuf {
     crate::library::paths::data_dir().join("canvas-session")
@@ -15,7 +21,7 @@ fn canvas_session_dir() -> std::path::PathBuf {
 
 /// Opens the login window. On success it hands the webview's cookies to
 /// oculus-keyd, marks the app signed in, then hides itself.
-pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) -> Result<(), String> {
+pub fn open_canvas_window(app: AppHandle) -> Result<(), String> {
     let inst = crate::sources::institution::current()
         .ok_or_else(|| crate::sources::institution::NOT_CONFIGURED.to_string())?;
     let url: url::Url = format!("{}{}", inst.canvas, inst.login_path)
@@ -31,11 +37,8 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) -> Result
     let dir = crate::library::paths::data_dir();
     let app_nav = app.clone();
     let app_win = app.clone();
-    let auth_flag_nav = Arc::clone(&auth_flag);
-    let auth_flag_win = Arc::clone(&auth_flag);
-
-    let resolved = Arc::new(AtomicBool::new(false));
-    let resolved_nav = Arc::clone(&resolved);
+    let confirmation = Arc::new(Mutex::new(Confirmation::default()));
+    let confirmation_load = Arc::clone(&confirmation);
 
     let result = WebviewWindowBuilder::new(&app, "canvas-auth", WebviewUrl::External(url))
         .title("Sign in to Canvas — Oculus")
@@ -43,33 +46,48 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) -> Result
         .center()
         .visible(true)
         .data_directory(session_dir)
-        .on_navigation(move |url| {
-            eprintln!("[oculus] nav: {url}");
-            if is_authenticated_url(&url) {
-                let was_resolved = resolved_nav.swap(true, Ordering::SeqCst);
-                if !was_resolved {
-                    // Now, so closing the window meanwhile is not a cancel.
-                    *auth_flag_nav.lock().unwrap() = true;
-
-                    // Give Canvas a moment to set the session cookie first.
-                    let app_delayed = app_nav.clone();
-                    let dir = dir.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_secs(2));
-                        if !cookies::save_session_cookie(&app_delayed) {
-                            eprintln!("[oculus] auth: the Canvas session was not stored");
-                            app_delayed.emit("canvas-auth-cancelled", "cancelled").ok();
-                            return;
-                        }
-                        session_established(&app_delayed, &dir, Via::Window);
-                        if let Some(w) = app_delayed.get_webview_window("canvas-auth") {
-                            w.hide().ok();
-                        }
-                        eprintln!("[oculus] auth success");
-                    });
-                }
+        .on_page_load(move |_, payload| {
+            if !matches!(payload.event(), PageLoadEvent::Finished)
+                || !is_authenticated_url(payload.url())
+                || !confirmation_load.lock().unwrap().request()
+            {
+                return;
             }
-            true
+            // The response has set its cookies. Reading the jar and probing
+            // keyd must run outside WebKit's page-load delegate callback.
+            let app = app_nav.clone();
+            let dir = dir.clone();
+            let confirmation = Arc::clone(&confirmation_load);
+            std::thread::spawn(move || loop {
+                if confirmation.lock().unwrap().closed() {
+                    return;
+                }
+                let stored = cookies::save_session_cookie(&app);
+                let accepted = stored && matches!(saved_session_probe(), AuthProbe::Valid(_));
+                if confirmation.lock().unwrap().closed() {
+                    return;
+                }
+                if accepted && record_sign_in(&app, &dir, Via::Window) {
+                    if !confirmation
+                        .lock()
+                        .unwrap()
+                        .resolve(|| announce_sign_in(&app))
+                    {
+                        return;
+                    }
+                    if let Some(w) = app.get_webview_window("canvas-auth") {
+                        w.hide().ok();
+                    }
+                    eprintln!("[oculus] auth success");
+                    return;
+                }
+                eprintln!("[oculus] auth: the saved Canvas session was not confirmed");
+                if confirmation.lock().unwrap().retry() {
+                    continue;
+                }
+                app.emit("canvas-auth-cancelled", "cancelled").ok();
+                return;
+            });
         })
         .build();
 
@@ -83,7 +101,7 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) -> Result
 
     win.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { .. } = event {
-            if !*auth_flag_win.lock().unwrap() {
+            if confirmation.lock().unwrap().close() {
                 app_win.emit("canvas-auth-cancelled", "cancelled").ok();
             }
         }

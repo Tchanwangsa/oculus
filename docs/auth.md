@@ -102,8 +102,12 @@ does — only an admin can issue one), so every request carries a snapshotted
   the headless sign-in stores it there itself, and the login window and
   browser tabs read their webview's Canvas and SSO cookies and hand them to
   keyd with `session_put` (`auth::save_session_cookie`), skipping any host with
-  no cookie yet and logging a refused put. An authenticated flag, which keyd
-  owns, means "we believe we have a session".
+  no cookie yet and logging a refused put. Capture reads the whole jar and
+  selects cookies for each host, including parent domains; same-named cookies
+  prefer a server cookie over an unchanged host copy written by seeding, then
+  the more specific domain. Wry's macOS `cookies_for_url` only matches
+  the exact domain and can omit cookies the browser sends. An authenticated
+  flag, which keyd owns, means "we believe we have a session".
 - The session has no cookie-side expiry: the server extends it on use. There
   is no remember-me cookie — once dead, it is rebuilt by
   [automated sign-in](#okta-sign-in-runs-headless-in-rust) or by hand.
@@ -170,7 +174,10 @@ so a page that redirects to SSO passes straight through.
 ## Every sign-in ends in one place
 
 The login window, a browser tab and the headless flow each store their session
-their own way, then call `auth::session_established`. For a person's sign-in
+their own way, then use the shared recording and announcement in `auth`.
+Tabs and headless flows call `auth::session_established`; the window separates
+the blocking recording from the announcement so closing it can cancel a
+pending confirmation. For a person's sign-in
 (window or tab) it sets the flag with `session_mark(true)`, which also removes
 the signed-out marker; if keyd cannot record that, the app is not signed in
 and the UI gets `canvas-auth-cancelled`. It then sets the in-memory state and
@@ -178,8 +185,12 @@ emits `canvas-auth-success`. A sign-in by a person also clears the attempt
 guard's failures, pause and wait, by asking keyd (`okta_resume`, app only);
 the app writes the record itself only when keyd is absent. The headless
 sign-in has already updated the guard, and keyd has already set the flag, for
-every trigger, so `oculus auth auto` sets nothing. The login window reports
-success only once the Canvas session was stored.
+every trigger, so `oculus auth auto` sets nothing. The login window captures
+cookies after a signed-in Canvas page finishes loading and reports success
+only once the stored session passes the Canvas API probe. A failed capture or
+probe leaves the window open, and another completed Canvas load can retry
+(including a load that arrived while the probe ran);
+closing the window while confirmation runs cancels it.
 
 `oculus auth login` opens the app and waits for a sign-in it did not make
 itself. The signal is keyd's `session_status`: a sign-in is new when Canvas is
@@ -491,7 +502,7 @@ through keyd's `canvas` route) by POSTing the course's LTI external-tool form (s
 - A rejected password is cleared and automatic sign-in paused, or every automatic path would replay it until Okta locks the account.
 - A TOTP seed cannot be recovered from codes; getting it means re-enrolling the factor.
 - `setCookies:completionHandler:` must get a real block — nil segfaults the app seconds later from a WebKit-only stack.
-- WebKit drops an API-set cookie that would replace an HttpOnly one a server set, with no error. Once Canvas hands the browser an anonymous `canvas_session`, re-seeding does nothing until the old cookie is deleted — so seeding deletes same-named cookies first.
+- WebKit drops an API-set cookie that would replace an HttpOnly one a server set, with no error. Seeding deletes same-named cookies for the host and its parent domains before writing host copies, and records the copies so capture can prefer a server's rotation.
 - `/login/session_token` answers 403 to a cookie session; it wants an access token, which is disabled here.
 - Ed's LTI redirect walk jars cookies per host, and Canvas's legs go through keyd, which attaches the cookie only to Canvas; it must never reach edstem.org.
 - UniMelb's `/login` is a portal page, not its IdP — detection tries `/login/saml` after it, and UniMelb's profile keeps `/login/saml` as its login path.

@@ -4,10 +4,25 @@
 //! place a sign-in made there can be read from.
 
 use keyd_core::client::SessionKind as Kind;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use tauri::webview::Cookie;
 use tauri::{AppHandle, Manager};
 
 use super::{session, tab};
 use crate::providers::credentials::Credentialed;
+
+type SeededCookies = HashMap<(String, String), String>;
+static SEEDED: LazyLock<Mutex<SeededCookies>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Track the host copies written by seeding so a server's rotated
+/// parent-domain cookie wins over an unchanged copy of the saved session.
+pub(crate) fn remember_seeded_cookies(cookies: Vec<(String, String, String)>) {
+    let mut seeded = SEEDED.lock().unwrap_or_else(|e| e.into_inner());
+    for (domain, name, value) in cookies {
+        seeded.insert((domain.trim_start_matches('.').to_string(), name), value);
+    }
+}
 
 /// The `name=value; ...` header for a jar's cookies, one entry per name:
 /// parent-domain cookies and the host copies `browser::seed_sessions` writes
@@ -20,6 +35,31 @@ fn cookie_header<'a>(cookies: impl IntoIterator<Item = (&'a str, &'a str)>) -> S
         .map(|(name, value)| format!("{name}={value}"))
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+/// Wry's macOS `cookies_for_url` compares domains for equality, omitting
+/// parent-domain cookies. Read the jar and scope it ourselves before saving.
+fn scoped_header(cookies: &[Cookie<'_>], url: &url::Url, seeded: &SeededCookies) -> String {
+    let Some(host) = url.host_str() else {
+        return String::new();
+    };
+    let mut scoped: Vec<_> = cookies
+        .iter()
+        .filter(|cookie| {
+            cookie.domain().is_some_and(|domain| {
+                let domain = domain.trim_start_matches('.');
+                host == domain || host.ends_with(&format!(".{domain}"))
+            }) && (!cookie.secure().unwrap_or(false) || url.scheme() == "https")
+        })
+        .collect();
+    scoped.sort_by_key(|cookie| {
+        let domain = cookie.domain().unwrap_or("").trim_start_matches('.');
+        let is_seeded = seeded
+            .get(&(domain.to_string(), cookie.name().to_string()))
+            .is_some_and(|value| value == cookie.value());
+        (is_seeded, std::cmp::Reverse(domain.len()))
+    });
+    cookie_header(scoped.into_iter().map(|c| (c.name(), c.value())))
 }
 
 /// The Canvas and SSO cookies from a live webview (HttpOnly included), as
@@ -37,7 +77,7 @@ fn snapshot(app: &AppHandle) -> Vec<(Kind, String)> {
     sessions
 }
 
-/// Scoped with `cookies_for_url`: every webview shares one jar
+/// Scoped by domain after reading the jar: every webview shares one jar
 /// (`data_directory` is a no-op on WKWebView).
 fn webview_header(app: &AppHandle, base: &str) -> String {
     let Ok(base) = base.parse::<url::Url>() else {
@@ -46,20 +86,21 @@ fn webview_header(app: &AppHandle, base: &str) -> String {
     // Same jar either way; fall back to an in-app browser tab when the login
     // window is gone.
     let cookies = match app.get_webview_window("canvas-auth") {
-        Some(win) => win.cookies_for_url(base.clone()),
+        Some(win) => win.cookies(),
         None => match app
             .webviews()
             .into_iter()
             .find(|(label, _)| label.starts_with(crate::shell::browser::LABEL_PREFIX))
         {
-            Some((_, webview)) => webview.cookies_for_url(base.clone()),
+            Some((_, webview)) => webview.cookies(),
             None => return String::new(),
         },
     };
     let host = base.host_str().unwrap_or_default();
     match cookies {
         Ok(cookies) => {
-            let header = cookie_header(cookies.iter().map(|c| (c.name(), c.value())));
+            let seeded = SEEDED.lock().unwrap_or_else(|e| e.into_inner());
+            let header = scoped_header(&cookies, &base, &seeded);
             if header.is_empty() {
                 eprintln!("[oculus] no {host} cookies to save yet");
             }
@@ -100,7 +141,8 @@ pub fn save_browser_session(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::cookie_header;
+    use super::{cookie_header, scoped_header, SeededCookies};
+    use tauri::webview::Cookie;
 
     #[test]
     fn a_header_keeps_the_first_cookie_of_each_name() {
@@ -113,5 +155,89 @@ mod tests {
             "canvas_session=a; _csrf=b"
         );
         assert_eq!(cookie_header([]), "");
+    }
+
+    #[test]
+    fn snapshots_include_parent_domains_but_exclude_other_hosts() {
+        let cookies = [
+            Cookie::build(("canvas_session", "canvas"))
+                .domain("rmit.instructure.com")
+                .secure(true)
+                .build(),
+            Cookie::build(("shared", "parent"))
+                .domain(".instructure.com")
+                .build(),
+            Cookie::build(("other", "sibling"))
+                .domain("other.instructure.com")
+                .build(),
+            Cookie::build(("lookalike", "foreign"))
+                .domain("mit.instructure.com")
+                .build(),
+            Cookie::build(("idp", "sso"))
+                .domain(".rmit.edu.au")
+                .secure(true)
+                .build(),
+        ];
+        let canvas = "https://rmit.instructure.com/".parse().unwrap();
+        assert_eq!(
+            scoped_header(&cookies, &canvas, &SeededCookies::new()),
+            "canvas_session=canvas; shared=parent"
+        );
+        let sso = "https://myapps.rmit.edu.au/".parse().unwrap();
+        assert_eq!(
+            scoped_header(&cookies, &sso, &SeededCookies::new()),
+            "idp=sso"
+        );
+        let http = "http://rmit.instructure.com/".parse().unwrap();
+        assert_eq!(
+            scoped_header(&cookies, &http, &SeededCookies::new()),
+            "shared=parent"
+        );
+    }
+
+    #[test]
+    fn host_copy_wins_regardless_of_jar_order() {
+        let parent = Cookie::build(("sid", "parent"))
+            .domain(".rmit.edu.au")
+            .build();
+        let host = Cookie::build(("sid", "host"))
+            .domain("myapps.rmit.edu.au")
+            .build();
+        let url = "https://myapps.rmit.edu.au/".parse().unwrap();
+        assert_eq!(
+            scoped_header(&[parent.clone(), host.clone()], &url, &SeededCookies::new()),
+            "sid=host"
+        );
+        assert_eq!(
+            scoped_header(&[host, parent], &url, &SeededCookies::new()),
+            "sid=host"
+        );
+    }
+
+    #[test]
+    fn a_rotated_server_cookie_wins_over_an_unchanged_seed() {
+        let parent = Cookie::build(("sid", "rotated"))
+            .domain(".rmit.edu.au")
+            .build();
+        let host = Cookie::build(("sid", "saved"))
+            .domain("myapps.rmit.edu.au")
+            .build();
+        let seeded =
+            SeededCookies::from([(("myapps.rmit.edu.au".into(), "sid".into()), "saved".into())]);
+        let url = "https://myapps.rmit.edu.au/".parse().unwrap();
+        assert_eq!(
+            scoped_header(&[host.clone(), parent.clone()], &url, &seeded),
+            "sid=rotated"
+        );
+        assert_eq!(
+            scoped_header(&[parent.clone(), host.clone()], &url, &seeded),
+            "sid=rotated"
+        );
+        let mut fresh_host = host;
+        fresh_host.set_value("new-host");
+        assert_eq!(
+            scoped_header(&[parent, fresh_host], &url, &seeded),
+            "sid=new-host"
+        );
     }
 }

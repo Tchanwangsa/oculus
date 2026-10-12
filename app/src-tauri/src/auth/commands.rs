@@ -36,12 +36,8 @@ pub async fn check_canvas_session() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn launch_canvas_auth(
-    app: AppHandle,
-    state: tauri::State<'_, AuthState>,
-) -> Result<(), String> {
-    let auth_flag = Arc::clone(&state.0);
-    login_window::open_canvas_window(app, auth_flag)
+pub async fn launch_canvas_auth(app: AppHandle) -> Result<(), String> {
+    login_window::open_canvas_window(app)
 }
 
 #[tauri::command]
