@@ -214,7 +214,7 @@ rewritten in place, every basic defined on an example before it is named,
 no slide shapes (card-and-arrow chains, a heading over lines, a formula
 that appears whole, a text-only scene), and no length budget.
 
-`SKILL.md` splits the work into three roles, each started as a
+`SKILL.md` splits the work into roles, each helper started as a
 [subagent](./harness.md#subagents) on the model Settings → Jobs gives that
 agent (`oculus studio agents` prints it and the call to make):
 
@@ -232,16 +232,30 @@ agent (`oculus studio agents` prints it and the call to make):
   component's only prop, `narrated`, set on narrated scenes) and
   `script.md`, lints and narrates before any scene is built, so builders
   cue to real word times.
-- **Build**, one helper per scene, writes that scene's components, cues
-  each beat with `word()`, and checks it with `strip --scene N` and
-  `frame` (a missing component elsewhere does not stop them; stale
-  narration anywhere does); a component two scenes share gets examples and
-  a `gallery --sheet`. It replies with its components, props, strip and
-  any narration change, which the director makes and re-narrates.
+- **Build**, one helper per scene, works from `build.md`: its first call is
+  `oculus studio brief <slug> --scene <id>`, which stands in for the
+  storyboard, script and manifest; it writes the scene's components, cues
+  each beat with `word()` on the brief's word times, checks as text with
+  `lint --scene` (every error fixed, each warning fixed or explained) and
+  `beats --scene`, then looks with the brief's `strip` or `frame` call,
+  reading the PNG at its fixed `-o` path in the same message (a missing
+  component elsewhere does not stop them; stale narration anywhere does).
+  A component two scenes share gets examples and a `gallery --sheet`. It
+  replies with its components, props, strip, kept warnings and any
+  narration change, which the director makes and re-narrates. The
+  director's brief is a few lines: slug, scene, component, shared keys and
+  the student's rules for the video.
+- **Review**, one helper per finished scene on the same scene role, runs
+  `brief`, `lint --scene` and `beats --scene`, looks at one strip and a few
+  frames, and replies `PASS` or a numbered fix list of at most ten (what,
+  when, where); it edits nothing. The director reads verdicts, not strips,
+  and sends a fix list to a fresh builder with the build brief and the
+  last reply.
 
-The director then lints to `[]`, strips the whole video, sends fixes to a
-fresh builder, and renders a draft, then `--final`. An agent whose role is
-off, or that cannot start helpers (agy), does the items itself in order.
+The director then lints until no errors are left, takes its one look at a
+strip of the whole video for the joins, and renders a draft, then
+`--final`. An agent whose role is off, or that cannot start helpers (agy),
+does the items itself in order.
 When `narrate` fails for want of a voice or the aligner, the agent stops and
 tells the student what to set in Settings -> Voice; it never downloads the
 aligner or the voice packs. After narrating with Kokoro it checks each
@@ -256,6 +270,12 @@ with `Write`, rewritten in place with `Steps`, pointed at with the
 overlays, shrunk into a corner, a value flying into its slot, carried to
 the next scene by key; never a formula appearing whole, stacked lines or
 maths as Text.
+
+`build.md` is the scene helper's procedure (brief, write, check as text,
+look, the bar every scene meets, the reply, review). The `studio-scene`
+role prompt carries it with the builder's sections of `reference.md`; on
+Codex the director's brief has the helper read them by file
+([harness.md](./harness.md#subagents)).
 
 `reference.md` is this page's authoring rules distilled for an agent
 (video.json, spoken form, the component contract, elements and style keys,

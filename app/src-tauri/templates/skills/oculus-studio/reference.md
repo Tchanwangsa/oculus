@@ -1,9 +1,9 @@
 # Studio reference
 
 The authoring rules for a video folder; `SKILL.md` has the roles, the
-workflow and the folder's layout. `studio.d.ts` types every global named here. Every
-command takes the video's slug as `DIR`; `oculus studio <command> --help`
-has the full flags.
+workflow and the folder's layout, and `build.md` a scene helper's steps.
+`studio.d.ts` types every global named here. Every command takes the
+video's slug as `DIR`; `oculus studio <command> --help` has the full flags.
 
 ## Contents
 
@@ -344,9 +344,8 @@ every variable is a Math, never Text.
 
 ## Moving maths
 
-`SKILL.md` "Moving maths" has the rule: a formula is written on term by
-term as it is said, rewrites itself in place, and shrinks aside when done.
-These do it:
+The rule: a formula is written on term by term as it is said, rewrites
+itself in place, and shrinks aside when done. These do it:
 
 - **`<Write at dur lag stroke>`** writes every Math inside it on, manim's
   Write: each piece's outline strokes on, then its fill fades in, piece
@@ -896,7 +895,7 @@ server set in Settings → Voice, times its words, and writes
 does one scene (an id, unlike `strip --scene`, which takes an index);
 `--force` makes it again. A failure keeps the scenes before it and names
 the failed one: `no TTS server`, `no TTS model` and `no TTS voice` mean
-Settings → Voice is unset (`SKILL.md` step 6 says what to do).
+Settings → Voice is unset (`SKILL.md` step 5 says what to do).
 
 The engine is Kokoro, run inside the app, or a TTS server; Settings →
 Voice or the video's `voice` block (`"engine": "kokoro"`) picks it. With

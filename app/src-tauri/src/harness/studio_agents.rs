@@ -1,14 +1,18 @@
 //! The two subagents a chat agent may start while it makes a Studio video:
-//! `studio-research` reads one slice of the source, `studio-scene` builds one
-//! scene. Their models come from Settings → Jobs (`Job::StudioResearch`,
-//! `Job::StudioScene`), one entry per agent (`jobs::for_agent`).
+//! `studio-research` reads one slice of the source, `studio-scene` builds,
+//! fixes or reviews one scene. Their models come from Settings → Jobs
+//! (`Job::StudioResearch`, `Job::StudioScene`), one entry per agent.
 //!
 //! Each CLI starts a subagent its own way, so each gets the model its own
 //! way: Claude and opencode through named agents written at spawn (Claude's
 //! `--agents`, opencode's config), Codex through `spawn_agent`'s `model`,
 //! which the skill asks for by the words [`how_to_spawn`] prints. agy's
-//! `invoke_subagent` takes no model, so agy does the work itself.
-//! docs/harness.md ("Subagents") has the measurements behind each.
+//! `invoke_subagent` takes no model, so agy does the work itself. The scene
+//! prompt carries the skill's `build.md` and the builder's sections of
+//! `reference.md`; Codex, with no role prompt, is told to read the same by
+//! [`codex_scene_opening`]. docs/harness.md ("Subagents") has the rest.
+
+use std::sync::LazyLock;
 
 use serde_json::{json, Map, Value};
 
@@ -16,12 +20,18 @@ use super::jobs::{self, Job, JobSelection};
 use super::Provider;
 
 /// One subagent: its name in every CLI, the job holding its models, and its
-/// system prompt (the role's half; the skill has the rest).
+/// system prompt.
 pub struct Role {
     pub name: &'static str,
     pub job: Job,
     pub description: &'static str,
-    pub prompt: &'static str,
+    pub prompt: fn() -> &'static str,
+}
+
+impl Role {
+    pub fn prompt(&self) -> &'static str {
+        (self.prompt)()
+    }
 }
 
 pub const ROLES: [Role; 2] = [
@@ -29,15 +39,93 @@ pub const ROLES: [Role; 2] = [
         name: "studio-research",
         job: Job::StudioResearch,
         description: "Reads one slice of a lecture for an Oculus Studio video and writes notes",
-        prompt: include_str!("../../templates/STUDIO_RESEARCH.template.md"),
+        prompt: || include_str!("../../templates/STUDIO_RESEARCH.template.md"),
     },
     Role {
         name: "studio-scene",
         job: Job::StudioScene,
-        description: "Builds one scene of an Oculus Studio video",
-        prompt: include_str!("../../templates/STUDIO_SCENE.template.md"),
+        description: "Builds, fixes or reviews one scene of an Oculus Studio video",
+        prompt: scene_prompt,
     },
 ];
+
+const SCENE_ROLE: &str = include_str!("../../templates/STUDIO_SCENE.template.md");
+const BUILD: &str = include_str!("../../templates/skills/oculus-studio/build.md");
+const REFERENCE: &str = include_str!("../../templates/skills/oculus-studio/reference.md");
+
+/// The `reference.md` sections a scene helper works from, in the file's
+/// order. The director's own (video.json, script.md, Narrate,
+/// Pronunciation, Render, Libraries) stay out.
+pub const BUILDER_SECTIONS: [&str; 10] = [
+    "Components",
+    "Elements",
+    "The theme",
+    "Motion",
+    "Maths",
+    "Moving maths",
+    "Word cues",
+    "Transitions and magic move",
+    "Lint",
+    "Looking",
+];
+
+/// The scene role's prompt: the role, `build.md`, then [`BUILDER_SECTIONS`].
+fn scene_prompt() -> &'static str {
+    static PROMPT: LazyLock<String> = LazyLock::new(|| {
+        let mut out = format!(
+            "{}\n\n{}\n\n# `reference.md`: the builder's sections\n",
+            SCENE_ROLE.trim_end(),
+            BUILD.trim_end()
+        );
+        for name in BUILDER_SECTIONS {
+            let body = section(REFERENCE, name)
+                .unwrap_or_else(|| panic!("reference.md has no `## {name}`"));
+            out.push('\n');
+            out.push_str(body.trim_end());
+            out.push('\n');
+        }
+        out
+    });
+    &PROMPT
+}
+
+/// `doc`'s `## name` section, heading included, up to the next `## `
+/// heading; headings inside code fences don't count.
+fn section<'a>(doc: &'a str, name: &str) -> Option<&'a str> {
+    let heading = format!("## {name}");
+    let mut fenced = false;
+    let mut start = None;
+    let mut at = 0;
+    for line in doc.split_inclusive('\n') {
+        let text = line.trim_end();
+        if text.starts_with("```") {
+            fenced = !fenced;
+        } else if !fenced && text.starts_with("## ") {
+            if let Some(s) = start {
+                return Some(&doc[s..at]);
+            }
+            if text == heading {
+                start = Some(at);
+            }
+        }
+        at += line.len();
+    }
+    start.map(|s| &doc[s..])
+}
+
+/// What a Codex director's scene brief opens with, since Codex gives a
+/// subagent no role prompt; `SKILL.md` repeats it word for word.
+pub fn codex_scene_opening() -> String {
+    let quoted: Vec<String> = BUILDER_SECTIONS
+        .iter()
+        .map(|s| format!("\"{s}\""))
+        .collect();
+    let (last, rest) = quoted.split_last().expect("sections");
+    format!(
+        "Read `skills/oculus-studio/build.md`, then these sections of `skills/oculus-studio/reference.md`: {} and {last}.",
+        rest.join(", ")
+    )
+}
 
 /// Whether the agent's subagents can be given a model at all.
 pub fn takes_model(provider: Provider) -> bool {
@@ -76,7 +164,7 @@ pub fn claude_agents_json(roles: &[(&'static Role, Option<JobSelection>)]) -> Op
         let Some(sel) = sel else { continue };
         let mut def = json!({
             "description": role.description,
-            "prompt": role.prompt,
+            "prompt": role.prompt(),
             "model": sel.model,
         });
         if let Some(e) = sel.effort() {
@@ -97,7 +185,7 @@ pub fn opencode_agents_fragment(roles: &[(&'static Role, Option<JobSelection>)])
         let mut def = json!({
             "mode": "subagent",
             "description": role.description,
-            "prompt": role.prompt,
+            "prompt": role.prompt(),
             "model": sel.model,
         });
         if let Some(e) = sel.effort() {
@@ -134,8 +222,15 @@ pub fn how_to_spawn(provider: Provider, role: &Role, sel: Option<&JobSelection>)
                 .effort()
                 .map(|e| format!(", reasoning_effort \"{e}\""))
                 .unwrap_or_default();
+            let opening = match role.job {
+                Job::StudioScene => format!(
+                    " Codex gives it no role prompt, so begin each brief, a builder's or a reviewer's, with this sentence: {}",
+                    codex_scene_opening()
+                ),
+                _ => String::new(),
+            };
             format!(
-                "spawn_agent with model \"{}\"{effort}, fork_turns \"none\", a task_name of lowercase letters, digits and underscores, and the brief as message. At most 3 at once; collect each with wait_agent, then close_agent it, since a finished agent holds its slot until closed.",
+                "spawn_agent with model \"{}\"{effort}, fork_turns \"none\", a task_name of lowercase letters, digits and underscores, and the brief as message. At most 3 at once; collect each with wait_agent, then close_agent it, since a finished agent holds its slot until closed.{opening}",
                 sel.model
             )
         }
@@ -200,10 +295,7 @@ mod tests {
         assert!(v["studio-research"].get("effort").is_none());
         assert_eq!(v["studio-scene"]["model"], "claude-opus-5-5");
         assert_eq!(v["studio-scene"]["effort"], "high");
-        assert!(v["studio-scene"]["prompt"]
-            .as_str()
-            .unwrap()
-            .contains("section \"Build\""));
+        assert_eq!(v["studio-scene"]["prompt"], scene_prompt());
         // Nothing to define: no flag at all.
         assert!(claude_agents_json(&assigned(Provider::Claude, |_| Vec::new())).is_none());
     }
@@ -231,5 +323,68 @@ mod tests {
         assert!(claude.contains("run_in_background false"));
         let agy = how_to_spawn(Provider::Antigravity, roles[0].0, None);
         assert!(agy.contains("yourself"));
+    }
+
+    /// The scene prompt is the role, then build.md whole, then each builder
+    /// section of reference.md from its heading on, and no director section.
+    #[test]
+    fn the_scene_prompt_carries_build_md_and_the_builder_sections() {
+        let prompt = scene_prompt();
+        assert!(prompt.starts_with(SCENE_ROLE.trim_end()));
+        assert!(prompt.contains(BUILD.trim_end()));
+        let mut last = 0;
+        for name in BUILDER_SECTIONS {
+            let heading = format!("\n## {name}\n");
+            assert_eq!(REFERENCE.matches(&heading).count(), 1, "{name}");
+            let first = section(REFERENCE, name)
+                .unwrap()
+                .lines()
+                .skip(1)
+                .find(|l| !l.trim().is_empty())
+                .unwrap();
+            let at = prompt.find(&heading).unwrap_or_else(|| panic!("{name}"));
+            assert!(at > last, "{name} out of order");
+            last = at;
+            assert!(prompt[at..].contains(first), "{name}: {first}");
+        }
+        assert!(prompt.contains("### Recipes"));
+        for director in [
+            "video.json",
+            "script.md",
+            "Narrate",
+            "Pronunciation",
+            "Render",
+            "Libraries",
+        ] {
+            assert!(
+                !prompt.contains(&format!("\n## {director}\n")),
+                "{director}"
+            );
+        }
+        // A `## ` line inside a code fence is not a heading.
+        assert!(section(REFERENCE, "idea").is_none());
+        let template = SCENE_ROLE.split_whitespace().collect::<Vec<_>>().join(" ");
+        for name in BUILDER_SECTIONS {
+            assert!(template.contains(name), "the role names {name}");
+        }
+    }
+
+    /// Codex gets no role prompt, so its director opens each scene brief with
+    /// the files to read, in the same words in SKILL.md and `studio agents`.
+    #[test]
+    fn codex_scene_briefs_open_with_the_same_files() {
+        let opening = codex_scene_opening();
+        let skill = include_str!("../../templates/skills/oculus-studio/SKILL.md");
+        let skill = skill.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(skill.contains(&opening), "SKILL.md lacks: {opening}");
+        let roles = assigned(Provider::Codex, chain);
+        let scene = how_to_spawn(Provider::Codex, roles[1].0, roles[1].1.as_ref());
+        assert!(scene.ends_with(&opening), "{scene}");
+        let research = how_to_spawn(
+            Provider::Codex,
+            roles[0].0,
+            Some(&sel(Provider::Codex, "gpt-6.1-sol", None)),
+        );
+        assert!(!research.contains("build.md"));
     }
 }
