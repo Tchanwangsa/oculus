@@ -17,8 +17,10 @@ import {
 const SPRING_PARTS = ["stiffness", "damping", "mass"] as const;
 const BEZIER = ["x1", "y1", "x2", "y2"] as const;
 
-const BLUR_LABEL: Record<(typeof MOTION_BLUR)[number], string> = { finals: "Final renders", off: "Off", always: "Always" };
+const BLUR_LABEL: Record<(typeof MOTION_BLUR)[number], string> = { finals: "Finals", off: "Off", always: "Always" };
 const BLUR_OPTIONS = MOTION_BLUR.map((v) => ({ value: v as string, label: BLUR_LABEL[v] }));
+
+const COLOR_BLEND = MORPH_COLOR.map((v) => ({ value: v as string, label: v.toUpperCase() }));
 
 const options = (names: readonly string[]) => names.map((n) => ({ value: n, label: tokenLabel(n) }));
 
@@ -119,20 +121,34 @@ export function MotionTokens({ tokens, onChange }: { tokens: Tokens; onChange: (
           </Row>
         )}
       </Section>
-      <Section title="Morphs and blur" note="Unset ones fall back to Studio's own defaults.">
-        <div className="space-y-1">
-          <div className="text-[12.5px] text-foreground">Magic move</div>
-          <Segmented label="Magic move" options={options(MAGIC_MOVE)} value={str(["magicMove"]) ?? ""} onChange={(v) => set(["magicMove"], v)} />
-        </div>
-        <div className="space-y-1">
-          <div className="text-[12.5px] text-foreground">Colour blend</div>
-          <Segmented label="Colour blend" options={MORPH_COLOR.map((v) => ({ value: v, label: v.toUpperCase() }))} value={str(["morphColor"]) ?? ""} onChange={(v) => set(["morphColor"], v)} />
-        </div>
-        <div className="space-y-1">
-          <div className="text-[12.5px] text-foreground">Motion blur</div>
-          <Segmented label="Motion blur" options={BLUR_OPTIONS} value={str(["motionBlur"]) ?? ""} onChange={(v) => set(["motionBlur"], v)} />
-        </div>
+      <Section
+        title="Morphs and blur"
+        note="Motion blur on finals means on final renders only. An unset choice falls back to Studio's own default."
+      >
+        <Choice label="Magic move" options={options(MAGIC_MOVE)} value={str(["magicMove"])} onChange={(v) => set(["magicMove"], v)} />
+        <Choice label="Colour blend" options={COLOR_BLEND} value={str(["morphColor"])} onChange={(v) => set(["morphColor"], v)} />
+        <Choice label="Motion blur" options={BLUR_OPTIONS} value={str(["motionBlur"])} onChange={(v) => set(["motionBlur"], v)} />
       </Section>
     </>
+  );
+}
+
+/** A labelled row of pills; an unset token lights none. */
+function Choice({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+  value: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="text-[12.5px] text-foreground">{label}</div>
+      <Segmented label={label} options={options} value={value ?? ""} onChange={onChange} />
+    </div>
   );
 }
