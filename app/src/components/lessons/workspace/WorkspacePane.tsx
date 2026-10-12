@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { LoadingFill } from "@/components/ui/layout/PageParts";
@@ -7,6 +7,7 @@ import { PillTabs } from "@/components/ui/table/PillTabs";
 import { useTauriEvent } from "@/hooks/backend/useEvents";
 import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
 import type { DbFile } from "@/lib/db";
+import { splitListing } from "@/lib/ed/conflicts";
 import {
   WORKSPACE_EVENT,
   type Submission,
@@ -19,6 +20,7 @@ import type { SaveState } from "@/lib/ed/workspaceSaver";
 import { edUnavailableReason } from "@/lib/ed/workspaceStatus";
 import { cn } from "@/lib/utils";
 
+import { ConflictFrame } from "./conflict/ConflictFrame";
 import { DescriptionColumn, type SideTab } from "./DescriptionColumn";
 import { MarkButton } from "./mark/MarkButton";
 import { MarkDialog } from "./mark/MarkDialog";
@@ -55,8 +57,9 @@ const DRAWER_PANEL = {
  * Run and Mark in its header and the terminal drawer under it, each as the
  * challenge's features allow. The session opens on mount and closes after
  * the last pane on it goes (`holdWorkspace`); `ed-workspace` events for this
- * challenge update the connection, the file list, and the open file when
- * another client commits.
+ * challenge update the connection, the file list, the open file when
+ * another client commits, and the files in conflict with Ed
+ * (`lib/ed/conflicts.ts`), whose server copies never show as tabs.
  */
 export function WorkspacePane({
   challengeId,
@@ -74,7 +77,10 @@ export function WorkspacePane({
   const [hold, setHold] = useState<WorkspaceHold | null>(null);
   const [info, setInfo] = useState<WorkspaceInfo | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
+  /** Rust's file list, server copies of conflicts included. */
   const [paths, setPaths] = useState<string[] | null>(null);
+  /** Conflicts named by `conflict` events, until their copy leaves the list. */
+  const [named, setNamed] = useState<ReadonlyMap<string, string>>(new Map());
   const [active, setActive] = useState<string | null>(null);
   const [connection, setConnection] = useState<WorkspaceStatus>({ state: "connecting", reason: null });
   const [save, setSave] = useState<SaveState>({ state: "idle" });
@@ -105,19 +111,32 @@ export function WorkspacePane({
     };
   }, [challengeId]);
 
+  const listing = useMemo(() => (paths ? splitListing(paths, named) : null), [paths, named]);
+  const tabs = listing?.files ?? null;
   /** The open tab: the chosen file while it is listed, else the first. */
-  const shown = active != null && paths?.includes(active) ? active : (paths?.[0] ?? null);
+  const shown = active != null && tabs?.includes(active) ? active : (tabs?.[0] ?? null);
 
   useTauriEvent<WorkspaceEvent>(WORKSPACE_EVENT, ({ payload }) => {
     if (payload.challengeId !== challengeId) return;
     switch (payload.kind) {
       case "status":
         setConnection(payload.status);
-        if (payload.status.state === "online") setNotice(null);
+        if (payload.status.state === "online") {
+          setNotice(null);
+          // Reconcile has run by now: what was saved only on disk is on Ed,
+          // and Ed's newer files are on disk, so clean buffers read again.
+          hold?.saver.synced();
+          hold?.saver.forgetClean((p) => p === shown);
+          setRemote((n) => n + 1);
+        }
         break;
       case "files":
         setPaths(payload.files);
+        setNamed((m) => new Map([...m].filter(([, copy]) => payload.files.includes(copy))));
         hold?.saver.forgetClean((p) => payload.files.includes(p));
+        break;
+      case "conflict":
+        setNamed((m) => new Map(m).set(payload.path, payload.serverPath));
         break;
       case "commit":
         if (payload.ours) break;
@@ -164,6 +183,13 @@ export function WorkspacePane({
     },
   });
 
+  /** Rust's `files` follows a resolve; until then the copy is gone here too. */
+  const resolved = (path: string) => {
+    const copy = listing?.conflicts.get(path);
+    setNamed((m) => new Map([...m].filter(([p]) => p !== path)));
+    if (copy != null) setPaths((ps) => ps?.filter((p) => p !== copy) ?? ps);
+  };
+
   const select = (path: string) => {
     if (path === shown) return;
     void hold?.saver.flush();
@@ -202,8 +228,26 @@ export function WorkspacePane({
       <section aria-label="Workspace" className="flex min-w-0 flex-1 flex-col border-l border-border-subtle">
         <div className="flex h-10 shrink-0 items-center gap-3 border-b border-border-subtle px-3">
           <div className="min-w-0 flex-1">
-            {shown != null && paths && (
-              <PillTabs scroll tabs={paths.map((p) => ({ value: p, label: p }))} value={shown} onChange={select} />
+            {shown != null && tabs && (
+              <PillTabs
+                scroll
+                tabs={tabs.map((p) => ({
+                  value: p,
+                  label: listing?.conflicts.has(p) ? (
+                    <span className="inline-flex items-center gap-1">
+                      {p}
+                      <span
+                        className="size-1.5 rounded-full bg-warning"
+                        title="Ed has a different version of this file"
+                      />
+                    </span>
+                  ) : (
+                    p
+                  ),
+                }))}
+                value={shown}
+                onChange={select}
+              />
             )}
           </div>
           {!openError && <WorkspaceStatusLine connection={connection} save={save} />}
@@ -245,21 +289,33 @@ export function WorkspacePane({
         )}
         <div className="min-h-0 flex-1">
           {hold && shown != null ? (
-            <WorkspaceEditor
+            <ConflictFrame
               key={shown}
               challengeId={challengeId}
               saver={hold.saver}
               path={shown}
-              remote={remote}
-              memory={{
-                read: () => memories.current.get(shown),
-                write: (json) => memories.current.set(shown, json),
-              }}
-            />
-          ) : paths === null ? (
+              serverPath={listing?.conflicts.get(shown) ?? null}
+              offline={offline}
+              onResolved={resolved}
+            >
+              {(locked) => (
+                <WorkspaceEditor
+                  challengeId={challengeId}
+                  saver={hold.saver}
+                  path={shown}
+                  remote={remote}
+                  readOnly={locked}
+                  memory={{
+                    read: () => memories.current.get(shown),
+                    write: (json) => memories.current.set(shown, json),
+                  }}
+                />
+              )}
+            </ConflictFrame>
+          ) : tabs === null ? (
             !openError && <LoadingFill />
           ) : (
-            paths.length === 0 && <p className="px-4 py-3 text-sm text-muted-foreground">This workspace has no files.</p>
+            tabs.length === 0 && <p className="px-4 py-3 text-sm text-muted-foreground">This workspace has no files.</p>
           )}
         </div>
         {shownDrawerTab && (
