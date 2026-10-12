@@ -8,6 +8,8 @@
 // `<id>/base`, `<id>/line`, `<id>/linelabel`, `<id>/diff`. A key follows its
 // bar when `sort` reorders, so one id morphs between scenes. Copy `bars`
 // and `Bars` (and the small helpers above them) into a scene to compose.
+// A bad input throws an error naming the prop. A two-line TeX label
+// (`labels`, `names`, `lineLabel`, `diffLabel`) may use a bare `\\`.
 export const props = {
   // One TeX label per bar; a histogram's are its n + 1 bin edges.
   labels: list(latex()),
@@ -27,13 +29,15 @@ export const props = {
   sort: bool().default(false),
   // TeX after every number on the value axis and bar labels, e.g. "\\%".
   unit: latex().default(""),
-  // The value axis tops out here, ticks every `step`; else both from the data.
+  // The value axis reaches at least `max`, ticks every `step` (thinned to
+  // fit the chart); else both from the data. The data always fits.
   max: num().optional(),
   step: num().optional(),
   // Bar labels count up; `decimals` fixes their places (else from the data).
   valueLabels: bool().default(true),
   decimals: num().optional(),
-  // The axis draws on from `at`, the bars grow from barsAt, each `each` after the last.
+  // The axis draws on from `at`, the bars grow from barsAt, each `each` after
+  // the last (else the stagger, squeezed so every bar has grown by barsAt + 1.2 s).
   at: num().default(0.2),
   barsAt: num().default(0.7),
   each: num().optional(),
@@ -110,13 +114,39 @@ export const examples = {
   },
 };
 
-const fmt = (v) => String(Number(v.toFixed(4)));
+/** A key for a number: no float noise. */
+const fmt = (v) => String(Number(v.toPrecision(10)));
 
-const decimals = (v) => {
-  const s = String(Number(v.toFixed(2)));
+/** Decimal places `v` needs, at most `cap`. */
+const places = (v, cap) => {
+  const s = String(Number(v.toFixed(cap)));
   const i = s.indexOf(".");
   return i < 0 ? 0 : s.length - i - 1;
 };
+
+/** Digits grouped in threes from 100000 up, so a long number reads at a glance. */
+const grouped = (s, v) => (Math.abs(v) >= 1e5 ? s.replace(/\B(?=(\d{3})+(?!\d))/g, "{,}") : s);
+
+/** `v` as TeX: no float noise, grouped digits, a power of ten when tiny or huge. */
+const numTex = (v) => {
+  if (v !== 0 && (Math.abs(v) < 1e-5 || Math.abs(v) >= 1e15)) {
+    const [m, e] = Number(v.toPrecision(10)).toExponential().split("e");
+    return `${m}\\times 10^{${Number(e)}}`;
+  }
+  const [whole, frac] = fmt(v).split(".");
+  return grouped(whole, v) + (frac ? `.${frac}` : "");
+};
+
+/** `v` to `dec` places as TeX. */
+const fixedTex = (v, dec) => {
+  const [whole, frac] = v.toFixed(dec).split(".");
+  return grouped(whole, v) + (frac ? `.${frac}` : "");
+};
+
+/** TeX with a bare `\\` (a second line) is wrapped so KaTeX accepts it. */
+const multiline = (tex) => (tex.includes("\\\\") && !tex.includes("\\begin") ? `\\begin{gathered}${tex}\\end{gathered}` : tex);
+
+const lineCount = (tex) => tex.split("\\\\").length;
 
 /** Rough px width of `tex` set at font size `size` (its widest line). */
 const texW = (tex, size) =>
@@ -149,11 +179,43 @@ const wrap = (labels, limit, size) =>
     return `\\begin{gathered}\\text{${a}}\\\\\\text{${b}}\\end{gathered}`;
   });
 
-/** The smallest 1, 2 or 5 times a power of ten that puts `span` in at most six steps. */
-const niceStep = (span) => {
-  const p = 10 ** Math.floor(Math.log10(span / 6));
-  for (const m of [1, 2, 5, 10]) if (span / (m * p) <= 6) return m * p;
+/** The smallest 1, 2 or 5 times a power of ten that puts `span` in at most `most` steps. */
+const niceStep = (span, most = 6) => {
+  const p = 10 ** Math.floor(Math.log10(span / most));
+  for (const m of [1, 2, 5, 10]) if (span / (m * p) <= most) return m * p;
   return 10 * p;
+};
+
+const need = (ok, msg) => {
+  if (!ok) throw new Error(`Bars: ${msg}`);
+};
+
+const SERIES = ["values", "values2", "values3"];
+const STATES = ["to", "to2", "to3"];
+
+/** Throws a readable error for data `bars()` cannot draw. */
+const checkData = ({ labels, series, to, changeAt, histogram }) => {
+  const n = series[0].length;
+  need(n > 0, "values is empty; give at least one bar");
+  series.forEach((row, s) => {
+    const name = SERIES[s] ?? `series ${s + 1}`;
+    need(row.length === n, `${name} has ${row.length} values but values has ${n}`);
+    row.forEach((x, i) => need(Number.isFinite(x), `${name}[${i}] = ${x} is not a finite number`));
+  });
+  need(
+    labels.length === n || (histogram && labels.length === n + 1),
+    `labels has ${labels.length} entries but values has ${n}${histogram ? " (a histogram's labels are its bin edges: one more than values)" : ""}`,
+  );
+  to.forEach((states, s) => need(!states || s < series.length, `${STATES[s]} is given but ${SERIES[s]} is not`));
+  to.forEach((states, s) => {
+    const name = STATES[s] ?? `to[${s}]`;
+    if (!states) return;
+    need(states.length <= changeAt.length, `${name} has ${states.length} states but changeAt has ${changeAt.length} times`);
+    states.forEach((row, k) => {
+      need(row.length === n, `${name}[${k}] has ${row.length} values but values has ${n}`);
+      row.forEach((x, i) => need(Number.isFinite(x), `${name}[${k}][${i}] = ${x} is not a finite number`));
+    });
+  });
 };
 
 /**
@@ -165,10 +227,15 @@ const niceStep = (span) => {
  * (fractional) slot p in series s, `rect`, `at(c, v)` a point, `catPos(x)`
  * a position along the bars, `pose(t)` the values and slots at t, plus the
  * ticks, the label texts and sizes. Unit and label fonts follow `size`.
+ * The value axis reaches `max` if given and always covers the data; its
+ * ticks are thinned until their numbers clear each other (and number at
+ * most 12). `labelOn(i)` says whether label i is shown: a crowded axis
+ * keeps every k-th label and the last.
  */
 const bars = (o) => {
   const { labels, series, to = [], changeAt = [], histogram = false, stacked = false, unit = "", size = 40 } = o;
   const { width: W = 1700, height: H = 920, glide = 0.9, names = [], lineLabel } = o;
+  checkData({ labels, series, to, changeAt, histogram });
   const vertical = o.orientation !== "horizontal";
   const n = series[0].length;
   const S = series.length;
@@ -202,24 +269,34 @@ const bars = (o) => {
       }
     }
   }
-  const stepV = o.step ?? niceStep(hi - lo || 1);
-  let top = o.max ?? Math.ceil(hi / stepV - 1e-9) * stepV;
-  const bot = Math.floor(lo / stepV + 1e-9) * stepV;
-  if (top <= bot) top = bot + stepV;
-  const ticks = [];
-  for (let k = Math.round(bot / stepV); k * stepV <= top + 1e-9; k++) ticks.push(Number((k * stepV).toFixed(6)));
-  const dec = o.decimals ?? Math.min(2, Math.max(0, ...states.flat(2).map(decimals)));
-  const valText = (v) => v.toFixed(dec) + unit;
+  // The axis for ticks every `step`: `max` is a floor, never a ceiling over the data.
+  const axisFor = (step) => {
+    const bot = Math.floor(lo / step + 1e-9) * step;
+    let top = Math.max(Math.ceil(hi / step - 1e-9) * step, o.max ?? -Infinity);
+    if (top <= bot) top = bot + step;
+    const count = (top - bot) / step;
+    // Too fine to list: only the ends, for sizing; a coarser step replaces it.
+    const ticks = count > 500 ? [bot, top] : [];
+    for (let k = Math.round(bot / step); count <= 500 && k * step <= top + 1e-9; k++) ticks.push(Number((k * step).toPrecision(12)));
+    return { step, top, bot, ticks, count };
+  };
+  const span = hi - lo || 1;
+  let axis = axisFor(o.step ?? niceStep(span));
 
   const catSize = size;
   const tickSize = size * 0.9;
   const gap = size * 0.6;
   const lineH = size * 1.7;
-  const tickW = Math.max(...ticks.map((v) => texW(fmt(v) + unit, tickSize)));
+  const tickW = Math.max(...axis.ticks.map((v) => texW(numTex(v) + unit, tickSize)));
+  // Places the data needs, at most two unless the axis steps finer than that.
+  const dec = o.decimals ?? Math.min(Math.max(0, ...states.flat(2).map((v) => places(v, 6))), Math.max(2, places(axis.step, 6)));
+  const big = Math.max(hi, -lo);
+  const valText = (v) => (big < 1e-4 || big >= 1e15 ? numTex(Number(v.toPrecision(3))) : fixedTex(v, dec)) + unit;
   const valW0 = Math.max(texW(valText(hi), size * 0.9), texW(valText(lo), size * 0.9));
   const lineHoriz = o.line !== undefined && vertical === (o.lineOn !== "category");
-  const lineLines = lineLabel ? lineLabel.split("\\\\").length : 1;
-  const legendH = names.length ? size * 1.7 : 0;
+  const lineLines = lineLabel ? lineCount(lineLabel) : 1;
+  const nameLines = Math.max(1, ...names.map(lineCount));
+  const legendH = names.length ? size * (0.5 + 1.2 * nameLines) : 0;
   const lineRow = o.line !== undefined && lineLabel && !lineHoriz ? lineLines * lineH + gap * 0.5 : 0;
 
   // Margins: L, R, T, B px round the plot. Vertical bars: the numbers sit
@@ -229,6 +306,7 @@ const bars = (o) => {
   let catEff = catSize;
   let valEff = size * 0.9;
   let showVal = o.valueLabels !== false;
+  let every = 1;
   const gapFrac = histogram ? 0 : 0.3;
   const group = (slot) => Math.min(slot * (1 - gapFrac), size * 5 * (stacked ? 1 : S));
   if (vertical) {
@@ -245,11 +323,13 @@ const bars = (o) => {
     labelTex = wrap(labels, limit, catSize);
     const widest = Math.max(...labelTex.map((l) => texW(l, catSize)));
     catEff = Math.max(catSize * 0.62, Math.min(catSize, (catSize * limit) / widest));
+    const fitted = widest * (catEff / catSize);
+    if (fitted > limit * 1.001) every = Math.ceil((fitted * 1.25) / sw);
     if (!stacked) valEff = Math.min(valEff, (valEff * bt * 1.15) / valW0);
     if (valEff < size * 0.55 && !stacked) showVal = false;
-    const lines = Math.max(...labelTex.map((l) => l.split("\\\\").length));
+    const lines = Math.max(...labelTex.map(lineCount));
     T = legendH + lineRow + (showVal ? valEff * 1.9 : gap * 1.2);
-    B = gap * 0.9 + lines * catEff * 1.6 + (showVal && lo < 0 ? valEff * 1.7 : 0);
+    B = gap * 0.9 + lines * catEff * 1.6 + (showVal && !stacked && lo < 0 ? valEff * 1.7 : 0);
   } else {
     T = legendH + lineRow + gap * 1.2;
     B = tickSize * 1.7 + gap;
@@ -257,8 +337,9 @@ const bars = (o) => {
     labelTex = wrap(labels, wideLimit, catSize);
     const widest = Math.max(...labelTex.map((l) => texW(l, catSize)));
     const sh = (H - T - B) / n;
-    const lines = Math.max(...labelTex.map((l) => l.split("\\\\").length));
+    const lines = Math.max(...labelTex.map(lineCount));
     catEff = Math.max(catSize * 0.62, Math.min(catSize, (catSize * wideLimit) / widest, (sh * 0.92) / (lines * 1.5)));
+    if (lines * catEff * 1.5 > sh * 0.92 * 1.001) every = Math.ceil((lines * catEff * 1.5 * 1.25) / sh);
     L = Math.min(wideLimit, Math.max(...labelTex.map((l) => texW(l, catEff)))) + gap * 1.4;
     const bt = group(sh) / (stacked ? 1 : S);
     if (!stacked) valEff = Math.min(valEff, bt / 1.45);
@@ -267,7 +348,34 @@ const bars = (o) => {
     if (lineHoriz && lineLabel) R = Math.max(R, texW(lineLabel, size) + gap * 1.6);
   }
   const [px0, px1, py0, py1] = [L, W - R, T, H - B];
-  const catTop = py1 + gap * 0.8 + (vertical && showVal && lo < 0 ? valEff * 1.7 : 0);
+
+  // Ticks go no closer than 1.6 label heights (a label width and a bit,
+  // horizontally) and no more than 12: a bigger step takes over when they do.
+  const room = vertical ? py1 - py0 : px1 - px0;
+  const most = Math.max(1, Math.min(11, Math.floor(room / (vertical ? tickSize * 1.6 : tickW * 1.25 + tickSize * 0.8))));
+  if (axis.count > most + 1e-9) {
+    if (o.step !== undefined) {
+      // The nearest 1, 2, 5 x 10^k that is a whole multiple of `step`, else a whole multiple of it.
+      const p0 = Math.floor(Math.log10(o.step));
+      let found = null;
+      for (let p = p0; p < p0 + 12 && !found; p++) {
+        for (const m of [1, 2, 5]) {
+          const c = m * 10 ** p;
+          const f = c / o.step;
+          if (!found && f > 1.5 && Math.abs(f - Math.round(f)) < 1e-9 && axisFor(c).count <= most + 1e-9) found = c;
+        }
+      }
+      axis = axisFor(found ?? o.step * Math.ceil(axis.count / most));
+    } else {
+      for (let m = Math.min(6, most); m >= 1; m--) {
+        axis = axisFor(niceStep(span, m));
+        if (axis.count <= most + 1e-9) break;
+      }
+    }
+  }
+  const { top, bot, ticks } = axis;
+
+  const catTop = py1 + gap * 0.8 + (vertical && showVal && !stacked && lo < 0 ? valEff * 1.7 : 0);
   const [cStart, cLen] = vertical ? [px0, px1 - px0] : [py0, py1 - py0];
   const vA = vertical ? py1 : px0;
   const vB = vertical ? py0 : px1;
@@ -293,6 +401,10 @@ const bars = (o) => {
     while (j < n - 1 && x > e[j + 1]) j++;
     return cStart + (j + (x - e[j]) / (e[j + 1] - e[j])) * sw;
   };
+  // Where a `line` may sit along the bars: a bar's index, or an edge value.
+  const catRange = !edges ? [-0.5, n - 0.5] : numeric ? [Number(labels[0]), Number(labels[n])] : [0, n];
+  const labelCount = edges ? n + 1 : n;
+  const labelOn = (i) => i === 0 || i === labelCount - 1 || (i % every === 0 && labelCount - 1 - i >= every * 0.8);
 
   const pose = (t) => {
     let v = states[0].map((row) => row.slice());
@@ -316,6 +428,7 @@ const bars = (o) => {
     histogram,
     ticks,
     labelTex,
+    labelOn,
     unit,
     dec,
     valText,
@@ -329,6 +442,8 @@ const bars = (o) => {
     lineHoriz,
     lineOn: o.lineOn ?? "value",
     lineH,
+    valueRange: [bot, top],
+    catRange,
     catTop,
     V,
     cross,
@@ -345,11 +460,15 @@ const layer = (ch) => ({ position: "absolute", left: 0, top: 0, width: ch.w, hei
 
 /**
  * The chart `ch` (from `bars()`). The axis and gridlines draw on from `at`;
- * bar i grows from `barsAt + rank * each`. `tones` colour the series (or the
- * bars of a single series); `line`/`lineLabel` (TeX) draw a reference line
- * from `lineAt`; `highlight` bar indices turn `highlightTone` from
+ * bar i grows from `barsAt + rank * each` (`each`: else the theme's stagger,
+ * squeezed so the last bar starts within 0.6 s). `tones` colour the series
+ * (or the bars of a single series); `line`/`lineLabel` (TeX) draw a
+ * reference line from `lineAt` and must lie within the chart; `highlight`
+ * bar indices turn `highlightTone` (default `accentStrong`) from
  * `highlightAt` (`dim` fades the rest); `diff` [i, j] marks the gap between
- * two bars of the first series with an arrow and `diffLabel` from `diffAt`.
+ * two bars of the first series from `diffAt`: a dashed guide from the taller
+ * bar's end, an arrow up the shorter bar's column to that level, and
+ * `diffLabel` beside the arrow where nothing else is.
  */
 const Bars = (
   {
@@ -367,7 +486,7 @@ const Bars = (
     highlight = [],
     highlightAt = 0,
     highlightTone,
-    dim = false,
+    dim = true,
     diff = [],
     diffLabel,
     diffAt = 0,
@@ -380,6 +499,8 @@ const Bars = (
   const { v: values, slot } = ch.pose(t);
   const first = ch.pose(0).slot;
   const stagger = each ?? motion.duration.stagger;
+  const spread = 0.6;
+  const growEach = each ?? Math.min(stagger, spread / Math.max(1, ch.n - 1));
   const palette = [color.accent, color.muted, color.positive];
   const toneOf = (s, i) =>
     ch.S === 1 && tones.length > 1 ? tones[i % tones.length] : (tones[s] ?? palette[s % palette.length]);
@@ -391,13 +512,49 @@ const Bars = (
     <Box style={{ position: "absolute", left, top, width: w, height: h, alignItems: ay, justifyContent: ax }}>{kid}</Box>
   );
   const math = (key, tex, fs, ink, opacity = 1) => (
-    <Math key={key} tex={tex} style={{ fontSize: fs, color: ink, opacity }} />
+    <Math key={key} tex={multiline(tex)} style={{ fontSize: fs, color: ink, opacity }} />
   );
   // Behind a value label, so a line or guide through it breaks there.
   const backed = (kid) => <Box style={{ padding: [0, size * 0.1], radius: radius.s, fill: color.bg }}>{kid}</Box>;
   const parts = [];
   const labels = [];
   const marks = [];
+
+  const [vMin, vMax] = ch.valueRange;
+  if (line !== undefined) {
+    const [lo, hi] = ch.lineOn === "value" ? [vMin, vMax] : ch.catRange;
+    need(
+      line >= lo - 1e-9 && line <= hi + 1e-9,
+      ch.lineOn === "value"
+        ? `line = ${line} is outside the value axis (${lo} to ${hi}); raise max, or move the line`
+        : `line = ${line} is outside the bars (${lo} to ${hi} along them, ${ch.edges ? "edge values" : "bar indices"})`,
+    );
+  }
+  const lineC = line === undefined ? undefined : ch.lineOn === "value" ? ch.V(line) : ch.catPos(line);
+
+  // The difference marker, in (cross, value) px: the taller bar's level
+  // `vT`, the shorter bar's column `ms`, and where the arrow starts.
+  let dg = null;
+  if (diff.length) {
+    need(
+      diff.length === 2 && diff.every((k) => Number.isInteger(k) && k >= 0 && k < ch.n),
+      `diff = [${diff}] must be two bar indices, each from 0 to ${ch.n - 1}`,
+    );
+    const [i, j] = diff;
+    const [tall, short] = values[0][i] >= values[0][j] ? [i, j] : [j, i];
+    const [ct, cs] = [ch.cross(slot[tall], 0), ch.cross(slot[short], 0)];
+    const [mt, ms] = [ct[0] + ct[1] / 2, cs[0] + cs[1] / 2];
+    const dir = Math.sign(mt - ms) || 1;
+    const [vT, vS] = [ch.V(values[0][tall]), ch.V(values[0][short])];
+    const up = Math.sign(vT - vS) || 1;
+    // The shorter bar's own value label sits on the free end: start beyond it.
+    const labelDir = (values[0][short] >= 0 ? 1 : -1) * (ch.vertical ? -1 : 1);
+    const tw = texW(ch.valText(values[0][short]), val);
+    const labelPad = ch.stacked || !ch.showVal ? gap * 0.4 : gap * 0.7 + (ch.vertical ? val * 1.5 : tw);
+    let vA = vS + up * (labelDir === up ? labelPad : gap * 0.4);
+    if ((vT - vA) * up < size * 2) vA = vS + up * gap * 0.4;
+    dg = { tall, short, ms, mt, dir, vT, vS, vA, up, c0: Math.min(mt - dir * (ct[1] / 2), ms), c1: Math.max(mt - dir * (ct[1] / 2), ms), edge: mt - dir * (ct[1] / 2) };
+  }
 
   ch.ticks.forEach((v, k) => {
     const shown = fade(at + k * stagger);
@@ -417,7 +574,7 @@ const Bars = (
         />,
       );
     }
-    const num = math(`${id}/n${fmt(v)}`, fmt(v) + ch.unit, tick, color.muted, shown);
+    const num = math(`${id}/n${fmt(v)}`, numTex(v) + ch.unit, tick, color.muted, shown);
     labels.push(
       ch.vertical
         ? box(0, c - tick, px0 - gap * 0.7, 2 * tick, num, "flex-end")
@@ -441,9 +598,9 @@ const Bars = (
 
   const hl = new Set(highlight);
   const dimmed = fade(highlightAt);
-  const lineC = line === undefined ? undefined : ch.lineOn === "value" ? ch.V(line) : ch.catPos(line);
+  const hlTone = highlightTone ?? color.accentStrong;
   for (let i = 0; i < ch.n; i++) {
-    const begin = barsAt + first[i] * stagger;
+    const begin = barsAt + first[i] * growEach;
     const grow = t < begin ? 0 : spring(t - begin, motion.spring.gentle);
     const shown = clamp(grow, 0, 1);
     let [up, down] = [0, 0];
@@ -459,7 +616,7 @@ const Bars = (
       }
       let ink = toneOf(s, i);
       if (highlight.length) {
-        const lit = hl.has(i) ? mix(ink, highlightTone, fade(highlightAt + first[i] * stagger)) : null;
+        const lit = hl.has(i) ? mix(ink, hlTone, fade(highlightAt + first[i] * growEach)) : null;
         ink = lit ?? (dim ? mix(ink, color.bg, 0.55 * dimmed) : ink);
       }
       const [pa, pb] = [ch.V(a), ch.V(b)];
@@ -501,16 +658,19 @@ const Bars = (
         }
         const [x0, y0] = [lx + (ax === "center" ? (lw - tw) / 2 : ax === "flex-end" ? lw - tw : 0), ly + (ay === "center" ? (lh - th) / 2 : ay === "flex-end" ? lh - th : 0)];
         const crossed = lineC !== undefined && (ch.lineHoriz ? lineC > y0 - gap * 0.2 && lineC < y0 + th + gap * 0.2 : lineC > x0 - gap * 0.2 && lineC < x0 + tw + gap * 0.2);
+        // The diff guide runs along the value axis' level `dg.vT` from the taller bar to the arrow.
+        const [along0, along1, across0, across1] = ch.vertical ? [y0, y0 + th, x0, x0 + tw] : [x0, x0 + tw, y0, y0 + th];
+        const onGuide = dg && dg.vT > along0 - gap * 0.2 && dg.vT < along1 + gap * 0.2 && across1 > dg.c0 && across0 < dg.c1;
         const kid = math(key, text, val, ch.stacked ? color.onAccent : color.text, clamp(grow * 2 - 1, 0, 1));
-        const shell = crossed && !ch.stacked ? backed(kid) : kid;
+        const shell = (crossed || onGuide) && !ch.stacked ? backed(kid) : kid;
         // A stacked label sits inside its segment, if it is tall enough.
         if (!ch.stacked || Math.abs(pa - pb) > lh * 1.1) marks.push(box(lx, ly, lw, lh, shell, ax, ay));
       }
     }
-    if (!ch.edges) {
+    if (!ch.edges && ch.labelOn(i)) {
       const centre = (ch.vertical ? px0 : py0) + (slot[i] + 0.5) * ch.sw;
-      const lines = ch.labelTex[i].split("\\\\").length;
-      const kid = math(`${id}/l${i}`, ch.labelTex[i], cat, color.text, fade(at + 0.2 + first[i] * stagger));
+      const lines = lineCount(ch.labelTex[i]);
+      const kid = math(`${id}/l${i}`, ch.labelTex[i], cat, color.text, fade(at + 0.2 + first[i] * growEach));
       labels.push(
         ch.vertical
           ? box(centre - ch.sw / 2, ch.catTop, ch.sw, lines * cat * 1.6, kid, "center", "flex-start")
@@ -520,7 +680,8 @@ const Bars = (
   }
   if (ch.edges) {
     for (let j = 0; j <= ch.n; j++) {
-      const kid = math(`${id}/e${j}`, ch.labelTex[j], cat, color.text, fade(at + 0.2 + j * stagger));
+      if (!ch.labelOn(j)) continue;
+      const kid = math(`${id}/e${j}`, ch.labelTex[j], cat, color.text, fade(at + 0.2 + j * growEach));
       labels.push(
         ch.vertical
           ? box(px0 + j * ch.sw - ch.sw / 2, ch.catTop, ch.sw, cat * 1.7, kid, "center", "flex-start")
@@ -545,7 +706,7 @@ const Bars = (
       />,
     );
     if (lineLabel) {
-      const h = lineLabel.split("\\\\").length * ch.lineH;
+      const h = lineCount(lineLabel) * ch.lineH;
       const w = texW(lineLabel, size) + gap * 2;
       const kid = math(`${id}/linelabel`, lineLabel, size, ink, clamp(p * 3 - 2, 0, 1));
       marks.push(
@@ -555,50 +716,90 @@ const Bars = (
       );
     }
   }
-  parts.push(...labels, ...marks);
-
-  if (diff.length === 2) {
-    const [i, j] = diff;
-    const [tall, short] = values[0][i] >= values[0][j] ? [i, j] : [j, i];
-    const [ct, cs] = [ch.cross(slot[tall], 0), ch.cross(slot[short], 0)];
-    const dir = Math.sign(ct[0] - cs[0]) || 1;
-    const room = ch.sw - ch.gt;
-    // The arrow runs up the gap beside the shorter bar, or up its middle where bars touch.
-    const mid = cs[0] + cs[1] / 2;
-    const x = room > size * 0.9 ? mid + dir * (cs[1] / 2 + room / 2) : mid;
-    const [yTall, yShort] = [ch.V(values[0][tall]), ch.V(values[0][short])];
-    const p = easeInOutCubic(clamp((t - diffAt) / motion.duration.slow, 0, 1));
-    const dash = size * 0.3;
-    const [g0, g1] = [ch.at(ct[0] + ct[1] / 2, yTall), ch.at(x, yTall)];
-    // Keyed anchors give the Arrow overlay its ends, so it follows the chart wherever it sits.
-    const anchor = (key, [ax, ay]) => (
-      <Box key={key} style={{ position: "absolute", left: ax, top: ay, width: rule, height: rule }} />
-    );
+  // The guide runs under the labels, so a value label it crosses stays legible.
+  const diffP = easeInOutCubic(clamp((t - diffAt) / motion.duration.slow, 0, 1));
+  if (dg) {
+    const [g0, g1] = [ch.at(dg.edge, dg.vT), ch.at(dg.ms, dg.vT)];
     parts.push(
       <Path
         key={`${id}/diffguide`}
         d={`M${g0[0]} ${g0[1]} L${g1[0]} ${g1[1]}`}
         viewBox={[0, 0, ch.w, ch.h]}
-        stroke={{ width: size / 14, color: color.muted, dash: [dash, dash] }}
-        trim={[0, p]}
+        stroke={{ width: size / 14, color: color.text, dash: [size * 0.3, size * 0.3] }}
+        trim={[0, diffP]}
         style={layer(ch)}
       />,
-      anchor(`${id}/diffa`, ch.at(x, yShort)),
-      anchor(`${id}/diffb`, ch.at(x, yTall)),
-      <Arrow
-        key={`${id}/diff`}
-        from={`${id}/diffa`}
-        to={`${id}/diffb`}
-        gap={0}
-        progress={p}
-        head={size * 0.7}
-        stroke={{ width: size / 10, color: color.text }}
-      />,
     );
+  }
+  parts.push(...labels, ...marks);
+
+  if (dg) {
+    const { ms, mt, dir, vT, vS, vA, up } = dg;
+    const p = diffP;
+    // Keyed anchors give the Arrow overlay its ends, so it follows the chart wherever it sits.
+    const anchor = (key, [ax, ay]) => (
+      <Box key={key} style={{ position: "absolute", left: ax, top: ay, width: rule, height: rule }} />
+    );
+    const length = (vT - vA) * up;
+    if (length > size * 0.5) {
+      parts.push(
+        anchor(`${id}/diffa`, ch.at(ms, vA)),
+        anchor(`${id}/diffb`, ch.at(ms, vT)),
+        <Arrow
+          key={`${id}/diff`}
+          from={`${id}/diffa`}
+          to={`${id}/diffb`}
+          gap={0}
+          progress={p}
+          head={size * 0.7}
+          stroke={{ width: size / 10, color: color.text }}
+        />,
+      );
+    }
     if (diffLabel) {
-      const w = texW(diffLabel, size) + gap * 2;
+      const [lw, lh] = [texW(diffLabel, size) + gap * 2, lineCount(diffLabel) * size * 1.4 + size * 0.4];
+      const [crossExt, valExt] = ch.vertical ? [lw, lh] : [lh, lw];
+      // Occupied px of every bar (and its value label) along the value axis, per cross range.
+      const room = (i) => {
+        const col = values.map((row) => row[i]);
+        let [hiEnd, loEnd] = [Math.max(0, ...col), Math.min(0, ...col)];
+        if (ch.stacked) [hiEnd, loEnd] = [col.reduce((a, x) => a + Math.max(x, 0), 0), col.reduce((a, x) => a + Math.min(x, 0), 0)];
+        const labelPx = ch.stacked || !ch.showVal ? gap * 0.5 : gap * 0.9 + (ch.vertical ? val * 1.5 : texW(ch.valText(hiEnd), val));
+        let [a, b] = [ch.V(hiEnd), ch.V(loEnd)];
+        const hiSide = ch.vertical ? -1 : 1;
+        if (hiEnd > 0) (hiSide < 0 ? (a -= labelPx) : (a += labelPx));
+        if (loEnd < 0) (hiSide < 0 ? (b += labelPx) : (b -= labelPx));
+        const [c0] = ch.cross(slot[i], 0);
+        const [cl, ll] = ch.cross(slot[i], ch.S - 1);
+        return { c0, c1: cl + ll, v0: Math.min(a, b), v1: Math.max(a, b) };
+      };
+      const cols = Array.from({ length: ch.n }, (_, i) => room(i));
+      const [cLo, cHi] = ch.vertical ? [px0, px1] : [py0, py1];
+      const [vLo, vHi] = ch.vertical ? [py0, py1] : [px0, px1];
+      const free = (cc, vc) => {
+        const [a0, a1, b0, b1] = [cc - crossExt / 2, cc + crossExt / 2, vc - valExt / 2, vc + valExt / 2];
+        if (a0 < cLo || a1 > cHi || b0 < vLo || b1 > vHi) return false;
+        return cols.every((k) => a1 <= k.c0 || a0 >= k.c1 || b1 <= k.v0 || b0 >= k.v1);
+      };
+      let spot = null;
+      if (length <= size * 0.5) {
+        // Bars (nearly) level: no arrow fits, so the label rides above both value labels.
+        const out = ch.vertical ? -1 : 1;
+        const end = ch.vertical ? Math.min(vT, vS) : Math.max(vT, vS);
+        const pad = ch.stacked || !ch.showVal ? gap : gap * 0.7 + (ch.vertical ? val * 1.5 : texW(ch.valText(values[0][dg.tall]), val));
+        spot = [(ms + mt) / 2, end + out * (pad + valExt / 2 - gap * 0.4)];
+      }
+      for (const f of spot ? [] : [0.5, 0.35, 0.65, 0.2, 0.8]) {
+        const vc = vA + (vT - vA) * f;
+        for (const side of [-dir, dir]) {
+          const cc = ms + side * (gap * 0.9 + crossExt / 2);
+          if (!spot && free(cc, vc)) spot = [cc, vc];
+        }
+      }
+      const [cc, vc] = spot ?? [ms, (vA + vT) / 2];
       const kid = math(`${id}/difflabel`, diffLabel, size, color.text, clamp(p * 3 - 2, 0, 1));
-      parts.push(box(x - dir * (w / 2 + gap * 0.6) - w / 2, (yTall + yShort) / 2 - size, w, 2 * size, kid));
+      const [bx, by] = ch.vertical ? [cc - lw / 2, vc - lh / 2] : [vc - lw / 2, cc - lh / 2];
+      parts.push(box(bx, by, lw, lh, spot ? kid : backed(kid)));
     }
   }
 
@@ -606,7 +807,7 @@ const Bars = (
     const items = names.map((name, s) => (
       <Row key={`${id}/key${s}`} gap={gap * 0.5} align="center" style={{ opacity: fade(at + 0.3) }}>
         <Box style={{ width: size * 0.55, height: size * 0.55, radius: radius.s, fill: toneOf(s, s) }} />
-        <Math key={`${id}/name${s}`} tex={name} style={{ fontSize: size * 0.9, color: color.text }} />
+        <Math key={`${id}/name${s}`} tex={multiline(name)} style={{ fontSize: size * 0.9, color: color.text }} />
       </Row>
     ));
     parts.push(
@@ -629,9 +830,11 @@ const Bars = (
   return <Box style={{ width: ch.w, height: ch.h }}>{parts}</Box>;
 };
 
-export default (p, { theme }) => {
-  const { color, motion } = theme;
+export default (p, { theme, size }) => {
+  const { color, motion, space } = theme;
   const series = [p.values, p.values2, p.values3].filter(Boolean);
+  // Sized to the frame: the type scales with it, the chart fills what the margins leave.
+  const k = Math.min(size.width / 1920, size.height / 1080);
   const ch = bars({
     labels: p.labels,
     series,
@@ -651,6 +854,9 @@ export default (p, { theme }) => {
     line: p.line,
     lineOn: p.lineOn,
     lineLabel: p.lineLabel,
+    size: 40 * k,
+    width: size.width - 2 * space.xxl,
+    height: size.height - 2 * (space.xl + space.s),
   });
   return (
     <Stack justify="center" align="center" style={{ flexGrow: 1, fill: color.bg }}>
