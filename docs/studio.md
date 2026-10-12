@@ -337,7 +337,14 @@ solves a layout or mapping problem a scene would otherwise redo (data to
 px, a fitted grid, columns of characters) and keys every piece it draws,
 so two with one `id` glide in a `Steps` and an overlay can point at a
 part. Each takes its colours and fonts from the theme and has at least
-two examples; only `Code` reads `font.mono`. `tests/starter.rs` lints the set
+two examples; only `Code` reads `font.mono`. The default export of `Axes`,
+`Graph`, `Grid`, `Bars` and `Code` sizes itself from `ctx.size`, so the demo
+fits 1280x720, 1920x1080 and 1080x1920 frames; their helpers take explicit
+`width` and `height` (`Code`: `maxWidth`, `maxHeight`), and a scene that
+copies one passes its own. Bad input to one of them throws an error naming
+the prop, the value and what is allowed (a ragged `cells`, a duplicate
+`keys`, a `path` that leaves the edges, a `diff` off the bars), never a
+blank or broken frame. `tests/starter.rs` lints the set
 in both themes, and `tests/gallery_golden.rs` pins each starter as one
 sheet, `starter-<Component>.png`, a row per example and a column per
 moment of the 6 s preview (laid out at 1920x1080, drawn at a quarter), so

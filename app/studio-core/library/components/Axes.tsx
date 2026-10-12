@@ -8,6 +8,9 @@
 // `<id>/yn<v>`; each helper takes its own `key` and suffixes its pieces
 // (`/label`, `/head`, `/dot`, `/fit`, `/r<i>`). Copy `formula`, `axes`,
 // `Axes` and the helpers you use into a scene component to compose them.
+// `endLabels` nudges curve names apart so they never sit on each other.
+// Formulas read implicit products like `*`: `1/2x` is `(1/2)*x`, so write
+// `1/(2x)` for one over two x.
 export const props = {
   x: list(num()).default([-1, 4, 1]),
   y: list(num()).default([-1, 10, 2]),
@@ -142,13 +145,20 @@ export const examples = {
   },
 };
 
-const fmt = (v) => String(Number(v.toFixed(2)));
+const fmt = (v, d = 2) => String(Number(v.toFixed(d)));
+
+/** Decimals that show a tick `step` exactly: two at least, six at most. */
+const decimals = (step) => {
+  for (let d = 2; d < 6; d++) if (Math.abs(step * 10 ** d - Math.round(step * 10 ** d)) < 1e-6) return d;
+  return 6;
+};
 
 /**
  * A function of x from a formula: numbers, x, pi, e, + - * / ^, unary minus,
  * implicit products (2x, 2(x+1), (x+1)(x-1)), parentheses and sin cos tan
- * asin acos atan exp ln log (base 10) sqrt abs floor min max. A bad formula
- * throws an error that names it.
+ * asin acos atan exp ln log (base 10) sqrt abs floor min max. An implicit
+ * product binds like `*`, so `1/2x` is `(1/2)*x`; write `1/(2x)`. A bad
+ * formula throws an error that names it.
  */
 const formula = (src) => {
   const FN = { sin: Math.sin, cos: Math.cos, tan: Math.tan, asin: Math.asin, acos: Math.acos, atan: Math.atan };
@@ -220,6 +230,11 @@ const formula = (src) => {
 
 /** Data -> px for an axes `width` by `height` px, `pad` px round it for numbers; `origin` is where the axes cross. */
 const axes = ({ x, y, origin = [0, 0], width = 1300, height = 760, pad = 96 }) => {
+  for (const [name, r] of [["x", x], ["y", y]]) {
+    if (!Array.isArray(r) || r.length !== 3 || !r.every(Number.isFinite) || !(r[0] < r[1]) || !(r[2] > 0)) {
+      throw new Error(`Axes: ${name} = ${JSON.stringify(r)} must be [lo, hi, step] with lo < hi and step > 0`);
+    }
+  }
   const X = (v) => pad + ((v - x[0]) / (x[1] - x[0])) * width;
   const Y = (v) => pad + height - ((v - y[0]) / (y[1] - y[0])) * height;
   const [ox, oy] = [clamp(origin[0], x[0], x[1]), clamp(origin[1], y[0], y[1])];
@@ -270,33 +285,36 @@ const Axes = ({ ax, at = 0, dur, id = "ax", size = 40, xTitle, yTitle, children 
   const numbers = (axis) => {
     const [lo, hi, step] = ax[axis];
     const zero = ax.origin[axis === "x" ? 0 : 1];
-    for (let k = Math.ceil(lo / step - 1e-9); k * step <= hi + 1e-9; k++) {
+    const [d, eps] = [decimals(step), step * 1e-6];
+    for (let k = Math.ceil(lo / step - 1e-6); k * step <= hi + eps; k++) {
       const v = k * step;
-      if (Math.abs(v - zero) < 1e-9) continue;
+      if (Math.abs(v - zero) < eps) continue;
       const along = axis === "x" ? (ax.X(v) - ax.X(lo)) / (ax.X(hi) - ax.X(lo)) : (ax.Y(lo) - ax.Y(v)) / (ax.Y(lo) - ax.Y(hi));
       const shown = clamp((q - along) * 8 + 1, 0, 1);
       const [cx, cy] = axis === "x" ? [ax.X(v), oy] : [ox, ax.Y(v)];
       const tick = size * 0.3;
       parts.push(
         axis === "x"
-          ? line(`${id}/xt${fmt(v)}`, cx - w / 2, cy - tick, w, 2 * tick, [0, 0, 0, 0], shown)
-          : line(`${id}/yt${fmt(v)}`, cx - tick, cy - w / 2, 2 * tick, w, [0, 0, 0, 0], shown),
+          ? line(`${id}/xt${fmt(v, d)}`, cx - w / 2, cy - tick, w, 2 * tick, [0, 0, 0, 0], shown)
+          : line(`${id}/yt${fmt(v, d)}`, cx - tick, cy - w / 2, 2 * tick, w, [0, 0, 0, 0], shown),
       );
+      const text = fmt(v, d);
       const box = 3 * size;
+      const boxW = Math.max(box, size * 0.7 * text.length);
       parts.push(
         <Box
           style={{
             position: "absolute",
-            left: axis === "x" ? cx - box / 2 : cx - box - size * 0.5,
+            left: axis === "x" ? cx - boxW / 2 : cx - boxW - size * 0.5,
             top: axis === "x" ? cy + size * 0.5 : cy - box / 2,
-            width: box,
+            width: boxW,
             height: box,
             alignItems: axis === "x" ? "flex-start" : "center",
             justifyContent: axis === "x" ? "center" : "flex-end",
             opacity: shown,
           }}
         >
-          <Math key={`${id}/${axis}n${fmt(v)}`} tex={fmt(v)} style={{ fontSize: size, color: color.muted }} />
+          <Math key={`${id}/${axis}n${fmt(v, d)}`} tex={text} style={{ fontSize: size, color: color.muted }} />
         </Box>,
       );
     }
@@ -371,19 +389,8 @@ const trace = (ax, f, lo, hi, samples) => {
   return pieces.filter((p) => p.length > 1);
 };
 
-/**
- * `f` (any function of x) stroked from `from` to `to` (default the x range),
- * drawn on from `at` over `dur`; it breaks where f leaves the y range, jumps
- * or is not finite. `label` (TeX) arrives at the drawn end; `head` rides it
- * as a dot.
- */
-const Plot = ({ ax, f, from, to, at = 0, dur, color, width = 7, label, head, key, samples = 240 }, { t, theme }) => {
-  const { motion } = theme;
-  const pieces = trace(ax, f, from ?? ax.x[0], to ?? ax.x[1], samples);
-  const d = pieces.map((p) => p.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(2)} ${py.toFixed(2)}`).join(" ")).join(" ");
-  const q = easeInOutCubic(clamp((t - at) / (dur ?? 2 * motion.duration.slow), 0, 1));
-  const ink = color ?? theme.color.accent;
-  // The point a fraction q of the stroke's length along, where the trim ends.
+/** The point a fraction q of the stroke's length along `pieces`, and whether the stroke is rising there. */
+const tip = (pieces, q) => {
   const lengths = pieces.map((p) => p.slice(1).map(([px, py], i) => Math.hypot(px - p[i][0], py - p[i][1])));
   let left = q * lengths.flat().reduce((s, l) => s + l, 0);
   let end = pieces[0]?.[0] ?? [0, 0];
@@ -397,9 +404,89 @@ const Plot = ({ ax, f, from, to, at = 0, dur, color, width = 7, label, head, key
       left -= l;
     }),
   );
-  // The name sits above-right of the end; a long one near the right edge goes to the left of it, on the free side.
-  const flip = label && end[0] + label.replace(/\\[A-Za-z]+/g, "xxx").replace(/[ {}^_]/g, "").length * 30 > ax.w + 100;
-  const place = flip ? [-1, rising ? -1 : 1] : [1, -1];
+  return { end, rising };
+};
+
+/** Rough px size [w, h] of `tex` set at font size `size`. */
+const texBox = (tex, size) => [
+  (tex.replace(/\\[A-Za-z]+/g, "xxx").replace(/[ {}^_]/g, "").length * 0.625 + 0.6 * (tex.match(/[=+<>-]/g) ?? []).length) * size,
+  size * (/\\t?frac/.test(tex) ? 2.1 : 1.25),
+];
+
+/** The name of a stroke ending at `end`: above-right of it, or left of it (on the free side) when it would pass `room` px right of the axes. */
+const endLabel = (ax, end, rising, label, width, size, room) => {
+  const [w, h] = texBox(label, size);
+  const place = end[0] + w > ax.w + room ? [-1, rising ? -1 : 1] : [1, -1];
+  return { place, px: end[0] + place[0] * width, py: end[1] + place[1] * 2 * width, w, h };
+};
+
+/** The [left, top, right, bottom] px of a `w` by `h` label whose [ux, uy] corner is at (px, py). */
+const boxOf = (px, py, [ux, uy], w, h) => {
+  const [l, t] = [ux > 0 ? px : ux < 0 ? px - w : px - w / 2, uy > 0 ? py : uy < 0 ? py - h : py - h / 2];
+  return [l, t, l + w, t + h];
+};
+
+/** How many 6 px steps of the polylines `pieces` lie inside `box`. */
+const through = (box, pieces) => {
+  const inside = (x, y) => x >= box[0] && x <= box[2] && y >= box[1] && y <= box[3];
+  return pieces.reduce(
+    (sum, p) =>
+      sum +
+      p.reduce((n, [x, y], j) => {
+        if (!j) return n + (inside(x, y) ? 1 : 0);
+        const [x0, y0] = p[j - 1];
+        const steps = Math.ceil(Math.hypot(x - x0, y - y0) / 6);
+        return n + Array.from({ length: steps }, (_, k) => inside(lerp(x0, x, (k + 1) / steps), lerp(y0, y, (k + 1) / steps))).filter(Boolean).length;
+      }, 0),
+    0,
+  );
+};
+
+/**
+ * The [dx, dy] px offsets (`nudge` for `Plot`) that keep the curves' end
+ * labels clear of each other and of every curve: `curves` is `[{ f, label }]`,
+ * the first label stays put and each later one moves the least (up or down,
+ * then right) that clears the earlier labels and the curves while staying in
+ * the plot; `room` is as for `Plot`.
+ */
+const endLabels = (ax, curves, size = 48, width = 7, room = ax.pad) => {
+  const lines = curves.map((c) => trace(ax, c.f, ax.x[0], ax.x[1], 240));
+  const taken = [];
+  return curves.map((c, i) => {
+    if (!c.label) return [0, 0];
+    const { end, rising } = tip(lines[i], 1);
+    const { place, px, py, w, h } = endLabel(ax, end, rising, c.label, width, size, room);
+    const grown = (bx, m) => [bx[0] - m, bx[1] - m, bx[2] + m, bx[3] + m];
+    const cost = ([dx, dy]) => {
+      const bx = boxOf(px + dx, py + dy, place, w, h);
+      const out = bx[1] < -ax.pad / 2 || bx[3] > ax.Y(ax.y[0]) || bx[0] < 0 || bx[2] > ax.w + room;
+      const overlap = (o) => Math.max(0, Math.min(bx[2], o[2]) - Math.max(bx[0], o[0]) + 6) * Math.max(0, Math.min(bx[3], o[3]) - Math.max(bx[1], o[1]) + 6);
+      const hit = taken.reduce((sum, o) => sum + (overlap(o) > 36 ? overlap(o) / 300 : 0), 0);
+      return (out ? 1000 : 0) + hit + lines.reduce((sum, l, j) => sum + (j === i ? 0.25 : 1) * through(grown(bx, 4), l), 0);
+    };
+    const ups = [0, ...Array.from({ length: 16 }, (_, k) => (k % 2 ? 1 : -1) * Math.ceil((k + 1) / 2) * h * 0.4)];
+    const tries = [0, 0.3, 0.6, 0.9].flatMap((r) => ups.map((dy) => [r * w, dy]));
+    const best = cost([0, 0]) < 2 ? [0, 0] : tries.reduce((pick, d) => (cost(d) < cost(pick) ? d : pick));
+    taken.push(boxOf(px + best[0], py + best[1], place, w, h));
+    return best;
+  });
+};
+
+/**
+ * `f` (any function of x) stroked from `from` to `to` (default the x range),
+ * drawn on from `at` over `dur`; it breaks where f leaves the y range, jumps
+ * or is not finite. `label` (TeX, font `size`) arrives at the drawn end, `nudge`
+ * px over (see `endLabels`), left of it if it would pass `room` px right of
+ * the axes; `head` rides it as a dot.
+ */
+const Plot = ({ ax, f, from, to, at = 0, dur, color, width = 7, label, head, nudge = [0, 0], key, size = 48, room = ax.pad, samples = 240 }, { t, theme }) => {
+  const { motion } = theme;
+  const pieces = trace(ax, f, from ?? ax.x[0], to ?? ax.x[1], samples);
+  const d = pieces.map((p) => p.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(2)} ${py.toFixed(2)}`).join(" ")).join(" ");
+  const q = easeInOutCubic(clamp((t - at) / (dur ?? 2 * motion.duration.slow), 0, 1));
+  const ink = color ?? theme.color.accent;
+  const { end, rising } = tip(pieces, q);
+  const name = label ? endLabel(ax, end, rising, label, width, size, room) : null;
   const r = width * 1.6;
   return [
     <Path
@@ -416,8 +503,8 @@ const Plot = ({ ax, f, from, to, at = 0, dur, color, width = 7, label, head, key
         style={{ position: "absolute", left: end[0] - r, top: end[1] - r, width: 2 * r, height: 2 * r, radius: r, fill: ink }}
       />
     ) : null,
-    label
-      ? tag(end[0] + place[0] * width, end[1] + place[1] * 2 * width, place, label, key ? `${key}/label` : undefined, { opacity: clamp(q * 8 - 7, 0, 1), color: ink }, 48)
+    name
+      ? tag(name.px + nudge[0], name.py + nudge[1], name.place, label, key ? `${key}/label` : undefined, { opacity: clamp(q * 8 - 7, 0, 1), color: ink }, size)
       : null,
   ];
 };
@@ -464,46 +551,76 @@ const Dot = ({ ax, x, y, at = 0, color, label, guides = true, place = [1, 0], ke
   ];
 };
 
-/** The least-squares line through (xs, ys): slope m, intercept b, and r squared. */
+/**
+ * The least-squares line through (xs, ys): slope m, intercept b, and r squared
+ * (null for a flat line, which explains nothing). Null when the points do not
+ * span two x values.
+ */
 const leastSquares = (xs, ys) => {
   const n = xs.length;
   const [mx, my] = [xs.reduce((s, v) => s + v, 0) / n, ys.reduce((s, v) => s + v, 0) / n];
   const sxx = xs.reduce((s, v) => s + (v - mx) ** 2, 0);
   const syy = ys.reduce((s, v) => s + (v - my) ** 2, 0);
   const sxy = xs.reduce((s, v, i) => s + (v - mx) * (ys[i] - my), 0);
-  return { m: sxy / sxx, b: my - (sxy / sxx) * mx, r2: (sxy * sxy) / (sxx * syy) };
+  if (n < 2 || sxx < 1e-12) return null;
+  const flat = syy < 1e-12;
+  return { m: flat ? 0 : sxy / sxx, b: flat ? my : my - (sxy / sxx) * mx, r2: flat ? null : (sxy * sxy) / (sxx * syy) };
+};
+
+/** The part of the segment p0 -> p1 inside the box [x0, y0, x1, y1] (Liang-Barsky), or null when none is. */
+const clipLine = ([ax_, ay], [bx, by], [x0, y0, x1, y1]) => {
+  let [lo, hi] = [0, 1];
+  const [dx, dy] = [bx - ax_, by - ay];
+  for (const [p, q] of [[-dx, ax_ - x0], [dx, x1 - ax_], [-dy, ay - y0], [dy, y1 - ay]]) {
+    if (p === 0) {
+      if (q < 0) return null;
+    } else {
+      const r = q / p;
+      if (p < 0) lo = Math.max(lo, r);
+      else hi = Math.min(hi, r);
+    }
+  }
+  return lo < hi ? [[ax_ + lo * dx, ay + lo * dy], [ax_ + hi * dx, ay + hi * dy]] : null;
 };
 
 /**
  * Points (xs[i], ys[i]) popping in one after another from `at`, `each` s
  * apart, keyed `<key>/p<i>`. With `fit`, the least-squares line is drawn on
- * from `fitAt` over `fitDur` as `<key>/fit`, with its equation and r squared
- * as `<key>/fit/label` in the empty top corner.
+ * from `fitAt` over `fitDur` as `<key>/fit` (cut at the plot's edges), with
+ * its equation and r squared as `<key>/fit/label` in the empty top corner.
+ * Fewer than two distinct x values have no line; a flat one has no r squared.
  */
 const Scatter = ({ ax, xs, ys, at = 0, each = 0.2, color, fit, fitAt = 0, fitDur, fitColor, key = "pts", size = 28 }, { t, theme }) => {
+  if (xs.length !== ys.length) throw new Error(`Scatter: px has ${xs.length} values but py has ${ys.length}; they must pair up`);
   const { motion, color: palette } = theme;
   const ink = color ?? palette.accent;
   const out = xs.map((x, i) => <Dot ax={ax} x={x} y={ys[i]} at={at + i * each} color={ink} guides={false} size={size} key={`${key}/p${i}`} />);
-  if (!fit) return out;
-  const { m, b, r2 } = leastSquares(xs, ys);
+  const ls = fit ? leastSquares(xs, ys) : null;
+  if (!ls) return out;
+  const { m, b, r2 } = ls;
   const [lo, hi] = [Math.min(...xs), Math.max(...xs)];
   const [a, c] = [lo - 0.04 * (ax.x[1] - ax.x[0]), hi + 0.04 * (ax.x[1] - ax.x[0])];
+  const seg = clipLine([ax.X(a), ax.Y(m * a + b)], [ax.X(c), ax.Y(m * c + b)], [ax.X(ax.x[0]), ax.Y(ax.y[1]), ax.X(ax.x[1]), ax.Y(ax.y[0])]);
   const q = easeInOutCubic(clamp((t - fitAt) / (fitDur ?? 2 * motion.duration.slow), 0, 1));
   const line = fitColor ?? palette.negative;
   const sign = b < 0 ? "-" : "+";
-  const tex = `y = ${m.toFixed(2)}x ${sign} ${Math.abs(b).toFixed(2)} \\quad r^2 = ${r2.toFixed(2)}`;
-  const rising = m >= 0;
-  const corner = [rising ? ax.X(ax.x[0]) + size : ax.X(ax.x[1]) - size, ax.Y(ax.y[1]) + size * 0.5];
+  const tex = r2 === null ? `y = ${b.toFixed(2)}` : `y = ${m.toFixed(2)}x ${sign} ${Math.abs(b).toFixed(2)} \\quad r^2 = ${r2.toFixed(2)}`;
+  // The equation sits in the top corner the line leans away from, or the other one if the line runs through it.
+  const [lw, lh] = texBox(tex, (size * 10) / 7);
+  const corners = (m >= 0 ? [-1, 1] : [1, -1]).map((side) => [side < 0 ? ax.X(ax.x[0]) + size : ax.X(ax.x[1]) - size, ax.Y(ax.y[1]) + size * 0.5, [-side, 1]]);
+  const [cx, cy, lean] = corners.find((c) => !seg || !through(boxOf(c[0], c[1], c[2], lw, lh), [seg])) ?? corners[0];
   out.push(
-    <Path
-      key={`${key}/fit`}
-      d={`M${ax.X(a)} ${ax.Y(m * a + b)} L${ax.X(c)} ${ax.Y(m * c + b)}`}
-      viewBox={[0, 0, ax.w, ax.h]}
-      stroke={{ width: size / 4, color: line, cap: "round" }}
-      trim={[0, q]}
-      style={layer(ax)}
-    />,
-    tag(corner[0], corner[1], [rising ? 1 : -1, 1], tex, `${key}/fit/label`, { opacity: clamp(q * 3 - 2, 0, 1), color: line }, 40),
+    seg ? (
+      <Path
+        key={`${key}/fit`}
+        d={`M${seg[0].join(" ")} L${seg[1].join(" ")}`}
+        viewBox={[0, 0, ax.w, ax.h]}
+        stroke={{ width: size / 4, color: line, cap: "round" }}
+        trim={[0, q]}
+        style={layer(ax)}
+      />
+    ) : null,
+    tag(cx, cy, lean, tex, `${key}/fit/label`, { opacity: clamp(q * 3 - 2, 0, 1), color: line }, (size * 10) / 7),
   );
   return out;
 };
@@ -534,10 +651,12 @@ const Area = ({ ax, f, g = () => 0, from, to, at = 0, dur, color, label, key = "
 /**
  * Rectangles under `f` over [from, to] (left-hand heights), the first
  * `counts[0]` popping in from `at`, `each` s apart; then each next count
- * splits them from `refineAt`, `gap` s after one another. Keyed `<key>/r<i>`
- * for the last count's rectangles; an earlier count's rectangles are the
- * same pieces, stacked on the one that is its first. `label` (TeX) sits
- * above them as `<key>/label`.
+ * splits them from `refineAt`, `gap` s after one another: a rectangle keeps
+ * its left edge and its new neighbours grow out of its right edge, so the
+ * pieces always tile the span without overlap. Keyed `<key>/r<i>` for the
+ * last count's rectangles; an earlier count's rectangles are the same
+ * pieces, the ones that split waiting with no width at the right of the one
+ * that is their first. `label` (TeX) sits above them as `<key>/label`.
  */
 const Riemann = ({ ax, f, from, to, counts, at = 0, refineAt, each = 0.12, gap = 1.4, color, label, key = "rects", size = 40 }, { t, theme }) => {
   const { motion } = theme;
@@ -546,13 +665,15 @@ const Riemann = ({ ax, f, from, to, counts, at = 0, refineAt, each = 0.12, gap =
   const N = counts[counts.length - 1];
   const base = ax.Y(clamp(0, ax.y[0], ax.y[1]));
   const first = refineAt ?? at + counts[0] * each + 0.8;
-  // Rectangle i as part of the counts[k] split: left px, right px, top px, shown.
+  // Rectangle i as part of the counts[k] split: left px, right px, top px.
   const part = (k, i) => {
     const n = counts[k];
     const c = Math.floor((i * n) / N);
     const x = a + ((b - a) * c) / n;
     const y = f(x);
-    return [ax.X(x), ax.X(x + (b - a) / n), ax.Y(Number.isFinite(y) ? clamp(y, ax.y[0], ax.y[1]) : 0), Math.ceil((c * N) / n) === i ? 1 : 0];
+    const right = ax.X(x + (b - a) / n);
+    const top = ax.Y(Number.isFinite(y) ? clamp(y, ax.y[0], ax.y[1]) : 0);
+    return [Math.ceil((c * N) / n) === i ? ax.X(x) : right, right, top];
   };
   const top = Math.min(...Array.from({ length: N }, (_, i) => part(counts.length - 1, i)[2]));
   const rects = Array.from({ length: N }, (_, i) => {
@@ -563,6 +684,7 @@ const Riemann = ({ ax, f, from, to, counts, at = 0, refineAt, each = 0.12, gap =
     }
     const pop = easeOutCubic(clamp((t - at - Math.floor((i * counts[0]) / N) * each) / motion.duration.base, 0, 1));
     const edge = base + (p[2] - base) * pop;
+    const wide = p[1] - p[0];
     return (
       <Box
         key={`${key}/r${i}`}
@@ -570,11 +692,11 @@ const Riemann = ({ ax, f, from, to, counts, at = 0, refineAt, each = 0.12, gap =
           position: "absolute",
           left: p[0],
           top: Math.min(edge, base),
-          width: p[1] - p[0],
+          width: wide,
           height: Math.abs(edge - base),
           fill: ink,
-          border: { width: 3, color: ink },
-          opacity: 0.45 * p[3] * Math.min(1, 3 * pop),
+          border: { width: size * 0.075, color: ink },
+          opacity: 0.45 * clamp(wide / 4, 0, 1) * Math.min(1, 3 * pop),
         }}
       />
     );
@@ -648,13 +770,20 @@ const Tangent = ({ ax, f, x0, x1 = x0, h = 0, h1 = 0, at = 0, moveAt, dur, reach
   ];
 };
 
-export default (props, { theme }) => {
+export default (props, { theme, size }) => {
   const { x, y, fns, tones, labels, marks, px, py, shade, rects, tangent, tone } = props;
-  const { color } = theme;
-  const ax = axes({ x, y, origin: props.origin });
+  const { color, space } = theme;
+  // The 1300 x 760 plot and its 96 px of numbers shrink with the frame, the plot taller when the frame is.
+  const [availW, availH] = [size.width - 2 * space.xl, size.height - 2 * space.xl];
+  const k = Math.min(1, availW / 1492, availH / 952);
+  const [pad, width] = [96 * k, 1300 * k];
+  const height = Math.max(760 * k, Math.min(availH - 2 * pad, width));
+  const ax = axes({ x, y, origin: props.origin, width, height, pad });
   const fs = fns.map(formula);
   const palette = [tone, color.warning, color.positive, color.negative];
   const f = fs[0];
+  const room = (size.width - ax.w) / 2;
+  const nudges = endLabels(ax, fs.map((g, i) => ({ f: g, label: labels[i] })), 48 * k, 7 * k, room);
   // A mark's label sits above the curve: up-left on a rising one, up-right on a falling one, above a flat one.
   const placed = (m) => {
     const slope = (f(m + 1e-4) - f(m - 1e-4)) * (x[1] - x[0]) / (2e-4 * (y[1] - y[0]));
@@ -662,9 +791,9 @@ export default (props, { theme }) => {
   };
   return (
     <Stack justify="center" align="center" style={{ flexGrow: 1, fill: color.bg }}>
-      <Axes ax={ax} at={props.at} xTitle={props.xTitle} yTitle={props.yTitle}>
+      <Axes ax={ax} at={props.at} size={40 * k} xTitle={props.xTitle} yTitle={props.yTitle}>
         {shade && rects.length ? (
-          <Riemann ax={ax} f={f} from={shade[0]} to={shade[1]} counts={rects} at={props.shadeAt} color={props.shadeTone ?? tone} label={props.shadeLabel} key="ax/rects" />
+          <Riemann ax={ax} f={f} from={shade[0]} to={shade[1]} counts={rects} at={props.shadeAt} color={props.shadeTone ?? tone} label={props.shadeLabel} size={40 * k} key="ax/rects" />
         ) : null}
         {shade && !rects.length ? (
           <Area
@@ -676,6 +805,7 @@ export default (props, { theme }) => {
             at={props.shadeAt}
             color={props.shadeTone ?? tone}
             label={props.shadeLabel}
+            size={40 * k}
             key="ax/area"
           />
         ) : null}
@@ -685,17 +815,21 @@ export default (props, { theme }) => {
             f={g}
             at={props.plotAt + i * 0.6}
             color={tones[i] ?? palette[i % palette.length]}
+            width={7 * k}
+            size={48 * k}
+            room={room}
             label={labels[i]}
+            nudge={nudges[i]}
             head={props.head && i === 0}
             key={i ? `curve${i}` : "curve"}
           />
         ))}
         {tangent.length ? (
-          <Tangent ax={ax} f={f} x0={tangent[0]} x1={tangent[1] ?? tangent[0]} h={props.secant} at={props.tangentAt} key="ax/tangent" />
+          <Tangent ax={ax} f={f} x0={tangent[0]} x1={tangent[1] ?? tangent[0]} h={props.secant} at={props.tangentAt} size={40 * k} key="ax/tangent" />
         ) : null}
-        {px.length ? <Scatter ax={ax} xs={px} ys={py} at={props.pointsAt} color={tone} fit={props.fit} fitAt={props.fitAt} key="ax/pts" /> : null}
+        {px.length ? <Scatter ax={ax} xs={px} ys={py} at={props.pointsAt} color={tone} fit={props.fit} fitAt={props.fitAt} size={28 * k} key="ax/pts" /> : null}
         {marks.map((m, i) => (
-          <Dot ax={ax} x={m} y={f(m)} at={props.markAt + i * 0.3} color={tones[0] ?? tone} label={props.markLabels?.[i] ?? `(${fmt(m)}, ${fmt(f(m))})`} place={props.markPlace ?? placed(m)} key={`m${i}`} />
+          <Dot ax={ax} x={m} y={f(m)} at={props.markAt + i * 0.3} color={tones[0] ?? tone} label={props.markLabels?.[i] ?? `(${fmt(m)}, ${fmt(f(m))})`} place={props.markPlace ?? placed(m)} size={40 * k} key={`m${i}`} />
         ))}
       </Axes>
     </Stack>

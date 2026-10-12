@@ -7,8 +7,10 @@
 // walks a marker along a node sequence. Keys: nodes `<id>/n<i>` (label
 // `<id>/l<i>`), edges `<id>/e<a>-<b>` (weight `<id>/w<a>-<b>`), the
 // walk `<id>/p<j>` and its marker `<id>/here`, so two Graphs with one id
-// and the same nodes glide between layouts in a Steps. Copy `layout` and
-// `Graph` into a scene component to compose them.
+// and the same nodes glide between layouts in a Steps. Edges between one
+// pair fan out; a plain-text label too long for its node is set beside it
+// (same key); a bad index or a path off the edges throws a readable error.
+// Copy `layout` and `Graph` into a scene component to compose them.
 export const props = {
   // A TeX label per node ("" for none); two or more plain letters are set as text.
   nodes: list(latex()),
@@ -42,7 +44,7 @@ export const props = {
   path: list(num()).default([]),
   walkAt: num().default(2),
   walkEach: num().default(0.8),
-  // Largest node radius in px; it shrinks when nodes crowd.
+  // Largest node radius in px; it shrinks when nodes crowd. The demo scales it with the frame.
   radius: num().default(60),
   tone: token("color").default("accent"),
   pathTone: token("color").default("positive"),
@@ -220,11 +222,34 @@ const layout = (kind, nodes, edges, { width, height, root = 0, columns = [], xs 
   return out;
 };
 
-/** TeX for a label: plain words and single capitals are text, anything else is maths. */
-const labelTex = (s) => (/^[A-Za-z]{2,}( [A-Za-z]+)*$|^[A-Z]$/.test(s) ? `\\text{${s}}` : s);
+/** Plain words (hyphens allowed inside a word): set as text, and moved outside a node that is too small to hold them. */
+const isPlain = (s) => /^[A-Za-z]{2,}(-[A-Za-z]{2,})*( [A-Za-z0-9]+(-[A-Za-z0-9]+)*)*$/.test(s);
 
-/** Rough count of glyphs a TeX label draws, to size it. */
-const glyphs = (s) => Math.max(1, s.replace(/\\[a-zA-Z]+|[{}^_$\\]/g, "").length);
+/** TeX for a label: plain words and single capitals are text, anything else is maths. */
+const labelTex = (s) => (isPlain(s) || /^[A-Z]$/.test(s) ? `\\text{${s}}` : s);
+
+/** Rough px width of `s` set as text at font size `size`. */
+const textW = (s, size) => 0.6 * size * s.length;
+
+/** `s` split at spaces into at most three lines, as narrow as that allows (from 14 letters wide). */
+const wrapWords = (s) => {
+  const words = s.split(" ");
+  for (let chars = 14; ; chars += 2) {
+    const lines = [];
+    for (const word of words) {
+      const last = lines.length - 1;
+      if (last >= 0 && lines[last].length + 1 + word.length <= chars) lines[last] += ` ${word}`;
+      else lines.push(word);
+    }
+    if (lines.length <= 3) return lines;
+  }
+};
+
+/** The label size that fits `label` across a node of radius `r`. */
+const fitIn = (label, r) => (2.28 * r) / glyphs(label);
+
+/** Rough count of glyphs a TeX label draws, to size it (a relation or operator spaced out counts twice). */
+const glyphs = (s) => Math.max(1, s.replace(/\\[a-zA-Z]+|[{}^_$\\]/g, "").replace(/[=+<>-]/g, "$&$&").length);
 
 /**
  * A self-loop on a node of radius `r` centred at the origin, opening
@@ -253,6 +278,47 @@ const loopShape = (r, u, head) => {
   return [d, [tip, [base[0] + side[0], base[1] + side[1]], [base[0] - side[0], base[1] - side[1]]], dc + lr];
 };
 
+/** Throws a readable error for an input the graph cannot be drawn from. */
+const check = ({ nodes, edges, weights, directed, kind, root, columns, xs, ys, visit, via, path }) => {
+  const n = nodes.length;
+  const fail = (msg) => {
+    throw new Error(`Graph: ${msg}`);
+  };
+  const range = `there are ${n} node${n === 1 ? "" : "s"} (indices 0 to ${n - 1})`;
+  const node = (v, what) => {
+    if (!Number.isInteger(v) || v < 0 || v >= n) fail(`${what} names node ${JSON.stringify(v)}, but ${range}`);
+  };
+  const joins = (a, b) => edges.some(([x, y]) => (x === a && y === b) || (!directed && x === b && y === a));
+  if (!["circle", "tree", "layers", "manual"].includes(kind)) fail(`layout ${JSON.stringify(kind)} is not "circle", "tree", "layers" or "manual"`);
+  if (n === 0) fail("nodes is empty; give at least one label");
+  edges.forEach((e, i) => {
+    if (!Array.isArray(e) || e.length !== 2) fail(`edges[${i}] = ${JSON.stringify(e)} is not a [from, to] pair of node indices`);
+    node(e[0], `edges[${i}] = ${JSON.stringify(e)}`);
+    node(e[1], `edges[${i}] = ${JSON.stringify(e)}`);
+  });
+  if (weights.length > edges.length) fail(`weights has ${weights.length} entries for ${edges.length} edges; give one per edge, or fewer to leave the last edges unweighted`);
+  visit.forEach((v, k) => node(v, `visit[${k}]`));
+  if (via.length > visit.length) fail(`via has ${via.length} entries for ${visit.length} visited nodes; give one per visit, -1 for none`);
+  via.forEach((v, k) => {
+    if (v === -1) return;
+    node(v, `via[${k}]`);
+    if (!joins(v, visit[k])) fail(`via[${k}] = ${v}, but no edge ${directed ? "runs from" : "joins"} node ${v} ${directed ? "to" : "and"} node ${visit[k]} (visit[${k}])`);
+  });
+  path.forEach((v, j) => node(v, `path[${j}]`));
+  for (let j = 1; j < path.length; j++) {
+    const [a, b] = [path[j - 1], path[j]];
+    if (!joins(a, b)) fail(`path[${j - 1}], path[${j}] = ${a}, ${b}, but no edge ${a === b ? `[${a}, ${a}] loops` : directed ? `runs from node ${a} to node ${b}` : `joins nodes ${a} and ${b}`}; a path must follow edges`);
+  }
+  if (kind === "tree") node(root, "root");
+  if (kind === "layers" && columns.length) {
+    const total = columns.reduce((sum, c) => sum + c, 0);
+    if (columns.some((c) => !Number.isInteger(c) || c < 0) || total !== n) fail(`columns ${JSON.stringify(columns)} must be counts that add up to the ${n} nodes, but add up to ${total}`);
+  }
+  if (kind === "manual") {
+    if (xs.length < n || ys.length < n) fail(`manual layout needs an x and a y (0 to 1) per node: ${n} nodes, but xs has ${xs.length} and ys has ${ys.length}`);
+  }
+};
+
 /**
  * The graph in a `width` by `height` box, everything drawn inside it. The
  * node radius is at most `radius` and shrinks to a third of the closest
@@ -270,12 +336,12 @@ const Graph = (
   },
   { t, theme },
 ) => {
+  check({ nodes, edges, weights, directed, kind, root, columns, xs, ys, visit, via, path });
   const { color, motion } = theme;
   const ink = tone ?? color.accent;
   const walkInk = pathTone ?? color.positive;
   const n = nodes.length;
   const m = edges.length;
-  const has = (a, b) => edges.some((e) => e[0] === a && e[1] === b);
   const tagged = (e) => weights[e] !== undefined && weights[e] !== "";
 
   // Positions, edge shapes and label places for node radius r and box padding pad.
@@ -284,6 +350,7 @@ const Graph = (
     const head = directed ? Math.max(14, 5 * w) : 0;
     const hug = r + (directed ? w : 0.5 * w);
     const wfs = clamp(r * 0.55, 26, 40);
+    const ring = clamp(r * 0.06, 2, 5);
     const pos = layout(kind, nodes, edges, { width, height, root, columns, xs, ys, pad });
     const mid = [0, 1].map((k) => pos.reduce((s, p) => s + p[k], 0) / Math.max(1, n));
     const outward = (v) => {
@@ -330,9 +397,18 @@ const Graph = (
       }
       return bend;
     };
-    const shapes = edges.map(([a, b]) => {
+    // Edges between one pair of nodes (either way round) fan out side by side.
+    const pairKey = (a, b) => (a < b ? `${a},${b}` : `${b},${a}`);
+    const lanes = {};
+    edges.forEach(([a, b], e) => {
+      if (a !== b) lanes[pairKey(a, b)] = [...(lanes[pairKey(a, b)] ?? []), e];
+    });
+    const shapes = edges.map(([a, b], e) => {
       if (a === b) return null;
-      return directed && has(b, a) ? shaft(a, b, 16, 0.4) : shaft(a, b, bendFor(a, b));
+      const group = lanes[pairKey(a, b)];
+      if (group.length === 1) return shaft(a, b, bendFor(a, b));
+      if (directed && group.length === 2 && edges[group[0]][0] !== edges[group[1]][0]) return shaft(a, b, 16, 0.4);
+      return shaft(a, b, (a < b ? 1 : -1) * (group.indexOf(e) - (group.length - 1) / 2) * clamp(120 / group.length, 24, 48));
     });
     const extent = (text, size, dir) => 0.5 * (Math.abs(dir[0]) * glyphs(text) * 0.75 * size + Math.abs(dir[1]) * 1.45 * size);
     // Each edge's loop (self-loops) and weight label: [x, y] of its centre.
@@ -352,27 +428,72 @@ const Graph = (
       const away = extent(text, wfs, side) + 0.6 * w + 8;
       return [s.apex[0] + side[0] * away, s.apex[1] + side[1] * away];
     });
+    // The loop at node a as a disk, and each weight as a rect, for labels to avoid.
+    const loopDisk = (a, e) => {
+      const u = outward(a);
+      const reach = loops[e][2] - 0.7 * r;
+      return [pos[a][0] + u[0] * reach, pos[a][1] + u[1] * reach, 0.7 * r + w];
+    };
+    const tagRects = tags.flatMap((c, e) => {
+      if (!c) return [];
+      const half = [0.5 * glyphs(weights[e]) * 0.75 * wfs, 0.5 * 1.45 * wfs];
+      return [[c[0] - half[0], c[1] - half[1], c[0] + half[0], c[1] + half[1]]];
+    });
+    // A plain-text label too long to read inside its node goes outside, at the side
+    // (below first; outward on a circle) that crosses the fewest edges, nodes and weights.
+    const dots = shapes.flatMap((s) => (s ? Array.from({ length: 17 }, (_, k) => s.along(k / 16)) : []));
+    const disks = edges.flatMap(([a, b], e) => (a === b ? [loopDisk(a, e)] : []));
+    const outside = [];
+    const set = nodes.map((label, i) => {
+      if (!isPlain(label) || fitIn(label, r) >= 0.37 * radius) return null;
+      const size = clamp(0.7 * r, 0.4 * radius, 0.7 * radius);
+      const lines = wrapWords(label);
+      const [lw, lh] = [Math.max(...lines.map((l) => textW(l, size))) + 0.3 * size, 1.3 * size * lines.length];
+      const gap = 6 + 2 * ring;
+      const down = [[0, 1], [0, -1], [1, 0], [-1, 0], [0.7071, 0.7071], [-0.7071, 0.7071], [0.7071, -0.7071], [-0.7071, -0.7071]];
+      const dirs = kind === "circle" ? [outward(i), ...down] : down;
+      let best = null;
+      dirs.forEach((d, rank) => {
+        const k = Math.max(Math.abs(d[0]), Math.abs(d[1]));
+        const c = [pos[i][0] + d[0] * (r + gap) + (d[0] / k) * (lw / 2), pos[i][1] + d[1] * (r + gap) + (d[1] / k) * (lh / 2)];
+        const rc = [c[0] - lw / 2, c[1] - lh / 2, c[0] + lw / 2, c[1] + lh / 2];
+        const near = ([x, y], rad) => Math.hypot(x - clamp(x, rc[0], rc[2]), y - clamp(y, rc[1], rc[3])) < rad;
+        const over = (q) => rc[0] < q[2] && q[0] < rc[2] && rc[1] < q[3] && q[1] < rc[3];
+        const cost =
+          dots.filter(([x, y]) => x > rc[0] - 6 && x < rc[2] + 6 && y > rc[1] - 6 && y < rc[3] + 6).length +
+          20 * pos.filter((q, k) => k !== i && near(q, r + 4)).length +
+          20 * disks.filter(([x, y, rad]) => near([x, y], rad)).length +
+          10 * tagRects.filter(over).length +
+          20 * outside.filter(over).length +
+          0.5 * rank;
+        if (!best || cost < best.cost) best = { cost, c, rc };
+      });
+      outside.push(best.rc);
+      return { c: best.c, lines, size, w: lw, h: lh };
+    });
     // The box everything occupies.
     const box = [Infinity, Infinity, -Infinity, -Infinity];
-    const grow = (x0, y0, x1, y1) => {
-      box[0] = Math.min(box[0], x0);
-      box[1] = Math.min(box[1], y0);
-      box[2] = Math.max(box[2], x1);
-      box[3] = Math.max(box[3], y1);
+    const grow = (x0, y0, x1, y1, m = 0) => {
+      box[0] = Math.min(box[0], x0 - m);
+      box[1] = Math.min(box[1], y0 - m);
+      box[2] = Math.max(box[2], x1 + m);
+      box[3] = Math.max(box[3], y1 + m);
     };
+    // Text keeps a margin off the frame; its box is wider than the glyphs.
+    const air = 0.5 * wfs;
     pos.forEach(([x, y]) => grow(x - r, y - r, x + r, y + r));
     edges.forEach(([a], e) => {
       if (loops[e]) {
-        const u = outward(a);
-        const c = [pos[a][0] + u[0] * (loops[e][2] - 0.7 * r), pos[a][1] + u[1] * (loops[e][2] - 0.7 * r)];
-        grow(c[0] - 0.7 * r - w, c[1] - 0.7 * r - w, c[0] + 0.7 * r + w, c[1] + 0.7 * r + w);
+        const [x, y, rad] = loopDisk(a, e);
+        grow(x - rad, y - rad, x + rad, y + rad);
       }
       if (tags[e]) {
         const half = [0.5 * glyphs(weights[e]) * 0.75 * wfs, 0.5 * 1.45 * wfs];
-        grow(tags[e][0] - half[0], tags[e][1] - half[1], tags[e][0] + half[0], tags[e][1] + half[1]);
+        grow(tags[e][0] - half[0], tags[e][1] - half[1], tags[e][0] + half[0], tags[e][1] + half[1], air);
       }
     });
-    return { pos, shapes, loops, tags, box, outward, shaft, w, head, hug, wfs };
+    outside.forEach((rc) => grow(...rc, air));
+    return { pos, shapes, loops, tags, set, box, outward, shaft, w, head, hug, wfs, ring };
   };
 
   // Settle the radius and padding: shrink nodes that crowd, and pad each side by what pokes out of it.
@@ -391,11 +512,9 @@ const Graph = (
     pad = [pad[0] - x0 + 4, pad[1] - y0 + 4, pad[2] - (width - x1) + 4, pad[3] - (height - y1) + 4].map((p) => Math.max(p, 0));
   }
   layoutNow = arrange(r, pad);
-  const { pos, shapes, loops, tags, outward, shaft, w, head, hug, wfs } = layoutNow;
-  const ring = clamp(r * 0.06, 2, 5);
+  const { pos, shapes, loops, tags, set, outward, shaft, w, head, hug, wfs, ring } = layoutNow;
   // One label size for the graph (not below half the largest); a longer label shrinks alone to fit.
-  const fits = (label) => (2.28 * r) / glyphs(label);
-  const text = Math.max(0.5 * r * 0.85, Math.min(r * 0.85, ...nodes.map(fits)));
+  const text = Math.max(0.5 * r * 0.85, Math.min(r * 0.85, ...nodes.map((label, i) => (set[i] ? Infinity : fitIn(label, r)))));
 
   // Visits: when each node is reached, and when the edge it was reached by lights.
   const reached = nodes.map(() => Infinity);
@@ -441,7 +560,8 @@ const Graph = (
   const labels = [];
   edges.forEach(([a, b], e) => {
     const base = `${id}/e${a}-${b}`;
-    const key = seen[base] ? `${base}#${seen[base]}` : base;
+    const dup = seen[base] ? `#${seen[base]}` : "";
+    const key = base + dup;
     seen[base] = (seen[base] ?? 0) + 1;
     const q = drawn(e);
     const k = strength(lit[e]);
@@ -451,7 +571,7 @@ const Graph = (
       parts.push(anchor(`${key}/s`, s.p0), anchor(`${key}/t`, s.p1));
       parts.push(<Arrow key={key} from={`${key}/s`} to={`${key}/t`} bend={s.bend} gap={0} head={head} progress={q} stroke={stroke} />);
     }
-    if (tags[e]) labels.push(tag(`${id}/w${a}-${b}`, labelTex(weights[e]), tags[e], wfs, mix(color.muted, ink, k), q));
+    if (tags[e]) labels.push(tag(`${id}/w${a}-${b}${dup}`, labelTex(weights[e]), tags[e], wfs, mix(color.muted, ink, k), q));
   });
 
   // A self-loop at node `i` as paths in the node's own box (centre-relative).
@@ -523,9 +643,29 @@ const Graph = (
     );
   }
 
+  const popOf = (i) => (t < at + i * stagger ? 0 : spring(t - (at + i * stagger), motion.spring.snappy));
+  nodes.forEach((_, i) => {
+    const o = set[i];
+    if (!o) return;
+    const pop = popOf(i);
+    labels.push(
+      <Stack
+        key={`${id}/l${i}`}
+        align="center"
+        justify="center"
+        style={{ position: "absolute", left: o.c[0] - o.w / 2, top: o.c[1] - o.h / 2, width: o.w, height: o.h, scale: pop, opacity: Math.min(1, 3 * pop) }}
+      >
+        {o.lines.map((line) => (
+          <Box style={{ width: o.w, height: 1.3 * o.size, alignItems: "center", justifyContent: "center" }}>
+            <Math tex={`\\text{${line}}`} style={{ fontSize: o.size, color: color.text }} />
+          </Box>
+        ))}
+      </Stack>,
+    );
+  });
+
   const circles = nodes.map((label, i) => {
-    const since = at + i * stagger;
-    const pop = t < since ? 0 : spring(t - since, motion.spring.snappy);
+    const pop = popOf(i);
     const seenAt = strength(reached[i]);
     const next = Math.min(Infinity, ...reached.filter((x) => x > reached[i] + 1e-6));
     const current = seenAt * (1 - strength(next));
@@ -564,8 +704,8 @@ const Graph = (
         }}
       >
         {own}
-        {label === "" ? null : (
-          <Math key={`${id}/l${i}`} tex={labelTex(label)} style={{ fontSize: Math.min(text, fits(label)), color: mix(color.text, color.onAccent, current * (1 - walked)) }} />
+        {label === "" || set[i] ? null : (
+          <Math key={`${id}/l${i}`} tex={labelTex(label)} style={{ fontSize: Math.min(text, fitIn(label, r)), color: mix(color.text, color.onAccent, current * (1 - walked)) }} />
         )}
       </Box>
     );
@@ -582,11 +722,15 @@ const Graph = (
   );
 };
 
-export default (props, { theme }) => {
-  const { layout: kind, ...rest } = props;
+export default (props, { theme, size }) => {
+  const { layout: kind, radius, ...rest } = props;
+  // The 1600 x 880 box of a 1920 x 1080 frame, scaled to the frame and kept off its edges.
+  const width = Math.min((5 / 6) * size.width, size.width - 2 * theme.space.xxl);
+  const height = Math.min((22 / 27) * size.height, size.height - 2 * theme.space.xl);
+  const scale = Math.min(width / 1600, height / 880);
   return (
     <Stack justify="center" align="center" style={{ flexGrow: 1, fill: theme.color.bg }}>
-      <Graph {...rest} kind={kind} />
+      <Graph {...rest} kind={kind} width={width} height={height} radius={(radius ?? 60) * scale} />
     </Stack>
   );
 };

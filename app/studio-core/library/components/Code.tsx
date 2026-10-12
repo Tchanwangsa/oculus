@@ -2,12 +2,15 @@
 // tokenizer, every character on a fixed column grid. Every line is keyed
 // `<id>/l<key>` (key = the line's index, or `keys[i]`), so a Steps between
 // two versions of the code slides the lines that persist instead of
-// flashing them. Other keys: `<id>/panel`, `<id>/g<i>` (line numbers),
-// `<id>/d<key>` (diff bands), `<id>/band`, `<id>/bar` (focus), `<id>/caret`,
-// `<id>/n<i>` (notes), `<id>/trace`, `<id>/v<name>` (trace rows).
+// flashing them; its number is `<id>/l<key>/g<number>` and each coloured
+// run `<id>/l<key>/<text>#<nth>`, so a changed run cross-fades and a
+// renumbered line swaps its digits as it slides. Other keys: `<id>/panel`,
+// `<id>/d<key>` (diff bands), `<id>/band`, `<id>/bar` (focus),
+// `<id>/caret`, `<id>/n<i>` (notes), `<id>/trace`, `<id>/v<name>` (trace rows).
 // Time-driven: focus (band + dimming), caret, reveal, notes, trace values
 // and a diff all take plain times a scene passes from `word()`. Line indices
 // are 0-based into `lines`. This is the one starter set in monospace.
+// Characters outside the bundled fonts' coverage (CJK, emoji) render as boxes.
 // Copy `tokenize`, `glide` and `Code` into a scene component to compose it.
 export const props = {
   lines: list(str()),
@@ -127,7 +130,8 @@ export const examples = {
 const ADVANCE = 0.6;
 
 // Per language: keyword list, line comment, [open, close, kind] blocks that
-// can run over several lines, quote characters. Honest, not a parser.
+// can run over several lines, quote characters (charQuote: a single quote
+// starts a char literal only as 'x' or '\\x'; else a lifetime). Honest, not a parser.
 const LANGS = {
   python: {
     kw: "and as assert async await break class continue def del elif else except finally for from global if import in is lambda None nonlocal not or pass raise return try while with yield True False",
@@ -146,6 +150,7 @@ const LANGS = {
     line: "//",
     blocks: [["/*", "*/", "com"]],
     quotes: "\"'",
+    charQuote: true,
     directive: true,
   },
   sql: {
@@ -183,7 +188,8 @@ const tokenize = (lines, lang) => {
     let i = 0;
     while (i < s.length) {
       if (open) {
-        const j = s.indexOf(open.close, i);
+        let j = s.indexOf(open.close, i);
+        while (open.esc && j > 0 && s[j - 1] === "\\") j = s.indexOf(open.close, j + 1);
         const to = j < 0 ? s.length : j + open.close.length;
         push(i, to, open.kind);
         i = to;
@@ -213,13 +219,21 @@ const tokenize = (lines, lang) => {
         continue;
       }
       if (L.quotes.includes(c)) {
-        let j = i + 1;
-        while (j < s.length && s[j] !== c) j += s[j] === "\\" && !L.plainQuotes ? 2 : 1;
-        // A quote with no partner on the line (a Rust lifetime) is punctuation.
-        if (j < s.length || c !== "'") {
+        if (L.charQuote && c === "'") {
+          const ch = /^'(\\.[^']*|[^\\'])'/.exec(s.slice(i));
+          if (ch) {
+            push(i, i + ch[0].length, "str");
+            i += ch[0].length;
+            continue;
+          }
+        } else {
+          let j = i + 1;
+          while (j < s.length && s[j] !== c) j += s[j] === "\\" && !L.plainQuotes ? 2 : 1;
           const to = Math.min(j + 1, s.length);
           push(i, to, "str");
           i = to;
+          // A template literal left open carries on into the next line.
+          if (c === "`" && j >= s.length) open = { close: "`", kind: "str", esc: true };
           continue;
         }
       }
@@ -261,13 +275,14 @@ const glide = (t, at, vals, dur) => {
  * `focus: [{ from, to, at }]` (from -1 clears); `caret: [{ line, at }]`;
  * `reveal: { at, each }`; `notes: [{ line, text, at }]`;
  * `trace: [{ name, value, at }]`; `added`/`removed` line indices with
- * `diffAt`. The font shrinks (or, with no `fontSize`, grows up to 1.5 x
+ * `diffAt`; `marks` keeps the +/- gutter without bands, so a Steps from a
+ * diff to the clean code does not resize the panel. The font shrinks (or, with no `fontSize`, grows up to 1.5 x
  * the theme's) so the panel (with its notes and trace) fits
  * `maxWidth` x `maxHeight` (default: the frame less `space.xl` all round)
  * instead of clipping, so a column is always `0.6 * fontSize` px.
  */
 const Code = (
-  { lines, lang = "plain", keys = [], numbers = true, first = 1, fontSize, id = "code", focus = [], caret = [], reveal, notes = [], trace = [], added = [], removed = [], diffAt = 0, maxWidth, maxHeight },
+  { lines, lang = "plain", keys = [], numbers = true, first = 1, fontSize, id = "code", focus = [], caret = [], reveal, notes = [], trace = [], added = [], removed = [], diffAt = 0, marks = false, maxWidth, maxHeight },
   { t, theme, size: frame },
 ) => {
   const { color, type, space, motion } = theme;
@@ -276,7 +291,7 @@ const Code = (
   const cols = Math.max(24, ...lines.map((l) => l.replace(/\t/g, "    ").trimEnd().length));
   const digits = String(first + lines.length - 1).length;
   const names = [...new Set(trace.map((e) => e.name))];
-  const diff = added.length + removed.length > 0;
+  const diff = marks || added.length + removed.length > 0;
   const longest = (xs) => Math.max(0, ...xs.map((x) => x.length));
 
   // Every length is a multiple of the code size, so one measure at the
@@ -355,13 +370,29 @@ const Code = (
   const reveal1 = (i) => (reveal ? ease(reveal.at + i * reveal.each) : 1);
   const dk = ease(diffAt);
 
+  // The number sits inside its line so it slides with the text; keyed by
+  // its digits, a renumbered line cross-fades them instead of swapping halves.
   const lineBox = (i) => {
     const r = reveal1(i);
+    const nth = {};
     return (
       <Box key={`${id}/l${key(i)}`} style={{ position: "absolute", left: 0, top: at(i), width: panelW, height: lh, opacity: shown(i) * r, translateY: (1 - r) * lh * 0.4 }}>
-        {runs[i].map((run) => (
-          <Text style={{ ...code, color: ink[run.kind], position: "absolute", left: codeX + run.col * cw, top: 0 }}>{run.text}</Text>
-        ))}
+        {numbers ? (
+          <Text
+            key={`${id}/l${key(i)}/g${first + i}`}
+            style={{ ...code, color: mix(color.faint, color.accent, cshow * clamp(1 - Math.abs(cpos - i), 0, 1)), position: "absolute", left: pad, top: 0, width: digits * cw, textAlign: "right" }}
+          >
+            {String(first + i)}
+          </Text>
+        ) : null}
+        {runs[i].map((run) => {
+          const n = (nth[run.text] = (nth[run.text] ?? -1) + 1);
+          return (
+            <Text key={`${id}/l${key(i)}/${run.text}#${n}`} style={{ ...code, color: ink[run.kind], position: "absolute", left: codeX + run.col * cw, top: 0 }}>
+              {run.text}
+            </Text>
+          );
+        })}
       </Box>
     );
   };
@@ -416,16 +447,6 @@ const Code = (
       {removed.map((i) => diffBand(i, color.negative, "-"))}
       {added.map((i) => diffBand(i, color.positive, "+"))}
       {ww > 0 ? <Box key={`${id}/bar`} style={{ position: "absolute", left: bw, top: at(wa), width: fs * 0.14, height: (wb - wa + 1) * lh, fill: color.accent, opacity: ww }} /> : null}
-      {numbers
-        ? lines.map((_, i) => (
-            <Text
-              key={`${id}/g${i}`}
-              style={{ ...code, color: mix(color.faint, color.accent, cshow * clamp(1 - Math.abs(cpos - i), 0, 1)), position: "absolute", left: pad, top: at(i), width: digits * cw, textAlign: "right", opacity: shown(i) * reveal1(i) }}
-            >
-              {String(first + i)}
-            </Text>
-          ))
-        : null}
       {lines.map((_, i) => lineBox(i))}
       {notes.map(noteBox)}
       {caret.length ? (
@@ -469,8 +490,19 @@ export default (p, { theme }) => {
     trace: p.vars.map((name, i) => ({ name, value: p.varVals[i], at: p.varAt[i] })),
     id: "code",
   };
+  // The diff's bands stay in the clean state as invisible ones (marks keeps
+  // the gutter), so a band that survives glides with its line and fades out.
+  const kept = p.added.map((i) => (p.keys[i] ?? i).toString()).map((k) => p.after.findIndex((_, j) => (p.afterKeys[j] ?? j).toString() === k));
   const state = (lines, keys, diff) => (
-    <Code {...common} lines={lines} keys={keys} added={diff ? p.added : []} removed={diff ? p.removed : []} diffAt={p.diffAt} />
+    <Code
+      {...common}
+      lines={lines}
+      keys={keys}
+      added={diff ? p.added : kept.filter((j) => j >= 0)}
+      removed={diff ? p.removed : []}
+      marks={!diff && p.added.length + p.removed.length > 0}
+      diffAt={diff ? p.diffAt : Infinity}
+    />
   );
   const stage = (child) => (
     <Stack justify="center" align="center" style={{ flexGrow: 1, fill: color.bg }}>
@@ -479,7 +511,7 @@ export default (p, { theme }) => {
   );
   if (!p.after.length) return stage(state(p.lines, p.keys, true));
   return stage(
-    <Steps at={[p.afterAt]} dur={motion.duration.slow} lag={0.06}>
+    <Steps at={[p.afterAt]} dur={motion.duration.slow}>
       {state(p.lines, p.keys, true)}
       {state(p.after, p.afterKeys, false)}
     </Steps>,
