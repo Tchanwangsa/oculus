@@ -20,12 +20,13 @@ frames and contact sheets, lints, and narrates.
 | Video folder, component lookup, the whole-frame timeline, scene fingerprints, lint | `app/studio-core/src/project/` (`timeline.rs`, `frames.rs`, `fingerprint.rs`, `lint/`) |
 | `script.md`, the narration manifest, scene lengths and word cues | `app/studio-core/src/project/` (`script/`, `narration/`, `scenes.rs`), `app/studio-core/src/host/prelude/words.js` |
 | Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
-| Magic move: matching and blending two laid-out trees, OKLab colour | `app/studio-core/src/morph/` |
+| Magic move: matching and blending two laid-out trees, OKLab colour, lag and fades | `app/studio-core/src/morph/` (`clock.rs`, `fade.rs`) |
+| Overlays bound to keys (Brace, Surround, Underline, Indicate, a keyed Arrow), drawn after layout and morphing | `app/studio-core/src/overlay/`, `app/studio-core/src/host/prelude/overlays.js` |
 | Easings shared by transitions and the morph (the prelude's, in Rust) | `app/studio-core/src/easing/` |
 | TSX → JS (oxc), the QuickJS sandbox, the prelude every component sees | `app/studio-core/src/host/` (`prelude/*.js`, one module scope, concatenated in order) |
 | The element tree and its style keys | `app/studio-core/src/scene/` |
 | Layout (taffy, parley) and paint (vello_cpu); Path trim and Text reveal | `app/studio-core/src/layout/`, `app/studio-core/src/paint/` (`path/`, `text/`) |
-| `<Math>`: KaTeX through math-core, the layout of its HTML tree, keys, the expansion into glyphs; the KaTeX fonts | `app/studio-core/src/math/` (`walk/` one file per construct), `app/studio-core/fonts/katex/` |
+| `<Math>`: KaTeX through math-core, the layout of its HTML tree, keys, the expansion into glyphs, `<Write>`, KaTeX's brace; the KaTeX fonts | `app/studio-core/src/math/` (`walk/` one file per construct, `write.rs`, `brace.rs`), `app/studio-core/fonts/katex/` |
 | Props schemas and their validation | `app/studio-core/src/schema/` |
 | Component and theme libraries: the starter set, seeding, the snapshot write path, promoting a video's own file | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots, `promote.rs`) |
 | Videos in the data directory: `new`, `list`, slug resolution | `app/src-tauri/src/studio/videos/`, `app/src-tauri/src/library/paths/studio.rs` (`studio_dir`, `agent_write_dirs`) |
@@ -204,38 +205,67 @@ one folder besides `agents/` and the database an agent thread may write
 A video is made in an ordinary Chat thread by the student's own CLI agent,
 through the `oculus` CLI and its file tools; there is no Studio page yet.
 The `oculus-studio` skill ([harness.md](./harness.md#the-brief-is-appended-except-on-opencode))
-is the whole brief, and `AGENTS.md` only points at it. Its `SKILL.md` is the
-loop, as a checklist the agent copies: read the lecture (through the
-`oculus-lectures` skill), `studio new`, read `reference.md`, write
-`video.json`, `script.md` and any component of the video's own, `gallery`
-each new component, `lint --json` until only stale narration is left,
-`narrate`, lint again, look at `frame` and `strip` PNGs with the agent's
-image-reading tool, and `render` a draft and then `--final`; `promote` only
-a component the student wants kept; the story rules (write the argument
-before the scenes, every claim with its reason, each scene's narration
-opening on a link to the last, numbers given meaning, terms defined in
-passing, an example followed by its general rule, the payoff shown, the
-end answering the opening question, and phrasing the voice cannot fuse
-across words: "R S A rests" is heard as "RS arrests"); and the taste
-rules (one idea per scene,
-words on screen summarise the narration, the frame filled with the key
-figure at display size, something on screen within a second, motion cued
-with `word()`, one shared key for consecutive headings, tokens over
-literals). When `narrate` fails for want of a
-voice or the aligner, the agent stops and tells the student what to set in
-Settings -> Voice; it never downloads the aligner or the voice packs.
-After narrating with Kokoro it checks each guessed-word note, tries a
-reading with `oculus studio g2p`, adds a lexicon entry for a wrong one
-and narrates again. `reference.md` is this
-page's authoring rules distilled for an agent (video.json, spoken form, the
-component contract, elements and style keys, motion, cues, transitions,
-each lint kind and what to do about it, and the commands' outputs).
-`studio.d.ts` types every prelude global; `src/host/tests/globals.rs` lists
-the globals a fresh sandbox context gains from the prelude (QuickJS's own
-`Object.getOwnPropertyNames(globalThis)` before and after, less the host's
-`__studio*` entry points) and fails when they differ from the file's
-top-level `declare`s, either way. The app ships the file with
-`include_str!`.
+is the whole brief, and `AGENTS.md` only points at it. The target is a
+3Blue1Brown-style explainer: maths written term by term as it is said and
+rewritten in place, every basic defined on an example before it is named,
+no slide shapes (card-and-arrow chains, a heading over lines, a formula
+that appears whole, a text-only scene), and no length budget.
+
+`SKILL.md` splits the work into three roles, each started as a
+[subagent](./harness.md#subagents) on the model Settings → Jobs gives that
+agent (`oculus studio agents` prints it and the call to make):
+
+- **Research**, one helper per slice of the lecture (about ten minutes or
+  ten slides), writes `notes/<nn>-<topic>.md` in the video's folder in a
+  fixed shape: definitions, worked examples with every number, figures
+  with page refs, what the slice assumes, what it leaves for later.
+- **Direct**, the thread's own agent, reads only the notes and writes
+  `storyboard.md`: the question, the viewer (a first-year who missed the
+  lecture), a ladder of every term in the order it is defined, and many
+  short scenes, each with what it carries in and hands on by key, the
+  idea, the picture, a narration draft and a beat list (each clause and
+  what appears or moves as it is said). It stops for the student's
+  go-ahead on the storyboard, then writes `video.json` (each one-scene
+  component's only prop, `narrated`, set on narrated scenes) and
+  `script.md`, lints and narrates before any scene is built, so builders
+  cue to real word times.
+- **Build**, one helper per scene, writes that scene's components, cues
+  each beat with `word()`, and checks it with `strip --scene N` and
+  `frame` (a missing component elsewhere does not stop them; stale
+  narration anywhere does); a component two scenes share gets examples and
+  a `gallery --sheet`. It replies with its components, props, strip and
+  any narration change, which the director makes and re-narrates.
+
+The director then lints to `[]`, strips the whole video, sends fixes to a
+fresh builder, and renders a draft, then `--final`. An agent whose role is
+off, or that cannot start helpers (agy), does the items itself in order.
+When `narrate` fails for want of a voice or the aligner, the agent stops and
+tells the student what to set in Settings -> Voice; it never downloads the
+aligner or the voice packs. After narrating with Kokoro it checks each
+guessed-word note, tries a reading with `oculus studio g2p`, adds a lexicon
+entry for a wrong one and narrates again. The story rules (explain with reasons, link each scene to the
+last, numbers given meaning, example then rule, the payoff shown, the end
+answering the opening question, phrasing the voice cannot fuse) and the
+taste rules (the picture carries the idea, the frame filled, every motion
+cued, stable magic-move keys, tokens over literals) and a map of moving
+maths close `SKILL.md`: every formula a `Math`, written on per `\k` group
+with `Write`, rewritten in place with `Steps`, pointed at with the
+overlays, shrunk into a corner, a value flying into its slot, carried to
+the next scene by key; never a formula appearing whole, stacked lines or
+maths as Text.
+
+`reference.md` is this page's authoring rules distilled for an agent
+(video.json, spoken form, the component contract, elements and style keys,
+type sizes, motion, `Math` with its backslash rule, `\k` groups, theme
+colours and size, moving maths with `Write`, `Steps` and the overlays as
+five whole components checked with `strip` plus their gotchas, cues,
+transitions, each lint kind and what to do about it, and the commands'
+outputs). `studio.d.ts` types every prelude global;
+`src/host/tests/globals.rs` lists the globals a fresh sandbox context gains
+from the prelude (QuickJS's own `Object.getOwnPropertyNames(globalThis)`
+before and after, less the host's `__studio*` entry points) and fails when
+they differ from the file's top-level `declare`s, either way. The app ships
+the file with `include_str!`.
 
 ## Libraries cascade: project, subject, global
 
@@ -258,16 +288,31 @@ and `components list` and `show` take `--subject`, which replace
 video.json's for that load. A component that no level has is an error
 listing every name in every level.
 
-The starter set (`app/studio-core/library/`) is compiled into the crate: the
-components `TitleCard`, `Steps`, `BigNumber`, `LowerThird` and `SplitShell`,
-and the theme `warm` beside `default`. Each takes its colours and fonts from
-the theme and has at least two examples. `tests/starter.rs` lints the set in both themes, and
-`tests/gallery_golden.rs` pins every example as `starter-<Component>-<example>.png`,
-laid out at 1920x1080 and drawn at half scale. A load copies each starter
+The starter set (`app/studio-core/library/`) is compiled into the crate:
+drawing primitives, `NumberLine`, `Axes` (with `Plot` and `Dot`), `DotGrid`,
+`Tiles` (Euclid's gcd as squares), `ModClock` (residues on a circle and a
+walk between them) and `Table` (keyed cells), plus `TitleCard`, and the
+theme `warm` beside `default`. Components cannot import one another, so
+each primitive file holds the primitive as a helper function (keys under
+an `id` prefix, times as numbers a scene passes from `word()`) and a
+default export that demos it; a scene copies the helper into its own
+component. The starters are primitives, never scene templates: a heading
+over lines, two text columns or a stat card is the slide shape the
+Studio skill bans, so none ships. Each takes its colours and fonts from
+the theme and has at least two examples. `tests/starter.rs` lints the set
+in both themes, and `tests/gallery_golden.rs` pins each starter as one
+sheet, `starter-<Component>.png`, a row per example and a column per
+moment of the 6 s preview (laid out at 1920x1080, drawn at a quarter), so
+the draw-on is pinned too. A load copies each starter
 file the global library has never been offered, then lists it in the
 library's `.seeded`; a listed file is never copied again, so a deleted
 starter stays deleted, while one added to a later build still arrives. An
-existing file is never replaced, so an edit is the user's. `oculus studio
+existing file is never replaced, so an edit is the user's. A starter
+dropped from the set is neither copied nor deleted: a library's existing
+copy stays, edited or not, and its `.seeded` line is harmless. Such a copy
+named like a prelude element (`Steps.tsx`) shadows nothing: each
+component is its own module and is called only by name from video.json,
+so inside every component `<Steps>` is still the element. `oculus studio
 components seed --reset` writes the starter text over every file that
 differs or is missing. Every write
 to a library file first copies the previous text to `.history/` beside it
@@ -703,12 +748,13 @@ studio narrate`.
 ## Four primitives and a closed set of style keys
 
 `Box`, `Text`, `Image` and `Path` are the host elements, `Morph` holds
-two layouts of one place (see "Magic move") and `Math` is LaTeX that
-becomes primitives before layout (see "Math"); `Stack` (a column) and `Row`
+two layouts of one place (see "Magic move"), `Math` is LaTeX that
+becomes primitives before layout (see "Math") and the overlays are drawn
+from keyed nodes after it (see "Overlays"); `Stack` (a column) and `Row`
 are `Box` with `gap`, `align`, `justify` and `wrap` shorthands. Elements take
 only `style`, `key`, children, `src` on `Image`, `d`, `viewBox`, `fill`,
-`stroke` and `trim` on `Path`, `p` on `Morph`, and `tex` and `display` on
-`Math`.
+`stroke` and `trim` on `Path`, `p`, `lag`, `fade` and `ease` on `Morph`,
+and `tex` and `display` on `Math`.
 
 - `flexDirection` defaults to `row`, as in CSS. Use `Stack` for a column.
 - `Text` children must be strings or numbers; to mix styles put several
@@ -783,7 +829,8 @@ own maths), so a formula looks as it does in the app. `display` (default
   does. `style.color` (default the theme's text colour) inks every piece;
   `\color{…}` and `\textcolor{…}{…}` take a theme colour's name
   (`\color{accent}`) or a hex colour, and a CSS colour name is an error
-  listing the theme's. The other text keys are ignored, so a `theme.type`
+  listing the theme's. What `\phantom` hides (KaTeX's `transparent`) takes
+  its space and draws no piece. The other text keys are ignored, so a `theme.type`
   token can be spread in; `width`, `height`, their min and max, `padding`,
   `border`, the flex container keys, `textAlign`, `reveal` and `objectFit`
   are errors (wrap the Math in a Box to size or pad it). Placement and
@@ -791,9 +838,18 @@ own maths), so a formula looks as it does in the app. `display` (default
   Box.
 - **Keys** make a `<Morph>` between two formulas move term by term, as
   manim's TransformMatchingTex does. Every piece is keyed `<prefix>/<term>`.
-  A term is its character and, from its second appearance, `#n` (`x`,
-  `x#2`; KaTeX's minus is `−`), `frac` for a fraction bar, `sqrt` for a
-  root sign, a box side `box`, and KaTeX's path name for other SVG.
+  A term is its label: its character (KaTeX's minus is `−`), `frac` for a
+  fraction bar, `sqrt` for a root sign, a box side `box`, and KaTeX's path
+  name for other SVG; then `^` or `_` for each script it sits in,
+  outermost first (a superscript, a limit above an operator and a root's
+  index are `^`; a subscript and a limit below are `_`); then, from the
+  term's second appearance, `#n`. So `x^2 - 5x` is `x`, `2^`, `−`, `5`,
+  `x#2`, and `x_{i_0}` ends in `0__`: the exponent of `x^2` never flies
+  into the `2` of `(x - 2)`, and the nth baseline `x` meets the nth.
+  Fraction terms keep their level (no mark), so a numerator `a` meets a
+  baseline `a` when both sides are multiplied out. A script's key is not
+  covered by its base's as an overlay target (`eq/4^` is not under
+  `eq/4`).
   `\k{name}{…}` (a macro over `\htmlData{k=name}`, with trust on) names a
   group: its pieces are `name`, `name.1`, `name.2`, … in reading order, the
   innermost group winning. Reading order is the tree's, with each vlist
@@ -817,6 +873,24 @@ own maths), so a formula looks as it does in the app. `display` (default
 - **Cache.** Each renderer keeps typeset formulas by source and display
   mode (up to 512, then it starts over), so a formula is typeset once, not
   every frame.
+- **Write** (`<Write at dur lag stroke>`, manim's Write; `math/write.rs`)
+  writes every Math inside it on: each piece's outline is stroked on (a
+  `trim` of its outline, `stroke` em wide, default 0.025, in its fill
+  colour, round caps) over the first half of its run, then its fill fades
+  in as the stroke fades over the second; a rule wipes on from the left and
+  a stroked path (`\cancel`) draws on. `at` is seconds, writing the whole
+  formula, or `{ group: seconds }` naming `\k` groups, each cued on its own
+  word (`at={{ lhs: word("two to the fourth"), minus: word("minus") }}`); a
+  piece in no listed group writes with the nearest listed group before it
+  in reading order, else with the first, and a group lists the pieces of
+  the groups inside it too. `dur` (a number or `{ group: seconds }`,
+  default `theme.motion.duration.slow`) is each group's run; inside a group
+  pieces go one after another in reading order, `lag` apart (default
+  manim's `min(4 / (n + 1), 0.2)`). Before its cue a piece is invisible but
+  keeps its place. The prelude sends each group's linear progress and Rust
+  places the pieces, since only it knows them. A name that is not a group
+  of the formula is an error listing its groups. Text cannot be written
+  (its glyphs are a shaped run, not outlines); `\text{…}` inside a Math can.
 - `Math` is JS's own `Math` object: the JSX factory knows it by identity,
   so `Math.max` and the seeded `Math.random` are untouched. `studio.d.ts`
   types `<Math>` through a call signature merged into the `Math` interface.
@@ -869,6 +943,18 @@ carries the element's TSX line.
   text's space is taken from the start. Settled units draw in the normal
   glyph run; only units in flight draw on their own.
   `revealProgress(t, at, dur, easing?)` feeds `progress`.
+- `<Steps at dur ease lag fade>` holds N states of one place (children,
+  or render props), a derivation rewritten in place. It is a `<Morph>`
+  between the pair the time picks: before `at[0]` the first state shows,
+  and transition k (state k to k + 1) runs from `at[k]` for `dur` (default
+  `theme.motion.duration.base`), cut short by the next cue so it always
+  finishes; so each cue is continuous, the Morph at `p = 1` and the next at
+  `p = 0` showing the same state. `p` goes in linearly and `ease` (default
+  easeInOutCubic) shapes each piece's own run, so `lag` staggers eased
+  pieces. Pairs are morphed one at a time: a key in states 0 and 2 but not
+  in 1 fades out over the first transition and back in, at its state-2
+  place, over the second. A Steps inside a Morph is a nested Morph, an
+  error.
 - `<Arrow points curve progress head stroke>` strokes through `points`
   (frame px; `curve` 0 is straight segments, otherwise a Catmull-Rom curve)
   up to `progress`, with a head (`head` px, default 4.5 × the stroke width,
@@ -879,19 +965,20 @@ carries the element's TSX line.
   placed by `__studioPathEnd`, a native that measures arc length as `trim`
   does (`paint/path/trim.rs`), so the two cannot drift apart. It is two
   absolute, full-frame Paths with the frame as viewBox, so its parent must
-  fill the frame.
+  fill the frame. With `from` and `to` instead of `points` it is an overlay
+  (see "Overlays").
 
 ## Transitions play over the incoming scene's head
 
 A scene after the first comes in through a transition: `{ kind, dur,
-easing, direction, morphColor }`, where `kind` is `cut`, `dissolve`, `push`, `wipe`,
+easing, direction, morphColor, lag, fade }`, where `kind` is `cut`, `dissolve`, `push`, `wipe`,
 `zoom` or `magic`, `dur` is seconds, `easing` is a theme easing name, a
 prelude easing (`linear`, `easeOutCubic`, `easeInOutCubic`) or `[x1, y1,
 x2, y2]`, and `direction` (`left`, `right`, `up`, `down`) is where the
 incoming scene comes from for `push` and `wipe` (`left` pushes the old scene
-out to the left). `morphColor` is under "Magic move". `video.json`'s
-`motion` block takes `transition`, `magicMove`, `morphColor` and
-`motionBlur`.
+out to the left). `morphColor`, `lag` and `fade` are under "Magic move"; they act only on
+a magic move. `video.json`'s `motion` block takes `transition`,
+`magicMove`, `morphColor` and `motionBlur`.
 
 - **Timing.** It plays over `[0, dur)` of the incoming scene B, with the
   outgoing scene A held at its last moment (the left limit of its length,
@@ -953,13 +1040,34 @@ at `p = 0`, B at `p = 1`) and returns one, which paint draws like any other.
   `motion.morphColor`, over the theme's; an in-scene `<Morph>` uses the
   video's, else the theme's. An unknown value is an error naming its level,
   like the other motion values.
-- **Unmatched** A nodes fade out over `p` 0 to 0.4 and unmatched B nodes in
-  over 0.4 to 1 (easeInOutCubic), at their own tree's place, carried by
-  their nearest matched ancestor's move. A new or removed box that holds
-  matched nodes fades its own fill, border and shadow only, so what moves
-  through it stays fully visible. The output follows B's paint order, each
-  unmatched A node just before its nearest following matched sibling, else
-  last.
+- **Clocks** (`morph/clock.rs`). Every node runs on its own progress. A
+  scope's leaves (childless nodes that paint) are numbered in reading
+  order: A's in tree order, then B's arrivals in theirs, a matched B leaf
+  taking its partner's number; for a Math that is its key order. A node's
+  window spans the numbers below it (a pair's, both sides'). With `lag`
+  (0 to 1, manim's `lag_ratio`) piece i starts `i · lag` piece-runs in and
+  the whole takes `(n - 1) · lag + 1` of them; a container runs from its
+  first piece's start to its last's end. Each window's linear progress
+  then goes through the scope's `ease`. Without lag every window is `p`.
+- **Unmatched** nodes fade by `fade` (`morph/fade.rs`, easeInOutCubic on
+  their own progress). `overlap`, the default, fades A's out over 0 to 0.6
+  and B's in over 0.4 to 1, so they cross while matched pieces move, and a
+  piece (a leaf: a glyph, a text) keeps its place beside its nearest
+  matched sibling (the one before it in its parent, else after; an empty
+  strut does not count) and moves with it, an arriving one where that
+  sibling's B place would put it and a leaving one where its A place would.
+  So the `4` of `2^4` leaves riding on its `2`, and `(2^2 + 1)` slides in
+  behind the `1` instead of waiting at its end place over the gliding
+  terms, as TransformMatchingTex reads. `sequential` fades out over 0 to
+  0.4 and in over 0.4 to 1, in place, never together. Everything is also
+  carried by its nearest matched ancestor's move. A new or removed box that
+  holds matched nodes fades its own fill, border and shadow only, so what
+  moves through it stays fully visible. The output follows B's paint
+  order, each unmatched A node just before its nearest following matched
+  sibling, else last.
+- **Overshoot.** `p` may pass 0 or 1 (a spring `ease`): rects, radius and
+  transforms follow it; opacity, blur, insets, colours, content swaps and
+  fades stop at the ends.
 - **Content.** The same string in the same family and line count re-shapes
   at the interpolated size, weight, line height and letter spacing, broken
   at the interpolated width (no bitmap scaling). Different strings or line
@@ -969,14 +1077,77 @@ at `p = 0`, B at `p = 1`) and returns one, which paint draws like any other.
   same path data morphs viewBox, fill, stroke and trim, different data swaps
   in halves.
 
-`<Morph p={...}>{a}{b}</Morph>` uses the same engine inside one scene, which
-also gives FLIP-style layout animation. The tree lays out twice, once with
+`<Morph p={...} lag fade ease>{a}{b}</Morph>` uses the same engine inside
+one scene, which also gives FLIP-style layout animation. `ease` is a
+function, cubic-bezier points or a theme easing name, sampled by the
+prelude into a 65-point table so each piece eases on its own clock; with
+`lag`, pass a linear `p` and an `ease` (an eased `p` would be cut into
+slices, each piece stopping at speed). `Steps` does this for you. A magic
+move between scenes takes `lag` and `fade` from its transition cascade
+(scene, `video.json`, theme; default 0 and overlap), with the
+transition's `easing` as each piece's `ease`. The tree lays out twice, once with
 every Morph replaced by its first child and once by its second, and the two
 layouts morph: inside each Morph at its own `p`, matching by key within that
 Morph; outside every Morph, nodes match by tree path and move at the first
-Morph's `p`, so siblings that shift because a Morph changes size glide too.
-`p` is clamped to 0 to 1. A Morph takes exactly two elements, and a Morph
-inside another is an error for now.
+Morph's eased `p` (no lag), so siblings that shift because a Morph changes
+size glide too. A Morph takes exactly two elements, and a Morph inside
+another is an error for now.
+
+A shrink-to-corner is a Steps whose last state lays the same Math key out
+smaller, absolutely placed in a corner: its glyph Paths keep their path
+data, so each rect glides and scales and the outline scales with it.
+
+## Overlays are drawn on the finished tree
+
+`Brace`, `Surround`, `Underline`, `Indicate` and an `Arrow` with `from`
+and `to` point at terms (`src/overlay/`, `prelude/overlays.js`). Each is
+an `overlay` host node, absolutely placed so it takes no space (a Brace's
+label is its child, laid out where it sits). After layout and after any
+morph has blended the tree, `overlay::resolve` finds each target's box on
+the composed frame and draws, so an overlay follows its target while it
+moves in a Morph or Steps. Two overlays matched across a Morph lerp
+between their two targets' boxes.
+
+- **Targets.** A key or a key prefix: `eq/lhs` covers `eq/lhs`,
+  `eq/lhs.1`, … and `eq/lhs/…`, not `eq/lhs2`. The box is the union of the
+  outermost covered nodes (the Math box for `eq`), through every transform
+  above and on them, mapped into the overlay's parent's space; a fading
+  node counts by its opacity, so the box eases as terms fade in and out,
+  and an overlay whose target has faded out fades with it. A target no key
+  covers fails the frame naming the closest key. Defaults scale with the
+  target's em, the px per em of its Math pieces (or a Text's font size;
+  else its height / 1.2).
+- **Timing.** `progress` (0 to 1) draws it on; or `at` and `dur` (default
+  `theme.motion.duration.base`) with `ease` (default easeInOutCubic) give
+  it from `ctx.t`; with neither it is drawn.
+- `<Brace target side label gap size color>`: KaTeX's own brace
+  (`math/brace.rs`: the three `\overbrace`/`\underbrace` SVG slices, at
+  least 1.6 em wide) along `side` (`below`, the default, `above`, `left`,
+  `right`), 0.12 em off, its thickness 0.548 of its em (`size`, default
+  the target's), text-coloured. It grows from its centre with `progress`
+  and its label fades in over the second half, 0.15 em beyond it. A
+  string label is `theme.type.body` text scaled about its centre to 0.7 of
+  the target's em, as manim's brace labels sit beside their formula (it is
+  laid out before the em is known, so `overlay/draw.rs` scales it); an
+  element label keeps its own size.
+- `<Surround target pad radius width color>`: a rounded rectangle 0.2 em
+  out with 0.12 em corners, stroked 0.045 em in the accent, drawn on
+  clockwise from its top left.
+- `<Underline target gap width color>`: a line 0.1 em under the target,
+  drawn on from the left.
+- `<Indicate target scale color at dur>` changes its targets themselves:
+  over its run (`dur` default `theme.motion.duration.slow`) they scale to
+  `scale` (1.2) about their joint centre and flash to `color` (the accent)
+  and back, along easeInOutCubic there and back. It runs before the other
+  overlays, so they measure the pulsed boxes.
+- `<Arrow from to bend head gap stroke>`: each end a key or a point in its
+  parent's px. A keyed end starts `gap` (0.1 em) off its target's box on
+  the line between the two ends' centres. `bend` (degrees) arcs the shaft
+  (one quadratic whose end tangents turn half the bend from the chord). It
+  draws on as the prelude's Arrow does, head and all (`overlay/arrow.rs`).
+- Across scenes an overlay is drawn in each scene before the magic move,
+  so its Paths morph like any others: a Surround or Underline whose box
+  changed, or a Brace of a new width, swaps in halves rather than gliding.
 
 ## Motion blur averages sub-frames, off unless asked
 
@@ -1361,6 +1532,11 @@ with the `Narration` error before any frame renders.
   `voices delete` removes them. `--json` gives `{ dir, packs: [{ id,
   status, bytes }], voices: [{ id, downloaded, chosen }] }`, `{ status,
   dir, seconds }` and `{ deleted_bytes }`.
+- `oculus studio agents [--agent A]` prints, for each agent or one, the
+  model and effort its `studio-research` and `studio-scene` subagents run
+  on and the call that starts one (`--json`: `[{agent, roles: [{role, job,
+  model, effort, spawn}]}]`). It reads only the settings; see
+  [harness.md](./harness.md#subagents).
 - `oculus studio render <DIR>` writes an mp4 (`--draft`, the default, or
   `--final`; `-o`, `--threads` for the frame renderers, not the encoder). It prints the plan, then per scene
   `rendered` with its frames, seconds and frames a second, or `cached`,

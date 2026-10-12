@@ -35,11 +35,14 @@ fn num(a: Option<f32>, b: Option<f32>, default: f32, p: f32) -> Option<f32> {
 
 /// The paint-relevant style of a matched pair at `p`; layout keys are B's
 /// (layout is already done). `text` is the theme's default text colour.
+/// Geometry (radius, transforms) follows `p` past 0..1 when an easing
+/// overshoots; opacity, blur, insets and colours stop at the ends.
 pub fn style(a: &Style, b: &Style, p: f32, text: Color, c: MorphColor) -> Style {
     let mut s = b.clone();
-    s.opacity = num(a.opacity, b.opacity, 1.0, p);
-    s.radius = num(a.radius, b.radius, 0.0, p);
-    s.blur = num(a.blur, b.blur, 0.0, p);
+    let q = p.clamp(0.0, 1.0);
+    s.opacity = num(a.opacity, b.opacity, 1.0, q);
+    s.radius = num(a.radius, b.radius, 0.0, p).map(|r| r.max(0.0));
+    s.blur = num(a.blur, b.blur, 0.0, q);
     s.translate_x = num(a.translate_x, b.translate_x, 0.0, p);
     s.translate_y = num(a.translate_y, b.translate_y, 0.0, p);
     s.scale = num(a.scale, b.scale, 1.0, p);
@@ -58,18 +61,18 @@ pub fn style(a: &Style, b: &Style, p: f32, text: Color, c: MorphColor) -> Style 
     if a.clip_inset != b.clip_inset {
         let none = Inset([0.0; 4]);
         let (Inset(ia), Inset(ib)) = (a.clip_inset.unwrap_or(none), b.clip_inset.unwrap_or(none));
-        s.clip_inset = Some(Inset([0, 1, 2, 3].map(|i| lerp(ia[i], ib[i], p))));
+        s.clip_inset = Some(Inset([0, 1, 2, 3].map(|i| lerp(ia[i], ib[i], q))));
     }
-    s.fill = fill(a.fill.as_ref(), b.fill.as_ref(), p, c);
-    s.border = border(a.border.as_ref(), b.border.as_ref(), p, c);
-    s.shadow = shadow(a.shadow.as_ref(), b.shadow.as_ref(), p, c);
+    s.fill = fill(a.fill.as_ref(), b.fill.as_ref(), q, c);
+    s.border = border(a.border.as_ref(), b.border.as_ref(), q, c);
+    s.shadow = shadow(a.shadow.as_ref(), b.shadow.as_ref(), q, c);
     if a.color != b.color {
-        s.color = Some(mix(a.color.unwrap_or(text), b.color.unwrap_or(text), p, c));
+        s.color = Some(mix(a.color.unwrap_or(text), b.color.unwrap_or(text), q, c));
     }
-    if p < 0.5 {
+    if q < 0.5 {
         s.clip = a.clip;
     }
-    s.reveal = reveal(a.reveal, b.reveal, p);
+    s.reveal = reveal(a.reveal, b.reveal, q);
     s
 }
 

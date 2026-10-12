@@ -81,11 +81,14 @@ fn shared_terms_glide_and_the_rest_fade() {
         assert_eq!(m.style.opacity(), 1.0, "{key}");
         assert_ne!(x0.x0, x1.x0, "{key} should move");
     }
-    // A's exponent is gone by p = 0.4 and B's parentheses are half in.
-    let four = find(&mid, "eq/4").map_or(0.0, |n| n.style.opacity());
-    assert_eq!(four, 0.0);
+    // Mid-way A's exponent is fading out as B's parentheses fade in, and
+    // it rides out beside the 2 it was on.
+    let four = find(&mid, "eq/4^").unwrap();
+    assert!(four.style.opacity() > 0.0 && four.style.opacity() < 1.0);
     let paren = find(&mid, "eq/(").unwrap().style.opacity();
     assert!(paren > 0.0 && paren < 1.0, "{paren}");
+    let beside = |t: &LNode| find(t, "eq/4^").unwrap().rect.x0 - find(t, "eq/2").unwrap().rect.x0;
+    assert!((beside(&mid) - beside(&a)).abs() < 1e-3);
 }
 
 #[test]

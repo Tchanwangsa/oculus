@@ -33,6 +33,7 @@ agent queries and plans through. Flags are in
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
 | `studio new` | A video folder, `<app data>/studio/videos/<slug>/` | Refuses a slug that exists ([studio.md](./studio.md#videos-live-in-the-data-directory)) |
 | `studio list` | Nothing | Reads each video's folder |
+| `studio agents` | Nothing | Reads the `job_models` settings row: each agent's Studio subagent models and the call that starts one ([harness.md](./harness.md#subagents)) |
 | `studio frame`, `studio strip`, `studio gallery` | PNGs, in the video folder's `out/` unless `-o`/`--out` says elsewhere | Read the video and the libraries: no database, no network ([studio.md](./studio.md)) |
 | `studio lint`, `studio components list`, `studio components show` | Nothing in the video folder | `lint` renders every scene in memory and exits 1 on any problem |
 | `studio components promote`, `studio themes promote`, `studio components seed` | A file in the global or a subject's library under `<app data>/studio/` | The library's previous text goes to its `.history/` first; nothing prunes it ([studio.md](./studio.md#libraries-cascade-project-subject-global)) |

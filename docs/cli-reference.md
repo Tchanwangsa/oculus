@@ -1411,6 +1411,7 @@ Commands:
   tts         Synthesise one clip of text to a WAV, to hear a voice
   g2p         Show how Kokoro reads text: each word's phonemes and who read it
   voices      List Kokoro's voices, or download or delete its packs (103 MB)
+  agents      Which models a chat agent's Studio subagents run on, and how to start one
   aligner     Download, check or delete the narration aligner model (378 MB)
   help        Print this message or the help of the given subcommand(s)
 
@@ -2115,6 +2116,29 @@ Delete both packs and any partial download
 Usage: oculus studio voices delete
 
 Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio agents`
+
+```
+Which models a chat agent's Studio subagents run on, and how to start one
+
+For each agent, or only `--agent`'s: the `studio-research` and `studio-scene` roles, the
+model and effort Settings -> Jobs gives that agent (its first entry in "Studio research"
+and "Studio scenes"), and the exact call that agent makes to start one. A role with no
+entry for the agent is off: the agent does that work itself. agy's subagents take no
+model, so agy always does it itself. Reads only the settings.
+
+oculus studio agents --agent codex
+
+Usage: oculus studio agents [OPTIONS]
+
+Options:
+      --agent <AGENT>
+          Only this agent: claude, codex, opencode or antigravity
+
   -h, --help
           Print help (see a summary with '-h')
 ```

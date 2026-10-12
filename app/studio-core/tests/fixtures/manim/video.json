@@ -1,0 +1,11 @@
+{
+  "size": { "width": 1280, "height": 720 },
+  "theme": "default",
+  "scenes": [
+    { "component": "Derive", "props": {}, "hold": 5.0 },
+    { "component": "WriteOn", "props": {}, "hold": 3.0, "transition": { "kind": "cut" } },
+    { "component": "Braced", "props": {}, "hold": 4.0, "transition": { "kind": "cut" } },
+    { "component": "Corner", "props": {}, "hold": 3.0, "transition": { "kind": "cut" } },
+    { "component": "Substitute", "props": {}, "hold": 2.0, "transition": { "kind": "cut" } }
+  ]
+}

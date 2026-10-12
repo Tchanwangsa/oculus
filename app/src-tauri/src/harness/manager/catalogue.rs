@@ -135,6 +135,9 @@ impl Harness {
                 writer: crate::harness::suggest::INSTRUCTIONS,
                 lecture_end: crate::lectures::lecture_end::INSTRUCTIONS,
             },
+            &crate::harness::studio_agents::opencode_agents_fragment(
+                &crate::harness::studio_agents::assigned_now(Provider::Opencode),
+            ),
         )?;
         let server = OpencodeServer::spawn(OpencodeSpawn {
             bin,

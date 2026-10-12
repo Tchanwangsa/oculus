@@ -22,8 +22,11 @@ const PRELUDE: &str = concat!(
     include_str!("prelude/props.js"),
     include_str!("prelude/motion.js"),
     include_str!("prelude/time.js"),
+    include_str!("prelude/steps.js"),
+    include_str!("prelude/write.js"),
     include_str!("prelude/presets.js"),
     include_str!("prelude/arrow.js"),
+    include_str!("prelude/overlays.js"),
     include_str!("prelude/words.js"),
     include_str!("prelude/entry.js"),
 );

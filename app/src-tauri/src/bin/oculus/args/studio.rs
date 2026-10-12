@@ -41,6 +41,7 @@ pub(crate) enum StudioAction {
         #[command(subcommand)]
         action: Option<StudioVoicesAction>,
     },
+    Agents(StudioAgentsArgs),
     /// Download, check or delete the narration aligner model (378 MB)
     ///
     /// `narrate` times each clip's words by forced alignment with a
@@ -100,6 +101,7 @@ impl StudioAction {
             | StudioAction::List(_)
             | StudioAction::Tts(_)
             | StudioAction::Voices { .. }
+            | StudioAction::Agents(_)
             | StudioAction::Aligner { .. } => None,
         }
     }
@@ -131,6 +133,23 @@ pub(crate) struct StudioNewArgs {
     /// 1080x1920 instead of 1920x1080
     #[arg(long)]
     pub(crate) portrait: bool,
+}
+
+/// Which models a chat agent's Studio subagents run on, and how to start one
+///
+/// For each agent, or only `--agent`'s: the `studio-research` and
+/// `studio-scene` roles, the model and effort Settings -> Jobs gives that
+/// agent (its first entry in "Studio research" and "Studio scenes"), and the
+/// exact call that agent makes to start one. A role with no entry for the
+/// agent is off: the agent does that work itself. agy's subagents take no
+/// model, so agy always does it itself. Reads only the settings.
+///
+///     oculus studio agents --agent codex
+#[derive(Args)]
+pub(crate) struct StudioAgentsArgs {
+    /// Only this agent: claude, codex, opencode or antigravity
+    #[arg(long, value_name = "AGENT")]
+    pub(crate) agent: Option<String>,
 }
 
 /// List the videos under `<app data>/studio/videos/`

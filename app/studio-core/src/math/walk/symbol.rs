@@ -51,7 +51,8 @@ pub fn layout<'a>(s: &'a SymbolNode, cx: Ctx<'a>) -> Result<Laid<'a>, String> {
             let view = Rect::new(x0, y0, x1, y1);
             out.pieces.push(Piece {
                 label: ch.to_string(),
-                group: cx.group,
+                groups: cx.groups,
+                script: cx.script,
                 rect: Affine::new([size, 0.0, 0.0, size, x, 0.0]).transform_rect_bbox(view),
                 shape: Shape::Glyph(GlyphShape {
                     outline: Arc::new(g.outline),

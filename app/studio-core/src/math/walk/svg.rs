@@ -230,7 +230,8 @@ fn paths<'a>(
                 };
                 out.push(Piece {
                     label: label.to_owned(),
-                    group: cx.group,
+                    groups: cx.groups,
+                    script: cx.script,
                     rect: clip,
                     shape: Shape::Path {
                         d: clamp(&d, t, clip),
@@ -262,7 +263,8 @@ fn paths<'a>(
                 d.line_to(p1 - clip.origin().to_vec2());
                 out.push(Piece {
                     label: "cancel".to_owned(),
-                    group: cx.group,
+                    groups: cx.groups,
+                    script: cx.script,
                     rect: clip,
                     shape: Shape::Path {
                         d,

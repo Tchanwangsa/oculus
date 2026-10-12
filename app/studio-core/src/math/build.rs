@@ -7,10 +7,12 @@
 //! other text keys are ignored, so a `theme.type` token can be spread in,
 //! and keys that size or pad the Box are refused.
 
-use super::colour;
 use super::expand::MathEnv;
 use super::{Formula, KATEX_SCALE, Shape};
-use crate::scene::{Align, Dim, Fill, Kind, Node, PathSpec, Position, StrokeSpec, Style};
+use super::{colour, write};
+use crate::scene::{
+    Align, Dim, Fill, Kind, Node, PathSpec, Position, StrokeSpec, Style, WriteSpec,
+};
 use vello_cpu::kurbo::Rect;
 
 /// Text's default size, when a Math sets no `fontSize`.
@@ -45,6 +47,7 @@ pub fn node(
     f: &Formula,
     prefix: Option<&str>,
     env: &MathEnv,
+    written: Option<&WriteSpec>,
 ) -> Result<Node, (String, bool)> {
     if let Some(key) = refused(&math.style) {
         return Err((
@@ -82,11 +85,18 @@ pub fn node(
         None,
         math.loc,
     ));
-    for item in &f.items {
+    let progress = written
+        .map(|w| write::plan(f, w))
+        .transpose()
+        .map_err(|m| (m, false))?;
+    for (i, item) in f.items.iter().enumerate() {
         let colour = match &item.colour {
             Some(c) => colour::resolve(c, env.colours).map_err(|m| (m, false))?,
             None => ink,
         };
+        if item.colour.is_some() && colour.a <= 0.0 {
+            continue;
+        }
         let r = item.rect;
         let mut s = Style {
             position: Some(Position::Absolute),
@@ -133,6 +143,9 @@ pub fn node(
             }
         };
         n.loc = math.loc;
+        if let (Some(u), Some(w)) = (progress.as_ref().map(|p| p[i]), written) {
+            write::apply(&mut n, &item.shape, colour, u, w.stroke);
+        }
         children.push(n);
     }
     let mut out = leaf(Kind::Box, style, math.key.clone(), math.loc);
@@ -148,10 +161,12 @@ fn leaf(kind: Kind, style: Style, key: Option<String>, loc: Option<(u32, u32)>) 
         src: String::new(),
         path: None,
         math: None,
+        overlay: None,
         children: Vec::new(),
         key,
         loc,
         p: 0.0,
+        timing: None,
         scope: None,
     }
 }

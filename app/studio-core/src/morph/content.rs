@@ -121,6 +121,7 @@ fn half(at: Rect, s: &mut LNode, alpha: f32, ts: &mut Typeset) -> Option<LNode> 
         key: None,
         loc: None,
         scope: None,
+        overlay: None,
     })
 }
 

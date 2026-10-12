@@ -207,3 +207,22 @@ fn morph_color_cascades_and_names_the_level_of_a_bad_value() {
         err(None, &none, &bad_theme)
     );
 }
+
+#[test]
+fn a_magic_move_takes_lag_and_fade_from_the_cascade() {
+    use crate::scene::{Curve, Fade};
+    let theme = Theme::bundled("default").unwrap();
+    let video = motion(json!({ "transition": { "lag": 0.2 } }));
+    let scene = spec(json!({ "kind": "magic", "fade": "sequential", "dur": 1.0 }));
+    let t = resolve(1, Some(&scene), &video, &theme).unwrap().unwrap();
+    let (p, timing) = t.magic(0.25);
+    assert_eq!(p, 0.25, "linear: the easing applies per piece");
+    assert_eq!((timing.lag, timing.fade), (0.2, Fade::Sequential));
+    assert_eq!(timing.ease, Curve::Easing(Easing::InOutCubic));
+    let bad = spec(json!({ "lag": 2.0 }));
+    let e = resolve(1, Some(&bad), &MotionSpec::default(), &theme).unwrap_err();
+    assert_eq!(e.level, "scene 1 transition.lag");
+    let bad = spec(json!({ "fade": "overlaps" }));
+    let e = resolve(1, Some(&bad), &MotionSpec::default(), &theme).unwrap_err();
+    assert!(e.message.contains("did you mean"), "{}", e.message);
+}

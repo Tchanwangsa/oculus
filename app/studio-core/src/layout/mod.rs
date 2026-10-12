@@ -8,7 +8,7 @@ mod text;
 pub use text::{TextKey, TextLayout, Typeset, finish};
 
 use crate::images::ImageCache;
-use crate::scene::{Dim, Kind, Node, PathSpec, Scope, Style};
+use crate::scene::{Dim, Kind, Node, PathSpec, Placed, Scope, Style};
 use std::sync::Arc;
 use taffy::{AvailableSpace, NodeId, ResolveOrZero, Size, TaffyTree};
 use vello_cpu::Pixmap;
@@ -33,6 +33,8 @@ pub struct LNode {
     pub loc: Option<(u32, u32)>,
     /// The Morph this node is the chosen layout of (see `scene::select`).
     pub scope: Option<Scope>,
+    /// An `Overlay` node's spec, until `overlay::resolve` draws it.
+    pub overlay: Option<Box<Placed>>,
 }
 
 pub enum LayoutError {
@@ -142,7 +144,7 @@ impl Layouter<'_> {
             }
             // `select` replaces every Morph, and `math::expand` every Math,
             // before layout.
-            Kind::Box | Kind::Morph | Kind::Math => {
+            Kind::Box | Kind::Morph | Kind::Math | Kind::Overlay => {
                 let kids = n
                     .children
                     .iter()
@@ -245,6 +247,7 @@ fn extract(
         key: n.key,
         loc: n.loc,
         scope: n.scope,
+        overlay: n.overlay.map(|s| Box::new(Placed { now: *s, was: None })),
     };
     match tree.get_node_context_mut(id) {
         Some(Leaf::Text(layout, key)) => {
