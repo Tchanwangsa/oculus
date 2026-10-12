@@ -136,6 +136,10 @@ function watch(): void {
     attributeFilter: ["style", "data-state"],
   });
   window.addEventListener("resize", schedule);
+  // A popover's open animation changes no attribute, and its rect mid-way
+  // is scaled and shifted; measure again once it settles.
+  document.addEventListener("animationend", schedule, true);
+  document.addEventListener("transitionend", schedule, true);
 }
 
 function unwatch(): void {
@@ -143,6 +147,8 @@ function unwatch(): void {
   mutations?.disconnect();
   resizes = mutations = null;
   window.removeEventListener("resize", schedule);
+  document.removeEventListener("animationend", schedule, true);
+  document.removeEventListener("transitionend", schedule, true);
   if (frame) cancelAnimationFrame(frame);
   frame = 0;
 }
