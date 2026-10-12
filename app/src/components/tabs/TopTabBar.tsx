@@ -252,7 +252,8 @@ export default function TopTabBar({
       {/* The wrapper claims the rest of the bar for the tabs to divide; the
           inner strip hugs its tabs so + sits beside the last one. */}
       <div ref={stripRef} className="flex flex-1 min-w-0 items-center gap-1">
-        <div className="flex min-w-0 select-none items-center overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* Keep the scrolling clip on one layer as tab borders and shadows change. */}
+        <div className="flex min-w-0 select-none items-center overflow-x-auto will-change-transform [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {tabs.map((tab, i) => {
             const { title, icon } = tabInfo(tab.path);
             const prev = tabs[i - 1];
