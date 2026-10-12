@@ -44,7 +44,7 @@ missing=
 for c in encoders:aac encoders:libopus encoders:mjpeg encoders:pcm_s16le \
   demuxers:rawvideo demuxers:concat demuxers:mov demuxers:ogg demuxers:wav \
   muxers:mp4 muxers:ogg muxers:wav muxers:image2 muxers:rawvideo \
-  filters:scale filters:fps filters:format bsfs:aac_adtstoasc; do
+  filters:scale filters:fps filters:format bsfs:aac_adtstoasc protocols:fd protocols:pipe; do
   has "${c%%:*}" "${c#*:}" || missing="$missing ${c#*:}"
 done
 [ -z "$missing" ] && pass "every component the app needs is built in" || fail "built without:$missing"
@@ -109,6 +109,13 @@ for input in h264-aac.mp4 h264-aac.mov vp9-opus.webm hevc-ac3.mkv av1-opus.mp4 m
     { fail "$input: -sseof scan $end bytes: $(tail -3 end.err)"; continue; }
   pass "$input: thumbnail $(size out.jpg) bytes, frame, $((all / FRAME)) scan frames, $((end / FRAME)) tail frames"
 done
+
+# Studio's stdin: raw frames in through `-i -`, which the CLI opens as fd:, and
+# back out through a pipe, with no encoder involved.
+stdin_bytes=$("$ff" -v error -nostdin -ss 1 -i "$fixtures/h264-aac.mp4" -frames:v 30 -vf scale=320:180,format=rgba -f rawvideo - 2> raw.err |
+  "$ff" -hide_banner -v error -f rawvideo -pix_fmt rgba -s 320x180 -r 30 -i - -pix_fmt gray -f rawvideo - 2> stdin.err | wc -c | tr -d ' ')
+[ "$stdin_bytes" -eq $((30 * 320 * 180)) ] && pass "studio: raw frames read from stdin" ||
+  fail "studio: stdin read $stdin_bytes bytes: $(tail -3 stdin.err)"
 
 # Studio: raw RGBA frames on stdin encoded by the OS encoder as two segments,
 # joined by the concat demuxer beside AAC narration, and the narration alone as
