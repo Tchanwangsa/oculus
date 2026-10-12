@@ -13,7 +13,7 @@ pub(in crate::okta) fn diagnose(env: &Env) -> String {
     let mut jar = Jar::default();
     let sso_host = env.sso_host();
 
-    let start = format!("{}/login/saml", env.canvas_base);
+    let start = format!("{}{}", env.canvas_base, env.login_path);
     let (landed, body) = match walk(&mut jar, &start, 10) {
         Ok(v) => v,
         Err(e) => return format!("could not reach the sign-in page: {e}\n"),

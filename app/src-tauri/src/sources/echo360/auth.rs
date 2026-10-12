@@ -1,34 +1,39 @@
-//! The LTI launch that mints an Echo360 session from the Canvas one.
+//! The LTI launch that mints an Echo360 session from the Canvas one. The
+//! course's own tabs name the tool, and the launch lands on the university's
+//! Echo360 region (`echo360.org`, `echo360.net.au`, …), which every later
+//! call uses.
 
-use super::Session;
-
-const LTI_TOOL_PATH: &str = "/external_tools/701";
+use super::{Session, NO_TOOL};
 
 pub(super) const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
 pub fn connect(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Result<Session, String> {
-    let lti_url = format!(
-        "{}/courses/{course_id}{LTI_TOOL_PATH}",
-        crate::library::paths::CANVAS_BASE
-    );
-    let (action, fields) = launch_form(canvas, course_id)?;
+    first_launch(canvas, course_id, launch)
+}
+
+/// POST one launch form to Echo360 and read the session off where it lands.
+fn launch((lti_url, action, fields): &LaunchForm) -> Result<Session, String> {
     let body = url::form_urlencoded::Serializer::new(String::new())
-        .extend_pairs(&fields)
+        .extend_pairs(fields)
         .finish();
 
     // The session cookies are spread across the redirect chain; the agent jars them.
     let agent = ureq::AgentBuilder::new().build();
     let resp = agent
-        .post(&action)
+        .post(action)
         .set("Content-Type", "application/x-www-form-urlencoded")
-        .set("Referer", &lti_url)
+        .set("Referer", lti_url)
         .set("User-Agent", UA)
         .send_string(&body)
         .map_err(|e| format!("Echo360 LTI POST failed: {e}"))?;
 
     let section_id = extract_section_id(resp.get_url())?;
+    let base = url::Url::parse(resp.get_url())
+        .map(|u| u.origin().ascii_serialization())
+        .map_err(|e| format!("Echo360 landed somewhere unreadable: {e}"))?;
 
     let mut s = Session {
+        base,
         jwt: String::new(),
         play_session: String::new(),
         cf_key_pair_id: String::new(),
@@ -54,31 +59,88 @@ pub fn connect(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Resul
         );
     }
 
-    elog!("[oculus] echo360 auth done: section={}", s.section_id);
+    elog!(
+        "[oculus] echo360 auth done: {} section={}",
+        s.base,
+        s.section_id
+    );
     Ok(s)
 }
 
-/// The form Canvas serves for the Echo360 tool: where it posts and its fields.
-/// The page is Canvas's, so it comes through oculus-keyd with the session.
-pub(super) fn launch_form(
+/// The launch page's URL, where its form posts, and the form's fields.
+pub(super) type LaunchForm = (String, String, Vec<(String, String)>);
+
+/// Launch the course's Echo360 tool. The tabs labelled for lecture capture
+/// come first, then the profile's fallback tool (a tab can be hidden). A
+/// launch page with no Echo360 form is skipped, and so is a launch that opens
+/// no section (a tab can launch Echo360 somewhere other than the course), so
+/// the next candidate still gets its turn. [`NO_TOOL`] when no page carries a
+/// form; every failed launch, joined, when none opens a section; a launch page
+/// Canvas fails to serve is an error at once. The pages are Canvas's, so they
+/// come through oculus-keyd with the session.
+pub(super) fn first_launch<T>(
     canvas: &crate::sources::canvas::Canvas,
     course_id: i64,
-) -> Result<(String, Vec<(String, String)>), String> {
-    elog!("[oculus] echo360 auth: fetching LTI page for course {course_id}");
-    let page = canvas
-        .get(&format!("/courses/{course_id}{LTI_TOOL_PATH}"))
-        .map_err(|e| format!("Canvas LTI page fetch failed: {e}"))?;
-    if !page.ok() {
-        return Err(format!(
-            "Canvas LTI page fetch failed: HTTP {}",
-            page.status
-        ));
+    mut launch: impl FnMut(&LaunchForm) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut candidates =
+        tool_candidates(&canvas.get_json(&format!("/api/v1/courses/{course_id}/tabs"))?);
+    if let Some(tool) = canvas.institution().and_then(|i| i.echo360_tool.as_deref()) {
+        let path = format!("/courses/{course_id}{tool}");
+        if !candidates.contains(&path) {
+            candidates.push(path);
+        }
     }
-    parse_lti_form(&String::from_utf8_lossy(&page.body)).ok_or_else(|| {
-        "Could not parse the Echo360 LTI form — the course may not use Echo360, \
-         or the Canvas session has lapsed"
-            .to_string()
-    })
+    let mut failures = Vec::new();
+    for path in &candidates {
+        elog!("[oculus] echo360 auth: trying {path}");
+        let page = canvas.get(path)?;
+        // A tool this course or student cannot launch is not a tool; any other
+        // failure is Canvas's, and surfaces rather than reading as "no lectures".
+        if matches!(page.status, 401 | 403 | 404) {
+            continue;
+        }
+        if !page.ok() {
+            return Err(format!("Canvas LTI page {path}: HTTP {}", page.status));
+        }
+        let Some((action, fields)) = parse_lti_form(&String::from_utf8_lossy(&page.body)) else {
+            continue;
+        };
+        match launch(&(format!("{}{path}", canvas.base()?), action, fields)) {
+            Ok(done) => return Ok(done),
+            Err(e) => {
+                elog!("[oculus] echo360 auth: {path} did not launch: {e}");
+                failures.push(format!("{path}: {e}"));
+            }
+        }
+    }
+    if failures.is_empty() {
+        Err(NO_TOOL.to_string())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+/// Course tabs that launch an external tool and are labelled for lecture
+/// capture, as Canvas-relative paths.
+pub(super) fn tool_candidates(tabs: &serde_json::Value) -> Vec<String> {
+    tabs.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|t| {
+            let label = t["label"].as_str().unwrap_or("").to_lowercase();
+            label.contains("echo")
+                || label.contains("lecture recording")
+                || label.contains("lecture capture")
+        })
+        .filter_map(|t| t["html_url"].as_str())
+        .filter(|u| u.contains("/external_tools/"))
+        .map(|u| match url::Url::parse(u) {
+            // `html_url` is usually relative; an absolute one keeps its path.
+            Ok(abs) => abs.path().to_string(),
+            Err(_) => u.to_string(),
+        })
+        .collect()
 }
 
 pub(super) fn parse_lti_form(html: &str) -> Option<(String, Vec<(String, String)>)> {

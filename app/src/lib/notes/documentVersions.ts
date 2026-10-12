@@ -1,6 +1,7 @@
 import { getDb, type DbFile } from "@/lib/db";
 import { createDocument, lastNoteWrite, quickHash, saveDocument } from "@/lib/notes/documents";
 import { fmtShortDate, sqliteUtcToMs } from "@/lib/format/format";
+import { displayLocale } from "@/lib/format/locale";
 
 /**
  * A note's saved versions, in `document_versions` (migration 39): the whole
@@ -270,7 +271,7 @@ export function versionsToPrune(versions: DocumentVersion[], now: Date): number[
 /** A snapshot's local time: "5 Oct" and "2:02 pm", as `fmtClock` writes it. */
 function stamp(version: DocumentVersion): { day: string; time: string } {
   const d = new Date(sqliteUtcToMs(version.created_at) ?? NaN);
-  const time = d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
+  const time = d.toLocaleTimeString(displayLocale, { hour: "numeric", minute: "2-digit" });
   return { day: fmtShortDate(d), time };
 }
 

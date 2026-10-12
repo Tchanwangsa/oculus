@@ -56,6 +56,9 @@ pub fn is_known(name: &str) -> bool {
 /// op can read, store or delete one, and none is ever a secret.
 pub const KEYD_PREFIX: &str = "keyd.";
 
+/// The university keyd serves (`crate::site`), as `site_set` stored it.
+pub const SITE: &str = "keyd.site";
+
 /// Present once keyd has copied `name`'s old keychain item into the vault (or
 /// found nothing to copy), so a later delete is never undone by a re-import.
 pub fn imported(name: &str) -> String {
@@ -207,6 +210,7 @@ mod tests {
 
     #[test]
     fn bookkeeping_entries_are_never_known_names() {
+        assert!(SITE.starts_with(KEYD_PREFIX) && !is_known(SITE));
         for name in KNOWN {
             assert!(!is_known(&imported(name)));
             assert!(!name.starts_with(KEYD_PREFIX));

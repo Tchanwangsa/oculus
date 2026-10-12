@@ -15,6 +15,10 @@ impl Ctx {
     fn run_lectures(&self, args: &RunArgs) -> Result<(), String> {
         let pool = self.db().ok_or("lectures are stored in the database")?;
         let canvas = app_lib::sources::canvas::Canvas::open(&self.data_dir);
+        // A missing session is not a stop: keyd signs in on demand.
+        canvas.base()?;
+        canvas.check_keyd()?;
+        let lead_in = app_lib::sources::echo360::lead_in_secs(&self.data_dir);
 
         let subjects = self.rt.block_on(store::subjects(&pool))?;
         let wanted = filter_subjects(&subjects, &args.codes, !args.all)?;
@@ -38,7 +42,7 @@ impl Ctx {
                     continue;
                 }
             };
-            let lectures = app_lib::sources::echo360::syllabus(&session)?;
+            let lectures = app_lib::sources::echo360::syllabus(&session, lead_in)?;
             self.rt
                 .block_on(store::upsert_lectures(&pool, s.id, &lectures))?;
             println!("  {} lecture(s)", lectures.len());
@@ -90,7 +94,9 @@ impl Ctx {
                                 )
                             })
                             .and_then(|bytes| {
-                                if app_lib::sources::echo360::trim_video(ffmpeg, &raw, &final_) {
+                                if app_lib::sources::echo360::trim_video(
+                                    ffmpeg, &raw, &final_, lead_in,
+                                ) {
                                     Ok(bytes)
                                 } else {
                                     Err("ffmpeg trim failed".to_string())

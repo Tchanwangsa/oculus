@@ -3,18 +3,21 @@ import { ArrowSquareOut, CaretDown, CaretRight } from "@phosphor-icons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AutoSignIn } from "@/components/settings/web/AutoSignIn";
 import { Button } from "@/components/ui/button";
-
-/** Okta's own settings page, where a factor is enrolled. */
-const OKTA_SETTINGS = "https://sso.unimelb.edu.au/enduser/settings";
+import { useInstitution } from "@/stores/sync/institutionStore";
 
 /**
  * The optional automated sign-in, folded away by default: what it does, who
  * can't use it, how to get the authenticator key by re-enrolling, then the
  * same `AutoSignIn` form as Settings → Canvas without its own title and guide.
+ * Only at a university that signs in through Okta, the one sign-in it answers.
  */
 export function NeverSignInAgain() {
+  const institution = useInstitution();
   const [open, setOpen] = useState(false);
   const Caret = open ? CaretDown : CaretRight;
+  if (!institution?.okta || !institution.sso_host) return null;
+  // Okta's own settings page, where a factor is enrolled.
+  const oktaSettings = `https://${institution.sso_host}/enduser/settings`;
 
   return (
     <section className="flex flex-col gap-3">
@@ -46,7 +49,7 @@ export function NeverSignInAgain() {
             <GuideStep n={1}>
               <span className="flex flex-wrap items-center gap-2">
                 Open your Okta settings.
-                <Button variant="outline" size="xs" onClick={() => void openUrl(OKTA_SETTINGS)}>
+                <Button variant="outline" size="xs" onClick={() => void openUrl(oktaSettings)}>
                   Okta settings
                   <ArrowSquareOut />
                 </Button>

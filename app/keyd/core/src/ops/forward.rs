@@ -10,16 +10,22 @@
 //! one sign-in: a request that finds the session replaced since it read it
 //! just retries. Ed never signs in here, because its token comes from a Canvas
 //! launch that only the app performs.
+//!
+//! A session request is bound to the site it read first: each send reads the
+//! session together with the site and refuses to go on if the site moved, and
+//! a rotated cookie is absorbed only while the site is still that one.
 
 use std::io::Cursor;
 
 use serde_json::{json, Value};
 
+use super::site::check_claim;
 use super::{BodyStream, OpError, Reply, State};
 use crate::forward::{read_capped, session_rejected, Auth, Call, Opened, Route};
-use crate::okta::{outcome_to_wire, Trigger, SSO_HOST};
+use crate::okta::{outcome_to_wire, Trigger};
 use crate::platform::Caller;
 use crate::session::{store, Kind};
+use crate::site::Site;
 use crate::vault::Vault;
 
 /// Headers a session route's answer never carries to the client: a rotated
@@ -77,9 +83,16 @@ impl State {
         let secret = route.auth.secret();
         self.import_once(&vault, secret)?;
         let mut trail = Trail::default();
+        let mut bound = None;
         let (opened, absorb) = if route.is_session() {
             self.import_sessions(&vault)?;
-            self.send_session(caller, route, &vault, &call, body, &mut trail)?
+            let site = self.site(&vault)?;
+            check_claim(&site, req)?;
+            let route = route.at(&site);
+            let sent = (&route, &site);
+            let answer = self.send_session(caller, sent, &vault, &call, body, &mut trail)?;
+            bound = Some(site);
+            answer
         } else {
             let credential = vault
                 .get(secret)?
@@ -98,8 +111,11 @@ impl State {
             headers.retain(|(k, _)| !WITHHELD.contains(&k.as_str()));
             if absorb && matches!(route.auth, Auth::Cookie(_)) && !set_cookies.is_empty() {
                 let kind = Kind::ALL.into_iter().find(|k| k.secret() == secret);
-                if let Some(kind) = kind {
-                    if let Err(e) = store::absorb(&vault, &self.generation, kind, &set_cookies) {
+                if let (Some(kind), Some(site)) = (kind, &bound) {
+                    let still = |e: &_| self.site_in(e).is_ok_and(|now| now == *site);
+                    if let Err(e) =
+                        store::absorb(&vault, &self.generation, kind, &set_cookies, still)
+                    {
                         crate::log(&format!("{name}: a rotated cookie was not saved: {e}"));
                     }
                 }
@@ -147,25 +163,28 @@ impl State {
         })
     }
 
-    /// A session route's request: the answer to send back, and whether its
-    /// `Set-Cookie` belongs to the session (a rejected answer's does not).
+    /// A session route's request, sent to the route's origin at `site`: the
+    /// answer to send back, and whether its `Set-Cookie` belongs to the
+    /// session (a rejected answer's does not).
     fn send_session(
         &self,
         caller: &Caller,
-        route: &Route,
+        (route, site): (&Route, &Site),
         vault: &Vault,
         call: &Call,
         body: &[u8],
         trail: &mut Trail,
     ) -> Result<(Opened, bool), OpError> {
         let revives = matches!(route.auth, Auth::Cookie(_));
+        let sso_host = site.sso_host();
+        let sso_host = sso_host.as_deref();
         // Before the session is read, so a change in between counts as one.
         let seen = self.generation.get();
 
-        let rejected = match self.send_once(route, vault, call, body)? {
+        let rejected = match self.send_once(route, site, vault, call, body)? {
             None if !revives => return Err(missing(route, None)),
             None => None,
-            Some(opened) => match self.judge(route, opened, revives) {
+            Some(opened) => match judge(route, sso_host, opened, revives) {
                 Judged::Fine(opened) => return Ok((opened, true)),
                 Judged::Rejected(opened) => Some(opened),
             },
@@ -196,9 +215,9 @@ impl State {
             }
         }
 
-        match self.send_once(route, vault, call, body)? {
+        match self.send_once(route, site, vault, call, body)? {
             None => Err(missing(route, None)),
-            Some(opened) => match self.judge(route, opened, true) {
+            Some(opened) => match judge(route, sso_host, opened, true) {
                 Judged::Fine(opened) => Ok((opened, true)),
                 Judged::Rejected(opened) => {
                     if signed_in {
@@ -211,59 +230,69 @@ impl State {
     }
 
     /// One send with the session as it is now; `None` when there is none.
+    /// The session and the site come from one read, and a site other than
+    /// `site`, the one `route` points at, ends the request: the session held
+    /// now was made for the new site's origin.
     fn send_once(
         &self,
         route: &Route,
+        site: &Site,
         vault: &Vault,
         call: &Call,
         body: &[u8],
     ) -> Result<Option<Opened>, OpError> {
-        let Some(session) = vault.get(route.auth.secret())?.filter(|v| !v.is_empty()) else {
+        let entries = vault.load()?;
+        if self.site_in(&entries)? != *site {
+            return Err(OpError::new(
+                "site",
+                format!(
+                    "oculus-keyd moved off {} while this {} request was waiting",
+                    site.canvas, route.name
+                ),
+            ));
+        }
+        let Some(session) = entries
+            .get(route.auth.secret())
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+        else {
             return Ok(None);
         };
         self.upstream.open(route, call, &session, body).map(Some)
     }
+}
 
-    /// Tells a dead session from any other answer. Only a 401 reads its body,
-    /// and only a rejected answer is buffered.
-    fn judge(&self, route: &Route, mut opened: Opened, revives: bool) -> Judged {
-        if !revives {
-            return Judged::Fine(opened);
-        }
-        let location = opened
-            .headers
-            .iter()
-            .find(|(k, _)| k == "location")
-            .map(|(_, v)| v.clone());
-        let mut body = Vec::new();
-        if opened.status == 401 {
-            body = read_capped(&mut opened.body).unwrap_or_default();
-            opened.body = Box::new(Cursor::new(body.clone()));
-        }
-        let dead = session_rejected(
-            opened.status,
-            location.as_deref(),
-            &body,
-            &route.origin,
-            &self.sso_host(),
-        );
-        if !dead {
-            return Judged::Fine(opened);
-        }
-        if opened.status != 401 {
-            body = read_capped(&mut opened.body).unwrap_or_default();
-            opened.body = Box::new(Cursor::new(body));
-        }
-        Judged::Rejected(opened)
+/// Tells a dead session from any other answer. Only a 401 reads its body,
+/// and only a rejected answer is buffered.
+fn judge(route: &Route, sso_host: Option<&str>, mut opened: Opened, revives: bool) -> Judged {
+    if !revives {
+        return Judged::Fine(opened);
     }
-
-    fn sso_host(&self) -> String {
-        self.sso_base
-            .as_deref()
-            .and_then(|base| url::Url::parse(base).ok())
-            .and_then(|u| u.host_str().map(str::to_string))
-            .unwrap_or_else(|| SSO_HOST.to_string())
+    let location = opened
+        .headers
+        .iter()
+        .find(|(k, _)| k == "location")
+        .map(|(_, v)| v.clone());
+    let mut body = Vec::new();
+    if opened.status == 401 {
+        body = read_capped(&mut opened.body).unwrap_or_default();
+        opened.body = Box::new(Cursor::new(body.clone()));
     }
+    let dead = session_rejected(
+        opened.status,
+        location.as_deref(),
+        &body,
+        &route.origin,
+        sso_host,
+    );
+    if !dead {
+        return Judged::Fine(opened);
+    }
+    if opened.status != 401 {
+        body = read_capped(&mut opened.body).unwrap_or_default();
+        opened.body = Box::new(Cursor::new(body));
+    }
+    Judged::Rejected(opened)
 }
 
 /// `missing`, with the refused sign-in beside it when there was one.
@@ -557,6 +586,91 @@ mod tests {
         );
         get(&state, "canvas", "/api/v1/courses").unwrap();
         assert_eq!(held(&dir, "session.canvas"), None);
+    }
+
+    fn rmit() -> crate::site::Site {
+        crate::site::Site {
+            canvas: "https://rmit.instructure.com".to_string(),
+            login_path: "/login".to_string(),
+            sso: None,
+            ed: "https://edstem.org".to_string(),
+        }
+    }
+
+    /// keyd moves to RMIT and a person signs in there while `state`'s
+    /// request is at the old site's origin.
+    fn move_and_sign_in(state: &State) {
+        call(state, "site_set", json!({"site": rmit().to_wire()})).unwrap();
+        call(
+            state,
+            "session_put",
+            json!({"kind": "canvas", "value": "canvas_session=RMIT"}),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn an_answer_from_a_site_keyd_has_left_is_not_absorbed() {
+        let dir = Scratch::new("fwd-absorb-moved");
+        let cell: Arc<std::sync::OnceLock<Arc<State>>> = Arc::default();
+        let old_site = FakeOrigin::start_raw({
+            let cell = Arc::clone(&cell);
+            move |_, stream| {
+                move_and_sign_in(cell.get().unwrap());
+                stream
+                    .write_all(b"HTTP/1.1 200 X\r\nSet-Cookie: canvas_session=FROM-OLD-SITE\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .unwrap();
+            }
+        });
+        let state = Arc::new(with_sessions(&dir, &old_site, &old_site));
+        cell.set(Arc::clone(&state)).ok();
+        get(&state, "canvas", "/api/v1/courses").unwrap();
+        assert_eq!(
+            held(&dir, "session.canvas").as_deref(),
+            Some("canvas_session=RMIT")
+        );
+    }
+
+    #[test]
+    fn a_retry_after_the_site_moved_is_refused_and_sends_nothing_more() {
+        let dir = Scratch::new("fwd-retry-moved");
+        let cell: Arc<std::sync::OnceLock<Arc<State>>> = Arc::default();
+        let old_site = FakeOrigin::start({
+            let cell = Arc::clone(&cell);
+            move |_| {
+                move_and_sign_in(cell.get().unwrap());
+                answer(401, vec![], br#"{"status":"unauthenticated"}"#)
+            }
+        });
+        let state = Arc::new(with_sessions(&dir, &old_site, &old_site));
+        cell.set(Arc::clone(&state)).ok();
+        let err = get(&state, "canvas", "/api/v1/courses").unwrap_err();
+        assert_eq!(err.kind, "site");
+        let hits = old_site.hits();
+        assert_eq!(
+            hits.len(),
+            1,
+            "the RMIT session was not sent to the old site"
+        );
+        assert_eq!(hits[0].header("cookie"), Some(COOKIE));
+    }
+
+    #[test]
+    fn a_forward_for_another_canvas_is_refused_before_it_is_sent() {
+        let origin = FakeOrigin::start(|_| ok(b"x"));
+        let dir = Scratch::new("fwd-claim");
+        let state = with_sessions(&dir, &origin, &origin);
+        let site = state.site(&state.vault().unwrap()).unwrap();
+        let req = |canvas: &str| json!({"op": "forward", "secret": "canvas", "method": "GET", "path": "/api/v1/courses", "canvas": canvas});
+        let err = state
+            .dispatch(&cli(), "forward", &req("https://rmit.instructure.com"), b"")
+            .unwrap_err();
+        assert_eq!(err.kind, "site");
+        assert!(origin.hits().is_empty());
+        state
+            .dispatch(&cli(), "forward", &req(&site.canvas), b"")
+            .unwrap();
+        assert_eq!(origin.hits().len(), 1);
     }
 
     #[test]

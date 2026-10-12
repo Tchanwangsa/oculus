@@ -7,7 +7,8 @@ use super::ImageMap;
 use super::*;
 
 fn md(html: &str) -> String {
-    to_markdown(html, &ImageMap::new())
+    let canvas = url::Url::parse("https://canvas.lms.unimelb.edu.au").unwrap();
+    to_markdown_on(html, &ImageMap::new(), Some(&canvas))
 }
 
 #[test]

@@ -213,11 +213,7 @@ impl Engine {
         );
         // The *requested* slug, not canonical `full["url"]`: old body links to
         // a renamed page still use it, and Canvas still resolves it.
-        let source = format!(
-            "{}/courses/{}/pages/{page_url}",
-            crate::sources::canvas::CANVAS_BASE,
-            c.id
-        );
+        let source = format!("{}/courses/{}/pages/{page_url}", self.canvas.base()?, c.id);
         self.write_from(c, &out, md_body.as_bytes(), None, Some(source))?;
         Ok(Some(links))
     }

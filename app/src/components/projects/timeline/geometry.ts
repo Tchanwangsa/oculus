@@ -1,6 +1,7 @@
 import { DAY_MS, addDays, addMonths, fmtMonth, startOfWeek } from "@/lib/planning/calendar";
 import { startOfDay } from "@/lib/format/format";
 import type { TimelineZoom } from "./zoom";
+import { displayLocale } from "@/lib/format/locale";
 
 export const PX_PER_DAY: Record<TimelineZoom, number> = { day: 52, week: 22, month: 5 };
 
@@ -65,7 +66,7 @@ export function ticksFor(zoom: TimelineZoom, start: Date, end: Date, now: Date):
       out.push({
         at: d,
         end: addMonths(d, 1),
-        label: d.toLocaleDateString("en-AU", { month: "short" }),
+        label: d.toLocaleDateString(displayLocale, { month: "short" }),
         major: d.getMonth() === 0,
         today: false,
       });
@@ -79,7 +80,7 @@ export function ticksFor(zoom: TimelineZoom, start: Date, end: Date, now: Date):
       end: addDays(d, step),
       label:
         zoom === "week"
-          ? d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })
+          ? d.toLocaleDateString(displayLocale, { day: "numeric", month: "short" })
           : String(d.getDate()),
       major: zoom === "week" ? false : d.getDate() === 1,
       today:

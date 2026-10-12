@@ -1,7 +1,8 @@
 # Auth & sessions
 
 Three services, three credentials — all derived from one Canvas session
-cookie. Two secrets keyd keeps are not: Spotify's login, for the music player
+cookie, at whichever university the institution profile names. Two secrets
+keyd keeps are not: Spotify's login, for the music player
 ([below](#spotifys-credentials-are-read-back-with-get)), and WebKit's
 WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-build)).
 
@@ -29,75 +30,224 @@ WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-
 | Spotify's stored credentials: the `music.spotify` vault entry, keyd's app-only `get`, and the music module that writes and reads it | `app/keyd/core/src/names.rs` (`READABLE`), `app/keyd/core/src/ops/get.rs`, `app/src-tauri/src/music/credentials.rs` ([music.md](./music.md)) |
 | WebKit's WebCrypto master key: the per-build names and items, the key's text form, keyd's `webcrypto_key` and its import, the client call | `app/keyd/core/src/names.rs` (`WEBCRYPTO`), `app/keyd/core/src/webcrypto.rs`, `app/keyd/core/src/ops/webcrypto.rs`, `app/keyd/core/src/client/webcrypto.rs`, the app's reader `app/src-tauri/src/shell/webcrypto/mod.rs` (`fetch`) |
 | Handing the key to WebKit: the data-store delegate, its once-per-process cache, where it is installed | `app/src-tauri/src/shell/webcrypto/delegate.rs`, `app/src-tauri/src/shell/webcrypto/cache.rs`, `install_default` in `app/src-tauri/src/shell/webcrypto/mod.rs` (called first in `app/src-tauri/src/lib.rs`'s setup), `configure_store` in `app/src-tauri/src/shell/dock/page.rs` |
+| Institution profile: the Canvas address, sign-in detection, the UniMelb migration, telling keyd | `app/src-tauri/src/sources/institution/` |
+| The site keyd sends the session to, and `site_set` | `app/keyd/core/src/site.rs`, `app/keyd/core/src/ops/site.rs` |
+| The check every credential call through keyd passes first: keyd's client side and the app's | `app/keyd/core/src/client/bound.rs`, `app/src-tauri/src/sources/institution/keyd.rs` |
+| Canvas address UI, the profile on the frontend | `app/src/components/settings/web/CanvasAddress.tsx`, `app/src/stores/sync/institutionStore.ts` |
+| The guard that no university or single region is named in app code | `app/tests/repo/uniAgnostic.test.ts` |
+| Start over | `app/src-tauri/src/library/storage/start_over.rs`, `app/src/components/settings/library/StartOver.tsx` |
+
+## Oculus works at any university
+
+Every student types their own Canvas address, so nothing in app code may
+assume which university, or which region of a service, they are at.
+
+- **What differs per university comes from the profile**
+  ([below](#one-institution-profile-says-which-university)): Rust through
+  `sources::institution` (`canvas_base`, `current`, `load`), the frontend
+  through `institutionStore`. A link the frontend builds before the profile
+  has loaded is resolved when clicked (`canvasFileLink` in
+  `app/src/lib/files/canvasLinks.ts`). A read that fails is not repeated on
+  its own: the store keeps the reason (`loadError`), and Settings → Canvas
+  shows it in place of the address with a *Try again*.
+- **What a launch reveals is learned, then saved to the profile**: Ed's API
+  host and web region from the page its LTI launch lands on, the Echo360
+  tool from the course's tabs. A feature that needs one before any launch
+  says so in its error rather than guessing a region.
+- **A regional service is checked against all of its regions**, never one:
+  Echo360's hosts are listed in `app/src-tauri/src/sources/echo360/embed/region.rs`, and
+  the calls after a launch go to the host it landed on.
+- **UniMelb appears only where an install from before the profile needs it**:
+  `institution::unimelb()`, keyd's `Site::unimelb()` and tests.
+  `app/tests/repo/uniAgnostic.test.ts` scans app code (comments, tests and
+  fixtures aside) for a university's domain or a single Echo360 or Ed region
+  and fails `bun run test` on a hit outside those files.
+
+## One institution profile says which university
+
+`institution.json` in the data dir holds the Canvas address (`https://host`),
+the path the sign-in window opens, the IdP type (`okta` or `other`) and its
+host, and what launches have learned: the Echo360 tool fallback and lead-in,
+Ed's API base and web region, course-code prefixes that are never subjects. It is a file, not
+a `settings` row, because synchronous code needs the Canvas host without a
+database pool; reads are cached on the file's mtime, so the CLI and the app see
+each other's writes.
+
+- **The student types one thing**, their Canvas address, in Settings → Canvas
+  or `oculus auth canvas <address>`. `institution::configure` keeps only the
+  origin, proves it is Canvas (an anonymous `/api/v1/users/self` answers 401
+  `{"status":"unauthenticated"}`), and walks the sign-in redirects with no
+  session (`keyd_core::okta::probe_sign_in_page`): `/login` first, then
+  `/login/saml`, stopping at the first that reaches Okta's widget. Otherwise
+  the SSO host is the first landing off Canvas that answers a sign-in request
+  (a SAML, OAuth/OIDC or CAS URL, `is_idp_request`): a portal page that
+  offers a choice of providers (Oxford's, NUS's) is not one, and none found
+  leaves it unset.
+- **An install older than the profile is UniMelb's.** A missing file beside an
+  old cookie file, keyd's authenticated flag or signed-out marker, an attempt
+  record or a non-empty `courses/` gets the UniMelb profile written
+  (`institution::unimelb`). A fresh install has none of those (the database
+  alone is no evidence — the app creates it before anyone signs in), so Canvas
+  stays unset until the student enters an address.
+- **The address cannot change under a library.** Subject rows are keyed by
+  Canvas course id, which another Canvas reuses, so a new address is refused
+  while `subjects` has rows. Start over (Settings → Storage) signs out,
+  forgets the Okta credentials, leaves a `start-over` marker and restarts; the
+  next launch empties the data dir before any thread or database handle
+  exists, keeping the two cloud usage files, the downloaded models
+  (`models/`), keyd's vault, socket and `bin/`, and the lock a running keyd
+  may hold on the sign-in attempt record (`canvas-session/sign-in.json.lock`).
+  The marker is written only once sign-out and forgetting the Okta
+  credentials have succeeded, so a failed Start over deletes nothing. The frontend clears its library-scoped
+  `localStorage` keys first and puts them back if the command fails.
+- Saving checks the address before changing anything (`institution::probe`),
+  then has keyd take the new site (`institution::accept`): a keyd that refuses
+  it leaves the session, the Okta credentials and the profile as they were.
+  A different address then signs out (`auth::commands::end_session`, while
+  the old hosts are still the profile's, so the browser jar loses the old
+  session) and clears the Okta credentials, which belong to the old IdP
+  (`institution::apply`); a failure there stops before the profile is saved.
+- Re-saving the same address re-detects the sign-in, except that a probe
+  that misses Okta at a university already known to use it keeps the stored
+  profile: dropping the Okta origin would be a move to keyd, which forgets
+  the authenticator key.
+
+## keyd sends the session only to the profile's university
+
+keyd holds its own copy of the origins it may send to, the *site*
+(`keyd_core::site::Site`: Canvas, the login path, Okta's origin when the IdP is
+Okta, Ed), sealed in the vault as `keyd.site`, so no file another process can
+edit decides where a cookie goes. The `canvas` and `ed` routes and the sign-in
+read it; a vault without one is UniMelb's.
+
+- The app sets it with `site_set` (app and CLI only) from the profile
+  (`Institution::site`): before saving a new address, when a launch learns
+  Ed's API host, and at startup before the session is restored. keyd hears
+  first, so a refusal leaves the profile unchanged; with keyd absent there is
+  no session to send anywhere.
+- **Nothing goes through a keyd that has not taken the profile's site.** The
+  app and the CLI register `institution::bound` with keyd's client
+  (`keyd_core::client::bound`), which runs it before `session_put`,
+  `session_get`, `okta_save`, `ensure_signed_in` and every `canvas` or `ed`
+  request. It passes once keyd has taken the profile's site in this process,
+  telling it first when it has not (keyd was absent at launch, or the CLI
+  moved it). A keyd too old for `site_set` serves UniMelb and passes only
+  there; anywhere else every call fails with `KeydError::Site` saying keyd
+  needs an update, the login window refuses to open with that message (which
+  `useAuth`'s `error` puts beside the button that asked), and a launch with a
+  stored session reports it expired. While Settings moves to a
+  new address the check refuses everything, and a profile change holds it
+  from telling keyd to saving the file.
+- **keyd checks the claim too.** `session_put` and `forward` carry the Canvas
+  origin the check answered (`"canvas"`), and keyd refuses one that is not its
+  site's (`site` error), under the vault's lock for a put. A `forward` reads its
+  session with the site on every send and stops if the site moved since it
+  began, and absorbs a rotated cookie only while the site is still that one,
+  so an answer from the old university never lands in the new one's session.
+  `site_set` drops the sessions and stores the site in one vault write.
+- **Moving Canvas's or Okta's origin is moving university**: under the
+  sign-in's single flight, keyd drops all three sessions, the authenticated
+  flag and the Okta credentials (and their old keychain items). Moving only
+  Ed's origin drops only Ed's token. A cookie or password is never sent to an
+  origin other than the one it was made for.
+- `site_set` refuses an origin that is not a bare `https://host` and a login
+  path that is not a plain path on Canvas.
+- A site with no Okta origin answers every sign-in with `LoginError::NotOkta`.
+
 
 ## Canvas authenticates by session cookie only
 
-UniMelb Canvas has disabled self-service access tokens — only an admin can
-issue one — so every request carries a snapshotted `canvas_session` cookie.
-Do not propose `Authorization: Bearer`. (The "New Access Token" button's text
-is on the page either way; only its `disabled` attribute tells you.)
+Universities commonly disable students' self-service access tokens (UniMelb
+does — only an admin can issue one), so every request carries a snapshotted
+`canvas_session` cookie, everywhere. Do not propose `Authorization: Bearer`.
+(The "New Access Token" button's text is on the page either way; only its
+`disabled` attribute tells you.)
 
-- Sign-in goes through the university's SAML IdP, so the first login happens
-  in a visible app WebView. The session lives in keyd's vault
-  ([below](#with-keyd-installed-keyd-holds-the-login-sessions)): the headless
-  sign-in stores it there itself, and the login window and browser tabs read
-  their webview's Canvas and Okta cookies and hand them to keyd with
-  `session_put` (`auth::save_session_cookie`), skipping any host with no
-  cookie yet and logging a refused put. An authenticated flag, which keyd owns,
-  means "we believe we have a session".
+- Sign-in goes through whatever the university uses — SAML, CAS, OIDC or
+  Canvas's own form — so the first login happens in a visible app WebView
+  opened at the profile's login path. It waits only for a signed-in Canvas URL
+  on the profile's host, so it is the same for every IdP. The session lives in
+  keyd's vault ([below](#with-keyd-installed-keyd-holds-the-login-sessions)):
+  the headless sign-in stores it there itself, and the login window and
+  browser tabs read their webview's Canvas and SSO cookies and hand them to
+  keyd with `session_put` (`auth::save_session_cookie`), skipping any host with
+  no cookie yet and logging a refused put. Capture reads the whole jar and
+  selects cookies for each host: the host's own, and a parent domain's only
+  when it is the university's own (`institution_domain`; never `.google.com`
+  or `.instructure.com`, `shell::browser::scope`); same-named cookies prefer
+  a server cookie over an unchanged host copy written by seeding, then the
+  more specific domain. Wry's macOS `cookies_for_url` only matches
+  the exact domain and can omit cookies the browser sends. An authenticated
+  flag, which keyd owns, means "we believe we have a session".
 - The session has no cookie-side expiry: the server extends it on use. There
   is no remember-me cookie — once dead, it is rebuilt by
   [automated sign-in](#okta-sign-in-runs-headless-in-rust) or by hand.
 - On launch a thread asks keyd for the flag; with it present the app starts
   connected while the thread probes the session: `Valid` confirms, `Rejected`
-  clears the flag through `session_mark(false)` (keeping the Okta session) and
+  clears the flag through `session_mark(false)` (keeping the SSO session) and
   emits `canvas-auth-expired`, `Unreachable` (no answer, a Canvas 5xx, or keyd
   not running) stays connected. A keyd that cannot be asked reads as not
   signed in, logged once. `get_auth_status` is the flag or this run's
   in-memory state, read off the main thread.
 - Signing out (Settings or `oculus auth logout`) is keyd's `sign_out`: it
-  deletes the Canvas, Okta and Ed sessions and the flag, and writes
-  `canvas-session/signed-out`. The Okta one goes too, or the in-app browser
-  would pass through SSO and re-save a Canvas session. The
+  deletes the Canvas, SSO and Ed sessions and the flag, and writes
+  `canvas-session/signed-out`. The SSO one goes too, or the in-app browser
+  would pass through SSO and re-save a Canvas session. The app's sign-out
+  (`auth::commands::end_session`) emits `canvas-signed-out` for every
+  `useAuth`. The
   [attempt record](#every-sign-in-attempt-goes-through-one-guard) stays, so a
   lockout pause outlives a sign-out. With keyd absent there is nothing to
   drop.
 - The marker keeps every automatic sign-in off (`LoginError::SignedOut`)
   until a session is established again: `session_mark(true)` removes it, and
   so does every sign-in keyd runs.
-- Settings' sign-out first deletes every cookie the browser would send to Canvas
-  or Okta (`shell::browser::clear_sessions`), or a tab still signed in would save the
-  session straight back. `oculus auth logout` cannot reach a running app's
+- Settings' sign-out first deletes the university's session cookies at
+  Canvas and the SSO host (`shell::browser::clear_sessions`): those set on the
+  host and those on a parent inside the university's own domain. Otherwise a
+  tab still signed in would save the session straight back. `oculus auth logout` cannot reach a running app's
   jar, so a Canvas tab open there can still re-save the cookie.
 
 ## The in-app browser is seeded with the same sessions
 
-`canvas_session` is HttpOnly and session-scoped; keyd's copy is the one
-that survives a restart. Okta's cookies for
-`sso.unimelb.edu.au` are kept beside it (written by a headless sign-in and by
-the browser), so a page that redirects to SSO passes straight through.
+`canvas_session` is HttpOnly and session-scoped, so the browser keeps it in
+memory only and keyd's copy is the one that survives a restart. The SSO host's
+cookies are kept beside it (written by a headless sign-in and by the browser),
+so a page that redirects to SSO passes straight through.
 
 - `shell::browser::seed_sessions` asks keyd for both (`session_get`, app only) on a
   thread of its own, because the first call after an update can wait on the
-  credential prompt. At startup and before any `*.unimelb.edu.au` tab,
-  navigation or reload, every bare `name=value` pair is scoped to its host
-  in the shared browser jar. macOS uses `WKHTTPCookieStore` with completion
-  handlers; Windows uses Tauri's `set_cookie`, then reads `cookies_for_url`
-  on the worker thread until the queued writes are confirmed. The load waits
-  for that confirmation; a failed write leaves it stopped and logs the error.
-  With keyd absent, or holding no session, it seeds nothing and the load goes on.
+  credential prompt. At startup and before any tab, navigation or reload on the
+  university's hosts, every bare `name=value` pair is scoped to its host in the
+  shared browser jar. macOS uses `WKHTTPCookieStore` with completion handlers
+  (Tauri has no cookie setter there); Windows uses Tauri's `set_cookie`, then
+  reads `cookies_for_url` on the worker thread until the queued writes are
+  confirmed. The load waits for that confirmation; a failed write leaves it
+  stopped and logs the error. With keyd absent, or holding no session, it
+  seeds nothing and the load goes on.
+- The university's hosts are the Canvas host, the SSO host, and the domain
+  they share when it is the university's own (`institution_domain`:
+  `unimelb.edu.au`, never a public suffix like `edu.au` or a shared host like
+  `instructure.com`).
+- **A shared identity provider is not the university's.** An SSO host that is
+  neither Okta's nor inside the university's own domain
+  (`Institution::session_sso_host`: accounts.google.com,
+  login.microsoftonline.com) also holds the student's own accounts, so no SSO
+  session is captured into keyd, seeded or cleared for it; only Canvas's is.
 - Windows uses WebView2's default profile for the main view, browser tabs and
   the login window. A separate login `data_directory` would split their jars.
   WebView2's `AddOrUpdateCookie` overwrites same-scoped HttpOnly cookies;
-  macOS deletes the old same-named cookie before setting its replacement.
+  macOS deletes the old same-named cookie set on that host before setting its
+  replacement. A name the jar holds on a parent domain is neither deleted nor
+  seeded: a host-only copy would shadow a cookie that may be the student's
+  own.
   Windows seeding and clearing are serialized, and clearing reads back the
   jar before sign-out continues. Cookies for unrelated hosts remain intact.
-- Canvas cookies always replace the jar's; Okta's only fill gaps, unless keyd's
-  header differs from the last one seeded this run (compared by hash) — while
-  the app runs, the browser's own Okta session is the freshest.
-- A page that lands on Okta's entry for any SAML app (`/app/…/sso/saml`, the
-  sign-in form when Okta has no session) asks `/api/v1/sessions/me` with the
-  browser's Okta cookies. On a 404 it runs the
+- Canvas cookies always replace the jar's; the SSO host's only fill gaps,
+  unless keyd's header differs from the last one seeded this run (compared by
+  hash) — while the app runs, the browser's own SSO session is the freshest.
+- At an Okta university, a page that lands on Okta's entry for any SAML app
+  (`/app/…/sso/saml`, the sign-in form when Okta has no session) asks
+  `/api/v1/sessions/me` with the browser's Okta cookies. On a 404 it runs the
   [headless sign-in](#okta-sign-in-runs-headless-in-rust), seeds the Okta
   session it saved and reloads the page, subject to the
   [attempt guard](#every-sign-in-attempt-goes-through-one-guard).
@@ -113,7 +263,10 @@ the browser), so a page that redirects to SSO passes straight through.
 ## Every sign-in ends in one place
 
 The login window, a browser tab and the headless flow each store their session
-their own way, then call `auth::session_established`. For a person's sign-in
+their own way, then use the shared recording and announcement in `auth`.
+Tabs and headless flows call `auth::session_established`; the window separates
+the blocking recording from the announcement so closing it can cancel a
+pending confirmation. For a person's sign-in
 (window or tab) it sets the flag with `session_mark(true)`, which also removes
 the signed-out marker; if keyd cannot record that, the app is not signed in
 and the UI gets `canvas-auth-cancelled`. It then sets the in-memory state and
@@ -121,8 +274,12 @@ emits `canvas-auth-success`. A sign-in by a person also clears the attempt
 guard's failures, pause and wait, by asking keyd (`okta_resume`, app only);
 the app writes the record itself only when keyd is absent. The headless
 sign-in has already updated the guard, and keyd has already set the flag, for
-every trigger, so `oculus auth auto` sets nothing. The login window reports
-success only once the Canvas session was stored.
+every trigger, so `oculus auth auto` sets nothing. The login window captures
+cookies after a signed-in Canvas page finishes loading and reports success
+only once the stored session passes the Canvas API probe. A failed capture or
+probe leaves the window open, and another completed Canvas load can retry
+(including a load that arrived while the probe ran);
+closing the window while confirmation runs cancels it.
 
 `oculus auth login` opens the app and waits for a sign-in it did not make
 itself. The signal is keyd's `session_status`: a sign-in is new when Canvas is
@@ -167,10 +324,15 @@ attempt (`LoginError::UnsupportedFactor`).
 ## Okta sign-in runs headless in Rust
 
 `keyd_core::okta::sign_in` (`app/keyd/core/src/okta/`) rebuilds a dead session
-without a browser, inside keyd. The IdP is Okta Identity Engine at `sso.unimelb.edu.au`, a JSON state machine at
-`/idp/idx/*`: introspect the login page's state token, answer each
-*remediation*, then replay the SAML app URL and POST the assertion to Canvas.
+without a browser, inside keyd, at a university whose site has an Okta origin.
+Okta Identity Engine is a JSON state machine at `/idp/idx/*` on that origin:
+introspect the login page's state token, answer each *remediation*, then
+replay the SAML app URL and POST the assertion to Canvas.
 
+- Anywhere else keyd answers `LoginError::NotOkta` before it reads the
+  credentials or the attempt record, `try_auto_recover` treats it like "never
+  set up", and Settings → Canvas does not offer automatic sign-in. Those
+  students sign in in the window when a session dies.
 - The loop dispatches on remediation **names**, not a fixed order, because
   factor order is an Okta policy setting.
 - It answers **password** and **TOTP** (generated in-tree from a stored
@@ -520,19 +682,24 @@ one, keyed by the embed's `linkId` (`app/src-tauri/src/sources/echo360/embed/`):
 1. GET the embed's Canvas `external_tools/retrieve` URL through keyd's
    `canvas` route. It answers an LTI form; a page without one is reported as a
    possibly lapsed Canvas session. The URL comes from page markdown, so
-   `embed::retrieve_url` accepts only a Canvas retrieve of an
-   `echo360.net.au/lti/…?linkId=` URL naming that same link, and rebuilds it.
-2. POST the form to Echo360 with redirects off. It answers a redirect to
-   `/ui/player/<mediaId>?sessionId=…&secureLinkAccessDataId=…`; the only cookie
-   is `PLAY_SESSION`, and there is no `ECHO_JWT`.
+   `embed::retrieve_url` accepts only a retrieve on the profile's Canvas of a
+   `<region>/lti/…?linkId=` URL naming that same link, and rebuilds it. The
+   regions are Echo360's own hosts (`echo360.org`, `echo360.net.au`, …,
+   listed in `app/src-tauri/src/sources/echo360/embed/region.rs`), since the form Canvas signs is posted there.
+2. POST the form to Echo360 with redirects off; its target must be a region
+   too. It answers a redirect to
+   `/ui/player/<mediaId>?sessionId=…&secureLinkAccessDataId=…` on that region,
+   which every later call uses; the only cookie is `PLAY_SESSION`, and there
+   is no `ECHO_JWT`.
 3. GET `/api/ui/sessions/<sessionId>` on the same cookie jar, at once: the
    session id goes stale within minutes. It answers 204 with the JWT in the
    `token` *response header*.
 4. Send that JWT as `Authorization: Bearer` to
    `/api/ui/echoplayer/secure-link-access-datas/<sl>/media/<mediaId>/player-properties`.
 
-One Bearer serves every link and lives about 13 hours, so the app keeps one in
-`EmbedBearer` and reuses it until five minutes before its `exp`. A link's media
+One Bearer serves every link on its region and lives about 13 hours, so the
+app keeps one in `EmbedBearer`, with the region that minted it, and reuses it
+for that region's links until five minutes before its `exp`. A link's media
 and secure-link ids never change, so they are cached in `echo_embeds`
 ([sync.md](./sync.md#an-embedded-echo360-video-is-resolved-and-downloaded-by-its-card));
 with both cached and a live Bearer, no launch runs, which matters because every
@@ -559,10 +726,12 @@ existing query 403s, as does the bare URL.
 - A TOTP seed cannot be recovered from codes; getting it means re-enrolling the factor.
 - `setCookies:completionHandler:` must get a real block — nil segfaults the app seconds later from a WebKit-only stack.
 - WebView2 cookie reads must run on a worker thread, and queued writes/deletes must be read back before navigation or sign-out.
-- WebKit drops an API-set cookie that would replace an HttpOnly one a server set, with no error. Once Canvas hands the browser an anonymous `canvas_session`, re-seeding does nothing until the old cookie is deleted — so seeding deletes same-named cookies first.
+- WebKit drops an API-set cookie that would replace an HttpOnly one a server set, with no error. Seeding deletes same-named cookies for the host and its parent domains before writing host copies, and records the copies so capture can prefer a server's rotation.
 - `/login/session_token` answers 403 to a cookie session; it wants an access token, which is disabled here.
 - The data store's delegate setter is `set_delegate:`; `_setDelegate:` does not exist and throws.
 - The navigation delegate's `_webCryptoMasterKeyForWebView:` misses service workers, which read WebKit's keychain item (and create it if absent); only the data store's delegate covers every IndexedDB.
 - A wrong WebCrypto master key fails silently: IndexedDB `get` resolves `undefined`, the records stay, and WhatsApp and Messenger sign out. Answer keyd's key or nil, nothing else.
 - WebKit holds the data store's delegate weakly, so the delegate lives for the process; and it checks each `webCryptoMasterKey:` handler is called exactly once.
 - Ed's LTI redirect walk jars cookies per host, and Canvas's legs go through keyd, which attaches the cookie only to Canvas; it must never reach edstem.org.
+- UniMelb's `/login` is a portal page, not its IdP — detection tries `/login/saml` after it, and UniMelb's profile keeps `/login/saml` as its login path.
+- The keychain service `com.oculus.unimelb-sso` is an identifier: renaming it orphans every saved password and setup key.

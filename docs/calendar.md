@@ -62,8 +62,8 @@ database, so it works offline.
   kept. The query asks for the course and its sections, then dedupes by id,
   because Canvas nests section occurrences inconsistently.
 - A subject with any `class` rows suppresses its `lecture` layer, or a class
-  and its recording draw twice. Most UniMelb subjects publish nothing, so the
-  recordings are the timetable.
+  and its recording draw twice. Many subjects (most at UniMelb) publish
+  nothing, so the recordings are the timetable.
 
 ## What Oculus owns lives outside the Canvas table
 
@@ -113,6 +113,20 @@ In `app/src/components/calendar/WeekView.tsx`, with `hourRange` in `app/src/lib/
   minute ticks update time styling. Month overflow lists share the grid clock.
 - Past hours carry a wash mixed from `muted-foreground`, finished events turn
   `chart-other`, and today gets a time line — all from `useNow`.
+
+## Dates follow the system locale; weeks and clocks do not
+
+Every date and time is formatted in `displayLocale`
+(`app/src/lib/format/locale.ts`): the system locale, so word order and month
+and day names are the student's, unless a test pins one with
+`pinDisplayLocale` so its expected strings hold anywhere. Two things are the
+same for everyone: the calendar is Gregorian (`-u-ca-gregory`; a Thai region,
+en-TH or th-TH, would otherwise print "October 2569 BE"), and the clock is
+12-hour (`-u-hc-h12`). Formats name their fields rather than using
+`dateStyle`/`timeStyle`, whose patterns can add an era or pad the hour. Weeks
+start on Monday whatever the locale: `WEEK_START` in
+`app/src/lib/planning/calendar/dates.ts`, which `startOfWeek`, `monthGrid` and
+the month view's day names follow.
 
 ## Gotchas
 

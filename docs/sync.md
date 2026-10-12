@@ -18,7 +18,7 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Canvas HTML → Markdown | `app/src-tauri/src/pages/md/` |
 | App-side entry: thread + `AppReporter`; on-demand module videos and page embeds | `app/src-tauri/src/sync/scrape/` |
 | Headless DB writes, subject list state | `app/src-tauri/src/db/store/`, `app/src-tauri/src/sync/subjects.rs` |
-| Chronological term ranking | `app/src-tauri/src/sync/terms.rs` |
+| Chronological term ordering (`term_sort`) | `app/src-tauri/src/sync/terms.rs` |
 | Agent docs written into the library | `app/src-tauri/src/agents/mod.rs` |
 | Frontend sync page, runner, options | `app/src/pages/tools/SyncPage.tsx`, `app/src/lib/pipeline/syncRunner.ts`, `app/src/components/sync/SyncSettings.tsx` |
 
@@ -70,10 +70,26 @@ is not running or not installed".
 `list_courses` marks the newest term that still has available courses as
 current; `oculus run` syncs it by default, `oculus list` marks it, and a
 search with no named subject falls back to it. Canvas term names do not sort
-chronologically (`"2026 Summer Term"` > `"2026 Semester 2"` as strings), so
-`app/src-tauri/src/sync/terms.rs` ranks within the year — summer, semester 1,
-winter, semester 2 — and a month-named intensive (`"2026 June"`) takes the rank
-of the term it falls inside.
+chronologically (`"2026 Summer Term"` > `"2026 Semester 2"` as strings) and
+mean different months in different places, so `app/src-tauri/src/sync/terms.rs`
+gives each term a `YYYY-MM` key, `subjects.term_sort`:
+
+- From the term's `start_at` when Canvas has one.
+- Otherwise from the name: the first 19xx/20xx anywhere in it, and the month
+  its words name — a season first (`"Summer Term 1"` is a summer term), then
+  numbered semesters, trimesters, terms and quarters (as whole words, so the
+  year in `"Fall Term 2026"` is no term number), then month names. Seasons
+  follow the hemisphere (`Institution::southern_hemisphere`, from the hosts'
+  country code): Summer opens a southern year and sits mid-year in a northern
+  one. A month-named southern intensive (`"2026 June"`, July) ranks with
+  Winter, and an unrecognised term sorts after every real one in its year.
+- An academic-year range (`"2025-26"`, `"2025/2026"`) puts a term opening in
+  the first half of a year — winter, spring, summer, or any numbered term —
+  in the later year, so `"Spring 2025-26"` follows `"Fall 2025"`.
+- Migration 45 fills the column for rows that have none from UniMelb's term
+  names, since an install that predates the institution profile is UniMelb's;
+  every course fetch rewrites it. Every reader — the frontend, the CLI —
+  sorts by the column and ranks no names itself.
 
 ## Modules drive the scrape, and every body feeds one link crawl
 
@@ -276,9 +292,27 @@ A `.csv` counts under a CSV, plain-text, Excel or missing type
 Ed returns threads and lesson slides as `<document>` XML, parsed with an HTML parser in
 `app/src-tauri/src/sources/ed/document.rs`: `<link>` is renamed `edlink` (HTML-void), `<image>`
 becomes `<img>`, and `<break/>` swallows following siblings, so every renderer
-emits its marker and still recurses. Ed course codes are staff-typed free text
-("comp10002 2024s2"), matched to Canvas subjects by leading code + year +
-semester from `/api/user`. The token is in [auth.md](./auth.md).
+emits its marker and still recurses. The token is in [auth.md](./auth.md).
+
+- Ed course codes are staff-typed free text ("comp10002 2024s2", "CS 101"),
+  matched to Canvas subjects from `/api/user` on the subject token — the words
+  up to the first with a digit — then year, and a UniMelb `SM<n>` or a shared
+  season name. A tie that leaves is no match: the course's LTI launch, which
+  names the course exactly, decides instead, and `ed-courses.json` in the data
+  dir keeps what it named (Canvas course id → Ed course id). That answer comes
+  first on later syncs while the session is still enrolled in the course, so
+  a tie costs one launch, not one per sync (`app/src-tauri/src/sources/ed/courses.rs`).
+- The Ed tab is the external tool labelled "Ed Discussion", "Ed" or "EdStem".
+- A launch's landing page names Ed's web region (`edstem.org/<region>/courses/…`,
+  or a `<region>.edstem.org` host), and the region names the API: the bare
+  host's `edstem.org/api` for the home region, `<region>.edstem.org/api` for
+  every other (`app/src-tauri/src/sources/ed/region.rs`). The profile keeps both
+  (`ed_region`, `ed_api`), and the login token is exchanged on that API only
+  once the profile and oculus-keyd have taken it. A launch that lands off
+  Ed's hosts — a tab labelled like Ed that runs another tool — fails, and its
+  token goes nowhere. A profile with an `ed_api` and no `ed_region` reads the
+  region from the API host; with neither, lessons carry no Ed link and a
+  workspace fetch fails saying why.
 
 ## Ed Lessons are one file per lesson, with their assets beside it
 
@@ -300,10 +334,10 @@ so a renamed lesson keeps its prefix. Progress reports the phase `ed_lessons`.
   1. `POST /challenges/<ch>/connect` attaches the student's own workspace
      (what opening the slide does) and returns a session ticket.
   2. Ed only hands out a download for a live workspace, so the sync opens
-     `wss://sahara.au.edstem.org/connect?ticket=…` directly over rustls, with
+     `wss://sahara.<region>.edstem.org/connect?ticket=…` directly over rustls, with
      the web app's `Origin`, and waits up to 30 s for the `init` frame.
   3. `POST /workspaces/<w>/download {"path": "."}` returns a one-shot ticket,
-     and the zip comes from `sahara.au.edstem.org/download/<ticket>` with no
+     and the zip comes from `sahara.<region>.edstem.org/download/<ticket>` with no
      credentials, through the same no-cookie fetch as a Canvas file CDN.
   4. The socket closes once the zip is in.
 
@@ -339,10 +373,25 @@ Workers share the course session cache and source-qualified cancellation flags.
   `echo360::connect` fetches through keyd; POSTing it to Echo360 (directly,
   with Echo360's own in-process cookies) creates the session, and the
   CloudFront cookies that come back are what the media CDN accepts.
+- The tool is found per course: tabs labelled Echo360, "lecture recording" or
+  "lecture capture" first, then the profile's `echo360_tool` (UniMelb's, since
+  its tab can be hidden). The first page with an `action="https://echo360…"`
+  form whose launch opens a `/section/…` is the session; a launch that opens
+  none (a tab can launch Echo360 elsewhere) gives the next candidate its turn,
+  and when every launch fails their errors surface together
+  (`echo360::auth::first_launch`). A course with no form at all answers
+  `echo360::NO_TOOL`, which `echo360_sync_lectures` turns into no lectures
+  rather than an error. A tool page that answers 401, 403 or 404 is skipped;
+  any other failure surfaces.
+- The launch lands on the university's Echo360 region (`echo360.org`,
+  `echo360.net.au`, …); `Session::base` keeps it for the syllabus,
+  transcripts and downloads.
 - A capture is one media id with the Presenter screen at `hd1.mp4` and the room
   camera at `hd2.mp4`. They land as `source1.mp4`/`source2.mp4`, trimmed
-  identically with the fetched ffmpeg so the player runs them off one clock;
-  VTT captions are aligned to the trimmed timeline.
+  identically so the player runs them off one clock. The trim is the
+  university's intro bumper, `echo360_lead_in_secs` in the profile (UniMelb's
+  is 14 s); with none the download is the file and ffmpeg is not run. VTT
+  captions are aligned to the trimmed timeline.
 - A sync fetches only source 1; the camera downloads per lecture from the
   player. Its existence is probed — the syllabus here carries no
   `secondaryFiles`, so each lecture asks for `hd2.mp4`, which 500s if absent

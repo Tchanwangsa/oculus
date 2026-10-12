@@ -6,13 +6,13 @@ use serde_json::Value;
 /// True for a 401 that is not Canvas saying the signed-in user may not do
 /// this (`"status": "unauthorized"`), or a redirect to the SSO host or to
 /// Canvas's own `/login`. `canvas_origin` is where the request went, and
-/// `sso_host` Okta's host.
+/// `sso_host` Okta's host when the site has one.
 pub fn session_rejected(
     status: u16,
     location: Option<&str>,
     body: &[u8],
     canvas_origin: &str,
-    sso_host: &str,
+    sso_host: Option<&str>,
 ) -> bool {
     match status {
         401 => !is_authorisation_failure(body),
@@ -34,17 +34,18 @@ fn is_authorisation_failure(body: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-fn leads_to_sign_in(location: &str, canvas_origin: &str, sso_host: &str) -> bool {
+fn leads_to_sign_in(location: &str, canvas_origin: &str, sso_host: Option<&str>) -> bool {
     let Ok(base) = url::Url::parse(canvas_origin) else {
         return false;
     };
     let Ok(target) = base.join(location.trim()) else {
         return false;
     };
-    if target
+    let to_sso = target
         .host_str()
-        .is_some_and(|h| h.eq_ignore_ascii_case(sso_host))
-    {
+        .zip(sso_host)
+        .is_some_and(|(host, sso)| host.eq_ignore_ascii_case(sso));
+    if to_sso {
         return true;
     }
     target.origin() == base.origin()
@@ -59,7 +60,7 @@ mod tests {
     const SSO: &str = "sso.unimelb.edu.au";
 
     fn rejected(status: u16, location: Option<&str>, body: &[u8]) -> bool {
-        session_rejected(status, location, body, CANVAS, SSO)
+        session_rejected(status, location, body, CANVAS, Some(SSO))
     }
 
     #[test]
@@ -93,6 +94,13 @@ mod tests {
                 assert!(rejected(status, Some(location), b""), "{status} {location}");
             }
         }
+    }
+
+    #[test]
+    fn without_okta_only_canvas_login_is_a_dead_session() {
+        let rejected = |location| session_rejected(302, Some(location), b"", CANVAS, None);
+        assert!(rejected("/login/saml"));
+        assert!(!rejected("https://sso.unimelb.edu.au/x"));
     }
 
     #[test]

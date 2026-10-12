@@ -1,0 +1,234 @@
+use super::configure::is_idp_request;
+use super::domain::is_southern;
+use super::*;
+use crate::test_support::Scratch;
+
+#[test]
+fn normalise_keeps_only_the_origin() {
+    let ok = |s: &str| normalise(s).unwrap();
+    assert_eq!(
+        ok("canvas.lms.unimelb.edu.au"),
+        "https://canvas.lms.unimelb.edu.au"
+    );
+    assert_eq!(
+        ok(" RMIT.instructure.com/ "),
+        "https://rmit.instructure.com"
+    );
+    assert_eq!(
+        ok("https://rmit.instructure.com/courses/12/modules?x=1"),
+        "https://rmit.instructure.com"
+    );
+    assert_eq!(ok("http://canvas.foo.edu"), "https://canvas.foo.edu");
+    assert!(normalise("").is_err());
+    assert!(normalise("localhost").is_err());
+    assert!(normalise("ftp://canvas.foo.edu").is_err());
+}
+
+#[test]
+fn a_fresh_data_dir_has_no_profile() {
+    let dir = Scratch::new("inst-fresh");
+    // The database exists before anyone signs in, so it is no evidence.
+    std::fs::write(crate::library::paths::db_path(&dir), b"").unwrap();
+    assert_eq!(load(&dir), None);
+    assert!(!path(&dir).exists());
+}
+
+#[test]
+fn an_older_install_is_given_the_unimelb_profile() {
+    let dir = Scratch::new("inst-legacy");
+    std::fs::write(keyd_core::paths::cookie(&dir), b"canvas_session=x").unwrap();
+    assert_eq!(load(&dir), Some(unimelb()));
+    assert!(path(&dir).exists(), "the migration is written once");
+
+    let flagged = Scratch::new("inst-legacy-flag");
+    std::fs::create_dir_all(keyd_core::paths::session_dir(&flagged)).unwrap();
+    std::fs::write(keyd_core::paths::authenticated(&flagged), b"").unwrap();
+    assert_eq!(load(&flagged), Some(unimelb()));
+
+    let synced = Scratch::new("inst-legacy-courses");
+    std::fs::create_dir_all(synced.join("courses/COMP30026_2026_SM2")).unwrap();
+    assert_eq!(load(&synced), Some(unimelb()));
+}
+
+#[test]
+fn a_saved_profile_round_trips_and_defaults_missing_fields() {
+    let dir = Scratch::new("inst-roundtrip");
+    std::fs::write(path(&dir), r#"{"canvas":"https://rmit.instructure.com"}"#).unwrap();
+    let inst = load(&dir).unwrap();
+    assert_eq!(inst.login_path, "/login");
+    assert_eq!(inst.idp, Idp::Other);
+    assert_eq!(inst.echo360_lead_in_secs, 0);
+
+    save(&dir, &unimelb()).unwrap();
+    assert_eq!(load(&dir), Some(unimelb()));
+}
+
+#[test]
+fn keyd_gets_okta_only_for_an_okta_university() {
+    let site = unimelb().site();
+    assert_eq!(site, keyd_core::site::Site::unimelb());
+    site.check().unwrap();
+
+    let rmit = Institution {
+        canvas: "https://rmit.instructure.com".to_string(),
+        login_path: "/login".to_string(),
+        idp: Idp::Other,
+        sso_host: Some("myapps.rmit.edu.au".to_string()),
+        echo360_tool: None,
+        echo360_lead_in_secs: 0,
+        ed_api: Some("https://us.edstem.org/api".to_string()),
+        ed_region: Some("us".to_string()),
+        exclude_code_prefixes: Vec::new(),
+    };
+    let site = rmit.site();
+    assert_eq!(site.sso, None);
+    assert_eq!(site.ed, "https://us.edstem.org");
+    site.check().unwrap();
+}
+
+#[test]
+fn the_hemisphere_comes_from_either_host() {
+    assert!(is_southern("https://canvas.lms.unimelb.edu.au", None));
+    assert!(is_southern(
+        "https://rmit.instructure.com",
+        Some("myapps.rmit.edu.au")
+    ));
+    assert!(!is_southern(
+        "https://canvas.harvard.edu",
+        Some("key.harvard.edu")
+    ));
+    assert!(!is_southern("https://foo.instructure.com", None));
+}
+
+#[test]
+fn the_institution_domain_is_the_universitys_own() {
+    let d = institution_domain;
+    assert_eq!(
+        d("canvas.lms.unimelb.edu.au", Some("sso.unimelb.edu.au")).as_deref(),
+        Some("unimelb.edu.au")
+    );
+    assert_eq!(
+        d("canvas.harvard.edu", Some("key.harvard.edu")).as_deref(),
+        Some("harvard.edu")
+    );
+    assert_eq!(
+        d("canvas.ox.ac.uk", Some("idp.ox.ac.uk")).as_deref(),
+        Some("ox.ac.uk")
+    );
+    // A shared public suffix is not a domain anyone owns.
+    assert_eq!(d("canvas.unimelb.edu.au", Some("sso.monash.edu.au")), None);
+    assert_eq!(d("rmit.instructure.com", Some("myapps.rmit.edu.au")), None);
+    assert_eq!(d("a.instructure.com", Some("b.instructure.com")), None);
+    assert_eq!(d("canvas.foo.edu", None), None);
+}
+
+#[test]
+fn an_idp_answers_a_sign_in_request_and_a_portal_does_not() {
+    let idp = |u: &str| is_idp_request(&url::Url::parse(u).unwrap());
+    // Landings measured on real Canvases.
+    assert!(idp(
+        "https://myapps.rmit.edu.au/nidp/saml2/sso?SAMLRequest=fVJb"
+    ));
+    assert!(idp(
+        "https://login.microsoftonline.com/dc0b52a3/oauth2/v2.0/authorize?client_id=x"
+    ));
+    assert!(idp(
+        "https://authentication.ubc.ca/idp/profile/SAML2/Redirect/SSO?execution=e1s1"
+    ));
+    assert!(idp(
+        "https://login.microsoftonline.com/cc95de1b/saml2?SAMLRequest=fZJP"
+    ));
+    assert!(idp(
+        "https://cas.foo.edu/cas/login?service=https%3A%2F%2Fcanvas.foo.edu"
+    ));
+    assert!(!idp("https://login.canvas.ox.ac.uk/"));
+    assert!(!idp("https://www.nus.edu.sg/canvas/login/"));
+    assert!(!idp("https://lms.unimelb.edu.au/canvas"));
+}
+
+fn rmit() -> Institution {
+    Institution {
+        canvas: "https://rmit.instructure.com".to_string(),
+        login_path: "/login".to_string(),
+        idp: Idp::Other,
+        sso_host: None,
+        echo360_tool: None,
+        echo360_lead_in_secs: 0,
+        ed_api: None,
+        ed_region: None,
+        exclude_code_prefixes: Vec::new(),
+    }
+}
+
+/// A keyd from before `site_set`, which answers it as an unknown op.
+fn old_keyd(dir: &std::path::Path) -> crate::test_support::FakeKeyd {
+    crate::test_support::FakeKeyd::start(dir, |header, _| {
+        let op = header["op"].as_str().unwrap_or("").to_string();
+        let reply = if op == "site_set" {
+            serde_json::json!({"error": "request", "detail": format!("unknown op {op:?}")})
+        } else {
+            serde_json::json!({"had": true, "existed": true})
+        };
+        (reply, vec![])
+    })
+}
+
+#[test]
+fn a_keyd_too_old_for_site_set_takes_only_unimelb() {
+    let dir = Scratch::new("institution-old-keyd");
+    let _keyd = old_keyd(&dir);
+    let mut told = keyd::Told::default();
+    let err = keyd::tell_held(&mut told, &dir, &rmit()).unwrap_err();
+    assert!(
+        matches!(&err, crate::providers::credentials::KeydError::Site(why) if why.contains("too old") && why.contains("bun run keyd")),
+        "{err}"
+    );
+    assert_eq!(told.site(), None);
+    keyd::tell_held(&mut told, &dir, &unimelb()).unwrap();
+    assert_eq!(told.site(), Some(&keyd_core::site::Site::unimelb()));
+}
+
+#[test]
+fn a_keyd_that_refuses_the_new_site_leaves_the_session_and_the_profile() {
+    let dir = Scratch::new("institution-refused");
+    save(&dir, &unimelb()).unwrap();
+    let keyd = old_keyd(&dir);
+    assert!(apply(&dir, rmit()).is_err());
+    assert_eq!(keyd.ops(), ["site_set"], "nothing signed out or forgotten");
+    assert_eq!(load(&dir), Some(unimelb()));
+}
+
+#[test]
+fn an_absent_keyd_has_taken_nothing() {
+    let dir = Scratch::new("institution-absent");
+    let mut told = keyd::Told::default();
+    keyd::tell_held(&mut told, &dir, &rmit()).unwrap();
+    assert_eq!(told.site(), None);
+}
+
+#[test]
+fn a_shared_identity_provider_is_not_the_universitys_session_host() {
+    let google = Institution {
+        sso_host: Some("accounts.google.com".to_string()),
+        ..rmit()
+    };
+    assert_eq!(google.session_sso_host(), None);
+    assert_eq!(google.session_domain(), None);
+
+    let own = Institution {
+        canvas: "https://canvas.lms.unimelb.edu.au".to_string(),
+        sso_host: Some("login.unimelb.edu.au".to_string()),
+        ..rmit()
+    };
+    assert_eq!(own.session_sso_host(), Some("login.unimelb.edu.au"));
+    assert_eq!(own.session_domain().as_deref(), Some("unimelb.edu.au"));
+
+    let okta = Institution {
+        idp: Idp::Okta,
+        sso_host: Some("rmit.okta.com".to_string()),
+        ..rmit()
+    };
+    assert_eq!(okta.session_sso_host(), Some("rmit.okta.com"));
+    assert_eq!(okta.session_domain(), None, "okta.com is shared");
+    assert_eq!(unimelb().session_sso_host(), Some("sso.unimelb.edu.au"));
+}

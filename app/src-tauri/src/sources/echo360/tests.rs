@@ -1,5 +1,6 @@
-use super::auth::{extract_section_id, launch_form, parse_lti_form};
+use super::auth::{extract_section_id, first_launch, parse_lti_form, tool_candidates, LaunchForm};
 use super::syllabus::{duration_between, second_source_hint};
+use super::{trim_video, NO_TOOL};
 
 #[test]
 fn reads_the_section_id_out_of_a_launch_url() {
@@ -28,10 +29,20 @@ fn pulls_hidden_fields_out_of_the_lti_form() {
     );
 }
 
+/// The first launch form, taken as it is.
+fn launch_form(
+    canvas: &crate::sources::canvas::Canvas,
+    course_id: i64,
+) -> Result<LaunchForm, String> {
+    first_launch(canvas, course_id, |form| Ok(form.clone()))
+}
+
 fn keyd_serving(
     pages: &'static [(&'static str, u16, &'static str, &'static str)],
 ) -> (crate::test_support::Scratch, crate::test_support::FakeKeyd) {
     let dir = crate::test_support::Scratch::new("echo360-lti");
+    let unimelb = crate::sources::institution::unimelb();
+    crate::sources::institution::save(&dir, &unimelb).unwrap();
     let keyd = crate::test_support::FakeKeyd::start(&dir, move |header, _| {
         let path = header["path"].as_str().unwrap_or("");
         let (_, status, location, body) = pages
@@ -55,6 +66,7 @@ fn keyd_serving(
 fn the_launch_page_comes_through_keyd_and_its_redirects_are_followed_there() {
     const FORM: &str = r#"<form action="https://echo360.net.au/lti"><input type="hidden" name="a" value="1"/></form>"#;
     let (dir, keyd) = keyd_serving(&[
+        ("/api/v1/courses/5/tabs", 200, "", "[]"),
         (
             "/courses/5/external_tools/701",
             302,
@@ -64,11 +76,15 @@ fn the_launch_page_comes_through_keyd_and_its_redirects_are_followed_there() {
         ("/courses/5/launch", 200, "", FORM),
     ]);
     let canvas = crate::sources::canvas::Canvas::open(&dir);
-    let (action, fields) = launch_form(&canvas, 5).unwrap();
+    let (lti_url, action, fields) = launch_form(&canvas, 5).unwrap();
+    assert_eq!(
+        lti_url,
+        "https://canvas.lms.unimelb.edu.au/courses/5/external_tools/701"
+    );
     assert_eq!(action, "https://echo360.net.au/lti");
     assert_eq!(fields, vec![("a".to_string(), "1".to_string())]);
     let requests = keyd.requests();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     for (header, _) in &requests {
         assert_eq!(header["secret"], "canvas");
         assert_eq!(header["headers"], serde_json::json!([]));
@@ -76,24 +92,120 @@ fn the_launch_page_comes_through_keyd_and_its_redirects_are_followed_there() {
 }
 
 #[test]
-fn a_launch_page_without_the_form_or_with_an_error_says_what_failed() {
+fn a_tab_labelled_for_lecture_capture_comes_before_the_profiles_tool() {
+    const FORM: &str = r#"<form action="https://echo360.org/lti"><input type="hidden" name="a" value="1"/></form>"#;
     let (dir, _keyd) = keyd_serving(&[
+        (
+            "/api/v1/courses/5/tabs",
+            200,
+            "",
+            r#"[{"label": "Echo360", "html_url": "/courses/5/external_tools/55"}]"#,
+        ),
+        ("/courses/5/external_tools/55", 200, "", FORM),
+    ]);
+    let canvas = crate::sources::canvas::Canvas::open(&dir);
+    let (lti_url, action, _) = launch_form(&canvas, 5).unwrap();
+    assert!(lti_url.ends_with("/courses/5/external_tools/55"));
+    assert_eq!(action, "https://echo360.org/lti");
+}
+
+#[test]
+fn a_tab_that_opens_no_section_falls_back_to_the_profiles_tool() {
+    const TAB: &str = r#"<form action="https://echo360.org/lti/tab"><input type="hidden" name="a" value="1"/></form>"#;
+    const PROFILE: &str = r#"<form action="https://echo360.org/lti/profile"><input type="hidden" name="a" value="1"/></form>"#;
+    let (dir, _keyd) = keyd_serving(&[
+        (
+            "/api/v1/courses/5/tabs",
+            200,
+            "",
+            r#"[{"label": "Echo360", "html_url": "/courses/5/external_tools/55"}]"#,
+        ),
+        ("/courses/5/external_tools/55", 200, "", TAB),
+        ("/courses/5/external_tools/701", 200, "", PROFILE),
+    ]);
+    let canvas = crate::sources::canvas::Canvas::open(&dir);
+    let landed = |(_, action, _): &LaunchForm| match action.as_str() {
+        "https://echo360.org/lti/profile" => {
+            extract_section_id("https://echo360.org/section/s-1/home")
+        }
+        _ => extract_section_id("https://echo360.org/home"),
+    };
+    assert_eq!(first_launch(&canvas, 5, landed).unwrap(), "s-1");
+
+    // When every candidate fails, every failure surfaces.
+    let err = first_launch(&canvas, 5, |_: &LaunchForm| -> Result<(), String> {
+        Err("no section".to_string())
+    })
+    .unwrap_err();
+    assert_eq!(
+        err,
+        "/courses/5/external_tools/55: no section; /courses/5/external_tools/701: no section"
+    );
+}
+
+#[test]
+fn a_course_whose_pages_carry_no_form_has_no_tool() {
+    let (dir, _keyd) = keyd_serving(&[
+        ("/api/v1/courses/5/tabs", 200, "", "[]"),
         (
             "/courses/5/external_tools/701",
             200,
             "",
             "<html>nothing</html>",
         ),
+        ("/api/v1/courses/6/tabs", 200, "", "[]"),
         ("/courses/6/external_tools/701", 404, "", "{}"),
     ]);
     let canvas = crate::sources::canvas::Canvas::open(&dir);
-    assert!(launch_form(&canvas, 5)
-        .unwrap_err()
-        .starts_with("Could not parse the Echo360 LTI form"));
+    assert_eq!(launch_form(&canvas, 5).unwrap_err(), NO_TOOL);
+    assert_eq!(launch_form(&canvas, 6).unwrap_err(), NO_TOOL);
+}
+
+#[test]
+fn a_launch_page_canvas_fails_to_serve_is_an_error_not_no_tool() {
+    let (dir, _keyd) = keyd_serving(&[
+        ("/api/v1/courses/7/tabs", 200, "", "[]"),
+        ("/courses/7/external_tools/701", 500, "", "{}"),
+    ]);
+    let canvas = crate::sources::canvas::Canvas::open(&dir);
     assert_eq!(
-        launch_form(&canvas, 6).unwrap_err(),
-        "Canvas LTI page fetch failed: HTTP 404"
+        launch_form(&canvas, 7).unwrap_err(),
+        "Canvas LTI page /courses/7/external_tools/701: HTTP 500"
     );
+}
+
+#[test]
+fn candidates_are_the_tabs_labelled_for_lecture_capture() {
+    let tabs = serde_json::json!([
+        {"label": "Home", "html_url": "/courses/9"},
+        {"label": "Lecture Recordings", "html_url": "/courses/9/external_tools/701"},
+        {"label": "Echo360", "html_url": "https://canvas.foo.edu/courses/9/external_tools/55"},
+        {"label": "Ed Discussion", "html_url": "/courses/9/external_tools/12"},
+        {"label": "Echo360 help", "html_url": "/courses/9/pages/echo"},
+    ]);
+    assert_eq!(
+        tool_candidates(&tabs),
+        [
+            "/courses/9/external_tools/701",
+            "/courses/9/external_tools/55"
+        ]
+    );
+}
+
+#[test]
+fn without_a_lead_in_the_download_is_the_file() {
+    let dir = crate::test_support::Scratch::new("echo-trim");
+    let (raw, out) = (dir.join("raw.mp4"), dir.join("source1.mp4"));
+    std::fs::write(&raw, b"video").unwrap();
+    // No ffmpeg is run, so a missing one cannot fail it.
+    assert!(trim_video(
+        std::path::Path::new("/nonexistent/ffmpeg"),
+        &raw,
+        &out,
+        0
+    ));
+    assert_eq!(std::fs::read(&out).unwrap(), b"video");
+    assert!(!raw.exists());
 }
 
 #[test]

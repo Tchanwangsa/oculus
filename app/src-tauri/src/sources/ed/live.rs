@@ -14,8 +14,6 @@ use std::time::{Duration, Instant};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::{Message, WebSocket};
 
-/// Ed's AU `workspaceWebSocketUrl` host.
-const HOST: &str = "sahara.au.edstem.org";
 /// The web app's origin, which the browser sends on the handshake.
 const ORIGIN: &str = "https://edstem.org";
 /// How long the server has to send `init`, and the bound on every read and
@@ -36,17 +34,18 @@ impl Drop for LiveWorkspace {
     }
 }
 
-/// Open the workspace socket with a connect ticket and wait for `init`.
-pub fn open_live_workspace(ticket: &str) -> Result<LiveWorkspace, String> {
-    let tcp = connect_tcp()?;
-    let name = rustls::pki_types::ServerName::try_from(HOST)
+/// Open the workspace socket on `host` (`lessons::workspace_host`) with a
+/// connect ticket and wait for `init`.
+pub fn open_live_workspace(host: &str, ticket: &str) -> Result<LiveWorkspace, String> {
+    let tcp = connect_tcp(host)?;
+    let name = rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|_| "the workspace host is not a valid name".to_string())?;
     let tls = rustls::ClientConnection::new(Arc::new(tls_config()), name)
         .map_err(|e| format!("could not start TLS to the workspace server: {e}"))?;
     let stream = rustls::StreamOwned::new(tls, tcp);
 
     let ticket: String = url::form_urlencoded::byte_serialize(ticket.as_bytes()).collect();
-    let mut request = format!("wss://{HOST}/connect?ticket={ticket}")
+    let mut request = format!("wss://{host}/connect?ticket={ticket}")
         .into_client_request()
         .map_err(|_| "the workspace ticket does not make a valid URL".to_string())?;
     request.headers_mut().insert(
@@ -97,9 +96,9 @@ impl LiveWorkspace {
     }
 }
 
-fn connect_tcp() -> Result<TcpStream, String> {
-    let unreachable = |e: std::io::Error| format!("could not reach {HOST}: {e}");
-    let addrs = (HOST, 443).to_socket_addrs().map_err(unreachable)?;
+fn connect_tcp(host: &str) -> Result<TcpStream, String> {
+    let unreachable = |e: std::io::Error| format!("could not reach {host}: {e}");
+    let addrs = (host, 443).to_socket_addrs().map_err(unreachable)?;
     let mut last = None;
     for addr in addrs {
         match TcpStream::connect_timeout(&addr, INIT_WAIT) {
@@ -112,7 +111,7 @@ fn connect_tcp() -> Result<TcpStream, String> {
             Err(e) => last = Some(e),
         }
     }
-    Err(last.map_or_else(|| format!("{HOST} has no address"), unreachable))
+    Err(last.map_or_else(|| format!("{host} has no address"), unreachable))
 }
 
 fn tls_config() -> rustls::ClientConfig {

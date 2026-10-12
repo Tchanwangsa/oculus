@@ -1,7 +1,5 @@
 //! Locating ffmpeg and trimming the fixed lead-in off a download.
 
-use super::TRIM_SECS;
-
 use std::path::{Path, PathBuf};
 
 fn is_runnable(path: &Path) -> bool {
@@ -33,13 +31,25 @@ pub fn find_ffmpeg(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
     candidates.into_iter().find(|p| is_runnable(p))
 }
 
-/// Drop the lead-in with a stream copy (no re-encode).
-pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path) -> bool {
+/// Seconds of intro the university puts on every recording (the institution
+/// profile's `echo360_lead_in_secs`); 0 for most.
+pub fn lead_in_secs(data_dir: &Path) -> u32 {
+    crate::sources::institution::load(data_dir)
+        .map(|i| i.echo360_lead_in_secs)
+        .unwrap_or(0)
+}
+
+/// Drop `lead_in` seconds with a stream copy (no re-encode); with none, the
+/// download is the file.
+pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path, lead_in: u32) -> bool {
+    if lead_in == 0 {
+        return std::fs::rename(raw, out).is_ok();
+    }
     crate::runtime::platform::command(ffmpeg)
         .args([
             "-y",
             "-ss",
-            &TRIM_SECS.to_string(),
+            &lead_in.to_string(),
             "-i",
             raw.to_str().unwrap_or(""),
             "-c",

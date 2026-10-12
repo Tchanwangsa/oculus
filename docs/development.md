@@ -47,7 +47,7 @@ bun run predev        # the dev preflight, by hand
 bun run cli           # release `oculus`
 bun run cli:dev       # debug `oculus` — the one the dev app's agents run
 bun run cli:install   # release build, symlink into ~/.local/bin, then `oculus docs`
-bun run docs:cli      # rebuild the release CLI, regenerate docs/cli-reference.md from its help
+bun run docs:cli      # rebuild the release CLI, regenerate docs/cli-reference.md from its help (--staged: run the staged sidecar)
 bun run ffmpeg        # fetch ffmpeg into app/src-tauri/binaries/
 bun run speech        # compile the on-device speech helper there (macOS)
 bun run whisper       # build whisper.cpp's whisper-cli there (macOS, needs cmake)
@@ -192,14 +192,16 @@ fails loudly instead of passing on an old file. `oculus_cli` ranks every candida
 by mtime rather than trusting one, which covers the seconds when the dev path
 has no binary at all.
 
-`tauri build` runs `stage-keyd`, `stage-cli` then `docs:cli` from
+`tauri build` runs `stage-keyd`, `stage-cli` then `docs:cli --staged` from
 `beforeBuildCommand`: the CLI ships inside the bundle because keyd admits only
 executables inside the app its helper is nested in, and gives
 `Contents/MacOS/oculus` the `cli` role ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
 The `oculus` that lands in the bundle is the crate's own `[[bin]]` from
 `tauri build`'s cargo run, which Tauri copies over the staged sidecar; the
 sidecar only has to exist for tauri-build's `externalBin` check. The reference is regenerated at the one moment a current release binary is
-guaranteed to exist.
+guaranteed to exist: `--staged` runs the sidecar `stage-cli` just wrote rather
+than building again, which would recompile the app because tauri-build reruns
+whenever a sidecar changes.
 
 ## CI proves a fresh checkout builds; releases are cut by hand
 
@@ -209,7 +211,10 @@ frontend and script tests, the frontend build, ffmpeg and keyd/CLI staging,
 tests with and without `dev`, plus the maths workspace's formatting and tests.
 Both Windows workflows install the WASM target and the locked `wasm-bindgen`
 CLI; the frontend checks build the maths WASM. CI builds the current-user NSIS
-installer, validates the GUI and sidecars, and retains `oculus-windows-x64-ci`
+installer with a second `--config` that nulls `beforeBuildCommand`: the earlier
+steps already bundle the frontend and stage every sidecar, and rerunning
+`stage-cli` would compile the app again, about four minutes;
+`bundle-config.test.mjs` checks those steps come first. It then validates the GUI and sidecars, and retains `oculus-windows-x64-ci`
 for VM testing. This workflow artifact does not create a GitHub release.
 It installs sccache before any cargo build.
 `app/scripts/test.mjs` enumerates script tests in Node so no shell has to

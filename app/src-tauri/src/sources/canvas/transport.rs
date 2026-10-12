@@ -8,10 +8,10 @@ use std::io::Read;
 use std::time::Duration;
 
 use keyd_core::client::{StreamedResponse, SESSION_TIMEOUT};
-use keyd_core::okta::{LoginError, SSO_HOST};
+use keyd_core::okta::LoginError;
 use url::{Position, Url};
 
-use super::{Canvas, CanvasError, CANVAS_BASE, RETRIES, TIMEOUT};
+use super::{Canvas, CanvasError, RETRIES, TIMEOUT};
 
 /// Redirects followed before a request is called a loop.
 pub(super) const MAX_REDIRECTS: usize = 5;
@@ -59,23 +59,27 @@ fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_str())
 }
 
-fn canvas_origin() -> Url {
-    Url::parse(CANVAS_BASE).expect("CANVAS_BASE is a URL")
-}
+impl Canvas {
+    /// An absolute URL, or a path on the profile's Canvas.
+    pub(crate) fn resolve(&self, url_or_path: &str) -> Result<Url, CanvasError> {
+        if url_or_path.starts_with("http") {
+            return Url::parse(url_or_path)
+                .map_err(|e| CanvasError::Failed(format!("not a usable URL: {e}")));
+        }
+        let base = self.base.as_ref().ok_or_else(|| {
+            CanvasError::Failed(crate::sources::institution::NOT_CONFIGURED.to_string())
+        })?;
+        base.join(url_or_path)
+            .map_err(|e| CanvasError::Failed(format!("not a usable URL: {e}")))
+    }
 
-/// An absolute URL, or a path on Canvas.
-pub(crate) fn resolve(url_or_path: &str) -> Result<Url, CanvasError> {
-    let text = if url_or_path.starts_with("http") {
-        url_or_path.to_string()
-    } else {
-        format!("{CANVAS_BASE}{url_or_path}")
-    };
-    Url::parse(&text).map_err(|e| CanvasError::Failed(format!("not a usable URL: {e}")))
-}
-
-/// Whether `url` is on Canvas, the only host that gets the session.
-pub(crate) fn is_canvas(url: &Url) -> bool {
-    url.origin() == canvas_origin().origin()
+    /// Whether `url` is on Canvas, the only host that gets the session: the
+    /// one oculus-keyd's `canvas` route sends to.
+    pub(crate) fn is_canvas(&self, url: &Url) -> bool {
+        self.base
+            .as_ref()
+            .is_some_and(|base| url.origin() == base.origin())
+    }
 }
 
 /// The path and query oculus-keyd's `canvas` route takes.
@@ -114,40 +118,46 @@ fn is_authorisation_failure(body: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-fn leads_to_sign_in(at: &Url, location: &str) -> bool {
-    let Ok(target) = at.join(location.trim()) else {
-        return false;
-    };
-    if target
-        .host_str()
-        .is_some_and(|h| h.eq_ignore_ascii_case(SSO_HOST))
-    {
-        return true;
+impl Canvas {
+    fn leads_to_sign_in(&self, at: &Url, location: &str) -> bool {
+        let Ok(target) = at.join(location.trim()) else {
+            return false;
+        };
+        let to_sso = target
+            .host_str()
+            .zip(self.institution().and_then(|i| i.sso_host.as_deref()))
+            .is_some_and(|(host, sso)| host.eq_ignore_ascii_case(sso));
+        if to_sso {
+            return true;
+        }
+        self.is_canvas(&target)
+            && (target.path() == "/login" || target.path().starts_with("/login/"))
     }
-    is_canvas(&target) && (target.path() == "/login" || target.path().starts_with("/login/"))
-}
 
-/// Whether an answer that oculus-keyd had already signed in again for says
-/// the session is dead. keyd retried once, so there is nothing left to try.
-fn judge(
-    status: u16,
-    location: Option<&str>,
-    body: &[u8],
-    signin: Option<LoginError>,
-    at: &Url,
-) -> Result<(), CanvasError> {
-    if let Some(why) = signin {
-        return Err(CanvasError::Expired(Some(why)));
+    /// Whether an answer that oculus-keyd had already signed in again for
+    /// says the session is dead. keyd retried once, so there is nothing left
+    /// to try.
+    fn judge(
+        &self,
+        status: u16,
+        location: Option<&str>,
+        body: &[u8],
+        signin: Option<LoginError>,
+        at: &Url,
+    ) -> Result<(), CanvasError> {
+        if let Some(why) = signin {
+            return Err(CanvasError::Expired(Some(why)));
+        }
+        let dead = match status {
+            401 => !is_authorisation_failure(body),
+            301 | 302 | 303 | 307 | 308 => location.is_some_and(|l| self.leads_to_sign_in(at, l)),
+            _ => false,
+        };
+        if dead {
+            return Err(CanvasError::Expired(None));
+        }
+        Ok(())
     }
-    let dead = match status {
-        401 => !is_authorisation_failure(body),
-        301 | 302 | 303 | 307 | 308 => location.is_some_and(|l| leads_to_sign_in(at, l)),
-        _ => false,
-    };
-    if dead {
-        return Err(CanvasError::Expired(None));
-    }
-    Ok(())
 }
 
 fn backoff(attempt: u32) {
@@ -196,7 +206,7 @@ impl Canvas {
                 .keyd
                 .send("canvas", method, target(at), headers, body, SESSION_TIMEOUT)
                 .map_err(CanvasError::from_keyd)?;
-            judge(
+            self.judge(
                 r.status,
                 header(&r.headers, "location"),
                 &r.body,
@@ -228,33 +238,33 @@ impl Canvas {
                     tries += 1;
                 }
                 Err(e) => break Err(e),
-                Ok(r) => break judged_stream(r, at),
+                Ok(r) => break self.judged_stream(r, at),
             }
         };
         self.latch(streamed)
     }
-}
 
-fn judged_stream(r: StreamedResponse, at: &Url) -> Result<Streamed, CanvasError> {
-    let StreamedResponse {
-        status,
-        headers,
-        signin,
-        mut body,
-    } = r;
-    let mut head = Vec::new();
-    if status == 401 {
-        body.by_ref()
-            .take(REJECTION_BODY)
-            .read_to_end(&mut head)
-            .ok();
+    fn judged_stream(&self, r: StreamedResponse, at: &Url) -> Result<Streamed, CanvasError> {
+        let StreamedResponse {
+            status,
+            headers,
+            signin,
+            mut body,
+        } = r;
+        let mut head = Vec::new();
+        if status == 401 {
+            body.by_ref()
+                .take(REJECTION_BODY)
+                .read_to_end(&mut head)
+                .ok();
+        }
+        self.judge(status, header(&headers, "location"), &head, signin, at)?;
+        Ok(Streamed {
+            status,
+            headers,
+            body: Box::new(body),
+        })
     }
-    judge(status, header(&headers, "location"), &head, signin, at)?;
-    Ok(Streamed {
-        status,
-        headers,
-        body: Box::new(body),
-    })
 }
 
 fn agent(read: Option<Duration>) -> ureq::Agent {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleNotch, Info, Key, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { useInstitution } from "@/stores/sync/institutionStore";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -30,6 +31,7 @@ export function AutoSignIn({
    *  until credentials are saved. */
   embedded?: boolean;
 }) {
+  const institution = useInstitution();
   const [status, setStatus] = useState<CredentialStatus | null>(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -178,7 +180,7 @@ export function AutoSignIn({
           {!embedded && (
             <p className="text-xs text-muted-foreground leading-relaxed">
               The setup key is shown only while enrolling an authenticator — open{" "}
-              <span className="text-foreground">sso.unimelb.edu.au/enduser/settings</span>,
+              <span className="text-foreground">{institution?.sso_host}/enduser/settings</span>,
               set up Google Authenticator, and click “Can’t scan?” on the QR
               screen. Scan the QR with your phone too, so you keep a working
               authenticator.

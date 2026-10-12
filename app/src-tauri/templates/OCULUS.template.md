@@ -4,8 +4,9 @@
 > and it stays. Until then, treat it as empty rather than as a claim that
 > Oculus has no more to it than the outline below.
 
-Oculus is a desktop app that turns University of Melbourne coursework into a
-searchable local library. It syncs Canvas, Ed Discussion and Echo360 into
+Oculus is a desktop app that turns a student's university coursework into a
+searchable local library. It syncs Canvas, and Ed Discussion and Echo360 where
+the university uses them, into
 `courses/<code>/`, parses every PDF page, and embeds the page *images* so
 search finds a slide by what it shows, not only by the words extracted from
 it.

@@ -17,13 +17,20 @@ impl Ctx {
     /// Walk the user through storing credentials. The setup key cannot be
     /// recovered later, so the instructions matter as much as the prompts.
     pub(crate) fn auth_setup(&self) -> Result<(), String> {
+        let inst = app_lib::sources::institution::load(&self.data_dir).ok_or(
+            "No Canvas address set — run `oculus auth canvas <address>` first.".to_string(),
+        )?;
+        let sso = match (inst.idp, inst.sso_host) {
+            (app_lib::sources::institution::Idp::Okta, Some(sso)) => sso,
+            _ => return Err(app_lib::auth::okta::LoginError::NotOkta(inst.canvas).to_string()),
+        };
         println!("{}", paint("Automated sign-in setup", DIM));
         println!();
         println!("This needs a TOTP factor enrolled and its setup key. A TOTP code is a");
         println!("one-way function of a secret seed, so it cannot be worked out from other");
         println!("codes — the seed is shown only at enrolment. If you never copied it:");
         println!();
-        println!("  1. Open https://sso.unimelb.edu.au/enduser/settings");
+        println!("  1. Open https://{sso}/enduser/settings");
         println!("  2. Google Authenticator → remove it, then set it up again");
         println!("  3. On the QR page click \"Can't scan?\" to reveal the setup key");
         println!(
@@ -87,9 +94,47 @@ impl Ctx {
         }
     }
 
-    /// Canvas sign-in is SAML and needs a real browser: start the app and
-    /// watch oculus-keyd for the session it stores.
+    /// Show the institution profile, or check, detect and save a new Canvas
+    /// address.
+    pub(crate) fn auth_canvas(&self, address: Option<&str>) -> Result<(), String> {
+        use app_lib::sources::institution;
+
+        let inst = match address {
+            None => institution::load(&self.data_dir)
+                .ok_or("No Canvas address set — run `oculus auth canvas <address>`.".to_string())?,
+            Some(address) => {
+                let wanted = institution::normalise(address)?;
+                let changing = institution::load(&self.data_dir).is_none_or(|i| i.canvas != wanted);
+                if changing && self.rt.block_on(institution::library_exists())? {
+                    return Err(institution::LOCKED.to_string());
+                }
+                institution::configure(&self.data_dir, address)?
+            }
+        };
+        if self.json {
+            return self.emit(&inst);
+        }
+        println!("canvas    {}", inst.canvas);
+        let sign_in = match (inst.idp, inst.sso_host.as_deref()) {
+            (institution::Idp::Okta, Some(host)) => {
+                format!("Okta at {host} — `oculus auth setup` enables automatic sign-in")
+            }
+            (_, Some(host)) => format!("single sign-on at {host}"),
+            (_, None) => "Canvas's own login page".to_string(),
+        };
+        println!("sign-in   {sign_in}");
+        Ok(())
+    }
+
+    /// Canvas sign-in goes through the university's IdP and needs a real
+    /// browser: start the app and watch oculus-keyd for the session it
+    /// stores.
     pub(crate) fn login(&self) -> Result<(), String> {
+        if app_lib::sources::institution::load(&self.data_dir).is_none() {
+            return Err(
+                "No Canvas address set — run `oculus auth canvas <address>` first.".to_string(),
+            );
+        }
         let canvas = app_lib::sources::canvas::Canvas::open(&self.data_dir);
         if let Ok(name) = canvas.whoami() {
             println!("{} as {name}", paint("already connected", GREEN));

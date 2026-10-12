@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::transport::{self, is_canvas, resolve, Streamed};
+use super::transport::{self, Streamed};
 use super::{Canvas, CanvasError};
 use crate::runtime::stream::{copy_to_file, percent};
 
@@ -57,9 +57,9 @@ impl Canvas {
     /// The final response of the redirect chain from `url_or_path`, its body
     /// unread.
     fn open_stream(&self, url_or_path: &str) -> Result<Streamed, CanvasError> {
-        let mut url = resolve(url_or_path)?;
+        let mut url = self.resolve(url_or_path)?;
         for followed in 0.. {
-            let resp = if is_canvas(&url) {
+            let resp = if self.is_canvas(&url) {
                 self.hop_stream(&url)?
             } else {
                 transport::direct_stream(&url)?

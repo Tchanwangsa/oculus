@@ -76,7 +76,7 @@ Instagram's page also leaves an open thread when it parks
 Pages are built with `.focused(false)`, and `dock_place` never calls
 `set_focus()`; a click in the page focuses it. Parking or closing a page that
 holds first responder hands it to the app's own WKWebView (`focus.rs`, using
-the address `shell/keys.rs` records), or keystrokes would go to a page nobody
+the address `shell/keys/` records), or keystrokes would go to a page nobody
 can see. While a dock page holds focus it gets ⌘-keys before the menu, like a
 browser page ([shell.md](./shell.md#the-shell-owns-tabs-side-panels-and-every-window-shortcut)).
 

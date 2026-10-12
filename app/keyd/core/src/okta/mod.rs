@@ -1,10 +1,10 @@
-//! Headless University of Melbourne SSO sign-in.
+//! Headless sign-in for a university whose Canvas signs in through Okta.
 //!
-//! Canvas authenticates through Okta Identity Engine at `sso.unimelb.edu.au`,
-//! whose widget is a thin client over a JSON state machine at `/idp/idx/*`. So
-//! the flow runs with no webview (see `docs/architecture.md`): introspect the
-//! login page's state token, answer each *remediation*, then replay the SAML
-//! app URL and POST the `SAMLResponse` to Canvas.
+//! Okta Identity Engine's widget is a thin client over a JSON state machine at
+//! `/idp/idx/*` on the site's Okta origin (`crate::site`). So the flow runs
+//! with no webview (see `docs/architecture.md`): introspect the login page's
+//! state token, answer each *remediation*, then replay the SAML app URL and
+//! POST the `SAMLResponse` to Canvas.
 //!
 //! Only password and TOTP (Google Authenticator) are answerable; push needs a
 //! human. The TOTP seed is shown once, at enrolment, so using this means
@@ -32,6 +32,7 @@ mod wire;
 #[cfg(test)]
 mod sign_in_tests;
 
+pub use flow::probe_sign_in_page;
 pub use guard::{resume_automatic_sign_in, Trigger};
 pub use setup_key::setup_key;
 pub use totp::{base32_decode, totp_at, totp_code, totp_now, totp_seconds_remaining};
@@ -41,11 +42,10 @@ use crate::clock::Clock;
 use crate::paths;
 use crate::platform::Role;
 use crate::session::{markers, Kind};
-
-pub const SSO_HOST: &str = "sso.unimelb.edu.au";
+use crate::site::Site;
 
 /// Never logged, never written outside the store, never sent anywhere but
-/// the SSO host.
+/// the site's Okta origin.
 pub struct Credentials {
     pub username: String,
     pub password: String,
@@ -110,12 +110,14 @@ impl SessionStore for NoSessions {
 
 /// Everything the sign-in takes from outside: where its files go, the two
 /// origins it talks to, the credentials, where the sessions are kept and the
-/// clock. `new` gives production's values; tests point the origins at a
-/// loopback server.
+/// clock. `new` takes them from a site; tests point the origins at a loopback
+/// server.
 pub struct Env<'a> {
     pub data_dir: PathBuf,
     /// Canvas's origin, without a trailing slash.
     pub canvas_base: String,
+    /// Where on Canvas the sign-in starts.
+    pub login_path: String,
     /// Okta's origin, without a trailing slash. Its host keys the cookie jar,
     /// so it must differ from Canvas's host.
     pub sso_base: String,
@@ -126,20 +128,27 @@ pub struct Env<'a> {
 }
 
 impl<'a> Env<'a> {
+    /// `NotOkta` when the site has no Okta origin: nothing can sign in to it
+    /// headlessly.
     pub fn new(
         data_dir: &Path,
-        canvas_base: &str,
+        site: &Site,
         store: &'a dyn CredentialStore,
         sessions: &'a dyn SessionStore,
-    ) -> Env<'a> {
-        Env {
+    ) -> Result<Env<'a>, LoginError> {
+        let sso_base = site
+            .sso
+            .clone()
+            .ok_or_else(|| LoginError::NotOkta(site.canvas.clone()))?;
+        Ok(Env {
             data_dir: data_dir.to_path_buf(),
-            canvas_base: canvas_base.to_string(),
-            sso_base: format!("https://{SSO_HOST}"),
+            canvas_base: site.canvas.clone(),
+            login_path: site.login_path.clone(),
+            sso_base,
             store,
             sessions,
             now: crate::clock::system(),
-        }
+        })
     }
 
     pub(crate) fn sso_host(&self) -> String {
@@ -156,6 +165,9 @@ impl<'a> Env<'a> {
 pub enum LoginError {
     /// No credentials on file — automated sign-in was never set up.
     NotConfigured,
+    /// The university's Canvas does not sign in through Okta; carries the
+    /// Canvas origin.
+    NotOkta(String),
     /// The user signed out; only a sign-in they start lifts it.
     SignedOut,
     /// The keychain refused the read (a denied prompt, a sandboxed process);
@@ -191,6 +203,11 @@ impl std::fmt::Display for LoginError {
                 f,
                 "Automated sign-in is not set up — save your username, password and \
                  authenticator setup key first."
+            ),
+            LoginError::NotOkta(canvas) => write!(
+                f,
+                "Automatic sign-in works only with Okta, and {canvas} signs in another way. \
+                 Sign in from Settings → Canvas in the app."
             ),
             LoginError::SignedOut => write!(
                 f,

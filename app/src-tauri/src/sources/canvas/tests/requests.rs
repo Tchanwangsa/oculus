@@ -117,6 +117,7 @@ fn a_valid_session_probes_as_the_users_name() {
 fn a_missing_keyd_is_said_plainly_and_is_never_an_expired_session() {
     use crate::sources::canvas::{CanvasError, SessionProbe};
     let dir = crate::test_support::Scratch::new("canvas-absent");
+    crate::sources::institution::save(&dir, &crate::sources::institution::unimelb()).unwrap();
     let canvas = crate::sources::canvas::Canvas::open(&dir);
     assert_eq!(canvas.get("/x").unwrap_err(), CanvasError::KeydAbsent);
     assert_eq!(canvas.check_keyd().unwrap_err(), CanvasError::KeydAbsent);
@@ -148,4 +149,18 @@ fn a_status_the_caller_wanted_as_an_error_names_it() {
         r.canvas.get_json("/api/v1/x").unwrap_err().to_string(),
         "HTTP 404 for /api/v1/x"
     );
+}
+
+#[test]
+fn without_a_canvas_address_nothing_is_sent() {
+    use crate::sources::canvas::CanvasError;
+    let r = rig(|_, _| answer(200, &[], b"{}"));
+    std::fs::remove_file(crate::sources::institution::path(&r.dir)).unwrap();
+    let canvas = crate::sources::canvas::Canvas::open(&r.dir);
+    assert_eq!(
+        canvas.get("/api/v1/users/self").unwrap_err(),
+        CanvasError::Failed(crate::sources::institution::NOT_CONFIGURED.to_string())
+    );
+    assert!(canvas.base().is_err());
+    assert!(r.forwards().is_empty());
 }

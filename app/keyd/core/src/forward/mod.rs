@@ -1,7 +1,8 @@
-//! The `forward` op's HTTP half: one request to a route's fixed origin, with
-//! keyd attaching the credential.
+//! The `forward` op's HTTP half: one request to a route's origin, with keyd
+//! attaching the credential.
 //!
-//! A route (`route`) names the origin, the path prefix every request must
+//! A route (`route`) names the origin (fixed for a cloud service, the site's
+//! for Canvas and Ed: `crate::site`), the path prefix every request must
 //! stay under, and how the credential rides: a Bearer key for the three cloud
 //! services, or a login session (Canvas's `Cookie`, Ed's `x-token`). The
 //! client names a path (`path` rules), a method and a few headers (`call`);
@@ -23,7 +24,7 @@ mod upstream;
 
 pub use call::Call;
 pub use rejection::session_rejected;
-pub use route::{Auth, Route, Routes, SESSION_READ_TIMEOUT};
+pub use route::{Auth, Route, Routes, SiteOrigin, SESSION_READ_TIMEOUT};
 pub use upstream::{read_capped, Opened, Upstream};
 
 /// The names a client gives `forward` for the session routes.

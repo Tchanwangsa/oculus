@@ -5,13 +5,15 @@
 //! attach the student's own workspace the way opening the slide does. No request sends
 //! `?view=1`: the web app does, and it records a view.
 
-use super::Ed;
+use super::{region, Ed};
 
 use std::collections::HashMap;
 
-/// Where Ed's AU region serves workspace downloads. The download ticket is
-/// the credential, so this host is fetched directly, never through keyd.
-pub const WORKSPACE_DOWNLOAD: &str = "https://sahara.au.edstem.org/download";
+/// The host that serves Ed's challenge workspaces in `region`. Its tickets
+/// are the credential, so it is reached directly, never through keyd.
+pub fn workspace_host(region: &str) -> String {
+    format!("sahara.{region}.edstem.org")
+}
 
 /// `GET /courses/<c>/lessons`: lessons carry no slides here.
 pub struct LessonList {
@@ -69,6 +71,11 @@ impl Ed {
         Ok(questions)
     }
 
+    /// Ed's web region, once a launch has named it.
+    pub fn region(&self) -> Option<String> {
+        region(&self.data_dir)
+    }
+
     /// The student's current workspace for a challenge, as a zip. Ed only
     /// hands out a download for a live workspace, so: connect, hand the
     /// connect ticket to `open_live` (the session stays open while its guard
@@ -78,9 +85,12 @@ impl Ed {
     pub fn workspace_zip<G>(
         &self,
         challenge_id: i64,
-        open_live: impl FnOnce(&str) -> Result<G, String>,
+        open_live: impl FnOnce(&str, &str) -> Result<G, String>,
         download: impl FnOnce(&str) -> Result<Vec<u8>, String>,
     ) -> Result<Vec<u8>, String> {
+        let host = workspace_host(&self.region().ok_or(
+            "Ed's region is not known yet; it is learned when Oculus next signs in to Ed",
+        )?);
         let connected = self.post(
             &format!("/challenges/{challenge_id}/connect"),
             &serde_json::json!({}),
@@ -94,7 +104,7 @@ impl Ed {
             .as_str()
             .filter(|t| !t.is_empty())
             .ok_or("Ed returned no session ticket for the workspace")?;
-        let _live = open_live(session)?;
+        let _live = open_live(&host, session)?;
         // `"."` is the whole tree; `""` is refused and `"/"` errors.
         let ticket = self.post(
             &format!("/workspaces/{workspace}/download"),
@@ -104,7 +114,7 @@ impl Ed {
             .as_str()
             .filter(|t| !t.is_empty())
             .ok_or("Ed returned no download ticket for the workspace")?;
-        download(&format!("{WORKSPACE_DOWNLOAD}/{ticket}"))
+        download(&format!("https://{host}/download/{ticket}"))
     }
 }
 

@@ -27,6 +27,8 @@ pub mod ops;
 pub mod server;
 #[cfg(feature = "okta")]
 pub mod session;
+#[cfg(feature = "okta")]
+pub mod site;
 #[cfg(feature = "server")]
 pub mod vault;
 

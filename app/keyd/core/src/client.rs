@@ -1,8 +1,10 @@
 //! The client side of `oculus-keyd`: `has`, `store`, `get`, `delete` and `forward`
 //! (buffered with `send`, streamed with `send_stream`), `okta_*` and
 //! `ensure_signed_in` for the Okta sign-in, `session_*` for the login
-//! sessions (`session`), `webcrypto_key` for WebKit's master key
-//! (`webcrypto`), one connection per call, and the `ping` that
+//! sessions (`session`), `site_set` for the university (`site`), the check
+//! every credential call passes first (`bound`),
+//! `webcrypto_key` for WebKit's master key (`webcrypto`), one connection per
+//! call, and the `ping` that
 //! `oculus keyd status` sends. The app re-exports it as
 //! `credentials::Credentialed`.
 //!
@@ -41,7 +43,9 @@ const PING_TIMEOUT: Duration = Duration::from_secs(10);
 /// worst of that; keyd's own stall detector (180 s) bounds a download.
 pub const SESSION_TIMEOUT: Option<Duration> = Some(Duration::from_secs(600));
 
+pub mod bound;
 mod session;
+mod site;
 mod stream;
 mod webcrypto;
 
@@ -51,6 +55,7 @@ mod against_session;
 mod against_webcrypto;
 
 pub use session::{SessionCookies, SessionStatus};
+pub use site::SiteChange;
 pub use stream::{StreamBody, StreamedResponse};
 pub use webcrypto::ServedKey;
 
@@ -86,6 +91,9 @@ pub enum KeydError {
     Request(String),
     Caller(String),
     Vault(String),
+    /// keyd has not taken the profile's university, or serves another one,
+    /// so no credential may go through it (`bound`).
+    Site(String),
     Broken(String),
 }
 
@@ -105,6 +113,7 @@ impl fmt::Display for KeydError {
             KeydError::Request(d) => write!(f, "oculus-keyd refused the request ({d})"),
             KeydError::Caller(d) => write!(f, "oculus-keyd refused this program ({d})"),
             KeydError::Vault(d) => write!(f, "oculus-keyd could not use its vault ({d})"),
+            KeydError::Site(d) => f.write_str(d),
             KeydError::Broken(d) => write!(f, "oculus-keyd: {d}"),
         }
     }
@@ -208,6 +217,7 @@ impl Client {
         password: &str,
         totp_secret: &str,
     ) -> Result<(), KeydError> {
+        bound::canvas()?;
         self.exchange(
             &json!({"op": "okta_save", "username": username, "password": password, "totp_secret": totp_secret}),
             &[],
@@ -241,6 +251,7 @@ impl Client {
     /// flow takes seconds, can wait for a fresh TOTP window, and the attempt it
     /// waits on may be another caller's.
     pub fn ensure_signed_in(&self, trigger: Trigger) -> Result<Result<(), LoginError>, KeydError> {
+        bound::canvas()?;
         let (reply, _) = self.exchange(
             &json!({"op": "ensure_signed_in", "trigger": trigger.wire_name()}),
             &[],
@@ -266,7 +277,7 @@ impl Client {
         body: &[u8],
         timeout: Option<Duration>,
     ) -> Result<RawResponse, KeydError> {
-        let header = forward_header(route, method, path, headers, body.len(), false);
+        let header = forward_header(route, method, path, headers, body.len(), false)?;
         let (reply, body) = self.exchange(&header, body, timeout)?;
         let (status, headers, signin) = forward_head(&reply)?;
         Ok(RawResponse {
@@ -360,6 +371,7 @@ impl Client {
                 "request" => KeydError::Request(detail),
                 "caller" => KeydError::Caller(detail),
                 "vault" => KeydError::Vault(detail),
+                "site" => KeydError::Site(detail),
                 other => KeydError::Broken(format!("{other}: {detail}")),
             });
         }
@@ -367,7 +379,8 @@ impl Client {
     }
 }
 
-/// A `forward` request's header line.
+/// A `forward` request's header line. A session route's names the Canvas
+/// origin the session is for, once the process's check passes (`bound`).
 fn forward_header(
     route: &str,
     method: &str,
@@ -375,7 +388,12 @@ fn forward_header(
     headers: &[(&str, &str)],
     body_len: usize,
     stream: bool,
-) -> Value {
+) -> Result<Value, KeydError> {
+    let canvas = if bound::is_session_route(route) {
+        bound::canvas()?
+    } else {
+        None
+    };
     let mut header = json!({
         "op": "forward",
         "secret": route,
@@ -387,7 +405,10 @@ fn forward_header(
     if stream {
         header["stream"] = json!(true);
     }
-    header
+    if let Some(canvas) = canvas {
+        header["canvas"] = json!(canvas);
+    }
+    Ok(header)
 }
 
 /// A `forward` reply's status, headers and refused sign-in, if any.
@@ -427,6 +448,7 @@ impl KeydError {
             KeydError::Request(_) => "request",
             KeydError::Caller(_) => "caller",
             KeydError::Vault(_) => "vault",
+            KeydError::Site(_) => "site",
             KeydError::Broken(_) => "broken",
         }
     }
@@ -441,6 +463,7 @@ impl KeydError {
             | KeydError::Request(d)
             | KeydError::Caller(d)
             | KeydError::Vault(d)
+            | KeydError::Site(d)
             | KeydError::Broken(d) => d,
         }
     }

@@ -112,8 +112,9 @@ classes work even when there are no dollar delimiters.
   ([frontend.md](./frontend.md#uploads-and-documents-are-ordinary-library-files)),
   then the percent and Cancel, then Play once the row lands. A failure shows
   verbatim with Retry. Every state keeps the Open in Canvas icon, to
-  `/courses/<subject id>/files/<id>` (a subject's id is its Canvas course
-  id; `app/src/lib/files/canvasLinks.ts`).
+  `/courses/<subject id>/files/<id>` on the profile's Canvas, read at the
+  click (a subject's id is its Canvas course id;
+  `app/src/lib/files/canvasLinks.ts`).
 - **`<web-video>` is a YouTube or Vimeo video**
   (`app/src/components/markdown/embed/WebVideoCard.tsx`), Play only. Its
   thumbnail, title, channel and (Vimeo only) length come from the provider's

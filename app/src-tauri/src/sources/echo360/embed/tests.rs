@@ -6,12 +6,14 @@ use super::super::auth::parse_lti_form;
 use super::bearer::{jwt_exp, Bearer};
 use super::download::{captions_path, video_share};
 use super::launch::parse_player_url;
-use super::link::retrieve_url;
+use super::link::{region_of, retrieve_url};
 use super::playlist::{best_variant, single_file, UNSUPPORTED};
 use super::properties::{iso_duration, parse, QueryString};
+use super::region::{in_region, is_region};
 use super::sign::{glob, sign};
 
 const LINK: &str = "943d56e6-0000-4000-8000-000000000001";
+const CANVAS: &str = "https://canvas.lms.unimelb.edu.au";
 const TOOL: &str = "https://echo360.net.au/lti/9381284d-5253-4e5b-b173-fb47a63576cb";
 
 fn src_for(tool_query: &str) -> String {
@@ -27,7 +29,7 @@ fn src_for(tool_query: &str) -> String {
 #[test]
 fn a_canvas_launch_of_the_same_echo360_link_is_rebuilt() {
     let src = src_for(&format!("linkId={LINK}&autoplay=false&automute=false"));
-    let out = retrieve_url(&src, LINK).unwrap();
+    let out = retrieve_url(CANVAS, &src, LINK).unwrap();
     let url = Url::parse(&out).unwrap();
     assert_eq!(url.path(), "/courses/253699/external_tools/retrieve");
     let tool = url
@@ -40,7 +42,10 @@ fn a_canvas_launch_of_the_same_echo360_link_is_rebuilt() {
         format!("{TOOL}?linkId={LINK}&autoplay=false&automute=false")
     );
     // An attribute that kept its HTML escaping names the same launch.
-    assert_eq!(retrieve_url(&src.replace('&', "&amp;"), LINK).unwrap(), out);
+    assert_eq!(
+        retrieve_url(CANVAS, &src.replace('&', "&amp;"), LINK).unwrap(),
+        out
+    );
 }
 
 #[test]
@@ -60,7 +65,7 @@ fn anything_but_that_launch_is_refused() {
         ("not a url", LINK),
         (ok.as_str(), "../etc"),
     ] {
-        let err = retrieve_url(src, link).unwrap_err();
+        let err = retrieve_url(CANVAS, src, link).unwrap_err();
         assert!(err.starts_with("Not an Echo360 embed link"), "{src}: {err}");
     }
 }
@@ -92,6 +97,7 @@ fn the_player_redirect_names_media_secure_link_and_session() {
         ),
         ("11111111-2222", "sl-9", "abc-123")
     );
+    assert_eq!(launch.base, "https://echo360.net.au");
     let missing = Url::parse("https://echo360.net.au/ui/player/m1?sessionId=s").unwrap();
     assert!(parse_player_url(&missing).is_err());
     let unsafe_id =
@@ -113,6 +119,7 @@ fn a_jwt_exp_is_read_from_its_payload() {
 #[test]
 fn a_bearer_is_reused_until_five_minutes_before_expiry() {
     let b = Bearer {
+        base: "https://echo360.net.au".into(),
         jwt: "j".into(),
         exp: 10_000,
     };
@@ -329,10 +336,35 @@ fn captions_sit_beside_the_video_as_name_dot_vtt() {
 #[test]
 fn the_tag_md_writes_is_accepted() {
     let src = "https://canvas.lms.unimelb.edu.au/courses/253699/external_tools/retrieve?display=borderless&amp;url=https%3A%2F%2Fecho360.net.au%2Flti%2F9381284d-5253-4e5b-b173-fb47a63576cb%3FlinkId%3Dabc-123%26autoplay%3Dfalse";
-    let out = retrieve_url(src, "abc-123").unwrap();
+    let out = retrieve_url(CANVAS, src, "abc-123").unwrap();
     assert_eq!(
         out,
-        retrieve_url(&src.replace("&amp;", "&"), "abc-123").unwrap()
+        retrieve_url(CANVAS, &src.replace("&amp;", "&"), "abc-123").unwrap()
     );
     assert!(out.starts_with("https://canvas.lms.unimelb.edu.au/courses/253699/external_tools/retrieve?display=borderless&url=https%3A%2F%2Fecho360.net.au%2Flti%2F"));
+}
+
+#[test]
+fn every_echo360_region_is_accepted_and_nothing_posing_as_one() {
+    for host in [
+        "echo360.org",
+        "echo360.org.uk",
+        "echo360.net.au",
+        "echo360.ca",
+    ] {
+        assert!(is_region(host), "{host}");
+        assert!(in_region(&format!("au.{host}")), "{host}");
+    }
+    for host in [
+        "echo360.evil.com",
+        "evil-echo360.org",
+        "xecho360.org",
+        "echo360.org.evil",
+    ] {
+        assert!(!is_region(host), "{host}");
+        assert!(!in_region(host), "{host}");
+    }
+    let us = src_for(&format!("linkId={LINK}")).replace("echo360.net.au", "echo360.org");
+    let out = retrieve_url(CANVAS, &us, LINK).unwrap();
+    assert_eq!(region_of(&out).as_deref(), Some("https://echo360.org"));
 }

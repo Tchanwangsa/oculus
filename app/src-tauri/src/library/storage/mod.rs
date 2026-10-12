@@ -1,8 +1,13 @@
-//! Disk usage of the app's data directory.
+//! Disk usage of the app's data directory, and Start over, which empties it
+//! (`start_over`).
 //!
 //! One walk returns every file with its size; the frontend owns the grouping
 //! (by file type, by subject) so new views need no Rust changes. Free/total
 //! space for the volume the data dir sits on comes from statvfs.
+
+pub mod start_over;
+
+pub use start_over::finish_start_over;
 
 use std::path::Path;
 

@@ -26,10 +26,12 @@ import { InstantMarker } from "@/components/calendar/week/InstantMarker";
 import { NowLine } from "@/components/calendar/week/NowLine";
 import { PastWash } from "@/components/calendar/week/PastWash";
 import { StripPill } from "@/components/calendar/week/StripPill";
+import { displayLocale } from "@/lib/format/locale";
 
 /**
- * The timetable: a Monday-first hour grid of classes, with deadlines in a strip
- * above it — most land at 11:59pm and would otherwise pin the grid to midnight.
+ * The timetable: a week's hour grid of classes, from Monday
+ * (`WEEK_START`), with deadlines in a strip above it — most land at 11:59pm
+ * and would otherwise pin the grid to midnight.
  */
 export function WeekView({
   anchor,
@@ -138,7 +140,7 @@ export function WeekView({
               return (
                 <div key={d.toISOString()} className="px-2 py-1.5 text-center">
                   <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {d.toLocaleDateString("en-AU", { weekday: "short" })}
+                    {d.toLocaleDateString(displayLocale, { weekday: "short" })}
                   </div>
                   <div
                     className={cn(

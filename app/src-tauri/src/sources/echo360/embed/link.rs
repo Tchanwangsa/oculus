@@ -3,9 +3,7 @@
 use url::Url;
 
 use super::super::auth::html_unescape;
-use crate::library::paths::CANVAS_BASE;
-
-const LTI_HOST: &str = "echo360.net.au";
+use super::region::is_region;
 
 /// Whether `id` can sit in a URL path or a file name as it is: Echo360's ids
 /// are UUIDs.
@@ -14,10 +12,11 @@ pub fn is_safe_id(id: &str) -> bool {
 }
 
 /// The Canvas retrieve URL that launches `link_id`, rebuilt from `src`. The
-/// tag comes from page markdown, so only a Canvas external-tool launch of an
-/// Echo360 LTI link naming that same `link_id` is accepted; anything else
-/// never reaches Canvas with the student's session.
-pub fn retrieve_url(src: &str, link_id: &str) -> Result<String, String> {
+/// tag comes from page markdown, so only an external-tool launch on `canvas`
+/// (the profile's `https://host`) of an Echo360 LTI link naming that same
+/// `link_id` is accepted; anything else never reaches Canvas with the
+/// student's session.
+pub fn retrieve_url(canvas: &str, src: &str, link_id: &str) -> Result<String, String> {
     let refuse = |why: &str| Err(format!("Not an Echo360 embed link: {why}."));
     if !is_safe_id(link_id) {
         return refuse("the link id is malformed");
@@ -27,7 +26,7 @@ pub fn retrieve_url(src: &str, link_id: &str) -> Result<String, String> {
     let Ok(url) = Url::parse(&src) else {
         return refuse("not a URL");
     };
-    let canvas = Url::parse(CANVAS_BASE).expect("CANVAS_BASE is a URL");
+    let canvas = Url::parse(canvas).map_err(|e| format!("Canvas address unreadable: {e}"))?;
     if url.origin() != canvas.origin() {
         return refuse("not on Canvas");
     }
@@ -54,7 +53,7 @@ pub fn retrieve_url(src: &str, link_id: &str) -> Result<String, String> {
         return refuse("the tool URL is not a URL");
     };
     if tool.scheme() != "https"
-        || tool.host_str() != Some(LTI_HOST)
+        || !tool.host_str().is_some_and(is_region)
         || !tool.path().starts_with("/lti/")
     {
         return refuse("the tool is not Echo360's LTI");
@@ -73,4 +72,14 @@ pub fn retrieve_url(src: &str, link_id: &str) -> Result<String, String> {
         .append_pair("display", "borderless")
         .append_pair("url", tool.as_str());
     Ok(out.to_string())
+}
+
+/// `https://host` of the Echo360 region a [`retrieve_url`] launches.
+pub fn region_of(retrieve: &str) -> Option<String> {
+    let url = Url::parse(retrieve).ok()?;
+    let (_, tool) = url.query_pairs().find(|(k, _)| k == "url")?;
+    let tool = Url::parse(&tool).ok()?;
+    tool.host_str()
+        .is_some_and(is_region)
+        .then(|| tool.origin().ascii_serialization())
 }

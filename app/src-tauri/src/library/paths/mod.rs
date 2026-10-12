@@ -23,9 +23,6 @@ use std::path::PathBuf;
 /// `identifier` in tauri.conf.json; a test holds them together.
 pub use keyd_core::paths::IDENTIFIER;
 
-/// Defined in `keyd_core`, because keyd's sign-in lands on it too.
-pub use keyd_core::paths::CANVAS_BASE;
-
 /// Tauri's `app.path().app_data_dir()`, reachable without an `AppHandle`; the
 /// one way every module and the CLI find the data directory. Defined in
 /// `keyd_core`, so `oculus-keyd` agrees.

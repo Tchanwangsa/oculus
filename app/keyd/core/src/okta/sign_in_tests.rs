@@ -88,8 +88,12 @@ impl SessionStore for Sessions {
 
 fn env<'a>(dir: &Scratch, origin: &str, store: &'a Store, sessions: &'a Sessions) -> Env<'a> {
     let port = origin.rsplit(':').next().unwrap();
-    let mut env = Env::new(&dir.0, &format!("http://127.0.0.1:{port}"), store, sessions);
-    env.sso_base = format!("http://localhost:{port}");
+    let site = crate::site::Site {
+        canvas: format!("http://127.0.0.1:{port}"),
+        sso: Some(format!("http://localhost:{port}")),
+        ..crate::site::Site::unimelb()
+    };
+    let mut env = Env::new(&dir.0, &site, store, sessions).unwrap();
     env.now = Arc::new(at_t0);
     env
 }

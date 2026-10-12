@@ -12,8 +12,8 @@ const SEEK_DRIFT = 1.5;
 /** Fraction a trimmed follower's rate is nudged by. */
 const RATE_TRIM = 0.08;
 
-/** Both files are trimmed alike (`echo360::TRIM_SECS`), so in sync means the
- *  same `currentTime` — no offset. */
+/** Both files are trimmed alike (`echo360::trim_video`, by the university's
+ *  lead-in), so in sync means the same `currentTime` — no offset. */
 export function syncFollowers() {
   const lead = leaderVideo();
   if (!lead) return;

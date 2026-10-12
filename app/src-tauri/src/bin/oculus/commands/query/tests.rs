@@ -1,6 +1,14 @@
 use super::*;
 
 #[test]
+fn codes_with_spaces_match_however_they_are_typed() {
+    assert!(matches_code("MULT20015_2026_SM2", "mult20015"));
+    assert!(matches_code("CS 101 Fall 2026", "cs-101"));
+    assert!(matches_code("CS 101", "CS_101"));
+    assert!(!matches_code("CS 1010", "CS 101"));
+}
+
+#[test]
 fn query_scopes_include_every_term_and_never_hide_an_unknown_code() {
     let subjects: Vec<store::SubjectRow> = [
         "COMP10001_2026_SM1",

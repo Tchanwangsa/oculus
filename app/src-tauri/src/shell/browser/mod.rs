@@ -12,15 +12,16 @@
 //! - Back/forward and find go through the WKWebView directly;
 //!   `with_webview` returns nothing, so answers are pushed as events.
 //!
-//! `canvas_session` is HttpOnly and session-scoped, so the browser loses it on quit;
-//! `seed_sessions` restores it and Okta's session from oculus-keyd before any
-//! `*.unimelb.edu.au` load, and each signed-in Canvas page hands both back
-//! (see `docs/auth.md`).
+//! `canvas_session` is HttpOnly and session-scoped, so the browser loses it
+//! on quit; `seed_sessions` restores it and the SSO session from oculus-keyd
+//! before any load on the university's hosts, and each signed-in Canvas page
+//! hands both back (see `docs/auth.md`).
 
 pub(crate) mod commands;
 mod favicon;
 mod layout;
 mod page;
+pub(crate) mod scope;
 mod seed;
 #[cfg(test)]
 mod tests;
@@ -42,8 +43,6 @@ pub const MAIN: &str = "main";
 /// Page webviews are `browse-<tab id>`. Not in any capability: they hold
 /// remote content and must reach no Tauri command.
 pub const LABEL_PREFIX: &str = "browse-";
-
-pub const CANVAS_HOST: &str = "canvas.lms.unimelb.edu.au";
 
 /// WKWebView's default UA has no `Version/… Safari/…` suffix, and UA-sniffing
 /// sites (google.com) serve their no-JavaScript fallback to it. Keep the

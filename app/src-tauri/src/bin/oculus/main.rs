@@ -30,12 +30,16 @@ use output::*;
 
 fn main() {
     restore_sigpipe();
+    app_lib::library::storage::finish_start_over(&paths::data_dir());
+    // No credential goes through keyd until it serves the profile's university.
+    keyd_core::client::bound::bind(app_lib::sources::institution::bound);
     let cli = Cli::parse();
     let ctx = Ctx::new(cli.json);
 
     let result = match cli.command {
         None | Some(Command::Status) => ctx.status(),
         Some(Command::Auth { action }) => match action {
+            AuthAction::Canvas { address } => ctx.auth_canvas(address.as_deref()),
             AuthAction::Login => ctx.login(),
             AuthAction::Logout => ctx.logout(),
             AuthAction::Status => ctx.auth_status(),

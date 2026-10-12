@@ -160,7 +160,7 @@ fn embed_labels_by_provider() {
             "Survey",
         ),
         (
-            "https://q.surveys.unimelb.edu.au/jfe/form/1".into(),
+            "https://surveys.example.edu/jfe/form/1".into(),
             "",
             "Survey",
         ),

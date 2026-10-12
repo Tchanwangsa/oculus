@@ -116,8 +116,9 @@ describe("card helpers", () => {
   });
 
   test("links out", () => {
-    expect(canvasFileUrl("26446254", 197340)).toBe("https://canvas.lms.unimelb.edu.au/courses/197340/files/26446254");
-    expect(canvasFileUrl("26446254")).toBe("https://canvas.lms.unimelb.edu.au/files/26446254");
+    const canvas = "https://canvas.example.edu";
+    expect(canvasFileUrl(canvas, "26446254", 197340)).toBe(`${canvas}/courses/197340/files/26446254`);
+    expect(canvasFileUrl(canvas, "26446254")).toBe(`${canvas}/files/26446254`);
     expect(webVideoUrl("youtube", "ECZUvBvPZoM")).toBe("https://www.youtube.com/watch?v=ECZUvBvPZoM");
     expect(webVideoUrl("vimeo", "123456")).toBe("https://vimeo.com/123456");
   });

@@ -5,7 +5,7 @@
 //!
 //! The items emit and the frontend decides what they mean, except that Undo,
 //! Redo and Select All act natively while a browser page holds focus. A
-//! focused page sees ⌘-keys before the menu, bar the chrome keys `keys.rs`
+//! focused page sees ⌘-keys before the menu, bar the chrome keys `keys/`
 //! reserves.
 
 #[cfg(target_os = "macos")]
@@ -370,7 +370,7 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
 }
 
 /// Sends `action` down the responder chain when a browser page holds focus,
-/// as the predefined item would (the page already saw the key, `keys.rs`);
+/// as the predefined item would (the page already saw the key, `keys/`);
 /// otherwise emits `event` for the frontend.
 #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 fn edit<R: Runtime>(app: &AppHandle<R>, event: &str, action: &std::ffi::CStr) {
