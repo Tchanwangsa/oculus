@@ -16,7 +16,8 @@ pub mod vocab;
 
 pub use chunk::{chunks, Chunk, MAX_TOKENS};
 pub use model::{
-    delete, dir, download, packs, voice_file, voices, MODEL_FILE, MODEL_ID, PACK, VOICES,
+    cancel, delete, dir, download, downloading, packs, status, voice_file, voices, MODEL_FILE,
+    MODEL_ID, PACK, VOICES, VOICE_BYTES,
 };
 pub use reader::{LexiconFiles, Reader};
 pub use speaker::{KokoroSpeaker, Packs};

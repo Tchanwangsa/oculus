@@ -290,7 +290,7 @@ function Models({ catalogue, settings, downloads, onChange, onModelsChanged }: {
 }
 
 /** A radio dot, or the space it takes, so labels line up. */
-function Radio({ label, checked, onSelect, hidden = false }: {
+export function Radio({ label, checked, onSelect, hidden = false }: {
   label: string;
   checked: boolean;
   onSelect: () => void;
