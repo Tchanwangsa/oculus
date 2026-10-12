@@ -3,7 +3,7 @@
 use tauri::{Emitter, Manager};
 
 use super::{saved_session_probe, session, AuthProbe, AuthState};
-use crate::providers::credentials::Credentialed;
+use crate::providers::credentials::{Credentialed, KeydError};
 
 /// If oculus-keyd says the app was signed in, replay the stored session with
 /// a server-side ping. Rejected → try auto-recover, else clear the flag;
@@ -15,6 +15,14 @@ pub fn restore_session(app: &tauri::AppHandle) {
         let keyd = Credentialed::at(&crate::library::paths::data_dir());
         if !session::signed_in(&keyd) {
             elog!("[oculus] no auth flag — fresh session");
+            return;
+        }
+        // A keyd that has not taken the profile's university gets nothing,
+        // so the stored session cannot be used: the UI asks for a sign-in,
+        // which reports why.
+        if let Err(e @ KeydError::Site(_)) = crate::sources::institution::bound() {
+            elog!("[oculus] the stored session stays unused: {e}");
+            app.emit("canvas-auth-expired", "expired").ok();
             return;
         }
         elog!("[oculus] auth flag found — verifying persisted session");

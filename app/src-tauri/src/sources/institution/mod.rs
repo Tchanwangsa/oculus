@@ -18,9 +18,9 @@ mod tests;
 
 use serde::{Deserialize, Serialize};
 
-pub use configure::{apply, configure, library_exists, normalise, probe};
+pub use configure::{accept, apply, configure, library_exists, normalise, probe};
 pub use domain::institution_domain;
-pub use keyd::tell_keyd;
+pub use keyd::{bound, tell_keyd};
 pub use profile::{
     canvas_base, canvas_host, current, host_of, is_okta, learn, load, path, save, sso_host,
 };

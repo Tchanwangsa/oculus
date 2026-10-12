@@ -32,6 +32,8 @@ use sync::subjects::SubjectsState;
 pub fn run() {
     // Before anything opens a file in the data dir (`storage::storage_start_over`).
     library::storage::finish_start_over(&library::paths::data_dir());
+    // No credential goes through keyd until it serves the profile's university.
+    keyd_core::client::bound::bind(sources::institution::bound);
     tauri::Builder::default()
         // ⌘T / ⌘W reach the app as menu events, not key events — see shell/menu.rs.
         .menu(shell::menu::build)

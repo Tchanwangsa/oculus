@@ -145,3 +145,63 @@ fn an_idp_answers_a_sign_in_request_and_a_portal_does_not() {
     assert!(!idp("https://www.nus.edu.sg/canvas/login/"));
     assert!(!idp("https://lms.unimelb.edu.au/canvas"));
 }
+
+fn rmit() -> Institution {
+    Institution {
+        canvas: "https://rmit.instructure.com".to_string(),
+        login_path: "/login".to_string(),
+        idp: Idp::Other,
+        sso_host: None,
+        echo360_tool: None,
+        echo360_lead_in_secs: 0,
+        ed_api: None,
+        ed_region: None,
+        exclude_code_prefixes: Vec::new(),
+    }
+}
+
+/// A keyd from before `site_set`, which answers it as an unknown op.
+fn old_keyd(dir: &std::path::Path) -> crate::test_support::FakeKeyd {
+    crate::test_support::FakeKeyd::start(dir, |header, _| {
+        let op = header["op"].as_str().unwrap_or("").to_string();
+        let reply = if op == "site_set" {
+            serde_json::json!({"error": "request", "detail": format!("unknown op {op:?}")})
+        } else {
+            serde_json::json!({"had": true, "existed": true})
+        };
+        (reply, vec![])
+    })
+}
+
+#[test]
+fn a_keyd_too_old_for_site_set_takes_only_unimelb() {
+    let dir = Scratch::new("institution-old-keyd");
+    let _keyd = old_keyd(&dir);
+    let mut told = keyd::Told::default();
+    let err = keyd::tell_held(&mut told, &dir, &rmit()).unwrap_err();
+    assert!(
+        matches!(&err, crate::providers::credentials::KeydError::Site(why) if why.contains("too old") && why.contains("bun run keyd")),
+        "{err}"
+    );
+    assert_eq!(told.site(), None);
+    keyd::tell_held(&mut told, &dir, &unimelb()).unwrap();
+    assert_eq!(told.site(), Some(&keyd_core::site::Site::unimelb()));
+}
+
+#[test]
+fn a_keyd_that_refuses_the_new_site_leaves_the_session_and_the_profile() {
+    let dir = Scratch::new("institution-refused");
+    save(&dir, &unimelb()).unwrap();
+    let keyd = old_keyd(&dir);
+    assert!(apply(&dir, rmit()).is_err());
+    assert_eq!(keyd.ops(), ["site_set"], "nothing signed out or forgotten");
+    assert_eq!(load(&dir), Some(unimelb()));
+}
+
+#[test]
+fn an_absent_keyd_has_taken_nothing() {
+    let dir = Scratch::new("institution-absent");
+    let mut told = keyd::Told::default();
+    keyd::tell_held(&mut told, &dir, &rmit()).unwrap();
+    assert_eq!(told.site(), None);
+}

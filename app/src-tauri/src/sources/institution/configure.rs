@@ -145,16 +145,28 @@ pub fn probe(data_dir: &Path, input: &str) -> Result<Institution, String> {
     Ok(inst)
 }
 
-/// Save `inst`, telling keyd first. A new address signs out and forgets the
-/// old university's IdP credentials.
+/// Save `inst`, telling keyd first: a keyd that refuses the site leaves the
+/// session, the IdP credentials and the profile as they were. A new address
+/// then signs out and forgets the old university's IdP credentials (keyd has
+/// dropped its own; this covers the keychain's when keyd is absent), and any
+/// failure there stops before the profile is saved.
 pub fn apply(data_dir: &Path, inst: Institution) -> Result<Institution, String> {
-    if load(data_dir).is_none_or(|p| p.canvas != inst.canvas) {
-        crate::auth::sign_out(data_dir)?;
-        crate::auth::okta::clear_credentials().ok();
-    }
-    super::keyd::tell(data_dir, &inst)?;
-    save(data_dir, &inst)?;
-    Ok(inst)
+    super::keyd::holding(|told| {
+        super::keyd::tell_held(told, data_dir, &inst).map_err(|e| e.to_string())?;
+        if load(data_dir).is_none_or(|p| p.canvas != inst.canvas) {
+            crate::auth::sign_out(data_dir)?;
+            crate::auth::okta::clear_credentials()
+                .map_err(|e| format!("Could not forget the Okta sign-in details: {e}"))?;
+        }
+        save(data_dir, &inst)?;
+        Ok(inst)
+    })
+}
+
+/// Has keyd take `inst`'s site before anything is signed out, so a keyd that
+/// refuses it costs nothing (`commands::institution_configure`).
+pub fn accept(data_dir: &Path, inst: &Institution) -> Result<(), String> {
+    super::keyd::tell(data_dir, inst)
 }
 
 /// Whether any subject has been synced. Subject rows are keyed by Canvas

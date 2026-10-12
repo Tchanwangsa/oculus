@@ -12,25 +12,62 @@ use super::{OpError, Reply, State};
 use crate::names;
 use crate::session::{markers, store, Kind};
 use crate::site::Site;
-use crate::vault::Vault;
+use crate::vault::{Entries, Vault};
 
 /// The site as `site_set` stored it, or UniMelb's.
-fn stored(vault: &Vault) -> Result<Site, OpError> {
-    let Some(raw) = vault.get(names::SITE)? else {
+fn stored(entries: &Entries) -> Result<Site, OpError> {
+    let Some(raw) = entries.get(names::SITE) else {
         return Ok(Site::unimelb());
     };
-    serde_json::from_str::<Value>(&raw)
+    serde_json::from_str::<Value>(raw)
         .ok()
         .as_ref()
         .and_then(Site::from_wire)
         .ok_or_else(|| OpError::new("vault", "the stored site is unreadable"))
 }
 
+/// Refuses a request the client made for a Canvas other than the site's.
+/// The app names the origin its profile holds (`"canvas"`); a keyd still
+/// serving another university, because it was never told or was moved since,
+/// must not take or send that university's session. A request that names
+/// none is judged by the site alone.
+pub(super) fn check_claim(site: &Site, req: &Value) -> Result<(), OpError> {
+    match req.get("canvas") {
+        None | Some(Value::Null) => Ok(()),
+        Some(Value::String(claimed)) if *claimed == site.canvas => Ok(()),
+        Some(Value::String(claimed)) => Err(OpError::new(
+            "site",
+            format!(
+                "oculus-keyd serves {} but this is for {}; Oculus tells it the university at launch and when the address is saved",
+                site.canvas,
+                printable(claimed)
+            ),
+        )),
+        Some(_) => Err(OpError::new("request", "canvas must be an origin")),
+    }
+}
+
+/// `claimed` as it can be quoted in an error: what a client sent is not
+/// trusted to be printable.
+fn printable(claimed: &str) -> String {
+    claimed
+        .chars()
+        .take(200)
+        .filter(|c| !c.is_control())
+        .collect()
+}
+
 impl State {
     /// The site the routes and the sign-in use, with any origin a debug build
     /// moved (`with_origins`).
     pub(super) fn site(&self, vault: &Vault) -> Result<Site, OpError> {
-        let mut site = stored(vault)?;
+        self.site_in(&vault.load()?)
+    }
+
+    /// `site`, from entries already read, so a check and the write it guards
+    /// can share one vault lock.
+    pub(super) fn site_in(&self, entries: &Entries) -> Result<Site, OpError> {
+        let mut site = stored(entries)?;
         if let Some(canvas) = &self.canvas_base {
             site.canvas = canvas.clone();
         }
@@ -55,7 +92,7 @@ impl State {
         self.flight.exclusively(|| {
             let vault = self.vault()?;
             self.import_sessions(&vault)?;
-            let before = stored(&vault)?;
+            let before = stored(&vault.load()?)?;
             let moved = before.canvas != next.canvas || before.sso != next.sso;
             let kinds: &[Kind] = if moved {
                 &Kind::ALL
@@ -64,18 +101,18 @@ impl State {
             } else {
                 &[]
             };
-            let cleared = if kinds.is_empty() {
-                Vec::new()
-            } else {
-                store::clear(&vault, &self.generation, kinds)?
-            };
             let mut forgot_okta = false;
             if moved {
+                forgot_okta = self.forget_okta(&vault)?.0;
                 markers::clear_authenticated(&self.data_dir)
                     .map_err(|e| OpError::new("record", format!("the authenticated flag: {e}")))?;
-                forgot_okta = self.forget_okta(&vault)?.0;
             }
-            vault.update(|e| e.insert(names::SITE, &next.to_wire().to_string()))?;
+            // One write: a session put or absorbed between the two would
+            // otherwise belong to neither site (`session_put`, `forward`).
+            let site = next.to_wire().to_string();
+            let cleared = store::clear_with(&vault, &self.generation, kinds, |e| {
+                e.insert(names::SITE, &site)
+            })?;
             let cleared: Vec<&str> = cleared.into_iter().map(Kind::wire).collect();
             Ok(Reply {
                 note: Some(format!("moved={moved} cleared={}", cleared.join(","))),

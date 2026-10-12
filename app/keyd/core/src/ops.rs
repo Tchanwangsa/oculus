@@ -87,7 +87,9 @@ pub struct State {
 /// `sign_out` use it for a marker file they could not write; a client reads
 /// it as `Broken`), `missing` (`forward` for a key or session the vault does not hold),
 /// `upstream` (`forward` got no answer: DNS, connect, TLS, a reset, or a
-/// session route's origin stalled). A `missing` session may also carry the
+/// session route's origin stalled), `site` (a `session_put` or `forward` for
+/// a Canvas origin that is not the site's, or a `forward` whose site moved
+/// while it was in flight). A `missing` session may also carry the
 /// `signin` outcome of the attempt to make one.
 #[derive(Debug)]
 pub struct OpError {

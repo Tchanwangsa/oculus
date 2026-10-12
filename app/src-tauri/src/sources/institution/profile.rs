@@ -120,13 +120,18 @@ pub fn learn(data_dir: &Path, update: impl FnOnce(&mut Institution)) {
     if inst == before {
         return;
     }
-    if inst.site() != before.site() {
-        if let Err(e) = super::keyd::tell(data_dir, &inst) {
-            elog!("[oculus] oculus-keyd did not take the new site: {e}");
-            return;
+    if inst.site() == before.site() {
+        if let Err(e) = save(data_dir, &inst) {
+            elog!("[oculus] could not update institution.json: {e}");
         }
+        return;
     }
-    if let Err(e) = save(data_dir, &inst) {
-        elog!("[oculus] could not update institution.json: {e}");
+    let saved = super::keyd::holding(|told| {
+        super::keyd::tell_held(told, data_dir, &inst)
+            .map_err(|e| format!("oculus-keyd did not take the new site: {e}"))?;
+        save(data_dir, &inst).map_err(|e| format!("could not update institution.json: {e}"))
+    });
+    if let Err(e) = saved {
+        elog!("[oculus] {e}");
     }
 }

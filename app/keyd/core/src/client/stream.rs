@@ -71,7 +71,7 @@ impl Client {
         body: &[u8],
         timeout: Option<Duration>,
     ) -> Result<StreamedResponse, KeydError> {
-        let header = forward_header(route, method, path, headers, body.len(), true);
+        let header = forward_header(route, method, path, headers, body.len(), true)?;
         let conn = self.connect()?;
         let (reply, _, reader) = self.request(conn, &header, body, timeout)?;
         let (status, headers, signin) = forward_head(&reply)?;

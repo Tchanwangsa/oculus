@@ -25,6 +25,13 @@ fn canvas_session_dir() -> std::path::PathBuf {
 pub fn open_canvas_window(app: AppHandle) -> Result<(), String> {
     let inst = crate::sources::institution::current()
         .ok_or_else(|| crate::sources::institution::NOT_CONFIGURED.to_string())?;
+    // A sign-in keyd would not take, or would send elsewhere, is refused
+    // before the window opens, with the reason.
+    if let Err(e @ crate::providers::credentials::KeydError::Site(_)) =
+        crate::sources::institution::bound()
+    {
+        return Err(e.to_string());
+    }
     let url: url::Url = format!("{}{}", inst.canvas, inst.login_path)
         .parse()
         .map_err(|e| format!("bad Canvas address: {e}"))?;

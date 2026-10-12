@@ -32,6 +32,7 @@ WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-
 | Handing the key to WebKit: the data-store delegate, its once-per-process cache, where it is installed | `app/src-tauri/src/shell/webcrypto/delegate.rs`, `app/src-tauri/src/shell/webcrypto/cache.rs`, `install_default` in `app/src-tauri/src/shell/webcrypto/mod.rs` (called first in `app/src-tauri/src/lib.rs`'s setup), `configure_store` in `app/src-tauri/src/shell/dock/page.rs` |
 | Institution profile: the Canvas address, sign-in detection, the UniMelb migration, telling keyd | `app/src-tauri/src/sources/institution/` |
 | The site keyd sends the session to, and `site_set` | `app/keyd/core/src/site.rs`, `app/keyd/core/src/ops/site.rs` |
+| The check every credential call through keyd passes first: keyd's client side and the app's | `app/keyd/core/src/client/bound.rs`, `app/src-tauri/src/sources/institution/keyd.rs` |
 | Canvas address UI, the profile on the frontend | `app/src/components/settings/web/CanvasAddress.tsx`, `app/src/stores/sync/institutionStore.ts` |
 | The guard that no university or single region is named in app code | `app/tests/repo/uniAgnostic.test.ts` |
 | Start over | `app/src-tauri/src/library/storage/start_over.rs`, `app/src/components/settings/library/StartOver.tsx` |
@@ -96,10 +97,12 @@ each other's writes.
   Start over deletes nothing. The frontend clears its library-scoped
   `localStorage` keys first and puts them back if the command fails.
 - Saving checks the address before changing anything (`institution::probe`),
-  then a different address signs out (`auth::commands::end_session`, while
+  then has keyd take the new site (`institution::accept`): a keyd that refuses
+  it leaves the session, the Okta credentials and the profile as they were.
+  A different address then signs out (`auth::commands::end_session`, while
   the old hosts are still the profile's, so the browser jar loses the old
   session) and clears the Okta credentials, which belong to the old IdP
-  (`institution::apply`).
+  (`institution::apply`); a failure there stops before the profile is saved.
 - Re-saving the same address re-detects the sign-in, except that a probe
   that misses Okta at a university already known to use it keeps the stored
   profile: dropping the Okta origin would be a move to keyd, which forgets
@@ -118,6 +121,25 @@ read it; a vault without one is UniMelb's.
   Ed's API host, and at startup before the session is restored. keyd hears
   first, so a refusal leaves the profile unchanged; with keyd absent there is
   no session to send anywhere.
+- **Nothing goes through a keyd that has not taken the profile's site.** The
+  app and the CLI register `institution::bound` with keyd's client
+  (`keyd_core::client::bound`), which runs it before `session_put`,
+  `session_get`, `okta_save`, `ensure_signed_in` and every `canvas` or `ed`
+  request. It passes once keyd has taken the profile's site in this process,
+  telling it first when it has not (keyd was absent at launch, or the CLI
+  moved it). A keyd too old for `site_set` serves UniMelb and passes only
+  there; anywhere else every call fails with `KeydError::Site` saying keyd
+  needs an update, the login window refuses to open with that message, and a
+  launch with a stored session reports it expired. While Settings moves to a
+  new address the check refuses everything, and a profile change holds it
+  from telling keyd to saving the file.
+- **keyd checks the claim too.** `session_put` and `forward` carry the Canvas
+  origin the check answered (`"canvas"`), and keyd refuses one that is not its
+  site's (`site` error), under the vault's lock for a put. A `forward` reads its
+  session with the site on every send and stops if the site moved since it
+  began, and absorbs a rotated cookie only while the site is still that one,
+  so an answer from the old university never lands in the new one's session.
+  `site_set` drops the sessions and stores the site in one vault write.
 - **Moving Canvas's or Okta's origin is moving university**: under the
   sign-in's single flight, keyd drops all three sessions, the authenticated
   flag and the Okta credentials (and their old keychain items). Moving only
