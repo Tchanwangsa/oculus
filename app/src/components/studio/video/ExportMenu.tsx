@@ -4,10 +4,11 @@ import { CaretDown, CheckCircle, CircleNotch, FolderOpen } from "@phosphor-icons
 
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import { isWindows } from "@/lib/platform";
 import { exportState, PRESET_LABEL, presetHint } from "@/lib/studio/exports";
 import { exportStatus, type ExportStatus, type RenderPreset } from "@/lib/studio/render";
-import type { VideoDetail } from "@/lib/studio/videos";
+import { setCaptions, type VideoDetail } from "@/lib/studio/videos";
 import { useRenderStore } from "@/stores/studio/renderStore";
 
 const REVEAL = isWindows ? "Show in Explorer" : "Show in Finder";
@@ -17,8 +18,10 @@ const REVEAL = isWindows ? "Show in Explorer" : "Show in Finder";
  * and current, Render for one that is missing or out of date (the render bar
  * under the player shows its progress), and Show in Finder for a file there.
  * The statuses are read when the menu opens and again when a render ends.
+ * Under the presets, the switch for captions drawn into the picture, which
+ * makes the files already there out of date; `onChanged` re-reads the video.
  */
-export function ExportMenu({ detail }: { detail: VideoDetail }) {
+export function ExportMenu({ detail, onChanged }: { detail: VideoDetail; onChanged: () => void }) {
   const { dir, slug } = detail.row;
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<ExportStatus[] | null>(null);
@@ -42,6 +45,22 @@ export function ExportMenu({ detail }: { detail: VideoDetail }) {
   }, [dir]);
 
   useEffect(() => (open ? load() : undefined), [open, load, settled]);
+
+  const [saving, setSaving] = useState(false);
+  const [captionsError, setCaptionsError] = useState<string | null>(null);
+  const toggleCaptions = async (on: boolean) => {
+    setSaving(true);
+    setCaptionsError(null);
+    try {
+      await setCaptions(slug, on);
+      onChanged();
+      load();
+    } catch (e) {
+      setCaptionsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const render = (preset: RenderPreset) => {
     setOpen(false);
@@ -69,6 +88,24 @@ export function ExportMenu({ detail }: { detail: VideoDetail }) {
             onRender={() => render(row.preset)}
           />
         ))}
+        <div className="mt-1 border-t border-border-subtle px-2 pb-1 pt-2.5">
+          <div className="flex items-center gap-3">
+            <label htmlFor={`captions-${slug}`} className="min-w-0 flex-1 cursor-pointer">
+              <div className="text-[13px] font-medium">Captions in the picture</div>
+              <div className="text-[11.5px] leading-snug text-muted-foreground">
+                Drawn into the frames, so every player shows them
+              </div>
+            </label>
+            <Switch
+              id={`captions-${slug}`}
+              checked={detail.captions}
+              disabled={saving}
+              onCheckedChange={(on) => void toggleCaptions(on)}
+              className="shrink-0"
+            />
+          </div>
+          {captionsError && <p className="mt-1 text-[12px] leading-snug text-destructive">{captionsError}</p>}
+        </div>
       </PopoverContent>
     </Popover>
   );

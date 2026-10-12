@@ -4,16 +4,13 @@ import type { RenderFile } from "@/lib/studio/videos";
 // The export presets as the video page shows them: names, what each makes,
 // and which renders the player can play.
 
-/** The presets that make an mp4, which the player can show. */
-export const VIDEO_PRESETS: readonly RenderPreset[] = ["draft", "final", "small", "2x"];
+/** The presets, every one an mp4 the player can show. */
+export const VIDEO_PRESETS: readonly RenderPreset[] = ["draft", "final", "small"];
 
 export const PRESET_LABEL: Record<RenderPreset, string> = {
   draft: "Draft",
   final: "Final",
   small: "Small",
-  "2x": "2×",
-  audio: "Audio",
-  subtitles: "Subtitles",
 };
 
 /** What a preset makes, for `width` x `height` video. */
@@ -32,12 +29,6 @@ export function presetHint(preset: RenderPreset, width: number, height: number):
       return `mp4 · ${portrait ? `${width}×${height}` : `${height}p`}`;
     case "small":
       return `mp4 · ${sized(720)}, smaller file`;
-    case "2x":
-      return `mp4 · ${width * 2}×${height * 2}`;
-    case "audio":
-      return "m4a · the narration";
-    case "subtitles":
-      return "vtt and srt";
   }
 }
 

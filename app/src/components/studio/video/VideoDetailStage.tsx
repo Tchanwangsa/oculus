@@ -10,7 +10,8 @@ const TAB_KEY = "oculus-studio-video-dock-tab";
 
 /**
  * The detail page's video: the player with the Script and Scenes in its dock,
- * and under it the facts and the render bar. Folding the dock (its button, T
+ * and under it the facts and the render bar (no buttons: Render draft and
+ * Export are in the header). Folding the dock (its button, T
  * or its ×) leaves the picture the whole width.
  */
 export function VideoDetailStage({ detail, playback }: { detail: VideoDetail; playback: VideoPlayback }) {
@@ -47,7 +48,7 @@ export function VideoDetailStage({ detail, playback }: { detail: VideoDetail; pl
         <div className="min-w-0 flex-[3_1_20rem]">
           <VideoFacts detail={detail} />
         </div>
-        <div className="min-w-0 flex-[2_1_18rem]">
+        <div className="min-w-0 flex-[2_1_18rem] empty:hidden">
           <RenderBar detail={detail} playback={playback} />
         </div>
       </div>
