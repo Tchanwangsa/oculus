@@ -3,9 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { StudioHeader } from "@/components/studio/StudioHeader";
 import { ExportMenu } from "@/components/studio/video/ExportMenu";
-import { ScriptList } from "@/components/studio/video/ScriptList";
-import { VideoFacts } from "@/components/studio/video/VideoFacts";
-import { VideoStage } from "@/components/studio/video/VideoStage";
+import { VideoDetailStage } from "@/components/studio/video/VideoDetailStage";
 import { WithPlayback } from "@/components/studio/video/WithPlayback";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,10 +11,13 @@ import { useVideoDetail } from "@/hooks/studio/useVideoDetail";
 import { videoHref, VIDEOS_HREF } from "@/lib/studio/routes";
 import { useVideosStore } from "@/stores/studio/videosStore";
 
+/** The page's width: the video fills it, though not past a sane size. */
+const PAGE = "mx-auto w-full max-w-[1440px] px-6 py-5";
+
 /**
- * /studio/videos/:slug: the player and scenes beside the script, the facts,
- * Continue in chat (the video's thread, when it has
- * one) and the Export menu of presets.
+ * /studio/videos/:slug: the player with the script and scenes in its dock,
+ * the facts and Render final under it, Continue in chat (the video's thread,
+ * when it has one) and the Export menu of presets.
  */
 export default function VideoPage() {
   const { slug = "" } = useParams();
@@ -56,27 +57,18 @@ export default function VideoPage() {
       />
       <div className="page-scroll min-h-0 flex-1">
         {detail ? (
-          <WithPlayback detail={detail}>
+          <WithPlayback detail={detail} docked>
             {(playback) => (
-              <div className="mx-auto flex max-w-6xl gap-8 px-6 py-5 max-lg:flex-col">
-                <div className="min-w-0 flex-1">
-                  <VideoStage detail={detail} playback={playback} />
-                </div>
-                <div className="w-full shrink-0 space-y-4 lg:w-[360px]">
-                  <VideoFacts detail={detail} />
-                  <div>
-                    <h2 className="mb-1 px-3 text-[11px] font-medium tracking-wide text-muted-foreground">Script</h2>
-                    <ScriptList detail={detail} playback={playback} />
-                  </div>
-                </div>
+              <div className={PAGE}>
+                <VideoDetailStage detail={detail} playback={playback} />
               </div>
             )}
           </WithPlayback>
         ) : error ? (
-          <p className="mx-auto max-w-6xl px-6 py-5 text-[12.5px] leading-snug text-destructive">{error}</p>
+          <p className={`${PAGE} text-[12.5px] leading-snug text-destructive`}>{error}</p>
         ) : (
-          <div className="mx-auto max-w-6xl px-6 py-5">
-            <Skeleton className="aspect-video w-full max-w-3xl rounded-xl" />
+          <div className={PAGE}>
+            <Skeleton className="aspect-video w-full rounded-xl" />
           </div>
         )}
       </div>

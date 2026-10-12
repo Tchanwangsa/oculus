@@ -20,6 +20,9 @@ export interface MediaPlayerOptions {
   fallbackDuration?: number;
   /** The dock tab whose minimum size applies (`useTranscriptDock`). */
   dockTab: DockTab;
+  /** Width the video keeps beside a side dock, which draws at the bottom
+   *  when the player is narrower (`useTranscriptDock`'s default if absent). */
+  dockKeepWidth?: number;
   /** C has something to show. */
   hasCaptions: boolean;
   /** On screen while another pane plays this recording: Space calls
@@ -38,6 +41,7 @@ export function useMediaPlayer({
   resetKey,
   fallbackDuration = 0,
   dockTab,
+  dockKeepWidth,
   hasCaptions,
   elsewhere = false,
   onClaim,
@@ -80,7 +84,7 @@ export function useMediaPlayer({
   const claimRef = useRef(onClaim);
   claimRef.current = onClaim;
 
-  const dock = useTranscriptDock(containerRef, dockTab);
+  const dock = useTranscriptDock(containerRef, dockTab, dockKeepWidth);
 
   // Reset per recording; where playback resumes is the caller's call.
   useEffect(() => {

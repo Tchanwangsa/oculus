@@ -11,6 +11,9 @@ import { renderCaptions, type VideoDetail } from "@/lib/studio/videos";
 /** Without captions beside it, a render has no cues. */
 const NO_CUES: Cue[] = [];
 const noop = () => {};
+/** The picture keeps this much width beside a side dock; a narrower page
+ *  docks at the bottom instead. */
+const DOCK_KEEP_WIDTH = 480;
 
 /** The scene starts the scrub bar notches and the strip follows. */
 export function sceneStarts(detail: VideoDetail): number[] {
@@ -21,9 +24,10 @@ export function sceneStarts(detail: VideoDetail): number[] {
  * A video's render in the media player: the newest video render (the reader
  * can pick another), its URL, the `<video>` element, and the scene under the
  * playhead. A re-render of the same file starts the player over. The
- * render's `.vtt` beside it, when there is one, is the CC.
+ * render's `.vtt` beside it, when there is one, is the CC. `docked` is
+ * whether the page gives the player a dock, which T then folds.
  */
-export function useVideoPlayback(detail: VideoDetail) {
+export function useVideoPlayback(detail: VideoDetail, docked: boolean) {
   const [picked, setPicked] = useState<RenderPreset | null>(null);
   const playable = useMemo(() => playableRenders(detail.renders), [detail.renders]);
   const shown = useMemo(
@@ -69,9 +73,10 @@ export function useVideoPlayback(detail: VideoDetail) {
     resetKey: `${path}:${version}`,
     fallbackDuration: duration,
     dockTab: "transcript",
+    dockKeepWidth: DOCK_KEEP_WIDTH,
     hasCaptions: cues.length > 0,
-    // T has no dock to show here.
-    onToggleDock: noop,
+    // Without a dock (the thread page) T has nothing to show.
+    onToggleDock: docked ? undefined : noop,
   });
 
   const [el, setEl] = useState<HTMLVideoElement | null>(null);
