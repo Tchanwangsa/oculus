@@ -37,7 +37,7 @@ frames and contact sheets, lints, and narrates.
 | Narrating a video: the `Speaker` trait, the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
 | The Kokoro engine: its pack, reader, chunking and synthesis | `app/src-tauri/src/studio/tts/kokoro/` |
 | Text to Kokoro phonemes (the G2P), the lexicon, the guesser and its pack; the lint of a video's narration that needs them | `app/src-tauri/src/studio/voice/g2p/` (`guess/`, `lexicon.rs`), `app/src-tauri/src/studio/voice/lint/` |
-| Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
+| Settings -> Voice: the `voice` row and its engine, the server's model list, Kokoro's packs and sample, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
@@ -518,8 +518,10 @@ manifest. Scenes run one at a time, in video order.
 
 The `kokoro` engine (`app/src-tauri/src/studio/tts/kokoro/`) runs
 Kokoro-82M on the ONNX Runtime the aligner uses, with no server and no
-side process. It needs two packs, downloaded on request by `oculus studio
-voices download` to `<app data>/models/voice/`, checked against their
+side process. It needs two packs, downloaded together on request (Settings
+-> Voice, or `oculus studio voices download`; one download at a time, and a
+cancel between the packs stops the second) to `<app data>/models/voice/`,
+checked against their
 pinned sizes and sha256 before they get their names, and never bundled:
 
 | Pack | Files | Size |
@@ -624,38 +626,76 @@ source, marking guesses, then the phoneme string; `--json` gives `{ text,
 phonemes, subject, lexicon: [<files>], words: [{ word, phonemes, source,
 guessed }] }`. It needs only the `g2p-en-us` pack.
 
-## Settings -> Voice sets the server and holds the aligner model
+## Settings -> Voice chooses the engine and holds the models
 
-Settings -> Voice (Library group) has two sections. It does not show the
-engine or Kokoro's packs yet: every save sends back the row's stored
-`engine`, so a row set to Kokoro stays so. Nothing on it
-synthesises, so it has no sample button: Settings never makes a billed
-call. Its one network call is listing models, which is free.
+Settings -> Voice (Library group) has two sections. Settings never makes a
+billed call: its one network call to a server is listing models, which is
+free, and the only sample is Kokoro's, made on this Mac.
 
-- **Narration voice** edits the `voice` row: Server URL, Model, Voice
-  (typed: the OpenAI API cannot list voices) and Speed (a slider, 0.5 to
-  2.0 in 0.05 steps). A text field saves on blur or Enter; each save sends
-  the whole row to `studio_set_voice_settings`, which trims it, unsets
-  blanks, normalises the URL (`tts::normalise_base`), refuses a speed that
-  is not a positive number, and answers with what it stored. A refusal shows
-  under its row. "List models" calls `studio_voice_models` with the URL as
-  typed: `GET <base>/v1/models`, the `data[].id`s in the server's order,
-  with only ureq's connect timeout (`studio::tts::list_models`). A non-empty
-  list turns the Model field into a select (the stored model stays in it
-  when the server does not list it); an empty list or a failure leaves the
-  text field, with the reason inline. Editing the URL drops the list. API
-  keys are not supported; the page says so.
+- **Narration voice** edits the `voice` row. **Engine** is a bordered list
+  of two rows, "Kokoro (built in)" and "TTS server", each with a radio dot
+  and a status line (Kokoro: whether it runs now or after its download, or
+  the download's percentage; server: its URL and model, or "No server
+  set"). A whole row picks its engine. Nothing is chosen until the user
+  picks (the app never preselects an engine), and with none chosen a
+  warning says Studio can't narrate. Only the chosen engine's fields show,
+  then Speed (a slider, 0.5 to 2.0 in 0.05 steps), which both share.
+  Switching engine keeps the other's fields stored; Voice is one field for
+  both.
+  - **Kokoro**: the packs' row, "Kokoro voice packs", with each pack's size
+    (Voice model 93 MB, Pronunciation 9 MB) and one Download for both, then
+    a percentage, a progress bar and Cancel, or Delete behind a
+    confirmation, as Word timing's row has; a Voice select listing
+    `kokoro::voices` by name ("Heart · American, female" for `af_heart`):
+    the pack's two, then any other voice file in the folder (a voice
+    stored for the server that is not one stays in the select, flagged);
+    and **Sample**, which plays a fixed sentence in the chosen voice at the
+    slider's speed. It is disabled until both packs and a voice are there,
+    shows "Making…" while the clip is made (a few seconds: the model loads
+    each time) and Stop while it plays; the credit line follows.
+  - **TTS server**: Server URL, Model and Voice (typed: the OpenAI API
+    cannot list voices), and the note that API keys are not supported. "List
+    models" calls `studio_voice_models` with the URL as typed: `GET
+    <base>/v1/models`, the `data[].id`s in the server's order, with only
+    ureq's connect timeout (`studio::tts::list_models`). A non-empty list
+    turns the Model field into a select (the stored model stays in it when
+    the server does not list it); an empty list or a failure leaves the text
+    field, with the reason inline. Editing the URL drops the list. A server
+    has no sample button: it could bill.
+
+  A text field saves on blur or Enter, a select or the slider on change;
+  each save sends the whole row to `studio_set_voice_settings`, which trims
+  it, unsets blanks, normalises the URL (`tts::normalise_base`), refuses a
+  speed that is not a positive number, and answers with what it stored. A
+  refusal shows under its row.
 - **Word timing** is the aligner model's row, like a Local Whisper model:
   "wav2vec2 base (English)", its 378 MB size and status, Download (then a
   percentage, a progress bar and Cancel) or Delete behind a confirmation,
-  and the credit line. `studio_aligner_status` gives `{ status: missing |
-  downloading | present, bytes }` from the disk alone;
-  `studio_aligner_download` resolves when the model is on disk, rejects
-  `cancelled` on `studio_aligner_cancel`, and emits
-  `studio-aligner-progress` `{ phase: downloading | complete | cancelled |
-  error, received, total, error? }` about every 150 ms;
-  `studio_aligner_delete` returns the bytes freed. A download started on an
-  earlier visit shows at 0 % until its next event.
+  and the credit line.
+
+Both downloads run the same way (`commands/progress.rs`;
+`usePackDownload` and `PackDownloadRow` on the page). The status commands
+read the disk alone: `studio_aligner_status` gives `{ status: missing |
+downloading | present, bytes }`, and `studio_voice_packs_status` gives the
+same for both packs together (present only when both are) plus `packs: [{
+id, status, bytes }]` and `voices: [{ id, downloaded }]`. The download
+commands (`studio_aligner_download`, `studio_voice_packs_download`) resolve
+when the files are on disk, reject `cancelled` on the matching cancel
+command, and emit `studio-aligner-progress` or `studio-voice-progress` `{
+phase: downloading | complete | cancelled | error, received, total, error?
+}` about every 150 ms; Kokoro's counts bytes over both packs. The delete
+commands stop a download and return the bytes freed; Kokoro's leaves any
+other voice file. A download started on an earlier visit shows at 0 %
+until its next event.
+
+`studio_voice_sample(voice, speed, text?)` (`commands/kokoro.rs`) checks the
+voice id and speed as narrate does, makes a `KokoroSpeaker` reading the
+global library's lexicon, synthesises `text` or a fixed spoken-form
+sentence, and returns the 24 kHz WAV's bytes; the speaker, its reader and
+its model session are dropped on return. The page plays them from a blob
+URL (`useVoiceSample`), released on Stop, at the clip's end, or when the
+page goes. Measured on a debug build: about 6.5 s of audio in 3.6 to 4.5 s,
+model load included.
 
 There is no narrate command in the app yet: narration runs from `oculus
 studio narrate`.

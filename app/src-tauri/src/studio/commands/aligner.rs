@@ -1,27 +1,15 @@
 //! The narration aligner's model in Settings -> Voice: its status, and a
-//! download that reports progress as `studio-aligner-progress` events, like
-//! the Whisper models' (`transcribe::app`).
-
-use std::cell::Cell;
+//! download that reports progress as `studio-aligner-progress` events
+//! (`progress`).
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
-use crate::studio::timing::{self, Status, CANCELLED, PACK};
+use super::progress::download_with_events;
+use crate::studio::timing::{self, Status, PACK};
 
 /// Display only, never persisted.
 pub const PROGRESS_EVENT: &str = "studio-aligner-progress";
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct Progress<'a> {
-    /// `downloading`, `complete`, `cancelled` or `error`.
-    phase: &'static str,
-    received: u64,
-    total: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<&'a str>,
-}
 
 #[derive(Serialize)]
 pub struct AlignerStatus {
@@ -47,43 +35,15 @@ pub async fn studio_aligner_status() -> Result<AlignerStatus, String> {
 #[tauri::command]
 pub async fn studio_aligner_download(app: AppHandle) -> Result<(), String> {
     crate::runtime::blocking::run(move || {
-        let emit = |phase, received, total, error: Option<&str>| {
-            app.emit(
-                PROGRESS_EVENT,
-                Progress {
-                    phase,
-                    received,
-                    total,
-                    error,
-                },
-            )
-            .ok();
-        };
-        let seen = Cell::new((0, PACK.bytes()));
-        let result = timing::download(
-            &timing::dir(),
-            |received, total| {
-                seen.set((received, total));
-                emit("downloading", received, total, None);
-            },
-            || false,
-        );
-        let (received, total) = seen.get();
-        match &result {
-            Ok(()) => {
-                elog!(
-                    "[oculus] downloaded the aligner model to {}",
-                    timing::dir().display()
-                );
-                emit("complete", received, total, None);
-            }
-            Err(e) if e == CANCELLED => emit("cancelled", received, total, None),
-            Err(e) => {
-                elog!("[oculus] the aligner model failed to download: {e}");
-                emit("error", received, total, Some(e));
-            }
-        }
-        result
+        let dir = timing::dir();
+        download_with_events(
+            &app,
+            PROGRESS_EVENT,
+            "the aligner model",
+            &dir,
+            PACK.bytes(),
+            |progress| timing::download(&dir, progress, || false),
+        )
     })
     .await
 }

@@ -1,4 +1,4 @@
-use super::voice::{validated, VoiceRow};
+use super::super::voice::{validated, VoiceRow};
 use crate::studio::voice::{Engine, VoiceSettings};
 
 fn row(base_url: Option<&str>, model: Option<&str>, voice: Option<&str>, speed: f64) -> VoiceRow {

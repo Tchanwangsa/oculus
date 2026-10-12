@@ -3,8 +3,9 @@
 //! the `g2p-en-us` pack, never bundled.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::runtime::onnx::{self, Pack, PackFile};
+use crate::runtime::onnx::{self, Pack, PackFile, Status, CANCELLED};
 use crate::studio::voice::g2p::guess;
 
 /// Names the model in a narration cache key, so changing it re-narrates.
@@ -67,6 +68,18 @@ pub fn packs() -> [&'static Pack; 2] {
     [&PACK, &guess::PACK]
 }
 
+/// Both packs together: present when both are in `dir`, downloading while
+/// [`download`] runs. Local only.
+pub fn status(dir: &Path) -> Status {
+    if packs().iter().all(|p| onnx::is_present(dir, p)) {
+        Status::Present
+    } else if downloading() {
+        Status::Downloading
+    } else {
+        Status::Missing
+    }
+}
+
 /// Every voice in `dir`: the pack's, downloaded or not, then any other
 /// `<id>.bin` at a voice file's size, by id. `true` when it is on disk.
 pub fn voices(dir: &Path) -> Vec<(String, bool)> {
@@ -89,31 +102,73 @@ pub fn voices(dir: &Path) -> Vec<(String, bool)> {
     out
 }
 
+/// Set while [`download`] runs; one at a time across both packs.
+static RUNNING: AtomicBool = AtomicBool::new(false);
+/// Set by [`cancel`]: checked between and inside the packs' downloads, so a
+/// cancel that lands between the two packs still stops the second.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+/// Clears [`RUNNING`] however the download ends.
+struct Running;
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Download both packs into `dir`, the files already there skipped,
 /// reporting `(received, total)` bytes over both. Ends in
-/// `Err(CANCELLED)` when cancelled or when `stop` returns true.
+/// `Err(CANCELLED)` when [`cancel`]led or when `stop` returns true.
 pub fn download(
     dir: &Path,
     progress: impl Fn(u64, u64),
     stop: impl Fn() -> bool,
 ) -> Result<(), String> {
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return Err("Kokoro's packs are already downloading".into());
+    }
+    let _running = Running;
+    STOP.store(false, Ordering::SeqCst);
+    let stop = || stop() || STOP.load(Ordering::SeqCst);
     let total: u64 = packs().iter().map(|p| p.bytes()).sum();
     let mut before = 0;
     for pack in packs() {
+        if stop() {
+            return Err(CANCELLED.into());
+        }
         onnx::download(
             dir,
             pack,
             |received, _| progress(before + received, total),
-            &stop,
+            stop,
         )?;
         before += pack.bytes();
     }
     Ok(())
 }
 
+/// A [`download`] is in flight in this process.
+pub fn downloading() -> bool {
+    RUNNING.load(Ordering::SeqCst)
+}
+
+/// Ask the in-flight [`download`] to stop; false when none runs.
+pub fn cancel() -> bool {
+    if !downloading() {
+        return false;
+    }
+    STOP.store(true, Ordering::SeqCst);
+    for pack in packs() {
+        onnx::cancel(pack.id);
+    }
+    true
+}
+
 /// Delete both packs, any partial download and nothing else (another
-/// voice's file stays); returns the bytes freed.
+/// voice's file stays), stopping a download first; returns the bytes freed.
 pub fn delete(dir: &Path) -> Result<u64, String> {
+    cancel();
     let mut freed = 0;
     for pack in packs() {
         freed += onnx::delete(dir, pack)?;
