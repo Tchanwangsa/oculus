@@ -1921,6 +1921,7 @@ on disk now; nothing is cached but thumbnails.
 | `studio_videos(subject?)` | `videos::list_in` plus `title` and `threadId`, newest change first (a video whose video.json does not load sorts last and carries `problem`) |
 | `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to `default`, which a subject's `themes/default.json` replaces through the cascade; `voice` is video.json's `voice` block (`{engine?, model?, voice?, speed?}`, `engine` being `kokoro` or `server`). The scaffold is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
 | `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `captions`, `scenes` and `renders` |
+| `studio_render_captions(slug, preset)` | the WebVTT text beside that preset's render (`renders/<preset>.vtt`), for the player's CC |
 | `studio_set_captions(slug, on)` | sets video.json's `captions`: the `true`/`false` literal is replaced in the text, or the key is added before `scenes` on a line of its own, so the rest of the file keeps its formatting (`videos::set_captions`) |
 | `studio_exports(dir)` | each preset's status (`render::exports`, see "Rendering a video") as `{preset, path, modified, current, problem}`; it asks ffmpeg for its toolkit, renders nothing and makes no network call |
 | `studio_frame(slug, at, width)` | a PNG `width` px wide (1 to 4096), the layout of the full-size frame, as bytes through `tauri::ipc::Response` |
@@ -1934,8 +1935,9 @@ on disk now; nothing is cached but thumbnails.
   they are known once every scene has a length (a hold, or narration that
   matches the script) and null for every scene until then, stale narration
   included. **Renders** are each preset's file that exists (`draft.mp4`,
-  `audio.m4a`, `subtitles.vtt`, ...), as `{preset, path, modified}` with the
-  absolute path and mtime in Unix seconds.
+  `audio.m4a`, `subtitles.vtt`, ...), as `{preset, path, modified,
+  captions}` with the absolute path, mtime in Unix seconds, and whether a
+  video render's `.vtt` is beside it.
 - **A frame is of the video as narrated.** `at` is `{scene, t}` (seconds into
   a scene, counting from 0) or `{global}`. Stale or missing narration makes
   `Renderer::new` fail, and the command rejects with studio-core's message

@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import type { RenderPreset } from "@/lib/studio/render";
+
 // Studio's videos under `<data>/studio/videos/<slug>/`
 // (`app/src-tauri/src/studio/commands/videos.rs`). A slug is `[a-z0-9-]+`.
 
@@ -14,7 +16,7 @@ export interface VideoRow {
   scenes: number | null;
   /** A narration manifest exists; it may be stale. */
   narrated: boolean;
-  /** File names in `renders/`: `draft.mp4`, `final.mp4`. */
+  /** File names in `renders/`: `draft.mp4`, `audio.m4a`, … */
   renders: string[];
   /** Seconds since the epoch. */
   modified: number | null;
@@ -53,12 +55,15 @@ export interface SceneInfo {
   text: string | null;
 }
 
+/** One export preset's file. */
 export interface RenderFile {
-  quality: "draft" | "final";
+  preset: RenderPreset;
   /** Absolute path. */
   path: string;
   /** Seconds since the epoch. */
   modified: number;
+  /** A video render's captions are beside it as `<preset>.vtt`. */
+  captions: boolean;
 }
 
 export interface VideoDetail {
@@ -70,12 +75,24 @@ export interface VideoDetail {
   /** The narration voice id, from video.json or Settings -> Voice; null if
    *  neither names one. */
   voice: string | null;
+  /** video.json's `captions`: the renders have captions burned in. */
+  captions: boolean;
   scenes: SceneInfo[];
   renders: RenderFile[];
 }
 
 export function videoDetail(slug: string): Promise<VideoDetail> {
   return invoke<VideoDetail>("studio_video_detail", { slug });
+}
+
+/** Turns the video's burned-in captions on or off (video.json's `captions`). */
+export function setCaptions(slug: string, on: boolean): Promise<void> {
+  return invoke("studio_set_captions", { slug, on });
+}
+
+/** The WebVTT text beside the video's `preset` render. */
+export function renderCaptions(slug: string, preset: RenderPreset): Promise<string> {
+  return invoke<string>("studio_render_captions", { slug, preset });
 }
 
 /** Where to take a still: `t` seconds into scene `scene`, or `global`

@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { StudioHeader } from "@/components/studio/StudioHeader";
+import { CaptionsSwitch } from "@/components/studio/video/CaptionsSwitch";
+import { ExportMenu } from "@/components/studio/video/ExportMenu";
 import { ScriptList } from "@/components/studio/video/ScriptList";
 import { VideoFacts } from "@/components/studio/video/VideoFacts";
 import { VideoStage } from "@/components/studio/video/VideoStage";
@@ -11,29 +12,20 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useVideoDetail } from "@/hooks/studio/useVideoDetail";
 import { videoHref, VIDEOS_HREF } from "@/lib/studio/routes";
-import type { VideoDetail } from "@/lib/studio/videos";
 import { useVideosStore } from "@/stores/studio/videosStore";
 
-/** The render to hand over: the final, else the newest. */
-function exportable(detail: VideoDetail | null): string | null {
-  if (!detail || detail.renders.length === 0) return null;
-  const final = detail.renders.find((r) => r.quality === "final");
-  return (final ?? detail.renders.slice().sort((a, b) => b.modified - a.modified)[0]).path;
-}
-
 /**
- * /studio/videos/:slug: the player and scenes beside the script, the facts,
- * Continue in chat (the video's thread, when it has one) and Export mp4, which
- * reveals the render in Finder.
+ * /studio/videos/:slug: the player and scenes beside the script, the facts
+ * and the captions switch, Continue in chat (the video's thread, when it has
+ * one) and the Export menu of presets.
  */
 export default function VideoPage() {
   const { slug = "" } = useParams();
   const navigate = useNavigate();
   const row = useVideosStore((s) => s.videos.find((v) => v.slug === slug) ?? null);
-  const { detail, error } = useVideoDetail(slug);
+  const { detail, error, reload } = useVideoDetail(slug);
   const title = row?.title ?? detail?.row.title ?? slug;
   const threadId = row?.threadId ?? detail?.row.threadId ?? null;
-  const file = exportable(detail);
 
   useEffect(() => {
     document.title = `${title} · Oculus`;
@@ -59,14 +51,7 @@ export default function VideoPage() {
                 Continue in chat
               </Button>
             )}
-            {file && (
-              <Button
-                size="sm"
-                onClick={() => revealItemInDir(file).catch((e) => console.error("reveal failed", e))}
-              >
-                Export mp4
-              </Button>
-            )}
+            {detail && <ExportMenu detail={detail} />}
           </>
         }
       />
@@ -80,6 +65,7 @@ export default function VideoPage() {
                 </div>
                 <div className="w-full shrink-0 space-y-4 lg:w-[360px]">
                   <VideoFacts detail={detail} />
+                  <CaptionsSwitch detail={detail} onChanged={() => void reload()} />
                   <div>
                     <h2 className="mb-1 px-3 text-[11px] font-medium tracking-wide text-muted-foreground">Script</h2>
                     <ScriptList detail={detail} playback={playback} />

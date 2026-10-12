@@ -11,7 +11,7 @@ use studio_core::{Library, Project};
 
 use super::rows::VideoView;
 use crate::db::store::StudioLink;
-use crate::studio::render::Preset;
+use crate::studio::render::{Output, Preset};
 use crate::studio::videos;
 
 /// Mirrors `VideoDetail` in `app/src/lib/studio/videos.ts`.
@@ -44,6 +44,8 @@ pub struct RenderFile {
     pub preset: Preset,
     pub path: String,
     pub modified: u64,
+    /// A video render's captions are beside it as `<preset>.vtt`.
+    pub captions: bool,
 }
 
 /// The video `slug` under `videos`. `settings_voice` is Settings -> Voice's
@@ -108,8 +110,11 @@ fn renders(dir: &Path) -> Vec<RenderFile> {
                 .duration_since(UNIX_EPOCH)
                 .ok()?
                 .as_secs();
+            let captions =
+                matches!(preset.output(), Output::Video(_)) && path.with_extension("vtt").is_file();
             Some(RenderFile {
                 preset,
+                captions,
                 path: path.to_string_lossy().into_owned(),
                 modified,
             })
