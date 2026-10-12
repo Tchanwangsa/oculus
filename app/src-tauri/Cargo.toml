@@ -157,9 +157,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 # Enables explicitly registered in-process fake brokers in Windows release tests.
 keyd_core = { package = "oculus-keyd-core", path = "../keyd/core", features = ["test-support"] }
 
-# In Cargo.toml, not .cargo/config.toml: config is read from cargo's working
-# directory, and a build started elsewhere would use another profile, rebuilding
-# every crate and leaving a second copy in target/.
+# The manifest profile applies to the app and CLI from every working directory.
 [profile.dev]
 # Limited debug info (no variables) is enough for backtraces and links faster.
 debug = 1

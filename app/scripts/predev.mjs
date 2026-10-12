@@ -1,11 +1,9 @@
-// Dev preflight: dependencies, native binaries, the editor core's wasm, debug CLI, keyd, generated docs, and
-// pruning target/debug of what no build reuses.
+// Dev preflight: dependencies, native binaries, the editor core's wasm, debug CLI, keyd and generated docs.
 // OCULUS_CLI_WATCH=1 also starts the CLI watcher; OCULUS_SKIP_PREDEV skips it.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { buildKeyd, crate as keydCrate, installFromMainCheckout } from "./keyd-build.mjs";
-import { pruneTarget } from "./prune-target.mjs";
 import { app, buildCli, cliPath, rust, stageCli } from "./runtime.mjs";
 import { endStaleBuilds, nameLockHolder } from "./stale-builds.mjs";
 
@@ -73,9 +71,8 @@ try {
 
 nameLockHolder(join(rust, "target", "debug"), "the build lock", log);
 const started = Date.now();
-const used = new Set();
 try {
-  buildCli("debug", used);
+  buildCli("debug");
 } catch (e) {
   console.error(`[predev] the oculus CLI did not build: ${e.message}`);
   process.exit(1);
@@ -92,9 +89,6 @@ try {
   process.exit(1);
 }
 log(`${version} built in ${((Date.now() - started) / 1000).toFixed(1)}s`);
-
-// The CLI build reported every unit the dev build uses (prune-target.mjs).
-pruneTarget({ profileDir: join(rust, "target", "debug"), used, log });
 
 // tauri dev's own cargo run copies the sidecar over this build, so the sidecar
 // has to be this build too.
