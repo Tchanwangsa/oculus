@@ -11,8 +11,20 @@ const INTER: &[u8] = include_bytes!("../../fonts/Inter.ttf");
 /// Manrope, variable (`wght` 200-800), SIL OFL 1.1. The app's heading face.
 const MANROPE: &[u8] = include_bytes!("../../fonts/Manrope.ttf");
 
+/// JetBrains Mono 2.304, variable (`wght` 100-800), upright only, SIL OFL 1.1.
+/// The monospace face, for code.
+const JETBRAINS_MONO: &[u8] = include_bytes!("../../fonts/JetBrainsMono.ttf");
+
+/// The monospace family's name. Text set in it has ligatures off: code
+/// shows `<=` and `!=` as typed.
+pub const MONO_FAMILY: &str = "JetBrains Mono";
+
 /// Family names are fixed here: Inter's own name is "Inter Variable".
-const BUNDLED: &[(&str, &[u8])] = &[("Inter", INTER), ("Manrope", MANROPE)];
+const BUNDLED: &[(&str, &[u8])] = &[
+    ("Inter", INTER),
+    ("Manrope", MANROPE),
+    (MONO_FAMILY, JETBRAINS_MONO),
+];
 
 /// A font context holding only the bundled fonts, and their family names.
 pub fn font_context() -> (FontContext, Vec<String>) {

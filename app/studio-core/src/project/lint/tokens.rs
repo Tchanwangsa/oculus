@@ -12,6 +12,9 @@
 //!
 //! The rules read the source through `tsx::scan`, so a literal inside a
 //! template literal's `${...}` is not checked.
+//!
+//! `mono_note` is a note, not an error: monospace belongs to a component
+//! named for code.
 
 mod names;
 mod places;
@@ -112,6 +115,37 @@ pub fn check(
     out
 }
 
+/// The note for a component that is not named for code but reads
+/// `font.mono` or `type.code`: the first such place in `src`, or none.
+pub fn mono_note(component: &str, src: &str) -> Option<StudioError> {
+    if component.starts_with("Code") || component.ends_with("Code") {
+        return None;
+    }
+    let toks = scan(src);
+    let (i, token) = toks.iter().enumerate().find_map(|(i, tok)| {
+        let owner = toks.get(i.checked_sub(2)?)?;
+        let dotted = toks.get(i - 1)?.kind == Kind::Punct('.');
+        let token = match (owner.text.as_str(), tok.text.as_str()) {
+            ("font", "mono") => "font.mono",
+            ("type", "code") => "type.code",
+            _ => return None,
+        };
+        (tok.kind == Kind::Ident && owner.kind == Kind::Ident && dotted).then_some((i, token))
+    })?;
+    let tok = &toks[i];
+    Some(StudioError::Component {
+        component: component.to_owned(),
+        message: format!(
+            "theme.{token} is used outside a Code component; monospace is for code, and numbers take fontVariantNumeric: \"tabular-nums\""
+        ),
+        loc: Some(TsxLoc {
+            line: tok.line,
+            col: tok.col,
+            snippet: line_text(src, tok.line).to_owned(),
+        }),
+    })
+}
+
 /// Which tokens sit inside the argument of a `token(...)` default: a
 /// `token(...)` call, or the `.default(...)` chained on one.
 fn exempt_flags(toks: &[Tok]) -> Vec<bool> {
@@ -209,6 +243,7 @@ struct Palette {
     spacing: Vec<(String, &'static str, f64)>,
     heading: String,
     body: String,
+    mono: String,
     families: Vec<String>,
 }
 
@@ -243,6 +278,7 @@ impl Palette {
             spacing,
             heading: font("heading"),
             body: font("body"),
+            mono: font("mono"),
             families: crate::bundled_families(),
         }
     }
@@ -262,8 +298,11 @@ impl Palette {
         if !self.body.is_empty() && s == self.body {
             return format!("font family `{s}` is a literal; use theme.font.body");
         }
+        if !self.mono.is_empty() && s == self.mono {
+            return format!("font family `{s}` is a literal; use theme.font.mono");
+        }
         format!(
-            "font family `{s}` is a literal; use theme.font.body or theme.font.heading (no system fonts)"
+            "font family `{s}` is a literal; use theme.font.body, theme.font.heading or theme.font.mono (no system fonts)"
         )
     }
 
