@@ -68,21 +68,31 @@ fn detect_sign_in(base: &str) -> (String, Idp, Option<String>) {
             .filter(|h| Some(h.to_string()) != canvas_host)
             .map(str::to_string)
     };
-    let mut first_away = None;
+    let mut idp_host = None;
     for login_path in ["/login", "/login/saml"] {
         match keyd_core::okta::probe_sign_in_page(&format!("{base}{login_path}")) {
             Ok((landed, true)) => {
                 return (login_path.to_string(), Idp::Okta, left_canvas(&landed));
             }
             Ok((landed, false)) => {
-                if first_away.is_none() {
-                    first_away = left_canvas(&landed);
+                if idp_host.is_none() && is_idp_request(&landed) {
+                    idp_host = left_canvas(&landed);
                 }
             }
             Err(e) => elog!("[oculus] sign-in detection: {login_path}: {e}"),
         }
     }
-    (default_login_path(), Idp::Other, first_away)
+    (default_login_path(), Idp::Other, idp_host)
+}
+
+/// Whether a landing is an identity provider answering a sign-in request
+/// (SAML, OAuth/OIDC, CAS) rather than a portal page that offers a choice of
+/// them, which some universities put on `/login` (Oxford, NUS).
+pub(super) fn is_idp_request(landed: &url::Url) -> bool {
+    let at = format!("{}?{}", landed.path(), landed.query().unwrap_or("")).to_ascii_lowercase();
+    ["saml", "oauth2", "/authorize", "openid", "/cas/"]
+        .iter()
+        .any(|marker| at.contains(marker))
 }
 
 /// Check the address is Canvas, detect how it signs in, and save the

@@ -25,7 +25,9 @@
 
 ## About
 
-Your whole degree in one app, at any university that uses Canvas. Oculus
+Your whole degree in one app, at a university that uses Canvas — tested at
+the University of Melbourne and RMIT; elsewhere it usually works, since you
+sign in yourself in a normal window. Oculus
 signs in to Canvas as you, brings in your subjects, Ed threads and lecture
 recordings, and puts an AI assistant right next to all of it.
 

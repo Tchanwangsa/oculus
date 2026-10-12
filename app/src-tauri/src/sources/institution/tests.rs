@@ -1,3 +1,4 @@
+use super::configure::is_idp_request;
 use super::domain::is_southern;
 use super::*;
 use crate::test_support::Scratch;
@@ -119,4 +120,28 @@ fn the_institution_domain_is_the_universitys_own() {
     assert_eq!(d("rmit.instructure.com", Some("myapps.rmit.edu.au")), None);
     assert_eq!(d("a.instructure.com", Some("b.instructure.com")), None);
     assert_eq!(d("canvas.foo.edu", None), None);
+}
+
+#[test]
+fn an_idp_answers_a_sign_in_request_and_a_portal_does_not() {
+    let idp = |u: &str| is_idp_request(&url::Url::parse(u).unwrap());
+    // Landings measured on real Canvases.
+    assert!(idp(
+        "https://myapps.rmit.edu.au/nidp/saml2/sso?SAMLRequest=fVJb"
+    ));
+    assert!(idp(
+        "https://login.microsoftonline.com/dc0b52a3/oauth2/v2.0/authorize?client_id=x"
+    ));
+    assert!(idp(
+        "https://authentication.ubc.ca/idp/profile/SAML2/Redirect/SSO?execution=e1s1"
+    ));
+    assert!(idp(
+        "https://login.microsoftonline.com/cc95de1b/saml2?SAMLRequest=fZJP"
+    ));
+    assert!(idp(
+        "https://cas.foo.edu/cas/login?service=https%3A%2F%2Fcanvas.foo.edu"
+    ));
+    assert!(!idp("https://login.canvas.ox.ac.uk/"));
+    assert!(!idp("https://www.nus.edu.sg/canvas/login/"));
+    assert!(!idp("https://lms.unimelb.edu.au/canvas"));
 }

@@ -122,7 +122,8 @@ export function CanvasAddress() {
       )}
       {!institution.canvas && !error && (
         <p className="text-xs text-muted-foreground pb-1">
-          Enter your university's Canvas address to connect.
+          Enter your university's Canvas address to connect. Tested at UniMelb and
+          RMIT; other universities usually work, since you sign in in a normal window.
         </p>
       )}
       {error && <p className="text-xs text-destructive pb-1">{error}</p>}

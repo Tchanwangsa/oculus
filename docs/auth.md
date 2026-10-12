@@ -75,8 +75,11 @@ each other's writes.
   origin, proves it is Canvas (an anonymous `/api/v1/users/self` answers 401
   `{"status":"unauthenticated"}`), and walks the sign-in redirects with no
   session (`keyd_core::okta::probe_sign_in_page`): `/login` first, then
-  `/login/saml`, stopping at the first that reaches Okta's widget. Where the
-  walk leaves Canvas is the SSO host.
+  `/login/saml`, stopping at the first that reaches Okta's widget. Otherwise
+  the SSO host is the first landing off Canvas that answers a sign-in request
+  (a SAML, OAuth/OIDC or CAS URL, `is_idp_request`): a portal page that
+  offers a choice of providers (Oxford's, NUS's) is not one, and none found
+  leaves it unset.
 - **An install older than the profile is UniMelb's.** A missing file beside an
   old cookie file, keyd's authenticated flag or signed-out marker, an attempt
   record or a non-empty `courses/` gets the UniMelb profile written
