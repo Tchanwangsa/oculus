@@ -1,4 +1,4 @@
-import type { WorkspaceState } from "@/lib/ed/workspace";
+import type { WorkspaceState, WorkspaceStatus } from "@/lib/ed/workspace";
 import type { SaveState } from "@/lib/ed/workspaceSaver";
 
 /**
@@ -19,4 +19,11 @@ export function workspaceStatusText(
   }
   if (connection === "connecting") return "Connecting…";
   return "All changes saved";
+}
+
+/** Why Run and Mark, which happen on Ed, can't right now; null when online. */
+export function edUnavailableReason({ state, reason }: WorkspaceStatus): string | null {
+  if (state === "online") return null;
+  if (state === "connecting") return "Connecting to Ed…";
+  return reason ? `Offline: ${reason}` : "Offline — this needs a connection to Ed";
 }

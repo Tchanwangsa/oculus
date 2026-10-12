@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-import { FileViewer } from "@/components/files/FileViewer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
@@ -8,12 +7,26 @@ import { PillTabs } from "@/components/ui/table/PillTabs";
 import { useTauriEvent } from "@/hooks/backend/useEvents";
 import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
 import type { DbFile } from "@/lib/db";
-import { WORKSPACE_EVENT, type WorkspaceEvent, type WorkspaceStatus } from "@/lib/ed/workspace";
+import {
+  WORKSPACE_EVENT,
+  type Submission,
+  type WorkspaceEvent,
+  type WorkspaceInfo,
+  type WorkspaceStatus,
+} from "@/lib/ed/workspace";
 import { holdWorkspace, type WorkspaceHold } from "@/lib/ed/workspaceHandles";
 import type { SaveState } from "@/lib/ed/workspaceSaver";
-import { openFileSmart } from "@/lib/files/openFile";
+import { edUnavailableReason } from "@/lib/ed/workspaceStatus";
 import { cn } from "@/lib/utils";
 
+import { DescriptionColumn, type SideTab } from "./DescriptionColumn";
+import { MarkButton } from "./mark/MarkButton";
+import { MarkDialog } from "./mark/MarkDialog";
+import { useMarkFlow } from "./mark/useMarkFlow";
+import { RunButton } from "./terminal/RunButton";
+import { TerminalDrawer, type DrawerTab } from "./terminal/TerminalDrawer";
+import { useRunSession } from "./terminal/useRunSession";
+import { useTerminalSession } from "./terminal/useTerminalSession";
 import { WorkspaceEditor } from "./WorkspaceEditor";
 import { WorkspaceStatusLine } from "./WorkspaceStatusLine";
 
@@ -25,13 +38,25 @@ const BRIEF_PANEL = {
   storageKey: "oculus-ed-workspace-brief",
 } as const;
 
+/** Ed's bottom drawer (terminal and Run), folded until first opened. */
+const DRAWER_PANEL = {
+  side: "bottom",
+  defaultWidth: 240,
+  minWidth: 120,
+  maxWidth: 640,
+  defaultCollapsed: true,
+  storageKey: "oculus-ed-workspace-drawer",
+} as const;
+
 /**
- * A `code` slide as Ed shows it: the slide's brief (its `.md`) on the left,
- * the challenge's files in tabs over `CodeEditor` on the right, saving to Ed
- * as you type (`lib/ed/workspaceSaver.ts`). The session opens on mount and
- * closes after the last pane on it goes (`holdWorkspace`); `ed-workspace`
- * events for this challenge update the connection, the file list, and the
- * open file when another client commits.
+ * A `code` slide as Ed shows it: the slide's brief (its `.md`) on the left
+ * with its Feedback tab, the challenge's files in tabs over `CodeEditor` on
+ * the right, saving to Ed as you type (`lib/ed/workspaceSaver.ts`), with
+ * Run and Mark in its header and the terminal drawer under it, each as the
+ * challenge's features allow. The session opens on mount and closes after
+ * the last pane on it goes (`holdWorkspace`); `ed-workspace` events for this
+ * challenge update the connection, the file list, and the open file when
+ * another client commits.
  */
 export function WorkspacePane({
   challengeId,
@@ -45,7 +70,9 @@ export function WorkspacePane({
   files: DbFile[];
 }) {
   const panel = useResizablePanel(BRIEF_PANEL);
+  const drawer = useResizablePanel(DRAWER_PANEL);
   const [hold, setHold] = useState<WorkspaceHold | null>(null);
+  const [info, setInfo] = useState<WorkspaceInfo | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
   const [paths, setPaths] = useState<string[] | null>(null);
   const [active, setActive] = useState<string | null>(null);
@@ -66,6 +93,7 @@ export function WorkspacePane({
     h.info
       .then((info) => {
         if (!live) return;
+        setInfo(info);
         setPaths(info.files);
         setConnection(info.status);
       })
@@ -103,6 +131,39 @@ export function WorkspacePane({
     }
   });
 
+  const features = info?.features;
+  const offline = edUnavailableReason(connection);
+  const canRun = !!features?.run && info?.runCommand != null;
+  const drawerTabs: DrawerTab[] = [];
+  if (features?.terminal) drawerTabs.push("terminal");
+  if (canRun) drawerTabs.push("run");
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>("terminal");
+  const shownDrawerTab = drawerTabs.includes(drawerTab) ? drawerTab : drawerTabs[0];
+  const terminal = useTerminalSession(
+    challengeId,
+    shownDrawerTab === "terminal" && !drawer.collapsed,
+    connection.state === "online",
+  );
+  const run = useRunSession(challengeId, hold?.saver ?? null);
+  const startRun = () => {
+    setDrawerTab("run");
+    drawer.setCollapsed(false);
+    void run.start();
+  };
+
+  const [sideTab, setSideTab] = useState<SideTab>("description");
+  const [marked, setMarked] = useState<Submission | null>(null);
+  const mark = useMarkFlow({
+    challengeId,
+    saver: hold?.saver ?? null,
+    confirmSubmit: !!features?.confirmSubmit,
+    dueAt: info?.dueAt ?? null,
+    onMarked: (submission) => {
+      setMarked(submission);
+      setSideTab("feedback");
+    },
+  });
+
   const select = (path: string) => {
     if (path === shown) return;
     void hold?.saver.flush();
@@ -121,7 +182,15 @@ export function WorkspacePane({
         )}
       >
         <div style={{ width: panel.restWidth }} className="flex min-h-0 flex-1 flex-col">
-          <FileViewer file={brief} files={files} onOpenFile={openFileSmart} />
+          <DescriptionColumn
+            challengeId={challengeId}
+            brief={brief}
+            files={files}
+            feedback={!!features && (features.feedback || features.mark)}
+            tab={sideTab}
+            onTab={setSideTab}
+            marked={marked}
+          />
         </div>
       </section>
       <ResizeHandle
@@ -138,8 +207,10 @@ export function WorkspacePane({
             )}
           </div>
           {!openError && <WorkspaceStatusLine connection={connection} save={save} />}
+          {canRun && <RunButton phase={run.phase} offline={offline} onRun={startRun} onStop={run.stop} />}
+          {features?.mark && <MarkButton step={mark.state.step} offline={offline} onClick={() => void mark.start()} />}
         </div>
-        {(openError || save.state === "error" || notice) && (
+        {(openError || save.state === "error" || notice || run.error || mark.error) && (
           <div className="shrink-0 space-y-2 px-3 pt-3">
             {openError && (
               <Alert variant="destructive">
@@ -156,6 +227,18 @@ export function WorkspacePane({
             {notice && (
               <Alert variant="warning">
                 <AlertDescription className="text-xs">{notice}</AlertDescription>
+              </Alert>
+            )}
+            {run.error && (
+              <Alert variant="destructive">
+                <AlertTitle className="text-xs">Run failed</AlertTitle>
+                <AlertDescription className="text-xs">{run.error}</AlertDescription>
+              </Alert>
+            )}
+            {mark.error && (
+              <Alert variant="destructive">
+                <AlertTitle className="text-xs">{mark.error.title}</AlertTitle>
+                <AlertDescription className="text-xs">{mark.error.message}</AlertDescription>
               </Alert>
             )}
           </div>
@@ -179,7 +262,24 @@ export function WorkspacePane({
             paths.length === 0 && <p className="px-4 py-3 text-sm text-muted-foreground">This workspace has no files.</p>
           )}
         </div>
+        {shownDrawerTab && (
+          <TerminalDrawer
+            panel={drawer}
+            tabs={drawerTabs}
+            tab={shownDrawerTab}
+            onTab={setDrawerTab}
+            terminal={terminal}
+            run={run}
+            offline={offline}
+          />
+        )}
       </section>
+      <MarkDialog
+        prompts={mark.state.step === "confirm" ? mark.state.prompts : null}
+        dueAt={mark.state.step === "confirm" ? mark.state.dueAt : null}
+        onConfirm={mark.confirm}
+        onCancel={mark.cancel}
+      />
     </div>
   );
 }

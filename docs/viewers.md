@@ -15,6 +15,7 @@ transcript, and a web page.
 | A parsed PDF's faces: PDF, Markdown | `app/src/components/files/FileViewer.tsx`, `app/src/components/files/FileMarkdown.tsx`, `app/src/components/files/pdf/pdfMdLink.ts`, `app/src/lib/pdf/pdfBlocks.ts` |
 | An Ed lesson's view: the slide sidebar and pane, the index reader | `app/src/components/lessons/`, `app/src/hooks/data/useLessonIndex.ts`, `app/src/lib/ed/lessons.ts` |
 | A challenge's workspace: the pane, its commands and events, the save loop, the shared session | `app/src/components/lessons/workspace/`, `app/src/lib/ed/workspace.ts`, `app/src/lib/ed/workspaceSaver.ts`, `app/src/lib/ed/workspaceHandles.ts`, `app/src/lib/ed/workspaceStatus.ts` |
+| The workspace's terminal drawer, Run, Mark and Feedback | `app/src/components/lessons/workspace/terminal/`, `app/src/components/lessons/workspace/mark/`, `app/src/components/lessons/workspace/feedback/`, `app/src/lib/ed/termOutput.ts`, `app/src/lib/ed/flushForEd.ts`, `app/src/lib/ed/markPrompts.ts`, `app/src/lib/ed/feedback.ts` |
 | The code editor and a library source file's read-only view | `app/src/components/code/`, `app/src/components/files/CodeFileViewer.tsx`, `fileLanguage` in `app/src/components/documents/editor/syntax/codeLanguages.ts`, `CODE_EXTS` in `app/src/lib/files/fileTypes.ts` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/lectures/media/`, `app/src/stores/lectures/playerPrefsStore.ts`, `app/src/hooks/lectures/useTranscriptDock.ts` |
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lectures/playback/`, `app/src/lib/lectures/playbackOwner.ts` |
@@ -375,7 +376,9 @@ whose list has slides (`useLessonIndex`), its body is `LessonView`
 layout: the slide's `.md` (the brief, its Files list included) through
 `FileViewer` in a left column, drag-resizable and remembered
 (`useResizablePanel`), and the challenge's files on the right as `PillTabs`
-over `CodeEditor`, the first file open. The library copy under the slide's
+over `CodeEditor`, the first file open. Run and Mark sit in the editor's
+header and the terminal drawer under it, each only where the challenge's
+`features` (from `ed_workspace_open`) allow. The library copy under the slide's
 folder is the working copy; Rust owns the session
 ([sync.md](./sync.md) has the state file), the pane only calls the
 commands typed in `app/src/lib/ed/workspace.ts`.
@@ -405,6 +408,52 @@ commands typed in `app/src/lib/ed/workspace.ts`.
   `ours: false` (Ed's web app saved) re-reads the open file unless it has
   unsaved edits, and forgets the other clean buffers so they read again;
   `error` shows as a warning `Alert` until the socket is back online.
+- **The terminal drawer** (`terminal/TerminalDrawer.tsx`) is Ed's bottom
+  drawer: a Terminal tab when `features.terminal`, a Run tab when Run
+  exists, each an xterm.js view (`XtermView`, loaded on demand) kept
+  mounted behind the other. Its top edge drags its height
+  (`useResizablePanel` with `side: "bottom"`), and it folds to its tab bar,
+  folded until first opened; folding keeps the views laid out at full
+  height, so it never resizes Ed's PTY. The views fit their box
+  (`FitAddon` on a `ResizeObserver`) and report each new size to Rust; their
+  colours and font are the theme's tokens and code font, read again when
+  either changes. Output events carry base64, written to xterm as bytes;
+  what lands before a view mounts or before an id is known is held and
+  replayed (`createTermSink` in `lib/ed/termOutput.ts`).
+- **The terminal opens on first show** (`useTerminalSession`): the first
+  time its tab is showing, unfolded and online, `ed_terminal_open` starts
+  Ed's bash, or re-attaches the one still running on Ed (`resumed`, noted
+  in dim text). A dropped connection notes it and opens again on reconnect;
+  a closed terminal offers "New terminal", a failed open "Try again".
+  Nothing kills the terminal when the pane closes: it persists on Ed.
+- **Run** shows when `features.run` and the challenge has a `runCommand`;
+  without one the terminal is the way to run. A click writes pending saves
+  (`flushForEd`, which stops on a save that failed), unfolds the drawer on
+  Run, clears it and calls `ed_workspace_run` at its size; output streams
+  in, typing goes to the program, and Stop replaces Run until `runExit`,
+  which ends in dim text with Ed's message, if any, and "Program exited
+  with code N". Offline or connecting, Run is disabled with the reason as
+  its tooltip; a failed start is an inline `Alert`.
+- **Mark** shows when `features.mark` and only ever submits from its
+  button (`mark/useMarkFlow.ts`): write pending saves, read the live
+  standing (`ed_challenge_standing`), then ask in one in-app dialog what
+  `markPrompts` (`lib/ed/markPrompts.ts`) says applies — past the due date
+  ("Submit late?"), the last attempt (`attemptsRemaining` 1), or
+  `features.confirmSubmit` — and submit (`ed_workspace_mark`) on Submit. No
+  prompt applies, no dialog. It is disabled offline and while a mark is in
+  flight, and a second click is ignored; a failed save, standing read or
+  mark is an inline `Alert` and is never retried by itself.
+- **Feedback** is a tab beside Description in the left column when
+  `features.feedback` or `features.mark` (`feedback/FeedbackPanel.tsx`). It
+  loads `ed_workspace_submissions` (the submissions this install made,
+  newest first) on first open, and a finished Mark joins the list, is
+  shown and switches the column to it. A submission reads as Ed's panel:
+  "N / M passed, P points" (summed testcase scores, `lib/ed/feedback.ts`),
+  Ed's feedback, a failed build's output, then each testcase with ✓ or ✗,
+  its feedback, its output and its `check_diff` lines as word runs (your
+  output red, expected green, a missing newline marked). Hidden and private
+  testcases show their name only. Older submissions are listed below to
+  pick from.
 
 ## One code editor for source files
 
