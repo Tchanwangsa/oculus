@@ -38,7 +38,7 @@ impl Ed {
         board: &Board,
     ) -> Result<String, String> {
         let id = listing["id"].as_i64().ok_or("thread without id")?;
-        let detail = self.get(&format!("/threads/{id}?view=1"))?;
+        let detail = self.get(&format!("/threads/{id}"))?;
         Ok(thread_md(listing, &detail, board))
     }
 }

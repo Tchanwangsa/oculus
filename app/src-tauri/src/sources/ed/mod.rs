@@ -21,6 +21,7 @@ mod palette;
 mod region;
 mod render;
 mod threads;
+pub mod views;
 mod workspace;
 
 #[cfg(test)]

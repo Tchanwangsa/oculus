@@ -138,6 +138,7 @@ pub fn run() {
             auth::commands::disconnect_canvas,
             sources::institution::commands::institution_get,
             sources::institution::commands::institution_configure,
+            sources::ed::views::ed_mark_viewed,
             auth::okta::commands::okta_credential_status,
             auth::okta::commands::okta_save_credentials,
             auth::okta::commands::okta_clear_credentials,

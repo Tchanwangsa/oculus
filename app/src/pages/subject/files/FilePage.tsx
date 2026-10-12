@@ -3,7 +3,8 @@ import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "
 import { ArrowSquareOut, Globe } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { isWebUrl, openExternal } from "@/lib/browser";
-import { isEdUrl } from "@/lib/ed/links";
+import { edThreadId, isEdUrl } from "@/lib/ed/links";
+import { markEdViewed } from "@/lib/ed/views";
 import {
   DocumentControls,
   SUGGEST_IDLE,
@@ -120,6 +121,11 @@ export default function SubjectFilePage() {
   useEffect(() => {
     if (fileId != null) recordFileAccess({ id: fileId, subject_id: fileSubjectId });
   }, [fileId, fileSubjectId]);
+  // Opening an Ed thread here counts as reading it in Ed.
+  const threadId = edThreadId(file?.source_url);
+  useEffect(() => {
+    if (threadId != null) markEdViewed("thread", threadId);
+  }, [threadId]);
 
   if (!Number.isFinite(id) || !relPath) return <Navigate to="/subjects" replace />;
 

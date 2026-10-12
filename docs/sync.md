@@ -336,6 +336,12 @@ top-level category takes Ed's colour for its position among the course's
 `settings.discussion.categories`, from the `/api/user` enrolment; past Ed's 16
 colours, or with no list, it is `null` (`app/src-tauri/src/sources/ed/palette.rs`).
 
+The sync reads threads and slides without `?view=1`, so a scrape never counts
+as reading them in Ed. Opening a thread or a lesson slide in the app sends the
+web app's own view request once per app session (`ed_mark_viewed`,
+`app/src-tauri/src/sources/ed/views.rs`; `app/src/lib/ed/views.ts`): a thread
+gains the view and a slide is marked seen, never completed.
+
 ## Ed Lessons are an index per lesson and a file per slide
 
 The Ed phase resolves the subject's Ed course once and runs lessons, threads or

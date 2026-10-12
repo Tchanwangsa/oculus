@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { FileViewer } from "@/components/files/FileViewer";
 import type { DbFile } from "@/lib/db";
 import { defaultSlide, slideFiles, slideKey, type LessonIndex } from "@/lib/ed/lessons";
+import { markEdViewed } from "@/lib/ed/views";
 import { openFileSmart, recordFileAccess } from "@/lib/files/openFile";
 import { LessonSidebar } from "./LessonSidebar";
 
@@ -53,6 +54,11 @@ export function LessonView({
       if (id != null) recordFileAccess({ id, subject_id: file.subject_id });
     }
   }, [mdId, pdfId, file.subject_id]);
+  // …and tells Ed, which marks the slide seen.
+  const slideId = slide.id;
+  useEffect(() => {
+    if (slideId != null) markEdViewed("slide", slideId);
+  }, [slideId]);
 
   return (
     <div className="flex min-h-0 flex-1">
