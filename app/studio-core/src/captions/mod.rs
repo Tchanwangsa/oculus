@@ -3,7 +3,7 @@
 //! scene (`timing`); at any moment the phrase on screen is drawn as an
 //! element tree (`tree`) over the finished frame, the word being said
 //! highlighted. Phrases never cross a scene, so a scene's captions depend on
-//! its own words only. The same phrases make the subtitle files
+//! its own words only. The same phrases make the WebVTT file
 //! (`subtitles`). Styled by the theme's `captions` tokens (`style`).
 
 mod phrase;
@@ -14,7 +14,7 @@ mod tree;
 
 pub use phrase::{Phrase, phrases};
 pub use style::{CaptionStyle, Highlight, Placement};
-pub use subtitles::{Cue, srt, vtt};
+pub use subtitles::{Cue, vtt};
 pub use timing::{Moment, moment};
 
 pub(crate) use style::{check, fill_defaults};

@@ -12,7 +12,7 @@ mod running;
 mod settings;
 mod toolkit;
 
-use super::preset::{Output, Preset};
+use super::preset::Preset;
 use super::settings::Settings;
 use super::toolkit::Toolkit;
 
@@ -51,8 +51,5 @@ pub(super) fn mac() -> Toolkit {
 
 /// `preset`'s settings for a `size` video at `fps` on the macOS build.
 pub(super) fn settings(preset: Preset, size: (u32, u32), fps: u32) -> Settings {
-    let Output::Video(video) = preset.output() else {
-        panic!("{} is not a video preset", preset.name())
-    };
-    Settings::new(preset, video, size, fps, None, &mac()).unwrap()
+    Settings::new(preset, preset.video(), size, fps, None, &mac()).unwrap()
 }

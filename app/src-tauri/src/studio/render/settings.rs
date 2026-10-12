@@ -8,7 +8,7 @@ use super::error::RenderError;
 use super::preset::{Preset, Video};
 use super::toolkit::{Codec, Toolkit};
 
-/// The largest output side: twice an 8192 px video would not encode.
+/// The largest output side the encoders take.
 const MAX_SIDE: u32 = 8192;
 
 /// Everything about a video render that is not the project: part of every

@@ -30,24 +30,24 @@ pub struct SegmentReport {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Report {
-    /// The file written: the mp4, m4a or vtt.
+    /// The mp4 written.
     pub path: PathBuf,
     pub preset: Preset,
-    /// Output px; `None` for `audio` and `subtitles`.
-    pub width: Option<u32>,
-    pub height: Option<u32>,
+    /// Output px.
+    pub width: u32,
+    pub height: u32,
     pub fps: u32,
     pub frames: u64,
     /// Seconds: `frames / fps`.
     pub duration: f64,
     /// Whether it has a narration track.
     pub audio: bool,
-    /// Frame renderers; 0 for `audio` and `subtitles`.
+    /// Frame renderers.
     pub threads: usize,
-    /// In video order; empty for `audio` and `subtitles`.
+    /// In video order.
     pub segments: Vec<SegmentReport>,
-    /// Files written beside `path`: a video's captions as `.vtt` (when it
-    /// is narrated), the subtitles' `.srt`.
+    /// Files written beside `path`: the captions as `.vtt`, when the video
+    /// is narrated.
     pub sidecars: Vec<PathBuf>,
     /// Cache files deleted afterwards: nothing any preset's last render
     /// uses.

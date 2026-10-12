@@ -1,6 +1,6 @@
-//! The export presets: what each writes, at what size and on which class of
-//! encoder (docs/studio.md, "Rendering a video"). `draft` and `final` keep
-//! the names renders.json and `renders/` already use.
+//! The export presets: the size each renders at and the class of encoder it
+//! wants (docs/studio.md, "Rendering a video"). `draft` and `final` keep the
+//! names renders.json and `renders/` already use.
 
 use std::path::{Path, PathBuf};
 
@@ -19,32 +19,14 @@ pub enum Preset {
     /// A 720 px version at crf 23, for sharing.
     #[serde(rename = "small")]
     Small,
-    /// Twice the video's size over the same layout (4K for a 1080p video).
-    #[serde(rename = "2x")]
-    Double,
-    /// The narration track alone, as AAC in an m4a.
-    #[serde(rename = "audio")]
-    Audio,
-    /// The captions' phrases as WebVTT, and SubRip beside it.
-    #[serde(rename = "subtitles")]
-    Subtitles,
 }
 
-/// What a preset writes.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Output {
-    /// Frames at `Video::scale` on an encoder of `Class`.
-    Video(Video),
-    Audio,
-    Subtitles,
-}
-
+/// What a preset renders: frames at `Video::scale` on an encoder of `Class`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Video {
     /// The output's shorter side in px, never above the video's own; `None`
-    /// scales by `factor` instead.
+    /// keeps the video's own size.
     pub short_side: Option<f64>,
-    pub factor: f64,
     pub class: Class,
 }
 
@@ -58,23 +40,13 @@ pub enum Class {
 }
 
 impl Preset {
-    pub const ALL: [Preset; 6] = [
-        Self::Draft,
-        Self::Final,
-        Self::Small,
-        Self::Double,
-        Self::Audio,
-        Self::Subtitles,
-    ];
+    pub const ALL: [Preset; 3] = [Self::Draft, Self::Final, Self::Small];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Draft => "draft",
             Self::Final => "final",
             Self::Small => "small",
-            Self::Double => "2x",
-            Self::Audio => "audio",
-            Self::Subtitles => "subtitles",
         }
     }
 
@@ -92,30 +64,20 @@ impl Preset {
             })
     }
 
-    pub fn output(self) -> Output {
-        let video = |short_side, factor, class| {
-            Output::Video(Video {
-                short_side,
-                factor,
-                class,
-            })
-        };
+    pub fn video(self) -> Video {
         match self {
-            Self::Draft => video(Some(540.0), 1.0, Class::Fast),
-            Self::Final => video(None, 1.0, Class::Quality { crf: 18 }),
-            Self::Small => video(Some(720.0), 1.0, Class::Quality { crf: 23 }),
-            Self::Double => video(None, 2.0, Class::Quality { crf: 18 }),
-            Self::Audio => Output::Audio,
-            Self::Subtitles => Output::Subtitles,
-        }
-    }
-
-    /// The output file's extension.
-    pub fn extension(self) -> &'static str {
-        match self.output() {
-            Output::Video(_) => "mp4",
-            Output::Audio => "m4a",
-            Output::Subtitles => "vtt",
+            Self::Draft => Video {
+                short_side: Some(540.0),
+                class: Class::Fast,
+            },
+            Self::Final => Video {
+                short_side: None,
+                class: Class::Quality { crf: 18 },
+            },
+            Self::Small => Video {
+                short_side: Some(720.0),
+                class: Class::Quality { crf: 23 },
+            },
         }
     }
 
@@ -127,10 +89,9 @@ impl Preset {
         }
     }
 
-    /// `<dir>/renders/<name>.<extension>`.
+    /// `<dir>/renders/<name>.mp4`.
     pub fn default_out(self, dir: &Path) -> PathBuf {
-        dir.join("renders")
-            .join(format!("{}.{}", self.name(), self.extension()))
+        dir.join("renders").join(format!("{}.mp4", self.name()))
     }
 }
 
@@ -139,7 +100,7 @@ impl Video {
     pub fn scale(self, (width, height): (u32, u32)) -> f64 {
         match self.short_side {
             Some(side) => (side / f64::from(width.min(height))).min(1.0),
-            None => self.factor,
+            None => 1.0,
         }
     }
 }
