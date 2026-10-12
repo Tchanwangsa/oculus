@@ -7,7 +7,9 @@
 //! node runs on its own clock (`clock`): with `lag`, pieces start one after
 //! another in reading order. Unmatched nodes fade (`fade`) at their own
 //! tree's place, carried by their nearest matched ancestor's move and, with
-//! the overlap fade, by their nearest matched sibling's. The output follows
+//! the overlap fade, by their nearest matched sibling's. A matched node is
+//! drawn under B's ancestors, so its opacity starts where its effective
+//! opacity in A was (its own times its A ancestors'). The output follows
 //! B's paint order, each unmatched A node just before its nearest following
 //! matched sibling (else last).
 
@@ -109,7 +111,7 @@ fn run(a: Tree, b: Tree, ts: &mut Typeset, ink: Ink) -> Result<LNode, MorphError
         ts,
         ink,
     };
-    let out = builder.emit_b(0, Vec2::ZERO);
+    let out = builder.emit_b(0, Vec2::ZERO, 1.0);
     let Builder { a, b, ts, .. } = builder;
     reclaim(a, ts);
     reclaim(b, ts);
@@ -169,13 +171,16 @@ struct Builder<'a> {
 
 impl Builder<'_> {
     /// B node `ib` and what goes under it; `shift` is how far its nearest
-    /// matched ancestor has moved from B's place.
-    fn emit_b(&mut self, ib: usize, shift: Vec2) -> Option<LNode> {
+    /// matched ancestor has moved from B's place, `start` its output
+    /// ancestors' opacity at p = 0.
+    fn emit_b(&mut self, ib: usize, shift: Vec2, start: f32) -> Option<LNode> {
         let Some(ia) = self.m.b_to_a[ib] else {
-            return self.unmatched_b(ib, shift);
+            return self.unmatched_b(ib, shift, start);
         };
         let p = self.pb[ib];
+        let q = p.clamp(0.0, 1.0);
         let (mut na, mut nb) = (self.a.take(ia)?, self.b.take(ib)?);
+        let from = opacity_from(&na, self.a.slots[ia].above, start);
         let mut out = LNode {
             kind: nb.kind,
             style: blend::style(&na.style, &nb.style, p, self.ink.text, self.ink.colour),
@@ -196,7 +201,10 @@ impl Builder<'_> {
                 (_, y) => y,
             },
         };
-        let q = p.clamp(0.0, 1.0);
+        if let Some(from) = from {
+            out.style.opacity = Some(blend::lerp(from, nb.style.opacity(), q));
+        }
+        let start = start * from.unwrap_or_else(|| na.style.opacity());
         content::blend(&mut out, &mut na, &mut nb, q, self.ts, self.ink.colour);
         let shift_a = out.rect.origin() - na.rect.origin();
         let shift_b = out.rect.origin() - nb.rect.origin();
@@ -220,7 +228,7 @@ impl Builder<'_> {
                 out.children.extend(self.unmatched_a(ka, shift_a + ride));
             }
             let ride = self.ride_b(ia, ib, kb);
-            out.children.extend(self.emit_b(kb, shift_b + ride));
+            out.children.extend(self.emit_b(kb, shift_b + ride, start));
         }
         for &(_, ka) in before.iter().filter(|(anchor, _)| anchor.is_none()) {
             let ride = self.ride_a(ia, ib, ka);
@@ -275,7 +283,7 @@ impl Builder<'_> {
         t.clock(i).1.fade == Fade::Overlap
     }
 
-    fn unmatched_b(&mut self, ib: usize, shift: Vec2) -> Option<LNode> {
+    fn unmatched_b(&mut self, ib: usize, shift: Vec2, start: f32) -> Option<LNode> {
         let k = fade::arriving(self.b.clock(ib).1.fade, self.pb[ib]);
         if !self.deep_b[ib] {
             let mut n = copy(&mut self.b, ib, shift)?;
@@ -285,8 +293,10 @@ impl Builder<'_> {
         let mut n = self.b.take(ib)?;
         shift_node(&mut n, shift);
         blend::fade_own(&mut n.style, k);
+        // Its fade is its own paint only, so its opacity reaches its kids.
+        let start = start * n.style.opacity();
         for kb in self.b.slots[ib].kids.clone() {
-            n.children.extend(self.emit_b(kb, shift));
+            n.children.extend(self.emit_b(kb, shift, start));
         }
         Some(n)
     }
@@ -309,6 +319,18 @@ impl Builder<'_> {
         }
         Some(n)
     }
+}
+
+/// The opacity a matched node starts at, when its B ancestors' opacity at
+/// p = 0 (`start`) is not its A ancestors' (`above`): its effective opacity
+/// in A over `start`. `None` when they agree, or when `start` is 0 and
+/// nothing under it shows anyway.
+fn opacity_from(na: &LNode, above: f32, start: f32) -> Option<f32> {
+    let own = na.style.opacity();
+    if start <= f32::EPSILON || (above - start).abs() <= 1e-6 {
+        return None;
+    }
+    Some((own * above / start).min(1.0))
 }
 
 /// Whether a node draws something (an empty strut does not, so nothing

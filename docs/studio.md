@@ -835,7 +835,11 @@ at `p = 0`, B at `p = 1`) and returns one, which paint draws like any other.
   the union of their stops (a colour is a flat gradient, no fill a clear
   one) and blend stop by stop, the angle turning the short way, so nothing
   is cross-faded. A side without a border or shadow grows it from zero width
-  or fades it in.
+  or fades it in. A pair is drawn under B's ancestors, so when its A
+  ancestors' opacity differs from what B's give it at `p = 0` (a `3` in a
+  table row still at opacity 0, keyed to a formula elsewhere), it starts
+  at its effective opacity in A (its own times its A ancestors') and
+  blends to its own in B; it can never show more than its B ancestors do.
 - **Colour** (fills, gradient stops, borders, shadows, text and strokes)
   blends in OKLab with alpha premultiplied, along the path the `morphColor`
   motion token picks. `oklch`, the default, is polar between two saturated
