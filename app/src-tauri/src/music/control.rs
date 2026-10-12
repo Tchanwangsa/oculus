@@ -14,6 +14,10 @@
 //! - **Activate** (a load with nothing active): `activate` alone. The Spirc
 //!   handles its commands in order and `activate` sets it active at once, so
 //!   the load that follows is not dropped.
+//! - **Restore** (Play with nothing active, while the player shows what
+//!   Oculus last played): that track loads here in its context at its
+//!   position and plays (`resume.rs`), rather than a pull bringing over
+//!   whatever Spotify last had.
 //! - **Skip**: nothing at all.
 //! - **Refuse** (add to queue with nothing active): there is no queue to
 //!   add to.
@@ -23,7 +27,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use super::remote::{self, RemoteCommand};
-use super::state;
+use super::{resume, state};
 
 /// How long a pull waits for Spotify's transfer to reach this device.
 const PULL_WAIT: Duration = Duration::from_secs(5);
@@ -38,6 +42,9 @@ pub(super) enum Need {
     Pull,
     /// The device playing: another one's by remote, else pulled here.
     Control,
+    /// Play: like `Control`, but with nothing active it plays what the
+    /// player shows, when that is what Oculus last played.
+    Play,
     /// Like `Control`, but with nothing active a pause pulls nothing.
     NeverPull,
     /// A load: another device's by remote, else activated here.
@@ -54,7 +61,10 @@ pub(super) enum Need {
 pub(super) enum At {
     Here,
     Elsewhere,
+    /// Nothing is active, and the player shows nothing Oculus remembers.
     Nowhere,
+    /// Nothing is active, and the player shows what Oculus last played.
+    Remembered,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,19 +73,25 @@ pub(super) enum Step {
     Remote,
     PullThenSend,
     ActivateThenSend,
+    /// Load what Oculus last played here, playing; nothing else is sent.
+    Restore,
     Skip,
     Refuse,
 }
 
 pub(super) fn step(at: At, need: Need) -> Step {
+    use At::{Elsewhere, Here, Nowhere, Remembered};
     match (at, need) {
-        (At::Here, _) => Step::Send,
+        (Here, _) => Step::Send,
         (_, Need::IfActive) => Step::Skip,
-        (_, Need::Pull) | (At::Nowhere, Need::Control) => Step::PullThenSend,
-        (At::Elsewhere, Need::Control | Need::NeverPull | Need::Load | Need::Queue) => Step::Remote,
-        (At::Nowhere, Need::NeverPull) => Step::Skip,
-        (At::Nowhere, Need::Load) => Step::ActivateThenSend,
-        (At::Nowhere, Need::Queue) => Step::Refuse,
+        (Remembered, Need::Play) => Step::Restore,
+        (_, Need::Pull) | (Nowhere | Remembered, Need::Control | Need::Play) => Step::PullThenSend,
+        (Elsewhere, Need::Control | Need::Play | Need::NeverPull | Need::Load | Need::Queue) => {
+            Step::Remote
+        }
+        (Nowhere | Remembered, Need::NeverPull) => Step::Skip,
+        (Nowhere | Remembered, Need::Load) => Step::ActivateThenSend,
+        (Nowhere | Remembered, Need::Queue) => Step::Refuse,
     }
 }
 
@@ -92,10 +108,16 @@ pub(super) enum Route {
 pub(super) async fn route(app: &AppHandle, need: Need) -> Result<Route, String> {
     let active = state::active(app).ok_or("Not connected to Spotify")?;
     let elsewhere = if active { None } else { other_device(app) };
-    let at = match (active, &elsewhere) {
-        (true, _) => At::Here,
-        (false, Some(_)) => At::Elsewhere,
-        (false, None) => At::Nowhere,
+    let remembered = if active || elsewhere.is_some() {
+        None
+    } else {
+        state::remembered(app)
+    };
+    let at = match (active, &elsewhere, &remembered) {
+        (true, _, _) => At::Here,
+        (false, Some(_), _) => At::Elsewhere,
+        (false, None, Some(_)) => At::Remembered,
+        (false, None, None) => At::Nowhere,
     };
     match step(at, need) {
         Step::Send => Ok(Route::Here),
@@ -107,6 +129,12 @@ pub(super) async fn route(app: &AppHandle, need: Need) -> Result<Route, String> 
         Step::ActivateThenSend => {
             state::with_spirc(app, |spirc| spirc.activate())?;
             Ok(Route::Here)
+        }
+        Step::Restore => {
+            let row = remembered.ok_or("Nothing to play")?;
+            resume::restore(app, &row, true)?;
+            state::update(app, |s| s.error = None);
+            Ok(Route::Skip)
         }
         Step::PullThenSend => {
             pull(app).await?;

@@ -23,6 +23,7 @@ use super::login::{self, LoginError};
 use super::queue;
 use super::remote::{self, RemoteCommand};
 use super::session::{self, Start};
+use super::startup;
 use super::state::{self, Snapshot};
 use crate::runtime::blocking;
 
@@ -77,11 +78,32 @@ pub fn music_connect(app: AppHandle) {
     session::start(&app, Start::Stored);
 }
 
-/// Leaves Spotify, keeping the stored credentials.
+/// What opening the rail's player or `/music` sends, on every open, so the
+/// connection is sound when the user looks: the session task checks its
+/// session now (a closed one reconnects) and a backoff is cut short.
+/// Sleep is not its to check: the link reconnects on waking by itself. With no session, one starts from
+/// the stored login while Settings → Music is on, unless a login is needed
+/// or the user disconnected. Otherwise nothing, and no network call.
+#[tauri::command]
+pub async fn music_wake(app: AppHandle) {
+    if state::wake(&app) || !state::may_start(&app) {
+        return;
+    }
+    let enabled = blocking::run(|| Ok(startup::enabled()))
+        .await
+        .unwrap_or(false);
+    if enabled && state::may_start(&app) {
+        session::start(&app, Start::Stored);
+    }
+}
+
+/// Leaves Spotify, keeping the stored credentials. Nothing reconnects by
+/// itself until the user connects again.
 #[tauri::command]
 pub fn music_disconnect(app: AppHandle) {
     state::cancel_login(&app);
     state::stop_run(&app);
+    state::hold(&app);
     state::update(&app, |s| s.set_idle());
 }
 
@@ -90,6 +112,7 @@ pub fn music_disconnect(app: AppHandle) {
 pub async fn music_sign_out(app: AppHandle) -> Result<(), String> {
     music_disconnect(app.clone());
     let deleted = blocking::run(super::credentials::delete).await;
+    state::forget_last(&app);
     state::update(&app, |s| {
         s.account = None;
         s.track = None;
@@ -118,7 +141,7 @@ pub async fn music_play_pause(app: AppHandle) -> Result<(), String> {
     let active = state::active(&app).ok_or("Not connected to Spotify")?;
     control::send(
         &app,
-        Need::Control,
+        Need::Play,
         || {
             state::with_spirc(&app, |spirc| {
                 if active {
@@ -140,12 +163,13 @@ pub async fn music_play_pause(app: AppHandle) -> Result<(), String> {
 }
 
 /// The player's play button: explicit, unlike the toggle, so a click on a
-/// stale button never pauses.
+/// stale button never pauses. With nothing playing anywhere it plays what
+/// the player shows (`control.rs`).
 #[tauri::command]
 pub async fn music_play(app: AppHandle) -> Result<(), String> {
     command(
         &app,
-        Need::Control,
+        Need::Play,
         |spirc| spirc.play(),
         RemoteCommand::Resume,
     )
@@ -154,16 +178,20 @@ pub async fn music_play(app: AppHandle) -> Result<(), String> {
 
 /// What the exclusive-playback rule (`app/src/lib/music/exclusive/`) sends:
 /// pauses this device only. A lecture starting on the Mac never pauses
-/// another device, and a pause never pulls playback here.
+/// another device, and a pause never pulls playback here. A resume waiting
+/// on a reconnect then loads paused.
 #[tauri::command]
 pub async fn music_pause(app: AppHandle) -> Result<(), String> {
+    state::hold_resume_paused(&app);
     control::if_active(&app, || state::with_spirc(&app, |spirc| spirc.pause())).await
 }
 
 /// The player's pause button: pauses what the player shows, here or on the
-/// device playing elsewhere; nothing when nothing is active.
+/// device playing elsewhere; nothing when nothing is active. A resume
+/// waiting on a reconnect then loads paused.
 #[tauri::command]
 pub async fn music_pause_player(app: AppHandle) -> Result<(), String> {
+    state::hold_resume_paused(&app);
     command(
         &app,
         Need::NeverPull,
@@ -450,8 +478,8 @@ pub async fn music_search_more(
     Ok(library::search_page(&app, &query, kind, offset).await?)
 }
 
-/// The account's Connect devices from the last pushed cluster; only this
-/// device until the first push.
+/// The account's Connect devices from the last cluster, announced or pushed;
+/// only this device before the connect's answer.
 #[tauri::command]
 pub fn music_devices(app: AppHandle) -> Result<Vec<Device>, String> {
     devices::list(&app)

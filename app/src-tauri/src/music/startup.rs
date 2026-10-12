@@ -28,6 +28,11 @@ pub(super) fn parse(raw: Option<&str>) -> Prefs {
         .unwrap_or_default()
 }
 
+/// Whether Settings → Music is on. Blocks on a database read.
+pub(super) fn enabled() -> bool {
+    parse(crate::db::store::setting_blocking(SETTING).as_deref()).enabled
+}
+
 /// Blocks on a database read, so callers run it off the main thread, after
 /// keyd is installed: the stored credentials are keyd's to hand back.
 pub fn apply_settings(app: &AppHandle) {

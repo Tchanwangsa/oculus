@@ -20,7 +20,7 @@ itself is [music.md](./music.md).
 | The pathfinder `searchDesktop` request and its answer | `app/src-tauri/src/music/library/search.rs` |
 | Queueing, here or on the device playing elsewhere | `app/src-tauri/src/music/commands.rs` (`music_add_to_queue`), `app/src-tauri/src/music/control.rs`, `app/src-tauri/src/music/remote/` |
 | Skipping to and removing a track up next | `app/src-tauri/src/music/queue.rs` (`music_skip_to`, `music_queue_remove` in `commands.rs`), `app/src-tauri/src/music/remote/command.rs` |
-| Up next and the context in the snapshot | `app/src-tauri/src/music/state.rs`, `app/src-tauri/src/music/events.rs`, `app/src-tauri/src/music/devices.rs` |
+| Up next and the context in the snapshot | `app/src-tauri/src/music/state/`, `app/src-tauri/src/music/events.rs`, `app/src-tauri/src/music/devices.rs` |
 | The Connect cluster, the device list and transfer | `app/src-tauri/src/music/devices.rs` |
 | Up next, playlists, a playlist's tracks and search under the player | `app/src/components/music/library/` (up next: `UpNext.tsx`, `RemoveAction.tsx`; search: `SearchGroups.tsx`, `SearchPages.tsx`; an opened playlist or album: `PlaylistView.tsx`) |
 | Track rows fetched a page at a time | `app/src/hooks/music/useTrackRows.ts` |
@@ -297,22 +297,26 @@ its own.
 - **Spotify pushes the Connect cluster** (every device, its name, type and
   volume, and the active device's id) over librespot's dealer at
   `hm://connect-state/v1/cluster`, which the Spirc also hears. Each session
-  subscribes before its Spirc starts the dealer, and the last push is kept
-  until the connection drops. It costs no call, and it gives the snapshot's
-  `playing_on`.
-- **Until the first push the list is this device alone.** Spotify pushes
-  only on a change, and the cluster the Spirc gets back when it announces the
-  device stays inside the Spirc. `music_devices` reads the kept push; the
-  menu asks once when it opens. Offline devices are left out; Oculus is
+  subscribes before its Spirc starts the dealer, and the last cluster is
+  kept until the connection drops. It costs no call, and it gives the
+  snapshot's `playing_on`.
+- **The announce's answer fills it from the connect on.** Spotify pushes
+  only on a change, but it answers the Spirc's announce of the device (on
+  connect, and again on each dealer reconnect) with the whole cluster. The
+  vendored `Spirc::announced` hands that out
+  ([music.md](./music.md#librespot-is-pinned-to-a-dev-branch-commit)), and
+  `devices::follow_announced` folds it in exactly as a push
+  (`Fold::cluster`). `music_devices` reads the kept cluster; the menu asks
+  once when it opens. Offline devices are left out; Oculus is
   listed first, then the active device, then by name.
 - **A transfer to Oculus is a pull** then play, the same as "Play here"
   ([music.md](./music.md#commands-control-the-device-playing-wherever-it-is)).
-- **A push also carries the active device's player state**, which becomes
+- **A cluster also carries the active device's player state**, which becomes
   the snapshot's `remote` while that device is another one
   ([music.md](./music.md#the-snapshots-remote-is-the-other-devices-playback)).
   To another device it is `spclient().transfer(from, to)`, from the active
   device (or this one when none is): the request Spotify's own apps send. A
-  device the last push does not list cannot be chosen.
+  device the last cluster does not list cannot be chosen.
 
 ## Gotchas
 
@@ -320,7 +324,7 @@ its own.
 - Spotify pads search hits with `null` — parse hits as optional.
 - A search error that is not an HTTP status arrives as HTTP 200 with an `errors` array — check it before reading `data`.
 - `ListItems` has required fields — a test protobuf without `pos` and `truncated` will not encode.
-- The cluster arrives only on a change — the menu shows this device alone until the first push.
+- The cluster is pushed only on a change — the announce's answer (`Spirc::announced`) is what fills the list at connect.
 - A search endpoint carries the query — log a label, never the endpoint.
 - librespot finds `music_play_track`'s track by URI among the context's loaded tracks — one past a page the resolver has not loaded yet starts the playlist from its top.
 - Stock librespot sends no `SetQueue` on a move, a shuffle or a repeat, and a shuffled load's arrives unshuffled — the vendored Spirc sends one after each; never trim `up_next` on `TrackChanged`, which can arrive before or after it.

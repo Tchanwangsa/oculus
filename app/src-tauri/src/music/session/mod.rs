@@ -1,12 +1,19 @@
 //! The session task: one player, and a Session + Spirc pair rebuilt whenever
 //! the connection drops without a stop. A Session cannot be reused once its
 //! Spirc has ended (its dealer listeners stay registered), so each attempt
-//! gets a new one and the player is handed it. Backoff is 2 s doubling to
-//! 60 s, reset once a connection has lived a minute. An auth error stops the
-//! task with the reason in the snapshot: it is never retried in a loop.
+//! gets a new one and the player is handed it. A drop, or the Mac waking, is
+//! noticed within a second (`link.rs`) and reconnects at once; attempts that fail back off
+//! (`policy.rs`). What Oculus was playing at the drop is resumed once the new
+//! connection is up (`resume.rs`). An auth error stops the task with the
+//! reason in the snapshot: it is never retried in a loop.
+
+mod link;
+pub(super) mod policy;
+#[cfg(test)]
+mod tests;
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use librespot_connect::{ConnectConfig, Spirc};
 use librespot_core::authentication::Credentials;
@@ -17,19 +24,22 @@ use librespot_playback::config::PlayerConfig;
 use librespot_playback::mixer::{self, Mixer, MixerConfig};
 use librespot_playback::player::Player;
 use tauri::AppHandle;
-use tokio::sync::watch;
+use tokio::sync::{watch, Notify};
 
 use super::audio::{Note, Switching};
 use super::credentials::{self, Loaded, Saved};
-use super::state::{self, from_percent, DEVICE_NAME};
-use super::{devices, events, logs};
+use super::state::{self, from_percent, Begun, DEVICE_NAME};
+use super::{devices, events, logs, netwatch, resume};
 use crate::runtime::blocking;
+use link::Unlinked;
+use policy::{Backoff, Stamp};
 
-pub(super) const BACKOFF_MIN: Duration = Duration::from_secs(2);
-pub(super) const BACKOFF_MAX: Duration = Duration::from_secs(60);
-const STABLE_AFTER: Duration = Duration::from_secs(60);
 /// How long a stopped Spirc gets to pause playback and leave the device list.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+/// How long a dropped link's Spirc gets to clear its device state and close
+/// its dealer. Its requests may hang on a dead network, and the next attempt
+/// must not start before they land or they would clear the new link's state.
+const DROP_GRACE: Duration = Duration::from_secs(3);
 
 pub(super) enum Start {
     /// From the credentials keyd holds.
@@ -49,13 +59,15 @@ enum End {
 
 /// Starts the session task, unless one is running already (false).
 pub(super) fn start(app: &AppHandle, how: Start) -> bool {
-    let Some((id, stop)) = state::begin_run(app) else {
+    let Some(begun) = state::begin_run(app) else {
         return false;
     };
     logs::install(app);
+    netwatch::start(app);
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        match run(&app, id, how, stop).await {
+        let id = begun.id;
+        match run(&app, begun, how).await {
             End::Stopped => {}
             End::NeedsLogin(why) => state::end_run(&app, id, |s| {
                 s.set_idle();
@@ -69,10 +81,6 @@ pub(super) fn start(app: &AppHandle, how: Start) -> bool {
         }
     });
     true
-}
-
-pub(super) fn next_backoff(backoff: Duration) -> Duration {
-    (backoff * 2).min(BACKOFF_MAX)
 }
 
 fn is_auth_error(e: &Error) -> bool {
@@ -96,7 +104,8 @@ fn connect_config(volume: u8) -> ConnectConfig {
     }
 }
 
-async fn run(app: &AppHandle, id: u64, how: Start, stop: watch::Receiver<bool>) -> End {
+async fn run(app: &AppHandle, begun: Begun, how: Start) -> End {
+    let Begun { id, stop, wake } = begun;
     let (credentials, saved) = match how {
         Start::Stored => match blocking::run(credentials::load).await {
             Ok(Loaded::Saved(saved)) => (saved.credentials.clone(), Some(saved)),
@@ -106,6 +115,12 @@ async fn run(app: &AppHandle, id: u64, how: Start, stop: watch::Receiver<bool>) 
         },
         Start::Token(token) => (Credentials::with_access_token(token), None),
     };
+    // The stored account is known before Spotify answers: what it last
+    // played shows while connecting.
+    if let Some(account) = saved.as_ref().and_then(|s| s.credentials.username.clone()) {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move { resume::recall(&app, id, &account).await });
+    }
     let config = SessionConfig {
         device_id: saved
             .as_ref()
@@ -148,6 +163,7 @@ async fn run(app: &AppHandle, id: u64, how: Start, stop: watch::Receiver<bool>) 
         player: player.clone(),
         mixer,
         stop,
+        wake,
     };
     let end = link.connect(session, credentials, saved).await;
     // Player's Drop joins its thread.
@@ -162,6 +178,8 @@ struct Link<'a> {
     player: Arc<Player>,
     mixer: Arc<dyn Mixer>,
     stop: watch::Receiver<bool>,
+    /// `music_wake`'s nudge: check the link now, or cut a backoff short.
+    wake: Arc<Notify>,
 }
 
 impl Link<'_> {
@@ -173,7 +191,7 @@ impl Link<'_> {
     ) -> End {
         let (app, id) = (self.app, self.id);
         let mut fresh = true;
-        let mut backoff = BACKOFF_MIN;
+        let mut backoff = Backoff::default();
         loop {
             if *self.stop.borrow() {
                 return End::Stopped;
@@ -203,8 +221,10 @@ impl Link<'_> {
                 }
             };
 
-            match result {
+            let wait = match result {
                 Ok((spirc, task)) => {
+                    let announced = spirc.announced();
+                    devices::follow_announced(app, id, &session, announced.clone());
                     let username = session.username();
                     let reusable = Saved::stored(
                         username.clone(),
@@ -218,22 +238,27 @@ impl Link<'_> {
                     state::update_run(app, id, |s| {
                         s.connected = true;
                         s.connecting = false;
+                        s.reconnecting = false;
                         s.needs_login = false;
-                        s.account = Some(username);
+                        s.account = Some(username.clone());
                         s.error = None;
                     });
                     if saved.as_ref() != Some(&reusable) {
                         keep(app, id, reusable.clone());
                         saved = Some(reusable);
                     }
+                    tauri::async_runtime::spawn(resume::after_connect(
+                        app.clone(),
+                        id,
+                        username,
+                        session.session_id(),
+                        announced,
+                    ));
 
-                    let connected_at = Instant::now();
+                    let connected = Stamp::now();
                     tokio::pin!(task);
-                    let stopping = tokio::select! {
-                        _ = &mut task => false,
-                        _ = self.stop.changed() => true,
-                    };
-                    if stopping {
+                    let why = self.linked(&session, task.as_mut()).await;
+                    if why == Unlinked::Stopped {
                         // `stop_run` has sent the Spirc its shutdown.
                         if tokio::time::timeout(SHUTDOWN_GRACE, &mut task)
                             .await
@@ -244,25 +269,16 @@ impl Link<'_> {
                         session.shutdown();
                         return End::Stopped;
                     }
-
-                    state::set_link(app, id, None).ok();
-                    if connected_at.elapsed() >= STABLE_AFTER {
-                        backoff = BACKOFF_MIN;
-                    }
+                    let lived = connected.lived();
+                    let wait = backoff.after_drop(lived);
                     elog!(
-                        "[music] the Spotify connection dropped after {} s; reconnecting in {} s",
-                        connected_at.elapsed().as_secs(),
-                        backoff.as_secs()
+                        "[music] the Spotify connection dropped after {} s ({}); reconnecting {}",
+                        lived.as_secs(),
+                        why.reason(),
+                        when(wait)
                     );
-                    state::update_run(app, id, |s| {
-                        s.connected = false;
-                        s.connecting = true;
-                        s.set_unlinked();
-                        s.error = Some(format!(
-                            "Lost the connection to Spotify; reconnecting in {} s",
-                            backoff.as_secs()
-                        ));
-                    });
+                    self.unlink(&session, task, why).await;
+                    wait
                 }
                 Err(e) if is_auth_error(&e) => {
                     elog!("[music] Spotify refused the login: {e}");
@@ -272,26 +288,39 @@ impl Link<'_> {
                     )));
                 }
                 Err(e) => {
+                    let wait = backoff.after_failure();
                     elog!(
-                        "[music] connecting to Spotify failed: {e}; retrying in {} s",
-                        backoff.as_secs()
+                        "[music] connecting to Spotify failed: {e}; retrying {}",
+                        when(wait)
                     );
                     state::update_run(app, id, |s| {
                         s.connecting = true;
                         s.error = Some(format!(
                             "Could not connect to Spotify ({e}); retrying in {} s",
-                            backoff.as_secs()
+                            wait.as_secs()
                         ));
                     });
+                    wait
+                }
+            };
+
+            if !wait.is_zero() {
+                tokio::select! {
+                    _ = tokio::time::sleep(wait) => {}
+                    _ = self.wake.notified() => {}
+                    _ = self.stop.changed() => return End::Stopped,
                 }
             }
-
-            tokio::select! {
-                _ = tokio::time::sleep(backoff) => {}
-                _ = self.stop.changed() => return End::Stopped,
-            }
-            backoff = next_backoff(backoff);
         }
+    }
+}
+
+/// When the next attempt comes, for the log.
+fn when(wait: Duration) -> String {
+    if wait.is_zero() {
+        "now".into()
+    } else {
+        format!("in {} s", wait.as_secs())
     }
 }
 

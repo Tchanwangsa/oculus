@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use librespot_core::SpotifyUri;
 use librespot_playback::player::PlayerEvent;
 use librespot_protocol::authentication::AuthenticationType;
@@ -14,7 +12,6 @@ use super::events::apply;
 use super::login::{callback_outcome, LoginError};
 use super::logs::is_track_failure;
 use super::queue::{find, nth, without};
-use super::session::{next_backoff, BACKOFF_MAX, BACKOFF_MIN};
 use super::startup::{parse, Prefs};
 use super::state::{
     apply_cluster, from_percent, percent, up_next, NextTrack, Snapshot, INITIAL_VOLUME,
@@ -118,18 +115,6 @@ fn volume_converts_both_ways_and_clamps() {
         assert_eq!(percent(from_percent(p)), p);
     }
     assert_eq!(from_percent(200), u16::MAX);
-}
-
-#[test]
-fn backoff_doubles_from_two_seconds_to_a_minute() {
-    let mut d = BACKOFF_MIN;
-    let mut seen = vec![d.as_secs()];
-    for _ in 0..7 {
-        d = next_backoff(d);
-        seen.push(d.as_secs());
-    }
-    assert_eq!(seen, [2, 4, 8, 16, 32, 60, 60, 60]);
-    assert_eq!(BACKOFF_MAX, Duration::from_secs(60));
 }
 
 #[test]
@@ -260,7 +245,7 @@ fn a_new_device_starts_at_full_volume() {
 #[test]
 fn a_command_goes_here_to_the_other_device_or_pulls_by_where_playback_is() {
     use Need::*;
-    let all = [Pull, Control, NeverPull, Load, Queue, IfActive];
+    let all = [Pull, Control, Play, NeverPull, Load, Queue, IfActive];
     for need in all {
         assert_eq!(step(At::Here, need), Step::Send, "{need:?}");
     }
@@ -275,6 +260,7 @@ fn a_command_goes_here_to_the_other_device_or_pulls_by_where_playback_is() {
             Step::Remote,
             Step::Remote,
             Step::Remote,
+            Step::Remote,
             Step::Skip
         ]
     );
@@ -284,12 +270,22 @@ fn a_command_goes_here_to_the_other_device_or_pulls_by_where_playback_is() {
         [
             Step::PullThenSend,
             Step::PullThenSend,
+            Step::PullThenSend,
             Step::Skip,
             Step::ActivateThenSend,
             Step::Refuse,
             Step::Skip
         ]
     );
+    // With what Oculus last played on show, Play plays it here; everything
+    // else goes as with nothing shown.
+    for need in all {
+        let expected = match need {
+            Play => Step::Restore,
+            other => step(At::Nowhere, other),
+        };
+        assert_eq!(step(At::Remembered, need), expected, "{need:?}");
+    }
     assert_eq!(QUEUE_REFUSAL, "Play something first, then add to the queue");
 }
 
@@ -671,4 +667,92 @@ fn oculus_names_an_up_next_entry_by_its_uri_and_which_of_its_tracks_it_is() {
     // The entry moved or the list ended: the first track with that URI.
     assert_eq!(nth(&up, T2, 3), 0);
     assert_eq!(nth(&up, T1, 9), 0);
+}
+
+#[test]
+fn a_resume_loads_the_track_in_its_context_at_its_place_and_modes() {
+    use super::last_played::LastPlayed;
+    use super::resume::request;
+    use super::state::Track;
+    use librespot_connect::{LoadContextOptions, PlayingTrack};
+
+    let mut row = LastPlayed {
+        account: "alice".into(),
+        context_uri: Some("spotify:playlist:x".into()),
+        track: Track {
+            uri: "spotify:track:a".into(),
+            name: "A".into(),
+            artists: vec![],
+            album: String::new(),
+            cover_url: None,
+            duration_ms: 200_000,
+        },
+        position_ms: 61_000,
+        saved_at_ms: 0,
+        shuffle: true,
+        repeat_context: true,
+        repeat_track: false,
+    };
+    let load = request(&row, false);
+    assert!(!load.start_playing);
+    assert_eq!(load.seek_to, 61_000);
+    assert!(matches!(&load.playing_track, Some(PlayingTrack::Uri(u)) if u == "spotify:track:a"));
+    assert!(matches!(
+        &load.context_options,
+        Some(LoadContextOptions::Options(o)) if o.shuffle && o.repeat && !o.repeat_track
+    ));
+    assert!(format!("{load:?}").contains("Uri(\"spotify:playlist:x\")"));
+    assert!(request(&row, true).start_playing);
+
+    // No context, or the track as its own context: the track alone.
+    for context in [None, Some("spotify:track:a".to_string())] {
+        row.context_uri = context;
+        let load = request(&row, true);
+        assert!(load.playing_track.is_none());
+        assert!(format!("{load:?}").contains("Tracks([\"spotify:track:a\"])"));
+    }
+}
+
+#[test]
+fn the_announce_answer_decides_whether_a_resume_loads() {
+    use super::resume::{decide, Decision};
+    use librespot_protocol::connect::{Cluster, DeviceInfo};
+    use librespot_protocol::player::PlayerState;
+
+    let with_active = |active: &str, name: &str| {
+        let mut cluster = Cluster::new();
+        cluster.active_device_id = active.into();
+        let mut info = DeviceInfo::new();
+        info.name = name.into();
+        cluster.device.insert(active.into(), info);
+        cluster
+    };
+    assert_eq!(
+        decide(&with_active("phone", "iPhone"), "own", "s2"),
+        Decision::Elsewhere("iPhone".into())
+    );
+    assert_eq!(
+        decide(&with_active("phone", ""), "own", "s2"),
+        Decision::Elsewhere("another device".into())
+    );
+    // Spotify still naming this device active is no other device.
+    assert_eq!(
+        decide(&with_active("own", "Oculus"), "own", "s2"),
+        Decision::Resume
+    );
+    assert_eq!(decide(&Cluster::new(), "own", "s2"), Decision::Resume);
+
+    // Nothing active with transfer data: librespot takes it over itself when
+    // the player state's session is this one or unnamed, never an old one.
+    let transfer = |session_id: &str| {
+        let mut cluster = Cluster::new();
+        cluster.transfer_data = vec![1, 2, 3];
+        let mut player = PlayerState::new();
+        player.session_id = session_id.into();
+        cluster.player_state = Some(player).into();
+        cluster
+    };
+    assert_eq!(decide(&transfer(""), "own", "s2"), Decision::TakenOver);
+    assert_eq!(decide(&transfer("s2"), "own", "s2"), Decision::TakenOver);
+    assert_eq!(decide(&transfer("s1"), "own", "s2"), Decision::Resume);
 }

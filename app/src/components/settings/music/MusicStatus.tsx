@@ -5,9 +5,10 @@ import { StatRow } from "@/components/settings/shared/section";
 import { music, type MusicSnapshot } from "@/lib/music";
 import { cn } from "@/lib/utils";
 
-type Status = "connected" | "connecting" | "signed-out" | "failed" | "idle";
+type Status = "connected" | "reconnecting" | "connecting" | "signed-out" | "failed" | "idle";
 
 function statusOf(s: MusicSnapshot): Status {
+  if (s.reconnecting) return "reconnecting";
   if (s.connecting) return "connecting";
   if (s.connected) return "connected";
   if (s.needs_login) return "signed-out";
@@ -16,6 +17,7 @@ function statusOf(s: MusicSnapshot): Status {
 
 const DOT: Record<Status, string> = {
   connected: "bg-success",
+  reconnecting: "bg-warning animate-pulse",
   connecting: "bg-warning animate-pulse",
   "signed-out": "bg-muted-foreground/40",
   failed: "bg-destructive",
@@ -32,6 +34,7 @@ export function MusicStatus({ snapshot }: { snapshot: MusicSnapshot }) {
   const status = statusOf(snapshot);
   const text: Record<Status, string> = {
     connected: `Connected as ${snapshot.account ?? "your account"}`,
+    reconnecting: "Reconnecting…",
     connecting: "Connecting…",
     "signed-out": "Not signed in",
     failed: "Stopped by the error below",

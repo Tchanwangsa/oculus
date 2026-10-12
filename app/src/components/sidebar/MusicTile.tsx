@@ -3,20 +3,21 @@ import { CircleNotch, MusicNotes } from "@phosphor-icons/react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NowPlaying } from "@/components/music/NowPlaying";
-import { shownPlayback } from "@/lib/music";
+import { music, shownPlayback } from "@/lib/music";
 import { openBeside } from "@/lib/shell/tabRouters";
 import { cn } from "@/lib/utils";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
 import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
-import { useActivePath } from "@/stores/shell/tabStore";
+import { useActivePath, useTabStore } from "@/stores/shell/tabStore";
 import { railButton, railIdle } from "./RailItem";
 
 /**
  * Spotify in the rail's group after the sections: the album cover (or a
  * note) of what the player shows — Oculus, or the device playing elsewhere —
  * with the rail's corner marks: a spinner while connecting, a brand dot
- * while playing. A popover player opens to its right. Only while
- * `useMusicTileShown`; otherwise nothing at all.
+ * while playing. A popover player opens to its right, and opening it sends
+ * `music.wake` so a connection that died meanwhile is made again at once.
+ * Only while `useMusicTileShown`; otherwise nothing at all.
  */
 export function MusicTile() {
   const shown = useMusicTileShown();
@@ -28,7 +29,8 @@ export function MusicTile() {
 
   if (!shown || !snapshot) return null;
   const { track, playing } = shownPlayback(snapshot);
-  const label = track ? `${track.name} · ${track.artists.join(", ")}` : "Music";
+  const named = track ? `${track.name} · ${track.artists.join(", ")}` : "Music";
+  const label = snapshot.reconnecting ? `${named} · Reconnecting…` : named;
   const indicator = snapshot.connecting ? (
     <CircleNotch size={10} weight="bold" className="animate-spin text-brand" />
   ) : playing ? (
@@ -37,7 +39,13 @@ export function MusicTile() {
   ) : null;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) music.wake().catch(() => {});
+      }}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
@@ -70,9 +78,10 @@ export function MusicTile() {
         <NowPlaying
           snapshot={snapshot}
           error={error}
-          onOpenPlayer={() => {
+          onOpenPlayer={(newTab) => {
             setOpen(false);
-            openBeside("/music");
+            if (newTab) useTabStore.getState().addTab("/music");
+            else openBeside("/music");
           }}
         />
       </PopoverContent>

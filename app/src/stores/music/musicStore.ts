@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { MusicSnapshot } from "@/lib/music";
 
-/** A mirror of Rust's music snapshot (`app/src-tauri/src/music/state.rs`),
+/** A mirror of Rust's music snapshot (`app/src-tauri/src/music/state/`),
  *  fed by `useMusicState`, plus the last playback command that failed (the
  *  snapshot's `error` is Rust's own). */
 interface MusicState {

@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { shownPlayback, type MusicSnapshot } from "@/lib/music";
 import { MusicCover } from "./MusicCover";
+import { connectingTitle, MusicNotice } from "./MusicNotice";
 import { MusicSeek } from "./MusicSeek";
 import { MusicTransport } from "./MusicTransport";
 import { PlayingElsewhere } from "./PlayingElsewhere";
@@ -25,7 +26,8 @@ export function NowPlaying({
 }: {
   snapshot: MusicSnapshot;
   error: string | null;
-  onOpenPlayer: () => void;
+  /** `newTab` is a ⌘-click: the player as a tab of its own, not beside the page. */
+  onOpenPlayer: (newTab: boolean) => void;
 }) {
   const { track, device } = shownPlayback(snapshot);
   return (
@@ -34,7 +36,7 @@ export function NowPlaying({
         <MusicCover url={track?.cover_url} className="size-12 rounded-md" />
         <div className="min-w-0">
           <p className="truncate text-[13px] font-medium text-foreground">
-            {track?.name ?? (snapshot.connecting ? "Connecting…" : nothingNamed(device))}
+            {track?.name ?? connectingTitle(snapshot) ?? nothingNamed(device)}
           </p>
           <p className="truncate text-xs text-muted-foreground">
             {track ? track.artists.join(", ") : device ? "" : NOTHING_PLAYING_HINT}
@@ -45,8 +47,8 @@ export function NowPlaying({
       <MusicTransport snapshot={snapshot} />
       <VolumeRow snapshot={snapshot} />
       <PlayingElsewhere snapshot={snapshot} />
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      <Button variant="ghost" size="xs" className="self-center" onClick={onOpenPlayer}>
+      <MusicNotice snapshot={snapshot} error={error} />
+      <Button variant="ghost" size="xs" className="self-center" onClick={(e) => onOpenPlayer(e.metaKey || e.ctrlKey)}>
         Open player
       </Button>
     </div>

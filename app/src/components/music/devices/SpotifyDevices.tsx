@@ -7,7 +7,7 @@ import { MenuGroup } from "./MenuGroup";
 /**
  * The account's Spotify Connect devices, the active one checked; a click
  * moves playback there. Read once when the menu opens from the device list
- * Spotify last pushed, which lists only this Mac until the first push.
+ * Spotify last sent: its answer to the connect, then each push.
  */
 export function SpotifyDevices({ onMoved }: { onMoved: () => void }) {
   const [devices, setDevices] = useState<MusicDevice[] | null>(null);
