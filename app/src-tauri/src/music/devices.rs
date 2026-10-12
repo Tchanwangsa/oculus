@@ -3,10 +3,11 @@
 //! - **The list is the Connect cluster** Spotify pushes over librespot's
 //!   dealer (`hm://connect-state/v1/cluster`, which the Spirc also hears):
 //!   free, and never rate-limited. Each session subscribes once, and the last
-//!   push is kept until the connection drops. Spotify pushes only on a
-//!   change, and the cluster the Spirc gets back when it announces the device
-//!   stays inside the Spirc, so until the first push the list is this device
-//!   alone. A push also carries the active device's next tracks and context,
+//!   cluster is kept until the connection drops. Spotify pushes only on a
+//!   change, so the cluster it answers the Spirc's announce with (on connect
+//!   and on each dealer reconnect, handed out by the vendored
+//!   `Spirc::announced`) is folded in the same way: the list is whole from
+//!   the connect on. A cluster also carries the active device's next tracks and context,
 //!   for the snapshot's `up_next` and `context_uri` and for skipping to or
 //!   removing a track (`queue.rs`), and, when that device is another one,
 //!   what it plays, for the snapshot's `remote` (`remote/playback.rs`).
@@ -20,6 +21,7 @@ use librespot_core::Session;
 use librespot_protocol::connect::{Cluster as ClusterProto, ClusterUpdate};
 use serde::Serialize;
 use tauri::AppHandle;
+use tokio::sync::watch;
 
 use super::control;
 use super::queue::Queue;
@@ -161,22 +163,14 @@ pub(super) fn listen(app: &AppHandle, id: u64, session: &Session) {
             return;
         }
     };
-    let app = app.clone();
-    let session_id = session.session_id();
-    let own_id = session.device_id().to_string();
-    let account = session.username();
+    let mut fold = Fold::new(app, id, session);
     tauri::async_runtime::spawn(async move {
         let mut updates = updates;
-        let mut asked = None;
         while let Some(update) = updates.next().await {
             match update {
                 Ok(update) => {
                     if let Some(cluster) = update.cluster.as_ref() {
-                        let mut cluster = from_cluster(cluster, &own_id);
-                        if let Some(remote) = cluster.remote.as_mut() {
-                            remote::describe(&app, id, &account, remote, &mut asked);
-                        }
-                        state::set_cluster(&app, id, &session_id, cluster);
+                        fold.cluster(cluster);
                     }
                 }
                 Err(e) => elog!("[music] unreadable Connect cluster update: {e}"),
@@ -185,8 +179,64 @@ pub(super) fn listen(app: &AppHandle, id: u64, session: &Session) {
     });
 }
 
-/// The devices of the last pushed cluster, or this device alone before the
-/// first push.
+/// Folds in the cluster Spotify answers each of the Spirc's announces with,
+/// as a push is folded in, so the list, `remote`, `up_next` and
+/// `context_uri` are right from the connect on. Ends with the Spirc's task.
+pub(super) fn follow_announced(
+    app: &AppHandle,
+    id: u64,
+    session: &Session,
+    mut announced: watch::Receiver<Option<ClusterProto>>,
+) {
+    let mut fold = Fold::new(app, id, session);
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let cluster = announced.borrow_and_update().clone();
+            if let Some(cluster) = cluster {
+                fold.cluster(&cluster);
+            }
+            if announced.changed().await.is_err() {
+                return;
+            }
+        }
+    });
+}
+
+/// One session's way of taking a cluster into the snapshot: pushed or
+/// announced alike.
+struct Fold {
+    app: AppHandle,
+    id: u64,
+    session_id: String,
+    own_id: String,
+    account: String,
+    /// The track `remote::describe` last asked a row for.
+    asked: Option<String>,
+}
+
+impl Fold {
+    fn new(app: &AppHandle, id: u64, session: &Session) -> Self {
+        Self {
+            app: app.clone(),
+            id,
+            session_id: session.session_id(),
+            own_id: session.device_id().to_string(),
+            account: session.username(),
+            asked: None,
+        }
+    }
+
+    fn cluster(&mut self, cluster: &ClusterProto) {
+        let mut cluster = from_cluster(cluster, &self.own_id);
+        if let Some(remote) = cluster.remote.as_mut() {
+            remote::describe(&self.app, self.id, &self.account, remote, &mut self.asked);
+        }
+        state::set_cluster(&self.app, self.id, &self.session_id, cluster);
+    }
+}
+
+/// The devices of the last cluster, or this device alone before the
+/// connect's answer.
 pub(super) fn list(app: &AppHandle) -> Result<Vec<Device>, String> {
     let session = state::session(app).ok_or("Not connected to Spotify")?;
     let own_id = session.device_id().to_string();

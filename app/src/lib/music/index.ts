@@ -300,8 +300,8 @@ export const music = {
   search: (query: string) => invoke<MusicSearchResults>("music_search", { query }),
   searchMore: (query: string, kind: MusicSearchKind, offset: number) =>
     invoke<MusicSearchPage>("music_search_more", { query, kind, offset }),
-  /** The account's Connect devices from Spotify's last pushed list; only
-   *  this device until the first push. Costs no call. */
+  /** The account's Connect devices from the list Spotify last sent (its
+   *  answer to the connect, then each push). Costs no call. */
   devices: () => invoke<MusicDevice[]>("music_devices"),
   /** Moves playback to the device and plays; this device's id pulls it here. */
   transfer: (deviceId: string) => invoke("music_transfer", { deviceId }),

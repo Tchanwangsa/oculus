@@ -478,8 +478,8 @@ pub async fn music_search_more(
     Ok(library::search_page(&app, &query, kind, offset).await?)
 }
 
-/// The account's Connect devices from the last pushed cluster; only this
-/// device until the first push.
+/// The account's Connect devices from the last cluster, announced or pushed;
+/// only this device before the connect's answer.
 #[tauri::command]
 pub fn music_devices(app: AppHandle) -> Result<Vec<Device>, String> {
     devices::list(&app)

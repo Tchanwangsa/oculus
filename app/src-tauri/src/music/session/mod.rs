@@ -222,6 +222,8 @@ impl Link<'_> {
 
             let wait = match result {
                 Ok((spirc, task)) => {
+                    let announced = spirc.announced();
+                    devices::follow_announced(app, id, &session, announced.clone());
                     let username = session.username();
                     let reusable = Saved::stored(
                         username.clone(),
@@ -249,6 +251,7 @@ impl Link<'_> {
                         id,
                         username,
                         session.session_id(),
+                        announced,
                     ));
 
                     let connected = Stamp::now();

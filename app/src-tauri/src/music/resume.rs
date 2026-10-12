@@ -4,21 +4,55 @@
 //! position with its modes, playing or paused. Queued tracks are not kept:
 //! the load starts the context afresh.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use librespot_connect::{
     LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack,
 };
+use librespot_protocol::connect::Cluster;
 use tauri::AppHandle;
+use tokio::sync::watch;
 
-use super::control;
 use super::last_played::{self, LastPlayed};
 use super::state;
 use crate::runtime::blocking;
 
-/// How long a resume waits for the first Connect cluster push after a
-/// reconnect, to see whether another device took playback meanwhile.
-const CLUSTER_WAIT: Duration = Duration::from_secs(2);
+/// A safety cap on waiting for the announce's answer, which normally comes
+/// within a second of the connect: the wait also ends with the Spirc's task.
+const ANNOUNCE_CAP: Duration = Duration::from_secs(15);
+
+/// What the announce's answer says of a waiting resume.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Decision {
+    Resume,
+    /// Another device is playing: playback is not taken back from it.
+    Elsewhere(String),
+    /// librespot takes the answer's transfer state over by itself (nothing
+    /// active, transfer data, and the player state's session ours or
+    /// unnamed): a resume would load over it.
+    TakenOver,
+}
+
+/// The decision for a resume on the session `session_id` of the device
+/// `own_id`, from the cluster Spotify answered its announce with.
+pub(super) fn decide(cluster: &Cluster, own_id: &str, session_id: &str) -> Decision {
+    let active = cluster.active_device_id.as_str();
+    if !active.is_empty() && active != own_id {
+        let name = cluster
+            .device
+            .get(active)
+            .map(|d| d.name.clone())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| "another device".into());
+        return Decision::Elsewhere(name);
+    }
+    let theirs = cluster.player_state.session_id.as_str();
+    let same_session = theirs == session_id || theirs.is_empty();
+    if active.is_empty() && same_session && !cluster.transfer_data.is_empty() {
+        return Decision::TakenOver;
+    }
+    Decision::Resume
+}
 
 /// The load for `row`: its context at its track, or the track alone when the
 /// context is none or is the track itself.
@@ -53,34 +87,54 @@ pub(super) fn restore(app: &AppHandle, row: &LastPlayed, play: bool) -> Result<(
 }
 
 /// After run `id` connects as `account` on the session `session_id`: shows
-/// the remembered row when nothing is shown, then resumes what the drop
-/// interrupted unless another device took playback meanwhile. A session
-/// that drops meanwhile leaves the resume to the next one.
-pub(super) async fn after_connect(app: AppHandle, id: u64, account: String, session_id: String) {
+/// the remembered row when nothing is shown, then, once Spotify has answered
+/// the Spirc's announce (`announced`), resumes what the drop interrupted
+/// unless that answer says another device plays. A session that drops or
+/// stops first leaves the resume to the next one.
+pub(super) async fn after_connect(
+    app: AppHandle,
+    id: u64,
+    account: String,
+    session_id: String,
+    mut announced: watch::Receiver<Option<Cluster>>,
+) {
     recall(&app, id, &account).await;
     if !state::resume_pending(&app, id) {
         return;
     }
-    let waited = Instant::now();
-    while state::cluster(&app).is_none() && waited.elapsed() < CLUSTER_WAIT {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    let current = state::session(&app).is_some_and(|s| s.session_id() == session_id);
-    if !current {
+    let cluster = match tokio::time::timeout(ANNOUNCE_CAP, announced.wait_for(Option::is_some))
+        .await
+    {
+        Ok(Ok(cluster)) => cluster.clone(),
+        // The Spirc's task ended: a stop, or the session dropped.
+        Ok(Err(_)) => return,
+        Err(_) => {
+            elog!("[music] Spotify did not answer the device's announce within 15 s; not resuming yet");
+            return;
+        }
+    };
+    let Some(cluster) = cluster else {
         return;
-    }
+    };
+    let Some(session) = state::session(&app).filter(|s| s.session_id() == session_id) else {
+        return;
+    };
     let Some((row, play)) = state::take_resume(&app, id) else {
         return;
     };
     if state::active(&app) != Some(false) {
         return;
     }
-    if let Some(device) = control::other_device(&app) {
-        elog!(
-            "[music] {} took playback while reconnecting; not resuming here",
-            device.name
-        );
-        return;
+    match decide(&cluster, session.device_id(), &session_id) {
+        Decision::Resume => {}
+        Decision::Elsewhere(device) => {
+            elog!("[music] {device} took playback while reconnecting; not resuming here");
+            return;
+        }
+        Decision::TakenOver => {
+            elog!("[music] librespot took over Spotify's transfer state; not resuming over it");
+            return;
+        }
     }
     if let Err(why) = restore(&app, &row, play) {
         elog!("[music] could not resume after reconnecting: {why}");

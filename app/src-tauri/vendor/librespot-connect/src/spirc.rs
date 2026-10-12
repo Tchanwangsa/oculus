@@ -42,7 +42,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
-use tokio::{sync::mpsc, time::sleep};
+use tokio::{
+    sync::{mpsc, watch},
+    time::sleep,
+};
 
 #[derive(Debug, Error)]
 enum SpircError {
@@ -72,6 +75,9 @@ impl From<SpircError> for Error {
 struct SpircTask {
     player: Arc<Player>,
     mixer: Arc<dyn Mixer>,
+
+    /// The cluster Spotify answers each announce with (Oculus addition).
+    announced: watch::Sender<Option<Cluster>>,
 
     /// the state management object
     connect_state: ConnectState,
@@ -151,6 +157,7 @@ const UPDATE_STATE_DELAY: Duration = Duration::from_millis(200);
 /// The spotify connect handle
 pub struct Spirc {
     commands: mpsc::UnboundedSender<SpircCommand>,
+    announced: watch::Receiver<Option<Cluster>>,
 }
 
 impl Spirc {
@@ -231,9 +238,13 @@ impl Spirc {
 
         let player_events = player.get_player_event_channel();
 
+        let (announced_tx, announced) = watch::channel(None);
+
         let mut task = SpircTask {
             player,
             mixer,
+
+            announced: announced_tx,
 
             connect_state,
             connect_established: false,
@@ -267,7 +278,10 @@ impl Spirc {
             spirc_id,
         };
 
-        let spirc = Spirc { commands: cmd_tx };
+        let spirc = Spirc {
+            commands: cmd_tx,
+            announced,
+        };
 
         let initial_volume = task.connect_state.device_info().volume;
         task.connect_state.set_volume(0);
@@ -283,6 +297,14 @@ impl Spirc {
         };
 
         Ok((spirc, task.run()))
+    }
+
+    /// The cluster Spotify answered the device's announce with, on connect
+    /// and again on every dealer reconnect: the active device, the device
+    /// list and the player state. `None` until the first announce; the
+    /// sender closes when the Spirc's task ends (Oculus addition).
+    pub fn announced(&self) -> watch::Receiver<Option<Cluster>> {
+        self.announced.clone()
     }
 
     /// Safely shutdowns the spirc.
@@ -952,6 +974,7 @@ impl SpircTask {
             }
         }
         .ok_or(SpircError::FailedDealerSetup)?;
+        self.announced.send_replace(Some(cluster.clone()));
 
         debug!(
             "successfully put connect state for {} with connection-id {connection_id}",

@@ -181,7 +181,7 @@ pub(super) async fn play_here(app: &AppHandle) -> Result<(), String> {
 }
 
 /// The active device from the last cluster push, when it is another one.
-pub(super) fn other_device(app: &AppHandle) -> Option<remote::Device> {
+fn other_device(app: &AppHandle) -> Option<remote::Device> {
     let own_id = state::session(app)?.device_id().to_string();
     let cluster = state::cluster(app)?;
     if cluster.active_id.is_empty() || cluster.active_id == own_id {

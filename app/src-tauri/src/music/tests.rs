@@ -712,3 +712,47 @@ fn a_resume_loads_the_track_in_its_context_at_its_place_and_modes() {
         assert!(format!("{load:?}").contains("Tracks([\"spotify:track:a\"])"));
     }
 }
+
+#[test]
+fn the_announce_answer_decides_whether_a_resume_loads() {
+    use super::resume::{decide, Decision};
+    use librespot_protocol::connect::{Cluster, DeviceInfo};
+    use librespot_protocol::player::PlayerState;
+
+    let with_active = |active: &str, name: &str| {
+        let mut cluster = Cluster::new();
+        cluster.active_device_id = active.into();
+        let mut info = DeviceInfo::new();
+        info.name = name.into();
+        cluster.device.insert(active.into(), info);
+        cluster
+    };
+    assert_eq!(
+        decide(&with_active("phone", "iPhone"), "own", "s2"),
+        Decision::Elsewhere("iPhone".into())
+    );
+    assert_eq!(
+        decide(&with_active("phone", ""), "own", "s2"),
+        Decision::Elsewhere("another device".into())
+    );
+    // Spotify still naming this device active is no other device.
+    assert_eq!(
+        decide(&with_active("own", "Oculus"), "own", "s2"),
+        Decision::Resume
+    );
+    assert_eq!(decide(&Cluster::new(), "own", "s2"), Decision::Resume);
+
+    // Nothing active with transfer data: librespot takes it over itself when
+    // the player state's session is this one or unnamed, never an old one.
+    let transfer = |session_id: &str| {
+        let mut cluster = Cluster::new();
+        cluster.transfer_data = vec![1, 2, 3];
+        let mut player = PlayerState::new();
+        player.session_id = session_id.into();
+        cluster.player_state = Some(player).into();
+        cluster
+    };
+    assert_eq!(decide(&transfer(""), "own", "s2"), Decision::TakenOver);
+    assert_eq!(decide(&transfer("s2"), "own", "s2"), Decision::TakenOver);
+    assert_eq!(decide(&transfer("s1"), "own", "s2"), Decision::Resume);
+}

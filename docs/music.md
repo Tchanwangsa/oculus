@@ -164,6 +164,12 @@ new `connect/` over it) must carry across:
 - **Previous with no previous track seeks to zero** instead of stopping
   (`handle_prev`, with `has_prev_track` in `state/tracks.rs`); with the
   context repeating it plays the context's first track.
+- **`Spirc::announced`**: a `watch` receiver of the `Cluster` Spotify
+  answers each announce with (`handle_connection_id_update`, on connect and
+  on every dealer reconnect), which stock librespot parses and keeps to
+  itself. It feeds the device list
+  ([music-library.md](./music-library.md#the-device-list-is-spotifys-pushed-cluster))
+  and the resume after a reconnect.
 
 librespot's `Cache` is never constructed: no `credentials.json`, no audio file
 cache, no volume file. While a track streams, librespot buffers it in a
@@ -251,10 +257,16 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
 7. **What Oculus was playing resumes.** When Oculus was the device playing
    at the drop (or stopped being it under 30 s before: a Spirc that ends by
    itself says it disconnected before its task ends), the new connection
-   waits up to 2 s for its first cluster push, then, unless that push names
-   another device playing or Oculus is active again, activates and loads the track in its context at its position,
-   with its shuffle and repeat, playing if it was playing and paused
-   otherwise (`resume.rs`). A pause from the player or the exclusive rule
+   waits for Spotify's answer to the Spirc's announce of the device (the
+   whole cluster, from `Spirc::announced`; the wait ends with the Spirc's
+   task, and gives up after 15 s with a log line). `resume::decide` then
+   reads it: another device active means no resume; nothing active with
+   transfer data that librespot takes over by itself (the player state's
+   session this one or unnamed) means no resume either, so the two never
+   both load. Otherwise, unless Oculus is active again by then, it
+   activates and loads the track in its context at its position, with its
+   shuffle and repeat, playing if it was playing and paused otherwise
+   (`resume.rs`). A pause from the player or the exclusive rule
    while it reconnects makes it load paused. Tracks added to the queue are
    lost: the load starts the context afresh. Nothing is taken back from
    another device.
@@ -305,8 +317,8 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
 After a phone or the desktop app takes playback, librespot's Spirc drops
 every command but `activate` and `transfer` ("will be ignored while Not
 Active"). So `control.rs` first finds where playback is — here (the
-snapshot's `active`), on another device (the last cluster push names an
-active device that is not this one), or nowhere — and `control::step`, a
+snapshot's `active`), on another device (the last cluster, announced or
+pushed, names an active device that is not this one), or nowhere — and `control::step`, a
 pure function, picks what the command does:
 
 | Command | Here | Another device plays | Nothing plays |
@@ -372,7 +384,8 @@ stays up.
 
 ### The snapshot's `remote` is the other device's playback
 
-While another device is active, each cluster push sets `remote` from its
+While another device is active, each cluster (the connect's answer, then
+each push) sets `remote` from its
 player state (`remote/playback.rs`): the device's name, the track,
 `position_as_of_timestamp` at `timestamp` as `position_ms` and
 `position_at_ms`, `playing` (playing and not paused), shuffle, repeat
@@ -508,7 +521,7 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_duck(level?)` | A level ducks to that share of the kept volume; null restores it; nothing while inactive |
 | `music_playlists(refresh)`, `music_search(query)`, `music_search_more(query, kind, offset)` | The playlists, kept until `refresh`; up to ten each of tracks, artists, albums and playlists; a page of 20 of one kind and the next offset ([music-library.md](./music-library.md)) |
 | `music_playlist_covers(uris)`, `music_playlist_tracks(uri)`, `music_album_tracks(uri)`, `music_tracks(uris)` | Covers made for playlists without one; a playlist's or album's track URIs; track rows by URI ([music-library.md](./music-library.md)) |
-| `music_devices()`, `music_transfer(device_id)` | Connect devices from the last push; move playback and play ([music-library.md](./music-library.md#the-device-list-is-spotifys-pushed-cluster)) |
+| `music_devices()`, `music_transfer(device_id)` | Connect devices from the last cluster; move playback and play ([music-library.md](./music-library.md#the-device-list-is-spotifys-pushed-cluster)) |
 | `music_outputs()`, `music_set_output(name?)` | This Mac's outputs, the default marked; choose one, null for the system default |
 
 Playback and library commands fail with "Not connected to Spotify" without a
