@@ -1,6 +1,7 @@
 //! Transcripts and video downloads, and where they live on disk.
 
 use super::{Session, SourceNum};
+use crate::runtime::stream::CANCELLED;
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -58,11 +59,8 @@ pub fn download_url(
     }
 }
 
-/// The error `stream_to_file` returns when `should_cancel` stopped it.
-pub const CANCELLED: &str = "cancelled";
-
 /// Stream `url` to `dest`, reporting whole-percent progress; `should_cancel`
-/// is polled per 64 KB chunk.
+/// is polled per 64 KB chunk and ends it with [`CANCELLED`].
 pub fn stream_to_file(
     url: &str,
     dest: &Path,

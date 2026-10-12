@@ -28,7 +28,7 @@ fn prelude_globals() -> BTreeSet<String> {
     ctx.with(|c| {
         let before = global_names(&c);
         runtime::install(&c, &prelude).unwrap();
-        runtime::install_closest(&c).unwrap();
+        runtime::install_natives(&c).unwrap();
         global_names(&c)
             .difference(&before)
             .filter(|n| !n.starts_with(INTERNAL_PREFIX))

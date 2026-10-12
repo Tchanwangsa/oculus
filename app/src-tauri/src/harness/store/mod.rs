@@ -7,7 +7,10 @@ mod items;
 mod naming;
 mod threads;
 
+#[cfg(test)]
+mod tests;
+
 pub use apply::apply;
 pub use items::{newest_anchor, truncate_from, user_item, Question};
-pub use naming::{claim_naming, reconcile, save_rate_limits, NamingSeed};
+pub use naming::{claim_naming, reconcile, save_rate_limits, NamingSeed, Reconciled};
 pub use threads::{create_thread, delete_thread, set_model, thread, LectureRef, ThreadRow};

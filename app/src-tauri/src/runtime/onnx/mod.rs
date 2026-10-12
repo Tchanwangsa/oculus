@@ -7,5 +7,7 @@
 mod pack;
 mod session;
 
-pub use pack::{cancel, delete, download, downloading, is_present, Pack, PackFile, CANCELLED};
+pub use pack::{
+    cancel, delete, download, downloading, is_present, status, Pack, PackFile, Status, CANCELLED,
+};
 pub use session::{intra_threads, session};

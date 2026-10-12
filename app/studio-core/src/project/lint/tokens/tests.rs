@@ -7,7 +7,7 @@ use crate::theme::Theme;
 
 fn messages(src: &str) -> Vec<String> {
     let theme = Theme::bundled("default").unwrap();
-    check("Card", src, &theme)
+    check("Card", src, &theme, &[])
         .iter()
         .map(|e| match e {
             StudioError::Component { message, .. } => message.clone(),
@@ -31,6 +31,8 @@ fn functional_and_named_colours_are_literals() {
         r##"const a = { fill: "oklch(0.7 0.1 200)" };"##,
         r##"const a = { color: "white" };"##,
         r##"const a = { color: "#fff" };"##,
+        r##"const a = { note: "hsl(200 50% 50%)" };"##,
+        r##"export default () => <Text>{"#5e6ad2"}</Text>;"##,
     ] {
         assert_eq!(messages(src).len(), 1, "{src}");
     }
@@ -126,10 +128,104 @@ fn a_numeric_prop_outside_style_is_not_checked() {
 fn the_position_is_the_literal_itself() {
     let theme = Theme::bundled("default").unwrap();
     let src = "export default () => (\n  <Box style={{ fill: \"#5e6ad3\" }} />\n);";
-    let errs = check("Card", src, &theme);
+    let errs = check("Card", src, &theme, &[]);
     let StudioError::Component { loc: Some(loc), .. } = &errs[0] else {
         panic!("{errs:?}")
     };
     assert_eq!((loc.line, loc.col), (2, 24), "{loc:?}");
     assert!(loc.snippet.contains("#5e6ad3"));
+}
+
+fn with_props(src: &str, colour_props: &[&str]) -> Vec<String> {
+    let theme = Theme::bundled("default").unwrap();
+    let props: Vec<String> = colour_props.iter().map(|p| (*p).to_owned()).collect();
+    check("Card", src, &theme, &props)
+        .iter()
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[test]
+fn a_colour_name_is_a_literal_only_where_a_colour_goes() {
+    for src in [
+        r##"export default () => <Box style={{ color: "purple" }} />;"##,
+        r##"export default () => <Box style={{ padding: 5, fill: on ? x : "gold" }} />;"##,
+        r##"export default () => <Box style={{ border: { width: 2, color: "red" } }} />;"##,
+        r##"export default () => <Box style={{ shadow: { y: 2, color: "black" } }} />;"##,
+        r##"const f = { linear: { angle: 90, stops: [[0, "red"], [1, "blue"]] } };"##,
+        r##"export default () => <Path d="M0 0" fill="orange" />;"##,
+        r##"export default () => <Arrow points={p} stroke={{ width: 4, color: "teal" }} />;"##,
+        r##"const s = { backgroundColor: "white", borderColor: "gray" };"##,
+    ] {
+        let m = messages(src);
+        assert!(
+            !m.is_empty() && m.iter().all(|x| x.contains("is a literal")),
+            "{src}: {m:?}"
+        );
+    }
+    for src in [
+        r##"export const examples = { a: { leftValue: "red", rightValue: "purple" } };"##,
+        r##"export const props = { label: str().default("gold") };"##,
+        r##"export default () => <Card title="orange" />;"##,
+        r##"export default () => <Text style={{ color: theme.color.text }}>{"purple"}</Text>;"##,
+        r##"const words = ["red", "green", "blue"];"##,
+        r##"export default () => <Box style={{ fill: c }} label="silver" />;"##,
+        r##"export const props = { accent: token("color").default("purple") };"##,
+    ] {
+        assert!(messages(src).is_empty(), "{src}: {:?}", messages(src));
+    }
+}
+
+#[test]
+fn a_token_colour_prop_takes_a_theme_name_but_not_a_css_name() {
+    let src = r##"export const examples = { a: { tone: "purple" }, b: { tone: "accent" } };"##;
+    let m = with_props(src, &["tone"]);
+    assert_eq!(m.len(), 1, "{m:?}");
+    assert!(m[0].contains("colour `purple` is a literal"), "{}", m[0]);
+    assert!(with_props(src, &[]).is_empty());
+}
+
+#[test]
+fn a_unitless_style_key_is_never_checked_for_spacing() {
+    for src in [
+        "export default () => <Box style={{ opacity: clamp(pop * 4, 0, 1) }} />;",
+        "export default () => <Box style={{ opacity: 1, scale: 4, rotate: 16 }} />;",
+        "export default () => <Box style={{ flexGrow: 8, flexShrink: 4, zIndex: 24 }} />;",
+        "export default () => <Text style={{ fontWeight: 4, lineHeight: 8 }} />;",
+        "export default () => <Box style={{ transformOrigin: [4, 8], clipInset: [0, 4, 0, 4] }} />;",
+        "export default () => <Text style={{ reveal: { progress: 4 } }} />;",
+    ] {
+        assert!(messages(src).is_empty(), "{src}: {:?}", messages(src));
+    }
+}
+
+#[test]
+fn a_factor_or_a_call_argument_is_not_a_style_value() {
+    for src in [
+        "export default () => <Box style={{ width: 24 * s, height: s * 16 }} />;",
+        "export default () => <Box style={{ padding: Math.max(16, p), gap: x > 8 ? a : b }} />;",
+        "export default () => <Box style={{ translateY: (1 - pop) * 40 }} />;",
+    ] {
+        assert!(messages(src).is_empty(), "{src}: {:?}", messages(src));
+    }
+}
+
+#[test]
+fn a_length_value_is_checked_through_ternaries_fallbacks_and_arrays() {
+    let m = messages(
+        "export default () => <Box style={{ padding: big ? 24 : 16, gap: g ?? 8, margin: [(40), 0] }} />;",
+    );
+    assert_eq!(m.len(), 4, "{m:?}");
+    // A term of a sum or difference is a length too; a negative is not.
+    let m = messages(
+        "export default () => <Box style={{ padding: [8, space.s + 4], width: w - 16, left: -24, top: 64 + x * 2 }} />;",
+    );
+    assert_eq!(m.len(), 4, "{m:?}");
+    // Each style key's own value is checked; a ternary's `:` is not a key.
+    let m = messages(
+        "export default () => <Box style={{ opacity: on ? x : 4, width: 24, color: \"#fff\" }} />;",
+    );
+    assert_eq!(m.len(), 2, "{m:?}");
+    assert!(m[0].contains("theme.space.m"), "{m:?}");
+    assert!(m[1].contains("colour `#fff`"), "{m:?}");
 }

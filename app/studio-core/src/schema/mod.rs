@@ -21,7 +21,8 @@ pub enum PropKind {
     /// A token name from a theme section (`color`, `space`, `motion.spring`…);
     /// the component receives the token's value.
     Token(String),
-    /// LaTeX source (drawn by the maths engine from stage 8).
+    /// LaTeX source, for `<Math tex>`; checked by typesetting it, so a
+    /// bad formula is a props error with KaTeX's message and position.
     Latex,
 }
 

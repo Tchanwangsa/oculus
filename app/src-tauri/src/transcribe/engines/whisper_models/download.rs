@@ -64,7 +64,7 @@ pub fn download(dir: &Path, model: &Model, progress: impl Fn(u64, u64)) -> Resul
     download_from(dir, model, &model.url(), VAD_URL, progress)
 }
 
-pub use crate::sources::echo360::CANCELLED;
+pub use crate::runtime::stream::CANCELLED;
 
 pub(super) fn download_from(
     dir: &Path,

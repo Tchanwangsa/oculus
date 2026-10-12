@@ -11,6 +11,7 @@ mod path;
 mod text;
 
 pub use canvas::Canvas;
+pub(crate) use path::{end_of, fit, trim};
 
 use crate::layout::LNode;
 use crate::scene::{Color, Inset, ObjectFit};
@@ -110,7 +111,7 @@ pub fn paint(c: &mut Canvas, n: &LNode, parent: Affine, text_color: Color) -> Re
 
 /// The border box less `clipInset`'s fractions; a side at 0 does not clip
 /// (shadows and overflow show there). `None` when nothing is left.
-fn inset_rect(r: Rect, Inset([t, right, b, l]): Inset) -> Option<Rect> {
+pub(crate) fn inset_rect(r: Rect, Inset([t, right, b, l]): Inset) -> Option<Rect> {
     const OPEN: f64 = 1e5;
     let side = |f: f32| f64::from(f.clamp(0.0, 1.0));
     let (w, h) = (r.width(), r.height());

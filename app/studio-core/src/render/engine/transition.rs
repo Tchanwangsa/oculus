@@ -41,7 +41,8 @@ impl Engine {
         let size = (f64::from(self.size.width), f64::from(self.size.height));
         let painted = if look == Look::Magic {
             let ink = self.ink(transition.morph_color);
-            let tree = morph(pa.tree, pb.tree, p, &mut self.typeset, ink)
+            let (p, timing) = transition.magic(t);
+            let tree = morph(pa.tree, pb.tree, p, &timing, &mut self.typeset, ink)
                 .map_err(|e| self.morph_error(a.component, b.component, e))?;
             vec![tree]
         } else {

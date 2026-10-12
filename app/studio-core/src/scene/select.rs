@@ -4,13 +4,15 @@
 //! matches inside it by key and blends it at that Morph's own `p`.
 
 use super::parse::NodeError;
-use super::{Kind, Node};
+use super::{Kind, Node, Timing};
 
-/// The Morph a subtree came from: its index in tree order and its `p`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// The Morph a subtree came from: its index in tree order, its `p` and
+/// how it spends it.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Scope {
     pub id: u32,
     pub p: f32,
+    pub timing: Timing,
 }
 
 /// The tree at every Morph's `p = 0` and at `p = 1`.
@@ -65,7 +67,11 @@ fn pick(
         *next += 1;
         let child_path = format!("{path} > {}[{side}]", chosen.kind.name());
         let mut c = pick(chosen, side, next, &child_path, true)?;
-        c.scope = Some(Scope { id, p: n.p });
+        c.scope = Some(Scope {
+            id,
+            p: n.p,
+            timing: n.timing.as_deref().cloned().unwrap_or_default(),
+        });
         return Ok(c);
     }
     let children = n
@@ -83,10 +89,13 @@ fn pick(
         text: n.text.clone(),
         src: n.src.clone(),
         path: n.path.clone(),
+        math: n.math.clone(),
+        overlay: n.overlay.clone(),
         children,
         key: n.key.clone(),
         loc: n.loc,
         p: n.p,
-        scope: n.scope,
+        timing: n.timing.clone(),
+        scope: n.scope.clone(),
     })
 }

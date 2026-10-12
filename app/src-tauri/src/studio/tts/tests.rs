@@ -4,8 +4,8 @@ use super::*;
 use crate::studio::test_wav::{tone, wav_of};
 use crate::test_support::{FakeServer, Reply};
 
-fn voice(base: &str) -> Voice {
-    Voice {
+fn voice(base: &str) -> ServerVoice {
+    ServerVoice {
         base_url: normalise_base(base).unwrap(),
         model: "kokoro".into(),
         voice: "af_heart".into(),

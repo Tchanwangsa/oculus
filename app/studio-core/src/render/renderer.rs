@@ -64,7 +64,8 @@ impl Renderer {
     }
 
     /// One frame. In the first `dur` seconds of a scene after the first, it
-    /// is the transition from the scene before (see `transition`). With
+    /// is the transition from the scene before (see `transition`), or the
+    /// scene alone while the scene before has no component. With
     /// motion blur on, it averages sub-frames inside the scene (see `blur`).
     pub fn frame(&mut self, at: Time) -> Result<Frame> {
         let (index, t) = self.timeline.locate(at)?;
@@ -80,8 +81,7 @@ impl Renderer {
         self.scenes[index].length
     }
 
-    /// Checks the scene's transition and loads the components a frame of it
-    /// needs.
+    /// Checks the scene's transition and loads the scene's component.
     fn ready(&mut self, index: usize) -> Result<()> {
         let count = self.scenes.len();
         let out_of_range = || StudioError::SceneOutOfRange { index, count };
@@ -91,42 +91,71 @@ impl Renderer {
             return Err(e.clone().into());
         }
         let scene = self.scenes.get(index).ok_or_else(out_of_range)?;
-        let before = index.checked_sub(1).and_then(|i| self.scenes.get(i));
-        for s in std::iter::once(scene).chain(before) {
-            let name = s.spec.component.as_str();
-            if self.engine.component(name).is_none() {
-                let tsx = self.components.read(name)?;
-                self.engine.load_component(name, &tsx)?;
-            }
+        load(&mut self.engine, &*self.components, &scene.spec.component)
+    }
+
+    /// Whether scene `index` at `t` plays over the scene before: its
+    /// transition covers `t` and that scene has a component. A missing one
+    /// draws the scene alone, as after a cut, since scenes are built in
+    /// parallel; lint still reports it.
+    fn draws_before(&mut self, index: usize, t: f64) -> Result<bool> {
+        let covers = self.transitions[index]
+            .as_ref()
+            .ok()
+            .and_then(Option::as_ref)
+            .is_some_and(|tr| tr.covers(t));
+        let Some(before) = index.checked_sub(1).filter(|_| covers) else {
+            return Ok(false);
+        };
+        let name = &self.scenes[before].spec.component;
+        match load(&mut self.engine, &*self.components, name) {
+            Ok(()) => Ok(true),
+            Err(StudioError::ComponentNotFound { .. }) => Ok(false),
+            Err(e) => Err(e),
         }
-        Ok(())
     }
 
     /// The frame at scene-relative `t`, without motion blur. `ready` first.
     pub(super) fn sharp(&mut self, index: usize, t: f64) -> Result<Frame> {
-        let (a, b, into) = calls(&self.scenes, &self.transitions, index, t);
+        let before = self.draws_before(index, t)?;
+        let (a, b, into) = calls(&self.scenes, &self.transitions, index, t, before);
         scene_frame(&mut self.engine, a, b, into)
     }
 
     /// What `sharp` would paint, laid out but not painted. Hand the trees
     /// back with `Engine::discard`.
     pub(super) fn layers(&mut self, index: usize, t: f64) -> Result<Vec<LNode>> {
-        let (a, b, into) = calls(&self.scenes, &self.transitions, index, t);
+        let before = self.draws_before(index, t)?;
+        let (a, b, into) = calls(&self.scenes, &self.transitions, index, t, before);
         let (layers, _logs) = scene_layers(&mut self.engine, a, b, into)?;
         Ok(layers)
     }
 }
 
-/// Scene `index` at `t`, the scene before it and the transition into it.
+/// Scene `index` at `t`, the scene before it when `before` (see
+/// `draws_before`) and the transition into it.
 fn calls<'a>(
     scenes: &'a [Staged],
     transitions: &'a [Result<Option<Transition>, TransitionError>],
     index: usize,
     t: f64,
+    before: bool,
 ) -> (Option<SceneCall<'a>>, SceneCall<'a>, Option<&'a Transition>) {
     let into = transitions[index].as_ref().ok().and_then(Option::as_ref);
-    let before = index.checked_sub(1).map(|i| scenes[i].call(i, 0.0));
-    (before, scenes[index].call(index, t), into)
+    let a = index
+        .checked_sub(1)
+        .filter(|_| before)
+        .map(|i| scenes[i].call(i, 0.0));
+    (a, scenes[index].call(index, t), into)
+}
+
+/// Loads component `name` into `engine` unless it is there already.
+fn load(engine: &mut Engine, components: &dyn ComponentSource, name: &str) -> Result<()> {
+    if engine.component(name).is_none() {
+        let tsx = components.read(name)?;
+        engine.load_component(name, &tsx)?;
+    }
+    Ok(())
 }
 
 /// Scene call `b` through `into` (its resolved transition) while it plays,

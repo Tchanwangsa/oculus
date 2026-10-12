@@ -1,5 +1,5 @@
 //! Naming a thread once, the provider accounts' rate-limit windows, and the
-//! startup sweep of threads a crash left `running`.
+//! startup sweep of threads and tool rows a crash left `running`.
 
 use sqlx::{Row, SqlitePool};
 
@@ -74,12 +74,36 @@ pub async fn save_rate_limits(
     crate::db::store::set_setting(pool, &key, &value).await
 }
 
-/// Threads left `running` by a crash or a quit mid-turn. Called at startup;
-/// nothing is going to finish them.
-pub async fn reconcile(pool: &SqlitePool) -> Result<u64, String> {
-    sqlx::query("UPDATE harness_threads SET status = 'idle' WHERE status = 'running'")
-        .execute(pool)
-        .await
-        .map(|r| r.rows_affected())
-        .map_err(|e| e.to_string())
+/// What [`reconcile`] finished: threads set idle and tool rows closed.
+pub struct Reconciled {
+    pub threads: u64,
+    pub tools: u64,
+}
+
+/// Threads left `running` and tool rows left open (`meta.ok` null) by a crash
+/// or a quit mid-turn. Called at startup; nothing is going to finish them, and
+/// an open row draws as running forever.
+pub async fn reconcile(pool: &SqlitePool) -> Result<Reconciled, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let threads =
+        sqlx::query("UPDATE harness_threads SET status = 'idle' WHERE status = 'running'")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?
+            .rows_affected();
+    // A `meta` that is not JSON is skipped rather than failing the sweep; only
+    // CASE promises `json_valid` runs before `json_extract`.
+    let tools = sqlx::query(
+        "UPDATE harness_items
+         SET meta = json_set(meta, '$.ok', json('false'), '$.output', ?1)
+         WHERE kind = 'tool'
+           AND CASE WHEN json_valid(meta) THEN json_extract(meta, '$.ok') IS NULL END",
+    )
+    .bind("the session ended before this finished")
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?
+    .rows_affected();
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(Reconciled { threads, tools })
 }

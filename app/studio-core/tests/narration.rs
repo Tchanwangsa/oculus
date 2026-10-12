@@ -8,6 +8,7 @@ mod common;
 use common::fixture;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use studio_core::gallery::{self, GalleryOptions};
 use studio_core::{Project, RenderOptions, Renderer, StripOptions, StudioError, Time, strip};
 
 /// A project folder in the temp dir, removed on drop.
@@ -202,7 +203,8 @@ fn a_silent_scene_needs_a_hold() {
         "{e}"
     );
     let report = p.lint().unwrap();
-    assert_eq!(report.issues.len(), 1, "{report}");
+    // Scene `a` also warns that nothing is on screen.
+    assert_eq!(report.errors(), 1, "{report}");
     assert_eq!(report.issues[0].scene, Some(1));
 }
 
@@ -294,6 +296,27 @@ fn script_ids_and_manifest_errors_fail_the_load() {
     let voice = t.load().video.voice.unwrap();
     assert_eq!(voice.model.as_deref(), Some("kokoro"));
     assert_eq!(voice.speed, Some(1.1));
+    assert_eq!(
+        voice.engine, None,
+        "a block without `engine` leaves it unset"
+    );
+    t.file(
+        "video.json",
+        &video(json!({ "engine": "kokoro", "voice": "am_michael" })),
+    );
+    let voice = t.load().video.voice.unwrap();
+    assert_eq!(voice.engine, Some(studio_core::VoiceEngine::Kokoro));
+    t.file("video.json", &video(json!({ "engine": "server" })));
+    assert_eq!(
+        t.load().video.voice.unwrap().engine,
+        Some(studio_core::VoiceEngine::Server)
+    );
+    t.file("video.json", &video(json!({ "engine": "piper" })));
+    assert!(
+        t.load_err().contains("unknown variant `piper`"),
+        "{}",
+        t.load_err()
+    );
 }
 
 /// A project whose two narrated scenes call `Probe`, which runs `body`.
@@ -347,6 +370,22 @@ fn word_cues_are_scene_seconds_with_the_lead() {
 }
 
 #[test]
+fn cued_words_are_the_times_word_returns() {
+    let t = probe(
+        "cued",
+        r#"  console.log(JSON.stringify([word("gradient"), wordEnd("gradient")]));"#,
+    );
+    let p = t.load();
+    let got: Vec<f64> =
+        serde_json::from_str(&logs(&p, Time::Scene { index: 0, t: 1.0 })[0]).unwrap();
+    let words = p.cued_words(0).unwrap().unwrap();
+    let gradient = words.iter().find(|w| w.text == "gradient,").unwrap();
+    assert!(near(gradient.start, got[0]) && near(gradient.end, got[1]));
+    assert_eq!(words.len(), 7);
+    assert!(p.cued_words(2).unwrap().is_none(), "`quiet` is silent");
+}
+
+#[test]
 fn word_errors_name_the_call_its_line_and_the_closest_word() {
     let cases = [
         (
@@ -362,10 +401,6 @@ fn word_errors_name_the_call_its_line_and_the_closest_word() {
             "`word(\"gradient\", 2)`: scene `a` says \"gradient\" once, so there is no occurrence 2",
         ),
         (
-            "  word(\"zebra\");",
-            "`word(\"zebra\")`: no such word in scene `a`",
-        ),
-        (
             "  word(\"...\");",
             "`word(\"...\")`: the phrase has no words",
         ),
@@ -379,9 +414,6 @@ fn word_errors_name_the_call_its_line_and_the_closest_word() {
         let loc = e.loc().unwrap_or_else(|| panic!("no TSX line: {e}"));
         assert_eq!(loc.line, 3, "{e}");
         assert!(e.to_string().contains(want), "{e}\nwanted: {want}");
-        if !want.contains("closest") {
-            assert!(!e.to_string().contains("closest"), "{e}");
-        }
     }
     let t = probe("silent", "  word(\"hello\");");
     let p = t.load();
@@ -406,4 +438,117 @@ fn transition_calls_get_their_own_scenes_words() {
     // 0.2 s into the default 0.7 s dissolve into scene b.
     let got = logs(&p, Time::Global(start + 0.2));
     assert_eq!(got, ["scene 0: 0.45", "0.35"]);
+}
+
+/// A project whose narrated scene `a` says "We get them back at
+/// ninety-one." and calls `Probe`, which runs `body`.
+fn hyphens(name: &str, body: &str) -> Temp {
+    let t = Temp::new(name);
+    t.video(json!([{ "id": "a", "component": "Probe" }]))
+        .file(
+            "components/Probe.tsx",
+            &format!(
+                "export const props = {{}};\nexport default () => {{\n{body}\n  return <Box />;\n}};\n"
+            ),
+        )
+        .file("script.md", "## a\nWe get them back at ninety-one.\n")
+        .manifest(json!({
+            "a": clip("We get them back at ninety-one.", 2.0, &[
+                ("We", 0.0, 0.2), ("get", 0.2, 0.4), ("them", 0.4, 0.6), ("back", 0.6, 0.9),
+                ("at", 0.9, 1.0), ("ninety-one.", 1.0, 1.8),
+            ]),
+        }));
+    t
+}
+
+fn first_error(t: &Temp) -> String {
+    let p = t.load();
+    let mut r = Renderer::new(&p, RenderOptions::default()).unwrap();
+    r.frame(Time::Scene { index: 0, t: 0.0 })
+        .unwrap_err()
+        .to_string()
+}
+
+#[test]
+fn a_hyphenated_word_matches_its_parts_spaced_or_hyphenated() {
+    let t = hyphens(
+        "hyphen",
+        r#"  console.log(JSON.stringify([word("ninety one"), word("Ninety-One"), wordEnd("ninety one"),
+    word("at ninety one")]));"#,
+    );
+    let p = t.load();
+    let got: Vec<f64> =
+        serde_json::from_str(&logs(&p, Time::Scene { index: 0, t: 0.0 })[0]).unwrap();
+    let want = [1.25, 1.25, 2.05, 1.15];
+    for (g, w) in got.iter().zip(want) {
+        assert!(near(*g, w), "{got:?} != {want:?}");
+    }
+}
+
+#[test]
+fn every_miss_names_the_closest_phrase_said() {
+    let cases = [
+        (
+            r#"  word("getting them back");"#,
+            "; closest: get them back",
+        ),
+        (r#"  word("ninetyone");"#, "; closest: ninety-one"),
+        // A phrase ending inside a word has no time to give.
+        (
+            r#"  wordEnd("back at ninety");"#,
+            "; closest: back at ninety-one",
+        ),
+        (r#"  word("zebra");"#, "; closest: "),
+    ];
+    for (i, (body, want)) in cases.iter().enumerate() {
+        let e = first_error(&hyphens(&format!("miss{i}"), body));
+        assert!(e.contains("no such word in scene `a`"), "{e}");
+        assert!(e.contains(want), "{e}\nwanted: {want}");
+    }
+}
+
+/// A narrated video with no manifest: `title` uses `Card`, `question`
+/// another component, and `Card` runs `body` in its call.
+fn unnarrated(name: &str, body: &str) -> Temp {
+    let t = Temp::new(name);
+    t.video(json!([
+        { "id": "title", "component": "Card" },
+        { "id": "question", "component": "Other" }
+    ]))
+    .file(
+        "components/Card.tsx",
+        &format!(
+            "export const props = {{ label: str() }};\nexport const examples = {{ one: {{ label: \"a\" }}, two: {{ label: \"b\" }} }};\nexport default ({{ label }}) => {{\n{body}\n  return <Box><Text>{{label}}</Text></Box>;\n}};\n"
+        ),
+    )
+    .file("components/Other.tsx", BLANK)
+    .file("script.md", "## title\nHello there.\n\n## question\nWhy?\n");
+    t
+}
+
+#[test]
+fn a_gallery_renders_a_narrated_video_before_narrate() {
+    let t = unnarrated("gallery", "");
+    assert!(!t.path().join("narration/manifest.json").exists());
+    let p = Project::load_unnarrated(t.path()).unwrap();
+    let g = gallery::render(&p, "Card", None, &GalleryOptions::default()).unwrap();
+    let names: Vec<&str> = g.stills.iter().map(|s| s.example.as_str()).collect();
+    assert_eq!(names, ["one", "two"]);
+    // A narrated scene's length needs its narration: the preview's middle.
+    assert_eq!((g.moment.t, g.moment.duration), (3.0, gallery::PREVIEW));
+    assert!(gallery::render(&p, "Card", Some(5.5), &GalleryOptions::default()).is_ok());
+}
+
+#[test]
+fn word_in_a_gallery_says_a_gallery_has_no_narration() {
+    let t = unnarrated("gallery-word", "  word(\"hello\");");
+    let p = Project::load_unnarrated(t.path()).unwrap();
+    let e = gallery::render(&p, "Card", None, &GalleryOptions::default())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("example `one`"), "{e}");
+    assert!(
+        e.contains("`word(\"hello\")`: a gallery renders without narration"),
+        "{e}"
+    );
 }

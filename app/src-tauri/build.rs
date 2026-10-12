@@ -9,8 +9,10 @@ fn main() {
 
 /// `STUDIO_RENDER_BUILD`: sha256 hex of everything a segment's pixels can
 /// depend on beyond the project: studio-core's `src/`, its bundled `fonts/`
-/// and `themes/`, `src/studio/render/`, and `Cargo.lock`, which pins the
-/// versions of vello_cpu, parley, taffy and the rest. Each root's path, then
+/// and `themes/`, the KaTeX port `<Math>` typesets with (a path dependency,
+/// so no version in the lock moves when it changes), `src/studio/render/`,
+/// and `Cargo.lock`, which pins the versions of vello_cpu, parley, taffy and
+/// the rest. Each root's path, then
 /// its files' sorted relative paths and bytes, all length-prefixed. A
 /// segment's key carries it, so a change to any of them never reuses a
 /// segment the old build made, and the app and the CLI built from one tree
@@ -20,6 +22,9 @@ fn studio_render_build() {
         Path::new("../studio-core/src"),
         Path::new("../studio-core/fonts"),
         Path::new("../studio-core/themes"),
+        Path::new("../math-core/katex/src"),
+        Path::new("../math-core/katex/data"),
+        Path::new("../math-core/katex/build.rs"),
         Path::new("src/studio/render"),
         Path::new("Cargo.lock"),
     ];

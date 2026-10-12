@@ -1,7 +1,8 @@
-//! The morph engine on hand-built trees: colour, matching and the built
-//! tree's order, fades and geometry.
+//! The morph engine on hand-built trees: colour, matching, clocks and the
+//! built tree's order, fades and geometry.
 
 mod build;
+mod clock;
 mod colour;
 mod matching;
 
@@ -27,6 +28,7 @@ fn bx(x: f64, y: f64, w: f64, h: f64, kids: Vec<LNode>) -> LNode {
         key: None,
         loc: None,
         scope: None,
+        overlay: None,
     }
 }
 

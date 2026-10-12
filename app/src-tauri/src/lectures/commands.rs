@@ -97,7 +97,7 @@ pub async fn echo360_download_video(
             // Not a fault: the frontend clears its bar without showing a failure.
             emit(
                 0,
-                if e == echo360::CANCELLED {
+                if e == crate::runtime::stream::CANCELLED {
                     "cancelled"
                 } else {
                     "error"

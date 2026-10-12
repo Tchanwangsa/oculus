@@ -12,7 +12,7 @@ mod tests;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
-pub use crate::sources::echo360::CANCELLED;
+pub use crate::runtime::stream::CANCELLED;
 use claim::Claim;
 pub use claim::{cancel, downloading};
 
@@ -35,6 +35,26 @@ pub struct Pack {
 impl Pack {
     pub fn bytes(&self) -> u64 {
         self.files.iter().map(|f| f.bytes).sum()
+    }
+}
+
+/// Where a pack is, for a status line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Status {
+    Missing,
+    Downloading,
+    Present,
+}
+
+/// Whether `pack` is in `dir`, or being downloaded. Local only.
+pub fn status(dir: &Path, pack: &Pack) -> Status {
+    if is_present(dir, pack) {
+        Status::Present
+    } else if downloading(pack.id) {
+        Status::Downloading
+    } else {
+        Status::Missing
     }
 }
 

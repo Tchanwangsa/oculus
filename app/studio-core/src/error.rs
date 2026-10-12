@@ -136,6 +136,11 @@ pub enum StudioError {
         source: Box<StudioError>,
     },
 
+    /// A lint warning about how a scene looks over time (`look::warn`);
+    /// `kind` names the check.
+    #[error("{message}")]
+    Look { kind: &'static str, message: String },
+
     /// A problem lint reports as a sentence, with no TSX position.
     #[error("{0}")]
     Lint(String),
@@ -227,6 +232,7 @@ impl StudioError {
             Self::Narration { .. } => "narration",
             Self::Script { .. } => "script",
             Self::Lint(_) => "lint",
+            Self::Look { kind, .. } => kind,
             Self::Frame { source, .. } => source.kind(),
             Self::Host(_) => "host",
             Self::Render(_) => "render",

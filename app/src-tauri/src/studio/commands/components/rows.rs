@@ -22,8 +22,8 @@ pub struct ComponentRow {
     pub problem: Option<String>,
 }
 
-/// A shell lays out named areas (`SplitShell`); a component is any other
-/// scene. Nothing in a component's code says which, so the name does: a
+/// A shell lays out named areas (a library's own `SplitShell`; no starter
+/// is one); a component is any other scene. Nothing in a component's code says which, so the name does: a
 /// shell's ends in `Shell`.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

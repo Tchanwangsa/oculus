@@ -3,8 +3,9 @@
 
 use super::MorphError;
 use crate::layout::LNode;
-use crate::scene::Kind;
+use crate::scene::{Kind, Timing};
 use std::collections::HashMap;
+use vello_cpu::kurbo::Rect;
 
 pub struct Slot {
     /// The node without its children (they are slots of their own), until
@@ -20,25 +21,34 @@ pub struct Slot {
     /// The Morph this node is inside (nearest scope root, itself included).
     pub scope: Option<u32>,
     pub scope_root: bool,
-    /// The node's own `p`: its Morph's, or the tree's outside `p`.
-    pub p: f32,
+    /// It has no children and paints something, so it takes a number in
+    /// its scope's reading order (`clock`).
+    pub leaf: bool,
+    /// Its border box, kept after the builder takes the node.
+    pub rect: Rect,
+    /// The product of its ancestors' opacities in this tree.
+    pub above: f32,
 }
 
 pub struct Tree {
     pub slots: Vec<Slot>,
     /// Which tree this is, for error messages.
     pub is_a: bool,
+    /// Each Morph's `p` and timing by scope id; `None` is outside every
+    /// Morph (or the whole tree, for a transition).
+    pub clocks: HashMap<Option<u32>, (f32, Timing)>,
 }
 
 impl Tree {
     /// With `scopes` off (a transition), Morph scopes are ignored and every
     /// node takes `outside`.
-    pub fn new(root: LNode, scopes: bool, outside: f32, is_a: bool) -> Tree {
+    pub fn new(root: LNode, scopes: bool, outside: (f32, Timing), is_a: bool) -> Tree {
         let mut t = Tree {
             slots: Vec::new(),
             is_a,
+            clocks: HashMap::from([(None, outside)]),
         };
-        t.push(root, None, 0, None, scopes, outside);
+        t.push(root, None, 0, None, scopes, 1.0);
         t
     }
 
@@ -47,31 +57,47 @@ impl Tree {
         mut n: LNode,
         parent: Option<usize>,
         index: usize,
-        scope: Option<(u32, f32)>,
+        scope: Option<u32>,
         scopes: bool,
-        outside: f32,
+        above: f32,
     ) -> usize {
-        let own = n.scope.filter(|_| scopes).map(|s| (s.id, s.p));
-        let scope = own.or(scope);
+        let own = n.scope.take().filter(|_| scopes);
+        let scope_root = own.is_some();
+        let scope = match own {
+            Some(s) => {
+                self.clocks.insert(Some(s.id), (s.p, s.timing));
+                Some(s.id)
+            }
+            None => scope,
+        };
         let kids = std::mem::take(&mut n.children);
+        let below = above * n.style.opacity();
         let i = self.slots.len();
         self.slots.push(Slot {
             kind: n.kind,
             key: n.key.clone(),
             loc: n.loc,
+            leaf: kids.is_empty() && paints(&n),
+            rect: n.rect,
+            above,
             node: Some(n),
             parent,
             index,
             kids: Vec::with_capacity(kids.len()),
-            scope: scope.map(|s| s.0),
-            scope_root: own.is_some(),
-            p: scope.map_or(outside, |s| s.1),
+            scope,
+            scope_root,
         });
         for (k, c) in kids.into_iter().enumerate() {
-            let ci = self.push(c, Some(i), k, scope, scopes, outside);
+            let ci = self.push(c, Some(i), k, scope, scopes, below);
             self.slots[i].kids.push(ci);
         }
         i
+    }
+
+    /// The `p` and timing of the scope node `i` is in.
+    pub fn clock(&self, i: usize) -> &(f32, Timing) {
+        let s = self.slots[i].scope;
+        self.clocks.get(&s).unwrap_or(&self.clocks[&None])
     }
 
     /// Each slot is taken once; the builder visits every node once.
@@ -109,6 +135,17 @@ impl Tree {
         }
         Ok(keys)
     }
+}
+
+/// Whether a childless node draws anything.
+fn paints(n: &LNode) -> bool {
+    let s = &n.style;
+    n.text.is_some()
+        || n.image.is_some()
+        || n.path.is_some()
+        || s.fill.is_some()
+        || s.border.is_some()
+        || s.shadow.is_some()
 }
 
 fn duplicate(

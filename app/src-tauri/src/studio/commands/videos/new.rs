@@ -26,6 +26,7 @@ pub struct NewVideoOptions {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceBlock {
+    pub engine: Option<studio_core::VoiceEngine>,
     pub model: Option<String>,
     pub voice: Option<String>,
     pub speed: Option<f64>,
@@ -52,6 +53,7 @@ pub fn create_in(
         .filter(|t| !t.is_empty());
     let slug = videos::unique_slug(videos, title);
     let voice = options.voice.map(|v| studio_core::Voice {
+        engine: v.engine,
         model: v.model.filter(|s| !s.trim().is_empty()),
         voice: v.voice.filter(|s| !s.trim().is_empty()),
         speed: v.speed,

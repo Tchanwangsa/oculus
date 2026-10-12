@@ -2,7 +2,7 @@
 //! spoken form (`spoken`). Scenes with an id and no section are silent,
 //! which needs a `hold`; `Project::scene_length` reports that.
 
-use super::{LintIssue, LintReport, spoken};
+use super::{Level, LintIssue, LintReport, spoken};
 use crate::error::StudioError;
 use crate::project::Project;
 use crate::suggest::did_you_mean;
@@ -21,6 +21,8 @@ pub(super) fn lint(project: &Project, report: &mut LintReport) {
             match index {
                 Some(i) => LintIssue::scene(project, i, error),
                 None => LintIssue {
+                    level: Level::Error,
+                    group: None,
                     scene: None,
                     id: Some(section.id.clone()),
                     component: None,

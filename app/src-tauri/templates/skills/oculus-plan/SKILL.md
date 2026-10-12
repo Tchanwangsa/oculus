@@ -1,6 +1,6 @@
 ---
 name: oculus-plan
-description: Put work on the student's board in an Oculus course library — create a project, break an assignment into tasks, move or refile something. Use for "put this on the board", "break this down", "make a plan for the assignment", "mark that done", or any request that should end as rows the app draws rather than as a written-out list.
+description: Puts work on the student's board in an Oculus course library — creates a project, breaks an assignment into tasks, moves or refiles a task. Use for "put this on the board", "break this down", "make a plan for the assignment", "mark that done", or any request that should end as rows the app draws rather than as a written-out list.
 ---
 
 # Planning

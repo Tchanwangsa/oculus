@@ -74,6 +74,13 @@ impl ClaudeSession {
             "--settings",
             &settings_json(&base.library, &base.cwd, cfg.oculus.as_deref(), &hosts),
         ]);
+        // The Studio subagents, on the models Settings → Jobs gives Claude.
+        if !cfg.one_off {
+            let roles = crate::harness::studio_agents::assigned_now(Provider::Claude);
+            if let Some(agents) = crate::harness::studio_agents::claude_agents_json(&roles) {
+                cmd.args(["--agents", &agents]);
+            }
+        }
         cmd.current_dir(&base.cwd)
             .env_clear()
             .envs(base.env.iter().map(|(k, v)| (k, v)))

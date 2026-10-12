@@ -22,6 +22,7 @@ mod manager;
 mod protected;
 mod providers;
 pub mod store;
+pub mod studio_agents;
 mod suggest;
 
 pub use cli::{discover, install, signin, update};

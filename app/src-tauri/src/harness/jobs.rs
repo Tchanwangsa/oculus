@@ -4,7 +4,10 @@
 //! models (provider, model, level), set in Settings → Jobs with the composer's
 //! `ModelPicker`. The first runs; when its run fails for any reason the next
 //! one does ([`try_each`]). An empty list switches the job off, and never
-//! falls back to the default, which can be an expensive model. Stored as one
+//! falls back to the default, which can be an expensive model. The two Studio
+//! jobs read their list differently: it holds one model per agent, and a chat
+//! agent's subagents take the first entry for its own agent ([`for_agent`]).
+//! Stored as one
 //! JSON value under [`SETTINGS_KEY`] (`getJobModels`/`setJobModels` in
 //! `app/src/lib/db/jobModels.ts`); an unreadable value costs the job its
 //! config, not its run.
@@ -29,6 +32,11 @@ pub enum Job {
     ThreadNaming,
     /// The document editor's inline completion (`document_suggest`).
     DocumentSuggestions,
+    /// A chat agent's subagent that reads lecture material for a video
+    /// (`harness::studio_agents`).
+    StudioResearch,
+    /// A chat agent's subagent that builds one scene of a video.
+    StudioScene,
 }
 
 impl Job {
@@ -39,6 +47,8 @@ impl Job {
             Job::LectureEnd => "lectureEnd",
             Job::ThreadNaming => "threadNaming",
             Job::DocumentSuggestions => "documentSuggestions",
+            Job::StudioResearch => "studioResearch",
+            Job::StudioScene => "studioScene",
         }
     }
 
@@ -49,6 +59,8 @@ impl Job {
             Job::LectureEnd => "Lecture end",
             Job::ThreadNaming => "Chat thread names",
             Job::DocumentSuggestions => "Document suggestions",
+            Job::StudioResearch => "Studio research",
+            Job::StudioScene => "Studio scenes",
         }
     }
 }
@@ -68,32 +80,49 @@ impl JobSelection {
     }
 }
 
-/// What a job runs on until someone says otherwise.
-pub fn default_selection(job: Job) -> JobSelection {
+/// What a job runs on until someone says otherwise. The Studio jobs name one
+/// model per agent whose subagents take a model (`studio_agents::takes_model`).
+pub fn default_chain(job: Job) -> Vec<JobSelection> {
+    let one = |provider, model: &str, effort: Option<&str>| JobSelection {
+        provider,
+        model: model.into(),
+        reasoning_effort: effort.map(Into::into),
+    };
     match job {
-        Job::LectureChapters => JobSelection {
-            provider: Provider::Codex,
-            model: "gpt-5.6-luna".into(),
-            reasoning_effort: Some("xhigh".into()),
-        },
-        Job::LectureEnd => JobSelection {
-            provider: Provider::Claude,
-            // Provisional, until the lecture-end eval picks the default.
-            model: "claude-haiku-4-5-20251001".into(),
-            reasoning_effort: None,
-        },
-        Job::ThreadNaming => JobSelection {
-            provider: Provider::Claude,
-            // Haiku declares no effort levels, so none is asked for.
-            model: "claude-haiku-4-5-20251001".into(),
-            reasoning_effort: None,
-        },
-        Job::DocumentSuggestions => JobSelection {
-            provider: Provider::Claude,
-            // Sonnet 5.5: `sonnet` in the CLI's catalogue, stored resolved.
-            model: "claude-sonnet-5-5".into(),
-            reasoning_effort: Some("medium".into()),
-        },
+        Job::LectureChapters => vec![one(Provider::Codex, "gpt-5.6-luna", Some("xhigh"))],
+        // Provisional, until the lecture-end eval picks the default.
+        Job::LectureEnd => vec![one(Provider::Claude, "claude-haiku-4-5-20251001", None)],
+        // Haiku declares no effort levels, so none is asked for.
+        Job::ThreadNaming => vec![one(Provider::Claude, "claude-haiku-4-5-20251001", None)],
+        // Sonnet 5.5: `sonnet` in the CLI's catalogue, stored resolved.
+        Job::DocumentSuggestions => {
+            vec![one(Provider::Claude, "claude-sonnet-5-5", Some("medium"))]
+        }
+        // Small and fast: notes from a slice of a lecture.
+        Job::StudioResearch => vec![
+            one(Provider::Claude, "claude-haiku-5-5", None),
+            one(Provider::Codex, "gpt-6-luna", Some("medium")),
+        ],
+        // Strong: a scene's animation is the hard part of a video.
+        Job::StudioScene => vec![
+            one(Provider::Claude, "claude-opus-5-5", Some("high")),
+            one(Provider::Codex, "gpt-6.1-sol", Some("high")),
+        ],
+    }
+}
+
+/// The entry an agent's subagents run on: the first for that agent, or none,
+/// which switches the job off for that agent.
+pub fn for_agent(chain: &[JobSelection], provider: Provider) -> Option<&JobSelection> {
+    chain.iter().find(|s| s.provider == provider)
+}
+
+/// [`chain`] for a caller with no pool, such as a spawn: read through
+/// `store::setting_blocking`. No database is the default, like no row.
+pub fn chain_blocking(job: Job) -> Vec<JobSelection> {
+    match crate::db::store::setting_blocking(SETTINGS_KEY) {
+        Some(raw) => from_json(&raw, job),
+        None => default_chain(job),
     }
 }
 
@@ -106,7 +135,7 @@ pub async fn chain(pool: &SqlitePool, job: Job) -> Vec<JobSelection> {
         .flatten();
     match stored {
         Some(raw) => from_json(&raw, job),
-        None => vec![default_selection(job)],
+        None => default_chain(job),
     }
 }
 
@@ -124,9 +153,9 @@ fn from_json(raw: &str, job: Job) -> Vec<JobSelection> {
     match entry {
         Some(serde_json::Value::Array(items)) => items.into_iter().filter_map(one).collect(),
         Some(item @ serde_json::Value::Object(_)) => {
-            one(item).map_or_else(|| vec![default_selection(job)], |s| vec![s])
+            one(item).map_or_else(|| default_chain(job), |s| vec![s])
         }
-        _ => vec![default_selection(job)],
+        _ => default_chain(job),
     }
 }
 
@@ -190,7 +219,11 @@ mod tests {
     }
 
     fn is_default(chain: &[JobSelection], job: Job) -> bool {
-        models(chain) == [default_selection(job).model.as_str()]
+        models(chain) == models(&default_chain(job))
+    }
+
+    fn first(job: Job) -> JobSelection {
+        default_chain(job).remove(0)
     }
 
     fn sel(model: &str) -> JobSelection {
@@ -304,28 +337,69 @@ mod tests {
 
     #[test]
     fn the_defaults_are_the_ones_the_cli_shipped_with() {
-        let c = default_selection(Job::LectureChapters);
+        let c = first(Job::LectureChapters);
         assert_eq!(
             (c.provider, c.model.as_str(), c.effort()),
             (Provider::Codex, "gpt-5.6-luna", Some("xhigh"))
         );
-        let n = default_selection(Job::ThreadNaming);
+        let n = first(Job::ThreadNaming);
         assert_eq!(n.provider, Provider::Claude);
         assert_eq!(
             (n.model.as_str(), n.effort()),
             ("claude-haiku-4-5-20251001", None)
         );
-        let e = default_selection(Job::LectureEnd);
+        let e = first(Job::LectureEnd);
         assert_eq!(
             (e.provider, e.model.as_str(), e.effort()),
             (Provider::Claude, "claude-haiku-4-5-20251001", None)
         );
         assert_eq!(Job::LectureEnd.key(), "lectureEnd");
-        let d = default_selection(Job::DocumentSuggestions);
+        let d = first(Job::DocumentSuggestions);
         assert_eq!(
             (d.provider, d.model.as_str(), d.effort()),
             (Provider::Claude, "claude-sonnet-5-5", Some("medium"))
         );
+    }
+
+    #[test]
+    fn the_studio_defaults_name_one_model_per_agent_that_takes_one() {
+        for job in [Job::StudioResearch, Job::StudioScene] {
+            let chain = default_chain(job);
+            let agents: Vec<Provider> = chain.iter().map(|s| s.provider).collect();
+            assert_eq!(agents, [Provider::Claude, Provider::Codex], "{job:?}");
+        }
+        let r = default_chain(Job::StudioResearch);
+        assert_eq!(
+            (r[0].model.as_str(), r[0].effort()),
+            ("claude-haiku-5-5", None)
+        );
+        let s = default_chain(Job::StudioScene);
+        assert_eq!(
+            (s[0].model.as_str(), s[0].effort()),
+            ("claude-opus-5-5", Some("high"))
+        );
+        assert_eq!(Job::StudioScene.key(), "studioScene");
+    }
+
+    #[test]
+    fn an_agent_takes_its_own_first_entry_or_none() {
+        let chain = from_json(
+            r#"{"studioScene":[
+                {"provider":"codex","model":"gpt-6.1-sol","reasoningEffort":"high"},
+                {"provider":"opencode","model":"openrouter/a","reasoningEffort":null},
+                {"provider":"opencode","model":"openrouter/b","reasoningEffort":null}]}"#,
+            Job::StudioScene,
+        );
+        assert_eq!(
+            for_agent(&chain, Provider::Opencode).map(|s| s.model.as_str()),
+            Some("openrouter/a")
+        );
+        assert_eq!(
+            for_agent(&chain, Provider::Codex).map(|s| s.model.as_str()),
+            Some("gpt-6.1-sol")
+        );
+        assert!(for_agent(&chain, Provider::Claude).is_none());
+        assert!(from_json(r#"{"studioScene":[]}"#, Job::StudioScene).is_empty());
     }
 
     #[test]

@@ -2,7 +2,8 @@ import { getSetting, setSetting } from "./settings";
 import { isProvider, type Provider } from "@/lib/harness/providers";
 
 // Each non-chat model job names an ordered list of models: the first, then
-// fallbacks tried when a run fails. One JSON value, read back in Rust by
+// fallbacks tried when a run fails. The Studio jobs read theirs as one model
+// per agent instead (`perAgent`). One JSON value, read back in Rust by
 // `harness::jobs`, where the jobs run. An empty list turns the job off.
 
 /** Mirrors `Job` in `app/src-tauri/src/harness/jobs.rs`. */
@@ -10,7 +11,9 @@ export type JobId =
   | "lectureChapters"
   | "lectureEnd"
   | "threadNaming"
-  | "documentSuggestions";
+  | "documentSuggestions"
+  | "studioResearch"
+  | "studioScene";
 
 /** `reasoningEffort` is null only for a model that takes no level. */
 export interface JobSelection {
@@ -24,8 +27,19 @@ export type JobChain = JobSelection[];
 
 export type JobModels = Record<JobId, JobChain>;
 
-/** The jobs Settings → Jobs lists, in the order it lists them. */
-export const JOBS: { id: JobId; label: string; description: string }[] = [
+/** The agents whose subagents take a model (`studio_agents::takes_model`):
+ *  agy's `invoke_subagent` takes none, so it is not offered. */
+const SUBAGENT_AGENTS: readonly Provider[] = ["claude", "codex", "opencode"];
+
+/** The jobs Settings → Jobs lists, in the order it lists them. A `perAgent`
+ *  job holds one model per agent in that list rather than fallbacks: a chat
+ *  agent's subagents take the first entry for their own agent. */
+export const JOBS: {
+  id: JobId;
+  label: string;
+  description: string;
+  perAgent?: readonly Provider[];
+}[] = [
   {
     id: "lectureChapters",
     label: "Lecture chapters",
@@ -50,6 +64,20 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
     description:
       "Inline ghost-text completions in notes, half a second after you stop typing. One short turn per pause.",
   },
+  {
+    id: "studioResearch",
+    label: "Studio research",
+    description:
+      "While a chat agent makes a video, its helpers that read the lecture, a slice each, and write notes. A small, fast model.",
+    perAgent: SUBAGENT_AGENTS,
+  },
+  {
+    id: "studioScene",
+    label: "Studio scenes",
+    description:
+      "While a chat agent makes a video, its helpers that build the scenes' animation, one scene each. A strong model.",
+    perAgent: SUBAGENT_AGENTS,
+  },
 ];
 
 const JOB_IDS = new Set<string>(JOBS.map((j) => j.id));
@@ -58,13 +86,21 @@ function isJobId(value: unknown): value is JobId {
   return typeof value === "string" && JOB_IDS.has(value);
 }
 
-/** Mirrors `default_selection` in `app/src-tauri/src/harness/jobs.rs`; either
+/** Mirrors `default_chain` in `app/src-tauri/src/harness/jobs.rs`; either
  *  side may resolve an unconfigured job, so they must agree. */
 export const DEFAULT_JOB_MODELS: JobModels = {
   lectureChapters: [{ provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "xhigh" }],
   lectureEnd: [{ provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null }],
   threadNaming: [{ provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null }],
   documentSuggestions: [{ provider: "claude", model: "claude-sonnet-5-5", reasoningEffort: "medium" }],
+  studioResearch: [
+    { provider: "claude", model: "claude-haiku-5-5", reasoningEffort: null },
+    { provider: "codex", model: "gpt-6-luna", reasoningEffort: "medium" },
+  ],
+  studioScene: [
+    { provider: "claude", model: "claude-opus-5-5", reasoningEffort: "high" },
+    { provider: "codex", model: "gpt-6.1-sol", reasoningEffort: "high" },
+  ],
 };
 
 const JOB_MODELS_KEY = "job_models";

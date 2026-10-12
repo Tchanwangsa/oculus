@@ -6,14 +6,17 @@ import { DEFAULT_JOB_MODELS, type JobChain, type JobId } from "@/lib/db";
 import { reasoningLabel, type PickerProvider, type Provider } from "@/lib/harness";
 import { ChainPicker } from "./ChainPicker";
 import { JobAttention } from "./JobAttention";
-import { modelLabel, withEntry } from "./chain";
+import { agentLabel, modelLabel, withEntry } from "./chain";
 
 /** One job: what it does, what the audit found, and its first model, with
- *  the fallbacks one click away in `JobModelsDialog`. */
+ *  the fallbacks one click away in `JobModelsDialog`. A `perAgent` job's
+ *  other entries are other agents' models, not fallbacks, and only the
+ *  agents it lists are offered. */
 export function JobRow({
   job,
   label,
   description,
+  perAgent,
   chain,
   providers,
   onChange,
@@ -23,6 +26,7 @@ export function JobRow({
   job: JobId;
   label: string;
   description: string;
+  perAgent?: readonly Provider[];
   chain: JobChain;
   providers: PickerProvider[];
   onChange: (edit: (chain: JobChain) => JobChain) => void;
@@ -30,20 +34,30 @@ export function JobRow({
   onFallbacks: () => void;
 }) {
   const off = chain.length === 0;
-  const fallbacks = chain.slice(1);
-  const fallbacksTip =
-    fallbacks.length === 0
+  const offered = perAgent ? providers.filter((p) => perAgent.includes(p.id)) : providers;
+  const rest = chain.slice(1);
+  const describe = (e: JobChain[number]) =>
+    [
+      perAgent && agentLabel(providers, e.provider),
+      modelLabel(providers, e.provider, e.model),
+      e.reasoningEffort && reasoningLabel(e.reasoningEffort),
+    ]
+      .filter(Boolean)
+      .join(" ");
+  const restTip = perAgent
+    ? rest.length === 0
+      ? "Add a model for another agent"
+      : `Also ${rest.map(describe).join(", ")}`
+    : rest.length === 0
       ? "Add fallbacks"
-      : `Then ${fallbacks
-          .map((f) =>
-            [
-              modelLabel(providers, f.provider, f.model),
-              f.reasoningEffort && reasoningLabel(f.reasoningEffort),
-            ]
-              .filter(Boolean)
-              .join(" "),
-          )
-          .join(", then ")}`;
+      : `Then ${rest.map(describe).join(", then ")}`;
+  const restLabel = perAgent
+    ? rest.length > 0
+      ? `${rest.length} more agents`
+      : "Add a model for another agent"
+    : rest.length > 0
+      ? `${rest.length} fallbacks`
+      : "Add fallbacks";
 
   return (
     <div className="flex items-start justify-between gap-4 py-2.5">
@@ -56,7 +70,7 @@ export function JobRow({
           the description, and every row's text wraps at the same edge. */}
       <div className="-mr-1.5 flex w-56 shrink-0 items-center justify-end gap-0.5">
         <ChainPicker
-          providers={providers}
+          providers={offered}
           entry={chain[0] ?? null}
           fallbackProvider={DEFAULT_JOB_MODELS[job][0].provider}
           onPick={(pick) => onChange((c) => withEntry(c, 0, pick))}
@@ -73,15 +87,15 @@ export function JobRow({
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label={fallbacks.length > 0 ? `${fallbacks.length} fallbacks` : "Add fallbacks"}
+              aria-label={restLabel}
               onClick={onFallbacks}
               className="relative text-muted-foreground hover:text-foreground"
             >
-              {fallbacks.length > 0 ? (
+              {rest.length > 0 ? (
                 <>
                   <Stack className="size-3.5" />
                   <span className="absolute right-0 top-0 flex h-3 min-w-3 items-center justify-center rounded-full bg-primary px-[3px] text-[9px] font-medium leading-none tabular-nums text-primary-foreground">
-                    {fallbacks.length}
+                    {rest.length}
                   </span>
                 </>
               ) : (
@@ -89,7 +103,7 @@ export function JobRow({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{fallbacksTip}</TooltipContent>
+          <TooltipContent>{restTip}</TooltipContent>
         </Tooltip>
       </div>
     </div>
