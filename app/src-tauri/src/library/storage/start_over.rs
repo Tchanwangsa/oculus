@@ -50,7 +50,7 @@ pub fn finish_start_over(data_dir: &Path) {
             _ => std::fs::remove_file(&path),
         };
         if let Err(e) = removed {
-            eprintln!(
+            elog!(
                 "[oculus] start over: could not remove {}: {e}",
                 path.display()
             );
@@ -59,7 +59,7 @@ pub fn finish_start_over(data_dir: &Path) {
     }
     if !failed {
         std::fs::remove_file(&marker).ok();
-        eprintln!("[oculus] start over: library cleared");
+        elog!("[oculus] start over: library cleared");
     }
 }
 

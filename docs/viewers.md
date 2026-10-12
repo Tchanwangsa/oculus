@@ -15,6 +15,7 @@ video's transcript, and a web page.
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lectures/playback/`, `app/src/lib/lectures/playbackOwner.ts` |
 | Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectures/end.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/lectures/chapters/app.rs` |
 | Library videos | `app/src/components/files/VideoFileViewer.tsx`, `app/src/lib/files/openFile.ts` |
+| An Echo360 embed in a page: the card, its subject, its store | `app/src/components/markdown/embed/EmbedVideoCard.tsx`, `app/src/components/markdown/embed/EmbedSubject.tsx`, `app/src/stores/lectures/embedDownloadStore.ts` |
 | Transcribe from a player | `app/src/hooks/lectures/useTranscription.ts`, `app/src/components/media/TranscribeEmpty.tsx` |
 | Transcript search and source-index mapping | `app/src/hooks/lectures/useTranscriptSearch.ts` |
 | Transcription of videos without captions | `app/src-tauri/src/transcribe/`, `app/src-tauri/src/providers/groq.rs`, `app/src/lib/lectures/transcribe/` |
@@ -36,6 +37,53 @@ classes work even when there are no dollar delimiters.
   first. An inline `<code>` holding only a citation (`app/src/lib/citations/`)
   renders as `FileChip`. `![alt](path)` naming a library picture or HTML
   page renders it in place (`OutputEmbed.tsx`).
+- **A library file's raw HTML is sanitized** (`fileMarkdownPlugins` in
+  `FileMarkdown.tsx`). When the text holds a `<`, `rehype-raw` parses its HTML
+  and `rehype-sanitize` cleans the tree straight after, before
+  `rehypeMaths` and the block anchors, so their own output (KaTeX markup,
+  `data-page`) is never checked. The schema
+  (`app/src/lib/markdown/sanitizeSchema.ts`) is GitHub's default plus
+  `<echo-video link-id src>` and remark-math's classes. Grow it from a tag
+  scan of the library's `.md`, not from memory; across the library it drops
+  only prose that parses as a tag
+  (`<section1>`, `<the>`, kept as their text), `on*` handlers, comments and
+  stray `<title>`/`<meta>`/`<form>`. MinerU's `<sub>`/`<sup>` render
+  unchanged. Its `user-content-` id prefix stays: nothing in the app
+  navigates by id, and it keeps a page's ids off `window`.
+- **Canvas's `<details>` and Echo360 embeds render as components** in
+  `MD_COMPONENTS`: `details`/`summary` as a bordered dropdown whose caret
+  turns by its own element's `[open]` (`group-open` would turn nested ones
+  too), and `echo-video` as `EmbedVideoCard`. hast keeps the attribute name,
+  so its prop is `link-id`. The tags are written by the sync ([sync.md](./sync.md#canvas-html-becomes-markdown-with-a-few-kept-tags)).
+- **An Echo360 embed is a card inside a library file**
+  (`app/src/components/markdown/embed/EmbedVideoCard.tsx`). Its commands need
+  the subject, which `MD_COMPONENTS` doesn't have, so `FileViewer` (every
+  Canvas page, announcement, assignment and parsed file) and a note's
+  `VersionPreview` wrap the markdown in `EmbedSubjectProvider`, which looks
+  the code up in the subjects list by id (a course folder is `safe_dir(code)`,
+  not the code). Anywhere else — a chat reply, `CompactMd` — the tag is
+  `EchoVideoPlaceholder`, a button opening the Canvas launch URL. The card is
+  spans, since the tag can land in a paragraph or table cell, and carries the
+  tag as `data-md` so a copied selection keeps it. Its states, all one height
+  (the 16:9 thumbnail sets it):
+  - **resolving** — a skeleton of the thumbnail and two text lines;
+  - **ready** — the poster from `posterRel`, Echo360's media name without its
+    video extension, the length (`fmtDurationSecs`, as lecture rows show it)
+    and a captions mark, then **Play** once `fileRel` is set (the file's row
+    through `openFileSmart`, so the shared media player and its Transcript tab;
+    ⌘-click opens a tab) or **Download**;
+  - **downloading** — the percent, a spinner before the first byte,
+    "Joining…" while ffmpeg muxes, and Cancel; it turns to Play once the
+    file's row has landed;
+  - **download off** (`restrictDownload`) — says so, with Open in Canvas;
+  - **failed** (the info call or a download) — the message verbatim and Retry.
+    A cancel goes back to Download silently.
+
+  Every state but download-off keeps a small Open in Canvas icon (⌘-click for
+  the system browser). The info call launches the link in Echo360, which
+  records a view, so `embedDownloadStore` asks it once per link per app
+  session and forgets only a rejection. Play that finds no row asks again;
+  the backend clears a deleted file, so the card offers Download.
 - **A reply goes through `CompactMd`**, whose `.md-compact` rules in `index.css`
   are deliberately *unlayered* — in `@layer base` they would lose to the
   utilities they override. **`InlineMd` flattens blocks** because chapter
@@ -55,6 +103,10 @@ classes work even when there are no dollar delimiters.
 - **A spreadsheet opens as its text** (`marks.xlsx.md`, a table per sheet),
   in-app like a PDF rather than in the system viewer (`lib/files/openFile.ts`), with no
   PDF ↔ Markdown toggle.
+- **A file with a web `source_url` has an Open in browser button** (the globe
+  in `FilePage`'s header, ⌘-click for the system browser). A synced Canvas page
+  is our markdown of it; the button opens the original, with its embeds and
+  styling, in a browser tab through `openExternal`.
 - **`FileViewer` resolves in-file links locally** — relative links and Canvas
   `/files/<id>` or `/pages/<slug>` URLs, by `canvas_id`, path or `source_url`
   (`app/src/lib/files/libraryLinks.ts`, shared with the note editor). A selection
@@ -241,6 +293,11 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   captions are the sibling `<video>.vtt`, and one that exists but won't read
   is an error, never a Transcribe offer. The element pauses when its tab goes
   to the back, since nothing parks it, and keeps no position.
+- **Files ▸ Media lists the videos Oculus fetched** — module videos and
+  Canvas-page embeds, the `file` rows that are videos
+  (`app/src/pages/subject/files/MediaPage.tsx`) — with a captions mark when the
+  sibling `.vtt` has content. A video not yet downloaded shows only on its
+  module.
 - **One sound at a time**: a library video playing pauses the lecture
   (`pauseLecturePlayback`) and other library videos; a lecture's leader
   playing pauses every registered library video (`registerLibraryVideo` in
@@ -546,8 +603,9 @@ recording on a large model takes minutes.
 ## The in-app browser is a native page per tab, owned by Rust
 
 A browser tab is `/browse/<id>`, naming a WKWebView that
-`app/src-tauri/src/shell/browser/` parks over an empty slot in `BrowserPage` (Canvas
-refuses iframes).
+`app/src-tauri/src/shell/browser/` places under an empty slot in `BrowserPage`, seen
+through a hole in the app ([architecture.md](./architecture.md#native-pages-sit-under-the-app-seen-through-holes-in-root)).
+Canvas refuses iframes.
 
 - **Rust owns the tab list** and pushes `browser-state` on every change;
   `useBrowserTabs` reconciles it per *pane*. The mirror preserves unchanged
@@ -555,12 +613,10 @@ refuses iframes).
   Page navigations change the URL in
   Rust only, never the route. What a page knows about itself (history, find,
   zoom) is pushed as events, because `with_webview` returns nothing.
-- **A native page can't interleave with the DOM.** `BrowserPage` hides it while
-  a portal overlaps the slot, while its tab is backgrounded (`useTabActive`),
-  and while the address field is focused — showing a PNG still
-  (`browser_snapshot`) so the card doesn't blank. It stays hidden for the whole
-  edit, not just while the list shows, because `browser_place` focuses the
-  page: re-placing it on a backspace to empty would steal the caret.
+- **A page is hidden only while its tab is backgrounded** (`useTabActive`).
+  Popovers and the address suggestions (`AddressSuggestions`, a portal) draw
+  over the live page. Hiding throttles a page's timers, and `browser_place`
+  focuses it, so nothing else hides or re-places it.
 - **History is one row per URL, ranked by frecency**, recorded on load
   *finish* (one row per redirect chain). `historyUrl` drops the fragment, and
   the whole query if any part looks like a credential.

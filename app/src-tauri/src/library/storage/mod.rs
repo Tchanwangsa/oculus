@@ -79,7 +79,7 @@ pub async fn storage_report() -> Result<StorageReport, String> {
         let mut files = Vec::new();
         let mut total = 0u64;
         walk(&root, &root, &mut files, &mut total);
-        files.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+        files.sort_by_key(|f| std::cmp::Reverse(f.bytes));
         let (disk_free_bytes, disk_total_bytes) = disk_space(&root);
         Ok(StorageReport {
             data_dir: root.to_string_lossy().into_owned(),

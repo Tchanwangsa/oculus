@@ -43,7 +43,7 @@ pub(super) fn resume_in(broker: &Credentialed, in_process: impl FnOnce() -> Resu
         other => other.map_err(|e| e.to_string()),
     };
     if let Err(why) = outcome {
-        eprintln!("[oculus] the attempt guard was not cleared: {why}");
+        elog!("[oculus] the attempt guard was not cleared: {why}");
     }
 }
 
@@ -91,11 +91,11 @@ pub fn try_auto_recover(app: &tauri::AppHandle, trigger: Trigger) -> bool {
     };
     match outcome {
         Ok(name) => {
-            eprintln!("[oculus] session rebuilt without a browser ({name})");
+            elog!("[oculus] session rebuilt without a browser ({name})");
             true
         }
         Err(e) => {
-            eprintln!("[oculus] automated re-sign-in failed: {e}");
+            elog!("[oculus] automated re-sign-in failed: {e}");
             false
         }
     }

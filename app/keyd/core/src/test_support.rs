@@ -68,6 +68,7 @@ impl Drop for Scratch {
 pub struct Peers {
     verdict: Result<(), String>,
     role: Role,
+    application: Option<String>,
     pub seen: Arc<AtomicUsize>,
 }
 
@@ -77,6 +78,7 @@ impl Peers {
         Peers {
             verdict: Ok(()),
             role: Role::Cli,
+            application: None,
             seen: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -89,10 +91,20 @@ impl Peers {
         }
     }
 
+    /// Admits every caller as the app, which the OS knows as `application`.
+    pub fn admit_app(application: &str) -> Peers {
+        Peers {
+            role: Role::App,
+            application: Some(application.to_string()),
+            ..Peers::admit()
+        }
+    }
+
     pub fn refuse(why: &str) -> Peers {
         Peers {
             verdict: Err(why.to_string()),
             role: Role::Cli,
+            application: None,
             seen: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -105,6 +117,7 @@ impl PeerCheck for Peers {
         Caller {
             pid: Some(std::process::id()),
             role: self.role,
+            application: self.application.clone(),
             ..Caller::default()
         }
     }
@@ -122,34 +135,64 @@ pub type Reads = Arc<AtomicUsize>;
 #[cfg(feature = "server")]
 pub type Removed = Arc<Mutex<Vec<(String, String)>>>;
 
+/// What a WebKit WebCrypto item read answers, by account.
+#[cfg(feature = "server")]
+type WebKitItems = Vec<(&'static str, Result<Option<Vec<u8>>, KeyError>)>;
+
+/// The (service, account) keys and what reading each yields, for `OldItems`.
+#[cfg(feature = "server")]
+pub type OldItemList = Vec<(
+    (&'static str, &'static str),
+    Result<Option<String>, KeyError>,
+)>;
+
 /// Old keychain items by (service, account), counting every read and
-/// recording every removal. A removed item is gone for later calls.
+/// recording every removal. A removed item is gone for later calls. WebKit's
+/// WebCrypto items answer by account; one not given is not there.
 #[cfg(feature = "server")]
 pub struct OldItems {
-    items: Vec<(
-        (&'static str, &'static str),
-        Result<Option<String>, KeyError>,
-    )>,
+    items: OldItemList,
     reads: Reads,
     removed: Removed,
     removal_fails: Option<KeyError>,
+    webkit: WebKitItems,
+    webkit_reads: Reads,
+    webkit_delay: std::time::Duration,
 }
 
 #[cfg(feature = "server")]
 impl OldItems {
-    pub fn new(
-        items: Vec<(
-            (&'static str, &'static str),
-            Result<Option<String>, KeyError>,
-        )>,
-        reads: Reads,
-    ) -> Self {
+    pub fn new(items: OldItemList, reads: Reads) -> Self {
         OldItems {
             items,
             reads,
             removed: Removed::default(),
             removal_fails: None,
+            webkit: Vec::new(),
+            webkit_reads: Reads::default(),
+            webkit_delay: std::time::Duration::ZERO,
         }
+    }
+
+    /// WebKit's WebCrypto item under `account` answers `read`.
+    pub fn webkit_item(
+        mut self,
+        account: &'static str,
+        read: Result<Option<Vec<u8>>, KeyError>,
+    ) -> Self {
+        self.webkit.push((account, read));
+        self
+    }
+
+    /// Each WebKit item read takes `delay`, as a keychain prompt would.
+    pub fn slow_webkit(mut self, delay: std::time::Duration) -> Self {
+        self.webkit_delay = delay;
+        self
+    }
+
+    /// A count of WebKit item reads, usable after the keyd owns the items.
+    pub fn webkit_reads(&self) -> Reads {
+        self.webkit_reads.clone()
     }
 
     /// Every removal answers `error`, and removes nothing.
@@ -190,6 +233,16 @@ impl LegacySource for OldItems {
             gone.push(pair);
         }
         Ok(there)
+    }
+
+    fn read_webcrypto(&self, key: &crate::names::WebCrypto) -> Result<Option<Vec<u8>>, KeyError> {
+        self.webkit_reads.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(self.webkit_delay);
+        self.webkit
+            .iter()
+            .find(|(account, _)| *account == key.account)
+            .map(|(_, r)| r.clone())
+            .unwrap_or(Ok(None))
     }
 }
 

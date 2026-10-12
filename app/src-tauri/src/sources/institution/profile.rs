@@ -20,14 +20,14 @@ pub fn load(data_dir: &Path) -> Option<Institution> {
         Ok(raw) => match serde_json::from_str(&raw) {
             Ok(inst) => Some(inst),
             Err(e) => {
-                eprintln!("[oculus] institution.json is unreadable: {e}");
+                elog!("[oculus] institution.json is unreadable: {e}");
                 None
             }
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound && predates_profile(data_dir) => {
             let inst = unimelb();
             if let Err(e) = save(data_dir, &inst) {
-                eprintln!("[oculus] could not write institution.json: {e}");
+                elog!("[oculus] could not write institution.json: {e}");
             }
             Some(inst)
         }
@@ -122,11 +122,11 @@ pub fn learn(data_dir: &Path, update: impl FnOnce(&mut Institution)) {
     }
     if inst.site() != before.site() {
         if let Err(e) = super::keyd::tell(data_dir, &inst) {
-            eprintln!("[oculus] oculus-keyd did not take the new site: {e}");
+            elog!("[oculus] oculus-keyd did not take the new site: {e}");
             return;
         }
     }
     if let Err(e) = save(data_dir, &inst) {
-        eprintln!("[oculus] could not update institution.json: {e}");
+        elog!("[oculus] could not update institution.json: {e}");
     }
 }

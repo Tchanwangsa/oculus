@@ -41,7 +41,7 @@ fn link_skill(link: &Path, target: &str, name: &str, body: &str) -> Result<Link,
             std::fs::remove_file(link).map_err(|e| format!("cannot relink {name}: {e}"))?;
         }
         Ok(_) => {
-            eprintln!("[oculus] {} is not ours — left alone", link.display());
+            elog!("[oculus] {} is not ours — left alone", link.display());
             return Ok(Link::Skipped);
         }
         Err(_) => {}
@@ -201,7 +201,7 @@ fn link_dir(data_dir: &Path, dir: &Path) -> Result<Link, String> {
     let link = dir.join(AGENTS_DOC_NAME);
     match std::fs::symlink_metadata(&link) {
         Ok(meta) if meta.file_type().is_symlink() => {
-            if std::fs::read_link(&link).is_ok_and(|t| t == PathBuf::from(AGENTS_DOC_REL)) {
+            if std::fs::read_link(&link).is_ok_and(|t| t == *AGENTS_DOC_REL) {
                 return Ok(Link::Current);
             }
             std::fs::remove_file(&link).map_err(|e| format!("cannot relink {name}: {e}"))?;

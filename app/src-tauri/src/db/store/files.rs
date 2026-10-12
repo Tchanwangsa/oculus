@@ -2,16 +2,28 @@ use std::path::Path;
 
 use sqlx::{Row, SqlitePool};
 
-pub async fn upsert_file(
-    pool: &SqlitePool,
-    subject_id: i64,
-    relative_path: &str,
-    size_bytes: u64,
-    category: &str,
-    canvas_id: Option<i64>,
-    source_url: Option<&str>,
-    changed: bool,
-) -> Result<(), String> {
+/// One scraped file, as `upsert_file` records it.
+pub struct FileRow<'a> {
+    pub subject_id: i64,
+    pub relative_path: &'a str,
+    pub size_bytes: u64,
+    pub category: &'a str,
+    pub canvas_id: Option<i64>,
+    pub source_url: Option<&'a str>,
+    /// The engine's action: content_changed_at moves only on new bytes.
+    pub changed: bool,
+}
+
+pub async fn upsert_file(pool: &SqlitePool, row: &FileRow<'_>) -> Result<(), String> {
+    let FileRow {
+        subject_id,
+        relative_path,
+        size_bytes,
+        category,
+        canvas_id,
+        source_url,
+        changed,
+    } = *row;
     let filename = relative_path
         .rsplit('/')
         .next()
@@ -22,7 +34,6 @@ pub async fn upsert_file(
         .map(|(_, e)| e.to_string())
         .unwrap_or_else(|| "md".into());
 
-    // `changed` is the engine's action; content_changed_at moves only on new bytes.
     sqlx::query(
         r#"INSERT INTO files (subject_id, filename, relative_path, file_type, size_bytes, category, canvas_id, source_url, first_seen_at, content_changed_at)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'),

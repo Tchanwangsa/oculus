@@ -1,3 +1,6 @@
+#[macro_use]
+mod elog;
+
 pub mod agents;
 pub mod auth;
 pub mod db;
@@ -5,6 +8,7 @@ pub mod embed;
 pub mod harness;
 pub mod lectures;
 pub mod library;
+pub mod music;
 pub mod pages;
 pub mod parse;
 pub mod providers;
@@ -40,9 +44,18 @@ pub fn run() {
         .manage(lectures::DownloadCancels::default())
         .manage(ScrapeCancel::default())
         .manage(sync::scrape::VideoCancels::default())
+        .manage(sync::scrape::embeds::EmbedCancels::default())
+        .manage(sync::scrape::embeds::EmbedBearer::default())
         .manage(shell::browser::BrowserState::default())
+        .manage(shell::dock::DockState::default())
         .manage(shell::usage::UsageState::default())
+        .manage(music::MusicState::default())
         .setup(|app| {
+            // WebKit's WebCrypto master key comes from keyd. First, so the
+            // default store has its delegate before any page can ask.
+            #[cfg(target_os = "macos")]
+            shell::webcrypto::install_default(app.handle());
+
             // Give the parse and embed seams a window to emit progress to;
             // headless (CLI) runs never bind, so their emits are no-ops.
             parse::events::bind(app.handle().clone());
@@ -55,8 +68,13 @@ pub fn run() {
 
             sources::echo360::cleanup_partial_downloads(&library::paths::data_dir());
 
+            // The app's webview goes transparent and routes clicks to the
+            // pages under it. Before any page exists.
+            shell::native_layer::init(app.handle());
             // Seeds WebKit with the Canvas session and follows window resizes.
             shell::browser::init(app.handle());
+            // Dock pages follow resizes; the frontend creates them (`dock_set_enabled`).
+            shell::dock::init(app.handle());
             // A focused browser page gets ⌘-keys before the menu.
             #[cfg(target_os = "macos")]
             shell::keys::install(app.handle());
@@ -83,12 +101,11 @@ pub fn run() {
                 auth::keyd::ensure_installed();
                 // keyd sends the session only to the profile's university.
                 sources::institution::tell_keyd();
+                // Spotify, when Settings → Music is on: its login is keyd's too.
+                music::startup::apply_settings(&restore);
                 // Replay the stored session with a server-side ping.
                 auth::restore_session(&restore);
             });
-
-            // The session keep-alive agent an earlier version installed.
-            auth::legacy_agent::retire_in_background();
 
             Ok(())
         })
@@ -124,6 +141,9 @@ pub fn run() {
             sync::scrape::cancel_scrape,
             sync::scrape::videos::canvas_download_video,
             sync::scrape::videos::canvas_cancel_video,
+            sync::scrape::embeds::commands::echo360_embed_info,
+            sync::scrape::embeds::commands::echo360_embed_download,
+            sync::scrape::embeds::commands::echo360_embed_cancel,
             sync::scrape::parse_file,
             sync::scrape::parse_skip,
             library::files::commands::read_course_file,
@@ -198,6 +218,7 @@ pub fn run() {
             harness::app::models::harness_antigravity_rules,
             harness::app::models::harness_antigravity_revoke,
             harness::app::models::harness_opencode_models,
+            harness::app::models::harness_opencode_models_if_running,
             harness::app::models::harness_opencode_providers,
             harness::app::models::harness_opencode_set_key,
             harness::app::models::harness_opencode_disconnect,
@@ -228,7 +249,7 @@ pub fn run() {
             shell::browser::commands::browser_place,
             shell::browser::commands::browser_set_viewport,
             shell::browser::commands::browser_hide_tab,
-            shell::browser::commands::browser_snapshot,
+            shell::native_layer::native_set_blocked,
             shell::browser::commands::browser_hide,
             shell::browser::commands::browser_navigate,
             shell::browser::commands::browser_history,
@@ -237,13 +258,56 @@ pub fn run() {
             shell::browser::commands::browser_find,
             shell::browser::commands::browser_find_clear,
             shell::browser::commands::browser_close_tab,
+            music::commands::music_state,
+            music::commands::music_login,
+            music::commands::music_connect,
+            music::commands::music_disconnect,
+            music::commands::music_sign_out,
+            music::commands::music_play_pause,
+            music::commands::music_play,
+            music::commands::music_pause,
+            music::commands::music_pause_player,
+            music::commands::music_shuffle,
+            music::commands::music_repeat,
+            music::commands::music_next,
+            music::commands::music_prev,
+            music::commands::music_seek,
+            music::commands::music_volume,
+            music::commands::music_play_context,
+            music::commands::music_play_track,
+            music::commands::music_playlists,
+            music::commands::music_playlist_covers,
+            music::commands::music_playlist_tracks,
+            music::commands::music_album_tracks,
+            music::commands::music_tracks,
+            music::commands::music_add_to_queue,
+            music::commands::music_skip_to,
+            music::commands::music_queue_remove,
+            music::commands::music_search,
+            music::commands::music_search_more,
+            music::commands::music_duck,
+            music::commands::music_devices,
+            music::commands::music_transfer,
+            music::commands::music_play_here,
+            music::commands::music_outputs,
+            music::commands::music_set_output,
+            shell::dock::commands::dock_list,
+            shell::dock::commands::dock_set_enabled,
+            shell::dock::commands::dock_place,
+            shell::dock::commands::dock_park,
+            shell::dock::commands::dock_set_viewport,
+            shell::dock::commands::dock_reload,
+            shell::dock::commands::dock_inbox,
+            shell::dock::commands::dock_inbox_clear,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // Don't let a CLI agent outlive the window.
+            // Don't let a CLI agent outlive the window, or the Spotify
+            // device linger in Spotify's device list.
             if matches!(event, tauri::RunEvent::Exit) {
                 harness::app::shutdown(app_handle);
+                music::shutdown(app_handle);
             }
         });
 }

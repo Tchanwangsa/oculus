@@ -7,6 +7,8 @@ import {
   harnessClaudeModels,
   harnessCodexModels,
   harnessOpencodeModels,
+  harnessOpencodeModelsIfRunning,
+  OPENCODE_RUNNING_EVENT,
   opencodeAsModels,
   type HarnessModel,
 } from "./models";
@@ -21,14 +23,24 @@ export interface ProviderInfo {
   staticModels: HarnessModel[] | null;
   /** Present exactly when `staticModels` is null; already in picker shape. */
   fetchModels?: () => Promise<HarnessModel[]>;
-  /** How the CLI's sign-in ends: `"code"` blocks on a pasted code (Claude),
-   *  `"callback"` finishes via a loopback server (Codex). `null`: nothing to
-   *  drive here — opencode signs in per provider in Settings → opencode. */
+  /** For a CLI only its own Settings page may start: the list if it is
+   *  already running, else null. A picker that must not start it (Settings →
+   *  Jobs) asks this instead of `fetchModels`. */
+  peekModels?: () => Promise<HarnessModel[] | null>;
+  /** What the picker says when `peekModels` found the CLI not running. */
+  dormantNote?: string;
+  /** The `window` event that says the CLI has since started, so a dormant
+   *  `peekModels` answer is asked again. */
+  runningEvent?: string;
+  /** How the CLI's sign-in ends: `"code"` blocks on a pasted code (Claude,
+   *  and Antigravity driven over a pseudo-terminal), `"callback"` finishes via a
+   *  loopback server (Codex). `null`: nothing to drive here — opencode signs
+   *  in per provider in Settings → opencode. */
   signIn: "code" | "callback" | null;
   /** What the picker says when an installed CLI's list is empty because of a
    *  step the student can take. */
   emptyNote?: string;
-  /** The Settings page the empty-list note's button opens. */
+  /** The Settings page the empty or dormant note's button opens. */
   emptyNotePage?: SettingsPageId;
   /** Whether the CLI can drop a question from its own context — gates Rewind,
    *  Edit and Retry. `agy` 1.2.9 cannot in print mode. */
@@ -64,6 +76,12 @@ export const PROVIDERS: ProviderInfo[] = [
       const models = opencodeAsModels(await harnessOpencodeModels());
       return filterOffered(models, await loadCatalogue());
     },
+    peekModels: async () => {
+      const raw = await harnessOpencodeModelsIfRunning();
+      return raw && filterOffered(opencodeAsModels(raw), await loadCatalogue());
+    },
+    dormantNote: "opencode isn't running. Open its Settings page to start it and load its models.",
+    runningEvent: OPENCODE_RUNNING_EVENT,
     signIn: null,
     emptyNote: "Sign in to a provider in Settings → opencode to get models here.",
     emptyNotePage: "opencode",
@@ -75,10 +93,8 @@ export const PROVIDERS: ProviderInfo[] = [
     staticModels: null,
     // `agy models` lists the account's own entitlements, so no filter.
     fetchModels: () => harnessAntigravityModels().then(antigravityAsModels),
-    // `agy` has no login subcommand; signing in is its interactive CLI.
-    signIn: null,
-    emptyNote:
-      "Run agy in a terminal and finish its Google sign-in, then its models appear here.",
+    signIn: "code",
+    emptyNote: "Sign in to Antigravity in Settings → Agents to get models here.",
     emptyNotePage: "agents",
     rewind: false,
   },

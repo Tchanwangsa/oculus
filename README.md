@@ -82,6 +82,10 @@ Mac first for now. Windows support is a main priority.
 Downloads are coming soon. Until then you can run it from source — you'll
 need [bun](https://bun.sh), [Rust](https://rustup.rs) and
 [sccache](https://github.com/mozilla/sccache) (`brew install sccache`).
+On macOS, add your terminal or editor under System Settings → Privacy &
+Security → Developer Tools first, or builds stall on macOS's security scan
+(for Claude Code's agents, its own `claude.app`, see
+[docs/development.md](docs/development.md#gotchas)).
 
 ```bash
 cd app

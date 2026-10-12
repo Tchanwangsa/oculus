@@ -9,6 +9,7 @@
 
 use core::ops::Range;
 
+use katex::types::OutputFormat;
 use oculus_math_edit::{Affinity, Bounds, SlotId, SlotKind, SlotPath, StopId, Stops, stops};
 
 fn parsed(source: &str, display: bool) -> Stops {
@@ -365,7 +366,7 @@ fn unparseable_source_has_no_stops() {
 /// The `data-s` of every placeholder the fork draws for `source`.
 fn placeholders(source: &str) -> Vec<usize> {
     let settings = katex::Settings::builder()
-        .output(katex::types::OutputFormat::Html)
+        .output(OutputFormat::Html)
         .source_map(true)
         .build();
     let html = katex::render_to_string(&katex::KatexContext::default(), source, &settings)

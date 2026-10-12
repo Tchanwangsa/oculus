@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 mod flow;
 mod guard;
 mod jar;
+mod setup_key;
 pub mod totp;
 mod wire;
 
@@ -33,6 +34,7 @@ mod sign_in_tests;
 
 pub use flow::probe_sign_in_page;
 pub use guard::{resume_automatic_sign_in, Trigger};
+pub use setup_key::setup_key;
 pub use totp::{base32_decode, totp_at, totp_code, totp_now, totp_seconds_remaining};
 pub use wire::{outcome_from_wire, outcome_to_wire, refused_signin_from_wire, OktaStatus};
 
@@ -50,27 +52,24 @@ pub struct Credentials {
     pub totp_secret: String,
 }
 
-const BAD_SEED: &str = "That does not look like a TOTP setup key: it may only contain the letters \
-                        A–Z and the digits 2–7.";
-
 /// The one check on credentials before they are saved, wherever they are
 /// kept. An undecodable TOTP seed would otherwise surface mid sign-in as an
-/// indistinguishable "wrong code". Messages never contain a value, not even one character of it.
+/// indistinguishable "wrong code". The seed may be pasted as a key or an
+/// `otpauth://` link; the bare key is what is kept (`setup_key`). Messages
+/// never contain a value, not even one character of it.
 pub fn validate_credentials(
     username: &str,
     password: &str,
     totp_secret: &str,
 ) -> Result<Credentials, String> {
     let username = username.trim();
-    let secret = totp_secret.trim().replace(' ', "");
     if username.is_empty() {
         return Err("Username is required.".to_string());
     }
     if password.is_empty() {
         return Err("Password is required.".to_string());
     }
-    // The decoder's error names the offending character; a pasted key is a secret.
-    base32_decode(&secret).map_err(|_| BAD_SEED.to_string())?;
+    let secret = setup_key(totp_secret)?;
     Ok(Credentials {
         username: username.to_string(),
         password: password.to_string(),

@@ -42,8 +42,14 @@ try {
 }
 writeFileSync(pidFile, String(process.pid));
 
+let timer = null;
+let building = null;
+let again = false;
+
 function bye(reason) {
   log(reason);
+  // The build would otherwise run on, orphaned, holding cargo's lock.
+  building?.kill("SIGTERM");
   try {
     unlinkSync(pidFile);
   } catch {
@@ -55,26 +61,21 @@ for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
   process.on(sig, () => bye("stopping"));
 }
 
-let timer = null;
-let building = false;
-let again = false;
-
 function build() {
   if (building) {
     again = true;
     return;
   }
-  building = true;
   const started = Date.now();
   // Same reason as predev: a build that leaves no binary must not pass on an
   // old one.
   rmSync(cli, { force: true });
-  execFile(
+  building = execFile(
     "cargo",
     cliBuildArgs("debug"),
     { maxBuffer: 32 * 1024 * 1024 },
     (err, _out, stderr) => {
-      building = false;
+      building = null;
       if (err) {
         // Not fatal — the same error is in front of them in tauri's own output,
         // and the session should keep running while they fix it.

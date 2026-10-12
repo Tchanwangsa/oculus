@@ -1,16 +1,7 @@
+use super::embeds::{details_md, iframe_md};
+use super::escape::escape_md;
 use super::tree::{attr, dropped, tag, text_content, Ref};
 use super::Ctx;
-
-pub(super) fn escape_md(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if matches!(c, '*' | '_' | '`' | '[' | ']' | '\\') {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
-}
 
 /// Emphasis wrapping content that is only footnote markers or digits produces
 /// ambiguous Markdown (`**\*†**`), so that content is emitted bare.
@@ -57,6 +48,9 @@ pub(super) fn inline_md(node: Ref<'_>, ctx: &Ctx) -> String {
             "sup" => out.push_str(&escape_md(&text_content(n))),
             "code" => out.push_str(&format!("`{}`", text_content(n))),
             "br" => out.push_str("  \n"),
+            // Blocks met inside a paragraph: blank lines either side split it.
+            "iframe" => out.push_str(&iframe_md(n, ctx).unwrap_or_default()),
+            "details" if !ctx.in_cell => out.push_str(&format!("\n\n{}", details_md(n, ctx))),
             "img" => {
                 let src = attr(&n, "src").unwrap_or_default();
                 let src = ctx.images.get(src).map(String::as_str).unwrap_or(src);

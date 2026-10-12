@@ -96,7 +96,7 @@ impl Ed {
             return;
         };
         if let Err(e) = self.keyd.session_put(SessionKind::Ed, &new) {
-            eprintln!("[oculus] ed token was not saved: {e}");
+            elog!("[oculus] ed token was not saved: {e}");
         }
     }
 }

@@ -93,7 +93,9 @@ pub fn decode_vector(encoded: &str) -> Result<Vec<f32>, EmbedError> {
 /// float16 little-endian -> f32. Vectors are stored normalised, so a dot
 /// product is cosine similarity.
 pub fn unpack_vector(raw: &[u8]) -> Vec<f32> {
-    raw.chunks_exact(2)
-        .map(|c| f16::from_le_bytes([c[0], c[1]]).to_f32())
+    raw.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&c| f16::from_le_bytes(c).to_f32())
         .collect()
 }

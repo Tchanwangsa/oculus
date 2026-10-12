@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { suspendHoles } from "@/lib/shell/nativeHoles";
 
 /**
  * Not `requestFullscreen()`: WKWebView gates element fullscreen behind
@@ -25,6 +26,9 @@ export function useFullscreen() {
       /* not fatal — the overlay just covers a windowed app */
     }
   }, []);
+
+  // The overlay is inside `#root`, so an open page's hole would cut through it.
+  useEffect(() => (isFullscreen ? suspendHoles() : undefined), [isFullscreen]);
 
   // Leaving window fullscreen another way (green button, ⌃⌘F) arrives as a
   // resize; only the leaving matters.

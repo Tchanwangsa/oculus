@@ -35,11 +35,11 @@ pub fn init(app: &AppHandle) -> HarnessState {
                 if thread_id > 0 {
                     match rt.block_on(store::apply(p, thread_id, &ev)) {
                         Ok(id) => item_id = id,
-                        Err(e) => eprintln!("[oculus] harness store: {e}"),
+                        Err(e) => elog!("[oculus] harness store: {e}"),
                     }
                 }
                 if let Err(e) = rt.block_on(store::save_rate_limits(p, provider, &ev)) {
-                    eprintln!("[oculus] harness rate limits: {e}");
+                    elog!("[oculus] harness rate limits: {e}");
                 }
                 // A finished first exchange is when a thread is named. The
                 // claim is atomic (asks at most once); the naming turn runs
@@ -64,13 +64,13 @@ pub fn init(app: &AppHandle) -> HarnessState {
                                                 HarnessEvent::ThreadTitled { title },
                                             ));
                                         }
-                                        Err(e) => eprintln!("[oculus] harness title: {e}"),
+                                        Err(e) => elog!("[oculus] harness title: {e}"),
                                     }
                                 });
                             }
                         }
                         Ok(None) => {}
-                        Err(e) => eprintln!("[oculus] harness title: {e}"),
+                        Err(e) => elog!("[oculus] harness title: {e}"),
                     }
                 }
             }
@@ -83,7 +83,7 @@ pub fn init(app: &AppHandle) -> HarnessState {
                     let _ = b.send((thread_id, provider, HarnessEvent::Unqueued { id: msg.id }));
                     tauri::async_runtime::spawn(async move {
                         if let Err(e) = dispatch(h, b, thread_id, provider, opts, msg.text).await {
-                            eprintln!("[oculus] harness queued send: {e}");
+                            elog!("[oculus] harness queued send: {e}");
                         }
                     });
                 }
@@ -112,7 +112,7 @@ pub fn init(app: &AppHandle) -> HarnessState {
 pub fn sweep_strays() {
     let killed = opencode::sweep();
     if !killed.is_empty() {
-        eprintln!(
+        elog!(
             "[oculus] harness: killed {} stray opencode server(s): {killed:?}",
             killed.len()
         );
@@ -126,7 +126,7 @@ pub fn reconcile(app: &AppHandle) {
         if let Ok(pool) = crate::db::store::open_pool().await {
             if let Ok(n) = store::reconcile(&pool).await {
                 if n > 0 {
-                    eprintln!("[oculus] harness: marked {n} interrupted thread(s) idle");
+                    elog!("[oculus] harness: marked {n} interrupted thread(s) idle");
                 }
             }
         }

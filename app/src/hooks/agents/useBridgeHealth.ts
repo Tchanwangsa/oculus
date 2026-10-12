@@ -4,7 +4,7 @@ import { harnessHealth, type BridgeHealth, type Provider, type ProviderHealth } 
 
 /** Whether each provider's CLI is on this machine, shared by every picker.
  *  Cached here (one in-flight invoke) and in Rust (`harness/cli/discover/`);
- *  only Settings' Recheck clears both. */
+ *  only Settings' Recheck and onboarding's Check again clear both. */
 export type { ProviderHealth } from "@/lib/harness";
 
 let cached: BridgeHealth[] | null = null;
@@ -53,7 +53,8 @@ export function providerHealth(rows: BridgeHealth[] | null, provider: Provider):
 
 export function useBridgeHealth(): {
   health: BridgeHealth[] | null;
-  /** Settings' Recheck button only: Rust drops its cached lookups. */
+  /** Settings' Recheck and onboarding's Check again only: Rust drops its
+   *  cached lookups. */
   recheck: () => Promise<void>;
   checking: boolean;
 } {

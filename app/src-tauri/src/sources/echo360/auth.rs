@@ -5,7 +5,7 @@
 
 use super::{Session, NO_TOOL};
 
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+pub(super) const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
 pub fn connect(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Result<Session, String> {
     let (lti_url, action, fields) = launch_form(canvas, course_id)?;
@@ -55,12 +55,16 @@ pub fn connect(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Resul
         );
     }
 
-    eprintln!(
+    elog!(
         "[oculus] echo360 auth done: {} section={}",
-        s.base, s.section_id
+        s.base,
+        s.section_id
     );
     Ok(s)
 }
+
+/// The launch page's URL, where its form posts, and the form's fields.
+pub(super) type LaunchForm = (String, String, Vec<(String, String)>);
 
 /// The course's Echo360 tool form: the launch page's URL, where the form
 /// posts and its fields. The tabs labelled for lecture capture come first,
@@ -70,7 +74,7 @@ pub fn connect(canvas: &crate::sources::canvas::Canvas, course_id: i64) -> Resul
 pub(super) fn launch_form(
     canvas: &crate::sources::canvas::Canvas,
     course_id: i64,
-) -> Result<(String, String, Vec<(String, String)>), String> {
+) -> Result<LaunchForm, String> {
     let mut candidates =
         tool_candidates(&canvas.get_json(&format!("/api/v1/courses/{course_id}/tabs"))?);
     if let Some(tool) = canvas.institution().and_then(|i| i.echo360_tool.as_deref()) {
@@ -80,7 +84,7 @@ pub(super) fn launch_form(
         }
     }
     for path in &candidates {
-        eprintln!("[oculus] echo360 auth: trying {path}");
+        elog!("[oculus] echo360 auth: trying {path}");
         let page = canvas.get(path)?;
         if !page.ok() {
             continue;
@@ -148,7 +152,7 @@ fn attr(elem: &str, name: &str) -> Option<String> {
     Some(html_unescape(&elem[s..e]))
 }
 
-fn html_unescape(s: &str) -> String {
+pub(super) fn html_unescape(s: &str) -> String {
     s.replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")

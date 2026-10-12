@@ -2,6 +2,8 @@
 //! rather than stripped up front.
 
 mod blocks;
+mod embeds;
+mod escape;
 mod inline;
 mod lists;
 mod tables;
@@ -14,6 +16,7 @@ pub use blocks::collapse_blank_lines;
 use std::collections::HashMap;
 
 use scraper::Html;
+use url::Url;
 
 use blocks::block_md;
 use tree::{is_tag, Ctx};
@@ -26,8 +29,17 @@ const SKIP_TAGS: &[&str] = &["script", "style", "noscript", "svg", "path"];
 /// `<img src>` → local relative path, filled in by the image downloader.
 pub type ImageMap = HashMap<String, String>;
 
-/// Convert a Canvas HTML body to Markdown. `images` may be empty.
+/// Convert a Canvas HTML body to Markdown, on the profile's Canvas. `images`
+/// may be empty.
 pub fn to_markdown(html: &str, images: &ImageMap) -> String {
+    let canvas = crate::sources::institution::canvas_base()
+        .ok()
+        .and_then(|base| Url::parse(&base).ok());
+    to_markdown_on(html, images, canvas.as_ref())
+}
+
+/// [`to_markdown`] with the Canvas a relative iframe src resolves against.
+fn to_markdown_on(html: &str, images: &ImageMap, canvas: Option<&Url>) -> String {
     let doc = Html::parse_document(html);
     let body = doc
         .tree
@@ -38,6 +50,7 @@ pub fn to_markdown(html: &str, images: &ImageMap) -> String {
 
     let ctx = Ctx {
         images,
+        canvas,
         in_cell: false,
     };
     let out = block_md(body, &ctx);

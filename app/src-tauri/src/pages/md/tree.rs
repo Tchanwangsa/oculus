@@ -1,12 +1,16 @@
 use ego_tree::NodeRef;
 use scraper::node::Node;
+use url::Url;
 
 use super::{ImageMap, SKIP_TAGS};
 
 pub(super) type Ref<'a> = NodeRef<'a, Node>;
 
+#[derive(Clone, Copy)]
 pub(super) struct Ctx<'a> {
     pub(super) images: &'a ImageMap,
+    /// The Canvas a relative iframe src is on; `None` keeps only absolute ones.
+    pub(super) canvas: Option<&'a Url>,
     /// Inside a table cell: images and block structure are dropped, because a
     /// GFM cell must stay on one line.
     pub(super) in_cell: bool,

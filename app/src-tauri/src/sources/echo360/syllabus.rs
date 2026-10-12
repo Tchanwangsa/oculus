@@ -64,12 +64,12 @@ pub fn syllabus(session: &Session, lead_in: u32) -> Result<Vec<Lecture>, String>
         });
     }
     let dual = out.iter().filter(|l| l.has_second_source).count();
-    eprintln!(
+    elog!(
         "[oculus] echo360 syllabus: {} lectures ({dual} with a second source)",
         out.len()
     );
     if probed > 0 {
-        eprintln!(
+        elog!(
             "[oculus] warn: syllabus carried no file lists for {probed} lecture(s) — \
              fell back to probing the download endpoint"
         );

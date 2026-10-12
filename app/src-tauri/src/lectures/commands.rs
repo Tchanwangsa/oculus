@@ -78,7 +78,7 @@ pub async fn echo360_download_video(
             let bytes = echo360::stream_to_file(&url, &raw, &|p| emit(p, "downloading"), &|| {
                 flag.load(Ordering::Relaxed)
             })?;
-            eprintln!(
+            elog!(
                 "[oculus] downloaded source {source}: {} MB",
                 bytes / 1_000_000
             );
@@ -131,7 +131,7 @@ pub fn echo360_cancel_download(
     match cancels.0.lock().unwrap().get(&key) {
         Some(flag) => {
             flag.store(true, Ordering::Relaxed);
-            eprintln!("[oculus] cancelling download {key}");
+            elog!("[oculus] cancelling download {key}");
             true
         }
         None => false,
@@ -174,7 +174,7 @@ pub async fn echo360_delete_video(
             }
         }
 
-        eprintln!(
+        elog!(
             "[oculus] deleted lecture video {media_id}: {} MB freed",
             freed / 1_000_000
         );
@@ -199,7 +199,7 @@ pub async fn echo360_download_transcript(
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let path = dir.join("transcript.vtt");
         std::fs::write(&path, vtt.as_bytes()).map_err(|e| e.to_string())?;
-        eprintln!("[oculus] transcript saved: {}", path.display());
+        elog!("[oculus] transcript saved: {}", path.display());
         Ok(path.to_string_lossy().to_string())
     })
     .await
@@ -228,7 +228,7 @@ pub async fn echo360_clear_transcripts() -> Result<u32, String> {
                 }
             }
         }
-        eprintln!("[oculus] cleared {deleted} transcript files");
+        elog!("[oculus] cleared {deleted} transcript files");
         Ok(deleted)
     })
     .await

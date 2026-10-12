@@ -1,5 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Globe } from "@phosphor-icons/react";
+import { Button } from "@/components/ui/button";
+import { isWebUrl, openExternal } from "@/lib/browser";
 import {
   DocumentControls,
   SUGGEST_IDLE,
@@ -132,7 +135,7 @@ export default function SubjectFilePage() {
             aria-label="Breadcrumb"
             className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
           >
-            <SubjectCrumbs subjectId={id} tab={fileCrumbTab(file.category)} />
+            <SubjectCrumbs subjectId={id} tab={fileCrumbTab(file)} />
           </nav>
           <PaneTitle>{fileTitle(file)}</PaneTitle>
         </PaneTrail>
@@ -156,6 +159,20 @@ export default function SubjectFilePage() {
           ) : (
             <MarkdownUnavailable file={file} openSeq={parseDetails} />
           ))
+        )}
+        {/* A synced page is our markdown of a Canvas page; this opens the
+            original, embeds and styling included, in a browser tab. */}
+        {!isDocument && isWebUrl(file.source_url) && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Open in browser"
+            title="Open in browser"
+            onClick={(e) => void openExternal(file.source_url!, e.metaKey)}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <Globe size={14} />
+          </Button>
         )}
       </PaneHeaderRow>
       <div ref={setBody} className="flex-1 min-h-0 overflow-hidden flex flex-col">

@@ -1,8 +1,8 @@
-use std::io::{Read, Write};
 use std::path::Path;
 
 use super::transport::{self, Streamed};
-use super::{Canvas, CanvasError, CANCELLED};
+use super::{Canvas, CanvasError};
+use crate::runtime::stream::{copy_to_file, percent};
 
 impl Canvas {
     /// Stream a GET into `dest` without holding the body in memory, for files
@@ -34,43 +34,24 @@ impl Canvas {
         }
         let total = resp
             .header("content-length")
-            .and_then(|s| s.trim().parse::<u64>().ok())
-            .unwrap_or(0);
+            .and_then(|s| s.trim().parse::<u64>().ok());
 
-        let mut reader = resp.body;
-        let mut file =
-            std::fs::File::create(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
-        let mut buf = vec![0u8; 256 * 1024];
-        let mut done = 0u64;
-        let mut last_pct = u8::MAX;
-        loop {
-            if cancelled() {
-                return Err(CANCELLED.to_string());
-            }
-            let n = reader
-                .read(&mut buf)
-                .map_err(|e| format!("network read failed after {done} bytes: {e}"))?;
-            if n == 0 {
-                break;
-            }
-            file.write_all(&buf[..n])
-                .map_err(|e| format!("write failed after {done} bytes: {e}"))?;
-            done += n as u64;
-            if total > 0 {
-                let pct = (done * 100 / total).min(100) as u8;
-                if pct != last_pct {
-                    last_pct = pct;
-                    on_progress(pct);
+        let last_pct = std::cell::Cell::new(u8::MAX);
+        let mut body = resp.body;
+        copy_to_file(
+            &mut body,
+            dest,
+            total,
+            &|done| {
+                if let Some(total) = total.filter(|&t| t > 0) {
+                    let pct = percent(done, total);
+                    if pct != last_pct.replace(pct) {
+                        on_progress(pct);
+                    }
                 }
-            }
-        }
-        // oculus-keyd ends a body early, without an error, when Canvas drops
-        // the connection; the announced length is the only way to tell.
-        if total > 0 && done != total {
-            return Err(format!("download incomplete: {done} of {total} bytes"));
-        }
-        file.sync_all().map_err(|e| e.to_string())?;
-        Ok(done)
+            },
+            cancelled,
+        )
     }
 
     /// The final response of the redirect chain from `url_or_path`, its body

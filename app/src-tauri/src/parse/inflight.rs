@@ -18,6 +18,12 @@ pub struct InFlightClaim<'a> {
     pdf: PathBuf,
 }
 
+impl Default for InFlight {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InFlight {
     pub const fn new() -> Self {
         Self {

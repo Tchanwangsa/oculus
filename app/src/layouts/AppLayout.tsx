@@ -16,6 +16,9 @@ import {
 import { useActivityPing } from "@/hooks/backend/useActivityPing";
 import { useJobAudit } from "@/hooks/agents/useJobAudit";
 import { useBrowserTabs } from "@/hooks/shell/useBrowserTabs";
+import { useMusicState } from "@/hooks/music/useMusicState";
+import { useDockPages } from "@/hooks/shell/useDockPages";
+import { dock, dockService } from "@/lib/dock";
 import { useTauriEvent, useWindowEvent } from "@/hooks/backend/useEvents";
 import { routeEdit, routeSelectAll } from "@/lib/menu/editRouting";
 import { routeFind } from "@/lib/menu/find";
@@ -55,6 +58,9 @@ export default function AppLayout() {
   const toggle = useCallback(() => setCollapsed((c) => !c), []);
 
   useBrowserTabs();
+
+  useMusicState();
+  useDockPages();
 
   useNewTabClicks();
 
@@ -103,10 +109,14 @@ export default function AppLayout() {
     );
   }, []);
 
-  /** ⌘R / ⇧⌘R (ignoring cache). Deliberately a no-op away from a browser tab. */
+  /** ⌘R / ⇧⌘R (ignoring cache) on a browser tab; either reloads a messaging
+   *  service. Deliberately a no-op anywhere else. */
   const reload = useCallback((hard: boolean) => {
-    const page = browseId(activePane()?.path);
+    const path = activePane()?.path;
+    const page = browseId(path);
     if (page != null) browser.reload(page, hard).catch(() => {});
+    const service = dockService(path);
+    if (service) dock.reload(service.id).catch(() => {});
   }, []);
 
   // Menu events, not key presses: a browser page's native WebView takes every

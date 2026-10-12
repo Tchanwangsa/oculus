@@ -154,7 +154,7 @@ mod tests {
     fn a_short_stream_or_an_overlong_line_is_an_error() {
         assert!(read_line(&mut BufReader::new(&b"{\"op\""[..]), MAX_LINE).is_err());
         assert!(read_body(&mut BufReader::new(&b"abc"[..]), 10).is_err());
-        let long = vec![b'a'; 100];
+        let long = [b'a'; 100];
         assert!(read_line(&mut BufReader::new(&long[..]), 64)
             .unwrap_err()
             .0

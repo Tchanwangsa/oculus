@@ -24,7 +24,7 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 const RETRIES: u32 = 2;
 
 /// Returned by [`Canvas::download_to`] when its `cancelled` poll said stop.
-pub const CANCELLED: &str = "cancelled";
+pub use crate::runtime::stream::CANCELLED;
 
 /// A finished response. 4xx/5xx are values (a locked module is a 403 to
 /// skip); `Err` means the request never completed, after retries.

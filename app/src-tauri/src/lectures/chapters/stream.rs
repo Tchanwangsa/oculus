@@ -62,7 +62,7 @@ pub fn detect(
 
     let first = read(video.to_path_buf(), 1, &mut on_frame)?;
     if source.is_none() && first.candidates.len() <= DEAD_SOURCE && second.exists() {
-        eprintln!(
+        elog!(
             "[oculus] source 1 gave {} candidate(s) — reading source 2 instead",
             first.candidates.len()
         );

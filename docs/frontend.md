@@ -27,7 +27,8 @@ library files; the rest of the frontend has its own pages:
 | Parser and embedding engine selection UI | `app/src/components/settings/shared/EngineSelect.tsx` |
 | Parse state, pipeline ledger, recovery sweep | `app/src/lib/pipeline/parseState.ts`, `app/src/stores/sync/parseStore.ts`, `app/src/stores/sync/pipelineStore.ts`, `app/src/hooks/sync/useQualitySweep.ts` |
 | Scraped document metadata loaders | `app/src/hooks/data/useCourseFileData.ts`, `app/src/hooks/data/useModuleTocs.ts` |
-| Module videos downloaded on demand | `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/stores/lectures/videoDownloadStore.ts` |
+| Spotify ([music.md](./music.md)): the `music-state` snapshot type and the command wrappers; the snapshot mirror and Settings → Music's switch; the listener mounted in `AppLayout` | `app/src/lib/music/index.ts`, `app/src/stores/music/musicStore.ts`, `app/src/stores/music/musicPrefsStore.ts`, `app/src/hooks/music/useMusicState.ts` |
+| Module videos and page embeds downloaded on demand | `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/stores/lectures/videoDownloadStore.ts`, `app/src/stores/lectures/embedDownloadStore.ts`, `app/src/lib/files/scrapedRow.ts` |
 
 ## Source is grouped by feature, and tests mirror it
 
@@ -226,8 +227,16 @@ library files; the rest of the frontend has its own pages:
   `videoDownloadStore` keys state by Canvas file id so a download outlives the
   page, and subscribes to `canvas-video-progress` on its first download. The
   row comes from the ordinary `scrape-file` handler, which can land after the
-  command resolves, so the store waits for `FILE_SCRAPED_EVENT` before the
-  row opens the file.
+  command resolves, so the store waits for `FILE_SCRAPED_EVENT`
+  (`scrapedRow`) before the row opens the file.
+- **An Echo360 video embedded in a page downloads from its card**
+  ([viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface),
+  backend in [sync.md](./sync.md#an-embedded-echo360-video-is-resolved-and-downloaded-by-its-card)).
+  `embedDownloadStore` is the same shape keyed by the embed's `linkId`: each
+  link's info (asked once per app session) and download, `echo-embed-progress`
+  subscribed on the first download (`downloading` sets the percent, `muxing`
+  the joining label; the invoke settles the rest), and the same wait on
+  `scrapedRow` before the card shows Play.
 - **A document is `courses/<code>/documents/<title>.md`** with a
   `category = 'document'` row. The title is the filename (`fileTitle`); a rename
   moves the file and keeps the row id. `reconcileDocuments` brings rows in line

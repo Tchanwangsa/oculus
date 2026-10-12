@@ -78,10 +78,10 @@ pub fn open_canvas_window(app: AppHandle) -> Result<(), String> {
                     if let Some(w) = app.get_webview_window("canvas-auth") {
                         w.hide().ok();
                     }
-                    eprintln!("[oculus] auth success");
+                    elog!("[oculus] auth success");
                     return;
                 }
-                eprintln!("[oculus] auth: the saved Canvas session was not confirmed");
+                elog!("[oculus] auth: the saved Canvas session was not confirmed");
                 if confirmation.lock().unwrap().retry() {
                     continue;
                 }
@@ -94,7 +94,7 @@ pub fn open_canvas_window(app: AppHandle) -> Result<(), String> {
     let win = match result {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("[oculus] failed to open canvas window: {e}");
+            elog!("[oculus] failed to open canvas window: {e}");
             return Err(format!("could not open the sign-in window: {e}"));
         }
     };

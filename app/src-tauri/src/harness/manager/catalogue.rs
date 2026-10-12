@@ -45,7 +45,7 @@ impl Harness {
             let s = server.clone();
             std::thread::spawn(move || {
                 if let Err(e) = s.read_rate_limits() {
-                    eprintln!("[oculus] codex rate limits: {e}");
+                    elog!("[oculus] codex rate limits: {e}");
                 }
             });
         }
@@ -61,7 +61,7 @@ impl Harness {
         };
         if let Some(s) = server {
             if let Err(e) = s.read_rate_limits() {
-                eprintln!("[oculus] codex rate limits: {e}");
+                elog!("[oculus] codex rate limits: {e}");
             }
         }
     }
@@ -149,6 +149,19 @@ impl Harness {
 
     pub fn opencode_models(&self) -> Result<Vec<opencode::ModelInfo>, String> {
         self.opencode_server()?.list_models()
+    }
+
+    /// The catalogue of a server that is already up, or `None` — never a
+    /// start. For Settings → Jobs: only Settings → opencode starts it.
+    pub fn opencode_models_if_running(&self) -> Result<Option<Vec<opencode::ModelInfo>>, String> {
+        let server = self
+            .opencode
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|s| s.is_alive())
+            .cloned();
+        server.map(|s| s.list_models()).transpose()
     }
 
     // opencode's credentials go through the server's own auth endpoints, so

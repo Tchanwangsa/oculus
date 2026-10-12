@@ -12,7 +12,7 @@ pub(super) fn tell(data_dir: &Path, inst: &Institution) -> Result<(), String> {
     match Credentialed::at(data_dir).site_set(&inst.site()) {
         Ok(change) => {
             if !change.cleared.is_empty() || change.forgot_okta {
-                eprintln!(
+                elog!(
                     "[oculus] oculus-keyd moved to {}: dropped {} session(s){}",
                     inst.canvas,
                     change.cleared.len(),
@@ -38,6 +38,6 @@ pub fn tell_keyd() {
         return;
     };
     if let Err(e) = tell(&dir, &inst) {
-        eprintln!("[oculus] oculus-keyd did not take the site: {e}");
+        elog!("[oculus] oculus-keyd did not take the site: {e}");
     }
 }

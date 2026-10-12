@@ -134,7 +134,7 @@ pub fn fits(total: u64, gpu: bool) -> Vec<Fit> {
             .enumerate()
             .filter(|&(i, m)| comfortable(m) && (gpu || i <= cpu_cap))
             .map(|(i, _)| i)
-            .last()
+            .next_back()
             .unwrap_or(0)
     };
     MODELS

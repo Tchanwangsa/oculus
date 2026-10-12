@@ -218,10 +218,32 @@ are in the table under [Four dialects](#four-dialects-become-one-event-stream).
 **Sign-in.** `signin::is_auth_failure` (via `HarnessEvent::error_for`) matches
 whole clauses only — a false positive sends a student to re-authenticate over
 an unrelated error — and marks the error row's `meta` for a sign-in card.
-`ProviderInfo.signIn` is `"code"` (`claude auth login` blocks on a pasted
-code), `"callback"` (`codex login` finishes on its own listener) or `null`
-(opencode signs in [per provider](#opencode-providers-go-through-its-own-server);
-`agy` only in a terminal). No deadline is imposed on a sign-in.
+`ProviderInfo.signIn` is `"code"` (`claude auth login` and `agy` block on a
+pasted code), `"callback"` (`codex login` finishes on its own listener) or
+`null` (opencode signs in [per provider](#opencode-providers-go-through-its-own-server)).
+No deadline is imposed on a sign-in.
+
+`agy` has no login subcommand and refuses a pipe, so `signin/agy/` runs bare
+`agy` on a pseudo-terminal (`signin/pty.rs`: `openpty`, a 1000-column window
+so the URL never wraps, `login_tty` for a session of its own). Its TUI's
+redraws are cut into lines at cursor moves and each distinct line is sent
+once per round. Enter answers the login-method menu (Google OAuth); `agy`
+opens the authorize URL itself, so Rust does not open it again, and the URL
+is read from its OSC 8 hyperlink. Google redirects to
+`antigravity.google/oauth-callback`, a page that shows the code — there is no
+loopback listener to finish on — and the pasted code is typed into the TUI.
+A refused code shows `agy`'s sentence as the dialog's notice; Enter on
+"Press any key to go back" and again on the menu starts a new round with a
+new URL, so one run takes as many codes as the student pastes. An error
+before any code ends the run instead of looping. Signed in, `agy` moves on
+to a chat rather than exiting, so once a code is in and either its success
+line shows or the screen has been still for 1.5 s, `agy models` is asked (at
+most every 5 s); a yes — or no answer either way after the success line —
+ends the run and kills `agy`'s process group, never before the check, so
+`agy` has stored the token first. A code typed outside the code box is
+refused, since in the menu or on the error screen the keys mean something
+else. The live check of this route is the ignored test in
+`signin/agy/smoke.rs`, which refuses to run without a scratch `HOME`.
 
 ## The timeline never re-renders per token
 
@@ -432,7 +454,10 @@ compile without one.
 bridge's connection into opencode's own store (shared with the student's
 terminal). A method spec is data rendered by one dialog; providers declaring
 nothing take an API key. Opening the opencode page starts it; Settings opens
-on another page, so opening Settings alone does not. The page is two tables,
+on another page, so opening Settings alone does not, and nor does Settings →
+Jobs (see [Per-job models](#per-job-models)). The one other start is
+onboarding's opencode card, on its *Connect OpenRouter* click
+([onboarding.md](./onboarding.md#the-agent-step-lists-every-agent-as-an-equal)). The page is two tables,
 Providers and Models, the second one row per model with opencode's own price,
 limits and capabilities (`ModelFacts`, a free catalogue read; a missing figure
 draws "—", never $0).
@@ -511,6 +536,14 @@ is set in the same menu.
 - **Notices and flags badge Settings** (a dot on the rail item and the Jobs
   row, `useJobAttention`) and print on the job's row until dismissed or the
   job's list is edited.
+
+Neither the Jobs pickers nor the audit starts opencode: both call
+`useProviderModels(…, { start: false })`, which asks it through `peekModels`,
+reading only a server already up (`harness_opencode_models_if_running`). Found
+down, it answers an empty list (so the audit removes nothing) and the picker's
+opencode tab links to Settings → opencode, whose opening starts it. It is asked
+again when `harnessOpencodeModels` next answers (`OPENCODE_RUNNING_EVENT`) —
+the composer or the opencode page starting it.
 
 ## Memory
 
@@ -637,7 +670,7 @@ chapter list inline — rebuilt on every send and before any spawn.
 - Never pass `agy` `--dangerously-skip-permissions` — its file tools then write outside the library.
 - Never put an `Edit` deny on `oculus.db*` in Claude's settings — it cancels the write grant and every board write fails readonly.
 - Never grant the library folder instead of the three database files — it exposes keyd's vault.
-- Never let Settings make a billed call, or start opencode anywhere but its own page — see [No model is ever probed](#no-model-is-ever-probed).
+- Never let Settings make a billed call, or start opencode anywhere but its own page or the onboarding opencode card's Connect button — see [No model is ever probed](#no-model-is-ever-probed).
 - Read opencode models from `/config/providers`, never `/api/model` — the latter lists the instance's providers, not the signed-in ones.
 - Every opencode call carries `?directory=<agents>` except `/auth/{id}` — unscoped, it binds to the server's launch cwd and another instance.
 - Never drive opencode's v2 API (`/api/*`) — on 1.18.31 a prompt on an `auth.json` provider fails with no event.

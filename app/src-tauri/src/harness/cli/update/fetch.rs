@@ -102,11 +102,13 @@ const FRESH_FOR: Duration = Duration::from_secs(6 * 60 * 60);
 /// A failed check is retried sooner, but not on every visit while offline.
 const FAILURE_FRESH_FOR: Duration = Duration::from_secs(10 * 60);
 
+/// When a registry was asked, and its answer.
+type Checked = (Instant, Result<String, String>);
+
 /// Newest versions by endpoint URL. Only the registry's answer is cached;
 /// the installed side comes from `discover::health` on every read.
-fn latest_cache() -> &'static Mutex<HashMap<String, (Instant, Result<String, String>)>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Result<String, String>)>>> =
-        OnceLock::new();
+fn latest_cache() -> &'static Mutex<HashMap<String, Checked>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Checked>>> = OnceLock::new();
     CACHE.get_or_init(Default::default)
 }
 

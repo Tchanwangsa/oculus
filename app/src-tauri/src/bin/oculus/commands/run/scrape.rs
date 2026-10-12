@@ -207,18 +207,16 @@ impl Ctx {
         if let Some(p) = &pool {
             self.rt.block_on(async {
                 for f in &written {
-                    if let Err(e) = store::upsert_file(
-                        p,
-                        f.subject_id,
-                        &f.relative_path,
-                        f.size_bytes,
-                        &f.category,
-                        f.canvas_id,
-                        f.source_url.as_deref(),
-                        f.action != "unchanged",
-                    )
-                    .await
-                    {
+                    let row = store::FileRow {
+                        subject_id: f.subject_id,
+                        relative_path: &f.relative_path,
+                        size_bytes: f.size_bytes,
+                        category: &f.category,
+                        canvas_id: f.canvas_id,
+                        source_url: f.source_url.as_deref(),
+                        changed: f.action != "unchanged",
+                    };
+                    if let Err(e) = store::upsert_file(p, &row).await {
                         eprintln!("{} {e}", paint("db:", YELLOW));
                     }
                 }

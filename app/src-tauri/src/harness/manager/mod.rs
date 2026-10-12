@@ -13,6 +13,7 @@ mod raw_log;
 mod session;
 
 pub(in crate::harness) use handle::Handle;
+pub use handle::RewindTo;
 pub use instructions::{instructions, thread_cwd, thread_sections};
 pub use one_off::run_once;
 pub(in crate::harness) use one_off::OneOff;

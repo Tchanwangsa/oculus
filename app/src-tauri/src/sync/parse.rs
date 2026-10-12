@@ -128,7 +128,7 @@ fn run_parse(
         let pages_recorded = match record {
             Some(record) => {
                 backfill_pages(data_dir, rel_path, subject_id, &record).unwrap_or_else(|e| {
-                    eprintln!("[oculus] parse-pdf {rel_path}: page records not backfilled: {e}");
+                    elog!("[oculus] parse-pdf {rel_path}: page records not backfilled: {e}");
                     0
                 })
             }
@@ -170,7 +170,7 @@ fn run_parse(
     let pages_recorded = match record_pages(data_dir, rel_path, subject_id, &output) {
         Ok(n) => n,
         Err(e) => {
-            eprintln!("[oculus] parse-pdf {rel_path}: page records not written: {e}");
+            elog!("[oculus] parse-pdf {rel_path}: page records not written: {e}");
             0
         }
     };

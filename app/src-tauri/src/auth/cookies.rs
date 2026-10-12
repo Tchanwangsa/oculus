@@ -102,12 +102,12 @@ fn webview_header(app: &AppHandle, base: &str) -> String {
             let seeded = SEEDED.lock().unwrap_or_else(|e| e.into_inner());
             let header = scoped_header(&cookies, &base, &seeded);
             if header.is_empty() {
-                eprintln!("[oculus] no {host} cookies to save yet");
+                elog!("[oculus] no {host} cookies to save yet");
             }
             header
         }
         Err(e) => {
-            eprintln!("[oculus] cookies() failed for {host}: {e}");
+            elog!("[oculus] cookies() failed for {host}: {e}");
             String::new()
         }
     }

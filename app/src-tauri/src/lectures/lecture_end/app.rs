@@ -57,7 +57,7 @@ pub async fn lecture_find_end(
                     error: None,
                 },
                 Err(e) => {
-                    eprintln!("[oculus] lecture end: {e}");
+                    elog!("[oculus] lecture end: {e}");
                     Finished {
                         lecture_id: lecture.id.clone(),
                         status: "error",

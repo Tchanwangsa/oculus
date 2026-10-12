@@ -16,11 +16,11 @@ pub(crate) fn is_text_file(rel: &str) -> bool {
 /// best tier that matched counts, and a tie within it is reported, not guessed.
 pub(crate) fn resolve_file<'a>(files: &'a [LibFile], target: &str) -> Result<&'a LibFile, String> {
     let needle = target.to_lowercase();
-    let tiers: [Box<dyn Fn(&LibFile) -> bool>; 4] = [
-        Box::new(|f: &LibFile| f.relative_path == target),
-        Box::new(|f: &LibFile| f.filename == target),
-        Box::new(|f: &LibFile| f.filename.to_lowercase() == needle),
-        Box::new(|f: &LibFile| f.relative_path.to_lowercase().contains(&needle)),
+    let tiers: [&dyn Fn(&LibFile) -> bool; 4] = [
+        &|f| f.relative_path == target,
+        &|f| f.filename == target,
+        &|f| f.filename.to_lowercase() == needle,
+        &|f| f.relative_path.to_lowercase().contains(&needle),
     ];
 
     for matches in tiers {

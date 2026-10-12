@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 
 use core_foundation::base::TCFType;
+use core_foundation::bundle::CFBundle;
 use core_foundation::data::CFData;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::CFString;
@@ -89,6 +90,9 @@ impl PeerCheck for Check {
         };
         let mut caller = inspect(fd);
         caller.role = role(self.policy, caller.path.as_deref());
+        if caller.role == Role::App {
+            caller.application = caller.path.as_deref().and_then(application);
+        }
         caller
     }
 
@@ -118,6 +122,21 @@ fn role(policy: Policy, path: Option<&Path>) -> Role {
             _ => Role::Unknown,
         },
     }
+}
+
+/// What WebKit calls the app: the bundle's `CFBundleIdentifier` when the
+/// path is a bundle (as `SecCodeCopyPath` reports a main executable), else
+/// the executable's file name.
+fn application(path: &Path) -> Option<String> {
+    if path.extension().and_then(|e| e.to_str()) != Some("app") {
+        return path.file_name()?.to_str().map(str::to_string);
+    }
+    let bundle = CFBundle::new(CFURL::from_path(path, true)?)?;
+    let id = bundle
+        .info_dictionary()
+        .find(CFString::from_static_string("CFBundleIdentifier"))?
+        .downcast::<CFString>()?;
+    Some(id.to_string())
 }
 
 fn role_in_bundle(bundle: &Path, path: &Path) -> Role {
@@ -396,6 +415,32 @@ mod tests {
             role(Policy::Install, Some(Path::new("/Applications/Oculus.app"))),
             Role::Unknown
         );
+    }
+
+    #[test]
+    fn the_application_is_the_bundle_identifier_or_the_executable_name() {
+        assert_eq!(
+            application(Path::new("/x/target/debug/app")).as_deref(),
+            Some("app")
+        );
+        let root = std::env::temp_dir().join(format!("keyd-application-{}", std::process::id()));
+        let bundle = root.join("Oculus.app");
+        std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        assert_eq!(application(&bundle), None, "no Info.plist, no identifier");
+        let other = root.join("Bare.app");
+        std::fs::create_dir_all(other.join("Contents")).unwrap();
+        std::fs::write(
+            other.join("Contents/Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.tchan.oculus</string>
+<key>CFBundleExecutable</key><string>app</string>
+</dict></plist>"#,
+        )
+        .unwrap();
+        assert_eq!(application(&other).as_deref(), Some("com.tchan.oculus"));
+        std::fs::remove_dir_all(&root).ok();
     }
 
     /// The whole check over a real socket: this test process is the caller.

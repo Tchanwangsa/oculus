@@ -3,9 +3,11 @@
 //! CloudFront cookies the media CDN accepts. Echo360's own cookies live in this
 //! process only; the Canvas page that carries the form comes through
 //! oculus-keyd, which holds the Canvas session. The launch lands on the
-//! university's Echo360 region, which every later call uses.
+//! university's Echo360 region, which every later call uses. Videos embedded
+//! in Canvas pages launch per link instead (`embed/`).
 
 mod auth;
+pub mod embed;
 mod ffmpeg;
 mod media;
 mod syllabus;

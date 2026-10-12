@@ -79,7 +79,7 @@ fn detect_sign_in(base: &str) -> (String, Idp, Option<String>) {
                     first_away = left_canvas(&landed);
                 }
             }
-            Err(e) => eprintln!("[oculus] sign-in detection: {login_path}: {e}"),
+            Err(e) => elog!("[oculus] sign-in detection: {login_path}: {e}"),
         }
     }
     (default_login_path(), Idp::Other, first_away)

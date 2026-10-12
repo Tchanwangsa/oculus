@@ -9,6 +9,9 @@ pub const OKTA_TOTP_SECRET: &str = "okta.totp_secret";
 pub const SESSION_CANVAS: &str = "session.canvas";
 pub const SESSION_SSO: &str = "session.sso";
 pub const SESSION_ED: &str = "session.ed";
+pub const MUSIC_SPOTIFY: &str = "music.spotify";
+pub const WEBCRYPTO_DEV: &str = "webkit.webcrypto.app";
+pub const WEBCRYPTO_BUNDLED: &str = "webkit.webcrypto.com.tchan.oculus";
 
 /// The Okta sign-in's three values. They are written only by `okta_save` and
 /// `okta_forget`, never by the generic `store` and `delete`.
@@ -18,6 +21,11 @@ pub const OKTA: &[&str] = &[OKTA_USERNAME, OKTA_PASSWORD, OKTA_TOTP_SECRET];
 /// They are written only by the `session_*` ops and by `forward` absorbing a
 /// `Set-Cookie`, never by the generic `store` and `delete`.
 pub const SESSIONS: &[&str] = &[SESSION_CANVAS, SESSION_SSO, SESSION_ED];
+
+/// WebKit's WebCrypto master keys, one per WebKit application. They are
+/// written and read only by `webcrypto_key`, never by `store`, `delete` or
+/// `get`, so a key that wraps saved logins cannot be replaced or crossed.
+pub const WEBCRYPTO_NAMES: &[&str] = &[WEBCRYPTO_DEV, WEBCRYPTO_BUNDLED];
 
 /// Every name the vault accepts; anything else is refused before it is stored.
 pub const KNOWN: &[&str] = &[
@@ -30,7 +38,15 @@ pub const KNOWN: &[&str] = &[
     SESSION_CANVAS,
     SESSION_SSO,
     SESSION_ED,
+    MUSIC_SPOTIFY,
+    WEBCRYPTO_DEV,
+    WEBCRYPTO_BUNDLED,
 ];
+
+/// The names `get` reads back, to the app alone: Spotify's stored
+/// credentials, which librespot must hold to log in and which no keyd route
+/// could attach for it. Never a cloud key, an Okta value or a session.
+pub const READABLE: &[&str] = &[MUSIC_SPOTIFY];
 
 pub fn is_known(name: &str) -> bool {
     KNOWN.contains(&name)
@@ -47,6 +63,41 @@ pub const SITE: &str = "keyd.site";
 /// found nothing to copy), so a later delete is never undone by a re-import.
 pub fn imported(name: &str) -> String {
     format!("{KEYD_PREFIX}imported.{name}")
+}
+
+/// The account of every WebCrypto master key item WebKit writes: this, then
+/// the application's name (`SerializedCryptoKeyWrapMac.mm`).
+pub const WEBKIT_ACCOUNT_PREFIX: &str = "com.apple.WebKit.WebCrypto.master+";
+
+/// One WebKit application's WebCrypto master key: the name WebKit files it
+/// under (a bundle identifier, else the executable's name), WebKit's own
+/// keychain item for it (a generic password with no service), and the vault
+/// entry keyd keeps it in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebCrypto {
+    pub app: &'static str,
+    pub account: &'static str,
+    pub secret: &'static str,
+}
+
+/// The dev build is the bare executable `app`; the bundle is
+/// `paths::IDENTIFIER`. Each is its own WebKit application with its own key,
+/// and the two must never be crossed: a wrong key unwraps nothing, silently.
+pub const WEBCRYPTO: &[WebCrypto] = &[
+    WebCrypto {
+        app: "app",
+        account: "com.apple.WebKit.WebCrypto.master+app",
+        secret: WEBCRYPTO_DEV,
+    },
+    WebCrypto {
+        app: "com.tchan.oculus",
+        account: "com.apple.WebKit.WebCrypto.master+com.tchan.oculus",
+        secret: WEBCRYPTO_BUNDLED,
+    },
+];
+
+pub fn webcrypto(app: &str) -> Option<&'static WebCrypto> {
+    WEBCRYPTO.iter().find(|w| w.app == app)
 }
 
 /// A keychain item the app wrote before the vault existed.
@@ -123,6 +174,38 @@ mod tests {
         assert_eq!(seen.len(), LEGACY.len());
         assert!(LEGACY.iter().all(|l| is_known(l.secret)));
         assert!(LEGACY.iter().all(|l| !SESSIONS.contains(&l.secret)));
+    }
+
+    #[test]
+    fn get_reads_back_only_the_spotify_credentials() {
+        assert_eq!(READABLE, [MUSIC_SPOTIFY]);
+        for name in READABLE {
+            assert!(is_known(name));
+            assert!(!OKTA.contains(name) && !SESSIONS.contains(name));
+            assert!(!WEBCRYPTO_NAMES.contains(name));
+            assert!(LEGACY.iter().all(|l| l.secret != *name));
+        }
+    }
+
+    #[test]
+    fn each_webkit_application_has_its_own_item_and_entry() {
+        let secrets: Vec<&str> = WEBCRYPTO.iter().map(|w| w.secret).collect();
+        assert_eq!(secrets, WEBCRYPTO_NAMES);
+        assert_eq!(webcrypto("app").unwrap().secret, WEBCRYPTO_DEV);
+        assert_eq!(
+            webcrypto(crate::paths::IDENTIFIER).unwrap().secret,
+            WEBCRYPTO_BUNDLED
+        );
+        for w in WEBCRYPTO {
+            assert_eq!(w.account, format!("{WEBKIT_ACCOUNT_PREFIX}{}", w.app));
+            assert_eq!(w.secret, format!("webkit.webcrypto.{}", w.app));
+            assert!(is_known(w.secret));
+            assert!(!READABLE.contains(&w.secret));
+            assert!(LEGACY.iter().all(|l| l.secret != w.secret));
+        }
+        assert_eq!(webcrypto(""), None);
+        assert_eq!(webcrypto("App"), None);
+        assert_eq!(webcrypto("com.tchan.oculus.keyd"), None);
     }
 
     #[test]

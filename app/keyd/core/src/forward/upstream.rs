@@ -36,6 +36,12 @@ fn agent(read_timeout: Option<Duration>) -> ureq::Agent {
     builder.build()
 }
 
+impl Default for Upstream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Upstream {
     pub fn new() -> Upstream {
         Upstream {

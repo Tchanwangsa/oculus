@@ -171,11 +171,11 @@ pub(crate) fn spawn_job(
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Runtime::new() {
             Ok(rt) => rt,
-            Err(e) => return eprintln!("[oculus] {tag}: {e}"),
+            Err(e) => return elog!("[oculus] {tag}: {e}"),
         };
         let pool = match rt.block_on(crate::db::store::open_pool()) {
             Ok(p) => p,
-            Err(e) => return eprintln!("[oculus] {tag}: {e}"),
+            Err(e) => return elog!("[oculus] {tag}: {e}"),
         };
         let chain = rt.block_on(crate::harness::jobs::chain(&pool, job));
         body(&rt, &pool, chain);
@@ -193,7 +193,7 @@ pub(crate) fn reconcile_status<F>(
         if let Ok(pool) = crate::db::store::open_pool().await {
             if let Ok(n) = sweep(pool).await {
                 if n > 0 {
-                    eprintln!("[oculus] {tag}: cleared {n} interrupted run(s)");
+                    elog!("[oculus] {tag}: cleared {n} interrupted run(s)");
                 }
             }
         }

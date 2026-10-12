@@ -21,6 +21,8 @@ import { parseFile } from "@/lib/files/courseFiles";
  * 2. A latching failure (no token, rejected token, spent quota) stands the
  *    sweep down until any parse progresses (`parseStore.update`), or until
  *    `LATCH_PROBE_AFTER_MS`, when it spends one file to probe a daily quota.
+ * Saving a MinerU token lifts both for the files it fixes
+ * (`parseStore.tokenSaved`) and sweeps at once (`sweepNow`).
  */
 const FIRST_SWEEP_DELAY_MS = 90 * 1000;
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
@@ -100,10 +102,38 @@ async function sweep(): Promise<void> {
   }
 }
 
+/** One sweep at a time: two would read the same rows and kick the same
+ *  files twice. A run asked for mid-sweep runs once it ends, since the one in
+ *  flight read `parseStore` before whatever prompted the ask. */
+let inFlight = false;
+let again = false;
+
+function run(): void {
+  if (inFlight) {
+    again = true;
+    return;
+  }
+  inFlight = true;
+  sweep()
+    .catch((e) => console.warn("[parse-sweep]", e))
+    .finally(() => {
+      inFlight = false;
+      if (again) {
+        again = false;
+        run();
+      }
+    });
+}
+
+/** Sweep now rather than at the next interval, up to 15 minutes away: a
+ *  saved MinerU token (`useMineruKey`) makes files parseable at once. */
+export function sweepNow(): void {
+  run();
+}
+
 /** Mount once at the app root. */
 export function useQualitySweep(): void {
   useEffect(() => {
-    const run = () => sweep().catch((e) => console.warn("[parse-sweep]", e));
     const first = setTimeout(run, FIRST_SWEEP_DELAY_MS);
     const every = setInterval(run, SWEEP_INTERVAL_MS);
     return () => {
