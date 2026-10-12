@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 
 // Oculus works at any university (docs/auth.md#oculus-works-at-any-university):
 // no university's host, and no one region of a regional service, in app code.
@@ -56,7 +56,8 @@ test("app code names no university and no single region of a service", () => {
   const hits: string[] = [];
   for (const root of ROOTS) {
     for (const path of sources(join(APP, root))) {
-      const rel = relative(APP, path);
+      // `ALLOWED` is written with `/`; Windows paths come back with `\`.
+      const rel = relative(APP, path).split(sep).join("/");
       if (ALLOWED.has(rel)) continue;
       for (const [n, line] of codeLines(path)) {
         const stripped = line.replace(PLACEHOLDER, "");
