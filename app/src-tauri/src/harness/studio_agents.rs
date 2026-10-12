@@ -55,8 +55,9 @@ const REFERENCE: &str = include_str!("../../templates/skills/oculus-studio/refer
 
 /// The `reference.md` sections a scene helper works from, in the file's
 /// order. The director's own (video.json, script.md, Narrate,
-/// Pronunciation, Render, Libraries) stay out.
-pub const BUILDER_SECTIONS: [&str; 10] = [
+/// Pronunciation, Render, Libraries) stay out; Slides is in because a
+/// builder makes the crop its scene shows.
+pub const BUILDER_SECTIONS: [&str; 11] = [
     "Components",
     "Elements",
     "The theme",
@@ -67,6 +68,7 @@ pub const BUILDER_SECTIONS: [&str; 10] = [
     "Transitions and magic move",
     "Lint",
     "Looking",
+    "Slides",
 ];
 
 /// The scene role's prompt: the role, `build.md`, then [`BUILDER_SECTIONS`].

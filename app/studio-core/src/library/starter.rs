@@ -6,7 +6,7 @@ use crate::project::{ComponentSource, valid_name};
 
 /// `(name, TSX)` for each starter component, in `library/components/`:
 /// drawing primitives a scene composes (each file's helper is copied into a
-/// scene component), and the title card.
+/// scene component), a crop of a lecture PDF page, and the title card.
 pub const STARTER_COMPONENTS: &[(&str, &str)] = &[
     ("Axes", include_str!("../../library/components/Axes.tsx")),
     ("Bars", include_str!("../../library/components/Bars.tsx")),
@@ -17,6 +17,7 @@ pub const STARTER_COMPONENTS: &[(&str, &str)] = &[
         "NumberLine",
         include_str!("../../library/components/NumberLine.tsx"),
     ),
+    ("Slide", include_str!("../../library/components/Slide.tsx")),
     ("Table", include_str!("../../library/components/Table.tsx")),
     (
         "TitleCard",

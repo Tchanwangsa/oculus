@@ -1,5 +1,6 @@
 //! `oculus studio lint`: `Project::lint` (or `lint_scene`) plus the checks
-//! that need the narration engine (`voice::lint`), printed short: errors one
+//! that need the narration engine (`voice::lint`) or the library (a slide
+//! whose PDF changed, `slides::lint`), printed short: errors one
 //! a line in full, then warnings and notes, a scene's repeats of one kind
 //! on one line with a count and the first few.
 
@@ -8,7 +9,7 @@ use crate::*;
 use app_lib::studio::tts::kokoro::{self, LexiconFiles};
 use app_lib::studio::voice::lint::{Note, VoiceLint};
 use app_lib::studio::voice::{self, VoiceOverrides};
-use app_lib::studio::{brief, libraries};
+use app_lib::studio::{brief, libraries, slides};
 use studio_core::{LintIssue, LintLevel, Project};
 
 /// Examples a grouped line shows before `…`.
@@ -32,6 +33,11 @@ impl Ctx {
             spoken.notes.retain(|n| n.scene == i);
         }
         report.issues.extend(spoken.issues);
+        let mut stale = slides::lint(&project, &self.data_dir);
+        if let Some(i) = scope {
+            stale.retain(|x| x.scene.is_none_or(|s| s == i));
+        }
+        report.issues.extend(stale);
         let errors = report.errors();
 
         if self.json {
@@ -123,7 +129,7 @@ fn print_report(issues: &[LintIssue], notes: &[Note]) {
             let (noun, short) = issue.group.clone().unwrap_or(("issue", String::new()));
             entries.push(Entry {
                 scene: issue.scene,
-                place: place(issue).unwrap_or_default(),
+                place: place(issue).unwrap_or_else(|| "video".to_owned()),
                 level: level.name(),
                 noun,
                 short,

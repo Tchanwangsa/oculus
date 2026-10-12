@@ -17,7 +17,7 @@ mod render;
 #[cfg(test)]
 mod tests;
 
-pub use documents::{forget, guarded, open, open_cached, page_count, OpenError, Panicked};
+pub use documents::{forget, guarded, open, open_cached, page_count, parse, OpenError, Panicked};
 #[cfg(test)]
 pub(crate) use render::scale_to;
 pub(crate) use render::{on_render_thread, RENDER_STACK};

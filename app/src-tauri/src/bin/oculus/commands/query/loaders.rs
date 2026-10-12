@@ -12,6 +12,22 @@ impl Ctx {
         subject_ids(&self.rt.block_on(store::subjects(pool))?, codes)
     }
 
+    /// The PDF a FILE argument names, as `oculus read` resolves it, relative
+    /// to the data directory: the file itself, or an Office document's
+    /// converted PDF.
+    pub(crate) fn library_pdf(
+        &self,
+        target: &str,
+        subject: Option<&String>,
+    ) -> Result<String, String> {
+        let pool = self.db().ok_or("the library index lives in the database")?;
+        let ids = self.subject_ids(&pool, subject.map(std::slice::from_ref).unwrap_or_default())?;
+        let files = self.library_files(&pool, &ids)?;
+        let file = resolve_file(&files, target)?;
+        app_lib::library::paths::doc_pdf_rel(&file.relative_path)
+            .ok_or_else(|| format!("{} is not a PDF or an Office document", file.relative_path))
+    }
+
     /// Every library file for the given subjects (all when empty), in the order
     /// `grep` scans and `files` prints: subject, then path.
     pub(super) fn library_files(

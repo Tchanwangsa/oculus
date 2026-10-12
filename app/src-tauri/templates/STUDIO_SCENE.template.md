@@ -9,8 +9,8 @@ library. `AGENTS.md` there has the shell rules and the `oculus` command.
 Below are `skills/oculus-studio/build.md`, how to do the work, and then
 these sections of `skills/oculus-studio/reference.md`: Components,
 Elements, The theme, Motion, Maths, Moving maths (its recipes, carrying a
-formula on, gotchas), Word cues, Transitions and magic move, Lint and
-Looking. They are the reference for those sections: do not Read
+formula on, gotchas), Word cues, Transitions and magic move, Lint, Looking
+and Slides. They are the reference for those sections: do not Read
 `reference.md` or `SKILL.md` for them. Look up any other section of
 `reference.md` by its heading only when a lint message points there.
 

@@ -7,7 +7,7 @@ Section names in quotes ("Moving maths", "Lint") are `reference.md`'s.
 ## Contents
 
 - Start: `oculus studio brief`
-- Write: the component, its cues, its maths
+- Write: the component, its cues, its maths, a page crop
 - Check as text: `lint` and `beats`
 - Look: one strip or frame, read in the same message
 - The bar: what every scene must be
@@ -52,6 +52,10 @@ is written, so make the fixes, then check and look as below.
    motion until the next word: the frame holds through the silence.
 5. Keys in and out are the ones the brief's neighbours name, so the magic
    move carries them.
+6. A storyboard entry that names a page figure (file, page, block or
+   `--find` text) is a `Slide`: make the crop with `oculus studio slide`
+   as `reference.md` ("Slides") says, unless `assets/slides/` has it, then
+   look at it before cueing its zoom and highlights.
 
 `skills/oculus-studio/studio.d.ts` has every global's exact signature:
 search it for the name rather than reading it whole.

@@ -36,6 +36,11 @@ pub fn guarded<T>(work: impl FnOnce() -> T) -> Result<T, Panicked> {
 /// The document at `path`, parsed afresh.
 pub fn open(path: &Path) -> Result<Pdf, OpenError> {
     let bytes = std::fs::read(path).map_err(|error| OpenError::Read(error.to_string()))?;
+    parse(bytes)
+}
+
+/// A document from bytes already read, for a caller that also needs them.
+pub fn parse(bytes: Vec<u8>) -> Result<Pdf, OpenError> {
     match guarded(|| Pdf::new(Arc::new(bytes))) {
         Ok(Ok(pdf)) => Ok(pdf),
         Ok(Err(LoadPdfError::Decryption(_))) => Err(OpenError::Encrypted),
