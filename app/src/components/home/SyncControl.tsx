@@ -18,7 +18,7 @@ const STALE_MS = 3 * 24 * 60 * 60 * 1000;
 /**
  * When the library last synced, with a Sync now pill — or the run's progress
  * while one is in flight. One quiet colour change when stale (sync is manual);
- * a refused start shows its reason inline.
+ * a refused start or sign-in shows its reason inline.
  */
 export function SyncControl() {
   // `undefined` until the first read, so "Never synced" can't flash.
@@ -27,7 +27,7 @@ export function SyncControl() {
   const scraping = useSyncStore((s) => s.scraping);
   const progress = useSyncStore((s) => s.progress);
   const completedAt = useSyncStore((s) => s.completedAt);
-  const { status: authStatus, connect } = useAuth();
+  const { status: authStatus, error: authError, connect } = useAuth();
   const institution = useInstitution();
 
   const reload = useCallback(() => {
@@ -60,6 +60,8 @@ export function SyncControl() {
 
   if (run === undefined) return null;
 
+  const shown = error ?? authError;
+
   // SQLite's `datetime('now')` has no zone; see `sqliteUtcToMs`.
   const finished = sqliteUtcToMs(run?.finished_at ?? null);
   const stale = finished != null && Date.now() - finished > STALE_MS;
@@ -85,7 +87,7 @@ export function SyncControl() {
           {institution && !institution.canvas ? "Set up Canvas" : "Sync now"}
         </Button>
       )}
-      {error && !scraping && <span className="text-warning/80">{error}</span>}
+      {shown && !scraping && <span className="text-warning/80">{shown}</span>}
     </div>
   );
 }

@@ -9,7 +9,7 @@ import type { StepProps } from "./types";
  *  does (`useAuth().connect`), with the optional automated sign-in folded
  *  below at an Okta university. Next waits for a session. */
 export function CanvasStep({ onNext, onSkip }: StepProps) {
-  const { state, connect } = useCanvasConnection();
+  const { state, error, connect } = useCanvasConnection();
   return (
     <StepFrame
       title="Connect Canvas"
@@ -20,7 +20,7 @@ export function CanvasStep({ onNext, onSkip }: StepProps) {
       onSkip={onSkip}
     >
       <div className="flex flex-col gap-5">
-        <CanvasCard state={state} onConnect={() => void connect()} />
+        <CanvasCard state={state} error={error} onConnect={() => void connect()} />
         <NeverSignInAgain />
       </div>
     </StepFrame>

@@ -20,6 +20,7 @@ const AUTH_TEXT: Record<AuthStatus, string> = {
 export default function SettingsCanvasPage() {
   const {
     status: authStatus,
+    error: authError,
     connect: connectCanvas,
     disconnect: disconnectCanvas,
   } = useAuth();
@@ -94,6 +95,9 @@ export default function SettingsCanvasPage() {
               )}
             </div>
           </div>
+          )}
+          {configured && authError && (
+            <p className="text-xs text-destructive pb-1">{authError}</p>
           )}
 
           {institution?.okta && <AutoSignIn />}

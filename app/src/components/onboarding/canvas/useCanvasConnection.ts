@@ -5,13 +5,13 @@ import { useAuth, type AuthStatus } from "@/hooks/sync/useAuth";
 export type CanvasState = AuthStatus | "checking";
 
 /**
- * `useAuth`, with "checking" until its first answer. `useAuth` starts at
+ * `useAuth`, with "checking" until its first answer, and its `error`. `useAuth` starts at
  * "disconnected" before `get_auth_status` replies, so a signed-in student
  * would see "Not connected" flash. Settled once that check says no, or once
  * `useAuth` leaves "disconnected" (a yes turns into "connected" there).
  */
 export function useCanvasConnection() {
-  const { status, connect } = useAuth();
+  const { status, error, connect } = useAuth();
   const [settled, setSettled] = useState(false);
   if (!settled && status !== "disconnected") setSettled(true);
 
@@ -24,5 +24,5 @@ export function useCanvasConnection() {
   }, []);
 
   const state: CanvasState = settled ? status : "checking";
-  return { state, connect };
+  return { state, error, connect };
 }

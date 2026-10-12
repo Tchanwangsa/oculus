@@ -21,8 +21,17 @@ const CHIP: Record<CanvasState, { label: string; variant: "secondary" | "success
 
 /** The student's Canvas: its address first, as in Settings → Canvas, then the
  *  sign-in. `onConnect` is `useAuth().connect`, which tries the saved
- *  credentials before opening the sign-in window. */
-export function CanvasCard({ state, onConnect }: { state: CanvasState; onConnect: () => void }) {
+ *  credentials before opening the sign-in window; `error` is why that window
+ *  could not open. */
+export function CanvasCard({
+  state,
+  error,
+  onConnect,
+}: {
+  state: CanvasState;
+  error: string | null;
+  onConnect: () => void;
+}) {
   const institution = useInstitution();
   const [editing, setEditing] = useState(false);
   const form = useCanvasAddressForm(() => setEditing(false));
@@ -117,6 +126,8 @@ export function CanvasCard({ state, onConnect }: { state: CanvasState; onConnect
           <CircleNotch size={13} className="shrink-0 animate-spin" />
           Finish signing in in the Canvas window.
         </p>
+      ) : configured && error ? (
+        <p className="text-xs text-destructive">{error}</p>
       ) : configured && state !== "connected" ? (
         <p className="text-xs text-muted-foreground">{signInSummary(institution)}</p>
       ) : null}
