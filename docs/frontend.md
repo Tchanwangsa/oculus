@@ -98,6 +98,8 @@ is a key with a JSON value, so a page opening with a `---` rule stays whole.
 
 Its keyword search reads the whole synced Markdown thread, including replies;
 every whitespace-separated keyword must match, regardless of case or order.
+While searching, keywords are marked in each title, and a line under it shows
+the post or reply prose where one first occurs (`matchSnippet`), marked too.
 Type, question answer status and exact category-path filters combine, with
 multiple selections within each filter matching any selected value. Answer
 status filters apply only to questions; older scrapes without a status remain

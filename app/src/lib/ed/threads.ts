@@ -30,11 +30,25 @@ export interface EdThread {
   /** The thread on Ed. */
   url: string | null;
   searchText: string;
+  /** The post and replies as one line of plain prose, for match snippets. */
+  prose: string;
 }
 
 const KINDS = ["question", "post", "announcement"] as const;
 
 const normalize = (text: string) => text.normalize("NFKC").toLowerCase();
+
+/** Markdown marks dropped and whitespace collapsed: what a snippet shows. */
+function plainProse(markdown: string): string {
+  return markdown
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|---+\s*$)/gm, "")
+    .replace(/[*_`~]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /** Read a scraped thread: its front matter where the sync wrote one, else the
  * `**#46 · question · …**` meta line older scrapes carry. Keeps a search index
@@ -69,6 +83,7 @@ export function parseEdThread(markdown: string, file: DbFile): EdThread {
     url: [frontString(data.url), file.source_url].find(isEdUrl) ?? null,
     posted: posted && !Number.isNaN(posted.getTime()) ? posted : null,
     searchText: normalize(`${number == null ? "" : `#${number}`} ${title} ${body}`),
+    prose: plainProse(body.slice(header.length)),
   };
 }
 
@@ -88,10 +103,44 @@ export interface ThreadFilters {
   categories: ReadonlySet<string>;
 }
 
+/** The search box's keywords, as the filter matches them. */
+export const queryWords = (query: string): string[] =>
+  normalize(query).trim().split(/\s+/).filter(Boolean);
+
+export interface TextPart {
+  text: string;
+  hit: boolean;
+}
+
+/** `text` cut at every case-insensitive occurrence of `words`. */
+export function markHits(text: string, words: readonly string[]): TextPart[] {
+  if (!words.length) return [{ text, hit: false }];
+  const escaped = [...words].sort((a, b) => b.length - a.length)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`(${escaped.join("|")})`, "gi");
+  return text.split(pattern).filter(Boolean)
+    .map((part) => ({ text: part, hit: words.includes(part.toLowerCase()) }));
+}
+
+/** Where a keyword first occurs in the thread's post or replies: that stretch
+ * of prose, from a little before the hit, with every keyword marked. Null when
+ * no keyword is in the prose (it matched the title or metadata only). */
+export function matchSnippet(thread: EdThread, words: readonly string[], lead = 40): TextPart[] | null {
+  const lower = thread.prose.toLowerCase();
+  const at = Math.min(...words.map((w) => lower.indexOf(w)).filter((i) => i >= 0));
+  if (!Number.isFinite(at)) return null;
+  // Start on a word boundary so the snippet doesn't open mid-word.
+  let start = Math.max(0, at - lead);
+  if (start > 0) start = thread.prose.indexOf(" ", start) + 1 || start;
+  if (start > at) start = at;
+  const text = `${start > 0 ? "…" : ""}${thread.prose.slice(start, at + 240)}`;
+  return markHits(text, words);
+}
+
 /** Each keyword must occur somewhere in the title, body, metadata or replies.
  * Selections within a filter are OR; separate filters combine with AND. */
 export function filterEdThreads(threads: readonly EdThread[], filters: ThreadFilters): EdThread[] {
-  const keywords = normalize(filters.query).trim().split(/\s+/).filter(Boolean);
+  const keywords = queryWords(filters.query);
   return threads.filter((thread) =>
     keywords.every((word) => thread.searchText.includes(word))
     && (!filters.types.size || filters.types.has(thread.kind ?? "unknown"))

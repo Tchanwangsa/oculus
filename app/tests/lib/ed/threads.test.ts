@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DbFile } from "@/lib/db";
-import { filterEdThreads, parseEdThread, threadTitle, type ThreadFilters } from "@/lib/ed/threads";
+import { filterEdThreads, markHits, matchSnippet, parseEdThread, queryWords, threadTitle, type ThreadFilters } from "@/lib/ed/threads";
 
 const file = { id: 1, filename: "0046-question-4-a2.md" } as DbFile;
 const markdown = "# Question 4 A2\n\n**#46 · question · unresolved · Assignments / A2**  \n**By:** Student · 2026-10-12 15:42\n\n---\n\nHow do I calculate the period?\n\n## Replies\nUse the eigenvalues of the rotation matrix.";
@@ -71,5 +71,23 @@ describe("Ed board search and filters", () => {
     const missing = parseEdThread("", file);
     expect(threadTitle(missing)).toBe("#46: Question 4 A2");
     expect(filterEdThreads([missing], filters({ query: "question" }))).toEqual([missing]);
+  });
+});
+
+describe("Ed board match snippets", () => {
+  const thread = parseEdThread(markdown, file);
+
+  test("the snippet is the prose around the first hit, markdown dropped", () => {
+    const parts = matchSnippet(thread, queryWords("EIGENVALUES"))!;
+    expect(parts.map((p) => p.text).join("")).toContain("Use the eigenvalues of the rotation matrix.");
+    expect(parts.filter((p) => p.hit).map((p) => p.text)).toEqual(["eigenvalues"]);
+  });
+
+  test("a keyword only in the title gives no snippet but is marked there", () => {
+    expect(matchSnippet(thread, queryWords("A2"))).toBeNull();
+    expect(markHits("Question 4 A2", ["a2"])).toEqual([
+      { text: "Question 4 ", hit: false },
+      { text: "A2", hit: true },
+    ]);
   });
 });

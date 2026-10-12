@@ -5,7 +5,7 @@ import { useSubjectFiles } from "@/hooks/data/useSubjectFiles";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { useCourseFileData } from "@/hooks/data/useCourseFileData";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
-import { filterEdThreads, parseEdThread, type ThreadFilters as Filters } from "@/lib/ed/threads";
+import { filterEdThreads, parseEdThread, queryWords, type ThreadFilters as Filters } from "@/lib/ed/threads";
 import { ThreadFilters } from "./discussion/ThreadFilters";
 import { THREAD_COLUMNS, ThreadRow } from "./discussion/ThreadRow";
 
@@ -25,6 +25,7 @@ export default function SubjectDiscussionPage() {
   }));
   const query = useDeferredValue(filters.query);
   const shown = useMemo(() => filterEdThreads(threads, { ...filters, query }), [threads, filters, query]);
+  const words = useMemo(() => queryWords(query), [query]);
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollFade(scrollRef, "y", shown.length > 0);
   const reading = loading || entries == null;
@@ -52,7 +53,7 @@ export default function SubjectDiscussionPage() {
         </div>
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-scroll px-6 pb-5">
-        {shown.map((thread) => <ThreadRow key={thread.file.id} thread={thread} />)}
+        {shown.map((thread) => <ThreadRow key={thread.file.id} thread={thread} words={words} />)}
         {!reading && shown.length === 0 && (
           <div className="flex flex-col items-center gap-2 py-16 text-center">
             <p className="text-sm text-foreground">No matching threads</p>
