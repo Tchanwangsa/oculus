@@ -2,14 +2,29 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useDefaultModel } from "@/hooks/studio/useDefaultModel";
 import { harnessSend } from "@/lib/harness";
-import { changeRequestText } from "@/lib/studio/changeRequest";
+import { changeRequestText, type LibraryItemKind } from "@/lib/studio/changeRequest";
 import {
   componentHistory,
   componentSource,
   restoreComponent,
   type ComponentLevel,
+  type Snapshot,
 } from "@/lib/studio/components";
+import { restoreTheme, themeHistory, themeSource } from "@/lib/studio/themes";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
+
+/** How a change reads a component's or a theme's text and history. */
+const ITEMS: Record<
+  LibraryItemKind,
+  {
+    source: (name: string, subject: string | null) => Promise<{ level: string; text: string }>;
+    history: (name: string, level: ComponentLevel, subject: string | null) => Promise<Snapshot[]>;
+    restore: (name: string, level: ComponentLevel, subject: string | null, id: string) => Promise<unknown>;
+  }
+> = {
+  component: { source: componentSource, history: componentHistory, restore: restoreComponent },
+  theme: { source: themeSource, history: themeHistory, restore: restoreTheme },
+};
 
 /** How long a sent turn may go without showing as running before the page
  *  looks at the component anyway. */
@@ -21,7 +36,7 @@ export interface ChangeSubject {
   code: string;
 }
 
-/** What the last change did to a component. */
+/** What the last change did to a component or theme. */
 export interface Applied {
   name: string;
   level: ComponentLevel;
@@ -44,14 +59,16 @@ interface Sent {
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
- * "Ask for a change": the first request of a page session starts a Chat
+ * "Ask for a change" to a component (the Components page) or a library theme
+ * (the Themes page): the first request of a page session starts a Chat
  * harness thread, later ones continue it (a new thread when the library's
  * subject changes, since a thread's subject is fixed at creation). When the
- * turn ends the component is read again and `onSettled` fires, so the page
- * can reload its list, source and stage. A change with an earlier snapshot at
+ * turn ends the item is read again and `onSettled` fires, so the page can
+ * reload its list, source and stage. A change with an earlier snapshot at
  * its level can be undone.
  */
-export function useComponentChange(subject: ChangeSubject | null, onSettled: () => void) {
+export function useLibraryChange(kind: LibraryItemKind, subject: ChangeSubject | null, onSettled: () => void) {
+  const item = ITEMS[kind];
   useDefaultModel();
   const [thread, setThread] = useState<{ id: number; subjectId: number | null } | null>(null);
   const [sent, setSent] = useState<Sent | null>(null);
@@ -73,15 +90,15 @@ export function useComponentChange(subject: ChangeSubject | null, onSettled: () 
       const code = level === "subject" ? (subject?.code ?? null) : null;
       try {
         const [text, history] = await Promise.all([
-          componentSource(name, code).catch(() => null),
-          componentHistory(name, level, code).catch(() => []),
+          item.source(name, code).catch(() => null),
+          item.history(name, level, code).catch(() => []),
         ]);
         const open = thread && thread.subjectId === (subject?.id ?? null) ? thread : null;
         const row = open ? store.threads.find((t) => t.id === open.id) : null;
         const id = await harnessSend(
           open?.id ?? null,
           row?.provider ?? store.provider,
-          changeRequestText({ name, level, subject: code, request }),
+          changeRequestText({ kind, name, level, subject: code, request }),
           {
             model: row ? row.model : store.model,
             reasoningEffort: store.reasoning,
@@ -105,13 +122,13 @@ export function useComponentChange(subject: ChangeSubject | null, onSettled: () 
         return false;
       }
     },
-    [subject, thread],
+    [kind, item, subject, thread],
   );
 
   const settle = useCallback(async (s: Sent) => {
     const [text, history] = await Promise.all([
-      componentSource(s.name, s.subject).catch(() => null),
-      componentHistory(s.name, s.level, s.subject).catch(() => []),
+      item.source(s.name, s.subject).catch(() => null),
+      item.history(s.name, s.level, s.subject).catch(() => []),
     ]);
     const newest = history[0]?.id ?? null;
     const newerSnapshot = newest !== s.beforeSnapshot;
@@ -126,7 +143,7 @@ export function useComponentChange(subject: ChangeSubject | null, onSettled: () 
     setSent(null);
     setWorking(null);
     settledRef.current();
-  }, []);
+  }, [item]);
 
   useEffect(() => {
     if (!sent) return;
@@ -147,17 +164,17 @@ export function useComponentChange(subject: ChangeSubject | null, onSettled: () 
     if (!applied?.undoId) return;
     setError(null);
     try {
-      await restoreComponent(applied.name, applied.level, applied.subject, applied.undoId);
+      await item.restore(applied.name, applied.level, applied.subject, applied.undoId);
       setApplied({ ...applied, undoId: null, undone: true });
       settledRef.current();
     } catch (e) {
       setError(message(e));
     }
-  }, [applied]);
+  }, [applied, item]);
 
   return {
     threadId: thread?.id ?? null,
-    /** The component the running turn is changing. */
+    /** The component or theme the running turn is changing. */
     working,
     error,
     applied,
