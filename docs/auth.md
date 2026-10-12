@@ -92,9 +92,11 @@ each other's writes.
   while `subjects` has rows. Start over (Settings → Storage) signs out,
   forgets the Okta credentials, leaves a `start-over` marker and restarts; the
   next launch empties the data dir before any thread or database handle
-  exists, keeping the two cloud usage files and keyd's vault, socket and
-  `bin/`. The marker is written only once sign-out has succeeded, so a failed
-  Start over deletes nothing. The frontend clears its library-scoped
+  exists, keeping the two cloud usage files, the downloaded models
+  (`models/`), keyd's vault, socket and `bin/`, and the lock a running keyd
+  may hold on the sign-in attempt record (`canvas-session/sign-in.json.lock`).
+  The marker is written only once sign-out and forgetting the Okta
+  credentials have succeeded, so a failed Start over deletes nothing. The frontend clears its library-scoped
   `localStorage` keys first and puts them back if the command fails.
 - Saving checks the address before changing anything (`institution::probe`),
   then has keyd take the new site (`institution::accept`): a keyd that refuses

@@ -321,8 +321,8 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
   with a dev-installed `Oculus Helper.app` and keyd's `oculus-keyd.stamp`
   ([above](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
 - `start-over` — present only between Start over and the next launch, which
-  empties the directory but for the two usage files and keyd's own
-  ([auth.md](./auth.md#one-institution-profile-says-which-university)).
+  empties the directory but for the two usage files, `models/` and keyd's
+  own ([auth.md](./auth.md#one-institution-profile-says-which-university)).
 
 ## The database has one schema owner and two writers
 
