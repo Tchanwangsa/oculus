@@ -2219,7 +2219,7 @@ Synthesise one clip of text to a WAV, to hear a voice
 
 Speaks `TEXT` as `narrate` would, with Kokoro or the TTS server, and writes the WAV,
 then prints its path and length. An empty, non-WAV or silent clip is an error (a Kokoro
-server answers an unknown voice with silence). Uses Settings -> Voice unless the flags
+server answers an unknown voice with silence). Uses Settings -> Studio -> Narration unless the flags
 say otherwise; no video is involved, so Kokoro reads only the global library's lexicon.
 
 oculus studio tts "We follow the gradient downhill." --voice bf_emma -o /tmp/emma.wav
@@ -2306,7 +2306,7 @@ Suggest how Kokoro should say a word, for the student to review
 
 The lexicon (`lexicon.json`) is written only by the app: an agent that doubts a guessed
 word suggests a reading with `suggest`, and the student hears the word's sentence both
-ways in Settings -> Voice and accepts the suggestion, keeps the guess, or marks it wrong
+ways in Settings -> Studio -> Pronunciation and accepts the suggestion, keeps the guess, or marks it wrong
 with a note. An accepted reading or a kept guess goes into the subject's lexicon (the
 global library's for a video with no subject) and applies at the next `narrate`. `list`
 shows what is still waiting and what was marked wrong.
@@ -2336,7 +2336,7 @@ find `WORD` (any case; `Word's` counts): its first guessed place, else its first
 recording how Kokoro reads it now, its sentence, scene and script.md line. A word the
 narration never says fails. The suggestion is stored as pending under the video's
 subject, replacing an earlier one for the same word; it prints the reading's phonemes.
-The student reviews it in Settings -> Voice. Needs the `g2p-en-us` pack.
+The student reviews it in Settings -> Studio -> Pronunciation. Needs the `g2p-en-us` pack.
 
 oculus studio pronounce suggest momentum Nesterov NESS-ter-off
 
@@ -2389,7 +2389,7 @@ data>/models/voice/`, downloaded on request, checked against a pinned size and s
 and never bundled: `voice-kokoro` (the int8 model and the voices `af_heart` and
 `am_michael`, 93 MB) and `g2p-en-us` (misaki's US dictionary and the guesser that reads
 the words it lacks, 9 MB). With no action it lists each pack's status and each voice,
-marking the one Settings -> Voice names.
+marking the one Settings -> Studio -> Narration names.
 
 Usage: oculus studio voices [COMMAND]
 

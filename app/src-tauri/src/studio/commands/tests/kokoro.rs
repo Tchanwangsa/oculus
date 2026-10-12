@@ -109,7 +109,7 @@ fn a_sample_refuses_a_bad_voice_or_speed_and_missing_packs() {
     }
     let e = sample("af_heart", 1.0, None, packs(&dir), lexicon.clone()).unwrap_err();
     assert!(
-        e.contains("voice pack") && e.contains("Settings -> Voice"),
+        e.contains("voice pack") && e.contains("Settings -> Studio -> Narration"),
         "{e}"
     );
     fake_pack(&dir, &PACK);

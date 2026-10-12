@@ -368,10 +368,10 @@ other error, above all `script`. Then narrate:
 oculus studio narrate shor-breaks-rsa
 ```
 
-It reads Settings → Voice; pass no `--engine`, `--server`, `--model` or
+It reads Settings → Studio → Narration; pass no `--engine`, `--server`, `--model` or
 `--voice` unless the student asks. If it fails for want of a server, model, voice or
 the word-timing model, **stop and tell the student** what to set in
-Settings → Voice. Never run `oculus studio aligner download` (378 MB) or
+Settings → Studio (Narration, or Word timing for the aligner). Never run `oculus studio aligner download` (378 MB) or
 `oculus studio voices download` (Kokoro's packs, 103 MB): their call. If
 the server does not answer, say so; do not retry in a loop.
 
@@ -391,11 +391,11 @@ decides how a word is said: never edit a `lexicon.json`. For each note:
    fails naming the part; the command prints the phonemes a good one
    gives. `reference.md` ("Pronunciation") has the rules.
 3. Tell the student which words you suggested readings for, and that they
-   hear each one both ways and decide in Settings → Voice.
+   hear each one both ways and decide in Settings → Studio → Pronunciation.
 4. Do not wait for the review: carry on with the video. A decision
    applies at the next `narrate`, which re-makes only the scenes whose
    reading changed. Later notes show each suggestion's state: `(suggested
-   "…", awaiting review in Settings -> Voice)`, or `(suggestion "…"
+   "…", awaiting review in Settings -> Studio -> Pronunciation)`, or `(suggestion "…"
    marked wrong: "<the student's note>"; suggest again)`. `oculus studio
    pronounce list --video <slug>` lists them too. For a wrong one,
    suggest again following the student's note.

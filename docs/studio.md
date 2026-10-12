@@ -43,7 +43,7 @@ crops library PDF pages into slides (`slide`), and narrates.
 | The Kokoro engine: its pack, reader, chunking and synthesis | `app/src-tauri/src/studio/tts/kokoro/` |
 | Text to Kokoro phonemes (the G2P), the lexicon, the guesser and its pack; the lint of a video's narration that needs them | `app/src-tauri/src/studio/voice/g2p/` (`guess/`, `lexicon.rs`), `app/src-tauri/src/studio/voice/lint/` |
 | The pronunciation review: suggestions stored one file each, the lexicon writer, finding a word in a video's narration; its Tauri commands and wrappers | `app/src-tauri/src/studio/voice/review/` (`key.rs`, `lexicon.rs`, `locate.rs`), `app/src-tauri/src/studio/commands/pronunciations.rs`, `app/src/lib/studio/pronunciations.ts` |
-| Settings -> Voice: the `voice` row and its engine, the server's model list, Kokoro's packs and sample, the pronunciation review, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/` (`pronunciations/`), `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
+| Settings -> Studio (Narration, Pronunciation, Word timing): the `voice` row and its engine, the server's model list, Kokoro's packs and sample, the pronunciation review, the aligner download; its Tauri commands | `app/src/pages/settings/studio/`, `app/src/components/settings/voice/` (`pronunciations/`), `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: the export presets, ffmpeg's toolkit and the encoder choice, plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, the `.vtt` beside each narrated render, each preset's status, one render per folder | `app/src-tauri/src/studio/render/` (`preset.rs`, `toolkit.rs`, `settings.rs`, `export.rs`, `status.rs`), `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, `studio_exports`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
@@ -88,7 +88,7 @@ narration/    manifest.json and the clips it names
   is required on every scene once the folder has a `script.md`; a scene
   whose id has no section is silent and needs a `hold`.
 - `voice` (optional: `engine` (`kokoro` or `server`), `model`, `voice`,
-  `speed`) overrides Settings -> Voice for this video. studio-core only stores it; the app's narrator reads it.
+  `speed`) overrides Settings -> Studio -> Narration for this video. studio-core only stores it; the app's narrator reads it.
 - `theme` is a bundled theme's name, a library theme's name (see "Libraries
   cascade") or a `.json` path relative to the folder.
 - `subject` (optional) is the course the video belongs to: a course code's
@@ -288,11 +288,11 @@ strip of the whole video for the joins, and renders a draft, then
 `--final`. An agent whose role is off, or that cannot start helpers (agy),
 does the items itself in order.
 When `narrate` fails for want of a voice or the aligner, the agent stops and
-tells the student what to set in Settings -> Voice; it never downloads the
+tells the student what to set in Settings -> Studio; it never downloads the
 aligner or the voice packs. After narrating with Kokoro it judges each
 guessed-word note, suggests a reading for each doubtful word with `oculus
 studio pronounce suggest` (it never edits a lexicon), tells the student to
-review them in Settings -> Voice, and carries on: a decision applies at the
+review them in Settings -> Studio -> Pronunciation, and carries on: a decision applies at the
 next narrate, and a suggestion marked wrong comes back in the notes with
 the student's note for another try. The story rules (explain with reasons, link each scene to the
 last, numbers given meaning, example then rule, the payoff shown, the end
@@ -532,7 +532,7 @@ CTC forced alignment of the script against wav2vec2's letter emissions, run
 by ONNX Runtime on the CPU (`app/src-tauri/src/runtime/onnx/`). The model
 is Xenova's fp32 ONNX export of `facebook/wav2vec2-base-960h` (Apache-2.0,
 credit facebook/wav2vec2-base-960h), pinned to one commit, 378 MB. It is
-downloaded on request (Settings -> Voice, or `oculus studio aligner
+downloaded on request (Settings -> Studio -> Word timing, or `oculus studio aligner
 download`) to
 `<app data>/models/align/` and never bundled; the download is checked
 against its pinned size and sha256 before it gets its name. ONNX Runtime
@@ -609,7 +609,7 @@ manifest. Scenes run one at a time, in video order.
   Voice, or pass --engine``. The server engine needs a server, model and
   voice, whose ids differ per server (Kokoro-FastAPI `kokoro`, mlx-audio
   `mlx-community/Kokoro-82M-bf16`, OpenAI `tts-1`): narrate fails with
-  ``set a TTS server in Settings -> Voice, or pass --server`` and the same
+  ``set a TTS server in Settings -> Studio -> Narration, or pass --server`` and the same
   for `--model` and `--voice`. The Kokoro engine needs only a voice, an id
   of lower-case letters, digits and `_` (it names a file in the voice
   pack); it ignores the server fields, which stay set for when the server
@@ -669,7 +669,7 @@ manifest. Scenes run one at a time, in video order.
   spoken, never on the spliced one, so a pause is not mistaken for a
   failed clip. The speaker and the aligner
   model are checked before the first clip, so a missing one costs no
-  synthesis; the aligner fails with ``download it in Settings -> Voice or
+  synthesis; the aligner fails with ``download it in Settings -> Studio -> Word timing or
   run `oculus studio aligner download` ``.
 - **Guessed words.** With Kokoro, each word the guesser read in the scenes
   the run keyed is printed after the scenes as ``note: scene 1 `momentum`
@@ -851,7 +851,7 @@ suggested for words it doubts, until the student decides on each.
   says fails; a word that is not a guess is still stored, with the
   phonemes it reads with now. It prints the reading's phonemes, how the
   word reads now, the scene, line and sentence, and that the student
-  reviews it in Settings -> Voice (`--json`: the item plus `phonemes`).
+  reviews it in Settings -> Studio -> Pronunciation (`--json`: the item plus `phonemes`).
 - **`oculus studio pronounce list [--video DIR]`** prints each item,
   newest first: its status, word, reading, subject, video, scene and line,
   and under a wrong one the student's note (`--json`: `[{ id, ...the
@@ -859,7 +859,7 @@ suggested for words it doubts, until the student decides on each.
 - **Notes.** `narrate` and `lint` look up each guessed word's file under
   the video's subject, a possessive's under its stem (`Store::annotate`),
   and end its note with
-  `(suggested "NESS-ter-off", awaiting review in Settings -> Voice)` or
+  `(suggested "NESS-ter-off", awaiting review in Settings -> Studio -> Pronunciation)` or
   `(suggestion "NESS-ter-off" marked wrong: "<note>"; suggest again)`.
 - **Deciding** (`Store::decide`) writes the word into the subject's
   `lexicon.json`, or the global library's for a video without a subject:
@@ -878,19 +878,20 @@ suggested for words it doubts, until the student decides on each.
   `studio_pronunciation_wrong(id, note?)` gives the item, a blank note
   stored as none; `studio_pronunciation_sample(id, which: "original" |
   "suggestion")` synthesises the item's sentence as `studio_voice_sample`
-  does, in Settings -> Voice's voice and speed, reading the subject's
+  does, in Settings -> Studio -> Narration's voice and speed, reading the subject's
   lexicon with one entry over it that pins the word to the original
   phonemes or to the suggestion (`LexiconFiles::pin`), and gives the WAV's
-  bytes. Settings -> Voice's Pronunciations section is built on them
+  bytes. The Pronunciation page is built on them
   (next section).
 
-## Settings -> Voice chooses the engine and holds the models
+## Settings -> Studio chooses the engine and holds the models
 
-Settings -> Voice (Library group) has three sections. Settings never makes a
+Settings has a Studio group of three pages: Narration, Pronunciation and
+Word timing. Settings never makes a
 billed call: its one network call to a server is listing models, which is
 free, and the only sample is Kokoro's, made on this Mac.
 
-- **Narration voice** edits the `voice` row. **Engine** is a bordered list
+- **Narration** (`/settings/narration`, the section "Narration voice") edits the `voice` row. **Engine** is a bordered list
   of two rows, "Kokoro (built in)" and "TTS server", each with a radio dot
   and a status line (Kokoro: whether it runs now or after its download, or
   the download's percentage; server: its URL and model, or "No server
@@ -926,7 +927,7 @@ free, and the only sample is Kokoro's, made on this Mac.
   it, unsets blanks, normalises the URL (`tts::normalise_base`), refuses a
   speed that is not a positive number, and answers with what it stored. A
   refusal shows under its row.
-- **Pronunciations** (`components/settings/voice/pronunciations/`) lists
+- **Pronunciation** (`/settings/pronunciation`, `components/settings/voice/pronunciations/`) lists
   the review's items, newest first, under a one-line hint. It loads on
   mount and again whenever the window regains focus, since the CLI adds
   items while the page is open; with none it says "No words waiting for
@@ -946,7 +947,7 @@ free, and the only sample is Kokoro's, made on this Mac.
   note in place of the verdicts, until the agent's next suggestion replaces
   it as pending. A row's buttons wait while its request runs, and a failed
   request or sample shows in red on the row.
-- **Word timing** is the aligner model's row, like a Local Whisper model:
+- **Word timing** (`/settings/word-timing`) is the aligner model's row, like a Local Whisper model:
   "wav2vec2 base (English)", its 378 MB size and status, Download (then a
   percentage, a progress bar and Cancel) or Delete behind a confirmation,
   and the credit line.
@@ -2253,7 +2254,7 @@ the `Slide` starter animates it in. Rendering never opens a PDF.
   readings"); `oculus studio aligner` manages the aligner model. See
   "Narration is made by `oculus studio narrate`".
 - `oculus studio voices` lists each Kokoro pack's status and size and each
-  voice, downloaded or not, marking the one Settings -> Voice names;
+  voice, downloaded or not, marking the one Settings -> Studio -> Narration names;
   `voices download` fetches both packs with the aligner's progress lines,
   `voices delete` removes them. `--json` gives `{ dir, packs: [{ id,
   status, bytes }], voices: [{ id, downloaded, chosen }] }`, `{ status,

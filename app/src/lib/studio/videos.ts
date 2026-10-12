@@ -72,7 +72,7 @@ export interface VideoDetail {
   width: number;
   height: number;
   theme: string;
-  /** The narration voice id, from video.json or Settings -> Voice; null if
+  /** The narration voice id, from video.json or Settings -> Studio -> Narration; null if
    *  neither names one. */
   voice: string | null;
   /** video.json's `captions`: the renders have captions drawn into the picture. */

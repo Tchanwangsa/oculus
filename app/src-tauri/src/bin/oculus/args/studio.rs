@@ -38,7 +38,7 @@ pub(crate) enum StudioAction {
     ///
     /// The lexicon (`lexicon.json`) is written only by the app: an agent
     /// that doubts a guessed word suggests a reading with `suggest`, and the
-    /// student hears the word's sentence both ways in Settings -> Voice and
+    /// student hears the word's sentence both ways in Settings -> Studio -> Pronunciation and
     /// accepts the suggestion, keeps the guess, or marks it wrong with a
     /// note. An accepted reading or a kept guess goes into the subject's
     /// lexicon (the global library's for a video with no subject) and
@@ -56,7 +56,7 @@ pub(crate) enum StudioAction {
     /// model and the voices `af_heart` and `am_michael`, 93 MB) and
     /// `g2p-en-us` (misaki's US dictionary and the guesser that reads the
     /// words it lacks, 9 MB). With no action it lists each pack's status
-    /// and each voice, marking the one Settings -> Voice names.
+    /// and each voice, marking the one Settings -> Studio -> Narration names.
     Voices {
         #[command(subcommand)]
         action: Option<StudioVoicesAction>,
@@ -103,7 +103,7 @@ pub(crate) enum StudioPronounceAction {
 /// and script.md line. A word the narration never says fails. The
 /// suggestion is stored as pending under the video's subject, replacing an
 /// earlier one for the same word; it prints the reading's phonemes. The
-/// student reviews it in Settings -> Voice. Needs the `g2p-en-us` pack.
+/// student reviews it in Settings -> Studio -> Pronunciation. Needs the `g2p-en-us` pack.
 ///
 ///     oculus studio pronounce suggest momentum Nesterov NESS-ter-off
 #[derive(Args)]
@@ -245,7 +245,7 @@ pub(crate) struct StudioListArgs {
 
 /// Which engine, voice and speed to use, and the server and model for the
 /// server engine. Each flag overrides the video.json `voice` block, which
-/// overrides Settings -> Voice.
+/// overrides Settings -> Studio -> Narration.
 #[derive(Args)]
 pub(crate) struct StudioVoiceArgs {
     /// `kokoro` runs Kokoro inside the app (`oculus studio voices download`
@@ -334,7 +334,7 @@ pub(crate) struct StudioNarrateArgs {
 /// Speaks `TEXT` as `narrate` would, with Kokoro or the TTS server, and
 /// writes the WAV, then prints its path and length. An empty, non-WAV or
 /// silent clip is an error (a Kokoro server answers an unknown voice with
-/// silence). Uses Settings -> Voice unless the flags say otherwise; no
+/// silence). Uses Settings -> Studio -> Narration unless the flags say otherwise; no
 /// video is involved, so Kokoro reads only the global library's lexicon.
 ///
 ///     oculus studio tts "We follow the gradient downhill." --voice bf_emma -o /tmp/emma.wav

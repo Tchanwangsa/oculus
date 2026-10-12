@@ -3,7 +3,7 @@
 //! Keyless only. No timeout: a cold server takes many seconds to load its
 //! model. A clip that is empty, not a WAV or digitally silent is a failure,
 //! never a pause (Kokoro answers an unknown voice with 200 and no audio).
-//! `models` lists the server's model ids for Settings -> Voice.
+//! `models` lists the server's model ids for Settings -> Studio -> Narration.
 
 pub mod kokoro;
 mod models;

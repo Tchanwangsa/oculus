@@ -93,7 +93,7 @@ pub(super) fn no_pad(text: &str) -> Result<(), String> {
 /// Kokoro's `what` (`bytes` big) is not on disk.
 pub(super) fn missing(what: &str, bytes: u64) -> String {
     format!(
-        "Kokoro's {what}, {} MB, is not downloaded: run `oculus studio voices download`, or download it in Settings -> Voice",
+        "Kokoro's {what}, {} MB, is not downloaded: run `oculus studio voices download`, or download it in Settings -> Studio -> Narration",
         (bytes + 500_000) / 1_000_000
     )
 }

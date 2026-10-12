@@ -22,7 +22,7 @@ pub struct NewVideoOptions {
     pub voice: Option<VoiceBlock>,
 }
 
-/// video.json's `voice` fields; each overrides Settings -> Voice for this
+/// video.json's `voice` fields; each overrides Settings -> Studio -> Narration for this
 /// video.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]

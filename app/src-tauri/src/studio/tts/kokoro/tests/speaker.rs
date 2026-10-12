@@ -37,7 +37,7 @@ fn ready_needs_both_packs_and_the_voice() {
     let dir = Scratch::new("kokoro-ready");
     let e = speaker(&dir, "af_heart").ready().unwrap_err();
     assert!(
-        e.contains("voice pack") && e.contains("Settings -> Voice"),
+        e.contains("voice pack") && e.contains("Settings -> Studio -> Narration"),
         "{e}"
     );
     fake_pack(&dir, &PACK);
@@ -63,7 +63,7 @@ fn keying_needs_the_g2p_pack() {
     let dir = Scratch::new("kokoro-key");
     let e = speaker(&dir, "af_heart").key("Hello there.").unwrap_err();
     assert!(
-        e.contains("G2P pack") && e.contains("Settings -> Voice"),
+        e.contains("G2P pack") && e.contains("Settings -> Studio -> Narration"),
         "{e}"
     );
 }

@@ -269,7 +269,7 @@ fn a_note_says_what_became_of_its_suggestion() {
     assert_eq!(notes[2].review, notes[0].review, "a possessive's stem");
     assert_eq!(
         notes[0].message(),
-        "check pronunciation: \"Nesterov\" is guessed as /nˈɛstəɹɔv/ (suggested \"NESS-ter-off\", awaiting review in Settings -> Voice)"
+        "check pronunciation: \"Nesterov\" is guessed as /nˈɛstəɹɔv/ (suggested \"NESS-ter-off\", awaiting review in Settings -> Studio -> Pronunciation)"
     );
     let mut elsewhere = vec![note("Nesterov")];
     s.annotate(None, &mut elsewhere);

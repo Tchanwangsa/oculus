@@ -56,7 +56,7 @@ video's slug as `DIR`; `oculus studio <command> --help` has the full flags.
 | `subject` | The subject code. Its library is read before the global one. |
 | `scenes` | The scenes in order (below). At least one. |
 | `motion` | Optional: `transition`, `magicMove`, `morphColor`, `motionBlur` for the whole video (see "Transitions"). |
-| `voice` | Optional: `{ model, voice, speed }` over Settings → Voice for this video. Leave it out unless the student asks for a voice. |
+| `voice` | Optional: `{ model, voice, speed }` over Settings → Studio → Narration for this video. Leave it out unless the student asks for a voice. |
 | `captions` | `true` burns word-highlight captions into the renders and `frame`: the phrase being said on a plate near the bottom edge, the current word highlighted. `new` writes `true`; leave it unless the student asks. Styled by the theme's `captions` tokens. |
 
 A scene:
@@ -931,12 +931,12 @@ another scene does not stop them.
 ## Narrate
 
 `oculus studio narrate <slug>` turns each section into a clip with the TTS
-server set in Settings → Voice, times its words, and writes
+server set in Settings → Studio → Narration, times its words, and writes
 `narration/manifest.json`. Unchanged scenes print `cached`. `--scene <id>`
 does one scene (an id, unlike `strip --scene`, which takes an index);
 `--force` makes it again. A failure keeps the scenes before it and names
 the failed one: `no TTS server`, `no TTS model` and `no TTS voice` mean
-Settings → Voice is unset (`SKILL.md` step 5 says what to do).
+Settings → Studio → Narration is unset (`SKILL.md` step 5 says what to do).
 
 The engine is Kokoro, run inside the app, or a TTS server; Settings →
 Voice or the video's `voice` block (`"engine": "kokoro"`) picks it. With
@@ -958,7 +958,7 @@ is said; you suggest, and never edit a `lexicon.json`.
   it gives, and records how Kokoro reads the word now and the sentence it
   is in; a new suggestion for the same word replaces the last. `--json`
   gives the stored item plus `phonemes`.
-- In Settings → Voice the student hears the sentence read both ways and
+- In Settings → Studio → Pronunciation the student hears the sentence read both ways and
   picks one: the suggestion is correct (it goes into the lexicon), the
   guess is fine (the guess goes into the lexicon, so it is no longer
   flagged), or the suggestion is wrong, with a note on how the word is

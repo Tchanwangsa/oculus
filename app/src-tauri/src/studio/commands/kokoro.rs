@@ -1,4 +1,4 @@
-//! Kokoro in Settings -> Voice: its two packs' status, one download for both
+//! Kokoro in Settings -> Studio -> Narration: its two packs' status, one download for both
 //! that reports progress as `studio-voice-progress` events (`progress`), and
 //! a sample clip synthesised on this Mac, never a billed call.
 

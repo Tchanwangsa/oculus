@@ -163,7 +163,7 @@ The app is not involved: once keyd is installed, launchd starts it on the first
 connect, so a chat agent's `oculus search` works with the app closed.
 
 **The TTS server is the one network host a thread is granted.** `oculus
-studio narrate` calls the server in Settings → Voice. At each spawn the
+studio narrate` calls the server in Settings → Studio → Narration. At each spawn the
 bridges read the `voice` row (`studio::voice::server_host`: the base URL's
 host and port, or nothing without a row, a URL or a host; never a
 wildcard), so a changed server reaches the next spawn. The Kokoro engine
