@@ -107,8 +107,8 @@ no network calls or file reads.
 
 A file row's recency slot (`FileRecency`) shows an indigo dot and *NEW* while
 the file has never been opened (new, or rewritten by a sync before then), the
-dot alone once it changed since it was last opened, and otherwise its
-last-opened time.
+same *NEW* in amber once it changed since it was last opened, and otherwise
+its last-opened time.
 
 ## Backend events are the write path
 
