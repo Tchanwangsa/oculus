@@ -70,15 +70,24 @@ export function sendRegions(slots: HTMLElement[]): void {
   invoke("native_set_holes", { holes, covers }).catch(() => {});
 }
 
-/** The portals over any page, each once. A wrapper and the content filling
- *  it are one cover with the content's radius; anything inside another
- *  cover adds nothing, and its square corners would clip the page where
- *  the outer one is rounded. */
+/** The portals over any page, each once. A wrapper that paints nothing
+ *  (Radix's popper wrapper) gives way to the content inside it, which can be
+ *  a pixel or two smaller and is what carries the rounded corners. A wrapper
+ *  and the content filling it are one cover with the content's radius;
+ *  anything inside another cover adds nothing, and its square corners would
+ *  clip the page where the outer one is rounded. */
 function coversOver(pages: DOMRect[]): { rect: DOMRect; radius: number }[] {
   const found = new Set<Element>();
   for (const page of pages) for (const el of portalsOver(page)) found.add(el);
-  const all = [...found]
-    .map((el) => ({ rect: el.getBoundingClientRect(), radius: radiusOf(el) }))
+  const measured = [...found].map((el) => ({
+    rect: el.getBoundingClientRect(),
+    radius: radiusOf(el),
+    paints: paints(el),
+  }));
+  const all = measured
+    .filter(
+      (c) => c.paints || !measured.some((o) => o !== c && o.paints && contains(c.rect, o.rect)),
+    )
     .sort((a, b) => area(b.rect) - area(a.rect));
   const kept: { rect: DOMRect; radius: number }[] = [];
   for (const c of all) {
@@ -99,6 +108,16 @@ function radiusOf(el: Element): number {
     cs.borderBottomRightRadius,
   ];
   return Math.max(...corners.map((v) => parseFloat(v) || 0));
+}
+
+/** Whether the element draws a box of its own: a background or a border. */
+function paints(el: Element): boolean {
+  const cs = getComputedStyle(el);
+  const clear = cs.backgroundColor === "transparent" || /rgba\(.*,\s*0\)$/.test(cs.backgroundColor);
+  const border = ["Top", "Right", "Bottom", "Left"].some(
+    (side) => parseFloat(cs.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0,
+  );
+  return !clear || cs.backgroundImage !== "none" || border;
 }
 
 function area(r: DOMRect): number {
