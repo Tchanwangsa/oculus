@@ -21,10 +21,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-
-[dev-dependencies]
-# The version parley and vello_cpu already lock (and src-tauri), for reading
-# font axes in tests.
+# The maths engine's KaTeX port (`app/math-core/katex`), typesetting `Math`.
+katex = { package = "katex-rs", path = "../math-core/katex" }
+# Glyph outlines for `Math`, at the version parley and vello_cpu already lock.
 skrifa = "=0.44.0"
 
 [lints.clippy]

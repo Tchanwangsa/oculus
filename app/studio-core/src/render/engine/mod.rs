@@ -10,6 +10,7 @@ use crate::error::{Result, StudioError};
 use crate::host::{ComponentInfo, Host};
 use crate::images::ImageCache;
 use crate::layout::{LNode, Typeset};
+use crate::math::MathCache;
 use crate::morph::{Ink, MorphColor, duplicate_key};
 use crate::paint::{Canvas, paint};
 use crate::project::WordCues;
@@ -50,6 +51,8 @@ pub struct Engine {
     /// How `<Morph>` blends colours: the video's `morphColor`, else the
     /// theme's (a bad theme value falls back to oklch here; lint reports it).
     morph_color: MorphColor,
+    /// Typeset `<Math>` formulas, kept across frames.
+    math: MathCache,
 }
 
 impl Engine {
@@ -88,6 +91,7 @@ impl Engine {
             size,
             scale,
             pixels,
+            math: MathCache::default(),
         })
     }
 

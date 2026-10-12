@@ -1,9 +1,9 @@
 # The maths engine: a vendored fork of katex-rs (`katex/`), its wasm binding
 # (`wasm/`), the edit field's model (`edit/`) and the display oracle
-# (`oracle/`). Its own workspace,
-# never a dependency of `app/src-tauri`, so `tauri dev` never rebuilds it.
-# The settings below are katex-rs's workspace settings, which `katex/`
-# inherits; see katex/UPSTREAM.md.
+# (`oracle/`). Its own workspace; only `katex/` is a dependency elsewhere
+# (of `app/studio-core`, and through it `app/src-tauri`). The settings below
+# are katex-rs's workspace settings, which `katex/` inherits; see
+# katex/UPSTREAM.md.
 
 [workspace]
 members = ["edit", "katex", "oracle", "wasm"]

@@ -25,6 +25,7 @@ frames and contact sheets, lints, and narrates.
 | TSX → JS (oxc), the QuickJS sandbox, the prelude every component sees | `app/studio-core/src/host/` (`prelude/*.js`, one module scope, concatenated in order) |
 | The element tree and its style keys | `app/studio-core/src/scene/` |
 | Layout (taffy, parley) and paint (vello_cpu); Path trim and Text reveal | `app/studio-core/src/layout/`, `app/studio-core/src/paint/` (`path/`, `text/`) |
+| `<Math>`: KaTeX through math-core, the layout of its HTML tree, keys, the expansion into glyphs; the KaTeX fonts | `app/studio-core/src/math/` (`walk/` one file per construct), `app/studio-core/fonts/katex/` |
 | Props schemas and their validation | `app/studio-core/src/schema/` |
 | Component and theme libraries: the starter set, seeding, the snapshot write path, promoting a video's own file | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots, `promote.rs`) |
 | Videos in the data directory: `new`, `list`, slug resolution, slugs from titles, the app's scope | `app/src-tauri/src/studio/videos/` (`slug.rs`), `app/src-tauri/src/library/paths/studio.rs` (`studio_dir`, `agent_write_dirs`) |
@@ -147,7 +148,9 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
   `props` export is refused (`{}` declares none): the schema is what lint and
   the inspector are built from.
 - Builders: `str()`, `num()`, `bool()`, `list(x)`, `oneOf([...])`,
-  `token(kind)`, `latex()` (a string of LaTeX source), each with
+  `token(kind)`, `latex()` (a string of LaTeX source, checked by typesetting
+  it, so a bad formula or `\color` is a `Props` error with KaTeX's message
+  and position), each with
   `.default(v)` and `.optional()`. Before every call the scene's props are
   checked: a missing required prop, a wrong type or an unknown prop is a
   `Props` error naming the component, the prop path, what was expected and
@@ -268,8 +271,7 @@ listing every name in every level.
 The starter set (`app/studio-core/library/`) is compiled into the crate: the
 components `TitleCard`, `Steps`, `BigNumber`, `LowerThird` and `SplitShell`,
 and the theme `warm` beside `default`. Each takes its colours and fonts from
-the theme and has at least two examples. `Formula` waits for the maths
-primitive (stage 8). `tests/starter.rs` lints the set in both themes, and
+the theme and has at least two examples. `tests/starter.rs` lints the set in both themes, and
 `tests/gallery_golden.rs` pins every example as `starter-<Component>-<example>.png`,
 laid out at 1920x1080 and drawn at half scale. A load copies each starter
 file the global library has never been offered, then lists it in the
@@ -521,15 +523,19 @@ studio narrate`.
 
 ## Four primitives and a closed set of style keys
 
-`Box`, `Text`, `Image` and `Path` are the host elements, and `Morph` holds
-two layouts of one place (see "Magic move"); `Stack` (a column) and `Row`
+`Box`, `Text`, `Image` and `Path` are the host elements, `Morph` holds
+two layouts of one place (see "Magic move") and `Math` is LaTeX that
+becomes primitives before layout (see "Math"); `Stack` (a column) and `Row`
 are `Box` with `gap`, `align`, `justify` and `wrap` shorthands. Elements take
 only `style`, `key`, children, `src` on `Image`, `d`, `viewBox`, `fill`,
-`stroke` and `trim` on `Path`, and `p` on `Morph`.
+`stroke` and `trim` on `Path`, `p` on `Morph`, and `tex` and `display` on
+`Math`.
 
 - `flexDirection` defaults to `row`, as in CSS. Use `Stack` for a column.
 - `Text` children must be strings or numbers; to mix styles put several
-  `Text` in a `Row`.
+  `Text` in a `Row`. A `Text`'s baseline is its first line's, so a `Row`
+  with `alignItems: "baseline"` lines texts of different sizes (and `Math`)
+  up on it.
 - `Image src` is relative to `assets/`. A missing or undecodable file is an
   error, never a placeholder. Decoded images are cached per renderer.
 - Style keys are `STYLE_KEYS` in `app/studio-core/src/scene/style.rs`: size
@@ -563,6 +569,78 @@ only `style`, `key`, children, `src` on `Image`, `d`, `viewBox`, `fill`,
   shadow and border included, and a side at 0 does not clip.
 - `fontVariantNumeric: "tabular-nums"` gives every digit one advance (the
   `tnum` feature, part of the shaping key); a theme type token may set it.
+
+## Math typesets LaTeX as keyed glyphs
+
+`<Math tex="\frac{a}{b}" display key style>` is LaTeX typeset by the
+maths engine's KaTeX port (`app/math-core/katex`, KaTeX 0.18.5, the app's
+own maths), so a formula looks as it does in the app. `display` (default
+`true`) is display style, limits above and below; `false` is inline maths.
+
+- **Expansion.** After the component returns and before `select` and
+  layout, each `Math` becomes a Box the formula's size (its width by its
+  height plus depth) holding one absolutely placed child per piece: a
+  filled `Path` per glyph (its outline from the bundled KaTeX fonts, read
+  with skrifa), a filled `Box` per rule (fraction bars, over- and
+  underlines, `\rule`, `\boxed` frames, `\colorbox` backgrounds) and a
+  `Path` per KaTeX SVG (root signs, tall and stretchy delimiters, braces,
+  arrows; `\cancel` strokes). Its first child is an empty strut as tall as
+  the formula's height, so the Box's baseline is the formula's.
+- **Layout.** `render_to_html_tree` gives KaTeX's HTML tree; `math/walk/`
+  lays it out as katex.css would in a browser: inline spans on one baseline
+  (margins, padding, widths, relative shifts, `vertical-align`), vlists by
+  their rows' `top` and pstrut, `width: 100%` bars and root tails across
+  their vlist, `text-align` per class, the size ladder, and each class's
+  font. SVG is mapped by its `viewBox` and `preserveAspectRatio` and
+  clipped to its `overflow: hidden` boxes by clamping its points, since
+  KaTeX's paths run far past what shows. The fonts have no kerning or
+  ligatures, so glyphs advance by their widths alone. Against KaTeX in
+  WebKit at 200 px per em (the `webkit` test in `src/math/tests/`), every
+  glyph, rule and SVG box of a corpus of fractions, scripts, roots,
+  delimiters, limits, matrices, accents, braces, boxes, laps and `\cancel`
+  is within 0.006 em.
+- **Size and colour.** `style.fontSize` (default 16) is the size of the
+  text the formula sits with; maths is set 1.21 times larger, as KaTeX's CSS
+  does. `style.color` (default the theme's text colour) inks every piece;
+  `\color{…}` and `\textcolor{…}{…}` take a theme colour's name
+  (`\color{accent}`) or a hex colour, and a CSS colour name is an error
+  listing the theme's. The other text keys are ignored, so a `theme.type`
+  token can be spread in; `width`, `height`, their min and max, `padding`,
+  `border`, the flex container keys, `textAlign`, `reveal` and `objectFit`
+  are errors (wrap the Math in a Box to size or pad it). Placement and
+  paint keys (`margin`, `position`, `opacity`, transforms, …) apply to the
+  Box.
+- **Keys** make a `<Morph>` between two formulas move term by term, as
+  manim's TransformMatchingTex does. Every piece is keyed `<prefix>/<term>`.
+  A term is its character and, from its second appearance, `#n` (`x`,
+  `x#2`; KaTeX's minus is `−`), `frac` for a fraction bar, `sqrt` for a
+  root sign, a box side `box`, and KaTeX's path name for other SVG.
+  `\k{name}{…}` (a macro over `\htmlData{k=name}`, with trust on) names a
+  group: its pieces are `name`, `name.1`, `name.2`, … in reading order, the
+  innermost group winning. Reading order is the tree's, with each vlist
+  read top to bottom: numerator, bar, denominator; a root sign before its
+  radicand. A group named like a term of the same formula is an error. The
+  prefix is the Math's `key`; two formulas given one key in a Morph glide
+  the terms they share and fade the rest, and a Math elsewhere never
+  collides with them. A Math without a key inside a Morph is prefixed by
+  its place, `~<morph>.<n>` (the nth Math of that Morph's child), so the
+  two sides match with no key; anywhere else its pieces are unkeyed. The
+  keys are ordinary keys: one shared by consecutive scenes makes their
+  transition a magic move, so a formula carries across scenes term by
+  term, and two Math elements with one key in one tree are a duplicate-key
+  error.
+- **Errors.** A formula KaTeX cannot parse fails the frame naming the
+  element's tree path and TSX line, with KaTeX's message and position
+  (``<Math tex="\frac{a}{">: Unexpected end of input in a macro argument,
+  expected '}' at end of input: \frac{a}{``); so does a character no
+  bundled KaTeX font has, a line break outside an environment and
+  `\includegraphics`.
+- **Cache.** Each renderer keeps typeset formulas by source and display
+  mode (up to 512, then it starts over), so a formula is typeset once, not
+  every frame.
+- `Math` is JS's own `Math` object: the JSX factory knows it by identity,
+  so `Math.max` and the seeded `Math.random` are untouched. `studio.d.ts`
+  types `<Math>` through a call signature merged into the `Math` interface.
 
 ## Motion
 
@@ -819,7 +897,9 @@ centroid smoothly.
 ## Fonts and themes are bundled, never the system's
 
 - The fonts are Inter (variable: `opsz`, `wght`) and Manrope (variable:
-  `wght`), compiled in with their OFL licences beside them. System fonts are
+  `wght`), compiled in with their OFL licences beside them, and the twenty
+  KaTeX faces (`fonts/katex/`, OFL, from the katex npm package the app
+  uses), which only `Math` reads; `Text` cannot name them. System fonts are
   never loaded, so a frame is the same on every machine; an unknown
   `fontFamily` is an error naming the bundled families.
 - A theme is tokens only: `color`, `font` (`heading` and `body` families),
@@ -982,7 +1062,8 @@ with the `Narration` error before any frame renders.
   file under `components/` and `assets/`, the render settings (quality,
   scale, size, fps, blur, filter, codec and tag arguments) and
   `STUDIO_RENDER_BUILD`, which `app/src-tauri/build.rs` hashes from
-  studio-core's `src/`, `fonts/` and `themes/`, `src/studio/render/` and
+  studio-core's `src/`, `fonts/` and `themes/`, the KaTeX port's `src/`,
+  `data/` and `build.rs` (`app/math-core/katex/`), `src/studio/render/` and
   `app/src-tauri/Cargo.lock` (the versions of vello_cpu, parley, taffy and
   the rest), so a renderer, font or dependency change in development never
   reuses an old segment. Editing one scene re-renders it
@@ -1313,6 +1394,12 @@ failures).
 tree hashes, the audio placement, the reorder buffer and pruning, and,
 through the real ffmpeg (skipped without one), the join and cache check
 above, a narrated fixture's audio onset, cancel and a failing frame.
+
+`tests/math.rs` pins a corpus of KaTeX constructs beside text labels on
+their baselines (`math-corpus`) and a Morph from `2^4 - 1` to
+`(2^2 - 1)(2^2 + 1)` as a contact sheet (`math-factor-strip`); the unit
+tests in `src/math/tests/` cover keys, the Morph's glide and fades, the
+prefixes, errors, colours, `latex()` props and the layout against WebKit's.
 
 `tests/gallery_golden.rs` pins the stills of the `gallery` fixture's examples
 and checks that their pixels do not depend on the thread count.
