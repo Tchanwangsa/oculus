@@ -62,7 +62,7 @@ function fmtDate(iso: string | null): string {
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
-  return d.toLocaleDateString();
+  return d.toLocaleDateString(displayLocale);
 }
 
 /** Relative time from an epoch-ms timestamp — same buckets as `fmtDate`. */
@@ -88,7 +88,7 @@ export function fmtSynced(iso: string | null): string {
 /** Time of day only: "2:18 am". */
 export function fmtTime(ms: number | undefined): string {
   if (!ms) return "";
-  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return new Date(ms).toLocaleTimeString(displayLocale, { hour: "numeric", minute: "2-digit" });
 }
 
 export function startOfDay(d: Date): Date {
@@ -117,7 +117,7 @@ export function fmtDayHeading(ms: number): string {
   );
   const opts: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" };
   if (d.getFullYear() !== today.getFullYear()) opts.year = "numeric";
-  const date = d.toLocaleDateString([], opts);
+  const date = d.toLocaleDateString(displayLocale, opts);
   if (daysAgo === 0) return `${date} — Today`;
   if (daysAgo === 1) return `${date} — Yesterday`;
   return date;
@@ -129,7 +129,7 @@ export function fmtClock(ms: number | undefined, withDate = false): string {
   const d = new Date(ms);
   const time = fmtTime(ms);
   if (sameDay(d, new Date()) && !withDate) return time;
-  return `${d.toLocaleDateString([], { day: "numeric", month: "short" })}, ${time}`;
+  return `${d.toLocaleDateString(displayLocale, { day: "numeric", month: "short" })}, ${time}`;
 }
 
 /** "just now", "12 min ago", "today, 2:18 pm", "yesterday, 2:18 pm", else
@@ -146,12 +146,12 @@ export function fmtRecent(ms: number, now: Date = new Date()): string {
   if (daysAgo === 1) return `yesterday, ${fmtTime(ms)}`;
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
   if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
-  return d.toLocaleDateString([], opts);
+  return d.toLocaleDateString(displayLocale, opts);
 }
 
 /** The whole stamp, for a tooltip: "Friday 2 October 2026 at 2:18 pm". */
 export function fmtFullStamp(ms: number): string {
-  return new Date(ms).toLocaleString([], { dateStyle: "full", timeStyle: "short" });
+  return new Date(ms).toLocaleString(displayLocale, { dateStyle: "full", timeStyle: "short" });
 }
 
 /** Elapsed time between two epoch-ms stamps: "34s", "2m 10s", "1h 4m". */

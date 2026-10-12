@@ -3,6 +3,7 @@ import { CalendarBlank, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { sqliteUtcToMs } from "@/lib/format/format";
+import { displayLocale } from "@/lib/format/locale";
 
 const Calendar = lazy(() =>
   import("@/components/ui/calendar").then((module) => ({ default: module.Calendar })),
@@ -20,8 +21,8 @@ const DEFAULT_TIME: Record<"start" | "end", { h: number; m: number }> = {
 function label(d: Date): string {
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
   if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return `${d.toLocaleDateString([], opts)}, ${time}`;
+  const time = d.toLocaleTimeString(displayLocale, { hour: "numeric", minute: "2-digit" });
+  return `${d.toLocaleDateString(displayLocale, opts)}, ${time}`;
 }
 
 /** `HH:mm`: the time input's value is 24-hour whatever it displays. */

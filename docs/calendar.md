@@ -118,7 +118,9 @@ In `app/src/components/calendar/WeekView.tsx`, with `hourRange` in `app/src/lib/
 
 Every date is formatted in `displayLocale` (`app/src/lib/format/locale.ts`): the
 system locale, never a fixed one, unless a test pins one with
-`pinDisplayLocale` so its expected strings hold anywhere. Weeks start on the
+`pinDisplayLocale` so its expected strings hold anywhere. Its calendar is
+always Gregorian (`-u-ca-gregory`): a Thai region (en-TH, th-TH) would
+otherwise print Buddhist-era years ("October 2569 BE"). Weeks start on the
 locale's first day:
 `WEEK_START` in `app/src/lib/planning/calendar/dates.ts` reads `Intl.Locale`'s week info
 (Monday when the engine has none), and `startOfWeek`, `monthGrid` and the
