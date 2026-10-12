@@ -2,7 +2,11 @@
 //! lesson with a file per slide (a PDF slide is its PDF), its PDFs and its
 //! challenge workspaces in `lessons/<id>-<slug>/`.
 
+use std::collections::BTreeSet;
+
 use crate::library::paths;
+use crate::sources::ed::workspace_session::paths as workspace_paths;
+use crate::sources::ed::workspace_session::reconcile::{self, Synced};
 use crate::sources::ed::workspace_state::{self, WorkspaceState};
 use crate::sources::ed::{self, LessonPlace, LinkedFile, SlideExtras, SlideFile};
 use crate::sync::render::{rel_within_course, slug};
@@ -235,10 +239,11 @@ impl Engine {
     }
 
     /// The student's current workspace for a challenge, every kept file
-    /// stored under the slide's folder. Fetched each sync: Ed gives no version
-    /// for a workspace, and the byte compare keeps unchanged files unchanged.
-    /// A workspace with a sync record (`workspace_state`) holds local work, so
-    /// it is not fetched: its files are listed as they are on disk.
+    /// stored under the slide's folder at Ed's own path. Fetched each sync: Ed
+    /// gives no version for a workspace, and the byte compare keeps unchanged
+    /// files unchanged. A workspace with a sync record (`workspace_state`)
+    /// holds local work, so it is reconciled instead, and its files are
+    /// listed as they are on disk.
     fn lesson_workspace(
         &self,
         c: &Subject,
@@ -258,14 +263,14 @@ impl Engine {
             }
         };
         if workspace_state::has_state(&self.data_dir, challenge_id) {
-            self.reporter.log(
-                "info",
-                &c.code,
-                &format!("ed workspace {slide_title}: workspace has local state, left as is"),
-            );
+            let changed = self.reconcile_workspace(c, challenge_id, slide_title, slide_stem);
             let state = workspace_state::load(&self.data_dir, challenge_id).unwrap_or_default();
             let kept = kept_files(&self.data_dir, &c.code, slide_stem, &state);
             for k in &kept {
+                let updated = changed.contains(&k.linked.path);
+                if updated {
+                    paths::purge_parse_artifacts(&self.data_dir, &k.rel);
+                }
                 self.reporter.file(&FileEvent {
                     subject_id: c.id,
                     code: c.code.clone(),
@@ -274,7 +279,7 @@ impl Engine {
                     category: paths::category_from_path(&k.rel).to_string(),
                     canvas_id: None,
                     source_url: None,
-                    action: "unchanged",
+                    action: if updated { "updated" } else { "unchanged" },
                 });
             }
             return SlideExtras {
@@ -305,8 +310,8 @@ impl Engine {
 
         let mut linked = Vec::new();
         for f in files {
-            match self.store(c, &format!("{slide_stem}/{}", f.path), &f.bytes, None, None) {
-                Ok((rel, _)) => linked.push(LinkedFile {
+            match self.store_workspace_file(c, slide_stem, &f.path, &f.bytes) {
+                Ok(rel) => linked.push(LinkedFile {
                     text: inline_text(&f.bytes),
                     rel: rel_within_course(&rel),
                     path: f.path,
@@ -323,6 +328,100 @@ impl Engine {
             ..SlideExtras::default()
         }
     }
+
+    /// Reconcile a workspace that has a sync record with Ed
+    /// (`reconcile::sync`), logging what it did. Returns the files it wrote
+    /// or deleted here.
+    fn reconcile_workspace(
+        &self,
+        c: &Subject,
+        challenge_id: i64,
+        slide_title: &str,
+        slide_stem: &str,
+    ) -> BTreeSet<String> {
+        let say = |level: &str, line: &str| {
+            self.reporter.log(
+                level,
+                &c.code,
+                &format!("ed workspace {slide_title}: {line}"),
+            )
+        };
+        let Some(slide_dir) = paths::course_rel_path(&c.code, slide_stem) else {
+            return BTreeSet::new();
+        };
+        match reconcile::sync(&self.ed, &self.data_dir, challenge_id, &slide_dir) {
+            Ok(Synced::Done(outcome)) => {
+                for line in &outcome.skipped {
+                    say("info", line);
+                }
+                for conflict in &outcome.conflicts {
+                    say(
+                        "warning",
+                        &format!(
+                            "{} changed here and on Ed; Ed's version is beside it as {}",
+                            conflict.path, conflict.server_path
+                        ),
+                    );
+                }
+                outcome.changed_here
+            }
+            Ok(Synced::LeftAlone(why)) => {
+                say("info", &format!("left as is: {why}"));
+                BTreeSet::new()
+            }
+            Err(e) => {
+                say("warning", &format!("not reconciled with Ed: {e}"));
+                BTreeSet::new()
+            }
+        }
+    }
+
+    /// Store one workspace file at Ed's own path under the slide's folder,
+    /// through the session's guard (`workspace_paths::resolve`), so the sync
+    /// and an open session name every file alike. Returns its
+    /// data-dir-relative path.
+    fn store_workspace_file(
+        &self,
+        c: &Subject,
+        slide_stem: &str,
+        path: &str,
+        bytes: &[u8],
+    ) -> Result<String, String> {
+        let dir = paths::course_rel_path(&c.code, slide_stem)
+            .ok_or_else(|| format!("invalid path: {slide_stem}"))?;
+        let root = self.data_dir.join(&dir);
+        std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+        let target = workspace_paths::resolve(&root, path)?;
+        let action = match std::fs::read(&target) {
+            Ok(existing) if existing == bytes => paths::WriteAction::Unchanged,
+            Ok(_) => paths::WriteAction::Updated,
+            Err(_) => paths::WriteAction::New,
+        };
+        if action != paths::WriteAction::Unchanged {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(&target, bytes).map_err(|e| e.to_string())?;
+        }
+        let rel = format!("{dir}/{path}");
+        if action == paths::WriteAction::Updated {
+            paths::purge_parse_artifacts(&self.data_dir, &rel);
+        }
+        self.reporter.file(&FileEvent {
+            subject_id: c.id,
+            code: c.code.clone(),
+            relative_path: rel.clone(),
+            size_bytes: bytes.len() as u64,
+            category: paths::category_from_path(&rel).to_string(),
+            canvas_id: None,
+            source_url: None,
+            action: action.as_str(),
+        });
+        if self.parse_pdfs && paths::is_pdf(&rel) {
+            self.trigger_parse(&rel, c.id);
+        }
+        Ok(rel)
+    }
 }
 
 /// A workspace file kept on disk, as the slide lists it.
@@ -334,8 +433,8 @@ struct KeptFile {
 }
 
 /// The files a workspace's sync record names, read from the slide's folder
-/// in the library (where a sync stores them), in the record's order. One
-/// missing from disk is left out.
+/// in the library at Ed's own paths, in the record's order. One missing
+/// from disk is left out.
 fn kept_files(
     data_dir: &std::path::Path,
     code: &str,
@@ -346,7 +445,7 @@ fn kept_files(
         .files
         .keys()
         .filter_map(|path| {
-            let rel = paths::course_rel_path(code, &format!("{slide_stem}/{path}"))?;
+            let rel = format!("{}/{path}", paths::course_rel_path(code, slide_stem)?);
             let bytes = std::fs::read(data_dir.join(&rel)).ok()?;
             Some(KeptFile {
                 size: bytes.len() as u64,

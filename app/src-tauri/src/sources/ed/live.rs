@@ -28,6 +28,21 @@ pub(super) type Socket = WebSocket<Tls>;
 /// An open workspace session; dropping it closes the socket.
 pub struct LiveWorkspace {
     socket: Socket,
+    head: Option<String>,
+}
+
+impl LiveWorkspace {
+    /// The commit `init` named as the workspace's newest.
+    pub fn head(&self) -> Option<&str> {
+        self.head.as_deref()
+    }
+
+    /// Send one text frame (an `fsop`).
+    pub fn send(&mut self, frame: String) -> Result<(), String> {
+        self.socket
+            .send(Message::text(frame))
+            .map_err(|e| socket_error(&e))
+    }
 }
 
 impl Drop for LiveWorkspace {
@@ -41,8 +56,9 @@ impl Drop for LiveWorkspace {
 /// connect ticket and wait for `init`.
 pub fn open_live_workspace(host: &str, ticket: &str) -> Result<LiveWorkspace, String> {
     let mut socket = open_socket(host, "connect", ticket)?;
-    wait_for_init(&mut socket)?;
-    Ok(LiveWorkspace { socket })
+    let init = wait_for_init(&mut socket)?;
+    let head = init["last_commits"][0]["hash"].as_str().map(str::to_string);
+    Ok(LiveWorkspace { socket, head })
 }
 
 /// Open `wss://<host>/<route>?ticket=` with the web app's origin.

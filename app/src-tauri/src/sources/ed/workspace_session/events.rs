@@ -63,6 +63,13 @@ pub enum Body {
     Error {
         message: String,
     },
+    /// Both sides changed `path` differently: Ed's version is at
+    /// `server_path` beside it until `ed_workspace_resolve`.
+    Conflict {
+        path: String,
+        #[serde(rename = "serverPath")]
+        server_path: String,
+    },
     /// Terminal output: base64 of the PTY's bytes, as Ed sent it.
     Term {
         id: String,
