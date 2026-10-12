@@ -8,18 +8,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  useInstitution,
-  useInstitutionStore,
-  type Institution,
-} from "@/stores/sync/institutionStore";
-
-/** How the saved address signs in, in a few words. */
-function signInSummary(i: Institution): string {
-  if (i.okta && i.sso_host) return `Signs in through Okta at ${i.sso_host}.`;
-  if (i.sso_host) return `Signs in through ${i.sso_host}.`;
-  return "Signs in on Canvas's own login page.";
-}
+import { useInstitution } from "@/stores/sync/institutionStore";
+import { signInSummary, useCanvasAddressForm } from "./useCanvasAddressForm";
 
 /**
  * The university's Canvas address — the one thing a student types; Rust
@@ -28,28 +18,13 @@ function signInSummary(i: Institution): string {
  */
 export function CanvasAddress() {
   const institution = useInstitution();
-  const configure = useInstitutionStore((s) => s.configure);
   const [editing, setEditing] = useState(false);
-  const [address, setAddress] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { address, setAddress, busy, error, setError, save } = useCanvasAddressForm(() =>
+    setEditing(false),
+  );
 
   if (institution === undefined) return null;
   const showField = editing || !institution.canvas;
-
-  const save = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await configure(address);
-      setEditing(false);
-      setAddress("");
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <div className="pb-1">
@@ -72,7 +47,7 @@ export function CanvasAddress() {
             className="flex items-center gap-1.5 min-w-0 flex-1 justify-end"
             onSubmit={(e) => {
               e.preventDefault();
-              if (address.trim() && !busy) save();
+              void save();
             }}
           >
             <Input
