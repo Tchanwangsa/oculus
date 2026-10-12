@@ -1428,13 +1428,20 @@ Commands:
   list        List the videos under `<app data>/studio/videos/`
   frame       Render one frame of a video to a PNG
   strip       Render frames across a stretch of a video as one contact-sheet PNG
-  lint        Check a whole video without writing to its folder
+  lint        Check a whole video, or one scene, without writing to its folder
+  brief       Print one scene builder's whole input
+  beats       Print what changes on screen in one scene, as a timeline
   gallery     Render every example of a component as a still
+  slide       Crop a region of a library PDF page into a video's assets
+  blocks      List a parsed PDF's blocks: what `slide` can crop
   components  List, show, promote or seed a video's components
   themes      Promote a video's own theme file into a library
   render      Render a video to an mp4
   narrate     Synthesise and time a video's narration, writing narration/manifest.json
   tts         Synthesise one clip of text to a WAV, to hear a voice
+  g2p         Show how Kokoro reads text: each word's phonemes and who read it
+  pronounce   Suggest how Kokoro should say a word, for the student to review
+  voices      List Kokoro's voices, or download or delete them and its packs
   agents      Which models a chat agent's Studio subagents run on, and how to start one
   aligner     Download, check or delete the narration aligner model (378 MB)
   help        Print this message or the help of the given subcommand(s)
@@ -1449,11 +1456,12 @@ Options:
 ```
 Make a new video under `<app data>/studio/videos/<SLUG>/`
 
-Writes `video.json` (1920x1080, or 1080x1920 with `--portrait`, 30 fps, theme `default`,
-the subject, and one silent `TitleCard` scene holding `--title`), an empty `script.md`,
-and empty `components/` and `assets/`, then prints the folder. A subject's library can
-replace the `default` theme with its own `themes/default.json`. Every other `oculus
-studio` command takes the slug in place of the folder. Refuses a slug that exists.
+Writes `video.json` (1920x1080, or 1080x1920 with `--portrait`, 30 fps, the default
+theme, the subject, and one silent `TitleCard` scene holding `--title`), an empty
+`script.md`, and empty `components/` and `assets/`, then prints the folder. The default
+theme is the `defaultTheme` in the subject library's `library.json`, else the global
+library's, else `default`, and video.json names it. Every other `oculus studio` command
+takes the slug in place of the folder. Refuses a slug that exists.
 
 oculus studio new gradient-descent --subject COMP30027 --title "Gradient descent"
 
@@ -1619,25 +1627,106 @@ Options:
 ### `oculus studio lint`
 
 ```
-Check a whole video without writing to its folder
+Check a whole video, or one scene, without writing to its folder
 
 Loads every component the video uses, checks each scene's props and each component's
 `examples` against its `props` schema, and renders every scene at its first and last
 moment. For a narrated video it also checks `script.md` (sections no scene matches, text
-not written as it is said) and the narration (missing or stale clips, words the aligner
-was unsure of, unscripted speech). Every problem is reported, not just the first, each
-with its scene, component and, where there is one, the TSX line. Exits 1 when there is
-any problem, so it can gate a render.
+not written as it is said) and the narration (missing or stale clips, unscripted
+speech). When the video narrates with Kokoro it also reads every section as `narrate`
+will: a missing `g2p-en-us` pack, a lexicon entry that is not valid, a word with no
+phonemes or a sentence too long for Kokoro is an error.
+
+Each scene that renders is then laid out every 0.2 s and at each cue word (never
+painted) for warnings: a node past the frame's edge (`off_frame`), narration over a
+frame where nothing changes for more than 2.5 s or an empty opening (`still`),
+everything kept small in one half of the frame for more than 3 s (`half_frame`), and a
+Math down to a piece or two, or a tiny mark alone, at the end (`fragment`). Each names
+its time span and the words said in it.
+
+Three levels: `error` (exits 1, so it can gate a render), `warning` and `note` (a word
+the aligner was unsure of, a word Kokoro's guesser read); warnings and notes never
+change the exit code. Errors print one a line in full; repeats of a warning or note in
+one scene print as one line with a count and the first few. `--json` gives one entry per
+issue with its `level`.
 
 See `oculus studio frame --help` for what a video folder holds.
 
-Usage: oculus studio lint <DIR>
+oculus studio lint shor --scene mod
+
+Usage: oculus studio lint [OPTIONS] <DIR>
 
 Arguments:
   <DIR>
           The video folder, the one holding `video.json` (or its slug)
 
 Options:
+      --scene <ID|N>
+          Only this scene (its id in video.json, or its index counting from 0), with its
+          component and the video settings it renders with
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio brief`
+
+```
+Print one scene builder's whole input
+
+For one scene: its index, component and props; the scenes before and after it, whether
+their components exist yet, and what their storyboard entries say under `Carries in:`
+and `Hands on:`; its own `storyboard.md` entry verbatim (from its `### <id>` heading to
+the next heading or `---`); the `notes/` files the entry names, else every file in
+`notes/`; its narration, one line per sentence, each word with the time `word()` returns
+for it (scene seconds, the theme's lead included) and each pause after its word at the
+time `pause()` returns; and the exact `strip`, `frame` and `gallery` calls that check
+it, `-o` paths absolute. Stale or missing narration prints its error and the script text
+instead. Reads only the folder.
+
+oculus studio brief shor --scene squares
+
+oculus studio brief lectures/week-4 --scene 3 --json
+
+Usage: oculus studio brief --scene <ID|N> <DIR>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json` (or its slug)
+
+Options:
+      --scene <ID|N>
+          The scene: its id in video.json, or its index counting from 0
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio beats`
+
+```
+Print what changes on screen in one scene, as a timeline
+
+Lays the scene out every 0.2 s and at each cue word (never painted) and lists, per key
+(or per Math, or per TSX line for nodes with no key near them), when it appears,
+vanishes, moves (centre more than 8 px), resizes, recolours or is rewritten, each with
+the words said then, and each `[pause]` with its length. Numbered keys doing the same
+thing at the same moment share a line (`d12-d14`). A builder checks a beat table against
+it as text instead of reading a strip. At most 80 lines print; `--json` gives every beat
+as `{index, id, component, length, beats: [{t, end, event, who, detail, words}]}`.
+
+oculus studio beats shor --scene squares
+
+Usage: oculus studio beats --scene <ID|N> <DIR>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json` (or its slug)
+
+Options:
+      --scene <ID|N>
+          The scene: its id in video.json, or its index counting from 0
+
   -h, --help
           Print help (see a summary with '-h')
 ```
@@ -1657,9 +1746,9 @@ and the PNGs are the same at any thread count. The component is read through the
 theme the same way. `--sheet` also writes all the stills as one contact sheet, `--cols`
 a row. Stills are named `<Component>-<example>.png`.
 
-oculus studio gallery lectures/week-4 Steps
+oculus studio gallery lectures/week-4 Bars
 
-oculus studio gallery lectures/week-4 Steps --subject COMP2011 --sheet --cols 2
+oculus studio gallery lectures/week-4 Bars --subject COMP2011 --sheet --cols 2
 
 Usage: oculus studio gallery [OPTIONS] <DIR> <COMPONENT>
 
@@ -1694,6 +1783,118 @@ Options:
 
       --threads <T>
           Render threads (default: half the cores, at most one per example)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio slide`
+
+```
+Crop a region of a library PDF page into a video's assets
+
+Renders the region with the app's PDF renderer and writes
+`<DIR>/assets/slides/<NAME>.png` (sharp at up to 2x the video's frame),
+`<NAME>.page.png` (the whole page fitted to the frame, for a zoom in from the page) and
+`<NAME>.json`: the PDF's library path and sha256, the page, the crop as fractions of the
+page, how it was chosen, the blocks inside it as fractions of the crop (kind and text,
+for highlight boxes), and the props for the `Slide` starter, which it also prints. FILE
+resolves as for `oculus read`. Name the region one way: `--find` text in a block (a
+figure, chart or table that holds it wins over running text; a caption that is its own
+block brings the figure beside it; a tie or no match lists the candidates), `--block`
+indices from `oculus studio blocks`, or `--bbox`. Blocks come from the parse record, so
+`--find` and `--block` need a parsed PDF. No edge slices ink: where the box cuts a line
+(a caption under a figure's box) the edge moves out to take it in, up to 6% of the page;
+a caption or label in the margin joins a figure, other text there is left out; the
+sidecar's `edges` says what moved, and `--exact` keeps the box as given. The same inputs
+write the same bytes; lint warns when the PDF changes after.
+
+oculus studio slide momentum lecture-04.pdf --find "Figure 3" --name descent
+
+oculus studio slide momentum lecture-04.pdf --page 12 --block 3,4
+
+oculus studio slide momentum lecture-04.pdf --page 12 --bbox 0.5,0.2,0.95,0.8
+
+Usage: oculus studio slide [OPTIONS] <DIR> <FILE>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json` (or its slug)
+
+  <FILE>
+          Library path, filename, or a fragment of either
+
+Options:
+  -p, --page <N>
+          The page, from 1 (needed by --block and --bbox; --find without it searches
+          every page)
+
+      --find <TEXT>
+          Text in the block to crop, any case, e.g. "Figure 3"
+
+      --block <I[,J…]>
+          Block indices on the page; several are cropped as one region round them all
+
+      --bbox <X0,Y0,X1,Y1>
+          A box as fractions of the page from its top left
+
+      --name <NAME>
+          The files' name under assets/slides/ (default: from the page and what was
+          asked, e.g. `p12-figure-3`)
+
+      --pad <FRACTION>
+          Margin round the region, as a fraction of the page's shorter side
+
+          [default: 0.02]
+
+      --width <PX>
+          The crop's width in pixels (default: 2x what fills the frame, at most 6
+          megapixels)
+
+      --replace
+          Overwrite a slide of the same name cropped from another PDF
+
+      --exact
+          Keep the padded box as it is; by default each edge moves off any ink it would
+          cut (out over a caption, back before other text)
+
+  -s, --subject <SUBJECT_CODE>
+          Disambiguate FILE by subject; prefix codes are fine
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio blocks`
+
+```
+List a parsed PDF's blocks: what `slide` can crop
+
+For each page (or only `--page`): its size in points, then each block of its parse
+record: index, kind (`text`, `image`, `chart`, `table`, `equation`, …), box as fractions
+of the page from its top left, and its text on one line (an image's caption). `--png`
+also writes that page with every block's box and index drawn on it (figures in indigo,
+the rest in grey), to look at before picking.
+
+oculus studio blocks lecture-04.pdf --page 12
+
+oculus studio blocks lecture-04.pdf --page 12 --png out/p12.png
+
+Usage: oculus studio blocks [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>
+          Library path, filename, or a fragment of either
+
+Options:
+  -p, --page <N>
+          Only this page, from 1
+
+      --png <OUT>
+          With --page: write the page, its blocks drawn on, as this PNG
+
+  -s, --subject <SUBJECT_CODE>
+          Disambiguate FILE by subject; prefix codes are fine
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1778,7 +1979,7 @@ library's `.history/` first; when the library already holds the same text nothin
 written. The video keeps its own copy, which still wins for it. Check the component with
 `gallery` (and its scenes with `strip`) before promoting it.
 
-oculus studio components promote gradient-descent Steps --to subject
+oculus studio components promote gradient-descent Descent --to subject
 
 Usage: oculus studio components promote --to <LIBRARY> <DIR> <COMPONENT>
 
@@ -1880,12 +2081,23 @@ everything its frames depend on: the scene and the one before it, their narratio
 theme, the `components/` and `assets/` folders and the render settings. A second render
 only renders the scenes an edit touched and prints `cached` for the rest. The segments
 are joined without re-encoding, beside the narration clips mixed into one track (AAC).
-Segments neither quality's last render used are deleted afterwards.
+Segments no preset's last render used are deleted afterwards.
 
-`--draft` (the default) is a 540 px-high proxy on the hardware encoder, without motion
-blur unless the theme's `motionBlur` says `always`; `--final` is full size on libx264
-(crf 18), blurred unless `motionBlur` is `off`. Both are H.264, yuv420p, BT.709. The mp4
-goes to `<DIR>/renders/draft.mp4` or `final.mp4` unless `-o` names another file.
+The preset says what size and quality to write, to `<DIR>/renders/<preset>.mp4` unless
+`-o` names another file:
+
+`draft` (the default, also `--draft`): a 540 px proxy on the fastest encoder, without
+motion blur unless the theme's `motionBlur` says `always`.
+
+`final` (also `--final`): the video's size at crf 18, blurred unless `motionBlur` is
+`off`.
+
+`small`: 720 px at crf 23, a smaller file to share.
+
+Presets are H.264, yuv420p, BT.709, and write the captions as a `.vtt` beside the mp4
+when the video is narrated. With video.json's `"captions": true` the captions are also
+burned into the frames. Before anything renders, ffmpeg is asked what it was built with:
+a missing encoder or demuxer is an error naming it.
 
 Render never narrates: run `oculus studio narrate` first, or it stops with the stale
 narration's scene. A frame that fails stops the render, naming its time and scene; an
@@ -1895,6 +2107,8 @@ oculus studio render lectures/week-4
 
 oculus studio render lectures/week-4 --final -o ~/Desktop/week-4.mp4
 
+oculus studio render lectures/week-4 --preset small
+
 Usage: oculus studio render [OPTIONS] <DIR>
 
 Arguments:
@@ -1903,18 +2117,21 @@ Arguments:
 
 Options:
       --draft
-          A 540 px-high proxy on the hardware encoder (the default)
+          The `draft` preset (the default)
 
       --final
-          Full size on libx264, with the theme's motion blur
+          The `final` preset
 
-  -o, --out <OUT.mp4>
-          Where to write the mp4 (default: `<DIR>/renders/<quality>.mp4`)
+      --preset <NAME>
+          The export preset: draft, final or small
+
+  -o, --out <OUT>
+          Where to write the file (default: `<DIR>/renders/<preset>.mp4`)
 
       --threads <T>
           Frame-rendering threads (default: half the cores, capped to keep their memory
-          under 2 GB). The encoder runs its own: `--final`'s libx264 always uses 8, so
-          its output is the same at any `--threads`
+          under 2 GB). The encoder runs its own: libx264 always uses 8, so its output is
+          the same at any `--threads`
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1925,21 +2142,31 @@ Options:
 ```
 Synthesise and time a video's narration, writing narration/manifest.json
 
-Each scene with a `## <id>` section in `script.md` gets a clip: its section text is sent
-to the TTS server (`POST <server>/v1/audio/speech`, WAV), the clip is saved as
-`narration/<key>.wav`, and its words are timed against the script with the aligner model
-(`oculus studio aligner download` fetches it once). The manifest then gives each
-narrated scene its length and its `word()` cues; `frame`, `strip` and `lint` read it.
+Each scene with a `## <id>` section in `script.md` gets a clip: its section text is
+spoken by Kokoro inside the app (`--engine kokoro`; read to phonemes through the
+lexicon, the dictionary and the guesser) or sent to a TTS server (`--engine server`,
+`POST <server>/v1/audio/speech`, WAV), the clip is saved as `narration/<key>.wav`, and
+its words are timed against the script with the aligner model (`oculus studio aligner
+download` fetches it once). The manifest then gives each narrated scene its length and
+its `word()` cues; `frame`, `strip` and `lint` read it. A section is said and timed
+whole, then each `[pause]` is spliced in as exact silence between the words either side
+of it.
 
-A clip's key hashes its text, the server, model, voice, speed and aligner model, so a
-run only requests scenes whose text or voice changed; the rest print `cached`. Scenes
-run one at a time in video order and the manifest is saved after each, so a failure
-keeps the scenes before it; the command then exits 1 naming the failed scene. At the
-end, entries for scenes no longer narrated and clips nothing names are deleted.
+A clip's key hashes its text with its pauses, the engine, the voice and speed, the
+server and model or Kokoro's model and the text's phonemes, and the aligner model, so a
+run only makes scenes whose text, voice or reading changed (a lexicon edit re-narrates
+the scenes it changes); the rest print `cached`. Scenes run one at a time in video order
+and the manifest is saved after each, so a failure keeps the scenes before it; the
+command then exits 1 naming the failed scene. At the end, entries for scenes no longer
+narrated and clips nothing names are deleted.
 
-Per scene it prints the id, `narrated` or `cached`, the clip's length, its word count,
-and as warnings the words the aligner was unsure of and any speech the script lacks (a
-mangled or added word: reword it, or listen). `lint` fails on the same words.
+Per scene it prints the id, `narrated` or `cached`, the clip's length, its word count
+and pauses, and as warnings the words the aligner was unsure of and any speech the
+script lacks (a mangled or added word: reword it, or listen). `lint` notes the unsure
+words and fails on the added speech. With Kokoro, every word the guesser read is then a
+`note: check pronunciation` with its scene and script.md line, and the state of any
+suggestion for it: listen to it, and suggest a reading for a doubtful one with `oculus
+studio pronounce suggest`. Notes never change the exit code.
 
 oculus studio narrate lectures/week-4
 
@@ -1958,6 +2185,14 @@ Options:
       --force
           Make the clips again even when the cached ones match
 
+      --engine <ENGINE>
+          `kokoro` runs Kokoro inside the app (`oculus studio voices download` fetches
+          it); `server` asks an OpenAI-compatible TTS server
+
+          Possible values:
+          - kokoro: Kokoro, run inside the app
+          - server: An OpenAI-compatible TTS server
+
       --server <URL>
           An OpenAI-compatible TTS server, with or without a trailing `/v1` (e.g.
           http://127.0.0.1:8880). Keyless servers only
@@ -1967,10 +2202,11 @@ Options:
           mlx-audio)
 
       --voice <VOICE>
-          The voice (e.g. `af_heart`)
+          The voice (e.g. `af_heart`; Kokoro's are listed by `oculus studio voices`)
 
       --speed <S>
-          Speaking rate; 1.0 is normal, 1.25 is a quarter faster
+          Speaking rate; 1.0 is the voice's own pace, 1.25 is a quarter faster (unset
+          anywhere: 0.9)
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1981,10 +2217,11 @@ Options:
 ```
 Synthesise one clip of text to a WAV, to hear a voice
 
-Sends `TEXT` to the TTS server as `narrate` would and writes the WAV it returns, then
-prints its path and length. An empty, non-WAV or silent reply is an error (Kokoro
-answers an unknown voice with silence). Uses Settings -> Voice unless the flags say
-otherwise; no video is involved.
+Speaks `TEXT` as `narrate` would, with Kokoro or the TTS server, and writes the WAV,
+then prints its path and length. An empty, non-WAV or silent clip is an error (a Kokoro
+server answers an unknown voice with silence). Uses Settings -> Studio -> Narration
+unless the flags say otherwise; no video is involved, so Kokoro reads only the global
+library's lexicon.
 
 oculus studio tts "We follow the gradient downhill." --voice bf_emma -o /tmp/emma.wav
 
@@ -2000,6 +2237,14 @@ Options:
 
           [default: tts.wav]
 
+      --engine <ENGINE>
+          `kokoro` runs Kokoro inside the app (`oculus studio voices download` fetches
+          it); `server` asks an OpenAI-compatible TTS server
+
+          Possible values:
+          - kokoro: Kokoro, run inside the app
+          - server: An OpenAI-compatible TTS server
+
       --server <URL>
           An OpenAI-compatible TTS server, with or without a trailing `/v1` (e.g.
           http://127.0.0.1:8880). Keyless servers only
@@ -2009,10 +2254,224 @@ Options:
           mlx-audio)
 
       --voice <VOICE>
-          The voice (e.g. `af_heart`)
+          The voice (e.g. `af_heart`; Kokoro's are listed by `oculus studio voices`)
 
       --speed <S>
-          Speaking rate; 1.0 is normal, 1.25 is a quarter faster
+          Speaking rate; 1.0 is the voice's own pace, 1.25 is a quarter faster (unset
+          anywhere: 0.9)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio g2p`
+
+```
+Show how Kokoro reads text: each word's phonemes and who read it
+
+Reads `TEXT` as `narrate --engine kokoro` would, without synthesising: each word with
+its phonemes and its source, `lexicon` (an entry in a lexicon.json), `dict` (misaki's US
+dictionary and its rules), `rule` (a heteronym's reading picked by its neighbours) or
+`guess` (the guesser, worth a listen), then the phoneme string Kokoro is given. The
+lexicon is the global library's (`<app data>/studio/library/lexicon.json`) with the
+subject's over it (`<app data>/studio/subjects/<CODE>/lexicon.json`): the subject is
+`--subject`, else the video's (`--video`, or the current folder when it holds a
+`video.json`). Needs the `g2p-en-us` pack (`oculus studio voices download`). A lexicon
+entry that is not valid fails, naming its file and key.
+
+oculus studio g2p "Nesterov and RMSProp adapt the step size."
+
+oculus studio g2p "Cauchy" --subject MAST20004
+
+Usage: oculus studio g2p [OPTIONS] <TEXT>
+
+Arguments:
+  <TEXT>
+          The text, written as it is said
+
+Options:
+      --video <DIR>
+          A video folder (or slug) whose subject's lexicon to read
+
+      --subject <CODE>
+          The subject whose lexicon to read, over the video's
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio pronounce`
+
+```
+Suggest how Kokoro should say a word, for the student to review
+
+The lexicon (`lexicon.json`) is written only by the app: an agent that doubts a guessed
+word suggests a reading with `suggest`, and the student hears the word's sentence both
+ways in Settings -> Studio -> Pronunciation and accepts the suggestion, keeps the guess,
+or marks it wrong with a note. An accepted reading or a kept guess goes into the
+subject's lexicon (the global library's for a video with no subject) and applies at the
+next `narrate`. `list` shows what is still waiting and what was marked wrong.
+
+Usage: oculus studio pronounce <COMMAND>
+
+Commands:
+  suggest  Put a reading of a word up for the student's review
+  list     List the suggestions waiting for the student, and the ones marked wrong
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio pronounce suggest`
+
+```
+Put a reading of a word up for the student's review
+
+Checks `READING` as a lexicon value: a respelling in dictionary words joined by `-` or
+spaces, an all-caps part taking the main stress (`NESS-ter-off`), or raw phonemes in
+Kokoro's alphabet in slashes (`/nˈɛstəɹˌɔf/`). A part the dictionary lacks or a symbol
+Kokoro lacks fails, naming it. Then reads the video's narration with Kokoro's G2P to
+find `WORD` (any case; `Word's` counts): its first guessed place, else its first place,
+recording how Kokoro reads it now, its sentence, scene and script.md line. A word the
+narration never says fails. The suggestion is stored as pending under the video's
+subject, replacing an earlier one for the same word; it prints the reading's phonemes.
+The student reviews it in Settings -> Studio -> Pronunciation. Needs the `g2p-en-us`
+pack.
+
+oculus studio pronounce suggest momentum Nesterov NESS-ter-off
+
+Usage: oculus studio pronounce suggest <DIR> <WORD> <READING>
+
+Arguments:
+  <DIR>
+          The video folder (or its slug) whose narration says the word
+
+  <WORD>
+          The word, as the script spells it
+
+  <READING>
+          How to say it: `RE-spell-ing` or `/phonemes/`
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio pronounce list`
+
+```
+List the suggestions waiting for the student, and the ones marked wrong
+
+Newest first: the status (`pending`, or `wrong` with the student's note on how the word
+is said), the word, the suggested reading, the subject, video, scene and line. A wrong
+one wants another suggestion that follows the note. Decided suggestions are gone: their
+reading is in the lexicon.
+
+oculus studio pronounce list --video momentum
+
+Usage: oculus studio pronounce list [OPTIONS]
+
+Options:
+      --video <DIR>
+          Only this video's (a folder or slug)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio voices`
+
+```
+List Kokoro's voices, or download or delete them and its packs
+
+The Kokoro engine narrates inside the app from two packs and a voice, all kept in `<app
+data>/models/voice/`, downloaded on request, checked against a pinned size and sha256
+and never bundled: `voice-kokoro` (the int8 model, 92 MB), `g2p-en-us` (misaki's US
+dictionary and the guesser that reads the words it lacks, 9 MB) and one of the 20 US
+English voices (0.5 MB each, graded A to F by Kokoro's authors). With no action it lists
+each pack's status and each voice, marking the one Settings -> Studio -> Narration
+names.
+
+Usage: oculus studio voices [COMMAND]
+
+Commands:
+  list      Each pack's status and size, and each voice with its grade, size and whether
+            it is downloaded (the default)
+  download  Download Kokoro's packs and starter voices, or the voices named
+  delete    Delete Kokoro's packs, or the voices named
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio voices list`
+
+```
+Each pack's status and size, and each voice with its grade, size and whether it is
+downloaded (the default)
+
+Usage: oculus studio voices list
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio voices download`
+
+```
+Download Kokoro's packs and starter voices, or the voices named
+
+With no ID and no `--all`, downloads what a fresh install needs to narrate: the model,
+the pronunciation pack and the starter voices `af_heart` and `am_michael`. With IDs, or
+with `--all` (all 20), downloads only those voices. Prints progress as it goes; files
+already there are kept.
+
+oculus studio voices download
+
+oculus studio voices download am_puck af_bella
+
+oculus studio voices download --all
+
+Usage: oculus studio voices download [OPTIONS] [ID]...
+
+Arguments:
+  [ID]...
+          Voice ids, as `oculus studio voices` lists them
+
+Options:
+      --all
+          Every voice
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio voices delete`
+
+```
+Delete Kokoro's packs, or the voices named
+
+With no ID, deletes the model and the pronunciation pack and any partial download of
+them; the voices stay. With IDs, or with `--all`, deletes only those voices.
+
+oculus studio voices delete
+
+oculus studio voices delete am_puck
+
+Usage: oculus studio voices delete [OPTIONS] [ID]...
+
+Arguments:
+  [ID]...
+          Voice ids, as `oculus studio voices` lists them
+
+Options:
+      --all
+          Every voice
 
   -h, --help
           Print help (see a summary with '-h')
