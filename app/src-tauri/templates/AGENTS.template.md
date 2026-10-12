@@ -20,8 +20,10 @@ Echo360 from the desktop app. Only `uploads/` and `documents/` are the student's
   announcements/   Canvas announcements, one .md each
   assignments/     briefs and due dates, one .md each
   ed/              Ed Discussion threads, NNNN-slug.md
-  lessons/         Ed Lessons, <id>-slug.md each with every slide in order;
-                   its PDFs and challenge files are in <id>-slug/
+  lessons/         Ed Lessons: <id>-slug.md is an index linking each slide
+                   in order; <id>-slug/ holds NN-slide.md per slide, a PDF
+                   slide as NN-slide.pdf (its text in NN-slide.md), and a
+                   challenge's files under NN-slide/
   files/           downloads plus parsed siblings:
                      13.pdf  13.md  13.pages.json  13_images/
                    a spreadsheet's text is beside it: marks.xlsx.md

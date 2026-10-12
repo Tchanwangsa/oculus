@@ -2,7 +2,8 @@ import { PencilLine, Rocket } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { filePageHref, openFileSmart } from "@/lib/files/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
-import { fmtDue, type TaskDoc } from "./grouping";
+import { fmtDue } from "@/lib/format/format";
+import type { TaskDoc } from "./grouping";
 
 export function TaskRow({ task: t, muted }: { task: TaskDoc; muted: boolean }) {
   const Icon = t.kind === "quiz" ? Rocket : PencilLine;

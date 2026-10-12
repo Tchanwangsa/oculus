@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -13,7 +13,9 @@ export function RowAction({
   children,
 }: {
   label: string;
-  onTrigger: () => void;
+  /** Gets the click or key event, for its modifiers (⌘ opens a link in the
+   *  system browser). */
+  onTrigger: (e: MouseEvent | KeyboardEvent) => void;
   className?: string;
   children: ReactNode;
 }) {
@@ -26,13 +28,13 @@ export function RowAction({
       title={label}
       onClick={(e) => {
         e.stopPropagation();
-        onTrigger();
+        onTrigger(e);
       }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           e.stopPropagation();
-          onTrigger();
+          onTrigger(e);
         }
       }}
       className={cn(

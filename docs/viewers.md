@@ -1,8 +1,8 @@
 # Viewers: markdown, PDFs, lectures and web pages
 
 How a pane shows content: library markdown (with maths, diagrams and a
-lightbox) and PDFs, a lecture or a library video in the media player, a
-video's transcript, and a web page.
+lightbox) and PDFs, an Ed lesson's slides, a lecture or a library video in
+the media player, a video's transcript, and a web page.
 
 ## Where
 
@@ -12,6 +12,7 @@ video's transcript, and a web page.
 | Inline file, web and planning references; hover metadata | `app/src/components/markdown/FileChip.tsx`, `app/src/components/markdown/ReferenceLink.tsx`, `app/src/components/markdown/ReferencePreview.tsx`, `app/src/components/markdown/referenceDetails.ts`, `app/src/lib/files/referenceAppearance.ts` |
 | The maths engine: loading, rendering, `rehypeMaths`, the visual field's edit model (`field.ts`) and the geometry of source-mapped maths (`geometry/`: where each caret stop is drawn, which stop a press lands on, a selection's bands); KaTeX's CSS and fonts | `app/src/lib/maths/`, `app/src/styles/katex/` |
 | A parsed PDF's faces: PDF, Markdown | `app/src/components/files/FileViewer.tsx`, `app/src/components/files/FileMarkdown.tsx`, `app/src/components/files/pdf/pdfMdLink.ts`, `app/src/lib/pdf/pdfBlocks.ts` |
+| An Ed lesson's view: the slide sidebar and pane, the index reader | `app/src/components/lessons/`, `app/src/hooks/data/useLessonIndex.ts`, `app/src/lib/ed/lessons.ts` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/lectures/media/`, `app/src/stores/lectures/playerPrefsStore.ts`, `app/src/hooks/lectures/useTranscriptDock.ts` |
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lectures/playback/`, `app/src/lib/lectures/playbackOwner.ts` |
 | Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectures/end.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/lectures/chapters/app.rs` |
@@ -36,7 +37,8 @@ classes work even when there are no dollar delimiters.
   the component map for every surface. A library file — a Canvas page,
   announcement or assignment, a parsed PDF, an Ed thread — renders through
   `FileMarkdown` with it, extended by `FileViewer`'s
-  `useLibraryMdComponents` to resolve in-file links; chat replies through
+  `useLibraryMdComponents` to resolve in-file links, and without the front
+  matter a scraped thread or lesson carries (`stripFrontmatter`); chat replies through
   `CompactMd`, with `rehypeMaths` only when `hasMath` finds a delimiter. `normalizeMath` rewrites
   `\(…\)` / `\[…\]` to `$…$` / `$$…$$` because CommonMark eats the backslash
   first. An inline `<code>` holding only a citation (`app/src/lib/citations/`)
@@ -330,6 +332,32 @@ classes work even when there are no dollar delimiters.
 
 Chat's composer (`harness/mentions/MentionInput.tsx` sends chips as backticked library paths),
 picker and timeline are [harness.md](./harness.md).
+
+## An Ed lesson opens as its slides
+
+A lesson's index, `lessons/<id>-<slug>.md`, carries the lesson and an ordered
+`slides` list in its front matter ([sync.md](./sync.md)); `parseLessonIndex`
+(`app/src/lib/ed/lessons.ts`) reads it. When the file page opens an index
+whose list has slides (`useLessonIndex`), its body is `LessonView`
+(`app/src/components/lessons/`) instead of `FileViewer`, as in Ed:
+
+- **The sidebar** (`LessonSidebar`, 240px) holds the lesson's title, its due
+  date and how many slides are completed, then a row per slide: a glyph for
+  Ed's slide type (`slideIcon`), the title, a green tick once completed. A
+  slide not yet opened in Ed reads a shade darker; the selected row takes
+  the nav column's active fill. ↑/↓ step through the slides. Open in Ed
+  (⌘-click for the system browser, `openLinkOut`) opens the shown slide's
+  page in Ed, else the lesson's.
+- **The pane shows the selected slide through `FileViewer`**: a PDF slide's
+  PDF, any other slide's `.md`, both found by path beside the index
+  (`slideFiles`). A slide whose rows a sync has not stored yet says so
+  quietly. Links inside a slide open beside the page, as any file's do.
+- **The slide rides in the URL** (`&slide=<Ed id>`, written with
+  `replace`), so a restored tab or Back reopens it; without one the view
+  opens on the first slide not completed. Showing a slide stamps its rows
+  accessed, as opening a file does; the page stamps the index.
+- **A lesson file without front matter** (every slide in one file) renders
+  as plain markdown, like any library file.
 
 ## One media player plays lectures and library videos
 
