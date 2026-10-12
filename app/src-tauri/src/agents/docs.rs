@@ -56,6 +56,11 @@ pub(super) const SKILLS: &[Skill] = &[
                 "reference.md",
                 include_str!("../../templates/skills/oculus-studio/reference.md"),
             ),
+            // Also the scene helper's role prompt (`harness::studio_agents`).
+            (
+                "build.md",
+                include_str!("../../templates/skills/oculus-studio/build.md"),
+            ),
             // Beside the prelude it types, whose test keeps the two equal.
             (
                 "studio.d.ts",

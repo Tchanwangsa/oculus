@@ -282,7 +282,7 @@ fn every_skill_file_lands_and_stale_ones_are_removed() {
         .collect();
     assert_eq!(
         studio_files,
-        [SKILL_DOC_NAME, "reference.md", "studio.d.ts"]
+        [SKILL_DOC_NAME, "reference.md", "build.md", "studio.d.ts"]
     );
 }
 
