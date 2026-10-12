@@ -2,12 +2,12 @@ use super::{bx, keyed, leaf};
 use crate::layout::LNode;
 use crate::morph::flat::Tree;
 use crate::morph::matching::match_trees;
-use crate::scene::Kind;
+use crate::scene::{Kind, Timing};
 
 fn pairs(a: LNode, b: LNode) -> Vec<Option<usize>> {
     let (a, b) = (
-        Tree::new(a, false, 0.5, true),
-        Tree::new(b, false, 0.5, false),
+        Tree::new(a, false, (0.5, Timing::default()), true),
+        Tree::new(b, false, (0.5, Timing::default()), false),
     );
     match_trees(&a, &b).unwrap().a_to_b
 }
@@ -114,8 +114,8 @@ fn a_duplicate_key_names_both_nodes() {
         ],
     );
     let (a, b) = (
-        Tree::new(a, false, 0.5, true),
-        Tree::new(leaf(0.0, 0.0), false, 0.5, false),
+        Tree::new(a, false, (0.5, Timing::default()), true),
+        Tree::new(leaf(0.0, 0.0), false, (0.5, Timing::default()), false),
     );
     let Err(e) = match_trees(&a, &b) else {
         panic!("duplicate keys matched")

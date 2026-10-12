@@ -3,7 +3,7 @@
 //! cargo test --lib studio::voice::g2p::tests::golden -- --nocapture
 
 use super::super::Lexicon;
-use super::fixtures::{check, golden_dir, trimmed_dictionary};
+use super::fixtures::{check, golden_dir, trimmed_dictionary, ROWS};
 use serde::Deserialize;
 
 #[test]
@@ -11,7 +11,7 @@ fn every_golden_row_matches_the_oracle() {
     let (matched, failures) = check(&trimmed_dictionary());
     println!("rows matched whole: {matched}");
     assert!(failures.is_empty(), "{} rows differ", failures.len());
-    assert_eq!(matched, 1026);
+    assert_eq!(matched, ROWS);
 }
 
 #[test]

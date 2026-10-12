@@ -4,11 +4,13 @@ Studio makes lecture videos from scenes written as TSX components.
 `app/studio-core/` is its renderer: a video folder plus a time in, one RGBA
 frame out, the same pixels on every machine, scene transitions included.
 A narrated scene lasts as long as its narration and can cue elements to its
-words, from clips and timings `oculus studio narrate` makes with a TTS server
-and a local aligner. `oculus studio render`, or the app's `studio_render`
+words, from clips and timings `oculus studio narrate` makes with Kokoro run
+inside the app or a TTS server, and a local aligner. `oculus studio render`, or the app's `studio_render`
 command, encodes a video to an mp4 with ffmpeg, one cached segment per
 scene. `oculus studio` also renders single
-frames and contact sheets, lints, and narrates.
+frames and contact sheets, lints (errors, and warnings about how a
+scene looks over time), prints a scene's timeline of changes (`beats`),
+crops library PDF pages into slides (`slide`), and narrates.
 
 ## Where
 
@@ -18,30 +20,37 @@ frames and contact sheets, lints, and narrates.
 | Public API: `Renderer`, `Engine`, `Frame`, `Time`; motion blur | `app/studio-core/src/render/` (`blur/`) |
 | Contact sheets (`strip`): parallel frames, the tiled sheet and its labels | `app/studio-core/src/strip/` |
 | Video folder, component lookup, the whole-frame timeline, scene fingerprints, lint | `app/studio-core/src/project/` (`timeline.rs`, `frames.rs`, `fingerprint.rs`, `lint/`) |
+| What a scene shows over time, from laid-out trees: sampling, the paint-order walker, lint's look warnings and their thresholds, `beats` | `app/studio-core/src/look/` (`sample.rs`, `walk.rs`, `items.rs`, `entities.rs`, `limits.rs`, `warn/`, `beats/`) |
 | `script.md`, the narration manifest, scene lengths and word cues | `app/studio-core/src/project/` (`script/`, `narration/`, `scenes.rs`), `app/studio-core/src/host/prelude/words.js` |
 | Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
-| Magic move: matching and blending two laid-out trees, OKLab colour | `app/studio-core/src/morph/` |
+| Magic move: matching and blending two laid-out trees, OKLab colour, lag and fades | `app/studio-core/src/morph/` (`clock.rs`, `fade.rs`) |
+| Burned-in captions: phrasing, timing, the caption's element tree, the WebVTT file, the theme's `captions` tokens | `app/studio-core/src/captions/` (`phrase.rs`, `timing.rs`, `tree.rs`, `subtitles.rs`, `style.rs`) |
+| Overlays bound to keys (Brace, Surround, Underline, Indicate, a keyed Arrow), drawn after layout and morphing | `app/studio-core/src/overlay/`, `app/studio-core/src/host/prelude/overlays.js` |
 | Easings shared by transitions and the morph (the prelude's, in Rust) | `app/studio-core/src/easing/` |
 | TSX → JS (oxc), the QuickJS sandbox, the prelude every component sees | `app/studio-core/src/host/` (`prelude/*.js`, one module scope, concatenated in order) |
 | The element tree and its style keys | `app/studio-core/src/scene/` |
 | Layout (taffy, parley) and paint (vello_cpu); Path trim and Text reveal | `app/studio-core/src/layout/`, `app/studio-core/src/paint/` (`path/`, `text/`) |
-| `<Math>`: KaTeX through math-core, the layout of its HTML tree, keys, the expansion into glyphs; the KaTeX fonts | `app/studio-core/src/math/` (`walk/` one file per construct), `app/studio-core/fonts/katex/` |
+| `<Math>`: KaTeX through math-core, the layout of its HTML tree, keys, the expansion into glyphs, `<Write>`, KaTeX's brace; the KaTeX fonts | `app/studio-core/src/math/` (`walk/` one file per construct, `write.rs`, `brace.rs`), `app/studio-core/fonts/katex/` |
 | Props schemas and their validation | `app/studio-core/src/schema/` |
-| Component and theme libraries: the starter set, seeding, the snapshot write path, promoting a video's own file | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots, `promote.rs`) |
+| Component and theme libraries: the starter set, seeding, the snapshot write path and removal, `library.json` (a library's default theme), promoting a video's own file | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots, `promote.rs`, `defaults.rs`) |
 | Videos in the data directory: `new`, `list`, slug resolution, slugs from titles, the app's scope | `app/src-tauri/src/studio/videos/` (`slug.rs`), `app/src-tauri/src/library/paths/studio.rs` (`studio_dir`, `agent_write_dirs`) |
 | Galleries: each example of a component as a still, and its contact sheet | `app/studio-core/src/gallery/` |
 | Themes and bundled fonts | `app/studio-core/themes/`, `app/studio-core/fonts/`, `app/studio-core/src/theme/`, `app/studio-core/src/fonts/` |
 | Every error and its message | `app/studio-core/src/error.rs` |
 | Fixture videos and golden frames | `app/studio-core/tests/fixtures/`, `app/studio-core/tests/golden/` |
 | Narration audio decode and word timing (the aligner, its model download) | `app/src-tauri/src/studio/` (`audio/`, `timing/`), `app/src-tauri/src/runtime/onnx/` |
-| Narrating a video: the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
-| Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
-| Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
-| Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
+| Narrating a video: the `Speaker` trait, the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
+| The Kokoro engine: its model pack, the 20 voices (`voices/`), reader, chunking and synthesis | `app/src-tauri/src/studio/tts/kokoro/` |
+| Text to Kokoro phonemes (the G2P), the lexicon, the guesser and its pack; the lint of a video's narration that needs them | `app/src-tauri/src/studio/voice/g2p/` (`guess/`, `lexicon.rs`), `app/src-tauri/src/studio/voice/lint/` |
+| The pronunciation review: suggestions stored one file each, the lexicon writer, finding a word in a video's narration; its Tauri commands and wrappers | `app/src-tauri/src/studio/voice/review/` (`key.rs`, `lexicon.rs`, `locate.rs`), `app/src-tauri/src/studio/commands/pronunciations.rs`, `app/src/lib/studio/pronunciations.ts` |
+| Settings -> Studio (Narration, Pronunciation, Word timing): the `voice` row and its engine, the server's model list, Kokoro's packs, voices and sample, the pronunciation review, the aligner download; its Tauri commands | `app/src/pages/settings/studio/`, `app/src/components/settings/voice/` (`pronunciations/`, `voices/`), `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `kokoroVoices.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `voice_files.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
+| Rendering a video: the export presets, ffmpeg's toolkit and the encoder choice, plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, the `.vtt` beside each narrated render, each preset's status, one render per folder | `app/src-tauri/src/studio/render/` (`preset.rs`, `toolkit.rs`, `settings.rs`, `export.rs`, `status.rs`), `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
+| Rendering from the app: `studio_render`, `studio_render_cancel`, `studio_exports`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
-| The playground's commands: `studio_themes`, the component list, source, frame, validated write, history and restore | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
+| The playground's and Themes page's commands: the theme and component lists, source, frame, validated write, history, restore and removal, each library's default theme; the shared snapshot listing; a new video's default theme | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `commands/history.rs`, `app/src-tauri/src/studio/libraries/defaults.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `render.rs`, `narrate.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| Slides: a region of a library PDF page as a video asset, the blocks to pick it by, edges moved off ink, the sidecar and its lint; the bundled sample crop | `app/src-tauri/src/studio/slides/` (`blocks.rs`, `geometry.rs`, `snap.rs`, `raster.rs`, `sidecar.rs`, `preview.rs`), `app/studio-core/library/components/Slide.tsx`, `app/studio-core/src/images/`, `app/studio-core/library/assets/` |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `lint.rs`, `brief.rs`, `beats.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `pronounce.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`, `slide.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -62,7 +71,7 @@ narration/    manifest.json and the clips it names
   "voice": { "voice": "af_heart", "speed": 1.0 },
   "scenes": [
     { "id": "title", "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 4.0 },
-    { "id": "steps", "component": "Steps", "transition": { "kind": "wipe", "direction": "up" } }
+    { "id": "sorts", "component": "Bars", "props": { "labels": ["\\text{bubble}", "\\text{insertion}", "\\text{merge}"], "values": [500, 250, 9], "diff": [0, 2], "diffLabel": "\\times 55", "diffAt": 2.2 }, "transition": { "kind": "wipe", "direction": "up" } }
   ]
 }
 ```
@@ -78,14 +87,17 @@ narration/    manifest.json and the clips it names
 - `id` (`[a-z0-9-]+`, unique) names the scene's section in `script.md`. It
   is required on every scene once the folder has a `script.md`; a scene
   whose id has no section is silent and needs a `hold`.
-- `voice` (optional: `model`, `voice`, `speed`) overrides Settings -> Voice
-  for this video. studio-core only stores it; the app's narrator reads it.
+- `voice` (optional: `engine` (`kokoro` or `server`), `model`, `voice`,
+  `speed`) overrides Settings -> Studio -> Narration for this video. studio-core only stores it; the app's narrator reads it.
 - `theme` is a bundled theme's name, a library theme's name (see "Libraries
   cascade") or a `.json` path relative to the folder.
 - `subject` (optional) is the course the video belongs to: a course code's
   folder name (letters, digits, `-` and `_`, up to 64 characters), whose
   library (`<app data>/studio/subjects/<CODE>/`) is read before the global
   one.
+- `captions` (optional, default `false`) burns word-highlight captions into
+  every frame of a render (see "Captions are burned in from the word
+  timings"). `oculus studio new` and the app write `true`.
 - `motion` (optional) overrides the theme's transition and motion-blur
   defaults for this video; a scene's `transition` (optional) overrides
   both. See "Transitions" and "Motion blur".
@@ -118,7 +130,8 @@ transitions) reads that one timeline.
 - `Project::scene_fingerprint(i)` is what in the folder scene `i`'s frames
   depend on, as canonical JSON bytes (keys sorted, so key order in a file
   never matters), for a per-scene segment cache key: the size and fps, the
-  theme's tokens and `video.json`'s `motion`, and for scene `i` and scene
+  theme's tokens (its `captions` block included), `video.json`'s `motion`
+  and `captions`, and for scene `i` and scene
   `i - 1` (whose last moment the transition into `i` shows) the scene spec
   (`id` included), the narration words as components see them (`text`,
   `start`, `end`), the frame count and, for a scene without an `id` only,
@@ -172,19 +185,22 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
 
 Everything Studio keeps is under `<app data>/studio/`
 (`library::paths::studio_dir`): `videos/<slug>/` (one folder per video),
-`library/` (the global library) and `subjects/<CODE>/` (each subject's).
+`library/` (the global library), `subjects/<CODE>/` (each subject's) and
+`pronunciations/` (the readings waiting for the student's review, see
+"The student reviews the agent's suggested readings").
 `courses/` stays read-only to agents, so no library lives there. It is the
 one folder besides `agents/` and the database an agent thread may write
 ([harness.md](./harness.md#every-thread-runs-from-agents-and-that-is-the-containment)).
 
 - `oculus studio new <slug> [--subject CODE] [--title T] [--portrait]`
   (`studio::videos::create_in`) makes `videos/<slug>/`: `video.json` at
-  1920x1080 (1080x1920 with `--portrait`), 30 fps, theme `default`, the
-  subject, and one silent `TitleCard` scene (`id` `title`, 4 s) whose title
+  1920x1080 (1080x1920 with `--portrait`), 30 fps, the default theme, the
+  subject, `"captions": true`, and one silent `TitleCard` scene (`id` `title`, 4 s) whose title
   is `--title` or the slug with spaces; an empty `script.md`; and empty
-  `components/` and `assets/`. A subject's library holding
-  `themes/default.json` gives its videos its own look through the cascade,
-  with no setting. A slug is lowercase letters, digits and `-`, at most 64
+  `components/` and `assets/`. The default theme is the subject library's
+  `library.json` `defaultTheme`, else the global library's, else `default`
+  (see "Libraries cascade"), and video.json names it, so a later change of
+  default leaves the video as it was. A slug is lowercase letters, digits and `-`, at most 64
   characters; one that exists is refused and left alone. It prints the
   folder (`--json`: `{dir, slug}`).
 - `oculus studio list [--subject CODE]` prints each video's slug, subject,
@@ -195,7 +211,8 @@ one folder besides `agents/` and the database an agent thread may write
   subject, scenes, narrated, renders, modified, problem}]`.
 - Every command that takes a video folder (`frame`, `strip`, `lint`,
   `gallery`, `components list|show|promote`, `themes promote`, `render`,
-  `narrate`) also takes a bare slug (`studio::videos::resolve`): a path
+  `narrate`, `g2p --video`, `pronounce suggest`, `pronounce list --video`)
+  also takes a bare slug (`studio::videos::resolve`): a path
   that exists is used as given, otherwise a slug names `videos/<slug>/`, and
   anything else fails naming both places.
 - The app's commands take a slug and reach only a video (`videos::scoped_in`,
@@ -214,8 +231,9 @@ one folder besides `agents/` and the database an agent thread may write
 
 ## Agent flow: a chat agent makes a video with the `oculus-studio` skill
 
-A video is made in an ordinary Chat thread by the student's own CLI agent,
-through the `oculus` CLI and its file tools; there is no Studio page yet.
+A video is made in a Chat thread by the student's own CLI agent, through
+the `oculus` CLI and its file tools; the Studio page's New video starts that
+thread beside the video's player ([studio-page.md](./studio-page.md)).
 The `oculus-studio` skill ([harness.md](./harness.md#the-brief-is-appended-except-on-opencode))
 is the whole brief, and `AGENTS.md` only points at it. The target is a
 3Blue1Brown-style explainer: maths written term by term as it is said and
@@ -223,7 +241,7 @@ rewritten in place, every basic defined on an example before it is named,
 no slide shapes (card-and-arrow chains, a heading over lines, a formula
 that appears whole, a text-only scene), and no length budget.
 
-`SKILL.md` splits the work into three roles, each started as a
+`SKILL.md` splits the work into roles, each helper started as a
 [subagent](./harness.md#subagents) on the model Settings → Jobs gives that
 agent (`oculus studio agents` prints it and the call to make):
 
@@ -239,31 +257,67 @@ agent (`oculus studio agents` prints it and the call to make):
   what appears or moves as it is said). It stops for the student's
   go-ahead on the storyboard, then writes `video.json` (each one-scene
   component's only prop, `narrated`, set on narrated scenes) and
-  `script.md`, lints and narrates before any scene is built, so builders
-  cue to real word times.
-- **Build**, one helper per scene, writes that scene's components, cues
-  each beat with `word()`, and checks it with `strip --scene N` and
-  `frame` (a missing component elsewhere does not stop them; stale
-  narration anywhere does); a component two scenes share gets examples and
-  a `gallery --sheet`. It replies with its components, props, strip and
-  any narration change, which the director makes and re-narrates.
+  `script.md`, placing a `[pause]` where an idea lands (a result shown, a
+  definition complete, a rewrite finished, the end of a scene's argument),
+  then lints and narrates before any scene is built, so builders cue to
+  real word times.
+- **Build**, one helper per scene, works from `build.md`: its first call is
+  `oculus studio brief <slug> --scene <id>`, which stands in for the
+  storyboard, script and manifest; it writes the scene's components, cues
+  each beat with `word()` on the brief's word times, lands the beat a
+  pause follows just before `pause()` and holds it through the silence,
+  checks as text with
+  `lint --scene` (every error fixed, each warning fixed or explained) and
+  `beats --scene`, then looks with the brief's `strip` or `frame` call,
+  reading the PNG at its fixed `-o` path in the same message (a missing
+  component elsewhere does not stop them; stale narration anywhere does).
+  A component two scenes share gets examples and a `gallery --sheet`. It
+  replies with its components, props, strip, kept warnings and any
+  narration change, which the director makes and re-narrates. The
+  director's brief is a few lines: slug, scene, component, shared keys and
+  the student's rules for the video.
+- **Review**, one helper per finished scene on the same scene role, runs
+  `brief`, `lint --scene` and `beats --scene`, looks at one strip and a few
+  frames, and replies `PASS` or a numbered fix list of at most ten (what,
+  when, where); it edits nothing. The director reads verdicts, not strips,
+  and sends a fix list to a fresh builder with the build brief and the
+  last reply.
 
-The director then lints to `[]`, strips the whole video, sends fixes to a
-fresh builder, and renders a draft, then `--final`. An agent whose role is
-off, or that cannot start helpers (agy), does the items itself in order.
+The director then lints until no errors are left, takes its one look at a
+strip of the whole video for the joins, and renders a draft, then
+`--final`. An agent whose role is off, or that cannot start helpers (agy),
+does the items itself in order.
 When `narrate` fails for want of a voice or the aligner, the agent stops and
-tells the student what to set in Settings -> Voice; it never downloads the
-aligner. The story rules (explain with reasons, link each scene to the
+tells the student what to set in Settings -> Studio; it never downloads the
+aligner or the voice packs. After narrating with Kokoro it judges each
+guessed-word note, suggests a reading for each doubtful word with `oculus
+studio pronounce suggest` (it never edits a lexicon), tells the student to
+review them in Settings -> Studio -> Pronunciation, and carries on: a decision applies at the
+next narrate, and a suggestion marked wrong comes back in the notes with
+the student's note for another try. The story rules (explain with reasons, link each scene to the
 last, numbers given meaning, example then rule, the payoff shown, the end
 answering the opening question, phrasing the voice cannot fuse) and the
 taste rules (the picture carries the idea, the frame filled, every motion
-cued, stable magic-move keys, tokens over literals) close `SKILL.md`.
+cued, stable magic-move keys, tokens over literals) and a map of moving
+maths close `SKILL.md`: every formula a `Math`, written on per `\k` group
+with `Write`, rewritten in place with `Steps`, pointed at with the
+overlays, shrunk into a corner, a value flying into its slot, carried to
+the next scene by key; never a formula appearing whole, stacked lines or
+maths as Text.
+
+`build.md` is the scene helper's procedure (brief, write, check as text,
+look, the bar every scene meets, the reply, review). The `studio-scene`
+role prompt carries it with the builder's sections of `reference.md`; on
+Codex the director's brief has the helper read them by file
+([harness.md](./harness.md#subagents)).
 
 `reference.md` is this page's authoring rules distilled for an agent
-(video.json, spoken form, the component contract, elements and style keys,
-type sizes, motion, moving maths with `Morph` as states picked by time with
-a worked derivation, cues, transitions, each lint kind and what to do about
-it, and the commands' outputs). `studio.d.ts` types every prelude global;
+(video.json, spoken form and pauses, the component contract, elements and style keys,
+type sizes, motion, `Math` with its backslash rule, `\k` groups, theme
+colours and size, moving maths with `Write`, `Steps` and the overlays as
+five whole components checked with `strip` plus their gotchas, cues,
+transitions, each lint kind and what to do about it, and the commands'
+outputs). `studio.d.ts` types every prelude global;
 `src/host/tests/globals.rs` lists the globals a fresh sandbox context gains
 from the prelude (QuickJS's own `Object.getOwnPropertyNames(globalThis)`
 before and after, less the host's `__studio*` entry points) and fails when
@@ -291,23 +345,81 @@ and `components list` and `show` take `--subject`, which replace
 video.json's for that load. A component that no level has is an error
 listing every name in every level.
 
-The starter set (`app/studio-core/library/`) is compiled into the crate: the
-components `TitleCard`, `Steps`, `BigNumber`, `LowerThird` and `SplitShell`,
-and the theme `warm` beside `default`. Each takes its colours and fonts from
-the theme and has at least two examples. `tests/starter.rs` lints the set in both themes, and
-`tests/gallery_golden.rs` pins every example as `starter-<Component>-<example>.png`,
-laid out at 1920x1080 and drawn at half scale. A load copies each starter
+The starter set (`app/studio-core/library/`) is compiled into the crate:
+drawing primitives: `NumberLine`, `Axes` (any formula string, several
+curves, `Scatter` with a regression line, `Area`, `Riemann` rectangles, a
+`Tangent` or shrinking secant, `Dot`), `Graph` (nodes and edges laid out
+on a circle, as a tree, in columns or by hand; a traversal and a walk),
+`Grid` (a matrix, DP table or board of cells with fills, marks and
+pointers), `Bars` (a bar chart or histogram), `Code` (highlighted source
+on a fixed column grid) and `Table` (keyed cells), plus `Slide` (a crop of
+a lecture PDF page; see "Slides crop a library PDF page") and `TitleCard`, and
+the theme `warm` beside `default`. Components cannot import one another, so
+each primitive file holds the primitive as a helper function (keys under
+an `id` prefix, times as numbers a scene passes from `word()`) and a
+default export that demos it; a scene copies the helper into its own
+component. The starters are primitives, never scene templates: a heading
+over lines, two text columns or a stat card is the slide shape the
+Studio skill bans, so none ships. A primitive earns its place when it
+solves a layout or mapping problem a scene would otherwise redo (data to
+px, a fitted grid, columns of characters) and keys every piece it draws,
+so two with one `id` glide in a `Steps` and an overlay can point at a
+part. Each takes its colours and fonts from the theme and has at least
+two examples; only `Code` reads `font.mono`. The default export of `Axes`,
+`Graph`, `Grid`, `Bars` and `Code` sizes itself from `ctx.size`, so the demo
+fits 1280x720, 1920x1080 and 1080x1920 frames; their helpers take explicit
+`width` and `height` (`Code`: `maxWidth`, `maxHeight`), and a scene that
+copies one passes its own. Bad input to one of them throws an error naming
+the prop, the value and what is allowed (a ragged `cells`, a duplicate
+`keys`, a `path` that leaves the edges, a `diff` off the bars), never a
+blank or broken frame. `tests/starter.rs` lints the set
+in both themes, and `tests/gallery_golden.rs` pins each starter as one
+sheet, `starter-<Component>.png`, a row per example and a column per
+moment of the 6 s preview (laid out at 1920x1080, drawn at a quarter), so
+the draw-on is pinned too. A load copies each starter
 file the global library has never been offered, then lists it in the
-library's `.seeded`; a listed file is never copied again, so a deleted
-starter stays deleted, while one added to a later build still arrives. An
-existing file is never replaced, so an edit is the user's. `oculus studio
+library's `.seeded` as `path<TAB>sha256 of the text written` (a legacy line
+has no tab and no hash). A listed file is never copied again, so a deleted
+starter stays deleted, while one added to a later build still arrives. A copy
+whose bytes still hash to the recorded text was never edited: when the
+starter has changed, the load rewrites it (the old text goes to `.history/`)
+and records the new hash. Any other text is the user's edit, left alone, and
+its hash is never recorded, so no later update can overwrite it. A legacy
+line has no hash to compare, so its copy counts as untouched only if it
+equals a version the repo has ever shipped (`library/shipped.rs`, SHA-256 of
+every blob in the starter files' git history; `bun run studio:hashes` in
+`app/` regenerates it, and a unit test fails until a starter edit's hash is
+in it); any other text stays hashless and is never updated. A copy
+that equals the current starter gets the current hash recorded. A starter
+dropped from the set is neither updated nor deleted: a library's existing
+copy stays, edited or not, and its `.seeded` line stays as it was, so a
+video that uses it keeps rendering. Such a copy
+named like a prelude element (`Steps.tsx`) shadows nothing: each
+component is its own module and is called only by name from video.json,
+so inside every component `<Steps>` is still the element. `oculus studio
 components seed --reset` writes the starter text over every file that
-differs or is missing. Every write
+differs or is missing, recording the hashes it writes. Every write
 to a library file first copies the previous text to `.history/` beside it
 (`<Name>.<unix-ms>.tsx` or `.json`, the millisecond moved on past any
 snapshot already there); nothing prunes `.history`. `oculus studio
 components list <DIR>` prints each name with the level it resolves from, and
 `components show <DIR> <Name>` its source.
+
+**A library's default theme** is `library.json` at its root
+(`<app data>/studio/library/library.json`, `<app data>/studio/subjects/<CODE>/library.json`),
+`{"defaultTheme": "<name>"}` and nothing else (`studio_core::LibrarySettings`,
+`deny_unknown_fields`); a library without the file has no default. A new
+video that names no theme (`oculus studio new`, the app's New video with no
+theme picked) takes its subject library's default, else the global
+library's, else the bundled `default`
+(`studio::libraries::default_theme`), and video.json gets that name. A
+default naming a theme its cascade no longer has is passed over; a
+`library.json` that does not parse stops the video being made, naming the
+file. Agents may edit the file by hand; the Themes page sets it with
+`studio_theme_set_default`. A theme's name is its file stem, lowercase
+letters, digits and `-`, at most 64 characters
+(`studio_core::valid_theme_name`), the one rule for a scaffold's theme, a
+library write, a promote and a lookup.
 
 A library grows through a video: a component is written and tuned in the
 video's own `components/`, where it wins the cascade, checked with
@@ -318,8 +430,8 @@ has (level `project`) can be promoted; `--to subject` writes to the subject
 in video.json and fails when there is none. `oculus studio themes promote
 <DIR> <FILE> --to global|subject` does the same for a theme file inside the
 video (a `.json` path such as `themes/chalk.json`, checked to load as a
-theme) as `themes/<stem>.json`, the stem being lowercase letters, digits
-and `-`, so any video can name it. Both go through the snapshotting write,
+theme) as `themes/<stem>.json`, the stem following the theme name rule, so
+any video can name it. Both go through the snapshotting write,
 write nothing when the library already has the same text, and leave the
 video's copy in place.
 
@@ -342,28 +454,49 @@ We follow the *gradient* downhill, one small step at a time.
 
 - **`script.md`** is one `## <id>` section per narrated scene, written as it
   is said. A section's text is its prose with `*`, `_` and backticks
-  removed and whitespace collapsed; nothing else is interpreted (`#` and
-  `###` lines are prose). Text before the first heading, a heading that is
-  not an id, a repeated id and an empty section fail `Project::load` with
-  the line. A section no scene's `id` matches is a lint error.
+  removed, pause markers cut out and whitespace collapsed; nothing else is
+  interpreted (`#` and `###` lines are prose). Text before the first
+  heading, a heading that is not an id, a repeated id and an empty section
+  fail `Project::load` with the line. A section no scene's `id` matches is
+  a lint error.
+- **Pauses.** `[pause]` anywhere in a section's prose holds the picture in
+  silence for the theme's `narration.pause` seconds, and `[pause 1.5]` for
+  that many: more than 0 and at most `MAX_PAUSE` (5 s); `pause` in any
+  case. A marker is not said and splits the words either side of it;
+  `ScriptSection::pauses` records each one's place (how many words come
+  before it) and length, and at the end of a section it holds the last
+  picture before the cut. A bracket opening with `pause` that is neither
+  form (`[pause x]`, `[pause 9]`, no `]`) is cut from the text too and is
+  a lint error (`project/script/pause.rs`). `ScriptSection::clip_text`
+  writes the pauses back into the text at their lengths (`It lands. [pause
+  1] Then it stays.`), a bare one at the theme's; without pauses it is the
+  text. That is what a clip is made from and what its manifest entry
+  matches, so moving a marker or changing its length, or the theme's,
+  makes the scene stale.
 - **The manifest** is `{ version: 1, scenes: { <id>: { key, text, audio,
   duration, words: [{ text, start, end, confidence }], gaps: [{ after,
-  start, end, heard }] } } }` (`Manifest`). `text` is the section text the
-  clip says, `audio` the clip's file name in `narration/`, `key` its content
-  address (sha256 of the text, server, model, voice, speed and aligner
-  model), times are seconds from the clip's start, `confidence` is the
+  start, end, heard }], pauses: [{ after, start, end }] } } }`
+  (`Manifest`). `text` is the section's `clip_text`, `audio` the clip's
+  file name in `narration/`, `key` its content
+  address (see "Cache" under "Narration is made by `oculus studio
+  narrate`"), times are seconds from the clip's start, `confidence` is the
   aligner's (mean log-probability of the word's letter frames; higher is
   surer), and `gaps` (optional) is speech the aligner heard that the
   script does not have, after word index `after` (`null`: before the first
-  word). Unknown keys, another
-  version, non-finite times and a word or gap ending before it starts fail
-  the load.
+  word). `pauses` is the exact silence each `[pause]` put in the clip,
+  after word index `after` (`null`: before the first word); it is left out
+  when there are none, so a manifest from before pauses reads unchanged.
+  Unknown keys, another version, non-finite times and a word, gap or pause
+  ending before it starts fail the load.
 - **Length.** A narrated scene lasts `max(hold, lead + duration + tail)`:
-  `hold` is optional and only a minimum. `lead` and `tail` are the theme's
-  `narration` tokens (0.25 s and 0.6 s in the bundled theme); the clip
-  starts `lead` into the scene. A silent scene (no section) lasts its
-  `hold`, and one without a `hold` has no length. Either rounds up to
-  whole frames: 3.85 s is 116 frames at 30 fps, 3.867 s.
+  `hold` is optional and only a minimum, and `duration` includes the
+  clip's pauses. `lead`, `tail` and `pause` are the theme's `narration`
+  tokens (0.25 s, 1.0 s and 1.0 s in the bundled themes); the clip starts
+  `lead` into the scene. `pause` may be left out of a theme file and reads
+  as `DEFAULT_PAUSE` (1.0 s), so a theme copied into a library before it
+  existed still loads. A silent scene (no section) lasts its `hold`, and
+  one without a `hold` has no length. Either rounds up to whole frames:
+  4.25 s is 128 frames at 30 fps, 4.267 s.
 - **Stale narration fails, it is never estimated.** A scene with script
   text whose manifest entry is missing or was made for other text makes
   `Project::timeline`, `Renderer::new` and `strip` fail with
@@ -381,11 +514,16 @@ We follow the *gradient* downhill, one small step at a time.
   words have times. A phrase that is not said, an `nth` past the last
   occurrence and a call in a silent scene throw at the call's TSX line. A
   phrase not said names the said run of words nearest it by edit distance,
-  however far, spelt with its hyphens (`suggest::nearest`): ``Steps.tsx:12:20:
-  `word("gradiant")`: no such word in scene `steps`; closest: gradient``.
+  however far, spelt with its hyphens (`suggest::nearest`): ``Descent.tsx:12:20:
+  `word("gradiant")`: no such word in scene `descent`; closest: gradient``.
   Each call gets its own scene's words (`SceneCall::words`, from
   `Project::word_cues`), so in a transition the outgoing scene cues to its
   words and the incoming one to its own.
+- **Pause cues.** `pause(nth = 1)` is the scene time (lead included) at
+  which the nth `[pause]`'s silence starts (`Project::cued_pauses`), so a
+  beat can land just before it and hold through it. A scene without that
+  many pauses, and a silent scene, throw at the call's line: ``scene `a`
+  has 2 pauses, so there is no pause 3``.
 
 ## Narration timing is forced alignment on the CPU
 
@@ -394,7 +532,7 @@ CTC forced alignment of the script against wav2vec2's letter emissions, run
 by ONNX Runtime on the CPU (`app/src-tauri/src/runtime/onnx/`). The model
 is Xenova's fp32 ONNX export of `facebook/wav2vec2-base-960h` (Apache-2.0,
 credit facebook/wav2vec2-base-960h), pinned to one commit, 378 MB. It is
-downloaded on request (Settings -> Voice, or `oculus studio aligner
+downloaded on request (Settings -> Studio -> Word timing, or `oculus studio aligner
 download`) to
 `<app data>/models/align/` and never bundled; the download is checked
 against its pinned size and sha256 before it gets its name. ONNX Runtime
@@ -456,39 +594,90 @@ aligner at a copy elsewhere instead, for development and the parity tests.
 `script.md` section into a clip and its word times, and writes the
 manifest. Scenes run one at a time, in video order.
 
-- **Voice.** Each of server, model, voice and speed comes from the first
-  that sets it: the CLI flags, the video's `voice` block, then the `voice`
-  settings row (`{ baseUrl, model, voice, speed }`, which Settings -> Voice
-  writes; `studio::voice`). A missing or ill-typed field in the row
-  reads as unset; only speed has a default (1.0). Server, model and voice
-  have none, since ids differ per server (Kokoro-FastAPI `kokoro`, mlx-audio
+- **Voice.** Each of engine, voice and speed, and for the server engine
+  the server and model, comes from the first that sets it: the CLI flags
+  (`--engine`, `--voice`, `--speed`, `--server`, `--model`), the video's
+  `voice` block, then the `voice` settings row (`{ engine, baseUrl, model,
+  voice, speed }`; `studio::voice`). A missing or ill-typed field in the
+  row reads as unset, and so does an engine other than `server` or
+  `kokoro` (in video.json it fails the load); a row with a `baseUrl` and
+  no `engine` key reads as `server`. Only speed has a default
+  (`voice::DEFAULT_SPEED`, 0.9: a little under the voice's own pace, since
+  a player can always speed a lecture up); a stored speed is kept.
+  There is no default engine, since Kokoro needs a download and a server
+  a URL: narrate fails with ``choose Kokoro or a TTS server in Settings ->
+  Voice, or pass --engine``. The server engine needs a server, model and
+  voice, whose ids differ per server (Kokoro-FastAPI `kokoro`, mlx-audio
   `mlx-community/Kokoro-82M-bf16`, OpenAI `tts-1`): narrate fails with
-  ``set a TTS server in Settings -> Voice, or pass --server`` and the same
-  for `--model` and `--voice`.
+  ``set a TTS server in Settings -> Studio -> Narration, or pass --server`` and the same
+  for `--model` and `--voice`. The Kokoro engine needs only a voice, an id
+  of lower-case letters, digits and `_` (it names a file in the voice
+  pack); it ignores the server fields, which stay set for when the server
+  engine is chosen again.
+- **Engines.** `narrate` asks for clips through the `Speaker` trait
+  (`narrate::Speaker`): `ready()` is asked once, beside the aligner's,
+  before the first clip; `key(text)` is asked for every scene, cached or
+  not, and gives the parts of its cache key, engine first; `speak(text)`
+  gives a WAV and its decoded samples, never silent. Both get the
+  section's text without its pauses. `ServerSpeaker` is
+  the TTS client below and has no readiness check of its own;
+  `KokoroSpeaker` runs Kokoro inside the app (see "Kokoro narrates inside
+  the app"). A video has one engine: when it fails, the narrate fails and
+  says why, with no fallback to the other.
 - **The TTS server** is OpenAI-compatible (Kokoro-FastAPI, mlx-audio):
   `POST <base>/v1/audio/speech` with `{ model, input, voice,
   response_format: "wav", speed }`, one request per clip, no timeout
-  (`studio::tts`). `narrate` asks for clips through the `Speaker` trait
-  (`ready`, `speak`), whose `ServerSpeaker` is this client; the server
-  has no readiness check of its own. The base URL is accepted with or
+  (`studio::tts`). The base URL is accepted with or
   without a trailing `/v1`, normalised once. Keyless servers only: no API
   key is sent. A non-2xx answer fails with its status and a short excerpt of the body; a
   429 is retried with back-off (1, 2, 4, 8 s; five tries). A 200 whose body
   is empty, is not a WAV, or is digitally silent (see "Input" above) is a
-  failure, never a pause: Kokoro answers an unknown voice with 200 and
-  nothing.
-- **Cache.** A clip's `key` is the sha256 hex of the section text, the
-  normalised server URL, model, voice, speed and the aligner's `MODEL_ID`,
-  each length-prefixed. A scene whose manifest entry has the same key and
-  whose `narration/<key>.wav` exists is kept (`cached`) unless `--force`;
-  editing one paragraph re-requests that one scene.
-- **A new clip** is saved byte for byte as the server sent it to
+  failure, never a pause: Kokoro-FastAPI answers an unknown voice with 200
+  and nothing.
+- **Cache.** A clip's `key` is the sha256 hex of `oculus-narration-2`, the
+  section's `clip_text` (its text with each pause at its length), the
+  speaker's key parts and the aligner's `MODEL_ID`, each length-prefixed
+  (`narrate/key.rs`). Without pauses `clip_text` is the text, so a section
+  keeps the key it had before pauses existed and its clip is kept. The server's parts are `server`, the
+  normalised URL, model, voice and speed. Kokoro's are `kokoro`, its model
+  id (`kokoro-82m-v1.0-onnx-int8@1939ad2a`), voice, speed and the text's
+  phoneme string, so a lexicon edit re-narrates only the scenes whose
+  phonemes it changes. The text is in every key because a manifest entry
+  is current only for the text it was timed against. A scene whose
+  manifest entry has the same key and whose `narration/<key>.wav` exists
+  is kept (`cached`) unless `--force`; editing one paragraph re-makes that
+  one scene. A scene whose key cannot be made (Kokoro: the G2P pack is
+  missing, a lexicon entry is bad, a word has no phonemes) fails naming
+  the scene.
+- **A new clip** is saved byte for byte as the speaker made it to
   `narration/<key>.wav`; its duration comes from the decoded samples, and
   it is resampled to 16 kHz and timed against the section's
-  whitespace-separated words, at any length. The aligner model is checked before
-  the first TTS request, so a missing one costs no synthesis and fails with
-  ``download it in Settings -> Voice or run `oculus studio aligner
-  download` ``.
+  whitespace-separated words, at any length. A section with pauses
+  (`narrate/clip.rs`) is said and timed the same way, whole, and then each
+  pause is spliced in as exact zeros: before the clip for a pause before
+  the first word, after it for one after the last, else at the quietest
+  10 ms (ties to the middle) between the end of the last word before it
+  and the start of the next, so the cut falls in the silence the voice
+  already left there. Words and gaps after a cut move on by its length,
+  each pause goes into the manifest as `{ after, start, end }`, and the
+  clip is written as a 16-bit mono WAV at the speaker's rate. The words
+  are said whole because Kokoro paces an input by its length: the same
+  scene said in parts between its pauses came out up to 11% slower, part
+  by part, than said whole (`af_heart` at 0.9, the first of three parts
+  1.7 s behind over 16 s); a server is asked once, too, and the aligner
+  never sees the inserted silence. The silence check runs on the clip as
+  spoken, never on the spliced one, so a pause is not mistaken for a
+  failed clip. The speaker and the aligner
+  model are checked before the first clip, so a missing one costs no
+  synthesis; the aligner fails with ``download it in Settings -> Studio -> Word timing or
+  run `oculus studio aligner download` ``.
+- **Guessed words.** With Kokoro, each word the guesser read in the scenes
+  the run keyed is printed after the scenes as ``note: scene 1 `momentum`
+  script.md:9: check pronunciation: "Nesterov" is guessed as
+  /nˈɛstəɹɔv/; ...`` (`voice::lint::notes`), ending with the state of the
+  word's suggestion when one is stored (see "The student reviews the
+  agent's suggested readings"). A note never changes the exit code; the
+  fix is a suggested reading the student accepts, then another `narrate`.
 - **Writes.** The manifest is rewritten atomically after each scene, so a
   failure keeps the scenes before it; the error names the scene and the
   command exits 1. After the last scene, entries whose id is no longer a
@@ -497,49 +686,329 @@ manifest. Scenes run one at a time, in video order.
   manifest this build cannot read (another version, damaged) is rebuilt
   from nothing, with a warning.
 - **Output.** Per scene: the id, `narrated` or `cached`, the clip's length,
-  its word count, and as warnings each word under `LOW_CONFIDENCE` and each
-  gap (times into the clip; lint fails on the same ones, at scene time).
-  `--json` gives `{ dir, voice, scenes: [{ id, outcome, audio, duration,
-  words, low_confidence, gaps, timings }], dropped, deleted, ms }`.
+  its word count, its pauses when it has any, and as warnings each word under `LOW_CONFIDENCE` and each
+  gap (times into the clip; lint notes the same words and fails on the
+  same gaps, at scene time),
+  then the notes. `--json` gives `{ dir, voice, scenes: [{ id, outcome,
+  audio, duration, words, pauses, low_confidence, gaps, timings }], notes: [{
+  scene, id, line, word, phonemes, guessed }], dropped, deleted, ms }`,
+  `voice` being `{ engine: "server", server, model, voice, speed }` or `{
+  engine: "kokoro", voice, speed }`, and each note also has `review`
+  (`null`, or `{ status, reading, note }`).
 - `oculus studio tts "<text>"` makes one clip the same way and writes it
-  (`tts.wav` unless `-o`), for hearing a voice. `oculus studio aligner
-  status|download|delete` manages the aligner model.
-- **Measured** on Kokoro (mlx-audio, `af_heart`, M-series Mac, debug
-  build): three scenes of 4 to 8 s narrated in 1.8 s with a 0.67 GB peak;
-  a re-run after one paragraph edit took 0.5 s. Kokoro's clips start with
-  about 0.2 s and end with about 0.4 s of exact zeros, well under the 1 s
-  zero-run limit.
+  (`tts.wav` unless `-o`), for hearing a voice; with Kokoro it reads the
+  global library's lexicon only. `oculus studio g2p "<text>"` shows how
+  Kokoro reads text without synthesising. `oculus studio voices` and
+  `oculus studio aligner status|download|delete` manage the downloaded
+  models and voices.
+- **Measured** on the server engine (mlx-audio Kokoro, `af_heart`,
+  M-series Mac, debug build): three scenes of 4 to 8 s narrated in 1.8 s
+  with a 0.67 GB peak; a re-run after one paragraph edit took 0.5 s.
+  Kokoro's clips start with about 0.2 s and end with about 0.4 s of exact
+  zeros, well under the 1 s zero-run limit. The Kokoro engine's numbers
+  are in the next section.
 
-## Settings -> Voice sets the server and holds the aligner model
+## Kokoro narrates inside the app
 
-Settings -> Voice (Library group) has two sections. Nothing on it
-synthesises, so it has no sample button: Settings never makes a billed
-call. Its one network call is listing models, which is free.
+The `kokoro` engine (`app/src-tauri/src/studio/tts/kokoro/`) runs
+Kokoro-82M on the ONNX Runtime the aligner uses, with no server and no
+side process. It needs two packs and a voice, downloaded on request to
+`<app data>/models/voice/`, checked against their pinned sizes and sha256
+before they get their names, and never bundled. The two packs download
+together (Settings -> Studio -> Narration, or `oculus studio voices
+download`; one download at a time, and a cancel between the packs stops
+the second); each voice downloads on its own:
 
-- **Narration voice** edits the `voice` row: Server URL, Model, Voice
-  (typed: the OpenAI API cannot list voices) and Speed (a slider, 0.5 to
-  2.0 in 0.05 steps). A text field saves on blur or Enter; each save sends
-  the whole row to `studio_set_voice_settings`, which trims it, unsets
-  blanks, normalises the URL (`tts::normalise_base`), refuses a speed that
-  is not a positive number, and answers with what it stored. A refusal shows
-  under its row. "List models" calls `studio_voice_models` with the URL as
-  typed: `GET <base>/v1/models`, the `data[].id`s in the server's order,
-  with only ureq's connect timeout (`studio::tts::list_models`). A non-empty
-  list turns the Model field into a select (the stored model stays in it
-  when the server does not list it); an empty list or a failure leaves the
-  text field, with the reason inline. Editing the URL drops the list. API
-  keys are not supported; the page says so.
-- **Word timing** is the aligner model's row, like a Local Whisper model:
+| Pack | Files | Size |
+| --- | --- | --- |
+| `voice-kokoro` | `kokoro-v1.0-int8.onnx` (onnx-community/Kokoro-82M-v1.0-ONNX's `model_quantized.onnx`, Apache-2.0), at commit `1939ad2a` | 92 MB |
+| `g2p-en-us` | misaki's `us_gold.json` and `us_silver.json` (Apache-2.0, commit `e820629b`), and the guesser's `g2p-encoder.onnx`, `g2p-decoder.onnx` and `g2p-config.json` (PeterReid/graphemes_to_phonemes_en_us, PR #1 at `9470bafd`) | 9 MB |
+| `voice-<id>`, one per voice | `<id>.bin` from the model's repository and commit, 522,240 bytes (510 rows of 256 f32s) | 510 KB |
+
+The model is int8: fp16 and q4f16 exports come out silent with no error.
+
+- **The voices** (`tts/kokoro/voices/`) are the 20 US English ones, as the
+  dictionary and the guesser are: `af_` Alloy, Aoede, Bella, Heart,
+  Jessica, Kore, Nicole, Nova, River, Sarah, Sky and `am_` Adam, Echo,
+  Eric, Fenrir, Liam, Michael, Onyx, Puck, Santa. `catalogue.rs` holds each
+  one's id, name, accent, gender, Kokoro's overall grade (the "Overall
+  Grade" column of hexgrad/Kokoro-82M's VOICES.md, which rates its training
+  data's quality and quantity, not how it sounds), URL, size and sha256.
+  A voice is its own one-file pack, so it downloads, cancels and deletes
+  alone and two can download at once. `af_heart` and `am_michael` are the
+  starters, the two a bare `oculus studio voices download` fetches. A voice
+  counts as downloaded when `<id>.bin` is in the folder at 522,240 bytes,
+  so a voice an earlier version downloaded needs nothing again. Any other
+  `<id>.bin` at that size, put there by hand, narrates with `--voice` but
+  is not listed.
+- **One speaker per run.** `KokoroSpeaker::ready` checks the model, the
+  G2P pack and the chosen voice's file, and no other voice. The reader (the dictionary, the video's lexicon and
+  the guesser; `reader.rs`) loads on the first key and the model session
+  on the first clip; both are dropped with the speaker when the run ends,
+  never held idle. No timeouts on either.
+- **Reading.** Each section's text is read to phonemes by the G2P (next
+  section). A `$` is refused: it is Kokoro's pad.
+- **Chunking** (`chunk.rs`). An input holds at most 509 tokens, since the
+  voice file has a style row per input length. The phoneme string is cut
+  after each sentence end (`.`, `!`, `?`, `…`, with any closing quote or
+  bracket) that whitespace follows, and sentences are packed greedily
+  under the limit; a sentence too long alone is cut at `,`, `;` and `:`
+  the same way, and a part still too long fails naming its sentence's
+  words. Whitespace runs read as one space. A character outside Kokoro's
+  115-symbol vocabulary (`vocab.rs`) fails naming its word, since Kokoro
+  would drop it silently.
+- **Synthesis** (`synth.rs`). Each input runs as `[0, ids..., 0]` with the
+  voice's style row `len(ids)` and the speed, on the shared CPU session
+  (`runtime::onnx::session`, arena on, half the cores up to 4). An input
+  that comes out digitally silent fails naming its words. The samples join
+  with no gap and are written as a 16-bit mono 24 kHz WAV, the shape a
+  server's clip has; the silence check runs on the float samples first.
+- **Measured** (`tts/kokoro/tests/e2e.rs`: two scenes, 19.3 s of audio,
+  `af_heart`, M-series Mac with other builds running, debug build around
+  a static ORT 1.28): synthesis at a real-time factor of 0.40 (0.61 on a
+  busier run), the first clip's figure including the session load; 0.9 s
+  of alignment; 0 unsure words and no gaps; a 1.12 GB peak for the whole
+  run, aligner included, and 1.27 GB after two more runs in the same
+  process. Synthesis and alignment therefore share one pass per scene. On
+  ORT 1.28 most of the time is one op, `ConvInteger`; ORT 1.31 runs the
+  same model about four times faster.
+
+## Kokoro reads text through the G2P
+
+`app/src-tauri/src/studio/voice/g2p/` turns a section's text into
+Kokoro's phonemes and one record per word, `{ word, phonemes, source,
+guessed }`. The text is already spoken form (lint forbids digits and
+symbols), so numbers and currency are not read. It is a port of misaki
+0.9.4's dictionary path without spaCy or espeak, and matches its oracle's
+golden files byte for byte (`tests/golden/`, with a dictionary trimmed to
+the entries they touch). Each word, or each part of a merged word
+(`PyTorch`, `scikit-learn`, of which only the unknown part is guessed), is
+read by the first of:
+
+1. **The lexicon** (`source: lexicon`), below.
+2. **misaki's dictionary** (`dict`): `us_gold.json`, then `us_silver.json`,
+   grown as misaki's `grow_dictionary` does, with its special cases (a, an,
+   the, to, I, by, in, used, dotted acronyms), case handling (an unknown
+   all-caps word is spelt out), possessives, the `-s`, `-ed` and `-ing`
+   stems, and three rules misaki lacks: `-ied` read from `-y`
+   ("multiplied"), an `-izer` agent noun read as its `-ize` verb + `əɹ`
+   ("optimizers"), and the British `-ise` family read as `-ize`
+   ("renormalise", "factorisation", "optimisers").
+3. **The heteronym table** (`rule`, `heteronym.rs`): read, lead, live,
+   content, used, that and close, and the generic verb, noun or adjective
+   reading, picked from the neighbouring words without a tagger; `lead`
+   also has the metal reading the dictionary lacks.
+4. **The guesser** (`guess`, `guess/`): a 3 MB BART (one encoder and one
+   decoder layer) run as two ONNX sessions, greedy, at most 63 steps.
+
+Stress is applied as misaki does, and `ɾ` and `ʔ` become `T` and `t`. A
+word with a letter in it and no phonemes is an error naming it: a dropped
+word would wreck its neighbours' timing.
+
+**The lexicon** is a `lexicon.json` object from a word to its reading, in
+two layers, the subject's over the library's:
+`<app data>/studio/library/lexicon.json` and
+`<app data>/studio/subjects/<CODE>/lexicon.json` for the video's
+`subject`. A value in slashes is raw phonemes in Kokoro's alphabet
+(`"Cauchy": "/kˈOʃi/"`), any of the 115 symbols but the pad `$`. Any other
+value is a respelling in dictionary words (`"softmax": "SOFT-max"`): each
+`-` or space part is read through the dictionary, an all-caps part longer
+than one letter takes primary stress and the rest secondary. Keys starting
+`_` are comments. A word finds its entry by exact key, then its lower
+case, then (ending `'s`) its stem's entry plus `-s`, then any key equal in
+lower case; `’` reads as `'` in keys and in the words looked up. Every
+entry is checked on load, and a bad phoneme or a respelling part the
+dictionary lacks fails naming the file and the key. The app writes the
+lexicon files, from the student's review (next section); the agent's skill
+tells it never to edit them.
+
+**Guessed words are notes.** A guess never stops narration, but every
+guessed word is printed by `narrate` and `lint` as a `check pronunciation`
+note with its scene and script.md line. The agent suggests a reading for
+the doubtful ones and the student decides (next section); only the scenes
+whose phonemes a decision changed are made again at the next narrate.
+
+`oculus studio g2p "<text>"` prints each word, its phonemes and its
+source, marking guesses, then the phoneme string; `--json` gives `{ text,
+phonemes, subject, lexicon: [<files>], words: [{ word, phonemes, source,
+guessed }] }`. It needs only the `g2p-en-us` pack.
+
+## The student reviews the agent's suggested readings
+
+`app/src-tauri/src/studio/voice/review/` holds the readings an agent
+suggested for words it doubts, until the student decides on each.
+
+- **A suggestion is one file**,
+  `<app data>/studio/pronunciations/<CODE or _library>/<key>.json`: the
+  video's subject, or `_library` for a video without one, and the word
+  lower-cased with every character outside `a-z`, `0-9` and `-` written
+  `_<hex>_` (`don't` is `don_27_t`). Its id is `<folder>/<key>`. The CLI
+  and the app are two processes with no lock between them, so neither ever
+  rewrites a list the other holds: each writes one file, atomically
+  (`runtime::atomic_write::json`). The file is `{ word, reading, original,
+  guessed, subject, video, sentence, scene, line, status, note, created }`:
+  the word as the script spells it, the suggested lexicon value, the
+  phonemes Kokoro read it with when it was suggested, whether the guesser
+  read it, the subject (or `null`), the video's slug, the spoken sentence
+  it is in (whitespace collapsed), the scene id and script.md line,
+  `pending` or `wrong`, the student's note (or `null`) and the UTC time
+  (`YYYY-MM-DDTHH:MM:SS`). A new suggestion for the same subject and word
+  replaces the file, back to `pending`.
+- **`oculus studio pronounce suggest <DIR> <WORD> <READING>`** checks the
+  reading as a lexicon value (`review::check`, the lexicon's own
+  validation and wording, naming `the reading` as its file), then reads
+  the video's narrated sections with the reader `narrate` would use and
+  finds the word in any case, `Word's` counting as `Word`
+  (`review::locate`): its first guessed place, else its first place. A
+  possessive's original is the stem read alone. A word the narration never
+  says fails; a word that is not a guess is still stored, with the
+  phonemes it reads with now. It prints the reading's phonemes, how the
+  word reads now, the scene, line and sentence, and that the student
+  reviews it in Settings -> Studio -> Pronunciation (`--json`: the item plus `phonemes`).
+- **`oculus studio pronounce list [--video DIR]`** prints each item,
+  newest first: its status, word, reading, subject, video, scene and line,
+  and under a wrong one the student's note (`--json`: `[{ id, ...the
+  file's fields }]`). A file that does not parse is skipped and logged.
+- **Notes.** `narrate` and `lint` look up each guessed word's file under
+  the video's subject, a possessive's under its stem (`Store::annotate`),
+  and end its note with
+  `(suggested "NESS-ter-off", awaiting review in Settings -> Studio -> Pronunciation)` or
+  `(suggestion "NESS-ter-off" marked wrong: "<note>"; suggest again)`.
+- **Deciding** (`Store::decide`) writes the word into the subject's
+  `lexicon.json`, or the global library's for a video without a subject:
+  `correct` writes the suggestion, `fine` the original as `/phonemes/`, so
+  the word is no longer a guess. The value is checked first, against the
+  dictionary of the `g2p-en-us` pack. The writer (`review::write_entry`)
+  keeps every other key, `_` comments included, in its place (serde_json's
+  `preserve_order`), keeps a replaced key's place, creates a missing file,
+  and refuses a file that is not a JSON object rather than overwrite it.
+  The item's file is then deleted, unless a new suggestion replaced it
+  meanwhile. A decision applies at the video's next narrate.
+- **Tauri commands** (`commands/pronunciations.rs`, wrapped in
+  `lib/studio/pronunciations.ts`): `studio_pronunciations_list()` gives
+  every item; `studio_pronunciation_decide(id, decision: "correct" |
+  "fine")` gives `{ lexicon, word, reading }`;
+  `studio_pronunciation_wrong(id, note?)` gives the item, a blank note
+  stored as none; `studio_pronunciation_sample(id, which: "original" |
+  "suggestion")` synthesises the item's sentence as `studio_voice_sample`
+  does, in Settings -> Studio -> Narration's voice and speed, reading the subject's
+  lexicon with one entry over it that pins the word to the original
+  phonemes or to the suggestion (`LexiconFiles::pin`), and gives the WAV's
+  bytes. The Pronunciation page is built on them
+  (next section).
+
+## Settings -> Studio chooses the engine and holds the models
+
+Settings has a Studio group of three pages: Narration, Pronunciation and
+Word timing. Settings never makes a
+billed call: its one network call to a server is listing models, which is
+free, and the only sample is Kokoro's, made on this Mac.
+
+- **Narration** (`/settings/narration`, the section "Narration voice") edits the `voice` row. **Engine** is a bordered list
+  of two rows, "Kokoro (built in)" and "TTS server", each with a radio dot
+  and a status line (Kokoro: whether it runs now or after its download, or
+  the download's percentage; server: its URL and model, or "No server
+  set"). A whole row picks its engine. Nothing is chosen until the user
+  picks (the app never preselects an engine), and with none chosen a
+  warning says Studio can't narrate. Only the chosen engine's fields show,
+  then Speed (a slider, 0.5 to 2.0 in 0.05 steps), which both share.
+  Switching engine keeps the other's fields stored; Voice is one field for
+  both.
+  - **Kokoro**: the packs' row, "Model and pronunciation pack", with each
+    pack's size (Model 92 MB, Pronunciation 9 MB) and one "Download model
+    and pronunciation pack" for both, then a percentage, a progress bar and
+    Cancel, or Delete behind a confirmation, as Word timing's row has;
+    deleting it leaves the voices. Beneath it the **Voices** table
+    (`voices/`, in `SyncHistoryTable`'s grammar): a row for each of the 20
+    voices in catalogue order, with the columns Voice (its name, marked "In
+    use" when it is the `voice` row's), Accent (American, female), Grade
+    (Kokoro's, A to F), Size (510 KB) and Status (Downloaded, Not
+    downloaded, or the percentage with a progress bar under the row), then
+    **Sample** and Download (Cancel while it downloads, Delete once it is
+    on disk). A voice deletes at once, except the one in use, which asks
+    first. The header counts "N of 20 downloaded" and has **Download all**,
+    which downloads the missing voices one after another (Cancel stops at
+    the voice in flight; a failure stops the rest and shows on its row).
+    Sample plays a fixed sentence in that voice at the slider's speed, one
+    clip at a time across the table; it is disabled until the model and
+    pronunciation pack and that voice are on disk, shows "Making…" while
+    the clip is made (a few seconds: the model loads each time) and Stop
+    while it plays. Download and Delete work before the packs are there. Then a
+    Voice select listing only the downloaded voices ("Heart · American,
+    female"); a stored voice that is not downloaded (deleted since, or set
+    for the server) stays in it, flagged under the field. With none
+    downloaded the hint suggests the starters, Heart and Michael. The credit
+    line follows.
+  - **TTS server**: Server URL, Model and Voice (typed: the OpenAI API
+    cannot list voices), and the note that API keys are not supported. "List
+    models" calls `studio_voice_models` with the URL as typed: `GET
+    <base>/v1/models`, the `data[].id`s in the server's order, with only
+    ureq's connect timeout (`studio::tts::list_models`). A non-empty list
+    turns the Model field into a select (the stored model stays in it when
+    the server does not list it); an empty list or a failure leaves the text
+    field, with the reason inline. Editing the URL drops the list. A server
+    has no sample button: it could bill.
+
+  A text field saves on blur or Enter, a select or the slider on change;
+  each save sends the whole row to `studio_set_voice_settings`, which trims
+  it, unsets blanks, normalises the URL (`tts::normalise_base`), refuses a
+  speed that is not a positive number, and answers with what it stored. A
+  refusal shows under its row.
+- **Pronunciation** (`/settings/pronunciation`, `components/settings/voice/pronunciations/`) lists
+  the review's items, newest first, under a one-line hint. It loads on
+  mount and again whenever the window regains focus, since the CLI adds
+  items while the page is open; with none it says "No words waiting for
+  review." A row shows the word and its suggested reading, the sentence
+  muted with the word picked out, and `<subject or Library> · <video> ·
+  scene <id>`. On the right, **Original** and **Suggestion** play the
+  sentence read each way (`studio_pronunciation_sample`; "Making…" while
+  Kokoro makes it, a click again stops). One clip plays at a time across
+  the section (`useClipPlayer`, which the voice sample also uses; blob URLs
+  revoked at the end, on Stop and when the page goes). Beneath, three
+  verdicts: **Suggestion correct** and **Pronunciation is fine** decide,
+  and the row gives way to a muted line saying which lexicon it went into
+  and that it applies when the video is next narrated, until the next
+  reload; **Suggestion wrong** opens "How is it said? (optional)", a text
+  field with Send and Cancel (Enter and Escape). A wrong row stays listed,
+  muted, with its samples and "Sent back to the agent" and the student's
+  note in place of the verdicts, until the agent's next suggestion replaces
+  it as pending. A row's buttons wait while its request runs, and a failed
+  request or sample shows in red on the row.
+- **Word timing** (`/settings/word-timing`) is the aligner model's row, like a Local Whisper model:
   "wav2vec2 base (English)", its 378 MB size and status, Download (then a
   percentage, a progress bar and Cancel) or Delete behind a confirmation,
-  and the credit line. `studio_aligner_status` gives `{ status: missing |
-  downloading | present, bytes }` from the disk alone;
-  `studio_aligner_download` resolves when the model is on disk, rejects
-  `cancelled` on `studio_aligner_cancel`, and emits
-  `studio-aligner-progress` `{ phase: downloading | complete | cancelled |
-  error, received, total, error? }` about every 150 ms;
-  `studio_aligner_delete` returns the bytes freed. A download started on an
-  earlier visit shows at 0 % until its next event.
+  and the credit line.
+
+All three downloads run the same way (`commands/progress.rs`;
+`usePackDownload` and `PackDownloadRow` on the page, `useKokoroVoices` for
+the voices). The status commands read the disk alone:
+`studio_aligner_status` gives `{ status: missing | downloading | present,
+bytes }`, and `studio_voice_packs_status` gives the same for the model and
+pronunciation pack together (present only when both are) plus `packs: [{
+id, status, bytes }]`. `studio_voices_status` (`commands/voice_files.rs`)
+gives the 20 voices in catalogue order, `[{ id, name, accent, gender,
+grade, bytes, status }]`. The download commands (`studio_aligner_download`,
+`studio_voice_packs_download`, `studio_voice_download(id)`) resolve when
+the files are on disk, reject `cancelled` on the matching cancel command
+(`studio_aligner_cancel`, `studio_voice_packs_cancel`,
+`studio_voice_cancel(id)`), and emit `studio-aligner-progress`,
+`studio-voice-progress` or `studio-voice-file-progress` `{ id?, phase:
+downloading | complete | cancelled | error, received, total, error? }`
+about every 150 ms; the voice event carries the voice's `id`, and the
+packs' counts bytes over both. The delete commands stop a download and
+return the bytes freed; the packs' leaves every voice, and
+`studio_voice_delete(id)` leaves everything else. An id outside the
+catalogue is refused by name. A download started on an earlier visit shows
+at 0 % until its next event.
+
+`studio_voice_sample(voice, speed, text?)` (`commands/kokoro.rs`) checks the
+voice id and speed as narrate does, makes a `KokoroSpeaker` reading the
+global library's lexicon, synthesises `text` or a fixed spoken-form
+sentence, and returns the 24 kHz WAV's bytes; the speaker, its reader and
+its model session are dropped on return. The page plays them from a blob
+URL (`useVoiceSample`), released on Stop, at the clip's end, or when the
+page goes. Measured on a debug build: about 6.5 s of audio in 3.6 to 4.5 s,
+model load included.
 
 There is no narrate command in the app yet: narration runs from `oculus
 studio narrate`.
@@ -547,12 +1016,13 @@ studio narrate`.
 ## Four primitives and a closed set of style keys
 
 `Box`, `Text`, `Image` and `Path` are the host elements, `Morph` holds
-two layouts of one place (see "Magic move") and `Math` is LaTeX that
-becomes primitives before layout (see "Math"); `Stack` (a column) and `Row`
+two layouts of one place (see "Magic move"), `Math` is LaTeX that
+becomes primitives before layout (see "Math") and the overlays are drawn
+from keyed nodes after it (see "Overlays"); `Stack` (a column) and `Row`
 are `Box` with `gap`, `align`, `justify` and `wrap` shorthands. Elements take
 only `style`, `key`, children, `src` on `Image`, `d`, `viewBox`, `fill`,
-`stroke` and `trim` on `Path`, `p` on `Morph`, and `tex` and `display` on
-`Math`.
+`stroke` and `trim` on `Path`, `p`, `lag`, `fade` and `ease` on `Morph`,
+and `tex` and `display` on `Math`.
 
 - `flexDirection` defaults to `row`, as in CSS. Use `Stack` for a column.
 - `Text` children must be strings or numbers; to mix styles put several
@@ -560,7 +1030,10 @@ only `style`, `key`, children, `src` on `Image`, `d`, `viewBox`, `fill`,
   with `alignItems: "baseline"` lines texts of different sizes (and `Math`)
   up on it.
 - `Image src` is relative to `assets/`. A missing or undecodable file is an
-  error, never a placeholder. Decoded images are cached per renderer.
+  error, never a placeholder. Decoded images are cached per renderer. A
+  `src` starting `starter:` is an image bundled in the crate
+  (`images::BUNDLED`, files in `app/studio-core/library/assets/`), so a
+  starter's examples render with no assets folder.
 - Style keys are `STYLE_KEYS` in `app/studio-core/src/scene/style.rs`: size
   and min/max, flex, `gap`, `padding`/`margin` (`n`, `[v, h]` or four
   sides), `position` with `left`/`top`/`right`/`bottom`, `fill`, `radius`,
@@ -627,7 +1100,8 @@ own maths), so a formula looks as it does in the app. `display` (default
   does. `style.color` (default the theme's text colour) inks every piece;
   `\color{…}` and `\textcolor{…}{…}` take a theme colour's name
   (`\color{accent}`) or a hex colour, and a CSS colour name is an error
-  listing the theme's. The other text keys are ignored, so a `theme.type`
+  listing the theme's. What `\phantom` hides (KaTeX's `transparent`) takes
+  its space and draws no piece. The other text keys are ignored, so a `theme.type`
   token can be spread in; `width`, `height`, their min and max, `padding`,
   `border`, the flex container keys, `textAlign`, `reveal` and `objectFit`
   are errors (wrap the Math in a Box to size or pad it). Placement and
@@ -635,9 +1109,18 @@ own maths), so a formula looks as it does in the app. `display` (default
   Box.
 - **Keys** make a `<Morph>` between two formulas move term by term, as
   manim's TransformMatchingTex does. Every piece is keyed `<prefix>/<term>`.
-  A term is its character and, from its second appearance, `#n` (`x`,
-  `x#2`; KaTeX's minus is `−`), `frac` for a fraction bar, `sqrt` for a
-  root sign, a box side `box`, and KaTeX's path name for other SVG.
+  A term is its label: its character (KaTeX's minus is `−`), `frac` for a
+  fraction bar, `sqrt` for a root sign, a box side `box`, and KaTeX's path
+  name for other SVG; then `^` or `_` for each script it sits in,
+  outermost first (a superscript, a limit above an operator and a root's
+  index are `^`; a subscript and a limit below are `_`); then, from the
+  term's second appearance, `#n`. So `x^2 - 5x` is `x`, `2^`, `−`, `5`,
+  `x#2`, and `x_{i_0}` ends in `0__`: the exponent of `x^2` never flies
+  into the `2` of `(x - 2)`, and the nth baseline `x` meets the nth.
+  Fraction terms keep their level (no mark), so a numerator `a` meets a
+  baseline `a` when both sides are multiplied out. A script's key is not
+  covered by its base's as an overlay target (`eq/4^` is not under
+  `eq/4`).
   `\k{name}{…}` (a macro over `\htmlData{k=name}`, with trust on) names a
   group: its pieces are `name`, `name.1`, `name.2`, … in reading order, the
   innermost group winning. Reading order is the tree's, with each vlist
@@ -661,6 +1144,24 @@ own maths), so a formula looks as it does in the app. `display` (default
 - **Cache.** Each renderer keeps typeset formulas by source and display
   mode (up to 512, then it starts over), so a formula is typeset once, not
   every frame.
+- **Write** (`<Write at dur lag stroke>`, manim's Write; `math/write.rs`)
+  writes every Math inside it on: each piece's outline is stroked on (a
+  `trim` of its outline, `stroke` em wide, default 0.025, in its fill
+  colour, round caps) over the first half of its run, then its fill fades
+  in as the stroke fades over the second; a rule wipes on from the left and
+  a stroked path (`\cancel`) draws on. `at` is seconds, writing the whole
+  formula, or `{ group: seconds }` naming `\k` groups, each cued on its own
+  word (`at={{ lhs: word("two to the fourth"), minus: word("minus") }}`); a
+  piece in no listed group writes with the nearest listed group before it
+  in reading order, else with the first, and a group lists the pieces of
+  the groups inside it too. `dur` (a number or `{ group: seconds }`,
+  default `theme.motion.duration.slow`) is each group's run; inside a group
+  pieces go one after another in reading order, `lag` apart (default
+  manim's `min(4 / (n + 1), 0.2)`). Before its cue a piece is invisible but
+  keeps its place. The prelude sends each group's linear progress and Rust
+  places the pieces, since only it knows them. A name that is not a group
+  of the formula is an error listing its groups. Text cannot be written
+  (its glyphs are a shaped run, not outlines); `\text{…}` inside a Math can.
 - `Math` is JS's own `Math` object: the JSX factory knows it by identity,
   so `Math.max` and the seeded `Math.random` are untouched. `studio.d.ts`
   types `<Math>` through a call signature merged into the `Math` interface.
@@ -713,6 +1214,18 @@ carries the element's TSX line.
   text's space is taken from the start. Settled units draw in the normal
   glyph run; only units in flight draw on their own.
   `revealProgress(t, at, dur, easing?)` feeds `progress`.
+- `<Steps at dur ease lag fade>` holds N states of one place (children,
+  or render props), a derivation rewritten in place. It is a `<Morph>`
+  between the pair the time picks: before `at[0]` the first state shows,
+  and transition k (state k to k + 1) runs from `at[k]` for `dur` (default
+  `theme.motion.duration.base`), cut short by the next cue so it always
+  finishes; so each cue is continuous, the Morph at `p = 1` and the next at
+  `p = 0` showing the same state. `p` goes in linearly and `ease` (default
+  easeInOutCubic) shapes each piece's own run, so `lag` staggers eased
+  pieces. Pairs are morphed one at a time: a key in states 0 and 2 but not
+  in 1 fades out over the first transition and back in, at its state-2
+  place, over the second. A Steps inside a Morph is a nested Morph, an
+  error.
 - `<Arrow points curve progress head stroke>` strokes through `points`
   (frame px; `curve` 0 is straight segments, otherwise a Catmull-Rom curve)
   up to `progress`, with a head (`head` px, default 4.5 × the stroke width,
@@ -723,19 +1236,20 @@ carries the element's TSX line.
   placed by `__studioPathEnd`, a native that measures arc length as `trim`
   does (`paint/path/trim.rs`), so the two cannot drift apart. It is two
   absolute, full-frame Paths with the frame as viewBox, so its parent must
-  fill the frame.
+  fill the frame. With `from` and `to` instead of `points` it is an overlay
+  (see "Overlays").
 
 ## Transitions play over the incoming scene's head
 
 A scene after the first comes in through a transition: `{ kind, dur,
-easing, direction, morphColor }`, where `kind` is `cut`, `dissolve`, `push`, `wipe`,
+easing, direction, morphColor, lag, fade }`, where `kind` is `cut`, `dissolve`, `push`, `wipe`,
 `zoom` or `magic`, `dur` is seconds, `easing` is a theme easing name, a
 prelude easing (`linear`, `easeOutCubic`, `easeInOutCubic`) or `[x1, y1,
 x2, y2]`, and `direction` (`left`, `right`, `up`, `down`) is where the
 incoming scene comes from for `push` and `wipe` (`left` pushes the old scene
-out to the left). `morphColor` is under "Magic move". `video.json`'s
-`motion` block takes `transition`, `magicMove`, `morphColor` and
-`motionBlur`.
+out to the left). `morphColor`, `lag` and `fade` are under "Magic move"; they act only on
+a magic move. `video.json`'s `motion` block takes `transition`,
+`magicMove`, `morphColor` and `motionBlur`.
 
 - **Timing.** It plays over `[0, dur)` of the incoming scene B, with the
   outgoing scene A held at its last moment (the left limit of its length,
@@ -744,6 +1258,10 @@ out to the left). `morphColor` is under "Magic move". `video.json`'s
   easing(t / dur)`. Each frame calls both components, each in its own fresh
   context, so a transition frame is seekable like any other. A's logs come
   first, prefixed `scene N:`.
+  A frame loads A's component only while the transition covers it; when A
+  has no component file, B is drawn alone, as after a cut, so a scene can
+  be checked before the scene before it is built. Lint still reports the
+  missing file, and a full render fails on A's own frames.
 - **Cascade, field by field:** the scene's `transition`, then `video.json`'s
   `motion.transition`, then the theme's `motion.transition`, then dissolve,
   0.7 s, easeInOutCubic, left. The bundled theme ships exactly that.
@@ -785,7 +1303,11 @@ at `p = 0`, B at `p = 1`) and returns one, which paint draws like any other.
   the union of their stops (a colour is a flat gradient, no fill a clear
   one) and blend stop by stop, the angle turning the short way, so nothing
   is cross-faded. A side without a border or shadow grows it from zero width
-  or fades it in.
+  or fades it in. A pair is drawn under B's ancestors, so when its A
+  ancestors' opacity differs from what B's give it at `p = 0` (a `3` in a
+  table row still at opacity 0, keyed to a formula elsewhere), it starts
+  at its effective opacity in A (its own times its A ancestors') and
+  blends to its own in B; it can never show more than its B ancestors do.
 - **Colour** (fills, gradient stops, borders, shadows, text and strokes)
   blends in OKLab with alpha premultiplied, along the path the `morphColor`
   motion token picks. `oklch`, the default, is polar between two saturated
@@ -797,13 +1319,34 @@ at `p = 0`, B at `p = 1`) and returns one, which paint draws like any other.
   `motion.morphColor`, over the theme's; an in-scene `<Morph>` uses the
   video's, else the theme's. An unknown value is an error naming its level,
   like the other motion values.
-- **Unmatched** A nodes fade out over `p` 0 to 0.4 and unmatched B nodes in
-  over 0.4 to 1 (easeInOutCubic), at their own tree's place, carried by
-  their nearest matched ancestor's move. A new or removed box that holds
-  matched nodes fades its own fill, border and shadow only, so what moves
-  through it stays fully visible. The output follows B's paint order, each
-  unmatched A node just before its nearest following matched sibling, else
-  last.
+- **Clocks** (`morph/clock.rs`). Every node runs on its own progress. A
+  scope's leaves (childless nodes that paint) are numbered in reading
+  order: A's in tree order, then B's arrivals in theirs, a matched B leaf
+  taking its partner's number; for a Math that is its key order. A node's
+  window spans the numbers below it (a pair's, both sides'). With `lag`
+  (0 to 1, manim's `lag_ratio`) piece i starts `i · lag` piece-runs in and
+  the whole takes `(n - 1) · lag + 1` of them; a container runs from its
+  first piece's start to its last's end. Each window's linear progress
+  then goes through the scope's `ease`. Without lag every window is `p`.
+- **Unmatched** nodes fade by `fade` (`morph/fade.rs`, easeInOutCubic on
+  their own progress). `overlap`, the default, fades A's out over 0 to 0.6
+  and B's in over 0.4 to 1, so they cross while matched pieces move, and a
+  piece (a leaf: a glyph, a text) keeps its place beside its nearest
+  matched sibling (the one before it in its parent, else after; an empty
+  strut does not count) and moves with it, an arriving one where that
+  sibling's B place would put it and a leaving one where its A place would.
+  So the `4` of `2^4` leaves riding on its `2`, and `(2^2 + 1)` slides in
+  behind the `1` instead of waiting at its end place over the gliding
+  terms, as TransformMatchingTex reads. `sequential` fades out over 0 to
+  0.4 and in over 0.4 to 1, in place, never together. Everything is also
+  carried by its nearest matched ancestor's move. A new or removed box that
+  holds matched nodes fades its own fill, border and shadow only, so what
+  moves through it stays fully visible. The output follows B's paint
+  order, each unmatched A node just before its nearest following matched
+  sibling, else last.
+- **Overshoot.** `p` may pass 0 or 1 (a spring `ease`): rects, radius and
+  transforms follow it; opacity, blur, insets, colours, content swaps and
+  fades stop at the ends.
 - **Content.** The same string in the same family and line count re-shapes
   at the interpolated size, weight, line height and letter spacing, broken
   at the interpolated width (no bitmap scaling). Different strings or line
@@ -813,14 +1356,134 @@ at `p = 0`, B at `p = 1`) and returns one, which paint draws like any other.
   same path data morphs viewBox, fill, stroke and trim, different data swaps
   in halves.
 
-`<Morph p={...}>{a}{b}</Morph>` uses the same engine inside one scene, which
-also gives FLIP-style layout animation. The tree lays out twice, once with
+`<Morph p={...} lag fade ease>{a}{b}</Morph>` uses the same engine inside
+one scene, which also gives FLIP-style layout animation. `ease` is a
+function, cubic-bezier points or a theme easing name, sampled by the
+prelude into a 65-point table so each piece eases on its own clock; with
+`lag`, pass a linear `p` and an `ease` (an eased `p` would be cut into
+slices, each piece stopping at speed). `Steps` does this for you. A magic
+move between scenes takes `lag` and `fade` from its transition cascade
+(scene, `video.json`, theme; default 0 and overlap), with the
+transition's `easing` as each piece's `ease`. The tree lays out twice, once with
 every Morph replaced by its first child and once by its second, and the two
 layouts morph: inside each Morph at its own `p`, matching by key within that
 Morph; outside every Morph, nodes match by tree path and move at the first
-Morph's `p`, so siblings that shift because a Morph changes size glide too.
-`p` is clamped to 0 to 1. A Morph takes exactly two elements, and a Morph
-inside another is an error for now.
+Morph's eased `p` (no lag), so siblings that shift because a Morph changes
+size glide too. A Morph takes exactly two elements, and a Morph inside
+another is an error for now.
+
+A shrink-to-corner is a Steps whose last state lays the same Math key out
+smaller, absolutely placed in a corner: its glyph Paths keep their path
+data, so each rect glides and scales and the outline scales with it.
+
+## Overlays are drawn on the finished tree
+
+`Brace`, `Surround`, `Underline`, `Indicate` and an `Arrow` with `from`
+and `to` point at terms (`src/overlay/`, `prelude/overlays.js`). Each is
+an `overlay` host node, absolutely placed so it takes no space (a Brace's
+label is its child, laid out where it sits). After layout and after any
+morph has blended the tree, `overlay::resolve` finds each target's box on
+the composed frame and draws, so an overlay follows its target while it
+moves in a Morph or Steps. Two overlays matched across a Morph lerp
+between their two targets' boxes.
+
+- **Targets.** A key or a key prefix: `eq/lhs` covers `eq/lhs`,
+  `eq/lhs.1`, … and `eq/lhs/…`, not `eq/lhs2`. The box is the union of the
+  outermost covered nodes (the Math box for `eq`), through every transform
+  above and on them, mapped into the overlay's parent's space; a fading
+  node counts by its opacity, so the box eases as terms fade in and out,
+  and an overlay whose target has faded out fades with it. A target no key
+  covers fails the frame naming the closest key. Defaults scale with the
+  target's em, the px per em of its Math pieces (or a Text's font size;
+  else its height / 1.2).
+- **Timing.** `progress` (0 to 1) draws it on; or `at` and `dur` (default
+  `theme.motion.duration.base`) with `ease` (default easeInOutCubic) give
+  it from `ctx.t`; with neither it is drawn.
+- `<Brace target side label gap size color>`: KaTeX's own brace
+  (`math/brace.rs`: the three `\overbrace`/`\underbrace` SVG slices, at
+  least 1.6 em wide) along `side` (`below`, the default, `above`, `left`,
+  `right`), 0.12 em off, its thickness 0.548 of its em (`size`, default
+  the target's), text-coloured. It grows from its centre with `progress`
+  and its label fades in over the second half, 0.15 em beyond it. A
+  string label is `theme.type.body` text scaled about its centre to 0.7 of
+  the target's em, as manim's brace labels sit beside their formula (it is
+  laid out before the em is known, so `overlay/draw.rs` scales it); an
+  element label keeps its own size.
+- `<Surround target pad radius width color>`: a rounded rectangle 0.2 em
+  out with 0.12 em corners, stroked 0.045 em in the accent, drawn on
+  clockwise from its top left.
+- `<Underline target gap width color>`: a line 0.1 em under the target,
+  drawn on from the left.
+- `<Indicate target scale color at dur>` changes its targets themselves:
+  over its run (`dur` default `theme.motion.duration.slow`) they scale to
+  `scale` (1.2) about their joint centre and flash to `color` (the accent)
+  and back, along easeInOutCubic there and back. It runs before the other
+  overlays, so they measure the pulsed boxes.
+- `<Arrow from to bend head gap stroke>`: each end a key or a point in its
+  parent's px. A keyed end starts `gap` (0.1 em) off its target's box on
+  the line between the two ends' centres. `bend` (degrees) arcs the shaft
+  (one quadratic whose end tangents turn half the bend from the chord). It
+  draws on as the prelude's Arrow does, head and all (`overlay/arrow.rs`).
+- Across scenes an overlay is drawn in each scene before the magic move,
+  so its Paths morph like any others: a Surround or Underline whose box
+  changed, or a Brace of a new width, swaps in halves rather than gliding.
+
+## Captions are burned in from the word timings
+
+With video.json's `captions` on, `Renderer` ends every frame of a narrated
+scene with a caption: the phrase being said on a rounded plate, the word
+being said highlighted, the words still to come faded (`src/captions/`).
+`renderer.without_captions()` leaves them out; `strip` and the app's stills
+(thumbnails, the scene strip) use it, and `gallery`, lint and the
+playground draw through `Engine` and never have them. `oculus studio frame`
+shows them, so a builder can check what a frame will look like.
+
+- **Phrases** (`phrase.rs`) come from one scene's words (`cued_words`, the
+  script's spelling and punctuation as said, spoken forms such as "thirteen
+  mod twelve" included), never across scenes, so a scene's captions depend
+  on its own words and the theme only. A `[pause]`, a silence of 0.6 s or
+  more, and a sentence's end (`.`, `!`, `?`, `…`) always end a phrase.
+  Longer stretches take as many words as fit the lines, ending at the last
+  clause break (`,` `;` `:` a dash, or a 0.25 s silence) that leaves the
+  phrase at least half full, and give a word back rather than leave one
+  word alone at the end. A phrase is set in as few lines as hold it, cut so
+  the longest line is shortest (a tie puts more on the later line), then
+  each cut moves to the nearest clause break that keeps every line within
+  the limit and the longest at most 9 characters longer ("eleven, / wrap
+  round", not "eleven, wrap / round"); a word longer than a line gets a
+  phrase to itself.
+- **Timing** (`timing.rs`): a phrase shows 0.15 s before its first word
+  (never before the one before it hides) and stays until the next shows;
+  before a silence of 0.6 s or more, and at the scene's end, it hides 0.4 s
+  after its last word, so a long pause has no caption. The current word is
+  the last one that has started, lit until 0.3 s after it ends; before the
+  first word nothing is lit.
+- **Drawing** (`tree.rs`): the caption is an element tree like a
+  component's, laid out at the frame's size and painted as the last layer,
+  each word its own `Text` in a padded box so the highlight moves without
+  reflowing the line. Under motion blur every sub-frame takes the caption
+  of the frame's own time, so it is drawn once and sharp.
+- **Style** is the theme's `captions` block (`style.rs`). A theme without
+  one gets it filled from its own tokens, so it is in `ctx.theme` too:
+  `fontFamily` (default the theme's body font), `fontSize` 44 and
+  `fontWeight` 600, `color` (`onInk`), `upcoming` (0.6, the opacity of
+  words not yet said), `highlight` (`accent`), `highlightText`
+  (`onAccent`), `highlightStyle` (`pill`, a pill of the highlight behind
+  the word in `highlightText`, or `color`, the word in the highlight),
+  `plate` (`ink`, or `"none"`) at `plateOpacity` (0.8), `position`
+  (`bottom` or `top`), `margin` (0.05 of the height from that edge),
+  `maxChars` (42 a line) and `maxLines` (2). A colour is a `color` token's
+  name or a `#hex`. Sizes are px on a 1080 px short side and scale with the
+  frame's shorter side, so portrait text is as big as landscape; a line on
+  a frame narrower than 16:9 holds proportionally fewer characters (24 on
+  9:16, never under 12). Each value is checked when the theme loads, and a
+  bad one is named (``captions.position = `middle`: must be `bottom` or `top` ``).
+- **Subtitles.** `Project::caption_cues()` is the same phrases in video
+  seconds, captions on or not, and `captions::vtt` writes them as each
+  narrated render's `.vtt` (see "Rendering a video").
+- **Not linted.** Lint does not check what a scene draws under the caption
+  band; the skill tells builders to keep key content above the bottom
+  sixth of the frame when captions are on.
 
 ## Motion blur averages sub-frames, off unless asked
 
@@ -919,22 +1582,35 @@ centroid smoothly.
 
 ## Fonts and themes are bundled, never the system's
 
-- The fonts are Inter (variable: `opsz`, `wght`) and Manrope (variable:
-  `wght`), compiled in with their OFL licences beside them, and the twenty
-  KaTeX faces (`fonts/katex/`, OFL, from the katex npm package the app
+- The fonts are Inter (variable: `opsz`, `wght`), Manrope (variable:
+  `wght`) and JetBrains Mono (variable: `wght`, upright only), compiled in
+  with their OFL licences beside them, and the twenty KaTeX faces (`fonts/katex/`, OFL, from the katex npm package the app
   uses), which only `Math` reads; `Text` cannot name them. System fonts are
   never loaded, so a frame is the same on every machine; an unknown
   `fontFamily` is an error naming the bundled families.
-- A theme is tokens only: `color`, `font` (`heading` and `body` families),
-  `type` (style fragments to spread into `style`), `space`, `radius`,
+- Monospace is for code. JetBrains Mono's advance is 0.6 em, so a column
+  of characters is a fixed number of px; the typesetter turns off its `calt`
+  feature (ligatures), so `<=` and `!=` show as typed (`layout/text.rs`).
+  Numbers, even in a table, take `fontVariantNumeric: "tabular-nums"`, not
+  the mono face.
+- A theme is tokens only: `color`, `font` (`heading`, `body` and `mono`
+  families), `type` (style fragments to spread into `style`; the bundled
+  themes have `display`, `h1`, `h2`, `h3`, `body`, `label`, `caption` and
+  `code`, the monospace fragment, 28 px), `space`, `radius`,
   `motion` (`duration`, `easing` as cubic-bezier points, `spring` presets,
   and optionally `transition`, `magicMove`, `morphColor` and `motionBlur`,
   the bottom of the motion cascade; the bundled theme sets `morphColor:
-  "oklch"` and `motionBlur: "finals"`) and `narration` (`lead` and `tail`,
-  non-negative seconds; see "Narration"). Components read it as
+  "oklch"` and `motionBlur: "finals"`), `narration` (`lead` and `tail`,
+  non-negative seconds; see "Narration") and `captions` (how burned-in
+  captions look; see "Captions are burned in from the word timings").
+  Components read it as
   `ctx.theme` and it is frozen.
 - `color.bg` is the canvas under every frame, `color.text` the colour and
   `font.body` the family of `Text` that sets none.
+- `font.mono` and `type.code` are optional in a theme file: a file without
+  them gets `JetBrains Mono` and the bundled `code` fragment before it is
+  validated (`theme/schema.rs`, `fill_defaults`), so a theme written before
+  the face existed still loads, and a component can always read them.
 - The bundled `default` theme is neutral greys with the app's indigo
   `#5e6ad2` accent, Manrope headings and Inter body.
 
@@ -1000,6 +1676,18 @@ with no `hold`) is reported and not rendered. It collects every problem
 with its scene, scene id and component instead of stopping at the first;
 an error is reported once even if several renders hit it.
 
+Each `LintIssue` has a level: `Error` (everything below unless it says
+otherwise; any error makes `oculus studio lint` exit 1), `Warning` (how a
+scene looks over time, below) or `Note`. Notes carry a noun and a short
+form (`group`) so the CLI prints a scene's repeats as one line; warnings
+print one per line in full, since their quoted words say where to fix
+them. `LintReport::is_clean` counts errors only. `Project::lint_scene(i)`
+lints scene `i` alone: it renders that scene and the one before it (for the
+transition's middle) and keeps only scene `i`'s issues, its component's
+own (tokens, props, examples) and the video's `morphColor` and
+`motionBlur`; a component that fails to load is reported at scene `i`
+even when the scene before uses it too.
+
 Lint also reads the source and declared props of each component a scene
 uses (`project/lint/tokens.rs`, `project/lint/props.rs`). Each problem is an
 error at the literal's `file.tsx:line:col`:
@@ -1021,13 +1709,29 @@ error at the literal's `file.tsx:line:col`:
   theme.color.accent (nearest: accent, accentStrong, muted)``.
 - **Font families.** A bundled family's name as a whole string, or any string
   after `fontFamily:`: ``font family `Manrope` is a literal; use
-  theme.font.heading``.
-- **Style numbers.** A number that is a direct value of a `style` object, or
-  an element of an array there (`padding: [0, 16]`), and equals a theme
-  `space` or `radius` entry: ``style value 24 equals theme.space.m; use
-  theme.space.m``. Space is searched before radius, so 16 names `space.s`
-  when `radius.m` is also 16. Numbers inside nested objects (`shadow`,
-  `border`, `fill`), negative numbers and every other number are allowed.
+  theme.font.heading`` (`JetBrains Mono` names `theme.font.mono`).
+- **Style numbers.** A number that is a length in a `style` object and
+  equals a theme `space` or `radius` entry: ``style value 24 equals
+  theme.space.m; use theme.space.m``. A length is the value of a length
+  key (`width`, `height`, the `min`/`max` sizes, `gap`, `padding`,
+  `margin`, `left`, `top`, `right`, `bottom`, `radius`, `blur`,
+  `translateX`, `translateY`, `fontSize`, `letterSpacing`): the value
+  itself, a branch of it (an array element as in `padding: [0, 16]`, a
+  ternary's arm, a side of `||`, `??` or `&&`) or a term added or
+  subtracted (`space.s + 4`). Space is searched before radius, so 16 names
+  `space.s` when `radius.m` is also 16. Unitless keys (`opacity`, `scale`,
+  `rotate`, `flexGrow`, `flexShrink`, `fontWeight`, `lineHeight`,
+  `transformOrigin`, `clipInset`) are never checked, so `opacity:
+  clamp(pop * 4, 0, 1)` passes, and neither is a factor (`width: 24 * s`),
+  a side of a comparison, a call's argument, a number inside a nested
+  object (`shadow`, `border`, `fill`, `reveal`), or a negative number
+  (`project/lint/tokens/style.rs`).
+
+One more check is a note, not an error (`mono_note`): a component whose
+name neither starts nor ends with `Code` that reads `theme.font.mono` or
+`theme.type.code` gets ``theme.font.mono is used outside a Code component;
+monospace is for code, and numbers take fontVariantNumeric:
+"tabular-nums"`` at the first place, grouped as `monospace outside code`.
 
 The check reads the TSX with a scanner, not a parser: comments are skipped,
 strings and template literals are read as strings (a literal inside a
@@ -1046,32 +1750,131 @@ For a narrated video lint also reports, each naming the scene id:
   symbols such as `×`, `÷`, `±`, `√`, `∑`, `∫`, `∈`, `≤`, `≠`, `≈`, Greek
   letters, any other symbol, and dotted abbreviations (`e.g.`, `i.e.`,
   `etc.`, `U.S.`), each with what to write instead (`` say `%` as
-  `percent` ``). Letters and `, . ; : ! ? ' " - — ( )` pass, and `*` or `_`
-  inside a word is emphasis. The rules are in
+  `percent` ``). Letters and `, . ; : ! ? ' " - — ( )` pass, `*` or `_`
+  inside a word is emphasis, and `[pause]` markers pass. The rules are in
   `app/studio-core/src/project/lint/spoken.rs`;
-- each word whose aligner confidence is below `LOW_CONFIDENCE` (-8.0,
-  measured on Kokoro, where clean words stayed above -4.83; re-check it for
-  another TTS engine), since a mangled word smears its neighbours' timing;
+- a malformed pause marker (kind `script`, with its line): ``[pause x]` is
+  not a pause; write `[pause]` for the theme's pause or `[pause 1.5]` for
+  seconds``, or that a pause is more than 0 and at most 5 seconds;
+- as a note, not an error, each word whose aligner confidence is below
+  `LOW_CONFIDENCE` (-8.0, measured on Kokoro, where clean words stayed
+  above -4.83; re-check it for another TTS engine), since a mangled word
+  smears its neighbours' timing;
 - each manifest gap: ``the audio has unscripted speech after `word` (heard
   "…")``, or ``before the first word``.
 
-All of these are errors: lint has no warning level, so any of them makes
-`oculus studio lint` exit 1.
+When the voice `narrate` would resolve (without flags) is Kokoro, lint
+also reads every section as `narrate` will (`studio::voice::lint`; the
+server engine has nothing to check):
+
+- the `g2p-en-us` pack missing, as one problem (kind `lint`) saying how to
+  download it;
+- a lexicon entry that is not valid (kind `lint`, naming the file and the
+  key; the student fixes the file);
+- a word with no phonemes, a `$`, or a sentence too long for Kokoro with
+  no comma to cut at (kind `script`, at the section's line).
+
+All of these but the unsure words are errors: any of them makes `oculus
+studio lint` exit 1. A voice that does not resolve is left to `narrate` to
+report. Each word Kokoro's guesser reads is a note: ``note: scene N `id`:
+script.md:<line>: check pronunciation: ...``, with the state of the word's
+suggestion when one is stored. Notes never change the exit code.
+
+### Look warnings: what a director would catch on a strip
+
+`crate::look` reads a scene's laid-out trees without painting them. Each
+scene that rendered cleanly is laid out alone (no transition) every 0.2 s
+and at each cue word's start, on worker threads (one `Engine` each, at most
+8, half the cores), and each tree is walked as paint composes it
+(`look/walk.rs`, which motion blur's `measure` shares): transforms,
+effective opacity, and ancestors' `clip` and `clipInset`. A node counts as
+shown when it paints something (fill, border, shadow, text, path, image),
+is above 5% effective opacity, and covers under 90% of the frame (a
+background). A path's box is its own outline as trimmed, stroke included,
+not the box it is fitted into. Shown nodes gather into entities: a key
+with its unkeyed descendants, a Math with all its pieces (the Box
+`math::build` makes, found by its zero-width strut), or a TSX line for
+nodes with no key near them. Every threshold is in `look/limits.rs`. A
+layout that throws mid-scene, which the renders at both ends miss, is an
+error naming its time.
+
+Each warning names the scene, the time span, the entity (its key, or
+`Box at Comp.tsx:line:col`) and the words said in that span:
+
+- **`off_frame`**: an entity more than 4 px past an edge, settled (moved
+  under 1 px) for two samples or more, after the transition in. Nodes
+  under a camera (a frame-filling ancestor with `scale`) are cropped on
+  purpose and skipped.
+- **`still`**: while the narration plays (`lead` to `lead + clip`), more
+  than 2.5 s where no entity's place (to the pixel), opacity (to 2%),
+  colours or shape changes, not counting the time inside `[pause]`
+  silences, which hold the picture on purpose; and nothing on screen by
+  0.5 s (``nothing is on screen until 3.2 s``, or ``nothing is ever on
+  screen``).
+- **`half_frame`**: for more than 3 s, everything shown sits in one half
+  of the frame (reaching at most 3% past the centre line) and is narrower
+  than half the frame; top and bottom too for a portrait video.
+- **`fragment`**: at the scene's last sample, once the last word is said
+  (and within its last 1.5 s), a Math showing at most 2 of its pieces and
+  under 25% of them (a stray `= .` left from a rewrite), or a node under 6
+  px both ways with nothing shown within 40 px.
+
+Calibration: on a 22-scene lecture video, a scene a reviewer judged good
+drew warnings only for its opening (a lone clock for 4 s, in the left half
+for 6.5 s); lint and its warnings take about 0.2 s a scene.
+
+### `beats` is the same samples as a timeline
+
+`SceneLook::beats` lists, per entity, when it appears, vanishes, moves
+(its centre more than 8 px), resizes (more than 8 px), recolours or is
+rewritten (its text, path, trim, reveal or a Math's shown pieces change),
+with 2-4 words said at that moment. A change over consecutive samples is
+one beat with a start and an end; an entity's changes that start together
+are one beat (`move+resize`); a change starting as it appears is part of
+the appear, which reports where it settles. The same beat at the same
+sample on keys that differ only in a trailing number shares a line
+(`d0-d3,d5`). A Math's rewrite lists the pieces it gains and loses
+(`+val -add`). Each `[pause]` is a beat of its own at its start, its
+length and the words before it: `  4.10  pause    1.0 s  "… lands on
+one."`.
 
 ## Rendering a video
 
-`render` (`app/src-tauri/src/studio/render/`) turns a video folder into an
-mp4: H.264, yuv420p, BT.709, 48 kHz AAC narration, `+faststart`. It never
-narrates and never touches the network: stale or missing narration fails
-with the `Narration` error before any frame renders.
+`render` (`app/src-tauri/src/studio/render/`) turns a video folder into
+one export preset's mp4: H.264, yuv420p, BT.709, 48 kHz AAC narration,
+`+faststart`. It never narrates and never
+touches the network: stale or missing narration fails with the `Narration`
+error before any frame renders.
 
-- **Two qualities.** `draft` renders at the scale that makes the frame 540
-  px high (never above 1) on the hardware encoder (`h264_videotoolbox -q:v
-  65`); `final` renders full size on `libx264 -preset medium -crf 18
-  -threads 8`. Motion blur follows the `motionBlur` token for the purpose
-  (`Draft` or `Final`): with the bundled `finals`, only `final` blurs. An
-  odd output side is an error naming the size and scale, since yuv420p
-  needs even sides; nothing is padded.
+- **Presets** (`preset.rs`), each written to `<dir>/renders/<name>.mp4`:
+
+  | Preset | Writes |
+  | --- | --- |
+  | `draft` | mp4, 540 px on the shorter side (never upscaled), on the fast encoder |
+  | `final` | mp4 at the video's size, crf 18 |
+  | `small` | mp4, 720 px on the shorter side, crf 23 |
+
+  Motion blur follows the `motionBlur` token for the purpose: `draft` is
+  `Draft`, every other preset `Final`, so with the bundled `finals` only
+  `draft` is sharp. An odd output side is an error naming the size and
+  scale, since yuv420p needs even sides (nothing is padded), and so is a
+  side over 8192 px. Portrait and square are a different video size, not a
+  preset.
+- **Encoders** (`toolkit.rs`). Before anything renders, the ffmpeg is asked
+  once per binary and process for its `-encoders`, `-decoders` and
+  `-demuxers`. A preset needs the `rawvideo` demuxer and decoder and
+  the `concat` demuxer; narration needs the `wav` demuxer, the `pcm_s16le`
+  decoder and the `aac` encoder. A missing one fails at once, naming it
+  ("this ffmpeg was built without the `concat` demuxer, ..."). `draft`
+  takes the first of `h264_videotoolbox -q:v 65`, `h264_mf` (Windows Media
+  Foundation, at 0.1 bits a pixel a frame) and `libx264 -preset veryfast
+  -crf 23 -threads 8`; the others take the first of `libx264 -preset medium
+  -crf <18|23> -threads 8`, `h264_mf` (0.3 or 0.15 bits a pixel, `-rate_control
+  u_vbr`) and `h264_videotoolbox` (`-q:v` 80 or 65). The chosen encoder
+  and its arguments are part of every segment's key. macOS's ffmpeg has
+  VideoToolbox and libx264; the Windows LGPL build has only `h264_mf` (see
+  [windows.md](./windows.md)). The hardware encoders can soften the
+  gradients' dither, which x264 at crf 18 keeps.
 - **Colour.** Frames go to ffmpeg as raw RGBA on stdin (`-f rawvideo
   -pix_fmt rgba -s WxH -r fps -i -`), converted with `-vf
   scale=out_color_matrix=bt709:out_range=tv -pix_fmt yuv420p` and tagged
@@ -1085,7 +1888,8 @@ with the `Narration` error before any frame renders.
   file under `components/` and `assets/`, the render settings (quality,
   scale, size, fps, blur, filter, codec and tag arguments) and
   `STUDIO_RENDER_BUILD`, which `app/src-tauri/build.rs` hashes from
-  studio-core's `src/`, `fonts/` and `themes/`, the KaTeX port's `src/`,
+  studio-core's `src/`, `fonts/`, `themes/` and `library/assets/` (the
+  bundled `starter:` images), the KaTeX port's `src/`,
   `data/` and `build.rs` (`app/math-core/katex/`), `src/studio/render/` and
   `app/src-tauri/Cargo.lock` (the versions of vello_cpu, parley, taffy and
   the rest), so a renderer, font or dependency change in development never
@@ -1100,13 +1904,13 @@ with the `Narration` error before any frame renders.
   current segment's ffmpeg, one process per segment. The earliest failing
   frame stops the render with `StudioError::Frame` (its time and scene).
   `--threads` bounds only these renderers. The encoder runs beside them on
-  its own threads: `final`'s x264 always on 8 (see "Two qualities"), so a
+  its own threads: x264 always on 8 (see "Encoders"), so a
   `--final --threads 3` render was measured at 553% CPU. The fixed count
   keeps x264's memory known and its output, and so the segment cache, the
   same at any `--threads`.
 - **Joining.** The segments are joined by the concat demuxer as a stream
   copy (`-f concat -safe 0 -c:v copy`, absolute paths in
-  `.cache/concat-<quality>.txt`). x264's B-frames do not drop or repeat a
+  `.cache/concat-<preset>.txt`). x264's B-frames do not drop or repeat a
   frame at the joins: the joined file decodes (`-f framemd5`) to each
   segment's frames in turn, and a render that reused cached segments
   decodes to the same frames as a cold one.
@@ -1117,11 +1921,21 @@ with the `Narration` error before any frame renders.
   `.cache/narration-<key>.wav` (keyed by the clips and their offsets) and
   encoded with `-c:a aac -b:a 160k`. A video without narration has no audio
   stream.
-- **Output.** `<dir>/renders/draft.mp4` or `final.mp4` (`-o` for another
-  path). Segments, the track and the output are written as `.part` and
-  renamed. After a render, `.cache/renders.json` records what that quality
-  used, and segments and tracks neither quality's last render used, and
-  any `.part`, are deleted.
+- **Output.** `Preset::default_out` (`-o` for another path). A narrated
+  video's render also writes its captions as WebVTT beside the mp4, the
+  same name with `.vtt` (`renders/draft.vtt`), whether or not they are
+  burned in, for the player's CC. Segments, the track and the output are
+  written as `.part` and renamed. After a render, `.cache/renders.json`
+  records, under the preset's name, the segments and track it used and the
+  file it wrote; segments and tracks no preset's last render used, and any
+  `.part`, are deleted. A record of a preset since removed is dropped with
+  them.
+- **Status** (`status.rs`, `render::exports`). For each preset: the file
+  at its default path, if any, its mtime, `current` when the file is there
+  and the record a render would write now (the segment keys, track and
+  file, planned without rendering) equals the recorded one, and `problem`
+  when the preset cannot render now (stale narration, an encoder ffmpeg
+  lacks, a size too large).
 - **Failure and cancel.** ffmpeg's non-zero exit is an error quoting its
   last stderr lines. Cancel (an `&AtomicBool`, checked before every frame
   and while joining) kills ffmpeg, deletes the partial segment and returns
@@ -1129,19 +1943,19 @@ with the `Narration` error before any frame renders.
 - **Progress.** A sync `&mut dyn FnMut(Progress)`: `Planned` (segments,
   cached, frames to render, threads), `Segment`, `Frame` (frame of frames
   and frames a second), `Done` per segment in video order, `Muxing`.
-- **From the app.** `studio_render(dir, quality)` (`"draft"` or `"final"`,
-  to `<dir>/renders/<quality>.mp4`, half the cores) runs `render` on a
+- **From the app.** `studio_render(dir, preset)` (a preset's name, to its
+  default path, half the cores) runs `render` on a
   blocking thread, finding ffmpeg like the CLI does plus the app's
   resources. It resolves to the report (`--json`'s `report`), or `null`
   when cancelled; it rejects with the failure's message. One render per
   folder (a slug or a video's folder; any other folder is refused, see "The
-  Studio page's commands"): `render::RENDERS` maps each canonical folder to its quality and
+  Studio page's commands"): `render::RENDERS` maps each canonical folder to its preset and
   an `Arc<AtomicBool>` cancel flag, and a second start for the same folder
   is refused at once ("a draft render of <dir> is already running"), with
   no event. A guard frees the folder however the render ends, before the
   last event. `studio_render_cancel(dir)` sets the flag (false when none
-  runs). Each step is a `studio-render-progress` event `{ dir, phase, ...
-  }`, `dir` as given: `planning` at the start and again with `plan:
+  runs). Each step is a `studio-render-progress` event `{ dir, preset,
+  phase, ... }`, `dir` as given: `planning` at the start and again with `plan:
   {segments, cached, frames, threads}`; `rendering` with `{segment, of,
   scene, frame, frames, fps}` (1-based segment and frame), at most one per
   100 ms besides each segment's first and last frame; `muxing`; then
@@ -1171,11 +1985,14 @@ on disk now; nothing is cached but thumbnails.
 | Command | Does |
 | --- | --- |
 | `studio_videos(subject?)` | `videos::list_in` plus `title` and `threadId`, newest change first (a video whose video.json does not load sorts last and carries `problem`) |
-| `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to `default`, which a subject's `themes/default.json` replaces through the cascade; `voice` is video.json's `voice` block (`{model?, voice?, speed?}`). The scaffold is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
-| `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `scenes` and `renders` |
+| `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to the subject's default theme (see "Libraries cascade"); `voice` is video.json's `voice` block (`{engine?, model?, voice?, speed?}`, `engine` being `kokoro` or `server`). The scaffold has `"captions": true`. It is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
+| `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `captions`, `scenes` and `renders` |
+| `studio_render_captions(slug, preset)` | the WebVTT text beside that preset's render (`renders/<preset>.vtt`), for the player's CC |
+| `studio_set_captions(slug, on)` | sets video.json's `captions`: the `true`/`false` literal is replaced in the text, or the key is added before `scenes` on a line of its own, so the rest of the file keeps its formatting (`videos::set_captions`) |
+| `studio_exports(dir)` | each preset's status (`render::exports`, see "Rendering a video") as `{preset, path, modified, current, problem}`; it asks ffmpeg for its toolkit, renders nothing and makes no network call |
 | `studio_frame(slug, at, width)` | a PNG `width` px wide (1 to 4096), the layout of the full-size frame, as bytes through `tauri::ipc::Response` |
 | `studio_thumbnail(slug)` | the video's cached thumbnail PNG |
-| `studio_render`, `studio_render_cancel` | see "Rendering a video"; they take a slug or a video's folder and refuse any other |
+| `studio_render`, `studio_render_cancel`, `studio_exports` | see "Rendering a video"; they take a slug or a video's folder and refuse any other |
 
 - **The detail's voice** is video.json's `voice.voice`, else Settings ->
   Voice's voice, else null. **Scenes** are `{id, component, start, duration,
@@ -1183,8 +2000,10 @@ on disk now; nothing is cached but thumbnails.
   has none). `start` and `duration` are seconds from `Project::timeline`, so
   they are known once every scene has a length (a hold, or narration that
   matches the script) and null for every scene until then, stale narration
-  included. **Renders** are the `draft.mp4` and `final.mp4` that exist, with
-  their absolute path and mtime in Unix seconds.
+  included. **Renders** are each preset's file that exists (`draft.mp4`,
+  `final.mp4`, `small.mp4`), as `{preset, path, modified, captions}` with
+  the absolute path, mtime in Unix seconds, and whether the render's `.vtt`
+  is beside it.
 - **A frame is of the video as narrated.** `at` is `{scene, t}` (seconds into
   a scene, counting from 0) or `{global}`. Stale or missing narration makes
   `Renderer::new` fail, and the command rejects with studio-core's message
@@ -1212,13 +2031,13 @@ on disk now; nothing is cached but thumbnails.
 
 A video made in the app is made by an ordinary harness thread, so it is also
 in Chat. `studio_videos(slug PK, thread_id, length_secs, created_at)`
-(migration 45) links them; `thread_id` references `harness_threads` `ON
+(migration 46) links them; `thread_id` references `harness_threads` `ON
 DELETE SET NULL` (deleting the thread keeps the video), is unique, and the
 row is written only by `db::store::link_studio_video`. It lives in the
 database, not in video.json, which is `deny_unknown_fields` and writable by
 the agent.
 
-`harness_send` takes `SendOptions.studio` (`{slug, lengthSecs?}`; the TS
+`harness_send` takes `SendOptions.studio` (`{slug, lengthSecs?}`, no `lengthSecs` for an Auto length; the TS
 `format` is not read, since the brief takes the format from video.json's
 size). When the send creates the thread it checks the folder exists
 (`video_in`), creates the thread, then links it; a link that fails deletes
@@ -1226,16 +2045,18 @@ the thread again. Every send reads the link back (`StudioBrief::read`) and
 the thread's brief gets a "The video being made" section, rebuilt like the
 lecture's: the folder (absolute) and that the app made it, the format
 (landscape or portrait, from the size), the theme, the subject and its
-library, the length target, and the instruction to use this skill, lint and
-narrate, render a draft and say it is ready, and ask before the final. The
-agent is told not to run `oculus studio new`. See
+library, the length target when there is one, and the instruction to direct the video with
+this skill (its step 1, the folder, done), render a draft and say it is
+ready, and ask before the final. The agent is told not to run `oculus
+studio new`. See
 [harness.md](./harness.md#a-studio-thread-carries-its-video).
 
 ### The playground's commands
 
 `studio::commands::components` and `studio::commands::themes` serve the
-Components page and the style chip (`app/src/lib/studio/components.ts` and
-`themes.ts` are the typed wrappers; JSON is camelCase). They read and write
+Components and Themes pages and the style chip
+(`app/src/lib/studio/components.ts` and `themes.ts` are the typed wrappers;
+JSON is camelCase). They read and write
 only the two libraries, `<data>/studio/library/` and
 `<data>/studio/subjects/<CODE>/`: a command takes a component name, a level
 (`subject` or `global`) and a subject code, never a path
@@ -1247,13 +2068,20 @@ there. Nothing is cached.
 
 | Command | Does |
 | --- | --- |
-| `studio_themes(subject?)` | one row per theme name: `{name, level, swatch, tokens, problem}` |
-| `studio_components(subject?)` | one row per component name: `{name, level, kind, props, examples, problem}` |
+| `studio_themes(subject?)` | one row per theme name: `{name, level, swatch, tokens, problem, shadows}` |
+| `studio_theme_source(name, subject?)` | `{level, text}` from the level that wins; a bundled theme's text as compiled in |
+| `studio_theme_write(name, level, subject?, text)` | writes once the text parses as a theme; returns `{level, text}` |
+| `studio_theme_delete(name, level, subject?)` | removes a library theme, snapshotting it first |
+| `studio_theme_history(name, level, subject?)`, `studio_theme_restore(name, level, subject?, id)` | as for components, over `<name>.<unix-ms>.json` |
+| `studio_theme_defaults(subject?)` | `{global, subject, effective}`: each library's `defaultTheme` as written, and the theme a new video there takes |
+| `studio_theme_set_default(level, subject?, name?)` | writes (or with no name clears) that library's `defaultTheme`; returns the defaults |
+| `studio_components(subject?)` | one row per component name: `{name, level, kind, props, examples, problem, shadows, starter}` |
 | `studio_component_source(name, subject?)` | `{level, text}` from the nearest level that has it |
-| `studio_component_frame(name, subject?, theme, props?, example?, t, width, duration?)` | a PNG `width` px wide (1 to 4096), as bytes through `tauri::ipc::Response` |
+| `studio_component_frame(name, subject?, theme, themeText?, props?, example?, t, width, duration?)` | a PNG `width` px wide (1 to 4096), as bytes through `tauri::ipc::Response` |
 | `studio_component_write(name, level, subject?, text)` | writes once the text loads; returns `{level, text}` |
 | `studio_component_history(name, level, subject?)` | `[{id, savedAt}]`, newest first |
 | `studio_component_restore(name, level, subject?, id)` | writes snapshot `id` back; returns `{level, text}` |
+| `studio_component_delete(name, subject)` | removes the subject's own version, snapshotting it first |
 
 - **Themes** are the bundled names, `themes/*.json` in the global library and
   in the subject's, resolved as a video resolves its theme: the subject's
@@ -1262,7 +2090,9 @@ there. Nothing is cached.
   `tokens` is the parsed theme file and `swatch` up to four CSS colours from
   its `color` tokens in the order `bg`, `text`, `accent`, `surface`. A file
   that does not parse is a row with `problem` (the `Theme::parse` message),
-  no `tokens` and an empty `swatch`, not a failed call.
+  no `tokens` and an empty `swatch`, not a failed call. `shadows` is the
+  level a library file replaces under the same name (a subject's own
+  version of a global theme is `global`), else null.
 - **Components** are read through the cascade without a video: the subject's
   `components/` over the global one, `level` being the one that won. Every
   one is loaded in a single engine for its `props` (the builders' own JSON
@@ -1271,8 +2101,12 @@ there. Nothing is cached.
   `examples` (name to props, in declaration order); a component that does
   not load is a row with `problem`, an empty `props` and no examples.
   `PropSpec` serialises to that JSON in studio-core. `kind` is `shell` when
-  the name ends in `Shell`, else `component`: nothing in a component's code
-  says which, so the name does.
+  the name ends in `Shell` (a library's own; no starter is one), else
+  `component`: nothing in a component's code
+  says which, so the name does. `shadows` is true for a subject's file that
+  replaces a global component, the subject's own version. `starter` is true
+  when the name is in the starter set (`STARTER_COMPONENTS`), whichever level
+  holds the file and whether it was edited.
 - **A frame** draws the component alone in a 1920x1080 frame scaled to
   `width`, in the theme `theme` names (resolved through the same levels).
   `t` is seconds into the component and must be in `[0, duration)`;
@@ -1284,7 +2118,9 @@ there. Nothing is cached.
   narration, so `word()` finds no cues. It takes a render slot
   (`videos/slot.rs`) and builds one `Engine` for the call, since QuickJS is
   not Send: a 480 px frame took about 3 ms and a 1920 px one about 6 ms
-  (a starter component, test build).
+  (a starter component, test build). With `themeText` the theme is that
+  text instead (at most 256 KB), parsed as a write would parse it, so the
+  Themes page draws an unsaved edit; `theme` then only names it in errors.
 - **A write** loads the text as the component first (a fresh engine; at most
   512 KB), so a text with a syntax error, no default export or a bad
   `props` is refused with the engine's message and the file, its history and
@@ -1298,6 +2134,110 @@ there. Nothing is cached.
   the same number. `restore` takes an id from that list, loads the old text
   (it must still load) and writes it through the same path, so the text it
   replaces is snapshotted as the newest entry and an Undo can be undone.
+  `.history` is shared by both kinds of file; a component's snapshots are
+  `.tsx` and a theme's `.json`, so one name never sees the other's.
+- **A theme write** checks the text with `Theme::parse` (at most 256 KB) and
+  goes through the same snapshotting write. A bundled theme's name
+  (`default`) is refused: a library file of that name would replace it for
+  every video, so the page saves a copy under a new name instead.
+- **Removing** (`studio_theme_delete` at either level,
+  `studio_component_delete` only at the subject level, the global library
+  being what a subject falls back to) copies the file to `.history` first
+  (`studio_core::remove_library_file`), so restore brings it back.
+
+## Slides crop a library PDF page
+
+A scene shows "page 12, Figure 3" as the real thing: `oculus studio slide`
+crops a region of a library PDF page into the video's `assets/`, once, and
+the `Slide` starter animates it in. Rendering never opens a PDF.
+
+- **Picking the region.** FILE resolves as for `oculus read` (an Office
+  document means its converted PDF). `--find TEXT` matches, in any case,
+  the text of each block in the parse record's `blocks`
+  ([parsing.md](./parsing.md#blocks-where-each-rendered-item-sits)), on
+  `--page` or every page: one figure (`image`, `chart`, `table`) among the
+  matches wins; else one text block next to a figure is its caption and
+  both are taken (the nearer neighbour by vertical gap); else one match is
+  taken alone. No match, or a tie at the tier that decided, is an error
+  listing each candidate as `page P block I (kind): text`. `--block I,J`
+  takes blocks by index, `--bbox x0,y0,x1,y1` any box. Boxes are the
+  record's convention, fractions of the rendered page (crop box, rotated)
+  from its top left; a MinerU figure box can leave out a caption printed
+  under it, so the crop is worth a look. `--pad` (default 0.02 of the
+  page's shorter side, the same in points on every side) grows the union
+  of the boxes, clamped to the page; under 2 pt a side is refused.
+- **No edge slices ink** (`snap.rs`, unless `--exact`). A probe render of
+  the region with 6% of the page round it marks each row and column that
+  holds ink (a pixel more than 40 a channel from the background, the
+  commonest colour on the probe's border). Then each edge: where the
+  blocks' box itself cuts ink (ink on both sides of it, past a row of
+  anti-aliasing), it moves out to the next blank row within 6% of the page
+  and then checks its pad as below, else pulls back to the middle of the
+  blank before the ink, else stays and is a `cut`. Where ink lies in the
+  pad, it moves out over that ink to the next blank row when it is a
+  figure's caption or label (the pick holds a figure, chart or table, the
+  ink starts within 34 pt, about two lines, and the nearest block to it
+  along that axis is a picked one, so another block's text never joins),
+  else pulls back halfway to it. After moving out it keeps as much pad as
+  fits before the next ink. Top and bottom are decided over the padded
+  columns, then left and right over the rows decided. The sidecar's
+  `edges` says what each did (`pad`, `trim`, `extend`, `cut`); an edge
+  left at its pad keeps the exact padded value. `--bbox` follows the same
+  rule, with no picked blocks, so only a cut line moves its edge out.
+- **`oculus studio blocks FILE [--page N] [--png OUT]`** lists each page's
+  size in points and its blocks: index, kind, box, and the block's text on
+  one line (`blocks::plain`: an image's `![caption](...)` as its caption,
+  tags and heading marks dropped, cut to 80 characters). `--png` writes
+  the page 1600 px wide with each box outlined (figures indigo, the rest
+  grey) and its index in a tab, drawn with a 3x5 bitmap font
+  (`preview.rs`). `--json` gives `{path, png, pages: [{page, width,
+  height, blocks: [{index, kind, bbox, text}]}]}`.
+- **Rendering.** `slides::make` runs hayro on a thread with the
+  renderer's stack (`RENDER_STACK`), every call guarded, each raster under
+  a render-budget reservation (the viewer's lane). Only the region is
+  interpreted, into a context its size (`hayro::render_into` with a
+  translate and scale before the page's own transform), so a small figure
+  at 2x never rasterises the whole page at that scale. The crop's default
+  width is twice what fills the video's frame (`video.json`'s size), at
+  most 6 megapixels; `--width` asks for one and is refused past 8192 px a
+  side or 6 megapixels. The whole page is also rendered fitted to the
+  frame at 1x, for the zoom. PNGs are RGB, opaque on white, encoded at
+  best compression: the same inputs write the same bytes, so the segment
+  cache, which hashes `assets/`, keeps its segments.
+- **Files.** `assets/slides/<name>.png`, `<name>.page.png` and
+  `<name>.json`. The name is `--name` (letters, digits, `-`, `_`) or made
+  from the page and the ask (`p12-figure-3`, `p12-b3-4`, `p12-region`). A
+  name already holding a crop of another PDF is refused unless
+  `--replace`. The sidecar (`sidecar::Sidecar`) holds `source` (the PDF's
+  data-relative path), `sha256` of its bytes, `page`, `pageSize` (points),
+  `bbox` (the crop as made), `select` (`find`, `blocks` or `bbox`), `pad`,
+  `exact` when set, `edges`,
+  `width` when one was asked, `image` and `pageImage` (`src`, `width`,
+  `height`), `blocks` (each block at least half inside the crop: index,
+  kind, box as fractions of the crop, text) and `props`, the `Slide`
+  props for the crop (`src`, `aspect`, `page`, `pageAspect`, `bbox`, and a
+  `source` label from the file name), which the command also prints.
+- **Lint.** `oculus studio lint` reads every sidecar under
+  `assets/slides/` and warns when the PDF at `source` no longer has the
+  sidecar's sha256, naming the scene whose props hold the crop's `src`
+  (else the video) and the `oculus studio slide` call that makes it again.
+  A PDF it cannot read is not checked (`slides::lint`).
+- **`Slide`** (`library/components/Slide.tsx`) draws the crop on a paper
+  card as large as the frame allows, a caption beside a crop that would
+  leave a third of the width empty and below a wide one, the source label
+  under it. With `page`, `pageAspect` and `bbox` it opens on the whole page
+  fitted to the frame and zooms into the crop: the card's rect goes from
+  the crop's place on the page to its own (size by powers, centre
+  linearly), the page drawn round it fading out while the card's edge and
+  shadow grow, so the crop is seamless at first. Without them the card
+  comes in with an `Enter` preset. `highlight` boxes, in fractions of the
+  crop (the sidecar's `blocks` give them), draw on as a rounded outline
+  with a tint at `highlightAt`. The sandbox reads no files, so the props
+  carry the aspect ratios and boxes. Keys are under `id`, so two Slides in
+  a `Steps` morph one crop's card into the other's. Its examples use
+  `starter:slide-figure.png` and `starter:slide-page.png`, a crop of a
+  lecture slide the app's tests build with lopdf; the ignored test
+  `slides::tests::make::write_the_starter_sample` remakes them.
 
 ## `oculus studio` renders and lints from the terminal
 
@@ -1314,31 +2254,86 @@ there. Nothing is cached.
   gives `{path, times, width, height, tile: {width, height}, cols, ms,
   threads}`.
 - `frame` and `strip` take `--motion-blur` (a 180° shutter at the video's
-  fps); `frame` then reports the sub-frames it averaged.
+  fps); `frame` then reports the sub-frames it averaged. `-o` is relative
+  to the working directory, and its folder is made.
+- `oculus studio brief <DIR> --scene <ID|N>` prints one scene builder's
+  whole input (`app/src-tauri/src/studio/brief/`): the scene's index,
+  component and props and the folder; for the scenes before and after it,
+  their component, whether it resolves yet, and their storyboard entries'
+  `Carries in:` and `Hands on:`; its own `storyboard.md` entry verbatim
+  (from a `### <id>` heading, then the end of the line, a space or `(`, to
+  the next `#` to `###` heading or `---` line, outside code fences), less
+  its `Narration:` paragraph (to a blank line, a table row or a heading)
+  when the words below are printed; the
+  `notes/` paths the entry names, else every file in `notes/`; its length
+  and words, one line per sentence, each as `start word` at the time
+  `word()` returns (`Project::cued_words`), with each pause as `start
+  [pause 1.0 s]` after the word it follows at the time `pause()` returns
+  (`Project::cued_pauses`), or the narration error and the script text
+  (its `clip_text`); and its `lint --scene`, `beats`, `strip`, `frame` (at the
+  scene's middle) and `gallery` calls with absolute `-o` paths, naming the
+  video by slug when it is in the data directory.
+  `--json` gives the same as `{index, count, id, component, props, dir,
+  previous, next, storyboard, storyboard_missing, notes: {named, paths,
+  missing}, narration: {kind: silent|spoken|unavailable, ...}, commands}`.
 - `frame` and `strip` read `script.md` and the narration manifest; stale or
   missing narration stops them with the `Narration` error, while `lint`
   lists it with the rest.
 - `oculus studio narrate <DIR>` makes the narration (`--scene ID`,
-  `--force`, and `--server`, `--model`, `--voice`, `--speed` over the
-  video's and Settings' voice); `oculus studio tts` makes one clip; `oculus
-  studio aligner` manages the aligner model. See "Narration is made by
-  `oculus studio narrate`".
+  `--force`, and `--engine`, `--voice`, `--speed`, `--server`, `--model`
+  over the video's and Settings' voice); `oculus studio tts` makes one
+  clip; `oculus studio g2p` shows how Kokoro reads text; `oculus studio
+  pronounce suggest|list` puts a reading up for the student's review and
+  lists the waiting ones (see "The student reviews the agent's suggested
+  readings"); `oculus studio aligner` manages the aligner model. See
+  "Narration is made by `oculus studio narrate`".
+- `oculus studio voices` lists each Kokoro pack's status and size and each
+  of the 20 voices with its accent, gender, grade and status, marking the
+  one Settings -> Studio -> Narration names. `voices download` with no
+  argument fetches the model, the pronunciation pack and the starter
+  voices; `voices download ID...` or `--all` fetches only those voices; each
+  prints progress lines about every two seconds, one stream per download.
+  `voices delete` removes the model and pronunciation pack, and
+  `voices delete ID...` or `--all` those voices. An id outside the
+  catalogue fails, naming it. `--json` gives `{ dir, packs: [{ id, status,
+  bytes }], voices: [{ id, name, accent, gender, grade, bytes, status,
+  chosen }] }`, `{ dir, downloaded: [ids], seconds }` and `{ deleted_bytes
+  }`.
 - `oculus studio agents [--agent A]` prints, for each agent or one, the
   model and effort its `studio-research` and `studio-scene` subagents run
   on and the call that starts one (`--json`: `[{agent, roles: [{role, job,
   model, effort, spawn}]}]`). It reads only the settings; see
   [harness.md](./harness.md#subagents).
-- `oculus studio render <DIR>` writes an mp4 (`--draft`, the default, or
-  `--final`; `-o`, `--threads` for the frame renderers, not the encoder). It prints the plan, then per scene
-  `rendered` with its frames, seconds and frames a second, or `cached`,
-  then the path and a summary; `--json` gives `{dir, report: {path,
-  quality, width, height, fps, frames, duration, audio, threads, segments:
-  [{scene, id, outcome, frames, ms, fps}], pruned, ms}}`. See "Rendering a
-  video".
-- `oculus studio lint <DIR>` prints each problem and exits 1 if there is
-  any. With `--json` it prints the issues as an array of `{scene, id,
-  component, example, kind, message, loc}`; `scene` and `component` are
-  null for a script section no scene matches.
+- `oculus studio render <DIR>` writes one export preset's mp4:
+  `--preset draft|final|small`, with `--draft` (the
+  default) and `--final` for the first two; `-o`, `--threads` for the frame
+  renderers, not the encoder. It prints the plan, then per scene `rendered`
+  with its frames, seconds and frames a second, or `cached`, then the paths
+  written (the mp4, then its `.vtt`) and a summary; `--json`
+  gives `{dir, report: {path, preset, width, height, fps, frames, duration,
+  audio, threads, segments: [{scene, id, outcome, frames, ms, fps}],
+  sidecars, pruned, ms}}`. See "Rendering a video".
+- `oculus studio lint <DIR>` (`--scene <ID|N>` for `lint_scene`; the
+  voice checks are cut to that scene too) prints each error in full, one a
+  line, then the warnings, then the notes, and exits 1 if there is any
+  error. A scene's warnings or notes of one kind (`still span`, `unsure
+  word`, `guessed word`, ...) print as one line when there are several:
+  ``warning: scene 5 `mod` (ClockMod): 4 still spans: 0.9-7.7 s,
+  16.0-19.0 s, 27.8-32.8 s, …``. With no errors it ends `no errors` and the
+  counts, or `no problems`. With `--json` it prints one array: each issue
+  as `{level: "error"|"warning"|"note", scene, id, component, example,
+  kind, message, loc}` (`kind` is `off_frame`, `still`, `half_frame` or
+  `fragment` for a warning; `scene` and `component` null for a script
+  section no scene matches, or for a problem of the whole video, such as a
+  slide no scene shows whose PDF changed), then each
+  guessed word as `{level: "note", scene, id, line, kind: "guessed",
+  message, word, phonemes, guessed, review}`.
+- `oculus studio beats <DIR> --scene <ID|N>` prints the scene's timeline
+  (see "`beats` is the same samples as a timeline"), one beat a line as
+  `  6.20  move     d12-d14  → (1180,420)…(1180,660) over 0.8 s  "… stands
+  up"`, at most 80 lines and how many were cut; `--json` gives every beat
+  as `{index, id, component, length, beats: [{t, end, event, who, detail,
+  words}]}`.
 
 - `oculus studio gallery <DIR> <Component>` renders each example of a
   component as `<DIR>/out/gallery/<Component>-<example>.png` (`--out`),
@@ -1353,6 +2348,9 @@ there. Nothing is cached.
   `components promote` and `themes promote` copy a video's own file into a
   library, and `components seed [--reset]` copies the starter set into the
   global library.
+- `oculus studio slide <DIR> <FILE>` crops a region of a library PDF page
+  into the video's `assets/slides/`, and `oculus studio blocks <FILE>`
+  lists the blocks to pick it by (see "Slides crop a library PDF page").
 - `oculus studio new` and `list` make and list the videos in the data
   directory, and every command above takes a video's slug in place of its
   folder (see "Videos live in the data directory").
@@ -1417,11 +2415,36 @@ the `/v1/models` listing (parsing, 404, non-JSON, unreachable), the Settings
 row's validation (`studio::commands`),
 the voice resolution, the cache key and `narrate` with a stubbed speaker
 and aligner (caching, one-paragraph edits, per-scene writes, pruning,
-failures).
-`cargo test --lib studio::render` covers the render plan, segment keys and
-tree hashes, the audio placement, the reorder buffer and pruning, and,
-through the real ffmpeg (skipped without one), the join and cache check
-above, a narrated fixture's audio onset, cancel and a failing frame.
+failures). `studio::voice::g2p` matches every golden row (1030) on the
+trimmed dictionary; `studio::tts::kokoro` covers chunking, the vocabulary
+and pad refusals, silence, the WAV and the pack; `studio::voice::lint`
+covers the missing pack, a bad lexicon entry and the notes' lines;
+`studio::voice::review` covers the store (replace, list order, wrong,
+decide), the lexicon writer, finding a word and the notes' review state.
+Ignored
+tests run the real models: the full dictionary (`STUDIO_G2P_DATA`), the
+guesser's goldens and a real lint (`STUDIO_G2P_GUESSER`), and Kokoro's
+end-to-end narrate (`STUDIO_KOKORO`, `STUDIO_G2P_GUESSER`,
+`STUDIO_ALIGN_MODEL`), which prints its real-time factor and peak memory,
+and the review's two samples differing (`STUDIO_KOKORO`,
+`STUDIO_G2P_GUESSER`).
+`cargo test --lib studio::render` covers the presets' sizes and names,
+the encoder choice from canned `-encoders` lists (macOS's build, the
+Windows LGPL build before and after Studio's additions, VideoToolbox or
+x264 alone), the render plan, segment keys and tree hashes, the audio
+placement, the reorder buffer and pruning, and, through the real ffmpeg
+(each test skipped, saying why, without one or when it lacks the encoder,
+demuxer or libx264 the test needs), the join and cache check above, a
+narrated fixture's audio onset, cancel, a failing frame, and the exports'
+`.vtt` sidecar and `current` status, including captions turned on.
+`studio::videos` covers the captions edit of video.json.
+
+`tests/captions.rs` pins two captioned frames of the `captions` fixture
+(the `narrated` one with `captions` on: a word lit mid-phrase and late in
+it), that captions are off without the switch and on no silent scene, that
+a blurred frame's caption matches the sharp frame's, the fingerprint, and
+the subtitle cues. `src/captions/tests/` covers phrasing, timing, the style
+tokens and the VTT text.
 
 `tests/math.rs` pins a corpus of KaTeX constructs beside text labels on
 their baselines (`math-corpus`) and a Morph from `2^4 - 1` to

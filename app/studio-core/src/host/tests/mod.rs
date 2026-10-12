@@ -366,3 +366,4 @@ fn the_heap_does_not_grow_across_calls() {
 mod globals;
 mod motion;
 mod resolve;
+mod steps;

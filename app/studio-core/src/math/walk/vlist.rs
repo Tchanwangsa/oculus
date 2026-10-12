@@ -7,9 +7,10 @@
 //! by the inherited `text-align`, and a `width: 100%` element (a fraction
 //! bar, a root sign's tail) takes the whole width, so rows holding one are
 //! laid out again once the width is known. A second `vlist-r` only carries
-//! the depth and is skipped.
+//! the depth and is skipped. In a script holder's vlist each row but the
+//! base is a script, up or down (`Holder`).
 
-use super::{Ctx, Laid, css, inside};
+use super::{Ctx, Holder, Laid, css, inside};
 use katex::dom_tree::{DomSpan, HtmlDomNode};
 use katex::types::CssProperty;
 
@@ -42,8 +43,12 @@ pub fn layout<'a>(table: &'a DomSpan, cx: Ctx<'a>) -> Result<Laid<'a>, String> {
     else {
         return Ok(Laid::empty(0.0));
     };
+    // KaTeX's order is bottom to top: rows before the operator's are below it.
+    let base = (cx.holder == Holder::Limits)
+        .then(|| spans(&cell.children).position(is_base))
+        .flatten();
     let mut rows = Vec::new();
-    for span in spans(&cell.children) {
+    for (i, span) in spans(&cell.children).enumerate() {
         let mut rcx = inside(span, cx);
         rcx.avail = None;
         let size = rcx.size;
@@ -55,6 +60,11 @@ pub fn layout<'a>(table: &'a DomSpan, cx: Ctx<'a>) -> Result<Laid<'a>, String> {
             css::or_zero(&span.style, CssProperty::MarginLeft, size),
             css::or_zero(&span.style, CssProperty::MarginRight, size),
         );
+        rcx.script = match (cx.holder, base) {
+            (Holder::SupSub, _) => rcx.script.push(top + pstrut < 0.0),
+            (Holder::Limits, Some(b)) if i != b => rcx.script.push(i > b),
+            _ => rcx.script,
+        };
         let laid = line(span, rcx)?;
         rows.push(Row {
             span,
@@ -80,6 +90,12 @@ pub fn layout<'a>(table: &'a DomSpan, cx: Ctx<'a>) -> Result<Laid<'a>, String> {
     }
     out.fills = false;
     Ok(out)
+}
+
+/// The operator's row under limits: KaTeX wraps the base in a span with no
+/// class, and each limit is a styled group.
+fn is_base(row: &DomSpan) -> bool {
+    elems(row).any(|e| matches!(e, HtmlDomNode::DomSpan(s) if s.classes.iter().next().is_none()))
 }
 
 fn line<'a>(row: &'a DomSpan, cx: Ctx<'a>) -> Result<Laid<'a>, String> {

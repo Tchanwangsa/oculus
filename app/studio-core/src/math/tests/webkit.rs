@@ -103,7 +103,8 @@ fn ours(tex: &str) -> (f64, Vec<Placed>, Vec<Rect>) {
         match &it.shape {
             Shape::Glyph(g) => {
                 let s = r.height() / g.view.height();
-                let ch = it.key.split('#').next().unwrap().to_owned();
+                // A glyph's key is its character, then script marks and `#n`.
+                let ch = it.key.chars().next().unwrap().to_string();
                 glyphs.push((ch, r.x0 - g.view.x0 * s, r.y0 - g.view.y0 * s, s));
             }
             _ if it.key.starts_with("box") => {

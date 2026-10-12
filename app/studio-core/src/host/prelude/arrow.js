@@ -1,7 +1,8 @@
 // Arrow: a stroke through `points` (frame px) drawn up to `progress`, and a
 // head riding the drawn end, along the shaft's tangent there. Both are
 // absolute full-frame Paths with the frame as viewBox, so the parent must
-// fill the frame.
+// fill the frame. With `from` and `to` (keys or points) it is an overlay
+// drawn in Rust instead (overlays.js).
 const xy = (p) => `${p[0]} ${p[1]}`;
 const towards = (a, b) => {
   const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
@@ -50,6 +51,7 @@ const endTangent = (pts, from) => {
 };
 
 function Arrow(props, ctx) {
+  if (props.from !== undefined || props.to !== undefined) return keyedArrow(props, ctx);
   const { points, curve = 0, progress: p = 1, head, stroke = {}, style, key, children, __source, __self, ...rest } = props;
   onlyProps('Arrow', rest, 'points, curve, progress, head, stroke, style, key');
   if (children && children.length) throw new TypeError('<Arrow> takes no children');

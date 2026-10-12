@@ -2,8 +2,8 @@
 //! videos under `<app data>/studio/videos/`; every command that takes a DIR
 //! also takes a bare slug naming one of them. `frame`, `strip`, `lint` and
 //! `render` read a video folder on disk (no database, no network); `narrate`
-//! and `tts` call the TTS server, and `aligner` manages the word-timing
-//! model.
+//! and `tts` run Kokoro or call the TTS server, `g2p` shows how Kokoro reads
+//! text, and `voices` and `aligner` manage the downloaded models.
 
 use crate::*;
 
@@ -27,6 +27,20 @@ pub(crate) enum StudioAction {
     Render(StudioRenderArgs),
     Narrate(StudioNarrateArgs),
     Tts(StudioTtsArgs),
+    G2p(StudioG2pArgs),
+    /// List Kokoro's voices, or download or delete its packs (103 MB)
+    ///
+    /// The Kokoro engine narrates inside the app from two packs, both kept
+    /// in `<app data>/models/voice/`, downloaded on request, checked against
+    /// a pinned size and sha256 and never bundled: `voice-kokoro` (the int8
+    /// model and the voices `af_heart` and `am_michael`, 93 MB) and
+    /// `g2p-en-us` (misaki's US dictionary and the guesser that reads the
+    /// words it lacks, 9 MB). With no action it lists each pack's status
+    /// and each voice, marking the one Settings -> Voice names.
+    Voices {
+        #[command(subcommand)]
+        action: Option<StudioVoicesAction>,
+    },
     Agents(StudioAgentsArgs),
     /// Download, check or delete the narration aligner model (378 MB)
     ///
@@ -51,6 +65,18 @@ pub(crate) enum StudioAlignerAction {
     Delete,
 }
 
+#[derive(Subcommand)]
+pub(crate) enum StudioVoicesAction {
+    /// Each pack's status and size, and each voice and whether it is
+    /// downloaded (the default)
+    List,
+    /// Download both packs, printing progress; files already there are
+    /// kept
+    Download,
+    /// Delete both packs and any partial download
+    Delete,
+}
+
 impl StudioAction {
     /// The DIR this command reads, if it takes one, for slug resolution.
     pub(crate) fn dir_mut(&mut self) -> Option<&mut PathBuf> {
@@ -61,6 +87,7 @@ impl StudioAction {
             StudioAction::Gallery(a) => Some(&mut a.dir),
             StudioAction::Render(a) => Some(&mut a.dir),
             StudioAction::Narrate(a) => Some(&mut a.dir),
+            StudioAction::G2p(a) => a.video.as_mut(),
             StudioAction::Components { action } => match action {
                 StudioComponentsAction::List(a) => Some(&mut a.dir),
                 StudioComponentsAction::Show(a) => Some(&mut a.dir),
@@ -73,6 +100,7 @@ impl StudioAction {
             StudioAction::New(_)
             | StudioAction::List(_)
             | StudioAction::Tts(_)
+            | StudioAction::Voices { .. }
             | StudioAction::Agents(_)
             | StudioAction::Aligner { .. } => None,
         }
@@ -137,10 +165,15 @@ pub(crate) struct StudioListArgs {
     pub(crate) subject: Option<String>,
 }
 
-/// Which TTS server, model, voice and speed to use. Each flag overrides the
-/// video.json `voice` block, which overrides Settings -> Voice.
+/// Which engine, voice and speed to use, and the server and model for the
+/// server engine. Each flag overrides the video.json `voice` block, which
+/// overrides Settings -> Voice.
 #[derive(Args)]
 pub(crate) struct StudioVoiceArgs {
+    /// `kokoro` runs Kokoro inside the app (`oculus studio voices download`
+    /// fetches it); `server` asks an OpenAI-compatible TTS server
+    #[arg(long, value_enum, value_name = "ENGINE")]
+    pub(crate) engine: Option<StudioEngineArg>,
     /// An OpenAI-compatible TTS server, with or without a trailing `/v1`
     /// (e.g. http://127.0.0.1:8880). Keyless servers only
     #[arg(long, value_name = "URL")]
@@ -149,7 +182,8 @@ pub(crate) struct StudioVoiceArgs {
     /// on mlx-audio)
     #[arg(long, value_name = "MODEL")]
     pub(crate) model: Option<String>,
-    /// The voice (e.g. `af_heart`)
+    /// The voice (e.g. `af_heart`; Kokoro's are listed by `oculus studio
+    /// voices`)
     #[arg(long, value_name = "VOICE")]
     pub(crate) voice: Option<String>,
     /// Speaking rate; 1.0 is normal, 1.25 is a quarter faster
@@ -157,18 +191,31 @@ pub(crate) struct StudioVoiceArgs {
     pub(crate) speed: Option<f64>,
 }
 
+/// A narration engine
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub(crate) enum StudioEngineArg {
+    /// Kokoro, run inside the app
+    Kokoro,
+    /// An OpenAI-compatible TTS server
+    Server,
+}
+
 /// Synthesise and time a video's narration, writing narration/manifest.json
 ///
 /// Each scene with a `## <id>` section in `script.md` gets a clip: its
-/// section text is sent to the TTS server (`POST <server>/v1/audio/speech`,
+/// section text is spoken by Kokoro inside the app (`--engine kokoro`; read
+/// to phonemes through the lexicon, the dictionary and the guesser) or sent
+/// to a TTS server (`--engine server`, `POST <server>/v1/audio/speech`,
 /// WAV), the clip is saved as `narration/<key>.wav`, and its words are timed
 /// against the script with the aligner model (`oculus studio aligner
 /// download` fetches it once). The manifest then gives each narrated scene its
 /// length and its `word()` cues; `frame`, `strip` and `lint` read it.
 ///
-/// A clip's key hashes its text, the server, model, voice, speed and aligner
-/// model, so a run only requests scenes whose text or voice changed; the
-/// rest print `cached`. Scenes run one at a time in video order and the
+/// A clip's key hashes its text, the engine, the voice and speed, the
+/// server and model or Kokoro's model and the text's phonemes, and the
+/// aligner model, so a run only makes scenes whose text, voice or reading
+/// changed (a lexicon edit re-narrates the scenes it changes); the rest
+/// print `cached`. Scenes run one at a time in video order and the
 /// manifest is saved after each, so a failure keeps the scenes before it;
 /// the command then exits 1 naming the failed scene. At the end, entries
 /// for scenes no longer narrated and clips nothing names are deleted.
@@ -176,7 +223,10 @@ pub(crate) struct StudioVoiceArgs {
 /// Per scene it prints the id, `narrated` or `cached`, the clip's length,
 /// its word count, and as warnings the words the aligner was unsure of and
 /// any speech the script lacks (a mangled or added word: reword it, or
-/// listen). `lint` fails on the same words.
+/// listen). `lint` fails on the same words. With Kokoro, every word the
+/// guesser read is then a `note: check pronunciation` with its scene and
+/// script.md line: listen to it, try a lexicon entry with `oculus studio
+/// g2p`, and narrate again. Notes never change the exit code.
 ///
 ///     oculus studio narrate lectures/week-4
 ///
@@ -198,10 +248,11 @@ pub(crate) struct StudioNarrateArgs {
 
 /// Synthesise one clip of text to a WAV, to hear a voice
 ///
-/// Sends `TEXT` to the TTS server as `narrate` would and writes the WAV it
-/// returns, then prints its path and length. An empty, non-WAV or silent
-/// reply is an error (Kokoro answers an unknown voice with silence). Uses
-/// Settings -> Voice unless the flags say otherwise; no video is involved.
+/// Speaks `TEXT` as `narrate` would, with Kokoro or the TTS server, and
+/// writes the WAV, then prints its path and length. An empty, non-WAV or
+/// silent clip is an error (a Kokoro server answers an unknown voice with
+/// silence). Uses Settings -> Voice unless the flags say otherwise; no
+/// video is involved, so Kokoro reads only the global library's lexicon.
 ///
 ///     oculus studio tts "We follow the gradient downhill." --voice bf_emma -o /tmp/emma.wav
 #[derive(Args)]
@@ -214,6 +265,36 @@ pub(crate) struct StudioTtsArgs {
     pub(crate) out: PathBuf,
     #[command(flatten)]
     pub(crate) voice: StudioVoiceArgs,
+}
+
+/// Show how Kokoro reads text: each word's phonemes and who read it
+///
+/// Reads `TEXT` as `narrate --engine kokoro` would, without synthesising:
+/// each word with its phonemes and its source, `lexicon` (an entry in a
+/// lexicon.json), `dict` (misaki's US dictionary and its rules), `rule` (a
+/// heteronym's reading picked by its neighbours) or `guess` (the guesser,
+/// worth a listen), then the phoneme string Kokoro is given. The lexicon is
+/// the global library's (`<app data>/studio/library/lexicon.json`) with the
+/// subject's over it (`<app data>/studio/subjects/<CODE>/lexicon.json`):
+/// the subject is `--subject`, else the video's (`--video`, or the current
+/// folder when it holds a `video.json`). Needs the `g2p-en-us` pack
+/// (`oculus studio voices download`). A lexicon entry that is not valid
+/// fails, naming its file and key.
+///
+///     oculus studio g2p "Nesterov and RMSProp adapt the step size."
+///
+///     oculus studio g2p "Cauchy" --subject MAST20004
+#[derive(Args)]
+pub(crate) struct StudioG2pArgs {
+    /// The text, written as it is said
+    #[arg(value_name = "TEXT")]
+    pub(crate) text: String,
+    /// A video folder (or slug) whose subject's lexicon to read
+    #[arg(long, value_name = "DIR")]
+    pub(crate) video: Option<PathBuf>,
+    /// The subject whose lexicon to read, over the video's
+    #[arg(long, value_name = "CODE")]
+    pub(crate) subject: Option<String>,
 }
 
 /// Render one frame of a video to a PNG
@@ -332,9 +413,16 @@ pub(crate) struct StudioStripArgs {
 /// at its first and last moment. For a narrated video it also checks
 /// `script.md` (sections no scene matches, text not written as it is said)
 /// and the narration (missing or stale clips, words the aligner was unsure
-/// of, unscripted speech). Every problem is reported, not just the first,
-/// each with its scene, component and, where there is one, the TSX line.
-/// Exits 1 when there is any problem, so it can gate a render.
+/// of, unscripted speech). When the video narrates with Kokoro it also
+/// reads every section as `narrate` will: a missing `g2p-en-us` pack, a
+/// lexicon entry that is not valid, a word with no phonemes or a sentence
+/// too long for Kokoro is a problem, and each word the guesser read is a
+/// `note: check pronunciation` with its script.md line. Every problem is
+/// reported, not just the first, each with its scene, component and, where
+/// there is one, the TSX line. Exits 1 when there is any problem, so it can
+/// gate a render; notes never change the exit code. `--json` gives one
+/// entry per problem and per note, each with its `level` (`issue` or
+/// `note`).
 ///
 /// See `oculus studio frame --help` for what a video folder holds.
 #[derive(Args)]
@@ -357,9 +445,9 @@ pub(crate) struct StudioLintArgs {
 /// theme the same way. `--sheet` also writes all the stills as one contact
 /// sheet, `--cols` a row. Stills are named `<Component>-<example>.png`.
 ///
-///     oculus studio gallery lectures/week-4 Steps
+///     oculus studio gallery lectures/week-4 DotGrid
 ///
-///     oculus studio gallery lectures/week-4 Steps --subject COMP2011 --sheet --cols 2
+///     oculus studio gallery lectures/week-4 DotGrid --subject COMP2011 --sheet --cols 2
 #[derive(Args)]
 pub(crate) struct StudioGalleryArgs {
     /// The video folder, the one holding `video.json` (or its slug)
@@ -461,7 +549,7 @@ pub(crate) enum StudioLibraryArg {
 /// copy, which still wins for it. Check the component with `gallery` (and
 /// its scenes with `strip`) before promoting it.
 ///
-///     oculus studio components promote gradient-descent Steps --to subject
+///     oculus studio components promote gradient-descent Descent --to subject
 #[derive(Args)]
 pub(crate) struct StudioComponentsPromoteArgs {
     /// The video folder (or its slug)

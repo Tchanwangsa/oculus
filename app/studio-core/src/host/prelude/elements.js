@@ -3,7 +3,8 @@
 // component, which `h` defers so the resolver (resolve.js) can call it top-down
 // with its subtree's ctx. `<Math>` names JS's own Math object, so `h` knows it by
 // identity and Math.max and the rest stay as they are. The prelude files share one module scope, in this order:
-// elements, resolve, props, motion, time, presets, arrow, words, entry.
+// elements, resolve, props, motion, time, steps, write, presets, arrow, overlays, words,
+// entry.
 const g = globalThis;
 const define = (name, value) =>
   Object.defineProperty(g, name, { value, writable: false, enumerable: false, configurable: false });
@@ -12,7 +13,7 @@ const define = (name, value) =>
 const COMPONENT = Symbol('component');
 const SCOPE = Symbol('scope');
 
-const NAMES = { box: 'Box', text: 'Text', image: 'Image', path: 'Path', morph: 'Morph', math: 'Math' };
+const NAMES = { box: 'Box', text: 'Text', image: 'Image', path: 'Path', morph: 'Morph', math: 'Math', overlay: 'Overlay' };
 const MATH = g.Math;
 const elementName = (k) => NAMES[k] || String(k);
 const componentName = (fn) => (fn && fn.name) || 'component';
@@ -34,7 +35,7 @@ const ALLOWED = {
   text: ['style', 'key', 'children'],
   image: ['style', 'key', 'src'],
   path: ['style', 'key', 'd', 'viewBox', 'fill', 'stroke', 'trim'],
-  morph: ['p', 'children'],
+  morph: ['p', 'lag', 'fade', 'ease', 'children'],
   math: ['style', 'key', 'tex', 'display'],
 };
 const PATH_PROPS = ['viewBox', 'fill', 'stroke', 'trim'];
@@ -131,7 +132,8 @@ function h(type, props, ...children) {
     if (kids.length !== 2 || !kids.every(isElement)) {
       throw new TypeError(`<Morph> takes exactly two elements, the layout at p = 0 and the layout at p = 1, got ${kids.length === 2 ? kids.map(describe).join(' and ') : kids.length}`);
     }
-    node.p = clamp(props.p, 0, 1);
+    Object.assign(node, morphTiming('<Morph>', props));
+    node.p = props.p;
     node.children = kids;
   } else {
     for (const c of kids) {
@@ -143,6 +145,39 @@ function h(type, props, ...children) {
   }
   return node;
 }
+// A Morph's lag, fade and ease, checked. `ease` (a function, cubic-bezier
+// points or a theme easing name) is sampled into a table, since each piece
+// eases on its own clock in Rust.
+const EASE_SAMPLES = 64;
+const FADE_NAMES = ['overlap', 'sequential'];
+const morphTiming = (what, props) => {
+  const out = {};
+  if (props.lag !== undefined) {
+    if (typeof props.lag !== 'number' || !(props.lag >= 0 && props.lag <= 1)) {
+      throw new TypeError(`${what} lag must be a number from 0 to 1, got ${describe(props.lag)}`);
+    }
+    if (props.lag > 0) out.lag = props.lag;
+  }
+  if (props.fade !== undefined) {
+    if (!FADE_NAMES.includes(props.fade)) {
+      throw new TypeError(`${what} fade must be "overlap" or "sequential", got ${describe(props.fade)}`);
+    }
+    out.fade = props.fade;
+  }
+  if (props.ease !== undefined && props.ease !== null) {
+    const f = toEasing(props.ease, theme, linear, `${what} ease`);
+    const table = [];
+    for (let i = 0; i <= EASE_SAMPLES; i++) {
+      const v = f(i / EASE_SAMPLES);
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new TypeError(`${what} ease returned ${describe(v)} at ${i / EASE_SAMPLES}; it must return finite numbers`);
+      }
+      table.push(v);
+    }
+    out.ease = table;
+  }
+  return out;
+};
 define('__studio_h', h);
 define('Box', 'box');
 define('Text', 'text');

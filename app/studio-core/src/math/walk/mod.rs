@@ -9,6 +9,8 @@
 //! Pieces come out in reading order: tree order, except that a vlist's
 //! rows, which KaTeX lists bottom to top, are read top to bottom (a
 //! numerator before its denominator, a root sign before its radicand).
+//! Each piece knows the scripts it sits in (`Script`), so `keys` can tell a
+//! superscript 2 from a baseline one.
 
 mod classes;
 mod css;
@@ -29,13 +31,62 @@ pub struct Piece<'a> {
     /// What keys it outside a `\k` group: its character, `frac` for a
     /// fraction bar, `sqrt` for a root sign, and so on.
     pub label: String,
-    /// The innermost `\k` group it is in.
-    pub group: Option<&'a str>,
+    /// The `\k` groups it is in, innermost first.
+    pub groups: Groups<'a>,
     pub rect: Rect,
     pub shape: Shape,
     /// The CSS colour KaTeX gave it (`\color`), as written.
     pub colour: Option<&'a str>,
+    pub script: Script,
 }
+
+/// The scripts around a piece, outermost first: up (a superscript, a limit
+/// above, a root's index) or down (a subscript, a limit below). A fraction
+/// is not a script: its terms stay on their level, so a numerator `a`
+/// matches a baseline `a` after both sides are multiplied out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Script {
+    /// Bit i set: level i is down.
+    down: u16,
+    depth: u8,
+}
+
+impl Script {
+    /// Deeper than this, levels are not told apart.
+    const MAX: u8 = 16;
+
+    pub fn push(self, up: bool) -> Script {
+        if self.depth >= Script::MAX {
+            return self;
+        }
+        Script {
+            down: self.down | (u16::from(!up) << self.depth),
+            depth: self.depth + 1,
+        }
+    }
+
+    /// `^` per level up and `_` per level down, outermost first: `^`, `^_`.
+    pub fn suffix(self) -> String {
+        (0..self.depth)
+            .map(|i| if self.down >> i & 1 == 0 { '^' } else { '_' })
+            .collect()
+    }
+}
+
+/// A span whose vlist holds scripts: `msupsub` (beside the base, up when
+/// the row's baseline is above the base's) or `op-limits` (above and below
+/// an operator, which is the row KaTeX wraps in a class-less span).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Holder {
+    #[default]
+    None,
+    SupSub,
+    Limits,
+}
+
+/// `\k` groups around a piece, innermost first; past four deep the
+/// outermost are dropped.
+pub type Groups<'a> = [Option<&'a str>; 4];
 
 /// What an element inherits, and what its parent gives it.
 #[derive(Clone, Copy)]
@@ -46,12 +97,15 @@ pub struct Ctx<'a> {
     pub colour: Option<&'a str>,
     /// `text-align`: 0 left, 0.5 centre, 1 right.
     pub align: f64,
-    pub group: Option<&'a str>,
+    pub groups: Groups<'a>,
     /// The containing block's width, which `width: 100%` fills; `None`
     /// while a vlist is still measuring its rows.
     pub avail: Option<f64>,
     /// The family `.delim-sizeN > span` gives this element.
     pub family: Option<Family>,
+    pub script: Script,
+    /// What the next vlist's rows are, until a row is entered.
+    pub holder: Holder,
 }
 
 /// An element laid out: its advance and what it draws, relative to its
@@ -90,9 +144,11 @@ pub fn walk(root: &DomSpan) -> Result<(Formula, Vec<Piece<'_>>), String> {
         font: Font::MAIN,
         colour: None,
         align: 0.0,
-        group: None,
+        groups: [None; 4],
         avail: None,
         family: None,
+        script: Script::default(),
+        holder: Holder::None,
     };
     let laid = span(root, cx)?;
     let formula = Formula {
@@ -139,9 +195,26 @@ fn inside<'a>(s: &'a DomSpan, cx: Ctx<'a>) -> Ctx<'a> {
         font,
         colour: s.style.get(CssProperty::Color).or(cx.colour),
         align: classes::align(&s.classes).unwrap_or(cx.align),
-        group: s.attributes.get("data-k").map(String::as_str).or(cx.group),
+        groups: match s.attributes.get("data-k") {
+            Some(k) => [Some(k.as_str()), cx.groups[0], cx.groups[1], cx.groups[2]],
+            None => cx.groups,
+        },
         avail: cx.avail,
         family: classes::child_family(&s.classes),
+        script: if s.classes.contains("katex-root") {
+            cx.script.push(true)
+        } else {
+            cx.script
+        },
+        holder: if s.classes.contains("msupsub") {
+            Holder::SupSub
+        } else if s.classes.contains("op-limits") {
+            Holder::Limits
+        } else if s.classes.contains("vlist-t") {
+            cx.holder
+        } else {
+            Holder::None
+        },
     }
 }
 

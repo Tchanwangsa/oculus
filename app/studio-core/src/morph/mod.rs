@@ -3,24 +3,29 @@
 //! scenes (the `magic` transition) and inside one (`<Morph>`).
 //!
 //! Matched pairs (`matching`) blend per property (`blend`, `content`):
-//! rects, so children ride along, and paint styles, colours in OKLab.
-//! Unmatched A nodes fade out over p 0..0.4 and unmatched B nodes in over
-//! 0.4..1, each at its own tree's place, carried by its nearest matched
-//! ancestor's move. The output follows B's paint order, each unmatched A
-//! node just before its nearest following matched sibling (else last).
+//! rects, so children ride along, and paint styles, colours in OKLab. Each
+//! node runs on its own clock (`clock`): with `lag`, pieces start one after
+//! another in reading order. Unmatched nodes fade (`fade`) at their own
+//! tree's place, carried by their nearest matched ancestor's move and, with
+//! the overlap fade, by their nearest matched sibling's. A matched node is
+//! drawn under B's ancestors, so its opacity starts where its effective
+//! opacity in A was (its own times its A ancestors'). The output follows
+//! B's paint order, each unmatched A node just before its nearest following
+//! matched sibling (else last).
 
 mod blend;
+mod clock;
 mod colour;
 mod content;
+mod fade;
 mod flat;
 mod matching;
 
 pub use colour::MorphColor;
 pub use flat::duplicate_key;
 
-use crate::easing::in_out_cubic;
 use crate::layout::{LNode, Typeset};
-use crate::scene::Color;
+use crate::scene::{Color, Fade, Placed, Timing};
 use flat::Tree;
 use matching::{Matching, match_trees};
 use vello_cpu::kurbo::Vec2;
@@ -42,12 +47,19 @@ pub struct Ink {
     pub colour: MorphColor,
 }
 
-/// Whole trees at one `p` (a magic-move transition); Morph scopes in them
-/// are ignored.
-pub fn morph(a: LNode, b: LNode, p: f32, ts: &mut Typeset, ink: Ink) -> Result<LNode, MorphError> {
+/// Whole trees at one `p` and timing (a magic-move transition); Morph
+/// scopes in them are ignored.
+pub fn morph(
+    a: LNode,
+    b: LNode,
+    p: f32,
+    timing: &Timing,
+    ts: &mut Typeset,
+    ink: Ink,
+) -> Result<LNode, MorphError> {
     run(
-        Tree::new(a, false, p, true),
-        Tree::new(b, false, p, false),
+        Tree::new(a, false, (p, timing.clone()), true),
+        Tree::new(b, false, (p, timing.clone()), false),
         ts,
         ink,
     )
@@ -56,20 +68,24 @@ pub fn morph(a: LNode, b: LNode, p: f32, ts: &mut Typeset, ink: Ink) -> Result<L
 /// The two layouts of a scene with `<Morph>`: each Morph's subtree blends at
 /// its own `p` and matches by key inside it; nodes outside every Morph
 /// match by tree path and move at the first Morph's `p`.
+/// Outside every Morph there is no lag: those nodes move together at the
+/// first Morph's eased `p`.
 pub fn morph_scene(a: LNode, b: LNode, ts: &mut Typeset, ink: Ink) -> Result<LNode, MorphError> {
-    let outside = first_scope_p(&a).unwrap_or(0.0);
+    let (p, timing) = first_scope(&a).unwrap_or_default();
+    let outside = (p, Timing { lag: 0.0, ..timing });
     run(
-        Tree::new(a, true, outside, true),
+        Tree::new(a, true, outside.clone(), true),
         Tree::new(b, true, outside, false),
         ts,
         ink,
     )
 }
 
-fn first_scope_p(n: &LNode) -> Option<f32> {
+fn first_scope(n: &LNode) -> Option<(f32, Timing)> {
     n.scope
-        .map(|s| s.p)
-        .or_else(|| n.children.iter().find_map(first_scope_p))
+        .as_ref()
+        .map(|s| (s.p, s.timing.clone()))
+        .or_else(|| n.children.iter().find_map(first_scope))
 }
 
 fn run(a: Tree, b: Tree, ts: &mut Typeset, ink: Ink) -> Result<LNode, MorphError> {
@@ -83,16 +99,19 @@ fn run(a: Tree, b: Tree, ts: &mut Typeset, ink: Ink) -> Result<LNode, MorphError
     };
     let deep_a = matched_below(&a, &m.a_to_b);
     let deep_b = matched_below(&b, &m.b_to_a);
+    let (pa, pb) = clock::clocks(&a, &b, &m);
     let mut builder = Builder {
         a,
         b,
         m,
         deep_a,
         deep_b,
+        pa,
+        pb,
         ts,
         ink,
     };
-    let out = builder.emit_b(0, Vec2::ZERO);
+    let out = builder.emit_b(0, Vec2::ZERO, 1.0);
     let Builder { a, b, ts, .. } = builder;
     reclaim(a, ts);
     reclaim(b, ts);
@@ -133,6 +152,7 @@ fn empty() -> LNode {
         key: None,
         loc: None,
         scope: None,
+        overlay: None,
     }
 }
 
@@ -142,19 +162,25 @@ struct Builder<'a> {
     m: Matching,
     deep_a: Vec<bool>,
     deep_b: Vec<bool>,
+    /// Each slot's eased progress (`clock`).
+    pa: Vec<f32>,
+    pb: Vec<f32>,
     ts: &'a mut Typeset,
     ink: Ink,
 }
 
 impl Builder<'_> {
     /// B node `ib` and what goes under it; `shift` is how far its nearest
-    /// matched ancestor has moved from B's place.
-    fn emit_b(&mut self, ib: usize, shift: Vec2) -> Option<LNode> {
+    /// matched ancestor has moved from B's place, `start` its output
+    /// ancestors' opacity at p = 0.
+    fn emit_b(&mut self, ib: usize, shift: Vec2, start: f32) -> Option<LNode> {
         let Some(ia) = self.m.b_to_a[ib] else {
-            return self.unmatched_b(ib, shift);
+            return self.unmatched_b(ib, shift, start);
         };
-        let p = self.b.slots[ib].p;
+        let p = self.pb[ib];
+        let q = p.clamp(0.0, 1.0);
         let (mut na, mut nb) = (self.a.take(ia)?, self.b.take(ib)?);
+        let from = opacity_from(&na, self.a.slots[ia].above, start);
         let mut out = LNode {
             kind: nb.kind,
             style: blend::style(&na.style, &nb.style, p, self.ink.text, self.ink.colour),
@@ -167,8 +193,19 @@ impl Builder<'_> {
             key: nb.key.take(),
             loc: nb.loc,
             scope: None,
+            overlay: match (na.overlay.take(), nb.overlay.take()) {
+                (Some(x), Some(y)) => Some(Box::new(Placed {
+                    now: y.now,
+                    was: Some((x.now, p)),
+                })),
+                (_, y) => y,
+            },
         };
-        content::blend(&mut out, &mut na, &mut nb, p, self.ts, self.ink.colour);
+        if let Some(from) = from {
+            out.style.opacity = Some(blend::lerp(from, nb.style.opacity(), q));
+        }
+        let start = start * from.unwrap_or_else(|| na.style.opacity());
+        content::blend(&mut out, &mut na, &mut nb, q, self.ts, self.ink.colour);
         let shift_a = out.rect.origin() - na.rect.origin();
         let shift_b = out.rect.origin() - nb.rect.origin();
         // Each unmatched A child goes before the B partner of its nearest
@@ -187,19 +224,67 @@ impl Builder<'_> {
         }
         for kb in self.b.slots[ib].kids.clone() {
             for &(_, ka) in before.iter().filter(|(anchor, _)| *anchor == Some(kb)) {
-                out.children.extend(self.unmatched_a(ka, shift_a));
+                let ride = self.ride_a(ia, ib, ka);
+                out.children.extend(self.unmatched_a(ka, shift_a + ride));
             }
-            out.children.extend(self.emit_b(kb, shift_b));
+            let ride = self.ride_b(ia, ib, kb);
+            out.children.extend(self.emit_b(kb, shift_b + ride, start));
         }
         for &(_, ka) in before.iter().filter(|(anchor, _)| anchor.is_none()) {
-            out.children.extend(self.unmatched_a(ka, shift_a));
+            let ride = self.ride_a(ia, ib, ka);
+            out.children.extend(self.unmatched_a(ka, shift_a + ride));
         }
         Some(out)
     }
 
-    fn unmatched_b(&mut self, ib: usize, shift: Vec2) -> Option<LNode> {
-        let p = self.b.slots[ib].p;
-        let k = in_out_cubic(((p - 0.4) / 0.6).clamp(0.0, 1.0));
+    /// How far matched B node `sb` is from its B place now, less how far
+    /// its parent pair (ia, ib) is from its own (which `shift` already
+    /// carries): both are their move from A times what is left of it.
+    fn behind(&self, ia: usize, ib: usize, sb: usize) -> Option<Vec2> {
+        let sa = self.m.b_to_a[sb]?;
+        let own = self.b.slots[sb].rect.origin() - self.a.slots[sa].rect.origin();
+        let parent = self.b.slots[ib].rect.origin() - self.a.slots[ia].rect.origin();
+        let left = |q: f32| f64::from(1.0 - q);
+        Some(parent * left(self.pb[ib]) - own * left(self.pb[sb]))
+    }
+
+    /// With the overlap fade, an unmatched piece (a leaf: a glyph, a text)
+    /// among the children of the pair (ia, ib) keeps its place beside its
+    /// nearest matched sibling (the one before it, else after) and moves
+    /// with it: an arriving one sits where that sibling's B place would put
+    /// it, a leaving one where its A place would. So new terms slide in
+    /// with their neighbours instead of waiting at their end places over
+    /// the moving ones; boxes with children fade in place.
+    fn ride_b(&self, ia: usize, ib: usize, kb: usize) -> Vec2 {
+        let piece = self.b.slots[kb].leaf;
+        if self.m.b_to_a[kb].is_some() || !piece || !self.overlap(&self.b, kb) {
+            return Vec2::ZERO;
+        }
+        let kids = &self.b.slots[ib].kids;
+        let found = |k: usize| visible(&self.b, k).then(|| self.behind(ia, ib, k))?;
+        nearest(kids, kb, found).unwrap_or(Vec2::ZERO)
+    }
+
+    fn ride_a(&self, ia: usize, ib: usize, ka: usize) -> Vec2 {
+        if !self.a.slots[ka].leaf || !self.overlap(&self.a, ka) {
+            return Vec2::ZERO;
+        }
+        let kids = &self.a.slots[ia].kids;
+        let ahead = |k: usize| {
+            let sb = self.m.a_to_b[k].filter(|_| visible(&self.a, k))?;
+            let own = self.b.slots[sb].rect.origin() - self.a.slots[k].rect.origin();
+            let parent = self.b.slots[ib].rect.origin() - self.a.slots[ia].rect.origin();
+            Some(own * f64::from(self.pb[sb]) - parent * f64::from(self.pb[ib]))
+        };
+        nearest(kids, ka, ahead).unwrap_or(Vec2::ZERO)
+    }
+
+    fn overlap(&self, t: &Tree, i: usize) -> bool {
+        t.clock(i).1.fade == Fade::Overlap
+    }
+
+    fn unmatched_b(&mut self, ib: usize, shift: Vec2, start: f32) -> Option<LNode> {
+        let k = fade::arriving(self.b.clock(ib).1.fade, self.pb[ib]);
         if !self.deep_b[ib] {
             let mut n = copy(&mut self.b, ib, shift)?;
             blend::fade(&mut n.style, k);
@@ -208,16 +293,17 @@ impl Builder<'_> {
         let mut n = self.b.take(ib)?;
         shift_node(&mut n, shift);
         blend::fade_own(&mut n.style, k);
+        // Its fade is its own paint only, so its opacity reaches its kids.
+        let start = start * n.style.opacity();
         for kb in self.b.slots[ib].kids.clone() {
-            n.children.extend(self.emit_b(kb, shift));
+            n.children.extend(self.emit_b(kb, shift, start));
         }
         Some(n)
     }
 
     /// An unmatched A node; matched nodes below it are drawn from B's side.
     fn unmatched_a(&mut self, ia: usize, shift: Vec2) -> Option<LNode> {
-        let p = self.a.slots[ia].p;
-        let k = 1.0 - in_out_cubic((p / 0.4).clamp(0.0, 1.0));
+        let k = fade::leaving(self.a.clock(ia).1.fade, self.pa[ia]);
         if !self.deep_a[ia] {
             let mut n = copy(&mut self.a, ia, shift)?;
             blend::fade(&mut n.style, k);
@@ -233,6 +319,34 @@ impl Builder<'_> {
         }
         Some(n)
     }
+}
+
+/// The opacity a matched node starts at, when its B ancestors' opacity at
+/// p = 0 (`start`) is not its A ancestors' (`above`): its effective opacity
+/// in A over `start`. `None` when they agree, or when `start` is 0 and
+/// nothing under it shows anyway.
+fn opacity_from(na: &LNode, above: f32, start: f32) -> Option<f32> {
+    let own = na.style.opacity();
+    if start <= f32::EPSILON || (above - start).abs() <= 1e-6 {
+        return None;
+    }
+    Some((own * above / start).min(1.0))
+}
+
+/// Whether a node draws something (an empty strut does not, so nothing
+/// rides with it).
+fn visible(t: &Tree, i: usize) -> bool {
+    t.slots[i].leaf || !t.slots[i].kids.is_empty()
+}
+
+/// The first `found` among `kids` before `at`, nearest first, else after.
+fn nearest<T>(kids: &[usize], at: usize, found: impl Fn(usize) -> Option<T>) -> Option<T> {
+    let i = kids.iter().position(|&k| k == at)?;
+    kids[..i]
+        .iter()
+        .rev()
+        .chain(&kids[i + 1..])
+        .find_map(|&k| found(k))
 }
 
 /// A whole subtree, moved by `shift`.

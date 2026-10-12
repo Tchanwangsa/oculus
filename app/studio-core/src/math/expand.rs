@@ -86,8 +86,14 @@ impl Walker<'_, '_> {
             .cache
             .get(&spec.tex, spec.display)
             .map_err(|m| fail(format!("<Math tex={}>: {m}", shown(&spec.tex)), false))?;
-        let built = build::node(n, &formula, prefix.as_deref(), self.env)
-            .map_err(|(message, is_style)| fail(message, is_style))?;
+        let built = build::node(
+            n,
+            &formula,
+            prefix.as_deref(),
+            self.env,
+            spec.write.as_ref(),
+        )
+        .map_err(|(message, is_style)| fail(message, is_style))?;
         *n = built;
         Ok(())
     }

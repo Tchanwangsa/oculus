@@ -5,8 +5,8 @@
 mod common;
 
 use common::{assert_golden, fixture};
-use studio_core::gallery::{self, GalleryOptions, Moment};
-use studio_core::{ComponentSource, Project, Size, Starter, Theme};
+use studio_core::gallery::{self, Gallery, GalleryOptions, Moment, Still};
+use studio_core::{ComponentSource, Frame, Project, Size, Starter, Theme};
 
 #[test]
 fn every_example_is_a_still_in_declaration_order() {
@@ -64,41 +64,95 @@ fn the_sheet_is_one_png() {
     assert!(w >= 2 * 640 && h >= 360, "{w}x{h}");
 }
 
-/// Every example of every starter component, at the default theme, pinned
-/// by a golden each (`starter-<Component>-<example>.png`); and one warm
-/// still, so the second bundled theme is pinned too.
+/// Every starter component as one sheet, `starter-<Component>.png`: a row
+/// per example (in declaration order), a column per moment of a 6 s
+/// preview, so a drawing primitive is pinned while it draws on as well as
+/// drawn. Laid out at 1920x1080 (the layouts a video gets) and drawn at a
+/// quarter. One warm still pins the second bundled theme.
 #[test]
-fn every_starter_example_has_its_golden() {
-    // Laid out at 1920x1080 and drawn at half scale (the 540p proxy), so the
-    // layouts are the ones a video gets.
+fn every_starter_has_its_golden_sheet() {
     let size = Size {
         width: 1920,
         height: 1080,
     };
-    let moment = Moment {
-        t: 1.0,
-        duration: 2.0,
-    };
     let options = GalleryOptions {
-        scale: 0.5,
+        scale: 0.25,
         threads: None,
     };
     let theme = Theme::bundled("default").unwrap();
     for name in Starter.names() {
-        let g =
-            gallery::render_source(&Starter, &theme, size, None, &name, moment, &options).unwrap();
-        assert!(!g.stills.is_empty(), "{name} has no examples");
-        for still in &g.stills {
-            assert_golden(&format!("starter-{name}-{}", still.example), &still.frame);
+        let mut stills = Vec::new();
+        for t in MOMENTS {
+            let moment = Moment {
+                t,
+                duration: gallery::PREVIEW,
+            };
+            let g = gallery::render_source(&Starter, &theme, size, None, &name, moment, &options)
+                .unwrap();
+            assert!(!g.stills.is_empty(), "{name} has no examples");
+            stills.push(g.stills);
         }
+        // Example-major: row i is example i at each moment.
+        let n = stills[0].len();
+        let mut columns: Vec<_> = stills.into_iter().map(Vec::into_iter).collect();
+        let mut sheet = Vec::new();
+        for _ in 0..n {
+            for (col, t) in columns.iter_mut().zip(MOMENTS) {
+                let s = col.next().unwrap();
+                sheet.push(Still {
+                    example: format!("{} · {t} s", s.example),
+                    frame: s.frame,
+                });
+            }
+        }
+        let g = Gallery {
+            component: name.clone(),
+            moment: Moment {
+                t: 0.0,
+                duration: gallery::PREVIEW,
+            },
+            stills: sheet,
+            threads: 1,
+        };
+        assert_golden(&format!("starter-{name}"), &sheet_frame(&g, MOMENTS.len()));
     }
     let lib = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("library/themes/warm.json"),
     )
     .unwrap();
     let warm = Theme::parse(&lib, std::path::Path::new("library/themes/warm.json")).unwrap();
+    let moment = Moment {
+        t: 1.0,
+        duration: 2.0,
+    };
+    let half = GalleryOptions {
+        scale: 0.5,
+        threads: None,
+    };
     let g =
-        gallery::render_source(&Starter, &warm, size, None, "TitleCard", moment, &options).unwrap();
+        gallery::render_source(&Starter, &warm, size, None, "TitleCard", moment, &half).unwrap();
     let long = g.stills.iter().find(|s| s.example == "long").unwrap();
     assert_golden("starter-TitleCard-long-warm", &long.frame);
+}
+
+/// Seconds into the preview each starter sheet shows.
+const MOMENTS: [f64; 5] = [0.6, 1.6, 2.6, 3.8, 5.6];
+
+/// The gallery's own sheet (labels and all), read back as a frame.
+fn sheet_frame(g: &Gallery, cols: usize) -> Frame {
+    let path = std::env::temp_dir().join(format!(
+        "starter-sheet-{}-{}.png",
+        g.component,
+        std::process::id()
+    ));
+    g.write_sheet(&path, cols).unwrap();
+    let img = image::open(&path).unwrap().to_rgba8();
+    std::fs::remove_file(&path).ok();
+    Frame {
+        width: img.width(),
+        height: img.height(),
+        rgba: img.into_raw(),
+        logs: Vec::new(),
+        samples: 1,
+    }
 }
