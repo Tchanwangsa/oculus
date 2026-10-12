@@ -90,7 +90,7 @@ impl fmt::Display for LexiconError {
     }
 }
 
-/// A JSON object's entries in file order (serde_json's map sorts them).
+/// A JSON object's entries in file order, a repeated key kept each time.
 struct Ordered(Vec<(String, serde_json::Value)>);
 
 impl<'de> Deserialize<'de> for Ordered {
@@ -131,6 +131,17 @@ impl Lexicon {
         subject: Option<&Path>,
         dict: &Dictionary,
     ) -> Result<Self, LexiconError> {
+        Self::load_over(library, subject, None, dict)
+    }
+
+    /// [`Lexicon::load`] with `over`, a `(name, JSON text)` layer, over both
+    /// files.
+    pub fn load_over(
+        library: Option<&Path>,
+        subject: Option<&Path>,
+        over: Option<(&str, &str)>,
+        dict: &Dictionary,
+    ) -> Result<Self, LexiconError> {
         let mut layers = Vec::new();
         for path in [library, subject].into_iter().flatten() {
             let file = path.display().to_string();
@@ -148,6 +159,7 @@ impl Lexicon {
         let layers: Vec<(&str, &str)> = layers
             .iter()
             .map(|(f, t)| (f.as_str(), t.as_str()))
+            .chain(over)
             .collect();
         Self::from_json(&layers, dict)
     }

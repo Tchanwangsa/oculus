@@ -24,7 +24,7 @@ has the full flags.
 - Lint: each kind and what to do, the literal rules exactly
 - Looking: frame, strip and gallery
 - Narrate
-- Pronunciation: guessed words, `oculus studio g2p`, lexicon.json
+- Pronunciation: guessed words, `oculus studio g2p`, suggesting a reading with `oculus studio pronounce`
 - Render
 - Libraries: how a name resolves, promoting, the starter components
 
@@ -765,7 +765,9 @@ wrong and what is valid.
 
 With the Kokoro engine it also prints a note per guessed word, `{ level:
 "note", scene, id, line, kind: "guessed", message, word, phonemes,
-guessed }`. Notes never fail lint; check each as "Pronunciation" says.
+guessed, review }`, `review` being `null` or the word's suggestion, `{
+status: "pending" | "wrong", reading, note }`. Notes never fail lint;
+check each as "Pronunciation" says.
 
 | `kind` | What it means | What to do |
 | --- | --- | --- |
@@ -785,7 +787,7 @@ guessed }`. Notes never fail lint; check each as "Pronunciation" says.
 | `transpile` | The TSX does not compile, or uses `import` | Fix the syntax at `loc`. |
 | `image`, `font`, `budget` | A missing asset, an unknown font, or a component doing too much work | Add the file; use `theme.font`; remove the loop. |
 | `lint` | Kokoro's G2P pack is not downloaded | Stop and tell the student (`oculus studio voices download`). |
-| `lint` | A `lexicon.json` entry names a phoneme Kokoro lacks, or a respelling part the dictionary lacks | Fix the entry the message names ("Pronunciation"). |
+| `lint` | A `lexicon.json` entry names a phoneme Kokoro lacks, or a respelling part the dictionary lacks | Tell the student which file and entry; never edit a lexicon yourself. |
 | `script` | Kokoro: a word with no phonemes, a `$`, or a sentence too long to say in one go | Reword: spell it out, or split the sentence or add a comma. |
 
 **The literal rules, exactly.** Lint reads each component's source:
@@ -860,32 +862,49 @@ Settings → Voice is unset (`SKILL.md` step 6 says what to do).
 
 The engine is Kokoro, run inside the app, or a TTS server; Settings →
 Voice or the video's `voice` block (`"engine": "kokoro"`) picks it. With
-Kokoro, narrate ends with a `note:` per guessed word.
+Kokoro, narrate ends with a `note:` per guessed word, with the state of any
+suggestion for it (`--json`: each note's `review`).
 
 ## Pronunciation
 
 Kokoro reads each word from the lexicon, then its dictionary, then a
-guesser. A guessed word is worth checking.
+guesser. A guessed word is worth checking. The student decides how a word
+is said; you suggest, and never edit a `lexicon.json`.
 
 - `oculus studio g2p "<text>" --video <slug>` prints each word, its
   phonemes and who read it: `lexicon`, `dict`, `rule` (a word like "read"
   or "lead" read by its neighbours) or `guess`. It does not synthesise.
-- Two `lexicon.json` files, the subject's over the global one:
-  `../studio/subjects/<CODE>/lexicon.json` (write here) and
-  `../studio/library/lexicon.json` (read only). Each is one JSON object
-  from a word to its reading; keys starting `_` are comments.
+- `oculus studio pronounce suggest <slug> <word> <reading>` puts a reading
+  up for review, for a word the video's narration says (any case;
+  `Word's` counts as `Word`). It checks the reading, prints the phonemes
+  it gives, and records how Kokoro reads the word now and the sentence it
+  is in; a new suggestion for the same word replaces the last. `--json`
+  gives the stored item plus `phonemes`.
+- In Settings → Voice the student hears the sentence read both ways and
+  picks one: the suggestion is correct (it goes into the lexicon), the
+  guess is fine (the guess goes into the lexicon, so it is no longer
+  flagged), or the suggestion is wrong, with a note on how the word is
+  said. A decision applies at the next `narrate`: only scenes whose
+  reading changed are made again.
+- `oculus studio pronounce list [--video <slug>]` lists what is waiting
+  (`pending`) and what was marked `wrong`, with the student's note;
+  `--json` gives `[{ id, word, reading, original, guessed, subject, video,
+  sentence, scene, line, status, note, created }]`. For a wrong one,
+  suggest again following the note. Notes show the same state.
+- The lexicon is two `lexicon.json` files, the subject's over the global
+  one: `../studio/subjects/<CODE>/lexicon.json` (a video with a subject
+  writes here) and `../studio/library/lexicon.json` (a video without
+  one). Read them; the app writes them.
 - **A respelling** is dictionary words joined by `-` or spaces:
-  `"softmax": "SOFT-max"`, `"Nesterov": "NESS-ter-off"`. Every part must
-  be in the dictionary (else the load fails naming it); an all-caps part
-  longer than one letter takes the main stress, the others a lighter one.
-- **Raw phonemes** go in slashes, in Kokoro's alphabet: `"Cauchy":
-  "/kˈOʃi/"`. `ˈ` marks the main stress, `ˌ` a lighter one; copy symbols
-  from words `g2p` prints rather than guessing them. A symbol Kokoro lacks,
-  or `$`, fails the load naming the entry.
+  `SOFT-max`, `NESS-ter-off`. Every part must be in the dictionary (else
+  the suggestion fails naming it); an all-caps part longer than one letter
+  takes the main stress, the others a lighter one.
+- **Raw phonemes** go in slashes, in Kokoro's alphabet: `/kˈOʃi/`. `ˈ`
+  marks the main stress, `ˌ` a lighter one; copy symbols from words `g2p`
+  prints rather than guessing them. A symbol Kokoro lacks, or `$`, fails
+  naming it.
 - A word finds its entry by exact key, then lower case; `Cauchy's` takes
   `Cauchy`'s entry plus `-s`.
-- After an edit, run `g2p` again, then `narrate`: only scenes whose
-  reading changed are made again.
 
 ## Render
 

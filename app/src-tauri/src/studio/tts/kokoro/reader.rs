@@ -14,6 +14,9 @@ use crate::studio::voice::g2p::{self, Dictionary, Lexicon, Phonemized};
 pub struct LexiconFiles {
     pub library: Option<PathBuf>,
     pub subject: Option<PathBuf>,
+    /// One word and its lexicon value over both files: the review's samples
+    /// of a word read as its guess or as a suggestion.
+    pub pin: Option<(String, String)>,
 }
 
 impl LexiconFiles {
@@ -24,6 +27,7 @@ impl LexiconFiles {
         Self {
             library: Some(global_dir().join("lexicon.json")),
             subject: subject.map(|code| subjects_dir().join(code).join("lexicon.json")),
+            pin: None,
         }
     }
 }
@@ -43,9 +47,17 @@ impl Reader {
             return Err(missing("G2P pack (g2p-en-us)", guess::PACK.bytes()));
         }
         let dict = Dictionary::load(g2p)?;
-        let lexicon = Lexicon::load(
+        let pin = lexicon.pin.as_ref().map(|(word, value)| {
+            serde_json::Value::Object(serde_json::Map::from_iter([(
+                word.clone(),
+                serde_json::Value::String(value.clone()),
+            )]))
+            .to_string()
+        });
+        let lexicon = Lexicon::load_over(
             lexicon.library.as_deref(),
             lexicon.subject.as_deref(),
+            pin.as_deref().map(|text| ("the pinned reading", text)),
             &dict,
         )
         .map_err(|e| e.to_string())?;
@@ -55,6 +67,11 @@ impl Reader {
             lexicon,
             guesser,
         })
+    }
+
+    /// The dictionary, for checking a lexicon value.
+    pub fn dict(&self) -> &Dictionary {
+        &self.dict
     }
 
     /// `text`'s phonemes and how each word was read. A `$` is refused: it

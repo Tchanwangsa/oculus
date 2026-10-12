@@ -111,6 +111,7 @@ fn a_bad_lexicon_entry_is_an_issue_naming_its_file_and_key() {
     let files = LexiconFiles {
         library: Some(lexicon),
         subject: None,
+        pin: None,
     };
     let out = lint(&p, &kokoro(), &pack, &files);
     assert_eq!(out.issues.len(), 1);
