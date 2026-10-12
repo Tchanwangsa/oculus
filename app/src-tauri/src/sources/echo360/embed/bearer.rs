@@ -10,6 +10,8 @@ const MARGIN_SECS: u64 = 5 * 60;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bearer {
+    /// `https://host` of the region that minted it, where it is sent.
+    pub base: String,
     pub jwt: String,
     /// The JWT's `exp`, Unix seconds.
     pub exp: u64,
@@ -22,10 +24,10 @@ impl Bearer {
     }
 }
 
-/// `GET /api/ui/sessions/<sessionId>` on the launch's agent, which carries
-/// its `PLAY_SESSION` cookie.
-pub fn redeem(agent: &ureq::Agent, session_id: &str) -> Result<Bearer, String> {
-    let url = format!("https://echo360.net.au/api/ui/sessions/{session_id}");
+/// `GET /api/ui/sessions/<sessionId>` at the launch's region, on its agent,
+/// which carries its `PLAY_SESSION` cookie.
+pub fn redeem(agent: &ureq::Agent, base: &str, session_id: &str) -> Result<Bearer, String> {
+    let url = format!("{base}/api/ui/sessions/{session_id}");
     let resp = match agent.get(&url).call() {
         Ok(resp) => resp,
         Err(ureq::Error::Status(code, _)) => {
@@ -47,7 +49,11 @@ pub fn redeem(agent: &ureq::Agent, session_id: &str) -> Result<Bearer, String> {
         })?
         .to_string();
     let exp = jwt_exp(&jwt)?;
-    Ok(Bearer { jwt, exp })
+    Ok(Bearer {
+        base: base.to_string(),
+        jwt,
+        exp,
+    })
 }
 
 /// The `exp` claim of a JWT, read without checking its signature: it only

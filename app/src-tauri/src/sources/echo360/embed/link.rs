@@ -3,8 +3,7 @@
 use url::Url;
 
 use super::super::auth::html_unescape;
-
-const LTI_HOST: &str = "echo360.net.au";
+use super::region::is_region;
 
 /// Whether `id` can sit in a URL path or a file name as it is: Echo360's ids
 /// are UUIDs.
@@ -54,7 +53,7 @@ pub fn retrieve_url(canvas: &str, src: &str, link_id: &str) -> Result<String, St
         return refuse("the tool URL is not a URL");
     };
     if tool.scheme() != "https"
-        || tool.host_str() != Some(LTI_HOST)
+        || !tool.host_str().is_some_and(is_region)
         || !tool.path().starts_with("/lti/")
     {
         return refuse("the tool is not Echo360's LTI");
@@ -73,4 +72,14 @@ pub fn retrieve_url(canvas: &str, src: &str, link_id: &str) -> Result<String, St
         .append_pair("display", "borderless")
         .append_pair("url", tool.as_str());
     Ok(out.to_string())
+}
+
+/// `https://host` of the Echo360 region a [`retrieve_url`] launches.
+pub fn region_of(retrieve: &str) -> Option<String> {
+    let url = Url::parse(retrieve).ok()?;
+    let (_, tool) = url.query_pairs().find(|(k, _)| k == "url")?;
+    let tool = Url::parse(&tool).ok()?;
+    tool.host_str()
+        .is_some_and(is_region)
+        .then(|| tool.origin().ascii_serialization())
 }

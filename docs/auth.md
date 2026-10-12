@@ -596,19 +596,24 @@ one, keyed by the embed's `linkId` (`app/src-tauri/src/sources/echo360/embed/`):
 1. GET the embed's Canvas `external_tools/retrieve` URL through keyd's
    `canvas` route. It answers an LTI form; a page without one is reported as a
    possibly lapsed Canvas session. The URL comes from page markdown, so
-   `embed::retrieve_url` accepts only a retrieve on the profile's Canvas of an
-   `echo360.net.au/lti/…?linkId=` URL naming that same link, and rebuilds it.
-2. POST the form to Echo360 with redirects off. It answers a redirect to
-   `/ui/player/<mediaId>?sessionId=…&secureLinkAccessDataId=…`; the only cookie
-   is `PLAY_SESSION`, and there is no `ECHO_JWT`.
+   `embed::retrieve_url` accepts only a retrieve on the profile's Canvas of a
+   `<region>/lti/…?linkId=` URL naming that same link, and rebuilds it. The
+   regions are Echo360's own hosts (`echo360.org`, `echo360.net.au`, …,
+   listed in `app/src-tauri/src/sources/echo360/embed/region.rs`), since the form Canvas signs is posted there.
+2. POST the form to Echo360 with redirects off; its target must be a region
+   too. It answers a redirect to
+   `/ui/player/<mediaId>?sessionId=…&secureLinkAccessDataId=…` on that region,
+   which every later call uses; the only cookie is `PLAY_SESSION`, and there
+   is no `ECHO_JWT`.
 3. GET `/api/ui/sessions/<sessionId>` on the same cookie jar, at once: the
    session id goes stale within minutes. It answers 204 with the JWT in the
    `token` *response header*.
 4. Send that JWT as `Authorization: Bearer` to
    `/api/ui/echoplayer/secure-link-access-datas/<sl>/media/<mediaId>/player-properties`.
 
-One Bearer serves every link and lives about 13 hours, so the app keeps one in
-`EmbedBearer` and reuses it until five minutes before its `exp`. A link's media
+One Bearer serves every link on its region and lives about 13 hours, so the
+app keeps one in `EmbedBearer`, with the region that minted it, and reuses it
+for that region's links until five minutes before its `exp`. A link's media
 and secure-link ids never change, so they are cached in `echo_embeds`
 ([sync.md](./sync.md#an-embedded-echo360-video-is-resolved-and-downloaded-by-its-card));
 with both cached and a live Bearer, no launch runs, which matters because every
