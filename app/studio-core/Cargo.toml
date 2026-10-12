@@ -20,6 +20,8 @@ parley = "0.12.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
+# Hashes the starter files `.seeded` records (`library/seed.rs`).
+sha2 = "0.10"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # The maths engine's KaTeX port (`app/math-core/katex`), typesetting `Math`.
 katex = { package = "katex-rs", path = "../math-core/katex" }

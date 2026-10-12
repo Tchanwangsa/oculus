@@ -1,9 +1,24 @@
-//! Seeding offers each starter file once and never overwrites; a write
-//! snapshots the old text first.
+//! Seeding offers each starter file once, updates the copies the user never
+//! edited and leaves the rest alone; a write snapshots the old text first.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
-use super::{LibrarySettings, remove, seed_files, write};
-use std::path::PathBuf;
+use super::seed::hash;
+use super::shipped::SHIPPED;
+use super::{LibrarySettings, STARTER_COMPONENTS, STARTER_THEMES, remove, seed, write};
+use std::path::{Path, PathBuf};
+
+/// `seed_files` with no shipped-version table.
+fn seed_files<'a>(
+    root: &Path,
+    files: impl Iterator<Item = (String, &'a str)>,
+    reset: bool,
+) -> crate::error::Result<Vec<String>> {
+    super::seed::seed_files(root, files, &[], reset)
+}
+
+fn seeded(root: &Path) -> String {
+    std::fs::read_to_string(root.join(".seeded")).unwrap_or_default()
+}
 
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("studio-library-{name}-{}", std::process::id()));
@@ -209,4 +224,232 @@ fn settings_round_trip_and_refuse_unknown_keys() {
     };
     assert!(bad.write(&root).is_err());
     std::fs::remove_dir_all(&root).ok();
+}
+
+const STEPS: &str = "components/Steps.tsx";
+
+fn one(text: &str) -> std::vec::IntoIter<(String, &str)> {
+    vec![(STEPS.to_owned(), text)].into_iter()
+}
+
+fn read(root: &Path, rel: &str) -> String {
+    std::fs::read_to_string(root.join(rel)).unwrap()
+}
+
+/// A `.seeded` line for `rel` as last written with `text`.
+fn line(rel: &str, text: &str) -> String {
+    format!("{rel}\t{}\n", hash(text.as_bytes()))
+}
+
+#[test]
+fn seeding_records_the_hash_of_what_it_wrote() {
+    let root = scratch("records");
+    seed_files(&root, one("v1"), false).unwrap();
+    assert_eq!(seeded(&root), line(STEPS, "v1"));
+    // The record lands through a rename: no temporary file is left behind.
+    assert!(!root.join(".seeded.tmp").exists());
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn an_untouched_copy_updates_and_snapshots_the_old_text() {
+    let root = scratch("update");
+    seed_files(&root, one("v1"), false).unwrap();
+    let written = seed_files(&root, one("v2"), false).unwrap();
+    assert_eq!(written, [STEPS]);
+    assert_eq!(read(&root, STEPS), "v2");
+    assert_eq!(seeded(&root), line(STEPS, "v2"));
+    let snapshots = history(&root);
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(root.join(".history").join(&snapshots[0])).unwrap(),
+        "v1"
+    );
+    // A third version updates it again; an unchanged one writes nothing.
+    assert_eq!(seed_files(&root, one("v3"), false).unwrap(), [STEPS]);
+    assert!(seed_files(&root, one("v3"), false).unwrap().is_empty());
+    assert_eq!(history(&root).len(), 2);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn an_edited_copy_is_kept_and_its_hash_never_recorded() {
+    let root = scratch("edited");
+    seed_files(&root, one("v1"), false).unwrap();
+    write(&root, STEPS, "my steps").unwrap();
+    for starter in ["v2", "v3"] {
+        assert!(seed_files(&root, one(starter), false).unwrap().is_empty());
+        assert_eq!(read(&root, STEPS), "my steps");
+        assert_eq!(seeded(&root), line(STEPS, "v1"));
+    }
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn a_deleted_copy_stays_deleted_through_an_update() {
+    let root = scratch("deleted");
+    seed_files(&root, one("v1"), false).unwrap();
+    std::fs::remove_file(root.join(STEPS)).unwrap();
+    assert!(seed_files(&root, one("v2"), false).unwrap().is_empty());
+    assert!(!root.join(STEPS).exists());
+    assert_eq!(seeded(&root), line(STEPS, "v1"));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn a_copy_equal_to_the_starter_gets_the_current_hash() {
+    let root = scratch("equal");
+    seed_files(&root, one("v1"), false).unwrap();
+    // The user pastes the newer starter text in by hand: nothing to write,
+    // and the record catches up so the next starter reaches it.
+    write(&root, STEPS, "v2").unwrap();
+    assert!(seed_files(&root, one("v2"), false).unwrap().is_empty());
+    assert_eq!(seeded(&root), line(STEPS, "v2"));
+    assert_eq!(seed_files(&root, one("v3"), false).unwrap(), [STEPS]);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn a_legacy_line_with_a_known_old_version_updates() {
+    let root = scratch("legacy-known");
+    std::fs::create_dir_all(root.join("components")).unwrap();
+    std::fs::write(root.join(STEPS), "v1").unwrap();
+    std::fs::write(root.join(".seeded"), format!("{STEPS}\n")).unwrap();
+    let (v1, v2) = (hash(b"v1"), hash(b"v2"));
+    let table: &[(&str, &[&str])] = &[(STEPS, &[&v1, &v2])];
+    let written = super::seed::seed_files(&root, one("v3"), table, false).unwrap();
+    assert_eq!(written, [STEPS]);
+    assert_eq!(read(&root, STEPS), "v3");
+    assert_eq!(seeded(&root), line(STEPS, "v3"));
+    assert_eq!(history(&root).len(), 1);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn a_legacy_line_with_unknown_text_is_kept_and_stays_hashless() {
+    let root = scratch("legacy-unknown");
+    std::fs::create_dir_all(root.join("components")).unwrap();
+    std::fs::write(root.join(STEPS), "my steps").unwrap();
+    std::fs::write(root.join(".seeded"), format!("{STEPS}\n")).unwrap();
+    let v1 = hash(b"v1");
+    let table: &[(&str, &[&str])] = &[(STEPS, &[&v1])];
+    for starter in ["v2", "v3"] {
+        let written = super::seed::seed_files(&root, one(starter), table, false).unwrap();
+        assert!(written.is_empty());
+        assert_eq!(read(&root, STEPS), "my steps");
+        assert_eq!(seeded(&root), format!("{STEPS}\n"));
+    }
+    assert!(history(&root).is_empty());
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn a_legacy_line_with_the_current_text_gains_its_hash() {
+    let root = scratch("legacy-current");
+    std::fs::create_dir_all(root.join("components")).unwrap();
+    std::fs::write(root.join(STEPS), "v2").unwrap();
+    std::fs::write(root.join(".seeded"), format!("{STEPS}\n")).unwrap();
+    assert!(seed_files(&root, one("v2"), false).unwrap().is_empty());
+    assert_eq!(seeded(&root), line(STEPS, "v2"));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn a_dropped_starter_keeps_its_file_and_its_line() {
+    let root = scratch("dropped-line");
+    let title = "components/TitleCard.tsx";
+    std::fs::create_dir_all(root.join("components")).unwrap();
+    std::fs::write(root.join(STEPS), "v1").unwrap();
+    std::fs::write(root.join(title), "title").unwrap();
+    // One dropped starter has a legacy line, one a hashed line; both lines
+    // and files survive an update of another starter and a reset.
+    let record = format!("{STEPS}\n{}", line(title, "title"));
+    std::fs::write(root.join(".seeded"), &record).unwrap();
+    let only = || vec![("components/Other.tsx".to_owned(), "other")].into_iter();
+    assert_eq!(
+        seed_files(&root, only(), false).unwrap(),
+        ["components/Other.tsx"]
+    );
+    assert_eq!(read(&root, STEPS), "v1");
+    assert_eq!(read(&root, title), "title");
+    let expected = format!("{record}{}", line("components/Other.tsx", "other"));
+    assert_eq!(seeded(&root), expected);
+    seed_files(&root, only(), true).unwrap();
+    assert_eq!(read(&root, STEPS), "v1");
+    assert_eq!(seeded(&root), expected);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn reset_records_the_hashes_it_writes() {
+    let root = scratch("reset-hash");
+    std::fs::create_dir_all(root.join("components")).unwrap();
+    std::fs::write(root.join(STEPS), "my steps").unwrap();
+    std::fs::write(root.join("components/Same.tsx"), "same").unwrap();
+    std::fs::write(
+        root.join(".seeded"),
+        format!("{STEPS}\ncomponents/Same.tsx\n"),
+    )
+    .unwrap();
+    let files = vec![
+        (STEPS.to_owned(), "v1"),
+        ("components/Same.tsx".to_owned(), "same"),
+        ("components/Gone.tsx".to_owned(), "gone"),
+    ];
+    let written = seed_files(&root, files.into_iter(), true).unwrap();
+    assert_eq!(written, [STEPS, "components/Gone.tsx"]);
+    assert_eq!(
+        seeded(&root),
+        format!(
+            "{}{}{}",
+            line(STEPS, "v1"),
+            line("components/Same.tsx", "same"),
+            line("components/Gone.tsx", "gone")
+        )
+    );
+    assert_eq!(history(&root).len(), 1);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn the_compiled_set_seeds_once_and_then_changes_nothing() {
+    let root = scratch("compiled");
+    let first = seed(&root, false).unwrap();
+    assert_eq!(first.len(), STARTER_COMPONENTS.len() + STARTER_THEMES.len());
+    let record = seeded(&root);
+    assert_eq!(record.lines().count(), first.len());
+    assert!(record.lines().all(|l| l.split_once('\t').is_some()));
+    assert!(seed(&root, false).unwrap().is_empty());
+    assert_eq!(seeded(&root), record);
+    assert!(history(&root).is_empty());
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn current_starters_are_in_the_shipped_table() {
+    let starters = STARTER_COMPONENTS
+        .iter()
+        .map(|(n, t)| (format!("components/{n}.tsx"), *t))
+        .chain(
+            STARTER_THEMES
+                .iter()
+                .map(|(n, t)| (format!("themes/{n}.json"), *t)),
+        );
+    for (rel, text) in starters {
+        let row = SHIPPED.iter().find(|(p, _)| *p == rel);
+        let hashes = row.map_or(&[][..], |(_, h)| h);
+        assert!(
+            hashes.contains(&hash(text.as_bytes()).as_str()),
+            "{rel} is not in the table: run `bun run studio:hashes` in app/"
+        );
+    }
+}
+
+#[test]
+fn the_axes_that_took_one_fn_counts_as_shipped() {
+    // components/Axes.tsx at b7ebf20d, whose `fn: oneOf([...])` is the copy
+    // already installed in libraries.
+    let axes = SHIPPED.iter().find(|(p, _)| *p == "components/Axes.tsx");
+    let hashes = axes.map_or(&[][..], |(_, h)| h);
+    assert!(hashes.contains(&"439a3348bda59204e6216a9f65fee7e6b94d7d8eb093d0f5494b2e2b6891df9e"));
 }

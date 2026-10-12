@@ -78,7 +78,10 @@ impl Ctx {
                 if written.is_empty() {
                     println!(
                         "{}",
-                        paint(&format!("nothing to copy into {}", global.display()), DIM)
+                        paint(
+                            &format!("nothing to copy or update in {}", global.display()),
+                            DIM
+                        )
                     );
                 }
                 for rel in &written {
