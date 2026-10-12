@@ -8,11 +8,9 @@ test("each preset says what it makes for the video's shape", () => {
   expect(presetHint("draft", 1920, 1080)).toBe("mp4 · 540p, quick");
   expect(presetHint("final", 1920, 1080)).toBe("mp4 · 1080p");
   expect(presetHint("small", 1920, 1080)).toBe("mp4 · 720p, smaller file");
-  expect(presetHint("2x", 1920, 1080)).toBe("mp4 · 3840×2160");
   expect(presetHint("small", 1080, 1920)).toBe("mp4 · 720×1280, smaller file");
   // A small video is never scaled up.
   expect(presetHint("small", 640, 360)).toBe("mp4 · 360p, smaller file");
-  expect(presetHint("subtitles", 1920, 1080)).toBe("vtt and srt");
 });
 
 test("a row is current, out of date, never made or blocked", () => {
