@@ -195,7 +195,11 @@ frontend and script tests, the frontend build, ffmpeg and keyd/CLI staging,
 tests with and without `dev`, plus the maths workspace's formatting and tests.
 Both Windows workflows install the WASM target and the locked `wasm-bindgen`
 CLI; the frontend checks build the maths WASM. CI builds the current-user NSIS
-installer, validates the GUI and sidecars, and retains `oculus-windows-x64-ci`
+installer with a second `--config` that nulls `beforeBuildCommand`: the earlier
+steps already bundle the frontend and stage every sidecar, and rerunning
+`stage-cli` then `docs:cli` would compile the app twice more (a new sidecar
+reruns tauri-build), about eight minutes; `bundle-config.test.mjs` checks those
+steps come first. It then validates the GUI and sidecars, and retains `oculus-windows-x64-ci`
 for VM testing. This workflow artifact does not create a GitHub release.
 It installs sccache before any cargo build.
 `app/scripts/test.mjs` enumerates script tests in Node so no shell has to

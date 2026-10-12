@@ -93,3 +93,17 @@ test("the bundle is signed hardened, with library validation on", () => {
   // none, and keyd's helper is signed by its own build.
   expect(mac.entitlements).toBeUndefined();
 });
+
+test("CI's Windows job stages what beforeBuildCommand would before skipping it", () => {
+  const job = ci.slice(ci.indexOf("\n  windows:"), ci.indexOf("\n  keyd-linux:"));
+  const build = job.indexOf("tauri build");
+  expect(job.slice(build)).toContain(`"beforeBuildCommand":null`);
+  // speech and whisper exit early off macOS; docs:cli writes a repo doc the
+  // bundle doesn't carry.
+  for (const step of ["bun run build", "bun run ffmpeg", "bun run stage-keyd", "bun run stage-cli"]) {
+    expect(before, step).toContain(step);
+    const at = job.indexOf(step);
+    expect(at, step).toBeGreaterThan(-1);
+    expect(at, step).toBeLessThan(build);
+  }
+});

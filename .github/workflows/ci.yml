@@ -198,8 +198,13 @@ jobs:
           if ($errors.Count) { throw ($errors | Out-String) }
       - name: Prepare Windows installer resources
         run: bun scripts/package-msix.mjs --prepare-release
+      # The steps above already bundled the frontend and staged every sidecar
+      # beforeBuildCommand would (speech and whisper are macOS-only, and the
+      # CLI reference isn't bundled); rerunning stage-cli and docs:cli would
+      # each recompile the app.
       - name: Build the Windows NSIS installer
-        run: bun run tauri build --config src-tauri/target/windows-release.conf.json -- --locked
+        shell: bash
+        run: bun run tauri build --config src-tauri/target/windows-release.conf.json --config '{"build":{"beforeBuildCommand":null}}' -- --locked
       - name: Validate the Windows GUI, sidecars and installer
         run: bun scripts/package-msix.mjs --check-release
       - name: Retain the Windows installer for VM testing
