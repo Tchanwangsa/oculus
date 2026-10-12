@@ -59,6 +59,27 @@ interface Theme {
   };
   /** Seconds of silence before and after a scene's narration clip. */
   narration: { lead: number; tail: number };
+  /** How burned-in captions look when video.json sets `captions: true`. They sit on a plate
+   *  `margin` (a fraction of the height) from the bottom or top edge; keep key content clear of it.
+   *  Colours are `color` token names or #hex; sizes are px on a 1080 px short side. */
+  captions: {
+    fontFamily: string;
+    fontSize: number;
+    fontWeight: number;
+    color: string;
+    /** Opacity of the words not yet said. */
+    upcoming: number;
+    highlight: string;
+    highlightText: string;
+    highlightStyle: 'color' | 'pill';
+    /** A colour, or `"none"`. */
+    plate: string;
+    plateOpacity: number;
+    position: 'bottom' | 'top';
+    margin: number;
+    maxChars: number;
+    maxLines: number;
+  };
 }
 
 type TypeToken = Pick<

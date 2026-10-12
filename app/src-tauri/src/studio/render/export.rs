@@ -77,7 +77,8 @@ pub(super) fn audio(
     ))
 }
 
-/// The captions as WebVTT at `out` and SubRip beside it. No ffmpeg.
+/// The captions as WebVTT at `out` and SubRip beside it, whether or not the
+/// video burns them in. No ffmpeg.
 pub(super) fn subtitles(
     dir: &Path,
     project: &Project,

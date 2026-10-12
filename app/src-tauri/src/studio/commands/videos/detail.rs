@@ -1,5 +1,6 @@
-//! One video for its page: the row, its format and theme, each scene with
-//! its place in time and its words, and which exports exist.
+//! One video for its page: the row, its format and theme, whether it burns
+//! captions in, each scene with its place in time and its words, and which
+//! exports exist.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -22,6 +23,8 @@ pub struct VideoDetail {
     pub height: u32,
     pub theme: String,
     pub voice: Option<String>,
+    /// video.json's `captions`: the renders have captions burned in.
+    pub captions: bool,
     pub scenes: Vec<SceneInfo>,
     pub renders: Vec<RenderFile>,
 }
@@ -87,6 +90,7 @@ pub fn detail_in(
         height: project.video.size.height,
         theme: project.video.theme.clone(),
         voice,
+        captions: project.video.captions,
         scenes,
         renders: renders(&dir),
     })
