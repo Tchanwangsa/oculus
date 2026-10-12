@@ -50,9 +50,7 @@ pub const SHIPPED: &[(&str, &[&str])] = &[
     ),
     (
         "components/NumberLine.tsx",
-        &[
-            "d569026fb09b486a5aef5fb3db7b7d7212b84d2d7fa24ceece8095e043130ca6",
-        ],
+        &["d569026fb09b486a5aef5fb3db7b7d7212b84d2d7fa24ceece8095e043130ca6"],
     ),
     (
         "components/Slide.tsx",
@@ -63,15 +61,11 @@ pub const SHIPPED: &[(&str, &[&str])] = &[
     ),
     (
         "components/Table.tsx",
-        &[
-            "6f44bba4be367d364043b6e193342e868068ba683a36ef383acd9851c45fc74e",
-        ],
+        &["6f44bba4be367d364043b6e193342e868068ba683a36ef383acd9851c45fc74e"],
     ),
     (
         "components/TitleCard.tsx",
-        &[
-            "4c35d2ec4ccb6ece1fc91a408e62fd46c1c1317190d7dc7a1c6df51d475ec62b",
-        ],
+        &["4c35d2ec4ccb6ece1fc91a408e62fd46c1c1317190d7dc7a1c6df51d475ec62b"],
     ),
     (
         "themes/warm.json",
