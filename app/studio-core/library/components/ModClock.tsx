@@ -65,46 +65,34 @@ const ModClock = (
   ];
   const drawn = (i) => easeInOutCubic(clamp((t - when(i)) / (0.8 * each), 0, 1));
   const arcs = [];
+  const d = size * 0.45;
   for (let i = 1; i <= s && i < walk.length; i++) {
     if (walk[i - 1] === walk[i]) continue;
     const a = arc(i);
-    const q = drawn(i);
+    // Bowed towards the centre: the quadratic's control sits 0.2 chord off
+    // the middle, which is a bend of 2 atan 0.4 degrees; the sign picks the
+    // side. A diameter has no inside, so it stays straight.
+    const side = ((a.y1 - a.y0) * (c - (a.x0 + a.x1) / 2) - (a.x1 - a.x0) * (c - (a.y0 + a.y1) / 2)) / a.len;
+    const bend = Math.abs(side) < 1e-6 ? 0 : Math.sign(side) * ((2 * Math.atan(0.4) * 180) / Math.PI);
     // Stop short of the dots: the stroke runs between their edges.
-    const gap = Math.min(0.3, (0.7 * size) / a.len);
-    const ink = mix(color.bg, tone, i < s ? 0.45 : 1);
+    const gap = Math.min(0.7 * size, 0.3 * a.len) - d / 2;
     arcs.push(
-      <Path
-        d={`M${a.x0} ${a.y0} Q${a.cx} ${a.cy} ${a.x1} ${a.y1}`}
-        viewBox={[0, 0, box, box]}
-        stroke={{ width: w, color: ink, cap: "round" }}
-        trim={[gap, gap + q * (1 - 2 * gap)]}
-        style={{ position: "absolute", left: 0, top: 0, width: box, height: box }}
+      <Arrow
+        from={`${id}/r${walk[i - 1]}`}
+        to={`${id}/r${walk[i]}`}
+        bend={bend}
+        gap={gap}
+        head={3.5 * w}
+        progress={drawn(i)}
+        stroke={{ width: w, color: mix(color.bg, tone, i < s ? 0.45 : 1) }}
       />,
     );
-    if (q > 0.85) {
-      // A head on the end tangent, its tip at the trimmed end.
-      const [tx, ty] = along(a, 1 - gap);
-      const [dx, dy] = [a.x1 - a.cx, a.y1 - a.cy];
-      const l = Math.hypot(dx, dy) || 1;
-      const [ux, uy] = [dx / l, dy / l];
-      const h = 3.5 * w;
-      const [bx, by] = [tx - ux * h, ty - uy * h];
-      arcs.push(
-        <Path
-          d={`M${tx} ${ty} L${bx - uy * h * 0.6} ${by + ux * h * 0.6} L${bx + uy * h * 0.6} ${by - ux * h * 0.6} Z`}
-          viewBox={[0, 0, box, box]}
-          fill={ink}
-          style={{ position: "absolute", left: 0, top: 0, width: box, height: box, opacity: (q - 0.85) / 0.15 }}
-        />,
-      );
-    }
   }
   const visited = new Set(walk.slice(0, s + 1));
   const residues = Array.from({ length: n }, (_, k) => {
     const shown = clamp((ring - k / n) * n * 0.5 + 0.5, 0, 1);
     const [x, y] = pos(k);
     const [lx, ly] = pos(k, radius + pad * 0.5);
-    const d = size * 0.45;
     const on = visited.has(k);
     return [
       <Box
