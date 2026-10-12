@@ -12,3 +12,4 @@ export { framePoint, frameOrigin, readLayout, type Layout, type MappedBox } from
 export { measure, type Measured } from "./measure";
 export { paintBands } from "./paint";
 export type { FieldShape } from "./shape";
+export { unitAt, extendUnit, type StopRange } from "./units";

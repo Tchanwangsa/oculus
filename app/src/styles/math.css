@@ -1,6 +1,8 @@
 /* Rendered maths selects as one unit (`watchMathSelection`): no native
  * highlight on KaTeX's glyphs; a formula the selection touches gets bands
  * over its atoms instead (`.md-math-band`). */
+.katex-display::selection,
+.katex-display ::selection,
 .katex::selection,
 .katex ::selection {
   background-color: transparent;

@@ -1,4 +1,6 @@
+import { unitAt, extendUnit } from "@/lib/maths/geometry/units";
 import { describe, expect, test } from "bun:test";
+import { paddedBands } from "@/lib/maths/geometry/paint";
 import { MathField } from "@/lib/maths";
 import { bands, measure, stopAt, type Box, type Layout, type MappedBox } from "@/lib/maths/geometry";
 
@@ -206,4 +208,96 @@ describe("bands", () => {
       expect(bands(layout, 75, 100, slots)).toEqual([box(339.44, 3.08, 473.3, 24.63)]);
     });
   });
+});
+
+describe("band padding", () => {
+  test("clips rows even with an array delimiter between them in paint order", () => {
+    const rows = [box(20, 0, 80, 10), box(0, 1, 10, 30), box(20, 11, 80, 21)];
+    expect(paddedBands(rows)).toEqual([box(20, -2, 80, 10.5), box(0, -1, 10, 32), box(20, 10.5, 80, 23)]);
+    expect(rows[0].bottom).toBe(10);
+  });
+
+  test("keeps padding beside a tall structure and across a wide line gap", () => {
+    expect(paddedBands([box(0, 0, 10, 30), box(20, 1, 40, 10), box(20, 20, 40, 30)]))
+      .toEqual([box(0, -2, 10, 32), box(20, -1, 40, 12), box(20, 18, 40, 32)]);
+  });
+
+  test("whole inline maths can follow its ink without extra vertical padding", () => {
+    expect(paddedBands([box(0, 0, 20, 14)], 0)).toEqual([box(0, 0, 20, 14)]);
+  });
+});
+
+describe("math multi-click units", () => {
+  const field = MathField.open(FRAC, false);
+  const sourceAt = (x: number, y: number, group = false) => {
+    const range = unitAt(fracLayout, field, x, y, group)!;
+    const selection = field.select(...range);
+    const source = selection.source.slice(...selection.selected);
+    selection.free();
+    return source;
+  };
+
+  test("double-click chooses a numerator atom, including either half of its ink", () => {
+    expect(sourceAt(6, 6)).toBe("a");
+    expect(sourceAt(10, 6)).toBe("a");
+    expect(sourceAt(15, 6)).toBe("+");
+    expect(sourceAt(23, 6)).toBe("x");
+  });
+
+  test("a glyph beats an equally sized source wrapper in the denominator", () => {
+    expect(sourceAt(15, 25)).toBe("b");
+  });
+
+  test("triple-click takes the whole fraction from either argument or its bar", () => {
+    expect(sourceAt(6, 6, true)).toBe(FRAC);
+    expect(sourceAt(15, 25, true)).toBe(FRAC);
+    expect(sourceAt(15, 15, true)).toBe(FRAC);
+  });
+
+  test("a plain atom’s group is its row, and commands stay whole", () => {
+    const source = "x+\\alpha";
+    const f = MathField.open(source, false);
+    const layout = { items: [item(0, 1, box(0, 0, 10, 14)), item(1, 2, box(12, 0, 22, 14)), item(2, 8, box(24, 0, 34, 14))] };
+    for (const [group, expected] of [[false, "\\alpha"], [true, source]] as const) {
+      const sel = f.select(...unitAt(layout, f, 30, 6, group)!);
+      expect(sel.source.slice(...sel.selected)).toBe(expected);
+      sel.free();
+    }
+    f.free();
+  });
+
+  test("scripts group with their base while a double-click keeps just the exponent", () => {
+    const f = MathField.open("x^2+y", false);
+    const layout = { items: [item(0, 3, box(0, 0, 20, 20)), item(0, 1, box(0, 6, 10, 20)), item(2, 3, box(10, 0, 20, 10)), item(3, 4, box(22, 6, 32, 20)), item(4, 5, box(34, 6, 44, 20))] };
+    for (const [x, y, group, expected] of [[15, 5, false, "2"], [15, 5, true, "x^2"], [5, 15, true, "x^2"]] as const) {
+      const sel = f.select(...unitAt(layout, f, x, y, group)!);
+      expect(sel.source.slice(...sel.selected)).toBe(expected);
+      sel.free();
+    }
+    f.free();
+  });
+
+  test("no ink offers no unit, and multi-click drag extends whole units backwards too", () => {
+    expect(unitAt({ items: [] }, field, 0, 0)).toBeNull();
+    expect(extendUnit([3, 5], [7, 9])).toEqual([3, 9]);
+    expect(extendUnit([3, 5], [0, 2])).toEqual([5, 0]);
+    expect(extendUnit([3, 5], [3, 4])).toEqual([3, 5]);
+  });
+});
+
+test("triple-click chooses an inner fraction before its surrounding radical", () => {
+  const source = "\\sqrt{\\frac{a+b}{c}}";
+  const f = MathField.open(source, false);
+  const layout = { items: [
+    item(0, 20, box(0, 0, 50, 40)),
+    item(6, 19, box(10, 5, 40, 35)),
+    item(17, 18, box(24, 23, 30, 35)),
+    item(12, 15, box(12, 5, 37, 17)),
+    item(12, 13, box(12, 5, 19, 17)),
+    item(14, 15, box(30, 5, 37, 17)),
+  ] };
+  const selected = f.select(...unitAt(layout, f, 15, 10, true)!);
+  expect(source.slice(...selected.selected)).toBe("\\frac{a+b}{c}");
+  selected.free();
+  f.free();
 });

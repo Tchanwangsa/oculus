@@ -95,8 +95,8 @@ classes work even when there are no dollar delimiters.
   need the subject, which `MD_COMPONENTS` doesn't have, so `FileViewer` (every
   library file) and a note's `VersionPreview` wrap the markdown in
   `EmbedSubjectProvider`, which looks the code up in the subjects list by id
-  (a course folder is `safe_dir(code)`, not the code). For a subject the list
-  list does not contain, those two are `VideoLinkOut`, a button named by the tag's
+  (a course folder is `safe_dir(code)`, not the code). For a subject absent from
+  the list, those two are `VideoLinkOut`, a button named by the tag’s
   title that opens Canvas. Chat replies don't parse raw HTML, so a tag in one
   shows as its literal text.
 - **`<echo-video>` is an Echo360 video**
@@ -187,7 +187,10 @@ classes work even when there are no dollar delimiters.
   as `$…$`, display as `$$` lines, `formulaMarkdown`), and
   `watchMathSelection` (`mathSelection/whole.ts`) paints bands over all its
   atoms, as a press-and-drag over all of it would, instead of KaTeX's
-  per-glyph highlight; nothing boxes the whole formula. A press on a formula
+  per-glyph highlight; the display wrapper also suppresses native selection
+  paint so WebKit leaves no full-width stripes. Whole inline selections follow
+  their ink without extra vertical padding, keeping them close to the prose
+  highlight; nothing boxes the whole formula. A press on a formula
   selects by structure — a cell, a matrix, a run of atoms — and copies that
   part's LaTeX wrapped by its shape (`copied` in `mathSelection/clipboard.ts`,
   shared with the note's field): within one line as `$…$`, over more than
@@ -195,7 +198,13 @@ classes work even when there are no dollar delimiters.
   the model takes whole with its environment) or a whole display formula as
   `$$` lines, one row each, also as `BLOCK_MATH_TYPE`; the bare TeX goes as
   `application/x-latex`. A press outside it, Esc or focus moving ends it. It selects in place
-  (`app/src/lib/markdown/mathSelection/`): `rehypeMaths` renders every
+  (`app/src/lib/markdown/mathSelection/`): a double-click selects the atom under
+  the pointer; a triple-click selects its nearest enclosing structure (a
+  fraction, radical or scripted base), or its row when there is none.
+  `unitAt` in `lib/maths/geometry/units.ts` maps the glyphs to the model’s stops;
+  multi-click dragging extends by whole units. A triple-click on prose takes
+  the full DOM paragraph (`mathSelection/paragraph.ts`), including every inline
+  formula and the text after it. `rehypeMaths` renders every
   formula with the source map, and the press runs the note field's edit model
   (`MathField`) read-only over the drawing: the geometry finds the stop under
   the pointer, a drag selects to it (the model widening over whole
@@ -203,11 +212,15 @@ classes work even when there are no dollar delimiters.
   inside `.katex`, so no glyph moves. A band covers the selected atoms of
   one line (`bands` in `lib/maths/geometry`): a display's row, or a row of
   an array whose rows are all selected, its delimiter and the atoms beside
-  it banded apart, so a whole `cases` reads as its rows, not one box. A band reaches past the
-  formula's box, so closing clears the bands first and drops the layer two
+  it banded apart, so a whole `cases` reads as its rows, not one box. Padding
+  checks every pair of bands that shares horizontal space so the tint does not
+  double between rows. Bands and pointer geometry track the containing
+  block and KaTeX’s inline blocks for wrapping and font changes
+  (`mathSelection/resize.ts`); non-replaced inline spans do not send resize
+  notifications. A band reaches past the formula's box, so closing clears the bands first and drops the layer two
   frames later: gone in the same paint as `.katex`'s stacking, WebKit
   repaints only that box and leaves the bands' edges on screen. The press's `mousedown` is
-  cancelled (no text selection, focus is blurred), never its `pointerdown`. A
+  cancelled (no text selection, focus is blurred), never its `pointerdown`. A single
   press with no drag selects nothing; ⌘A widens in the formula
   (`lib/menu/editRouting.ts`); copy is taken in the capture phase, after
   cancelling `beforecopy` so WebKit enables Copy. The source map's offsets

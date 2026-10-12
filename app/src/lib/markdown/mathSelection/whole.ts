@@ -2,6 +2,7 @@ import { bands, paintBands, readLayout, type BandSlot } from "@/lib/maths/geomet
 import { mathAround } from "../selection";
 import { fieldOf, formulaOf, type Formula } from "./formula";
 import { dropLayer, openLayer } from "./session";
+import { watchLayout } from "./resize";
 
 /**
  * A rendered formula a selection takes whole — a text selection over it in
@@ -11,7 +12,7 @@ import { dropLayer, openLayer } from "./session";
  */
 export class WholeBands {
   readonly layer: HTMLElement;
-  #resize: ResizeObserver;
+  #unwatch: () => void;
 
   constructor(
     readonly formula: Formula,
@@ -20,19 +21,19 @@ export class WholeBands {
   ) {
     this.layer = openLayer(formula.root);
     this.redraw();
-    // Fonts arriving, the column resizing, or the rendering first laid out.
-    this.#resize = new ResizeObserver(() => this.redraw());
-    this.#resize.observe(formula.html);
+    this.#unwatch = watchLayout(formula, () => this.redraw());
   }
 
   redraw() {
     if (!this.formula.root.isConnected) return;
     const layout = readLayout(this.formula.html, this.layer);
-    paintBands(this.layer, bands(layout, 0, Number.MAX_SAFE_INTEGER, this.slots), "md-math-band");
+    // Inline prose already supplies the line’s height; extra pad makes bumps.
+    const pad = this.formula.display ? undefined : 0;
+    paintBands(this.layer, bands(layout, 0, Number.MAX_SAFE_INTEGER, this.slots), "md-math-band", pad);
   }
 
   close() {
-    this.#resize.disconnect();
+    this.#unwatch();
     dropLayer(this.layer, this.formula.root);
   }
 }

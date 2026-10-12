@@ -1,6 +1,8 @@
 import { type MathField, MathsTrap } from "@/lib/maths";
 import { bands, framePoint, measure, paintBands, readLayout, stopAt, type Layout, type Measured } from "@/lib/maths/geometry";
+import { unitAt, type StopRange } from "@/lib/maths/geometry/units";
 import type { Formula } from "./formula";
+import { watchLayout } from "./resize";
 
 /** Marks the formula a selection is drawn in (`styles/math.css`). */
 const SELECTING = "data-math-selecting";
@@ -51,7 +53,7 @@ export class Session {
   anchor = 0;
   #layout: Layout = { items: [] };
   #measured: Measured = { x: new Float64Array(), top: new Float64Array(), bottom: new Float64Array() };
-  #resize: ResizeObserver;
+  #unwatch: () => void;
 
   constructor(
     readonly formula: Formula,
@@ -61,9 +63,7 @@ export class Session {
     this.field = base;
     this.layer = openLayer(formula.root);
     this.#relayout();
-    // Fonts arriving or the column resizing move the glyphs.
-    this.#resize = new ResizeObserver(() => this.redraw());
-    this.#resize.observe(formula.html);
+    this.#unwatch = watchLayout(formula, () => this.redraw());
   }
 
   get connected(): boolean {
@@ -74,6 +74,12 @@ export class Session {
   stopAt(clientX: number, clientY: number): number | null {
     const { x, y } = framePoint(this.layer, clientX, clientY);
     return stopAt(this.#layout, this.base, this.#measured, x, y);
+  }
+
+  /** The atom or enclosing structure under this viewport point. */
+  unitAt(clientX: number, clientY: number, group: boolean): StopRange | null {
+    const { x, y } = framePoint(this.layer, clientX, clientY);
+    return unitAt(this.#layout, this.base, x, y, group);
   }
 
   /** Selects between two stops, widened by the model over whole
@@ -100,7 +106,7 @@ export class Session {
   }
 
   close() {
-    this.#resize.disconnect();
+    this.#unwatch();
     dropLayer(this.layer, this.formula.root);
     if (this.field !== this.base) this.field.free();
     this.field = this.base;

@@ -4,33 +4,38 @@ import type { Box } from "./box";
  *  script, `\sum`) overshoots its font's line box a little. */
 const BAND_PAD = 2;
 
+/** Pad without overlapping any band that shares horizontal space. Array
+ *  delimiters can sit between two rows in the sorted list, so neighbours
+ *  alone do not catch every overlap. */
+export function paddedBands(boxes: readonly Box[], pad = BAND_PAD): Box[] {
+  const out = boxes.map((b) => ({ ...b, top: b.top - pad, bottom: b.bottom + pad }));
+  for (let i = 1; i < boxes.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const [above, below] = [boxes[j], boxes[i]];
+      if (below.left >= above.right || below.right <= above.left || out[i].top >= out[j].bottom) continue;
+      const cut = Math.max(above.bottom, Math.min(below.top, (above.bottom + below.top) / 2));
+      out[j].bottom = Math.min(out[j].bottom, cut);
+      out[i].top = Math.max(out[i].top, cut);
+    }
+  }
+  return out;
+}
+
 /** Draws `boxes` (`bands`, in `layer`'s frame, top to bottom) as
- *  absolutely positioned children of `layer` with class `className`,
- *  reusing its elements. Each is padded above and below, except where that
- *  would overlap the band next to it, which would paint darker. */
-export function paintBands(layer: HTMLElement, boxes: readonly Box[], className: string) {
+ *  absolutely positioned children of `layer`, reusing its elements.
+ *  Padding is clipped between rows so their tint never doubles. */
+export function paintBands(layer: HTMLElement, boxes: readonly Box[], className: string, pad = BAND_PAD) {
   while (layer.children.length > boxes.length) layer.lastElementChild!.remove();
   while (layer.children.length < boxes.length) {
     const band = document.createElement("span");
     band.className = className;
     layer.append(band);
   }
-  const tops = boxes.map((b) => b.top - BAND_PAD);
-  const bottoms = boxes.map((b) => b.bottom + BAND_PAD);
-  for (let i = 1; i < boxes.length; i++) {
-    const [above, below] = [boxes[i - 1], boxes[i]];
-    const sideBySide = below.left >= above.right || below.right <= above.left;
-    if (!sideBySide && tops[i] < bottoms[i - 1]) {
-      const cut = Math.max(above.bottom, Math.min(below.top, (above.bottom + below.top) / 2));
-      bottoms[i - 1] = cut;
-      tops[i] = cut;
-    }
-  }
-  boxes.forEach((b, i) => {
+  paddedBands(boxes, pad).forEach((b, i) => {
     const band = layer.children[i] as HTMLElement;
     band.style.left = `${b.left}px`;
-    band.style.top = `${tops[i]}px`;
+    band.style.top = `${b.top}px`;
     band.style.width = `${b.right - b.left}px`;
-    band.style.height = `${bottoms[i] - tops[i]}px`;
+    band.style.height = `${b.bottom - b.top}px`;
   });
 }
