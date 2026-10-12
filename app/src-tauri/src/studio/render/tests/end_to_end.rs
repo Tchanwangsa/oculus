@@ -35,8 +35,8 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-/// The transitions fixture's `Slide`, four scenes of half a second.
-fn slides(dir: &Path, titles: [&str; 4]) {
+/// The transitions fixture's `Panel`, four scenes of half a second.
+fn panels(dir: &Path, titles: [&str; 4]) {
     copy_dir(
         &Path::new(FIXTURES).join("transitions/components"),
         &dir.join("components"),
@@ -46,7 +46,7 @@ fn slides(dir: &Path, titles: [&str; 4]) {
         .enumerate()
         .map(|(i, title)| {
             json!({
-                "component": "Slide",
+                "component": "Panel",
                 "props": { "title": title, "variant": if i % 2 == 0 { "a" } else { "b" } },
                 "hold": 0.5,
                 "transition": if i == 0 { json!(null) } else { json!({ "kind": "push", "dur": 0.2 }) },
@@ -118,7 +118,7 @@ fn listed_segments(dir: &Path, quality: Quality) -> Vec<PathBuf> {
 fn a_cached_concat_decodes_like_a_cold_render() {
     let Some(ffmpeg) = ffmpeg() else { return };
     let dir = Scratch::new("render-e2e-cache");
-    slides(&dir, ["One", "Two", "Three", "Four"]);
+    panels(&dir, ["One", "Two", "Three", "Four"]);
     let final_ = options(&ffmpeg, Quality::Final, None);
 
     let first = complete(&dir, &final_);
@@ -138,7 +138,7 @@ fn a_cached_concat_decodes_like_a_cold_render() {
     assert_eq!(parts, hashes);
 
     // Editing scene 1 re-renders it and scene 2, whose transition shows it.
-    slides(&dir, ["One", "Deux", "Three", "Four"]);
+    panels(&dir, ["One", "Deux", "Three", "Four"]);
     let second = complete(&dir, &final_);
     let outcomes: Vec<Outcome> = second.segments.iter().map(|s| s.outcome).collect();
     use Outcome::{Cached, Rendered};
@@ -223,7 +223,7 @@ fn narration_starts_at_its_scenes_lead() {
 fn a_cancel_mid_render_leaves_nothing_partial() {
     let Some(ffmpeg) = ffmpeg() else { return };
     let dir = Scratch::new("render-e2e-cancel");
-    slides(&dir, ["One", "Two", "Three", "Four"]);
+    panels(&dir, ["One", "Two", "Three", "Four"]);
     let cancel = AtomicBool::new(false);
     let result = render(
         &dir,
@@ -249,7 +249,7 @@ fn a_cancel_mid_render_leaves_nothing_partial() {
 fn a_failing_frame_names_its_scene_and_time() {
     let Some(ffmpeg) = ffmpeg() else { return };
     let dir = Scratch::new("render-e2e-fail");
-    slides(&dir, ["One", "Two", "Three", "Four"]);
+    panels(&dir, ["One", "Two", "Three", "Four"]);
     std::fs::write(
         dir.join("components/Breaks.tsx"),
         "export const props = {};\nexport default ({}, { t }) => {\n  if (t > 0.3) throw new Error(\"late\");\n  return <Box />;\n};\n",
