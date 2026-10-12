@@ -11,6 +11,8 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Canvas scrape engine (modules driver, link crawl, Office conversion) | `app/src-tauri/src/sync/` |
 | Canvas HTTP through keyd's `canvas` route: redirects, retries, pagination, streamed downloads | `app/src-tauri/src/sources/canvas/` |
 | Ed Discussion: courses, threads, XML→md; its requests through keyd's `ed` route | `app/src-tauri/src/sources/ed/` |
+| Ed Lessons: lessons, quiz questions, workspace zips, the lesson renderer | `app/src-tauri/src/sources/ed/lessons.rs`, `app/src-tauri/src/sources/ed/workspace.rs`, `app/src-tauri/src/sources/ed/lesson_md.rs` |
+| The Ed phase (one course resolve for threads and lessons) and the lessons phase | `app/src-tauri/src/sync/phases/ed.rs`, `app/src-tauri/src/sync/phases/ed_lessons.rs` |
 | Echo360 core | `app/src-tauri/src/sources/echo360/` |
 | Echo360 Tauri commands, session cache, downloads | `app/src-tauri/src/lectures/commands.rs`, `app/src-tauri/src/lectures/mod.rs`, `app/src-tauri/src/lectures/downloads.rs` |
 | Canvas HTML → Markdown | `app/src-tauri/src/pages/md/` |
@@ -82,8 +84,8 @@ of the term it falls inside.
   into a per-course `LinkCrawl`, drained depth-first after the content phases
   with `seen` sets breaking cycles. Anything reachable from any scraped body
   lands on disk.
-- `SyncOptions` (announcements, assignments+quizzes, modules, Ed) gates the
-  phases; the app persists the choice from `SyncSettings.tsx`, the CLI syncs
+- `SyncOptions` (announcements, assignments+quizzes, modules, Ed threads,
+  Ed lessons) gates the phases; the app persists the choice from `SyncSettings.tsx`, the CLI syncs
   everything. The "Lectures" and "Calendar" toggles are not Rust phases: the
   frontend refreshes Echo360 lecture lists and the calendar
   ([calendar.md](./calendar.md)) after `scrape-complete`, database-only.
@@ -128,7 +130,7 @@ cannot write it — see [cli.md](./cli.md).
 - `file-manifest.json` in the data dir maps Canvas file id → (`modified_at`,
   size); when the metadata call reports the same pair and the file is on disk,
   nothing is downloaded.
-- Bodies (pages, announcements, tasks, Ed threads) are always re-fetched;
+- Bodies (pages, announcements, tasks, Ed threads and lessons) are always re-fetched;
   the byte-compare in `library::paths::write_course_bytes` decides new/updated/unchanged.
 - An `updated` write purges the parse/embed artifacts
   (`library::paths::purge_parse_artifacts`) and the file's pages, so the parse re-runs.
@@ -217,14 +219,63 @@ arrive labelled `application/vnd.ms-excel`.
 A `.csv` counts under a CSV, plain-text, Excel or missing type
 (`is_csv_type`).
 
-## Ed threads are a custom XML dialect
+## Ed content is a custom XML dialect
 
-Ed returns threads as `<document>` XML, parsed with an HTML parser in
+Ed returns threads and lesson slides as `<document>` XML, parsed with an HTML parser in
 `app/src-tauri/src/sources/ed/document.rs`: `<link>` is renamed `edlink` (HTML-void), `<image>`
 becomes `<img>`, and `<break/>` swallows following siblings, so every renderer
 emits its marker and still recurses. Ed course codes are staff-typed free text
 ("comp10002 2024s2"), matched to Canvas subjects by leading code + year +
 semester from `/api/user`. The token is in [auth.md](./auth.md).
+
+## Ed Lessons are one file per lesson, with their assets beside it
+
+The Ed phase resolves the subject's Ed course once and runs lessons, threads or
+both (`ed_lessons`, `ed`), so a course costs at most one LTI walk. Lessons run
+first: the board re-reads every thread and is what meets Ed's rate limit. Every
+Ed request that gets a 429 waits (`Retry-After`, capped at a minute, else 2, 4,
+8 … seconds) and is sent again, up to six times (`sources/ed/client.rs`). Lessons go
+in sidebar order (module, then `index` with unset ones last, then id), each to
+`lessons/<lessonId>-<slug>.md` with its slides in `index` order; the id leads
+so a renamed lesson keeps its prefix. Progress reports the phase `ed_lessons`.
+
+- Assets sit in `lessons/<lessonId>-<slug>/`: a PDF slide as
+  `<NN>-<slide-slug>.pdf`, a challenge's files under `<NN>-<slide-slug>/`
+  (`NN` is the slide's position). The lesson file links them relative to its
+  own folder, percent-encoded, which is the form the viewer resolves.
+- Every request is a read without `?view=1`, which would mark the slide seen,
+  except a challenge's workspace (`app/src-tauri/src/sources/ed/live.rs`):
+  1. `POST /challenges/<ch>/connect` attaches the student's own workspace
+     (what opening the slide does) and returns a session ticket.
+  2. Ed only hands out a download for a live workspace, so the sync opens
+     `wss://sahara.au.edstem.org/connect?ticket=…` directly over rustls, with
+     the web app's `Origin`, and waits up to 30 s for the `init` frame.
+  3. `POST /workspaces/<w>/download {"path": "."}` returns a one-shot ticket,
+     and the zip comes from `sahara.au.edstem.org/download/<ticket>` with no
+     credentials, through the same no-cookie fetch as a Canvas file CDN.
+  4. The socket closes once the zip is in.
+
+  Both tickets are credentials: neither goes through keyd, and no URL that
+  carries one reaches a log.
+- Zip entries are read with `enclosed_name` (an escaping path is refused and
+  logged); directories, dotfiles, dot-directories and `__MACOSX` are dropped,
+  and a file over 20 MB is skipped with a log line. Text files up to 20 KB are
+  also shown inline as fenced code. A workspace is fetched every sync, since
+  Ed gives it no version; the byte compare keeps unchanged files unchanged.
+- A PDF slide's `file_url` names its content, so `file-manifest.json` keeps it
+  under `ed-slide-<id>`, and a match with the file on disk skips the
+  download. The PDF is an ordinary library file: parsed and embedded.
+- A quiz lists each question's answers as `- [ ]` in Ed's order. Ed sends a
+  question's `solution` only once the lesson's solutions are released, and
+  only then does the file get a collapsed `<details>` naming the answer and
+  the explanation.
+- Slide bodies are Ed's `<document>` XML ([above](#ed-content-is-a-custom-xml-dialect)), except `html` slides,
+  which go through `app/src-tauri/src/pages/md/` as they are. A slide's own
+  headings are pushed two levels down (h1 → h3, capped at h6), below its
+  `## <slide title>`. Images stay remote, as in threads. An unknown slide type renders a one-line note.
+- A lesson Ed refuses (a password-gated quiz answers 403) is a warning and the
+  course carries on; a slide whose PDF, questions or workspace fails is a
+  warning and a note in the lesson file.
 
 ## Echo360 is an LTI launch with up to two streams
 

@@ -107,7 +107,8 @@ classes work even when there are no dollar delimiters.
   in `FilePage`'s header, ⌘-click for the system browser). A synced Canvas page
   is our markdown of it; the button opens the original, with its embeds and
   styling, in a browser tab through `openExternal`.
-- **`FileViewer` resolves in-file links locally** — relative links and Canvas
+- **`FileViewer` resolves in-file links locally** — `../` links, links into a
+  folder beside the file (an Ed lesson's `<id>-<slug>/…` assets) and Canvas
   `/files/<id>` or `/pages/<slug>` URLs, by `canvas_id`, path or `source_url`
   (`app/src/lib/files/libraryLinks.ts`, shared with the note editor). A selection
   in its rendered markdown copies or drags out as markdown, maths as TeX

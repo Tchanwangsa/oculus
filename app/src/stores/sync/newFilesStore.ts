@@ -7,9 +7,10 @@ import { FILE_ACCESSED_EVENT } from "@/lib/files/openFile";
 /**
  * Counts of never-opened files per subject and category, for the sidebar's
  * Subjects dot and subject-tab badges. Only categories with openable rows
- * count: anything else could never be cleared.
+ * count: anything else could never be cleared. Of `lessons`, only the lesson
+ * `.md`s the Lessons tab lists count, not the assets in their folders.
  */
-const COUNTED_CATEGORIES = ["file", "page", "announcement", "assignment", "quiz", "ed"];
+const COUNTED_CATEGORIES = ["file", "page", "announcement", "assignment", "quiz", "ed", "lessons"];
 
 /** Keyed by the tab's path segment (`TABS` in `SubjectLayout`). */
 export const TAB_CATEGORIES: Record<string, string[]> = {
@@ -18,6 +19,7 @@ export const TAB_CATEGORIES: Record<string, string[]> = {
   announcements: ["announcement"],
   assignments: ["assignment", "quiz"],
   discussion: ["ed"],
+  lessons: ["lessons"],
 };
 
 type CountsBySubject = Record<number, Record<string, number>>;
@@ -38,6 +40,7 @@ export const useNewFilesStore = create<NewFilesState>((set) => ({
          FROM files
          WHERE first_seen_at IS NOT NULL AND last_accessed_at IS NULL
            AND category IN (${COUNTED_CATEGORIES.map((c) => `'${c}'`).join(", ")})
+           AND NOT (category = 'lessons' AND relative_path GLOB 'courses/*/lessons/*/*')
          GROUP BY subject_id, category`,
       );
       const bySubject: CountsBySubject = {};

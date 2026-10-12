@@ -1,4 +1,5 @@
 import {
+  ChalkboardTeacher,
   ChatsCircle,
   File,
   FileArchive,
@@ -75,6 +76,14 @@ export function isPipelineFile(filename: string): boolean {
   return isPdfBacked(filename) || isSheetFile(filename);
 }
 
+/** A file an Ed lesson's `.md` links to — a PDF slide or a challenge's
+ *  workspace file under `lessons/<id>-<slug>/` — rather than a lesson. It is a
+ *  download like `files/`, so it opens and titles like one. A workspace's own
+ *  `.md` counts as a page. */
+export function isLessonAsset(file: { category: string | null; filename: string }): boolean {
+  return file.category === "lessons" && ext(file.filename) !== "md";
+}
+
 /** Video formats a library file can hold — module videos land as
  *  `files/<name>.mp4`. Mirrors VIDEO_EXTS in sync/mod.rs. */
 const VIDEO_EXTS = ["mp4", "mov", "m4v", "webm"];
@@ -104,6 +113,7 @@ export function categoryIconFor(file: {
     case "assignment": return PencilLine;
     case "quiz": return Rocket;
     case "ed": return ChatsCircle;
+    case "lessons": return isLessonAsset(file) ? fileIconFor(file.filename) : ChalkboardTeacher;
     case "module": return Stack;
     case "file":
     case "image": return fileIconFor(file.filename);

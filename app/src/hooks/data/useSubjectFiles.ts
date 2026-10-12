@@ -49,7 +49,7 @@ export function useSubjectFiles(subjectId: number | null) {
       home: [] as DbFile[], module: [] as DbFile[], page: [] as DbFile[],
       file: [] as DbFile[], upload: [] as DbFile[], document: [] as DbFile[],
       announcement: [] as DbFile[], assignment: [] as DbFile[], quiz: [] as DbFile[],
-      ed: [] as DbFile[], image: [] as DbFile[], syllabus: [] as DbFile[],
+      ed: [] as DbFile[], lessons: [] as DbFile[], image: [] as DbFile[], syllabus: [] as DbFile[],
     };
     for (const file of files) {
       const category = file.category;

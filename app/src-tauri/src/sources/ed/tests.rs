@@ -254,3 +254,41 @@ fn a_dead_canvas_session_ends_the_launch_with_the_reason() {
     assert!(err.contains("Signed out"), "{err}");
     assert!(canvas.expired().is_some());
 }
+
+#[test]
+fn a_rate_limited_request_waits_and_is_sent_again() {
+    let dir = Scratch::new("ed-429");
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = calls.clone();
+    let keyd = FakeKeyd::start(&dir, move |header, _| {
+        match header["op"].as_str().unwrap() {
+            "forward" if seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 => (
+                json!({"status": 429, "headers": [["retry-after", "3"]]}),
+                b"{}".to_vec(),
+            ),
+            "forward" => (
+                json!({"status": 200, "headers": []}),
+                br#"{"user":{"name":"Ada"}}"#.to_vec(),
+            ),
+            _ => (json!({}), vec![]),
+        }
+    });
+    assert_eq!(Ed::open(&dir).whoami().unwrap(), "Ada");
+    let forwards = keyd
+        .requests()
+        .into_iter()
+        .filter(|(h, _)| h["op"] == "forward")
+        .count();
+    assert_eq!(forwards, 3);
+}
+
+#[test]
+fn rate_limit_waits_follow_retry_after_else_double() {
+    use super::client::rate_limit_wait;
+    use std::time::Duration;
+    assert_eq!(rate_limit_wait(Some("7"), 0), Duration::from_secs(7));
+    assert_eq!(rate_limit_wait(Some("600"), 0), Duration::from_secs(60));
+    assert_eq!(rate_limit_wait(None, 0), Duration::from_secs(2));
+    assert_eq!(rate_limit_wait(None, 3), Duration::from_secs(16));
+    assert_eq!(rate_limit_wait(Some("soon"), 1), Duration::from_secs(4));
+}
