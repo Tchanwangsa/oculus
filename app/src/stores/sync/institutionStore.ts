@@ -17,6 +17,9 @@ export interface Institution {
 interface InstitutionState {
   /** `undefined` until the first read. */
   institution: Institution | undefined;
+  /** Why the last read failed; cleared by the next one that succeeds. */
+  loadError: string | null;
+  /** Reads the profile; on failure records `loadError` and rejects. */
   load: () => Promise<Institution>;
   /** Checks the address is Canvas, detects its sign-in and saves it; a
    *  changed address signs the app out. Rejects with Rust's reason. */
@@ -25,10 +28,16 @@ interface InstitutionState {
 
 export const useInstitutionStore = create<InstitutionState>((set) => ({
   institution: undefined,
+  loadError: null,
   load: async () => {
-    const institution = await invoke<Institution>("institution_get");
-    set({ institution });
-    return institution;
+    try {
+      const institution = await invoke<Institution>("institution_get");
+      set({ institution, loadError: null });
+      return institution;
+    } catch (e) {
+      set({ loadError: String(e) });
+      throw e;
+    }
   },
   configure: async (address) => {
     const institution = await invoke<Institution>("institution_configure", { address });
@@ -37,13 +46,16 @@ export const useInstitutionStore = create<InstitutionState>((set) => ({
   },
 }));
 
-/** The profile, read once per app run by whichever component asks first. */
+/** The profile, read once per app run by whichever component asks first. A
+ *  failed read is not repeated on its own: `loadError` holds why, and a retry
+ *  is a `load()` call. */
 export function useInstitution(): Institution | undefined {
   const institution = useInstitutionStore((s) => s.institution);
+  const loadError = useInstitutionStore((s) => s.loadError);
   const load = useInstitutionStore((s) => s.load);
   useEffect(() => {
-    if (institution === undefined) load().catch(console.error);
-  }, [institution, load]);
+    if (institution === undefined && loadError === null) load().catch(console.error);
+  }, [institution, loadError, load]);
   return institution;
 }
 

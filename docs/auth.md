@@ -47,7 +47,9 @@ assume which university, or which region of a service, they are at.
   `sources::institution` (`canvas_base`, `current`, `load`), the frontend
   through `institutionStore`. A link the frontend builds before the profile
   has loaded is resolved when clicked (`canvasFileLink` in
-  `app/src/lib/files/canvasLinks.ts`).
+  `app/src/lib/files/canvasLinks.ts`). A read that fails is not repeated on
+  its own: the store keeps the reason (`loadError`), and Settings → Canvas
+  shows it in place of the address with a *Try again*.
 - **What a launch reveals is learned, then saved to the profile**: Ed's API
   host and web region from the page its LTI launch lands on, the Echo360
   tool from the course's tabs. A feature that needs one before any launch
