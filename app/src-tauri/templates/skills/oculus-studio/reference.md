@@ -1028,40 +1028,6 @@ oculus studio slide <slug> lecture-04.pdf --page 12 --bbox 0.5,0.2,0.95,0.8 --na
   comes from the props printed. Lint warns when the PDF has changed since
   the crop; re-run the command it prints.
 
-## Slides
-
-When the lecture's own figure is the point, show it, cropped from the
-library PDF, rather than redraw it.
-
-```bash
-oculus studio blocks lecture-04.pdf --page 12                       # each block: index, kind, box, text
-oculus studio blocks lecture-04.pdf --page 12 --png out/p12.png     # the page, blocks boxed and numbered
-oculus studio slide <slug> lecture-04.pdf --find "Figure 3" --name descent
-oculus studio slide <slug> lecture-04.pdf --page 12 --block 3,4 --name descent
-oculus studio slide <slug> lecture-04.pdf --page 12 --bbox 0.5,0.2,0.95,0.8 --name descent
-```
-
-- FILE is found as `oculus read` finds it. `--find` picks the figure, chart
-  or table whose text holds the words, with its caption when the caption is
-  its own block; a tie or a miss lists the candidates, so pick one with
-  `--page` and `--block`. `--bbox` is fractions of the page from its top
-  left. `--pad` (0.02) adds a margin.
-- It writes `assets/slides/<name>.png` (sharp at 2x the frame),
-  `<name>.page.png` (the whole page) and `<name>.json`, and prints the
-  `Slide` props and the blocks inside the crop as boxes in fractions of the
-  crop. Paste the props; take `highlight` boxes from those blocks.
-- No edge cuts through ink: a caption or label next to a figure is taken
-  in, other text near it is left out, and the sidecar's `edges` says what
-  moved (`--exact` keeps the box as given). **Look at the crop** anyway
-  (`frame` the scene); widen or narrow it with `--bbox`.
-- Use `Slide` as the scene (props in `video.json`), or copy the helper into
-  a component to put the crop beside other elements: `area: [x, y, w, h]`
-  places it. Cue `zoomAt` and `highlightAt` with `word()`. Without `page`
-  it enters with `enter` (an Enter preset) at `at`.
-- The sandbox reads no files, so never compute a crop's size: `aspect`
-  comes from the props printed. Lint warns when the PDF has changed since
-  the crop; re-run the command it prints.
-
 ## Libraries
 
 A component name resolves through three levels; the first hit wins:

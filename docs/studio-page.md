@@ -16,7 +16,7 @@ page is the frontend over them.
 | New video: the box and its start-up | `app/src/components/studio/new/NewVideo.tsx`, `app/src/hooks/studio/useNewVideo.ts`, `app/src/lib/studio/title.ts` |
 | The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/hooks/studio/useThemeDefaults.ts`, `app/src/lib/studio/themes.ts` |
 | The thread column | `app/src/components/studio/thread/ThreadColumn.tsx` |
-| Player, render bar, scene strip, script, facts, the captions switch, the Export menu | `app/src/components/studio/video/` (`ExportMenu.tsx`, `CaptionsSwitch.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
+| Player, render bar, scene strip, script, facts, the Export menu | `app/src/components/studio/video/` (`ExportMenu.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
 | The Videos grid, its cards and subject pills | `app/src/components/studio/videos/`, `app/src/components/ui/layout/MediaGrid.tsx` |
 | Stills (`studio_frame`, `studio_thumbnail`) as object URLs | `app/src/lib/studio/stills.ts`, `app/src/hooks/studio/useStill.ts` |
 | Render state, the video list, the event bridge | `app/src/stores/studio/` (`renderStore.ts`, `videosStore.ts`), `app/src/hooks/backend/useStudioEvents.ts` |
@@ -95,8 +95,7 @@ The right column loads `studio_video_detail` and then renders `VideoStage`:
   optional) over the newest video render (`draft`, `final`, `small` or `2x`;
   `playableRenders`), `mediaSrc(path)` plus `&v=<mtime>` so a re-render of
   the same path is a new file to the element. With several, pills choose.
-  When the video does not burn captions in and the render has its `.vtt`
-  beside it, `studio_render_captions` reads it, `parseVtt` makes the cues
+  When the render has its `.vtt` beside it, `studio_render_captions` reads it, `parseVtt` makes the cues
   and the bar gets its captions button; otherwise there is none. No render
   shows "Not rendered yet" and Render draft. The scrub bar's notches
   are the scene starts. The element shares the app's one sound with lectures
@@ -135,12 +134,9 @@ the problem in place of its facts. Pills over the grid narrow by subject
 `oculus-studio-subject`). With no video the page offers New video.
 
 The detail is the same `VideoStage` beside the facts (subject, theme, voice,
-length, shape), the captions switch and the script split by scene; a press
-on a scene seeks the player. **Continue in chat** opens the thread page.
+length, shape) and the script split by scene; a press on a scene seeks the
+player. **Continue in chat** opens the thread page.
 
-- **Burn in captions** (`CaptionsSwitch`) writes video.json's `captions`
-  through `studio_set_captions` and re-reads the detail; it applies from
-  the next render. A failed write shows its sentence under the switch.
 - **Export** (`ExportMenu`) is a pill over a popover of the presets
   ([studio.md](./studio.md#rendering-a-video)): each row names the preset and
   what it makes for this video's shape (`presetHint`), and its state from

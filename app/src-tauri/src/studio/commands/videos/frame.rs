@@ -50,16 +50,13 @@ pub fn frame_png(
     png(&project, at.into(), scale)
 }
 
-/// `project` at `at`, rendered at `scale`, as a PNG. A still shows the
-/// scene itself, so burned-in captions are left out.
+/// `project` at `at`, rendered at `scale`, as a PNG.
 pub(super) fn png(project: &Project, at: Time, scale: f64) -> Result<Vec<u8>, String> {
     let options = RenderOptions {
         scale,
         motion_blur: None,
     };
-    let mut renderer = Renderer::new(project, options)
-        .map_err(|e| e.to_string())?
-        .without_captions();
+    let mut renderer = Renderer::new(project, options).map_err(|e| e.to_string())?;
     let frame = renderer.frame(at).map_err(|e| e.to_string())?;
     frame.encode_png().map_err(|e| e.to_string())
 }

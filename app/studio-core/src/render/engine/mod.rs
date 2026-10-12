@@ -99,11 +99,6 @@ impl Engine {
         &self.theme
     }
 
-    /// The layout size, in px.
-    pub(crate) fn size(&self) -> Size {
-        self.size
-    }
-
     pub(crate) fn set_morph_color(&mut self, c: MorphColor) {
         self.morph_color = c;
     }

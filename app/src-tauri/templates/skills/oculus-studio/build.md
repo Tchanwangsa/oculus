@@ -103,10 +103,7 @@ and stays while it is used. Words in a formula are `\text{…}` inside it.
 
 **Taste.** The picture carries the idea; words on screen are labels, never
 the script. The main element is large and centred, and the frame is
-filled. Every motion is cued to its words. With `"captions": true` in
-video.json the captions take the bottom sixth of the frame (a plate 5% of
-the height above the edge, one or two lines): keep key content above it,
-and check with `frame`, which draws them. No colour, font or spacing
+filled. Every motion is cued to its words. No colour, font or spacing
 literals: read them from `theme` ("The theme").
 
 ## What is yours

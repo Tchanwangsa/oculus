@@ -6,7 +6,7 @@ import type { VideoPlayback } from "@/hooks/studio/useVideoPlayback";
 /**
  * The render in the media player, in a 16:9 frame whatever the video's shape
  * (a portrait video letterboxes), with a captions button when the render's
- * captions are beside it rather than burned in. With no render yet the frame
+ * captions are beside it. With no render yet the frame
  * says so; the render bar beside it offers one.
  */
 export function VideoPlayer({ playback }: { playback: VideoPlayback }) {
