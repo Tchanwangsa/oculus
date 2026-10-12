@@ -54,6 +54,7 @@ fn speaker(packs: &Packs, lexicon: &Path) -> KokoroSpeaker {
         LexiconFiles {
             library: Some(lexicon.to_owned()),
             subject: None,
+            pin: None,
         },
     )
 }

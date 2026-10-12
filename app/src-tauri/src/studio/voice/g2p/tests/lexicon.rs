@@ -72,3 +72,19 @@ fn a_curly_apostrophe_reads_as_a_straight_one() {
     assert_eq!(l.phonemes("Bayes'").unwrap(), "bˈAz");
     assert_eq!(l.phonemes("Bayes’").unwrap(), "bˈAz");
 }
+
+#[test]
+fn a_layer_over_the_files_wins() {
+    let dir = crate::test_support::Scratch::new("lexicon-over");
+    let file = dir.join("lexicon.json");
+    std::fs::write(&file, r#"{"Euler":"/ˈYləɹ/","Gauss":"/ɡˈWs/"}"#).unwrap();
+    let l = Lexicon::load_over(
+        Some(&file),
+        None,
+        Some(("pinned", r#"{"Euler":"/ˈulɚ/"}"#)),
+        &dict(),
+    )
+    .unwrap();
+    assert_eq!(l.phonemes("Euler").unwrap(), "ˈulɚ");
+    assert_eq!(l.phonemes("Gauss").unwrap(), "ɡˈWs");
+}

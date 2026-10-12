@@ -40,7 +40,7 @@ studio_core = { package = "oculus-studio-core", path = "../studio-core" }
 serde = { version = "1", features = ["derive"] }
 # `raw_value`: `harness/providers/antigravity/rules.rs` rewrites two lists in agy's
 # settings file and hands every other value back verbatim, in file order.
-serde_json = { version = "1", features = ["raw_value"] }
+serde_json = { version = "1", features = ["raw_value", "preserve_order"] }
 tiny_http = "0.12"
 url = "2"
 ureq = { version = "2", features = ["cookies"] }
