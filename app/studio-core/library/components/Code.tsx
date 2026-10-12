@@ -17,7 +17,8 @@ export const props = {
   keys: list(str()).default([]),
   numbers: bool().default(true),
   first: num().default(1),
-  // Overrides the code size (px on the 1920 frame); long code is scaled down to fit.
+  // Pins the code size (px on the 1920 frame); long code is still scaled down to fit.
+  // Unset, short code grows up to 1.5 x the theme's size to fill the frame.
   fontSize: num().optional(),
   // Focus k: lines focusLine[k] to focusEnd[k] (default the same line) are lit
   // and the rest dimmed from focusAt[k]; -1 clears.
@@ -64,7 +65,6 @@ export const examples = {
       "    return -1",
     ],
     lang: "python",
-    fontSize: 36,
     caretLine: [1, 2, 3, 4, 6, 7, 2, 3, 4, 5],
     caretAt: [0.5, 0.95, 1.4, 1.85, 2.3, 2.75, 3.2, 3.6, 4.0, 4.4],
     vars: ["lo", "hi", "mid", "lo", "mid"],
@@ -85,7 +85,6 @@ export const examples = {
       "ORDER BY pay DESC;",
     ],
     lang: "sql",
-    fontSize: 36,
     focusLine: [1, 3, 4, 5, 0, 6],
     focusEnd: [2, 3, 4, 5, 0, 6],
     focusAt: [0.6, 1.5, 2.4, 3.2, 4.0, 4.8],
@@ -262,7 +261,8 @@ const glide = (t, at, vals, dur) => {
  * `focus: [{ from, to, at }]` (from -1 clears); `caret: [{ line, at }]`;
  * `reveal: { at, each }`; `notes: [{ line, text, at }]`;
  * `trace: [{ name, value, at }]`; `added`/`removed` line indices with
- * `diffAt`. The font shrinks so the panel (with its notes and trace) fits
+ * `diffAt`. The font shrinks (or, with no `fontSize`, grows up to 1.5 x
+ * the theme's) so the panel (with its notes and trace) fits
  * `maxWidth` x `maxHeight` (default: the frame less `space.xl` all round)
  * instead of clipping, so a column is always `0.6 * fontSize` px.
  */
@@ -302,8 +302,8 @@ const Code = (
     return { fs, r, sp, cw, lh, pad, small, codeX, noteX, noteW, panelW, panelH, tpad, nameW, valW, traceW, traceH, gap, w: panelW + gap + traceW, h: Math.max(panelH, traceH) };
   };
   const fit = measure(base);
-  const k = Math.min(1, (maxWidth ?? frame.width - 2 * space.xl) / fit.w, (maxHeight ?? frame.height - 2 * space.xl) / fit.h);
-  const m = k < 1 ? measure(base * k) : fit;
+  const k = Math.min(fontSize === undefined ? 1.5 : 1, (maxWidth ?? frame.width - 2 * space.xl) / fit.w, (maxHeight ?? frame.height - 2 * space.xl) / fit.h);
+  const m = k === 1 ? fit : measure(base * k);
   const { fs, sp, cw, lh, pad, small, codeX, noteX, panelW, panelH } = m;
 
   const ink = {
