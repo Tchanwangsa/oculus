@@ -1156,12 +1156,22 @@ error at the literal's `file.tsx:line:col`:
 - **Font families.** A bundled family's name as a whole string, or any string
   after `fontFamily:`: ``font family `Manrope` is a literal; use
   theme.font.heading``.
-- **Style numbers.** A number that is a direct value of a `style` object, or
-  an element of an array there (`padding: [0, 16]`), and equals a theme
-  `space` or `radius` entry: ``style value 24 equals theme.space.m; use
-  theme.space.m``. Space is searched before radius, so 16 names `space.s`
-  when `radius.m` is also 16. Numbers inside nested objects (`shadow`,
-  `border`, `fill`), negative numbers and every other number are allowed.
+- **Style numbers.** A number that is a length in a `style` object and
+  equals a theme `space` or `radius` entry: ``style value 24 equals
+  theme.space.m; use theme.space.m``. A length is the value of a length
+  key (`width`, `height`, the `min`/`max` sizes, `gap`, `padding`,
+  `margin`, `left`, `top`, `right`, `bottom`, `radius`, `blur`,
+  `translateX`, `translateY`, `fontSize`, `letterSpacing`): the value
+  itself, a branch of it (an array element as in `padding: [0, 16]`, a
+  ternary's arm, a side of `||`, `??` or `&&`) or a term added or
+  subtracted (`space.s + 4`). Space is searched before radius, so 16 names
+  `space.s` when `radius.m` is also 16. Unitless keys (`opacity`, `scale`,
+  `rotate`, `flexGrow`, `flexShrink`, `fontWeight`, `lineHeight`,
+  `transformOrigin`, `clipInset`) are never checked, so `opacity:
+  clamp(pop * 4, 0, 1)` passes, and neither is a factor (`width: 24 * s`),
+  a side of a comparison, a call's argument, a number inside a nested
+  object (`shadow`, `border`, `fill`, `reveal`), or a negative number
+  (`project/lint/tokens/style.rs`).
 
 The check reads the TSX with a scanner, not a parser: comments are skipped,
 strings and template literals are read as strings (a literal inside a
