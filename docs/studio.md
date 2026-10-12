@@ -1300,6 +1300,11 @@ there. Nothing is cached.
   video's and Settings' voice); `oculus studio tts` makes one clip; `oculus
   studio aligner` manages the aligner model. See "Narration is made by
   `oculus studio narrate`".
+- `oculus studio agents [--agent A]` prints, for each agent or one, the
+  model and effort its `studio-research` and `studio-scene` subagents run
+  on and the call that starts one (`--json`: `[{agent, roles: [{role, job,
+  model, effort, spawn}]}]`). It reads only the settings; see
+  [harness.md](./harness.md#subagents).
 - `oculus studio render <DIR>` writes an mp4 (`--draft`, the default, or
   `--final`; `-o`, `--threads` for the frame renderers, not the encoder). It prints the plan, then per scene
   `rendered` with its frames, seconds and frames a second, or `cached`,
