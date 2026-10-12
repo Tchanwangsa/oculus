@@ -284,16 +284,31 @@ and `components list` and `show` take `--subject`, which replace
 video.json's for that load. A component that no level has is an error
 listing every name in every level.
 
-The starter set (`app/studio-core/library/`) is compiled into the crate: the
-components `TitleCard`, `Steps`, `BigNumber`, `LowerThird` and `SplitShell`,
-and the theme `warm` beside `default`. Each takes its colours and fonts from
-the theme and has at least two examples. `tests/starter.rs` lints the set in both themes, and
-`tests/gallery_golden.rs` pins every example as `starter-<Component>-<example>.png`,
-laid out at 1920x1080 and drawn at half scale. A load copies each starter
+The starter set (`app/studio-core/library/`) is compiled into the crate:
+drawing primitives, `NumberLine`, `Axes` (with `Plot` and `Dot`), `DotGrid`,
+`Tiles` (Euclid's gcd as squares), `ModClock` (residues on a circle and a
+walk between them) and `Table` (keyed cells), plus `TitleCard`, and the
+theme `warm` beside `default`. Components cannot import one another, so
+each primitive file holds the primitive as a helper function (keys under
+an `id` prefix, times as numbers a scene passes from `word()`) and a
+default export that demos it; a scene copies the helper into its own
+component. The starters are primitives, never scene templates: a heading
+over lines, two text columns or a stat card is the slide shape the
+Studio skill bans, so none ships. Each takes its colours and fonts from
+the theme and has at least two examples. `tests/starter.rs` lints the set
+in both themes, and `tests/gallery_golden.rs` pins each starter as one
+sheet, `starter-<Component>.png`, a row per example and a column per
+moment of the 6 s preview (laid out at 1920x1080, drawn at a quarter), so
+the draw-on is pinned too. A load copies each starter
 file the global library has never been offered, then lists it in the
 library's `.seeded`; a listed file is never copied again, so a deleted
 starter stays deleted, while one added to a later build still arrives. An
-existing file is never replaced, so an edit is the user's. `oculus studio
+existing file is never replaced, so an edit is the user's. A starter
+dropped from the set is neither copied nor deleted: a library's existing
+copy stays, edited or not, and its `.seeded` line is harmless. Such a copy
+named like a prelude element (`Steps.tsx`) shadows nothing: each
+component is its own module and is called only by name from video.json,
+so inside every component `<Steps>` is still the element. `oculus studio
 components seed --reset` writes the starter text over every file that
 differs or is missing. Every write
 to a library file first copies the previous text to `.history/` beside it
