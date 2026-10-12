@@ -2,7 +2,7 @@
 //! is also valid YAML, and a non-empty list is one JSON value per item; the
 //! encoding is described in `docs/sync.md`.
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// `---`-fenced front matter for `fields`, in order. Missing data goes in as
 /// `null`, never as an omitted key.
@@ -33,4 +33,30 @@ pub fn text_or_null(value: &Value) -> Value {
 
 fn literal(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".into())
+}
+
+/// The fields of front matter [`front_matter`] wrote, and the body after it.
+/// `None` when `md` opens with none or a line is not of that encoding.
+pub fn read_front_matter(md: &str) -> Option<(Map<String, Value>, &str)> {
+    let rest = md.strip_prefix("---\n")?;
+    let end = rest.find("\n---\n")?;
+    let mut map = Map::new();
+    let mut list: Option<&str> = None;
+    for line in rest[..end].lines() {
+        if let (Some(item), Some(key)) = (line.strip_prefix("  - "), list) {
+            map.get_mut(key)?
+                .as_array_mut()?
+                .push(serde_json::from_str(item).ok()?);
+            continue;
+        }
+        let (key, value) = line.split_once(':')?;
+        if value.is_empty() {
+            map.insert(key.into(), Value::Array(Vec::new()));
+            list = Some(key);
+        } else {
+            map.insert(key.into(), serde_json::from_str(value.trim()).ok()?);
+            list = None;
+        }
+    }
+    Some((map, &rest[end + "\n---\n".len()..]))
 }

@@ -115,6 +115,12 @@ impl SlideFile<'_> {
     }
 }
 
+/// A slide's workspace folder from its file's path (either relative form):
+/// the slide's assets share its stem.
+pub fn slide_workspace_dir(slide_md: &str) -> Option<&str> {
+    slide_md.strip_suffix(".md").filter(|d| !d.is_empty())
+}
+
 /// The web app's page for a lesson in Ed's `region`.
 pub fn lesson_url(region: &str, course_id: i64, lesson_id: i64) -> String {
     format!("https://edstem.org/{region}/courses/{course_id}/lessons/{lesson_id}")

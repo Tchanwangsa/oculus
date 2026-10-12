@@ -53,6 +53,7 @@ pub fn run() {
         .manage(shell::dock::DockState::default())
         .manage(shell::usage::UsageState::default())
         .manage(music::MusicState::default())
+        .manage(sources::ed::workspace_session::EdWorkspaces::default())
         .setup(|app| {
             // WebKit's WebCrypto master key comes from keyd. First, so the
             // default store has its delegate before any page can ask.
@@ -139,6 +140,11 @@ pub fn run() {
             sources::institution::commands::institution_get,
             sources::institution::commands::institution_configure,
             sources::ed::views::ed_mark_viewed,
+            sources::ed::workspace_session::commands::ed_workspace_open,
+            sources::ed::workspace_session::commands::ed_workspace_close,
+            sources::ed::workspace_session::commands::ed_workspace_read,
+            sources::ed::workspace_session::commands::ed_workspace_save,
+            sources::ed::workspace_session::commands::ed_workspace_delete,
             auth::okta::commands::okta_credential_status,
             auth::okta::commands::okta_save_credentials,
             auth::okta::commands::okta_clear_credentials,

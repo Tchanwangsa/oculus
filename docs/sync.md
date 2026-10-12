@@ -13,6 +13,7 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Ed Discussion: courses, threads, XML→md; its requests through keyd's `ed` route | `app/src-tauri/src/sources/ed/` |
 | Ed Lessons: lessons, quiz questions, challenge settings, workspace zips, the index and slide renderers | `app/src-tauri/src/sources/ed/lessons.rs`, `app/src-tauri/src/sources/ed/workspace.rs`, `app/src-tauri/src/sources/ed/lesson_md/` |
 | A challenge workspace's local sync record | `app/src-tauri/src/sources/ed/workspace_state.rs` |
+| A workspace opened in the app: its socket thread, frames, commands and `ed-workspace` events; the `/api` and workspace-server calls it makes | `app/src-tauri/src/sources/ed/workspace_session/`, `app/src-tauri/src/sources/ed/workspace_api.rs`, `app/src-tauri/src/sources/ed/sahara.rs`, `app/src-tauri/src/sources/ed/live.rs` |
 | Front matter on Ed files; Ed's category colours | `app/src-tauri/src/sources/ed/front.rs`, `app/src-tauri/src/sources/ed/palette.rs` |
 | The Ed phase (one course resolve for threads and lessons) and the lessons phase | `app/src-tauri/src/sync/phases/ed.rs`, `app/src-tauri/src/sync/phases/ed_lessons.rs` |
 | Echo360 core | `app/src-tauri/src/sources/echo360/` |
@@ -433,6 +434,68 @@ leaves the last whole lesson.
 - A lesson Ed refuses (a password-gated quiz answers 403) is a warning and the
   course carries on; a slide whose PDF, questions or workspace fails is a
   warning and a note in the slide's file (in the index, for a PDF).
+
+## An open challenge workspace is a live session
+
+Opening a `code` slide's workspace in the app starts a session
+(`app/src-tauri/src/sources/ed/workspace_session/`): one per challenge, held in
+the managed `EdWorkspaces` state. The library copy under the slide's folder is
+the working copy; Ed gets each save as an upload.
+
+- `ed_workspace_open {challengeId}` finds the slide by the `ed_challenge_id`
+  in its front matter (the folder the sync record names first, else every
+  `courses/*/lessons/*/*.md`), lists the folder's files, reads the
+  `challenge` snapshot for `runCommand`, `features` and `dueAt`, starts the
+  socket thread and answers at once with status `connecting`. A second open
+  answers for the session already running; `ed_workspace_close` ends it and
+  is a no-op when none is open.
+- The thread owns the socket (`live.rs`'s TLS and handshake, shared with the
+  sync): `POST /challenges/<ch>/connect` for a ticket, `wss://sahara.<region>…/connect`,
+  `init`, then reads of at most 200 ms, between which it sends what the
+  commands queued and a `keep_alive` every 270 s. When the socket drops it
+  goes `offline` with the reason and connects again with a fresh ticket after
+  2, 4, 8 … seconds, at most a minute; nothing times out a live session on
+  top of Ed's server.
+- The first connect of a challenge with no sync record downloads the tree
+  (`"."` zip, unpacked as the sync does), writes it into the slide's folder,
+  and saves the record: `base_commit` is `init.last_commits[0]`, each file's
+  hash is of Ed's bytes. A save or delete made before that (offline, or while
+  connecting) is kept over Ed's copy, then uploaded or removed. From then on
+  the lesson sync leaves the folder alone. A connect with a record goes
+  online without comparing files: offline changes stay local until reconcile
+  compares them.
+- Every path is workspace-relative and goes through one guard
+  (`paths::resolve`): no empty, absolute, `.`/`..`, hidden (dot), `\`, `:` or
+  NUL component, and nothing a symlink takes outside the folder. The file list
+  leaves out hidden files and symlinks.
+- `ed_workspace_save {challengeId, path, text}` writes the file atomically,
+  then, while online, gets an upload ticket (`POST /workspaces/<w>/upload
+  {wid, path: "."}`) and posts the file as one multipart `file` part named by
+  its path to `sahara…/upload/<ticket>`. Every upload is a commit: the answer
+  is `{hash}`, which becomes `base_commit`, and the file's hash goes into the
+  record. The answer is `{saved: "ed", hash}`; offline it is `{saved:
+  "local", hash: null}`; a failed upload is an error, with the file already
+  written. Saves and deletes of one challenge run one at a time in the order
+  they were asked (`queue.rs`).
+- `ed_workspace_delete` removes the file or folder, and while online sends
+  `fsop {type: "remove", param1: <path>}` and drops it from the record.
+  `ed_workspace_read` returns the library copy as UTF-8 (lossy).
+- One event, `ed-workspace`, to the main window: `{challengeId, kind}` with
+  `status {state: connecting|online|offline, reason}`, `commit {hash, ours}`,
+  `files {files}` (after the first download writes, and when a save or
+  delete changes the list) and `error {message}` (Ed's `display_error`).
+  A `new_commit` frame is ours when its hash is one an upload of ours
+  answered; the frame can beat that answer, so one that matches nothing
+  while an upload is in flight is held until the uploads finish
+  (`commits.rs`). `ours: false` is another client, such as Ed's web app.
+- Frames are `{type, data}` JSON (`frames.rs`); kinds the workspace does not
+  use (live editing, cursors, chat) are ignored.
+- Tickets are held in a `Ticket` whose `Debug` hides them, and the workspace
+  server's errors name a status or a transport kind, never the URL. `init`'s
+  `auth` is never read into a field. None of the three reaches a log, an
+  event, a result or an error.
+- `mark` (`POST /challenges/<ch>/mark`) is a real submission. Only the
+  workspace's Mark button may call it.
 
 ## Echo360 is an LTI launch with up to two streams
 
