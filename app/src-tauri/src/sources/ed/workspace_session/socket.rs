@@ -13,8 +13,9 @@ use tungstenite::Message;
 
 use super::bootstrap;
 use super::context::Context;
-use super::events::{Body, State};
+use super::events::{Body, State, TermState};
 use super::frames::{self, Incoming};
+use super::terminal;
 use crate::sources::ed::live::{
     open_socket, set_read_timeout, socket_error, wait_for_init, Socket,
 };
@@ -41,7 +42,9 @@ enum Ended {
 pub fn run(core: Arc<Context>, queue: Receiver<Out>) {
     let mut retry = FIRST_RETRY;
     loop {
-        match connect_and_serve(&core, &queue) {
+        let ended = connect_and_serve(&core, &queue);
+        core.shared().snapshots.fail_all();
+        match ended {
             Ended::Stopped => return,
             Ended::Lost { reason, was_online } => {
                 elog!("[oculus] ed workspace {}: {reason}", core.challenge_id);
@@ -107,9 +110,14 @@ fn connect_and_serve(core: &Context, queue: &Receiver<Out>) -> Ended {
             return lost(reason);
         }
     };
+    let (attach, gone) = core.shared().terminals.connected(&init);
     core.shared().online = Some((wid, host));
     core.set_status(State::Online, None);
-    for frame in pending {
+    for id in gone {
+        let state = TermState::Exited;
+        core.emit(Body::TermState { id, state });
+    }
+    for frame in pending.into_iter().chain(attach) {
         if let Err(e) = socket.send(Message::text(frame)) {
             return Ended::Lost {
                 reason: socket_error(&e),
@@ -168,17 +176,33 @@ fn serve(core: &Context, socket: &mut Socket, queue: &Receiver<Out>) -> Ended {
     }
 }
 
-/// One frame from the server. Terminal frames (`program_*`) wait for the
-/// terminal; another client's file changes wait for reconcile.
+/// One frame from the server. Another client's file changes wait for
+/// reconcile.
 fn handle(core: &Context, frame: Incoming) {
     match frame {
         Incoming::NewCommit(commit) => {
-            let decided = core.shared().commits.arrived(&commit.commit.hash);
+            let hash = &commit.commit.hash;
+            let asked = core
+                .shared()
+                .snapshots
+                .answered(commit.context.as_ref(), hash);
+            if asked {
+                core.emit(Body::Commit {
+                    hash: hash.clone(),
+                    ours: true,
+                });
+                return;
+            }
+            let decided = core.shared().commits.arrived(hash);
             if let Some((hash, ours)) = decided {
                 core.emit(Body::Commit { hash, ours });
             }
         }
         Incoming::DisplayError(message) => core.emit(Body::Error { message }),
+        Incoming::ProgramInit(_)
+        | Incoming::ProgramData(_)
+        | Incoming::ProgramUpdate(_)
+        | Incoming::ProgramClose(_) => terminal::on_frame(core, frame),
         _ => {}
     }
 }

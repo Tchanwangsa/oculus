@@ -107,7 +107,7 @@ fn send_unrecorded(
                 })?;
             }
             Unrecorded::Deleted => {
-                frames_out.push(frames::remove(path));
+                frames_out.push(frames::remove(path, core.recorded_folder(path)));
                 core.record(workspace_id, |state| forget(state, path))?;
             }
         }

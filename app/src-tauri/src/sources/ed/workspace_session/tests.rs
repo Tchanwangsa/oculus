@@ -114,11 +114,13 @@ fn the_frames_a_workspace_uses_are_read_and_the_rest_ignored() {
 fn outgoing_frames_are_type_and_data() {
     let keep: Value = serde_json::from_str(&frames::keep_alive()).unwrap();
     assert_eq!(keep, json!({"type": "keep_alive"}));
-    let remove: Value = serde_json::from_str(&frames::remove("src/a.py")).unwrap();
+    let remove: Value = serde_json::from_str(&frames::remove("src/a.py", false)).unwrap();
     assert_eq!(
         remove,
-        json!({"type": "fsop", "data": {"type": "remove", "param1": "src/a.py", "param2": "", "param3": ""}})
+        json!({"type": "fsop", "data": {"type": "remove", "param1": "src/a.py", "param3": "file"}})
     );
+    let remove: Value = serde_json::from_str(&frames::remove("src", true)).unwrap();
+    assert_eq!(remove["data"]["param3"], "folder");
 }
 
 #[test]

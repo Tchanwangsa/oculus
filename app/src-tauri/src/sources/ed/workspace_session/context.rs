@@ -12,6 +12,8 @@ use super::commits::Commits;
 use super::events::{Body, Sink, State, Status, WorkspaceEvent};
 use super::paths;
 use super::queue::Queue;
+use super::snapshot::Snapshots;
+use super::terminal::Terminals;
 use crate::sources::ed::workspace_state::{self, WorkspaceState};
 use crate::sources::ed::{sahara, Ed};
 
@@ -29,6 +31,9 @@ pub struct Shared {
     pub online: Option<(String, String)>,
     pub commits: Commits,
     pub unrecorded: BTreeMap<String, Unrecorded>,
+    pub terminals: Terminals,
+    /// Commits asked of the server for Run and Mark, awaiting their hash.
+    pub snapshots: Snapshots,
 }
 
 pub struct Context {
@@ -65,6 +70,8 @@ impl Context {
                 online: None,
                 commits: Commits::default(),
                 unrecorded: BTreeMap::new(),
+                terminals: Terminals::default(),
+                snapshots: Snapshots::default(),
             }),
             sink,
         }
@@ -111,6 +118,7 @@ impl Context {
             let mut shared = self.shared();
             if state != State::Online {
                 shared.online = None;
+                shared.snapshots.fail_all();
             }
             if shared.status == status {
                 return;
@@ -175,6 +183,15 @@ impl Context {
 
     pub fn has_record(&self) -> bool {
         workspace_state::has_state(&self.data_dir, self.challenge_id)
+    }
+
+    /// Whether the record holds `path` as a folder: files under it and not
+    /// the path itself. A remove frame must say which it is.
+    pub fn recorded_folder(&self, path: &str) -> bool {
+        let folder = format!("{path}/");
+        workspace_state::load(&self.data_dir, self.challenge_id).is_some_and(|state| {
+            !state.files.contains_key(path) && state.files.keys().any(|p| p.starts_with(&folder))
+        })
     }
 }
 

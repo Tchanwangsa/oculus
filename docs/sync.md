@@ -478,12 +478,14 @@ the working copy; Ed gets each save as an upload.
   written. Saves and deletes of one challenge run one at a time in the order
   they were asked (`queue.rs`).
 - `ed_workspace_delete` removes the file or folder, and while online sends
-  `fsop {type: "remove", param1: <path>}` and drops it from the record.
+  `fsop {type: "remove", param1: <path>, param3: "file"|"folder"}` (the
+  server ignores a remove without `param3`) and drops it from the record.
   `ed_workspace_read` returns the library copy as UTF-8 (lossy).
 - One event, `ed-workspace`, to the main window: `{challengeId, kind}` with
   `status {state: connecting|online|offline, reason}`, `commit {hash, ours}`,
   `files {files}` (after the first download writes, and when a save or
-  delete changes the list) and `error {message}` (Ed's `display_error`).
+  delete changes the list), `error {message}` (Ed's `display_error`), and
+  the terminal and Run kinds below.
   A `new_commit` frame is ours when its hash is one an upload of ours
   answered; the frame can beat that answer, so one that matches nothing
   while an upload is in flight is held until the uploads finish
@@ -494,8 +496,59 @@ the working copy; Ed gets each save as an upload.
   server's errors name a status or a transport kind, never the URL. `init`'s
   `auth` is never read into a field. None of the three reaches a log, an
   event, a result or an error.
-- `mark` (`POST /challenges/<ch>/mark`) is a real submission. Only the
-  workspace's Mark button may call it.
+- Terminals (`terminal.rs`) run on the session socket. `ed_terminal_open
+  {cols, rows}` sends `program_open {id: "term-<u32>", command: "bash
+  --login", pty_size, start_if_stopped: true, persist: true}` and answers
+  `{id, resumed}`. A persisting terminal outlives the socket: `init`'s
+  `programs` and `program_state` list the ones the server still runs, and
+  opening one of those ids again attaches to it instead of starting a shell
+  (what Ed's web app does after a reload). The pane gets a listed terminal it
+  does not hold yet first (`resumed: true`), else a new id. Each connect
+  re-attaches every terminal the pane holds at its last size, and reports one
+  the server no longer lists as `termState exited`, so the pane opens a
+  terminal once per session. `ed_terminal_input {id, data}` sends
+  `program_data` with the UTF-8 text in base64, `ed_terminal_resize` sends
+  `program_set_pty`, `ed_terminal_kill` sends `program_signal {signal:
+  "kill"}`. Incoming `program_data` becomes `term {id, data}` (base64 passed
+  through), `program_init`/`program_update`/`program_close` become
+  `termState {id, state: running|exited}`; programs whose id is not
+  `term-…` are not the pane's. Offline, each command is an error.
+- Run and Mark take the workspace's latest commit (`snapshot.rs`), after the
+  saves asked before them have landed: the record's `base_commit`, which
+  every upload moves. A workspace with none (Ed named no head and nothing
+  was uploaded) sends `commit {id}` on the session socket and waits for the
+  `new_commit` whose `context.id` echoes it (announced as `commit {ours:
+  true}`); going offline ends the wait with an error.
+- Run (`run/`): `ed_workspace_run {cols, rows}` needs a `run_command` and
+  the session online, stops the challenge's run in progress, gets a ticket
+  (`POST /challenges/<ch>/run {pty_size, hash, command: run_command,
+  dump_files: true}`), opens `wss://sahara.<region>…/run?ticket=` with
+  `live.rs`'s TLS and handshake, and hands it to a thread of its own; it
+  answers `{runId}`. The thread streams `run_frame` stdout/stderr data as
+  `run {runId, data}` (base64), writes `status_built`'s output and, when
+  `ok` is false, ends with "The build failed"; `run_exit {exit_status: {type,
+  value}}` becomes `runExit {runId, code | signal | message}` (`normal` →
+  code, `signal` → signal, `killed`/`exec` → words); close code 1013 is "No
+  resources available". Every run ends with exactly one `runExit`.
+  `ed_run_input` sends `run_frame {pid: 0, type: "stdin", data}`,
+  `ed_run_resize` `run_set_size`, `ed_run_stop` closes the socket ("Stopped");
+  closing the workspace stops its run.
+- Mark (`mark/`): `ed_workspace_mark` (`POST /challenges/<ch>/mark {hash}`)
+  is a real submission. Only the workspace's Mark button calls it, after the
+  pane's confirm dialogs; a second Mark while one is in flight is refused,
+  nothing retries it, and no sync, reconnect, agent or CLI reaches it. Its id
+  is appended to the record's `submissions` before the answer is shaped.
+  The answer is the pane's `Submission`: camelCase, a testcase's
+  `run.output` as `output`, and `diffs`, the lines of every `check_diff`
+  check's `value.diff` in order. Ed writes a line as `[[sign], [sign|"=",
+  text]…]`; each element becomes a `[sign, text]` pair, so a line starts
+  with its sign (`-` observed, `+` expected) and empty text, and `["mn"]`
+  (missing newline) keeps its sign. `ed_workspace_submissions` reads the
+  record's ids newest first (`GET /challenges/submissions/<id>`, 300 ms
+  apart, since Ed 429s bursts); Ed lists none for a student.
+  `ed_challenge_standing` reads `GET /challenges/<ch>` live for `{score,
+  status, attemptsRemaining, dueAt}`, `dueAt` falling back to the slide's
+  front matter. Neither read needs the workspace open.
 
 ## Echo360 is an LTI launch with up to two streams
 

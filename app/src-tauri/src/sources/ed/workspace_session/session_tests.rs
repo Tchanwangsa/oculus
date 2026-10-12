@@ -19,7 +19,7 @@ use crate::sources::ed::workspace_state;
 use crate::sources::ed::Ed;
 use crate::test_support::{FakeKeyd, FakeServer, Reply, Scratch};
 
-const SLIDE_DIR: &str = "courses/COMP30026/lessons/1-week-1/03-tally";
+pub(super) const SLIDE_DIR: &str = "courses/COMP30026/lessons/1-week-1/03-tally";
 
 fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
@@ -32,7 +32,7 @@ fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
 }
 
 /// Ed's `/api` as the session calls it: tickets for every path.
-fn fake_ed(dir: &Path) -> FakeKeyd {
+pub(super) fn fake_ed(dir: &Path) -> FakeKeyd {
     FakeKeyd::start(dir, |header, _| {
         let body: Value = match header["path"].as_str().unwrap() {
             "/api/workspaces/W1/download" => json!({"ticket": "T-DOWN"}),
@@ -62,9 +62,9 @@ fn fake_sahara(zip: Vec<u8>) -> FakeServer {
     })
 }
 
-type Events = Arc<Mutex<Vec<WorkspaceEvent>>>;
+pub(super) type Events = Arc<Mutex<Vec<WorkspaceEvent>>>;
 
-fn context(dir: &Path, origin: &str) -> (Arc<Context>, Events) {
+pub(super) fn context(dir: &Path, origin: &str) -> (Arc<Context>, Events) {
     let events: Events = Arc::default();
     let log = events.clone();
     let sink: Sink = Arc::new(move |e| log.lock().unwrap().push(e));
@@ -80,7 +80,7 @@ fn context(dir: &Path, origin: &str) -> (Arc<Context>, Events) {
     (Arc::new(context), events)
 }
 
-fn slide() -> Slide {
+pub(super) fn slide() -> Slide {
     Slide {
         slide_dir: SLIDE_DIR.into(),
         run_command: None,
@@ -89,7 +89,7 @@ fn slide() -> Slide {
     }
 }
 
-fn go_online(context: &Context) {
+pub(super) fn go_online(context: &Context) {
     context.shared().online = Some(("W1".into(), "sahara.test".into()));
     context.set_status(State::Online, None);
 }
@@ -131,7 +131,7 @@ fn the_first_connect_records_eds_tree_and_keeps_what_was_saved_before_it() {
     assert_eq!(std::fs::read(root.join("src/util.py")).unwrap(), b"u\n");
     assert!(!root.join("gone.txt").exists());
     assert!(!root.join(".hidden").exists());
-    assert_eq!(pending, [frames::remove("gone.txt")]);
+    assert_eq!(pending, [frames::remove("gone.txt", false)]);
 
     let record = workspace_state::load(&dir, 267880).unwrap();
     assert_eq!(record.workspace_id, "W1");
@@ -293,7 +293,7 @@ fn an_online_delete_sends_the_remove_and_forgets_the_file() {
     session.delete(session.place(), "src").unwrap();
     assert!(!root.join("src").exists());
     match out.try_recv() {
-        Ok(Out::Frame(frame)) => assert_eq!(frame, frames::remove("src")),
+        Ok(Out::Frame(frame)) => assert_eq!(frame, frames::remove("src", true)),
         _ => panic!("no remove frame"),
     }
     let record = workspace_state::load(&dir, 267880).unwrap();
