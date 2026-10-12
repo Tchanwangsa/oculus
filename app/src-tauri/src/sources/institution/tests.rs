@@ -205,3 +205,30 @@ fn an_absent_keyd_has_taken_nothing() {
     keyd::tell_held(&mut told, &dir, &rmit()).unwrap();
     assert_eq!(told.site(), None);
 }
+
+#[test]
+fn a_shared_identity_provider_is_not_the_universitys_session_host() {
+    let google = Institution {
+        sso_host: Some("accounts.google.com".to_string()),
+        ..rmit()
+    };
+    assert_eq!(google.session_sso_host(), None);
+    assert_eq!(google.session_domain(), None);
+
+    let own = Institution {
+        canvas: "https://canvas.lms.unimelb.edu.au".to_string(),
+        sso_host: Some("login.unimelb.edu.au".to_string()),
+        ..rmit()
+    };
+    assert_eq!(own.session_sso_host(), Some("login.unimelb.edu.au"));
+    assert_eq!(own.session_domain().as_deref(), Some("unimelb.edu.au"));
+
+    let okta = Institution {
+        idp: Idp::Okta,
+        sso_host: Some("rmit.okta.com".to_string()),
+        ..rmit()
+    };
+    assert_eq!(okta.session_sso_host(), Some("rmit.okta.com"));
+    assert_eq!(okta.session_domain(), None, "okta.com is shared");
+    assert_eq!(unimelb().session_sso_host(), Some("sso.unimelb.edu.au"));
+}

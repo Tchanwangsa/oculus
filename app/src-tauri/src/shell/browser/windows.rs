@@ -7,6 +7,8 @@ use tauri::webview::Cookie;
 #[cfg(target_os = "windows")]
 use tauri::{AppHandle, Manager, Webview};
 
+use super::scope::{at_parent, belongs};
+#[cfg(test)]
 use super::seed::sent_to;
 
 #[cfg(target_os = "windows")]
@@ -64,7 +66,15 @@ fn seed_jar(jar: &mut impl CookieJar, sessions: Sessions) -> Result<(), String> 
         let mut expected = Vec::new();
         for (name, value) in header.split(';').filter_map(|p| p.trim().split_once('=')) {
             let (name, value) = (name.trim(), value.trim());
-            if name.is_empty() || (!replace && present.iter().any(|c| c.name() == name)) {
+            // A name the jar holds on a parent domain is left to it: a host
+            // copy would shadow a cookie that may be the student's own.
+            let from_parent = present
+                .iter()
+                .any(|c| c.name() == name && c.domain().is_some_and(|d| at_parent(d, &host)));
+            if name.is_empty()
+                || from_parent
+                || (!replace && present.iter().any(|c| c.name() == name))
+            {
                 continue;
             }
             // Bare headers have no attributes. Preserve a browser cookie's
@@ -111,13 +121,17 @@ fn seed_jar(jar: &mut impl CookieJar, sessions: Sessions) -> Result<(), String> 
     Ok(())
 }
 
-/// Clears every cookie the jar would send to one of `hosts` (the profile's
-/// Canvas and SSO hosts).
-fn clear_jar(jar: &mut impl CookieJar, hosts: &[String]) -> Result<(), String> {
+/// Clears every cookie that is the university's session at one of `hosts`
+/// (`scope::belongs`): set on the host, or on a parent inside `university`.
+fn clear_jar(
+    jar: &mut impl CookieJar,
+    hosts: &[String],
+    university: Option<&str>,
+) -> Result<(), String> {
     let ours = |cookie: &Cookie<'_>| {
         cookie
             .domain()
-            .is_some_and(|domain| hosts.iter().any(|host| sent_to(domain, host)))
+            .is_some_and(|domain| hosts.iter().any(|host| belongs(domain, host, university)))
     };
     for cookie in jar.cookies()?.into_iter().filter(|c| ours(c)) {
         jar.delete(cookie)?;
@@ -162,13 +176,12 @@ pub(super) fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'stati
 #[cfg(target_os = "windows")]
 pub(super) fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
     let app = app.clone();
-    let hosts: Vec<String> = crate::sources::institution::canvas_host()
-        .into_iter()
-        .chain(crate::sources::institution::sso_host())
-        .collect();
+    let (hosts, university) = super::seed::session_hosts();
     std::thread::spawn(move || {
         let _work = COOKIE_WORK.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(e) = shared_jar(&app).and_then(|mut jar| clear_jar(&mut jar, &hosts)) {
+        let cleared =
+            shared_jar(&app).and_then(|mut jar| clear_jar(&mut jar, &hosts, university.as_deref()));
+        if let Err(e) = cleared {
             elog!("[oculus] browser: could not clear WebView2 sessions: {e}");
             return;
         }
@@ -324,10 +337,44 @@ mod tests {
             ],
             ..Default::default()
         };
-        clear_jar(&mut jar, &[CANVAS_HOST.into(), SSO_HOST.into()]).unwrap();
+        clear_jar(
+            &mut jar,
+            &[CANVAS_HOST.into(), SSO_HOST.into()],
+            Some("unimelb.edu.au"),
+        )
+        .unwrap();
         assert!(jar.deletes.is_empty());
         assert_eq!(jar.held.len(), 1);
         assert_eq!(jar.held[0].name(), "ed");
         assert_eq!(jar.reads, 2);
+    }
+
+    #[test]
+    fn sign_out_and_seeding_leave_a_shared_parent_domain_alone() {
+        let mut jar = QueuedJar {
+            held: vec![
+                cookie("rmit.instructure.com", "canvas_session", "a"),
+                cookie(".instructure.com", "shared", "b"),
+                cookie(".google.com", "SID", "mine"),
+            ],
+            ..Default::default()
+        };
+        seed_jar(
+            &mut jar,
+            vec![(
+                "rmit.instructure.com".into(),
+                "canvas_session=new; shared=copy".into(),
+                true,
+            )],
+        )
+        .unwrap();
+        let shared: Vec<_> = jar.held.iter().filter(|c| c.name() == "shared").collect();
+        assert_eq!(shared.len(), 1, "no host copy shadows the parent's");
+        assert_eq!(shared[0].value(), "b");
+
+        clear_jar(&mut jar, &["rmit.instructure.com".into()], None).unwrap();
+        let mut left: Vec<_> = jar.held.iter().map(|c| c.name().to_string()).collect();
+        left.sort();
+        assert_eq!(left, ["SID", "shared"]);
     }
 }

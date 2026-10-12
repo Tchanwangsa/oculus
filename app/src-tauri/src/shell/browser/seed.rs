@@ -7,6 +7,8 @@ use tauri::AppHandle;
 
 use super::layout::page;
 use super::page::reload_page;
+#[cfg(target_os = "macos")]
+use super::scope;
 use crate::sources::institution;
 
 /// A page on the university's hosts loads only after the saved sessions are
@@ -65,7 +67,7 @@ pub(super) fn saved_sessions() -> Vec<(String, String, bool)> {
         return Vec::new();
     };
     let keyd = crate::providers::credentials::Credentialed::at(&crate::library::paths::data_dir());
-    sessions_from(&keyd, &SSO_SEEDED, &canvas, inst.sso_host.as_deref())
+    sessions_from(&keyd, &SSO_SEEDED, &canvas, inst.session_sso_host())
 }
 
 /// `saved_sessions` for the keyd `keyd` reaches and the hosts `canvas` and
@@ -107,9 +109,12 @@ pub(super) fn sessions_from(
 /// Canvas anonymous. The sessions are fetched from oculus-keyd on a thread of
 /// its own, so a keychain prompt there never holds up the UI.
 ///
-/// Same-named cookies on those hosts are deleted first. WebKit will not let an
-/// API-set cookie replace an HttpOnly one a server set, so once Canvas hands
-/// out an anonymous `canvas_session`, a plain re-set is silently dropped.
+/// Same-named cookies set on those hosts themselves are deleted first. WebKit
+/// will not let an API-set cookie replace an HttpOnly one a server set, so
+/// once Canvas hands out an anonymous `canvas_session`, a plain re-set is
+/// silently dropped. A name the jar holds on a parent domain is left alone and
+/// not seeded: a host copy would shadow the parent's cookie, which may be the
+/// student's own (`scope`).
 #[cfg(target_os = "macos")]
 pub fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
     let app = app.clone();
@@ -217,14 +222,25 @@ fn seed_webkit(
                 .filter(|c| {
                     let (domain, name) = key(c);
                     replacing.iter().any(|(host, replacing_name)| {
-                        name == *replacing_name && sent_to(&domain, host)
+                        name == *replacing_name && scope::on_host(&domain, host)
                     })
                 })
+                .collect();
+            let from_parent: HashSet<_> = cookies
+                .iter()
+                .filter(|(host, name, _, _)| {
+                    all.iter().any(|c| {
+                        c.name().to_string() == *name
+                            && scope::at_parent(&c.domain().to_string(), host)
+                    })
+                })
+                .map(|(host, name, _, _)| (host.clone(), name.clone()))
                 .collect();
             let fresh: Vec<_> = cookies
                 .iter()
                 .filter(|(host, name, replace, _)| {
-                    *replace || !present.contains(&(host.clone(), name.clone()))
+                    let at = (host.clone(), name.clone());
+                    !from_parent.contains(&at) && (*replace || !present.contains(&at))
                 })
                 .map(|(_, _, _, cookie)| cookie.clone())
                 .collect();
@@ -359,9 +375,11 @@ pub(super) fn sent_to(domain: &str, host: &str) -> bool {
     host == domain || host.ends_with(&format!(".{domain}"))
 }
 
-/// Deletes every cookie WebKit's shared jar would send to Canvas or SSO, then
-/// runs `then`. Sign-out calls it: otherwise a browser tab is still signed in
-/// and a Canvas page saves the session straight back to disk. `then` is
+/// Deletes every cookie in WebKit's shared jar that is the university's
+/// session at Canvas or its SSO host (`scope::belongs`), then runs `then`.
+/// Sign-out calls it: otherwise a browser tab is still signed in and a Canvas
+/// page saves the session straight back to disk. A shared provider's cookies
+/// (`Institution::session_sso_host`) and other parent domains stay. `then` is
 /// dropped uncalled when the main thread cannot be reached.
 #[cfg(target_os = "macos")]
 pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
@@ -375,10 +393,7 @@ pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
     use objc2_web_kit::WKWebsiteDataStore;
 
     let then: Box<dyn FnOnce() + Send> = Box::new(then);
-    let hosts: Vec<String> = institution::canvas_host()
-        .into_iter()
-        .chain(institution::sso_host())
-        .collect();
+    let (hosts, university) = session_hosts();
     let result = app.run_on_main_thread(move || {
         let Some(mtm) = MainThreadMarker::new() else {
             return;
@@ -392,7 +407,9 @@ pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
                 .iter()
                 .filter(|c| {
                     let domain = c.domain().to_string();
-                    hosts.iter().any(|host| sent_to(&domain, host))
+                    hosts
+                        .iter()
+                        .any(|host| scope::belongs(&domain, host, university.as_deref()))
                 })
                 .collect();
             let count = ours.len();
@@ -429,6 +446,20 @@ pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
     if result.is_err() {
         elog!("[oculus] browser: could not reach the main thread to clear cookies");
     }
+}
+
+/// The hosts whose session sign-out clears (Canvas's, and the SSO host's
+/// unless it is a shared provider) and the university's own domain.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(super) fn session_hosts() -> (Vec<String>, Option<String>) {
+    let Some(inst) = institution::current() else {
+        return (Vec::new(), None);
+    };
+    let hosts = institution::host_of(&inst.canvas)
+        .into_iter()
+        .chain(inst.session_sso_host().map(str::to_string))
+        .collect();
+    (hosts, inst.session_domain())
 }
 
 #[cfg(target_os = "windows")]

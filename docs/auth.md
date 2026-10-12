@@ -169,9 +169,11 @@ does — only an admin can issue one), so every request carries a snapshotted
   browser tabs read their webview's Canvas and SSO cookies and hand them to
   keyd with `session_put` (`auth::save_session_cookie`), skipping any host with
   no cookie yet and logging a refused put. Capture reads the whole jar and
-  selects cookies for each host, including parent domains; same-named cookies
-  prefer a server cookie over an unchanged host copy written by seeding, then
-  the more specific domain. Wry's macOS `cookies_for_url` only matches
+  selects cookies for each host: the host's own, and a parent domain's only
+  when it is the university's own (`institution_domain`; never `.google.com`
+  or `.instructure.com`, `shell::browser::scope`); same-named cookies prefer
+  a server cookie over an unchanged host copy written by seeding, then the
+  more specific domain. Wry's macOS `cookies_for_url` only matches
   the exact domain and can omit cookies the browser sends. An authenticated
   flag, which keyd owns, means "we believe we have a session".
 - The session has no cookie-side expiry: the server extends it on use. There
@@ -196,9 +198,10 @@ does — only an admin can issue one), so every request carries a snapshotted
 - The marker keeps every automatic sign-in off (`LoginError::SignedOut`)
   until a session is established again: `session_mark(true)` removes it, and
   so does every sign-in keyd runs.
-- Settings' sign-out first deletes every cookie the browser would send to
-  Canvas or the SSO host (`shell::browser::clear_sessions`), or a tab still
-  signed in would save the session straight back. `oculus auth logout` cannot reach a running app's
+- Settings' sign-out first deletes the university's session cookies at
+  Canvas and the SSO host (`shell::browser::clear_sessions`): those set on the
+  host and those on a parent inside the university's own domain. Otherwise a
+  tab still signed in would save the session straight back. `oculus auth logout` cannot reach a running app's
   jar, so a Canvas tab open there can still re-save the cookie.
 
 ## The in-app browser is seeded with the same sessions
@@ -222,10 +225,18 @@ so a page that redirects to SSO passes straight through.
   they share when it is the university's own (`institution_domain`:
   `unimelb.edu.au`, never a public suffix like `edu.au` or a shared host like
   `instructure.com`).
+- **A shared identity provider is not the university's.** An SSO host that is
+  neither Okta's nor inside the university's own domain
+  (`Institution::session_sso_host`: accounts.google.com,
+  login.microsoftonline.com) also holds the student's own accounts, so no SSO
+  session is captured into keyd, seeded or cleared for it; only Canvas's is.
 - Windows uses WebView2's default profile for the main view, browser tabs and
   the login window. A separate login `data_directory` would split their jars.
   WebView2's `AddOrUpdateCookie` overwrites same-scoped HttpOnly cookies;
-  macOS deletes the old same-named cookie before setting its replacement.
+  macOS deletes the old same-named cookie set on that host before setting its
+  replacement. A name the jar holds on a parent domain is neither deleted nor
+  seeded: a host-only copy would shadow a cookie that may be the student's
+  own.
   Windows seeding and clearing are serialized, and clearing reads back the
   jar before sign-out continues. Cookies for unrelated hosts remain intact.
 - Canvas cookies always replace the jar's; the SSO host's only fill gaps,

@@ -101,6 +101,26 @@ impl Institution {
         self.idp == Idp::Okta && self.sso_host.is_some()
     }
 
+    /// The SSO host whose cookies are the university's session: Okta's,
+    /// where keyd signs in, or one inside the university's own domain. A
+    /// shared provider (accounts.google.com, login.microsoftonline.com) also
+    /// holds the student's own accounts, so its cookies are never copied into
+    /// keyd, seeded or cleared.
+    pub fn session_sso_host(&self) -> Option<&str> {
+        let sso = self.sso_host.as_deref()?;
+        let own = self.idp == Idp::Okta
+            || host_of(&self.canvas)
+                .and_then(|canvas| institution_domain(&canvas, Some(sso)))
+                .is_some();
+        own.then_some(sso)
+    }
+
+    /// The university's own domain, whose parent-domain cookies are part of
+    /// its session (`shell::browser::scope`).
+    pub fn session_domain(&self) -> Option<String> {
+        institution_domain(&host_of(&self.canvas)?, self.session_sso_host())
+    }
+
     /// Whether the university is in the southern hemisphere, judged by its
     /// Canvas or SSO host's country code. Only term names lean on it
     /// (`sync::terms`).

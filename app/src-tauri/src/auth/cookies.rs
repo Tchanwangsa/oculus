@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager};
 
 use super::{session, tab};
 use crate::providers::credentials::Credentialed;
+use crate::shell::browser::scope;
 
 type SeededCookies = HashMap<(String, String), String>;
 static SEEDED: LazyLock<Mutex<SeededCookies>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -38,18 +39,25 @@ fn cookie_header<'a>(cookies: impl IntoIterator<Item = (&'a str, &'a str)>) -> S
 }
 
 /// Wry's macOS `cookies_for_url` compares domains for equality, omitting
-/// parent-domain cookies. Read the jar and scope it ourselves before saving.
-fn scoped_header(cookies: &[Cookie<'_>], url: &url::Url, seeded: &SeededCookies) -> String {
+/// parent-domain cookies. Read the jar and scope it ourselves before saving:
+/// the host's own cookies, and a parent domain's only when it is the
+/// university's (`university`, `shell::browser::scope`).
+fn scoped_header(
+    cookies: &[Cookie<'_>],
+    url: &url::Url,
+    university: Option<&str>,
+    seeded: &SeededCookies,
+) -> String {
     let Some(host) = url.host_str() else {
         return String::new();
     };
     let mut scoped: Vec<_> = cookies
         .iter()
         .filter(|cookie| {
-            cookie.domain().is_some_and(|domain| {
-                let domain = domain.trim_start_matches('.');
-                host == domain || host.ends_with(&format!(".{domain}"))
-            }) && (!cookie.secure().unwrap_or(false) || url.scheme() == "https")
+            cookie
+                .domain()
+                .is_some_and(|domain| scope::belongs(domain, host, university))
+                && (!cookie.secure().unwrap_or(false) || url.scheme() == "https")
         })
         .collect();
     scoped.sort_by_key(|cookie| {
@@ -63,23 +71,26 @@ fn scoped_header(cookies: &[Cookie<'_>], url: &url::Url, seeded: &SeededCookies)
 }
 
 /// The Canvas and SSO cookies from a live webview (HttpOnly included), as
-/// the sessions to store: the profile's hosts, whatever the university's IdP.
-/// An empty header means that host had none yet. Only reads the jar; no
-/// socket call.
+/// the sessions to store: the profile's hosts, whatever the university's IdP,
+/// except a shared provider's (`Institution::session_sso_host`). An empty
+/// header means that host had none yet. Only reads the jar; no socket call.
 fn snapshot(app: &AppHandle) -> Vec<(Kind, String)> {
     let Some(inst) = crate::sources::institution::current() else {
         return Vec::new();
     };
-    let mut sessions = vec![(Kind::Canvas, webview_header(app, &inst.canvas))];
-    if let Some(sso) = &inst.sso_host {
-        sessions.push((Kind::Sso, webview_header(app, &format!("https://{sso}"))));
+    let university = inst.session_domain();
+    let university = university.as_deref();
+    let mut sessions = vec![(Kind::Canvas, webview_header(app, &inst.canvas, university))];
+    if let Some(sso) = inst.session_sso_host() {
+        let header = webview_header(app, &format!("https://{sso}"), university);
+        sessions.push((Kind::Sso, header));
     }
     sessions
 }
 
 /// Scoped by domain after reading the jar: every webview shares one jar
 /// (the default profile on Windows; `data_directory` is a no-op on WKWebView).
-fn webview_header(app: &AppHandle, base: &str) -> String {
+fn webview_header(app: &AppHandle, base: &str, university: Option<&str>) -> String {
     let Ok(base) = base.parse::<url::Url>() else {
         return String::new();
     };
@@ -100,7 +111,7 @@ fn webview_header(app: &AppHandle, base: &str) -> String {
     match cookies {
         Ok(cookies) => {
             let seeded = SEEDED.lock().unwrap_or_else(|e| e.into_inner());
-            let header = scoped_header(&cookies, &base, &seeded);
+            let header = scoped_header(&cookies, &base, university, &seeded);
             if header.is_empty() {
                 elog!("[oculus] no {host} cookies to save yet");
             }
@@ -144,6 +155,9 @@ mod tests {
     use super::{cookie_header, scoped_header, SeededCookies};
     use tauri::webview::Cookie;
 
+    /// A university whose Canvas and SSO share `rmit.edu.au`.
+    const UNI: Option<&str> = Some("rmit.edu.au");
+
     #[test]
     fn a_header_keeps_the_first_cookie_of_each_name() {
         assert_eq!(
@@ -158,7 +172,38 @@ mod tests {
     }
 
     #[test]
-    fn snapshots_include_parent_domains_but_exclude_other_hosts() {
+    fn snapshots_take_the_universitys_parent_domain_but_no_one_elses() {
+        let cookies = [
+            Cookie::build(("canvas_session", "canvas"))
+                .domain("canvas.lms.unimelb.edu.au")
+                .secure(true)
+                .build(),
+            Cookie::build(("shared", "university"))
+                .domain(".unimelb.edu.au")
+                .build(),
+            Cookie::build(("SID", "google"))
+                .domain(".google.com")
+                .build(),
+        ];
+        let canvas = "https://canvas.lms.unimelb.edu.au/".parse().unwrap();
+        assert_eq!(
+            scoped_header(
+                &cookies,
+                &canvas,
+                Some("unimelb.edu.au"),
+                &SeededCookies::new()
+            ),
+            "canvas_session=canvas; shared=university"
+        );
+        let google = "https://accounts.google.com/".parse().unwrap();
+        assert_eq!(
+            scoped_header(&cookies, &google, None, &SeededCookies::new()),
+            ""
+        );
+    }
+
+    #[test]
+    fn snapshots_exclude_shared_parent_domains_and_other_hosts() {
         let cookies = [
             Cookie::build(("canvas_session", "canvas"))
                 .domain("rmit.instructure.com")
@@ -180,18 +225,22 @@ mod tests {
         ];
         let canvas = "https://rmit.instructure.com/".parse().unwrap();
         assert_eq!(
-            scoped_header(&cookies, &canvas, &SeededCookies::new()),
-            "canvas_session=canvas; shared=parent"
+            scoped_header(&cookies, &canvas, None, &SeededCookies::new()),
+            "canvas_session=canvas"
         );
         let sso = "https://myapps.rmit.edu.au/".parse().unwrap();
         assert_eq!(
-            scoped_header(&cookies, &sso, &SeededCookies::new()),
+            scoped_header(&cookies, &sso, Some("rmit.edu.au"), &SeededCookies::new()),
             "idp=sso"
+        );
+        assert_eq!(
+            scoped_header(&cookies, &sso, None, &SeededCookies::new()),
+            ""
         );
         let http = "http://rmit.instructure.com/".parse().unwrap();
         assert_eq!(
-            scoped_header(&cookies, &http, &SeededCookies::new()),
-            "shared=parent"
+            scoped_header(&cookies, &http, None, &SeededCookies::new()),
+            ""
         );
     }
 
@@ -205,11 +254,16 @@ mod tests {
             .build();
         let url = "https://myapps.rmit.edu.au/".parse().unwrap();
         assert_eq!(
-            scoped_header(&[parent.clone(), host.clone()], &url, &SeededCookies::new()),
+            scoped_header(
+                &[parent.clone(), host.clone()],
+                &url,
+                UNI,
+                &SeededCookies::new()
+            ),
             "sid=host"
         );
         assert_eq!(
-            scoped_header(&[host, parent], &url, &SeededCookies::new()),
+            scoped_header(&[host, parent], &url, UNI, &SeededCookies::new()),
             "sid=host"
         );
     }
@@ -226,17 +280,17 @@ mod tests {
             SeededCookies::from([(("myapps.rmit.edu.au".into(), "sid".into()), "saved".into())]);
         let url = "https://myapps.rmit.edu.au/".parse().unwrap();
         assert_eq!(
-            scoped_header(&[host.clone(), parent.clone()], &url, &seeded),
+            scoped_header(&[host.clone(), parent.clone()], &url, UNI, &seeded),
             "sid=rotated"
         );
         assert_eq!(
-            scoped_header(&[parent.clone(), host.clone()], &url, &seeded),
+            scoped_header(&[parent.clone(), host.clone()], &url, UNI, &seeded),
             "sid=rotated"
         );
         let mut fresh_host = host;
         fresh_host.set_value("new-host");
         assert_eq!(
-            scoped_header(&[parent, fresh_host], &url, &seeded),
+            scoped_header(&[parent, fresh_host], &url, UNI, &seeded),
             "sid=new-host"
         );
     }

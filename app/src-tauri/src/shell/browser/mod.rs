@@ -21,6 +21,7 @@ pub(crate) mod commands;
 mod favicon;
 mod layout;
 mod page;
+pub(crate) mod scope;
 mod seed;
 #[cfg(test)]
 mod tests;
