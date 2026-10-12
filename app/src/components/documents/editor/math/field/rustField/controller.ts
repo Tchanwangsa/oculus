@@ -70,7 +70,7 @@ export class RustFieldController implements VisualField {
     this.dom = this.mv.dom;
     this.hint = document.createElement("span");
     this.hint.className = "cm-math-hint";
-    this.hint.textContent = block ? "Start typing or Space (␣) for math tools" : "Space (␣) for math tools";
+    this.hint.textContent = "Start typing or 'Space'";
     this.hint.hidden = true;
     this.dom.append(this.hint);
 
