@@ -204,6 +204,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["Speed", ["rate", "pace"]],
     ["Sample", ["preview", "listen", "play", "hear"]],
   ]),
+  ...section("voice", "Pronunciations", ["pronunciation", "lexicon", "review", "suggestion", "guessed words", "studio"]),
   ...section("voice", "Word timing", ["aligner", "alignment", "word cues", "studio"], [
     ["wav2vec2 base (English)", ["aligner model", "download", "delete", "wav2vec2"]],
   ]),

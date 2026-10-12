@@ -38,8 +38,8 @@ frames and contact sheets, lints, and narrates.
 | Narrating a video: the `Speaker` trait, the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
 | The Kokoro engine: its pack, reader, chunking and synthesis | `app/src-tauri/src/studio/tts/kokoro/` |
 | Text to Kokoro phonemes (the G2P), the lexicon, the guesser and its pack; the lint of a video's narration that needs them | `app/src-tauri/src/studio/voice/g2p/` (`guess/`, `lexicon.rs`), `app/src-tauri/src/studio/voice/lint/` |
-| The pronunciation review: suggestions stored one file each, the lexicon writer, finding a word in a video's narration; its Tauri commands and wrappers (no UI yet) | `app/src-tauri/src/studio/voice/review/` (`key.rs`, `lexicon.rs`, `locate.rs`), `app/src-tauri/src/studio/commands/pronunciations.rs`, `app/src/lib/studio/pronunciations.ts` |
-| Settings -> Voice: the `voice` row and its engine, the server's model list, Kokoro's packs and sample, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
+| The pronunciation review: suggestions stored one file each, the lexicon writer, finding a word in a video's narration; its Tauri commands and wrappers | `app/src-tauri/src/studio/voice/review/` (`key.rs`, `lexicon.rs`, `locate.rs`), `app/src-tauri/src/studio/commands/pronunciations.rs`, `app/src/lib/studio/pronunciations.ts` |
+| Settings -> Voice: the `voice` row and its engine, the server's model list, Kokoro's packs and sample, the pronunciation review, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/` (`pronunciations/`), `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
@@ -741,11 +741,12 @@ suggested for words it doubts, until the student decides on each.
   does, in Settings -> Voice's voice and speed, reading the subject's
   lexicon with one entry over it that pins the word to the original
   phonemes or to the suggestion (`LexiconFiles::pin`), and gives the WAV's
-  bytes. Settings -> Voice has no section for them yet.
+  bytes. Settings -> Voice's Pronunciations section is built on them
+  (next section).
 
 ## Settings -> Voice chooses the engine and holds the models
 
-Settings -> Voice (Library group) has two sections. Settings never makes a
+Settings -> Voice (Library group) has three sections. Settings never makes a
 billed call: its one network call to a server is listing models, which is
 free, and the only sample is Kokoro's, made on this Mac.
 
@@ -785,6 +786,26 @@ free, and the only sample is Kokoro's, made on this Mac.
   it, unsets blanks, normalises the URL (`tts::normalise_base`), refuses a
   speed that is not a positive number, and answers with what it stored. A
   refusal shows under its row.
+- **Pronunciations** (`components/settings/voice/pronunciations/`) lists
+  the review's items, newest first, under a one-line hint. It loads on
+  mount and again whenever the window regains focus, since the CLI adds
+  items while the page is open; with none it says "No words waiting for
+  review." A row shows the word and its suggested reading, the sentence
+  muted with the word picked out, and `<subject or Library> · <video> ·
+  scene <id>`. On the right, **Original** and **Suggestion** play the
+  sentence read each way (`studio_pronunciation_sample`; "Making…" while
+  Kokoro makes it, a click again stops). One clip plays at a time across
+  the section (`useClipPlayer`, which the voice sample also uses; blob URLs
+  revoked at the end, on Stop and when the page goes). Beneath, three
+  verdicts: **Suggestion correct** and **Pronunciation is fine** decide,
+  and the row gives way to a muted line saying which lexicon it went into
+  and that it applies when the video is next narrated, until the next
+  reload; **Suggestion wrong** opens "How is it said? (optional)", a text
+  field with Send and Cancel (Enter and Escape). A wrong row stays listed,
+  muted, with its samples and "Sent back to the agent" and the student's
+  note in place of the verdicts, until the agent's next suggestion replaces
+  it as pending. A row's buttons wait while its request runs, and a failed
+  request or sample shows in red on the row.
 - **Word timing** is the aligner model's row, like a Local Whisper model:
   "wav2vec2 base (English)", its 378 MB size and status, Download (then a
   percentage, a progress bar and Cancel) or Delete behind a confirmation,
