@@ -255,6 +255,7 @@ fn the_detail_of_a_narrated_video_has_scene_times_and_words() {
     let json = serde_json::to_value(&detail).unwrap();
     assert_eq!(json["renders"][0]["preset"], "draft");
     assert_eq!(json["renders"][1]["preset"], "audio");
+    assert_eq!(json["renders"][0]["captions"], false);
     assert_eq!(json["captions"], false);
     assert_eq!(json["scenes"][1]["duration"], 1.5);
     assert_eq!(json["row"]["slug"], "narrated");

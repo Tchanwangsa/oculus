@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-// Rendering a Studio video folder to an mp4 with ffmpeg
+// Rendering a Studio video folder to one export preset's file with ffmpeg
 // (`app/src-tauri/src/studio/commands/render.rs`). One render per folder at a
 // time; nothing here touches the network.
 
-/** Mirrors `render::Quality`. */
-export type RenderQuality = "draft" | "final";
+/** Mirrors `render::Preset`. */
+export type RenderPreset = "draft" | "final" | "small" | "2x" | "audio" | "subtitles";
 
 /** Mirrors `SegmentReport`: one per scene, in video order. */
 export interface SegmentReport {
@@ -23,11 +23,12 @@ export interface SegmentReport {
 
 /** Mirrors `render::Report`. */
 export interface RenderReport {
-  /** The mp4 written. */
+  /** The file written: the mp4, m4a or vtt. */
   path: string;
-  quality: RenderQuality;
-  width: number;
-  height: number;
+  preset: RenderPreset;
+  /** Null for `audio` and `subtitles`. */
+  width: number | null;
+  height: number | null;
   fps: number;
   frames: number;
   /** Seconds. */
@@ -36,16 +37,36 @@ export interface RenderReport {
   audio: boolean;
   threads: number;
   segments: SegmentReport[];
+  /** Written beside `path`: a video's `.vtt` captions, the subtitles' `.srt`. */
+  sidecars: string[];
   /** Cache files deleted afterwards. */
   pruned: string[];
   ms: number;
 }
 
-/** Renders `dir` to `<dir>/renders/<quality>.mp4`. Resolves to the report,
+/** Renders `dir` to `<dir>/renders/<preset>.<ext>`. Resolves to the report,
  *  or null when cancelled; rejects with a sentence fit to show when the
  *  render fails or `dir` already has one running. */
-export function renderVideo(dir: string, quality: RenderQuality): Promise<RenderReport | null> {
-  return invoke<RenderReport | null>("studio_render", { dir, quality });
+export function renderVideo(dir: string, preset: RenderPreset): Promise<RenderReport | null> {
+  return invoke<RenderReport | null>("studio_render", { dir, preset });
+}
+
+/** Mirrors `render::ExportStatus`: one preset's file and whether a render now
+ *  would make the same file. */
+export interface ExportStatus {
+  preset: RenderPreset;
+  /** Absolute path of `renders/<preset>.<ext>`, when it exists. */
+  path: string | null;
+  /** Seconds since the epoch. */
+  modified: number | null;
+  current: boolean;
+  /** Why the preset cannot render now, a sentence fit to show. */
+  problem: string | null;
+}
+
+/** Every preset's status, in the menu's order. Renders nothing. */
+export function exportStatus(dir: string): Promise<ExportStatus[]> {
+  return invoke<ExportStatus[]>("studio_exports", { dir });
 }
 
 /** false when `dir` has no render running. */
@@ -65,7 +86,7 @@ export interface RenderPlan {
 /** Mirrors `Event`; `dir` is the folder as `renderVideo` was given it.
  *  `rendering` comes at most about ten times a second, plus each segment's
  *  first and last frame. */
-export type RenderProgress = { dir: string } & (
+export type RenderProgress = { dir: string; preset: RenderPreset } & (
   | { phase: "planning"; plan?: RenderPlan }
   | {
       phase: "rendering";

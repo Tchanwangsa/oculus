@@ -3,10 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useMediaPlayer } from "@/components/media/MediaPlayer";
 import { useLibraryPlayback } from "@/components/media/player/useLibraryPlayback";
 import { useTabActive } from "@/components/tabs/TabContext";
-import { mediaSrc, spanAt, type Cue } from "@/lib/lectures/media";
-import type { RenderFile, VideoDetail } from "@/lib/studio/videos";
+import { mediaSrc, parseVtt, spanAt, type Cue } from "@/lib/lectures/media";
+import { playableRenders } from "@/lib/studio/exports";
+import type { RenderPreset } from "@/lib/studio/render";
+import { renderCaptions, type VideoDetail } from "@/lib/studio/videos";
 
-/** A render has no transcript, so the player gets no cues. */
+/** Without captions beside it, a render has no cues. */
 const NO_CUES: Cue[] = [];
 const noop = () => {};
 
@@ -16,16 +18,18 @@ export function sceneStarts(detail: VideoDetail): number[] {
 }
 
 /**
- * A video's render in the media player: the newest draft or final (the
- * reader can pick the other), its URL, the `<video>` element, and the scene
- * under the playhead. A re-render of the same file starts the player over.
+ * A video's render in the media player: the newest video render (the reader
+ * can pick another), its URL, the `<video>` element, and the scene under the
+ * playhead. A re-render of the same file starts the player over. When the
+ * captions are not burned in, the render's `.vtt` beside it is the CC.
  */
 export function useVideoPlayback(detail: VideoDetail) {
-  const [picked, setPicked] = useState<RenderFile["quality"] | null>(null);
-  const shown = useMemo(() => {
-    const byQuality = detail.renders.find((r) => r.quality === picked);
-    return byQuality ?? detail.renders.slice().sort((a, b) => b.modified - a.modified)[0] ?? null;
-  }, [detail.renders, picked]);
+  const [picked, setPicked] = useState<RenderPreset | null>(null);
+  const playable = useMemo(() => playableRenders(detail.renders), [detail.renders]);
+  const shown = useMemo(
+    () => playable.find((r) => r.preset === picked) ?? playable[0] ?? null,
+    [playable, picked],
+  );
 
   const [src, setSrc] = useState<string | null>(null);
   const path = shown?.path;
@@ -45,12 +49,27 @@ export function useVideoPlayback(detail: VideoDetail) {
     return last?.start != null && last.duration != null ? last.start + last.duration : 0;
   }, [detail.scenes]);
 
+  const [cues, setCues] = useState<Cue[]>(NO_CUES);
+  const slug = detail.row.slug;
+  const sidecar = !detail.captions && shown?.captions ? shown.preset : null;
+  useEffect(() => {
+    setCues(NO_CUES);
+    if (!sidecar) return;
+    let stale = false;
+    renderCaptions(slug, sidecar)
+      .then((vtt) => !stale && setCues(parseVtt(vtt)))
+      .catch((e) => console.error("render captions failed", e));
+    return () => {
+      stale = true;
+    };
+  }, [slug, sidecar, version]);
+
   const player = useMediaPlayer({
-    cues: NO_CUES,
+    cues,
     resetKey: `${path}:${version}`,
     fallbackDuration: duration,
     dockTab: "transcript",
-    hasCaptions: false,
+    hasCaptions: cues.length > 0,
     // T has no dock to show here.
     onToggleDock: noop,
   });
@@ -65,7 +84,17 @@ export function useVideoPlayback(detail: VideoDetail) {
   const known = useMemo(() => starts.filter((s) => !Number.isNaN(s)), [starts]);
   const current = known.length === starts.length ? spanAt(known, player.currentTime) : -1;
 
-  return { player, shown, src, setEl, pick: setPicked, current, chapters: known.filter((s) => s > 0) };
+  return {
+    player,
+    shown,
+    playable,
+    src,
+    setEl,
+    pick: setPicked,
+    current,
+    chapters: known.filter((s) => s > 0),
+    hasCaptions: cues.length > 0,
+  };
 }
 
 export type VideoPlayback = ReturnType<typeof useVideoPlayback>;

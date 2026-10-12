@@ -206,6 +206,7 @@ pub fn run() {
             studio::commands::render::studio_render_cancel,
             studio::commands::render::studio_exports,
             studio::commands::videos::studio_set_captions,
+            studio::commands::videos::studio_render_captions,
             studio::commands::videos::studio_videos,
             studio::commands::videos::studio_new_video,
             studio::commands::videos::studio_video_detail,
