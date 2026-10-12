@@ -40,3 +40,25 @@ test("a buffered delta cannot recreate a deleted thread on the next flush", () =
   useHarnessStore.getState().flushLive();
   expect(useHarnessStore.getState().live[1]).toBeUndefined();
 });
+
+test("a turn the agent starts itself leaves a row and runs until it finishes", () => {
+  useHarnessStore.setState({
+    threads: [{ id: 1, status: "idle" }] as HarnessThread[],
+    items: { 1: [] },
+  });
+  const apply = useHarnessStore.getState().apply;
+  apply({
+    threadId: 1, provider: "claude", itemId: 30, event: { type: "unprompted_turn", after: ["Say pong"] },
+  });
+  let state = useHarnessStore.getState();
+  expect(state.items[1].map((i) => [i.id, i.kind, i.meta])).toEqual([
+    [30, "unprompted", JSON.stringify({ after: ["Say pong"] })],
+  ]);
+  expect(state.live[1].running).toBe(true);
+  expect(state.threads[0].status).toBe("running");
+
+  apply({ threadId: 1, provider: "claude", itemId: null, event: { type: "turn_finished", status: "completed" } });
+  state = useHarnessStore.getState();
+  expect(state.live[1].running).toBe(false);
+  expect(state.threads[0].status).toBe("idle");
+});

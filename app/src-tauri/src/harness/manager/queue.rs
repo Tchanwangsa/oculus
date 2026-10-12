@@ -23,7 +23,10 @@ fn next_queue_id() -> String {
 /// The CLIs mishandle a message sent mid-turn (`claude` silently chains a
 /// second turn; `codex` folds it into the running one), so one turn per
 /// thread runs and the rest wait here. A pending message has no row until it
-/// goes out, which is why it can still be edited or dropped.
+/// goes out, which is why it can still be edited or dropped. A turn the
+/// provider starts itself
+/// ([`UnpromptedTurn`](crate::harness::HarnessEvent::UnpromptedTurn)) holds
+/// the thread the same way.
 #[derive(Default)]
 pub struct Queue {
     threads: HashMap<i64, ThreadQueue>,
@@ -31,9 +34,10 @@ pub struct Queue {
 
 #[derive(Default)]
 struct ThreadQueue {
-    /// A turn of ours is open. Released by its `TurnFinished` — every bridge
-    /// emits exactly one per message it accepts.
-    busy: bool,
+    /// Turns holding the thread. Each is released by its `TurnFinished` —
+    /// every bridge emits exactly one per message it accepts and per turn the
+    /// provider starts itself. Two at once is a send racing such a turn.
+    open: u32,
     pending: VecDeque<(QueuedMessage, SendOptions)>,
 }
 
@@ -41,11 +45,17 @@ impl Queue {
     /// Take the thread for a send. False when a turn already has it.
     pub fn try_claim(&mut self, thread_id: i64) -> bool {
         let q = self.threads.entry(thread_id).or_default();
-        if q.busy {
+        if q.open > 0 {
             return false;
         }
-        q.busy = true;
+        q.open = 1;
         true
+    }
+
+    /// The provider started a turn of its own: the thread is held until its
+    /// `TurnFinished`, whatever else holds it.
+    pub fn hold(&mut self, thread_id: i64) {
+        self.threads.entry(thread_id).or_default().open += 1;
     }
 
     /// Fall in behind the turn that has the thread.
@@ -62,18 +72,18 @@ impl Queue {
         msg
     }
 
-    /// The turn ended: the next message waiting, if there is one. The thread
-    /// stays claimed when one is handed back — it is about to be sent — and
-    /// goes idle when nothing is.
+    /// A turn ended: once no other turn holds the thread, the next message
+    /// waiting, if there is one. The thread stays claimed when one is handed
+    /// back — it is about to be sent — and goes idle when nothing is.
     pub fn next(&mut self, thread_id: i64) -> Option<(QueuedMessage, SendOptions)> {
         let q = self.threads.entry(thread_id).or_default();
-        match q.pending.pop_front() {
-            Some(next) => Some(next),
-            None => {
-                q.busy = false;
-                None
-            }
+        q.open = q.open.saturating_sub(1);
+        if q.open > 0 {
+            return None;
         }
+        let next = q.pending.pop_front()?;
+        q.open = 1;
+        Some(next)
     }
 
     /// Everything still waiting, dropped — what stop does. Handed back so
@@ -110,10 +120,10 @@ impl Queue {
         }
     }
 
-    /// A turn of ours is open on this thread, or something is waiting behind
-    /// one. Anything that rewrites the thread's rows has to wait for both.
+    /// A turn is open on this thread, or something is waiting behind one.
+    /// Anything that rewrites the thread's rows has to wait for both.
     pub fn is_busy(&self, thread_id: i64) -> bool {
-        self.threads.get(&thread_id).is_some_and(|q| q.busy)
+        self.threads.get(&thread_id).is_some_and(|q| q.open > 0)
     }
 
     pub fn forget(&mut self, thread_id: i64) {
@@ -174,5 +184,53 @@ mod tests {
         assert!(!q.try_claim(7));
         assert!(q.next(7).is_none());
         assert!(q.try_claim(7));
+    }
+
+    #[test]
+    fn a_turn_the_provider_starts_holds_an_idle_thread() {
+        let mut q = Queue::default();
+        let opts = SendOptions::default();
+        q.hold(3);
+        assert!(q.is_busy(3));
+        assert!(
+            !q.try_claim(3),
+            "a send waits behind the provider's own turn"
+        );
+        let msg = q.push(3, "meanwhile", &opts);
+        assert_eq!(
+            q.next(3).map(|(m, _)| m),
+            Some(msg),
+            "and goes out when that turn finishes"
+        );
+        assert!(q.is_busy(3), "held for the message going out");
+        assert!(q.next(3).is_none());
+        assert!(!q.is_busy(3));
+    }
+
+    #[test]
+    fn a_hold_racing_a_claim_releases_after_both_turns() {
+        let mut q = Queue::default();
+        let opts = SendOptions::default();
+        assert!(q.try_claim(4));
+        q.hold(4);
+        q.push(4, "later", &opts);
+        assert!(q.next(4).is_none(), "one turn still holds the thread");
+        assert!(!q.try_claim(4));
+        assert_eq!(q.next(4).map(|(m, _)| m.text), Some("later".into()));
+        assert!(q.next(4).is_none());
+        assert!(q.try_claim(4));
+    }
+
+    #[test]
+    fn clearing_the_queue_does_not_release_a_hold() {
+        let mut q = Queue::default();
+        let opts = SendOptions::default();
+        q.hold(5);
+        q.push(5, "one", &opts);
+        assert_eq!(q.clear(5).len(), 1);
+        assert!(q.is_busy(5));
+        assert!(!q.try_claim(5));
+        assert!(q.next(5).is_none());
+        assert!(q.try_claim(5));
     }
 }

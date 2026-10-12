@@ -42,12 +42,14 @@ export const Timeline = memo(function Timeline({
   const run = useSignIn(recheck);
 
   const rows = useMemo(() => buildRows(items, running), [items, running]);
-  // Which question each answer answered, for Retry.
+  // Which question each answer answered, for Retry. A turn the agent started
+  // itself answered none of the student's.
   const asked = useMemo(() => {
     const map = new Map<number, HarnessItem>();
     let last: HarnessItem | undefined;
     for (const i of items) {
       if (i.kind === "user") last = i;
+      else if (i.kind === "unprompted") last = undefined;
       else if (i.kind === "assistant" && last) map.set(i.id, last);
     }
     return map;

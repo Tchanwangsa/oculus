@@ -131,6 +131,15 @@ impl AgentPrinter {
                     .unwrap_or_default();
                 let _ = writeln!(out, "{} {what}{hint}", paint("refused:", RED));
             }
+            HarnessEvent::UnpromptedTurn { after } => {
+                end_line(&mut mid, &mut out);
+                let why = if after.is_empty() {
+                    "on its own".to_string()
+                } else {
+                    format!("after {}", after.join(", "))
+                };
+                let _ = writeln!(out, "{}", paint(&format!("· continued {why}"), DIM));
+            }
             HarnessEvent::TurnFinished { status } => {
                 end_line(&mut mid, &mut out);
                 let _ = writeln!(out, "{}", paint(&format!("· turn {status}"), DIM));

@@ -2,7 +2,7 @@ import { memo, useMemo } from "react";
 import { parseErrorMeta, parseToolMeta, type HarnessItem, type Provider } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
-import { Reply, Stopped, User } from "./Messages";
+import { Reply, Stopped, Unprompted, User } from "./Messages";
 import { PermissionCard } from "./PermissionCard";
 import { bundleLabel } from "./rows";
 import type { QuestionActions } from "./types";
@@ -52,6 +52,8 @@ export const Item = memo(function Item({
       );
     case "interrupted":
       return <Stopped />;
+    case "unprompted":
+      return <Unprompted item={item} />;
     case "permission":
       return <PermissionCard item={item} actionable={!!latest} onFollowUp={actions?.followUp} />;
   }

@@ -101,7 +101,16 @@ pub enum HarnessEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<i64>,
     },
-    /// The provider began working on the last user message.
+    /// The provider began a turn nobody sent a message for (Claude picking up
+    /// a background task that finished). Holds the thread like a sent message
+    /// until its [`Self::TurnFinished`]; persisted as a row. Comes right before
+    /// that turn's [`Self::TurnStarted`].
+    UnpromptedTurn {
+        /// The finished background tasks' descriptions, if known.
+        after: Vec<String>,
+    },
+    /// The provider began working on the last user message, or, after
+    /// [`Self::UnpromptedTurn`], on a turn of its own.
     TurnStarted,
     /// Live assistant text, superseded by the [`Self::AssistantMessage`] that follows.
     AssistantDelta {
@@ -191,7 +200,7 @@ pub enum HarnessEvent {
         /// A rule that would allow it (`command(python3)`), when readable off the refusal.
         rule: Option<String>,
     },
-    /// The provider stopped working on the user's message.
+    /// The provider stopped working on the user's message, or on its own turn.
     TurnFinished {
         /// `completed`, `interrupted`, `failed`.
         status: String,

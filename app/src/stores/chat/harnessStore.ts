@@ -298,6 +298,11 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           live = { ...prev, running: true };
           touchThread({ status: "running" });
           break;
+        case "unprompted_turn":
+          push(rowFrom(env, "unprompted", "", { after: event.after }));
+          live = { ...prev, running: true };
+          touchThread({ status: "running" });
+          break;
         case "turn_started":
           live = { ...prev, running: true };
           touchThread({ status: "running" });

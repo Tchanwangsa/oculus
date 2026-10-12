@@ -81,6 +81,12 @@ export function parseErrorMeta(item: HarnessItem): ErrorMeta {
   return isProvider(auth) ? { auth } : {};
 }
 
+/** An `unprompted` row's finished background tasks; empty when unknown. */
+export function unpromptedAfter(item: HarnessItem): string[] {
+  const { after } = parseItemMeta(item);
+  return Array.isArray(after) ? after.filter((a): a is string => typeof a === "string" && !!a) : [];
+}
+
 /** A `permission` row's `meta`. A row that does not parse draws as a refusal
  *  with nothing to approve, never a malformed rule. */
 export interface PermissionMeta {
