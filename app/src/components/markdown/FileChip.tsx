@@ -49,7 +49,7 @@ export function FileChip({
   const full = cite ? citationText(cite) : path;
   const label = children ?? fileTitle(file);
   const load = useCallback(() => fileReferenceDetails(path), [path]);
-  const icon = <Icon size={16} aria-hidden className={cn("mr-1.5 inline align-[-3px]", tone)} />;
+  const icon = <Icon size="1.15em" aria-hidden className={cn("mr-[0.35em] inline align-[-0.18em]", tone)} />;
   return (
     <ReferencePreview icon={icon} title={fileTitle(file)} kind={kind} detail={full} load={load}>
       <span

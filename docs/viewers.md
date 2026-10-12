@@ -45,7 +45,9 @@ classes work even when there are no dollar delimiters.
 - **Inline references share a glyph and a hover card.** `FileChip` preserves
   citation paths for copying and the composer's atomic mentions; clickable
   references use an understated underline and content-specific Phosphor colours
-  (`reference-*` tokens). In prose they have link semantics so they select with
+  (`reference-*` tokens). Inline glyphs, favicons, spacing and baseline offsets
+  use `em` units so references scale with headings; hover-card icons keep their
+  own fixed size. In prose they have link semantics so they select with
   the sentence; only composer mentions are non-editable, and a selection drag
   never opens the reference. `ReferenceLink` handles web URLs and recognised task,
   project and lecture routes. Web links reuse the browser's cached favicon,
