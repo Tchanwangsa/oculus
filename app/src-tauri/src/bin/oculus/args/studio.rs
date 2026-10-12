@@ -766,8 +766,7 @@ pub(crate) struct StudioThemesPromoteArgs {
 /// `subtitles`: the captions as WebVTT, with SubRip (`.srt`) beside it.
 ///
 /// Video presets are H.264, yuv420p, BT.709, and write the captions as a
-/// `.vtt` beside the mp4 when the video is narrated. With video.json's
-/// `"captions": true` the captions are also burned into the frames.
+/// `.vtt` beside the mp4 when the video is narrated.
 /// Before anything renders, ffmpeg is asked what it was built with: a
 /// missing encoder or demuxer is an error naming it.
 ///

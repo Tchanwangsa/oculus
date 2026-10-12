@@ -29,10 +29,6 @@ pub struct Video {
     /// is read before the global one.
     #[serde(default)]
     pub subject: Option<String>,
-    /// Burn word-highlight captions into the frames, styled by the theme's
-    /// `captions` tokens (`crate::captions`). Off when absent.
-    #[serde(default)]
-    pub captions: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

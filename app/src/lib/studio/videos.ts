@@ -75,19 +75,12 @@ export interface VideoDetail {
   /** The narration voice id, from video.json or Settings -> Voice; null if
    *  neither names one. */
   voice: string | null;
-  /** video.json's `captions`: the renders have captions burned in. */
-  captions: boolean;
   scenes: SceneInfo[];
   renders: RenderFile[];
 }
 
 export function videoDetail(slug: string): Promise<VideoDetail> {
   return invoke<VideoDetail>("studio_video_detail", { slug });
-}
-
-/** Turns the video's burned-in captions on or off (video.json's `captions`). */
-export function setCaptions(slug: string, on: boolean): Promise<void> {
-  return invoke("studio_set_captions", { slug, on });
 }
 
 /** The WebVTT text beside the video's `preset` render. */

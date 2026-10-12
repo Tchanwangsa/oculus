@@ -1,5 +1,5 @@
 //! Themes: tokens only (colours, fonts, type scale, space, radii, motion,
-//! narration timing, captions).
+//! narration timing).
 //! Components read them from `ctx.theme`; a retheme is an edit here, never
 //! in a component. Bundled themes live in the crate's `themes/` folder.
 
@@ -7,7 +7,6 @@ mod schema;
 
 pub use schema::{DEFAULT_PAUSE, NarrationTokens};
 
-use crate::captions::CaptionStyle;
 use crate::error::{Result, StudioError};
 use crate::scene::Color;
 use crate::transition::MotionSpec;
@@ -48,8 +47,6 @@ pub struct Theme {
     /// `narration`: the silence before and after a scene's narration, and
     /// a bare `[pause]`'s length.
     pub narration: NarrationTokens,
-    /// `captions`: how burned-in captions look.
-    pub captions: CaptionStyle,
 }
 
 impl Theme {
@@ -101,7 +98,6 @@ impl Theme {
             motion: checked.motion,
             easings: checked.easings,
             narration: checked.narration,
-            captions: checked.captions,
         })
     }
 

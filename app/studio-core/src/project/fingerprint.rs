@@ -12,14 +12,13 @@ use serde_json::{Map, Value, json};
 
 /// The fingerprint's shape; a change to what it holds bumps it, so old
 /// keys stop matching.
-const FORMAT: u32 = 3;
+const FORMAT: u32 = 2;
 
 impl Project {
     /// The studio-core inputs of scene `index`'s frames, as canonical JSON
     /// bytes (object keys sorted): the video's size and fps, the theme's
-    /// tokens, `video.json`'s `motion` (the transition cascade, morph
-    /// colour and blur token) and `captions` (a scene's captions read only
-    /// its own words and the theme), and for scene `index` and the scene before
+    /// tokens and `video.json`'s `motion` (the transition cascade, morph
+    /// colour and blur token), and for scene `index` and the scene before
     /// it, its spec (component, props, hold, transition, id), its narration
     /// words and pauses as components see them, its frame count and, for a
     /// scene without an `id`, its index (`Math.random` is seeded by
@@ -42,7 +41,6 @@ impl Project {
         v.insert("fps".into(), self.fps().into());
         v.insert("theme".into(), self.theme.tokens.clone());
         v.insert("motion".into(), to_value(&self.video.motion)?);
-        v.insert("captions".into(), self.video.captions.into());
         v.insert("scene".into(), self.scene_inputs(index)?);
         v.insert("previous".into(), previous);
         serde_json::to_vec(&canonical(Value::Object(v))).map_err(fail)

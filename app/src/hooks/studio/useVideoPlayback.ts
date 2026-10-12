@@ -20,8 +20,8 @@ export function sceneStarts(detail: VideoDetail): number[] {
 /**
  * A video's render in the media player: the newest video render (the reader
  * can pick another), its URL, the `<video>` element, and the scene under the
- * playhead. A re-render of the same file starts the player over. When the
- * captions are not burned in, the render's `.vtt` beside it is the CC.
+ * playhead. A re-render of the same file starts the player over. The
+ * render's `.vtt` beside it, when there is one, is the CC.
  */
 export function useVideoPlayback(detail: VideoDetail) {
   const [picked, setPicked] = useState<RenderPreset | null>(null);
@@ -51,7 +51,7 @@ export function useVideoPlayback(detail: VideoDetail) {
 
   const [cues, setCues] = useState<Cue[]>(NO_CUES);
   const slug = detail.row.slug;
-  const sidecar = !detail.captions && shown?.captions ? shown.preset : null;
+  const sidecar = shown?.captions ? shown.preset : null;
   useEffect(() => {
     setCues(NO_CUES);
     if (!sidecar) return;

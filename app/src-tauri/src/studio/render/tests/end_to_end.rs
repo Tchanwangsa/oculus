@@ -410,18 +410,19 @@ fn each_export_writes_its_file_and_knows_when_it_is_current() {
         assert!(status(Preset::Draft).current);
     }
 
-    // Turning captions on changes the frames, not the words.
+    // A longer silent outro changes the frames, not the words.
     let video = std::fs::read_to_string(dir.join("video.json")).unwrap();
-    let on = crate::studio::videos::with_captions(&video, true).unwrap();
-    std::fs::write(dir.join("video.json"), on).unwrap();
+    std::fs::write(
+        dir.join("video.json"),
+        video.replace("\"hold\": 1.5", "\"hold\": 2.0"),
+    )
+    .unwrap();
     assert!(!status(Preset::Draft).current);
     assert!(status(Preset::Subtitles).current);
-    let captioned = complete(&dir, &options(&ffmpeg, Preset::Draft, None));
-    let outcomes: Vec<Outcome> = captioned.segments.iter().map(|s| s.outcome).collect();
-    assert_eq!(outcomes, [Outcome::Rendered, Outcome::Rendered]);
-    let burned = framemd5(&ffmpeg, &captioned.path);
-    assert_eq!(burned.len(), plain.len());
-    assert_ne!(burned, plain);
+    let longer = complete(&dir, &options(&ffmpeg, Preset::Draft, None));
+    let outcomes: Vec<Outcome> = longer.segments.iter().map(|s| s.outcome).collect();
+    assert_eq!(outcomes, [Outcome::Cached, Outcome::Rendered]);
+    assert_eq!(framemd5(&ffmpeg, &longer.path).len(), plain.len() + 15);
 }
 
 #[test]

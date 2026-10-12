@@ -1,77 +1,42 @@
-//! Word-highlight captions from the narration's word timings. A scene's
+//! Captions from the narration's word timings, as subtitle files: a scene's
 //! words become phrases (`phrase`), each on screen for a stretch of the
-//! scene (`timing`); at any moment the phrase on screen is drawn as an
-//! element tree (`tree`) over the finished frame, the word being said
-//! highlighted. Phrases never cross a scene, so a scene's captions depend on
-//! its own words only. The same phrases make the subtitle files
-//! (`subtitles`). Styled by the theme's `captions` tokens (`style`).
+//! scene (`timing`), and the phrases in video time become WebVTT or SubRip
+//! cues (`subtitles`). Phrases never cross a scene.
 
 mod phrase;
-mod style;
 mod subtitles;
 mod timing;
-mod tree;
 
 pub use phrase::{Phrase, phrases};
-pub use style::{CaptionStyle, Highlight, Placement};
 pub use subtitles::{Cue, srt, vtt};
-pub use timing::{Moment, moment};
-
-pub(crate) use style::{check, fill_defaults};
 
 use crate::error::Result;
-use crate::project::{CuedWord, Project};
-use serde_json::Value;
+use crate::project::Project;
 
-/// One scene's captions: its words and their phrases.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SceneCaptions {
-    pub words: Vec<CuedWord>,
-    pub phrases: Vec<Phrase>,
-}
-
-impl SceneCaptions {
-    /// The caption tree at scene time `t` on a `size` frame, or `None` when
-    /// no phrase is on screen.
-    pub(crate) fn tree_at(&self, style: &CaptionStyle, t: f64, size: (u32, u32)) -> Option<Value> {
-        let m = moment(&self.phrases, &self.words, t)?;
-        Some(tree::tree(style, &self.phrases, &self.words, m, size))
-    }
-}
+/// Characters a caption line holds, the usual subtitle limit.
+pub const LINE_CHARS: usize = 42;
+/// Lines a caption holds.
+pub const MAX_LINES: usize = 2;
 
 impl Project {
-    /// Scene `index`'s captions, phrased for this video's frame and the
-    /// theme's `captions` tokens: `None` for a silent scene. Fails like
-    /// `cued_words` on stale narration.
-    pub fn scene_captions(&self, index: usize) -> Result<Option<SceneCaptions>> {
-        let Some(words) = self.cued_words(index)? else {
-            return Ok(None);
-        };
-        let pauses = self.cued_pauses(index)?;
-        let style = &self.theme.captions;
-        let size = self.video.size;
-        let line = style.line_chars(size.width, size.height);
-        let phrases = phrases(&words, &pauses, line, style.max_lines);
-        Ok(Some(SceneCaptions { words, phrases }))
-    }
-
-    /// Every scene's phrases as subtitle cues in video seconds, whether or
-    /// not video.json burns captions in. Fails on stale narration.
+    /// Every narrated scene's phrases as subtitle cues in video seconds.
+    /// Fails on stale narration.
     pub fn caption_cues(&self) -> Result<Vec<Cue>> {
         let timeline = self.timeline()?;
         let mut cues = Vec::new();
         for i in 0..self.video.scenes.len() {
-            let Some(c) = self.scene_captions(i)? else {
+            let Some(words) = self.cued_words(i)? else {
                 continue;
             };
+            let pauses = self.cued_pauses(i)?;
             let (start, end) = timeline.window(i)?;
-            for p in &c.phrases {
+            for p in phrases(&words, &pauses, LINE_CHARS, MAX_LINES) {
                 let lines = p
                     .lines
                     .iter()
                     .map(|l| {
                         let words: Vec<&str> =
-                            c.words[l.clone()].iter().map(|w| w.text.as_str()).collect();
+                            words[l.clone()].iter().map(|w| w.text.as_str()).collect();
                         words.join(" ")
                     })
                     .collect();
