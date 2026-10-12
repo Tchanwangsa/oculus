@@ -39,8 +39,9 @@
       "binaries/oculus-keyd"
     ],
     "resources": {
-      "windows/distribution/FFMPEG-LICENSE.txt": "FFMPEG-LICENSE.txt",
-      "windows/distribution/FFMPEG-README.txt": "FFMPEG-README.txt"
+      "ffmpeg-notices/FFMPEG-LICENSE.txt": "FFMPEG-LICENSE.txt",
+      "ffmpeg-notices/FFMPEG-README.txt": "FFMPEG-README.txt",
+      "../../LICENSE": "LICENSE"
     }
   },
   "mainBinaryName": "oculus-app"

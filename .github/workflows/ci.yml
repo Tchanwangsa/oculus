@@ -214,7 +214,7 @@ jobs:
           if-no-files-found: error
           path: |
             app/src-tauri/target/release/bundle/nsis/*.exe
-            app/src-tauri/windows/distribution/FFMPEG-*.txt
+            app/src-tauri/ffmpeg-notices/FFMPEG-*.txt
 
   # keyd's core and keyd itself on a target with no adapter: the build
   # proves no OS call has leaked out of app/keyd/core/src/platform/, and

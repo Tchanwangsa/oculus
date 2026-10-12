@@ -133,7 +133,7 @@ jobs:
           if-no-files-found: error
           path: |
             app/src-tauri/target/release/bundle/nsis/*.exe
-            app/src-tauri/windows/distribution/FFMPEG-*.txt
+            app/src-tauri/ffmpeg-notices/FFMPEG-*.txt
       - name: Check real Partner Center configuration
         id: store
         working-directory: app

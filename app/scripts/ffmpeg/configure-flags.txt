@@ -15,8 +15,9 @@
 --enable-static
 --disable-shared
 
-# Local files and the stdout pipe the frame readers use.
---enable-protocol=file,pipe
+# Local files, the stdout pipe the frame readers use, and fd, which the ffmpeg
+# CLI maps an input of `-` to (Studio feeds raw frames on stdin).
+--enable-protocol=file,pipe,fd
 
 # Containers a student's lecture or module video can arrive in.
 --enable-demuxer=mov,matroska,ogg,mp3,wav,w64,aiff,aac,ac3,eac3,flac,avi,mpegts,mpegps,asf
@@ -37,6 +38,15 @@
 --enable-encoder=libopus,pcm_s16le,mjpeg,rawvideo
 
 --enable-muxer=ogg,wav,mp4,mov,image2,rawvideo
+
+# Studio renders (docs/studio.md, "Rendering a video"): raw RGBA frames on
+# stdin, per-scene mp4 segments joined by the concat demuxer (which adds the
+# h264_mp4toannexb filter below), and the narration as AAC. The H.264
+# encoder is the target's own: build.sh enables Media Foundation's h264_mf
+# for Windows.
+--enable-demuxer=rawvideo,concat
+--enable-decoder=rawvideo
+--enable-encoder=aac
 
 # The app's own filters, plus those the ffmpeg CLI inserts itself: format
 # conversion, -ss/-t trimming, container cropping and display-matrix rotation.

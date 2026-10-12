@@ -4,7 +4,7 @@
 # configure-flags.txt. Every tarball must match its pinned SHA-256, and
 # FFmpeg's must carry a good signature from its release key.
 #
-# Usage: build.sh <target> <out-dir>     targets: windows-x64
+# Usage: build.sh <target> <out-dir>     targets: windows-x64, macos-arm64
 #
 # <out-dir> receives everything a release needs: the binary, the
 # byte-identical source tarballs, these build files, the full configure line,
@@ -22,9 +22,9 @@ DAV1D_VERSION=1.5.4
 DAV1D_SHA256=686616b7c69eb88d44459391ab25cac13b6647a3b288835c5784e71c1514a5c5
 # Raise when the build changes without an upstream version change; it names
 # the release tag, ffmpeg-<version>-oculus<build>.
-OCULUS_BUILD=1
+OCULUS_BUILD=2
 
-usage="usage: build.sh <target> <out-dir> (targets: windows-x64)"
+usage="usage: build.sh <target> <out-dir> (targets: windows-x64, macos-arm64)"
 here=$(cd "$(dirname "$0")" && pwd)
 target=${1:?$usage}
 out_arg=${2:?$usage}
@@ -43,9 +43,26 @@ case "$target" in
     # system DLLs only, never the MinGW runtime's. The linker strips it, since
     # strip would stamp the PE header with the time, so rebuilds match byte
     # for byte.
+    # Media Foundation's H.264 encoder (h264_mf) is Studio's encoder here:
+    # it is part of Windows, so no GPL x264. --disable-autodetect means it
+    # is named; it loads mfplat.dll at run time. mfenc.c uses Direct3D 11's
+    # types whatever the options, and includes their header only with
+    # d3d11va, whose hardware decoders stay off with --disable-everything.
     target_flags=(--enable-cross-compile --target-os=mingw32 --arch=x86_64
-      "--cross-prefix=$host-" --enable-w32threads --disable-stripping)
+      "--cross-prefix=$host-" --enable-w32threads --disable-stripping
+      --enable-mediafoundation --enable-d3d11va --enable-encoder=h264_mf)
     target_ldflags="-static -s -Wl,--no-insert-timestamp"
+    ;;
+  macos-arm64)
+    # Built natively on an Apple Silicon runner. VideoToolbox's h264_videotoolbox
+    # is Studio's encoder here: it is part of macOS, so no GPL x264.
+    # --disable-autodetect means the framework is named. The deployment target
+    # is whisper-cli's (scripts/build-whisper.mjs); the linker drops local
+    # symbols.
+    exe_ext=
+    export MACOSX_DEPLOYMENT_TARGET=13.3
+    target_flags=(--target-os=darwin --arch=arm64 --enable-videotoolbox --enable-encoder=h264_videotoolbox)
+    target_ldflags="-Wl,-x"
     ;;
   *) die "unknown target '$target'; $usage" ;;
 esac
@@ -126,7 +143,7 @@ endian = 'little'
 EOF
   meson_cross=(--cross-file "$build/cross.meson")
 fi
-(meson setup "${meson_cross[@]}" "$build/dav1d" "$build/dav1d-$DAV1D_VERSION" --prefix="$prefix" --libdir=lib \
+(meson setup ${meson_cross[@]+"${meson_cross[@]}"} "$build/dav1d" "$build/dav1d-$DAV1D_VERSION" --prefix="$prefix" --libdir=lib \
   --buildtype=release --default-library=static -Denable_tools=false -Denable_tests=false \
   -Denable_examples=false -Denable_docs=false && ninja -C "$build/dav1d" install) \
   > "$build/dav1d.log" 2>&1 || { tail -50 "$build/dav1d.log"; die "dav1d failed; see $build/dav1d.log"; }
@@ -170,7 +187,7 @@ cp ffbuild/config.log "$out/config-$target.log"
   else
     cc --version | head -1
   fi
-  nasm -v
+  if command -v nasm >/dev/null; then nasm -v; fi
   echo "meson $(meson --version)"
   echo "ninja $(ninja --version)"
   if command -v dpkg-query >/dev/null; then
@@ -186,6 +203,19 @@ if [ "$target" = windows-x64 ]; then
   allowed='^(kernel32|user32|advapi32|bcrypt|gdi32|ole32|oleaut32|shell32|shlwapi|msvcrt|ucrtbase|ntdll|psapi|secur32|api-ms-win-[a-z0-9-]+)\.dll$'
   bad=$(echo "$imports" | tr 'A-Z' 'a-z' | grep -Ev "$allowed" || true)
   [ -z "$bad" ] || die "$binary imports non-system DLLs: $bad"
+fi
+
+if [ "$target" = macos-arm64 ]; then
+  # Only Apple's own libraries and frameworks may be linked, and only for an
+  # Apple Silicon Mac at or above the deployment target.
+  libs=$(otool -L "$out/$binary" | awk 'NR > 1 { print $1 }')
+  echo "dynamic libraries:" >> "$out/toolchain-$target.txt"
+  echo "$libs" | sed 's/^/  /' >> "$out/toolchain-$target.txt"
+  bad=$(echo "$libs" | grep -Ev '^(/usr/lib/|/System/Library/)' || true)
+  [ -z "$bad" ] || die "$binary links non-system libraries: $bad"
+  [ "$(lipo -archs "$out/$binary")" = arm64 ] || die "$binary is not an arm64-only binary"
+  minos=$(otool -l "$out/$binary" | awk '/LC_BUILD_VERSION/ { found = 1 } found && $1 == "minos" { print $2; exit }')
+  [ "$minos" = "$MACOSX_DEPLOYMENT_TARGET" ] || die "$binary needs macOS $minos, expected $MACOSX_DEPLOYMENT_TARGET"
 fi
 
 for file in "$ffmpeg_tar" "$ffmpeg_tar.asc" "$opus_tar" "$dav1d_tar"; do
