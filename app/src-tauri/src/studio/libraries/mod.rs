@@ -5,8 +5,10 @@
 //! replaced. `--reset` (the CLI's `components seed --reset`) writes the
 //! starter text over the edits, with each old text kept in `.history`
 //! first. `promote` copies a video's own component or theme into a library
-//! through the same snapshotting write.
+//! through the same snapshotting write. `defaults` picks the theme a new
+//! video takes from the libraries' `library.json`.
 
+mod defaults;
 mod promote;
 #[cfg(test)]
 mod tests;
@@ -15,6 +17,7 @@ use crate::library::paths::{data_dir, studio_dir};
 use std::path::{Path, PathBuf};
 use studio_core::{seed_library, Library, Project, StudioError};
 
+pub use defaults::{default_theme, defined as theme_defined, FALLBACK_THEME};
 pub use promote::{promote_component, promote_theme, Promoted, Target};
 
 /// `<data dir>/studio/library`.

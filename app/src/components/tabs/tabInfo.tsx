@@ -16,6 +16,7 @@ import {
   Kanban,
   ListChecks,
   MusicNotes,
+  Palette,
 } from "@phosphor-icons/react";
 import { browseId, hostOf, type BrowserTab } from "@/lib/browser";
 import { DOCK_ROOT, dockService, type DockPageInfo } from "@/lib/dock";
@@ -142,6 +143,9 @@ export function tabInfo(
     const component = /^\/studio\/components\/([^/]+)/.exec(pathname);
     if (component) return { title: decodeURIComponent(component[1]), icon: <Cube size={size} /> };
     if (pathname.startsWith("/studio/components")) return { title: "Components", icon: <Cube size={size} /> };
+    const theme = /^\/studio\/themes\/([^/]+)/.exec(pathname);
+    if (theme) return { title: decodeURIComponent(theme[1]), icon: <Palette size={size} /> };
+    if (pathname.startsWith("/studio/themes")) return { title: "Themes", icon: <Palette size={size} /> };
     return {
       title: pathname.startsWith("/studio/videos") ? "Videos" : "New video",
       icon: <FilmSlate size={size} />,

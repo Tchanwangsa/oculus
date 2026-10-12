@@ -259,7 +259,7 @@ fn a_new_video_takes_a_theme_and_a_voice_block() {
         "{text}"
     );
 
-    for theme in ["../x", "a b", ""] {
+    for theme in ["../x", "a b", "", "Warm", "a_b"] {
         let err = create_in(
             &root,
             &NewVideo {

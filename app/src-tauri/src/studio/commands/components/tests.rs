@@ -1,16 +1,17 @@
 //! The playground's commands over a scratch library: the list with two
 //! levels, the schema as JSON, writes that must load, history and restore,
-//! and a frame of a starter component.
+//! removing a subject's own version, and a frame of a starter component in
+//! a saved or an unsaved theme.
 
 use serde_json::json;
-use studio_core::Library;
+use studio_core::{Library, Theme};
 
 use super::super::levels::Level;
 use super::frame::{frame_png, FrameRequest};
 use super::history::{list_in as history, restore_in};
 use super::rows::{list_in, Kind};
 use super::source::source_in;
-use super::write::write_in;
+use super::write::{delete_in, write_in};
 use crate::studio::libraries::libraries_at;
 use crate::test_support::Scratch;
 
@@ -30,6 +31,7 @@ fn request(name: &str) -> FrameRequest {
         name: name.into(),
         subject: None,
         theme: "default".into(),
+        theme_text: None,
         props: None,
         example: None,
         t: 1.0,
@@ -85,10 +87,19 @@ fn the_list_has_the_nearest_level_per_name_and_marks_shells() {
     assert!(global.iter().all(|r| r.level == Level::Global));
 
     let subject = list_in(&library, Some("MAST1")).unwrap();
-    let level = |name: &str| subject.iter().find(|r| r.name == name).unwrap().level;
-    assert_eq!(level("Banner"), Level::Subject);
-    assert_eq!(level("Grid"), Level::Subject);
-    assert_eq!(level("TitleCard"), Level::Global);
+    let row = |name: &str| subject.iter().find(|r| r.name == name).unwrap();
+    assert_eq!(
+        (row("Banner").level, row("Banner").shadows),
+        (Level::Subject, false)
+    );
+    assert_eq!(
+        (row("Grid").level, row("Grid").shadows),
+        (Level::Subject, true)
+    );
+    assert_eq!(
+        (row("TitleCard").level, row("TitleCard").shadows),
+        (Level::Global, false)
+    );
     assert_eq!(subject.len(), 11);
 
     let kind = |name: &str| subject.iter().find(|r| r.name == name).unwrap().kind;
@@ -360,4 +371,71 @@ fn props_win_over_examples_and_mistakes_come_back_as_sentences() {
         ..request("TitleCard")
     };
     frame_png(&library, longer).unwrap();
+}
+
+#[test]
+fn removing_an_own_version_falls_back_to_the_global_one_and_can_be_restored() {
+    let root = Scratch::new("comp-delete");
+    let library = library(&root);
+    write_in(&library, Level::Subject, Some("MAST1"), "Grid", BANNER).unwrap();
+    assert_eq!(
+        source_in(&library, Some("MAST1"), "Grid").unwrap().level,
+        Level::Subject
+    );
+    delete_in(&library, "MAST1", "Grid").unwrap();
+    assert!(!root.join("subjects/MAST1/components/Grid.tsx").exists());
+    assert_eq!(
+        source_in(&library, Some("MAST1"), "Grid").unwrap().level,
+        Level::Global
+    );
+    let snapshots = history(&library, Level::Subject, Some("MAST1"), "Grid").unwrap();
+    assert_eq!(snapshots.len(), 1);
+    let back = restore_in(
+        &library,
+        Level::Subject,
+        Some("MAST1"),
+        "Grid",
+        &snapshots[0].id,
+    )
+    .unwrap();
+    assert_eq!(back.text, BANNER);
+
+    let e = delete_in(&library, "MAST1", "TitleCard").unwrap_err();
+    assert!(e.contains("no "), "{e}");
+    assert!(delete_in(&library, "../x", "Grid").is_err());
+    assert!(delete_in(&library, "MAST1", "../Grid").is_err());
+    assert!(root.join("global/components/Grid.tsx").exists());
+}
+
+#[test]
+fn an_unsaved_theme_draws_in_place_of_the_saved_one() {
+    let root = Scratch::new("comp-frame-draft");
+    let library = library(&root);
+    let mut tokens = Theme::bundled("default").unwrap().tokens;
+    let saved = frame_png(&library, request("TitleCard")).unwrap();
+    let same = FrameRequest {
+        theme_text: Some(serde_json::to_string(&tokens).unwrap()),
+        ..request("TitleCard")
+    };
+    assert_eq!(frame_png(&library, same).unwrap(), saved);
+
+    tokens["color"]["ink"] = json!("#102030");
+    let draft = FrameRequest {
+        theme_text: Some(serde_json::to_string(&tokens).unwrap()),
+        ..request("TitleCard")
+    };
+    assert_ne!(frame_png(&library, draft).unwrap(), saved);
+
+    tokens["color"]["ink"] = json!("blue");
+    let bad = FrameRequest {
+        theme_text: Some(serde_json::to_string(&tokens).unwrap()),
+        ..request("TitleCard")
+    };
+    let e = frame_png(&library, bad).unwrap_err();
+    assert!(e.contains("blue") && e.contains("default.json"), "{e}");
+    let huge = FrameRequest {
+        theme_text: Some(" ".repeat(300 * 1024)),
+        ..request("TitleCard")
+    };
+    assert!(frame_png(&library, huge).unwrap_err().contains("KB"));
 }

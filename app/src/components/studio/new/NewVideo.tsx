@@ -5,6 +5,7 @@ import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { StyleChip } from "@/components/studio/style/StyleChip";
 import { readStyle, writeStyle, type StudioStyle } from "@/components/studio/style/style";
 import { useNewVideo } from "@/hooks/studio/useNewVideo";
+import { useThemeDefaults } from "@/hooks/studio/useThemeDefaults";
 import { useThemes } from "@/hooks/studio/useThemes";
 import { useStoredState } from "@/hooks/ui/useStoredState";
 import { draftKey } from "@/stores/chat/draftStore";
@@ -23,7 +24,8 @@ export function NewVideo() {
   const reasoning = useHarnessStore((s) => s.reasoning);
   const [subjectId, setSubjectId] = useState<number | null>(null);
   const [stored, setStored] = useStoredState("oculus-studio-style", readStyle, writeStyle);
-  // The theme is per video: picked by hand it holds, else the subject's own.
+  // The theme is per video: picked by hand it holds across a subject change,
+  // else (null) the chip shows and the backend uses the subject's default.
   const [theme, setTheme] = useState<string | null>(null);
   const style: StudioStyle = useMemo(() => ({ ...stored, theme }), [stored, theme]);
   const [restore, setRestore] = useState<{ text: string; n: number } | null>(null);
@@ -39,6 +41,7 @@ export function NewVideo() {
     return s ? s.code : null;
   }, [subjects, subjectId]);
   const themes = useThemes(code);
+  const { defaults } = useThemeDefaults(code);
   const { start, error } = useNewVideo(subjectId, code, style);
 
   const onStyle = useCallback(
@@ -91,7 +94,7 @@ export function NewVideo() {
               dropRef={columnRef}
               onDropping={setDropping}
               placeholder="Describe it, and type @ to add a lecture, assignment or file"
-              leading={<StyleChip style={style} onChange={onStyle} themes={themes} />}
+              leading={<StyleChip style={style} onChange={onStyle} themes={themes} defaultTheme={defaults?.effective ?? null} />}
             />
             {error && <p className="px-0.5 text-[12px] text-destructive">{error}</p>}
           </div>

@@ -102,6 +102,73 @@ fn new_makes_a_unique_slug_that_loads_with_the_options_given() {
 }
 
 #[test]
+fn a_video_with_no_theme_takes_its_subjects_default_by_name() {
+    let root = Scratch::new("cmd-new-default");
+    let videos = root.join("videos");
+    let library = libraries_at(&root.join("library"), &root.join("subjects"), false).unwrap();
+    let theme_of = |made: &super::new::Made| {
+        studio_core::Project::load_with(&made.dir, &library)
+            .unwrap()
+            .video
+            .theme
+    };
+    let made = create_in(&videos, &library, options("Plain")).unwrap();
+    assert_eq!(theme_of(&made), "default");
+
+    std::fs::write(
+        root.join("library/library.json"),
+        r#"{"defaultTheme": "warm"}"#,
+    )
+    .unwrap();
+    let global = create_in(&videos, &library, options("Global default")).unwrap();
+    assert_eq!(theme_of(&global), "warm");
+
+    let code = root.join("subjects/MAST1");
+    std::fs::create_dir_all(code.join("themes")).unwrap();
+    let mut tokens = studio_core::Theme::bundled("default").unwrap().tokens;
+    tokens["color"]["bg"] = serde_json::json!("#101010");
+    std::fs::write(code.join("themes/chalk.json"), tokens.to_string()).unwrap();
+    std::fs::write(code.join("library.json"), r#"{"defaultTheme": "chalk"}"#).unwrap();
+    let own = create_in(
+        &videos,
+        &library,
+        NewVideoOptions {
+            subject: Some("MAST1".into()),
+            ..options("Subject default")
+        },
+    )
+    .unwrap();
+    assert_eq!(theme_of(&own), "chalk");
+    let text = std::fs::read_to_string(own.dir.join("video.json")).unwrap();
+    assert!(text.contains("\"theme\": \"chalk\""), "{text}");
+
+    // A theme asked for wins over the default.
+    let asked = create_in(
+        &videos,
+        &library,
+        NewVideoOptions {
+            subject: Some("MAST1".into()),
+            theme: Some("default".into()),
+            ..options("Asked")
+        },
+    )
+    .unwrap();
+    assert_eq!(theme_of(&asked), "default");
+
+    std::fs::write(code.join("library.json"), "{ nope").unwrap();
+    let err = create_in(
+        &videos,
+        &library,
+        NewVideoOptions {
+            subject: Some("MAST1".into()),
+            ..options("Broken settings")
+        },
+    )
+    .unwrap_err();
+    assert!(err.contains("library.json"), "{err}");
+}
+
+#[test]
 fn the_list_has_titles_threads_and_the_newest_first() {
     let root = Scratch::new("cmd-list");
     let videos = root.join("videos");

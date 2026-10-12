@@ -9,6 +9,7 @@
 
 pub mod aligner;
 pub mod components;
+mod history;
 pub mod kokoro;
 mod levels;
 mod progress;

@@ -97,3 +97,21 @@ fn the_mono_tokens_are_in_the_bundled_themes_and_default_for_older_ones() {
         "{e}"
     );
 }
+
+#[test]
+fn theme_names_are_lowercase_digits_and_dashes() {
+    for good in ["default", "warm", "chalk-2", "a"] {
+        assert!(valid_theme_name(good), "{good}");
+    }
+    for bad in ["", "Chalk", "a_b", "a/b", "../x", "x.json", &"a".repeat(65)] {
+        assert!(!valid_theme_name(bad), "{bad}");
+    }
+    for name in Theme::bundled_names() {
+        assert!(valid_theme_name(name), "bundled {name}");
+        assert!(Theme::bundled_text(name).is_some());
+    }
+    for (name, _) in crate::STARTER_THEMES {
+        assert!(valid_theme_name(name), "starter {name}");
+    }
+    assert!(Theme::bundled_text("warm").is_none());
+}

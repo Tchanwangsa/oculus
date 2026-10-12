@@ -80,7 +80,8 @@ export const routes: RouteObject[] = [
       },
       {
         // Videos: the nav column (`StudioLayout`) beside New video, the
-        // grid, one video's detail and its thread, and the Components playground.
+        // grid, one video's detail and its thread, the Components playground
+        // and the Themes page.
         path: "studio",
         element: <StudioLayout />,
         children: [
@@ -90,6 +91,8 @@ export const routes: RouteObject[] = [
           { path: "videos/:slug/thread", lazy: page(() => import("@/pages/studio/VideoThreadPage")) },
           { path: "components", lazy: page(() => import("@/pages/studio/ComponentsPage")) },
           { path: "components/:name", lazy: page(() => import("@/pages/studio/ComponentsPage")) },
+          { path: "themes", lazy: page(() => import("@/pages/studio/ThemesPage")) },
+          { path: "themes/:name", lazy: page(() => import("@/pages/studio/ThemesPage")) },
         ],
       },
       // Spotify's full player, opened beside the page from the rail (docs/music.md).
