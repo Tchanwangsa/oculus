@@ -1,20 +1,39 @@
-//! Phase: the subject's Ed Discussion board.
+//! Phase: the subject's Ed course — its Discussion board and its Lessons.
 
 use crate::sync::render::slug;
 use crate::sync::{Engine, Progress, Subject};
 
 impl Engine {
-    /// Mirror the subject's Ed board into `ed/*.md`, one thread per file. A
-    /// course with no Ed tool is skipped (session minting: `Ed::resolve_course`).
-    pub(in crate::sync) fn scrape_ed(&self, c: &Subject) -> Result<(), String> {
+    /// Resolve the subject's Ed course once (session minting:
+    /// `Ed::resolve_course`), then mirror whichever of threads and lessons the
+    /// options ask for. A course with no Ed tool is skipped; a failure in one
+    /// half is a warning and never costs the other.
+    pub(in crate::sync) fn scrape_ed(&self, c: &Subject) {
         let course_id = match self.ed.resolve_course(&self.canvas, c.id, &c.code) {
             Ok(Some(id)) => id,
-            Ok(None) => return Ok(()),
+            Ok(None) => return,
             Err(e) => {
                 self.reporter.log("info", &c.code, &format!("ed: {e}"));
-                return Ok(());
+                return;
             }
         };
+        // Lessons first: a few dozen requests, where the board re-reads every
+        // thread and is the half that meets Ed's rate limit.
+        if self.options.ed_lessons {
+            if let Err(e) = self.scrape_ed_lessons(c, course_id) {
+                self.reporter
+                    .log("warning", &c.code, &format!("ed lessons: {e}"));
+            }
+        }
+        if self.options.ed && !self.reporter.cancelled() {
+            if let Err(e) = self.scrape_ed_threads(c, course_id) {
+                self.reporter.log("warning", &c.code, &format!("ed: {e}"));
+            }
+        }
+    }
+
+    /// The board into `ed/*.md`, one thread per file.
+    fn scrape_ed_threads(&self, c: &Subject, course_id: i64) -> Result<(), String> {
         let threads = self.ed.threads(course_id)?;
 
         for (i, t) in threads.iter().enumerate() {

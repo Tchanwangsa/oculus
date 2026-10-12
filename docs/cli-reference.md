@@ -414,7 +414,7 @@ Options:
 
   -c, --category <CATEGORY>
           Only these categories (home, syllabus, upload, document, page, assignment,
-          quiz, announcement, ed, file, module, image, other). Repeatable
+          quiz, announcement, ed, lessons, file, module, image, other). Repeatable
 
   -F, --fixed
           Treat the pattern as literal text, not a regular expression
@@ -485,7 +485,7 @@ Options:
 
   -c, --category <CATEGORY>
           Only these categories (home, syllabus, upload, document, page, assignment,
-          quiz, announcement, ed, file, module, image, other). Repeatable
+          quiz, announcement, ed, lessons, file, module, image, other). Repeatable
 
   -m, --match <TEXT>
           Only paths containing this text (case-insensitive)

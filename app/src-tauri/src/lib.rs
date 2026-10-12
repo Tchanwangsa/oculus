@@ -138,6 +138,7 @@ pub fn run() {
             sync::scrape::embeds::commands::echo360_embed_info,
             sync::scrape::embeds::commands::echo360_embed_download,
             sync::scrape::embeds::commands::echo360_embed_cancel,
+            sources::oembed::web_video_info,
             sync::scrape::parse_file,
             sync::scrape::parse_skip,
             library::files::commands::read_course_file,

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTabStore } from "@/stores/shell/tabStore";
 import { openBeside } from "@/lib/shell/tabRouters";
 import { humanizeSlug } from "@/lib/format/format";
-import { isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath, parsedMdSource } from "@/lib/files/fileTypes";
+import { isLessonAsset, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath, parsedMdSource } from "@/lib/files/fileTypes";
 import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
 import { attachmentPath } from "@/lib/harness/attachments";
 import { isWebUrl, openExternal } from "@/lib/browser";
@@ -19,7 +19,7 @@ const REAL_FILENAME = new Set(["file", "image", "upload"]);
 export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
   // A document's filename was typed by the student: never humanise it.
   if (file.category === "document") return file.filename.replace(/\.md$/i, "");
-  return REAL_FILENAME.has(file.category ?? "")
+  return REAL_FILENAME.has(file.category ?? "") || isLessonAsset(file)
     ? file.filename
     : humanizeSlug(file.filename);
 }
@@ -86,7 +86,7 @@ function systemOnly(file: DbFile): boolean {
  *  system viewer. */
 export function openFileSmart(file: DbFile, locate?: FileLocate): void {
   recordFileAccess(file);
-  const binary = file.category === "file" || file.category === "upload";
+  const binary = file.category === "file" || file.category === "upload" || isLessonAsset(file);
   if (binary && systemOnly(file)) {
     invoke("open_course_file", { relativePath: file.relative_path }).catch(
       console.error,
@@ -106,7 +106,7 @@ export function filePagePath(subjectId: number, relativePath: string): string {
 /** A row's `data-tab-href` (`lib/shell/newTabClicks.ts`): its ⌘-click route, or
  *  null for a binary that only opens in the system viewer. */
 export function filePageHref(file: DbFile): string | null {
-  if (file.category === "file" && systemOnly(file)) return null;
+  if ((file.category === "file" || isLessonAsset(file)) && systemOnly(file)) return null;
   return filePagePath(file.subject_id, file.relative_path);
 }
 
@@ -125,6 +125,7 @@ const CATEGORY_FOLDERS: Record<string, string> = {
   "quizzes/": "quiz",
   "announcements/": "announcement",
   "ed/": "ed",
+  "lessons/": "lessons",
   "files/": "file",
   "modules/": "module",
   "images/": "image",

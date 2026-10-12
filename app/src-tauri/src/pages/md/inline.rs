@@ -1,6 +1,9 @@
 use super::embeds::{details_md, iframe_md};
 use super::escape::escape_md;
+use super::links::normalize_href;
+use super::maths::{equation_latex, inline_math, is_equation_image, text_md};
 use super::tree::{attr, dropped, tag, text_content, Ref};
+use super::widgets::toggler_md;
 use super::Ctx;
 
 /// Emphasis wrapping content that is only footnote markers or digits produces
@@ -14,7 +17,7 @@ fn is_marker_only(s: &str) -> bool {
         })
 }
 
-pub(super) fn emphasis(n: Ref<'_>, ctx: &Ctx, marks: &str) -> String {
+fn emphasis(n: Ref<'_>, ctx: &Ctx, marks: &str) -> String {
     let inner = inline_md(n, ctx).trim().to_string();
     if inner.is_empty() {
         String::new()
@@ -25,42 +28,61 @@ pub(super) fn emphasis(n: Ref<'_>, ctx: &Ctx, marks: &str) -> String {
     }
 }
 
+/// A node's children as inline markdown.
 pub(super) fn inline_md(node: Ref<'_>, ctx: &Ctx) -> String {
     let mut out = String::new();
     for n in node.children() {
-        if let Some(t) = n.value().as_text() {
-            out.push_str(&escape_md(t));
-            continue;
-        }
-        let Some(name) = tag(&n) else { continue };
-        if dropped(&n, ctx.in_cell) {
-            continue;
-        }
-        match name {
-            "a" => out.push_str(&format!(
-                "[{}]({})",
-                inline_md(n, ctx),
-                attr(&n, "href").unwrap_or_default()
-            )),
-            "strong" | "b" => out.push_str(&emphasis(n, ctx, "**")),
-            "em" | "i" => out.push_str(&emphasis(n, ctx, "*")),
-            // Footnote markers: keep the character, drop the superscript.
-            "sup" => out.push_str(&escape_md(&text_content(n))),
-            "code" => out.push_str(&format!("`{}`", text_content(n))),
-            "br" => out.push_str("  \n"),
-            // Blocks met inside a paragraph: blank lines either side split it.
-            "iframe" => out.push_str(&iframe_md(n, ctx).unwrap_or_default()),
-            "details" if !ctx.in_cell => out.push_str(&format!("\n\n{}", details_md(n, ctx))),
-            "img" => {
-                let src = attr(&n, "src").unwrap_or_default();
-                let src = ctx.images.get(src).map(String::as_str).unwrap_or(src);
-                out.push_str(&format!(
-                    "![{}]({src})",
-                    attr(&n, "alt").unwrap_or_default()
-                ));
-            }
-            _ => out.push_str(&inline_md(n, ctx)),
+        match n.value().as_text() {
+            Some(t) => out.push_str(&text_md(t, ctx, escape_md)),
+            None => out.push_str(&inline_md_self(n, ctx)),
         }
     }
     out
+}
+
+/// One element as inline markdown. Blocks met here (an embed, a `<details>`)
+/// put blank lines either side, splitting the paragraph they sit in.
+pub(super) fn inline_md_self(n: Ref<'_>, ctx: &Ctx) -> String {
+    let Some(name) = tag(&n) else {
+        return String::new();
+    };
+    if dropped(&n, ctx) {
+        return String::new();
+    }
+    if let Some(md) = toggler_md(n, ctx) {
+        return md;
+    }
+    match name {
+        "a" => link_md(n, ctx),
+        "strong" | "b" => emphasis(n, ctx, "**"),
+        "em" | "i" => emphasis(n, ctx, "*"),
+        // Footnote markers: keep the character, drop the superscript.
+        "sup" => escape_md(&text_content(n)),
+        "code" => format!("`{}`", text_content(n)),
+        "br" => "  \n".to_string(),
+        "iframe" => iframe_md(n, ctx).unwrap_or_default(),
+        "details" if !ctx.in_cell => format!("\n\n{}", details_md(n, ctx)),
+        "img" => img_md(n, ctx),
+        _ => inline_md(n, ctx),
+    }
+}
+
+fn link_md(n: Ref<'_>, ctx: &Ctx) -> String {
+    let text = inline_md(n, ctx);
+    let href = attr(&n, "href").and_then(|h| normalize_href(h, attr(&n, "data-api-endpoint")));
+    match href {
+        Some(href) => format!("[{text}]({href})"),
+        None => text,
+    }
+}
+
+fn img_md(n: Ref<'_>, ctx: &Ctx) -> String {
+    if n.value().as_element().is_some_and(is_equation_image) {
+        return equation_latex(&n)
+            .map(|l| inline_math(&l))
+            .unwrap_or_default();
+    }
+    let src = attr(&n, "src").unwrap_or_default();
+    let src = ctx.walk.images.get(src).map(String::as_str).unwrap_or(src);
+    format!("![{}]({src})", attr(&n, "alt").unwrap_or_default())
 }

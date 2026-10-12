@@ -30,6 +30,7 @@ const FILE_TAB: Record<string, CrumbTab> = {
   assignment: { to: "assignments", label: "Assignments" },
   quiz: { to: "assignments", label: "Assignments" },
   ed: { to: "discussion", label: "Discussion" },
+  lessons: { to: "lessons", label: "Lessons" },
 };
 
 /** Downloaded videos are listed under Media, not Downloads (`MediaPage`). */

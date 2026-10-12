@@ -70,6 +70,7 @@ export const routes: RouteObject[] = [
           { path: "announcements", lazy: page(() => import("@/pages/subject/content/AnnouncementsPage")) },
           { path: "assignments", lazy: page(() => import("@/pages/subject/content/AssignmentsPage")) },
           { path: "discussion", lazy: page(() => import("@/pages/subject/content/DiscussionPage")) },
+          { path: "lessons", lazy: page(() => import("@/pages/subject/content/LessonsPage")) },
           { path: "projects", lazy: page(() => import("@/pages/work/ProjectsPage")) },
           // Legacy paths that restored tabs and Recent entries may carry.
           { path: "downloads", element: <Navigate to="../files/downloads" replace /> },

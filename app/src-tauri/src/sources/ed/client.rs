@@ -5,6 +5,7 @@ use super::{Ed, ED_API, ED_BASE, TIMEOUT};
 
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use keyd_core::client::{SessionKind, SESSION_TIMEOUT};
 
@@ -56,18 +57,52 @@ impl Ed {
 
     /// GET `/api{path}` with oculus-keyd attaching the token.
     pub(super) fn get(&self, path: &str) -> Result<serde_json::Value, String> {
-        let reply = self
-            .keyd
-            .send(
-                "ed",
-                "GET",
-                &format!("{ED_API}{path}"),
-                &[],
-                b"",
-                SESSION_TIMEOUT,
-            )
-            .map_err(keyd_failure)?;
-        json_reply(reply.status, &reply.body, path)
+        self.send_paced("GET", path, &[], b"")
+    }
+
+    /// POST `body` as JSON to `/api{path}` with oculus-keyd attaching the token.
+    pub(super) fn post(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        self.send_paced(
+            "POST",
+            path,
+            &[("content-type", "application/json")],
+            body.to_string().as_bytes(),
+        )
+    }
+
+    /// One request, sent again after a pause while Ed answers 429. A sync
+    /// re-reads every thread, which outruns Ed's rate limit; a refused
+    /// request did nothing, so a POST is as safe to repeat as a GET.
+    fn send_paced(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> Result<serde_json::Value, String> {
+        let mut tries = 0;
+        loop {
+            let reply = self
+                .keyd
+                .send(
+                    "ed",
+                    method,
+                    &format!("{ED_API}{path}"),
+                    headers,
+                    body,
+                    SESSION_TIMEOUT,
+                )
+                .map_err(keyd_failure)?;
+            if reply.status != 429 || tries >= RATE_LIMIT_RETRIES {
+                return json_reply(reply.status, &reply.body, path);
+            }
+            pause(rate_limit_wait(reply.header("retry-after"), tries));
+            tries += 1;
+        }
     }
 
     /// Extend the session and keep the fresh token. Best-effort.
@@ -96,6 +131,24 @@ impl Ed {
         if let Err(e) = self.keyd.session_put(SessionKind::Ed, &new) {
             elog!("[oculus] ed token was not saved: {e}");
         }
+    }
+}
+
+/// How many times a 429 is waited out before it is reported.
+const RATE_LIMIT_RETRIES: u32 = 6;
+
+/// Ed's `Retry-After` seconds when it sends one (capped at a minute), else
+/// 2, 4, 8 … seconds.
+pub(super) fn rate_limit_wait(retry_after: Option<&str>, tries: u32) -> Duration {
+    let secs = retry_after
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(2u64 << tries.min(5));
+    Duration::from_secs(secs.clamp(1, 60))
+}
+
+fn pause(wait: Duration) {
+    if !cfg!(test) {
+        std::thread::sleep(wait);
     }
 }
 

@@ -194,6 +194,7 @@ dependencies = [
  "tauri-plugin-sql",
  "tiny_http",
  "tokio",
+ "tungstenite",
  "ureq",
  "url",
  "webpki-roots 0.26.11",

@@ -8,8 +8,8 @@ library's own `agents/` folder instead — where the in-app chat runs you —
 the course folders are at `../courses/<CODE>/`, and everything below is about
 them.
 
-Oculus fills this folder by syncing Canvas, Ed Discussion and Echo360 from the
-desktop app. Only `uploads/` and `documents/` are the student's own.
+Oculus fills this folder by syncing Canvas, Ed (Discussion and Lessons) and
+Echo360 from the desktop app. Only `uploads/` and `documents/` are the student's own.
 
 ```
 ./
@@ -17,6 +17,8 @@ desktop app. Only `uploads/` and `documents/` are the student's own.
   announcements/   Canvas announcements, one .md each
   assignments/     briefs and due dates, one .md each
   ed/              Ed Discussion threads, NNNN-slug.md
+  lessons/         Ed Lessons, <id>-slug.md each with every slide in order;
+                   its PDFs and challenge files are in <id>-slug/
   files/           downloads plus parsed siblings:
                      13.pdf  13.md  13.pages.json  13_images/
                    a spreadsheet's text is beside it: marks.xlsx.md

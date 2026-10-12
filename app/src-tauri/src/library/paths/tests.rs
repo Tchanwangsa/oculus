@@ -42,6 +42,7 @@ fn every_category_the_scraper_writes_is_listed() {
         "quizzes/mid.md",
         "announcements/2026-07-14-welcome.md",
         "ed/0001-teams.md",
+        "lessons/120619-assignment-2.md",
         "files/week-01.pdf",
         "modules/01-intro.md",
         "images/fig-3.png",

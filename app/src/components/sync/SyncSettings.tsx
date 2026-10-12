@@ -20,6 +20,7 @@ const OPTION_ROWS: Array<{ key: keyof SyncOptions; label: string; hint: string }
   { key: "assignments", label: "Assignments", hint: "Including quizzes" },
   { key: "announcements", label: "Announcements", hint: "Course announcements" },
   { key: "ed", label: "Ed Discussion", hint: "Threads and answers" },
+  { key: "ed_lessons", label: "Ed Lessons", hint: "Slides, PDFs, challenge files and released quiz answers" },
   { key: "lectures", label: "Lectures", hint: "Echo360 list" },
   { key: "calendar", label: "Calendar", hint: "Class times and due dates" },
 ];
