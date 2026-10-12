@@ -28,3 +28,13 @@ export function LevelMark({
     </span>
   );
 }
+
+/** Marks a component of the starter set studio-core ships, wherever it lives
+ *  now and whether or not it was edited. */
+export function StarterMark() {
+  return (
+    <span className="shrink-0 rounded-full bg-secondary px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+      Starter
+    </span>
+  );
+}

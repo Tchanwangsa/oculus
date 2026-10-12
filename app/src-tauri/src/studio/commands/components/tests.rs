@@ -110,6 +110,16 @@ fn the_list_has_the_nearest_level_per_name_and_marks_shells() {
     let broken = subject.iter().find(|r| r.name == "Broken").unwrap();
     assert!(broken.problem.is_some() && broken.props.is_empty());
     assert!(subject.iter().filter(|r| r.problem.is_none()).count() == 11);
+
+    // A starter is a starter whichever level holds its file and however it
+    // was edited; a component the user made is not.
+    assert!(global
+        .iter()
+        .filter(|r| r.name != "Broken")
+        .all(|r| r.starter));
+    assert!(!global.iter().find(|r| r.name == "Broken").unwrap().starter);
+    assert!(row("Grid").starter && row("TitleCard").starter);
+    assert!(!row("Banner").starter && !row("SplitShell").starter);
 }
 
 #[test]

@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { WarningCircle } from "@phosphor-icons/react";
 
-import { LevelMark } from "@/components/studio/LevelMark";
+import { LevelMark, StarterMark } from "@/components/studio/LevelMark";
 import { SIDE_NAV_ROW, SIDE_NAV_ROW_ACTIVE, SIDE_NAV_ROW_IDLE } from "@/components/ui/layout/SideNav";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ComponentInfo } from "@/lib/studio/components";
@@ -29,7 +29,7 @@ export function ComponentList({
   const shells = components.filter((c) => c.kind === "shell");
   const rest = components.filter((c) => c.kind !== "shell");
   return (
-    <nav aria-label="Components" className="min-h-0 overflow-y-auto border-r border-border-subtle px-2 pb-4 pt-2">
+    <nav aria-label="Components" className="min-h-0 w-[208px] shrink-0 overflow-y-auto border-r border-border-subtle px-2 pb-4 pt-2">
       {!loaded ? (
         <div className="space-y-1.5 p-1">
           {Array.from({ length: 8 }, (_, i) => (
@@ -69,6 +69,7 @@ function Group({ label, items, inSubject }: { label: string; items: ComponentInf
             {c.problem != null && (
               <WarningCircle size={13} weight="fill" aria-label="Does not load" className="shrink-0 text-destructive" />
             )}
+            {c.starter && <StarterMark />}
             <LevelMark level={c.level} shadows={c.shadows} inSubject={inSubject} />
           </NavLink>
         ))}
