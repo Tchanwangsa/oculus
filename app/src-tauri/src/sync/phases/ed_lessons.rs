@@ -83,14 +83,12 @@ impl Engine {
             extras.insert(slide_id, extra);
         }
 
-        let md = ed::lesson_md(&lesson, course_id, module, &extras);
-        self.write_from(
-            c,
-            &format!("{stem}.md"),
-            md.as_bytes(),
-            None,
-            Some(ed::lesson_url(course_id, lesson_id)),
-        )?;
+        let url = self
+            .ed
+            .region()
+            .map(|region| ed::lesson_url(&region, course_id, lesson_id));
+        let md = ed::lesson_md(&lesson, url.as_deref(), module, &extras);
+        self.write_from(c, &format!("{stem}.md"), md.as_bytes(), None, url)?;
         Ok(())
     }
 

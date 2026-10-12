@@ -348,3 +348,19 @@ fn rate_limit_waits_follow_retry_after_else_double() {
     assert_eq!(rate_limit_wait(None, 3), Duration::from_secs(16));
     assert_eq!(rate_limit_wait(Some("soon"), 1), Duration::from_secs(4));
 }
+
+#[test]
+fn a_launch_names_eds_region_in_its_first_path_segment() {
+    let region = |u: &str| super::region_of_landing(&url::Url::parse(u).unwrap());
+    assert_eq!(
+        region("https://edstem.org/au/courses/38809?_logintoken=x").as_deref(),
+        Some("au")
+    );
+    assert_eq!(
+        region("https://edstem.org/us/courses/1").as_deref(),
+        Some("us")
+    );
+    assert_eq!(region("https://edstem.org/courses/1"), None);
+    assert_eq!(region("https://edstem.org/AU/courses/1"), None);
+    assert_eq!(region("https://edstem.org/../courses/1"), None);
+}

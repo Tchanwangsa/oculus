@@ -48,6 +48,10 @@ pub struct Institution {
     /// Ed's API base, learned from the first LTI launch (`sources::ed`).
     #[serde(default)]
     pub ed_api: Option<String>,
+    /// Ed's web region (`au`, `us`, …), the first path segment of the page a
+    /// launch lands on; the lesson links and workspace host name it.
+    #[serde(default)]
+    pub ed_region: Option<String>,
     /// Course codes that are never subjects (training shells and the like).
     #[serde(default)]
     pub exclude_code_prefixes: Vec<String>,
@@ -77,6 +81,7 @@ pub fn unimelb() -> Institution {
         echo360_tool: Some("/external_tools/701".to_string()),
         echo360_lead_in_secs: 14,
         ed_api: Some("https://edstem.org/api".to_string()),
+        ed_region: Some("au".to_string()),
         exclude_code_prefixes: vec!["MPMP".to_string()],
     }
 }

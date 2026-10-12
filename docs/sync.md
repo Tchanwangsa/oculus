@@ -296,7 +296,10 @@ emits its marker and still recurses. The token is in [auth.md](./auth.md).
   names the course exactly, decides instead.
 - The Ed tab is the external tool labelled "Ed Discussion", "Ed" or "EdStem".
 - The API base is `edstem.org/api` unless a launch lands on another Ed host,
-  which the profile then remembers (`ed_api`).
+  which the profile then remembers (`ed_api`). The launch's landing path names
+  Ed's web region (`/au/courses/…`), kept as `ed_region` for the lesson links
+  and the workspace host; until a launch names it, lessons carry no Ed link
+  and a workspace fetch fails saying why.
 
 ## Ed Lessons are one file per lesson, with their assets beside it
 
@@ -318,10 +321,10 @@ so a renamed lesson keeps its prefix. Progress reports the phase `ed_lessons`.
   1. `POST /challenges/<ch>/connect` attaches the student's own workspace
      (what opening the slide does) and returns a session ticket.
   2. Ed only hands out a download for a live workspace, so the sync opens
-     `wss://sahara.au.edstem.org/connect?ticket=…` directly over rustls, with
+     `wss://sahara.<region>.edstem.org/connect?ticket=…` directly over rustls, with
      the web app's `Origin`, and waits up to 30 s for the `init` frame.
   3. `POST /workspaces/<w>/download {"path": "."}` returns a one-shot ticket,
-     and the zip comes from `sahara.au.edstem.org/download/<ticket>` with no
+     and the zip comes from `sahara.<region>.edstem.org/download/<ticket>` with no
      credentials, through the same no-cookie fetch as a Canvas file CDN.
   4. The socket closes once the zip is in.
 

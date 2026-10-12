@@ -108,6 +108,7 @@ pub fn configure(data_dir: &Path, input: &str) -> Result<Institution, String> {
             echo360_tool: None,
             echo360_lead_in_secs: 0,
             ed_api: None,
+            ed_region: None,
             exclude_code_prefixes: Vec::new(),
         },
     };

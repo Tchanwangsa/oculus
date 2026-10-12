@@ -43,6 +43,21 @@ fn api_base(data_dir: &std::path::Path) -> String {
         .unwrap_or_else(|| DEFAULT_API.to_string())
 }
 
+/// Ed's web region for `data_dir`, once a launch has named it.
+fn region(data_dir: &std::path::Path) -> Option<String> {
+    crate::sources::institution::load(data_dir).and_then(|i| i.ed_region)
+}
+
+/// The region a launch landed in: `https://edstem.org/au/courses/1` → `au`.
+fn region_of_landing(landed: &url::Url) -> Option<String> {
+    let mut segments = landed.path_segments()?;
+    let region = segments.next()?;
+    (segments.next() == Some("courses")
+        && (2..=3).contains(&region.len())
+        && region.bytes().all(|b| b.is_ascii_lowercase()))
+    .then(|| region.to_string())
+}
+
 /// The API on the host a launch landed on, when that is not the default's.
 fn api_for_landing(landed: &url::Url) -> Option<String> {
     let host = landed.host_str()?;

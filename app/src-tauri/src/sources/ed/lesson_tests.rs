@@ -1,8 +1,8 @@
 //! Ed Lessons: ordering, the lesson renderer, the workspace zip and its calls.
 //! The fixtures are trimmed answers from the live API.
 
-use super::lesson_md::{lesson_md, sorted_slides, LinkedFile, SlideExtras};
-use super::lessons::{order_lessons, WORKSPACE_DOWNLOAD};
+use super::lesson_md::{lesson_md, lesson_url, sorted_slides, LinkedFile, SlideExtras};
+use super::lessons::{order_lessons, workspace_host};
 use super::workspace::{unpack, MAX_ENTRY_BYTES};
 use super::Ed;
 use crate::test_support::{FakeKeyd, Scratch};
@@ -100,7 +100,8 @@ fn the_fixture_lesson_renders_every_slide_type() {
             ..SlideExtras::default()
         },
     );
-    let md = lesson_md(&lesson(), 38775, Some("Assignments"), &extras);
+    let url = lesson_url("au", 38775, 120619);
+    let md = lesson_md(&lesson(), Some(&url), Some("Assignments"), &extras);
 
     assert!(
         md.starts_with("# Assignment 2\n\n**Module:** Assignments  \n"),
@@ -175,7 +176,7 @@ fn a_released_quiz_shows_its_answers_collapsed() {
             ..SlideExtras::default()
         },
     );
-    let md = lesson_md(&quiz, 1, None, &extras);
+    let md = lesson_md(&quiz, None, None, &extras);
 
     assert!(md.contains("- [ ] Yes, the solved crossword was found.\n- [ ] No, the program terminated incorrectly."), "{md}");
     assert!(
@@ -207,7 +208,7 @@ fn a_short_answer_solution_may_be_text() {
             ..SlideExtras::default()
         },
     );
-    let md = lesson_md(&quiz, 1, None, &extras);
+    let md = lesson_md(&quiz, None, None, &extras);
     assert!(md.contains("**Answers:**\n\n- 4\n- four"), "{md}");
     assert!(!md.contains("- [ ]"), "{md}");
 }
@@ -230,7 +231,7 @@ fn unknown_slides_say_so_and_links_are_percent_encoded() {
             ..SlideExtras::default()
         },
     );
-    let md = lesson_md(&l, 1, None, &extras);
+    let md = lesson_md(&l, None, None, &extras);
     assert!(md.contains("_Unsupported Ed slide type surprise._"), "{md}");
     assert!(
         md.contains("- [my (draft).py](1-l/02-b/my%20%28draft%29.py)"),
@@ -246,7 +247,7 @@ fn a_slides_own_headings_sit_below_its_title() {
         {"id": 2, "type": "html", "title": "Sheet", "index": 1,
             "html": "<html><body><h1>Week 2</h1><h2>Part A</h2></body></html>"}
     ]));
-    let md = lesson_md(&l, 1, None, &HashMap::new());
+    let md = lesson_md(&l, None, None, &HashMap::new());
     let headings: Vec<&str> = md.lines().filter(|l| l.starts_with('#')).collect();
     assert_eq!(
         headings,
@@ -338,14 +339,19 @@ fn the_workspace_is_connected_and_ticketed_through_the_ed_route() {
         }
     }
     let events = Rc::new(RefCell::new(Vec::<String>::new()));
+    let profile = crate::sources::institution::Institution {
+        ed_region: Some("au".to_string()),
+        ..crate::sources::institution::unimelb()
+    };
+    crate::sources::institution::save(&dir, &profile).unwrap();
     let zip = Ed::open(&dir)
         .workspace_zip(
             281410,
-            |ticket| {
+            |host, ticket| {
                 let posts = keyd.requests().len();
                 events
                     .borrow_mut()
-                    .push(format!("live {ticket} after {posts}"));
+                    .push(format!("live {host} {ticket} after {posts}"));
                 Ok(Session(events.clone()))
             },
             |url| {
@@ -360,8 +366,8 @@ fn the_workspace_is_connected_and_ticketed_through_the_ed_route() {
     assert_eq!(
         *events.borrow(),
         [
-            "live c after 1".to_string(),
-            format!("download {WORKSPACE_DOWNLOAD}/T0"),
+            "live sahara.au.edstem.org c after 1".to_string(),
+            "download https://sahara.au.edstem.org/download/T0".to_string(),
             "closed".to_string(),
         ]
     );
@@ -415,4 +421,15 @@ fn lessons_and_questions_are_plain_reads() {
             "{header}"
         );
     }
+}
+
+#[test]
+fn the_workspace_host_and_lesson_link_follow_eds_region() {
+    assert_eq!(workspace_host("us"), "sahara.us.edstem.org");
+    assert_eq!(
+        lesson_url("us", 1, 2),
+        "https://edstem.org/us/courses/1/lessons/2"
+    );
+    let md = lesson_md(&json!({"id": 2, "title": "L"}), None, None, &HashMap::new());
+    assert!(!md.contains("Open in Ed"), "{md}");
 }

@@ -76,6 +76,7 @@ fn keyd_gets_okta_only_for_an_okta_university() {
         echo360_tool: None,
         echo360_lead_in_secs: 0,
         ed_api: Some("https://us.edstem.org/api".to_string()),
+        ed_region: Some("us".to_string()),
         exclude_code_prefixes: Vec::new(),
     };
     let site = rmit.site();

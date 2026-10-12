@@ -2,7 +2,7 @@
 //! launch like a browser.
 
 use super::client::keyd_failure;
-use super::{api_for_landing, Ed, TIMEOUT};
+use super::{api_for_landing, region, region_of_landing, Ed, TIMEOUT};
 use scraper::Html;
 use std::collections::HashMap;
 
@@ -40,6 +40,12 @@ impl Ed {
     ) -> Result<i64, String> {
         let tool_path = find_ed_tool(canvas, canvas_course_id)?;
         let (login_token, destination) = walk_lti_chain(canvas, &tool_path)?;
+        // The lesson links and workspace host name the region.
+        if let Some(landed) =
+            region_of_landing(&destination).filter(|r| region(&self.data_dir).as_ref() != Some(r))
+        {
+            crate::sources::institution::learn(&self.data_dir, |i| i.ed_region = Some(landed));
+        }
         if let Some(api) = api_for_landing(&destination) {
             // Before the token is saved: oculus-keyd drops an Ed token when
             // its origin moves.
