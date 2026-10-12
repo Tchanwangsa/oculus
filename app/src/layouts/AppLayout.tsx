@@ -16,6 +16,7 @@ import {
 import { useActivityPing } from "@/hooks/backend/useActivityPing";
 import { useJobAudit } from "@/hooks/agents/useJobAudit";
 import { useBrowserTabs } from "@/hooks/shell/useBrowserTabs";
+import { useMusicState } from "@/hooks/music/useMusicState";
 import { useTauriEvent, useWindowEvent } from "@/hooks/backend/useEvents";
 import { routeEdit, routeSelectAll } from "@/lib/menu/editRouting";
 import { routeFind } from "@/lib/menu/find";
@@ -55,6 +56,8 @@ export default function AppLayout() {
   const toggle = useCallback(() => setCollapsed((c) => !c), []);
 
   useBrowserTabs();
+
+  useMusicState();
 
   useNewTabClicks();
 

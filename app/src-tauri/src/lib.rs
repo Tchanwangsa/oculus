@@ -5,6 +5,7 @@ pub mod embed;
 pub mod harness;
 pub mod lectures;
 pub mod library;
+pub mod music;
 pub mod pages;
 pub mod parse;
 pub mod providers;
@@ -40,6 +41,7 @@ pub fn run() {
         .manage(sync::scrape::VideoCancels::default())
         .manage(shell::browser::BrowserState::default())
         .manage(shell::usage::UsageState::default())
+        .manage(music::MusicState::default())
         .setup(|app| {
             // Give the parse and embed seams a window to emit progress to;
             // headless (CLI) runs never bind, so their emits are no-ops.
@@ -79,6 +81,8 @@ pub fn run() {
             let restore = app.handle().clone();
             std::thread::spawn(move || {
                 auth::keyd::ensure_installed();
+                // Spotify, when Settings → Music is on: its login is keyd's too.
+                music::startup::apply_settings(&restore);
                 // Replay the stored session with a server-side ping.
                 auth::restore_session(&restore);
             });
@@ -230,13 +234,48 @@ pub fn run() {
             shell::browser::commands::browser_find,
             shell::browser::commands::browser_find_clear,
             shell::browser::commands::browser_close_tab,
+            music::commands::music_state,
+            music::commands::music_login,
+            music::commands::music_connect,
+            music::commands::music_disconnect,
+            music::commands::music_sign_out,
+            music::commands::music_play_pause,
+            music::commands::music_play,
+            music::commands::music_pause,
+            music::commands::music_pause_player,
+            music::commands::music_shuffle,
+            music::commands::music_repeat,
+            music::commands::music_next,
+            music::commands::music_prev,
+            music::commands::music_seek,
+            music::commands::music_volume,
+            music::commands::music_play_context,
+            music::commands::music_play_track,
+            music::commands::music_playlists,
+            music::commands::music_playlist_covers,
+            music::commands::music_playlist_tracks,
+            music::commands::music_album_tracks,
+            music::commands::music_tracks,
+            music::commands::music_add_to_queue,
+            music::commands::music_skip_to,
+            music::commands::music_queue_remove,
+            music::commands::music_search,
+            music::commands::music_search_more,
+            music::commands::music_duck,
+            music::commands::music_devices,
+            music::commands::music_transfer,
+            music::commands::music_play_here,
+            music::commands::music_outputs,
+            music::commands::music_set_output,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // Don't let a CLI agent outlive the window.
+            // Don't let a CLI agent outlive the window, or the Spotify
+            // device linger in Spotify's device list.
             if matches!(event, tauri::RunEvent::Exit) {
                 harness::app::shutdown(app_handle);
+                music::shutdown(app_handle);
             }
         });
 }

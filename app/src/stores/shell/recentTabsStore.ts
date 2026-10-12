@@ -53,6 +53,8 @@ export function recentKey(path: string): string | null {
   }
 
   if (pathname.startsWith("/settings")) return "settings";
+  // One player, so one side panel item however it was opened.
+  if (pathname === "/music") return "music";
   return pathname;
 }
 

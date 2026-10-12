@@ -18,6 +18,7 @@ import { useRailOrder, type RailSection } from "@/stores/shell/railOrderStore";
 import { DRAG_SURFACE, useStripReorder } from "@/hooks/gestures/usePointerDrag";
 import { cn } from "@/lib/utils";
 import RailItem, { railButton, railIdle } from "./RailItem";
+import { MusicTile, useMusicTileShown } from "./MusicTile";
 import {
   Tooltip,
   TooltipContent,
@@ -31,8 +32,8 @@ interface SidebarProps {
 const WIDTH = 52;
 
 /**
- * An icon rail: search, the sections, then Sync and Settings pinned to the
- * foot. The sections drag into any order, kept in `railOrderStore`. Collapsed
+ * An icon rail: search, the sections, then Spotify's tile while music is on,
+ * and Sync and Settings pinned to the foot. The sections drag into any order, kept in `railOrderStore`. Collapsed
  * animates to zero width; the title bar's button is the only toggle. No fill
  * or divider of its own — see docs/ui.md (UI system).
  */
@@ -60,6 +61,8 @@ export default function Sidebar({ collapsed }: SidebarProps) {
         <SearchButton />
 
         <Sections />
+
+        <AppItems />
 
         <div className="flex-1" />
 
@@ -149,6 +152,18 @@ function Sections() {
         );
       })}
     </div>
+  );
+}
+
+/** Spotify's tile, under a seam, while music is on. */
+function AppItems() {
+  const music = useMusicTileShown();
+  if (!music) return null;
+  return (
+    <>
+      <Rule />
+      <MusicTile />
+    </>
   );
 }
 

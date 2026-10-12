@@ -27,6 +27,7 @@ library files; the rest of the frontend has its own pages:
 | Parser and embedding engine selection UI | `app/src/components/settings/shared/EngineSelect.tsx` |
 | Parse state, pipeline ledger, recovery sweep | `app/src/lib/pipeline/parseState.ts`, `app/src/stores/sync/parseStore.ts`, `app/src/stores/sync/pipelineStore.ts`, `app/src/hooks/sync/useQualitySweep.ts` |
 | Scraped document metadata loaders | `app/src/hooks/data/useCourseFileData.ts`, `app/src/hooks/data/useModuleTocs.ts` |
+| Spotify ([music.md](./music.md)): the `music-state` snapshot type and the command wrappers; the snapshot mirror and Settings → Music's switch; the listener mounted in `AppLayout` | `app/src/lib/music/index.ts`, `app/src/stores/music/musicStore.ts`, `app/src/stores/music/musicPrefsStore.ts`, `app/src/hooks/music/useMusicState.ts` |
 | Module videos downloaded on demand | `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/stores/lectures/videoDownloadStore.ts` |
 
 ## Source is grouped by feature, and tests mirror it

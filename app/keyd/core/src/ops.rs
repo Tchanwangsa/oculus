@@ -26,6 +26,7 @@ pub struct Build {
 }
 
 mod forward;
+mod get;
 mod legacy;
 mod okta;
 #[cfg(test)]
@@ -236,9 +237,11 @@ impl State {
     }
 
     /// One request. `body` is the raw bytes after the header line; only
-    /// `forward` takes any. No reply carries a secret value. `caller` is who
-    /// asked: the peer check admits any executable in the install (ffmpeg
-    /// ships in it), so every op but `ping` also needs the app or the CLI.
+    /// `forward` takes any. No reply carries a secret value but `get`'s, for
+    /// the one name in `names::READABLE`, and `session_get`'s cookies, both to
+    /// the app only. `caller` is who asked: the peer check admits any
+    /// executable in the install (ffmpeg ships in it), so every op but `ping`
+    /// also needs the app or the CLI.
     pub fn dispatch(
         &self,
         caller: &Caller,
@@ -293,6 +296,7 @@ impl State {
                     ..json!({"existed": existed, "legacy": legacy.as_str()}).into()
                 })
             }
+            "get" => self.get(req),
             "forward" => self.forward(caller, req, body),
             "okta_save" => self.okta_save(req),
             "okta_forget" => self.okta_forget(),
@@ -355,12 +359,12 @@ impl State {
 /// The one place an op's caller is judged, so a new op cannot forget it.
 /// `ping` answers whoever the peer check admitted, for diagnostics; the rest
 /// are for the app and the CLI, except `okta_resume`, which lifts a lockout
-/// pause, and `session_get`, the one reply that carries a cookie, so both are
-/// for the app alone.
+/// pause, `session_get`, the one reply that carries a cookie, and `get`, the
+/// one that carries a stored value, so those three are for the app alone.
 fn require_role(op: &str, role: Role) -> Result<(), OpError> {
     let (allowed, who) = match op {
         "ping" => return Ok(()),
-        "okta_resume" | "session_get" => (role == Role::App, "app"),
+        "okta_resume" | "session_get" | "get" => (role == Role::App, "app"),
         _ => (matches!(role, Role::App | Role::Cli), "app and CLI"),
     };
     if allowed {
