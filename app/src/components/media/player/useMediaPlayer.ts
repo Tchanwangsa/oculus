@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Cue } from "@/lib/lectures/media";
 import { useActivePaneId } from "@/stores/shell/tabStore";
 import { useTabId } from "@/components/tabs/TabContext";
-import { useTranscriptDock } from "@/hooks/lectures/useTranscriptDock";
+import { useTranscriptDock, type DockSide } from "@/hooks/lectures/useTranscriptDock";
 import { usePlayerPrefs, type DockTab } from "@/stores/lectures/playerPrefsStore";
 import { useControlsVisibility } from "@/components/media/player/useControlsVisibility";
 import { useFollow } from "@/components/media/player/useFollow";
@@ -23,6 +23,8 @@ export interface MediaPlayerOptions {
   /** Width the video keeps beside a side dock, which draws at the bottom
    *  when the player is narrower (`useTranscriptDock`'s default if absent). */
   dockKeepWidth?: number;
+  /** The dock's side, when the caller keeps it rather than the shared prefs. */
+  dockSide?: DockSide;
   /** C has something to show. */
   hasCaptions: boolean;
   /** On screen while another pane plays this recording: Space calls
@@ -42,6 +44,7 @@ export function useMediaPlayer({
   fallbackDuration = 0,
   dockTab,
   dockKeepWidth,
+  dockSide,
   hasCaptions,
   elsewhere = false,
   onClaim,
@@ -84,7 +87,7 @@ export function useMediaPlayer({
   const claimRef = useRef(onClaim);
   claimRef.current = onClaim;
 
-  const dock = useTranscriptDock(containerRef, dockTab, dockKeepWidth);
+  const dock = useTranscriptDock(containerRef, dockTab, dockKeepWidth, dockSide);
 
   // Reset per recording; where playback resumes is the caller's call.
   useEffect(() => {

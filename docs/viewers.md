@@ -340,8 +340,8 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   to the back, since nothing parks it, and keeps no position.
 - **A Studio render uses it two ways** (`VideoPlayer`, see
   [studio-page.md](./studio-page.md)): on a video's detail page with a dock
-  (Script and Scenes in a `MediaDock`, sharing the dock side, size and open
-  state with lectures; `dockKeepWidth` asks the picture to keep more than
+  (Script and Scenes in a `MediaDock`, sharing the dock size and open state
+  with lectures but keeping its own side, passed as `dockSide`; `dockKeepWidth` asks the picture to keep more than
   300px beside a side dock), and on its thread page without one. `dock` and
   `dockLabel` are optional, and with no dock there is no dock button, no
   resize handle and T does nothing; `captions={false}` leaves out the captions

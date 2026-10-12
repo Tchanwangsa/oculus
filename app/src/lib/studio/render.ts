@@ -6,7 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 // time; nothing here touches the network.
 
 /** Mirrors `render::Preset`. */
-export type RenderPreset = "draft" | "final" | "small" | "2x" | "audio" | "subtitles";
+export type RenderPreset = "draft" | "final" | "small";
 
 /** Mirrors `SegmentReport`: one per scene, in video order. */
 export interface SegmentReport {
@@ -23,10 +23,9 @@ export interface SegmentReport {
 
 /** Mirrors `render::Report`. */
 export interface RenderReport {
-  /** The file written: the mp4, m4a or vtt. */
+  /** The file written: the mp4. */
   path: string;
   preset: RenderPreset;
-  /** Null for `audio` and `subtitles`. */
   width: number | null;
   height: number | null;
   fps: number;
@@ -37,7 +36,7 @@ export interface RenderReport {
   audio: boolean;
   threads: number;
   segments: SegmentReport[];
-  /** Written beside `path`: a video's `.vtt` captions, the subtitles' `.srt`. */
+  /** Written beside `path`: the video's `.vtt` captions. */
   sidecars: string[];
   /** Cache files deleted afterwards. */
   pruned: string[];

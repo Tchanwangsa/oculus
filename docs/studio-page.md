@@ -16,7 +16,7 @@ page is the frontend over them.
 | New video: the box and its start-up | `app/src/components/studio/new/NewVideo.tsx`, `app/src/hooks/studio/useNewVideo.ts`, `app/src/lib/studio/title.ts` |
 | The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/hooks/studio/useThemeDefaults.ts`, `app/src/lib/studio/themes.ts` |
 | The thread column | `app/src/components/studio/thread/ThreadColumn.tsx` |
-| Player, render bar, scene strip, the detail's dock (script, scene grid), facts, the Export menu | `app/src/components/studio/video/` (`VideoDetailStage.tsx`, `VideoDock.tsx`, `ExportMenu.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useDockedFrameHeight.ts`, `app/src/hooks/studio/useSceneStill.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
+| Player, render bar, scene strip, the detail's dock (script, scene grid), facts, Render draft, the Export menu | `app/src/components/studio/video/` (`VideoDetailStage.tsx`, `VideoDock.tsx`, `RenderDraftButton.tsx`, `ExportMenu.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useDockedFrameHeight.ts`, `app/src/hooks/studio/useSceneStill.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
 | The Videos grid, its cards and subject pills | `app/src/components/studio/videos/`, `app/src/components/ui/layout/MediaGrid.tsx` |
 | Stills (`studio_frame`, `studio_thumbnail`) as object URLs | `app/src/lib/studio/stills.ts`, `app/src/hooks/studio/useStill.ts` |
 | Render state, the video list, the event bridge | `app/src/stores/studio/` (`renderStore.ts`, `videosStore.ts`), `app/src/hooks/backend/useStudioEvents.ts` |
@@ -94,12 +94,13 @@ The right column loads `studio_video_detail` and then renders `VideoStage`
 player and render bar itself):
 
 - **The player** is the app's `MediaPlayer` with no dock (the detail page
-  gives it one) over the newest video render (`draft`, `final`, `small` or `2x`;
+  gives it one) over the newest video render (`draft`, `final` or `small`;
   `playableRenders`), `mediaSrc(path)` plus `&v=<mtime>` so a re-render of
   the same path is a new file to the element. With several, pills choose.
   When the render has its `.vtt` beside it, `studio_render_captions` reads it, `parseVtt` makes the cues
-  and the bar gets its captions button; otherwise there is none. No render
-  shows "Not rendered yet" and Render draft. The scrub bar's notches
+  and the bar gets its captions button; otherwise there is none (and none
+  when the video's captions are drawn into the picture, `detail.captions`).
+  No render shows "Not rendered yet", and the header offers Render draft. The scrub bar's notches
   are the scene starts. The element shares the app's one sound with lectures
   and library videos (`useLibraryPlayback`).
 - **The scene strip** has a tile per scene, a still from `studio_frame` at
@@ -109,11 +110,13 @@ player and render bar itself):
   narration, says so once under the strip with the command's own sentence.
   The detail page has no strip: its Scenes tab draws the same stills
   (`useSceneStill`) as a grid.
-- **The render bar** starts `studio_render` through `renderStore`. A render
-  in flight, of any preset (the Export menu starts the others), swaps Render
-  final for a bar naming the preset, the percentage and Cancel; a failure
-  stays until the next render starts. Rendering is local (ffmpeg),
-  so unlike Settings it may start here.
+- **The render bar** is under the player and has no buttons: the render
+  pills when there are several, and when the shown one was made. A render in
+  flight, of any preset (the header starts them through `renderStore`), takes
+  its place with a bar naming the preset, the percentage and Cancel; a failure
+  stays until the next render starts. Rendering is local (ffmpeg), so unlike
+  Settings it may start from the page. The thread page has no render button
+  either: its video is rendered from the detail page.
 
 ## Renders live in a store, not in the page
 
@@ -139,12 +142,17 @@ the problem in place of its facts. Pills over the grid narrow by subject
 
 The detail (`VideoDetailStage`) is the player with a dock, and under it a row
 of the facts (subject, theme, voice, length, shape) beside the render bar.
-**Continue in chat** opens the thread page.
+**Continue in chat** opens the thread page. The header's last button is
+**Render draft** while the video has no playable render (it starts
+`studio_render` for `draft` through `renderStore`, and spins, disabled, while
+any render of the folder runs), and **Export** once it has one.
 
 - **The dock** is the lecture player's (`MediaDock`, `useTranscriptDock`):
   the player's dock button, T and the dock's × fold it, its header drags it to
   an edge, its divider resizes it, and the side, size and open state are
-  `playerPrefsStore`'s, shared with lectures ([viewers.md](./viewers.md)). Its
+  `playerPrefsStore`'s, shared with lectures ([viewers.md](./viewers.md)),
+  except the side: a video's dock keeps its own (`oculus-studio-video-dock-side`,
+  `DockSide` passed to `useMediaPlayer`), on the right until moved. Its
   tabs, **Script** and **Scenes** (the tab is remembered in
   `oculus-studio-video-dock-tab`), take the place of the lecture's Transcript:
   - **Script** (`ScriptPanel`) is the narration split by scene, with each
@@ -165,19 +173,26 @@ of the facts (subject, theme, voice, length, shape) beside the render bar.
   1440px. The picture keeps 480px beside a side dock (`dockKeepWidth`): a
   narrower page draws the dock at the bottom without rewriting the preference.
   With no render the picture says "Not rendered yet" under the control bar,
-  and the render bar offers Render draft.
-- **Export** (`ExportMenu`) is a pill over a popover of the presets
-  ([studio.md](./studio.md#rendering-a-video)): each row names the preset and
-  what it makes for this video's shape (`presetHint`), and its state from
-  `studio_exports`, read when the menu opens and again when a render of the
-  folder ends: a check when its file is current, "out of date" when the file
-  is from an older version, the reason when it cannot render now. Render (or
-  Re-render) closes the menu and starts it through `renderStore`, so its
-  progress is the render bar's; while any render of the video runs the
-  buttons are off and the running row spins. A row with a file has Show in
-  Finder (Show in Explorer on Windows, `revealItemInDir`). A failure to read
-  the statuses shows in the popover; a render's failure, under the render
-  bar.
+  with no button of its own.
+- **Export** (`ExportMenu`) is a pill over a popover of the presets, Draft,
+  Final and Small ([studio.md](./studio.md#rendering-a-video)): each row names
+  the preset and what it makes for this video's shape (`presetHint`), and its
+  state from `studio_exports`, read when the menu opens and again when a
+  render of the folder ends: a check when its file is current, "out of date"
+  when the file is from an older version, the reason when it cannot render
+  now. Render (or Re-render) closes the menu and starts it through
+  `renderStore`, so its progress is the render bar's; while any render of the
+  video runs the buttons are off and the running row spins. A row with a file
+  has Show in Finder (Show in Explorer on Windows, `revealItemInDir`). A
+  failure to read the statuses shows in the popover; a render's failure,
+  under the render bar.
+- **Captions in the picture** is the switch under the presets (hint: "Drawn
+  into the frames, so every player shows them"), per video: `detail.captions`
+  is video.json's `captions` and `setCaptions` writes it
+  (`studio_set_captions`). A change re-reads the detail and the statuses, so
+  the files made the other way show "out of date". With the switch on the
+  player has no CC button, since the words are in the frames; with it off the
+  CC button shows the render's `.vtt`. A failed write shows under the switch.
 
 ## The Components playground
 
