@@ -14,7 +14,12 @@ use crate::scene::Color;
 /// Line height, in em.
 const LINE_HEIGHT: f64 = 1.25;
 /// Each word's padding (the highlight pill's), in em: vertical, horizontal.
-const WORD_PAD: (f64, f64) = (0.06, 0.16);
+/// The horizontal side is under 40% of Inter's 0.28 em space, so a pill
+/// stays clear of its neighbours' letters.
+const WORD_PAD: (f64, f64) = (0.06, 0.1);
+/// The gap between word boxes, in em: with both paddings, words sit 0.32 em
+/// apart, a little wider than a space.
+const WORD_GAP: f64 = 0.12;
 /// The plate's padding beyond the words', in em: vertical, horizontal.
 const PLATE_PAD: (f64, f64) = (0.22, 0.34);
 /// The widest the plate gets, as a fraction of the frame's width.
@@ -41,7 +46,11 @@ pub fn tree(
                 .collect();
             json!({
                 "k": "box",
-                "style": { "flexDirection": "row", "flexWrap": "wrap", "justifyContent": "center" },
+                "style": {
+                    "flexDirection": "row",
+                    "justifyContent": "center",
+                    "gap": em * WORD_GAP,
+                },
                 "children": words,
             })
         })
