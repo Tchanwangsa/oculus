@@ -123,6 +123,9 @@ export function setOpenLinksInSystem(value: boolean): void {
   openLinksInSystem = value;
 }
 
+/** Settings → Browser: every link goes to the system browser. */
+export const opensLinksInSystem = (): boolean => openLinksInSystem;
+
 /** A browser tab's route, stable for its life: navigation changes the URL
  *  in Rust, never the route. */
 export function browsePath(id: number): string {

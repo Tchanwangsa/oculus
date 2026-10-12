@@ -1,14 +1,13 @@
-import { ArrowSquareOut, CircleNotch, X } from "@phosphor-icons/react";
+import { CircleNotch, X } from "@phosphor-icons/react";
+import { OpenOriginal } from "@/components/files/OpenOriginal";
 import { IconAction } from "@/components/markdown/embed/IconAction";
-import { openLinkOut, type LinkOut } from "@/lib/files/canvasLinks";
+import type { LinkOut } from "@/lib/files/canvasLinks";
 
 /** The small Open in Canvas icon a card keeps beside its main action;
  *  ⌘-click opens the system browser. */
 export function OpenInCanvasIcon({ href }: { href: LinkOut }) {
   return (
-    <IconAction label="Open in Canvas" size="icon-sm" onClick={(e) => void openLinkOut(href, e.metaKey)}>
-      <ArrowSquareOut size={14} />
-    </IconAction>
+    <OpenOriginal href={href} label="Open in Canvas" size="icon-sm" />
   );
 }
 

@@ -1,5 +1,5 @@
 import type { DataRouter } from "react-router-dom";
-import { browseId, browsePath, browser, openExternal } from "@/lib/browser";
+import { browseId, browsePath, browser, openExternal, opensLinksInSystem } from "@/lib/browser";
 import { ownsPlayback, stopLecturePlayback } from "@/lib/lectures/playback";
 import { lecturePageId } from "@/lib/lectures";
 import { claimPlayback } from "@/lib/lectures/playbackOwner";
@@ -230,9 +230,38 @@ export async function openUrlInFocusedPane(url: string): Promise<void> {
   // The main pane: the tab the reconcile makes is the answer.
   if (!tab || !pane || pane.id === tab.id) return;
   navigateInTab(pane.id, browsePath(pageId));
+  dropStrayTab(pageId, tab.id);
+}
+
+/** The strip tab the browser reconcile may already have made for `pageId`
+ *  before it was placed elsewhere. `closeTab`, not `browser.close`: only the
+ *  stand-in goes, the page lives on where it was placed. */
+function dropStrayTab(pageId: number, keep?: number): void {
   const stray = useTabStore
     .getState()
-    .tabs.find((t) => t.id !== tab.id && browseId(t.path) === pageId);
-  // `closeTab`, not `browser.close`: only the stand-in strip tab goes.
+    .tabs.find((t) => t.id !== keep && browseId(t.path) === pageId);
   if (stray) useTabStore.getState().closeTab(stray.id);
+}
+
+/**
+ * How every web link opens: an in-app page in the side panel beside the page
+ * (`openBeside`), or with `newTab` (⌘-click) an in-app tab of its own. The
+ * system browser only when Settings → Browser asks for it or the in-app page
+ * fails.
+ */
+export async function openLink(url: string, newTab = false): Promise<void> {
+  if (opensLinksInSystem()) return openExternal(url, true);
+  let pageId: number;
+  try {
+    pageId = await browser.open(url);
+  } catch (e) {
+    console.error(`[oculus] in-app tab failed for ${url}`, e);
+    await openExternal(url, true);
+    return;
+  }
+  // A new tab: the one the reconcile makes is the answer.
+  if (newTab) return;
+  const front = useTabStore.getState().activeId;
+  openBeside(browsePath(pageId));
+  dropStrayTab(pageId, front);
 }

@@ -224,7 +224,12 @@ while Ctrl+Shift+Z is Redo.
   the real route table (an agent's absolute file paths are not routes). A file
   chip is the one exception, carried by `openCitation` in
   `app/src/lib/files/openFile.ts`. Plain external links open in the in-app browser
-  through a capture handler in `AppLayout` (`openExternal`).
+  through a capture handler in `AppLayout`: `openLink`
+  (`app/src/lib/shell/tabRouters.ts`) puts the page in the side panel, and
+  ⌘-click gives it a tab of its own. The system browser only when Settings →
+  Browser asks for it, or as the fallback when an in-app page fails. Every
+  "Open in Canvas"/"Open in Ed" icon is the one `OpenOriginal`
+  (`app/src/components/files/OpenOriginal.tsx`) and opens the same way.
 - **A new tab lands on `/new`**, not Home: a search field, a browser door, a
   chat door and the Recent trail.
 - **Recent is a still list** (`recentTabsStore`): a visit lands only after the

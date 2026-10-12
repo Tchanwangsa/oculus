@@ -1,10 +1,9 @@
 import { useRef, type KeyboardEvent } from "react";
-import { ArrowSquareOut, CheckCircle } from "@phosphor-icons/react";
-import { IconAction } from "@/components/markdown/embed/IconAction";
+import { CheckCircle } from "@phosphor-icons/react";
+import { OpenOriginal } from "@/components/files/OpenOriginal";
 import { SIDE_NAV_ROW, SIDE_NAV_ROW_ACTIVE, SIDE_NAV_ROW_IDLE } from "@/components/ui/layout/SideNav";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { lessonProgress, slideIcon, type LessonIndex } from "@/lib/ed/lessons";
-import { openLinkOut } from "@/lib/files/canvasLinks";
 import { fmtDue } from "@/lib/format/format";
 import { cn } from "@/lib/utils";
 
@@ -52,9 +51,7 @@ export function LessonSidebar({
           </p>
         </div>
         {edUrl && (
-          <IconAction label="Open in Ed" onClick={(e) => void openLinkOut(edUrl, e.metaKey)}>
-            <ArrowSquareOut size={14} />
-          </IconAction>
+          <OpenOriginal href={edUrl} label="Open in Ed" />
         )}
       </div>
       <div ref={listRef} onKeyDown={onKeyDown} className="min-h-0 flex-1 space-y-px overflow-y-auto px-2 pb-3">

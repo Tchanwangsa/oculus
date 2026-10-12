@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { CardShell } from "@/components/markdown/embed/card/CardShell";
 import { Thumbnail } from "@/components/markdown/embed/card/Thumbnail";
 import { tagSource } from "@/components/markdown/embed/card/tagSource";
-import { openExternal } from "@/lib/browser";
+import { openLink } from "@/lib/shell/tabRouters";
 import { fmtDurationSecs } from "@/lib/lectures/format";
 import {
   useWebVideos,
@@ -76,7 +76,7 @@ function Card({
         </>
       }
       actions={
-        <Button title={url} onClick={(e) => void openExternal(url, e.metaKey)}>
+        <Button title={url} onClick={(e) => void openLink(url, e.metaKey)}>
           <Play weight="fill" />
           Play
         </Button>

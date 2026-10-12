@@ -10,7 +10,6 @@ import {
   browser,
   browseId,
   isWebUrl,
-  openExternal,
   stepZoom,
 } from "@/lib/browser";
 import { useActivityPing } from "@/hooks/backend/useActivityPing";
@@ -24,6 +23,7 @@ import { routeEdit, routeSelectAll } from "@/lib/menu/editRouting";
 import { routeFind } from "@/lib/menu/find";
 import { containSelection } from "@/lib/ui/selectScope";
 import { useNewTabClicks } from "@/lib/shell/newTabClicks";
+import { openLink } from "@/lib/shell/tabRouters";
 import { useBrowserStore } from "@/stores/shell/browserStore";
 import { activePane, useTabStore } from "@/stores/shell/tabStore";
 import {
@@ -70,8 +70,8 @@ export default function AppLayout() {
 
   useEffect(() => containSelection(), []);
 
-  // Capture-phase net: every external `<a href>` opens in an in-app browser
-  // tab; ⌘-click hands it to the real browser.
+  // Capture-phase net: every external `<a href>` opens as an in-app page in
+  // the side panel; ⌘-click opens it as a tab of its own (`openLink`).
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (e.defaultPrevented || e.button !== 0) return;
@@ -81,7 +81,7 @@ export default function AppLayout() {
       const href = anchor?.getAttribute("href");
       if (!isWebUrl(href)) return;
       e.preventDefault();
-      void openExternal(href, e.metaKey || e.ctrlKey);
+      void openLink(href, e.metaKey || e.ctrlKey);
     };
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);

@@ -1,14 +1,14 @@
-import { openExternal } from "@/lib/browser";
+import { openLink } from "@/lib/shell/tabRouters";
 import { currentInstitution } from "@/stores/sync/institutionStore";
 
 /** Where a link out goes: a URL, or one read at the click, for a Canvas page
  *  whose host is the profile's (which may load after the first render). */
 export type LinkOut = string | (() => Promise<string | null>);
 
-/** Opens `link`; ⌘-click (`system`) opens the system browser. */
-export async function openLinkOut(link: LinkOut, system: boolean): Promise<void> {
+/** Opens `link` beside the page; ⌘-click (`newTab`) as a tab of its own. */
+export async function openLinkOut(link: LinkOut, newTab: boolean): Promise<void> {
   const url = typeof link === "string" ? link : await link();
-  if (url) await openExternal(url, system);
+  if (url) await openLink(url, newTab);
 }
 
 /** A Canvas file's page on `canvas`, the profile's `https://host`: under its

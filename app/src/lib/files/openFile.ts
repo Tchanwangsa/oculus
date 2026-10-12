@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useTabStore } from "@/stores/shell/tabStore";
-import { openBeside } from "@/lib/shell/tabRouters";
+import { openBeside, openLink } from "@/lib/shell/tabRouters";
 import { humanizeSlug } from "@/lib/format/format";
 import { isLessonAsset, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath, parsedMdSource } from "@/lib/files/fileTypes";
 import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
 import { attachmentPath } from "@/lib/harness/attachments";
-import { isWebUrl, openExternal } from "@/lib/browser";
+import { isWebUrl } from "@/lib/browser";
 import { libraryLinkTarget } from "@/lib/files/libraryLinks";
 import { readCourseFile } from "@/lib/files/courseFiles";
 import { lecturePagePath } from "@/lib/lectures";
@@ -197,7 +197,7 @@ export function openNoteLink(href: string, files: DbFile[]): void {
     return;
   }
   const url = /^www\./i.test(href) ? `https://${href}` : href;
-  if (isWebUrl(url)) void openExternal(url);
+  if (isWebUrl(url)) void openLink(url);
 }
 
 let locateSeq = 0;

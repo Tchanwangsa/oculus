@@ -112,7 +112,7 @@ classes work even when there are no dollar delimiters.
     A cancel goes back to Download silently.
 
   Every state but download-off keeps a small Open in Canvas icon (⌘-click for
-  the system browser). The info call launches the link in Echo360, which
+  a new tab). The info call launches the link in Echo360, which
   records a view, so `embedDownloadStore` asks it once per link per app
   session and forgets only a rejection. Play that finds no row asks again;
   the backend clears a deleted file, so the card offers Download.
@@ -140,8 +140,8 @@ classes work even when there are no dollar delimiters.
   video per app session and forgets a rejection. Until then, or without an
   answer, the card shows the tag's title (else "YouTube video"/"Vimeo video")
   and still plays. Play opens `youtube.com/watch?v=<id>` or
-  `vimeo.com/<id>/<hash>` through `openExternal`, so an in-app browser tab (⌘-click
-  for the system browser); never an iframe in the app's webview, since
+  `vimeo.com/<id>/<hash>` through `openLink`, so an in-app page beside it (⌘-click
+  for a tab of its own); never an iframe in the app's webview, since
   YouTube refuses embeds from the app's origin. An unknown provider renders
   nothing.
 - **A reply goes through `CompactMd`**, whose `.md-compact` rules in `index.css`
@@ -163,10 +163,11 @@ classes work even when there are no dollar delimiters.
 - **A spreadsheet opens as its text** (`marks.xlsx.md`, a table per sheet),
   in-app like a PDF rather than in the system viewer (`lib/files/openFile.ts`), with no
   PDF ↔ Markdown toggle.
-- **A file with a web `source_url` has an Open in browser button** (the globe
-  in `FilePage`'s header, ⌘-click for the system browser). A synced Canvas page
-  is our markdown of it; the button opens the original, with its embeds and
-  styling, in a browser tab through `openExternal`.
+- **A file with a web `source_url` has an Open in Canvas / Open in Ed button**
+  (`OpenOriginal` in `FilePage`'s header, ⌘-click for a new tab). A synced
+  Canvas page or Ed thread is our markdown of it; the button opens the
+  original, with its embeds and styling, beside it through `openLink`. Ed
+  thread and slide files also carry an `[Open in Ed]` line in their text.
 - **`FileViewer` resolves in-file links locally** — `../` links, links into a
   folder beside the file (an Ed lesson's `<id>-<slug>/…` assets) and Canvas
   `/files/<id>` or `/pages/<slug>` URLs, by `canvas_id`, path or `source_url`
@@ -346,7 +347,7 @@ whose list has slides (`useLessonIndex`), its body is `LessonView`
   Ed's slide type (`slideIcon`), the title, a green tick once completed. A
   slide not yet opened in Ed reads a shade darker; the selected row takes
   the nav column's active fill. ↑/↓ step through the slides. Open in Ed
-  (⌘-click for the system browser, `openLinkOut`) opens the shown slide's
+  (`OpenOriginal`, ⌘-click for a new tab) opens the shown slide's
   page in Ed, else the lesson's.
 - **The pane shows the selected slide through `FileViewer`**: a PDF slide's
   PDF, any other slide's `.md`, both found by path beside the index

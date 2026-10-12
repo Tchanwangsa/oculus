@@ -8,7 +8,7 @@ import { tagSource, videoDisplayName } from "@/components/markdown/embed/card/ta
 import { useEmbedSubject } from "@/components/markdown/embed/EmbedSubject";
 import { VideoLinkOut } from "@/components/markdown/embed/VideoLinkOut";
 import { useDataDir } from "@/hooks/backend/useDataDir";
-import { openExternal } from "@/lib/browser";
+import { openLink } from "@/lib/shell/tabRouters";
 import { filePagePath, openFileSmart } from "@/lib/files/openFile";
 import { attachmentSrc } from "@/lib/harness/attachments";
 import { fmtDurationSecs } from "@/lib/lectures/format";
@@ -136,7 +136,7 @@ function RowActions({
 
   if (row.restrictDownload) {
     return (
-      <Button variant="outline" onClick={(e) => void openExternal(embed.src, e.metaKey)}>
+      <Button variant="outline" onClick={(e) => void openLink(embed.src, e.metaKey)}>
         <ArrowSquareOut />
         Open in Canvas
       </Button>
