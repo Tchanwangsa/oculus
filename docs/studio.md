@@ -61,7 +61,7 @@ narration/    manifest.json and the clips it names
   "voice": { "voice": "af_heart", "speed": 1.0 },
   "scenes": [
     { "id": "title", "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 4.0 },
-    { "id": "steps", "component": "Steps", "transition": { "kind": "wipe", "direction": "up" } }
+    { "id": "dots", "component": "DotGrid", "props": { "n": 12, "cols": [4, 6], "at": [2.2] }, "transition": { "kind": "wipe", "direction": "up" } }
   ]
 }
 ```
@@ -389,8 +389,8 @@ We follow the *gradient* downhill, one small step at a time.
   words have times. A phrase that is not said, an `nth` past the last
   occurrence and a call in a silent scene throw at the call's TSX line. A
   phrase not said names the said run of words nearest it by edit distance,
-  however far, spelt with its hyphens (`suggest::nearest`): ``Steps.tsx:12:20:
-  `word("gradiant")`: no such word in scene `steps`; closest: gradient``.
+  however far, spelt with its hyphens (`suggest::nearest`): ``Descent.tsx:12:20:
+  `word("gradiant")`: no such word in scene `descent`; closest: gradient``.
   Each call gets its own scene's words (`SceneCall::words`, from
   `Project::word_cues`), so in a transition the outgoing scene cues to its
   words and the incoming one to its own.

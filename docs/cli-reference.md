@@ -1631,9 +1631,9 @@ and the PNGs are the same at any thread count. The component is read through the
 theme the same way. `--sheet` also writes all the stills as one contact sheet, `--cols`
 a row. Stills are named `<Component>-<example>.png`.
 
-oculus studio gallery lectures/week-4 Steps
+oculus studio gallery lectures/week-4 DotGrid
 
-oculus studio gallery lectures/week-4 Steps --subject COMP2011 --sheet --cols 2
+oculus studio gallery lectures/week-4 DotGrid --subject COMP2011 --sheet --cols 2
 
 Usage: oculus studio gallery [OPTIONS] <DIR> <COMPONENT>
 
@@ -1752,7 +1752,7 @@ library's `.history/` first; when the library already holds the same text nothin
 written. The video keeps its own copy, which still wins for it. Check the component with
 `gallery` (and its scenes with `strip`) before promoting it.
 
-oculus studio components promote gradient-descent Steps --to subject
+oculus studio components promote gradient-descent Descent --to subject
 
 Usage: oculus studio components promote --to <LIBRARY> <DIR> <COMPONENT>
 

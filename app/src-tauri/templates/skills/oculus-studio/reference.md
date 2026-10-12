@@ -38,7 +38,7 @@ has the full flags.
   "scenes": [
     { "id": "title", "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 3 },
     { "id": "factor", "component": "FactorTwelve", "props": { "narrated": true } },
-    { "id": "rate", "component": "BigNumber", "props": { "value": "0.01", "label": "a typical step size" },
+    { "id": "dots", "component": "DotGrid", "props": { "n": 12, "cols": [4, 6], "at": [2.2] },
       "transition": { "kind": "push", "direction": "left" } }
   ]
 }
