@@ -27,18 +27,12 @@ struct Reader<'a> {
 
 impl Reader<'_> {
     /// The lexicon, then the dictionary.
-    fn read(
-        &self,
-        text: &str,
-        tag: &str,
-        ctx: &Ctx,
-        ev: &mut Events,
-    ) -> Result<Option<String>, String> {
-        if let Some(ps) = self.lexicon.phonemes(self.dict, text)? {
+    fn read(&self, text: &str, tag: &str, ctx: &Ctx, ev: &mut Events) -> Option<String> {
+        if let Some(ps) = self.lexicon.phonemes(text) {
             ev.lexicon = true;
-            return Ok(Some(ps));
+            return Some(ps);
         }
-        Ok(word_phonemes(self.dict, text, tag, ctx))
+        word_phonemes(self.dict, text, tag, ctx)
     }
 
     /// The guesser, for something with a letter in it; an empty guess is no
@@ -68,7 +62,7 @@ impl Reader<'_> {
             if window.iter().all(|tk| tk.phonemes.is_none()) {
                 let text = merged_text(window);
                 let tag = merged_tag(window);
-                if let Some(ps) = self.read(&text, &tag, &ctx, ev)? {
+                if let Some(ps) = self.read(&text, &tag, &ctx, ev) {
                     read = Some((ps, text, tag));
                 }
             }
@@ -106,7 +100,7 @@ pub fn phonemize(
     guesser: &mut dyn Guess,
 ) -> Result<Phonemized, String> {
     let text = preprocess(text);
-    let tagged = tokenize(&text);
+    let tagged = tokenize(&text, dict);
     let mut words = retokenize(tagged.tokens);
     let mut reader = Reader {
         dict,
@@ -119,7 +113,7 @@ pub fn phonemize(
         match w {
             Word::One(tk) => {
                 if tk.phonemes.is_none() {
-                    tk.phonemes = reader.read(&tk.text, &tk.tag, &ctx, ev)?;
+                    tk.phonemes = reader.read(&tk.text, &tk.tag, &ctx, ev);
                 }
                 if tk.phonemes.is_none() {
                     tk.phonemes = reader.guess(&tk.text, ev)?;

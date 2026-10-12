@@ -3,7 +3,8 @@
 //! `data/evals/studio-g2p/tools/a2c.py` runs it. Each word is read by the
 //! user's lexicon, else misaki's gold and silver dictionaries with its
 //! special cases, case handling and stem rules (plus `-ied` and British
-//! `-ise`), else the guesser, one sub-token at a time. Nothing is dropped:
+//! `-ise`) and a heteronym's reading picked by a neighbour-word table, else
+//! the guesser, one sub-token at a time. Nothing is dropped:
 //! a word with a letter in it and no phonemes is an error naming it.
 //!
 //! The golden files under `tests/golden/` are the oracle's output; the
@@ -12,6 +13,8 @@
 mod chars;
 mod dict;
 pub mod guess;
+mod heteronym;
+mod lexicon;
 mod resolve;
 mod special;
 mod split;
@@ -24,23 +27,12 @@ mod token;
 mod word;
 
 pub use dict::{Dictionary, Entry};
+pub use lexicon::{Lexicon, LexiconError};
 pub use resolve::phonemize;
 
 /// Phonemes for a word or sub-token nothing else reads.
 pub trait Guess {
     fn guess(&mut self, part: &str) -> Result<String, String>;
-}
-
-/// The user's respelling lexicon, read before the dictionary. Holds no
-/// entries yet.
-#[derive(Debug, Clone, Default)]
-pub struct Lexicon {}
-
-impl Lexicon {
-    /// An entry's phonemes for `word`, or `None` to read it on.
-    fn phonemes(&self, _dict: &Dictionary, _word: &str) -> Result<Option<String>, String> {
-        Ok(None)
-    }
 }
 
 /// Who read a word.

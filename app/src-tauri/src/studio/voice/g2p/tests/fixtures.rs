@@ -78,43 +78,39 @@ impl Guess for TableGuess {
     }
 }
 
-/// The 7 bake-off inputs (library lexicon), the same without a lexicon, and
-/// the special cases.
-pub const FILES: [&str; 15] = [
-    "script163.jsonl",
-    "maths16.jsonl",
-    "propernouns.jsonl",
-    "lecture1.jsonl",
-    "lecture2.jsonl",
-    "lecture3.jsonl",
-    "heteronyms30.jsonl",
-    "nolex/script163.jsonl",
-    "nolex/maths16.jsonl",
-    "nolex/propernouns.jsonl",
-    "nolex/lecture1.jsonl",
-    "nolex/lecture2.jsonl",
-    "nolex/lecture3.jsonl",
-    "nolex/heteronyms30.jsonl",
-    "special.jsonl",
+/// A golden file and the lexicon layers the oracle ran it with: the 7
+/// bake-off inputs with the library's, the same with none (`nolex/`), and
+/// the special cases with the subject's over the library's.
+pub const FILES: [(&str, &[&str]); 15] = [
+    ("script163.jsonl", LIBRARY),
+    ("maths16.jsonl", LIBRARY),
+    ("propernouns.jsonl", LIBRARY),
+    ("lecture1.jsonl", LIBRARY),
+    ("lecture2.jsonl", LIBRARY),
+    ("lecture3.jsonl", LIBRARY),
+    ("heteronyms30.jsonl", LIBRARY),
+    ("nolex/script163.jsonl", &[]),
+    ("nolex/maths16.jsonl", &[]),
+    ("nolex/propernouns.jsonl", &[]),
+    ("nolex/lecture1.jsonl", &[]),
+    ("nolex/lecture2.jsonl", &[]),
+    ("nolex/lecture3.jsonl", &[]),
+    ("nolex/heteronyms30.jsonl", &[]),
+    ("special.jsonl", BOTH),
 ];
+const LIBRARY: &[&str] = &["lexicon.library.json"];
+const BOTH: &[&str] = &["lexicon.library.json", "lexicon.subject.json"];
 
-/// Every golden row run through the port with no lexicon and the table
-/// guesser. A row the heteronym table or the lexicon decides somewhere is
-/// left to those (its dictionary words are still compared when it runs);
-/// every other row must match whole.
-#[derive(Default, Debug)]
-pub struct Report {
-    pub whole: usize,
-    pub dict_words: usize,
-    /// Dictionary words not compared because a lexicon or guessed word
-    /// follows.
-    pub before_lexicon: usize,
-    pub deferred: Vec<String>,
-    pub skipped: Vec<String>,
-    pub failures: Vec<String>,
+pub fn lexicon(layers: &[&str], dict: &Dictionary) -> Lexicon {
+    let texts: Vec<(&str, String)> = layers
+        .iter()
+        .map(|&f| (f, std::fs::read_to_string(golden_dir().join(f)).unwrap()))
+        .collect();
+    let layers: Vec<(&str, &str)> = texts.iter().map(|(f, t)| (*f, t.as_str())).collect();
+    Lexicon::from_json(&layers, dict).unwrap()
 }
 
-fn same(got: &Phonemized, row: &Row) -> Option<String> {
+fn differs(got: &Phonemized, row: &Row) -> Option<String> {
     if got.phonemes != row.phonemes {
         return Some(format!(
             "phonemes\n  got  {:?}\n  want {:?}",
@@ -140,67 +136,26 @@ fn same(got: &Phonemized, row: &Row) -> Option<String> {
     None
 }
 
-pub fn check(dict: &Dictionary) -> Report {
-    let lexicon = Lexicon::default();
+/// Every golden row through the port with the table guesser: the rows
+/// matched whole, and why each other row did not.
+pub fn check(dict: &Dictionary) -> (usize, Vec<String>) {
     let mut guesser = TableGuess::load();
-    let mut report = Report::default();
-    for file in FILES {
+    let mut matched = 0;
+    let mut failures = Vec::new();
+    for (file, layers) in FILES {
+        let lexicon = lexicon(layers, dict);
         for row in rows(file) {
-            let id = format!("{file} {}", row.id);
-            let later = row
-                .words
-                .iter()
-                .any(|w| w.source == "lexicon" || w.source == "rule");
-            let got = phonemize(&row.text, dict, &lexicon, &mut guesser);
-            match (got, later) {
-                (Ok(got), false) => match same(&got, &row) {
-                    None => report.whole += 1,
-                    Some(why) => report.failures.push(format!("{id}: {why}")),
+            match phonemize(&row.text, dict, &lexicon, &mut guesser) {
+                Ok(got) => match differs(&got, &row) {
+                    None => matched += 1,
+                    Some(why) => failures.push(format!("{file} {}: {why}", row.id)),
                 },
-                (Err(e), false) => report.failures.push(format!("{id}: {e}")),
-                (Ok(got), true) => {
-                    report.deferred.push(id.clone());
-                    if got.words.len() != row.words.len() {
-                        report.failures.push(format!(
-                            "{id}: {} words, want {}",
-                            got.words.len(),
-                            row.words.len()
-                        ));
-                        continue;
-                    }
-                    for (j, (g, w)) in got.words.iter().zip(&row.words).enumerate() {
-                        if w.source != "dict" {
-                            continue;
-                        }
-                        // The next word's first sound decides this one's reading
-                        // ("the" before "Cauchy-Schwarz"), and with no lexicon a
-                        // lexicon word, or a guessed word with a lexicon part,
-                        // reads differently.
-                        if row
-                            .words
-                            .get(j + 1)
-                            .is_some_and(|n| n.source == "lexicon" || n.source == "guess")
-                        {
-                            report.before_lexicon += 1;
-                            continue;
-                        }
-                        report.dict_words += 1;
-                        if g.word != w.word
-                            || g.phonemes != w.phonemes
-                            || g.source.as_str() != "dict"
-                        {
-                            report
-                                .failures
-                                .push(format!("{id}: dict word {g:?}, want {w:?}"));
-                        }
-                    }
-                }
-                (Err(e), true) => report.skipped.push(format!("{id}: {e}")),
+                Err(e) => failures.push(format!("{file} {}: {e}", row.id)),
             }
         }
     }
-    for row in &report.failures {
-        println!("FAIL {row}");
+    for f in &failures {
+        println!("FAIL {f}");
     }
-    report
+    (matched, failures)
 }

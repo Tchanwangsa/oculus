@@ -7,22 +7,15 @@
 use std::path::PathBuf;
 
 use super::super::Dictionary;
-use super::fixtures::{check, trimmed_dictionary};
+use super::fixtures::check;
 
 #[test]
 #[ignore]
-fn full_dictionary_matches_the_trimmed_one() {
+fn the_full_dictionary_matches_the_oracle() {
     let dir = PathBuf::from(
         std::env::var("STUDIO_G2P_DATA").expect("set STUDIO_G2P_DATA to run this test"),
     );
-    let full = check(&Dictionary::load(&dir).unwrap());
-    let trimmed = check(&trimmed_dictionary());
-    assert!(
-        full.failures.is_empty(),
-        "{} rows differ",
-        full.failures.len()
-    );
-    assert_eq!(full.whole, trimmed.whole);
-    assert_eq!(full.dict_words, trimmed.dict_words);
-    assert_eq!(full.deferred, trimmed.deferred);
+    let (matched, failures) = check(&Dictionary::load(&dir).unwrap());
+    assert!(failures.is_empty(), "{} rows differ", failures.len());
+    assert_eq!(matched, 1026);
 }

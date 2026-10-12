@@ -2,30 +2,38 @@
 //!
 //! cargo test --lib studio::voice::g2p::tests::golden -- --nocapture
 
-use super::fixtures::{check, trimmed_dictionary};
+use super::super::Lexicon;
+use super::fixtures::{check, golden_dir, trimmed_dictionary};
+use serde::Deserialize;
 
 #[test]
-fn golden_rows_match_the_oracle() {
-    let report = check(&trimmed_dictionary());
-    println!(
-        "whole rows matched: {}; rows left to the heteronym table or lexicon: {} \
-         ({} dictionary words in them matched, {} before a lexicon or guessed word not compared); \
-         skipped: {}",
-        report.whole,
-        report.deferred.len() + report.skipped.len(),
-        report.dict_words,
-        report.before_lexicon,
-        report.skipped.len()
-    );
-    for row in &report.deferred {
-        println!("  deferred {row}");
+fn every_golden_row_matches_the_oracle() {
+    let (matched, failures) = check(&trimmed_dictionary());
+    println!("rows matched whole: {matched}");
+    assert!(failures.is_empty(), "{} rows differ", failures.len());
+    assert_eq!(matched, 1026);
+}
+
+#[test]
+fn the_oracles_bad_lexicon_entries_are_refused() {
+    #[derive(Deserialize)]
+    struct Bad {
+        key: String,
+        value: String,
+        error: String,
     }
-    for row in &report.skipped {
-        println!("  skipped {row}");
+    let dict = trimmed_dictionary();
+    let text = std::fs::read_to_string(golden_dir().join("lexicon-errors.jsonl")).unwrap();
+    let bad: Vec<Bad> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(bad.len(), 3);
+    for b in bad {
+        let json = serde_json::json!({ &b.key: b.value }).to_string();
+        let e = Lexicon::from_json(&[("lexicon.json", &json)], &dict).unwrap_err();
+        assert_eq!(e.kind(), b.error, "{}: {e}", b.key);
+        assert!(e.to_string().contains(&format!("{:?}", b.key)), "{e}");
     }
-    assert!(
-        report.failures.is_empty(),
-        "{} rows differ",
-        report.failures.len()
-    );
 }
