@@ -18,7 +18,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use studio_core::{Manifest, ManifestGap, ManifestScene, ManifestWord, Project, MANIFEST_PATH};
+use studio_core::{
+    Library, Manifest, ManifestGap, ManifestScene, ManifestWord, Project, MANIFEST_PATH,
+};
 
 use super::audio::resample_to_16k;
 use super::timing::{self, Alignment};
@@ -92,15 +94,20 @@ impl fmt::Display for NarrateError {
 
 impl std::error::Error for NarrateError {}
 
-/// Narrate the video in `dir` with `voice`; see the module doc.
+/// Narrate the video in `dir` with `voice`, loading it over `library` (the
+/// app's are `studio::libraries::libraries`), so a library theme or
+/// component resolves as it does for every other command; see the module
+/// doc.
 pub fn narrate(
     dir: &Path,
+    library: &Library,
     voice: &Voice,
     aligner: &dyn Aligner,
     options: &Options,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report, NarrateError> {
-    let project = Project::load_unnarrated(dir).map_err(|e| NarrateError::video(e.to_string()))?;
+    let project = Project::load_unnarrated_with(dir, library)
+        .map_err(|e| NarrateError::video(e.to_string()))?;
     if project.script.is_none() {
         return Err(NarrateError::video(format!(
             "{} has no script.md; write one `## <scene id>` section per narrated scene",

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Provider } from "./providers";
 import type { BridgeHealth, QueuedMessage } from "./types";
+import type { StudioSend } from "@/lib/studio/videos";
 
 export interface SendOptions {
   model?: string | null;
@@ -13,6 +14,8 @@ export interface SendOptions {
   context?: string | null;
   /** Playhead second; stored on the user row's `meta` as `{ at }`. */
   at?: number | null;
+  /** Only read on creation: links the new thread to a Studio video. */
+  studio?: StudioSend;
 }
 
 export function harnessSend(

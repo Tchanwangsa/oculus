@@ -155,6 +155,7 @@ fn approvals_come_and_go_through_the_record() {
         &lib,
         None,
         Some(vec!["command(python3)".into()]),
+        None,
     )
     .unwrap();
     let allow = |p: &Path| read(p)["permissions"]["allow"].clone();
@@ -162,12 +163,12 @@ fn approvals_come_and_go_through_the_record() {
         .as_array()
         .unwrap()
         .contains(&"command(python3)".into()));
-    install_at(&settings, &state, &lib, None, None).unwrap();
+    install_at(&settings, &state, &lib, None, None, None).unwrap();
     assert!(allow(&settings)
         .as_array()
         .unwrap()
         .contains(&"command(python3)".into()));
-    install_at(&settings, &state, &lib, None, Some(vec![])).unwrap();
+    install_at(&settings, &state, &lib, None, Some(vec![]), None).unwrap();
     assert!(!allow(&settings)
         .as_array()
         .unwrap()
@@ -181,11 +182,12 @@ fn the_rule_set_mirrors_claudes() {
         bin: PathBuf::from("/repo/target/release/oculus"),
         launcher: Some(PathBuf::from("/home/u/.local/bin/oculus")),
     };
-    let r = rules_for(lib, Some(&cli), &["command(python3)".into()]);
+    let r = rules_for(lib, Some(&cli), &["command(python3)".into()], None);
     for want in [
         "write_file(/lib/oculus.db)",
         "write_file(/lib/oculus.db-wal)",
         "write_file(/lib/oculus.db-shm)",
+        "write_file(/lib/studio)",
         "read_file(/repo/target/release)",
         "read_file(/home/u/.local/bin)",
         "command(oculus)",
@@ -236,7 +238,7 @@ fn native_windows_paths_use_slashes_in_file_and_cli_rules() {
         bin: PathBuf::from(r"C:\Program Files\Oculus\oculus.exe"),
         launcher: Some(PathBuf::from(r"C:\Users\s\.local\bin\oculus.exe")),
     };
-    let r = rules_for(lib, Some(&cli), &[]);
+    let r = rules_for(lib, Some(&cli), &[], None);
     for want in [
         "read_file(C:/Program Files/Oculus)",
         "read_file(C:/Users/s/.local/bin)",
@@ -260,7 +262,7 @@ fn no_rule_denies_keyds_socket_and_the_cli_may_run() {
         bin: PathBuf::from("/repo/target/release/oculus"),
         launcher: None,
     };
-    let r = rules_for(lib, Some(&cli), &[]);
+    let r = rules_for(lib, Some(&cli), &[], None);
     let socket = keyd_core::paths::socket(lib);
     for d in &r.deny {
         let Some(path) = d
@@ -282,7 +284,7 @@ fn no_rule_denies_keyds_socket_and_the_cli_may_run() {
 fn sqlite3_is_denied_on_both_spellings_of_the_database() {
     let lib = scratch("spellings");
     let real = lib.canonicalize().unwrap();
-    let r = rules_for(&lib, None, &[]);
+    let r = rules_for(&lib, None, &[], None);
     let want = |l: &Path| {
         format!(
             "command(sqlite3 {})",
@@ -296,7 +298,7 @@ fn sqlite3_is_denied_on_both_spellings_of_the_database() {
 #[test]
 fn a_database_path_with_a_space_is_denied_however_it_is_quoted() {
     let lib = Path::new("/Users/s/Library/Application Support/com.tchan.oculus");
-    let deny = rules_for(lib, None, &[]).deny;
+    let deny = rules_for(lib, None, &[], None).deny;
     for want in [
         "command(sqlite3 /Users/s/Library/Application Support/com.tchan.oculus/oculus.db)",
         "command(sqlite3 \"/Users/s/Library/Application Support/com.tchan.oculus/oculus.db\")",
@@ -333,4 +335,40 @@ fn rules_are_validated_and_denies_win() {
     assert!(denied_by(lib, "command(sqlite3)").is_none());
     assert!(denied_by(lib, "write_file(/lib/agents/notes)").is_none());
     assert!(denied_by(lib, "command(python3)").is_none());
+}
+
+/// Every `agent_write_dirs` folder is granted, and no deny covers a file a
+/// video is made of (agy's `write_file` is recursive).
+#[test]
+fn studio_is_writable_and_no_deny_covers_it() {
+    let lib = Path::new("/lib");
+    let r = rules_for(lib, None, &[], None);
+    for dir in crate::library::paths::agent_write_dirs(lib) {
+        let rule = format!("write_file({})", crate::library::paths::slash_path(&dir));
+        assert!(r.allow.contains(&rule), "{rule}: {:?}", r.allow);
+        for file in ["videos/a/video.json", "library/components/Steps.tsx"] {
+            let want = format!(
+                "write_file({})",
+                crate::library::paths::slash_path(dir.join(file))
+            );
+            assert_eq!(denied_by(lib, &want), None, "{want}");
+        }
+    }
+    assert!(
+        !r.allow.iter().any(|a| a.starts_with("read_url(")),
+        "no TTS server, no host: {:?}",
+        r.allow
+    );
+}
+
+/// The TTS server's host is the one `read_url` grant.
+#[test]
+fn the_tts_host_is_the_only_url_grant() {
+    let r = rules_for(Path::new("/lib"), None, &[], Some("127.0.0.1"));
+    let urls: Vec<&String> = r
+        .allow
+        .iter()
+        .filter(|a| a.starts_with("read_url("))
+        .collect();
+    assert_eq!(urls, ["read_url(127.0.0.1)"]);
 }

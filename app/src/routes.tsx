@@ -4,6 +4,7 @@ import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { RouteError } from "@/components/ErrorBoundary";
 import SubjectLayout from "@/layouts/SubjectLayout";
 import SettingsLayout from "@/layouts/SettingsLayout";
+import StudioLayout from "@/layouts/StudioLayout";
 import HomePage from "@/pages/start/HomePage";
 import NewTabPage from "@/pages/start/NewTabPage";
 import SubjectsRedirect from "@/pages/start/SubjectsRedirect";
@@ -75,6 +76,20 @@ export const routes: RouteObject[] = [
           // Legacy paths that restored tabs and Recent entries may carry.
           { path: "downloads", element: <Navigate to="../files/downloads" replace /> },
           { path: "uploads", element: <Navigate to="../files/uploads" replace /> },
+        ],
+      },
+      {
+        // Videos: the nav column (`StudioLayout`) beside New video, the
+        // grid, one video's detail and its thread, and the Components playground.
+        path: "studio",
+        element: <StudioLayout />,
+        children: [
+          { index: true, lazy: page(() => import("@/pages/studio/NewVideoPage")) },
+          { path: "videos", lazy: page(() => import("@/pages/studio/VideosPage")) },
+          { path: "videos/:slug", lazy: page(() => import("@/pages/studio/VideoPage")) },
+          { path: "videos/:slug/thread", lazy: page(() => import("@/pages/studio/VideoThreadPage")) },
+          { path: "components", lazy: page(() => import("@/pages/studio/ComponentsPage")) },
+          { path: "components/:name", lazy: page(() => import("@/pages/studio/ComponentsPage")) },
         ],
       },
       // Spotify's full player, opened beside the page from the rail (docs/music.md).

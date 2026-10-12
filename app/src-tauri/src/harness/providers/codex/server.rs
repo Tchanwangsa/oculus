@@ -213,7 +213,7 @@ impl CodexServer {
             "features.default_mode_request_user_input": false,
             // `thread/start` takes a mode, not a policy, so the writable files
             // go in as config here and as `sandboxPolicy` on `turn/start`.
-            "sandbox_workspace_write.writable_roots": opts.writable_files,
+            "sandbox_workspace_write.writable_roots": opts.writable_roots,
             "sandbox_workspace_write.network_access": true,
         });
         if let Some(e) = &opts.reasoning_effort {
@@ -298,7 +298,7 @@ impl CodexServer {
             "approvalPolicy": "never",
             "sandboxPolicy": {
                 "type": "workspaceWrite",
-                "writableRoots": opts.writable_files,
+                "writableRoots": opts.writable_roots,
                 "networkAccess": true,
                 "excludeTmpdirEnvVar": false,
                 "excludeSlashTmp": false,

@@ -1,13 +1,14 @@
 ---
 name: oculus-library
-description: Find and read coursework in an Oculus course library — search slides and readings by meaning or by pattern, list what a subject has, and print a page. Use for "find where it says X", "which slide covers Y", "read page 12", "open the assignment brief", "what files are in this subject", or any question answered from a PDF, a Canvas page, an announcement or an Ed thread.
+description: Finds and reads coursework in an Oculus course library — searches slides and readings by meaning or by pattern, lists what a subject has, and prints a page. Use for "find where it says X", "which slide covers Y", "read page 12", "open the assignment brief", "what files are in this subject", or any question answered from a PDF, a Canvas page, an announcement or an Ed thread.
 ---
 
 # Finding and reading
 
-Three commands, and **choosing between them is the whole skill** — each one
-covers a different half of the library, and a miss looks exactly like an
-absence.
+`oculus grep` and `oculus search` find, `oculus files` lists and `oculus
+read` prints. **Choosing between `grep` and `search` is the whole skill** —
+each covers a different half of the library, and a miss looks exactly like
+an absence.
 
 | What you are looking in | `oculus grep` | `oculus search` |
 | --- | --- | --- |
@@ -25,10 +26,9 @@ Two consequences worth holding on to:
   covers — that is the `oculus-lectures` skill, not this one.
 
 And a third, for when a plain `rg` looks tempting: **per-page PDF text is not
-on disk.** It lives in the database, and it is **43% of this library's
-searchable text** — 2,977 pages across 170 files, which is where most of the
-actual teaching is. `rg` over `courses/` reads the other 57% and reports
-nothing for the rest.
+on disk.** It lives in the database, and it is where most of the actual
+teaching is. `rg` over `courses/` reads the markdown and silently misses
+every slide deck's page text.
 
 ## The two passes
 

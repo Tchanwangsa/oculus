@@ -7,12 +7,17 @@
 //! scene id and component.
 
 mod narration;
+mod props;
 mod script;
 mod spoken;
+mod tokens;
+mod tsx;
 
-use super::{Project, Staged};
+use super::{ComponentSource, Project, Staged};
 use crate::error::{Result, StudioError};
 use crate::render::{Engine, RenderOptions, scene_frame};
+use crate::schema::PropKind;
+use crate::theme::Theme;
 use crate::transition::{blur_mode, check_length};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -148,9 +153,12 @@ impl Project {
                 let loaded = self
                     .components
                     .read(name)
-                    .and_then(|tsx| engine.load_component(name, &tsx).map(|_| ()));
+                    .and_then(|tsx| engine.load_component(name, &tsx).map(|_| tsx));
                 match loaded {
-                    Ok(()) => lint_examples(&engine, name, &mut report),
+                    Ok(tsx) => {
+                        lint_examples(&engine, name, &mut report);
+                        lint_source(&engine, name, &tsx, &self.theme, &mut report);
+                    }
                     Err(error) => {
                         failed.insert(name);
                         report.issues.push(issue(error));
@@ -190,6 +198,30 @@ impl Project {
             staged.push(Some(st));
         }
         Ok(report)
+    }
+}
+
+/// The checks on a component's own source and declared props: token use
+/// (`tokens`) and required props (`props`).
+fn lint_source(engine: &Engine, name: &str, tsx: &str, theme: &Theme, report: &mut LintReport) {
+    let colour_props: Vec<String> = engine.component(name).map_or_else(Vec::new, |info| {
+        info.props
+            .iter()
+            .filter(|(_, spec)| matches!(&spec.kind, PropKind::Token(k) if k == "color"))
+            .map(|(prop, _)| prop.clone())
+            .collect()
+    });
+    for error in tokens::check(name, tsx, theme, &colour_props) {
+        report.issues.push(LintIssue {
+            scene: None,
+            id: None,
+            component: Some(name.to_owned()),
+            example: None,
+            error,
+        });
+    }
+    if let Some(info) = engine.component(name) {
+        props::check(name, info, report);
     }
 }
 

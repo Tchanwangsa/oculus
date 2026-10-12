@@ -1,7 +1,9 @@
 //! `oculus studio render`: a video folder to an mp4 through
 //! `app_lib::studio::render` (docs/studio.md, "Rendering a video").
 
+use super::studio_error;
 use crate::*;
+use app_lib::studio::libraries;
 use app_lib::studio::render::{self, Finished, Outcome, Progress, Quality, SegmentReport};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
@@ -23,6 +25,7 @@ impl Ctx {
             threads: args.threads,
             out: args.out.clone(),
             ffmpeg,
+            library: libraries::libraries(false).map_err(studio_error)?,
         };
         let quiet = self.json;
         let mut last = Instant::now();

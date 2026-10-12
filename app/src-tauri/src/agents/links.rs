@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::library::paths;
 
-use super::docs::SKILLS;
+use super::docs::{Skill, SKILLS};
 use super::{
     agents_dir, AGENTS_DOC, AGENTS_DOC_NAME, AGENTS_DOC_REL, MEMORIES_DIR, MEMORY_INDEX_NAME,
     SKILLS_DIR,
@@ -19,20 +19,20 @@ pub(super) fn link_agent_skills(data_dir: &Path) -> Result<(), String> {
         let into = agents_dir(data_dir).join(scanned).join(SKILLS_DIR);
         std::fs::create_dir_all(&into)
             .map_err(|e| format!("cannot create {}: {e}", into.display()))?;
-        for (name, body) in SKILLS {
+        for skill in SKILLS {
             // Up out of `<scanned>/skills`, back down into `skills/` beside it.
             link_skill(
-                &into.join(name),
-                &format!("../../{SKILLS_DIR}/{name}"),
-                name,
-                body,
+                &into.join(skill.name),
+                &format!("../../{SKILLS_DIR}/{}", skill.name),
+                skill,
             )?;
         }
     }
     Ok(())
 }
 
-fn link_skill(link: &Path, target: &str, name: &str, body: &str) -> Result<Link, String> {
+fn link_skill(link: &Path, target: &str, skill: &Skill) -> Result<Link, String> {
+    let name = skill.name;
     match std::fs::symlink_metadata(link) {
         Ok(meta) if meta.file_type().is_symlink() => {
             if std::fs::read_link(link).is_ok_and(|t| t == Path::new(target)) {
@@ -41,17 +41,14 @@ fn link_skill(link: &Path, target: &str, name: &str, body: &str) -> Result<Link,
             std::fs::remove_file(link).map_err(|e| format!("cannot relink {name}: {e}"))?;
         }
         #[cfg(windows)]
-        Ok(meta) if meta.is_dir() => {
-            return managed_copy(&link.join(super::SKILL_DOC_NAME), body)
-                .map_err(|e| format!("cannot refresh {name}: {e}"));
-        }
+        Ok(meta) if meta.is_dir() => return refresh_skill_copy(link, skill),
         Ok(_) => {
             elog!("[oculus] {} is not ours — left alone", link.display());
             return Ok(Link::Skipped);
         }
         Err(_) => {}
     }
-    link_skill_dir(target, link, body).map_err(|e| format!("cannot link {name}: {e}"))?;
+    link_skill_dir(target, link, skill)?;
     Ok(Link::Linked)
 }
 
@@ -264,16 +261,35 @@ fn symlink_or_copy(_target: &str, link: &Path, body: &str) -> std::io::Result<()
     }
 }
 
-/// The same for a skill directory: the copy rebuilds the directory's shape.
+/// The same for a skill directory: the copy is the skill written again.
 #[cfg(unix)]
-fn link_skill_dir(target: &str, link: &Path, _body: &str) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(target, link)
+fn link_skill_dir(target: &str, link: &Path, skill: &Skill) -> Result<(), String> {
+    std::os::unix::fs::symlink(target, link).map_err(|e| format!("cannot link {}: {e}", skill.name))
 }
 
 #[cfg(not(unix))]
-fn link_skill_dir(_target: &str, link: &Path, body: &str) -> std::io::Result<()> {
-    std::fs::create_dir_all(link)?;
-    symlink_or_copy("", &link.join(super::SKILL_DOC_NAME), body)
+fn link_skill_dir(_target: &str, link: &Path, skill: &Skill) -> Result<(), String> {
+    let name = skill.name;
+    std::fs::create_dir_all(link).map_err(|e| format!("cannot link {name}: {e}"))?;
+    for (file, body) in skill.files {
+        symlink_or_copy("", &link.join(file), body)
+            .map_err(|e| format!("cannot link {name}/{file}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Refreshes each file of a copied skill; a file the user edited is kept.
+#[cfg(windows)]
+fn refresh_skill_copy(link: &Path, skill: &Skill) -> Result<Link, String> {
+    let mut outcome = Link::Current;
+    for (file, body) in skill.files {
+        let done = managed_copy(&link.join(file), body)
+            .map_err(|e| format!("cannot refresh {}/{file}: {e}", skill.name))?;
+        if done != Link::Current {
+            outcome = done;
+        }
+    }
+    Ok(outcome)
 }
 
 #[cfg(any(windows, test))]

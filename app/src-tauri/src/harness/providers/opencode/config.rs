@@ -102,6 +102,44 @@ mod tests {
         }
     }
 
+    /// Every `agent_write_dirs` folder is allowed by a rule after every
+    /// library deny: opencode's `*` crosses `/` and the last matching rule
+    /// wins, so `{{LIBRARY}}/*.json` alone would deny a video's video.json.
+    #[test]
+    fn studio_is_allowed_after_every_library_deny() {
+        let lib = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
+        let rendered = render_config(
+            lib,
+            "p",
+            &OneOffPrompts {
+                naming: "n",
+                writer: "w",
+                lecture_end: "l",
+            },
+        );
+        let rules: Vec<(String, String)> = rendered
+            .lines()
+            .map(str::trim)
+            .filter_map(|l| {
+                let (k, v) = l.trim_end_matches(',').split_once("\": ")?;
+                Some((
+                    k.trim_start_matches('"').to_owned(),
+                    v.trim_matches('"').to_owned(),
+                ))
+            })
+            .filter(|(k, _)| k.starts_with(lib.to_str().unwrap()))
+            .collect();
+        let last_deny = rules.iter().rposition(|(_, v)| v == "deny").unwrap();
+        for dir in crate::library::paths::agent_write_dirs(lib) {
+            let key = format!("{}/**", dir.display());
+            let at = rules
+                .iter()
+                .position(|(k, v)| *k == key && v == "allow")
+                .unwrap_or_else(|| panic!("no allow for {key} in {rules:?}"));
+            assert!(at > last_deny, "{key} must come after every deny");
+        }
+    }
+
     /// Pins the rule shapes that work: siblings of `agents/` denied one by one,
     /// the bash map ending on an allow, and in-directory paths relative.
     #[test]

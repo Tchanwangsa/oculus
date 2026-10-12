@@ -1,7 +1,9 @@
 //! Rendering a video from the app: `studio_render` runs `render::render` off
 //! the async runtime and reports each step as a `studio-render-progress`
 //! event; `studio_render_cancel` stops it. One render per folder
-//! (`render::RENDERS`). Rules: docs/studio.md, "Rendering a video".
+//! (`render::RENDERS`). Both take a video's folder or its slug and refuse any
+//! other folder (`videos::scoped`). Rules: docs/studio.md, "Rendering a
+//! video".
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -10,6 +12,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::studio::render::{self, Finished, Progress, Quality, Report, RENDERS};
+use crate::studio::videos;
 
 /// Display only, never persisted.
 pub const PROGRESS_EVENT: &str = "studio-render-progress";
@@ -65,19 +68,21 @@ struct Plan {
     threads: usize,
 }
 
-/// Render the video in `dir` at `quality` to `<dir>/renders/<quality>.mp4`.
-/// Resolves to the report, or `null` when cancelled; rejects with the
-/// reason a render failed, or when `dir` already has a render running.
+/// Render the video in `dir` (its folder or slug) at `quality` to
+/// `<dir>/renders/<quality>.mp4`. Resolves to the report, or `null` when
+/// cancelled; rejects with the reason a render failed, when `dir` is not a
+/// video, or when it already has a render running.
 #[tauri::command]
 pub async fn studio_render(
     app: AppHandle,
     dir: String,
     quality: Quality,
 ) -> Result<Option<Report>, String> {
-    let running = RENDERS.start(Path::new(&dir), quality)?;
+    let folder = videos::scoped(Path::new(&dir))?;
+    let running = RENDERS.start(&folder, quality)?;
     crate::runtime::blocking::run(move || {
         emit(&app, &dir, Step::Planning { plan: None });
-        let result = render_once(&app, &dir, quality, &running);
+        let result = render_once(&app, &dir, &folder, quality, &running);
         // Freed before the terminal event, so a listener can start the next
         // render as soon as it hears this one end.
         drop(running);
@@ -109,16 +114,18 @@ pub async fn studio_render(
 /// Ask the render of `dir` to stop; false when none runs.
 #[tauri::command]
 pub fn studio_render_cancel(dir: String) -> bool {
-    RENDERS.cancel(Path::new(&dir))
+    videos::scoped(Path::new(&dir)).is_ok_and(|folder| RENDERS.cancel(&folder))
 }
 
 fn emit(app: &AppHandle, dir: &str, step: Step<'_>) {
     app.emit(PROGRESS_EVENT, Event { dir, step }).ok();
 }
 
+/// Render `folder`; `dir` is the name events carry.
 fn render_once(
     app: &AppHandle,
     dir: &str,
+    folder: &Path,
     quality: Quality,
     running: &render::Running,
 ) -> Result<Option<Report>, String> {
@@ -129,59 +136,55 @@ fn render_once(
         threads: None,
         out: None,
         ffmpeg,
+        library: crate::studio::libraries::libraries(false).map_err(|e| e.to_string())?,
     };
     let (mut of, mut scene) = (0, 0);
     let mut last: Option<Instant> = None;
-    let finished = render::render(
-        Path::new(dir),
-        &options,
-        running.cancel_flag(),
-        &mut |p| match p {
-            Progress::Planned {
+    let finished = render::render(folder, &options, running.cancel_flag(), &mut |p| match p {
+        Progress::Planned {
+            segments,
+            cached,
+            frames,
+            threads,
+        } => {
+            let plan = Plan {
                 segments,
                 cached,
                 frames,
                 threads,
-            } => {
-                let plan = Plan {
-                    segments,
-                    cached,
+            };
+            emit(app, dir, Step::Planning { plan: Some(plan) });
+        }
+        Progress::Segment {
+            of: segments,
+            scene: index,
+            ..
+        } => {
+            (of, scene) = (segments, index);
+            last = None;
+        }
+        Progress::Frame {
+            n,
+            frame,
+            frames,
+            fps,
+        } => {
+            if frame == frames || last.is_none_or(|t| t.elapsed() >= EVERY) {
+                last = Some(Instant::now());
+                let step = Step::Rendering {
+                    segment: n,
+                    of,
+                    scene,
+                    frame,
                     frames,
-                    threads,
+                    fps,
                 };
-                emit(app, dir, Step::Planning { plan: Some(plan) });
+                emit(app, dir, step);
             }
-            Progress::Segment {
-                of: segments,
-                scene: index,
-                ..
-            } => {
-                (of, scene) = (segments, index);
-                last = None;
-            }
-            Progress::Frame {
-                n,
-                frame,
-                frames,
-                fps,
-            } => {
-                if frame == frames || last.is_none_or(|t| t.elapsed() >= EVERY) {
-                    last = Some(Instant::now());
-                    let step = Step::Rendering {
-                        segment: n,
-                        of,
-                        scene,
-                        frame,
-                        frames,
-                        fps,
-                    };
-                    emit(app, dir, step);
-                }
-            }
-            Progress::Done(_) => {}
-            Progress::Muxing => emit(app, dir, Step::Muxing),
-        },
-    )
+        }
+        Progress::Done(_) => {}
+        Progress::Muxing => emit(app, dir, Step::Muxing),
+    })
     .map_err(|e| e.to_string())?;
     Ok(match finished {
         Finished::Complete(report) => Some(report),

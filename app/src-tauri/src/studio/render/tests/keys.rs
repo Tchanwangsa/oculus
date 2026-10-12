@@ -68,3 +68,41 @@ fn a_tree_hash_follows_names_and_bytes_and_skips_ds_store() {
     std::fs::rename(dir.join("img/a.png"), dir.join("img/b.png")).unwrap();
     assert_ne!(tree_hash(&dir).unwrap(), two);
 }
+
+/// A video of one scene using `Card`, with `Card` in the project folder, the
+/// subject's library or the global one; the trees of its render.
+#[test]
+fn a_library_component_edit_changes_the_trees_of_the_scenes_that_use_it() {
+    use studio_core::{Library, Project};
+    let root = Scratch::new("render-keys-library");
+    let video = root.join("video");
+    let global = root.join("library");
+    std::fs::create_dir_all(&video).unwrap();
+    std::fs::create_dir_all(global.join("components")).unwrap();
+    let video_json = serde_json::json!({
+        "size": { "width": 64, "height": 36 }, "theme": "default",
+        "scenes": [{ "component": "Card", "hold": 1 }, { "component": "Other", "hold": 1 }],
+    });
+    std::fs::write(video.join("video.json"), video_json.to_string()).unwrap();
+    let tsx = |label: &str| {
+        format!("export const props = {{}};\nexport default () => <Text style={{{{ fontSize: 20 }}}}>{label}</Text>;\n")
+    };
+    std::fs::write(global.join("components/Card.tsx"), tsx("one")).unwrap();
+    std::fs::write(global.join("components/Other.tsx"), tsx("other")).unwrap();
+    let library = Library {
+        global: Some(global.clone()),
+        ..Library::default()
+    };
+    let trees = |library: &Library| {
+        let project = Project::load_with(&video, library).unwrap();
+        Trees::of(&video, &project).unwrap()
+    };
+    let before = trees(&library);
+    assert_eq!(before, trees(&library));
+    std::fs::write(global.join("components/Card.tsx"), tsx("two")).unwrap();
+    assert_ne!(trees(&library).components, before.components);
+    // A component no scene uses is not part of the key.
+    let used = trees(&library).components;
+    std::fs::write(global.join("components/Unused.tsx"), tsx("unused")).unwrap();
+    assert_eq!(trees(&library).components, used);
+}

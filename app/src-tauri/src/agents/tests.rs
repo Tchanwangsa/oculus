@@ -211,7 +211,8 @@ fn stubs_are_written_once_and_then_left_alone() {
             AGENTS_DOC_NAME,
             "oculus-lectures",
             "oculus-library",
-            "oculus-plan"
+            "oculus-plan",
+            "oculus-studio"
         ]
     );
     assert_eq!(
@@ -239,6 +240,106 @@ fn skills_are_rewritten_over_whatever_is_there() {
         .contains("name: oculus-plan"));
 }
 
+/// A skill is a folder: every file it ships lands, and anything else in the
+/// app-owned folder goes.
+#[test]
+fn every_skill_file_lands_and_stale_ones_are_removed() {
+    let root = Scratch::new("agents-skill-files");
+    let studio = skills_dir(&root).join("oculus-studio");
+    std::fs::create_dir_all(studio.join("old")).unwrap();
+    std::fs::write(studio.join("old/notes.md"), "stale").unwrap();
+    std::fs::write(studio.join("retired.md"), "stale").unwrap();
+    std::os::unix::fs::symlink("/nowhere", studio.join("dangling")).unwrap();
+
+    ensure_library_docs(&root).unwrap();
+
+    for skill in SKILLS {
+        let dir = skills_dir(&root).join(skill.name);
+        let mut want: Vec<&str> = skill.files.iter().map(|(f, _)| *f).collect();
+        let mut have: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        want.sort();
+        have.sort();
+        assert_eq!(have, want, "{}", skill.name);
+        for (file, body) in skill.files {
+            assert_eq!(
+                std::fs::read_to_string(dir.join(file)).unwrap(),
+                *body,
+                "{}/{file}",
+                skill.name
+            );
+        }
+    }
+    let studio_files: Vec<&str> = SKILLS
+        .iter()
+        .find(|s| s.name == "oculus-studio")
+        .unwrap()
+        .files
+        .iter()
+        .map(|(f, _)| *f)
+        .collect();
+    assert_eq!(
+        studio_files,
+        [SKILL_DOC_NAME, "reference.md", "studio.d.ts"]
+    );
+}
+
+/// Each CLI indexes a skill by its `SKILL.md` front matter; the name must be
+/// the folder's.
+#[test]
+fn every_skill_opens_with_its_own_name_and_a_description() {
+    for skill in SKILLS {
+        let (file, doc) = skill.files[0];
+        assert_eq!(file, SKILL_DOC_NAME, "{}", skill.name);
+        let front = doc
+            .strip_prefix("---\n")
+            .and_then(|d| d.split_once("\n---\n"))
+            .map(|(f, _)| f)
+            .unwrap_or_else(|| panic!("{}: no front matter", skill.name));
+        assert!(
+            front.lines().any(|l| l == format!("name: {}", skill.name)),
+            "{}",
+            skill.name
+        );
+        assert!(
+            front
+                .lines()
+                .any(|l| l.starts_with("description: ") && l.len() > 40),
+            "{}",
+            skill.name
+        );
+    }
+}
+
+/// opencode finds skills through `skills.paths` in its config, relative to
+/// the `agents/` cwd: every skill's folder must sit under one of them.
+#[test]
+fn opencodes_skill_paths_reach_every_skill() {
+    let root = Scratch::new("agents-skill-opencode");
+    ensure_library_docs(&root).unwrap();
+    let raw = include_str!("../../templates/OPENCODE.template.json");
+    let v: serde_json::Value = serde_json::from_str(raw).unwrap();
+    let paths: Vec<&str> = v["skills"]["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p.as_str().unwrap())
+        .collect();
+    for skill in SKILLS {
+        assert!(
+            paths.iter().any(|p| agents_dir(&root)
+                .join(p)
+                .join(skill.name)
+                .join(SKILL_DOC_NAME)
+                .is_file()),
+            "no skills.paths entry reaches {}",
+            skill.name
+        );
+    }
+}
+
 /// Three CLIs, three discovery paths, one directory.
 #[test]
 fn all_three_clis_reach_the_one_skills_directory() {
@@ -258,9 +359,27 @@ fn all_three_clis_reach_the_one_skills_directory() {
         );
         assert_eq!(
             std::fs::read_to_string(link.join(SKILL_DOC_NAME)).unwrap(),
-            SKILLS[0].1,
+            SKILLS[0].files[0].1,
             "{scanned}: and it resolves to the one copy"
         );
+    }
+
+    // Every skill, every file, through both links.
+    for scanned in SCANNED_SKILL_DIRS {
+        for skill in SKILLS {
+            let link = agents_dir(&root)
+                .join(scanned)
+                .join("skills")
+                .join(skill.name);
+            for (file, body) in skill.files {
+                assert_eq!(
+                    std::fs::read_to_string(link.join(file)).unwrap(),
+                    *body,
+                    "{scanned}/skills/{}/{file}",
+                    skill.name
+                );
+            }
+        }
     }
 
     // opencode takes a config key instead (`harness/providers/opencode/config.rs`).

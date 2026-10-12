@@ -26,6 +26,9 @@ frames and contact sheets, lints, and narrates.
 | The element tree and its style keys | `app/studio-core/src/scene/` |
 | Layout (taffy, parley) and paint (vello_cpu); Path trim and Text reveal | `app/studio-core/src/layout/`, `app/studio-core/src/paint/` (`path/`, `text/`) |
 | Props schemas and their validation | `app/studio-core/src/schema/` |
+| Component and theme libraries: the starter set, seeding, the snapshot write path, promoting a video's own file | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots, `promote.rs`) |
+| Videos in the data directory: `new`, `list`, slug resolution, slugs from titles, the app's scope | `app/src-tauri/src/studio/videos/` (`slug.rs`), `app/src-tauri/src/library/paths/studio.rs` (`studio_dir`, `agent_write_dirs`) |
+| Galleries: each example of a component as a still, and its contact sheet | `app/studio-core/src/gallery/` |
 | Themes and bundled fonts | `app/studio-core/themes/`, `app/studio-core/fonts/`, `app/studio-core/src/theme/`, `app/studio-core/src/fonts/` |
 | Every error and its message | `app/studio-core/src/error.rs` |
 | Fixture videos and golden frames | `app/studio-core/tests/fixtures/`, `app/studio-core/tests/golden/` |
@@ -33,8 +36,11 @@ frames and contact sheets, lints, and narrates.
 | Narrating a video: the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
 | Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
-| Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`render.rs`, `narrate.rs`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
+| The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
+| The playground's commands: `studio_themes`, the component list, source, frame, validated write, history and restore | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
+| The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `render.rs`, `narrate.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -73,7 +79,12 @@ narration/    manifest.json and the clips it names
   whose id has no section is silent and needs a `hold`.
 - `voice` (optional: `model`, `voice`, `speed`) overrides Settings -> Voice
   for this video. studio-core only stores it; the app's narrator reads it.
-- `theme` is a bundled theme's name or a `.json` path relative to the folder.
+- `theme` is a bundled theme's name, a library theme's name (see "Libraries
+  cascade") or a `.json` path relative to the folder.
+- `subject` (optional) is the course the video belongs to: a course code's
+  folder name (letters, digits, `-` and `_`, up to 64 characters), whose
+  library (`<app data>/studio/subjects/<CODE>/`) is read before the global
+  one.
 - `motion` (optional) overrides the theme's transition and motion-blur
   defaults for this video; a scene's `transition` (optional) overrides
   both. See "Transitions" and "Motion blur".
@@ -143,8 +154,9 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
   what came. Defaults are filled in.
 - `token("color")` takes a token *name* (`"accent"`) and hands the component
   its value; any theme section works, dotted ones too (`token("motion.spring")`).
-- `examples` are named prop sets. Lint checks them against the schema; nothing
-  renders them yet.
+- `examples` are named prop sets. Lint checks them against the schema and
+  requires each required prop in every example (see "Lint"); `gallery`
+  renders each one as a still.
 - Motion helpers are prelude globals and pure functions of `t`:
   `interpolate(t, inputs, outputs, { easing, clamp })`, `spring(t, { stiffness,
   damping, mass })` (closed form, so any `t` samples directly), `linear`,
@@ -152,6 +164,143 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
   for hex colours, `clamp`, `lerp`, `counter`, `revealProgress`, `series` and
   `parallel`. The motion components are in "Motion" below; `word` and
   `wordEnd` are in "Narration".
+
+## Videos live in the data directory
+
+Everything Studio keeps is under `<app data>/studio/`
+(`library::paths::studio_dir`): `videos/<slug>/` (one folder per video),
+`library/` (the global library) and `subjects/<CODE>/` (each subject's).
+`courses/` stays read-only to agents, so no library lives there. It is the
+one folder besides `agents/` and the database an agent thread may write
+([harness.md](./harness.md#every-thread-runs-from-agents-and-that-is-the-containment)).
+
+- `oculus studio new <slug> [--subject CODE] [--title T] [--portrait]`
+  (`studio::videos::create_in`) makes `videos/<slug>/`: `video.json` at
+  1920x1080 (1080x1920 with `--portrait`), 30 fps, theme `default`, the
+  subject, and one silent `TitleCard` scene (`id` `title`, 4 s) whose title
+  is `--title` or the slug with spaces; an empty `script.md`; and empty
+  `components/` and `assets/`. A subject's library holding
+  `themes/default.json` gives its videos its own look through the cascade,
+  with no setting. A slug is lowercase letters, digits and `-`, at most 64
+  characters; one that exists is refused and left alone. It prints the
+  folder (`--json`: `{dir, slug}`).
+- `oculus studio list [--subject CODE]` prints each video's slug, subject,
+  scene count, whether `narration/manifest.json` exists (`narrated`; `lint`
+  says whether it is current), the files in `renders/` and the newest change
+  to video.json, script.md or `components/`. A folder whose video.json does
+  not parse is listed with the reason. `--json` gives `[{slug, dir,
+  subject, scenes, narrated, renders, modified, problem}]`.
+- Every command that takes a video folder (`frame`, `strip`, `lint`,
+  `gallery`, `components list|show|promote`, `themes promote`, `render`,
+  `narrate`) also takes a bare slug (`studio::videos::resolve`): a path
+  that exists is used as given, otherwise a slug names `videos/<slug>/`, and
+  anything else fails naming both places.
+- The app's commands take a slug and reach only a video (`videos::scoped_in`,
+  `video_in`): a bare slug that names a folder in `videos/` wins over a path
+  of that name, and a path must, once symlinks are followed, be a folder
+  directly inside `videos/`. `videos/`, `components/` and any folder
+  elsewhere are refused ("is not a video").
+- A title makes a slug (`slug_from_title`): ASCII letters and digits
+  lowercased, any other run one `-`, at most 56 characters (room for a
+  suffix), `untitled` when none is left. `unique_slug` appends `-2`, `-3`...
+  until no folder has the name.
+- video.json has no title field. The Videos list and the detail call a video
+  by its slug spelled out (`title_of`: `gradient-descent` -> `Gradient
+  descent`); the scaffold's `TitleCard` carries the title the student typed,
+  and an agent may rewrite it.
+
+## Agent flow: a chat agent makes a video with the `oculus-studio` skill
+
+A video is made in an ordinary Chat thread by the student's own CLI agent,
+through the `oculus` CLI and its file tools; there is no Studio page yet.
+The `oculus-studio` skill ([harness.md](./harness.md#the-brief-is-appended-except-on-opencode))
+is the whole brief, and `AGENTS.md` only points at it. Its `SKILL.md` is the
+loop, as a checklist the agent copies: read the lecture (through the
+`oculus-lectures` skill), `studio new`, read `reference.md`, write
+`video.json`, `script.md` and any component of the video's own, `gallery`
+each new component, `lint --json` until only stale narration is left,
+`narrate`, lint again, look at `frame` and `strip` PNGs with the agent's
+image-reading tool, and `render` a draft and then `--final`; `promote` only
+a component the student wants kept; the story rules (write the argument
+before the scenes, every claim with its reason, each scene's narration
+opening on a link to the last, numbers given meaning, terms defined in
+passing, an example followed by its general rule, the payoff shown, the
+end answering the opening question, and phrasing the voice cannot fuse
+across words: "R S A rests" is heard as "RS arrests"); and the taste
+rules (one idea per scene,
+words on screen summarise the narration, the frame filled with the key
+figure at display size, something on screen within a second, motion cued
+with `word()`, one shared key for consecutive headings, tokens over
+literals). When `narrate` fails for want of a
+voice or the aligner, the agent stops and tells the student what to set in
+Settings -> Voice; it never downloads the aligner. `reference.md` is this
+page's authoring rules distilled for an agent (video.json, spoken form, the
+component contract, elements and style keys, motion, cues, transitions,
+each lint kind and what to do about it, and the commands' outputs).
+`studio.d.ts` types every prelude global; `src/host/tests/globals.rs` lists
+the globals a fresh sandbox context gains from the prelude (QuickJS's own
+`Object.getOwnPropertyNames(globalThis)` before and after, less the host's
+`__studio*` entry points) and fails when they differ from the file's
+top-level `declare`s, either way. The app ships the file with
+`include_str!`.
+
+## Libraries cascade: project, subject, global
+
+A video's components and themes resolve through up to three libraries, and
+the first hit wins:
+
+| Level | Components | Themes |
+| --- | --- | --- |
+| `project` | the video folder's `components/` | (a `.json` path in the folder) |
+| `subject <CODE>` | `<app data>/studio/subjects/<CODE>/components/` | `<app data>/studio/subjects/<CODE>/themes/` |
+| `global` | `<app data>/studio/library/components/` | `<app data>/studio/library/themes/` |
+
+A component resolves by name (`CascadeComponents`, in the order above). A
+theme name resolves through the subject's library, then the global one, then
+the bundled set. A subject's library is read only when the libraries are
+given (`Library::subjects`); every app and CLI path that loads a video
+gives them (`studio::libraries::open`, `libraries`), narrate included, and
+the `Project::load` API does not. `gallery` takes `--subject` and `--theme`,
+and `components list` and `show` take `--subject`, which replace
+video.json's for that load. A component that no level has is an error
+listing every name in every level.
+
+The starter set (`app/studio-core/library/`) is compiled into the crate: the
+components `TitleCard`, `Steps`, `BigNumber`, `LowerThird` and `SplitShell`,
+and the theme `warm` beside `default`. Each takes its colours and fonts from
+the theme and has at least two examples. `Formula` waits for the maths
+primitive (stage 8). `tests/starter.rs` lints the set in both themes, and
+`tests/gallery_golden.rs` pins every example as `starter-<Component>-<example>.png`,
+laid out at 1920x1080 and drawn at half scale. A load copies each starter
+file the global library has never been offered, then lists it in the
+library's `.seeded`; a listed file is never copied again, so a deleted
+starter stays deleted, while one added to a later build still arrives. An
+existing file is never replaced, so an edit is the user's. `oculus studio
+components seed --reset` writes the starter text over every file that
+differs or is missing. Every write
+to a library file first copies the previous text to `.history/` beside it
+(`<Name>.<unix-ms>.tsx` or `.json`, the millisecond moved on past any
+snapshot already there); nothing prunes `.history`. `oculus studio
+components list <DIR>` prints each name with the level it resolves from, and
+`components show <DIR> <Name>` its source.
+
+A library grows through a video: a component is written and tuned in the
+video's own `components/`, where it wins the cascade, checked with
+`gallery` and `strip`, then copied into a library with `oculus studio
+components promote <DIR> <Name> --to global|subject`
+(`studio::libraries::promote_component`). Only a component the video itself
+has (level `project`) can be promoted; `--to subject` writes to the subject
+in video.json and fails when there is none. `oculus studio themes promote
+<DIR> <FILE> --to global|subject` does the same for a theme file inside the
+video (a `.json` path such as `themes/chalk.json`, checked to load as a
+theme) as `themes/<stem>.json`, the stem being lowercase letters, digits
+and `-`, so any video can name it. Both go through the snapshotting write,
+write nothing when the library already has the same text, and leave the
+video's copy in place.
+
+The render segment key covers the source of every component a scene uses, as
+the cascade resolves it, so an edit to a library component re-renders the
+scenes that use it.
 
 ## Narration sets a scene's length and cues its elements
 
@@ -200,13 +349,18 @@ We follow the *gradient* downhill, one small step at a time.
   at which the nth occurrence of `phrase` starts, and `wordEnd(phrase, nth
   = 1)` when its last word ends, so `<Enter at={word("gradient")}>` enters
   as it is said. Words match lowercased with only letters, digits and
-  apostrophes kept; a phrase is consecutive words. A phrase that is not
-  said, an `nth` past the last occurrence and a call in a silent scene
-  throw at the call's TSX line, with the closest phrase that is said:
-  ``Steps.tsx:12:20: `word("gradiant")`: no such word in scene `steps`;
-  closest: gradient``. Each call gets its own scene's words (`SceneCall::
-  words`, from `Project::word_cues`), so in a transition the outgoing scene
-  cues to its words and the incoming one to its own.
+  apostrophes kept. A hyphen or dash splits a word into parts, in the phrase
+  and the narration alike, so `word("ninety one")` and `word("ninety-one")`
+  both find the said `ninety-one`; a phrase is consecutive parts that start
+  and end on whole said words (`word("one")` does not find it), since only
+  words have times. A phrase that is not said, an `nth` past the last
+  occurrence and a call in a silent scene throw at the call's TSX line. A
+  phrase not said names the said run of words nearest it by edit distance,
+  however far, spelt with its hyphens (`suggest::nearest`): ``Steps.tsx:12:20:
+  `word("gradiant")`: no such word in scene `steps`; closest: gradient``.
+  Each call gets its own scene's words (`SceneCall::words`, from
+  `Project::word_cues`), so in a transition the outgoing scene cues to its
+  words and the incoming one to its own.
 
 ## Narration timing is forced alignment on the CPU
 
@@ -458,10 +612,15 @@ carries the element's TSX line.
   `revealProgress(t, at, dur, easing?)` feeds `progress`.
 - `<Arrow points curve progress head stroke>` strokes through `points`
   (frame px; `curve` 0 is straight segments, otherwise a Catmull-Rom curve)
-  up to `progress`, and fades and grows a head (`head` px, default 4.5 ×
-  the stroke width, 0 for none) in over the last 15%. It is two absolute,
-  full-frame Paths with the frame as viewBox, so its parent must fill the
-  frame.
+  up to `progress`, with a head (`head` px, default 4.5 × the stroke width,
+  0 for none) riding the drawn end along the shaft's tangent there, so the
+  arrow reads as being drawn. The shaft ends inside the head, a fixed
+  pull-back behind its tip, so the round cap never pokes past it; the head
+  grows in from nothing over the first head length of shaft. The head is
+  placed by `__studioPathEnd`, a native that measures arc length as `trim`
+  does (`paint/path/trim.rs`), so the two cannot drift apart. It is two
+  absolute, full-frame Paths with the frame as viewBox, so its parent must
+  fill the frame.
 
 ## Transitions play over the incoming scene's head
 
@@ -736,6 +895,44 @@ with no `hold`) is reported and not rendered. It collects every problem
 with its scene, scene id and component instead of stopping at the first;
 an error is reported once even if several renders hit it.
 
+Lint also reads the source and declared props of each component a scene
+uses (`project/lint/tokens.rs`, `project/lint/props.rs`). Each problem is an
+error at the literal's `file.tsx:line:col`:
+
+- **Colour literals.** `#rgb`, `#rrggbb` or `#rrggbbaa`, `rgb(`, `rgba(`,
+  `hsl(`, `oklch(` and the other functional notations in any string, and a
+  whole string that is a CSS colour name where a colour goes
+  (`project/lint/tokens/places.rs`): the value of a `color`, `fill`,
+  `stroke`, `background` or `stops` key, or of any key ending in `Color`,
+  whether an object key (`color: "red"`) or a JSX attribute (`fill="red"`),
+  including the arrays, calls and ternaries inside it; or the value of a
+  key named after a `token("color")` prop, unless the theme has a colour by
+  that name. Elsewhere a colour name is a word on screen (`rightValue:
+  "purple"`) and passes. The argument of `token(...)`, and a `.default(...)`
+  chained on it, may hold a name, not a literal; the props check rejects a
+  default the theme has no token for. The message names the theme
+  colour to use and the three nearest by RGB distance (all colour names for a
+  functional or named notation): ``colour `#5e6ad3` is a literal; use
+  theme.color.accent (nearest: accent, accentStrong, muted)``.
+- **Font families.** A bundled family's name as a whole string, or any string
+  after `fontFamily:`: ``font family `Manrope` is a literal; use
+  theme.font.heading``.
+- **Style numbers.** A number that is a direct value of a `style` object, or
+  an element of an array there (`padding: [0, 16]`), and equals a theme
+  `space` or `radius` entry: ``style value 24 equals theme.space.m; use
+  theme.space.m``. Space is searched before radius, so 16 names `space.s`
+  when `radius.m` is also 16. Numbers inside nested objects (`shadow`,
+  `border`, `fill`), negative numbers and every other number are allowed.
+
+The check reads the TSX with a scanner, not a parser: comments are skipped,
+strings and template literals are read as strings (a literal inside a
+template's `${...}` is not checked), and JSX text is read token by token.
+
+- **Required props.** A prop with no `.default()` and not `.optional()` must
+  be set in every `examples` entry: ``example `short` omits required prop
+  `note`, which has no default``. A component with required props and no
+  `examples` is reported once.
+
 For a narrated video lint also reports, each naming the scene id:
 
 - a `script.md` section no scene matches (kind `script`, with its line);
@@ -796,6 +993,11 @@ with the `Narration` error before any frame renders.
   per worker; the calling thread takes them in order and writes each to the
   current segment's ffmpeg, one process per segment. The earliest failing
   frame stops the render with `StudioError::Frame` (its time and scene).
+  `--threads` bounds only these renderers. The encoder runs beside them on
+  its own threads: `final`'s x264 always on 8 (see "Two qualities"), so a
+  `--final --threads 3` render was measured at 553% CPU. The fixed count
+  keeps x264's memory known and its output, and so the segment cache, the
+  same at any `--threads`.
 - **Joining.** The segments are joined by the concat demuxer as a stream
   copy (`-f concat -safe 0 -c:v copy`, absolute paths in
   `.cache/concat-<quality>.txt`). x264's B-frames do not drop or repeat a
@@ -826,7 +1028,8 @@ with the `Narration` error before any frame renders.
   blocking thread, finding ffmpeg like the CLI does plus the app's
   resources. It resolves to the report (`--json`'s `report`), or `null`
   when cancelled; it rejects with the failure's message. One render per
-  folder: `render::RENDERS` maps each canonical folder to its quality and
+  folder (a slug or a video's folder; any other folder is refused, see "The
+  Studio page's commands"): `render::RENDERS` maps each canonical folder to its quality and
   an `Arc<AtomicBool>` cancel flag, and a second start for the same folder
   is refused at once ("a draft render of <dir> is already running"), with
   no event. A guard frees the folder however the render ends, before the
@@ -851,6 +1054,144 @@ with the `Narration` error before any frame renders.
   `oculus studio frame` draws at that frame's time (41 to 48 dB PSNR, 23 dB
   against its neighbour). The scenes were mostly still; motion-blurred
   motion costs up to 32 sub-frames a frame.
+
+## The Studio page's commands
+
+`studio::commands::videos` is what the Studio page calls
+(`app/src/lib/studio/videos.ts` is the typed wrapper; JSON is camelCase).
+Each takes a slug, resolves it with `videos::video_in`, and returns what is
+on disk now; nothing is cached but thumbnails.
+
+| Command | Does |
+| --- | --- |
+| `studio_videos(subject?)` | `videos::list_in` plus `title` and `threadId`, newest change first (a video whose video.json does not load sorts last and carries `problem`) |
+| `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to `default`, which a subject's `themes/default.json` replaces through the cascade; `voice` is video.json's `voice` block (`{model?, voice?, speed?}`). The scaffold is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
+| `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `scenes` and `renders` |
+| `studio_frame(slug, at, width)` | a PNG `width` px wide (1 to 4096), the layout of the full-size frame, as bytes through `tauri::ipc::Response` |
+| `studio_thumbnail(slug)` | the video's cached thumbnail PNG |
+| `studio_render`, `studio_render_cancel` | see "Rendering a video"; they take a slug or a video's folder and refuse any other |
+
+- **The detail's voice** is video.json's `voice.voice`, else Settings ->
+  Voice's voice, else null. **Scenes** are `{id, component, start, duration,
+  text}`; `text` is the scene's `## id` section of `script.md` (null when it
+  has none). `start` and `duration` are seconds from `Project::timeline`, so
+  they are known once every scene has a length (a hold, or narration that
+  matches the script) and null for every scene until then, stale narration
+  included. **Renders** are the `draft.mp4` and `final.mp4` that exist, with
+  their absolute path and mtime in Unix seconds.
+- **A frame is of the video as narrated.** `at` is `{scene, t}` (seconds into
+  a scene, counting from 0) or `{global}`. Stale or missing narration makes
+  `Renderer::new` fail, and the command rejects with studio-core's message
+  (``run `oculus studio narrate` ``); it never falls back to a silent frame.
+- **A render plays from the media server.** `lectures/media.rs` serves
+  files under `studio/videos/` (Range requests, so a seek works), and the
+  asset protocol's scope in `tauri.conf.json` names `$APPDATA/studio/videos/**`;
+  the page reaches `renders/draft.mp4` with `mediaSrc(path)`.
+- **Stills share render slots**, half the cores (`slot.rs`, as the PDF
+  viewer's `on_render_slot`), so a page of thumbnails queues without holding
+  threads, and each renders on the blocking pool.
+- **Thumbnails** are `<video>/.cache/thumbs/<key>.png`, 640 px on the long
+  side. The key is `render::still_key` over scene 0 (its fingerprint, the
+  components it can use, `assets/`, the build) and the shot, so an edit to
+  the scene, a component or an asset is a new file and writing it deletes
+  the others. A narrated video (every scene has a length) shows scene 0 one
+  second in. One that is not draws scene 0 silent from a copy of the project
+  without `script.md` and manifest, every scene given its hold (3 s if it
+  has none), at the end of its hold. A scene that cues `word()` cannot draw
+  silent, so its video has no thumbnail until it is narrated: the command
+  rejects with ``no thumbnail for `slug`: `` and the reason, and the page
+  shows a placeholder. `renders/` is never written.
+
+### A video has a thread
+
+A video made in the app is made by an ordinary harness thread, so it is also
+in Chat. `studio_videos(slug PK, thread_id, length_secs, created_at)`
+(migration 45) links them; `thread_id` references `harness_threads` `ON
+DELETE SET NULL` (deleting the thread keeps the video), is unique, and the
+row is written only by `db::store::link_studio_video`. It lives in the
+database, not in video.json, which is `deny_unknown_fields` and writable by
+the agent.
+
+`harness_send` takes `SendOptions.studio` (`{slug, lengthSecs?}`; the TS
+`format` is not read, since the brief takes the format from video.json's
+size). When the send creates the thread it checks the folder exists
+(`video_in`), creates the thread, then links it; a link that fails deletes
+the thread again. Every send reads the link back (`StudioBrief::read`) and
+the thread's brief gets a "The video being made" section, rebuilt like the
+lecture's: the folder (absolute) and that the app made it, the format
+(landscape or portrait, from the size), the theme, the subject and its
+library, the length target, and the instruction to use this skill, lint and
+narrate, render a draft and say it is ready, and ask before the final. The
+agent is told not to run `oculus studio new`. See
+[harness.md](./harness.md#a-studio-thread-carries-its-video).
+
+### The playground's commands
+
+`studio::commands::components` and `studio::commands::themes` serve the
+Components page and the style chip (`app/src/lib/studio/components.ts` and
+`themes.ts` are the typed wrappers; JSON is camelCase). They read and write
+only the two libraries, `<data>/studio/library/` and
+`<data>/studio/subjects/<CODE>/`: a command takes a component name, a level
+(`subject` or `global`) and a subject code, never a path
+(`commands/levels.rs`), and a name that is not a PascalCase identifier (for a
+theme, lowercase letters, digits and `-`) or a subject that is not a course
+code's folder name is refused. Without a subject only the global library is
+read. Each call loads the global library first, so the starter set is
+there. Nothing is cached.
+
+| Command | Does |
+| --- | --- |
+| `studio_themes(subject?)` | one row per theme name: `{name, level, swatch, tokens, problem}` |
+| `studio_components(subject?)` | one row per component name: `{name, level, kind, props, examples, problem}` |
+| `studio_component_source(name, subject?)` | `{level, text}` from the nearest level that has it |
+| `studio_component_frame(name, subject?, theme, props?, example?, t, width, duration?)` | a PNG `width` px wide (1 to 4096), as bytes through `tauri::ipc::Response` |
+| `studio_component_write(name, level, subject?, text)` | writes once the text loads; returns `{level, text}` |
+| `studio_component_history(name, level, subject?)` | `[{id, savedAt}]`, newest first |
+| `studio_component_restore(name, level, subject?, id)` | writes snapshot `id` back; returns `{level, text}` |
+
+- **Themes** are the bundled names, `themes/*.json` in the global library and
+  in the subject's, resolved as a video resolves its theme: the subject's
+  over the global one over the bundled one, one row per name with the level
+  that won (`bundled`, `global`, `subject`), `default` first, then by name.
+  `tokens` is the parsed theme file and `swatch` up to four CSS colours from
+  its `color` tokens in the order `bg`, `text`, `accent`, `surface`. A file
+  that does not parse is a row with `problem` (the `Theme::parse` message),
+  no `tokens` and an empty `swatch`, not a failed call.
+- **Components** are read through the cascade without a video: the subject's
+  `components/` over the global one, `level` being the one that won. Every
+  one is loaded in a single engine for its `props` (the builders' own JSON
+  in declaration order, each prop `{name, kind, optional, default?}` with
+  `of` for a list, `values` for `oneOf` and `token` for a token) and its
+  `examples` (name to props, in declaration order); a component that does
+  not load is a row with `problem`, an empty `props` and no examples.
+  `PropSpec` serialises to that JSON in studio-core. `kind` is `shell` when
+  the name ends in `Shell`, else `component`: nothing in a component's code
+  says which, so the name does.
+- **A frame** draws the component alone in a 1920x1080 frame scaled to
+  `width`, in the theme `theme` names (resolved through the same levels).
+  `t` is seconds into the component and must be in `[0, duration)`;
+  `duration` is what the component sees as `ctx.duration` (default 4 s).
+  The props are `props` if given, else the example `example` names, else the
+  first example, else none. They are checked against the schema, so a wrong
+  one is refused with the engine's sentence and nothing is drawn as a guess;
+  so is a theme that does not parse or an error in the TSX. There is no
+  narration, so `word()` finds no cues. It takes a render slot
+  (`videos/slot.rs`) and builds one `Engine` for the call, since QuickJS is
+  not Send: a 480 px frame took about 3 ms and a 1920 px one about 6 ms
+  (a starter component, test build).
+- **A write** loads the text as the component first (a fresh engine; at most
+  512 KB), so a text with a syntax error, no default export or a bad
+  `props` is refused with the engine's message and the file, its history and
+  the library are untouched. Then it goes through `studio_core::write_library`,
+  which copies the text it replaces to `<library>/.history/` (see
+  "Libraries cascade"). A subject write creates the subject's version of a
+  global component; a global write may create a new component. The same text
+  again writes nothing.
+- **History and restore.** `history` lists `<Name>.<unix-ms>.tsx` files in
+  the level's `.history/`; `id` is the milliseconds as a string and `savedAt`
+  the same number. `restore` takes an id from that list, loads the old text
+  (it must still load) and writes it through the same path, so the text it
+  replaces is snapshotted as the newest entry and an Undo can be undone.
 
 ## `oculus studio` renders and lints from the terminal
 
@@ -877,7 +1218,7 @@ with the `Narration` error before any frame renders.
   studio aligner` manages the aligner model. See "Narration is made by
   `oculus studio narrate`".
 - `oculus studio render <DIR>` writes an mp4 (`--draft`, the default, or
-  `--final`; `-o`, `--threads`). It prints the plan, then per scene
+  `--final`; `-o`, `--threads` for the frame renderers, not the encoder). It prints the plan, then per scene
   `rendered` with its frames, seconds and frames a second, or `cached`,
   then the path and a summary; `--json` gives `{dir, report: {path,
   quality, width, height, fps, frames, duration, audio, threads, segments:
@@ -888,7 +1229,51 @@ with the `Narration` error before any frame renders.
   component, example, kind, message, loc}`; `scene` and `component` are
   null for a script section no scene matches.
 
+- `oculus studio gallery <DIR> <Component>` renders each example of a
+  component as `<DIR>/out/gallery/<Component>-<example>.png` (`--out`),
+  at `--t` seconds of the component's scene (default: the middle of its
+  silent scene's hold, or 3 s of a 6 s preview), and with `--sheet` a
+  contact sheet `<Component>.png` (`--cols`). It never reads the narration,
+  so it runs before `narrate`. `--subject` and `--theme` replace video.json's
+  for the load; `--threads` sets the render threads. See "Galleries render
+  every example as a still".
+- `oculus studio components list <DIR>` and `components show <DIR>
+  <Component>` read through the cascade (see "Libraries cascade"),
+  `components promote` and `themes promote` copy a video's own file into a
+  library, and `components seed [--reset]` copies the starter set into the
+  global library.
+- `oculus studio new` and `list` make and list the videos in the data
+  directory, and every command above takes a video's slug in place of its
+  folder (see "Videos live in the data directory").
+
 Flags are in [cli-reference.md](./cli-reference.md#oculus-studio).
+
+## Galleries render every example as a still
+
+`gallery::render(project, component, t, options)` renders each entry of the
+component's `examples` as one still, in declaration order. Each still is the
+component called with that example's props at one moment: `t`, by default the
+middle of the first scene that uses the component when that scene is silent
+with a `hold` (its length is `ctx.duration`), else the middle of a 6 s
+preview (`gallery::PREVIEW`), long enough for entrances on fixed fallback
+times to have settled. An explicit `t` must lie inside that length.
+
+A gallery reads neither the narration nor the timeline: a narrated scene's
+length would need its narration, and a stale scene elsewhere in the video
+does not concern the component. So it runs before `narrate`, and the CLI
+loads the video with `Project::load_unnarrated_with`
+(`studio::libraries::open_unnarrated`), so a missing or unreadable manifest
+does not stop it. `word()` and `wordEnd()` in a gallery throw ``a gallery
+renders without narration, so there are no words to cue; take the phrases
+in an optional `cues` prop, …`` (`WordCues::unavailable`). An example is
+checked against the props schema when it renders, and a failure names the
+example.
+
+Examples render in parallel, one engine per thread, at most one engine per
+example and within the strip's 2 GiB budget. Each still is put back at its
+declaration's index, so one thread and many give the same bytes
+(`tests/gallery_golden.rs`). `Gallery::write_sheet` tiles the stills, two
+or more a row, labelled with their example names.
 
 ## Golden frames pin the pixels
 
@@ -913,7 +1298,8 @@ counts, which edits move which scene fingerprints, and (the `random`
 fixture) that an id'd scene using `Math.random` keeps its fingerprint and
 its exact pixels when moved behind the same scene.
 `tests/narration.rs` covers scene lengths, stale and missing narration, the
-load errors and `word`/`wordEnd`; the `narrated` fixture (a hand-written
+load errors, `word`/`wordEnd` (hyphenated words, and the nearest phrase on
+every miss) and a gallery of a narrated video with no manifest; the `narrated` fixture (a hand-written
 manifest, no audio) pins a card entering at its word. In the app crate, `cargo test --lib studio::` covers the TTS client
 against a loopback fake server (WAV, empty, non-WAV, silent, 404, 429),
 the `/v1/models` listing (parsing, 404, non-JSON, unreachable), the Settings
@@ -924,6 +1310,9 @@ the voice resolution, the cache key and `narrate` with a stubbed aligner
 tree hashes, the audio placement, the reorder buffer and pruning, and,
 through the real ffmpeg (skipped without one), the join and cache check
 above, a narrated fixture's audio onset, cancel and a failing frame.
+
+`tests/gallery_golden.rs` pins the stills of the `gallery` fixture's examples
+and checks that their pixels do not depend on the thread count.
 
 From `app/studio-core`: `cargo test`, `cargo clippy --all-targets -- -D
 warnings`, `cargo fmt`. CI runs these in the `studio-core` job on macOS.

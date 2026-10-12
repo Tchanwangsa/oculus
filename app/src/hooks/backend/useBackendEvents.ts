@@ -5,6 +5,7 @@ import { useEmbedEvents } from "./useEmbedEvents";
 import { useHarnessEvents } from "./useHarnessEvents";
 import { useParseEvents } from "./useParseEvents";
 import { useScrapeEvents } from "./useScrapeEvents";
+import { useStudioEvents } from "./useStudioEvents";
 
 /**
  * The one bridge from backend Tauri events into the global stores and the DB.
@@ -21,4 +22,5 @@ export function useBackendEvents() {
   useScrapeEvents();
   useParseEvents();
   useEmbedEvents();
+  useStudioEvents();
 }

@@ -15,13 +15,15 @@ mod script;
 mod timeline;
 mod video;
 
-pub use components::{ComponentSource, FolderComponents};
+pub(crate) use components::valid_name;
+pub use components::{CascadeComponents, ComponentSource, FolderComponents};
 pub use lint::{LintIssue, LintReport};
 pub use narration::{
     LOW_CONFIDENCE, MANIFEST_PATH, Manifest, ManifestGap, ManifestScene, ManifestWord, WordCues,
 };
 pub use script::{Script, ScriptSection};
 pub use timeline::Timeline;
+pub use video::valid_subject;
 pub use video::{FRAME_RATES, SceneSpec, Video, Voice};
 
 pub(crate) use scenes::Staged;
@@ -34,12 +36,29 @@ use crate::transition::{BlurMode, Transition, TransitionError, blur_mode, morph_
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// What a load looks at beyond the video's folder. `global` is the global
+/// library (`studio/library/`) and `subjects` the folder holding each
+/// subject's library as `<code>/`; a subject's library is read only when
+/// both it and `subjects` are given. `subject` and `theme`, when set, replace
+/// video.json's for this load (the CLI's `--subject` and `--theme`). Themes
+/// and components resolve through the subject's library, then the global
+/// one, then (for themes) the bundled set.
+#[derive(Clone, Debug, Default)]
+pub struct Library {
+    pub global: Option<PathBuf>,
+    pub subjects: Option<PathBuf>,
+    pub subject: Option<String>,
+    pub theme: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct Project {
     pub dir: PathBuf,
     pub video: Video,
     pub theme: Theme,
-    pub components: Arc<dyn ComponentSource>,
+    /// The cascade over the project's `components/`, the subject's library
+    /// and the global one, in that order.
+    pub components: Arc<CascadeComponents>,
     /// `script.md`, when the video is narrated.
     pub script: Option<Script>,
     /// `narration/manifest.json`, when it exists.
@@ -47,8 +66,14 @@ pub struct Project {
 }
 
 impl Project {
+    /// The video alone: its own `components/` and the bundled themes.
     pub fn load(dir: impl AsRef<Path>) -> Result<Project> {
-        let mut project = Project::load_unnarrated(dir)?;
+        Project::load_with(dir, &Library::default())
+    }
+
+    /// [`Project::load`] over `library`'s subject and global libraries.
+    pub fn load_with(dir: impl AsRef<Path>, library: &Library) -> Result<Project> {
+        let mut project = Project::load_unnarrated_with(dir, library)?;
         project.manifest = Manifest::read(&project.dir)?;
         Ok(project)
     }
@@ -57,6 +82,10 @@ impl Project {
     /// (`manifest` is `None`): for the narrator, which rewrites a manifest
     /// this build cannot read instead of failing on it.
     pub fn load_unnarrated(dir: impl AsRef<Path>) -> Result<Project> {
+        Project::load_unnarrated_with(dir, &Library::default())
+    }
+
+    pub fn load_unnarrated_with(dir: impl AsRef<Path>, library: &Library) -> Result<Project> {
         let dir = dir.as_ref().to_path_buf();
         let path = dir.join("video.json");
         let json = std::fs::read_to_string(&path).map_err(|e| StudioError::io(&path, e))?;
@@ -68,17 +97,42 @@ impl Project {
                 path: path.clone(),
                 message,
             })?;
-        let theme = if video.theme.ends_with(".json") || video.theme.contains('/') {
-            Theme::from_file(&dir.join(&video.theme))?
-        } else {
-            Theme::bundled(&video.theme)?
+        let subject = library.subject.clone().or_else(|| video.subject.clone());
+        if let Some(s) = &subject
+            && !valid_subject(s)
+        {
+            return Err(StudioError::Project {
+                path: path.clone(),
+                message: format!("subject `{s}` must be a course code's folder name"),
+            });
+        }
+        let subject_dir = match (&subject, &library.subjects) {
+            (Some(s), Some(subjects)) => Some(subjects.join(s)),
+            _ => None,
         };
-        let components = Arc::new(FolderComponents::new(dir.join("components")));
+        let name = library.theme.as_deref().unwrap_or(&video.theme);
+        let theme = resolve_theme(&dir, name, subject_dir.as_deref(), library)?;
+        let mut sources: Vec<(String, Arc<dyn ComponentSource>)> = vec![(
+            "project".to_owned(),
+            Arc::new(FolderComponents::new(dir.join("components"))),
+        )];
+        if let (Some(s), Some(sub)) = (&subject, &subject_dir) {
+            sources.push((
+                format!("subject {s}"),
+                Arc::new(FolderComponents::new(sub.join("components"))),
+            ));
+        }
+        if let Some(global) = &library.global {
+            sources.push((
+                "global".to_owned(),
+                Arc::new(FolderComponents::new(global.join("components"))),
+            ));
+        }
         Ok(Project {
             dir,
             video,
             theme,
-            components,
+            components: Arc::new(CascadeComponents::new(sources)),
             script,
             manifest: None,
         })
@@ -116,6 +170,30 @@ impl Project {
             .map(|(i, s)| resolve(i, s.transition.as_ref(), &self.video.motion, &self.theme))
             .collect()
     }
+}
+
+/// A theme name or a `.json` path. A path is relative to the video; a name
+/// is looked up as `themes/<name>.json` in the subject's library, then the
+/// global one, then the bundled set.
+fn resolve_theme(
+    dir: &Path,
+    name: &str,
+    subject_dir: Option<&Path>,
+    library: &Library,
+) -> Result<Theme> {
+    if name.ends_with(".json") || name.contains('/') {
+        return Theme::from_file(&dir.join(name));
+    }
+    for root in [subject_dir, library.global.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        let file = root.join("themes").join(format!("{name}.json"));
+        if file.try_exists().map_err(|e| StudioError::io(&file, e))? {
+            return Theme::from_file(&file);
+        }
+    }
+    Theme::bundled(name)
 }
 
 /// `<dir>/script.md`, parsed, when it exists.

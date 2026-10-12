@@ -86,7 +86,7 @@ pub(crate) enum Command {
         action: LectureAction,
     },
     Transcribe(TranscribeArgs),
-    /// Render, check and narrate Studio videos: TSX scenes drawn frame by frame
+    /// Make, render, check and narrate Studio videos: TSX scenes drawn frame by frame
     Studio {
         #[command(subcommand)]
         action: StudioAction,

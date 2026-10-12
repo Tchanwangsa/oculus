@@ -30,8 +30,10 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Model picker and its catalogue hook | `app/src/components/harness/composer/ModelPicker.tsx`, `app/src/hooks/agents/useProviderModels.ts` |
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/integrations/OpencodePage.tsx`, `app/src/components/settings/agents/opencode/`, `app/src/components/settings/agents/OpencodeConnectDialog.tsx`, `app/src/lib/harness/opencodeCatalogue.ts` |
 | Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db/jobModels.ts`, `app/src/components/settings/jobs/`, `app/src/hooks/agents/useJobAudit.ts` |
+| Subagents (Studio's research and scene helpers) | `app/src-tauri/src/harness/studio_agents.rs`, `app/src-tauri/templates/STUDIO_*.template.md`, `oculus studio agents` (`app/src-tauri/src/bin/oculus/commands/studio/agents.rs`) |
 | One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends | `app/src-tauri/src/harness/manager/one_off.rs`, `app/src-tauri/src/harness/app/suggest.rs`, `app/src-tauri/src/harness/suggest/`, `app/src-tauri/src/lectures/lecture_end/` |
 | `@` menu and mention input | `app/src/components/harness/mentions/useMentionMenu.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
+| Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
 | Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/agents/useAttachments.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
@@ -63,6 +65,10 @@ persisted the same way. `classify` in `event/classify.rs` is the one tool table.
   writes every event to `harness_threads`/`harness_items`, then emits
   `harness-event` with the row id — a tool's finish never overtakes its start,
   and a reload loses nothing.
+- **Nothing survives a restart as running.** `harness::store::reconcile` runs
+  at startup: threads left `running` go `idle`, and tool rows whose `meta.ok`
+  is still null are closed as failed with "the session ended before this
+  finished" — otherwise the row draws as running forever.
 - **Settings storage is shared.** Job selections, rate limits and Antigravity
   approvals use `db::store::setting` / `db::store::set_setting`; each caller owns its
   JSON shape and fallback policy.
@@ -80,12 +86,13 @@ A thread rooted at the library writes straight into `courses/` under
 `acceptEdits`. From `agents/`, each CLI refuses other writes its own way; the
 protected paths are one list in `protected.rs`: the library folders, the root files by pattern (the vault and its lock and temp files among them, so an agent cannot delete or truncate the sealed sessions) and the workspace folders. agy names the files instead.
 
-- **Claude**: its sandbox with the cwd as the only write root, `--add-dir` for
+- **Claude**: its sandbox with the cwd as the write root (plus the two holes
+  below), `--add-dir` for
   reads (without it `ls ../courses` is refused), `Edit` denies on protected
   paths so `--add-dir` doesn't pull them into `acceptEdits`, and
   `--permission-prompts none`, since an unanswered prompt under `-p` hangs.
-- **Codex**: `workspace-write` with one root, `approvalPolicy: never`; any
-  server request is declined.
+- **Codex**: `workspace-write` rooted at the cwd (plus the two holes below),
+  `approvalPolicy: never`; any server request is declined.
 - **opencode has no sandbox** — a rule list its runner checks. File tools are
   real (`edit` covers `write`/`edit`/`apply_patch`); `bash` is a glob over the
   command string, allow-listing `oculus …` and `ls …` — it stops `rm -rf`, not
@@ -94,13 +101,28 @@ protected paths are one list in `protected.rs`: the library folders, the root fi
   last; a path inside the session directory is written relative to it.
 - **Antigravity**: [below](#antigravity-keeps-its-rules-in-the-students-global-settings).
 
-**The database is the one hole, three files wide.** `oculus project`/`task`
+**The database is the first hole, three files wide.** `oculus project`/`task`
 write the board ([projects.md](./projects.md)), and a sandbox that opens
 `oculus.db` but not `-wal` fails "attempt to write a readonly database". So
 `library::paths::db_write_paths` names `oculus.db`, `-wal`, `-shm`: `allowWrite` for
 Claude; `writableRoots` on the turn's `sandboxPolicy` plus
 `sandbox_workspace_write.writable_roots` in thread config for Codex. Files,
 not the folder — it holds keyd's vault.
+
+**Studio is the second hole: `<data>/studio/`.** Studio's videos and its
+component and theme libraries live there ([studio.md](./studio.md#videos-live-in-the-data-directory)),
+and it holds no secrets. `library::paths::agent_write_dirs` names it once;
+the manager creates it before a spawn, and each CLI renders it: `allowWrite`
+for Claude; a writable root for Codex (`codex::writable_roots`, which keeps
+only paths that exist, the database's absent sidecars included);
+`"{{LIBRARY}}/studio/**": "allow"` in opencode's template, after every
+library deny, since opencode's `*` crosses `/` and the last matching rule
+wins, so `{{LIBRARY}}/*.json` alone would refuse a video's `video.json`;
+`write_file(<data>/studio)` for agy. Each bridge's tests pin the grant and
+that no deny covers a video's files. A library file is meant to change only
+through `oculus studio components|themes promote`, which keeps the old text
+in `.history/`; the sandbox cannot tell the CLI from a direct edit, so that
+is a skill rule, a speed bump like the `sqlite3` deny, not a wall.
 
 **The CLI stays the only door.** Claude merges `Edit(...)` denies into its
 sandbox's `denyWrite`, so an `oculus.db*` deny would cancel the grant; instead
@@ -140,13 +162,29 @@ Each bridge's tests pin its row, and that nothing it denies covers the socket.
 The app is not involved: once keyd is installed, launchd starts it on the first
 connect, so a chat agent's `oculus search` works with the app closed.
 
+**The TTS server is the one network host a thread is granted.** `oculus
+studio narrate` calls the server in Settings → Studio → Narration. At each spawn the
+bridges read the `voice` row (`studio::voice::server_host`: the base URL's
+host and port, or nothing without a row, a URL or a host; never a
+wildcard), so a changed server reaches the next spawn. The Kokoro engine
+needs no grant: it reads its packs from `<app data>/models/voice/` and
+makes no request.
+
+| CLI | Grant | What reaches the server |
+| --- | --- | --- |
+| Claude | `sandbox.network.allowedDomains: ["<host>:<port>"]` (omitted with no row; the CLI matches the port too); none on a one-off turn | A loopback server (`localhost`, `127.0.0.1`, `::1`) needs no entry on macOS: with `allowLocalBinding` a sandboxed command may connect to any localhost port, and the CLI sets `NO_PROXY` so loopback is dialled directly (Claude Code's sandboxing docs, "A command fails to reach a server on localhost"). Any other host is reachable only through the sandbox's filtering proxy (`HTTP(S)_PROXY`/`ALL_PROXY`), where the entry admits it; `oculus`'s TTS client (ureq 2) reads no proxy variable and dials directly, so a non-loopback server is not reached from a Claude thread |
+| Codex | none needed: the `workspace-write` policy's `networkAccess` is already on (for keyd's socket) | Any host |
+| opencode | none: no sandbox | Any host |
+| Antigravity | `read_url(<host>)` in its rules, which its docs say joins the terminal sandbox's outbound allowlist | Not measured: its docs say sandboxed commands have no network by default and that `read_url` domains are added to the allowlist, and say nothing about localhost |
+
 ### Antigravity keeps its rules in the student's global settings
 
 `--sandbox` bounds shell commands only, and `--dangerously-skip-permissions`
 lets `write_to_file` write outside the library, so that flag is never passed.
 `agy` 1.2.9 reads rules only from `~/.gemini/antigravity-cli/settings.json`,
 so `providers/antigravity/rules.rs` merges Oculus's block there before every spawn (or
-fails the spawn): writes on the three database files, the `oculus` binary's
+fails the spawn): writes on the three database files and `studio/`, the
+`read_url` grant for the TTS server's host, the `oculus` binary's
 real directory (the sandbox can't read through the `~/.local/bin` symlink),
 read-only commands no flag turns into a write (`find`/`rg` are out — the
 matcher is a word prefix), `sqlite3 <library>/oculus.db` denied per path
@@ -179,6 +217,14 @@ system prompt, so the brief is the `oculus` agent's prompt in
 `agents/skills/` on Unix; Windows uses managed copies — and opencode's `skills.paths` names it. Nothing goes in
 `$CODEX_HOME/skills`, which every project shares. The set stays small: every
 CLI puts the skill index in every turn, headless jobs included.
+
+**A skill is a folder of files.** `agents::docs::SKILLS` lists each skill's
+name and its files, `SKILL.md` first; `oculus-studio` also ships
+`reference.md`, `build.md` and `studio.d.ts` (`app/studio-core/studio.d.ts`),
+which `SKILL.md` tells the agent to open when it needs them, so only the
+index line costs a turn. Every write rewrites each file and deletes anything else
+in the skill's folder: the folders are app-owned and agents may not write
+them, so a stray file could only be a stale instruction.
 
 Windows children start suspended, enter a Job Object with kill-on-close, then
 resume. Stopping a turn or closing the app terminates descendants too; the Unix
@@ -522,7 +568,8 @@ provider-verified model (Meta's Muse Spark) fails once in the timeline.
 ## Per-job models
 
 Windows starts new chats with Codex. Job defaults use `gpt-5.6-luna`: lecture
-chapters takes `xhigh`, and the other jobs take `medium`. A stored Claude job
+chapters takes `xhigh`, and the other jobs take `medium`, except the two Studio
+jobs, which keep their Codex entry and drop Claude's. A stored Claude job
 selection resolves to its Windows default in memory without rewriting the
 stored setting; supported provider selections keep their saved model and level.
 
@@ -571,6 +618,53 @@ down, it answers an empty list (so the audit removes nothing) and the picker's
 opencode tab links to Settings → opencode, whose opening starts it. It is asked
 again when `harnessOpencodeModels` next answers (`OPENCODE_RUNNING_EVENT`) —
 the composer or the opencode page starting it.
+
+**The two Studio jobs hold a model per agent, not fallbacks.** "Studio
+research" (`studioResearch`) and "Studio scenes" (`studioScene`) are the
+models a chat agent's [subagents](#subagents) run on while it makes a video.
+Nothing tries them in order: an agent's subagents take the first entry for
+that agent (`jobs::for_agent`), and an agent with none does the work itself.
+Their `JOBS` rows carry `perAgent`, which offers only the agents whose
+subagents take a model (not agy) and words the row and dialog for it ("Add a
+model for another agent"). The defaults name Claude and Codex (Haiku 5.5 and
+GPT-6-Luna for research; Opus 5.5 and GPT-6.1-Sol at high for scenes);
+opencode's models depend on the student's providers, so opencode has none
+until one is picked.
+
+## Subagents
+
+A chat agent may start helpers: the `oculus-studio` skill has a director
+fan research and scene building out to them. The two roles are
+`harness::studio_agents::ROLES`, `studio-research` and `studio-scene`.
+`studio-research`'s system prompt (`templates/STUDIO_RESEARCH.template.md`)
+points at the skill's "Research" section. `studio-scene`, which builds,
+fixes and reviews a scene, gets `STUDIO_SCENE.template.md`, then the
+skill's `build.md`, then the builder's sections of `reference.md`
+(`BUILDER_SECTIONS`: Components to Looking, and Slides, not the director's video.json,
+script.md, Narrate, Pronunciation, Render and Libraries), cut at their
+`## ` headings from the same compiled-in files the skill ships, so a
+builder reads no file for them and every builder starts from the same
+system prompt. A test fails when a named heading is missing. Each CLI starts a
+subagent its own way, so each gets the job's model its own way; `oculus
+studio agents [--agent A]` prints, per agent, the model and the exact call,
+which the skill tells the agent to use as printed.
+
+| CLI | How a subagent starts | Where the model comes from | Measured |
+| --- | --- | --- | --- |
+| Claude | the `Agent` tool, `subagent_type: "studio-scene"` | `--agents` at spawn: one definition per role with a model, its full id and `effort` (the tool's own `model` takes only an alias) | One Haiku turn under `acceptEdits`, `--permission-prompts none` and the sandboxed settings: the definitions loaded and the subagent's `Write` and `Bash` ran under the parent's mode and sandbox, no denial. Subagents run in the background by default: the turn ended with a `result` while the helper ran, and the CLI then started a turn of its own on the completion notice, so the skill asks for `run_in_background: false` |
+| Codex | `spawn_agent` with `model`, `reasoning_effort`, `fork_turns: "none"` | the call itself; Codex sets `model` only when a skill or the user asks, which the skill does. No role prompt: the scene brief opens with a sentence naming `build.md` and the builder's sections (`codex_scene_opening`, the same words in `SKILL.md` and `oculus studio agents`) | One `gpt-6-luna` turn through `app-server` with the thread's `workspace-write` policy and `approvalPolicy: never`: the child wrote under the writable roots, no server request, the parent waited (`wait`) and answered. 4 slots including the parent; a finished child holds its slot until `close_agent` |
+| opencode | the `task` tool, `subagent_type: "studio-scene"` | named agents in `opencode.json` (`mode: subagent`, `model`, `variant`), written from the jobs at each server start | Not run live. Read from opencode 1.18's task tool: `subagent_depth` counts parents, so 1 lets the thread's session spawn and a subagent not; a subagent session takes its parent's permissions, with `task` and `todowrite` denied unless its agent allows them |
+| agy | none | `invoke_subagent` takes a type name and no model | Not run: with no way to give the job's model, Studio starts none on agy and the agent does the work itself |
+
+opencode's template sets `subagent_depth: 1` and `task: allow` for this; the
+named agents carry no `permission` of their own, so they are never wider
+than the thread. The hidden one-off agents keep `"*": "deny"`, `task`
+included. A role off for an agent is left out of its definitions, and
+`oculus studio agents` says to do that role's work in order.
+
+A change in Settings → Jobs reaches Claude's definitions at the thread's
+next spawn and opencode's at its server's next start; Codex reads it per
+call, from `oculus studio agents`.
 
 ## Memory
 
@@ -691,6 +785,20 @@ chapter list inline — rebuilt on every send and before any spawn.
   so nothing re-renders the memoised transcript. Lecture docks and Chat tabs
   use counted `hold`/`unhold` ownership of cached rows; closing one view does
   not release a thread still displayed by another.
+
+## A Studio thread carries its video
+
+A thread that makes a Studio video is linked to its folder by a
+`studio_videos` row, written when `harness_send` creates the thread with
+`SendOptions.studio` ([studio.md](./studio.md#a-video-has-a-thread)). Like the
+lecture, the link is read back on every send and before any spawn
+(`studio_brief` in `harness/app/send.rs`, a rewind's included), and
+`instructions()` / `thread_sections()` append the "The video being made"
+section after the subject and lecture ones: the absolute folder, format,
+theme, subject library and length target read from video.json and the link,
+and the order of work (direct it with the skill, draft, ask before the
+final). It is the per-thread half the opencode and `agy` bridges send ahead
+of the first message.
 
 ## Gotchas
 

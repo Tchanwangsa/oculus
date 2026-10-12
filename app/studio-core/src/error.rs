@@ -136,6 +136,10 @@ pub enum StudioError {
         source: Box<StudioError>,
     },
 
+    /// A problem lint reports as a sentence, with no TSX position.
+    #[error("{0}")]
+    Lint(String),
+
     #[error("JavaScript host: {0}")]
     Host(String),
 
@@ -222,6 +226,7 @@ impl StudioError {
             Self::Transition { .. } => "transition",
             Self::Narration { .. } => "narration",
             Self::Script { .. } => "script",
+            Self::Lint(_) => "lint",
             Self::Frame { source, .. } => source.kind(),
             Self::Host(_) => "host",
             Self::Render(_) => "render",

@@ -1,6 +1,6 @@
 ---
 name: oculus-lectures
-description: Read what was said in a recorded lecture in an Oculus course library, and quote it with timestamps. Use for "what did the lecture say about X", "find where they covered Y", "quote the recording", or any question that has to be answered from a lecture rather than from a slide deck or a Canvas page.
+description: Reads what was said in a recorded lecture in an Oculus course library, through its merged transcript and slide outline, and quotes it with timestamps. Use for "what did the lecture say about X", "find where they covered Y", "quote the recording", or any question that has to be answered from a lecture rather than from a slide deck or a Canvas page.
 ---
 
 # Lectures
@@ -73,10 +73,8 @@ offset; they are permitted and do the same job.
 
 ## 4. Quote it by time
 
-Cite the clock — "at 12:03 they say…". The bare second in the first column is
-for machinery, not for a reader: it exists because a chapter's `start` has to
-match a detected boundary *exactly*, and a rounded second is not in the
-allowed set.
+Cite the clock — "at 12:03 they say…" — never the bare second in the first
+column, which is for matching a chapter's `start` to a detected boundary.
 
 ## What not to run to answer a question
 

@@ -1,21 +1,48 @@
-//! `oculus studio`: render and check a Studio video folder with
-//! `studio_core` (docs/studio.md). `frame`, `strip` and `lint` read only
-//! the folder and write only the PNG; `render`, `narrate`, `tts` and
-//! `aligner` are in their own files.
+//! `oculus studio`: make, render and check a Studio video folder with
+//! `studio_core` (docs/studio.md). A DIR argument that is not a folder but
+//! a bare slug names a video under `<app data>/studio/videos/`. `frame`,
+//! `strip` and `lint` read only the folder and write only the PNG; the
+//! other commands are in their own files.
 
 mod aligner;
+mod components;
+mod gallery;
 mod narrate;
 mod render;
+mod themes;
+mod videos;
 
 use crate::*;
+use app_lib::studio::{libraries, videos as video_dirs};
 use std::time::Instant;
 use studio_core::{
-    LintIssue, MotionBlur, Project, RenderOptions, Renderer, StripOptions, StudioError, Time,
+    LintIssue, MotionBlur, RenderOptions, Renderer, StripOptions, StudioError, Time,
 };
 
 impl Ctx {
+    /// Resolves the command's DIR (a folder, or a video's slug), then runs it.
+    pub(crate) fn studio(&self, mut action: StudioAction) -> Result<(), String> {
+        if let Some(dir) = action.dir_mut() {
+            *dir = video_dirs::resolve(dir)?;
+        }
+        match action {
+            StudioAction::New(a) => self.studio_new(&a),
+            StudioAction::List(a) => self.studio_list(&a),
+            StudioAction::Frame(a) => self.studio_frame(&a),
+            StudioAction::Strip(a) => self.studio_strip(&a),
+            StudioAction::Lint(a) => self.studio_lint(&a),
+            StudioAction::Gallery(a) => self.studio_gallery(&a),
+            StudioAction::Components { action } => self.studio_components(&action),
+            StudioAction::Themes { action } => self.studio_themes(&action),
+            StudioAction::Render(a) => self.studio_render(&a),
+            StudioAction::Narrate(a) => self.studio_narrate(&a),
+            StudioAction::Tts(a) => self.studio_tts(&a),
+            StudioAction::Aligner { action } => self.studio_aligner(&action),
+        }
+    }
+
     pub(crate) fn studio_frame(&self, args: &StudioFrameArgs) -> Result<(), String> {
-        let project = Project::load(&args.dir).map_err(studio_error)?;
+        let project = libraries::open(&args.dir, None, None).map_err(studio_error)?;
         let at = match args.scene {
             Some(index) => Time::Scene {
                 index,
@@ -83,7 +110,7 @@ impl Ctx {
     }
 
     pub(crate) fn studio_strip(&self, args: &StudioStripArgs) -> Result<(), String> {
-        let project = Project::load(&args.dir).map_err(studio_error)?;
+        let project = libraries::open(&args.dir, None, None).map_err(studio_error)?;
         let (from, to) = match args.scene {
             Some(index) => project
                 .timeline()
@@ -151,7 +178,7 @@ impl Ctx {
     }
 
     pub(crate) fn studio_lint(&self, args: &StudioLintArgs) -> Result<(), String> {
-        let project = Project::load(&args.dir).map_err(studio_error)?;
+        let project = libraries::open(&args.dir, None, None).map_err(studio_error)?;
         let report = project.lint().map_err(studio_error)?;
         let count = report.issues.len();
 

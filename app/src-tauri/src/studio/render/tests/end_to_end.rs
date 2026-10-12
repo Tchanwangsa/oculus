@@ -72,6 +72,7 @@ fn options(ffmpeg: &Path, quality: Quality, out: Option<PathBuf>) -> Options {
         threads: Some(2),
         out,
         ffmpeg: ffmpeg.to_owned(),
+        library: studio_core::Library::default(),
     }
 }
 
@@ -201,8 +202,10 @@ fn narration_starts_at_its_scenes_lead() {
     );
     let pcm: Vec<f32> = out
         .stdout
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
         .collect();
     // lead 0.25 s + 0.2 s of silence = 21,600 samples; AAC smears an edge
     // by a few ms.

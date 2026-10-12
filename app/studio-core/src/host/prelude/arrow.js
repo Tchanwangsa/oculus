@@ -1,6 +1,7 @@
 // Arrow: a stroke through `points` (frame px) drawn up to `progress`, and a
-// head that fades and grows in over the last 15% of it. Both are absolute
-// full-frame Paths with the frame as viewBox, so the parent must fill the frame.
+// head riding the drawn end, along the shaft's tangent there. Both are
+// absolute full-frame Paths with the frame as viewBox, so the parent must
+// fill the frame.
 const xy = (p) => `${p[0]} ${p[1]}`;
 const towards = (a, b) => {
   const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
@@ -71,17 +72,16 @@ function Arrow(props, ctx) {
   // The shaft stops inside the head, so its cap never pokes past the tip.
   const pts = points.map((q) => [q[0], q[1]]);
   const end = pts[pts.length - 1];
-  const tip = [end[0], end[1]];
   let dir = endTangent(pts, pathThrough(pts, curve).from);
+  let back = 0;
   if (size > 0 && dir) {
     const last = towards(pts[pts.length - 2], end);
-    const back = Math.min(size * 0.6, (last ? last.len : 0) * 0.9);
+    back = Math.min(size * 0.6, (last ? last.len : 0) * 0.9);
     end[0] -= dir.u[0] * back;
     end[1] -= dir.u[1] * back;
   }
-  // The head follows the tangent of the shaft as drawn.
   const drawn = pathThrough(pts, curve);
-  dir = endTangent(pts, drawn.from) || dir;
+  const q = clamp(p, 0, 1);
   const shaftStroke = Object.assign({ cap: 'round', join: 'round' }, stroke, { width, color });
   const shaft = h('path', {
     key: key === undefined ? undefined : `${key}:shaft`,
@@ -89,21 +89,28 @@ function Arrow(props, ctx) {
     d: drawn.d,
     viewBox,
     stroke: shaftStroke,
-    trim: [0, clamp(p, 0, 1)],
+    trim: [0, q],
     style: overlay({}),
   });
-  if (!(size > 0 && dir)) return shaft;
-  const u = dir.u, nrm = [-u[1], u[0]];
-  const base = [tip[0] - u[0] * size, tip[1] - u[1] * size];
-  const corner = (s) => [base[0] + nrm[0] * size * 0.5 * s, base[1] + nrm[1] * size * 0.5 * s];
-  const shown = easeOutCubic(clamp((p - 0.85) / 0.15, 0, 1));
+  // Where the trim ends and the tangent there, by the trim's own measure,
+  // so the head sits on the drawn end and points along the shaft.
+  const at = size > 0 && dir ? __studioPathEnd(drawn.d, q) : undefined;
+  if (!at) return shaft;
+  const [x, y, ux, uy, length] = at;
+  // The head grows in from nothing over the first head length of shaft (the
+  // whole shaft, if shorter), so it is never drawn without a line.
+  const k = clamp((q * length) / Math.min(size, length), 0, 1);
+  const tip = [x + ux * back * k, y + uy * back * k];
+  const s = size * k;
+  const base = [tip[0] - ux * s, tip[1] - uy * s];
+  const corner = (sign) => [base[0] - uy * s * 0.5 * sign, base[1] + ux * s * 0.5 * sign];
   const arrowHead = h('path', {
     key: key === undefined ? undefined : `${key}:head`,
     __source,
     d: `M ${xy(tip)} L ${xy(corner(1))} L ${xy(corner(-1))} Z`,
     viewBox,
     fill: color,
-    style: overlay({ opacity: shown, scale: lerp(0.5, 1, shown), transformOrigin: [end[0] / w, end[1] / hgt] }),
+    style: overlay({}),
   });
   return [shaft, arrowHead];
 }

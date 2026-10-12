@@ -7,7 +7,14 @@ use crate::harness::protected::{LIBRARY_DIRS, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
 /// The inline `--settings` document; docs/harness.md explains each part.
 /// `//` prefixes an absolute path in the CLI's rule syntax. Root files are
 /// denied by suffix, because a bare `*` also denied everything under `agents/`.
-pub(super) fn settings_json(library: &Path, cwd: &Path, oculus: Option<&Path>) -> String {
+/// `hosts` (`host:port`) are the network destinations a sandboxed command
+/// may reach: the TTS server's, or none.
+pub(super) fn settings_json(
+    library: &Path,
+    cwd: &Path,
+    oculus: Option<&Path>,
+    hosts: &[String],
+) -> String {
     let root = library.display().to_string();
     let abs = root.trim_start_matches('/');
     // Never `oculus.db*`: the CLI merges `Edit(...)` denies into the
@@ -30,19 +37,22 @@ pub(super) fn settings_json(library: &Path, cwd: &Path, oculus: Option<&Path>) -
         allow.push(format!("Bash({}:*)", cli.display()));
     }
 
-    // `agents/` plus the database's three files (`paths::db_write_paths`).
-    let write: Vec<String> = std::iter::once(cwd.display().to_string())
-        .chain(
-            crate::library::paths::db_write_paths(library)
-                .iter()
-                .map(|p| p.display().to_string()),
-        )
+    // `agents/`, the database's three files (`paths::db_write_paths`) and
+    // `studio/` (`paths::agent_write_dirs`).
+    let write: Vec<String> = std::iter::once(cwd.to_path_buf())
+        .chain(crate::library::paths::db_write_paths(library))
+        .chain(crate::library::paths::agent_write_dirs(library))
+        .map(|p| p.display().to_string())
         .collect();
     // `oculus` reaches its keys only through keyd's socket; without this the
     // sandbox refuses the connect (EPERM).
     let keyd = crate::library::paths::keyd_socket_path(library)
         .display()
         .to_string();
+    let mut network = serde_json::json!({ "allowLocalBinding": true, "allowUnixSockets": [keyd] });
+    if !hosts.is_empty() {
+        network["allowedDomains"] = serde_json::json!(hosts);
+    }
     serde_json::json!({
         "permissions": { "allow": allow, "deny": deny },
         "sandbox": {
@@ -50,7 +60,7 @@ pub(super) fn settings_json(library: &Path, cwd: &Path, oculus: Option<&Path>) -
             "failIfUnavailable": false,
             "autoAllowBashIfSandboxed": true,
             "allowUnsandboxedCommands": false,
-            "network": { "allowLocalBinding": true, "allowUnixSockets": [keyd] },
+            "network": network,
             "filesystem": { "allowWrite": write },
         },
         "autoMemoryEnabled": false,
@@ -63,11 +73,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_settings_document_opens_the_database_and_nothing_else() {
+    fn the_settings_document_opens_the_database_and_studio_and_nothing_else() {
         let library = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
         let cwd = library.join("agents");
-        let v: serde_json::Value =
-            serde_json::from_str(&settings_json(library, &cwd, None)).expect("valid settings JSON");
+        let v: serde_json::Value = serde_json::from_str(&settings_json(library, &cwd, None, &[]))
+            .expect("valid settings JSON");
 
         let write = v.pointer("/sandbox/filesystem/allowWrite").unwrap();
         assert_eq!(
@@ -77,8 +87,13 @@ mod tests {
                 "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db",
                 "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db-wal",
                 "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db-shm",
+                "/Users/x/Library/Application Support/com.tchan.oculus/studio",
             ]),
-            "the cwd, then the database's three files — nothing else in the library"
+            "the cwd, the database's three files and studio/ — nothing else in the library"
+        );
+        assert!(
+            v.pointer("/sandbox/network/allowedDomains").is_none(),
+            "no TTS server, no network host"
         );
         assert_eq!(v["sandbox"]["enabled"], true);
         assert_eq!(v["autoMemoryEnabled"], false);
@@ -147,6 +162,7 @@ mod tests {
             library,
             &cwd,
             Some(Path::new("/opt/oculus/bin/oculus")),
+            &[],
         ))
         .expect("valid settings JSON");
         let allow2: Vec<&str> = v2
@@ -159,6 +175,63 @@ mod tests {
         assert_eq!(allow2, ["Bash(oculus:*)", "Bash(/opt/oculus/bin/oculus:*)"]);
     }
 
+    /// Every `agent_write_dirs` folder is writable, and no `Edit` deny (which
+    /// the CLI merges into `denyWrite`) covers a file a video is made of.
+    #[test]
+    fn studio_is_writable_and_no_deny_covers_it() {
+        let library = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
+        let v: serde_json::Value =
+            serde_json::from_str(&settings_json(library, &library.join("agents"), None, &[]))
+                .unwrap();
+        let write = v.pointer("/sandbox/filesystem/allowWrite").unwrap();
+        for dir in crate::library::paths::agent_write_dirs(library) {
+            let dir = dir.to_str().unwrap();
+            assert!(
+                write.as_array().unwrap().iter().any(|w| w == dir),
+                "{dir} in {write}"
+            );
+            for file in [
+                "videos/a/video.json",
+                "videos/a/script.md",
+                "library/components/Steps.tsx",
+                "subjects/S/themes/warm.json",
+                "library/.history/Steps.1.tsx",
+            ] {
+                let path = format!("{dir}/{file}");
+                for rule in v
+                    .pointer("/permissions/deny")
+                    .and_then(|d| d.as_array())
+                    .unwrap()
+                    .iter()
+                    .filter_map(|r| r.as_str())
+                    .filter_map(|r| r.strip_prefix("Edit(/").and_then(|r| r.strip_suffix(')')))
+                {
+                    assert!(
+                        !crate::harness::protected::glob_covers(rule, &path),
+                        "Edit deny {rule} covers {path}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The TTS host goes in as `allowedDomains`, exactly as given.
+    #[test]
+    fn the_tts_host_is_the_only_network_domain() {
+        let library = Path::new("/l");
+        let v: serde_json::Value = serde_json::from_str(&settings_json(
+            library,
+            &library.join("agents"),
+            None,
+            &["127.0.0.1:8880".to_owned()],
+        ))
+        .unwrap();
+        assert_eq!(
+            v.pointer("/sandbox/network/allowedDomains").unwrap(),
+            &serde_json::json!(["127.0.0.1:8880"])
+        );
+    }
+
     /// The sandbox grant follows the library the thread runs over, and no
     /// `Edit` deny (merged into `denyWrite`) covers the socket it grants.
     #[test]
@@ -169,7 +242,7 @@ mod tests {
         ] {
             let library = Path::new(lib);
             let v: serde_json::Value =
-                serde_json::from_str(&settings_json(library, &library.join("agents"), None))
+                serde_json::from_str(&settings_json(library, &library.join("agents"), None, &[]))
                     .unwrap();
             let socket = keyd_core::paths::socket(library);
             assert_eq!(

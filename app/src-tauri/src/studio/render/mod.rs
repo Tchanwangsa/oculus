@@ -30,6 +30,7 @@ use studio_core::{Project, RenderOptions, StudioError};
 
 pub use error::RenderError;
 use error::Stop;
+pub use key::still_key;
 use plan::Scene;
 pub use progress::{Outcome, Progress, Report, SegmentReport};
 pub use quality::Quality;
@@ -39,12 +40,15 @@ pub use running::{Renders, Running, RENDERS};
 #[derive(Debug, Clone)]
 pub struct Options {
     pub quality: Quality,
-    /// Render threads (default: half the cores), capped by memory.
+    /// Frame-rendering threads (default: half the cores), capped by memory.
+    /// The encoder's own threads are fixed (`Quality::codec_args`).
     pub threads: Option<usize>,
     /// The mp4 (default: `<dir>/renders/<quality>.mp4`).
     pub out: Option<PathBuf>,
     /// The ffmpeg to run (`sources::echo360::find_ffmpeg`).
     pub ffmpeg: PathBuf,
+    /// The libraries the video's components and themes resolve through.
+    pub library: studio_core::Library,
 }
 
 /// How a render ended that was not a failure.
@@ -86,7 +90,7 @@ fn run(
     // The concat list names segments by path, which ffmpeg resolves against
     // the list's folder, so every path is made absolute here.
     let dir = &std::path::absolute(dir).map_err(|e| RenderError::io(dir, e))?;
-    let project = Project::load(dir)?;
+    let project = Project::load_with(dir, &options.library)?;
     let fps = project.fps();
     let size = project.video.size;
     let settings = Settings::new(
@@ -96,7 +100,7 @@ fn run(
         project.motion_blur(options.quality.purpose())?,
     )?;
     let scenes = scenes(&project)?;
-    let trees = key::Trees::of(dir)?;
+    let trees = key::Trees::of(dir, &project)?;
     let segments = plan::segments(dir, &scenes, &trees, &settings);
     let jobs = plan::jobs(&segments, fps);
     let frame_bytes = u64::from(settings.width) * u64::from(settings.height) * 4;

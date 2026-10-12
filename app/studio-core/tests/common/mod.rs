@@ -4,6 +4,17 @@
 use std::path::{Path, PathBuf};
 use studio_core::{Frame, Project, RenderOptions, Renderer, Time};
 
+/// Whether a lint message is one of the component-source rules (token use,
+/// required props). Renderer fixtures and the inline test components use
+/// literal colours and numbers on purpose, so tests about other lint rules
+/// filter these out.
+pub fn component_rule(message: &str) -> bool {
+    message.contains("is a literal; use theme.")
+        || message.contains("equals theme.")
+        || message.contains("has required props")
+        || message.contains("omits required prop")
+}
+
 pub fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")

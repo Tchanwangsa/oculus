@@ -11,6 +11,7 @@ mod options;
 mod queue;
 mod raw_log;
 mod session;
+mod studio;
 
 pub(in crate::harness) use handle::Handle;
 pub use handle::RewindTo;
@@ -18,9 +19,10 @@ pub use instructions::{instructions, thread_cwd, thread_sections};
 pub use one_off::run_once;
 pub(in crate::harness) use one_off::OneOff;
 pub(in crate::harness) use options::validate_effort;
-pub use options::{LectureBrief, SendOptions};
+pub use options::{LectureBrief, SendOptions, StudioSend};
 pub use queue::{Queue, QueuedMessage};
 pub use raw_log::RawLog;
+pub use studio::StudioBrief;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

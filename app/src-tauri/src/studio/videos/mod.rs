@@ -1,0 +1,342 @@
+//! Where videos live: `<data dir>/studio/videos/<slug>/`, one folder per
+//! video. `create` scaffolds one, `list` reads them all, and `resolve` turns
+//! a command's DIR argument into a folder: a path that exists wins, else a
+//! bare slug names a video here (docs/studio.md, "Videos live in the data
+//! directory"). `scoped_in` is `resolve_in` for the app's commands, which may
+//! name only a video; `slug` makes a unique slug from a title.
+
+mod slug;
+#[cfg(test)]
+mod tests;
+
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+
+use serde::Serialize;
+use serde_json::json;
+use studio_core::{valid_subject, Video};
+
+use crate::library::paths::{data_dir, studio_dir};
+
+pub use slug::{slug_from_title, unique_slug};
+
+/// `<data dir>/studio/videos`.
+pub fn videos_dir() -> PathBuf {
+    studio_dir(&data_dir()).join("videos")
+}
+
+/// A slug is lowercase letters, digits and `-`, at most 64 characters.
+pub fn valid_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug.len() <= 64
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// [`resolve_in`] over the app's videos.
+pub fn resolve(arg: &Path) -> Result<PathBuf, String> {
+    resolve_in(&videos_dir(), arg)
+}
+
+/// `arg` when it exists; otherwise, when it is a bare slug, that video's
+/// folder under `videos`. Anything else is an error naming both places.
+pub fn resolve_in(videos: &Path, arg: &Path) -> Result<PathBuf, String> {
+    let exists = arg
+        .try_exists()
+        .map_err(|e| format!("cannot look at {}: {e}", arg.display()))?;
+    if exists {
+        return Ok(arg.to_owned());
+    }
+    let Some(slug) = arg.to_str().filter(|s| valid_slug(s)) else {
+        return Err(format!("no folder {}", arg.display()));
+    };
+    let dir = videos.join(slug);
+    if dir.is_dir() {
+        return Ok(dir);
+    }
+    Err(format!(
+        "no folder `{slug}` here and no video `{slug}` in {}; `oculus studio list` lists the videos",
+        videos.display()
+    ))
+}
+
+/// [`scoped_in`] over the app's videos.
+pub fn scoped(arg: &Path) -> Result<PathBuf, String> {
+    scoped_in(&videos_dir(), arg)
+}
+
+/// The folder of the video `arg` names, canonical: a bare slug, or a path to
+/// a video's folder. Anything that is not directly inside `videos` once
+/// symlinks are followed is refused, so an app command never renders or
+/// reads an arbitrary folder.
+pub fn scoped_in(videos: &Path, arg: &Path) -> Result<PathBuf, String> {
+    let named = arg
+        .to_str()
+        .filter(|s| valid_slug(s))
+        .map(|slug| videos.join(slug))
+        .filter(|dir| dir.is_dir());
+    let dir = match named {
+        Some(dir) => dir,
+        None => resolve_in(videos, arg)?,
+    };
+    let root = videos
+        .canonicalize()
+        .map_err(|e| format!("no videos in {}: {e}", videos.display()))?;
+    let dir = dir
+        .canonicalize()
+        .map_err(|e| format!("cannot look at {}: {e}", dir.display()))?;
+    if dir.parent() != Some(root.as_path()) {
+        return Err(format!(
+            "{} is not a video: Studio only works on the folders directly inside {}",
+            dir.display(),
+            root.display()
+        ));
+    }
+    Ok(dir)
+}
+
+/// The folder of the video `slug` under `videos`, as `list_in` gives it.
+/// Refuses a slug that is not one, or whose folder is a link out of
+/// `videos` (see [`scoped_in`]).
+pub fn video_in(videos: &Path, slug: &str) -> Result<PathBuf, String> {
+    if !valid_slug(slug) {
+        return Err(format!(
+            "`{slug}` is not a video's slug: lowercase letters, digits and `-`, at most 64 characters"
+        ));
+    }
+    scoped_in(videos, Path::new(slug))?;
+    Ok(videos.join(slug))
+}
+
+/// What `oculus studio new` and the app's `studio_new_video` make.
+#[derive(Debug, Clone, Default)]
+pub struct NewVideo {
+    pub slug: String,
+    pub subject: Option<String>,
+    pub title: Option<String>,
+    /// 1080x1920 instead of 1920x1080.
+    pub portrait: bool,
+    /// A bundled or library theme name; `default` when unset, which a
+    /// subject's own `themes/default.json` replaces through the cascade.
+    pub theme: Option<String>,
+    /// Written as video.json's `voice` block when any field is set.
+    pub voice: Option<studio_core::Voice>,
+}
+
+/// Scaffolds `videos/<slug>/`: a `video.json` (30 fps, the theme, the
+/// subject, an optional voice, and one silent `TitleCard` scene), an empty
+/// `script.md`, and empty `components/` and `assets/`. Refuses a slug that
+/// exists. Returns the folder.
+pub fn create_in(videos: &Path, new: &NewVideo) -> Result<PathBuf, String> {
+    if !valid_slug(&new.slug) {
+        return Err(format!(
+            "slug `{}` must be lowercase letters, digits and `-`, at most 64 characters",
+            new.slug
+        ));
+    }
+    if let Some(s) = new.subject.as_deref().filter(|s| !valid_subject(s)) {
+        return Err(format!(
+            "subject `{s}` must be a course code's folder name: letters, digits, `-` and `_`"
+        ));
+    }
+    if let Some(t) = new.theme.as_deref().filter(|t| !valid_theme(t)) {
+        return Err(format!(
+            "theme `{t}` must be a theme's name: letters, digits, `-` and `_`"
+        ));
+    }
+    let speed = new.voice.as_ref().and_then(|v| v.speed);
+    if let Some(speed) = speed.filter(|s| !(s.is_finite() && *s > 0.0)) {
+        return Err(format!("voice speed {speed} must be a positive number"));
+    }
+    std::fs::create_dir_all(videos)
+        .map_err(|e| format!("cannot create {}: {e}", videos.display()))?;
+    let dir = videos.join(&new.slug);
+    match std::fs::create_dir(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(format!(
+                "video `{}` exists at {}; pick another slug",
+                new.slug,
+                dir.display()
+            ))
+        }
+        Err(e) => return Err(format!("cannot create {}: {e}", dir.display())),
+    }
+    for sub in ["components", "assets"] {
+        let path = dir.join(sub);
+        std::fs::create_dir(&path).map_err(|e| format!("cannot create {}: {e}", path.display()))?;
+    }
+    let file = |name: &str, text: &str| {
+        let path = dir.join(name);
+        std::fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    };
+    file("video.json", &video_json(new))?;
+    file("script.md", "")?;
+    Ok(dir)
+}
+
+/// The scaffold's `video.json`, keys in reading order.
+fn video_json(new: &NewVideo) -> String {
+    let (width, height) = if new.portrait {
+        (1080, 1920)
+    } else {
+        (1920, 1080)
+    };
+    let title = new.title.clone().unwrap_or_else(|| title_of(&new.slug));
+    let scene = json!({
+        "id": "title",
+        "component": "TitleCard",
+        "props": { "title": title },
+        "hold": 4,
+    });
+    let mut lines = vec![
+        format!("  \"size\": {{ \"width\": {width}, \"height\": {height} }},"),
+        "  \"fps\": 30,".to_owned(),
+        format!(
+            "  \"theme\": {},",
+            json!(new.theme.as_deref().unwrap_or("default"))
+        ),
+    ];
+    if let Some(s) = &new.subject {
+        lines.push(format!("  \"subject\": {},", json!(s)));
+    }
+    if let Some(voice) = new.voice.as_ref().and_then(voice_json) {
+        lines.push(format!("  \"voice\": {voice},"));
+    }
+    lines.push(format!("  \"scenes\": [\n    {scene}\n  ]"));
+    format!("{{\n{}\n}}\n", lines.join("\n"))
+}
+
+/// A theme name, not a `.json` path: a scaffold names a theme the cascade
+/// finds.
+fn valid_theme(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// The `voice` block of the fields that are set, or `None` when none is.
+fn voice_json(voice: &studio_core::Voice) -> Option<String> {
+    let mut fields = serde_json::Map::new();
+    if let Some(model) = &voice.model {
+        fields.insert("model".into(), json!(model));
+    }
+    if let Some(v) = &voice.voice {
+        fields.insert("voice".into(), json!(v));
+    }
+    if let Some(speed) = voice.speed {
+        fields.insert("speed".into(), json!(speed));
+    }
+    (!fields.is_empty()).then(|| serde_json::Value::Object(fields).to_string())
+}
+
+/// `gradient-descent` -> `Gradient descent`; what a video is called, since
+/// video.json has no title.
+pub fn title_of(slug: &str) -> String {
+    let words = slug.replace('-', " ");
+    let mut chars = words.trim().chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+/// One video, as `oculus studio list` shows it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct VideoRow {
+    pub slug: String,
+    pub dir: PathBuf,
+    pub subject: Option<String>,
+    /// `None` when video.json does not load; `problem` says why.
+    pub scenes: Option<usize>,
+    /// `narration/manifest.json` exists (it may still be stale; `lint` says).
+    pub narrated: bool,
+    /// The files in `renders/`, e.g. `draft.mp4`.
+    pub renders: Vec<String>,
+    /// The newest change to video.json, script.md or `components/`, as Unix
+    /// seconds.
+    pub modified: Option<u64>,
+    pub problem: Option<String>,
+}
+
+/// Every folder under `videos`, by slug; with `subject`, only that
+/// subject's. A folder whose video.json does not load is listed with the
+/// reason (and is never one `subject` matches).
+pub fn list_in(videos: &Path, subject: Option<&str>) -> Result<Vec<VideoRow>, String> {
+    let entries = match std::fs::read_dir(videos) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("cannot read {}: {e}", videos.display())),
+    };
+    let mut rows = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("cannot read {}: {e}", videos.display()))?;
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let row = row(&dir);
+        if subject.is_none_or(|s| row.subject.as_deref() == Some(s)) {
+            rows.push(row);
+        }
+    }
+    rows.sort_by(|a, b| a.slug.cmp(&b.slug));
+    Ok(rows)
+}
+
+/// The row of the video in `dir`.
+pub fn row(dir: &Path) -> VideoRow {
+    let slug = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let path = dir.join("video.json");
+    let video = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))
+        .and_then(|text| {
+            serde_json::from_str::<Video>(&text).map_err(|e| format!("{}: {e}", path.display()))
+        });
+    let (subject, scenes, problem) = match video {
+        Ok(v) => (v.subject, Some(v.scenes.len()), None),
+        Err(e) => (None, None, Some(e)),
+    };
+    let mut renders: Vec<String> = std::fs::read_dir(dir.join("renders"))
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.path().is_file())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    renders.sort();
+    VideoRow {
+        slug,
+        dir: dir.to_owned(),
+        subject,
+        scenes,
+        narrated: dir.join(studio_core::MANIFEST_PATH).is_file(),
+        renders,
+        modified: modified(dir),
+        problem,
+    }
+}
+
+fn modified(dir: &Path) -> Option<u64> {
+    let components = std::fs::read_dir(dir.join("components"))
+        .map(|rd| rd.flatten().map(|e| e.path()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    [
+        dir.join("video.json"),
+        dir.join("script.md"),
+        dir.join(studio_core::MANIFEST_PATH),
+    ]
+    .into_iter()
+    .chain(components)
+    .filter_map(|p| p.metadata().and_then(|m| m.modified()).ok())
+    .filter_map(|t| t.duration_since(UNIX_EPOCH).ok())
+    .map(|d| d.as_secs())
+    .max()
+}

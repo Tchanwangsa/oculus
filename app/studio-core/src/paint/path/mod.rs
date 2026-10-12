@@ -5,7 +5,7 @@ mod trim;
 
 use super::Canvas;
 use crate::scene::{LineCap, LineJoin, PathSpec, StrokeSpec};
-use trim::trim;
+pub use trim::{end_of, trim};
 use vello_cpu::kurbo::{Affine, BezPath, Cap, Join, Rect, Shape, Stroke};
 
 pub fn draw(c: &mut Canvas, t: Affine, content: Rect, p: &PathSpec) {
