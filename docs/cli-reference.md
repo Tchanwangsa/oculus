@@ -1403,6 +1403,7 @@ Commands:
   frame       Render one frame of a video to a PNG
   strip       Render frames across a stretch of a video as one contact-sheet PNG
   lint        Check a whole video without writing to its folder
+  brief       Print one scene builder's whole input
   gallery     Render every example of a component as a still
   components  List, show, promote or seed a video's components
   themes      Promote a video's own theme file into a library
@@ -1619,6 +1620,38 @@ Arguments:
           The video folder, the one holding `video.json` (or its slug)
 
 Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio brief`
+
+```
+Print one scene builder's whole input
+
+For one scene: its index, component and props; the scenes before and after it, whether
+their components exist yet, and what their storyboard entries say under `Carries in:`
+and `Hands on:`; its own `storyboard.md` entry verbatim (from its `### <id>` heading to
+the next heading or `---`); the `notes/` files the entry names, else every file in
+`notes/`; its narration, one line per sentence, each word with the time `word()` returns
+for it (scene seconds, the theme's lead included); and the exact `strip`, `frame` and
+`gallery` calls that check it, `-o` paths absolute. Stale or missing narration prints
+its error and the script text instead. Reads only the folder.
+
+oculus studio brief shor --scene squares
+
+oculus studio brief lectures/week-4 --scene 3 --json
+
+Usage: oculus studio brief --scene <ID|N> <DIR>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json` (or its slug)
+
+Options:
+      --scene <ID|N>
+          The scene: its id in video.json, or its index counting from 0
+
   -h, --help
           Print help (see a summary with '-h')
 ```

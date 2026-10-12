@@ -6,7 +6,7 @@
 
 mod cues;
 
-pub use cues::WordCues;
+pub use cues::{CuedWord, WordCues};
 
 use crate::error::{Result, StudioError};
 use serde::{Deserialize, Serialize};

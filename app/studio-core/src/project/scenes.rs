@@ -4,7 +4,7 @@
 //! rounds up to whole frames.
 
 use super::timeline::whole_frames;
-use super::{ManifestScene, Project, SceneSpec, ScriptSection, WordCues};
+use super::{CuedWord, ManifestScene, Project, SceneSpec, ScriptSection, WordCues};
 use crate::error::{Result, StudioError};
 use crate::render::SceneCall;
 
@@ -84,13 +84,19 @@ impl Project {
         Ok(scene.hold.map_or(spoken, |h| h.max(spoken)))
     }
 
+    /// Scene `index`'s words at the times `word()` and `wordEnd()` return:
+    /// `None` for a silent scene, an error on stale narration.
+    pub fn cued_words(&self, index: usize) -> Result<Option<Vec<CuedWord>>> {
+        let lead = self.theme.narration.lead;
+        Ok(self.narration(index)?.map(|clip| CuedWord::all(clip, lead)))
+    }
+
     /// Scene `index`'s words for `SceneCall::words`: `None` for a silent
     /// scene, an error on stale narration.
     pub fn word_cues(&self, index: usize) -> Result<Option<WordCues>> {
-        let lead = self.theme.narration.lead;
         let id = self.scene(index)?.id.as_deref();
-        Ok(match (self.narration(index)?, id) {
-            (Some(clip), Some(id)) => Some(WordCues::new(id, clip, lead)),
+        Ok(match (self.cued_words(index)?, id) {
+            (Some(words), Some(id)) => Some(WordCues::new(id, &words)),
             _ => None,
         })
     }

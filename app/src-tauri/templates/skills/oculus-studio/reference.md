@@ -844,6 +844,13 @@ Each command prints the PNG's absolute path.
   else the middle of a 6 s preview, so entrances on fixed fallback times
   have settled. `--t S` picks another moment inside that length.
 
+`oculus studio brief <slug> --scene <id|N>` prints one scene's whole input:
+its index, component and props; what the scenes either side carry in and
+hand on, and whether their components exist yet; its storyboard entry; the
+notes it names; its words at the times `word()` returns; and its exact
+`strip`, `frame` and `gallery` calls. Read it instead of `storyboard.md` or
+the manifest.
+
 `frame` and `strip` stop when any narrated scene's narration is stale, even
 with `--scene` on another scene; lint lists it. A missing component in
 another scene does not stop them.

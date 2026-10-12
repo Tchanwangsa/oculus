@@ -987,6 +987,10 @@ a magic move. `video.json`'s `motion` block takes `transition`,
   easing(t / dur)`. Each frame calls both components, each in its own fresh
   context, so a transition frame is seekable like any other. A's logs come
   first, prefixed `scene N:`.
+  A frame loads A's component only while the transition covers it; when A
+  has no component file, B is drawn alone, as after a cut, so a scene can
+  be checked before the scene before it is built. Lint still reports the
+  missing file, and a full render fails on A's own frames.
 - **Cascade, field by field:** the scene's `transition`, then `video.json`'s
   `motion.transition`, then the theme's `motion.transition`, then dissolve,
   0.7 s, easeInOutCubic, left. The bundled theme ships exactly that.
@@ -1530,7 +1534,23 @@ with the `Narration` error before any frame renders.
   gives `{path, times, width, height, tile: {width, height}, cols, ms,
   threads}`.
 - `frame` and `strip` take `--motion-blur` (a 180° shutter at the video's
-  fps); `frame` then reports the sub-frames it averaged.
+  fps); `frame` then reports the sub-frames it averaged. `-o` is relative
+  to the working directory, and its folder is made.
+- `oculus studio brief <DIR> --scene <ID|N>` prints one scene builder's
+  whole input (`app/src-tauri/src/studio/brief/`): the scene's index,
+  component and props and the folder; for the scenes before and after it,
+  their component, whether it resolves yet, and their storyboard entries'
+  `Carries in:` and `Hands on:`; its own `storyboard.md` entry verbatim
+  (from a `### <id>` heading, then the end of the line, a space or `(`, to
+  the next `#` to `###` heading or `---` line, outside code fences); the
+  `notes/` paths the entry names, else every file in `notes/`; its length
+  and words, one line per sentence, each as `start word` at the time
+  `word()` returns (`Project::cued_words`), or the narration error and the
+  script text; and its `strip`, `frame` and `gallery` calls with absolute
+  `-o` paths, naming the video by slug when it is in the data directory.
+  `--json` gives the same as `{index, count, id, component, props, dir,
+  previous, next, storyboard, storyboard_missing, notes: {named, paths,
+  missing}, narration: {kind: silent|spoken|unavailable, ...}, commands}`.
 - `frame` and `strip` read `script.md` and the narration manifest; stale or
   missing narration stops them with the `Narration` error, while `lint`
   lists it with the rest.

@@ -1,7 +1,31 @@
 //! A narrated scene's words as `word()` and `wordEnd()` read them.
 
 use super::ManifestScene;
+use serde::Serialize;
 use serde_json::json;
+
+/// One narrated word at the times `word()` and `wordEnd()` return for it:
+/// seconds from the scene's start, the narration lead included.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CuedWord {
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+}
+
+impl CuedWord {
+    /// `clip`'s words with the theme's narration `lead` added.
+    pub(crate) fn all(clip: &ManifestScene, lead: f64) -> Vec<CuedWord> {
+        clip.words
+            .iter()
+            .map(|w| CuedWord {
+                text: w.text.clone(),
+                start: w.start + lead,
+                end: w.end + lead,
+            })
+            .collect()
+    }
+}
 
 /// One scene's word timings, scene-relative with the narration lead
 /// included, ready for a component call. Only a project makes them.
@@ -13,11 +37,10 @@ pub struct WordCues {
 }
 
 impl WordCues {
-    pub(crate) fn new(scene: &str, clip: &ManifestScene, lead: f64) -> WordCues {
-        let words: Vec<_> = clip
-            .words
+    pub(crate) fn new(scene: &str, words: &[CuedWord]) -> WordCues {
+        let words: Vec<_> = words
             .iter()
-            .map(|w| json!([w.text, w.start + lead, w.end + lead]))
+            .map(|w| json!([w.text, w.start, w.end]))
             .collect();
         WordCues {
             json: json!({ "scene": scene, "words": words }).to_string(),

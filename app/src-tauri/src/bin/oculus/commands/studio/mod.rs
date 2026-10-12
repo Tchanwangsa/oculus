@@ -1,11 +1,12 @@
 //! `oculus studio`: make, render and check a Studio video folder with
 //! `studio_core` (docs/studio.md). A DIR argument that is not a folder but
 //! a bare slug names a video under `<app data>/studio/videos/`. `frame`,
-//! `strip` and `lint` read only the folder and write only the PNG; the
-//! other commands are in their own files.
+//! `strip` and `lint` read only the folder and write only the PNG (`-o`
+//! makes its folder); the other commands are in their own files.
 
 mod agents;
 mod aligner;
+mod brief;
 mod components;
 mod g2p;
 mod gallery;
@@ -20,6 +21,7 @@ use app_lib::studio::tts::kokoro::{self, LexiconFiles};
 use app_lib::studio::voice::lint::{Note, VoiceLint};
 use app_lib::studio::voice::{self, VoiceOverrides};
 use app_lib::studio::{libraries, videos as video_dirs};
+use std::path::Path;
 use std::time::Instant;
 use studio_core::{
     LintIssue, MotionBlur, RenderOptions, Renderer, StripOptions, StudioError, Time,
@@ -37,6 +39,7 @@ impl Ctx {
             StudioAction::Frame(a) => self.studio_frame(&a),
             StudioAction::Strip(a) => self.studio_strip(&a),
             StudioAction::Lint(a) => self.studio_lint(&a),
+            StudioAction::Brief(a) => self.studio_brief(&a),
             StudioAction::Gallery(a) => self.studio_gallery(&a),
             StudioAction::Components { action } => self.studio_components(&action),
             StudioAction::Themes { action } => self.studio_themes(&action),
@@ -64,15 +67,9 @@ impl Ctx {
         let global = timeline.start(scene) + t;
         let component = project.video.scenes[scene].component.clone();
 
-        let out = match &args.out {
-            Some(path) => path.clone(),
-            None => {
-                let dir = args.dir.join("out");
-                std::fs::create_dir_all(&dir)
-                    .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-                dir.join(format!("frame-{}.png", seconds(global)))
-            }
-        };
+        let out = png_out(args.out.as_ref(), &args.dir, || {
+            format!("frame-{}.png", seconds(global))
+        })?;
 
         let options = RenderOptions {
             scale: args.scale,
@@ -140,16 +137,10 @@ impl Ctx {
         let strip = studio_core::strip(&project, options).map_err(studio_error)?;
         let ms = started.elapsed().as_millis();
 
-        let out = match &args.out {
-            Some(path) => path.clone(),
-            None => {
-                let dir = args.dir.join("out");
-                std::fs::create_dir_all(&dir)
-                    .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-                let last = strip.times.last().copied().unwrap_or(from);
-                dir.join(format!("strip-{}-{}.png", seconds(from), seconds(last)))
-            }
-        };
+        let out = png_out(args.out.as_ref(), &args.dir, || {
+            let last = strip.times.last().copied().unwrap_or(from);
+            format!("strip-{}-{}.png", seconds(from), seconds(last))
+        })?;
         strip.write_png(&out).map_err(studio_error)?;
 
         if self.json {
@@ -308,6 +299,20 @@ fn issue_json(issue: &LintIssue) -> serde_json::Value {
 /// An error's own message: studio-core writes them for agents to act on.
 fn studio_error(e: StudioError) -> String {
     e.to_string()
+}
+
+/// `-o`'s path, else `<DIR>/out/<name>`, with its folder made.
+fn png_out(
+    out: Option<&PathBuf>,
+    dir: &Path,
+    name: impl FnOnce() -> String,
+) -> Result<PathBuf, String> {
+    let path = out.cloned().unwrap_or_else(|| dir.join("out").join(name()));
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    Ok(path)
 }
 
 /// Seconds for a filename: up to three decimals, trailing zeros dropped.
