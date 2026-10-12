@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::chunk::chunks;
-use super::model::{self, MODEL_FILE, MODEL_ID, PACK, VOICES};
+use super::model::{self, MODEL_FILE, MODEL_ID, PACK};
 use super::reader::{missing, no_pad, LexiconFiles, Reader};
 use super::synth::{render, wav, Kokoro};
+use super::voices;
 use crate::runtime::onnx;
 use crate::studio::audio::decode_wav;
 use crate::studio::narrate::Speaker;
@@ -15,8 +16,8 @@ use crate::studio::tts::Speech;
 use crate::studio::voice::g2p::{guess, Phonemized};
 use crate::studio::voice::KokoroVoice;
 
-/// Where the two packs are: the voice (`voice-kokoro`) and the G2P
-/// (`g2p-en-us`).
+/// Where the model and the chosen voice's file are (`voice`: `voice-kokoro`
+/// and `voices`), and the G2P pack (`g2p-en-us`).
 #[derive(Debug, Clone)]
 pub struct Packs {
     pub voice: PathBuf,
@@ -24,7 +25,7 @@ pub struct Packs {
 }
 
 impl Packs {
-    /// The app's download folder for both.
+    /// The app's download folders.
     pub fn app() -> Self {
         Self {
             voice: model::dir(),
@@ -82,29 +83,34 @@ impl KokoroSpeaker {
     }
 
     fn load_kokoro(&self) -> Result<Kokoro, String> {
-        let voice = model::voice_file(&self.packs.voice, &self.voice.voice)
-            .ok_or_else(|| self.no_voice())?;
+        let voice =
+            voices::file(&self.packs.voice, &self.voice.voice).ok_or_else(|| self.no_voice())?;
         Kokoro::load(&self.packs.voice.join(MODEL_FILE), &voice, self.voice.speed)
     }
 
     fn no_voice(&self) -> String {
-        format!(
-            "Kokoro voice `{}` is not downloaded; the voice pack has {}",
-            self.voice.voice,
-            VOICES.join(" and ")
-        )
+        let id = &self.voice.voice;
+        if voices::find(id).is_some() {
+            format!(
+                "Kokoro voice `{id}` is not downloaded: run `oculus studio voices download {id}`, or download it in Settings -> Studio -> Narration"
+            )
+        } else {
+            format!(
+                "Kokoro voice `{id}` is not one of Kokoro's US voices, and {id}.bin is not in the voice folder; `oculus studio voices` lists the ones to download"
+            )
+        }
     }
 }
 
 impl Speaker for KokoroSpeaker {
     fn ready(&self) -> Result<(), String> {
         if !onnx::is_present(&self.packs.voice, &PACK) {
-            return Err(missing("voice pack (voice-kokoro)", PACK.bytes()));
+            return Err(missing("model (voice-kokoro)", PACK.bytes()));
         }
         if !onnx::is_present(&self.packs.g2p, &guess::PACK) {
             return Err(missing("G2P pack (g2p-en-us)", guess::PACK.bytes()));
         }
-        model::voice_file(&self.packs.voice, &self.voice.voice)
+        voices::file(&self.packs.voice, &self.voice.voice)
             .map(drop)
             .ok_or_else(|| self.no_voice())
     }

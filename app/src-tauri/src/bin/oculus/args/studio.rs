@@ -48,15 +48,16 @@ pub(crate) enum StudioAction {
         #[command(subcommand)]
         action: StudioPronounceAction,
     },
-    /// List Kokoro's voices, or download or delete its packs (103 MB)
+    /// List Kokoro's voices, or download or delete them and its packs
     ///
-    /// The Kokoro engine narrates inside the app from two packs, both kept
-    /// in `<app data>/models/voice/`, downloaded on request, checked against
-    /// a pinned size and sha256 and never bundled: `voice-kokoro` (the int8
-    /// model and the voices `af_heart` and `am_michael`, 93 MB) and
-    /// `g2p-en-us` (misaki's US dictionary and the guesser that reads the
-    /// words it lacks, 9 MB). With no action it lists each pack's status
-    /// and each voice, marking the one Settings -> Studio -> Narration names.
+    /// The Kokoro engine narrates inside the app from two packs and a voice,
+    /// all kept in `<app data>/models/voice/`, downloaded on request,
+    /// checked against a pinned size and sha256 and never bundled:
+    /// `voice-kokoro` (the int8 model, 92 MB), `g2p-en-us` (misaki's US
+    /// dictionary and the guesser that reads the words it lacks, 9 MB) and
+    /// one of the 20 US English voices (0.5 MB each, graded A to F by
+    /// Kokoro's authors). With no action it lists each pack's status and
+    /// each voice, marking the one Settings -> Studio -> Narration names.
     Voices {
         #[command(subcommand)]
         action: Option<StudioVoicesAction>,
@@ -136,14 +137,53 @@ pub(crate) struct StudioPronounceListArgs {
 
 #[derive(Subcommand)]
 pub(crate) enum StudioVoicesAction {
-    /// Each pack's status and size, and each voice and whether it is
-    /// downloaded (the default)
+    /// Each pack's status and size, and each voice with its grade, size
+    /// and whether it is downloaded (the default)
     List,
-    /// Download both packs, printing progress; files already there are
-    /// kept
-    Download,
-    /// Delete both packs and any partial download
-    Delete,
+    Download(StudioVoicesDownloadArgs),
+    Delete(StudioVoicesDeleteArgs),
+}
+
+/// Download Kokoro's packs and starter voices, or the voices named
+///
+/// With no ID and no `--all`, downloads what a fresh install needs to
+/// narrate: the model, the pronunciation pack and the starter voices
+/// `af_heart` and `am_michael`. With IDs, or with `--all` (all 20), downloads
+/// only those voices. Prints progress as it goes; files already there are
+/// kept.
+///
+///     oculus studio voices download
+///
+///     oculus studio voices download am_puck af_bella
+///
+///     oculus studio voices download --all
+#[derive(Args)]
+pub(crate) struct StudioVoicesDownloadArgs {
+    /// Voice ids, as `oculus studio voices` lists them
+    #[arg(value_name = "ID", conflicts_with = "all")]
+    pub(crate) ids: Vec<String>,
+    /// Every voice
+    #[arg(long)]
+    pub(crate) all: bool,
+}
+
+/// Delete Kokoro's packs, or the voices named
+///
+/// With no ID, deletes the model and the pronunciation pack and any partial
+/// download of them; the voices stay. With IDs, or with `--all`, deletes
+/// only those voices.
+///
+///     oculus studio voices delete
+///
+///     oculus studio voices delete am_puck
+#[derive(Args)]
+pub(crate) struct StudioVoicesDeleteArgs {
+    /// Voice ids, as `oculus studio voices` lists them
+    #[arg(value_name = "ID", conflicts_with = "all")]
+    pub(crate) ids: Vec<String>,
+    /// Every voice
+    #[arg(long)]
+    pub(crate) all: bool,
 }
 
 impl StudioAction {

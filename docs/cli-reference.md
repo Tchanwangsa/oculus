@@ -1441,7 +1441,7 @@ Commands:
   tts         Synthesise one clip of text to a WAV, to hear a voice
   g2p         Show how Kokoro reads text: each word's phonemes and who read it
   pronounce   Suggest how Kokoro should say a word, for the student to review
-  voices      List Kokoro's voices, or download or delete its packs (103 MB)
+  voices      List Kokoro's voices, or download or delete them and its packs
   agents      Which models a chat agent's Studio subagents run on, and how to start one
   aligner     Download, check or delete the narration aligner model (378 MB)
   help        Print this message or the help of the given subcommand(s)
@@ -2219,8 +2219,9 @@ Synthesise one clip of text to a WAV, to hear a voice
 
 Speaks `TEXT` as `narrate` would, with Kokoro or the TTS server, and writes the WAV,
 then prints its path and length. An empty, non-WAV or silent clip is an error (a Kokoro
-server answers an unknown voice with silence). Uses Settings -> Studio -> Narration unless the flags
-say otherwise; no video is involved, so Kokoro reads only the global library's lexicon.
+server answers an unknown voice with silence). Uses Settings -> Studio -> Narration
+unless the flags say otherwise; no video is involved, so Kokoro reads only the global
+library's lexicon.
 
 oculus studio tts "We follow the gradient downhill." --voice bf_emma -o /tmp/emma.wav
 
@@ -2306,10 +2307,10 @@ Suggest how Kokoro should say a word, for the student to review
 
 The lexicon (`lexicon.json`) is written only by the app: an agent that doubts a guessed
 word suggests a reading with `suggest`, and the student hears the word's sentence both
-ways in Settings -> Studio -> Pronunciation and accepts the suggestion, keeps the guess, or marks it wrong
-with a note. An accepted reading or a kept guess goes into the subject's lexicon (the
-global library's for a video with no subject) and applies at the next `narrate`. `list`
-shows what is still waiting and what was marked wrong.
+ways in Settings -> Studio -> Pronunciation and accepts the suggestion, keeps the guess,
+or marks it wrong with a note. An accepted reading or a kept guess goes into the
+subject's lexicon (the global library's for a video with no subject) and applies at the
+next `narrate`. `list` shows what is still waiting and what was marked wrong.
 
 Usage: oculus studio pronounce <COMMAND>
 
@@ -2336,7 +2337,8 @@ find `WORD` (any case; `Word's` counts): its first guessed place, else its first
 recording how Kokoro reads it now, its sentence, scene and script.md line. A word the
 narration never says fails. The suggestion is stored as pending under the video's
 subject, replacing an earlier one for the same word; it prints the reading's phonemes.
-The student reviews it in Settings -> Studio -> Pronunciation. Needs the `g2p-en-us` pack.
+The student reviews it in Settings -> Studio -> Pronunciation. Needs the `g2p-en-us`
+pack.
 
 oculus studio pronounce suggest momentum Nesterov NESS-ter-off
 
@@ -2382,22 +2384,23 @@ Options:
 ### `oculus studio voices`
 
 ```
-List Kokoro's voices, or download or delete its packs (103 MB)
+List Kokoro's voices, or download or delete them and its packs
 
-The Kokoro engine narrates inside the app from two packs, both kept in `<app
+The Kokoro engine narrates inside the app from two packs and a voice, all kept in `<app
 data>/models/voice/`, downloaded on request, checked against a pinned size and sha256
-and never bundled: `voice-kokoro` (the int8 model and the voices `af_heart` and
-`am_michael`, 93 MB) and `g2p-en-us` (misaki's US dictionary and the guesser that reads
-the words it lacks, 9 MB). With no action it lists each pack's status and each voice,
-marking the one Settings -> Studio -> Narration names.
+and never bundled: `voice-kokoro` (the int8 model, 92 MB), `g2p-en-us` (misaki's US
+dictionary and the guesser that reads the words it lacks, 9 MB) and one of the 20 US
+English voices (0.5 MB each, graded A to F by Kokoro's authors). With no action it lists
+each pack's status and each voice, marking the one Settings -> Studio -> Narration
+names.
 
 Usage: oculus studio voices [COMMAND]
 
 Commands:
-  list      Each pack's status and size, and each voice and whether it is downloaded
-            (the default)
-  download  Download both packs, printing progress; files already there are kept
-  delete    Delete both packs and any partial download
+  list      Each pack's status and size, and each voice with its grade, size and whether
+            it is downloaded (the default)
+  download  Download Kokoro's packs and starter voices, or the voices named
+  delete    Delete Kokoro's packs, or the voices named
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -2408,7 +2411,8 @@ Options:
 #### `oculus studio voices list`
 
 ```
-Each pack's status and size, and each voice and whether it is downloaded (the default)
+Each pack's status and size, and each voice with its grade, size and whether it is
+downloaded (the default)
 
 Usage: oculus studio voices list
 
@@ -2420,11 +2424,29 @@ Options:
 #### `oculus studio voices download`
 
 ```
-Download both packs, printing progress; files already there are kept
+Download Kokoro's packs and starter voices, or the voices named
 
-Usage: oculus studio voices download
+With no ID and no `--all`, downloads what a fresh install needs to narrate: the model,
+the pronunciation pack and the starter voices `af_heart` and `am_michael`. With IDs, or
+with `--all` (all 20), downloads only those voices. Prints progress as it goes; files
+already there are kept.
+
+oculus studio voices download
+
+oculus studio voices download am_puck af_bella
+
+oculus studio voices download --all
+
+Usage: oculus studio voices download [OPTIONS] [ID]...
+
+Arguments:
+  [ID]...
+          Voice ids, as `oculus studio voices` lists them
 
 Options:
+      --all
+          Every voice
+
   -h, --help
           Print help (see a summary with '-h')
 ```
@@ -2432,11 +2454,25 @@ Options:
 #### `oculus studio voices delete`
 
 ```
-Delete both packs and any partial download
+Delete Kokoro's packs, or the voices named
 
-Usage: oculus studio voices delete
+With no ID, deletes the model and the pronunciation pack and any partial download of
+them; the voices stay. With IDs, or with `--all`, deletes only those voices.
+
+oculus studio voices delete
+
+oculus studio voices delete am_puck
+
+Usage: oculus studio voices delete [OPTIONS] [ID]...
+
+Arguments:
+  [ID]...
+          Voice ids, as `oculus studio voices` lists them
 
 Options:
+      --all
+          Every voice
+
   -h, --help
           Print help (see a summary with '-h')
 ```

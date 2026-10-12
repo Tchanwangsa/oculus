@@ -124,7 +124,7 @@ pub struct ServerVoice {
     pub speed: f64,
 }
 
-/// A Kokoro voice: `voice` names its style file in the voice pack
+/// A Kokoro voice: `voice` names its style file in the voice folder
 /// (`af_heart` reads `af_heart.bin`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct KokoroVoice {
@@ -258,7 +258,7 @@ pub fn resolve(
     }
 }
 
-/// A Kokoro voice id names a file in the voice pack, so it is lower-case
+/// A Kokoro voice id names a file in the voice folder, so it is lower-case
 /// letters, digits and `_` only.
 fn valid_kokoro_voice(voice: &str) -> bool {
     !voice.is_empty()

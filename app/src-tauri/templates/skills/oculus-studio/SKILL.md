@@ -372,7 +372,7 @@ It reads Settings → Studio → Narration; pass no `--engine`, `--server`, `--m
 `--voice` unless the student asks. If it fails for want of a server, model, voice or
 the word-timing model, **stop and tell the student** what to set in
 Settings → Studio (Narration, or Word timing for the aligner). Never run `oculus studio aligner download` (378 MB) or
-`oculus studio voices download` (Kokoro's packs, 103 MB): their call. If
+`oculus studio voices download` (Kokoro's packs and voices, 101 MB or more): their call. If
 the server does not answer, say so; do not retry in a loop.
 
 **Check the guessed words.** With the Kokoro engine, narrate ends with a
