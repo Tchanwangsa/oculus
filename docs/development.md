@@ -288,8 +288,9 @@ the draft is a manual step on GitHub.
   `com.apple.security.cs.disable-library-validation`, which Tauri would put on
   every sidecar. A downloaded copy
   is quarantined — `xattr -dr com.apple.quarantine /Applications/Oculus.app` —
-  and, having no team identifier, re-prompts for keychain items after every
-  update. A Developer ID certificate plus notarisation (the `APPLE_*` secrets
+  and, having no team identifier, re-prompts for keychain items whenever
+  keyd's own bytes change (an app update that leaves keyd alone does not). A
+  Developer ID certificate plus notarisation (the `APPLE_*` secrets
   tauri-action reads) removes both.
 - The installed app and `tauri dev` share the identifier `com.tchan.oculus`, so
   they open the same library, database and keychain items. Never run both at
