@@ -9,6 +9,7 @@ use super::context::{sha256, write_file, Context, Unrecorded};
 use super::frames::{self, Init};
 use super::paths;
 use super::reconcile::{self, Head, Removes};
+use crate::library::paths::safe_rel_path;
 use crate::sources::ed::workspace_state::WorkspaceState;
 use crate::sources::ed::{sahara, unpack_workspace};
 
@@ -75,7 +76,7 @@ fn first_connect(
         elog!("[oculus] ed workspace {}: {skip}", core.challenge_id);
         unknown.insert(skip.path);
     }
-    let unrecorded = std::mem::take(&mut core.shared().unrecorded);
+    let mut unrecorded = std::mem::take(&mut core.shared().unrecorded);
     let root = core.root();
     std::fs::create_dir_all(&root)
         .map_err(|e| format!("could not make the workspace folder: {e}"))?;
@@ -96,19 +97,25 @@ fn first_connect(
         }
         write_file(&target, &file.bytes)?;
     }
-    // Left by an earlier sync (a file since removed on Ed, or a name it
-    // rewrote): reconcile would otherwise upload it as new.
+    // A file Ed lacks is new here and goes up, except an earlier sync's
+    // renamed copy of one of Ed's (`my_file.py` for `my file.py`).
+    let renamed = old_sync_names(files.iter().map(|f| f.path.as_str()));
     for path in paths::list(&root) {
-        let leftover = !record.contains_key(&path)
-            && !unrecorded.contains_key(&path)
-            && !unknown.contains(&path)
-            && !reconcile::is_server_copy(&path);
-        if leftover {
+        let known = record.contains_key(&path)
+            || unrecorded.contains_key(&path)
+            || unknown.contains(&path)
+            || reconcile::is_server_copy(&path);
+        if known {
+            continue;
+        }
+        if renamed.contains(&path) {
             elog!(
-                "[oculus] ed workspace {}: {path} is not on Ed, deleted",
+                "[oculus] ed workspace {}: {path} is an earlier sync's name for a file on Ed, deleted",
                 core.challenge_id
             );
             let _ = std::fs::remove_file(root.join(&path));
+        } else {
+            unrecorded.insert(path, Unrecorded::Saved);
         }
     }
     core.record(workspace_id, |state| {
@@ -122,6 +129,14 @@ fn first_connect(
     })?;
     core.emit_files();
     send_unrecorded(core, workspace_id, host, &unrecorded)
+}
+
+/// The names the lesson sync gave Ed's `paths` before it kept Ed's own
+/// (`safe_rel_path`), where they differ.
+pub(super) fn old_sync_names<'a>(paths: impl Iterator<Item = &'a str>) -> BTreeSet<String> {
+    paths
+        .filter_map(|p| safe_rel_path(p).filter(|old| old != p))
+        .collect()
 }
 
 /// Upload what was saved before the record existed and remove what was

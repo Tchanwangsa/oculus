@@ -471,8 +471,9 @@ the working copy; Ed gets each save as an upload.
   and saves the record: `base_commit` is `init.last_commits[0]`, each file's
   hash is of Ed's bytes. A save or delete made before that (offline, or while
   connecting) is kept over Ed's copy, then uploaded or removed. Any other
-  file in the folder is a leftover of an earlier sync and is deleted (logged),
-  or reconcile would upload it as new. Every later connect reconciles
+  file in the folder that Ed lacks is new here and is uploaded too, except
+  an earlier sync's rewritten name for one of Ed's files (`my_file.py` for
+  `my file.py`), which is deleted (logged). Every later connect reconciles
   ([below](#reconcile-brings-a-recorded-workspace-in-step-with-ed)) before
   the session goes online.
 - Every path is workspace-relative and goes through one guard
