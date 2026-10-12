@@ -32,7 +32,7 @@ it is named. Nothing is asserted that the picture does not show.
 Both are in `skills/oculus-studio/` under your working directory.
 
 - **`reference.md`**: the authoring rules (video.json, script.md, the
-  component format, elements, motion, `Morph`, cues, lint). A scene builder
+  component format, elements, maths, motion, cues, lint). A scene builder
   reads it in full before writing TSX; the director reads its "video.json"
   and "script.md" sections before writing those files. Afterwards, go to the
   section a lint message or a question points at.
@@ -277,9 +277,9 @@ means. Twelve is different: three rows of four.
 | "Two rows leave one dot over" | the row regroups into rows of 3 and 3; d6 drops below, turns `negative` |
 | "three rows leave one over too" | regroups into 2, 2, 2; d6 again alone |
 | "Only one row of seven works" | back to one row; d6 back to `text` colour |
-| "factors are one and itself" | under the row, `7 = 1 × 7` is written term by term, keys eq7.* |
-| "that is what prime means" | the word `prime` writes in beside the 7, `accent` |
-| "Twelve is different" | row and label shrink to the top left (key `row7`); twelve dots enter at centre |
+| "factors are one and itself" | under the row, Math `eq7` `7 = 1 \times 7` is written on with `Write`, a `\k` group per term on its words |
+| "that is what prime means" | `\text{prime}` in `\color{accent}`, a group of the same Math, writes on beside the 7 |
+| "Twelve is different" | a `Steps` state: the row, its label and `eq7` shrink to the top left (keys `row7`, `seven`, `eq7`); twelve dots enter at centre |
 | "three rows of four" | the twelve dots fall into 3 rows of 4 |
 ````
 
@@ -306,14 +306,14 @@ builder which scenes share keys with its own, and which keys.
    number), never templates to fill. A component made for one scene
    declares one prop, `narrated: bool().default(false)`: `video.json` sets
    it `true` on a narrated scene, so the beats cue on `word()`, and without
-   it they fall back to fixed times (`reference.md` "Moving maths with
-   Morph" shows the pattern).
+   it they fall back to fixed times (every recipe in `reference.md`
+   "Moving maths" shows the pattern).
 2. Cues every beat with `word("…")` on the words the beat list names, in
    the scene's `script.md` section as written. The first element is on
    screen at a fixed time under half a second, not at a late cue, so no
    scene opens on an empty frame.
-3. Builds maths term by term ("Moving maths" below, `reference.md` "Moving
-   maths with Morph").
+3. Builds maths term by term as `Math`, never Text ("Moving maths" below,
+   `reference.md` "Maths" and "Moving maths").
 4. Draws and looks, until every beat reads:
 
    ```bash
@@ -440,9 +440,28 @@ The student watches to understand, not to be told.
 
 ## Moving maths
 
-Build a formula from keyed terms, one per term, and move it with
-`<Morph>`: each step of a derivation is a state, picked by time, so terms
-glide into the next line in place and a finished line shrinks into a
-corner by re-laying out its keyed root. `reference.md` "Moving maths with Morph" has the pattern and a
-working three-step example. Write terms as they are said: a term enters on
-its word, never the whole line at once.
+Every formula, number in a formula and variable on screen is a
+`<Math tex="…" key="eq">`: LaTeX typeset as one keyed glyph per piece, so
+it can be written on and rewritten term by term. It moves as it is said:
+
+| The narration says | On screen | Built with |
+| --- | --- | --- |
+| a formula, term by term | each term is written on as its words are said | `<Write at={{ lhs: word("…"), … }}>` round the Math, one `\k{name}{…}` group per spoken term |
+| the next step | the line rewrites itself in place: shared terms glide, what cancels fades, what is new arrives beside its neighbours | `<Steps at={[word("…"), …]} lag={0.1}>`, one state per line, the same Math `key` in every state, `\k` names on the terms that must travel |
+| "this term", "the period" | the term is pointed at as it is named | `Brace` with a label, `Surround`, `Underline`, `Indicate`, `Arrow from to`, each on `target="eq/name"` |
+| "keep that", then the next idea | the finished result shrinks into a corner and stays there while it is used | a later Steps state: the same Math key, smaller, `position: "absolute"`, no `lag` |
+| a value put into a formula | the number flies into the symbol's slot; the symbol fades | one Math holding the formula and the given, the number `\k{val}{…}` in both states |
+| the next scene uses it | it carries over term by term | the same Math `key` in the next scene's tree, and no `transition` on that scene |
+
+`reference.md` "Maths" has the element (props, backslashes, `\k` keys,
+theme colours, size) and "Moving maths" a working component for each row;
+start a scene from the closest one.
+
+**Never:**
+
+- a formula that appears whole: every Math is inside a `Write` cued to its
+  words, or arrives as a Steps state on its cue;
+- lines stacking under each other: a derivation is one place, rewritten;
+- text pretending to be maths: `2^{4}` or `7 = 1 × 7` as Text, a power
+  as a raised Text run. Words that belong in a formula are `\text{…}`
+  inside its Math.

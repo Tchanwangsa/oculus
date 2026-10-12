@@ -13,8 +13,12 @@ has the full flags.
 - Elements: element props, layout, the style keys
 - The theme: token names and type sizes, making a new theme
 - Motion: Enter and Exit, Sequence, Stagger, Camera, Arrow, the helpers
-- Moving maths with Morph: states picked by time, a worked derivation,
-  moving a result aside, carrying it into the next scene
+- Maths: `Math`, backslashes, `\k` groups and keys, theme colours, size,
+  errors
+- Moving maths: `Write`, `Steps`, the overlays; five recipes (a derivation
+  in place, writing on per group, pointing at a term, a result shrunk
+  aside, a number into a symbol's slot); carrying a formula into the next
+  scene; gotchas
 - Word cues: `word()`, `wordEnd()`, cues in props
 - Transitions and magic move
 - Lint: each kind and what to do, the literal rules exactly
@@ -173,7 +177,7 @@ export default ({ count, cols, cues }, { theme }) => {
 - `console.log` output is printed by `oculus studio frame`.
 
 **Prop builders:** `str()`, `num()`, `bool()`, `list(x)`, `oneOf([...])`,
-`latex()` (a string of LaTeX source; no element draws it as an equation),
+`latex()` (a string of LaTeX source, for a `<Math tex>`),
 and `token(section)`, which takes a token's *name* and hands the component
 its value:
 `token("color").default("accent")` set to `"positive"` in a scene's props
@@ -195,7 +199,11 @@ list(token("color"))`, read together by index.
 | `Text` | `style`, `key`, children | Children are strings or numbers. To mix styles, several Text in a Row. Wraps at its box's width. |
 | `Image` | `src`, `style`, `key` | `src` is relative to `assets/`. A missing file is an error. |
 | `Path` | `d`, `viewBox`, `fill`, `stroke`, `trim`, `style`, `key` | SVG path data fitted into its box. `stroke` is `{ width, color, cap, join, dash, dashOffset }`; `trim: [start, end]` draws that fraction of the length. |
-| `Morph` | `p`, two children | Two layouts of one place, blended at `p` (0 to 1). No `key`. |
+| `Math` | `tex`, `display`, `style`, `key` | LaTeX as one keyed piece per glyph ("Maths"). |
+| `Morph` | `p`, `lag`, `fade`, `ease`, two children | Two layouts of one place, blended at `p` (0 to 1). No `key`. |
+| `Steps` | `at`, `dur`, `ease`, `lag`, `fade`, two or more children | States of one place, the pair picked by time ("Moving maths"). |
+| `Write` | `at`, `dur`, `lag`, `stroke`, children | Writes the Math inside it on ("Moving maths"). |
+| `Brace`, `Surround`, `Underline`, `Indicate` | `target`, `at`, `dur`, `ease`, `progress`, and their own | Overlays on a key, drawn after layout ("Moving maths"). |
 
 An element takes only these props; anything else is an error that names
 the allowed ones. Style keys go inside `style`.
@@ -265,7 +273,8 @@ Everything moves as a function of `t`.
   `<Arrow>`'s head rides the drawn end of the shaft, pointing along the
   shaft's tangent there, so the arrow reads as being drawn; it grows in
   from nothing over the first head length of shaft and settles on the last
-  point at `progress` 1.
+  point at `progress` 1. With `from` and `to` instead of `points` it is an
+  overlay that points at a term ("Moving maths").
 - Helpers: `interpolate(t, [0, 1], [0, 200], { easing })` (easing must be
   a function here), `spring(t, { stiffness, damping, mass })`, `mix(c1, c2,
   p)` for colours, `clamp`, `lerp`, `linear`, `easeOutCubic`,
@@ -280,35 +289,115 @@ Everything moves as a function of `t`.
 `easing` props take a function, `[x1, y1, x2, y2]`, or a theme easing name
 (`"enter"`, `"exit"`, `"standard"`).
 
-## Moving maths with Morph
+## Maths
 
-Here a formula is a `Row` of keyed `Text` runs, one per term, and a
-derivation is a list of **states** of that row. `<Morph p>`
-blends two layouts of one place; picking the pair by time chains any number
-of states, so each line rewrites itself into the next in place:
+`<Math tex="…" key="eq">` typesets LaTeX with KaTeX, as the app does, and
+draws each glyph, fraction bar, root sign and tall bracket as its own keyed
+piece. That is what lets a formula be written on term by term and rewrite
+itself into the next line. Every formula, every number in a formula and
+every variable is a Math, never Text.
 
-- **Keys are terms.** A key matches the same key anywhere inside the Morph,
-  at any depth, so `2` can leave a product and become an exponent in a
-  nested `Row`. A matched term moves, resizes and recolours; the same
-  string re-shapes at the new size (no bitmap scaling); a different string
-  cross-fades in halves. A key the next state drops fades out over `p` 0 to
-  0.4; a new key fades in over 0.4 to 1. Keys are unique within one state.
-- **One pair at a time.** Transition i (state i to i + 1) starts on its
-  cue and lasts a fixed time; at its end the next pair starts from the same
-  layout, so the joins are seamless. `p` is clamped to 0 to 1, a Morph takes
-  exactly two children, and a Morph inside another is an error.
-- **Writing the first line** is opacity per term, cued to its word: a term
-  enters as it is said, never the whole line at once.
-- **Moving a result aside** is one more state: the same keyed row laid out
-  again, smaller and `position: "absolute"` in a corner. Every term glides
-  there together and stays visible while the next idea is built.
-- **Carrying it into the next scene**: give the next scene's root the same
-  keyed row in the same corner, at the same sizes, and no `transition` on
-  that scene; the magic move keeps it in place while the rest changes.
+| Prop | What it is |
+| --- | --- |
+| `tex` | The LaTeX source. |
+| `key` | Prefixes every piece's key: `eq` gives `eq/…`. Give every Math one; the same key in two states of a `Steps`, or in two scenes, is what makes it move. |
+| `display` | `true` (default): display style, limits above and below. `false`: inline. |
+| `style` | `fontSize` and `color`, plus placement and paint (`margin`, `position`, `left`, `top`, `opacity`, transforms). |
 
-The derivation 12 = 2 × 6 → 12 = 2 × 2 × 3 → 12 = 2² × 3, then aside. Its
-`narrated` prop is `true` in the scene (`word()` cues) and false in a
-gallery (fixed times). Checked with `oculus studio strip`:
+- **Backslashes.** In a JSX attribute a backslash is itself:
+  `tex="\frac{a}{b}"`. In a JS string or template literal it is written
+  twice: `tex={"\\frac{a}{b}"}`, ``tex={`\\k{n}{${n}}`}``. Use attributes
+  unless the formula is built from a prop or a constant.
+- **Groups and keys.** `\k{name}{…}` names a term: its pieces are keyed
+  `eq/name`, `eq/name.1`, `eq/name.2`, … in reading order, and the
+  innermost group wins. A piece in no group gets an automatic key from its
+  character and how many came before it. Automatic keys suit a `=` or a
+  lone bracket, but they can pair the wrong copy of a repeated digit across
+  a rewrite, so name every term that must travel deliberately. Names are
+  words (`lhs`, `exp`, `val`): a group named like a symbol of the same
+  formula (`x` where the formula has an `x`) is an error. `Write` cues
+  groups, overlays target them, and `Steps` matches by them.
+- **Colour.** `style.color` inks the whole formula (default
+  `theme.color.text`). Inside, `\color{accent}` and `\textcolor{accent}{…}`
+  take a theme colour's name (any `theme.color` token) or hex; a CSS colour
+  name is an error that lists the theme's.
+- **Size.** `style.fontSize` is the size of the text the formula sits
+  with; the maths draws 1.21 times larger, as KaTeX does. Spread a type
+  token: `style={{ ...type.h1 }}` is 72 px text and 87 px maths. The Math's
+  box is the formula's size and its baseline the formula's, so beside a
+  Text in a Row use `align="baseline"`. `width`, `height`, `padding`,
+  `border`, flex container keys, `textAlign` and `reveal` are errors: wrap
+  the Math in a Box to size or pad it.
+- **Words in a formula** are `\text{…}` inside it (`\text{or}`,
+  `\textcolor{accent}{\text{prime}}`), since only Math can be written on.
+- **Two lines** are an environment (`\begin{gathered} … \\ … \end{gathered}`,
+  `aligned`); `\\` outside one is an error. `\phantom{…}` takes its space
+  and draws nothing, which keeps a line in place when what was beside it
+  goes.
+- **Errors.** A formula KaTeX cannot parse fails the frame with KaTeX's
+  message and position, and lint reports it at the TSX line:
+  ``<Math tex="\frac{a}{">: Unexpected end of input …``. So does a
+  character no KaTeX font has.
+- `Math.max` and `Math.random` still work: the element is JS's own `Math`.
+- A `latex()` prop is a string of LaTeX source for a Math's `tex`.
+
+## Moving maths
+
+`SKILL.md` "Moving maths" has the rule: a formula is written on term by
+term as it is said, rewrites itself in place, and shrinks aside when done.
+These do it:
+
+- **`<Write at dur lag stroke>`** writes every Math inside it on, manim's
+  Write: each piece's outline strokes on, then its fill fades in, piece
+  after piece in reading order. `at` is seconds for the whole formula, or
+  `{ group: seconds }` naming `\k` groups, each cued on its own words. A
+  piece in no listed group writes with the nearest listed group before it,
+  else the first; a group includes the groups inside it. `dur` (a number or
+  `{ group: seconds }`, default `motion.duration.slow`) is each group's
+  run. Before its cue a piece is invisible but keeps its place. A name that
+  is not a group of the formula is an error listing its groups.
+- **`<Steps at dur ease lag fade>`** holds N states of one place, its
+  children. Before `at[0]` the first state shows; transition k (state k to
+  k + 1) starts at `at[k]` and runs `dur` (default `motion.duration.base`;
+  `motion.duration.slow` reads better for a derivation), cut short by the
+  next cue. `lag` (0 to 1) starts the pieces one after another in reading
+  order, manim's lag_ratio. `ease` shapes each piece's run (default
+  easeInOutCubic). A Steps inside another Steps or a Morph is an error.
+- **How a rewrite reads.** A key matches the same key anywhere in the next
+  state, so a term can move from one side to the other or into an
+  exponent: it glides, resizes and recolours. A key the next state drops
+  fades out and a new one fades in, at the same time as the glide, each
+  riding beside its nearest matched neighbour, so `(2^2 + 1)` slides in
+  behind what it follows instead of appearing at its final place.
+  `fade="sequential"` fades out, then in, in place.
+- **Overlays** point at a term after layout and follow it while it moves.
+  Each takes a `target` (a key or a key prefix: `eq/lhs` covers `eq/lhs`,
+  `eq/lhs.1`, …; `eq` is the whole formula) and draws on from `at` over
+  `dur`, or at `progress` (0 to 1). Sizes default to the target's maths
+  size.
+  - `<Brace target label side>`: KaTeX's brace below (default), above,
+    left or right, the label beyond it: a string is set at body size, so
+    pass a Text for a label that matches large maths (recipe 3).
+  - `<Surround target>`: a rounded rectangle drawn on round it, accent.
+  - `<Underline target>`: a line drawn on under it, accent.
+  - `<Indicate target at>`: the term itself pulses larger and flashes to
+    the accent, then back. It needs `at` or `progress`.
+  - `<Arrow from to bend>`: each end a key or a `[x, y]` point in its
+    parent's px; it stops just short of a keyed end.
+- **`<Morph p lag fade ease>`** is the two-state engine under Steps. Use it
+  only when you compute `p` yourself; with `lag`, pass a linear `p` and an
+  `ease`.
+
+### Recipes
+
+Each is a whole component, checked with `strip` on its fixed times. Its
+`narrated` prop is `true` in `video.json` (cues on `word()`) and `false`
+without narration (fixed times). The comment is the narration it is cued
+to. Start a scene from the closest one and change the maths, not the
+mechanism.
+
+**1. A derivation rewritten in place**, written on first: 15 = 2⁴ − 1 →
+(2²)² − 1 → (2² − 1)(2² + 1) → 3 × 5.
 
 ```tsx
 export const props = {
@@ -317,78 +406,300 @@ export const props = {
 
 export const examples = {};
 
-// One state per line of the derivation: [key, text], or [key, base, power]
-// for a raised term. A key is one term across every state, so it glides; a
-// key a state drops fades out, a new one fades in.
-const LINES = [
-  [["n", "12"], ["eq", "="], ["a", "2"], ["x1", "×"], ["six", "6"]],
-  [["n", "12"], ["eq", "="], ["a", "2"], ["x1", "×"], ["b", "2"], ["x2", "×"], ["c", "3"]],
-  [["n", "12"], ["eq", "="], ["sq", ["a", "2"], ["b", "2"]], ["x2", "×"], ["c", "3"]],
-];
+// Narration: "Fifteen is two to the fourth, minus one. Two to the fourth is
+// two squared, squared. So this is a difference of squares: two squared minus
+// one, times two squared plus one. That is three times five."
+export default ({ narrated }, { t, theme, size }) => {
+  const { color, type, motion } = theme;
+  const cue = (phrase, fallback) => (narrated ? word(phrase) : fallback);
+  const at = [cue("two squared", 3.0), cue("difference", 4.6), cue("three times five", 6.2)];
+  const big = { ...type.display };
+  const edge = size.width * 0.25;
+  // The formula starts at a fixed left edge, so `15 =` never moves while the
+  // right side is rewritten. Lag staggers the rewrites; the last step, where
+  // a whole side becomes its value, goes at once.
+  return (
+    <Stack justify="center" align="flex-start" style={{ flexGrow: 1, fill: color.bg, padding: [0, edge] }}>
+      <Steps at={at} dur={motion.duration.slow} lag={t < at[2] ? 0.1 : 0}>
+        <Write at={{ lhs: cue("fifteen", 0.3), base: cue("two to the fourth", 0.9), less: cue("minus one", 1.8) }}>
+          <Math key="eq" tex="\k{lhs}{15} = \k{base}{2}^{\k{exp}{4}} \k{less}{- 1}" style={big} />
+        </Write>
+        <Math key="eq" tex="\k{lhs}{15} = (\k{base}{2}^{2})^{2} \k{less}{- 1}" style={big} />
+        <Math key="eq" tex="\k{lhs}{15} = (\k{base}{2}^{2} \k{less}{- 1})(2^{2} + 1)" style={big} />
+        <Math key="eq" tex="\k{lhs}{15} = 3 \times 5" style={big} />
+      </Steps>
+    </Stack>
+  );
+};
+```
 
-// Transition i (state i to i + 1) starts at at[i] and lasts dur: the pair to
-// morph and how far along it is.
-const step = (t, at, dur) => {
-  let i = 0;
-  while (i < at.length - 1 && t >= at[i + 1]) i += 1;
-  return [i, easeInOutCubic(clamp((t - at[i]) / dur, 0, 1))];
+**2. Writing on per group**, a word included: 7 = 1 × 7, then *prime*.
+
+```tsx
+export const props = {
+  narrated: bool().default(false),
 };
 
-export default ({ narrated }, { t, theme }) => {
-  const { color, type, space, motion } = theme;
+export const examples = {};
+
+// Narration: "Seven is one times seven, and nothing else: its only factors
+// are one and itself. That is what prime means."
+export default ({ narrated }, { theme }) => {
+  const { color, type } = theme;
   const cue = (phrase, fallback) => (narrated ? word(phrase) : fallback);
-  // The first line is written term by term as it is said.
-  const enter = {
-    n: cue("twelve", 0.2),
-    eq: cue("is", 0.5),
-    a: cue("two", 0.8),
-    x1: cue("times", 1.1),
-    six: cue("six", 1.4),
-  };
-  const shown = (key) =>
-    key in enter ? interpolate(t, [enter[key], enter[key] + motion.duration.base], [0, 1]) : 1;
-  // `aside` re-lays the same keyed line small in the top left corner.
-  const term = (key, text, size, tone) => (
-    <Text key={key} style={{ ...size, color: tone, opacity: shown(key) }}>
-      {text}
-    </Text>
-  );
-  const line = (terms, aside) => (
-    <Row
-      key="line"
-      gap={aside ? space.s : space.m}
-      align="center"
-      style={aside ? { position: "absolute", left: space.xl, top: space.xl } : {}}
-    >
-      {terms.map(([key, text, power]) =>
-        power ? (
-          <Row key={key} align="flex-start">
-            {term(text[0], text[1], aside ? type.h2 : type.display, color.text)}
-            {term(power[0], power[1], aside ? type.h3 : type.h1, color.accent)}
-          </Row>
-        ) : (
-          term(key, text, aside ? type.h2 : type.display, color.text)
-        ),
-      )}
-    </Row>
-  );
-  const states = [line(LINES[0]), line(LINES[1]), line(LINES[2]), line(LINES[2], true)];
-  const at = [cue("six is", 2.4), cue("together", 4.4), cue("keep", 6.4)];
-  const [i, p] = step(t, at, motion.duration.slow);
   return (
-    <Box style={{ flexGrow: 1, fill: color.bg, alignItems: "center", justifyContent: "center" }}>
-      <Morph p={p}>
-        {states[i]}
-        {states[i + 1]}
-      </Morph>
+    <Stack justify="center" align="center" style={{ flexGrow: 1, fill: color.bg }}>
+      <Write
+        at={{
+          lhs: cue("seven is", 0.3),
+          one: cue("one times", 0.9),
+          self: cue("times seven", 1.3),
+          name: cue("prime", 2.6),
+        }}
+        dur={{ name: 1.2 }}
+      >
+        <Math
+          key="eq7"
+          tex="\k{lhs}{7} = \k{one}{1} \k{self}{\times 7} \qquad \k{name}{\textcolor{accent}{\text{prime}}}"
+          style={{ ...type.display }}
+        />
+      </Write>
+    </Stack>
+  );
+};
+```
+
+**3. Pointing at terms** as they are named: a brace with a label, a
+surround, an arrow from a label and a pulse.
+
+```tsx
+export const props = {
+  narrated: bool().default(false),
+};
+
+export const examples = {};
+
+// Narration: "Seven to the fourth is two thousand four hundred and one, which
+// is a hundred and sixty fifteens, plus one. So it leaves one over when
+// divided by fifteen. The four that got us there is the period."
+export default ({ narrated }, { theme }) => {
+  const { color, type, motion } = theme;
+  const cue = (phrase, fallback) => (narrated ? word(phrase) : fallback);
+  const period = cue("period", 5.4);
+  return (
+    <Stack justify="center" align="center" style={{ flexGrow: 1, fill: color.bg }}>
+      <Write
+        at={{
+          base: cue("seven to the fourth", 0.3),
+          big: cue("two thousand", 1.1),
+          mult: cue("hundred and sixty", 2.0),
+          rest: cue("plus one", 2.8),
+        }}
+      >
+        <Math
+          key="eq"
+          tex="\k{base}{7}^{\k{per}{4}} = \k{big}{2401} = \k{mult}{160 \times 15} \k{rest}{+ \k{one}{1}}"
+          style={{ ...type.h1 }}
+        />
+      </Write>
+      <Brace
+        target="eq/mult"
+        label={<Text style={{ ...type.h3, color: color.muted }}>a multiple of 15</Text>}
+        at={cue("fifteens", 2.3)}
+      />
+      <Surround target="eq/one" at={cue("leaves one over", 3.8)} />
+      <Enter preset="fade" at={period}>
+        <Text
+          key="periodName"
+          style={{ ...type.h3, color: color.accent, position: "absolute", left: "18%", top: "16%" }}
+        >
+          the period
+        </Text>
+      </Enter>
+      <Arrow from="periodName" to="eq/per" bend={-30} at={period} />
+      <Indicate target="eq/per" at={period + motion.duration.base} />
+    </Stack>
+  );
+};
+```
+
+**4. A result shrunk aside, then a new formula.** The second state lays
+the same `rule` Math out small in the corner and writes the next formula
+in the middle.
+
+```tsx
+export const props = {
+  narrated: bool().default(false),
+};
+
+export const examples = {};
+
+// Narration: "So a to the r leaves one over, mod N. Keep that in the corner:
+// it means a to the r minus one is a multiple of N, and that splits into two
+// factors."
+export default ({ narrated }, { theme }) => {
+  const { color, type, space } = theme;
+  const cue = (phrase, fallback) => (narrated ? word(phrase) : fallback);
+  const full = { width: "100%", height: "100%" };
+  return (
+    <Box style={{ flexGrow: 1, fill: color.bg }}>
+      <Steps at={[cue("keep that", 2.4)]} dur={1.2}>
+        <Stack justify="center" align="center" style={full}>
+          <Write at={{ power: cue("a to the r", 0.3), rest: cue("leaves one over", 1.0) }}>
+            <Math key="rule" tex="\k{power}{a^r} \k{rest}{\equiv 1 \pmod{N}}" style={{ ...type.display }} />
+          </Write>
+        </Stack>
+        <Box style={full}>
+          <Math
+            key="rule"
+            tex="\k{power}{a^r} \k{rest}{\equiv 1 \pmod{N}}"
+            style={{ ...type.h2, position: "absolute", left: space.xl, top: space.l }}
+          />
+          <Stack justify="center" align="center" style={full}>
+            <Write at={{ lhs: cue("minus one", 3.7), split: cue("splits", 5.0) }}>
+              <Math
+                key="next"
+                tex="\k{lhs}{a^r - 1 = k N} \k{split}{= (a^{r/2} - 1)(a^{r/2} + 1)}"
+                style={{ ...type.h1 }}
+              />
+            </Write>
+          </Stack>
+        </Box>
+      </Steps>
     </Box>
   );
 };
 ```
 
-Narration it is cued to: "Twelve is two times six. And six is two times
-three, so twelve is two times two times three. Put the two twos together,
-two squared, times three. Keep that line; we will need it."
+**5. A number flying into a symbol's slot.** The formula and the givens
+are one Math, so each value keeps its `\k` key from the given line into
+the formula.
+
+```tsx
+export const props = {
+  narrated: bool().default(false),
+};
+
+export const examples = {};
+
+// Narration: "The recipe wants a, r and N. Here a is seven, r is four, and N
+// is fifteen. Put them in. Seven squared minus one is forty-eight, and the
+// gcd of forty-eight and fifteen is three."
+// The formula and the givens are one Math, so each value's \k key is the
+// same in both states and the value flies into its slot. `aligned` with a
+// leading & starts both lines at one left edge; a phantom keeps the lines
+// where they were once the givens have gone.
+const GIVEN = "\\k{ga}{a = \\k{av}{7},} \\quad \\k{gr}{r = \\k{rv}{4},} \\quad \\k{gn}{N = \\k{nv}{15}}";
+const HIDE = "\\phantom{a = 7,}";
+const lines = (top, bottom) => `\\begin{aligned} &${top} \\\\ &${bottom} \\end{aligned}`;
+
+export default ({ narrated }, { theme, size }) => {
+  const { color, type, motion } = theme;
+  const cue = (phrase, fallback) => (narrated ? word(phrase) : fallback);
+  const big = { ...type.h1 };
+  const edge = size.width * 0.3;
+  return (
+    <Stack justify="center" align="flex-start" style={{ flexGrow: 1, fill: color.bg, padding: [0, edge] }}>
+      <Steps
+        at={[cue("put them in", 3.6), cue("forty-eight", 5.2), cue("is three", 6.8)]}
+        dur={motion.duration.slow}
+      >
+        <Write
+          at={{
+            fn: cue("recipe", 0.3),
+            ga: cue("is seven", 1.2),
+            gr: cue("is four", 1.9),
+            gn: cue("is fifteen", 2.6),
+          }}
+        >
+          <Math key="eq" tex={lines("\\k{fn}{\\gcd}(a^{r/2} - 1,\\ N)", GIVEN)} style={big} />
+        </Write>
+        <Math key="eq" tex={lines("\\k{fn}{\\gcd}(\\k{av}{7}^{\\k{rv}{4}/2} - 1,\\ \\k{nv}{15})", HIDE)} style={big} />
+        <Math key="eq" tex={lines("\\k{fn}{\\gcd}(\\k{prod}{48},\\ \\k{nv}{15})", HIDE)} style={big} />
+        <Math key="eq" tex={lines("\\k{fn}{\\gcd}(\\k{prod}{48},\\ \\k{nv}{15}) = 3", HIDE)} style={big} />
+      </Steps>
+    </Stack>
+  );
+};
+```
+
+### Carrying a formula into the next scene
+
+Give the next scene's tree a Math with the same `key` and `tex`, and set
+no `transition` on that scene: the magic move glides every shared piece
+from its last place to its new one, and the rest of both scenes fades. To
+keep a corner formula still, lay it out at the same place and size. The
+scene after recipe 4:
+
+```tsx
+export const props = {
+  narrated: bool().default(false),
+};
+
+export const examples = {};
+
+// Narration: "Each factor might share a piece of N."
+// The scene after KeepAside, with no `transition`: `rule` stays in its
+// corner and `next` glides up and shrinks, both by their keys; the new line
+// is written below.
+export default ({ narrated }, { theme }) => {
+  const { color, type, space } = theme;
+  const cue = (phrase, fallback) => (narrated ? word(phrase) : fallback);
+  return (
+    <Box style={{ flexGrow: 1, fill: color.bg }}>
+      <Math
+        key="rule"
+        tex="\k{power}{a^r} \k{rest}{\equiv 1 \pmod{N}}"
+        style={{ ...type.h2, position: "absolute", left: space.xl, top: space.l }}
+      />
+      <Stack justify="center" align="center" gap={space.xl} style={{ width: "100%", height: "100%" }}>
+        <Math
+          key="next"
+          tex="\k{lhs}{a^r - 1 = k N} \k{split}{= (a^{r/2} - 1)(a^{r/2} + 1)}"
+          style={{ ...type.h2 }}
+        />
+        <Write at={cue("share", 1.0)}>
+          <Math key="share" tex="\gcd(a^{r/2} - 1,\ N) > 1" style={{ ...type.h1 }} />
+        </Write>
+      </Stack>
+    </Box>
+  );
+};
+```
+
+### Gotchas
+
+- **Anchor what stays.** A centred formula that changes width moves every
+  term, even the unchanged ones, and with `lag` a number's digits drift
+  apart and collide. Start the formula at a fixed left edge (recipes 1 and
+  5), so `15 =` holds still while the right side is rewritten; for two
+  lines use `aligned` with a leading `&`.
+- **One `lag` per Steps, picked by time.** `lag` 0.1 reads well when terms
+  travel; a step where a whole side becomes its value, a shrink to a
+  corner and a substitution read best at 0. Pass `lag={t < at[2] ? 0.1 :
+  0}` to change it at a cue (recipe 1); the joins stay seamless.
+- **Write wraps one Math, not a Steps.** Every group named in `at` must be
+  a group of every Math inside the Write, so wrap the first state (or a new
+  Math inside a later state, recipe 4), never the whole Steps.
+- **Write writes Math only.** A word that must be written on is
+  `\text{…}` inside a Math; a Text label enters with `Enter`.
+- **An overlay's target must be on screen.** A key that a later state
+  drops fades out, and an overlay on it fades with it. Point at a key every
+  state keeps, or at a group that names the term in each state.
+- **Overlays do not travel between scenes.** A magic move swaps an overlay
+  whose box changed in halves instead of gliding it; let each overlay do
+  its job inside its scene.
+- **Keys are per scene.** Two Math elements with one key in one state are
+  a duplicate-key error, and two Math elements never match each other's
+  terms, so a value and the slot it flies into must be one Math (recipe 5).
+- **A key missing from a middle state** fades out and back in. Keep a term
+  in every state it should stay on screen for.
+- **Name the terms that travel.** Automatic keys follow characters, not
+  meaning: with two `2`s on a line, which one goes where is decided by
+  order. A `\k` name on both sides is a promise.
+- **Cue on words, not letters.** `word("a to the r")` finds the phrase; a
+  letter alone may be timed as the word it sounds like ("Word cues").
+
 
 ## Word cues
 
@@ -408,8 +719,8 @@ end on whole said words (`word("one")` does not find it).
   the narration. A component used in several scenes takes its cue phrases
   in props (an optional `cues: list(str())`, as in the example above) and
   falls back to fixed times without them, so its examples still draw. A
-  component made for one scene can take a `narrated` flag instead, as in
-  "Moving maths with Morph".
+  component made for one scene can take a `narrated` flag instead, as
+  every recipe in "Moving maths" does.
 - A letter said alone ("q") may be timed as the word it sounds like
   ("cue"); cue the word beside it.
 - Cues exist only after `narrate`: a narrated scene is not rendered by
