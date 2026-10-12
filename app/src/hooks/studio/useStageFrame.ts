@@ -11,6 +11,8 @@ export interface FrameRequest {
   name: string;
   subject: string | null;
   theme: string;
+  /** An unsaved theme's text to draw in instead of the saved `theme`. */
+  themeText?: string | null;
   props: PropValues;
   t: number;
   width: number;
@@ -53,6 +55,7 @@ export function useStageFrame(request: FrameRequest | null): StageFrame {
     componentFrame(next.name, {
       subject: next.subject,
       theme: next.theme,
+      themeText: next.themeText,
       props: next.props,
       t: next.t,
       width: next.width,

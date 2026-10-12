@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use studio_core::{Library, Theme};
+use studio_core::{valid_theme_name, Library, Theme};
 
 use super::super::levels::{roots, Level};
 
@@ -17,28 +17,26 @@ pub enum ThemeLevel {
 }
 
 /// Where a name is defined: a library file, or the bundled set (`path` is
-/// then None).
+/// then None). A name nothing defines is `Bundled` too, and `theme` says so.
 pub struct Found {
     pub level: ThemeLevel,
     pub path: Option<PathBuf>,
 }
 
-/// A library theme's name is its file stem, in lowercase letters, digits and
-/// `-` (the rule `promote` writes by), which also keeps it inside `themes/`.
-pub fn valid_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 64
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+/// A library theme's name is its file stem (`studio_core::valid_theme_name`),
+/// which also keeps it inside `themes/`.
+pub fn check_name(name: &str) -> Result<(), String> {
+    if valid_theme_name(name) {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{name}` is not a theme name: lowercase letters, digits and `-`"
+        ))
+    }
 }
 
 pub fn locate(roots: &[(Level, PathBuf)], name: &str) -> Result<Found, String> {
-    if !valid_name(name) {
-        return Err(format!(
-            "`{name}` is not a theme name: lowercase letters, digits and `-`"
-        ));
-    }
+    check_name(name)?;
     for (level, root) in roots {
         let path = root.join("themes").join(format!("{name}.json"));
         if path
@@ -85,7 +83,7 @@ pub fn names_in(root: &Path) -> Vec<String> {
         .filter_map(|entry| {
             let file = entry.file_name().into_string().ok()?;
             let stem = file.strip_suffix(".json")?;
-            valid_name(stem).then(|| stem.to_owned())
+            valid_theme_name(stem).then(|| stem.to_owned())
         })
         .collect()
 }

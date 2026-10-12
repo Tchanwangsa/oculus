@@ -4,7 +4,7 @@ import { ArrowUp, CircleNotch } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { Applied } from "@/hooks/studio/useComponentChange";
+import type { Applied } from "@/hooks/studio/useLibraryChange";
 import { chatHref } from "@/lib/harness";
 import { cn } from "@/lib/utils";
 

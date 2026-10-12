@@ -13,21 +13,26 @@ import { readVoiceSettings } from "@/lib/studio/voice";
 const VOICE_SETTINGS = "/settings/voice";
 
 /**
- * The chip beside the subject's: the theme (a swatch and its name, "Default"
- * when none is picked), and the format and length. Its popover also shows the
- * narration voice, read-only: it comes from Settings → Voice.
+ * The chip beside the subject's: the theme (a swatch and its name: the one
+ * picked by hand, else the subject's default), and the format and length.
+ * Its popover also shows the narration voice, read-only: it comes from
+ * Settings → Voice.
  */
 export function StyleChip({
   style,
   onChange,
   themes,
+  defaultTheme,
 }: {
   style: StudioStyle;
   onChange: (next: StudioStyle) => void;
   themes: ThemesState;
+  /** The subject's default theme, once known. */
+  defaultTheme: string | null;
 }) {
-  const picked = themes.themes.find((t) => t.name === style.theme) ?? null;
-  const label = style.theme ?? "Default";
+  const shown = style.theme ?? defaultTheme;
+  const picked = themes.themes.find((t) => t.name === shown) ?? null;
+  const label = shown ?? "Default";
   const set = (patch: Partial<StudioStyle>) => onChange({ ...style, ...patch });
 
   return (
@@ -49,7 +54,12 @@ export function StyleChip({
       </PopoverTrigger>
       <PopoverContent align="start" side="top" className="w-72 space-y-3 p-3">
         <Field label="Theme">
-          <ThemeList state={themes} value={style.theme} onChange={(theme) => set({ theme })} />
+          <ThemeList
+            state={themes}
+            value={style.theme}
+            defaultTheme={defaultTheme}
+            onChange={(theme) => set({ theme })}
+          />
         </Field>
         <Field label="Format">
           <Segmented label="Format" options={FORMATS} value={style.format} onChange={(format) => set({ format })} />

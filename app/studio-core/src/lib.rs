@@ -39,7 +39,8 @@ pub use fonts::bundled_families;
 pub mod gallery;
 pub use host::ComponentInfo;
 pub use library::{
-    STARTER_COMPONENTS, STARTER_THEMES, Starter, seed as seed_library, write as write_library,
+    LibrarySettings, SETTINGS_FILE as LIBRARY_SETTINGS_FILE, STARTER_COMPONENTS, STARTER_THEMES,
+    Starter, remove as remove_library_file, seed as seed_library, write as write_library,
 };
 pub use look::{Beat, SceneLook, Warning};
 pub use project::{
@@ -54,4 +55,4 @@ pub use render::{
 pub use scene::STYLE_KEYS;
 pub use schema::{PropKind, PropSpec, PropsSchema};
 pub use strip::{Strip, StripOptions, strip};
-pub use theme::{DEFAULT_PAUSE, NarrationTokens, Theme};
+pub use theme::{DEFAULT_PAUSE, NarrationTokens, Theme, valid_theme_name};

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 
 import { ComponentList } from "@/components/studio/components/ComponentList";
@@ -6,13 +6,13 @@ import { LibrarySelect } from "@/components/studio/components/LibrarySelect";
 import { Workbench } from "@/components/studio/components/Workbench";
 import { StudioHeader } from "@/components/studio/StudioHeader";
 import { LoadingFill } from "@/components/ui/layout/PageParts";
-import { useComponentChange } from "@/hooks/studio/useComponentChange";
 import { useComponents } from "@/hooks/studio/useComponents";
+import { useLibraryChange } from "@/hooks/studio/useLibraryChange";
+import { useStudioLibrary } from "@/hooks/studio/useStudioLibrary";
 import { useThemes } from "@/hooks/studio/useThemes";
 import { useStoredState } from "@/hooks/ui/useStoredState";
 import { displayCode } from "@/lib/format/format";
 import { componentHref } from "@/lib/studio/routes";
-import { useHarnessStore } from "@/stores/chat/harnessStore";
 
 const readStored = (raw: string | null) => raw ?? "";
 
@@ -23,19 +23,9 @@ const readStored = (raw: string | null) => raw ?? "";
  */
 export default function ComponentsPage() {
   const { name } = useParams();
-  const subjects = useHarnessStore((s) => s.subjects);
-  const [stored, setStored] = useStoredState("oculus-studio-components-library", readStored);
+  const { subjects, subject, code, setCode } = useStudioLibrary();
   const [storedTheme, setTheme] = useStoredState("oculus-studio-components-theme", readStored);
   const [revision, setRevision] = useState(0);
-
-  useEffect(() => {
-    void useHarnessStore.getState().loadSubjects();
-  }, []);
-
-  // A remembered subject that is gone shows the global library.
-  const subject = useMemo(() => subjects.find((s) => s.code === stored) ?? null, [subjects, stored]);
-  // Until the subjects arrive the remembered code is taken as it is.
-  const code = subject ? subject.code : subjects.length === 0 && stored ? stored : null;
   const { components, loaded, error, reload } = useComponents(code);
   const themes = useThemes(code);
   const theme = themes.themes.find((t) => t.name === storedTheme && !t.problem)?.name
@@ -46,7 +36,7 @@ export default function ComponentsPage() {
     void reload();
     setRevision((n) => n + 1);
   }, [reload]);
-  const change = useComponentChange(subject ? { id: subject.id, code: subject.code } : null, onSettled);
+  const change = useLibraryChange("component", subject ? { id: subject.id, code: subject.code } : null, onSettled);
 
   const selected = name ? (components.find((c) => c.name === name) ?? null) : null;
   useEffect(() => {
@@ -65,11 +55,11 @@ export default function ComponentsPage() {
       <StudioHeader
         title="Components"
         actions={
-          <LibrarySelect subjects={subjects} value={code} onChange={(c) => setStored(c ?? "")} />
+          <LibrarySelect subjects={subjects} value={code} onChange={setCode} />
         }
       />
       <div className="grid min-h-0 flex-1 grid-cols-[208px_minmax(0,1fr)_296px]">
-        <ComponentList components={components} loaded={loaded} error={error} />
+        <ComponentList components={components} loaded={loaded} error={error} subject={code} />
         {selected ? (
           <Workbench
             key={`${code ?? ""}/${selected.name}`}
@@ -80,6 +70,7 @@ export default function ComponentsPage() {
             onTheme={setTheme}
             revision={revision}
             change={change}
+            onLibraryChanged={onSettled}
           />
         ) : (
           <div className="col-span-2 flex items-center justify-center px-6 text-center text-[13px] text-muted-foreground">

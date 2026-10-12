@@ -1,8 +1,9 @@
 //! The Components playground's commands: the components a video could use,
 //! one component's source and live frames, and validated edits with a
-//! history to undo them from (docs/studio.md, "The playground's commands").
-//! Each takes a component name (a PascalCase identifier), a level and a
-//! subject code, and reaches only the global and subject libraries.
+//! history to undo them from, and removing a subject's own version
+//! (docs/studio.md, "The playground's commands"). Each takes a component
+//! name (a PascalCase identifier), a level and a subject code, and reaches
+//! only the global and subject libraries.
 
 mod engine;
 mod frame;
@@ -17,12 +18,12 @@ mod write;
 use serde_json::{Map, Value};
 use tauri::ipc::Response;
 
+use super::history::Snapshot;
 use super::levels::Level;
 use super::videos::slot::on_render_slot;
 use crate::runtime::blocking;
 use crate::studio::libraries::libraries;
 use frame::FrameRequest;
-use history::Snapshot;
 use rows::ComponentRow;
 use source::ComponentText;
 
@@ -53,13 +54,15 @@ pub async fn studio_component_source(
 /// A PNG `width` px wide of the component at `t` seconds, 16:9, in theme
 /// `theme`. Props are `props`, else the example named `example`, else the
 /// first example. `duration` (default 4 s) is the scene length the
-/// component sees as `ctx.duration`.
+/// component sees as `ctx.duration`. `theme_text`, when given, is a theme
+/// file's text drawn in place of the saved `theme` (an unsaved edit).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn studio_component_frame(
     name: String,
     subject: Option<String>,
     theme: String,
+    theme_text: Option<String>,
     props: Option<Map<String, Value>>,
     example: Option<String>,
     t: f64,
@@ -74,6 +77,7 @@ pub async fn studio_component_frame(
                 name,
                 subject,
                 theme,
+                theme_text,
                 props,
                 example,
                 t,
@@ -128,6 +132,18 @@ pub async fn studio_component_restore(
     blocking::run(move || {
         let library = libraries(false).map_err(|e| e.to_string())?;
         history::restore_in(&library, level, subject.as_deref(), &name, &id)
+    })
+    .await
+}
+
+/// Removes the subject's own version of a component, so the subject falls
+/// back to the global one. The text goes to `.history` first, so restore can
+/// bring it back.
+#[tauri::command]
+pub async fn studio_component_delete(name: String, subject: String) -> Result<(), String> {
+    blocking::run(move || {
+        let library = libraries(false).map_err(|e| e.to_string())?;
+        write::delete_in(&library, &subject, &name)
     })
     .await
 }
