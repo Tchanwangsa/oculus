@@ -4,8 +4,9 @@ use super::super::audio::{offset, RATE};
 use super::super::cache;
 use super::super::key::Trees;
 use super::super::plan::{self, Scene};
-use super::super::quality::{Quality, Settings};
+use super::super::preset::Preset;
 use super::super::workers::Job;
+use super::settings;
 use crate::test_support::Scratch;
 
 fn scene(index: usize, frames: std::ops::Range<u64>, clip: Option<&str>) -> Scene {
@@ -28,7 +29,7 @@ fn trees() -> Trees {
 #[test]
 fn a_segment_is_cached_when_its_keyed_file_exists() {
     let dir = Scratch::new("render-plan");
-    let settings = Settings::new(Quality::Final, (640, 360), 30, None).unwrap();
+    let settings = settings(Preset::Final, (640, 360), 30);
     let scenes = [scene(0, 0..10, None), scene(1, 10..25, None)];
     let first = plan::segments(&dir, &scenes, &trees(), &settings);
     assert!(first.iter().all(|s| !s.cached));
@@ -48,7 +49,7 @@ fn a_segment_is_cached_when_its_keyed_file_exists() {
 #[test]
 fn jobs_cover_uncached_segments_at_scene_relative_frame_times() {
     let dir = Scratch::new("render-jobs");
-    let settings = Settings::new(Quality::Final, (640, 360), 25, None).unwrap();
+    let settings = settings(Preset::Final, (640, 360), 25);
     let scenes = [
         scene(0, 0..3, None),
         scene(1, 3..5, None),

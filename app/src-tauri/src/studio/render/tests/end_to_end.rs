@@ -1,6 +1,7 @@
 //! Renders through the real ffmpeg, checked by decoding the output with
-//! `-f framemd5` (one hash per decoded frame). Skipped when no ffmpeg is
-//! found.
+//! `-f framemd5` (one hash per decoded frame). Skipped, saying why, when no
+//! ffmpeg is found or it lacks what a test needs (Windows' LGPL build has no
+//! libx264).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,16 +10,64 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::json;
 use studio_core::StudioError;
 
-use super::super::{cache, render, Finished, Options, Outcome, Progress, Quality, RenderError};
+use super::super::{
+    cache, exports, render, Finished, Options, Outcome, Preset, Progress, RenderError, Toolkit,
+};
 use crate::studio::test_wav::wav_of;
 use crate::test_support::Scratch;
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../studio-core/tests/fixtures");
 
-fn ffmpeg() -> Option<PathBuf> {
-    let found = crate::sources::echo360::find_ffmpeg(None);
-    if found.is_none() {
+/// The ffmpeg to test with, if there is one that can render `preset`
+/// (frames, an encoder and AAC).
+fn ffmpeg(preset: Preset) -> Option<PathBuf> {
+    let Some(found) = crate::sources::echo360::find_ffmpeg(None) else {
         eprintln!("skipped: no ffmpeg");
+        return None;
+    };
+    let toolkit = Toolkit::of(&found).unwrap();
+    let ready = toolkit
+        .check_frames()
+        .and_then(|()| toolkit.check_audio())
+        .and_then(|()| {
+            toolkit
+                .codec(preset.video().class, (640, 360), 30)
+                .map(drop)
+        });
+    match ready.and_then(|()| checkable(&found)) {
+        Ok(()) => Some(found),
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            None
+        }
+    }
+}
+
+/// The muxers these tests decode through, which the Windows LGPL build
+/// leaves out.
+fn checkable(ffmpeg: &Path) -> Result<(), RenderError> {
+    let out = Command::new(ffmpeg)
+        .args(["-hide_banner", "-muxers"])
+        .output()
+        .unwrap();
+    let list = String::from_utf8_lossy(&out.stdout);
+    let has = |name: &str| {
+        list.lines()
+            .any(|l| l.split_whitespace().nth(1) == Some(name))
+    };
+    match ["framemd5", "f32le", "null"].into_iter().find(|m| !has(m)) {
+        None => Ok(()),
+        Some(m) => Err(RenderError::Render(format!(
+            "this ffmpeg has no `{m}` muxer to check with"
+        ))),
+    }
+}
+
+/// libx264, where the final preset's output is the same on every run.
+fn has_x264(ffmpeg: &Path) -> bool {
+    let found = Toolkit::of(ffmpeg).unwrap().has_encoder("libx264");
+    if !found {
+        eprintln!("skipped: this ffmpeg has no libx264");
     }
     found
 }
@@ -35,8 +84,8 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-/// The transitions fixture's `Slide`, four scenes of half a second.
-fn slides(dir: &Path, titles: [&str; 4]) {
+/// The transitions fixture's `Panel`, four scenes of half a second.
+fn panels(dir: &Path, titles: [&str; 4]) {
     copy_dir(
         &Path::new(FIXTURES).join("transitions/components"),
         &dir.join("components"),
@@ -46,7 +95,7 @@ fn slides(dir: &Path, titles: [&str; 4]) {
         .enumerate()
         .map(|(i, title)| {
             json!({
-                "component": "Slide",
+                "component": "Panel",
                 "props": { "title": title, "variant": if i % 2 == 0 { "a" } else { "b" } },
                 "hold": 0.5,
                 "transition": if i == 0 { json!(null) } else { json!({ "kind": "push", "dur": 0.2 }) },
@@ -66,9 +115,9 @@ fn slides(dir: &Path, titles: [&str; 4]) {
     std::fs::write(dir.join("video.json"), video.to_string()).unwrap();
 }
 
-fn options(ffmpeg: &Path, quality: Quality, out: Option<PathBuf>) -> Options {
+fn options(ffmpeg: &Path, preset: Preset, out: Option<PathBuf>) -> Options {
     Options {
-        quality,
+        preset,
         threads: Some(2),
         out,
         ffmpeg: ffmpeg.to_owned(),
@@ -106,8 +155,8 @@ fn framemd5(ffmpeg: &Path, file: &Path) -> Vec<String> {
 }
 
 /// The segments a render joined, from its concat list.
-fn listed_segments(dir: &Path, quality: Quality) -> Vec<PathBuf> {
-    std::fs::read_to_string(cache::concat_list(dir, quality))
+fn listed_segments(dir: &Path, preset: Preset) -> Vec<PathBuf> {
+    std::fs::read_to_string(cache::concat_list(dir, preset))
         .unwrap()
         .lines()
         .map(|l| PathBuf::from(l.trim_start_matches("file '").trim_end_matches('\'')))
@@ -116,10 +165,15 @@ fn listed_segments(dir: &Path, quality: Quality) -> Vec<PathBuf> {
 
 #[test]
 fn a_cached_concat_decodes_like_a_cold_render() {
-    let Some(ffmpeg) = ffmpeg() else { return };
+    let Some(ffmpeg) = ffmpeg(Preset::Final) else {
+        return;
+    };
+    if !has_x264(&ffmpeg) {
+        return;
+    }
     let dir = Scratch::new("render-e2e-cache");
-    slides(&dir, ["One", "Two", "Three", "Four"]);
-    let final_ = options(&ffmpeg, Quality::Final, None);
+    panels(&dir, ["One", "Two", "Three", "Four"]);
+    let final_ = options(&ffmpeg, Preset::Final, None);
 
     let first = complete(&dir, &final_);
     assert_eq!(first.frames, 60);
@@ -131,14 +185,14 @@ fn a_cached_concat_decodes_like_a_cold_render() {
     assert_eq!(hashes.len(), 60);
     // The joins neither drop nor repeat a frame: the joined file decodes to
     // each segment's frames in turn.
-    let parts: Vec<String> = listed_segments(&dir, Quality::Final)
+    let parts: Vec<String> = listed_segments(&dir, Preset::Final)
         .iter()
         .flat_map(|s| framemd5(&ffmpeg, s))
         .collect();
     assert_eq!(parts, hashes);
 
     // Editing scene 1 re-renders it and scene 2, whose transition shows it.
-    slides(&dir, ["One", "Deux", "Three", "Four"]);
+    panels(&dir, ["One", "Deux", "Three", "Four"]);
     let second = complete(&dir, &final_);
     let outcomes: Vec<Outcome> = second.segments.iter().map(|s| s.outcome).collect();
     use Outcome::{Cached, Rendered};
@@ -151,7 +205,7 @@ fn a_cached_concat_decodes_like_a_cold_render() {
     let cold_out = dir.join("cold.mp4");
     let cold = complete(
         &dir,
-        &options(&ffmpeg, Quality::Final, Some(cold_out.clone())),
+        &options(&ffmpeg, Preset::Final, Some(cold_out.clone())),
     );
     assert!(cold.segments.iter().all(|s| s.outcome == Rendered));
     assert_eq!(cold.path, cold_out);
@@ -165,7 +219,9 @@ fn onset(pcm: &[f32], level: f32) -> usize {
 
 #[test]
 fn narration_starts_at_its_scenes_lead() {
-    let Some(ffmpeg) = ffmpeg() else { return };
+    let Some(ffmpeg) = ffmpeg(Preset::Draft) else {
+        return;
+    };
     let dir = Scratch::new("render-e2e-audio");
     copy_dir(&Path::new(FIXTURES).join("narrated"), &dir);
     // The manifest's 3 s clip: 0.2 s of silence, then a square wave.
@@ -176,12 +232,7 @@ fn narration_starts_at_its_scenes_lead() {
     });
     std::fs::write(dir.join("narration/fixture-intro.wav"), clip).unwrap();
 
-    let quality = if cfg!(target_os = "macos") {
-        Quality::Draft
-    } else {
-        Quality::Final
-    };
-    let report = complete(&dir, &options(&ffmpeg, quality, None));
+    let report = complete(&dir, &options(&ffmpeg, Preset::Draft, None));
     // intro: 0.25 + 3 + 1.0 s = 127.5 frames, rounded up; outro 1.5 s.
     assert_eq!(report.frames, 128 + 45);
     assert!(report.audio);
@@ -221,13 +272,15 @@ fn narration_starts_at_its_scenes_lead() {
 
 #[test]
 fn a_cancel_mid_render_leaves_nothing_partial() {
-    let Some(ffmpeg) = ffmpeg() else { return };
+    let Some(ffmpeg) = ffmpeg(Preset::Final) else {
+        return;
+    };
     let dir = Scratch::new("render-e2e-cancel");
-    slides(&dir, ["One", "Two", "Three", "Four"]);
+    panels(&dir, ["One", "Two", "Three", "Four"]);
     let cancel = AtomicBool::new(false);
     let result = render(
         &dir,
-        &options(&ffmpeg, Quality::Final, None),
+        &options(&ffmpeg, Preset::Final, None),
         &cancel,
         &mut |p| {
             if let Progress::Frame { frame: 3, .. } = p {
@@ -236,7 +289,7 @@ fn a_cancel_mid_render_leaves_nothing_partial() {
         },
     );
     assert!(matches!(result, Ok(Finished::Cancelled)), "{result:?}");
-    assert!(!super::super::default_out(&dir, Quality::Final).exists());
+    assert!(!Preset::Final.default_out(&dir).exists());
     let left: Vec<_> = std::fs::read_dir(cache::segments(&dir))
         .unwrap()
         .flatten()
@@ -247,9 +300,11 @@ fn a_cancel_mid_render_leaves_nothing_partial() {
 
 #[test]
 fn a_failing_frame_names_its_scene_and_time() {
-    let Some(ffmpeg) = ffmpeg() else { return };
+    let Some(ffmpeg) = ffmpeg(Preset::Final) else {
+        return;
+    };
     let dir = Scratch::new("render-e2e-fail");
-    slides(&dir, ["One", "Two", "Three", "Four"]);
+    panels(&dir, ["One", "Two", "Three", "Four"]);
     std::fs::write(
         dir.join("components/Breaks.tsx"),
         "export const props = {};\nexport default ({}, { t }) => {\n  if (t > 0.3) throw new Error(\"late\");\n  return <Box />;\n};\n",
@@ -263,7 +318,7 @@ fn a_failing_frame_names_its_scene_and_time() {
 
     let result = render(
         &dir,
-        &options(&ffmpeg, Quality::Final, None),
+        &options(&ffmpeg, Preset::Final, None),
         &AtomicBool::new(false),
         &mut |_| {},
     );
@@ -282,4 +337,59 @@ fn a_failing_frame_names_its_scene_and_time() {
         .filter(|e| e.file_name().to_string_lossy().ends_with(".part"))
         .count();
     assert_eq!(parts, 0);
+}
+
+/// The narrated fixture with its clip, a 3 s square wave.
+fn narrated_video(name: &str) -> Scratch {
+    let dir = Scratch::new(name);
+    copy_dir(&Path::new(FIXTURES).join("narrated"), &dir);
+    let clip = wav_of(
+        24_000,
+        3.0,
+        |i| if (i / 30) % 2 == 0 { 9_000 } else { -9_000 },
+    );
+    std::fs::write(dir.join("narration/fixture-intro.wav"), clip).unwrap();
+    dir
+}
+
+#[test]
+fn each_export_writes_its_file_and_knows_when_it_is_current() {
+    let Some(ffmpeg) = ffmpeg(Preset::Draft) else {
+        return;
+    };
+    let dir = narrated_video("render-e2e-exports");
+    let library = studio_core::Library::default();
+    let status = |preset: Preset| {
+        exports(&dir, &ffmpeg, &library)
+            .into_iter()
+            .find(|s| s.preset == preset)
+            .unwrap()
+    };
+    assert!(!status(Preset::Draft).current && status(Preset::Draft).path.is_none());
+
+    let draft = complete(&dir, &options(&ffmpeg, Preset::Draft, None));
+    let plain = framemd5(&ffmpeg, &draft.path);
+    let vtt = dir.join("renders/draft.vtt");
+    assert_eq!(draft.sidecars, std::slice::from_ref(&vtt));
+    let text = std::fs::read_to_string(&vtt).unwrap();
+    assert!(
+        text.starts_with(
+            "WEBVTT\n\n00:00:00.100 --> 00:00:03.650\nWe follow the gradient downhill,\n"
+        ),
+        "{text}"
+    );
+    assert!(status(Preset::Draft).current);
+    assert!(!status(Preset::Final).current);
+
+    // Turning captions on changes the frames, not the words.
+    let video = std::fs::read_to_string(dir.join("video.json")).unwrap();
+    let on = crate::studio::videos::with_captions(&video, true).unwrap();
+    std::fs::write(dir.join("video.json"), on).unwrap();
+    assert!(!status(Preset::Draft).current);
+    let captioned = complete(&dir, &options(&ffmpeg, Preset::Draft, None));
+    let outcomes: Vec<Outcome> = captioned.segments.iter().map(|s| s.outcome).collect();
+    assert_eq!(outcomes, [Outcome::Rendered, Outcome::Rendered]);
+    let burned = framemd5(&ffmpeg, &captioned.path);
+    assert_eq!(burned.len(), plain.len());
+    assert_ne!(burned, plain);
 }

@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import type { RenderPreset } from "@/lib/studio/render";
+
 // Studio's videos under `<data>/studio/videos/<slug>/`
 // (`app/src-tauri/src/studio/commands/videos.rs`). A slug is `[a-z0-9-]+`.
 
@@ -14,7 +16,7 @@ export interface VideoRow {
   scenes: number | null;
   /** A narration manifest exists; it may be stale. */
   narrated: boolean;
-  /** File names in `renders/`: `draft.mp4`, `final.mp4`. */
+  /** File names in `renders/`: `draft.mp4`, `audio.m4a`, … */
   renders: string[];
   /** Seconds since the epoch. */
   modified: number | null;
@@ -53,12 +55,15 @@ export interface SceneInfo {
   text: string | null;
 }
 
+/** One export preset's file. */
 export interface RenderFile {
-  quality: "draft" | "final";
+  preset: RenderPreset;
   /** Absolute path. */
   path: string;
   /** Seconds since the epoch. */
   modified: number;
+  /** A video render's captions are beside it as `<preset>.vtt`. */
+  captions: boolean;
 }
 
 export interface VideoDetail {
@@ -76,6 +81,11 @@ export interface VideoDetail {
 
 export function videoDetail(slug: string): Promise<VideoDetail> {
   return invoke<VideoDetail>("studio_video_detail", { slug });
+}
+
+/** The WebVTT text beside the video's `preset` render. */
+export function renderCaptions(slug: string, preset: RenderPreset): Promise<string> {
+  return invoke<string>("studio_render_captions", { slug, preset });
 }
 
 /** Where to take a still: `t` seconds into scene `scene`, or `global`

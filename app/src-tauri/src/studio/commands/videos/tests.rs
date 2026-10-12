@@ -212,6 +212,8 @@ fn the_detail_of_a_narrated_video_has_scene_times_and_words() {
     let dir = narrated(&videos);
     std::fs::create_dir_all(dir.join("renders")).unwrap();
     std::fs::write(dir.join("renders/draft.mp4"), "x").unwrap();
+    std::fs::write(dir.join("renders/audio.m4a"), "x").unwrap();
+    std::fs::write(dir.join("renders/notes.txt"), "x").unwrap();
 
     let detail = detail_in(
         &videos,
@@ -243,7 +245,7 @@ fn the_detail_of_a_narrated_video_has_scene_times_and_words() {
     assert_eq!(outro.start, intro.duration);
     assert_eq!(outro.duration, Some(1.5));
     assert_eq!(outro.text, None, "a silent scene has no words");
-    assert_eq!(detail.renders.len(), 1);
+    assert_eq!(detail.renders.len(), 2, "{:?}", detail.renders);
     assert_eq!(
         detail.renders[0].path,
         dir.join("renders/draft.mp4").to_string_lossy()
@@ -251,7 +253,9 @@ fn the_detail_of_a_narrated_video_has_scene_times_and_words() {
     assert!(detail.renders[0].modified > 0);
 
     let json = serde_json::to_value(&detail).unwrap();
-    assert_eq!(json["renders"][0]["quality"], "draft");
+    assert_eq!(json["renders"][0]["preset"], "draft");
+    assert_eq!(json["renders"][1]["preset"], "audio");
+    assert_eq!(json["renders"][0]["captions"], false);
     assert_eq!(json["scenes"][1]["duration"], 1.5);
     assert_eq!(json["row"]["slug"], "narrated");
 }

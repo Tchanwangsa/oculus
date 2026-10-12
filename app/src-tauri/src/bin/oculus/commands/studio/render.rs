@@ -1,10 +1,10 @@
-//! `oculus studio render`: a video folder to an mp4 through
-//! `app_lib::studio::render` (docs/studio.md, "Rendering a video").
+//! `oculus studio render`: a video folder to an export preset's file
+//! through `app_lib::studio::render` (docs/studio.md, "Rendering a video").
 
 use super::studio_error;
 use crate::*;
 use app_lib::studio::libraries;
-use app_lib::studio::render::{self, Finished, Outcome, Progress, Quality, SegmentReport};
+use app_lib::studio::render::{self, Finished, Outcome, Preset, Progress, SegmentReport};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
@@ -13,15 +13,15 @@ const EVERY: Duration = Duration::from_secs(2);
 
 impl Ctx {
     pub(crate) fn studio_render(&self, args: &StudioRenderArgs) -> Result<(), String> {
-        let quality = if args.final_ {
-            Quality::Final
-        } else {
-            Quality::Draft
+        let preset = match (&args.preset, args.final_) {
+            (Some(name), _) => Preset::parse(name)?,
+            (None, true) => Preset::Final,
+            (None, false) => Preset::Draft,
         };
         let ffmpeg = app_lib::sources::echo360::find_ffmpeg(None)
             .ok_or("ffmpeg not found; run `bun run ffmpeg` in app/, or install it")?;
         let options = render::Options {
-            quality,
+            preset,
             threads: args.threads,
             out: args.out.clone(),
             ffmpeg,
@@ -51,6 +51,25 @@ impl Ctx {
             .iter()
             .filter(|s| s.outcome == Outcome::Rendered)
             .collect();
+        println!("{} {}", paint("wrote", GREEN), report.path.display());
+        for path in &report.sidecars {
+            println!("{} {}", paint("wrote", GREEN), path.display());
+        }
+        if report.segments.is_empty() {
+            println!(
+                "{}",
+                paint(
+                    &format!(
+                        "  {} · {:.2} s · {:.1} s",
+                        report.preset.name(),
+                        report.duration,
+                        report.ms as f64 / 1000.0
+                    ),
+                    DIM
+                )
+            );
+            return Ok(());
+        }
         let frames: u64 = rendered.iter().map(|s| s.frames).sum();
         let ms: u64 = rendered.iter().map(|s| s.ms).sum();
         let rate = if ms > 0 {
@@ -58,15 +77,14 @@ impl Ctx {
         } else {
             String::new()
         };
-        println!("{} {}", paint("wrote", GREEN), report.path.display());
         println!(
             "{}",
             paint(
                 &format!(
                     "  {} · {}×{} at {} fps · {} frames, {:.2} s{} · {} rendered{rate}, {} cached · {} thread{} · {:.1} s",
-                    report.quality.name(),
-                    report.width,
-                    report.height,
+                    report.preset.name(),
+                    report.width.unwrap_or_default(),
+                    report.height.unwrap_or_default(),
                     report.fps,
                     report.frames,
                     report.duration,

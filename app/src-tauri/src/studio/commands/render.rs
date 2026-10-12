@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::studio::render::{self, Finished, Progress, Quality, Report, RENDERS};
+use crate::studio::render::{self, Finished, Preset, Progress, Report, RENDERS};
 use crate::studio::videos;
 
 /// Display only, never persisted.
@@ -25,6 +25,8 @@ const EVERY: Duration = Duration::from_millis(100);
 struct Event<'a> {
     /// The folder as `studio_render` was given it.
     dir: &'a str,
+    /// The preset's name.
+    preset: &'a str,
     #[serde(flatten)]
     step: Step<'a>,
 }
@@ -68,25 +70,37 @@ struct Plan {
     threads: usize,
 }
 
-/// Render the video in `dir` (its folder or slug) at `quality` to
-/// `<dir>/renders/<quality>.mp4`. Resolves to the report, or `null` when
+/// Render the video in `dir` (its folder or slug) to export `preset`
+/// (`draft`, `final`, `small`, `2x`, `audio` or `subtitles`), written to
+/// `<dir>/renders/<preset>.<ext>`. Resolves to the report, or `null` when
 /// cancelled; rejects with the reason a render failed, when `dir` is not a
 /// video, or when it already has a render running.
 #[tauri::command]
 pub async fn studio_render(
     app: AppHandle,
     dir: String,
-    quality: Quality,
+    preset: String,
 ) -> Result<Option<Report>, String> {
+    let preset = Preset::parse(&preset)?;
     let folder = videos::scoped(Path::new(&dir))?;
-    let running = RENDERS.start(&folder, quality)?;
+    let running = RENDERS.start(&folder, preset)?;
     crate::runtime::blocking::run(move || {
-        emit(&app, &dir, Step::Planning { plan: None });
-        let result = render_once(&app, &dir, &folder, quality, &running);
+        let name = preset.name();
+        let emit = |step: Step<'_>| {
+            app.emit(
+                PROGRESS_EVENT,
+                Event {
+                    dir: &dir,
+                    preset: name,
+                    step,
+                },
+            )
+            .ok();
+        };
+        emit(Step::Planning { plan: None });
+        let result = render_once(&app, &folder, preset, &running, &emit);
         // Freed before the terminal event, so a listener can start the next
         // render as soon as it hears this one end.
-        drop(running);
-        let name = quality.name();
         match &result {
             Ok(Some(report)) => {
                 elog!(
@@ -95,15 +109,15 @@ pub async fn studio_render(
                     report.ms as f64 / 1000.0
                 );
                 let path = &report.path;
-                emit(&app, &dir, Step::Complete { path, report });
+                emit(Step::Complete { path, report });
             }
             Ok(None) => {
                 elog!("[oculus] studio {name} render of {dir} cancelled");
-                emit(&app, &dir, Step::Cancelled);
+                emit(Step::Cancelled);
             }
             Err(error) => {
                 elog!("[oculus] studio {name} render of {dir} failed: {error}");
-                emit(&app, &dir, Step::Error { error });
+                emit(Step::Error { error });
             }
         }
         result
@@ -117,25 +131,40 @@ pub fn studio_render_cancel(dir: String) -> bool {
     videos::scoped(Path::new(&dir)).is_ok_and(|folder| RENDERS.cancel(&folder))
 }
 
-fn emit(app: &AppHandle, dir: &str, step: Step<'_>) {
-    app.emit(PROGRESS_EVENT, Event { dir, step }).ok();
+/// Every export preset of the video in `dir` (its folder or slug): its
+/// file, if any, and whether a render now would make the same file.
+#[tauri::command]
+pub async fn studio_exports(
+    app: AppHandle,
+    dir: String,
+) -> Result<Vec<render::ExportStatus>, String> {
+    let folder = videos::scoped(Path::new(&dir))?;
+    let ffmpeg = ffmpeg(&app)?;
+    crate::runtime::blocking::run(move || {
+        let library = crate::studio::libraries::libraries(false).map_err(|e| e.to_string())?;
+        Ok(render::exports(&folder, &ffmpeg, &library))
+    })
+    .await
 }
 
-/// Render `folder`; `dir` is the name events carry.
+fn ffmpeg(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    crate::sources::echo360::find_ffmpeg(app.path().resource_dir().ok())
+        .ok_or_else(|| "ffmpeg not found; run `bun run ffmpeg` in app/, or install it".to_owned())
+}
+
+/// Render `folder`, sending each step to `emit`.
 fn render_once(
     app: &AppHandle,
-    dir: &str,
     folder: &Path,
-    quality: Quality,
+    preset: Preset,
     running: &render::Running,
+    emit: &dyn Fn(Step<'_>),
 ) -> Result<Option<Report>, String> {
-    let ffmpeg = crate::sources::echo360::find_ffmpeg(app.path().resource_dir().ok())
-        .ok_or("ffmpeg not found; run `bun run ffmpeg` in app/, or install it")?;
     let options = render::Options {
-        quality,
+        preset,
         threads: None,
         out: None,
-        ffmpeg,
+        ffmpeg: ffmpeg(app)?,
         library: crate::studio::libraries::libraries(false).map_err(|e| e.to_string())?,
     };
     let (mut of, mut scene) = (0, 0);
@@ -153,7 +182,7 @@ fn render_once(
                 frames,
                 threads,
             };
-            emit(app, dir, Step::Planning { plan: Some(plan) });
+            emit(Step::Planning { plan: Some(plan) });
         }
         Progress::Segment {
             of: segments,
@@ -179,11 +208,11 @@ fn render_once(
                     frames,
                     fps,
                 };
-                emit(app, dir, step);
+                emit(step);
             }
         }
         Progress::Done(_) => {}
-        Progress::Muxing => emit(app, dir, Step::Muxing),
+        Progress::Muxing => emit(Step::Muxing),
     })
     .map_err(|e| e.to_string())?;
     Ok(match finished {
