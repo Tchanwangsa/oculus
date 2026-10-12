@@ -33,6 +33,7 @@ const SECTION_LABELS: Record<string, string> = {
   announcements: "Announcements",
   assignments: "Assignments",
   discussion: "Discussion",
+  lessons: "Lessons",
 };
 
 export interface TabInfo {

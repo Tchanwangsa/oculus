@@ -7,18 +7,20 @@ const base = defaultSchema.attributes ?? {};
 
 /**
  * What raw HTML in a library file may render (docs/viewers.md). GitHub's
- * schema, plus the tags the Canvas converter emits (`<details>`, `<echo-video>`)
- * and remark-math's classes.
+ * schema, plus the tags the Canvas converter emits (`<details>`,
+ * `<echo-video>`, `<canvas-video>`, `<web-video>`) and remark-math's classes.
  */
 export const SANITIZE_SCHEMA: Options = {
   ...defaultSchema,
-  tagNames: [...(defaultSchema.tagNames ?? []), "echo-video"],
+  tagNames: [...(defaultSchema.tagNames ?? []), "echo-video", "canvas-video", "web-video"],
   attributes: {
     ...base,
     code: [["className", /^language-./, ...MATH_CLASSES]],
     span: [...(base.span ?? []), ["className", ...MATH_CLASSES]],
     div: [...(base.div ?? []), ["className", ...MATH_CLASSES]],
     pre: [...(base.pre ?? []), ["className", ...MATH_CLASSES]],
-    "echo-video": ["link-id", "src"],
+    "echo-video": ["link-id", "src", "title"],
+    "canvas-video": ["file-id", "title"],
+    "web-video": ["provider", "video-id", "hash", "title"],
   },
 };

@@ -1,8 +1,9 @@
 # Oculus docs
 
 Oculus is a Tauri 2 desktop app that scrapes a student's coursework from any
-university's Canvas — pages and files, and Ed Discussion threads and Echo360
-lecture recordings where the university uses them — into a local library, parses every PDF to markdown, embeds each page as an
+university's Canvas — pages and files, and Ed Discussion threads, Ed Lessons and
+Echo360 lecture recordings where the university uses them — into a local
+library, parses every PDF to markdown, embeds each page as an
 image, and retrieves the right pages for a question. Chat is a coding agent the
 student already has (Claude Code, Codex, opencode or Antigravity), run inside
 the library with the `oculus` CLI as its tool surface. These pages are the map;
@@ -13,7 +14,7 @@ the root `CLAUDE.md` holds only the rules.
 | Page | What it covers |
 | --- | --- |
 | [architecture.md](./architecture.md) | The two processes and the credential broker, how they talk, the data directory, `oculus.db`, the code layout |
-| [sync.md](./sync.md) | The scrape engine: Canvas modules, Ed threads, Echo360 lectures, HTML→md |
+| [sync.md](./sync.md) | The scrape engine: Canvas modules, Ed threads and lessons, Echo360 lectures, HTML→md |
 | [auth.md](./auth.md) | Canvas session in keyd's vault, sign-in on demand, Okta sign-in and its attempt guard, Ed `x-token`, Echo360 LTI, WebKit's WebCrypto master key in keyd and the data-store delegate that hands it to WebKit |
 | [parsing.md](./parsing.md) | PDFs to markdown: the parser seam, the two MinerU engines, failures |
 | [retrieval.md](./retrieval.md) | Page-image embeddings, the `pages` table, query flow |

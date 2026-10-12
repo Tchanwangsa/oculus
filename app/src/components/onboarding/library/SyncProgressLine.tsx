@@ -12,6 +12,7 @@ const PHASE: Record<string, string> = {
   modules: "modules",
   assignments: "assignments",
   ed: "Ed threads",
+  ed_lessons: "Ed lessons",
 };
 
 /**

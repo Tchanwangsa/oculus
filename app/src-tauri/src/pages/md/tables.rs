@@ -1,7 +1,7 @@
-use super::escape::escape_html;
-use super::inline::inline_md;
-use super::lists::inline_md_self;
-use super::tree::{dropped, element_children, is_heading, tag, Ref};
+use super::escape::escape_loose;
+use super::inline::{inline_md, inline_md_self};
+use super::maths::text_md;
+use super::tree::{dropped, element_children, is_heading, squeeze, tag, Ref};
 use super::{is_tag, Ctx, NBSP};
 
 const CELL_BLOCKS: &[&str] = &["p", "div", "blockquote", "section", "article", "li"];
@@ -12,10 +12,10 @@ fn is_cell_block(name: &str) -> bool {
 
 /// A GFM cell must be a single line. Block children become segments joined by
 /// " · "; lists collapse to "; "-joined items.
-fn cell_md(cell: Ref<'_>, table: &Ctx) -> String {
+fn cell_md(cell: Ref<'_>, ctx: &Ctx) -> String {
     let ctx = Ctx {
         in_cell: true,
-        ..*table
+        ..*ctx
     };
     let mut segs: Vec<String> = Vec::new();
     let mut cur = String::new();
@@ -30,11 +30,11 @@ fn cell_md(cell: Ref<'_>, table: &Ctx) -> String {
 
     for n in cell.children() {
         if let Some(t) = n.value().as_text() {
-            cur.push_str(&escape_html(t));
+            cur.push_str(&text_md(t, &ctx, escape_loose));
             continue;
         }
         let Some(name) = tag(&n) else { continue };
-        if dropped(&n, true) {
+        if dropped(&n, &ctx) {
             continue;
         }
         match name {
@@ -65,10 +65,6 @@ fn cell_md(cell: Ref<'_>, table: &Ctx) -> String {
         .replace('|', "\\|")
         .trim()
         .to_string()
-}
-
-fn squeeze(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub(super) fn table_md(node: Ref<'_>, ctx: &Ctx) -> String {

@@ -15,7 +15,8 @@ video's transcript, and a web page.
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lectures/playback/`, `app/src/lib/lectures/playbackOwner.ts` |
 | Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectures/end.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/lectures/chapters/app.rs` |
 | Library videos | `app/src/components/files/VideoFileViewer.tsx`, `app/src/lib/files/openFile.ts` |
-| An Echo360 embed in a page: the card, its subject, its store | `app/src/components/markdown/embed/EmbedVideoCard.tsx`, `app/src/components/markdown/embed/EmbedSubject.tsx`, `app/src/stores/lectures/embedDownloadStore.ts` |
+| A page's video cards: Echo360, Canvas, YouTube/Vimeo; their shared frame, the subject, the stores | `app/src/components/markdown/embed/EmbedVideoCard.tsx`, `app/src/components/markdown/embed/CanvasVideoCard.tsx`, `app/src/components/markdown/embed/WebVideoCard.tsx`, `app/src/components/markdown/embed/card/`, `app/src/components/markdown/embed/EmbedSubject.tsx`, `app/src/stores/lectures/embedDownloadStore.ts`, `app/src/stores/lectures/videoDownloadStore.ts`, `app/src/stores/lectures/webVideoStore.ts` |
+| YouTube and Vimeo metadata (`web_video_info`) | `app/src-tauri/src/sources/oembed.rs` |
 | Transcribe from a player | `app/src/hooks/lectures/useTranscription.ts`, `app/src/components/media/TranscribeEmpty.tsx` |
 | Transcript search and source-index mapping | `app/src/hooks/lectures/useTranscriptSearch.ts` |
 | Transcription of videos without captions | `app/src-tauri/src/transcribe/`, `app/src-tauri/src/providers/groq.rs`, `app/src/lib/lectures/transcribe/` |
@@ -30,9 +31,12 @@ video's transcript, and a web page.
 Library file rendering always runs `rehypeMaths` so math fences and HTML math
 classes work even when there are no dollar delimiters.
 
-- **`app/src/components/markdown/MdComponents.tsx`** renders Canvas bodies,
-  parsed PDFs, Ed threads and replies, with `rehypeMaths` only when `hasMath`
-  finds a delimiter. `normalizeMath` rewrites
+- **`MD_COMPONENTS`** (`app/src/components/markdown/MdComponents.tsx`) is
+  the component map for every surface. A library file — a Canvas page,
+  announcement or assignment, a parsed PDF, an Ed thread — renders through
+  `FileMarkdown` with it, extended by `FileViewer`'s
+  `useLibraryMdComponents` to resolve in-file links; chat replies through
+  `CompactMd`, with `rehypeMaths` only when `hasMath` finds a delimiter. `normalizeMath` rewrites
   `\(…\)` / `\[…\]` to `$…$` / `$$…$$` because CommonMark eats the backslash
   first. An inline `<code>` holding only a citation (`app/src/lib/citations/`)
   renders as `FileChip`. `![alt](path)` naming a library picture or HTML
@@ -43,30 +47,42 @@ classes work even when there are no dollar delimiters.
   `rehypeMaths` and the block anchors, so their own output (KaTeX markup,
   `data-page`) is never checked. The schema
   (`app/src/lib/markdown/sanitizeSchema.ts`) is GitHub's default plus
-  `<echo-video link-id src>` and remark-math's classes. Grow it from a tag
+  `<echo-video link-id src title>`, `<canvas-video file-id title>`,
+  `<web-video provider video-id hash title>` and remark-math's classes. Grow it from a tag
   scan of the library's `.md`, not from memory; across the library it drops
   only prose that parses as a tag
   (`<section1>`, `<the>`, kept as their text), `on*` handlers, comments and
   stray `<title>`/`<meta>`/`<form>`. MinerU's `<sub>`/`<sup>` render
   unchanged. Its `user-content-` id prefix stays: nothing in the app
   navigates by id, and it keeps a page's ids off `window`.
-- **Canvas's `<details>` and Echo360 embeds render as components** in
+- **Canvas's `<details>` and video tags render as components** in
   `MD_COMPONENTS`: `details`/`summary` as a bordered dropdown whose caret
   turns by its own element's `[open]` (`group-open` would turn nested ones
-  too), and `echo-video` as `EmbedVideoCard`. hast keeps the attribute name,
-  so its prop is `link-id`. The tags are written by the sync ([sync.md](./sync.md#canvas-html-becomes-markdown-with-a-few-kept-tags)).
-- **An Echo360 embed is a card inside a library file**
-  (`app/src/components/markdown/embed/EmbedVideoCard.tsx`). Its commands need
-  the subject, which `MD_COMPONENTS` doesn't have, so `FileViewer` (every
-  Canvas page, announcement, assignment and parsed file) and a note's
-  `VersionPreview` wrap the markdown in `EmbedSubjectProvider`, which looks
-  the code up in the subjects list by id (a course folder is `safe_dir(code)`,
-  not the code). Anywhere else — a chat reply, `CompactMd` — the tag is
-  `EchoVideoPlaceholder`, a button opening the Canvas launch URL. The card is
-  spans, since the tag can land in a paragraph or table cell, and carries the
-  tag as `data-md` so a copied selection keeps it. Its states, all one height
-  (the 16:9 thumbnail sets it):
-  - **resolving** — a skeleton of the thumbnail and two text lines;
+  too), and the three video tags as cards. hast keeps the attribute names,
+  so the props are `link-id`, `file-id`, `video-id`. The tags are written by
+  the sync ([sync.md](./sync.md#canvas-html-becomes-markdown-with-a-few-kept-tags)).
+- **A task list (`- [ ]`) keeps its indent and drops its bullets.** The
+  `ul`/`ol`/`li` renderers merge remark-gfm's `contains-task-list` and
+  `task-list-item` classes into their own rather than spreading over them;
+  the disabled box hangs back into the list's indent (`input`), so wrapped
+  lines align with the text, and sits on the first line.
+- **Every video card shares one frame** (`app/src/components/markdown/embed/card/`):
+  a 16:9 thumbnail (a camera glyph without a picture), the name and a meta
+  line, the actions — one height in every state, the skeleton included. It is
+  spans, since a tag can land in a paragraph or table cell, and carries the
+  tag as `data-md` so a copied selection keeps it. Echo360 and Canvas cards
+  need the subject, which `MD_COMPONENTS` doesn't have, so `FileViewer` (every
+  library file) and a note's `VersionPreview` wrap the markdown in
+  `EmbedSubjectProvider`, which looks the code up in the subjects list by id
+  (a course folder is `safe_dir(code)`, not the code). For a subject the list
+  no longer has, those two are `VideoLinkOut`, a button named by the tag's
+  title that opens Canvas. Chat replies don't parse raw HTML, so a tag in one
+  shows as its literal text.
+- **`<echo-video>` is an Echo360 video**
+  (`app/src/components/markdown/embed/EmbedVideoCard.tsx`). The tag's
+  `title` (the Canvas iframe's) names the card until the info call answers,
+  and stands in when Echo360's name is empty. Its states:
+  - **resolving** — the skeleton, with the title when the tag has one;
   - **ready** — the poster from `posterRel`, Echo360's media name without its
     video extension, the length (`fmtDurationSecs`, as lecture rows show it)
     and a captions mark, then **Play** once `fileRel` is set (the file's row
@@ -84,6 +100,33 @@ classes work even when there are no dollar delimiters.
   records a view, so `embedDownloadStore` asks it once per link per app
   session and forgets only a rejection. Play that finds no row asks again;
   the backend clears a deleted file, so the card offers Download.
+- **`<canvas-video>` is a video file uploaded to Canvas**
+  (`app/src/components/markdown/embed/CanvasVideoCard.tsx`), named by its
+  `title` without the extension, on a camera tile (Canvas gives no poster). A
+  sync never fetches one — they run to hundreds of megabytes — so the card
+  looks for a `files` row with this subject and `canvas_id = file-id`
+  (`getFileByCanvasId`, again on every `FILE_SCRAPED_EVENT` for that file):
+  found, it shows the size and **Play** (`openFileSmart`, ⌘-click a tab);
+  otherwise **Download**, through `videoDownloadStore` and
+  `canvas_download_video` exactly as a module video
+  ([frontend.md](./frontend.md#uploads-and-documents-are-ordinary-library-files)),
+  then the percent and Cancel, then Play once the row lands. A failure shows
+  verbatim with Retry. Every state keeps the Open in Canvas icon, to
+  `/courses/<subject id>/files/<id>` (a subject's id is its Canvas course
+  id; `app/src/lib/files/canvasLinks.ts`).
+- **`<web-video>` is a YouTube or Vimeo video**
+  (`app/src/components/markdown/embed/WebVideoCard.tsx`), Play only. Its
+  thumbnail, title, channel and (Vimeo only) length come from the provider's
+  oEmbed endpoint through `web_video_info` (`app/src-tauri/src/sources/oembed.rs`,
+  in Rust because the webview's CORS refuses it), which checks the provider
+  and the id's charset before building a URL. `webVideoStore` asks once per
+  video per app session and forgets a rejection. Until then, or without an
+  answer, the card shows the tag's title (else "YouTube video"/"Vimeo video")
+  and still plays. Play opens `youtube.com/watch?v=<id>` or
+  `vimeo.com/<id>/<hash>` through `openExternal`, so an in-app browser tab (⌘-click
+  for the system browser); never an iframe in the app's webview, since
+  YouTube refuses embeds from the app's origin. An unknown provider renders
+  nothing.
 - **A reply goes through `CompactMd`**, whose `.md-compact` rules in `index.css`
   are deliberately *unlayered* — in `@layer base` they would lose to the
   utilities they override. **`InlineMd` flattens blocks** because chapter
@@ -107,7 +150,8 @@ classes work even when there are no dollar delimiters.
   in `FilePage`'s header, ⌘-click for the system browser). A synced Canvas page
   is our markdown of it; the button opens the original, with its embeds and
   styling, in a browser tab through `openExternal`.
-- **`FileViewer` resolves in-file links locally** — relative links and Canvas
+- **`FileViewer` resolves in-file links locally** — `../` links, links into a
+  folder beside the file (an Ed lesson's `<id>-<slug>/…` assets) and Canvas
   `/files/<id>` or `/pages/<slug>` URLs, by `canvas_id`, path or `source_url`
   (`app/src/lib/files/libraryLinks.ts`, shared with the note editor). A selection
   in its rendered markdown copies or drags out as markdown, maths as TeX

@@ -222,14 +222,12 @@ impl Engine {
         }
         self.crawl_links(c, &mut crawl);
 
-        if self.options.ed {
+        if self.options.ed || self.options.ed_lessons {
             phase("ed");
             if self.stopped() {
                 return Ok(());
             }
-            if let Err(e) = self.scrape_ed(c) {
-                self.reporter.log("warning", &c.code, &format!("ed: {e}"));
-            }
+            self.scrape_ed(c);
         }
         Ok(())
     }

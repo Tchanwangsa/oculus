@@ -1,3 +1,8 @@
+mod embeds;
+mod links;
+mod maths;
+mod widgets;
+
 use super::ImageMap;
 use super::*;
 
@@ -168,11 +173,7 @@ fn echo_iframe_in_a_list_item_stays_inside_it() {
 }
 
 #[test]
-fn other_iframes_link_out_by_host() {
-    assert_eq!(
-        md("<iframe src=\"https://player.vimeo.com/video/1?h=2\"></iframe>"),
-        "[Embedded: player.vimeo.com](https://player.vimeo.com/video/1?h=2)"
-    );
+fn iframes_without_an_http_src_are_dropped() {
     assert_eq!(md("<p>x<iframe src=\"about:blank\"></iframe></p>"), "x");
     assert_eq!(md("<p>x<iframe></iframe></p>"), "x");
 }
@@ -191,7 +192,7 @@ fn details_keep_markdown_inside() {
 
 #[test]
 fn thtr_day_one_page() {
-    let out = md(include_str!("fixtures/thtr-day-one.html"));
+    let out = md(include_str!("../fixtures/thtr-day-one.html"));
 
     let ids: Vec<&str> = out
         .lines()
@@ -240,7 +241,38 @@ fn thtr_day_one_page() {
     );
 
     assert!(
-        out.contains("\n[Embedded: padlet.com](https://padlet.com/embed/thtr30042dayone)\n"),
+        out.contains("\n[Padlet](https://padlet.com/embed/thtr30042dayone)\n"),
         "{out}"
+    );
+}
+
+#[test]
+fn pasted_noise_is_dropped() {
+    assert_eq!(
+        md(
+            r#"<div class="pdf-page-container"><span>dup</span></div><div class="textLayer">dup</div>
+<p><span class="plv-text-layer">dup</span>keep</p>"#
+        ),
+        "keep"
+    );
+    assert_eq!(
+        md(
+            r#"<h2 class="css-ydn2ow-view-heading" data-testid="message_title">Week 3</h2><p>Body</p>"#
+        ),
+        "Body"
+    );
+    assert_eq!(
+        md(
+            r#"<p>a <img class="ally-accessibility-score-indicator-image" src="https://prod.ally.ac/x.svg" alt="Ally"><img alt="Attachment.tiff"><img src=" " alt="e"> b</p>"#
+        ),
+        "a  b"
+    );
+}
+
+#[test]
+fn block_level_inline_elements_keep_their_markup() {
+    assert_eq!(
+        md("<a href='/x'>go</a><img src='p.png' alt='fig'>"),
+        "[go](/x)\n\n![fig](p.png)"
     );
 }

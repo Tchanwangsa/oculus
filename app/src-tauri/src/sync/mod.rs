@@ -216,7 +216,10 @@ pub struct SyncOptions {
     pub announcements: bool,
     pub assignments: bool,
     pub modules: bool,
+    /// Ed Discussion threads.
     pub ed: bool,
+    /// Ed Lessons: slides, their PDFs, challenge workspaces, quizzes.
+    pub ed_lessons: bool,
 }
 
 impl Default for SyncOptions {
@@ -226,6 +229,7 @@ impl Default for SyncOptions {
             assignments: true,
             modules: true,
             ed: true,
+            ed_lessons: true,
         }
     }
 }

@@ -67,7 +67,12 @@ before leaving a playing lecture.
   `useOutletContext` reads the nearest Outlet and a different shape would make
   `useSubject()` lie. Downloads and Media split the `file` rows: Media lists the
   videos (`isVideoFile`), Downloads everything else, so no file shows twice; the
-  student's own videos stay in Uploads.
+  student's own videos stay in Uploads. Lessons
+  (`app/src/pages/subject/content/LessonsPage.tsx`) lists only the lesson docs,
+  `lessons/<id>-<slug>.md`, of the `lessons` rows. A lesson's PDFs and
+  challenge files share the category but sit in its folder: they open from its
+  links, open and title like downloads (`isLessonAsset` in
+  `app/src/lib/files/fileTypes.ts`), and stay out of the tab's never-opened count.
 - **`/subjects` is a redirect, not a page** (`SubjectsRedirect`): it replaces
   itself with the Overview of the last subject `SubjectLayout` resolved
   (`localStorage`, `oculus-last-subject`), else the first current subject,

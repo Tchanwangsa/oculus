@@ -1,5 +1,6 @@
-//! Ed Discussion access: token auth, course mapping, thread fetching, and the
-//! `<document>` XML → Markdown converter.
+//! Ed access: token auth, course mapping, Discussion threads, Lessons (slides,
+//! quizzes, challenge workspaces), and the `<document>` XML → Markdown
+//! converter both share.
 //!
 //! Ed authenticates API calls with an `x-token` JWT that oculus-keyd holds and
 //! attaches to its `ed` route; this module never reads it back. The token is
@@ -11,10 +12,16 @@
 mod client;
 mod courses;
 mod document;
+mod lesson_md;
+mod lessons;
+mod live;
 mod lti;
 mod render;
 mod threads;
+mod workspace;
 
+#[cfg(test)]
+mod lesson_tests;
 #[cfg(test)]
 mod tests;
 
@@ -23,6 +30,10 @@ use std::sync::Mutex;
 use crate::providers::credentials::Credentialed;
 
 pub use document::document_md;
+pub use lesson_md::{lesson_md, lesson_url, sorted_slides, LinkedFile, SlideExtras};
+pub use lessons::LessonList;
+pub use live::open_live_workspace;
+pub use workspace::{unpack as unpack_workspace, WorkspaceFile};
 
 /// Ed's API base for `data_dir`: what a launch landed on (`institution.json`),
 /// else the default.

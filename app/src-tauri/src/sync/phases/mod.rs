@@ -1,6 +1,7 @@
 mod announcements;
 mod assignments;
 mod ed;
+mod ed_lessons;
 mod files;
 mod home;
 mod images;
