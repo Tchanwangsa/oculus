@@ -29,7 +29,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | ONNX Runtime (static): the CPU session and pinned, checksummed model-pack downloads | `app/src-tauri/src/runtime/onnx/` |
 | Studio's text to Kokoro phonemes: misaki's dictionary path, heteronym rules, the lexicon, the neural guesser ([studio.md](./studio.md#kokoro-reads-text-through-the-g2p)) | `app/src-tauri/src/studio/voice/g2p/` |
 | Studio's pronunciation review: suggested readings stored one file each, the only lexicon writer ([studio.md](./studio.md#the-student-reviews-the-agents-suggested-readings)) | `app/src-tauri/src/studio/voice/review/` |
-| Studio's Kokoro engine: the voice pack, the reader, chunking, synthesis, the `Speaker` ([studio.md](./studio.md#kokoro-narrates-inside-the-app)) | `app/src-tauri/src/studio/tts/kokoro/` |
+| Studio's Kokoro engine: the model pack, the voices, the reader, chunking, synthesis, the `Speaker` ([studio.md](./studio.md#kokoro-narrates-inside-the-app)) | `app/src-tauri/src/studio/tts/kokoro/` |
 | PDF viewer's render, text and links | `app/src-tauri/src/library/pdf_view/` |
 | In-app browser | `app/src-tauri/src/shell/browser/`, `app/src-tauri/capabilities/default.json` |
 | Spotify playback ([music.md](./music.md)) | `app/src-tauri/src/music/`, `app/src/lib/music/index.ts` |

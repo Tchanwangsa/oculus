@@ -39,6 +39,7 @@ pub async fn studio_aligner_download(app: AppHandle) -> Result<(), String> {
         download_with_events(
             &app,
             PROGRESS_EVENT,
+            None,
             "the aligner model",
             &dir,
             PACK.bytes(),
