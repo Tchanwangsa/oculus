@@ -21,7 +21,8 @@ page is the frontend over them.
 | Stills (`studio_frame`, `studio_thumbnail`) as object URLs | `app/src/lib/studio/stills.ts`, `app/src/hooks/studio/useStill.ts` |
 | Render state, the video list, the event bridge | `app/src/stores/studio/` (`renderStore.ts`, `videosStore.ts`), `app/src/hooks/backend/useStudioEvents.ts` |
 | The Components playground: list, stage, timeline, inspector, source, change box | `app/src/pages/studio/ComponentsPage.tsx`, `app/src/components/studio/components/` (`inspector/` for the props form) |
-| The playground's hooks: component list, source, stage frames, playhead, change flow | `app/src/hooks/studio/` (`useComponents`, `useComponentSource`, `useStageFrame`, `useStageWidth`, `usePlayhead`, `useLibraryChange`, `useDefaultModel`), `app/src/lib/studio/props.ts`, `app/src/lib/studio/changeRequest.ts` |
+| The inspector column both editors share: fold, width, sections, compact fields | `app/src/components/studio/panel/` (`InspectorColumn.tsx`, `fields.tsx`), `app/src/components/ui/CollapsibleSection.tsx`, `app/src/hooks/studio/useInspectorSections.ts` |
+| The playground's hooks: component list, source, stage frames, playhead, change flow | `app/src/hooks/studio/` (`useComponents`, `useComponentSource`, `useStageFrame`, `useStageWidth`, `usePlayhead`, `useLibraryChange`, `useDefaultModel`), `app/src/lib/studio/props.ts` (the form's sections, tooltips and changed-from-default), `app/src/lib/studio/changeRequest.ts` |
 | The library choice both pages share, where an item comes from, own versions | `app/src/hooks/studio/useStudioLibrary.ts`, `app/src/components/studio/LevelMark.tsx`, `app/src/components/studio/components/OwnVersionActions.tsx` |
 | The Themes page: list, sample scenes, header actions, token inspector, copies | `app/src/pages/studio/ThemesPage.tsx`, `app/src/components/studio/themes/` (`inspector/` for the token form), `app/src/hooks/studio/useThemeSource.ts`, `app/src/lib/studio/themeDraft.ts` |
 | The colour control | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
@@ -164,7 +165,12 @@ columns:
   a row says where it comes from (`LevelMark`): "Own version" when the
   subject's file replaces a global one (`shadows`), "Subject" when only the
   subject has it, "Global" when it is inherited. A component that does not
-  load is marked (`problem`, its sentence in the row's tooltip).
+  load is marked (`problem`, its sentence in the row's tooltip). A **Starter**
+  pill (`StarterMark`) marks a name in studio-core's starter set
+  (`STARTER_COMPONENTS`; `ComponentRow.starter`, `ComponentInfo.starter`),
+  in the global library and in a subject's alike, whichever level holds the
+  file and whether it was edited; a component the user made has none. The
+  stage's header shows it beside the name.
 - **Own versions.** In a subject's library the stage's header offers **Own
   version** on an inherited component, which copies the global text into
   the subject's library (`studio_component_write` at the subject level), and
@@ -178,18 +184,49 @@ columns:
   `oculus-studio-components-theme`), the example pills pick a named example,
   and the frame is `studio_component_frame` at the playhead `t`, for a scene
   length of 2, 4 or 8 s, at the stage's width in device pixels (a step of 80,
-  320 to 1920). The props it sends are always the inspector's whole set, not
+  320 to 2160). The props it sends are always the inspector's whole set, not
   an example name, so an edit is just a new request.
-- **The inspector** is generated from `props`: `str` and `latex` a text
-  field, `num` a number field, `bool` a switch, `oneOf` a select of the
-  schema's values, `token` a select of the names in the chosen theme's
-  `tokens` section (`color`, or a dotted path; a colour shows its dot; a theme
-  without the section leaves a plain text field), and `list` rows of the inner
-  kind with Add and remove. A prop that is not set takes its default, which
-  shows as the placeholder (a switch shows the default's state); an optional
-  prop or one with a default has an unset button, and an empty text field on
-  an optional prop unsets it. Reset to example restores the chosen example's
-  props. Nothing here edits the component.
+- **The inspector** is generated from `props` and is a column on the
+  stage's right (below). `str` and `latex` are a text field, `num` a number
+  field, `bool` a switch, `oneOf` a select of the schema's values, `token` a
+  select of the names in the chosen theme's `tokens` section (`color`, or a
+  dotted path; a colour shows its dot; a theme without the section leaves a
+  plain text field), and `list` an add control over items of the inner kind.
+  A prop that is not set takes its default, which shows as the placeholder
+  (a switch shows the default's state); an emptied number or an emptied text
+  field on an optional prop unsets it. Nothing here edits the component.
+
+**The inspector column** (`InspectorColumn`, the same on the Themes page)
+holds a header row (a title and its actions: here the icon that resets the
+props to the chosen example) over a scroller. The header's last button
+(`InspectorToggle`, beside the library select) folds the whole column and the
+stage takes its width; dragging the seam resizes it (264 to 420 px; dragging
+it narrow folds it, as the nav column). The fold and width are remembered per page
+(`oculus-studio-components-inspector`, `oculus-studio-themes-inspector`). The
+column's content keeps its unfolded width while it eases shut, so it is
+clipped, not reflowed. The stage's column may grow from 920 to 1080 px with
+the inspector folded, and `useStageWidth` measures the stage, so the frame
+request follows (up to 2160 device pixels).
+
+**The props form** is in sections (`CollapsibleSection`, a caret, a name, a
+count, and a brand dot while a folded section holds a change) that fold, each
+remembered in `oculus-studio-components-sections` (`useInspectorSections`).
+`groupProps` (`lib/studio/props.ts`) derives them from the schema and the
+names, never from a component: a name that ends in a moment (`at`, `plotAt`,
+`revealEach`, `zoomDur`) is **Timing**; a colour (`token`), a closed choice
+(`oneOf`) or a switch (`bool`), alone or as a list, is **Style**; the rest is
+**Content**. Fewer than six props, or only one non-empty group, is a single
+"Props" section.
+
+Fields are 28 px. A prop is its name on one line, with a small number,
+switch or select beside it and text and lists under it. What it takes and
+its default (`describeProp`, "List of numbers - default [-1,4,1]") is the
+name's tooltip, not text beside it. A brand dot before the name means the
+value differs from the default (`changed`; a required prop never does), and
+an icon at the row's end, shown on hover, puts the prop back to its default
+(or unsets it). A list of numbers is a grid of small fields, four to a line,
+each with a remove badge on hover; any other list is a row per item with its
+remove at the end on hover; an empty list is its name and an add icon.
 
 **One frame in flight.** `useStageFrame` keeps at most one
 `studio_component_frame` call running and, behind it, only the newest request,
@@ -246,19 +283,28 @@ built-in `default` under a name asked for. Three columns:
   `useStageFrame` (one in flight, edits wait 150 ms, as the playground) with
   the timeline to play or scrub its motion. Under it, Ask for a change and
   the theme file (the draft's text while there is one).
-- **The inspector** (`inspector/`) edits the draft: **Default for** chips
-  (Global, and the browsed subject) that make the theme that library's
-  default or clear it (`studio_theme_set_default`, the library's
-  `library.json`; a subject's own theme cannot be the global default), then
-  every `color.*` token with the colour control, the heading, body and code
-  fonts (the families studio-core bundles), each `type.*` font size,
-  `radius.*`, the motion durations, easings (four cubic-bezier numbers),
-  spring presets (a preset choice, then its stiffness, damping and mass),
-  the scene transition's kind, length and direction, magic move, colour
-  blend and motion blur, and the narration's lead, tail and pause. There is
-  no texture token. A new heading or body font also moves the `type.*`
-  entries that used the old family (`setFontRole`, by entry name when two
-  roles share one), since components spread `type.*`.
+- **The inspector** (`inspector/`, in `InspectorColumn` as on the Components
+  page: the header's toggle folds it, the seam resizes it, both remembered
+  under `oculus-studio-themes-inspector`) edits the draft in sections that
+  fold (`oculus-studio-themes-sections`; Type, Shape, Motion, Transition and
+  Narration start folded). **Default for**: chips (Global, and the browsed
+  subject) that make the theme that library's default or clear it
+  (`studio_theme_set_default`, the library's `library.json`; a subject's own
+  theme cannot be the global default); its header says which are on.
+  **Colours**: every `color.*` token as a tile of a swatch, the name and the
+  hex, two to a line, under a small heading for what it colours
+  (`colorGroups` in `lib/studio/themeDraft.ts`, by name: Surfaces, Text,
+  Accent, Ink, Status, Other); a tile opens the colour control. **Type**: the
+  heading, body and code fonts (the families studio-core bundles) and each
+  `type.*` font size. **Shape**: `radius.*`. **Motion**: the durations, the
+  easings (four cubic-bezier numbers) and the spring presets (a preset
+  choice, then its stiffness, damping and mass). **Transition**: the scene
+  transition's kind, length and direction, then magic move, colour blend and
+  motion blur. **Narration**: the lead, tail and pause. A section whose
+  tokens the theme lacks is left out. There is no texture token. A new
+  heading or body font also moves the `type.*` entries that used the old
+  family (`setFontRole`, by entry name when two roles share one), since
+  components spread `type.*`.
 
 **Edits are a draft until saved.** Each edit replaces the draft
 (`lib/studio/themeDraft.ts`, key order kept), and the stage draws it at once
@@ -286,8 +332,9 @@ the built-in theme (duplicate it first) and while the draft has unsaved
 edits.
 
 **The colour control** (`components/ui/color/`) is a round swatch and its
-hex that opens a popover: a saturation and brightness pad, a hue strip, an
-opacity strip and the hex text. It is pointer-driven (`useFractionDrag`
+hex that opens a popover (`ColorField`; `ColorPopover` is the same popover
+behind any face, as the inspector's tiles): a saturation and brightness pad,
+a hue strip, an opacity strip and the hex text. It is pointer-driven (`useFractionDrag`
 reports positions as fractions of the element's box, so page zoom does not
 matter) and the arrow keys move each part. It holds the hue itself, so
 dragging through grey keeps it, and hands back `#rrggbb`, or `#rrggbbaa`

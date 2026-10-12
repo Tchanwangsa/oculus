@@ -4,6 +4,7 @@ import { Navigate, useParams } from "react-router-dom";
 import { ComponentList } from "@/components/studio/components/ComponentList";
 import { LibrarySelect } from "@/components/studio/components/LibrarySelect";
 import { Workbench } from "@/components/studio/components/Workbench";
+import { InspectorToggle, useInspectorPanel } from "@/components/studio/panel/InspectorColumn";
 import { StudioHeader } from "@/components/studio/StudioHeader";
 import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { useComponents } from "@/hooks/studio/useComponents";
@@ -26,6 +27,7 @@ export default function ComponentsPage() {
   const { subjects, subject, code, setCode } = useStudioLibrary();
   const [storedTheme, setTheme] = useStoredState("oculus-studio-components-theme", readStored);
   const [revision, setRevision] = useState(0);
+  const panel = useInspectorPanel("oculus-studio-components-inspector");
   const { components, loaded, error, reload } = useComponents(code);
   const themes = useThemes(code);
   const theme = themes.themes.find((t) => t.name === storedTheme && !t.problem)?.name
@@ -55,10 +57,13 @@ export default function ComponentsPage() {
       <StudioHeader
         title="Components"
         actions={
-          <LibrarySelect subjects={subjects} value={code} onChange={setCode} />
+          <>
+            <LibrarySelect subjects={subjects} value={code} onChange={setCode} />
+            <InspectorToggle panel={panel} />
+          </>
         }
       />
-      <div className="grid min-h-0 flex-1 grid-cols-[208px_minmax(0,1fr)_296px]">
+      <div className="flex min-h-0 flex-1">
         <ComponentList components={components} loaded={loaded} error={error} subject={code} />
         {selected ? (
           <Workbench
@@ -71,9 +76,10 @@ export default function ComponentsPage() {
             revision={revision}
             change={change}
             onLibraryChanged={onSettled}
+            panel={panel}
           />
         ) : (
-          <div className="col-span-2 flex items-center justify-center px-6 text-center text-[13px] text-muted-foreground">
+          <div className="flex min-w-0 flex-1 items-center justify-center px-6 text-center text-[13px] text-muted-foreground">
             {!loaded ? (
               <LoadingFill />
             ) : name ? (
