@@ -77,8 +77,8 @@ fn with_motion(name: &str, motion: Value) -> PathBuf {
     }
     std::fs::write(dir.join("video.json"), video.to_string()).unwrap();
     std::fs::copy(
-        src.join("components/Slide.tsx"),
-        dir.join("components/Slide.tsx"),
+        src.join("components/Panel.tsx"),
+        dir.join("components/Panel.tsx"),
     )
     .unwrap();
     dir

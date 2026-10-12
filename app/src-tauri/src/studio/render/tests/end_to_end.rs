@@ -19,21 +19,21 @@ use crate::test_support::Scratch;
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../studio-core/tests/fixtures");
 
 /// The ffmpeg to test with, if there is one that can render `preset`
-/// (frames, an encoder and AAC for a video preset; AAC for `audio`).
+/// (frames, an encoder and AAC).
 fn ffmpeg(preset: Preset) -> Option<PathBuf> {
     let Some(found) = crate::sources::echo360::find_ffmpeg(None) else {
         eprintln!("skipped: no ffmpeg");
         return None;
     };
     let toolkit = Toolkit::of(&found).unwrap();
-    let ready = match preset.output() {
-        super::super::Output::Video(video) => toolkit
-            .check_frames()
-            .and_then(|()| toolkit.check_audio())
-            .and_then(|()| toolkit.codec(video.class, (640, 360), 30).map(drop)),
-        super::super::Output::Audio => toolkit.check_audio(),
-        super::super::Output::Subtitles => Ok(()),
-    };
+    let ready = toolkit
+        .check_frames()
+        .and_then(|()| toolkit.check_audio())
+        .and_then(|()| {
+            toolkit
+                .codec(preset.video().class, (640, 360), 30)
+                .map(drop)
+        });
     match ready.and_then(|()| checkable(&found)) {
         Ok(()) => Some(found),
         Err(e) => {
@@ -84,8 +84,8 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-/// The transitions fixture's `Slide`, four scenes of half a second.
-fn slides(dir: &Path, titles: [&str; 4]) {
+/// The transitions fixture's `Panel`, four scenes of half a second.
+fn panels(dir: &Path, titles: [&str; 4]) {
     copy_dir(
         &Path::new(FIXTURES).join("transitions/components"),
         &dir.join("components"),
@@ -95,7 +95,7 @@ fn slides(dir: &Path, titles: [&str; 4]) {
         .enumerate()
         .map(|(i, title)| {
             json!({
-                "component": "Slide",
+                "component": "Panel",
                 "props": { "title": title, "variant": if i % 2 == 0 { "a" } else { "b" } },
                 "hold": 0.5,
                 "transition": if i == 0 { json!(null) } else { json!({ "kind": "push", "dur": 0.2 }) },
@@ -172,7 +172,7 @@ fn a_cached_concat_decodes_like_a_cold_render() {
         return;
     }
     let dir = Scratch::new("render-e2e-cache");
-    slides(&dir, ["One", "Two", "Three", "Four"]);
+    panels(&dir, ["One", "Two", "Three", "Four"]);
     let final_ = options(&ffmpeg, Preset::Final, None);
 
     let first = complete(&dir, &final_);
@@ -192,7 +192,7 @@ fn a_cached_concat_decodes_like_a_cold_render() {
     assert_eq!(parts, hashes);
 
     // Editing scene 1 re-renders it and scene 2, whose transition shows it.
-    slides(&dir, ["One", "Deux", "Three", "Four"]);
+    panels(&dir, ["One", "Deux", "Three", "Four"]);
     let second = complete(&dir, &final_);
     let outcomes: Vec<Outcome> = second.segments.iter().map(|s| s.outcome).collect();
     use Outcome::{Cached, Rendered};
@@ -276,7 +276,7 @@ fn a_cancel_mid_render_leaves_nothing_partial() {
         return;
     };
     let dir = Scratch::new("render-e2e-cancel");
-    slides(&dir, ["One", "Two", "Three", "Four"]);
+    panels(&dir, ["One", "Two", "Three", "Four"]);
     let cancel = AtomicBool::new(false);
     let result = render(
         &dir,
@@ -304,7 +304,7 @@ fn a_failing_frame_names_its_scene_and_time() {
         return;
     };
     let dir = Scratch::new("render-e2e-fail");
-    slides(&dir, ["One", "Two", "Three", "Four"]);
+    panels(&dir, ["One", "Two", "Three", "Four"]);
     std::fs::write(
         dir.join("components/Breaks.tsx"),
         "export const props = {};\nexport default ({}, { t }) => {\n  if (t > 0.3) throw new Error(\"late\");\n  return <Box />;\n};\n",
@@ -381,61 +381,15 @@ fn each_export_writes_its_file_and_knows_when_it_is_current() {
     assert!(status(Preset::Draft).current);
     assert!(!status(Preset::Final).current);
 
-    let subtitles = complete(&dir, &options(&ffmpeg, Preset::Subtitles, None));
-    assert_eq!(subtitles.path, dir.join("renders/subtitles.vtt"));
-    assert_eq!(std::fs::read_to_string(&subtitles.path).unwrap(), text);
-    let srt = std::fs::read_to_string(dir.join("renders/subtitles.srt")).unwrap();
-    assert!(
-        srt.starts_with("1\n00:00:00,100 --> 00:00:03,650\n"),
-        "{srt}"
-    );
-    assert!(status(Preset::Subtitles).current);
-
-    if Toolkit::of(&ffmpeg).unwrap().check_audio().is_ok() {
-        let audio = complete(&dir, &options(&ffmpeg, Preset::Audio, None));
-        assert_eq!(audio.path, dir.join("renders/audio.m4a"));
-        let out = Command::new(&ffmpeg)
-            .args(["-v", "error", "-i"])
-            .arg(&audio.path)
-            .args(["-map", "0:a", "-f", "null", "-"])
-            .output()
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert!(status(Preset::Audio).current);
-        // The audio export's track is the draft's: neither was pruned.
-        assert!(status(Preset::Draft).current);
-    }
-
     // Turning captions on changes the frames, not the words.
     let video = std::fs::read_to_string(dir.join("video.json")).unwrap();
     let on = crate::studio::videos::with_captions(&video, true).unwrap();
     std::fs::write(dir.join("video.json"), on).unwrap();
     assert!(!status(Preset::Draft).current);
-    assert!(status(Preset::Subtitles).current);
     let captioned = complete(&dir, &options(&ffmpeg, Preset::Draft, None));
     let outcomes: Vec<Outcome> = captioned.segments.iter().map(|s| s.outcome).collect();
     assert_eq!(outcomes, [Outcome::Rendered, Outcome::Rendered]);
     let burned = framemd5(&ffmpeg, &captioned.path);
     assert_eq!(burned.len(), plain.len());
     assert_ne!(burned, plain);
-}
-
-#[test]
-fn an_export_with_nothing_to_say_is_refused() {
-    let dir = Scratch::new("render-e2e-silent");
-    slides(&dir, ["One", "Two", "Three", "Four"]);
-    let ffmpeg = PathBuf::from("ffmpeg-is-not-needed");
-    let e = render(
-        &dir,
-        &options(&ffmpeg, Preset::Subtitles, None),
-        &AtomicBool::new(false),
-        &mut |_| {},
-    )
-    .unwrap_err()
-    .to_string();
-    assert!(e.contains("has no narration to export"), "{e}");
 }
