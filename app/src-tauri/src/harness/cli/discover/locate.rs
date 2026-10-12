@@ -170,7 +170,7 @@ fn search_dirs(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
     #[cfg(windows)]
     let names = executable_names(name, std::env::var("PATHEXT").ok().as_deref());
     #[cfg(not(windows))]
-    let names = vec![name.to_owned()];
+    let names = [name.to_owned()];
     // Prefer a native executable even when an earlier PATH directory has a shim.
     names
         .iter()

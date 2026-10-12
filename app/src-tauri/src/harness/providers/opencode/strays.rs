@@ -87,6 +87,11 @@ fn ps_field<'a>(rest: &mut &'a str) -> Option<&'a str> {
     (!head.is_empty()).then_some(head)
 }
 
+#[cfg(not(unix))]
+pub fn sweep() -> Vec<u32> {
+    Vec::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,9 +113,4 @@ mod tests {
         );
         assert_eq!(strays(&listing, 501), vec![4011, 4017]);
     }
-}
-
-#[cfg(not(unix))]
-pub fn sweep() -> Vec<u32> {
-    Vec::new()
 }

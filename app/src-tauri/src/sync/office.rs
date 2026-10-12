@@ -116,19 +116,24 @@ fn find_soffice() -> Option<PathBuf> {
             return Some(p);
         }
     }
-    #[cfg(windows)]
-    {
-        for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
-            if let Some(root) = std::env::var_os(variable) {
-                let path = PathBuf::from(root).join("LibreOffice/program/soffice.exe");
-                if path.is_file() {
-                    return Some(path);
-                }
+    installed_soffice()
+}
+
+#[cfg(windows)]
+fn installed_soffice() -> Option<PathBuf> {
+    for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(root) = std::env::var_os(variable) {
+            let path = PathBuf::from(root).join("LibreOffice/program/soffice.exe");
+            if path.is_file() {
+                return Some(path);
             }
         }
-        return crate::harness::cli::discover::tool("soffice");
     }
-    #[cfg(not(windows))]
+    crate::harness::cli::discover::tool("soffice")
+}
+
+#[cfg(not(windows))]
+fn installed_soffice() -> Option<PathBuf> {
     [
         "/Applications/LibreOffice.app/Contents/MacOS/soffice",
         "/opt/homebrew/bin/soffice",

@@ -13,13 +13,12 @@ pub struct ProcessJob;
 pub fn command(program: impl AsRef<OsStr>) -> Command {
     let cmd = Command::new(program);
     #[cfg(windows)]
-    {
-        let mut cmd = cmd;
+    let cmd = {
         use std::os::windows::process::CommandExt;
+        let mut cmd = cmd;
         cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
-        return cmd;
-    }
-    #[cfg(not(windows))]
+        cmd
+    };
     cmd
 }
 

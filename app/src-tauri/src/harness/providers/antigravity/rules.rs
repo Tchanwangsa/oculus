@@ -77,7 +77,7 @@ pub(super) struct State {
 
 pub fn settings_path() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("the home directory cannot be found for agy settings")?;
-    Ok(PathBuf::from(home).join(".gemini/antigravity-cli/settings.json"))
+    Ok(home.join(".gemini/antigravity-cli/settings.json"))
 }
 
 /// The record of Oculus's own entries, at the library root — outside every

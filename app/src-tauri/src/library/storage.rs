@@ -45,7 +45,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<StorageFile>, total: &mut u64) {
             *total += bytes;
             let rel = path
                 .strip_prefix(root)
-                .map(|p| crate::library::paths::slash_path(p))
+                .map(crate::library::paths::slash_path)
                 .unwrap_or_else(|_| path.to_string_lossy().into_owned());
             out.push(StorageFile { path: rel, bytes });
         }
