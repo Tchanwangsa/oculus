@@ -1,7 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 
 import { diagramBounds, mermaidId, renderMermaid, type Diagram } from "@/components/markdown/mermaidRender";
-import { isDark, subscribeDark } from "@/lib/ui/theme";
+import { subscribeTheme, themeKey } from "@/lib/ui/themes";
 
 import { SourceWidget } from "./source";
 
@@ -75,13 +75,13 @@ class DiagramPainter {
     private editing: boolean,
   ) {
     // A theme flip re-renders: mermaid bakes the palette into the SVG.
-    this.stopWatching = subscribeDark(() => this.paint(this.code, false));
+    this.stopWatching = subscribeTheme(() => this.paint(this.code, false));
   }
 
   paint(code: string, settle: boolean) {
     this.code = code;
     window.clearTimeout(this.timer);
-    const key = `${isDark() ? "D" : "L"}${code}`;
+    const key = `${themeKey()}\n${code}`;
     const hit = diagramCache.get(key);
     if (hit !== undefined) return this.show(hit);
     if (!this.drawn) this.placeholder(false);

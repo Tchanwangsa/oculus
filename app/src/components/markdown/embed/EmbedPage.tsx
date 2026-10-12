@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { ArrowSquareOut, ArrowsOutSimple, CircleNotch, FileHtml } from "@phosphor-icons/react";
 import { useDataDir } from "@/hooks/backend/useDataDir";
 import { readCourseFile } from "@/lib/files/courseFiles";
-import { isDark, subscribeDark } from "@/lib/ui/theme";
+import { isDark, subscribeDark } from "@/lib/ui/themes";
 import { IconAction } from "@/components/markdown/embed/IconAction";
 import { PageViewer } from "@/components/markdown/embed/PageViewer";
 import {

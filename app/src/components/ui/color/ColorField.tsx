@@ -32,6 +32,7 @@ export function ColorPopover({
   onChange,
   label,
   align = "end",
+  opaque,
   className,
   children,
 }: {
@@ -40,6 +41,8 @@ export function ColorPopover({
   /** What the colour is, for the button's accessible name. */
   label: string;
   align?: "start" | "center" | "end";
+  /** No alpha: edits always come back as `#rrggbb`. */
+  opaque?: boolean;
   className?: string;
   children: ReactNode;
 }) {
@@ -52,7 +55,7 @@ export function ColorPopover({
         </button>
       </PopoverTrigger>
       <PopoverContent align={align} className="w-60 p-3">
-        <ColorPicker value={ok ? value : "#000000"} onChange={onChange} />
+        <ColorPicker value={ok ? value : "#000000"} onChange={onChange} opaque={opaque} />
       </PopoverContent>
     </Popover>
   );
@@ -67,11 +70,13 @@ export function ColorField({
   value,
   onChange,
   label,
+  opaque,
   className,
 }: {
   value: string;
   onChange: (hex: string) => void;
   label: string;
+  opaque?: boolean;
   className?: string;
 }) {
   const ok = parseHex(value) != null;
@@ -80,6 +85,7 @@ export function ColorField({
       value={value}
       onChange={onChange}
       label={label}
+      opaque={opaque}
       className={cn(
         "group flex min-w-0 items-center gap-2 rounded-full py-0.5 pl-0.5 pr-2 transition-colors hover:bg-accent",
         className,

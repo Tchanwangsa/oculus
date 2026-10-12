@@ -27,13 +27,14 @@
     user-select: none;
   }
 
-  /* The background is here, not on body: a body or html background paints
+  /* The window ground is here, not on body: a body or html background paints
      the whole canvas, and the webview must stay see-through where
-     `lib/shell/nativeHoles.ts` clips #root over a native page. */
+     `lib/shell/nativeHoles.ts` clips #root over a native page. The only
+     fill under the shell chrome, so a see-through frame is painted once. */
   #root {
     height: 100%;
     display: flex;
-    background-color: var(--color-background);
+    background-color: var(--color-frame);
   }
 
   /* Phosphor glyphs (256 viewBox) such as VideoCamera run flush to the box

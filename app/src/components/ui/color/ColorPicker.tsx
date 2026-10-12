@@ -13,12 +13,20 @@ const CHECKER =
  * A colour picker: a saturation/value pad, a hue strip, an alpha strip and
  * the hex text, all editing one hex value (`#rrggbb`, or `#rrggbbaa` when it
  * is not opaque). The hue is held here, so dragging through grey or black
- * does not lose it.
+ * does not lose it. `opaque` drops the alpha strip and every edit's alpha.
  */
-export function ColorPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
+export function ColorPicker({
+  value,
+  onChange,
+  opaque: solid = false,
+}: {
+  value: string;
+  onChange: (hex: string) => void;
+  opaque?: boolean;
+}) {
   const parsed = parseHex(value) ?? { r: 0, g: 0, b: 0, a: 1 };
   const [hsv, setHsv] = useState<Hsv>(() => rgbToHsv(parsed));
-  const alpha = parsed.a;
+  const alpha = solid ? 1 : parsed.a;
   const sent = useRef(value);
 
   // An outside change (another edit, a revert) replaces the held colour.
@@ -37,8 +45,9 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
   };
 
   const typed = (text: string) => {
-    const next = parseHex(text);
-    if (!next) return;
+    const parsedText = parseHex(text);
+    if (!parsedText) return;
+    const next = solid ? { ...parsedText, a: 1 } : parsedText;
     setHsv(rgbToHsv(next));
     const hex = toHex(next);
     sent.current = hex;
@@ -81,16 +90,18 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
         onStep={(dx) => emit({ ...hsv, h: (hsv.h + dx * 360 + 360) % 360 })}
         step={1 / 360}
       />
-      <Strip
-        label="Opacity"
-        valueText={`${Math.round(alpha * 100)}%`}
-        drag={fade}
-        at={alpha}
-        background={`linear-gradient(to right, transparent, ${opaque}), ${CHECKER}`}
-        thumb={toHex(hsvToRgb(hsv, alpha))}
-        onStep={(dx) => emit(hsv, Math.round(unit(alpha + dx) * 100) / 100)}
-        step={0.01}
-      />
+      {!solid && (
+        <Strip
+          label="Opacity"
+          valueText={`${Math.round(alpha * 100)}%`}
+          drag={fade}
+          at={alpha}
+          background={`linear-gradient(to right, transparent, ${opaque}), ${CHECKER}`}
+          thumb={toHex(hsvToRgb(hsv, alpha))}
+          onStep={(dx) => emit(hsv, Math.round(unit(alpha + dx) * 100) / 100)}
+          step={0.01}
+        />
+      )}
       <HexInput value={value} onCommit={typed} />
     </div>
   );

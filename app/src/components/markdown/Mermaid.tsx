@@ -10,7 +10,7 @@ import { ArrowsOutSimple } from "@phosphor-icons/react";
 import { DiagramLightbox, type DiagramSize } from "@/components/markdown/DiagramLightbox";
 import { diagramBounds, mermaidId, renderMermaid } from "@/components/markdown/mermaidRender";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { isDark, subscribeDark } from "@/lib/ui/theme";
+import { subscribeTheme, themeKey } from "@/lib/ui/themes";
 import { cn } from "@/lib/utils";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 
@@ -41,7 +41,7 @@ export function Mermaid({
   /** The fence as a code block, shown until (or instead of) the diagram. */
   children: React.ReactNode;
 }) {
-  const dark = useSyncExternalStore(subscribeDark, isDark);
+  const theme = useSyncExternalStore(subscribeTheme, themeKey);
   const [svg, setSvg] = useState<string | null>(null);
   const [size, setSize] = useState<DiagramSize | null>(null);
   const [open, setOpen] = useState(false);
@@ -63,8 +63,8 @@ export function Mermaid({
       live = false;
       clearTimeout(timer);
     };
-    // `dark` only re-runs it: `renderMermaid` reads the theme itself.
-  }, [code, dark, id]);
+    // `theme` only re-runs it: `renderMermaid` reads the theme itself.
+  }, [code, theme, id]);
 
   if (svg == null) return <>{children}</>;
 

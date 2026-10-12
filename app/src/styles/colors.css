@@ -23,6 +23,10 @@
   --color-background:        #f9f9f9;
   --color-foreground:        #0d0d0d;
 
+  /* The window ground around the card (`#root`). Themes write it with alpha
+     over native glass (lib/ui/themes/apply.ts); opaque, it is the background. */
+  --color-frame:             var(--color-background);
+
   /* The floating content pane, one step lighter than the ground. */
   --color-card:              #ffffff;
   --color-card-foreground:   #0d0d0d;
