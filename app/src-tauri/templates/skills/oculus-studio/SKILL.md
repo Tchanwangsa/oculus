@@ -278,7 +278,7 @@ Picture: a dot grid that regroups into rows as each grouping is said.
 Narration: Some numbers refuse to make a rectangle. Take seven dots. Two rows
 leave one dot over, and three rows leave one over too. Only one row of seven
 works, so seven's only factors are one and itself, and that is what prime
-means. Twelve is different: three rows of four.
+means. [pause] Twelve is different: three rows of four. [pause]
 
 | Said | On screen |
 | --- | --- |
@@ -289,8 +289,10 @@ means. Twelve is different: three rows of four.
 | "Only one row of seven works" | back to one row; d6 back to `text` colour |
 | "factors are one and itself" | under the row, Math `eq7` `7 = 1 \times 7` is written on with `Write`, a `\k` group per term on its words |
 | "that is what prime means" | `\text{prime}` in `\color{accent}`, a group of the same Math, writes on beside the 7 |
+| [pause] | the row, `eq7` and "prime" hold; nothing moves |
 | "Twelve is different" | a `Steps` state: the row, its label and `eq7` shrink to the top left (keys `row7`, `seven`, `eq7`); twelve dots enter at centre |
 | "three rows of four" | the twelve dots fall into 3 rows of 4 |
+| [pause] | the 3 by 4 rectangle holds before the cut |
 ````
 
 ## Build
@@ -336,6 +338,13 @@ scene again.
 scene: its `id`, its component name, and `"props": { "narrated": true }`
 on a narrated scene or `{}` and a `hold` on a silent one) and `script.md` (each scene's narration, in spoken form; see
 `reference.md` "script.md"). Then:
+
+**Pace it.** The voice never stops on its own, so give each idea time to
+land. Put `[pause]` (one second) or `[pause 1.5]` in `script.md` at the
+end of the sentence where an idea lands: after a result is shown, after a definition is complete, after
+a rewrite finishes, and at the end of a scene's argument, so the last
+picture holds before the cut. Not after every sentence: two to four in a
+scene. A pause is silent and its beat-table row says what holds on screen.
 
 ```bash
 oculus studio lint shor-breaks-rsa --json

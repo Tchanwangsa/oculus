@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::{Map, Value};
-use studio_core::{ComponentSource, CuedWord, Project};
+use studio_core::{ComponentSource, CuedPause, CuedWord, Project};
 
 use super::videos::valid_slug;
 
@@ -70,10 +70,12 @@ pub struct Notes {
 pub enum Narration {
     /// A silent scene and its hold.
     Silent { seconds: f64 },
-    /// The scene's length and its words, one list per sentence.
+    /// The scene's length, its words, one list per sentence, and its
+    /// `[pause]`s at the times `pause()` returns.
     Spoken {
         seconds: f64,
         sentences: Vec<Vec<CuedWord>>,
+        pauses: Vec<CuedPause>,
     },
     /// Narration missing or stale (or a silent scene without a hold): the
     /// error, and the script section's text when there is one.
@@ -229,19 +231,22 @@ fn notes(dir: &Path, entry: Option<&str>) -> Notes {
 fn narration(project: &Project, index: usize) -> Narration {
     let unavailable = |e: studio_core::StudioError| Narration::Unavailable {
         error: e.to_string(),
-        script: project.section(index).map(|s| s.text.clone()),
+        script: project
+            .section(index)
+            .map(|s| s.clip_text(project.theme.narration.pause)),
     };
     let seconds = match project.scene_length(index) {
         Ok(s) => s,
         Err(e) => return unavailable(e),
     };
-    match project.cued_words(index) {
-        Ok(Some(words)) => Narration::Spoken {
+    match (project.cued_words(index), project.cued_pauses(index)) {
+        (Ok(Some(words)), Ok(pauses)) => Narration::Spoken {
             seconds,
             sentences: sentences(words),
+            pauses,
         },
-        Ok(None) => Narration::Silent { seconds },
-        Err(e) => unavailable(e),
+        (Ok(None), _) => Narration::Silent { seconds },
+        (Err(e), _) | (_, Err(e)) => unavailable(e),
     }
 }
 

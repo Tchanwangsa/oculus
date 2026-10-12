@@ -552,3 +552,115 @@ fn a_library_theme_narrates() {
     assert!(project.manifest.is_some());
     assert_eq!(project.video.theme, "warm");
 }
+
+#[test]
+fn a_section_without_pauses_keeps_its_key() {
+    let dir = Scratch::new("narrate-key");
+    video(&dir, SCRIPT);
+    let speaker = FakeSpeaker::new();
+    run(&dir, &speaker, &Stub::new(), &Options::default());
+    let text = "We follow the gradient.";
+    let want = cache_key(text, &speaker.key(text).unwrap());
+    assert_eq!(manifest(&dir).scenes["a"].key, want);
+}
+
+#[test]
+fn pauses_splice_exact_silence_into_the_clip_said_whole() {
+    let dir = Scratch::new("narrate-pause");
+    video(
+        &dir,
+        "## a\nWe follow. [pause]\nUm, the gradient. [pause 0.5]\n\n## b\nOne small step.\n",
+    );
+    let speaker = FakeSpeaker::new();
+    let stub = Stub::new();
+    let report = run(&dir, &speaker, &stub, &Options::default());
+    assert_eq!(report.scenes[0].pauses, 2);
+    assert_eq!(
+        speaker.spoken(),
+        ["We follow. Um, the gradient.", "One small step."],
+        "said in one go, so the pace is the voice's own"
+    );
+    assert_eq!(stub.calls.get(), 2, "timed in one pass, before the splice");
+
+    let m = manifest(&dir);
+    let a = &m.scenes["a"];
+    assert_eq!(a.text, "We follow. [pause 1] Um, the gradient. [pause 0.5]");
+    assert!((a.duration - 2.0).abs() < 1e-9, "{}", a.duration);
+    let times: Vec<(&str, f64, f64)> = a
+        .words
+        .iter()
+        .map(|w| (w.text.as_str(), w.start, w.end))
+        .collect();
+    let want = [
+        ("We", 0.0, 0.1),
+        ("follow.", 0.1, 0.2),
+        ("Um,", 1.2, 1.3),
+        ("the", 1.3, 1.4),
+        ("gradient.", 1.4, 1.5),
+    ];
+    for ((t, s, e), (wt, ws, we)) in times.iter().zip(want) {
+        assert!(
+            *t == wt && (s - ws).abs() < 1e-9 && (e - we).abs() < 1e-9,
+            "{times:?}"
+        );
+    }
+    let pauses: Vec<(Option<usize>, f64, f64)> =
+        a.pauses.iter().map(|p| (p.after, p.start, p.end)).collect();
+    assert_eq!(pauses.len(), 2);
+    assert_eq!((pauses[0].0, pauses[1].0), (Some(1), Some(4)));
+    assert!((pauses[0].1 - 0.2).abs() < 1e-9 && (pauses[0].2 - 1.2).abs() < 1e-9);
+    assert!((pauses[1].1 - 1.5).abs() < 1e-9 && (pauses[1].2 - 2.0).abs() < 1e-9);
+
+    let clip = decode_wav(&std::fs::read(dir.join("narration").join(&a.audio)).unwrap()).unwrap();
+    assert!((clip.duration - a.duration).abs() < 1e-9);
+    let (from, to) = (24_000 / 5, 24_000 * 6 / 5);
+    assert!(clip.samples[from..to].iter().all(|&s| s == 0.0));
+    let said = decode_wav(&tone(0.5)).unwrap();
+    assert_eq!(
+        clip.samples[..from],
+        said.samples[..from],
+        "speech is kept as made"
+    );
+    assert_eq!(
+        clip.samples[to..to + 7_200],
+        said.samples[from..],
+        "and resumes after"
+    );
+
+    let p = studio_core::Project::load(&*dir).unwrap();
+    assert_eq!(p.cued_pauses(0).unwrap().len(), 2, "studio-core reads it");
+
+    video(
+        &dir,
+        "## a\nWe follow. [pause 2]\nUm, the gradient. [pause 0.5]\n\n## b\nOne small step.\n",
+    );
+    let again = run(&dir, &speaker, &stub, &Options::default());
+    assert_eq!(
+        outcomes(&again),
+        [("a", Outcome::Narrated), ("b", Outcome::Cached)],
+        "a pause's length is in the key"
+    );
+}
+
+#[test]
+fn a_pause_is_cut_into_the_silence_between_its_words() {
+    let rate = 24_000;
+    let tone = |n: usize| (0..n).map(|i| ((i as f32) * 0.05).sin() * 0.3);
+    let samples: Vec<f32> = tone(12_000)
+        .chain(std::iter::repeat_n(0.0, 7_200))
+        .chain(tone(9_600))
+        .collect();
+    let word = |index: usize, start: f64, end: f64| WordTime {
+        index,
+        text: "w".into(),
+        start,
+        end,
+        confidence: -0.5,
+    };
+    let words = [word(0, 0.0, 0.45), word(1, 0.75, 1.2)];
+    let c = clip::cut(&samples, rate, &words, 1);
+    assert!((12_000..19_200).contains(&c), "in the silence: {c}");
+    assert!(c.abs_diff(14_400) <= 60, "its middle, of equal quiet: {c}");
+    assert_eq!(clip::cut(&samples, rate, &words, 0), 0);
+    assert_eq!(clip::cut(&samples, rate, &words, 2), samples.len());
+}

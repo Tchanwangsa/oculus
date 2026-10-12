@@ -234,12 +234,16 @@ agent (`oculus studio agents` prints it and the call to make):
   what appears or moves as it is said). It stops for the student's
   go-ahead on the storyboard, then writes `video.json` (each one-scene
   component's only prop, `narrated`, set on narrated scenes) and
-  `script.md`, lints and narrates before any scene is built, so builders
-  cue to real word times.
+  `script.md`, placing a `[pause]` where an idea lands (a result shown, a
+  definition complete, a rewrite finished, the end of a scene's argument),
+  then lints and narrates before any scene is built, so builders cue to
+  real word times.
 - **Build**, one helper per scene, works from `build.md`: its first call is
   `oculus studio brief <slug> --scene <id>`, which stands in for the
   storyboard, script and manifest; it writes the scene's components, cues
-  each beat with `word()` on the brief's word times, checks as text with
+  each beat with `word()` on the brief's word times, lands the beat a
+  pause follows just before `pause()` and holds it through the silence,
+  checks as text with
   `lint --scene` (every error fixed, each warning fixed or explained) and
   `beats --scene`, then looks with the brief's `strip` or `frame` call,
   reading the PNG at its fixed `-o` path in the same message (a missing
@@ -285,7 +289,7 @@ Codex the director's brief has the helper read them by file
 ([harness.md](./harness.md#subagents)).
 
 `reference.md` is this page's authoring rules distilled for an agent
-(video.json, spoken form, the component contract, elements and style keys,
+(video.json, spoken form and pauses, the component contract, elements and style keys,
 type sizes, motion, `Math` with its backslash rule, `\k` groups, theme
 colours and size, moving maths with `Write`, `Steps` and the overlays as
 five whole components checked with `strip` plus their gotchas, cues,
@@ -384,28 +388,49 @@ We follow the *gradient* downhill, one small step at a time.
 
 - **`script.md`** is one `## <id>` section per narrated scene, written as it
   is said. A section's text is its prose with `*`, `_` and backticks
-  removed and whitespace collapsed; nothing else is interpreted (`#` and
-  `###` lines are prose). Text before the first heading, a heading that is
-  not an id, a repeated id and an empty section fail `Project::load` with
-  the line. A section no scene's `id` matches is a lint error.
+  removed, pause markers cut out and whitespace collapsed; nothing else is
+  interpreted (`#` and `###` lines are prose). Text before the first
+  heading, a heading that is not an id, a repeated id and an empty section
+  fail `Project::load` with the line. A section no scene's `id` matches is
+  a lint error.
+- **Pauses.** `[pause]` anywhere in a section's prose holds the picture in
+  silence for the theme's `narration.pause` seconds, and `[pause 1.5]` for
+  that many: more than 0 and at most `MAX_PAUSE` (5 s); `pause` in any
+  case. A marker is not said and splits the words either side of it;
+  `ScriptSection::pauses` records each one's place (how many words come
+  before it) and length, and at the end of a section it holds the last
+  picture before the cut. A bracket opening with `pause` that is neither
+  form (`[pause x]`, `[pause 9]`, no `]`) is cut from the text too and is
+  a lint error (`project/script/pause.rs`). `ScriptSection::clip_text`
+  writes the pauses back into the text at their lengths (`It lands. [pause
+  1] Then it stays.`), a bare one at the theme's; without pauses it is the
+  text. That is what a clip is made from and what its manifest entry
+  matches, so moving a marker or changing its length, or the theme's,
+  makes the scene stale.
 - **The manifest** is `{ version: 1, scenes: { <id>: { key, text, audio,
   duration, words: [{ text, start, end, confidence }], gaps: [{ after,
-  start, end, heard }] } } }` (`Manifest`). `text` is the section text the
-  clip says, `audio` the clip's file name in `narration/`, `key` its content
+  start, end, heard }], pauses: [{ after, start, end }] } } }`
+  (`Manifest`). `text` is the section's `clip_text`, `audio` the clip's
+  file name in `narration/`, `key` its content
   address (see "Cache" under "Narration is made by `oculus studio
   narrate`"), times are seconds from the clip's start, `confidence` is the
   aligner's (mean log-probability of the word's letter frames; higher is
   surer), and `gaps` (optional) is speech the aligner heard that the
   script does not have, after word index `after` (`null`: before the first
-  word). Unknown keys, another
-  version, non-finite times and a word or gap ending before it starts fail
-  the load.
+  word). `pauses` is the exact silence each `[pause]` put in the clip,
+  after word index `after` (`null`: before the first word); it is left out
+  when there are none, so a manifest from before pauses reads unchanged.
+  Unknown keys, another version, non-finite times and a word, gap or pause
+  ending before it starts fail the load.
 - **Length.** A narrated scene lasts `max(hold, lead + duration + tail)`:
-  `hold` is optional and only a minimum. `lead` and `tail` are the theme's
-  `narration` tokens (0.25 s and 0.6 s in the bundled theme); the clip
-  starts `lead` into the scene. A silent scene (no section) lasts its
-  `hold`, and one without a `hold` has no length. Either rounds up to
-  whole frames: 3.85 s is 116 frames at 30 fps, 3.867 s.
+  `hold` is optional and only a minimum, and `duration` includes the
+  clip's pauses. `lead`, `tail` and `pause` are the theme's `narration`
+  tokens (0.25 s, 1.0 s and 1.0 s in the bundled themes); the clip starts
+  `lead` into the scene. `pause` may be left out of a theme file and reads
+  as `DEFAULT_PAUSE` (1.0 s), so a theme copied into a library before it
+  existed still loads. A silent scene (no section) lasts its `hold`, and
+  one without a `hold` has no length. Either rounds up to whole frames:
+  4.25 s is 128 frames at 30 fps, 4.267 s.
 - **Stale narration fails, it is never estimated.** A scene with script
   text whose manifest entry is missing or was made for other text makes
   `Project::timeline`, `Renderer::new` and `strip` fail with
@@ -428,6 +453,11 @@ We follow the *gradient* downhill, one small step at a time.
   Each call gets its own scene's words (`SceneCall::words`, from
   `Project::word_cues`), so in a transition the outgoing scene cues to its
   words and the incoming one to its own.
+- **Pause cues.** `pause(nth = 1)` is the scene time (lead included) at
+  which the nth `[pause]`'s silence starts (`Project::cued_pauses`), so a
+  beat can land just before it and hold through it. A scene without that
+  many pauses, and a silent scene, throw at the call's line: ``scene `a`
+  has 2 pauses, so there is no pause 3``.
 
 ## Narration timing is forced alignment on the CPU
 
@@ -505,7 +535,9 @@ manifest. Scenes run one at a time, in video order.
   voice, speed }`; `studio::voice`). A missing or ill-typed field in the
   row reads as unset, and so does an engine other than `server` or
   `kokoro` (in video.json it fails the load); a row with a `baseUrl` and
-  no `engine` key reads as `server`. Only speed has a default (1.0).
+  no `engine` key reads as `server`. Only speed has a default
+  (`voice::DEFAULT_SPEED`, 0.9: a little under the voice's own pace, since
+  a player can always speed a lecture up); a stored speed is kept.
   There is no default engine, since Kokoro needs a download and a server
   a URL: narrate fails with ``choose Kokoro or a TTS server in Settings ->
   Voice, or pass --engine``. The server engine needs a server, model and
@@ -520,7 +552,8 @@ manifest. Scenes run one at a time, in video order.
   (`narrate::Speaker`): `ready()` is asked once, beside the aligner's,
   before the first clip; `key(text)` is asked for every scene, cached or
   not, and gives the parts of its cache key, engine first; `speak(text)`
-  gives a WAV and its decoded samples, never silent. `ServerSpeaker` is
+  gives a WAV and its decoded samples, never silent. Both get the
+  section's text without its pauses. `ServerSpeaker` is
   the TTS client below and has no readiness check of its own;
   `KokoroSpeaker` runs Kokoro inside the app (see "Kokoro narrates inside
   the app"). A video has one engine: when it fails, the narrate fails and
@@ -536,8 +569,10 @@ manifest. Scenes run one at a time, in video order.
   failure, never a pause: Kokoro-FastAPI answers an unknown voice with 200
   and nothing.
 - **Cache.** A clip's `key` is the sha256 hex of `oculus-narration-2`, the
-  section text, the speaker's key parts and the aligner's `MODEL_ID`, each
-  length-prefixed (`narrate/key.rs`). The server's parts are `server`, the
+  section's `clip_text` (its text with each pause at its length), the
+  speaker's key parts and the aligner's `MODEL_ID`, each length-prefixed
+  (`narrate/key.rs`). Without pauses `clip_text` is the text, so a section
+  keeps the key it had before pauses existed and its clip is kept. The server's parts are `server`, the
   normalised URL, model, voice and speed. Kokoro's are `kokoro`, its model
   id (`kokoro-82m-v1.0-onnx-int8@1939ad2a`), voice, speed and the text's
   phoneme string, so a lexicon edit re-narrates only the scenes whose
@@ -551,7 +586,22 @@ manifest. Scenes run one at a time, in video order.
 - **A new clip** is saved byte for byte as the speaker made it to
   `narration/<key>.wav`; its duration comes from the decoded samples, and
   it is resampled to 16 kHz and timed against the section's
-  whitespace-separated words, at any length. The speaker and the aligner
+  whitespace-separated words, at any length. A section with pauses
+  (`narrate/clip.rs`) is said and timed the same way, whole, and then each
+  pause is spliced in as exact zeros: before the clip for a pause before
+  the first word, after it for one after the last, else at the quietest
+  10 ms (ties to the middle) between the end of the last word before it
+  and the start of the next, so the cut falls in the silence the voice
+  already left there. Words and gaps after a cut move on by its length,
+  each pause goes into the manifest as `{ after, start, end }`, and the
+  clip is written as a 16-bit mono WAV at the speaker's rate. The words
+  are said whole because Kokoro paces an input by its length: the same
+  scene said in parts between its pauses came out up to 11% slower, part
+  by part, than said whole (`af_heart` at 0.9, the first of three parts
+  1.7 s behind over 16 s); a server is asked once, too, and the aligner
+  never sees the inserted silence. The silence check runs on the clip as
+  spoken, never on the spliced one, so a pause is not mistaken for a
+  failed clip. The speaker and the aligner
   model are checked before the first clip, so a missing one costs no
   synthesis; the aligner fails with ``download it in Settings -> Voice or
   run `oculus studio aligner download` ``.
@@ -570,11 +620,11 @@ manifest. Scenes run one at a time, in video order.
   manifest this build cannot read (another version, damaged) is rebuilt
   from nothing, with a warning.
 - **Output.** Per scene: the id, `narrated` or `cached`, the clip's length,
-  its word count, and as warnings each word under `LOW_CONFIDENCE` and each
+  its word count, its pauses when it has any, and as warnings each word under `LOW_CONFIDENCE` and each
   gap (times into the clip; lint notes the same words and fails on the
   same gaps, at scene time),
   then the notes. `--json` gives `{ dir, voice, scenes: [{ id, outcome,
-  audio, duration, words, low_confidence, gaps, timings }], notes: [{
+  audio, duration, words, pauses, low_confidence, gaps, timings }], notes: [{
   scene, id, line, word, phonemes, guessed }], dropped, deleted, ms }`,
   `voice` being `{ engine: "server", server, model, voice, speed }` or `{
   engine: "kokoro", voice, speed }`, and each note also has `review`
@@ -1520,9 +1570,12 @@ For a narrated video lint also reports, each naming the scene id:
   symbols such as `×`, `÷`, `±`, `√`, `∑`, `∫`, `∈`, `≤`, `≠`, `≈`, Greek
   letters, any other symbol, and dotted abbreviations (`e.g.`, `i.e.`,
   `etc.`, `U.S.`), each with what to write instead (`` say `%` as
-  `percent` ``). Letters and `, . ; : ! ? ' " - — ( )` pass, and `*` or `_`
-  inside a word is emphasis. The rules are in
+  `percent` ``). Letters and `, . ; : ! ? ' " - — ( )` pass, `*` or `_`
+  inside a word is emphasis, and `[pause]` markers pass. The rules are in
   `app/studio-core/src/project/lint/spoken.rs`;
+- a malformed pause marker (kind `script`, with its line): ``[pause x]` is
+  not a pause; write `[pause]` for the theme's pause or `[pause 1.5]` for
+  seconds``, or that a pause is more than 0 and at most 5 seconds;
 - as a note, not an error, each word whose aligner confidence is below
   `LOW_CONFIDENCE` (-8.0, measured on Kokoro, where clean words stayed
   above -4.83; re-check it for another TTS engine), since a mangled word
@@ -1574,8 +1627,10 @@ Each warning names the scene, the time span, the entity (its key, or
   purpose and skipped.
 - **`still`**: while the narration plays (`lead` to `lead + clip`), more
   than 2.5 s where no entity's place (to the pixel), opacity (to 2%),
-  colours or shape changes; and nothing on screen by 0.5 s (``nothing is on
-  screen until 3.2 s``, or ``nothing is ever on screen``).
+  colours or shape changes, not counting the time inside `[pause]`
+  silences, which hold the picture on purpose; and nothing on screen by
+  0.5 s (``nothing is on screen until 3.2 s``, or ``nothing is ever on
+  screen``).
 - **`half_frame`**: for more than 3 s, everything shown sits in one half
   of the frame (reaching at most 3% past the centre line) and is narrower
   than half the frame; top and bottom too for a portrait video.
@@ -1599,7 +1654,9 @@ are one beat (`move+resize`); a change starting as it appears is part of
 the appear, which reports where it settles. The same beat at the same
 sample on keys that differ only in a trailing number shares a line
 (`d0-d3,d5`). A Math's rewrite lists the pieces it gains and loses
-(`+val -add`).
+(`+val -add`). Each `[pause]` is a beat of its own at its start, its
+length and the words before it: `  4.10  pause    1.0 s  "… lands on
+one."`.
 
 ## Rendering a video
 
@@ -1731,8 +1788,10 @@ with the `Narration` error before any frame renders.
   when the words below are printed; the
   `notes/` paths the entry names, else every file in `notes/`; its length
   and words, one line per sentence, each as `start word` at the time
-  `word()` returns (`Project::cued_words`), or the narration error and the
-  script text; and its `lint --scene`, `beats`, `strip`, `frame` (at the
+  `word()` returns (`Project::cued_words`), with each pause as `start
+  [pause 1.0 s]` after the word it follows at the time `pause()` returns
+  (`Project::cued_pauses`), or the narration error and the script text
+  (its `clip_text`); and its `lint --scene`, `beats`, `strip`, `frame` (at the
   scene's middle) and `gallery` calls with absolute `-o` paths, naming the
   video by slug when it is in the data directory.
   `--json` gives the same as `{index, count, id, component, props, dir,

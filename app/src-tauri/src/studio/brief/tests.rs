@@ -235,3 +235,40 @@ fn commands_name_a_video_by_slug_only_where_it_lives() {
         format!("'{}'", elsewhere.display())
     );
 }
+
+#[test]
+fn a_brief_lists_each_pause_after_its_word() {
+    let root = Scratch::new("brief-pause");
+    let dir = video(&root);
+    std::fs::write(
+        dir.join("script.md"),
+        "## count\nFifteen is odd. [pause]\nIs it?\n\n## outro\nBye now.\n",
+    )
+    .unwrap();
+    let word =
+        |t: &str, s: f64, e: f64| json!({ "text": t, "start": s, "end": e, "confidence": -1.0 });
+    std::fs::write(
+        dir.join("narration/manifest.json"),
+        json!({ "version": 1, "scenes": {
+            "count": { "key": "k", "text": "Fifteen is odd. [pause 1] Is it?", "audio": "k.wav",
+                "duration": 2.6,
+                "words": [word("Fifteen", 0.28, 0.7), word("is", 0.71, 0.8), word("odd.", 0.8, 1.1),
+                          word("Is", 2.2, 2.3), word("it?", 2.3, 2.5)],
+                "pauses": [{ "after": 2, "start": 1.1, "end": 2.1 }] }
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let project = Project::load(&dir).unwrap();
+    let text = build(&project, 1, &dir, "counting").to_string();
+    assert!(
+        text.contains("each [pause] at the time pause() returns"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "\n0.53 Fifteen  0.96 is  1.05 odd.  1.35 [pause 1.0 s]\n2.45 Is  2.55 it?\n"
+        ),
+        "{text}"
+    );
+}

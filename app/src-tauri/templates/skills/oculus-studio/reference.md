@@ -8,7 +8,7 @@ video's slug as `DIR`; `oculus studio <command> --help` has the full flags.
 ## Contents
 
 - video.json: its keys, a scene's keys, how long a scene lasts
-- script.md: sections, the spoken-form table, acronyms and fusions
+- script.md: sections, pauses, the spoken-form table, acronyms and fusions
 - Components: the file's three exports, prop builders, flat props
 - Elements: element props, layout, the style keys
 - The theme: token names and type sizes, making a new theme
@@ -19,7 +19,7 @@ video's slug as `DIR`; `oculus studio <command> --help` has the full flags.
   in place, writing on per group, pointing at a term, a result shrunk
   aside, a number into a symbol's slot); carrying a formula into the next
   scene; gotchas
-- Word cues: `word()`, `wordEnd()`, cues in props
+- Word cues: `word()`, `wordEnd()`, `pause()`, cues in props
 - Transitions and magic move
 - Lint: each kind and what to do, the literal rules exactly
 - Looking: frame, strip and gallery
@@ -69,9 +69,9 @@ Unknown keys are refused.
 
 **A scene's length.** A silent scene lasts its `hold`. A narrated scene
 lasts `max(hold, lead + clip + tail)`, where `lead` (0.25 s) and `tail`
-(0.6 s) are the theme's `narration` tokens: the clip starts `lead` into the
-scene. Lengths round up to whole frames. The video's length is the sum of
-its scenes' lengths.
+(1.0 s) are the theme's `narration` tokens: the clip starts `lead` into the
+scene, and the clip's length includes its pauses. Lengths round up to
+whole frames. The video's length is the sum of its scenes' lengths.
 
 ## script.md
 
@@ -91,7 +91,24 @@ A typical step size is zero point zero one.
   each id appears once, and no section is empty: any of these stops every
   command from loading the video, naming the line.
 - `*`, `_` and backticks are dropped; whitespace is collapsed. Everything
-  else is read aloud.
+  else is read aloud, except pauses.
+
+**Pauses.** `[pause]` holds the picture in silence for the theme's pause
+(1 s); `[pause 1.5]` for that many seconds, at most 5. The voice does not
+change its tone for it, so write it after a sentence's last word, at the
+end of a section too (the last picture holds before the cut):
+
+```markdown
+## mod
+
+Seven mod three: count around a clock of three, and it lands on one. [pause]
+Keep only the remainder. [pause]
+```
+
+Place one where an idea lands: after a result is shown, a definition is
+complete, a rewrite finishes, and at the end of the scene's argument. Not
+after every sentence: two to four a scene. Changing a pause re-narrates
+its scene. Anything else in brackets starting `pause` is a `script` error.
 
 **Spoken form.** Write what the voice should say. Lint flags each of these
 with what to write instead:
@@ -727,6 +744,11 @@ end on whole said words (`word("one")` does not find it).
 - Cues exist only after `narrate`: a narrated scene is not rendered by
   lint, `frame` or `strip` until its narration is current.
 
+`pause()` is the scene time at which the scene's first `[pause]` starts;
+`pause(2)` the second. Land the beat just before it and hold: nothing new
+moves until the next word (`word()` after it). It throws in a scene without
+that many pauses.
+
 ## Transitions and magic move
 
 Every scene after the first comes in through a transition, played over the
@@ -782,7 +804,7 @@ Warnings name the time span and the words said in it:
 | `kind` | What it means | What to do |
 | --- | --- | --- |
 | `off_frame` | A node sits more than 4 px past the frame's edge (not while sliding in or out, not under a `Camera` zoom) | Move or shrink it inside the frame. |
-| `still` | Narration plays over more than 2.5 s where nothing on screen changes, or nothing is on screen by 0.5 s | Cue something to those words: a highlight, a rewrite, the next element. |
+| `still` | Narration plays over more than 2.5 s where nothing on screen changes (not counting `[pause]` silences), or nothing is on screen by 0.5 s | Cue something to those words: a highlight, a rewrite, the next element. |
 | `half_frame` | For more than 3 s, everything sits in one half of the frame | Spread the picture, or put the next element in the empty half. |
 | `fragment` | At the end, a Math shows only one or two of its pieces (a stray `= .` from a rewrite), or a tiny mark sits alone | Hide the whole Math, or finish the rewrite; remove the mark. |
 
@@ -793,6 +815,7 @@ Warnings name the time span and the words said in it:
 | `narration` | "unscripted speech" | The voice said something the script lacks; reword, then narrate again. |
 | `script` | A section no scene's `id` matches | Rename the heading or the scene id. |
 | `script` | Text not in spoken form, with `say … as …` | Write the words it suggests. |
+| `script` | `[pause x]` is not a pause, or longer than 5 seconds | Write `[pause]` or `[pause <seconds>]`. |
 | `component` | A colour, font or spacing literal (`colour #5e6ad2 is a literal; use theme.color.accent`) | Use the token it names. |
 | `component` | The component threw, or a key is on two nodes | Fix the TSX at `loc`. A bad `word()` phrase names the closest one said. |
 | `lint` | An example omits a required prop | Add it to the example, or give the prop a `.default()`. |
@@ -866,7 +889,8 @@ Each command prints the PNG's absolute path.
 `oculus studio brief <slug> --scene <id|N>` prints one scene's whole input:
 its index, component and props; what the scenes either side carry in and
 hand on, and whether their components exist yet; its storyboard entry; the
-notes it names; its words at the times `word()` returns; and its exact
+notes it names; its words at the times `word()` returns, each pause as
+`4.10 [pause 1.0 s]` after its word at the time `pause()` returns; and its exact
 `lint`, `beats`, `strip`, `frame` and `gallery` calls. Read it instead of
 `storyboard.md` or the manifest.
 
@@ -877,12 +901,14 @@ as text, with the words said then:
   0.20  appear   d0-d15  (centre (960,540))  "Fifteen is …"
   5.10  vanish   d15  "… loses a corner"
   6.20  move     d12-d14  → (1180,420)…(1180,660) over 0.8 s  "… stands up"
+  7.10  pause    1.0 s  "… stands up."
   7.40  move+resize+rewrite eq  (1248,349) → (1346,349); 390x66 → 577x65; +lap +plus -add over 0.8 s  "… one whole lap …"
 ```
 
 Each line is a key (or a Math under its key, or `Box:12` for nodes with no
 key, by TSX line): `appear`, `vanish`, `move`, `resize`, `recolour`,
-`rewrite`. Check the beat table against it before you look at a strip, and
+`rewrite`, and `pause` for each `[pause]` (its length and the words before
+it). Check the beat table against it before you look at a strip, and
 spend strips on how it looks.
 
 `frame` and `strip` stop when any narrated scene's narration is stale, even

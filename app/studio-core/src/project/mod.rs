@@ -22,7 +22,7 @@ pub use narration::{
     CuedPause, CuedWord, LOW_CONFIDENCE, MANIFEST_PATH, Manifest, ManifestGap, ManifestPause,
     ManifestScene, ManifestWord, WordCues,
 };
-pub use script::{ClipPart, MAX_PAUSE, Script, ScriptPause, ScriptSection};
+pub use script::{MAX_PAUSE, Script, ScriptPause, ScriptSection};
 pub use timeline::Timeline;
 pub use video::valid_subject;
 pub use video::{FRAME_RATES, SceneSpec, Video, Voice, VoiceEngine};

@@ -259,7 +259,8 @@ pub(crate) struct StudioVoiceArgs {
     /// voices`)
     #[arg(long, value_name = "VOICE")]
     pub(crate) voice: Option<String>,
-    /// Speaking rate; 1.0 is normal, 1.25 is a quarter faster
+    /// Speaking rate; 1.0 is the voice's own pace, 1.25 is a quarter
+    /// faster (unset anywhere: 0.9)
     #[arg(long, value_name = "S")]
     pub(crate) speed: Option<f64>,
 }
@@ -282,11 +283,13 @@ pub(crate) enum StudioEngineArg {
 /// WAV), the clip is saved as `narration/<key>.wav`, and its words are timed
 /// against the script with the aligner model (`oculus studio aligner
 /// download` fetches it once). The manifest then gives each narrated scene its
-/// length and its `word()` cues; `frame`, `strip` and `lint` read it.
+/// length and its `word()` cues; `frame`, `strip` and `lint` read it. A
+/// section is said and timed whole, then each `[pause]` is spliced in as
+/// exact silence between the words either side of it.
 ///
-/// A clip's key hashes its text, the engine, the voice and speed, the
-/// server and model or Kokoro's model and the text's phonemes, and the
-/// aligner model, so a run only makes scenes whose text, voice or reading
+/// A clip's key hashes its text with its pauses, the engine, the voice and
+/// speed, the server and model or Kokoro's model and the text's phonemes,
+/// and the aligner model, so a run only makes scenes whose text, voice or reading
 /// changed (a lexicon edit re-narrates the scenes it changes); the rest
 /// print `cached`. Scenes run one at a time in video order and the
 /// manifest is saved after each, so a failure keeps the scenes before it;
@@ -294,7 +297,7 @@ pub(crate) enum StudioEngineArg {
 /// for scenes no longer narrated and clips nothing names are deleted.
 ///
 /// Per scene it prints the id, `narrated` or `cached`, the clip's length,
-/// its word count, and as warnings the words the aligner was unsure of and
+/// its word count and pauses, and as warnings the words the aligner was unsure of and
 /// any speech the script lacks (a mangled or added word: reword it, or
 /// listen). `lint` notes the unsure words and fails on the added speech.
 /// With Kokoro, every word the guesser read is then a `note: check
@@ -526,7 +529,8 @@ pub(crate) struct StudioLintArgs {
 /// Lays the scene out every 0.2 s and at each cue word (never painted)
 /// and lists, per key (or per Math, or per TSX line for nodes with no key
 /// near them), when it appears, vanishes, moves (centre more than 8 px),
-/// resizes, recolours or is rewritten, each with the words said then.
+/// resizes, recolours or is rewritten, each with the words said then, and
+/// each `[pause]` with its length.
 /// Numbered keys doing the same thing at the same moment share a line
 /// (`d12-d14`). A builder checks a beat table against it as text instead
 /// of reading a strip. At most 80 lines print; `--json` gives every beat
@@ -552,9 +556,10 @@ pub(crate) struct StudioBeatsArgs {
 /// `storyboard.md` entry verbatim (from its `### <id>` heading to the next
 /// heading or `---`); the `notes/` files the entry names, else every file
 /// in `notes/`; its narration, one line per sentence, each word with the
-/// time `word()` returns for it (scene seconds, the theme's lead included);
-/// and the exact `strip`, `frame` and `gallery` calls that check it, `-o`
-/// paths absolute. Stale or missing narration prints its error and the
+/// time `word()` returns for it (scene seconds, the theme's lead included)
+/// and each pause after its word at the time `pause()` returns; and the
+/// exact `strip`, `frame` and `gallery` calls that check it, `-o` paths
+/// absolute. Stale or missing narration prints its error and the
 /// script text instead. Reads only the folder.
 ///
 ///     oculus studio brief shor --scene squares

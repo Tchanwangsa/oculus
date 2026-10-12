@@ -245,8 +245,8 @@ fn print_progress(p: &Progress) {
     }
 }
 
-/// `id  narrated  3.42 s  11 words  (synth 0.4 s, align 1.2 s)`, then a
-/// warning line per unsure word and per gap.
+/// `id  narrated  3.42 s  11 words  2 pauses  (synth 0.4 s, align 1.2 s)`,
+/// then a warning line per unsure word and per gap.
 fn print_scene(s: &SceneReport) {
     let (outcome, colour) = match s.outcome {
         Outcome::Narrated => ("narrated", GREEN),
@@ -262,8 +262,13 @@ fn print_scene(s: &SceneReport) {
             )
         })
         .unwrap_or_default();
+    let pauses = match s.pauses {
+        0 => String::new(),
+        1 => "  1 pause".to_owned(),
+        n => format!("  {n} pauses"),
+    };
     println!(
-        "{} {} {:>6.2} s  {:>3} words{}",
+        "{} {} {:>6.2} s  {:>3} words{pauses}{}",
         paint(&format!("{:<16}", s.id), BOLD),
         paint(&format!("{outcome:<8}"), colour),
         s.duration,

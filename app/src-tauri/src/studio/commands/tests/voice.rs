@@ -37,7 +37,7 @@ fn a_row_is_trimmed_and_its_url_normalised() {
 
 #[test]
 fn blank_fields_are_unset() {
-    let saved = validated(row(Some("  "), Some(""), None, 1.0)).unwrap();
+    let saved = validated(row(Some("  "), Some(""), None, 0.9)).unwrap();
     assert_eq!(saved, VoiceSettings::default());
 }
 
@@ -57,7 +57,7 @@ fn the_row_serialises_camel_case_with_nulls() {
     assert_eq!(
         json,
         serde_json::json!({ "engine": null, "baseUrl": null, "model": null, "voice": null,
-            "speed": 1.0 })
+            "speed": 0.9 })
     );
     let back: VoiceRow =
         serde_json::from_value(serde_json::json!({ "baseUrl": "http://x:1", "model": null,
