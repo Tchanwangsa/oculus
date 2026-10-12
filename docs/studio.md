@@ -217,35 +217,58 @@ one folder besides `agents/` and the database an agent thread may write
 A video is made in an ordinary Chat thread by the student's own CLI agent,
 through the `oculus` CLI and its file tools; there is no Studio page yet.
 The `oculus-studio` skill ([harness.md](./harness.md#the-brief-is-appended-except-on-opencode))
-is the whole brief, and `AGENTS.md` only points at it. Its `SKILL.md` is the
-loop, as a checklist the agent copies: read the lecture (through the
-`oculus-lectures` skill), `studio new`, read `reference.md`, write
-`video.json`, `script.md` and any component of the video's own, `gallery`
-each new component, `lint --json` until only stale narration is left,
-`narrate`, lint again, look at `frame` and `strip` PNGs with the agent's
-image-reading tool, and `render` a draft and then `--final`; `promote` only
-a component the student wants kept; the story rules (write the argument
-before the scenes, every claim with its reason, each scene's narration
-opening on a link to the last, numbers given meaning, terms defined in
-passing, an example followed by its general rule, the payoff shown, the
-end answering the opening question, and phrasing the voice cannot fuse
-across words: "R S A rests" is heard as "RS arrests"); and the taste
-rules (one idea per scene,
-words on screen summarise the narration, the frame filled with the key
-figure at display size, something on screen within a second, motion cued
-with `word()`, one shared key for consecutive headings, tokens over
-literals). When `narrate` fails for want of a
-voice or the aligner, the agent stops and tells the student what to set in
-Settings -> Voice; it never downloads the aligner. `reference.md` is this
-page's authoring rules distilled for an agent (video.json, spoken form, the
-component contract, elements and style keys, motion, cues, transitions,
-each lint kind and what to do about it, and the commands' outputs).
-`studio.d.ts` types every prelude global; `src/host/tests/globals.rs` lists
-the globals a fresh sandbox context gains from the prelude (QuickJS's own
-`Object.getOwnPropertyNames(globalThis)` before and after, less the host's
-`__studio*` entry points) and fails when they differ from the file's
-top-level `declare`s, either way. The app ships the file with
-`include_str!`.
+is the whole brief, and `AGENTS.md` only points at it. The target is a
+3Blue1Brown-style explainer: maths written term by term as it is said and
+rewritten in place, every basic defined on an example before it is named,
+no slide shapes (card-and-arrow chains, a heading over lines, a formula
+that appears whole, a text-only scene), and no length budget.
+
+`SKILL.md` splits the work into three roles, each started as a
+[subagent](./harness.md#subagents) on the model Settings → Jobs gives that
+agent (`oculus studio agents` prints it and the call to make):
+
+- **Research**, one helper per slice of the lecture (about ten minutes or
+  ten slides), writes `notes/<nn>-<topic>.md` in the video's folder in a
+  fixed shape: definitions, worked examples with every number, figures
+  with page refs, what the slice assumes, what it leaves for later.
+- **Direct**, the thread's own agent, reads only the notes and writes
+  `storyboard.md`: the question, the viewer (a first-year who missed the
+  lecture), a ladder of every term in the order it is defined, and many
+  short scenes, each with what it carries in and hands on by key, the
+  idea, the picture, a narration draft and a beat list (each clause and
+  what appears or moves as it is said). It stops for the student's
+  go-ahead on the storyboard, then writes `video.json` (each one-scene
+  component's only prop, `narrated`, set on narrated scenes) and
+  `script.md`, lints and narrates before any scene is built, so builders
+  cue to real word times.
+- **Build**, one helper per scene, writes that scene's components, cues
+  each beat with `word()`, and checks it with `strip --scene N` and
+  `frame` (a missing component elsewhere does not stop them; stale
+  narration anywhere does); a component two scenes share gets examples and
+  a `gallery --sheet`. It replies with its components, props, strip and
+  any narration change, which the director makes and re-narrates.
+
+The director then lints to `[]`, strips the whole video, sends fixes to a
+fresh builder, and renders a draft, then `--final`. An agent whose role is
+off, or that cannot start helpers (agy), does the items itself in order.
+When `narrate` fails for want of a voice or the aligner, the agent stops and
+tells the student what to set in Settings -> Voice; it never downloads the
+aligner. The story rules (explain with reasons, link each scene to the
+last, numbers given meaning, example then rule, the payoff shown, the end
+answering the opening question, phrasing the voice cannot fuse) and the
+taste rules (the picture carries the idea, the frame filled, every motion
+cued, stable magic-move keys, tokens over literals) close `SKILL.md`.
+
+`reference.md` is this page's authoring rules distilled for an agent
+(video.json, spoken form, the component contract, elements and style keys,
+type sizes, motion, moving maths with `Morph` as states picked by time with
+a worked derivation, cues, transitions, each lint kind and what to do about
+it, and the commands' outputs). `studio.d.ts` types every prelude global;
+`src/host/tests/globals.rs` lists the globals a fresh sandbox context gains
+from the prelude (QuickJS's own `Object.getOwnPropertyNames(globalThis)`
+before and after, less the host's `__studio*` entry points) and fails when
+they differ from the file's top-level `declare`s, either way. The app ships
+the file with `include_str!`.
 
 ## Libraries cascade: project, subject, global
 
