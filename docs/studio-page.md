@@ -14,7 +14,7 @@ page is the frontend over them.
 | The nav column: New video, Videos, Components, Themes, the Recent list and its search | `app/src/components/studio/nav/` |
 | Pages | `app/src/pages/studio/` (`NewVideoPage`, `VideosPage`, `VideoPage`, `VideoThreadPage`, `ComponentsPage`, `ThemesPage`) |
 | New video: the box and its start-up | `app/src/components/studio/new/NewVideo.tsx`, `app/src/hooks/studio/useNewVideo.ts`, `app/src/lib/studio/title.ts` |
-| The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/hooks/studio/useThemeDefaults.ts`, `app/src/lib/studio/themes.ts` |
+| The style chip: theme, format, length, voice | `app/src/components/studio/style/`, `app/src/hooks/studio/useThemes.ts`, `app/src/hooks/studio/useThemeDefaults.ts`, `app/src/lib/studio/themes.ts`, `app/src/lib/studio/length.ts`, `app/src/lib/studio/voice.ts` |
 | The thread column | `app/src/components/studio/thread/ThreadColumn.tsx` |
 | Player, render bar, scene strip, the detail's dock (script, scene grid), facts, Render draft, the Export menu | `app/src/components/studio/video/` (`VideoDetailStage.tsx`, `VideoDock.tsx`, `RenderDraftButton.tsx`, `ExportMenu.tsx`), `app/src/hooks/studio/useVideoPlayback.ts`, `app/src/hooks/studio/useDockedFrameHeight.ts`, `app/src/hooks/studio/useSceneStill.ts`, `app/src/hooks/studio/useVideoDetail.ts`, `app/src/lib/studio/exports.ts` |
 | The Videos grid, its cards and subject pills | `app/src/components/studio/videos/`, `app/src/components/ui/layout/MediaGrid.tsx` |
@@ -53,22 +53,34 @@ there are no toasts or bars ([ui.md](./ui.md)).
 Chat's "next thread" scope) and the style chip. Sending runs
 `useNewVideo`:
 
-1. `newVideo({title, subject, theme?, portrait})`. The title is the prompt's
+1. Read the saved voice settings (`readVoiceSettings`, free: nothing
+   synthesises) and check them with `voiceProblem`. A video needs a usable
+   voice, so with none (no engine; no voice; for the server engine also no URL
+   or model) it stops here: no folder is made and the sentence is the error.
+   `voiceProblem` mirrors the requirements of Rust's `voice::resolve`, which
+   stays the source of truth.
+2. `newVideo({title, subject, theme?, portrait})`. The title is the prompt's
    first line without its `@` paths, cut at 60 characters; the thread names
    itself later and the slug comes from the title. The subject is the course
    code without its term (`displayCode`), the name of its folder under
    `studio/subjects/`.
-2. `harnessSend(null, provider, text, {model, reasoningEffort, subjectId,
-   studio: {slug, lengthSecs, format}})`, which links the new thread to the
+3. `harnessSend(null, provider, text, {model, reasoningEffort, subjectId,
+   studio: {slug, lengthSecs?, format}})`, which links the new thread to the
    video ([studio.md](./studio.md#a-video-has-a-thread)).
-3. Reload the thread and video lists, and open `/studio/videos/:slug/thread`.
+4. Reload the thread and video lists, and open `/studio/videos/:slug/thread`.
 
-A failure at either step shows its sentence under the box and gives the text
-back (`Composer`'s `restore`). One after step 1 leaves the scaffold behind, a
-video with no thread in the grid.
+`lengthSecs` is left out when the length is Auto, and the brief then has no
+length line. A failure at any step shows its sentence under the box and gives
+the text back (`Composer`'s `restore`); the missing-voice sentence carries an
+"Open voice settings" link to `/settings/voice`. One after step 1 leaves the
+scaffold behind, a video with no thread in the grid.
 
 **The style chip** holds the theme, the format (Video or Reels, which is
-`portrait`) and the length target (30 s, 60 s, 2 min, 5 min). Until a theme
+`portrait`) and the length. The length is Auto (the default: no target, the
+agent decides), 30 s, 60 s, 2 min, 5 min, or Custom, a field that takes `45`,
+`90s`, `3m` or `1:30` (`parseLength`; whole seconds, at least 5, else a
+sentence under the field). The chip reads "Video · Auto", "Video · 90 s" or
+"Video · 2:30". Until a theme
 is picked by hand the chip shows the subject's default
 (`studio_theme_defaults`' `effective`, marked "Default" in the list) and
 sends none, so the backend gives the video that default by name; choosing a
@@ -76,10 +88,11 @@ subject brings its default. A theme picked by hand holds across a subject
 change, and picking the marked default again goes back to following it.
 Each theme row says where it comes from (an own version, the subject's,
 global, built in). The format and length are remembered
-(`oculus-studio-style`). Themes come from `studio_themes` for the chosen
+(`oculus-studio-style`), a custom length as typed. Themes come from `studio_themes` for the chosen
 subject; if the command rejects, the list is only "Default" and the popover
 prints the reason. The voice is shown read-only
-from Settings → Voice with a link there. There is no sample button: a sample
+from Settings → Voice with a link there, and the line is a warning that says
+what is missing while `voiceProblem` finds the voice unusable. There is no sample button: a sample
 would be a billed TTS call, and nothing in Settings makes one.
 
 ## The thread page: the conversation beside the video

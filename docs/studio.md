@@ -2003,7 +2003,7 @@ row is written only by `db::store::link_studio_video`. It lives in the
 database, not in video.json, which is `deny_unknown_fields` and writable by
 the agent.
 
-`harness_send` takes `SendOptions.studio` (`{slug, lengthSecs?}`; the TS
+`harness_send` takes `SendOptions.studio` (`{slug, lengthSecs?}`, no `lengthSecs` for an Auto length; the TS
 `format` is not read, since the brief takes the format from video.json's
 size). When the send creates the thread it checks the folder exists
 (`video_in`), creates the thread, then links it; a link that fails deletes
@@ -2011,7 +2011,7 @@ the thread again. Every send reads the link back (`StudioBrief::read`) and
 the thread's brief gets a "The video being made" section, rebuilt like the
 lecture's: the folder (absolute) and that the app made it, the format
 (landscape or portrait, from the size), the theme, the subject and its
-library, the length target, and the instruction to direct the video with
+library, the length target when there is one, and the instruction to direct the video with
 this skill (its step 1, the folder, done), render a draft and say it is
 ready, and ask before the final. The agent is told not to run `oculus
 studio new`. See
