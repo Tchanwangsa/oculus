@@ -12,9 +12,10 @@
 //!   (`state.rs`), the `browser-state` discipline.
 //! - **The library** (`library/`) lists the account's playlists and searches
 //!   through the session's own spclient host, behind a rate-limit gate.
-//! - **Commands pull playback back** when another device holds it
-//!   (`control.rs`); `devices.rs` lists the account's Connect devices from
-//!   the pushed cluster and moves playback between them.
+//! - **Commands control the device playing elsewhere** over Spotify's
+//!   connect-state API (`remote/`), and pull or activate playback here when
+//!   nothing is active (`control.rs`); `devices.rs` lists the account's
+//!   Connect devices from the pushed cluster and moves playback between them.
 //! - **The output on this Mac** is the system default or a named device,
 //!   switched mid-track by the player's own sink (`audio/`).
 //! - **`music_duck`** is the seam a focus mode calls (`duck.rs`); no mode
@@ -32,6 +33,8 @@ mod events;
 mod library;
 mod login;
 mod logs;
+mod queue;
+mod remote;
 mod session;
 pub mod startup;
 mod state;

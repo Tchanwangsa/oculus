@@ -19,7 +19,7 @@ import {
   type Subject,
 } from "@/lib/db";
 import { addressKind, hostOf, normalizeAddress } from "@/lib/browser";
-import { categoryIconFor, isPipelineFile } from "@/lib/files/fileTypes";
+import { categoryIconFor, isLessonAsset, isPipelineFile } from "@/lib/files/fileTypes";
 import { displayCode, displayName } from "@/lib/format/format";
 import { fmtLectureDate, lecturePagePath } from "@/lib/lectures";
 import { filePagePath, fileTitle } from "@/lib/files/openFile";
@@ -98,7 +98,7 @@ export function fileItem(f: LibraryFileHit): SearchItem {
     label: fileTitle(f),
     meta: displayCode(f.subject_code),
     target:
-      f.category === "file" && !isPipelineFile(f.filename)
+      (f.category === "file" || isLessonAsset(f)) && !isPipelineFile(f.filename)
         ? { kind: "file", file: f }
         : { kind: "route", path: filePagePath(f.subject_id, f.relative_path) },
   };

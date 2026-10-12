@@ -69,6 +69,7 @@ fn versions_compare_numerically() {
     assert!(!is_newer("0.160.0,abc123", "0.160.0"));
 }
 
+#[cfg(not(windows))]
 #[test]
 fn commands_match_the_install() {
     let p = Path::new("/Users/s/.local/bin/claude");
@@ -108,6 +109,7 @@ fn commands_match_the_install() {
     );
 }
 
+#[cfg(not(windows))]
 #[test]
 fn unknown_pairings_fall_back_to_the_cli() {
     let agy = Path::new("/opt/homebrew/bin/agy");
@@ -218,4 +220,17 @@ fn live_endpoints_answer() {
         let v = fetch(&url, shape).unwrap_or_else(|e| panic!("{p:?} {s:?}: {e}"));
         assert!(!version_core(&v).is_empty(), "{url}: {v}");
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn self_updates_quote_powershell_paths() {
+    assert_eq!(
+        command(
+            Provider::Opencode,
+            Source::SelfManaged,
+            Path::new(r"C:\Users\O'Neil\opencode.exe")
+        ),
+        r"& 'C:\Users\O''Neil\opencode.exe' upgrade"
+    );
 }

@@ -63,7 +63,13 @@ impl Engine {
     /// Academic courses only — the term filter drops sandboxes and training
     /// shells.
     pub fn list_courses(&self) -> Result<Vec<Course>, String> {
-        const NON_SUBJECT_PREFIXES: &[&str] = &["MPMP"];
+        let inst = crate::sources::institution::load(&self.data_dir);
+        // Codes the university uses for shells that are not subjects.
+        let excluded = inst
+            .as_ref()
+            .map(|i| i.exclude_code_prefixes.clone())
+            .unwrap_or_default();
+        let southern = inst.as_ref().is_some_and(|i| i.southern_hemisphere());
 
         let all = self
             .canvas
@@ -77,35 +83,42 @@ impl Engine {
                 let code = c["course_code"].as_str().unwrap_or("");
                 term.is_some_and(|t| t != "Default Term")
                     && (state == "available" || state == "completed")
-                    && !NON_SUBJECT_PREFIXES.iter().any(|p| code.starts_with(p))
+                    && !excluded.iter().any(|p| code.starts_with(p.as_str()))
             })
             .collect();
 
-        // The newest term with live courses is "current". Ranked by
-        // `terms::term_key`, never compared as text.
-        let latest = academic
-            .iter()
-            .filter(|c| c["workflow_state"] == "available")
-            .filter_map(|c| c["term"]["name"].as_str())
-            .max_by_key(|t| crate::sync::terms::term_key(t))
-            .map(str::to_string);
-
-        Ok(academic
+        let mut courses: Vec<Course> = academic
             .into_iter()
             .map(|c| {
                 let term = c["term"]["name"].as_str().map(str::to_string);
-                let workflow_state = c["workflow_state"].as_str().unwrap_or("").to_string();
+                let term_sort = term.as_deref().and_then(|t| {
+                    crate::sync::terms::term_sort(t, c["term"]["start_at"].as_str(), southern)
+                });
                 Course {
                     id: c["id"].as_i64().unwrap_or(0),
                     code: c["course_code"].as_str().unwrap_or("").to_string(),
                     name: c["name"].as_str().unwrap_or("").to_string(),
-                    is_current: term.is_some() && term == latest && workflow_state == "available",
                     term,
-                    workflow_state,
+                    term_sort,
+                    workflow_state: c["workflow_state"].as_str().unwrap_or("").to_string(),
+                    is_current: false,
                 }
             })
             .filter(|c| c.id != 0)
-            .collect())
+            .collect();
+
+        // The newest term with live courses is "current", by `term_sort`,
+        // never by comparing names.
+        let latest = courses
+            .iter()
+            .filter(|c| c.workflow_state == "available")
+            .filter_map(|c| c.term_sort.clone())
+            .max();
+        for c in &mut courses {
+            c.is_current =
+                latest.is_some() && c.term_sort == latest && c.workflow_state == "available";
+        }
+        Ok(courses)
     }
 
     /// A subject that fails is logged and skipped, except that a Canvas
@@ -209,14 +222,12 @@ impl Engine {
         }
         self.crawl_links(c, &mut crawl);
 
-        if self.options.ed {
+        if self.options.ed || self.options.ed_lessons {
             phase("ed");
             if self.stopped() {
                 return Ok(());
             }
-            if let Err(e) = self.scrape_ed(c) {
-                self.reporter.log("warning", &c.code, &format!("ed: {e}"));
-            }
+            self.scrape_ed(c);
         }
         Ok(())
     }

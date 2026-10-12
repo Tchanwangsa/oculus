@@ -1,22 +1,27 @@
 //! The music commands. Each returns as soon as its work is handed off; the
-//! outcome arrives as `music-state`. Playback commands go to the connected
+//! outcome arrives as `music-state`. Playback commands need a connected
 //! device and fail with "Not connected to Spotify" otherwise; while another
-//! device holds playback they pull it back first (`control.rs`). The lists
+//! device holds playback they control it remotely, and with nothing active
+//! anywhere they pull or activate playback here (`control.rs`). The lists
 //! (`music_playlists`, `music_playlist_covers`, `music_playlist_tracks`,
 //! `music_album_tracks`, `music_tracks`, `music_search`, `music_search_more`,
 //! `music_devices`, `music_outputs`) return their results.
 
 use std::collections::HashMap;
 
-use librespot_connect::{LoadRequest, LoadRequestOptions, PlayingTrack, Spirc};
+use librespot_connect::{
+    LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack, Spirc,
+};
 use librespot_core::{SessionConfig, SpotifyUri};
 use tauri::AppHandle;
 
 use super::audio::{self, OutputDevice};
-use super::control::{self, Need};
+use super::control::{self, Need, Route};
 use super::devices::{self, Device};
 use super::library::{self, Playlist, SearchKind, SearchPage, SearchResults, TrackRow};
 use super::login::{self, LoginError};
+use super::queue;
+use super::remote::{self, RemoteCommand};
 use super::session::{self, Start};
 use super::state::{self, Snapshot};
 use crate::runtime::blocking;
@@ -94,110 +99,201 @@ pub async fn music_sign_out(app: AppHandle) -> Result<(), String> {
     deleted
 }
 
-/// Runs `f` once this device is active, pulling playback here first.
-async fn pulled(
+/// Runs `local` on this device's Spirc, or sends `remote` to the device
+/// playing elsewhere, as `need` routes it (`control.rs`).
+async fn command(
     app: &AppHandle,
-    f: impl FnOnce(&Spirc) -> Result<(), librespot_core::Error>,
+    need: Need,
+    local: impl FnOnce(&Spirc) -> Result<(), librespot_core::Error>,
+    remote: RemoteCommand,
 ) -> Result<(), String> {
-    control::send(app, Need::Pull, || state::with_spirc(app, f)).await
+    control::send(app, need, || state::with_spirc(app, local), |_| remote).await
 }
 
-/// While another device plays, a toggle would pause what the pull brings
-/// over, so it pulls and plays.
+/// Here, a toggle; with nothing active, a pull that plays (a toggle would
+/// pause what the pull brings over); elsewhere, the other device's pause or
+/// resume by what it is doing.
 #[tauri::command]
 pub async fn music_play_pause(app: AppHandle) -> Result<(), String> {
-    if state::active(&app).ok_or("Not connected to Spotify")? {
-        state::with_spirc(&app, |spirc| spirc.play_pause())
-    } else {
-        pulled(&app, |spirc| spirc.play()).await
-    }
+    let active = state::active(&app).ok_or("Not connected to Spotify")?;
+    control::send(
+        &app,
+        Need::Control,
+        || {
+            state::with_spirc(&app, |spirc| {
+                if active {
+                    spirc.play_pause()
+                } else {
+                    spirc.play()
+                }
+            })
+        },
+        |device| {
+            if device.playing {
+                RemoteCommand::Pause
+            } else {
+                RemoteCommand::Resume
+            }
+        },
+    )
+    .await
 }
 
-/// Explicit, unlike the toggle: what pauses music when a lecture starts
-/// (`app/src/lib/music/exclusive/`) must never start it instead.
+/// The player's play button: explicit, unlike the toggle, so a click on a
+/// stale button never pauses.
 #[tauri::command]
 pub async fn music_play(app: AppHandle) -> Result<(), String> {
-    pulled(&app, |spirc| spirc.play()).await
+    command(
+        &app,
+        Need::Control,
+        |spirc| spirc.play(),
+        RemoteCommand::Resume,
+    )
+    .await
 }
 
-/// Nothing while another device plays: a pause never pulls playback here.
+/// What the exclusive-playback rule (`app/src/lib/music/exclusive/`) sends:
+/// pauses this device only. A lecture starting on the Mac never pauses
+/// another device, and a pause never pulls playback here.
 #[tauri::command]
 pub async fn music_pause(app: AppHandle) -> Result<(), String> {
-    control::send(&app, Need::IfActive, || {
-        state::with_spirc(&app, |spirc| spirc.pause())
-    })
+    control::if_active(&app, || state::with_spirc(&app, |spirc| spirc.pause())).await
+}
+
+/// The player's pause button: pauses what the player shows, here or on the
+/// device playing elsewhere; nothing when nothing is active.
+#[tauri::command]
+pub async fn music_pause_player(app: AppHandle) -> Result<(), String> {
+    command(
+        &app,
+        Need::NeverPull,
+        |spirc| spirc.pause(),
+        RemoteCommand::Pause,
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn music_next(app: AppHandle) -> Result<(), String> {
-    pulled(&app, |spirc| spirc.next()).await
+    command(
+        &app,
+        Need::Control,
+        |spirc| spirc.next(),
+        RemoteCommand::SkipNext,
+    )
+    .await
 }
 
+/// Another device whose player state forbids going back (a phone at its
+/// first track answers `skip_prev` with a 403) is sent nothing.
 #[tauri::command]
 pub async fn music_prev(app: AppHandle) -> Result<(), String> {
-    pulled(&app, |spirc| spirc.prev()).await
+    match control::route(&app, Need::Control).await? {
+        Route::Here => state::with_spirc(&app, |spirc| spirc.prev()),
+        Route::There(device) if device.can_prev => {
+            remote::send(&app, &device, RemoteCommand::SkipPrev).await
+        }
+        Route::There(_) | Route::Skip => Ok(()),
+    }
 }
 
 #[tauri::command]
 pub async fn music_seek(app: AppHandle, position_ms: u32) -> Result<(), String> {
-    pulled(&app, |spirc| spirc.set_position_ms(position_ms)).await
+    command(
+        &app,
+        Need::Control,
+        |spirc| spirc.set_position_ms(position_ms),
+        RemoteCommand::SeekTo(position_ms),
+    )
+    .await
 }
 
-/// `percent` is 0–100; more is taken as 100. Drops a held duck.
+/// `percent` is 0–100; more is taken as 100. Here it drops a held duck.
 #[tauri::command]
 pub async fn music_volume(app: AppHandle, percent: u8) -> Result<(), String> {
-    control::send(&app, Need::Pull, || state::set_volume(&app, percent)).await
+    let percent = percent.min(100);
+    control::send(
+        &app,
+        Need::Control,
+        || state::set_volume(&app, percent),
+        |_| RemoteCommand::Volume(percent),
+    )
+    .await
 }
 
 /// The seam a focus mode calls. `Some(level)` lowers the volume to `level`%
 /// of what it was before the first duck; `None` puts that volume back. A
 /// volume the user sets in between wins, and the unduck then does nothing.
-/// Nothing while another device plays.
+/// This device only: nothing while another device plays.
 #[tauri::command]
 pub async fn music_duck(app: AppHandle, level: Option<u8>) -> Result<(), String> {
-    control::send(&app, Need::IfActive, || state::duck(&app, level)).await
+    control::if_active(&app, || state::duck(&app, level)).await
 }
 
 #[tauri::command]
 pub async fn music_shuffle(app: AppHandle, on: bool) -> Result<(), String> {
-    pulled(&app, |spirc| spirc.shuffle(on)).await
+    command(
+        &app,
+        Need::Control,
+        |spirc| spirc.shuffle(on),
+        RemoteCommand::Shuffle(on),
+    )
+    .await
 }
 
 /// On repeats the context. The snapshot's `repeat` is also true for a
 /// repeated track (set from the phone), so off clears both.
 #[tauri::command]
 pub async fn music_repeat(app: AppHandle, on: bool) -> Result<(), String> {
-    pulled(&app, |spirc| {
-        if !on {
-            spirc.repeat_track(false)?;
+    let route = control::route(&app, Need::Control).await?;
+    match route {
+        Route::Here => state::with_spirc(&app, |spirc| {
+            if !on {
+                spirc.repeat_track(false)?;
+            }
+            spirc.repeat(on)
+        }),
+        Route::There(device) => {
+            if !on {
+                remote::send(&app, &device, RemoteCommand::RepeatTrack(false)).await?;
+            }
+            remote::send(&app, &device, RemoteCommand::RepeatContext(on)).await
         }
-        spirc.repeat(on)
-    })
-    .await
+        Route::Skip => Ok(()),
+    }
 }
 
-/// Plays a context (`spotify:playlist:…`, `spotify:album:…`) here.
+/// Plays a context (`spotify:playlist:…`, `spotify:album:…`): on the device
+/// playing elsewhere, else here. Shuffle is always stated, so Play plays in
+/// order and Shuffle play shuffles; here repeat stays as the snapshot has it
+/// (a load resets every option it is not given).
 #[tauri::command]
-pub async fn music_play_context(app: AppHandle, uri: String) -> Result<(), String> {
+pub async fn music_play_context(app: AppHandle, uri: String, shuffle: bool) -> Result<(), String> {
     spotify_uri(&uri)?;
-    load(
-        &app,
-        LoadRequest::from_context_uri(
-            uri,
-            LoadRequestOptions {
-                start_playing: true,
-                ..Default::default()
-            },
-        ),
-    )
-    .await
+    let remote = RemoteCommand::Play {
+        context: uri.clone(),
+        track: None,
+        shuffle: Some(shuffle),
+    };
+    let repeat = state::snapshot(&app).repeat_context;
+    let options = LoadRequestOptions {
+        start_playing: true,
+        context_options: Some(LoadContextOptions::Options(Options {
+            shuffle,
+            repeat,
+            repeat_track: false,
+        })),
+        ..Default::default()
+    };
+    load(&app, LoadRequest::from_context_uri(uri, options), remote).await
 }
 
-/// Plays a track here: from its place in `context_uri` (its album from a
-/// search, or the playlist it was picked in) so playback goes on through
-/// it, or alone without one. librespot finds the track by URI among the
-/// context's loaded tracks. A track URI is not a context librespot can load.
+/// Plays a track: from its place in `context_uri` (its album from a search,
+/// or the playlist it was picked in) so playback goes on through it, or
+/// alone without one. librespot finds the track by URI among the context's
+/// loaded tracks. A track URI is not a context librespot can load; another
+/// device is sent the track as its own context. Here shuffle and repeat stay
+/// as the snapshot has them, since a load resets every option it is not given.
 #[tauri::command]
 pub async fn music_play_track(
     app: AppHandle,
@@ -207,19 +303,39 @@ pub async fn music_play_track(
     if !uri.starts_with("spotify:track:") {
         return Err(format!("Not a Spotify track: {uri}"));
     }
+    let kept = state::snapshot(&app);
     let options = |playing_track| LoadRequestOptions {
         start_playing: true,
         playing_track,
+        context_options: Some(LoadContextOptions::Options(Options {
+            shuffle: kept.shuffle,
+            repeat: kept.repeat_context,
+            repeat_track: kept.repeat && !kept.repeat_context,
+        })),
         ..Default::default()
     };
-    let request = match context_uri {
+    let (request, remote) = match context_uri {
         Some(context) => {
             spotify_uri(&context)?;
-            LoadRequest::from_context_uri(context, options(Some(PlayingTrack::Uri(uri))))
+            let remote = RemoteCommand::Play {
+                context: context.clone(),
+                track: Some(uri.clone()),
+                shuffle: None,
+            };
+            let request =
+                LoadRequest::from_context_uri(context, options(Some(PlayingTrack::Uri(uri))));
+            (request, remote)
         }
-        None => LoadRequest::from_tracks(vec![uri], options(None)),
+        None => {
+            let remote = RemoteCommand::Play {
+                context: uri.clone(),
+                track: None,
+                shuffle: None,
+            };
+            (LoadRequest::from_tracks(vec![uri], options(None)), remote)
+        }
     };
-    load(&app, request).await
+    load(&app, request, remote).await
 }
 
 fn spotify_uri(uri: &str) -> Result<(), String> {
@@ -230,13 +346,11 @@ fn spotify_uri(uri: &str) -> Result<(), String> {
     }
 }
 
-/// Spotify ignores a load sent to a device that is not active, so this
-/// activates it first; the load replaces whatever a pull would bring over.
-async fn load(app: &AppHandle, request: LoadRequest) -> Result<(), String> {
-    control::send(app, Need::Local, || {
-        state::with_spirc(app, |spirc| spirc.load(request))
-    })
-    .await?;
+/// Spotify ignores a load sent to a device that is not active, so with
+/// nothing active this activates it first; the load replaces whatever a pull
+/// would bring over. Another device playing is sent `remote` instead.
+async fn load(app: &AppHandle, request: LoadRequest, remote: RemoteCommand) -> Result<(), String> {
+    command(app, Need::Load, |spirc| spirc.load(request), remote).await?;
     state::update(app, |s| s.error = None);
     Ok(())
 }
@@ -286,19 +400,36 @@ pub async fn music_tracks(
     Ok(library::track_rows(&app, &uris).await?)
 }
 
-/// Adds a track to the queue, only while Oculus is the active device: the
-/// Spirc drops a queue command otherwise, and librespot has no way to queue
-/// on another device (`control.rs`).
+/// Adds a track to the queue of the device playing: Oculus's own, or
+/// another device's by remote; refused with nothing active (`control.rs`).
 #[tauri::command]
 pub async fn music_add_to_queue(app: AppHandle, uri: String) -> Result<(), String> {
     let track = SpotifyUri::from_uri(&uri).map_err(|_| format!("Not a Spotify URI: {uri}"))?;
     if !matches!(track, SpotifyUri::Track { .. }) {
         return Err(format!("Not a Spotify track: {uri}"));
     }
-    control::send(&app, Need::Active, || {
-        state::with_spirc(&app, |spirc| spirc.add_to_queue(track))
-    })
+    command(
+        &app,
+        Need::Queue,
+        |spirc| spirc.add_to_queue(track),
+        RemoteCommand::AddToQueue(uri),
+    )
     .await
+}
+
+/// Plays the snapshot's `up_next` entry at `index`, named `uri`, on the
+/// device playing, Oculus or another, skipping what comes before it
+/// (`queue.rs`).
+#[tauri::command]
+pub async fn music_skip_to(app: AppHandle, uri: String, index: usize) -> Result<(), String> {
+    queue::skip_to(&app, &uri, index).await
+}
+
+/// Takes the snapshot's `up_next` entry at `index`, named `uri`, out of the
+/// queue of the device playing (`queue.rs`).
+#[tauri::command]
+pub async fn music_queue_remove(app: AppHandle, uri: String, index: usize) -> Result<(), String> {
+    queue::remove(&app, &uri, index).await
 }
 
 /// Tracks, artists, albums and playlists matching `query`, ten of each.
@@ -330,6 +461,13 @@ pub fn music_devices(app: AppHandle) -> Result<Vec<Device>, String> {
 #[tauri::command]
 pub async fn music_transfer(app: AppHandle, device_id: String) -> Result<(), String> {
     devices::transfer(&app, device_id).await
+}
+
+/// "Play here": moves playback from the device playing elsewhere to this
+/// one and plays.
+#[tauri::command]
+pub async fn music_play_here(app: AppHandle) -> Result<(), String> {
+    control::play_here(&app).await
 }
 
 /// This Mac's output devices, the current default marked.

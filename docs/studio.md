@@ -1860,7 +1860,7 @@ on disk now; nothing is cached but thumbnails.
 
 A video made in the app is made by an ordinary harness thread, so it is also
 in Chat. `studio_videos(slug PK, thread_id, length_secs, created_at)`
-(migration 45) links them; `thread_id` references `harness_threads` `ON
+(migration 46) links them; `thread_id` references `harness_threads` `ON
 DELETE SET NULL` (deleting the thread keeps the video), is unique, and the
 row is written only by `db::store::link_studio_video`. It lives in the
 database, not in video.json, which is `deny_unknown_fields` and writable by

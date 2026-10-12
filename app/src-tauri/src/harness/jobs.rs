@@ -82,13 +82,23 @@ impl JobSelection {
 
 /// What a job runs on until someone says otherwise. The Studio jobs name one
 /// model per agent whose subagents take a model (`studio_agents::takes_model`).
+/// Native Claude Code is disabled on Windows (docs/harness.md), so there the
+/// small jobs run on Codex and the Studio jobs drop their Claude entry.
 pub fn default_chain(job: Job) -> Vec<JobSelection> {
     let one = |provider, model: &str, effort: Option<&str>| JobSelection {
         provider,
         model: model.into(),
         reasoning_effort: effort.map(Into::into),
     };
-    match job {
+    if cfg!(windows)
+        && matches!(
+            job,
+            Job::LectureEnd | Job::ThreadNaming | Job::DocumentSuggestions
+        )
+    {
+        return vec![one(Provider::Codex, "gpt-5.6-luna", Some("medium"))];
+    }
+    let chain = match job {
         Job::LectureChapters => vec![one(Provider::Codex, "gpt-5.6-luna", Some("xhigh"))],
         // Provisional, until the lecture-end eval picks the default.
         Job::LectureEnd => vec![one(Provider::Claude, "claude-haiku-4-5-20251001", None)],
@@ -108,6 +118,14 @@ pub fn default_chain(job: Job) -> Vec<JobSelection> {
             one(Provider::Claude, "claude-opus-5-5", Some("high")),
             one(Provider::Codex, "gpt-6.1-sol", Some("high")),
         ],
+    };
+    if cfg!(windows) {
+        chain
+            .into_iter()
+            .filter(|s| s.provider != Provider::Claude)
+            .collect()
+    } else {
+        chain
     }
 }
 
@@ -162,6 +180,12 @@ fn from_json(raw: &str, job: Job) -> Vec<JobSelection> {
 /// One stored selection, if it parses and names a model.
 fn one(value: serde_json::Value) -> Option<JobSelection> {
     let picked: JobSelection = serde_json::from_value(value).ok()?;
+    // Native Claude Code is disabled on Windows (docs/harness.md), so a
+    // stored Claude pick reads as unreadable there.
+    #[cfg(windows)]
+    if picked.provider == Provider::Claude {
+        return None;
+    }
     (!picked.model.trim().is_empty()).then_some(picked)
 }
 
@@ -235,6 +259,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn a_configured_job_is_read_back() {
         let chain = json(
             r#"{"lectureChapters":[{"provider":"claude","model":"claude-opus-5","reasoningEffort":"max"}]}"#,
@@ -248,6 +273,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn a_legacy_single_object_is_still_read() {
         let chain = json(
             r#"{"lectureChapters":{"provider":"claude","model":"claude-opus-5","reasoningEffort":"max"}}"#,
@@ -265,6 +291,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn an_arrays_order_is_the_order_tried() {
         let chain = json(
             r#"{"lectureChapters":[
@@ -285,6 +312,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn a_bad_entry_in_an_array_drops_just_that_entry() {
         let chain = json(
             r#"{"lectureChapters":[
@@ -342,26 +370,60 @@ mod tests {
             (c.provider, c.model.as_str(), c.effort()),
             (Provider::Codex, "gpt-5.6-luna", Some("xhigh"))
         );
-        let n = first(Job::ThreadNaming);
-        assert_eq!(n.provider, Provider::Claude);
-        assert_eq!(
-            (n.model.as_str(), n.effort()),
-            ("claude-haiku-4-5-20251001", None)
-        );
-        let e = first(Job::LectureEnd);
-        assert_eq!(
-            (e.provider, e.model.as_str(), e.effort()),
-            (Provider::Claude, "claude-haiku-4-5-20251001", None)
-        );
-        assert_eq!(Job::LectureEnd.key(), "lectureEnd");
-        let d = first(Job::DocumentSuggestions);
-        assert_eq!(
-            (d.provider, d.model.as_str(), d.effort()),
-            (Provider::Claude, "claude-sonnet-5-5", Some("medium"))
-        );
+        #[cfg(windows)]
+        for job in [Job::ThreadNaming, Job::LectureEnd, Job::DocumentSuggestions] {
+            let picked = first(job);
+            assert_eq!(
+                (picked.provider, picked.model.as_str(), picked.effort()),
+                (Provider::Codex, "gpt-5.6-luna", Some("medium"))
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            let n = first(Job::ThreadNaming);
+            assert_eq!(n.provider, Provider::Claude);
+            assert_eq!(
+                (n.model.as_str(), n.effort()),
+                ("claude-haiku-4-5-20251001", None)
+            );
+            let e = first(Job::LectureEnd);
+            assert_eq!(
+                (e.provider, e.model.as_str(), e.effort()),
+                (Provider::Claude, "claude-haiku-4-5-20251001", None)
+            );
+            assert_eq!(Job::LectureEnd.key(), "lectureEnd");
+            let d = first(Job::DocumentSuggestions);
+            assert_eq!(
+                (d.provider, d.model.as_str(), d.effort()),
+                (Provider::Claude, "claude-sonnet-5-5", Some("medium"))
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_windows_jobs_do_not_resolve_a_stored_claude_selection() {
+        for job in [
+            Job::LectureChapters,
+            Job::LectureEnd,
+            Job::ThreadNaming,
+            Job::DocumentSuggestions,
+        ] {
+            let raw = format!(
+                r#"{{"{}":{{"provider":"claude","model":"claude-opus-5","reasoningEffort":"max"}}}}"#,
+                job.key()
+            );
+            assert!(is_default(&from_json(&raw, job), job));
+            let list = format!(
+                r#"{{"{}":[{{"provider":"claude","model":"claude-opus-5","reasoningEffort":"max"}}]}}"#,
+                job.key()
+            );
+            assert!(from_json(&list, job).is_empty());
+        }
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn the_studio_defaults_name_one_model_per_agent_that_takes_one() {
         for job in [Job::StudioResearch, Job::StudioScene] {
             let chain = default_chain(job);

@@ -18,11 +18,12 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Paths no agent may write; opencode's ruleset; agy's rules | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/rules.rs` |
 | Finding, installing, updating and signing in the CLIs | `app/src-tauri/src/harness/cli/discover/`, `app/src-tauri/src/harness/cli/install/`, `app/src-tauri/src/harness/cli/update/`, `app/src-tauri/src/harness/cli/signin/` |
 | …their frontend | `app/src/hooks/agents/useBridgeHealth.ts`, `app/src/hooks/agents/useSignInStatus.ts`, `app/src/components/settings/agents/InstallAgentDialog.tsx`, `app/src/components/settings/agents/UpdateAgents.tsx`, `app/src/components/harness/SignInDialog.tsx`, `app/src/pages/settings/integrations/AgentsPage.tsx` |
+| Hidden native processes, Windows job ownership and npm shim resolution | `app/src-tauri/src/runtime/platform/` |
 | Process pipes, JSON lines and terminal turn failures shared by the bridges | `app/src-tauri/src/harness/child.rs` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store/` |
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents/mod.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
-| Provider table (`PROVIDERS`), types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/` |
+| Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
 | Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
@@ -38,6 +39,12 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
 | Library paths in rows and prose; copy as markdown | `app/src/lib/files/openFile.ts`, `app/src/lib/markdown/selection.ts` |
 | The lecture dock's chat | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx`, `lecture_grab_frames` in `app/src-tauri/src/lectures/chapters/app.rs` |
+
+Windows offers Codex and opencode; native Claude Code is disabled because its
+Windows sandbox is unsupported. Settings shows “Needs WSL2 (coming soon)” for
+Claude and model pickers omit it. `availability.ts` owns the frontend platform
+capabilities. Antigravity has no in-app Windows install or update route; its
+Settings row directs installation and updates to a terminal.
 
 ## Four dialects become one event stream
 
@@ -184,6 +191,8 @@ matcher is a word prefix), `sqlite3 <library>/oculus.db` denied per path
 spelling (not `command(sqlite3)`, which bans it everywhere), and the student's
 approvals. The entries are global — they apply in the student's own `agy` —
 and `antigravity-rules.json` at the library root records which are Oculus's.
+Generated file rules and suggested folder grants use `/` separators on every
+platform; a suggested grant requires a fully absolute native path.
 
 **A refusal ends the turn as `completed`** (an `ERROR` step reading
 `permission check failed…`, then a `SUCCESS` result with `denied_actions`).
@@ -205,7 +214,7 @@ system prompt, so the brief is the `oculus` agent's prompt in
 
 **Skills are one directory, found three ways.** Claude scans
 `<cwd>/.claude/skills`, Codex `<cwd>/.agents/skills` — each a relative link to
-`agents/skills/` — and opencode's `skills.paths` names it. Nothing goes in
+`agents/skills/` on Unix; Windows uses managed copies — and opencode's `skills.paths` names it. Nothing goes in
 `$CODEX_HOME/skills`, which every project shares. The set stays small: every
 CLI puts the skill index in every turn, headless jobs included.
 
@@ -217,18 +226,31 @@ index line costs a turn. Every write rewrites each file and deletes anything els
 in the skill's folder: the folders are app-owned and agents may not write
 them, so a stray file could only be a stale instruction.
 
+Windows children start suspended, enter a Job Object with kill-on-close, then
+resume. Stopping a turn or closing the app terminates descendants too; the Unix
+startup stray sweep is disabled on Windows. Native commands use one helper to
+suppress console windows.
+
 ## Finding, installing, updating and signing in the CLIs
 
 A Dock-launched app has launchd's PATH, so `cli/discover/` tries
 `OCULUS_{CLAUDE,CODEX,OPENCODE,ANTIGRAVITY}_BIN`, PATH, `well_known_dirs`, then
-a login shell. Provider and installer-tool discovery share that executable lookup order.
+a login shell on Unix. Windows adds `%APPDATA%/npm`, `%LOCALAPPDATA%/Programs`
+and the Node installation directory, searches PATHEXT with `.exe` first, and
+skips the login shell. Provider and installer-tool discovery share that executable lookup order.
+Supported npm `.cmd`/`.bat` shims are resolved from the package manifest and run
+with `node`, so agent prompts and settings never pass through batch quoting.
 Answers and the `--version` health probe are cached, failures
 included (every picker asks); `harness_health`'s `recheck` drops both.
 
 **Install** runs a literal vendor command (shown with Copy) only for routes
 that land in `well_known_dirs`; no `sudo`, stdin on `/dev/null` so a question
 fails instead of hanging, and the webview names a provider, never a command
-string. macOS only.
+string. Windows offers npm for Codex and npm/bun for opencode and runs the
+package managers directly; self-update commands use noninteractive PowerShell.
+Unix uses a login shell. Settings reads install offers before showing Install;
+a null offer or an empty route list exposes no action. The opened dialog keeps
+its offer while an installation finishes and health is rechecked.
 
 **Update.** Settings → Agents checks each installed CLI against its newest
 published version on every visit (`harness_updates`). The binary's
@@ -264,10 +286,32 @@ are in the table under [Four dialects](#four-dialects-become-one-event-stream).
 **Sign-in.** `signin::is_auth_failure` (via `HarnessEvent::error_for`) matches
 whole clauses only — a false positive sends a student to re-authenticate over
 an unrelated error — and marks the error row's `meta` for a sign-in card.
-`ProviderInfo.signIn` is `"code"` (`claude auth login` blocks on a pasted
-code), `"callback"` (`codex login` finishes on its own listener) or `null`
-(opencode signs in [per provider](#opencode-providers-go-through-its-own-server);
-`agy` only in a terminal). No deadline is imposed on a sign-in.
+`ProviderInfo.signIn` is `"code"` (`claude auth login` and `agy` block on a
+pasted code), `"callback"` (`codex login` finishes on its own listener) or
+`null` (opencode signs in [per provider](#opencode-providers-go-through-its-own-server)).
+No deadline is imposed on a sign-in.
+
+`agy` has no login subcommand and refuses a pipe, so `signin/agy/` runs bare
+`agy` on a pseudo-terminal (`signin/pty.rs`: `openpty`, a 1000-column window
+so the URL never wraps, `login_tty` for a session of its own). Its TUI's
+redraws are cut into lines at cursor moves and each distinct line is sent
+once per round. Enter answers the login-method menu (Google OAuth); `agy`
+opens the authorize URL itself, so Rust does not open it again, and the URL
+is read from its OSC 8 hyperlink. Google redirects to
+`antigravity.google/oauth-callback`, a page that shows the code — there is no
+loopback listener to finish on — and the pasted code is typed into the TUI.
+A refused code shows `agy`'s sentence as the dialog's notice; Enter on
+"Press any key to go back" and again on the menu starts a new round with a
+new URL, so one run takes as many codes as the student pastes. An error
+before any code ends the run instead of looping. Signed in, `agy` moves on
+to a chat rather than exiting, so once a code is in and either its success
+line shows or the screen has been still for 1.5 s, `agy models` is asked (at
+most every 5 s); a yes — or no answer either way after the success line —
+ends the run and kills `agy`'s process group, never before the check, so
+`agy` has stored the token first. A code typed outside the code box is
+refused, since in the menu or on the error screen the keys mean something
+else. The live check of this route is the ignored test in
+`signin/agy/smoke.rs`, which refuses to run without a scratch `HOME`.
 
 ## The timeline never re-renders per token
 
@@ -478,7 +522,10 @@ compile without one.
 bridge's connection into opencode's own store (shared with the student's
 terminal). A method spec is data rendered by one dialog; providers declaring
 nothing take an API key. Opening the opencode page starts it; Settings opens
-on another page, so opening Settings alone does not. The page is two tables,
+on another page, so opening Settings alone does not, and nor does Settings →
+Jobs (see [Per-job models](#per-job-models)). The one other start is
+onboarding's opencode card, on its *Connect OpenRouter* click
+([onboarding.md](./onboarding.md#the-agent-step-lists-every-agent-as-an-equal)). The page is two tables,
 Providers and Models, the second one row per model with opencode's own price,
 limits and capabilities (`ModelFacts`, a free catalogue read; a missing figure
 draws "—", never $0).
@@ -520,6 +567,12 @@ provider-verified model (Meta's Muse Spark) fails once in the timeline.
 
 ## Per-job models
 
+Windows starts new chats with Codex. Job defaults use `gpt-5.6-luna`: lecture
+chapters takes `xhigh`, and the other jobs take `medium`, except the two Studio
+jobs, which keep their Codex entry and drop Claude's. A stored Claude job
+selection resolves to its Windows default in memory without rewriting the
+stored setting; supported provider selections keep their saved model and level.
+
 Chaptering, the lecture end, thread naming and document suggestions each
 name an ordered list of models (agent, model and level) in a Settings → Jobs
 row using `ModelPicker`. The first runs; when its run fails for any reason —
@@ -557,6 +610,14 @@ is set in the same menu.
 - **Notices and flags badge Settings** (a dot on the rail item and the Jobs
   row, `useJobAttention`) and print on the job's row until dismissed or the
   job's list is edited.
+
+Neither the Jobs pickers nor the audit starts opencode: both call
+`useProviderModels(…, { start: false })`, which asks it through `peekModels`,
+reading only a server already up (`harness_opencode_models_if_running`). Found
+down, it answers an empty list (so the audit removes nothing) and the picker's
+opencode tab links to Settings → opencode, whose opening starts it. It is asked
+again when `harnessOpencodeModels` next answers (`OPENCODE_RUNNING_EVENT`) —
+the composer or the opencode page starting it.
 
 **The two Studio jobs hold a model per agent, not fallbacks.** "Studio
 research" (`studioResearch`) and "Studio scenes" (`studioScene`) are the
@@ -744,7 +805,7 @@ of the first message.
 - Never pass `agy` `--dangerously-skip-permissions` — its file tools then write outside the library.
 - Never put an `Edit` deny on `oculus.db*` in Claude's settings — it cancels the write grant and every board write fails readonly.
 - Never grant the library folder instead of the three database files — it exposes keyd's vault.
-- Never let Settings make a billed call, or start opencode anywhere but its own page — see [No model is ever probed](#no-model-is-ever-probed).
+- Never let Settings make a billed call, or start opencode anywhere but its own page or the onboarding opencode card's Connect button — see [No model is ever probed](#no-model-is-ever-probed).
 - Read opencode models from `/config/providers`, never `/api/model` — the latter lists the instance's providers, not the signed-in ones.
 - Every opencode call carries `?directory=<agents>` except `/auth/{id}` — unscoped, it binds to the server's launch cwd and another instance.
 - Never drive opencode's v2 API (`/api/*`) — on 1.18.31 a prompt on an `auth.json` provider fails with no event.

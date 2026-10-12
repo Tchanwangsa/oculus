@@ -1,15 +1,13 @@
 //! A course's finished recordings, from the Echo360 syllabus API.
 
 use super::media::download_url;
-use super::{Lecture, Session, TRIM_SECS};
+use super::{Lecture, Session};
 
 /// Every past lesson with a finished recording — one still processing has a
 /// media id but its download 404s.
-pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
-    let url = format!(
-        "https://echo360.net.au/section/{}/syllabus",
-        session.section_id
-    );
+/// Durations are less `lead_in`, the seconds the download is trimmed by.
+pub fn syllabus(session: &Session, lead_in: u32) -> Result<Vec<Lecture>, String> {
+    let url = format!("{}/section/{}/syllabus", session.base, session.section_id);
     let raw = ureq::get(&url)
         .set("Cookie", &session.cookie_header())
         .call()
@@ -61,7 +59,7 @@ pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
             title: inner["name"].as_str().unwrap_or("").to_string(),
             date: inner["timing"]["start"].as_str().unwrap_or("").to_string(),
             // Post-trim, to match the file on disk.
-            duration_seconds: (raw_dur - TRIM_SECS as i64).max(0),
+            duration_seconds: (raw_dur - lead_in as i64).max(0),
             has_second_source,
         });
     }

@@ -10,7 +10,8 @@ const MIN_VIDEO_BYTES: u64 = 1_000_000;
 
 pub fn transcript(session: &Session, lesson_id: &str, media_id: &str) -> Result<String, String> {
     let url = format!(
-        "https://echo360.net.au/api/ui/echoplayer/lessons/{lesson_id}/medias/{media_id}/transcript-file?format=vtt"
+        "{}/api/ui/echoplayer/lessons/{lesson_id}/medias/{media_id}/transcript-file?format=vtt",
+        session.base
     );
     let mut vtt = String::new();
     ureq::get(&url)
@@ -34,7 +35,8 @@ pub fn download_url(
     source: SourceNum,
 ) -> Result<String, String> {
     let url = format!(
-        "https://echo360.net.au/media/download/{media_id}/hd{source}.mp4?lessonId={lesson_id}"
+        "{}/media/download/{media_id}/hd{source}.mp4?lessonId={lesson_id}",
+        session.base
     );
     let agent = ureq::AgentBuilder::new().redirects(0).build();
     match agent
@@ -92,8 +94,7 @@ pub fn stream_to_file(
                 file.write_all(&buf[..n])
                     .map_err(|e| format!("Write error after {done} bytes: {e}"))?;
                 done += n as u64;
-                if total > 0 {
-                    let pct = (done * 100 / total) as u8;
+                if let Some(pct) = (done * 100).checked_div(total).map(|p| p as u8) {
                     if pct != last_pct {
                         last_pct = pct;
                         on_progress(pct);

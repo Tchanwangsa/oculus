@@ -88,8 +88,12 @@ impl SessionStore for Sessions {
 
 fn env<'a>(dir: &Scratch, origin: &str, store: &'a Store, sessions: &'a Sessions) -> Env<'a> {
     let port = origin.rsplit(':').next().unwrap();
-    let mut env = Env::new(&dir.0, &format!("http://127.0.0.1:{port}"), store, sessions);
-    env.sso_base = format!("http://localhost:{port}");
+    let site = crate::site::Site {
+        canvas: format!("http://127.0.0.1:{port}"),
+        sso: Some(format!("http://localhost:{port}")),
+        ..crate::site::Site::unimelb()
+    };
+    let mut env = Env::new(&dir.0, &site, store, sessions).unwrap();
     env.now = Arc::new(at_t0);
     env
 }
@@ -333,6 +337,30 @@ fn credentials_are_trimmed_and_validated_before_they_are_saved() {
     assert_eq!(refusal("u", "", SEED), "Password is required.");
     assert!(refusal("u", "pw", " ").starts_with("That does not look like a TOTP setup key:"));
     assert!(refusal("u", "pw", "GEZD1").starts_with("That does not look like a TOTP setup key:"));
+}
+
+#[test]
+fn a_pasted_otpauth_link_is_saved_as_its_bare_secret() {
+    let link =
+        format!("otpauth://totp/UniMelb:me%40student.unimelb.edu.au?secret={SEED}&issuer=UniMelb");
+    assert_eq!(
+        validate_credentials("u", "pw", &link).unwrap().totp_secret,
+        SEED
+    );
+    assert!(
+        validate_credentials("u", "pw", "otpauth://totp/UniMelb?issuer=UniMelb")
+            .err()
+            .unwrap()
+            .starts_with("That does not look like a TOTP setup key:")
+    );
+    assert!(
+        validate_credentials("u", "pw", "otpauth-migration://offline?data=CjEK")
+            .err()
+            .unwrap()
+            .contains("Google Authenticator export link")
+    );
+    // `oculus auth setup` prints the code from the key as pasted.
+    assert_eq!(totp_now(&link).unwrap(), totp_now(SEED).unwrap());
 }
 
 #[test]

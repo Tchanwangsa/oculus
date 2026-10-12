@@ -16,7 +16,7 @@ default-run = "app"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -47,6 +47,9 @@ ureq = { version = "2", features = ["cookies"] }
 # The rustls and roots ureq already uses, for `parse::mineru::result_tls`.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "0.26"
+# The Ed workspace socket (`sources/ed/live.rs`), over the rustls above: no
+# TLS feature of its own.
+tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 # Retrieval reads embedding BLOBs directly. Same sqlx version tauri-plugin-sql
 # pulls in, so cargo unifies on one libsqlite3-sys rather than linking two
@@ -56,11 +59,12 @@ base64 = "0.22"
 half = "2"
 # LLM provider API keys live in the macOS keychain, never in SQLite — the
 # platform store is an opt-in feature in keyring 3.
-keyring = { version = "3", features = ["apple-native"] }
+keyring = "3"
+rpassword = "7"
 
-# `sync` is the browser's: a WKWebView snapshot answers on a completion
-# block, and the command awaits a oneshot for it (see src/shell/browser/still.rs). `time`
-# is the usage ticker's interval (src/shell/usage/ticker.rs).
+# `sync` is for the oneshots, watches and semaphores commands await (e.g.
+# src/library/pdf_render/render.rs). `time` is the usage ticker's interval
+# (src/shell/usage/ticker.rs).
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 # Local time for the usage table's hour keys.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -73,6 +77,7 @@ libc = "0.2.189"
 # `oculus grep` searches PDF page text, which lives only in the database —
 # ripgrep over the library on disk cannot see it. Already in the lock tree.
 regex = "1"
+ring = "0.17"
 
 # The MinerU cloud client, ported from the Python sidecar (see src/parse/).
 # `zip` reads the result archive, and `imagesize` replaces PIL's one use:
@@ -91,7 +96,8 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 calamine = "0.36"
 # Spotify Connect playback (`src/music/`, docs/music.md). librespot's dev
 # branch by rev, not crates.io 0.8.0: Spotify's endpoint changes land there
-# first. Bump the rev by hand; never `cargo update` them.
+# first. Bump the rev by hand; never `cargo update` them. librespot-connect
+# is patched to a vendored copy (`[patch]` below).
 librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
 librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
 librespot-metadata = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
@@ -133,13 +139,16 @@ sha2 = "0.10"
 unicode-normalization = "0.1.25"
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
-# `seed_sessions` in src/shell/browser/seed.rs) — Tauri exposes no cookie setter, so
-# that goes through WKHTTPCookieStore directly. These are the same crates wry
+# `seed_sessions` in src/shell/browser/seed.rs). WebKit cookie ordering uses
+# WKHTTPCookieStore directly; Windows uses Tauri cookie APIs. These are the same crates wry
 # already builds on.
 [target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSHTTPCookie", "NSString", "NSURL", "NSUUID"] }
+# `NSBundle`, `NSProcessInfo` and `NSData` name WebKit's application and hand
+# it the WebCrypto master key (`src/shell/webcrypto/`).
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSData", "NSDictionary", "NSHTTPCookie", "NSProcessInfo", "NSString", "NSURL", "NSUUID"] }
 # A local key-down monitor gives a focused browser page ⌘-keys before the
 # menu, and Undo/Redo/Select All reach it as AppKit actions (see `src/shell/keys.rs`).
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSResponder", "NSWindow"] }
@@ -155,3 +164,31 @@ objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "W
 [dev-dependencies]
 # Writes the synthetic PDFs the tests parse and rasterise.
 lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+dunce = "1"
+junction = "1"
+webview2-com = "0.38.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# Enables explicitly registered in-process fake brokers in Windows release tests.
+keyd_core = { package = "oculus-keyd-core", path = "../keyd/core", features = ["test-support"] }
+
+# The manifest profile applies to the app and CLI from every working directory.
+[profile.dev]
+# Limited debug info (no variables) is enough for backtraces and links faster.
+debug = 1
+
+[profile.dev.package."*"]
+# Dependencies optimised once and cached; our own crate stays unoptimised so
+# incremental rebuilds stay quick.
+opt-level = 3
+debug = false
+
+# librespot-connect with Spirc::skip_to and Spirc::remove_next, which act on
+# the Spirc's own queue (`vendor/librespot-connect`, docs/music-library.md).
+# Bump it with the other librespot crates' rev.
+[patch."https://github.com/librespot-org/librespot"]
+librespot-connect = { path = "vendor/librespot-connect" }

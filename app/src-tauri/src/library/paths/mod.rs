@@ -25,9 +25,6 @@ use std::path::PathBuf;
 /// `identifier` in tauri.conf.json; a test holds them together.
 pub use keyd_core::paths::IDENTIFIER;
 
-/// Defined in `keyd_core`, because keyd's sign-in lands on it too.
-pub use keyd_core::paths::CANVAS_BASE;
-
 /// Tauri's `app.path().app_data_dir()`, reachable without an `AppHandle`; the
 /// one way every module and the CLI find the data directory. Defined in
 /// `keyd_core`, so `oculus-keyd` agrees.
@@ -41,4 +38,9 @@ pub use keyd_core::clock::iso8601_utc;
 /// `oculus-keyd`'s endpoint (`auth/keyd/`).
 pub fn keyd_socket_path(data_dir: &std::path::Path) -> PathBuf {
     keyd_core::paths::socket(data_dir)
+}
+
+/// Relative paths in database rows and IPC always use forward slashes.
+pub fn slash_path(path: impl AsRef<std::path::Path>) -> String {
+    path.as_ref().to_string_lossy().replace('\\', "/")
 }

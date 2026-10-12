@@ -1,3 +1,4 @@
+import { isWindows } from "@/lib/platform";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { DotsSixVertical } from "@phosphor-icons/react";
@@ -73,6 +74,7 @@ export function TranscriptionSection() {
   const writes = useRef<Promise<unknown>>(Promise.resolve());
 
   const listModels = useCallback(() => {
+    if (isWindows) return;
     whisperModels()
       .then(setCatalogue)
       .catch((cause) => {
@@ -92,7 +94,7 @@ export function TranscriptionSection() {
         console.error("Groq key check failed", cause);
         if (!cancelled) setNote(String(cause));
       });
-    appleSpeechStatus()
+    if (!isWindows) appleSpeechStatus()
       .then((status) => {
         if (!cancelled) setSpeech(status);
       })
@@ -127,7 +129,7 @@ export function TranscriptionSection() {
       });
   };
 
-  const order = settings?.order ?? [...DEFAULT_ENGINE_ORDER];
+  const order = isWindows ? ["groq" as const] : settings?.order ?? [...DEFAULT_ENGINE_ORDER];
   const language = settings?.language ?? null;
   const defaultLocale = speech?.available ? speech.defaultLocale : null;
 
@@ -139,13 +141,13 @@ export function TranscriptionSection() {
     whisper: whisperStatus(catalogue, settings?.whisper ?? null, downloads.downloads),
     apple: speechStatus(speech, language),
   };
-  const settled = settings !== null && connected !== null && speech !== undefined && catalogue !== null;
+  const settled = settings !== null && connected !== null && (isWindows || (speech !== undefined && catalogue !== null));
   const anyReady = order.some((e) => settings?.[e].enabled && status[e].ready);
 
   return (
     <Section
       title="Transcription"
-      description="Videos without captions are transcribed on Groq's free tier or on this Mac."
+      description={isWindows ? "Videos without captions are transcribed on Groq’s free tier." : "Videos without captions are transcribed on Groq’s free tier or on this computer."}
     >
       <LanguageRow
         language={language}
@@ -158,8 +160,7 @@ export function TranscriptionSection() {
       <div className="mt-3">
         <p className="text-xs text-foreground">Engines</p>
         <p id="transcribe-engines-hint" className="text-[11px] text-muted-foreground">
-          Tried top to bottom: the next one answers only when the one above isn't set up or hits
-          its limit.
+          {isWindows ? "Add a Groq key to transcribe videos." : "Tried top to bottom: the next one answers only when the one above isn’t set up or hits its limit."}
         </p>
         <EngineList
           order={order}
@@ -187,7 +188,7 @@ export function TranscriptionSection() {
         connected={connected}
         onConnected={setConnected}
       />
-      <LocalWhisperDialog
+      {!isWindows && <LocalWhisperDialog
         open={dialog === "whisper"}
         onOpenChange={(open) => setDialog(open ? "whisper" : null)}
         catalogue={catalogue}
@@ -195,13 +196,13 @@ export function TranscriptionSection() {
         downloads={downloads}
         onChange={(patch) => save({ whisper: patch })}
         onModelsChanged={listModels}
-      />
-      <OnDeviceSpeechDialog
+      />}
+      {!isWindows && <OnDeviceSpeechDialog
         open={dialog === "apple"}
         onOpenChange={(open) => setDialog(open ? "apple" : null)}
         status={speech}
         language={language}
-      />
+      />}
     </Section>
   );
 }
@@ -262,6 +263,7 @@ function EngineList({ order, settings, status, onReorder, onToggle, onOpen }: {
   onToggle: (engine: TranscribeEngine, enabled: boolean) => void;
   onOpen: (engine: TranscribeEngine) => void;
 }) {
+  const reorderable = order.length > 1;
   const [announcement, setAnnouncement] = useState("");
   const handles = useRef(new Map<TranscribeEngine, HTMLButtonElement>());
   // React may move the focused row's node to reorder, which blurs it.
@@ -314,7 +316,7 @@ function EngineList({ order, settings, status, onReorder, onToggle, onOpen }: {
             <li
               key={engine}
               ref={strip.itemRef(engine)}
-              onPointerDown={(e) => strip.onPointerDown(e, engine)}
+              onPointerDown={reorderable ? (e) => strip.onPointerDown(e, engine) : undefined}
               // Swallow the click a drag's release raises, before a button hears it.
               onClickCapture={(e) => {
                 if (strip.didDrag()) e.stopPropagation();
@@ -322,12 +324,13 @@ function EngineList({ order, settings, status, onReorder, onToggle, onOpen }: {
               style={strip.styleFor(engine, i)}
               className={cn(
                 "flex items-center gap-2 bg-card py-2 pr-2.5 pl-1.5 first:rounded-t-lg last:rounded-b-lg",
+                !reorderable && "pl-3",
                 grabbed
                   ? "relative z-10 rounded-lg shadow-md"
                   : strip.drag && "transition-transform duration-200 ease-out",
               )}
             >
-              <button
+              {reorderable && <button
                 ref={(node) => {
                   if (node) handles.current.set(engine, node);
                   else handles.current.delete(engine);
@@ -343,8 +346,8 @@ function EngineList({ order, settings, status, onReorder, onToggle, onOpen }: {
                 )}
               >
                 <DotsSixVertical size={14} weight="bold" />
-              </button>
-              <span className="w-3 shrink-0 text-[11px] text-muted-foreground tabular-nums">{i + 1}</span>
+              </button>}
+              {reorderable && <span className="w-3 shrink-0 text-[11px] text-muted-foreground tabular-nums">{i + 1}</span>}
               <div className={cn("min-w-0 flex-1", !enabled && settings && "opacity-60")}>
                 <p className="text-xs text-foreground">{NAMES[engine]}</p>
                 <p className="truncate text-[11px] text-muted-foreground">{text || "\u00a0"}</p>

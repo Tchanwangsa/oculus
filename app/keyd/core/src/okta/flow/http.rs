@@ -78,13 +78,14 @@ pub(super) fn walk(
 
 /// Start the SAML flow and pull the IDX state token out of the login page.
 pub(super) fn bootstrap(jar: &mut Jar, env: &Env) -> Result<(String, String), LoginError> {
-    let start = format!("{}/login/saml", env.canvas_base);
+    let start = format!("{}{}", env.canvas_base, env.login_path);
     let (landed, body) = walk(jar, &start, 10)?;
 
     let sso_host = env.sso_host();
     if host_of(&landed) != sso_host {
         return Err(LoginError::Unexpected(format!(
-            "SAML start landed on {landed} instead of {sso_host}"
+            "sign-in landed on {landed} instead of {sso_host} — save the Canvas address again \
+             in Settings → Canvas to detect the sign-in page again"
         )));
     }
     let token = extract_state_token(&body).ok_or_else(|| {

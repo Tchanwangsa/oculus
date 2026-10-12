@@ -40,8 +40,8 @@ fn the_render_ceiling_keeps_standard_pages_at_full_dpi_and_above_the_billing_cap
         assert!(width * height <= MAX_RENDER_PIXELS, "{width}x{height}");
     }
     // A clamped page still gives Voyage more pixels than it keeps.
-    assert!(MAX_RENDER_PIXELS > 2 * BILLED_PIXEL_CAP);
-    assert!(MAX_RENDER_PIXELS < MAX_PIXELS_PER_IMAGE);
+    const { assert!(MAX_RENDER_PIXELS > 2 * BILLED_PIXEL_CAP) };
+    const { assert!(MAX_RENDER_PIXELS < MAX_PIXELS_PER_IMAGE) };
 }
 
 #[test]

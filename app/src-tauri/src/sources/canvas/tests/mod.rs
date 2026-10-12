@@ -43,6 +43,8 @@ where
     H: Fn(&Value, &[u8]) -> (Value, Vec<u8>) + Send + 'static,
 {
     let dir = Scratch::new("canvas");
+    let unimelb = crate::sources::institution::unimelb();
+    crate::sources::institution::save(&dir, &unimelb).unwrap();
     let keyd = FakeKeyd::start(&dir, handler);
     Rig {
         canvas: Canvas::open(&dir),

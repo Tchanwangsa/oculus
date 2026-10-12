@@ -15,9 +15,8 @@ use std::sync::Mutex;
 
 use crate::providers::credentials::Credentialed;
 
-pub use crate::library::paths::CANVAS_BASE;
 pub use error::CanvasError;
-pub(crate) use transport::{is_canvas, resolve, Hop};
+pub(crate) use transport::Hop;
 
 /// Bounds a request to a host other than Canvas. Canvas requests are bounded
 /// by oculus-keyd's own read timeout, and nothing above this layer has one.
@@ -67,6 +66,11 @@ impl From<Hop> for Res {
 pub struct Canvas {
     keyd: Credentialed,
     expired: Mutex<Option<CanvasError>>,
+    /// The institution profile this run is for; `None` before a Canvas
+    /// address is set, and then every Canvas request fails with that.
+    institution: Option<crate::sources::institution::Institution>,
+    /// The profile's Canvas origin.
+    base: Option<url::Url>,
 }
 
 /// Outcome of pinging Canvas through the saved session.
@@ -87,12 +91,23 @@ fn display_name(v: &serde_json::Value) -> String {
 }
 
 impl Canvas {
-    /// A client of the oculus-keyd serving `data_dir`.
+    /// A client of the oculus-keyd serving `data_dir`, for the Canvas its
+    /// institution profile names.
     pub fn open(data_dir: &Path) -> Self {
+        let institution = crate::sources::institution::load(data_dir);
         Canvas {
             keyd: Credentialed::at(data_dir),
             expired: Mutex::new(None),
+            base: institution
+                .as_ref()
+                .and_then(|i| url::Url::parse(&i.canvas).ok()),
+            institution,
         }
+    }
+
+    /// The institution profile this client was opened with.
+    pub fn institution(&self) -> Option<&crate::sources::institution::Institution> {
+        self.institution.as_ref()
     }
 
     /// Whether oculus-keyd holds a Canvas session right now. False when it
@@ -100,6 +115,16 @@ impl Canvas {
     /// this is for display, not a gate ([`Canvas::check_keyd`] is one).
     pub fn has_session(&self) -> bool {
         self.keyd.session_status().is_ok_and(|s| s.canvas)
+    }
+
+    /// `https://host` of this Canvas, or the "no Canvas address" error.
+    pub fn base(&self) -> Result<String, CanvasError> {
+        self.base
+            .as_ref()
+            .map(|u| u.origin().ascii_serialization())
+            .ok_or_else(|| {
+                CanvasError::Failed(crate::sources::institution::NOT_CONFIGURED.to_string())
+            })
     }
 
     /// `KeydAbsent` (or another keyd error) when oculus-keyd cannot be asked.
@@ -130,9 +155,9 @@ impl Canvas {
     /// cookie; any other host (a `public_url` is a pre-signed S3 link) is
     /// fetched directly with none.
     pub fn get(&self, url_or_path: &str) -> Result<Res, CanvasError> {
-        let mut url = resolve(url_or_path)?;
+        let mut url = self.resolve(url_or_path)?;
         for followed in 0.. {
-            let hop = if is_canvas(&url) {
+            let hop = if self.is_canvas(&url) {
                 self.hop("GET", &url, &[], b"")?
             } else {
                 transport::direct(&url)?

@@ -17,9 +17,9 @@ if (!built) process.exit(0);
 
 // The signature must hold before it is shipped and after the copy, and the
 // stage must be this build — not whatever was staged before.
-execFileSync("codesign", ["--verify", "--strict", built.helper], { stdio: "inherit" });
+if (process.platform === "darwin") execFileSync("codesign", ["--verify", "--strict", built.helper], { stdio: "inherit" });
 const dest = stageKeyd(built.helper, out);
-execFileSync("codesign", ["--verify", "--strict", dest], { stdio: "inherit" });
-const staged = execFileSync(helperProgram(dest), ["source-hash"], { encoding: "utf8" }).trim();
+if (process.platform === "darwin") execFileSync("codesign", ["--verify", "--strict", dest], { stdio: "inherit" });
+const staged = execFileSync(process.platform === "win32" ? dest : helperProgram(dest), ["source-hash"], { encoding: "utf8" }).trim();
 if (staged !== built.hash) throw new Error(`${dest} reports source ${staged}, expected ${built.hash}`);
 log(`staged ${dest}`);

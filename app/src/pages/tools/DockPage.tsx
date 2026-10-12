@@ -13,10 +13,11 @@ import { useDockViewport } from "./dock/useDockViewport";
 
 /**
  * Messaging: a header of tabs (the Inbox, then one per enabled service) over
- * the Inbox on bare `/dock`, or over an empty slot that Rust places the
- * service's native WKWebView over (`app/src-tauri/src/shell/dock/`). The
- * header also keeps the card's rounded top corners clear, since Rust rounds
- * only a page's bottom corners. Pages outlive this route; leaving a service,
+ * the Inbox on bare `/dock`, or over an empty slot where Rust places the
+ * service's native page (`app/src-tauri/src/shell/dock/`), shown through a
+ * hole the app opens there (`lib/shell/nativeHoles.ts`). The header
+ * also keeps the card's rounded top corners clear, since the hole rounds only
+ * its bottom corners. Pages outlive this route; leaving a service,
  * for the Inbox included, unmounts its slot and parks it.
  */
 export default function DockPage() {

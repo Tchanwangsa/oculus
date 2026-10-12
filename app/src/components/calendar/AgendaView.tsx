@@ -3,6 +3,7 @@ import type { CalEvent } from "@/lib/planning/calendar";
 import { sameDay, startOfDay } from "@/lib/format/format";
 import { EventRow } from "./EventRow";
 import { ListCard } from "@/components/ui/layout/PageParts";
+import { displayLocale } from "@/lib/format/locale";
 
 /** Everything ahead, grouped by day. Past events are left to month and week. */
 export function AgendaView({
@@ -37,7 +38,7 @@ export function AgendaView({
         {days.map(({ day, items }) => (
           <section key={day.toDateString()}>
             <h2 className="mb-2 px-0.5 text-[13px] font-semibold text-foreground">
-              {day.toLocaleDateString("en-AU", {
+              {day.toLocaleDateString(displayLocale, {
                 weekday: "long",
                 day: "numeric",
                 month: "short",

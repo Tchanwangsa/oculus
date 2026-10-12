@@ -302,7 +302,7 @@ fn a_429_with_nothing_readable_in_it_halves_rather_than_guessing() {
 fn a_calm_stretch_raises_the_ceiling_back_so_a_new_card_is_noticed() {
     let dir = scratch("raise");
     let ledger = ledger_at(&dir);
-    let gate = RateGate::with_calm(ledger.clone(), Duration::from_millis(40));
+    let gate = RateGate::with_calm(ledger.clone(), Duration::from_secs(3600));
     gate.throttled(Some(1.0), "rate limit of 3 RPM and 10000 TPM");
     assert_eq!(gate.tier().tpm, FREE_TPM);
 
@@ -310,7 +310,7 @@ fn a_calm_stretch_raises_the_ceiling_back_so_a_new_card_is_noticed() {
     gate.succeeded(100, Some(100));
     assert_eq!(gate.tier().tpm, FREE_TPM);
 
-    std::thread::sleep(Duration::from_millis(60));
+    gate.elapse_calm();
     gate.succeeded(100, Some(100));
     assert_eq!(gate.tier().tpm, FREE_TPM * 2.0);
     assert_eq!(gate.tier().source, TierSource::Observed);
@@ -319,7 +319,7 @@ fn a_calm_stretch_raises_the_ceiling_back_so_a_new_card_is_noticed() {
 
     // Climbs to tier 1 if the calm holds, never past it.
     for _ in 0..20 {
-        std::thread::sleep(Duration::from_millis(60));
+        gate.elapse_calm();
         gate.succeeded(100, None);
     }
     assert_eq!(gate.tier().tpm, TIER1_TPM);

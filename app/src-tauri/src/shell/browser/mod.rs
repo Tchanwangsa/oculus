@@ -1,31 +1,34 @@
 //! The in-app browser: one native WebView per tab, parked inside the main
 //! window's content card, so Canvas/Ed/Echo360 links open signed in.
 //!
-//! - **Real WKWebViews, not iframes** — sites send `X-Frame-Options`.
+//! - **Native webviews, not iframes** — sites send `X-Frame-Options`.
 //!   `Window::add_child` needs tauri's `unstable` feature.
 //! - **Rust owns the tab list**; every change goes out whole as
 //!   `browser-state`. The route for a tab is `/browse/<id>`, never the page URL.
 //! - **The frontend reports each page's slot as insets** (`Viewport`), so a
-//!   window resize is laid out here with no JavaScript in the loop. It asks for
-//!   a page to be hidden when it must draw over it.
-//! - Back/forward, find and snapshots go through the WKWebView directly;
+//!   window resize is laid out here with no JavaScript in the loop.
+//! - **A page shows only through a hole the app opens over its slot**, so
+//!   popovers draw over a live page (`shell/native_layer`).
+//! - Back/forward and find go through the WKWebView directly;
 //!   `with_webview` returns nothing, so answers are pushed as events.
 //!
-//! `canvas_session` is HttpOnly and session-scoped, so WebKit loses it on quit;
-//! `seed_sessions` restores it and Okta's session from oculus-keyd before any
-//! `*.unimelb.edu.au` load, and each signed-in Canvas page hands both back
-//! (see `docs/auth.md`).
+//! `canvas_session` is HttpOnly and session-scoped, so the browser loses it
+//! on quit; `seed_sessions` restores it and the SSO session from oculus-keyd
+//! before any load on the university's hosts, and each signed-in Canvas page
+//! hands both back (see `docs/auth.md`).
 
 pub(crate) mod commands;
 mod favicon;
 mod layout;
 mod page;
+pub(crate) mod scope;
 mod seed;
-mod still;
 #[cfg(test)]
 mod tests;
+#[cfg(any(target_os = "windows", test))]
+mod windows;
 
-pub(crate) use layout::{content_size, rect, round_corners};
+pub(crate) use layout::{content_size, rect};
 pub use layout::{init, open_tab};
 pub use seed::{clear_sessions, seed_sessions};
 
@@ -41,12 +44,12 @@ pub const MAIN: &str = "main";
 /// remote content and must reach no Tauri command.
 pub const LABEL_PREFIX: &str = "browse-";
 
-pub const CANVAS_HOST: &str = "canvas.lms.unimelb.edu.au";
-
 /// WKWebView's default UA has no `Version/… Safari/…` suffix, and UA-sniffing
 /// sites (google.com) serve their no-JavaScript fallback to it. Keep the
 /// version roughly current. Deliberately separate from `auth/okta/`'s string.
-/// The messaging dock (`shell/dock/`) sends it too.
+/// The messaging dock (`shell/dock/`) sends it too. WebView2 keeps its own
+/// Edge UA.
+#[cfg(not(target_os = "windows"))]
 pub(crate) const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15";
 
 fn label(id: u32) -> String {
@@ -86,15 +89,13 @@ pub struct Snapshot {
     pub tabs: Vec<Tab>,
 }
 
-/// Insets from the window's content edges in logical points, plus the
-/// bottom-corner radius of the card the page sits in.
+/// Insets from the window's content edges in logical points.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct Viewport {
     pub left: f64,
     pub top: f64,
     pub right: f64,
     pub bottom: f64,
-    pub radius: f64,
 }
 
 #[derive(Default)]

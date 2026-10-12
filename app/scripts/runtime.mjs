@@ -19,7 +19,8 @@ export const cliBuildArgs = (profile = "release") => [
 export function buildCli(profile = "release") {
   const binary = cliPath(profile);
   rmSync(binary, { force: true });
-  execFileSync("cargo", cliBuildArgs(profile), { stdio: "inherit" });
+  // Read the same Cargo config (including sccache) as Tauri's app build.
+  execFileSync("cargo", cliBuildArgs(profile), { cwd: rust, stdio: "inherit" });
   if (!existsSync(binary)) throw new Error(`cargo reported success but ${binary} is not there`);
   return binary;
 }
@@ -51,7 +52,9 @@ export const keydHelperApp = "Oculus Helper.app";
  * (`keyd_core::paths::helper_program`). The release bundle copies the staged
  * helper to `Contents/Helpers/` (`bundle.macOS.files` in tauri.macos.conf.json).
  */
-export const helperProgram = (helper) => join(helper, "Contents", "MacOS", `Oculus Helper${exe}`);
+export const helperProgram = (helper) => process.platform === "win32"
+  ? join(helper, "oculus-keyd.exe")
+  : join(helper, "Contents", "MacOS", "Oculus Helper");
 
 /**
  * Copy a signed helper app to `dir` (`binaries/` unless a script is pointed
@@ -59,6 +62,12 @@ export const helperProgram = (helper) => join(helper, "Contents", "MacOS", `Ocul
  * place leaves the kernel's cached signature stale.
  */
 export function stageKeyd(helper, dir = binaries) {
+  if (process.platform === "win32") {
+    const dest = join(dir, `oculus-keyd-${hostTriple()}.exe`);
+    mkdirSync(dir, { recursive: true });
+    copyFileSync(helperProgram(helper), dest);
+    return dest;
+  }
   const dest = join(dir, keydHelperApp);
   const partial = join(dir, `.${keydHelperApp}.${process.pid}.part`);
   mkdirSync(dir, { recursive: true });

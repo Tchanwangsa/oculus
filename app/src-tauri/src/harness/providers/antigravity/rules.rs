@@ -76,9 +76,8 @@ pub(super) struct State {
 }
 
 pub fn settings_path() -> Result<PathBuf, String> {
-    let home =
-        std::env::var_os("HOME").ok_or("HOME is not set, so agy's settings cannot be found")?;
-    Ok(PathBuf::from(home).join(".gemini/antigravity-cli/settings.json"))
+    let home = dirs::home_dir().ok_or("the home directory cannot be found for agy settings")?;
+    Ok(home.join(".gemini/antigravity-cli/settings.json"))
 }
 
 /// The record of Oculus's own entries, at the library root — outside every
@@ -99,8 +98,11 @@ impl OculusCli {
     pub fn discover() -> Option<OculusCli> {
         let found = crate::harness::cli::discover::oculus_cli()?;
         let bin = found.canonicalize().unwrap_or(found);
-        let launcher = std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join(".local/bin/oculus"))
+        let launcher = dirs::home_dir()
+            .map(|h| {
+                h.join(".local/bin")
+                    .join(format!("oculus{}", std::env::consts::EXE_SUFFIX))
+            })
             .filter(|p| std::fs::symlink_metadata(p).is_ok());
         Some(OculusCli { bin, launcher })
     }
@@ -118,26 +120,35 @@ pub fn rules_for(
     approved: &[String],
     tts_host: Option<&str>,
 ) -> Rules {
-    let at = |rel: &str| library.join(rel).display().to_string();
+    let at = |rel: &str| crate::library::paths::slash_path(library.join(rel));
     let mut allow: Vec<String> = crate::library::paths::db_write_paths(library)
         .into_iter()
         .chain(crate::library::paths::agent_write_dirs(library))
-        .map(|p| format!("write_file({})", p.display()))
+        .map(|p| format!("write_file({})", crate::library::paths::slash_path(p)))
         .collect();
     if let Some(host) = tts_host {
         allow.push(format!("read_url({host})"));
     }
     if let Some(cli) = oculus {
         if let Some(dir) = cli.bin.parent() {
-            allow.push(format!("read_file({})", dir.display()));
+            allow.push(format!(
+                "read_file({})",
+                crate::library::paths::slash_path(dir)
+            ));
         }
         if let Some(dir) = cli.launcher.as_deref().and_then(Path::parent) {
-            allow.push(format!("read_file({})", dir.display()));
+            allow.push(format!(
+                "read_file({})",
+                crate::library::paths::slash_path(dir)
+            ));
         }
         allow.push("command(oculus)".into());
-        allow.push(format!("command({})", cli.bin.display()));
+        allow.push(format!(
+            "command({})",
+            crate::library::paths::slash_path(&cli.bin)
+        ));
         if let Some(l) = &cli.launcher {
-            allow.push(format!("command({})", l.display()));
+            allow.push(format!("command({})", crate::library::paths::slash_path(l)));
         }
     }
     allow.extend(READ_ONLY_COMMANDS.iter().map(|c| format!("command({c})")));
@@ -153,9 +164,12 @@ pub fn rules_for(
     deny.extend(
         named_root_files(library)
             .iter()
-            .map(|p| format!("write_file({})", p.display())),
+            .map(|p| format!("write_file({})", crate::library::paths::slash_path(p))),
     );
-    deny.push(format!("write_file({})", state_path(library).display()));
+    deny.push(format!(
+        "write_file({})",
+        crate::library::paths::slash_path(state_path(library))
+    ));
     // `sqlite3` on *this* database only: the rules are global, and a blanket
     // deny would ban it from the student's own sessions. A speed bump in front
     // of the CLI, not a wall (a `cd` and a relative path pass). agy ignores
@@ -174,13 +188,13 @@ pub fn rules_for(
 /// path with a space also double-quoted, single-quoted and escaped.
 fn sqlite_paths(library: &Path) -> Vec<String> {
     let db = crate::library::paths::db_path(library);
-    let mut plain = vec![db.display().to_string()];
+    let mut plain = vec![crate::library::paths::slash_path(&db)];
     if let Ok(real) = db.canonicalize().or_else(|_| {
         library
             .canonicalize()
             .map(|l| crate::library::paths::db_path(&l))
     }) {
-        plain.push(real.display().to_string());
+        plain.push(crate::library::paths::slash_path(real));
     }
     let mut out = Vec::new();
     for p in dedupe(plain) {

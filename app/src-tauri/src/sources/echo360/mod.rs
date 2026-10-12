@@ -2,8 +2,9 @@
 //! POSTing Canvas's OAuth-signed tool form to Echo360 mints the session and the
 //! CloudFront cookies the media CDN accepts. Echo360's own cookies live in this
 //! process only; the Canvas page that carries the form comes through
-//! oculus-keyd, which holds the Canvas session. Videos embedded in Canvas
-//! pages launch per link instead (`embed/`).
+//! oculus-keyd, which holds the Canvas session. The launch lands on the
+//! university's Echo360 region, which every later call uses. Videos embedded
+//! in Canvas pages launch per link instead (`embed/`).
 
 mod auth;
 pub mod embed;
@@ -15,17 +16,20 @@ mod syllabus;
 mod tests;
 
 pub use auth::connect;
-pub use ffmpeg::{find_ffmpeg, trim_video};
+pub use ffmpeg::{find_ffmpeg, lead_in_secs, trim_video};
 pub use media::{
     cleanup_partial_downloads, download_url, lecture_dir, partial_path, source_path,
     stream_to_file, transcript,
 };
 pub use syllabus::syllabus;
 
-/// Echo360 pads every recording with a fixed lead-in before the lecture starts.
-pub const TRIM_SECS: f64 = 14.0;
+/// `connect`'s answer for a course with no Echo360 tool — no lectures, not a
+/// failure.
+pub const NO_TOOL: &str = "this course has no Echo360 tool";
 
 pub struct Session {
+    /// `https://host` of the Echo360 region the launch landed on.
+    pub base: String,
     pub jwt: String,
     play_session: String,
     cf_key_pair_id: String,
@@ -51,6 +55,7 @@ impl Session {
 
     pub fn clone_fields(&self) -> Session {
         Session {
+            base: self.base.clone(),
             jwt: self.jwt.clone(),
             play_session: self.play_session.clone(),
             cf_key_pair_id: self.cf_key_pair_id.clone(),

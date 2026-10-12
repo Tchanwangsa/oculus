@@ -71,6 +71,7 @@ export const routes: RouteObject[] = [
           { path: "announcements", lazy: page(() => import("@/pages/subject/content/AnnouncementsPage")) },
           { path: "assignments", lazy: page(() => import("@/pages/subject/content/AssignmentsPage")) },
           { path: "discussion", lazy: page(() => import("@/pages/subject/content/DiscussionPage")) },
+          { path: "lessons", lazy: page(() => import("@/pages/subject/content/LessonsPage")) },
           { path: "projects", lazy: page(() => import("@/pages/work/ProjectsPage")) },
           // Legacy paths that restored tabs and Recent entries may carry.
           { path: "downloads", element: <Navigate to="../files/downloads" replace /> },
@@ -94,9 +95,9 @@ export const routes: RouteObject[] = [
       // Spotify's full player, opened beside the page from the rail (docs/music.md).
       { path: "music", lazy: page(() => import("@/pages/tools/MusicPage")) },
       { path: "sync", lazy: page(() => import("@/pages/tools/SyncPage")) },
-      // The id names a native WebView Rust parks over this content area.
+      // The id names a native WebView Rust places under this content area.
       { path: "browse/:id", lazy: page(() => import("@/pages/tools/BrowserPage")) },
-      // Messaging: one service's native WebView, placed over this content
+      // Messaging: one service's native WebView, placed under this content
       // area. Bare `/dock` opens the last service shown.
       { path: "dock", lazy: page(() => import("@/pages/tools/DockPage")) },
       { path: "dock/:service", lazy: page(() => import("@/pages/tools/DockPage")) },

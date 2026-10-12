@@ -22,7 +22,7 @@ pub async fn refile_task(
     project_id: Option<i64>,
 ) -> Result<u64, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let existing = task_on(&mut *tx, id)
+    let existing = task_on(&mut tx, id)
         .await?
         .ok_or_else(|| format!("task {id} does not exist"))?;
 
@@ -38,7 +38,7 @@ pub async fn refile_task(
 
     let source = match existing.project_id {
         Some(pid) => Some(
-            project_on(&mut *tx, pid)
+            project_on(&mut tx, pid)
                 .await?
                 .ok_or_else(|| format!("project {pid} does not exist"))?,
         ),
@@ -46,7 +46,7 @@ pub async fn refile_task(
     };
     let target = match project_id {
         Some(pid) => Some(
-            project_on(&mut *tx, pid)
+            project_on(&mut tx, pid)
                 .await?
                 .ok_or_else(|| format!("project {pid} does not exist"))?,
         ),
@@ -117,8 +117,8 @@ pub async fn refile_task(
         .map_err(|e| e.to_string())?;
     }
 
-    touch_project(&mut *tx, existing.project_id).await?;
-    touch_project(&mut *tx, project_id).await?;
+    touch_project(&mut tx, existing.project_id).await?;
+    touch_project(&mut tx, project_id).await?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(moving.len() as u64)
 }

@@ -31,7 +31,16 @@ library files; the rest of the frontend has its own pages:
 | Parse state, pipeline ledger, recovery sweep | `app/src/lib/pipeline/parseState.ts`, `app/src/stores/sync/parseStore.ts`, `app/src/stores/sync/pipelineStore.ts`, `app/src/hooks/sync/useQualitySweep.ts` |
 | Scraped document metadata loaders | `app/src/hooks/data/useCourseFileData.ts`, `app/src/hooks/data/useModuleTocs.ts` |
 | Spotify ([music.md](./music.md)): the `music-state` snapshot type and the command wrappers; the snapshot mirror and Settings → Music's switch; the listener mounted in `AppLayout` | `app/src/lib/music/index.ts`, `app/src/stores/music/musicStore.ts`, `app/src/stores/music/musicPrefsStore.ts`, `app/src/hooks/music/useMusicState.ts` |
-| Module videos and page embeds downloaded on demand | `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/stores/lectures/videoDownloadStore.ts`, `app/src/stores/lectures/embedDownloadStore.ts`, `app/src/lib/files/scrapedRow.ts` |
+| Module videos and page embeds downloaded on demand; YouTube/Vimeo metadata | `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/stores/lectures/videoDownloadStore.ts`, `app/src/stores/lectures/embedDownloadStore.ts`, `app/src/stores/lectures/webVideoStore.ts`, `app/src/lib/files/scrapedRow.ts` |
+
+## Windows transcription settings expose Groq only
+
+`TranscriptionSection` keeps the shared language and Groq key controls on
+Windows, hides the local Whisper and on-device speech dialogs, and skips
+their model and OS-status reads. The stored settings retain every engine's
+preferences; Windows only renders the Groq row. Backend selection follows
+the same platform limit ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)).
+Credential descriptions and parse errors say credential store across platforms.
 
 ## Source is grouped by feature, and tests mirror it
 
@@ -71,9 +80,10 @@ library files; the rest of the frontend has its own pages:
   because the chat agent writes too (`oculus project` / `oculus task`);
   `useBackendEvents` fires the same event when a finished tool call names one.
 - **`getSubjects` derives, it doesn't read**: `last_synced_at` from the latest
-  *completed* `sync_runs` row, and `is_current` from `app/src/lib/format/terms.ts`
-  rather than the stored column. Terms sort by rank (`TERM_RANK_SQL`), never by
-  name — `Su` > `Se` would file Summer last.
+  *completed* `sync_runs` row, and `is_current` as the newest `term_sort`
+  among available rows rather than the stored column, which a course fetch
+  stamps only for the courses it returned. Terms sort by `term_sort`
+  ([sync.md](./sync.md)), never by name — `Su` > `Se` would file Summer last.
 - **Errors**: `errorElement` takes down one pane, `ErrorBoundary` the shell, and
   `app/src/main.tsx`'s overlay paints handler throws (no console in release).
 
@@ -224,11 +234,12 @@ library files; the rest of the frontend has its own pages:
   replace a newer subject or refresh. File-access and document-change events
   carry their subject id, so unrelated mounted file lists do not requery;
   events without an id refresh every list.
-- **A module video downloads from its Modules row** (the backend side is in
+- **A module video downloads from its Modules row**, and a `<canvas-video>`
+  in a page from its card (the backend side is in
   [sync.md](./sync.md#a-sync-lists-module-videos-and-the-student-downloads-them)).
-  `videoDownloadStore` keys state by Canvas file id so a download outlives the
-  page, and subscribes to `canvas-video-progress` on its first download. The
-  row comes from the ordinary `scrape-file` handler, which can land after the
+  Both use `videoDownloadStore`, which keys state by Canvas file id so a
+  download outlives the page and the two agree, and subscribes to
+  `canvas-video-progress` on its first download. The row comes from the ordinary `scrape-file` handler, which can land after the
   command resolves, so the store waits for `FILE_SCRAPED_EVENT`
   (`scrapedRow`) before the row opens the file.
 - **An Echo360 video embedded in a page downloads from its card**
@@ -239,6 +250,9 @@ library files; the rest of the frontend has its own pages:
   subscribed on the first download (`downloading` sets the percent, `muxing`
   the joining label; the invoke settles the rest), and the same wait on
   `scrapedRow` before the card shows Play.
+- **A YouTube or Vimeo video in a page only plays**, in a browser tab.
+  `webVideoStore` holds each video's oEmbed answer (`web_video_info`), asked
+  once per app session ([viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface)).
 - **A document is `courses/<code>/documents/<title>.md`** with a
   `category = 'document'` row. The title is the filename (`fileTitle`); a rename
   moves the file and keeps the row id. `reconcileDocuments` brings rows in line

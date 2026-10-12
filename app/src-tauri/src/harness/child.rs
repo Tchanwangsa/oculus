@@ -38,6 +38,7 @@ pub struct ThreadSpawn {
 /// A spawned CLI, killed on drop. `who` names it in error messages.
 pub struct ChildProc {
     who: &'static str,
+    job: crate::runtime::platform::ProcessJob,
     child: Mutex<Child>,
     stdin: Option<Mutex<ChildStdin>>,
     alive: AtomicBool,
@@ -55,7 +56,7 @@ impl ChildProc {
         cmd.stdin(if stdin { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = cmd.spawn().map_err(|e| {
+        let (mut child, job) = crate::runtime::platform::spawn_agent(cmd).map_err(|e| {
             format!(
                 "cannot start {}: {e}",
                 Path::new(cmd.get_program()).display()
@@ -94,6 +95,7 @@ impl ChildProc {
         }
         let proc = ChildProc {
             who,
+            job,
             child: Mutex::new(child),
             stdin: pipe,
             alive: AtomicBool::new(true),
@@ -110,6 +112,7 @@ impl ChildProc {
     /// alive.
     pub fn kill(&self) -> Option<i32> {
         self.alive.store(false, Ordering::SeqCst);
+        self.job.terminate();
         let mut child = self.child.lock().unwrap();
         let _ = child.kill();
         child.wait().ok().and_then(|s| s.code())
@@ -172,6 +175,7 @@ impl ChildProc {
 
 impl Drop for ChildProc {
     fn drop(&mut self) {
+        self.job.terminate();
         if let Ok(c) = self.child.get_mut() {
             let _ = c.kill();
         }

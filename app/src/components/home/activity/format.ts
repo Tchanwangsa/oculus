@@ -1,4 +1,5 @@
 import type { ChartDay } from "@/lib/activity/usage";
+import { displayLocale } from "@/lib/format/locale";
 
 export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -6,7 +7,7 @@ export function plural(n: number, word: string): string {
 
 /** "6 Oct". */
 export function shortDate(d: Date): string {
-  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return d.toLocaleDateString(displayLocale, { day: "numeric", month: "short" });
 }
 
 /** "7 Sep – 6 Oct". */

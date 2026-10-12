@@ -19,7 +19,9 @@ lists each message the pages report while Oculus is open.
 | Capability invariant test | `app/src-tauri/src/shell/dock/capabilities_test.rs` |
 | Unread from the title | `app/src-tauri/src/shell/dock/title.rs` |
 | The `dock` message handler and its origin check; parsing a message | `app/src-tauri/src/shell/dock/channel.rs`, `app/src-tauri/src/shell/dock/message.rs` |
-| Injected scripts: Notification shim, chat-list row watcher | `app/src-tauri/src/shell/dock/scripts.rs`, `app/src-tauri/src/shell/dock/scripts/` |
+| Injected scripts: Notification shim, chat-list row watcher, one-hop guard, trim sheets, leave-on-park | `app/src-tauri/src/shell/dock/scripts.rs`, `app/src-tauri/src/shell/dock/scripts/` |
+| The one-hop rule table and its matcher; the native navigation guard | `app/src-tauri/src/shell/dock/scripts/rules/instagram.json`, `app/src-tauri/src/shell/dock/rules.rs`, `app/src-tauri/src/shell/dock/scripts/hop.js`; `navigation_guard` in `app/src-tauri/src/shell/dock/page.rs` |
+| The rule fixture and the JS guard's test | `app/src-tauri/src/shell/dock/scripts/rules/instagram.cases.json`, `app/tests/lib/dock/hop.test.ts` |
 | The Inbox (memory only) | `app/src-tauri/src/shell/dock/inbox.rs` |
 | Frontend service table, invoke wrappers, path helpers | `app/src/lib/dock/index.ts` |
 | Enabled set (`dock_enabled` setting) and the `dock-state` mirror | `app/src/stores/shell/dockPrefsStore.ts`, `app/src/stores/shell/dockStore.ts` |
@@ -47,6 +49,8 @@ a tab per enabled service with its own count; switching replaces the route
 (`/dock` or `/dock/<id>`), and leaving a service parks its page. A tab on a
 dock route is titled with the service's name, never the page title, which
 carries unread counts. ⌘R on a dock route reloads that service.
+Instagram's page also leaves an open thread when it parks
+([below](#a-page-stays-on-its-messages)).
 
 ## A page is placed or parked, never hidden
 
@@ -57,21 +61,22 @@ carries unread counts. ⌘R on a dock route reloads that service.
   hidden page throttles its timers to about 1 Hz; a parked one keeps its
   sockets and timers at full rate, and its title updates keep arriving. A
   sliver would flip these sites to their mobile layouts.
-- A page parks when its tab leaves the front, when a popover covers the slot
-  (nothing draws over a native view), and when the route unmounts. Two panes
+- A page parks when its tab leaves the front and when the route unmounts;
+  popovers draw over the live page
+  ([architecture.md](./architecture.md#native-pages-show-through-holes-the-app-opens)). Two panes
   on one service share one page; only the pane that last placed it may move
   or park it.
 - Rust re-lays out the shown page on window resize, and resizes parked ones
   to the new slot size.
 - The service tabs sit in a header row above the slot, which also keeps the
-  card's top corners clear: `round_corners` rounds only a page's bottom ones.
+  card's top corners clear: the page's hole rounds only its bottom ones.
 
 ## Placing never takes keyboard focus
 
 Pages are built with `.focused(false)`, and `dock_place` never calls
 `set_focus()`; a click in the page focuses it. Parking or closing a page that
 holds first responder hands it to the app's own WKWebView (`focus.rs`, using
-the address `shell/keys.rs` records), or keystrokes would go to a page nobody
+the address `shell/keys/` records), or keystrokes would go to a page nobody
 can see. While a dock page holds focus it gets ⌘-keys before the menu, like a
 browser page ([shell.md](./shell.md#the-shell-owns-tabs-side-panels-and-every-window-shortcut)).
 
@@ -91,6 +96,10 @@ browser page ([shell.md](./shell.md#the-shell-owns-tabs-side-panels-and-every-wi
   registrable domain.
 - Per-service stores need macOS 14. Below that wry silently uses the shared
   default store; `configure_store` logs it and leaves that store's ITP alone.
+- `configure_store` also gives each store the WebCrypto master key delegate,
+  so the `CryptoKey`s WhatsApp and Messenger keep in IndexedDB are unwrapped
+  with the key keyd serves, not WebKit's keychain item, whose prompt returns
+  with every dev rebuild ([auth.md](./auth.md#webkits-webcrypto-master-key-comes-from-keyd-per-build)).
 - Messenger is hosted at `www.facebook.com/messages/`: its session cookie
   lives on `.facebook.com`, which messenger.com doesn't read. A fresh store
   asks for the Messenger PIN to restore end-to-end-encrypted history; the
@@ -101,7 +110,73 @@ browser page ([shell.md](./shell.md#the-shell-owns-tabs-side-panels-and-every-wi
 `on_new_window` opens http(s) URLs with the opener plugin and denies the
 popup, so a login that relied on a popup would land in the browser. The
 logins seen so far use iframes (captchas) and same-page navigations (2FA).
-No navigation inside a page is blocked.
+Only Instagram's page has navigations blocked
+([below](#a-page-stays-on-its-messages)).
+
+## A page stays on its messages
+
+The dock is there so the user stops reaching for the phone, so a page must
+not become a way into the feed. On Instagram the rule is **one hop from a
+thread**: from the inbox or a thread you may open one shared item (a post,
+reel, story or highlight); from inside it you may only go back to messages.
+The feed, Reels, Explore, search, notifications, create, any profile and
+hashtag or location pages are blocked, and a blocked click does nothing (no
+default browser either, ⌘-click included).
+
+The rule is data in one place, `scripts/rules/instagram.json`: path templates
+for **home** (the messages; entering one leaves any item), **pass** (login,
+challenge, 2FA and the site's plumbing: always allowed, hop state untouched)
+and **items**, each with a kind, so `/p/<code>/`, `/reel/<code>/` and
+`/reels/<code>/` are one item and a story is `story:<owner>` (stepping
+through one owner's stories stays allowed). Every other path on
+`instagram.com` is blocked. `rules.rs` parses the file and `scripts.rs`
+prepends the same text to `scripts/hop.js`, so Rust and the page can't
+drift; both are tested against `instagram.cases.json`, the URL shapes
+captured from the live site.
+
+Three layers, because no one of them sees everything:
+
+- **Click guard** (`scripts/guard.js`): a capture-phase `click`/`auxclick`
+  listener stops blocked links before the router sees them. Shared items open
+  from href-less buttons, so it sees only real links (profiles, the nav,
+  links a friend sent). Off-site links without `target=_blank` open in the
+  default browser instead of replacing the page.
+- **Route guard** (same script): wraps `pushState`/`replaceState` and hears
+  `popstate`, for what isn't a link click: a story's "See post", the router's
+  own redirects. A blocked push is undone with `history.back()`, which also
+  returns the view (an expired story *pushes* the poster's profile; this lands
+  back on the thread). A blocked replace or pop has no entry to go back over,
+  so the last allowed URL is put back with `replaceState` and a synthetic
+  `popstate`, which Instagram's router follows and the guard ignores.
+- **Native guard** (`navigation_guard` in `page.rs`): `on_navigation` for full
+  loads the script never sees (the post-login redirect to `/`, a reload). It
+  also sees every iframe and gets only the URL, so it judges only
+  `instagram.com` hosts, with no hop state, and allows every other host: a
+  guard that breaks login (`facebook.com/instagram/login_sync`, captcha
+  frames) is worse than none. A denied load is logged and sends the page home,
+  unless the page already sits on its messages or an item, so a blocked
+  iframe there can't loop it.
+
+A **trim sheet** hides the rest of the site's chrome so the page shows only
+messages: Instagram's whole left nav column, Messages included, and the
+padding its content keeps for it (`scripts/instagram.css`); Facebook's whole
+top bar on `/messages/`, with `--header-height` zeroed on every element so
+the chats take the full height (`scripts/facebook.css`). It is a `<style>` added at document start
+(`scripts/style.js`), on the root element since `<head>` may not exist yet,
+and put back if removed. Facebook gets the sheet only, no guard. WhatsApp and
+Discord get neither, since both forbid client modification. Both sheets
+assume the sites' current markup (Instagram's `data-visualcompletion`
+wrapper and `main > section` layout, Facebook's `role=banner` and CSS
+variable), so a redesign can bring the chrome back; the guard still blocks
+its links.
+
+**A parked Instagram page leaves its thread.** Instagram marks an open thread
+"Seen" while the page is parked, so when the page goes from shown to parked
+(`dock_place` parking the previous page, `dock_park` on the shown one; not
+the resize re-park) `page.rs` evaluates `scripts/leave.js`: from a thread or
+an item it pushes `/direct/inbox/` (the service's `park_path`) and fires a
+synthetic `popstate`. That is a move to home, so the guard allows it. Login
+pages are left alone.
 
 ## Unread counts come from the page title
 
@@ -115,7 +190,9 @@ Facebook's number includes its other notifications.
 ## The Inbox hears from two read-only scripts
 
 Both are injected into each page's main frame (`scripts/`) and post to a
-`dock` WKScriptMessageHandler. Neither changes what the page shows.
+`dock` WKScriptMessageHandler. Neither changes what the page shows; the guard
+and trim sheets above are the only scripts that do, and only on Instagram and
+Facebook.
 
 - **Notification shim** (all four): replaces `window.Notification` and
   reports it as granted, so a site that notifies (Discord, once its own
@@ -161,3 +238,6 @@ webview scopes match by OR). Globs are read so that they can only over-match.
 - Creating a page activates the app (wry), so it brings Oculus to the front when a service is turned on.
 - Message text in a setting, a table or a log puts private messages where agents can read them — keep the Inbox in memory.
 - A capability scoped to window `main` or a `dock-*` glob hands every command to a remote site; the test catches it.
+- A guard or stylesheet on WhatsApp or Discord breaks their terms; `scripts.rs`'s tests pin which services get one.
+- A new Instagram URL shape is blocked until `instagram.json` lists it: add the real URL to `instagram.cases.json`, which both test suites read.
+- Leaving the thread on every `park` call would yank the page on each window resize: only the shown-to-parked transition does it.

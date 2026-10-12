@@ -2,7 +2,6 @@
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::Command;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -62,7 +61,7 @@ pub fn list_models(
     env: &[(String, String)],
 ) -> Result<Vec<ModelInfo>, String> {
     const REQUEST_ID: &str = "oculus-models";
-    let mut cmd = Command::new(bin);
+    let mut cmd = crate::runtime::platform::cli_command(bin)?;
     cmd.arg("-p")
         .args(["--input-format", "stream-json"])
         .args(["--output-format", "stream-json"])

@@ -33,10 +33,12 @@ mod okta;
 mod resign_tests;
 mod session;
 mod session_import;
+mod site;
 #[cfg(test)]
 mod testing;
 #[cfg(test)]
 mod tests;
+mod webcrypto;
 
 /// Secrets whose old keychain item keyd copies into the vault the first time
 /// an op touches them (`State::import_once`): the three cloud keys and the
@@ -56,14 +58,14 @@ pub struct State {
     keys: Box<dyn KeySource>,
     master: Mutex<Option<MasterKey>>,
     legacy: Box<dyn LegacySource>,
-    /// Held across one import, so racing first requests read the old item once.
+    /// Held across one import, so racing first requests read the old item
+    /// once; `webcrypto_key` takes it too.
     importing: Mutex<()>,
     routes: Routes,
     upstream: Upstream,
-    /// Canvas's origin for the sign-in; production's unless a debug build
-    /// moved it.
-    canvas_base: String,
-    /// Okta's origin; `None` is production's (`okta::Env::new`).
+    /// Canvas's and Okta's origins as a debug build moved them; `None` is the
+    /// site's (`State::site`).
+    canvas_base: Option<String>,
     sso_base: Option<String>,
     /// One sign-in at a time; see `okta::Flight`.
     flight: okta::Flight,
@@ -78,13 +80,16 @@ pub struct State {
 /// An op's failure as it goes on the wire: `{"error": kind, "detail": …}`.
 /// Kinds: `request` (malformed, unknown op or name, a refused path or header),
 /// `caller` (refused: the peer check, or any op but `ping` asked by a program
-/// that is neither the app nor the CLI), `keychain` (the master key, or an old item
-/// being imported, was refused or failed), `vault`, `record` (`okta_resume`:
+/// that is neither the app nor the CLI, or `webcrypto_key` asked for another
+/// build's key), `keychain` (the master key, an old item being imported, or
+/// WebKit's WebCrypto item was refused, failed or held no key), `vault`, `record` (`okta_resume`:
 /// the sign-in attempt record could not be replaced; `session_mark` and
 /// `sign_out` use it for a marker file they could not write; a client reads
 /// it as `Broken`), `missing` (`forward` for a key or session the vault does not hold),
 /// `upstream` (`forward` got no answer: DNS, connect, TLS, a reset, or a
-/// session route's origin stalled). A `missing` session may also carry the
+/// session route's origin stalled), `site` (a `session_put` or `forward` for
+/// a Canvas origin that is not the site's, or a `forward` whose site moved
+/// while it was in flight). A `missing` session may also carry the
 /// `signin` outcome of the attempt to make one.
 #[derive(Debug)]
 pub struct OpError {
@@ -175,7 +180,7 @@ impl State {
             importing: Mutex::new(()),
             routes: Routes::compiled(),
             upstream: Upstream::new(),
-            canvas_base: crate::paths::CANVAS_BASE.to_string(),
+            canvas_base: None,
             sso_base: None,
             flight: okta::Flight::default(),
             clock: crate::clock::system(),
@@ -210,7 +215,7 @@ impl State {
     #[cfg(debug_assertions)]
     pub fn with_origins(mut self, canvas: Option<&str>, sso: Option<&str>) -> Result<Self, String> {
         if let Some(origin) = canvas {
-            self.canvas_base = test_origin(origin)?;
+            self.canvas_base = Some(test_origin(origin)?);
             self.routes.set_origin(crate::forward::CANVAS, origin);
         }
         if let Some(origin) = sso {
@@ -238,8 +243,8 @@ impl State {
 
     /// One request. `body` is the raw bytes after the header line; only
     /// `forward` takes any. No reply carries a secret value but `get`'s, for
-    /// the one name in `names::READABLE`, and `session_get`'s cookies, both to
-    /// the app only. `caller` is who asked: the peer check admits any
+    /// the one name in `names::READABLE`, `session_get`'s cookies and
+    /// `webcrypto_key`'s key, all to the app only. `caller` is who asked: the peer check admits any
     /// executable in the install (ffmpeg ships in it), so every op but `ping`
     /// also needs the app or the CLI.
     pub fn dispatch(
@@ -297,6 +302,7 @@ impl State {
                 })
             }
             "get" => self.get(req),
+            "webcrypto_key" => self.webcrypto_key(caller, req),
             "forward" => self.forward(caller, req, body),
             "okta_save" => self.okta_save(req),
             "okta_forget" => self.okta_forget(),
@@ -309,6 +315,7 @@ impl State {
             "session_status" => self.session_status(),
             "session_mark" => self.session_mark(req),
             "sign_out" => self.sign_out(),
+            "site_set" => self.site_set(req),
             _ => Err(OpError::new("request", format!("unknown op {op:?}"))),
         }
     }
@@ -359,12 +366,13 @@ impl State {
 /// The one place an op's caller is judged, so a new op cannot forget it.
 /// `ping` answers whoever the peer check admitted, for diagnostics; the rest
 /// are for the app and the CLI, except `okta_resume`, which lifts a lockout
-/// pause, `session_get`, the one reply that carries a cookie, and `get`, the
-/// one that carries a stored value, so those three are for the app alone.
+/// pause, `session_get`, the one reply that carries a cookie, and `get` and
+/// `webcrypto_key`, which carry a stored value, so those four are for the app
+/// alone.
 fn require_role(op: &str, role: Role) -> Result<(), OpError> {
     let (allowed, who) = match op {
         "ping" => return Ok(()),
-        "okta_resume" | "session_get" | "get" => (role == Role::App, "app"),
+        "okta_resume" | "session_get" | "get" | "webcrypto_key" => (role == Role::App, "app"),
         _ => (matches!(role, Role::App | Role::Cli), "app and CLI"),
     };
     if allowed {
@@ -382,8 +390,8 @@ fn imported_marker(name: &str) -> Option<String> {
         .then(|| names::imported(name))
 }
 
-/// The generic `store` and `delete` leave the Okta values and the sessions to
-/// their own ops, which validate what they write.
+/// The generic `store` and `delete` leave the Okta values, the sessions and
+/// WebKit's keys to their own ops, which validate what they write.
 fn refuse_managed(name: &str, saving: bool) -> Result<(), OpError> {
     let how = if names::OKTA.contains(&name) {
         if saving {
@@ -397,6 +405,8 @@ fn refuse_managed(name: &str, saving: bool) -> Result<(), OpError> {
         } else {
             "removed with session_clear"
         }
+    } else if names::WEBCRYPTO_NAMES.contains(&name) {
+        "kept by webcrypto_key"
     } else {
         return Ok(());
     };

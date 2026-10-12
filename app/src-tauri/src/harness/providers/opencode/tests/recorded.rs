@@ -289,11 +289,10 @@ fn a_v1_turn_finishes_exactly_once() {
     let last_of = |ty: &str, role: Option<&str>| {
         V1_LS
             .lines()
-            .filter(|l| {
+            .rfind(|l| {
                 let v: Value = serde_json::from_str(l).unwrap();
                 v["type"] == ty && role.is_none_or(|r| v["properties"]["info"]["role"] == r)
             })
-            .last()
             .unwrap()
             .to_string()
     };

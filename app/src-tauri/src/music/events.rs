@@ -4,7 +4,7 @@
 use librespot_playback::player::{PlayerEvent, PlayerEventChannel};
 use tauri::AppHandle;
 
-use super::state::{self, percent, up_next, Snapshot};
+use super::state::{self, context, has_prev, percent, up_next, Snapshot};
 use super::track;
 
 pub(super) async fn run(app: AppHandle, id: u64, mut rx: PlayerEventChannel) {
@@ -23,15 +23,23 @@ pub(super) async fn run(app: AppHandle, id: u64, mut rx: PlayerEventChannel) {
 pub(super) fn apply(s: &mut Snapshot, event: PlayerEvent) {
     match event {
         PlayerEvent::TrackChanged { audio_item } => {
-            s.advance_to(&audio_item.uri);
             s.track = Some(track::from_item(&audio_item));
         }
-        PlayerEvent::SetQueue { next_tracks, .. } => {
+        // The Spirc sends one whenever the next or previous tracks change:
+        // a load, the queue, shuffle, repeat, and every move on or back.
+        PlayerEvent::SetQueue {
+            context_uri,
+            next_tracks,
+            prev_tracks,
+            ..
+        } => {
             s.up_next = up_next(
                 next_tracks
                     .iter()
                     .map(|t| (t.uri.as_str(), t.provider.as_str())),
             );
+            s.context_uri = context(&context_uri);
+            s.set_has_prev(has_prev(prev_tracks.iter().map(|t| t.uri.as_str())));
         }
         PlayerEvent::Playing { position_ms, .. } => {
             s.playing = true;
@@ -56,13 +64,14 @@ pub(super) fn apply(s: &mut Snapshot, event: PlayerEvent) {
         }
         PlayerEvent::VolumeChanged { volume } => s.volume = percent(volume),
         PlayerEvent::ShuffleChanged { shuffle } => s.shuffle = shuffle,
-        PlayerEvent::RepeatChanged { context, track } => s.repeat = context || track,
+        PlayerEvent::RepeatChanged { context, track } => s.set_repeat(context, track),
         // The Spirc's own word on being the active Connect device: it emits
         // these on activating and on another device taking over, while the
         // session itself stays up.
         PlayerEvent::SessionConnected { .. } => {
             s.active = true;
             s.playing_on = None;
+            s.remote = None;
         }
         PlayerEvent::SessionDisconnected { .. } => {
             s.active = false;

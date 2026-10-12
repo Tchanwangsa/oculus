@@ -1,0 +1,4 @@
+{"modules":[{"id":23757,"course_id":38775,"name":"Models of computation examples"},{"id":24732,"course_id":38775,"name":"Assignments"}],
+"lessons":[{"id":119094,"course_id":38775,"module_id":23757,"title":"Context-Free Grammars","type":"python","kind":"content","state":"active","openable":false,"index":null,"available_at":null,"due_at":null,"locked_at":null,"slide_count":1,"slides":[]},
+{"id":116662,"course_id":38775,"module_id":24732,"title":"Assignment 1","type":"general","kind":"content","state":"scheduled","openable":true,"index":null,"available_at":"2026-08-24T11:59:00+10:00","due_at":"2026-09-04T23:59:00+10:00","locked_at":"2026-09-18T20:00:00+10:00","solutions_at":"2026-09-18T20:00:00+10:00","slide_count":4,"slides":[]},
+{"id":115326,"course_id":38775,"module_id":23757,"title":"Finite automata","type":"python","kind":"content","state":"active","openable":false,"index":1,"available_at":null,"due_at":null,"locked_at":null,"slide_count":5,"slides":[]}]}

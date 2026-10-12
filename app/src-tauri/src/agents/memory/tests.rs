@@ -142,6 +142,16 @@ fn an_instruction_memory_without_its_why_is_refused() {
     assert!(file.contains("**How to apply:** Reach for bun"));
 }
 
+#[test]
+fn a_spaced_code_finds_its_folder() {
+    let root = Scratch::new("memory-spaced-code");
+    std::fs::create_dir_all(root.join("courses/CS_101_Fall_2026")).unwrap();
+    assert_eq!(
+        resolve_subject(&root, "cs 101").unwrap(),
+        "CS_101_Fall_2026"
+    );
+}
+
 /// A subject code resolves on disk, not in the database.
 #[test]
 fn a_subject_fact_is_filed_under_the_subject() {

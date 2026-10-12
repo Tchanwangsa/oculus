@@ -3,6 +3,8 @@ export interface Subject {
   code: string;
   name: string;
   term_name: string | null;
+  /** `YYYY-MM` from Rust's `terms::term_sort`; the only term ordering. */
+  term_sort: string | null;
   is_current: boolean;
   workflow_state: string;
   selected: boolean;

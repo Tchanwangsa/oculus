@@ -8,9 +8,8 @@
 //!    connect started keyd, outside the caller's sandbox.
 //! 3. PeerCheck: `inspect` (same user, which executable, its `Role`) and
 //!    `admit`, both before a byte of the request is read.
-//! 4, 5. `master_key()` and `legacy_items()`: the OS secret store.
-//! 6. `registrar()`: installs, reports and removes what starts keyd, and
-//!    retires a registration an earlier Oculus made.
+//! 4. `master_key()` and 5. `legacy_items()`: the OS secret store.
+//! 6. `registrar()`: installs, reports and removes what starts keyd.
 //! 7. Paths are `crate::paths`; 8. the build step is the adapter's part of
 //!    `app/scripts/build-keyd.mjs`. `files` holds the file helpers.
 
@@ -18,18 +17,29 @@
 mod macos;
 #[cfg(target_os = "macos")]
 use macos as imp;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 mod unsupported;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 use unsupported as imp;
+
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as imp;
+#[cfg(windows)]
+pub use windows::pipe_name;
+#[cfg(all(windows, feature = "client", feature = "test-support"))]
+pub use windows::{register_test_broker, TestBrokerRegistration};
 
 /// Exclusive locks, owner-only files, durable renames: the POSIX ones on any
 /// Unix, whatever its adapter.
 #[cfg(unix)]
 #[path = "unix.rs"]
 pub mod files;
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub use unsupported::files;
+#[cfg(windows)]
+pub use windows::files;
 
 // Without a feature nothing serves or connects, so the listener goes unused.
 #[cfg(test)]
@@ -48,7 +58,7 @@ pub use caller::peer_check;
 pub use caller::{Caller, PeerCheck, Policy, Role};
 #[cfg(test)]
 pub(crate) use endpoint::Accept;
-#[cfg(any(test, all(feature = "server", target_os = "macos")))]
+#[cfg(any(test, all(feature = "server", any(target_os = "macos", windows))))]
 pub(crate) use endpoint::Stream;
 pub use endpoint::{accept_any, activated, connect, Conn, ConnectError, Listener};
 #[cfg(feature = "client")]

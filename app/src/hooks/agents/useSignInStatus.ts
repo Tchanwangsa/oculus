@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   harnessSignInStatus,
   PROVIDERS,
+  providerAvailability,
   type Provider,
   type SignInStatus,
 } from "@/lib/harness";
@@ -27,7 +28,8 @@ function read(recheck: boolean): Promise<SignInStatus[]> {
   // A check that could not run is not evidence of "signed out": drop that
   // provider so it reads as `unknown`, not as a Sign in button.
   const p = Promise.all(
-    PROVIDERS.map((p) => harnessSignInStatus(p.id).catch(() => null)),
+    PROVIDERS.filter((p) => providerAvailability(p.id).supported)
+      .map((p) => harnessSignInStatus(p.id).catch(() => null)),
   )
     .then((rows) => {
       const found = rows.filter((r): r is SignInStatus => r !== null);

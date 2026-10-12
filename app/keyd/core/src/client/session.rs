@@ -6,7 +6,7 @@ use std::fmt;
 
 use serde_json::{json, Value};
 
-use super::{Client, KeydError, OP_TIMEOUT};
+use super::{bound, Client, KeydError, OP_TIMEOUT};
 use crate::session::{check_value, Kind};
 
 /// The two cookie headers keyd returns to the app, which seeds WebKit with
@@ -59,6 +59,7 @@ impl Client {
     /// The Canvas and Okta cookie headers. App only: any other caller gets
     /// `KeydError::Caller`. The one call that returns a cookie.
     pub fn session_get(&self) -> Result<SessionCookies, KeydError> {
+        bound::canvas()?;
         let (reply, _) = self.exchange(&json!({"op": "session_get"}), &[], Some(OP_TIMEOUT))?;
         Ok(SessionCookies {
             canvas: text(&reply, "canvas"),
@@ -69,15 +70,16 @@ impl Client {
     /// Replaces the whole session `kind`: a cookie header for Canvas or Okta,
     /// the token for Ed. A value keyd could not carry (empty, over
     /// `session::MAX_VALUE`, or holding a control or non-ASCII character) is
-    /// `KeydError::Request`, without a round trip.
+    /// `KeydError::Request`, without a round trip. The put names the Canvas
+    /// origin the process's check answers (`bound`), and keyd refuses it as
+    /// `KeydError::Site` when that is not its site.
     pub fn session_put(&self, kind: Kind, value: &str) -> Result<(), KeydError> {
         check_value(value).map_err(KeydError::Request)?;
-        self.exchange(
-            &json!({"op": "session_put", "kind": kind.wire(), "value": value}),
-            &[],
-            Some(OP_TIMEOUT),
-        )
-        .map(|_| ())
+        let mut req = json!({"op": "session_put", "kind": kind.wire(), "value": value});
+        if let Some(canvas) = bound::canvas()? {
+            req["canvas"] = json!(canvas);
+        }
+        self.exchange(&req, &[], Some(OP_TIMEOUT)).map(|_| ())
     }
 
     /// Drops `kinds` (`Kind::ALL` for every session); the ones that were held

@@ -14,7 +14,7 @@ test("the row alone decides when it is present", () => {
 });
 
 test("an agent is ready when installed and signed in", () => {
-  expect(isAgentReady(agent({ provider: "claude", installed: true, signIn: "in" }))).toBe(true);
+  expect(isAgentReady(agent({ provider: "claude", installed: true, signIn: "in" }), false)).toBe(true);
   expect(isAgentReady(agent({ provider: "claude", installed: true, signIn: "out" }))).toBe(false);
   expect(isAgentReady(agent({ provider: "codex", installed: false, signIn: "in" }))).toBe(false);
   // A failed check reads unknown, which is not signed in.
@@ -35,4 +35,16 @@ test("an existing setup needs Canvas and one ready agent", () => {
   expect(isExistingSetup(false, ready)).toBe(false);
   expect(isExistingSetup(true, [agent({ provider: "claude", installed: true, signIn: "out" })])).toBe(false);
   expect(isExistingSetup(true, [])).toBe(false);
+});
+
+test("a signed-in native Claude install cannot bypass Windows onboarding", () => {
+  const claude = agent({ provider: "claude", installed: true, signIn: "in" });
+  expect(isExistingSetup(true, [claude], false)).toBe(true);
+  expect(isExistingSetup(true, [claude], true)).toBe(false);
+  expect(isExistingSetup(true, [claude, agent({ provider: "codex", installed: true, signIn: "in" })], true)).toBe(true);
+});
+
+test("Windows accepts a manually installed and signed-in Antigravity", () => {
+  expect(isExistingSetup(true, [agent({ provider: "antigravity", installed: true, signIn: "in" })], true)).toBe(true);
+  expect(isExistingSetup(true, [agent({ provider: "opencode", installed: true })], true)).toBe(true);
 });

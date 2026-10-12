@@ -1,7 +1,8 @@
 # Development
 
 How to build, run and check the app and the `oculus` CLI. macOS is the primary
-target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
+target; Windows x64 uses the same bun (never npm — see the root `CLAUDE.md`)
+and stable Rust, plus the MSVC toolchain, Windows SDK and WebView2.
 
 ## Where
 
@@ -11,9 +12,11 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | `beforeDevCommand`, `beforeBuildCommand`, `externalBin` | `app/src-tauri/tauri.conf.json`; macOS's `externalBin` and keyd's helper app (`bundle.macOS.files`) in `app/src-tauri/tauri.macos.conf.json` |
 | Cargo CLI build, target paths and host detection | `app/scripts/runtime.mjs`, `app/scripts/build-cli.mjs` |
 | Shared cached native download and installation | `app/scripts/native-binary.mjs` |
-| The dev preflight | `app/scripts/predev.mjs` |
+| The dev wrapper, preflight and cross-shell test runner | `app/scripts/dev.mjs`, `app/scripts/predev.mjs`, `app/scripts/test.mjs` |
+| The app and CLI dev profile | `[profile.dev]` in `app/src-tauri/Cargo.toml` |
 | Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
 | Native binary fetcher (ffmpeg) | `app/scripts/fetch-ffmpeg.mjs` |
+| Builds and smoke-tests the Windows LGPL ffmpeg, and stages its release | `app/scripts/ffmpeg/`, `.github/workflows/ffmpeg.yml` |
 | Builds the editor core's wasm for dev shadow mode | `app/scripts/build-editor-wasm.mjs` |
 | Compiles the on-device speech helper | `app/scripts/build-speech.mjs`, `app/src-tauri/speech/main.swift` |
 | Builds whisper.cpp's `whisper-cli` from a pinned release | `app/scripts/build-whisper.mjs` |
@@ -28,6 +31,8 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
 | How an agent thread finds `oculus` | `app/src-tauri/src/harness/cli/discover/` |
+| Windows native manifest, Store manifest template and MSIX packaging | `app/src-tauri/windows-app-manifest.xml`, `app/src-tauri/windows/AppxManifest.xml`, `app/src-tauri/windows/logo.svg`, `app/scripts/windows-icons.mjs`, `app/scripts/package-msix.mjs`, `app/scripts/package-msix.ps1`, `app/scripts/package-msix.test.mjs` |
+| Windows ffmpeg distribution notices and release gate | `app/src-tauri/windows/distribution/README.md` |
 | CI checks and the release bundle | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
 ## Commands
@@ -42,7 +47,7 @@ bun run predev        # the dev preflight, by hand
 bun run cli           # release `oculus`
 bun run cli:dev       # debug `oculus` — the one the dev app's agents run
 bun run cli:install   # release build, symlink into ~/.local/bin, then `oculus docs`
-bun run docs:cli      # rebuild the release CLI, regenerate docs/cli-reference.md from its help
+bun run docs:cli      # rebuild the release CLI, regenerate docs/cli-reference.md from its help (--staged: run the staged sidecar)
 bun run ffmpeg        # fetch ffmpeg into app/src-tauri/binaries/
 bun run speech        # compile the on-device speech helper there (macOS)
 bun run whisper       # build whisper.cpp's whisper-cli there (macOS, needs cmake)
@@ -54,8 +59,9 @@ bun run math          # build the maths wasm into app/math-core/pkg/
 
 ## `predev` is the whole preflight, and it is idempotent
 
-It is bun's lifecycle hook for `dev`, and `beforeDevCommand` is
-`OCULUS_CLI_WATCH=1 bun run dev`, so every `tauri dev` runs it. In order it
+It is bun's lifecycle hook for `dev`. `beforeDevCommand` calls
+`app/scripts/dev.mjs`, which supplies `OCULUS_CLI_WATCH=1` in the child
+environment before running bun, so every `tauri dev` runs it on either OS. In order it
 runs `bun install`, fetches ffmpeg, compiles the speech helper,
 `whisper-cli` and the maths wasm, builds the editor core's wasm for
 [shadow mode](./editor-core.md#shadow-mode-checks-the-rust-core-against-every-note-editor)
@@ -70,13 +76,41 @@ changed), and runs `oculus docs` to refresh the library's agent docs. The last
 two are non-fatal: a machine whose app has never run has no library to fill.
 `OCULUS_SKIP_PREDEV=1` skips it all for a vite-only session.
 
+There is one preflight per checkout. A stopped `tauri dev` leaves its
+preflight's synchronous cargo builds running and holding cargo's lock, so a new
+preflight first ends any other preflight of the same checkout (recorded in
+`target/.oculus-predev.pid`, or found by its cwd) and orphaned cargo builds of
+this checkout's CLI or keyd, and this checkout's CLI watcher, each with its
+whole process tree. The watcher goes because predev rebuilds the CLI and starts
+a new one, and a quick restart never trips its dev-server probe. It also ends
+this checkout's orphaned vite (adopted by launchd, alone or under its
+`bun run dev`), which would otherwise hold port 1420 and stop the new dev
+server; one under a live `tauri dev` is left alone. Other checkouts, editors'
+`cargo check` and builds run from a shell are left alone.
+Before each cargo build it names whoever else holds that target's lock rather
+than leaving cargo's "Blocking waiting for file lock" unexplained.
+`app/scripts/stale-builds.mjs` does both, fail-open, and skips Windows.
+
 The scripts share target detection and artifact paths through `app/scripts/runtime.mjs`;
-the ffmpeg fetcher rejects failed HTTP responses and truncated downloads before
-installing anything.
+the ffmpeg fetcher rejects failed HTTP responses, truncated downloads and,
+where a SHA-256 is pinned, any other bytes before installing anything.
 
 `cargo test` and `bun run cli` go through neither Tauri nor `predev`, so on a
 fresh checkout run `bun run ffmpeg` and (on macOS)
 `bun run speech` and `bun run whisper` yourself.
+
+## The app and CLI share one dev profile
+
+The app and CLI use the dev profile in `app/src-tauri/Cargo.toml`:
+dependencies at `opt-level = 3` without debug info, and the app crate at
+`debug = 1` without optimisation. The manifest profile applies wherever
+Cargo runs. The CLI scripts also run Cargo from `app/src-tauri` so they
+read the same config and sccache wrapper as Tauri's app build.
+The app library emits only an `rlib` for the desktop app and CLI.
+
+To reclaim this checkout's build cache, run `cargo clean` from
+`app/src-tauri`; Cargo coordinates deletion with its build locks. The next
+build recreates those artifacts.
 
 ## The speech helper is compiled, not fetched
 
@@ -116,7 +150,9 @@ Its floor is macOS 13.3, upstream's own. Like `apple-speech` it is a macOS-only
 and the maths field's edit model;
 [`app/math-core/README.md`](../app/math-core/README.md)) with cargo's `wasm`
 profile, runs `wasm-bindgen --target web` and then `wasm-opt -Oz` (the
-`binaryen` devDependency) into the gitignored `app/math-core/pkg/`. It skips
+`binaryen` devDependency) into the gitignored `app/math-core/pkg/`. Binaryen's
+JavaScript entry runs through Node directly so Windows needs no batch shim.
+It skips
 while the `.wasm` is newer than every input. It needs
 `rustup target add wasm32-unknown-unknown` and the `wasm-bindgen` CLI at
 exactly the version in `app/math-core/Cargo.lock` (`cargo install
@@ -139,7 +175,8 @@ PATH. Four pieces keep it current:
 - `app/scripts/watch-cli.mjs` rebuilds it on Rust changes through the session,
   since `tauri dev` never re-runs `beforeDevCommand`. Its debounce is longer
   than tauri's, so the app build takes cargo's lock first. It exits when the
-  vite port (probed on `localhost`, which is `::1` on macOS) stops answering.
+  vite port (probed on `localhost`, which is `::1` on macOS) stops answering,
+  and takes an in-flight build down with it.
 - Both, and `bun run cli`/`cli:dev`, copy each build over the
   `binaries/oculus-<triple>` sidecar. tauri-build copies every `externalBin`
   into `target/<profile>/` whenever the app's build script runs, so `tauri
@@ -155,16 +192,34 @@ fails loudly instead of passing on an old file. `oculus_cli` ranks every candida
 by mtime rather than trusting one, which covers the seconds when the dev path
 has no binary at all.
 
-`tauri build` runs `stage-keyd`, `stage-cli` then `docs:cli` from
+`tauri build` runs `stage-keyd`, `stage-cli` then `docs:cli --staged` from
 `beforeBuildCommand`: the CLI ships inside the bundle because keyd admits only
 executables inside the app its helper is nested in, and gives
 `Contents/MacOS/oculus` the `cli` role ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
 The `oculus` that lands in the bundle is the crate's own `[[bin]]` from
 `tauri build`'s cargo run, which Tauri copies over the staged sidecar; the
 sidecar only has to exist for tauri-build's `externalBin` check. The reference is regenerated at the one moment a current release binary is
-guaranteed to exist.
+guaranteed to exist: `--staged` runs the sidecar `stage-cli` just wrote rather
+than building again, which would recompile the app because tauri-build reruns
+whenever a sidecar changes.
 
 ## CI proves a fresh checkout builds; releases are cut by hand
+
+The Windows x64 job repeats formatting, frozen dependency installation,
+frontend and script tests, the frontend build, ffmpeg and keyd/CLI staging,
+`cargo test --release --locked`, keyd core with all features, and keyd's debug
+tests with and without `dev`, plus the maths workspace's formatting and tests.
+Both Windows workflows install the WASM target and the locked `wasm-bindgen`
+CLI; the frontend checks build the maths WASM. CI builds the current-user NSIS
+installer with a second `--config` that nulls `beforeBuildCommand`: the earlier
+steps already bundle the frontend and stage every sidecar, and rerunning
+`stage-cli` would compile the app again, about four minutes;
+`bundle-config.test.mjs` checks those steps come first. It then validates the GUI and sidecars, and retains `oculus-windows-x64-ci`
+for VM testing. This workflow artifact does not create a GitHub release.
+It installs sccache before any cargo build.
+`app/scripts/test.mjs` enumerates script tests in Node so no shell has to
+expand `scripts/*.test.mjs`. Windows also checks the packaging PowerShell
+script's syntax; a Windows SDK run remains necessary to validate a real MSIX.
 
 `ci.yml` runs on every push to `master` and every pull request, on a macOS
 runner with nothing cached but crates: `cargo fmt --check` (the app, keyd,
@@ -172,19 +227,30 @@ keyd core and `app/math-core`'s own crates), `bun run test`, `bun run build`
 (both build the maths wasm, so the runner gets the wasm target and the locked
 `wasm-bindgen`), the ffmpeg fetch, the
 speech helper and `whisper-cli`, `stage-keyd` (a real release build and signature
-of keyd, as the bundle carries it), `stage-cli`, `cargo test --release --locked`,
+of keyd, as the bundle carries it), `stage-cli`, clippy with `-D warnings` over
+every target of the app, keyd core (every feature), keyd (with and without
+`dev`) and the maths engine's own crates (`--no-deps`, so not the vendored
+`katex/`; the bridge for `wasm32-unknown-unknown` too), `cargo test --release --locked`,
 keyd core's tests with every feature and keyd's with and without `dev`, the
 maths engine's `cargo test --locked`, then
 `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
 reference fails. A second job, `keyd-linux`, checks and tests keyd core and
 checks keyd on Ubuntu, where only the unsupported adapter exists
 ([below](#keyds-os-code-lives-in-one-adapter)); keyd's own tests bind a socket
-through the macOS adapter, so they run only in the first job. `stage-cli`
+through an OS adapter, so the macOS and Windows jobs run them. `stage-cli`
 comes before any cargo call of the app because tauri-build refuses to compile
 until every `externalBin` exists, and it is what writes the CLI's on a clean
-tree. keyd's helper is no `externalBin`, so no cargo build waits on it. The release profile is shared with that
-CLI build, so the tests reuse its artifacts. sccache is installed because
+tree. keyd's macOS helper is no `externalBin`, so no cargo build waits on it;
+Windows keyd is a sidecar, so it is staged before the CLI. The release profile is shared with that
+CLI build, so clippy reuses its build scripts and the tests its artifacts. sccache is installed because
 `app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
+
+The app's Windows dev-dependency enables keyd core's `test-support` for scripted
+brokers in release tests. `app/src-tauri/src/test_support/keyd.rs` registers
+only its isolated Windows test endpoint, for the fake's lifetime. A registered
+endpoint still requires the pipe server's live PID to be this test process;
+unregistered endpoints retain MSIX verification, and the production pipe
+cannot be registered. Normal app and CLI builds select only `client`.
 
 A second job, on Linux because the crate is portable, checks
 `app/editor-core` ([editor-core.md](./editor-core.md)) and its wasm bridge:
@@ -211,8 +277,8 @@ creates tag `v<version>` on that commit, and attaches the `.dmg` and `.app` to
 a draft prerelease; the same files are kept as workflow artifacts. Publishing
 the draft is a manual step on GitHub.
 
-- The matrix has one entry, Apple Silicon. Another platform is one more
-  `include` with its runner and `args` (`--target …`); the sidecars are named by
+- The macOS matrix builds Apple Silicon; a separate Windows x64 job builds
+  NSIS and, with real Store configuration, MSIX. Sidecars are named by
   `hostTriple()`, so build on the runner whose triple you want.
 - The bundle is signed ad-hoc with the hardened runtime. `bundle.macOS` in
   `tauri.conf.json` sets `signingIdentity: "-"` and `hardenedRuntime`, so a
@@ -233,6 +299,112 @@ the draft is a manual step on GitHub.
 - The installed app and `tauri dev` share the identifier `com.tchan.oculus`, so
   they open the same library, database and keychain items. Never run both at
   once: they write the same database and session files.
+
+## Windows packaging separates build artifacts from public distribution
+
+Cross-compiled keyd integration tests can be transferred to a Windows VM.
+Set `OCULUS_TEST_KEYD` to the daemon's path on that guest; without it the test
+harness uses Cargo's build-machine executable path. The override belongs to
+the test harness and does not change application broker discovery.
+
+Release always builds a current-user NSIS installer on Windows and retains it
+as `oculus-windows-x64` for VM testing. The native Windows job runs
+`tauri build --config src-tauri/target/windows-release.conf.json -- --locked`;
+Tauri automatically merges `tauri.windows.conf.json` before that resource overlay.
+It builds Cargo's `app.exe`, then renames the GUI to `oculus-app.exe` from
+`mainBinaryName`, keeping `oculus.exe` for the CLI. A direct Cargo or xwin build
+leaves the GUI named `app.exe`. The packaging scripts require the Tauri output
+and validate all four executables plus the NSIS installer before upload, under
+`src-tauri/target/release` on the native runner. Tauri documents the
+[main binary rename](https://v2.tauri.app/reference/config/#mainbinaryname).
+Its payload includes ffmpeg's licence, README and written source offer
+([below](#windows-ffmpeg-is-our-own-lgpl-build)), which the generated release
+config adds as resources. The public-release attachment job additionally
+requires `OCULUS_WINDOWS_DISTRIBUTION_APPROVED=true`, set once a maintainer has
+published the ffmpeg source release and reviewed the offer; it then attaches
+the installer, those notices and the ffmpeg source tarballs to the app's draft
+release.
+
+MSIX packaging skips with a clear configuration list when any Store value is
+missing. Set these repository variables from Partner Center:
+
+- `OCULUS_MSIX_IDENTITY_NAME`, `OCULUS_MSIX_PUBLISHER`;
+- `OCULUS_MSIX_DISPLAY_NAME`, `OCULUS_MSIX_PUBLISHER_DISPLAY_NAME`;
+- `OCULUS_MSIX_VERSION`: four integer parts, a nonzero major and final 0.
+
+The app's three-part development version is not converted into an invented
+Store version. These requirements follow Microsoft's
+[identity guidance](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-manual-conversion)
+and [Store version rules](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/supported-languages?pivots=store-installer-msix).
+
+After `tauri build`, run `bun scripts/package-msix.mjs` from `app/`. It stages
+`oculus-app.exe`, `oculus.exe`, `oculus-keyd.exe` and ffmpeg beside each other,
+with the notices and the committed logos in `src-tauri/windows/Assets`, then
+builds a PRI with the Windows SDK. MakeAppx packs the result with semantic validation enabled,
+following Microsoft's [packaging commands](https://learn.microsoft.com/en-us/windows/msix/package/create-app-package-with-makeappx-tool).
+The manifest requests `runFullTrust` and an `oculus.exe` execution alias,
+without a startup task or data-virtualization capability. The unsigned output
+is a Store-upload artifact, `oculus-store-x64`; installing it outside the Store
+requires separate signing. Packaging is not Store submission or certification.
+The native executable manifest opts into long paths.
+
+Windows logos come from `src-tauri/windows/logo.svg`: the mascot on an
+indigo circle, the Windows counterpart of the macOS squircle.
+`bun run icons:windows` renders the MSIX scale and unplated taskbar
+`targetsize` variants and the `icon.ico` that `tauri.windows.conf.json` gives
+the exe and NSIS installer, dropping the drop shadows below 64 px where they
+blur. The outputs are committed; rerun it after editing the SVG.
+
+Windows keyd is a release `.exe` without codesign, staged as a target-triple
+sidecar; the dev preflight stages it beside the debug app and the GUI starts
+it. There is no `.app` helper layout on Windows. The shared Windows library is
+`%USERPROFILE%\Oculus` ([windows.md](./windows.md)).
+
+## Windows ffmpeg is our own LGPL build
+
+The Windows sidecar is FFmpeg built by `app/scripts/ffmpeg/build.sh` without
+`--enable-gpl` or `--enable-nonfree` and with `--enable-version3`, so it is
+LGPL v3 or later; every source it is built from can be published beside it.
+The script pins the FFmpeg, libopus and dav1d release tarballs by SHA-256,
+checks FFmpeg's signature against the committed `ffmpeg-release-key.asc`
+(fingerprint pinned), and builds libopus and dav1d as static libraries, then
+FFmpeg with `configure-flags.txt`: file and pipe protocols, the demuxers and
+decoders for the containers and codecs a student's videos and recordings
+arrive in, libopus, PCM, MJPEG and rawvideo encoders, and the filters the app
+names plus the ones the ffmpeg CLI inserts for format conversion, `-ss`/`-t`,
+cropping and rotation. It refuses a configuration whose licence is not LGPL v3,
+and for Windows a binary that imports any DLL but Windows' own. The Windows
+target cross-compiles with MinGW-w64, Win32 threads and a static link,
+stripped by the linker so a rebuild on the same toolchain is byte-identical;
+`build.sh <target> <out-dir>` is target-keyed so another can be added.
+
+`.github/workflows/ffmpeg.yml` runs on any push that touches `app/scripts/ffmpeg/`
+or the workflow, and from the Actions tab. It builds on Ubuntu, writes
+fixtures with Ubuntu's full ffmpeg (`fixtures.sh`), and on a Windows runner
+`smoke.sh` runs every command shape the app uses — the Echo360 trim, the Opus
+extraction with its `Duration:` and "matches no streams" stderr, the WAV
+decode and Ogg part copies, thumbnails and 160×90 grey frames — against
+mp4, mov, webm, mkv, AV1, MPEG-TS, AVI, WMV, MP3, M4A, WAV, FLAC, Ogg, a
+video without audio and a rotated one, and checks that `-L` reports LGPL v3.
+It then creates or updates the draft release `ffmpeg-<version>-oculus<build>`
+with the binary, the byte-identical upstream tarballs, the build files, the
+full configure line, `config.log`, the toolchain versions, `-buildconf` and
+`SHA256SUMS`. It only ever touches a draft: once a maintainer publishes the
+release its assets are fixed, and a changed build raises `OCULUS_BUILD` in
+`build.sh`, which names a new tag.
+
+`fetch-ffmpeg.mjs` downloads the Windows binary from that release and refuses
+it unless it matches the pinned SHA-256, the hash the workflow's summary
+reports; a cached copy with another hash is fetched again. A draft's assets
+are not public, so the Windows fetch fails until the release is published.
+Other targets
+download ffmpeg-static's builds. `app/src-tauri/windows/distribution/` holds
+the notices the Windows packages ship: the LGPL v3 and GPL v3 texts with
+libopus's and dav1d's licences, a README with the versions, hashes and
+configure line, and the written source offer pointing at the release
+([README](../app/src-tauri/windows/distribution/README.md)). Upgrading means
+changing the pins in `build.sh`, the release URL and hash in
+`fetch-ffmpeg.mjs`, and those notices together.
 
 ## `oculus-keyd` is built apart so its signature only changes with its source
 
@@ -352,8 +524,8 @@ fallback (`Secret`, over the `keyring` crate) that runs while keyd is absent,
 and it goes with that fallback.
 
 - **The build step** is the adapter's too: `keyd-build.mjs` keeps one
-  function per OS (`buildForMacos`, the reproducible build and the ad-hoc
-  signature above) and builds nothing on an OS without one.
+  function per OS (the macOS reproducible build and ad-hoc signature above,
+  or a Windows release executable) and builds nothing on an OS without one.
 - **Core's tests run anywhere.** The server loop and the client are tested
   over an in-memory `Conn` (`platform/memory.rs`); the macOS adapter tests
   its socket, caller check, keychain errors and plist itself. The POSIX file
@@ -408,8 +580,10 @@ without keyd — neither is an environment variable.
 
 ## Gotchas
 
+- A Rust build sitting at 0% CPU is macOS scanning each new build script and proc-macro (`syspolicyd`). Add every app that starts builds (terminal, editor) under System Settings → Privacy & Security → Developer Tools, then relaunch it. Claude Code runs its agents under its own bundle, not Claude.app: add `~/Library/Application Support/Claude/claude-code/<version>/<hash>/claude.app` (⌘⇧G in the picker). A build with no `GK evaluateScanResult` line for its `build_script_build` in `/usr/bin/log show --predicate 'process == "syspolicyd"'` is exempt. Every compile runs under one shared sccache server, which belongs to whichever app started it, so restart it (`sccache --stop-server`) after adding one.
 - Any build of the crate copies the `binaries/` sidecar to `target/<profile>/oculus` — a stale sidecar means a stale CLI.
 - `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
+- rust-analyzer sharing `app/src-tauri/target/` takes cargo's build lock and stalls the preflight's builds. The repo's `.zed/settings.json` sets rust-analyzer's `cargo.targetDir` to `true`, which moves it to `target/rust-analyzer`; other editors need the same setting.
 - Anything under `app/src-tauri/` changing, templates included, rebuilds and relaunches the dev app.
 - A dev rebuild SIGTERMs the app past Tauri's Exit event, so agent subprocesses can outlive it ([harness.md](./harness.md)).
 - `eprintln!` panics once stderr is a closed pipe, as it is for an app a dead `tauri dev` left running, and a panic inside a WebKit or Objective-C callback aborts the app. The app crate logs with `elog!` (`app/src-tauri/src/elog.rs`), which drops the write error; tests and the CLI binary keep `eprintln!`.

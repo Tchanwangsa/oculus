@@ -1,7 +1,6 @@
 //! One `claude -p` process per thread: spawn, send, interrupt, rewind.
 
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
@@ -32,8 +31,13 @@ pub struct ClaudeSession {
 
 impl ClaudeSession {
     pub fn spawn(cfg: ClaudeSpawn, sink: Sink) -> Result<Arc<Self>, String> {
+        if cfg!(windows) {
+            return Err(
+                "Claude Code is unavailable on Windows: its native sandbox is not supported".into(),
+            );
+        }
         let base = cfg.base;
-        let mut cmd = Command::new(&base.bin);
+        let mut cmd = crate::runtime::platform::cli_command(&base.bin)?;
         cmd.arg("-p")
             .args(["--input-format", "stream-json"])
             .args(["--output-format", "stream-json"])

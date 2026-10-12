@@ -1,7 +1,5 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { embedReady } from "@/lib/pipeline/retrieval";
-import { useIndexStore } from "@/stores/sync/indexStore";
 import type { ReindexPrompt } from "../ReindexConfirmDialog";
 import type { EmbedSettings } from "./types";
 
@@ -12,14 +10,11 @@ interface EmbedActionsInput {
   loadEstimate: () => void;
 }
 
-/** The engine switch, the spend guard and the Voyage key: every write on this page. */
+/** The engine switch and the spend guard: every write on this page but the
+ *  Voyage key, which is `useVoyageKey`'s. */
 export function useEmbedActions({ settings, setSettings, setError, loadEstimate }: EmbedActionsInput) {
   const [prompt, setPrompt] = useState<(ReindexPrompt & { engine: string }) | null>(null);
   const [switching, setSwitching] = useState(false);
-
-  const [key, setKey] = useState("");
-  const [keyNote, setKeyNote] = useState<{ kind: "error" | "warn"; text: string } | null>(null);
-  const [checkingKey, setCheckingKey] = useState(false);
 
   const apply = async (engine: string) => {
     setSwitching(true);
@@ -64,54 +59,12 @@ export function useEmbedActions({ settings, setSettings, setError, loadEstimate 
     }
   };
 
-  // Rust checks the key against Voyage before storing it in the keychain.
-  const saveKey = async () => {
-    if (!key.trim()) return;
-    setCheckingKey(true);
-    setKeyNote(null);
-    try {
-      const verdict = await invoke<string>("voyage_set_api_key", { key: key.trim() });
-      setKey("");
-      setSettings((prev) => (prev ? { ...prev, credentials_ready: true, credentials_error: null } : prev));
-      // Re-asked rather than assumed: the engine also decides readiness.
-      void embedReady().then((ready) => useIndexStore.getState().setReady(ready));
-      setKeyNote(
-        verdict === "unverified"
-          ? { kind: "warn", text: "Saved, but Voyage was unreachable — it has not been checked." }
-          : null,
-      );
-    } catch (cause) {
-      setKeyNote({ kind: "error", text: String(cause) });
-    } finally {
-      setCheckingKey(false);
-    }
-  };
-
-  const deleteKey = async () => {
-    setKeyNote(null);
-    try {
-      await invoke("voyage_delete_api_key");
-      setKey("");
-      setSettings((prev) => (prev ? { ...prev, credentials_ready: false, credentials_error: null } : prev));
-      useIndexStore.getState().setReady(false);
-    } catch (cause) {
-      console.error("Voyage key removal failed", cause);
-      setKeyNote({ kind: "error", text: String(cause) });
-    }
-  };
-
   return {
     prompt,
     setPrompt,
     switching,
-    key,
-    setKey,
-    keyNote,
-    checkingKey,
     apply,
     choose,
     setBudget,
-    saveKey,
-    deleteKey,
   };
 }

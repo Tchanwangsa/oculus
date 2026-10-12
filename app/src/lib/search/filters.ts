@@ -13,6 +13,7 @@ export type KindId =
   | "announcement"
   | "quiz"
   | "discussion"
+  | "lesson"
   | "page"
   | "note"
   | "lecture"
@@ -43,6 +44,7 @@ const KINDS: Kind[] = [
   { id: "announcement", label: "Announcement", plural: "announcements", description: "Canvas announcements", icon: categoryIcon("announcement"), category: "announcement" },
   { id: "quiz", label: "Quiz", plural: "quizzes", description: "Canvas quizzes", icon: categoryIcon("quiz"), category: "quiz" },
   { id: "discussion", label: "Discussion", plural: "discussions", description: "Ed threads", icon: categoryIcon("ed"), category: "ed", aliases: ["ed"] },
+  { id: "lesson", label: "Lesson", plural: "lessons", description: "Ed lessons", icon: categoryIcon("lessons"), category: "lessons", aliases: ["lessons"] },
   { id: "page", label: "Page", plural: "pages", description: "Canvas pages", icon: categoryIcon("page"), category: "page" },
   { id: "note", label: "Note", plural: "notes", description: "Your own documents", icon: categoryIcon("document"), category: "document", aliases: ["document"] },
   { id: "lecture", label: "Lecture", plural: "lectures", description: "Lecture recordings", icon: VideoCamera },

@@ -9,10 +9,11 @@ use super::locate::{home, is_executable, search_path_env};
 /// bundle; in dev the preflight's debug build (`app/scripts/predev.mjs`), the
 /// release one `bun run cli` leaves, or the `~/.local/bin` symlink.
 pub fn oculus_cli() -> Option<PathBuf> {
+    let name = format!("oculus{}", std::env::consts::EXE_SUFFIX);
     let mut found: Vec<PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            for c in [dir.join("oculus"), dir.join("../release/oculus")] {
+            for c in [dir.join(&name), dir.join("../release").join(&name)] {
                 if is_executable(&c) {
                     found.push(c.canonicalize().unwrap_or(c));
                 }
@@ -20,13 +21,13 @@ pub fn oculus_cli() -> Option<PathBuf> {
         }
     }
     if let Some(h) = home() {
-        let c = h.join(".local/bin/oculus");
+        let c = h.join(".local/bin").join(&name);
         if is_executable(&c) {
             found.push(c.canonicalize().unwrap_or(c));
         }
     }
     if found.is_empty() {
-        return search_path_env("oculus");
+        return search_path_env(&name);
     }
     // Newest wins: its dir heads the thread's PATH (`child_env`), so a stale dev
     // build would shadow the current CLI. See `docs/development.md`.

@@ -124,7 +124,10 @@ with the app's icon.
   labelled "Oculus keys" because the access prompt quotes the label. keyd
   creates it on the first op that needs the vault and never rewrites it; it
   is never read at start or for `ping`, so installing keyd prompts for
-  nothing. Concurrent first requests wait on one read.
+  nothing. Concurrent first requests wait on one read. Beside the old items
+  it imports, keyd reads one other program's item: WebKit's WebCrypto master
+  key, once per build, never written
+  ([auth.md](./auth.md#webkits-webcrypto-master-key-comes-from-keyd-per-build)).
 - **`vault.bin`** holds the secrets as one ChaCha20-Poly1305-sealed JSON map
   (`app/keyd/core/src/vault.rs`): a fresh nonce per write, replaced by rename,
   read-modify-write under an exclusive lock. A file that fails to decrypt is never
@@ -132,23 +135,28 @@ with the app's icon.
 - **The wire format** is one JSON line, then `body_len` raw bytes if the
   header names them; replies have the same shape. One module writes and reads
   it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
-  hash, pid), `has`, `store`, `get`, `delete`, `forward`, the Okta ops `okta_save`,
+  hash, pid), `has`, `store`, `get`, `delete`, `forward`, `webcrypto_key`, the Okta ops `okta_save`,
   `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`, and the
   session ops `session_get`, `session_put`, `session_clear`, `session_status`,
-  `session_mark` and `sign_out` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)).
-  No op returns a key, a password, a seed or a token, with one exception:
-  `get` returns the stored value of a name in `names::READABLE`, which is only
-  `music.spotify`, Spotify's credentials, to the app
-  ([auth.md](./auth.md#spotifys-credentials-are-the-one-value-keyd-reads-back)).
+  `session_mark` and `sign_out` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)),
+  and `site_set` ([auth.md](./auth.md#keyd-sends-the-session-only-to-the-profiles-university)).
+  No op returns a key, a password, a seed or a token, with two exceptions,
+  both to the app only: `get` returns the stored value of a name in
+  `names::READABLE`, which is only `music.spotify`, Spotify's credentials
+  ([auth.md](./auth.md#spotifys-credentials-are-read-back-with-get)), and
+  `webcrypto_key` returns WebKit's WebCrypto master key for the build that asks
+  ([auth.md](./auth.md#webkits-webcrypto-master-key-comes-from-keyd-per-build)).
   The one reply that carries a cookie is `session_get`, to the app. Only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
-  `request`, `caller`, `keychain` (the master key or an old item refused or
-  failed), `vault`, `record` (the sign-in attempt record, or a marker file, could
+  `request`, `caller`, `keychain` (the master key, an old item or WebKit's
+  WebCrypto item refused or failed), `vault`, `record` (the sign-in attempt record, or a marker file, could
   not be replaced), `missing` (a `canvas` one may carry the refused sign-in as
   `signin`) and `upstream`.
 - **`forward` sends one request with the credential added; the credential
   never leaves.** The request names a route (`secret`), `method` (GET or
   POST), `path`, `headers`, and optionally `"stream": true`; keyd sends it to
-  the route's fixed origin and attaches the credential from the vault. Routes
+  the route's origin and attaches the credential from the vault. A cloud
+  route's origin is fixed; `canvas` and `ed` go to the site's
+  ([auth.md](./auth.md#keyd-sends-the-session-only-to-the-profiles-university)). Routes
   are `app/keyd/core/src/forward/route.rs`; a name with no route (Okta's, a
   `session.*` name) cannot be forwarded:
 
@@ -157,8 +165,8 @@ with the app's icon.
   | `voyage` | `https://api.voyageai.com` | `/v1/` | `Authorization: Bearer` |
   | `mineru` | `https://mineru.net` | `/api/v4/` | `Authorization: Bearer` |
   | `groq` | `https://api.groq.com` | `/openai/v1/` | `Authorization: Bearer` |
-  | `canvas` | `https://canvas.lms.unimelb.edu.au` | `/` | `Cookie` (`session.canvas`) |
-  | `ed` | `https://edstem.org` | `/api/` | `x-token` (`session.ed`) |
+  | `canvas` | the site's Canvas | `/` | `Cookie` (`session.canvas`) |
+  | `ed` | the site's Ed (`https://edstem.org` by default) | `/api/` | `x-token` (`session.ed`) |
 
   The client may set only `Content-Type` and `Accept`, plus `Range`,
   `If-None-Match` and `If-Modified-Since` on `canvas` and `ed`; `Cookie`,
@@ -222,10 +230,13 @@ with the app's icon.
   admits any same-user caller. The adapter also gives each caller a role — `app` (the
   bundle itself), `cli` (its `Contents/MacOS/oculus`) or `unknown`; a dev
   build goes by file name, `app` or `oculus` — which the log records beside
-  the signing identifier. Ops check the role, never a path, and in one place
+  the signing identifier. For the `app` role it also names the application
+  WebKit files data under (`Caller::application`: the bundle's identifier, or
+  the dev executable's name), which `webcrypto_key` checks. Ops check the role,
+  never a path, and in one place
   (`State::dispatch`): every op but `ping` needs `app` or `cli`, because every
   executable in the install (ffmpeg ships in it) passes the caller check;
-  `okta_resume`, `session_get` and `get` need `app`. `ping` answers whoever was
+  `okta_resume`, `session_get`, `get` and `webcrypto_key` need `app`. `ping` answers whoever was
   admitted, for diagnostics.
 - **keyd holds the Okta credentials and runs the sign-in.** The username,
   password and TOTP seed are vault entries, written together by `okta_save`
@@ -256,7 +267,8 @@ with the app's icon.
   logs the failure when that file is missing or is not a keyd
   ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
 - **One data dir.** `keyd_core::paths::data_dir` (the OS data dir plus
-  `com.tchan.oculus`) is the only definition; the app's `paths::data_dir`
+  `com.tchan.oculus` on macOS; the Windows profile folder is described in
+  [windows.md](./windows.md)) is the only definition; the app's `paths::data_dir`
   and keyd's `main` both call it. Only a debug keyd reads an override.
 
 ## Scraping lives in Rust because hidden WebViews freeze
@@ -280,7 +292,8 @@ WebP as images. The frontend gets URLs from `mediaSrc()` in `app/src/lib/lecture
 
 `library::paths::data_dir()` computes the directory Tauri would
 (`~/Library/Application Support/com.tchan.oculus`) with no `AppHandle`, and is
-the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
+the only way Rust reaches it — so the CLI and the app cannot disagree. Windows
+uses the shared profile folder described in [windows.md](./windows.md). Inside:
 
 - `oculus.db` — SQLite, everything structured.
 - `courses/<code>/…` — scraped files in Canvas's layout, with the parser's
@@ -308,12 +321,19 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   spend guard from Settings → Embeddings, kept here rather than in `settings`
   because the reservation that enforces it already reads this file
   ([retrieval.md](./retrieval.md)).
+- `institution.json` — which university: its Canvas address, how it signs
+  in, and what launches learned ([auth.md](./auth.md#one-institution-profile-says-which-university)).
+- `ed-courses.json` — the Ed course each Canvas course's LTI launch named
+  ([sync.md](./sync.md#ed-content-is-a-custom-xml-dialect)).
 - `canvas-session/`: the authenticated flag, the signed-out marker and the
   sign-in attempt record, with `okta-sign-in.log` beside it
   ([auth.md](./auth.md)). The sessions themselves are in the vault.
 - `vault.bin` and its `vault.bin.lock`, `keyd.sock` (launchd's), and `bin/`
   with a dev-installed `Oculus Helper.app` and keyd's `oculus-keyd.stamp`
   ([above](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+- `start-over` — present only between Start over and the next launch, which
+  empties the directory but for the two usage files, `models/` and keyd's
+  own ([auth.md](./auth.md#one-institution-profile-says-which-university)).
 
 ## The database has one schema owner and two writers
 
@@ -401,7 +421,7 @@ has applied the migrations fail quietly and later ones retry.
 ## The main window holds one webview per browser tab and messaging service
 
 External links open as in-app browser tabs: each is a child webview of remote
-content stacked over the slot the `/browse/:id` route leaves in the content
+content placed under the slot the `/browse/:id` route leaves in the content
 card ([viewers.md](./viewers.md#the-in-app-browser-is-a-native-page-per-tab-owned-by-rust)). The frontend reports that slot as window
 insets and Rust lays pages out from them, so a resize never waits on
 JavaScript.
@@ -427,12 +447,56 @@ webview, laid out the same way.
   load and emits `browser-favicon`; the frontend owns the `browser_favicons`
   rows. Rust sees events, the frontend owns rows — the same split as history.
 
+## Native pages show through holes the app opens
+
+The frontend opens a hole over each shown page's slot
+(`app/src/lib/shell/nativeHoles.ts`), rounded where the slot meets the card's
+bottom corners. Popovers, menus and dialogs are portals (children of `body`),
+so they draw over a live page; anything inside `#root` over a slot is hidden
+by the page. A fullscreen media player, a fixed
+overlay inside `#root`, suspends every hole. `adopt_page`
+(`app/src-tauri/src/shell/native_layer/`) runs right after every `add_child`.
+
+- **macOS: pages sit under the app.** `init` turns off the app webview's
+  background, `adopt_page` moves each page to the bottom of the window's
+  views, and the holes are one `clip-path` on `#root`, which paints the
+  background. Clicks go through a `hitTest:` override on the window's content
+  view: a point inside a shown page's frame goes to that page, unless the
+  frontend has reported a portal over an open hole (`native_set_blocked`).
+  Then the app keeps the click, so clicking the page under a popover
+  dismisses it.
+- **macOS: the keyboard never goes to a page nobody can see.** WebKit makes a
+  page first responder whenever its script focuses an element, so a parked
+  dock page focusing its composer would take every key and ⌘C from the page
+  in front, which also loses its selection. The main window refuses
+  `makeFirstResponder:` for a hidden or off-window page (`focus_guard.rs`),
+  and browser pages are built unfocused, so a background tab never takes it
+  either.
+- **Windows: pages sit over an opaque app, clipped.** A transparent WebView2
+  shows the app's own background, never a sibling under it, so the macOS
+  layering cannot work. `adopt_page` raises each page's wry container (the
+  HWND `ICoreWebView2Controller::ParentWindow` returns) to the top and gives
+  it the current window region, empty until a hole opens over it. The frontend sends the holes and every portal
+  over them in logical window points (`native_set_holes`, from
+  `app/src/lib/shell/nativeRegions.ts`), and each page's region becomes the
+  holes over it minus those portals (`SetWindowRgn`, in container pixels).
+  Rust re-applies it after moving or resizing a page itself. A page with no
+  hole over it is hidden, and so is the page under a dialog's full-window
+  overlay. Clicks follow the region natively; a click on the page beside a
+  popover moves focus out of the app, and that `blur` sends Escape so the
+  popover closes, as switching apps does.
+- **Ordering**: a hole opens only after its page is placed, and closes before
+  the page is hidden or parked, or the bare window (macOS) or a page in the
+  wrong place (Windows) shows for a frame.
+
 ## Gotchas
 
 - Background work in a hidden WebView freezes silently — keep it in Rust ([above](#scraping-lives-in-rust-because-hidden-webviews-freeze)).
 - Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
 - A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
+- A background on `html` or `body` paints the whole canvas and hides every native page — keep it on `#root`.
+- A strip or menu drawn over a native page from inside `#root` is hidden by the page — portal it ([above](#native-pages-show-through-holes-the-app-opens)).
 - Reaching the data dir any way but `library::paths::data_dir()` (itself `keyd_core::paths::data_dir`) lets the CLI, the app and keyd diverge.
-- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process; `get` is app-only and limited to `names::READABLE` for that reason.
+- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process; `get` is app-only and limited to `names::READABLE` for that reason, and `webcrypto_key` is app-only and serves each build only its own key.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.
 - A `subject_id` that cascades on user-owned tables deletes the student's work with a course.

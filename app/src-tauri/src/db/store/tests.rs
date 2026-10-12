@@ -152,18 +152,16 @@ async fn file_upserts_preserve_content_time_unless_bytes_changed() {
         .execute(&pool)
         .await
         .unwrap();
-    upsert_file(
-        &pool,
-        1,
-        "courses/SUBJ/files/a.pdf",
-        4,
-        "files",
-        Some(7),
-        None,
-        false,
-    )
-    .await
-    .unwrap();
+    let row = FileRow {
+        subject_id: 1,
+        relative_path: "courses/SUBJ/files/a.pdf",
+        size_bytes: 4,
+        category: "files",
+        canvas_id: Some(7),
+        source_url: None,
+        changed: false,
+    };
+    upsert_file(&pool, &row).await.unwrap();
     let id = file_id(&pool, 1, "courses/SUBJ/files/a.pdf")
         .await
         .unwrap()
@@ -186,18 +184,14 @@ async fn file_upserts_preserve_content_time_unless_bytes_changed() {
     .await
     .unwrap();
     for changed in [false, true] {
-        upsert_file(
-            &pool,
-            1,
-            "courses/SUBJ/files/a.pdf",
-            8,
-            "files",
-            Some(9),
-            Some("https://source"),
+        let row = FileRow {
+            size_bytes: 8,
+            canvas_id: Some(9),
+            source_url: Some("https://source"),
             changed,
-        )
-        .await
-        .unwrap();
+            ..row
+        };
+        upsert_file(&pool, &row).await.unwrap();
         let row = sqlx::query("SELECT first_seen_at, content_changed_at, size_bytes, canvas_id, source_url FROM files WHERE id = ?1")
                 .bind(id).fetch_one(&pool).await.unwrap();
         assert_eq!(row.get::<String, _>("first_seen_at"), "first");

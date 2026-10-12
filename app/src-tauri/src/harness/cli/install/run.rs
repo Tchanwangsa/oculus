@@ -1,9 +1,9 @@
-//! Running an install route in a login shell and streaming its output. The
+//! Running a fixed install route and streaming its output. The
 //! runner is shared with `update` and `signin` through [`run_command`],
 //! [`drain_lines`] and [`exit_text`].
 
 use std::io::{BufRead, BufReader};
-use std::process::{ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{ChildStderr, ChildStdout, ExitStatus, Stdio};
 use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
@@ -92,8 +92,9 @@ pub struct Line {
     pub status: Option<String>,
 }
 
-/// Spawn `$SHELL -lc "<command>"` and stream it, `success` being the status
-/// of a zero exit. stdin is `/dev/null`, so anything that asks a question (a
+/// Unix uses a login shell; Windows resolves npm/bun directly and uses
+/// PowerShell for self-update commands. `success` names a zero exit.
+/// stdin is closed, so anything that asks a question (a
 /// `sudo` password, a prompt) fails at once instead of hanging.
 pub(in crate::harness::cli) fn run_command<F>(
     command: &str,
@@ -108,18 +109,40 @@ where
         return Err("that command needs sudo, which this app cannot ask for".into());
     }
 
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let mut child = Command::new(&shell)
-        .args(["-lc", command])
-        .stdin(Stdio::null())
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let mut cmd = crate::runtime::platform::command(shell);
+        cmd.args(["-lc", command]);
+        cmd
+    };
+    #[cfg(windows)]
+    let mut cmd = {
+        let words: Vec<&str> = command.split_whitespace().collect();
+        if words
+            .first()
+            .is_some_and(|name| matches!(*name, "npm" | "bun"))
+        {
+            let tool = crate::harness::cli::discover::tool(words[0])
+                .ok_or_else(|| format!("{} was not found", words[0]))?;
+            let mut cmd = crate::runtime::platform::cli_command(&tool)?;
+            cmd.args(&words[1..]);
+            cmd
+        } else {
+            let mut cmd = crate::runtime::platform::command("powershell.exe");
+            cmd.args(["-NoProfile", "-NonInteractive", "-Command", command]);
+            cmd
+        }
+    };
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("cannot run {shell}: {e}"))?;
+        .stderr(Stdio::piped());
+    let (mut child, job) = crate::runtime::platform::spawn_agent(&mut cmd)?;
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     std::thread::spawn(move || {
+        let _job = job;
         drain_lines(stdout, stderr, |line| {
             emit(Line {
                 line: Some(line),

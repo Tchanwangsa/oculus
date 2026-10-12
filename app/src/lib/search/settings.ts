@@ -114,6 +114,7 @@ function section(
 export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   page("canvas", ["sign in", "login", "session", "authenticate", "connect", "disconnect"]),
   ...rows("canvas", "Canvas", [
+    ["Canvas address", ["university", "url", "school", "institution"]],
     ["Sign in without the browser", ["okta", "password", "keychain", "authenticator"]],
   ]),
   ...section("canvas", "Setup", ["onboarding", "first run", "welcome"], [
@@ -148,6 +149,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
 
   page("storage", ["disk", "space", "videos"]),
   ...rows("storage", "Storage", [["Largest files"]]),
+  ...section("storage", "Start over", ["reset", "wipe", "delete library", "change university"]),
 
   page("agents", ["ai", "cli"]),
   ...section("agents", "CLI agents", ["claude code", "codex", "opencode", "antigravity", "install", "sign in", "update", "upgrade", "version"]),

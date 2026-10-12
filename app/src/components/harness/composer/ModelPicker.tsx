@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProviderMark } from "@/components/icons/ProviderMark";
-import { reasoningLabel, type PickerProvider, type Provider } from "@/lib/harness";
+import { providerAvailability, providerLabel, reasoningLabel, type PickerProvider, type Provider } from "@/lib/harness";
 import { settingsPage, type SettingsPageId } from "@/lib/search/settings";
 import { navigateActive } from "@/lib/shell/tabRouters";
 import { cn } from "@/lib/utils";
@@ -71,8 +71,10 @@ export const ModelPicker = memo(function ModelPicker({
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const active = providers.find((p) => p.id === provider) ?? providers[0];
-  const models = active?.models ?? [];
+  const active = providers.find((p) => p.id === provider);
+  const availability = providerAvailability(provider);
+  const unsupported = !availability.supported;
+  const models = unsupported ? [] : active?.models ?? [];
   const selected = models.find((m) => m.id === model) ?? null;
 
   // A stale search would silently hide rows the next time the menu opens.
@@ -82,7 +84,7 @@ export const ModelPicker = memo(function ModelPicker({
 
   const missing = active?.health === "missing";
 
-  const showSearch = !missing && models.length > SEARCH_THRESHOLD;
+  const showSearch = !unsupported && !missing && models.length > SEARCH_THRESHOLD;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return models;
@@ -91,17 +93,18 @@ export const ModelPicker = memo(function ModelPicker({
     );
   }, [models, query]);
 
-  const levels = missing ? [] : selected?.reasoningEfforts ?? [];
+  const levels = unsupported || missing ? [] : selected?.reasoningEfforts ?? [];
   const level = reasoning && levels.includes(reasoning) ? reasoning : null;
 
   // An id with no row (a model this list doesn't know) shows as the raw id.
   const label = selected?.label ?? model;
   const levelText = level ? reasoningLabel(level) : null;
   const title = [
-    active?.label,
+    active?.label ?? providerLabel(provider),
     selected?.id ?? model,
     levelText && `${levelText} reasoning`,
     missing && "not installed",
+    unsupported && availability.note,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -196,7 +199,11 @@ export const ModelPicker = memo(function ModelPicker({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-1">
-          {missing ? (
+          {unsupported ? (
+            <div className="px-2 py-3 text-xs text-muted-foreground">
+              {providerLabel(provider)} — {availability.note}
+            </div>
+          ) : missing ? (
             <NotInstalled
               label={active?.label ?? ""}
               onSettings={() => {

@@ -68,7 +68,7 @@ pub(super) fn settings_json(
     .to_string()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

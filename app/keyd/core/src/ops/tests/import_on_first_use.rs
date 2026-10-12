@@ -1,13 +1,8 @@
 use super::forward_op::{answer, forward};
 use super::*;
+use crate::test_support::OldItemList;
 
-fn with_items(
-    dir: &Scratch,
-    items: Vec<(
-        (&'static str, &'static str),
-        Result<Option<String>, KeyError>,
-    )>,
-) -> (State, Reads) {
+fn with_items(dir: &Scratch, items: OldItemList) -> (State, Reads) {
     let reads = Reads::default();
     let state = State::new(
         BUILD,

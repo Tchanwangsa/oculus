@@ -50,9 +50,10 @@ impl Unanswered {
                 Unanswered::Transport(detail)
             }
             KeydError::Absent => Unanswered::Transport("oculus-keyd stopped listening".into()),
-            other @ (KeydError::Request(_) | KeydError::Caller(_) | KeydError::Vault(_)) => {
-                Unanswered::Fatal(EmbedError::Broker(other.to_string()))
-            }
+            other @ (KeydError::Request(_)
+            | KeydError::Caller(_)
+            | KeydError::Vault(_)
+            | KeydError::Site(_)) => Unanswered::Fatal(EmbedError::Broker(other.to_string())),
         }
     }
 }

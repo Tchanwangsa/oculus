@@ -8,7 +8,9 @@ use base64::Engine as _;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, EventTarget};
 
-use super::{with_state, MAIN, PAGE_USER_AGENT};
+#[cfg(not(target_os = "windows"))]
+use super::PAGE_USER_AGENT;
+use super::{with_state, MAIN};
 
 /// On its own event so kilobytes of icon don't ride every snapshot.
 #[derive(Clone, Serialize)]
@@ -23,10 +25,10 @@ const FAVICON_MAX: usize = 256 * 1024;
 const FAVICON_HTML_MAX: u64 = 512 * 1024;
 
 fn favicon_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(8))
-        .user_agent(PAGE_USER_AGENT)
-        .build()
+    let builder = ureq::AgentBuilder::new().timeout(Duration::from_secs(8));
+    #[cfg(not(target_os = "windows"))]
+    let builder = builder.user_agent(PAGE_USER_AGENT);
+    builder.build()
 }
 
 pub(super) fn ensure_favicon(app: &AppHandle, url: &url::Url) {

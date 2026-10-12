@@ -31,6 +31,10 @@ use sync::subjects::SubjectsState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before anything opens a file in the data dir (`storage::storage_start_over`).
+    library::storage::finish_start_over(&library::paths::data_dir());
+    // No credential goes through keyd until it serves the profile's university.
+    keyd_core::client::bound::bind(sources::institution::bound);
     tauri::Builder::default()
         // ⌘T / ⌘W reach the app as menu events, not key events — see shell/menu.rs.
         .menu(shell::menu::build)
@@ -50,6 +54,15 @@ pub fn run() {
         .manage(shell::usage::UsageState::default())
         .manage(music::MusicState::default())
         .setup(|app| {
+            // WebKit's WebCrypto master key comes from keyd. First, so the
+            // default store has its delegate before any page can ask.
+            #[cfg(target_os = "macos")]
+            shell::webcrypto::install_default(app.handle());
+            #[cfg(windows)]
+            if let Err(error) = shell::window::fit_startup(app.handle()) {
+                elog!("[oculus] could not fit the startup window to the monitor: {error}");
+            }
+
             // Give the parse and embed seams a window to emit progress to;
             // headless (CLI) runs never bind, so their emits are no-ops.
             parse::events::bind(app.handle().clone());
@@ -62,6 +75,9 @@ pub fn run() {
 
             sources::echo360::cleanup_partial_downloads(&library::paths::data_dir());
 
+            // How pages share the window with the app: under its transparent
+            // webview on macOS, clipped to holes on Windows. Before any page.
+            shell::native_layer::init(app.handle());
             // Seeds WebKit with the Canvas session and follows window resizes.
             shell::browser::init(app.handle());
             // Dock pages follow resizes; the frontend creates them (`dock_set_enabled`).
@@ -90,14 +106,13 @@ pub fn run() {
             let restore = app.handle().clone();
             std::thread::spawn(move || {
                 auth::keyd::ensure_installed();
+                // keyd sends the session only to the profile's university.
+                sources::institution::tell_keyd();
                 // Spotify, when Settings → Music is on: its login is keyd's too.
                 music::startup::apply_settings(&restore);
                 // Replay the stored session with a server-side ping.
                 auth::restore_session(&restore);
             });
-
-            // The session keep-alive agent an earlier version installed.
-            auth::legacy_agent::retire_in_background();
 
             Ok(())
         })
@@ -121,6 +136,8 @@ pub fn run() {
             auth::commands::check_canvas_session,
             auth::commands::launch_canvas_auth,
             auth::commands::disconnect_canvas,
+            sources::institution::commands::institution_get,
+            sources::institution::commands::institution_configure,
             auth::okta::commands::okta_credential_status,
             auth::okta::commands::okta_save_credentials,
             auth::okta::commands::okta_clear_credentials,
@@ -134,6 +151,7 @@ pub fn run() {
             sync::scrape::embeds::commands::echo360_embed_info,
             sync::scrape::embeds::commands::echo360_embed_download,
             sync::scrape::embeds::commands::echo360_embed_cancel,
+            sources::oembed::web_video_info,
             sync::scrape::parse_file,
             sync::scrape::parse_skip,
             library::files::commands::read_course_file,
@@ -238,6 +256,7 @@ pub fn run() {
             harness::app::models::harness_antigravity_rules,
             harness::app::models::harness_antigravity_revoke,
             harness::app::models::harness_opencode_models,
+            harness::app::models::harness_opencode_models_if_running,
             harness::app::models::harness_opencode_providers,
             harness::app::models::harness_opencode_set_key,
             harness::app::models::harness_opencode_disconnect,
@@ -261,13 +280,16 @@ pub fn run() {
             lectures::chapters::app::lecture_thumbnail,
             lectures::lecture_end::app::lecture_find_end,
             library::storage::storage_report,
+            library::storage::start_over::storage_start_over,
             shell::usage::usage_activity,
             shell::browser::commands::browser_open_url,
             shell::browser::commands::browser_state,
             shell::browser::commands::browser_place,
             shell::browser::commands::browser_set_viewport,
             shell::browser::commands::browser_hide_tab,
-            shell::browser::commands::browser_snapshot,
+            shell::native_layer::native_set_blocked,
+            #[cfg(windows)]
+            shell::native_layer::windows::native_set_holes,
             shell::browser::commands::browser_hide,
             shell::browser::commands::browser_navigate,
             shell::browser::commands::browser_history,
@@ -284,6 +306,7 @@ pub fn run() {
             music::commands::music_play_pause,
             music::commands::music_play,
             music::commands::music_pause,
+            music::commands::music_pause_player,
             music::commands::music_shuffle,
             music::commands::music_repeat,
             music::commands::music_next,
@@ -298,11 +321,14 @@ pub fn run() {
             music::commands::music_album_tracks,
             music::commands::music_tracks,
             music::commands::music_add_to_queue,
+            music::commands::music_skip_to,
+            music::commands::music_queue_remove,
             music::commands::music_search,
             music::commands::music_search_more,
             music::commands::music_duck,
             music::commands::music_devices,
             music::commands::music_transfer,
+            music::commands::music_play_here,
             music::commands::music_outputs,
             music::commands::music_set_output,
             shell::dock::commands::dock_list,

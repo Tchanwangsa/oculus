@@ -39,10 +39,7 @@ impl<R: Read> Read for UploadBody<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if (self.cancelled)() {
             // Not `Interrupted`, which `io::copy` would retry.
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "upload skipped",
-            ));
+            return Err(std::io::Error::other("upload skipped"));
         }
         let read = self.inner.read(buf)?;
         self.sent += read as u64;

@@ -8,6 +8,7 @@ Read this before any UI work.
 | Piece | Location |
 | --- | --- |
 | Tokens, base resets, utilities (`page-scroll`, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
+| Platform detection and shortcut labels | `app/src/lib/platform.ts` |
 | Text selection scopes | `app/src/styles/base.css`, `app/src/lib/ui/selectScope.ts` |
 | shadcn primitives (flat) | `app/src/components/ui/` |
 | Composites built on them | `app/src/components/ui/layout/`, `app/src/components/ui/table/`, `app/src/components/ui/search/`, `app/src/components/ui/lightbox/` |
@@ -31,6 +32,11 @@ headings and Inter for everything else, Notion-style layout.
   (`app/src/layouts/AppLayout.tsx`). Tabs and rail icons are pills and rounded
   squares on that ground. A sidebar divider or a rule under the strip breaks the
   effect — the card's border is the separation.
+- **Shortcut labels follow the desktop platform** through `shortcut` in
+  `app/src/lib/platform.ts`: Command glyphs on macOS, Ctrl/Alt/Shift names on
+  Windows. The shell reserves the traffic-light inset only on macOS; Windows
+  caption controls sit after the side-panel toggle, outside the tab strip's
+  measured width ([shell.md](./shell.md#the-shell-owns-tabs-side-panels-and-every-window-shortcut)).
 - **Buttons and chips are pills** (`rounded-full` in
   `app/src/components/ui/button.tsx`); rectangles are for segmented toolbars
   that override the radius at the call site.

@@ -106,7 +106,7 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
         _ => {
             if let Some(rest) = name.strip_prefix("mcp__") {
                 // `mcp__server__tool`: title by the tool.
-                let tool = rest.splitn(2, "__").nth(1).unwrap_or(rest);
+                let tool = rest.split_once("__").map(|x| x.1).unwrap_or(rest);
                 return (ToolKind::Other, tool.to_string());
             }
             (ToolKind::Other, String::new())
@@ -135,9 +135,14 @@ fn patch_target(patch: &str) -> String {
 /// `oculus grep …`, `/path/to/oculus search …`, or the same behind an env
 /// prefix. Word-boundary rather than substring, so `myoculus` is not it.
 fn is_oculus_cli(cmd: &str) -> bool {
-    cmd.split_whitespace()
-        .take(3)
-        .any(|w| w == "oculus" || w.ends_with("/oculus"))
+    cmd.split_whitespace().take(3).any(|word| {
+        let name = word
+            .trim_matches(['\'', '"'])
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(word);
+        name.eq_ignore_ascii_case("oculus") || name.eq_ignore_ascii_case("oculus.exe")
+    })
 }
 
 /// Tool output past this is truncated with a marker: it is a timeline row and a Tauri event.
@@ -173,6 +178,9 @@ mod tests {
         assert_eq!(k, ToolKind::OculusCli);
         let (k, _) = classify("Bash", &serde_json::json!({"command": "ls myoculus"}));
         assert_eq!(k, ToolKind::Bash);
+        assert!(is_oculus_cli(r"C:\Oculus\oculus.exe search foo"));
+        assert!(is_oculus_cli("oculus.exe task add"));
+        assert!(!is_oculus_cli("myoculus.exe task add"));
     }
 
     #[test]

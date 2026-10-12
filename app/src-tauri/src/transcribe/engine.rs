@@ -42,7 +42,11 @@ pub trait Engine {
 }
 
 /// Every engine, in the default order.
+#[cfg(not(target_os = "windows"))]
 pub const ENGINES: [&str; 3] = ["groq", "whisper", "apple"];
+
+#[cfg(target_os = "windows")]
+pub const ENGINES: [&str; 1] = ["groq"];
 
 /// How the CLI and the app's messages name an engine.
 pub fn engine_label(name: &str) -> &'static str {
@@ -54,6 +58,11 @@ pub fn engine_label(name: &str) -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 pub(super) const NO_ENGINE: &str =
     "No transcription engine — add a Groq key, download a Whisper model, \
                          or turn on on-device speech, in Settings → Transcription";
+
+#[cfg(target_os = "windows")]
+pub(super) const NO_ENGINE: &str =
+    "No transcription engine — add a Groq key in Settings → Transcription";

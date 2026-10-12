@@ -1,0 +1,109 @@
+//! Disk usage of the app's data directory, and Start over, which empties it
+//! (`start_over`).
+//!
+//! One walk returns every file with its size; the frontend owns the grouping
+//! (by file type, by subject) so new views need no Rust changes. Free/total
+//! space for the volume the data dir sits on comes from statvfs.
+
+pub mod start_over;
+
+pub use start_over::finish_start_over;
+
+use std::path::Path;
+
+use serde::Serialize;
+
+#[derive(Serialize)]
+pub struct StorageFile {
+    /// Path relative to the data dir, `/`-separated.
+    pub path: String,
+    pub bytes: u64,
+}
+
+#[derive(Serialize)]
+pub struct StorageReport {
+    pub data_dir: String,
+    pub total_bytes: u64,
+    pub disk_free_bytes: u64,
+    pub disk_total_bytes: u64,
+    pub files: Vec<StorageFile>,
+}
+
+fn walk(root: &Path, dir: &Path, out: &mut Vec<StorageFile>, total: &mut u64) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // symlink_metadata so a stray link can't loop the walk or double-count.
+        let Ok(meta) = entry.path().symlink_metadata() else {
+            continue;
+        };
+        #[cfg(windows)]
+        if junction::exists(&path).unwrap_or(false) {
+            continue;
+        }
+        if meta.is_dir() {
+            walk(root, &path, out, total);
+        } else if meta.is_file() {
+            let bytes = meta.len();
+            *total += bytes;
+            let rel = path
+                .strip_prefix(root)
+                .map(crate::library::paths::slash_path)
+                .unwrap_or_else(|_| path.to_string_lossy().into_owned());
+            out.push(StorageFile { path: rel, bytes });
+        }
+    }
+}
+
+#[cfg(unix)]
+fn disk_space(path: &Path) -> (u64, u64) {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return (0, 0);
+    };
+    let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c.as_ptr(), &mut s) } != 0 {
+        return (0, 0);
+    }
+    let frsize = s.f_frsize as u64;
+    (s.f_bavail as u64 * frsize, s.f_blocks as u64 * frsize)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn disk_space(_path: &Path) -> (u64, u64) {
+    (0, 0)
+}
+
+#[tauri::command]
+pub async fn storage_report() -> Result<StorageReport, String> {
+    crate::runtime::blocking::run(|| {
+        let root = crate::library::paths::data_dir();
+        let mut files = Vec::new();
+        let mut total = 0u64;
+        walk(&root, &root, &mut files, &mut total);
+        files.sort_by_key(|f| std::cmp::Reverse(f.bytes));
+        let (disk_free_bytes, disk_total_bytes) = disk_space(&root);
+        Ok(StorageReport {
+            data_dir: root.to_string_lossy().into_owned(),
+            total_bytes: total,
+            disk_free_bytes,
+            disk_total_bytes,
+            files,
+        })
+    })
+    .await
+}
+
+#[cfg(windows)]
+fn disk_space(path: &Path) -> (u64, u64) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let (mut free, mut total, mut volume_free) = (0, 0, 0);
+    if unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, &mut volume_free) } == 0 {
+        return (0, 0);
+    }
+    (free, total)
+}

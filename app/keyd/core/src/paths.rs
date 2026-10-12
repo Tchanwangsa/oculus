@@ -8,10 +8,6 @@ use std::path::{Path, PathBuf};
 /// tests hold the two together).
 pub const IDENTIFIER: &str = "com.tchan.oculus";
 
-/// Canvas's origin, without a trailing slash: where the sign-in lands and
-/// where the app's requests go.
-pub const CANVAS_BASE: &str = "https://canvas.lms.unimelb.edu.au";
-
 /// The name cargo builds keyd under, and of the bare binary an earlier
 /// install left in `bin/`.
 pub const BINARY: &str = "oculus-keyd";
@@ -26,6 +22,13 @@ const STAMP: &str = "oculus-keyd.stamp";
 
 /// The OS's per-user data dir plus the identifier: Tauri's `app_data_dir()`.
 pub fn data_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        return dirs::home_dir()
+            .expect("Windows user profile directory is unavailable")
+            .join("Oculus");
+    }
+    #[cfg(not(windows))]
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(IDENTIFIER)
@@ -33,6 +36,22 @@ pub fn data_dir() -> PathBuf {
 
 /// keyd's endpoint. Short on purpose: a macOS `sun_path` holds 104 bytes.
 pub fn socket(data_dir: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let mut endpoint = crate::platform::pipe_name().expect("Windows user SID is unavailable");
+        if data_dir != self::data_dir() {
+            // Explicit non-production roots (test fixtures) must not share the
+            // live user's endpoint or collide with each other.
+            use std::hash::{Hash, Hasher};
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            data_dir.hash(&mut hash);
+            let mut name = endpoint.into_os_string();
+            name.push(format!(".test.{:x}", hash.finish()));
+            endpoint = name.into();
+        }
+        return endpoint;
+    }
+    #[cfg(not(windows))]
     data_dir.join("keyd.sock")
 }
 
@@ -143,6 +162,11 @@ pub fn helper_app_name() -> String {
 
 /// keyd's executable inside the helper app `helper`.
 pub fn helper_program(helper: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        return helper.join("oculus-keyd.exe");
+    }
+    #[cfg(not(windows))]
     helper.join("Contents/MacOS").join(HELPER)
 }
 
@@ -162,13 +186,20 @@ pub fn helper_of(program: &Path) -> Option<PathBuf> {
 /// The keyd an app bundle ships for `exe`, one of the bundle's
 /// `Contents/MacOS` executables: its `Contents/Helpers/<HELPER>.app`.
 pub fn bundled_program(exe: &Path) -> Option<PathBuf> {
-    let macos = exe.parent()?;
-    let contents = macos.parent()?;
-    let app = contents.parent()?;
-    let shaped = macos.file_name()? == "MacOS"
-        && contents.file_name()? == "Contents"
-        && app.extension()? == "app";
-    shaped.then(|| helper_program(&contents.join("Helpers").join(helper_app_name())))
+    #[cfg(windows)]
+    {
+        return Some(exe.parent()?.join("oculus-keyd.exe"));
+    }
+    #[cfg(not(windows))]
+    {
+        let macos = exe.parent()?;
+        let contents = macos.parent()?;
+        let app = contents.parent()?;
+        let shaped = macos.file_name()? == "MacOS"
+            && contents.file_name()? == "Contents"
+            && app.extension()? == "app";
+        shaped.then(|| helper_program(&contents.join("Helpers").join(helper_app_name())))
+    }
 }
 
 /// Where an install that does not run in place puts keyd's helper app, and
@@ -196,7 +227,7 @@ pub fn stamp(data_dir: &Path) -> PathBuf {
     bin_dir(data_dir).join(STAMP)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
 

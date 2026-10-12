@@ -40,6 +40,7 @@ pub fn source_of(real: &Path, home: Option<&Path>) -> Source {
 }
 
 /// `'…'`, with any `'` closed, escaped and reopened.
+#[cfg(not(windows))]
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
@@ -76,4 +77,9 @@ pub(super) fn effective_source(provider: Provider, source: Source) -> Source {
         (Provider::Claude | Provider::Codex, Source::Bun) => Source::SelfManaged,
         _ => source,
     }
+}
+
+#[cfg(windows)]
+fn shell_quote(s: &str) -> String {
+    format!("& '{}'", s.replace('\'', "''"))
 }

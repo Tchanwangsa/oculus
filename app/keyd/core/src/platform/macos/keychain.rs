@@ -1,14 +1,17 @@
-//! The login keychain: the master key's one item, and plain reads and
-//! deletes of the items that predate the vault (import on use, and removal
-//! when the key is deleted).
+//! The login keychain: the master key's one item, plain reads and deletes of
+//! the items that predate the vault (import on use, and removal when the key
+//! is deleted), and reads of WebKit's WebCrypto master key items.
 //!
 //! The master key is added with `SecItemAdd` and never updated: if another
 //! writer got there first, its key is the one read back and used.
 
 use core_foundation::data::CFData;
-use security_framework::item::{ItemAddOptions, ItemAddValue, ItemClass};
+use security_framework::item::{
+    ItemAddOptions, ItemAddValue, ItemClass, ItemSearchOptions, SearchResult,
+};
 use security_framework::passwords::{delete_generic_password, generic_password, PasswordOptions};
 
+use crate::names::{WebCrypto, WEBKIT_ACCOUNT_PREFIX};
 use crate::vault::{
     KeyError, KeySource, LegacySource, MasterKey, MASTER_ACCOUNT, MASTER_LABEL, MASTER_SERVICE,
 };
@@ -70,6 +73,35 @@ impl LegacySource for LegacyKeychain {
             Ok(()) => Ok(true),
             Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(false),
             Err(e) => Err(classify(&format!("deleting {service}/{account}"), e.code())),
+        }
+    }
+
+    /// The query WebKit's `findMasterKey` makes: class and account, no
+    /// service, the first match's data. Only a WebKit WebCrypto account is
+    /// ever asked for.
+    fn read_webcrypto(&self, key: &WebCrypto) -> Result<Option<Vec<u8>>, KeyError> {
+        if !key.account.starts_with(WEBKIT_ACCOUNT_PREFIX) {
+            return Err(KeyError::Platform(format!(
+                "{} is not a WebKit WebCrypto item",
+                key.account
+            )));
+        }
+        let found = ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .account(key.account)
+            .load_data(true)
+            .search();
+        match found {
+            Ok(items) => match items.into_iter().next() {
+                Some(SearchResult::Data(bytes)) => Ok(Some(bytes)),
+                // Never `None`: only "not found" may lead to a new key.
+                _ => Err(KeyError::Platform(format!(
+                    "reading {}: the keychain returned no data",
+                    key.account
+                ))),
+            },
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
+            Err(e) => Err(classify(&format!("reading {}", key.account), e.code())),
         }
     }
 }

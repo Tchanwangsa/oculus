@@ -2,7 +2,7 @@
 
 use super::{FRAME_BYTES, FRAME_H, FRAME_W, GRAB_OFFSETS, GRAB_TOLERANCE, GRAB_WIDTH};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// One probed JPEG per boundary at `<out_dir>/<second>.jpg` (see
 /// [`grab_frame`]); the name keeps the boundary second, not the probed offset.
@@ -76,7 +76,7 @@ pub fn grab_frame(
     let at = best_offset(ffmpeg, video, second);
     // Escaped: an unescaped comma would end the filter.
     let scale = format!("scale=min({width}\\,iw):-2");
-    let status = Command::new(ffmpeg)
+    let status = crate::runtime::platform::command(ffmpeg)
         .args([
             "-v",
             "error",
@@ -141,7 +141,7 @@ pub(super) fn pick_offset(probed: &[(u32, f32)]) -> Option<u32> {
 /// its grey values at 160×90. A blank scores ~0. `None` means no frame
 /// (normally past the end).
 fn frame_detail(ffmpeg: &Path, video: &Path, second: u32) -> Option<f32> {
-    let out = Command::new(ffmpeg)
+    let out = crate::runtime::platform::command(ffmpeg)
         .args(["-v", "error", "-nostdin", "-ss", &second.to_string(), "-i"])
         .arg(video)
         .args([

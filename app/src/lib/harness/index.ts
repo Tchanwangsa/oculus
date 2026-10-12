@@ -4,6 +4,7 @@
  * `stores/chat/harnessStore.ts` folds the live events. See docs/harness.md.
  */
 export * from "./providers";
+export * from "./availability";
 export * from "./models";
 export * from "./registry";
 export * from "./route";

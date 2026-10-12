@@ -15,7 +15,8 @@ video's transcript, and a web page.
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lectures/playback/`, `app/src/lib/lectures/playbackOwner.ts` |
 | Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectures/end.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/lectures/chapters/app.rs` |
 | Library videos | `app/src/components/files/VideoFileViewer.tsx`, `app/src/lib/files/openFile.ts` |
-| An Echo360 embed in a page: the card, its subject, its store | `app/src/components/markdown/embed/EmbedVideoCard.tsx`, `app/src/components/markdown/embed/EmbedSubject.tsx`, `app/src/stores/lectures/embedDownloadStore.ts` |
+| A page's video cards: Echo360, Canvas, YouTube/Vimeo; their shared frame, the subject, the stores | `app/src/components/markdown/embed/EmbedVideoCard.tsx`, `app/src/components/markdown/embed/CanvasVideoCard.tsx`, `app/src/components/markdown/embed/WebVideoCard.tsx`, `app/src/components/markdown/embed/card/`, `app/src/components/markdown/embed/EmbedSubject.tsx`, `app/src/stores/lectures/embedDownloadStore.ts`, `app/src/stores/lectures/videoDownloadStore.ts`, `app/src/stores/lectures/webVideoStore.ts` |
+| YouTube and Vimeo metadata (`web_video_info`) | `app/src-tauri/src/sources/oembed.rs` |
 | Transcribe from a player | `app/src/hooks/lectures/useTranscription.ts`, `app/src/components/media/TranscribeEmpty.tsx` |
 | Transcript search and source-index mapping | `app/src/hooks/lectures/useTranscriptSearch.ts` |
 | Transcription of videos without captions | `app/src-tauri/src/transcribe/`, `app/src-tauri/src/providers/groq.rs`, `app/src/lib/lectures/transcribe/` |
@@ -30,9 +31,12 @@ video's transcript, and a web page.
 Library file rendering always runs `rehypeMaths` so math fences and HTML math
 classes work even when there are no dollar delimiters.
 
-- **`app/src/components/markdown/MdComponents.tsx`** renders Canvas bodies,
-  parsed PDFs, Ed threads and replies, with `rehypeMaths` only when `hasMath`
-  finds a delimiter. `normalizeMath` rewrites
+- **`MD_COMPONENTS`** (`app/src/components/markdown/MdComponents.tsx`) is
+  the component map for every surface. A library file — a Canvas page,
+  announcement or assignment, a parsed PDF, an Ed thread — renders through
+  `FileMarkdown` with it, extended by `FileViewer`'s
+  `useLibraryMdComponents` to resolve in-file links; chat replies through
+  `CompactMd`, with `rehypeMaths` only when `hasMath` finds a delimiter. `normalizeMath` rewrites
   `\(…\)` / `\[…\]` to `$…$` / `$$…$$` because CommonMark eats the backslash
   first. An inline `<code>` holding only a citation (`app/src/lib/citations/`)
   renders as `FileChip`. `![alt](path)` naming a library picture or HTML
@@ -43,30 +47,42 @@ classes work even when there are no dollar delimiters.
   `rehypeMaths` and the block anchors, so their own output (KaTeX markup,
   `data-page`) is never checked. The schema
   (`app/src/lib/markdown/sanitizeSchema.ts`) is GitHub's default plus
-  `<echo-video link-id src>` and remark-math's classes. Grow it from a tag
+  `<echo-video link-id src title>`, `<canvas-video file-id title>`,
+  `<web-video provider video-id hash title>` and remark-math's classes. Grow it from a tag
   scan of the library's `.md`, not from memory; across the library it drops
   only prose that parses as a tag
   (`<section1>`, `<the>`, kept as their text), `on*` handlers, comments and
   stray `<title>`/`<meta>`/`<form>`. MinerU's `<sub>`/`<sup>` render
   unchanged. Its `user-content-` id prefix stays: nothing in the app
   navigates by id, and it keeps a page's ids off `window`.
-- **Canvas's `<details>` and Echo360 embeds render as components** in
+- **Canvas's `<details>` and video tags render as components** in
   `MD_COMPONENTS`: `details`/`summary` as a bordered dropdown whose caret
   turns by its own element's `[open]` (`group-open` would turn nested ones
-  too), and `echo-video` as `EmbedVideoCard`. hast keeps the attribute name,
-  so its prop is `link-id`. The tags are written by the sync ([sync.md](./sync.md#canvas-html-becomes-markdown-with-a-few-kept-tags)).
-- **An Echo360 embed is a card inside a library file**
-  (`app/src/components/markdown/embed/EmbedVideoCard.tsx`). Its commands need
-  the subject, which `MD_COMPONENTS` doesn't have, so `FileViewer` (every
-  Canvas page, announcement, assignment and parsed file) and a note's
-  `VersionPreview` wrap the markdown in `EmbedSubjectProvider`, which looks
-  the code up in the subjects list by id (a course folder is `safe_dir(code)`,
-  not the code). Anywhere else — a chat reply, `CompactMd` — the tag is
-  `EchoVideoPlaceholder`, a button opening the Canvas launch URL. The card is
-  spans, since the tag can land in a paragraph or table cell, and carries the
-  tag as `data-md` so a copied selection keeps it. Its states, all one height
-  (the 16:9 thumbnail sets it):
-  - **resolving** — a skeleton of the thumbnail and two text lines;
+  too), and the three video tags as cards. hast keeps the attribute names,
+  so the props are `link-id`, `file-id`, `video-id`. The tags are written by
+  the sync ([sync.md](./sync.md#canvas-html-becomes-markdown-with-a-few-kept-tags)).
+- **A task list (`- [ ]`) keeps its indent and drops its bullets.** The
+  `ul`/`ol`/`li` renderers merge remark-gfm's `contains-task-list` and
+  `task-list-item` classes into their own rather than spreading over them;
+  the disabled box hangs back into the list's indent (`input`), so wrapped
+  lines align with the text, and sits on the first line.
+- **Every video card shares one frame** (`app/src/components/markdown/embed/card/`):
+  a 16:9 thumbnail (a camera glyph without a picture), the name and a meta
+  line, the actions — one height in every state, the skeleton included. It is
+  spans, since a tag can land in a paragraph or table cell, and carries the
+  tag as `data-md` so a copied selection keeps it. Echo360 and Canvas cards
+  need the subject, which `MD_COMPONENTS` doesn't have, so `FileViewer` (every
+  library file) and a note's `VersionPreview` wrap the markdown in
+  `EmbedSubjectProvider`, which looks the code up in the subjects list by id
+  (a course folder is `safe_dir(code)`, not the code). For a subject the list
+  no longer has, those two are `VideoLinkOut`, a button named by the tag's
+  title that opens Canvas. Chat replies don't parse raw HTML, so a tag in one
+  shows as its literal text.
+- **`<echo-video>` is an Echo360 video**
+  (`app/src/components/markdown/embed/EmbedVideoCard.tsx`). The tag's
+  `title` (the Canvas iframe's) names the card until the info call answers,
+  and stands in when Echo360's name is empty. Its states:
+  - **resolving** — the skeleton, with the title when the tag has one;
   - **ready** — the poster from `posterRel`, Echo360's media name without its
     video extension, the length (`fmtDurationSecs`, as lecture rows show it)
     and a captions mark, then **Play** once `fileRel` is set (the file's row
@@ -84,6 +100,34 @@ classes work even when there are no dollar delimiters.
   records a view, so `embedDownloadStore` asks it once per link per app
   session and forgets only a rejection. Play that finds no row asks again;
   the backend clears a deleted file, so the card offers Download.
+- **`<canvas-video>` is a video file uploaded to Canvas**
+  (`app/src/components/markdown/embed/CanvasVideoCard.tsx`), named by its
+  `title` without the extension, on a camera tile (Canvas gives no poster). A
+  sync never fetches one — they run to hundreds of megabytes — so the card
+  looks for a `files` row with this subject and `canvas_id = file-id`
+  (`getFileByCanvasId`, again on every `FILE_SCRAPED_EVENT` for that file):
+  found, it shows the size and **Play** (`openFileSmart`, ⌘-click a tab);
+  otherwise **Download**, through `videoDownloadStore` and
+  `canvas_download_video` exactly as a module video
+  ([frontend.md](./frontend.md#uploads-and-documents-are-ordinary-library-files)),
+  then the percent and Cancel, then Play once the row lands. A failure shows
+  verbatim with Retry. Every state keeps the Open in Canvas icon, to
+  `/courses/<subject id>/files/<id>` on the profile's Canvas, read at the
+  click (a subject's id is its Canvas course id;
+  `app/src/lib/files/canvasLinks.ts`).
+- **`<web-video>` is a YouTube or Vimeo video**
+  (`app/src/components/markdown/embed/WebVideoCard.tsx`), Play only. Its
+  thumbnail, title, channel and (Vimeo only) length come from the provider's
+  oEmbed endpoint through `web_video_info` (`app/src-tauri/src/sources/oembed.rs`,
+  in Rust because the webview's CORS refuses it), which checks the provider
+  and the id's charset before building a URL. `webVideoStore` asks once per
+  video per app session and forgets a rejection. Until then, or without an
+  answer, the card shows the tag's title (else "YouTube video"/"Vimeo video")
+  and still plays. Play opens `youtube.com/watch?v=<id>` or
+  `vimeo.com/<id>/<hash>` through `openExternal`, so an in-app browser tab (⌘-click
+  for the system browser); never an iframe in the app's webview, since
+  YouTube refuses embeds from the app's origin. An unknown provider renders
+  nothing.
 - **A reply goes through `CompactMd`**, whose `.md-compact` rules in `index.css`
   are deliberately *unlayered* — in `@layer base` they would lose to the
   utilities they override. **`InlineMd` flattens blocks** because chapter
@@ -107,7 +151,8 @@ classes work even when there are no dollar delimiters.
   in `FilePage`'s header, ⌘-click for the system browser). A synced Canvas page
   is our markdown of it; the button opens the original, with its embeds and
   styling, in a browser tab through `openExternal`.
-- **`FileViewer` resolves in-file links locally** — relative links and Canvas
+- **`FileViewer` resolves in-file links locally** — `../` links, links into a
+  folder beside the file (an Ed lesson's `<id>-<slug>/…` assets) and Canvas
   `/files/<id>` or `/pages/<slug>` URLs, by `canvas_id`, path or `source_url`
   (`app/src/lib/files/libraryLinks.ts`, shared with the note editor). A selection
   in its rendered markdown copies or drags out as markdown, maths as TeX
@@ -445,6 +490,9 @@ frontend's call; `oculus transcribe` is the terminal's.
 
 **Engines are tried in the order set in Settings → Transcription** — Groq,
 local Whisper, then on-device speech until the user drags them into another.
+Windows offers Groq only: local Whisper and on-device speech are hidden in
+Settings and excluded from backend selection, even if their switches are stored.
+A missing enabled Groq key fails the run with a Settings → Transcription hint.
 An `Engine` turns one audio file into timed segments; the pipeline owns
 everything else. `engines()` in `app/src-tauri/src/transcribe/settings/mod.rs` lists
 the configured ones in that order before any decoding: Groq when it is on and
@@ -597,7 +645,7 @@ recording on a large model takes minutes.
   needing at most a quarter, capped at `small` without a GPU (`fits`).
 - **Settings only lists, downloads and deletes.** `whisper_models` reads the
   directory, the RAM size and whether `whisper-cli` is found, so it runs on
-  every visit; `whisper_download_model`
+  every macOS visit; `whisper_download_model`
   resolves when the file is on disk (rejecting `cancelled` on a cancel) and
   reports through `whisper-model-progress`
   (`{id, phase, received, total, error?}`, every ~150 ms). A download in
@@ -608,9 +656,11 @@ recording on a large model takes minutes.
 
 ## The in-app browser is a native page per tab, owned by Rust
 
-A browser tab is `/browse/<id>`, naming a WKWebView that
-`app/src-tauri/src/shell/browser/` parks over an empty slot in `BrowserPage` (Canvas
-refuses iframes).
+A browser tab is `/browse/<id>`, naming a native child webview (WKWebView on
+macOS, WebView2 on Windows) that
+`app/src-tauri/src/shell/browser/` places at an empty slot in `BrowserPage`, seen
+through a hole the app opens ([architecture.md](./architecture.md#native-pages-show-through-holes-the-app-opens)).
+Canvas refuses iframes.
 
 - **Rust owns the tab list** and pushes `browser-state` on every change;
   `useBrowserTabs` reconciles it per *pane*. The mirror preserves unchanged
@@ -618,17 +668,27 @@ refuses iframes).
   Page navigations change the URL in
   Rust only, never the route. What a page knows about itself (history, find,
   zoom) is pushed as events, because `with_webview` returns nothing.
-- **A native page can't interleave with the DOM.** `BrowserPage` hides it while
-  a portal overlaps the slot, while its tab is backgrounded (`useTabActive`),
-  and while the address field is focused — showing a PNG still
-  (`browser_snapshot`) so the card doesn't blank. It stays hidden for the whole
-  edit, not just while the list shows, because `browser_place` focuses the
-  page: re-placing it on a backspace to empty would steal the caret.
+- **A page is hidden only while its tab is backgrounded** (`useTabActive`).
+  Popovers and the address suggestions (`AddressSuggestions`, a portal) draw
+  over the live page. Hiding throttles a page's timers, and `browser_place`
+  focuses it, so nothing else hides or re-places it.
+- **Windows page creation runs off the main event loop.** `browser_open_url`
+  is an async command so its tab ID or creation error reaches the caller without
+  blocking WebView2. Popup tabs and the continuation after cookie seeding stay
+  on worker threads; moving either back to the main loop deadlocks child creation.
+  macOS popup creation is queued onto the main thread after the WebKit callback.
+- **Windows browser pages and the login window share WebView2's default jar.**
+  Cookie reads and writes run on worker threads: calling Tauri's cookie APIs
+  on the main event loop deadlocks. Seeding copies both Canvas and SSO headers
+  from keyd and reads back the jar until queued writes match before navigating.
+  Sign-out deletes both hosts' cookies from the same jar.
+- **Windows uses JavaScript for browser history, reload and find.**
 - **History is one row per URL, ranked by frecency**, recorded on load
   *finish* (one row per redirect chain). `historyUrl` drops the fragment, and
   the whole query if any part looks like a credential.
-- **A page must claim to be Safari** (`PAGE_USER_AGENT`) or UA-sniffing sites
-  serve fallbacks, and an `initialization_script` reports a real
+- **macOS pages claim to be Safari** (`PAGE_USER_AGENT`) so UA-sniffing sites
+  serve their full pages; Windows keeps WebView2's default user agent.
+  An `initialization_script` reports a real
   `outerWidth`/`outerHeight` (a child view's are 0, which drops canvas renderers
   to minimum scale).
 - **Pages get every plugin's init script.** `tauri-plugin-opener` is built

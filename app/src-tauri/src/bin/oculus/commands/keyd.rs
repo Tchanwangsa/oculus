@@ -46,7 +46,7 @@ impl Ctx {
             short(&installed.source_hash)
         );
         println!("  program  {}", installed.program.display());
-        println!("  agent    {}", installed.plist.display());
+        println!("  registration  {}", installed.plist.display());
         Ok(())
     }
 
@@ -56,19 +56,24 @@ impl Ctx {
             return self.emit(&s);
         }
 
+        let registration = if cfg!(windows) { "broker" } else { "agent" };
+        let install_advice = if cfg!(windows) {
+            "not installed — open Oculus"
+        } else {
+            "not installed — run `oculus keyd install`"
+        };
         match &s.program {
-            Some(p) => println!("agent      {} → {p}", s.plist.display()),
-            None => println!(
-                "agent      {}",
-                paint("not installed — run `oculus keyd install`", YELLOW)
-            ),
+            Some(p) => println!("{registration:<11}{} → {p}", s.plist.display()),
+            None => println!("{registration:<11}{}", paint(install_advice, YELLOW)),
         }
         println!(
-            "launchd    {}",
-            if s.loaded {
-                paint("loaded", GREEN)
-            } else {
-                paint("not loaded", YELLOW)
+            "{:<11}{}",
+            if cfg!(windows) { "resident" } else { "launchd" },
+            match (cfg!(windows), s.loaded) {
+                (true, true) => paint("running", GREEN),
+                (true, false) => paint("not running — open Oculus", YELLOW),
+                (false, true) => paint("loaded", GREEN),
+                (false, false) => paint("not loaded", YELLOW),
             }
         );
         match &s.installed_hash {
@@ -81,7 +86,11 @@ impl Ctx {
                     paint("same as installed", DIM)
                 } else {
                     paint(
-                        "differs from installed — `oculus keyd install` takes it",
+                        if cfg!(windows) {
+                            "differs from installed — open Oculus to update it"
+                        } else {
+                            "differs from installed — `oculus keyd install` takes it"
+                        },
                         YELLOW,
                     )
                 };
@@ -132,7 +141,7 @@ impl Ctx {
         for p in removed {
             println!("{} {}", paint("removed", GREEN), p.display());
         }
-        println!("The vault and the keychain's master key are kept.");
+        println!("The vault and its master key are kept.");
         Ok(())
     }
 }

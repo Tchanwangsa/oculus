@@ -15,8 +15,14 @@ pub async fn echo360_sync_lectures(
 ) -> Result<Vec<LectureData>, String> {
     let cache = cache.inner().clone();
     crate::runtime::blocking::run(move || {
-        let session = get_or_auth(&cache, canvas_course_id)?;
-        echo360::syllabus(&session)
+        let session = match get_or_auth(&cache, canvas_course_id) {
+            Err(e) if e == echo360::NO_TOOL => return Ok(Vec::new()),
+            other => other?,
+        };
+        echo360::syllabus(
+            &session,
+            echo360::lead_in_secs(&crate::library::paths::data_dir()),
+        )
     })
     .await
 }
@@ -80,7 +86,12 @@ pub async fn echo360_download_video(
             emit(100, "trimming");
             let ffmpeg = echo360::find_ffmpeg(app.path().resource_dir().ok())
                 .ok_or("ffmpeg not found — run `bun run ffmpeg` in app/")?;
-            if !echo360::trim_video(&ffmpeg, &raw, &final_) {
+            if !echo360::trim_video(
+                &ffmpeg,
+                &raw,
+                &final_,
+                echo360::lead_in_secs(&crate::library::paths::data_dir()),
+            ) {
                 return Err("ffmpeg trim failed".to_string());
             }
             std::fs::remove_file(&raw).ok();

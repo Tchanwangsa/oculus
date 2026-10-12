@@ -230,6 +230,29 @@ fn the_rule_set_mirrors_claudes() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn native_windows_paths_use_slashes_in_file_and_cli_rules() {
+    let lib = Path::new(r"C:\Users\s\Oculus data");
+    let cli = OculusCli {
+        bin: PathBuf::from(r"C:\Program Files\Oculus\oculus.exe"),
+        launcher: Some(PathBuf::from(r"C:\Users\s\.local\bin\oculus.exe")),
+    };
+    let r = rules_for(lib, Some(&cli), &[], None);
+    for want in [
+        "read_file(C:/Program Files/Oculus)",
+        "read_file(C:/Users/s/.local/bin)",
+        "command(C:/Program Files/Oculus/oculus.exe)",
+        "command(C:/Users/s/.local/bin/oculus.exe)",
+    ] {
+        assert!(r.allow.iter().any(|a| a == want), "{want}: {:?}", r.allow);
+    }
+    assert!(r
+        .deny
+        .iter()
+        .any(|d| d == "write_file(C:/Users/s/Oculus data/antigravity-rules.json)"));
+}
+
 /// `oculus` runs in agy's terminal sandbox and must reach keyd's socket:
 /// no deny covers it, and the rules grant the CLI to run.
 #[test]
@@ -262,7 +285,12 @@ fn sqlite3_is_denied_on_both_spellings_of_the_database() {
     let lib = scratch("spellings");
     let real = lib.canonicalize().unwrap();
     let r = rules_for(&lib, None, &[], None);
-    let want = |l: &Path| format!("command(sqlite3 {})", l.join("oculus.db").display());
+    let want = |l: &Path| {
+        format!(
+            "command(sqlite3 {})",
+            crate::library::paths::slash_path(l.join("oculus.db"))
+        )
+    };
     assert!(r.deny.contains(&want(&lib)), "{:?}", r.deny);
     assert!(r.deny.contains(&want(&real)), "{:?}", r.deny);
 }
@@ -316,10 +344,13 @@ fn studio_is_writable_and_no_deny_covers_it() {
     let lib = Path::new("/lib");
     let r = rules_for(lib, None, &[], None);
     for dir in crate::library::paths::agent_write_dirs(lib) {
-        let rule = format!("write_file({})", dir.display());
+        let rule = format!("write_file({})", crate::library::paths::slash_path(&dir));
         assert!(r.allow.contains(&rule), "{rule}: {:?}", r.allow);
         for file in ["videos/a/video.json", "library/components/Steps.tsx"] {
-            let want = format!("write_file({})", dir.join(file).display());
+            let want = format!(
+                "write_file({})",
+                crate::library::paths::slash_path(dir.join(file))
+            );
             assert_eq!(denied_by(lib, &want), None, "{want}");
         }
     }

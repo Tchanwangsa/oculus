@@ -41,7 +41,7 @@ fn render_config(library: &Path, prompt: &str, one_off: &OneOffPrompts, subagent
         .replace("\"{{SUBAGENTS}}\": null,", subagents)
         .replace(
             "{{LIBRARY}}",
-            &json_fragment(&library.display().to_string()),
+            &json_fragment(&crate::library::paths::slash_path(library)),
         )
         .replace("\"{{PROMPT}}\"", &json_string(prompt))
         .replace("\"{{NAMING_PROMPT}}\"", &json_string(one_off.naming))

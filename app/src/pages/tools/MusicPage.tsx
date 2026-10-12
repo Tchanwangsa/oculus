@@ -8,12 +8,14 @@ import { MusicCover } from "@/components/music/MusicCover";
 import { RepeatToggle, ShuffleToggle } from "@/components/music/MusicModes";
 import { MusicSeek } from "@/components/music/MusicSeek";
 import { MusicTransport } from "@/components/music/MusicTransport";
+import { nothingNamed } from "@/components/music/NowPlaying";
 import { PlayingElsewhere } from "@/components/music/PlayingElsewhere";
 import { QueueToggle } from "@/components/music/QueueToggle";
 import { VolumeRow } from "@/components/music/VolumeRow";
+import { useMusicSpaceKey } from "@/hooks/music/useMusicSpaceKey";
 import { MusicLibrary } from "@/components/music/library/MusicLibrary";
 import { UpNext } from "@/components/music/library/UpNext";
-import type { MusicSnapshot } from "@/lib/music";
+import { shownPlayback, type MusicSnapshot } from "@/lib/music";
 import { cn } from "@/lib/utils";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
 import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
@@ -26,7 +28,7 @@ function notConnectedBody(enabled: boolean, s: MusicSnapshot | null): string {
 }
 
 /** What nothing playing says here, above the list to pick from. */
-const NOTHING_PLAYING = "Pick a playlist below, or choose Oculus in Spotify.";
+const NOTHING_PLAYING = "Play a song here or from any device.";
 
 /**
  * The full player, opened as the page from the rail's popover (`/music`),
@@ -35,7 +37,7 @@ const NOTHING_PLAYING = "Pick a playlist below, or choose Oculus in Spotify.";
  * player sits left and the list fills the height on the right, the list
  * being the only scroller. Spotify's state is Rust's (`useMusicState`); this
  * only draws it and sends commands. Without a session or a track it points
- * to Settings → Music.
+ * to Settings → Music. Space plays and pauses (`useMusicSpaceKey`).
  */
 export default function MusicPage() {
   const active = useTabActive();
@@ -43,6 +45,7 @@ export default function MusicPage() {
   const snapshot = useMusicStore((s) => s.snapshot);
   const error = useMusicStore(musicError);
   const [queueOpen, setQueueOpen] = useState(false);
+  useMusicSpaceKey(snapshot);
 
   if (!enabled || !snapshot || !(snapshot.connected || snapshot.connecting || snapshot.track)) {
     return (
@@ -62,7 +65,7 @@ export default function MusicPage() {
     );
   }
 
-  const track = snapshot.track;
+  const { track, device } = shownPlayback(snapshot);
   return (
     <div className="@container h-full">
       <div className="page-scroll @3xl:overflow-y-hidden">
@@ -76,10 +79,10 @@ export default function MusicPage() {
               />
               <div className="min-w-0 text-center">
                 <h1 className="truncate text-lg font-semibold text-foreground">
-                  {track?.name ?? (snapshot.connecting ? "Connecting…" : "Nothing playing")}
+                  {track?.name ?? (snapshot.connecting ? "Connecting…" : nothingNamed(device))}
                 </h1>
                 <p className="truncate text-[13px] text-foreground/80">
-                  {track ? track.artists.join(", ") : NOTHING_PLAYING}
+                  {track ? track.artists.join(", ") : device ? "" : NOTHING_PLAYING}
                 </p>
                 {track?.album && (
                   <p className="truncate text-xs text-muted-foreground">{track.album}</p>

@@ -1,4 +1,5 @@
-//! The app's half of the headless University of Melbourne SSO sign-in.
+//! The app's half of the headless Okta sign-in, for a university whose Canvas
+//! signs in through Okta (`sources::institution`).
 //!
 //! The flow itself (Okta's IDX state machine, the SAML round trip, the
 //! attempt guard) is `keyd_core::okta`, and runs only inside `oculus-keyd`:
@@ -20,7 +21,7 @@ mod login;
 mod tests;
 
 pub use credentials::{clear_credentials, credential_status, store_credentials, CredentialStatus};
-pub use keyd_core::okta::{totp_now, LoginError, Trigger, SSO_HOST};
+pub use keyd_core::okta::{totp_now, LoginError, Trigger};
 pub use login::{diagnose, resume_automatic_sign_in, sign_in, try_auto_recover};
 
 use crate::providers::credentials::Credentialed;

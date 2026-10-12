@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Deserializer};
 
+use super::bearer::Bearer;
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryString {
@@ -48,16 +50,18 @@ impl From<PropertiesError> for String {
     }
 }
 
+/// The player properties at `bearer`'s region.
 pub fn fetch(
-    jwt: &str,
+    bearer: &Bearer,
     secure_link_id: &str,
     media_id: &str,
 ) -> Result<EmbedInfo, PropertiesError> {
     let url = format!(
-        "https://echo360.net.au/api/ui/echoplayer/secure-link-access-datas/{secure_link_id}/media/{media_id}/player-properties"
+        "{}/api/ui/echoplayer/secure-link-access-datas/{secure_link_id}/media/{media_id}/player-properties",
+        bearer.base
     );
     let resp = match ureq::get(&url)
-        .set("Authorization", &format!("Bearer {jwt}"))
+        .set("Authorization", &format!("Bearer {}", bearer.jwt))
         .set("Accept", "application/json")
         .call()
     {

@@ -10,15 +10,19 @@ export function addMonths(d: Date, n: number): Date {
   return new Date(d.getFullYear(), d.getMonth() + n, 1);
 }
 
-/** Monday-first, the Australian week. */
+/** The first day of the week, 0 = Sunday … 6 = Saturday: Monday for
+ *  everyone, whatever the locale. */
+export const WEEK_START = 1;
+
+/** The start of `d`'s week ({@link WEEK_START}). */
 export function startOfWeek(d: Date): Date {
-  const day = (d.getDay() + 6) % 7;
+  const day = (d.getDay() - WEEK_START + 7) % 7;
   return addDays(startOfDay(d), -day);
 }
 
 /**
- * The six Monday-first weeks a month grid draws. Always six rows, so the grid
- * never changes height as you page through months.
+ * The six weeks a month grid draws, each from {@link WEEK_START}. Always six
+ * rows, so the grid never changes height as you page through months.
  */
 export function monthGrid(month: Date): Date[][] {
   const first = startOfWeek(new Date(month.getFullYear(), month.getMonth(), 1));

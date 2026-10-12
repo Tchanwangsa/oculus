@@ -38,16 +38,16 @@ test("concurrent database users share initialization and recover from a failed l
 
 test("subject sync aggregation preserves latest completed runs, term ordering and selection", async () => {
   sqlite.exec(`CREATE TABLE subjects (
-    id INTEGER PRIMARY KEY, code TEXT, name TEXT, term_name TEXT,
+    id INTEGER PRIMARY KEY, code TEXT, name TEXT, term_name TEXT, term_sort TEXT,
     workflow_state TEXT, selected INTEGER, is_current INTEGER,
     last_synced_at TEXT, created_at TEXT
   ); CREATE TABLE sync_runs (status TEXT, finished_at TEXT, subject_codes TEXT);
   INSERT INTO subjects VALUES
-    (1, 'A', 'Alpha', '2026 Semester 2', 'available', 0, 0, 'stale', ''),
-    (2, 'B', 'Beta', '2026 Summer Term', 'available', 1, 1, 'stale', ''),
-    (3, 'C', 'Closed', '2027 Semester 1', 'completed', 1, 1, NULL, ''),
-    (4, 'D', 'Delta', '2026 Semester 2', 'available', 1, 0, NULL, ''),
-    (5, 'E', 'Empty', NULL, 'available', 0, 0, NULL, '');
+    (1, 'A', 'Alpha', '2026 Semester 2', '2026-07', 'available', 0, 0, 'stale', ''),
+    (2, 'B', 'Beta', '2026 Summer Term', '2026-01', 'available', 1, 1, 'stale', ''),
+    (3, 'C', 'Closed', '2027 Semester 1', '2027-03', 'completed', 1, 1, NULL, ''),
+    (4, 'D', 'Delta', '2026 Semester 2', '2026-07', 'available', 1, 0, NULL, ''),
+    (5, 'E', 'Empty', NULL, NULL, 'available', 0, 0, NULL, '');
   INSERT INTO sync_runs VALUES
     ('completed', '2026-01-01', '["A", "B"]'),
     ('completed', '2026-02-01', '["A", "A"]'),

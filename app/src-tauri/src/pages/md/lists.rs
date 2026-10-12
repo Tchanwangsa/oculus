@@ -1,6 +1,7 @@
-use super::escape::{escape_html, escape_md};
-use super::inline::{emphasis, inline_md};
-use super::tree::{attr, dropped, tag, text_content, Ref};
+use super::escape::escape_loose;
+use super::inline::inline_md_self;
+use super::maths::text_md;
+use super::tree::{tag, Ref};
 use super::{is_tag, Ctx};
 
 pub(super) fn list_md(node: Ref<'_>, depth: usize, ordered: bool, ctx: &Ctx) -> String {
@@ -24,7 +25,7 @@ pub(super) fn list_md(node: Ref<'_>, depth: usize, ordered: bool, ctx: &Ctx) -> 
                 Some(_) => inline_parts.push_str(&inline_md_self(c, ctx)),
                 None => {
                     if let Some(t) = c.value().as_text() {
-                        inline_parts.push_str(&escape_html(t));
+                        inline_parts.push_str(&text_md(t, ctx, escape_loose));
                     }
                 }
             }
@@ -36,30 +37,4 @@ pub(super) fn list_md(node: Ref<'_>, depth: usize, ordered: bool, ctx: &Ctx) -> 
         out.push_str(&nested);
     }
     out
-}
-
-/// `inline_md` renders a node's children; this renders the node itself.
-pub(super) fn inline_md_self(n: Ref<'_>, ctx: &Ctx) -> String {
-    if dropped(&n, ctx.in_cell) {
-        return String::new();
-    }
-    match tag(&n) {
-        Some("a") => format!(
-            "[{}]({})",
-            inline_md(n, ctx),
-            attr(&n, "href").unwrap_or_default()
-        ),
-        Some("strong" | "b") => emphasis(n, ctx, "**"),
-        Some("em" | "i") => emphasis(n, ctx, "*"),
-        Some("sup") => escape_md(&text_content(n)),
-        Some("code") => format!("`{}`", text_content(n)),
-        Some("br") => "  \n".to_string(),
-        Some("iframe") => super::embeds::iframe_md(n, ctx).unwrap_or_default(),
-        Some("img") => {
-            let src = attr(&n, "src").unwrap_or_default();
-            let src = ctx.images.get(src).map(String::as_str).unwrap_or(src);
-            format!("![{}]({src})", attr(&n, "alt").unwrap_or_default())
-        }
-        _ => inline_md(n, ctx),
-    }
 }

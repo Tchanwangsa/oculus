@@ -53,7 +53,7 @@ test("keyd ships on macOS only, as a helper app nested in the bundle", () => {
 test("the helper's name and identifier match keyd's own", () => {
   const helper = paths.match(/pub const HELPER: &str = "([^"]+)";/)?.[1];
   expect(`${helper}.app`).toBe(keydHelperApp);
-  const plist = readFileSync(join(app, "keyd", "bundle", "Info.plist"), "utf8");
+  const plist = readFileSync(join(app, "keyd", "bundle", "Info.plist"), "utf8").replaceAll("\r\n", "\n");
   expect(plist).toContain(`<key>CFBundleIdentifier</key>\n    <string>${KEYD_IDENTIFIER}</string>`);
   expect(plist).toContain(`<key>CFBundleName</key>\n    <string>${helper}</string>`);
 });
@@ -63,6 +63,11 @@ test("beforeBuildCommand produces every sidecar and keyd's helper", () => {
     expect(producers[bin], `no producer known for ${bin}`).toBeDefined();
     expect(before, bin).toContain(producers[bin]);
   }
+});
+
+test("beforeBuildCommand's CLI reference reads the CLI stage-cli just staged", () => {
+  // Rebuilding it after staging would compile the app again.
+  expect(before).toContain("bun run stage-cli && bun run docs:cli --staged");
 });
 
 test("every producer is a package script over a script that exists", () => {
@@ -92,4 +97,18 @@ test("the bundle is signed hardened, with library validation on", () => {
   // Tauri would put entitlements on every sidecar; library validation needs
   // none, and keyd's helper is signed by its own build.
   expect(mac.entitlements).toBeUndefined();
+});
+
+test("CI's Windows job stages what beforeBuildCommand would before skipping it", () => {
+  const job = ci.slice(ci.indexOf("\n  windows:"), ci.indexOf("\n  keyd-linux:"));
+  const build = job.indexOf("tauri build");
+  expect(job.slice(build)).toContain(`"beforeBuildCommand":null`);
+  // speech and whisper exit early off macOS; docs:cli writes a repo doc the
+  // bundle doesn't carry.
+  for (const step of ["bun run build", "bun run ffmpeg", "bun run stage-keyd", "bun run stage-cli"]) {
+    expect(before, step).toContain(step);
+    const at = job.indexOf(step);
+    expect(at, step).toBeGreaterThan(-1);
+    expect(at, step).toBeLessThan(build);
+  }
 });

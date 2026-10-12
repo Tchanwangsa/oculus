@@ -8,6 +8,8 @@ export interface SyncOptions {
   /** Module pages and files. */
   modules: boolean;
   ed: boolean;
+  /** Ed Lessons: slides, PDFs, challenge workspace files, released quiz answers. */
+  ed_lessons: boolean;
   /** Echo360 lecture list only, refreshed by the frontend after the scrape;
    *  never downloads videos. */
   lectures: boolean;
@@ -20,6 +22,7 @@ export const DEFAULT_SYNC_OPTIONS: SyncOptions = {
   assignments: true,
   modules: true,
   ed: true,
+  ed_lessons: true,
   lectures: true,
   calendar: true,
 };

@@ -44,6 +44,7 @@ pub fn dock_place(app: AppHandle, id: String, viewport: Viewport) {
             focus::release(&view);
         }
         park(&app, other);
+        page::parked(&app, other);
     }
     place(&app, service.id);
     if let Some(view) = webview(&app, service.id) {
@@ -72,6 +73,7 @@ pub fn dock_park(app: AppHandle, id: String) {
     });
     park(&app, &id);
     if was_shown {
+        page::parked(&app, &id);
         broadcast(&app);
     }
 }

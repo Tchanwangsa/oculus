@@ -7,12 +7,18 @@ import type { DbFile } from "@/lib/db";
  * files: shared by `FileViewer`'s markdown and the document editor.
  */
 
-/** The library file a link points at: a `../` path, or a raw Canvas
- *  `/files/<id>` or `/pages/<slug>` URL. Undefined for anything else. */
-export function libraryLinkTarget(href: string, files: DbFile[]): DbFile | undefined {
+/** The library file a link points at: a `../` path, a path below the linking
+ *  file's folder (`fromPath`; an Ed lesson's `<id>-<slug>/…` assets), or a raw
+ *  Canvas `/files/<id>` or `/pages/<slug>` URL. Undefined for anything else. */
+export function libraryLinkTarget(href: string, files: DbFile[], fromPath?: string): DbFile | undefined {
   if (/^\.\.\//.test(href)) {
     const rel = decodeLinkPath(href.replace(/^\.\.\//, ""));
     return files.find((f) => f.relative_path.endsWith(rel));
+  }
+  if (fromPath && /^[^/#?:]+\//.test(href)) {
+    const rel = fromPath.replace(/[^/]+$/, "") + decodeLinkPath(href.replace(/^\.\//, ""));
+    const hit = files.find((f) => f.relative_path === rel);
+    if (hit) return hit;
   }
   if (href.includes("/courses/")) {
     const fileId = /\/files\/(\d+)/.exec(href)?.[1];

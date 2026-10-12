@@ -1,4 +1,5 @@
 use super::{KeyError, MasterKey};
+use crate::names::WebCrypto;
 
 /// Where the master key comes from: the OS secret store in production
 /// (`platform::master_key`), a fixed key in tests.
@@ -25,6 +26,11 @@ pub trait LegacySource: Send + Sync {
     /// Deletes one item: `Ok(true)` when it was there, `Ok(false)` when no
     /// such item exists.
     fn remove(&self, service: &str, account: &str) -> Result<bool, KeyError>;
+
+    /// WebKit's own WebCrypto master key item for `key.app`, matched as WebKit
+    /// matches it: a generic password by account alone. Its data as stored.
+    /// `Ok(None)` only when no such item exists. Never written or deleted.
+    fn read_webcrypto(&self, key: &WebCrypto) -> Result<Option<Vec<u8>>, KeyError>;
 }
 
 /// No old items: for a keyd whose master key is not the store's either.
@@ -39,5 +45,9 @@ impl LegacySource for NoLegacy {
 
     fn remove(&self, _service: &str, _account: &str) -> Result<bool, KeyError> {
         Ok(false)
+    }
+
+    fn read_webcrypto(&self, _key: &WebCrypto) -> Result<Option<Vec<u8>>, KeyError> {
+        Ok(None)
     }
 }

@@ -183,7 +183,8 @@ export function FileViewer({
 
 /**
  * `MD_COMPONENTS` for a library file: links to files we hold locally (`../`
- * paths and raw Canvas `/files/<id>` / `/pages/<slug>` URLs) go to
+ * paths, paths below the file's folder, and raw Canvas `/files/<id>` /
+ * `/pages/<slug>` URLs) go to
  * `onOpenFile`, others open externally, and relative images resolve against the
  * file's directory (`app/src/lib/files/libraryLinks.ts`). Also draws a note's
  * saved versions (`HistoryPanel`).
@@ -198,7 +199,7 @@ export function useLibraryMdComponents(
     return {
       ...MD_COMPONENTS,
       a: ({ href, children, ...p }: any) => {
-        const target = href ? libraryLinkTarget(href, files) : undefined;
+        const target = href ? libraryLinkTarget(href, files, file.relative_path) : undefined;
         if (target) {
           return (
             <Button

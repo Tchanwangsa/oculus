@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/sync/useAuth";
 import { getSyncRunSummaries, type SyncRun } from "@/lib/db";
 import { fmtSynced, sqliteUtcToMs } from "@/lib/format/format";
 import { triggerSync } from "@/lib/pipeline/syncRunner";
+import { useInstitution } from "@/stores/sync/institutionStore";
 import { useSyncStore } from "@/stores/sync/syncStore";
 import { useHomeSection } from "./useHomeSection";
 
@@ -17,7 +18,7 @@ const STALE_MS = 3 * 24 * 60 * 60 * 1000;
 /**
  * When the library last synced, with a Sync now pill — or the run's progress
  * while one is in flight. One quiet colour change when stale (sync is manual);
- * a refused start shows its reason inline.
+ * a refused start or sign-in shows its reason inline.
  */
 export function SyncControl() {
   // `undefined` until the first read, so "Never synced" can't flash.
@@ -26,7 +27,8 @@ export function SyncControl() {
   const scraping = useSyncStore((s) => s.scraping);
   const progress = useSyncStore((s) => s.progress);
   const completedAt = useSyncStore((s) => s.completedAt);
-  const { status: authStatus, connect } = useAuth();
+  const { status: authStatus, error: authError, connect } = useAuth();
+  const institution = useInstitution();
 
   const reload = useCallback(() => {
     // The top `sync_runs` row may be running or interrupted; find a completed one.
@@ -43,7 +45,8 @@ export function SyncControl() {
 
   const start = async () => {
     setError(null);
-    // No live session: open the Canvas sign-in window, as the Sync page does.
+    // No live session: open the Canvas sign-in window (or, with no address
+    // yet, Settings → Canvas), as the Sync page does.
     if (authStatus !== "connected") {
       connect();
       return;
@@ -56,6 +59,8 @@ export function SyncControl() {
   };
 
   if (run === undefined) return null;
+
+  const shown = error ?? authError;
 
   // SQLite's `datetime('now')` has no zone; see `sqliteUtcToMs`.
   const finished = sqliteUtcToMs(run?.finished_at ?? null);
@@ -79,10 +84,10 @@ export function SyncControl() {
       ) : (
         <Button variant="outline" size="xs" onClick={start}>
           <ArrowsClockwise />
-          Sync now
+          {institution && !institution.canvas ? "Set up Canvas" : "Sync now"}
         </Button>
       )}
-      {error && !scraping && <span className="text-warning/80">{error}</span>}
+      {shown && !scraping && <span className="text-warning/80">{shown}</span>}
     </div>
   );
 }

@@ -17,7 +17,7 @@ agent queries and plans through. Flags are in
 | `studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs` resolves a slug and dispatches; `videos.rs` for `new` and `list`, `lint.rs`, `brief.rs`, `beats.rs`, `components.rs`, `themes.rs`, `gallery.rs`, `render.rs`, `narrate.rs` for `narrate` and `tts`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs`, `app/studio-core/`, `app/src-tauri/src/studio/` (`videos/`, `libraries/`, `brief/`) |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/commands/docs.rs`, `app/src-tauri/src/agents/` (`docs.rs`, `links.rs`) |
 | The memory store | `app/src-tauri/src/agents/memory/`, `app/src-tauri/src/bin/oculus/commands/memory.rs` |
-| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/commands/keyd.rs`, `app/src-tauri/src/auth/keyd/`; the LaunchAgent itself in `app/keyd/core/src/platform/macos/registrar.rs` |
+| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/commands/keyd.rs`, `app/src-tauri/src/auth/keyd/`; the platform registrations in `app/keyd/core/src/platform/macos/registrar.rs` and `app/keyd/core/src/platform/windows/registrar.rs` |
 | Headless writes to the scrape tables | `app/src-tauri/src/db/store/` |
 | Repo copy of the reference | `app/scripts/gen-cli-docs.mjs` |
 
@@ -46,8 +46,8 @@ agent queries and plans through. Flags are in
 | `studio voices download`, `studio voices delete` | Kokoro's `voice-kokoro` and `g2p-en-us` packs in `<app data>/models/voice/` (103 MB) | Checked against their pinned sha256 before they get their names; `voices` alone writes nothing |
 | `studio aligner download`, `studio aligner delete` | The aligner model in `<app data>/models/align/` (378 MB) | Checked against its pinned sha256 before it gets its name; `status` writes nothing |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |
-| `keyd install`, `keyd uninstall` | The LaunchAgent `com.tchan.oculus.keyd`, `bin/Oculus Helper.app` and keyd's stamp in the data dir; install also (re)loads the agent | Never touches `vault.bin` or the keychain, so uninstalling loses no key ([below](#keyd-install-never-points-the-agent-at-a-build-tree)) |
-| `keyd status` | Nothing | Pings keyd, which starts it; prints no secret |
+| `keyd install`, `keyd uninstall` | macOS: the LaunchAgent, copied helper app and stamp; Windows: uninstall stops the verified resident broker and removes its registration and stamp, while CLI install cannot start it | Keeps the vault and its master key ([below](#keyd-lifetime-follows-the-platform)) |
+| `keyd status` | Nothing | Pings keyd; macOS launchd can activate it, while Windows only checks an existing broker. Prints no secret |
 | `agent` | Nothing recorded | One turn through the app's own bridges; `--subject` appends the picker's scope ([harness.md](./harness.md)) |
 
 Every `studio` command that loads a video first copies each starter
@@ -81,33 +81,37 @@ migrations, so on a fresh machine the app must open once first; until then
 - `run -s` scrapes, then parses and embeds each written PDF one file at a time,
   then replaces each subject's `calendar_events` — always, since there are no
   sync options to gate it ([calendar.md](./calendar.md)).
-- Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`);
-  lecture ids match on a unique prefix as `oculus list -l` prints them.
+- Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`),
+  with space, `-` and `_` alike (`paths::fold_code`), so `cs-101` finds
+  `CS 101 Fall 2026` and its `CS_101_Fall_2026` folder; lecture ids match on a
+  unique prefix as `oculus list -l` prints them.
 
-## `keyd install` never points the agent at a build tree
+## keyd lifetime follows the platform
 
-The LaunchAgent's program is fixed: a keyd whose helper app is nested in the
-Oculus app is registered in place, since its caller check needs that app, and
-any other has its whole helper app copied to `bin/Oculus Helper.app` in the
-data dir, built beside it and swapped in with one rename; the next install
-removes a bare `bin/oculus-keyd` an earlier one left. `--from` takes the
-helper app or the keyd inside it, and refuses a keyd that is not in one.
-Without `--from` it takes the keyd in the CLI's bundle, or in a debug CLI the
-output of `bun run keyd` in the checkout it was built from
+On macOS, `keyd install` registers a LaunchAgent. A keyd whose signed helper
+app is nested in Oculus runs in place; any other has its whole helper app
+copied to `bin/Oculus Helper.app` in the data dir and swapped in with one
+rename. `--from` takes the helper app or the keyd inside it, and refuses a
+keyd outside a helper app. Without `--from` it takes the keyd in the CLI's
+bundle, or in a debug CLI the output of `bun run keyd` in its checkout
 ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
 
-- `launchctl bootout` returns before launchd lets go of the job, and a
-  `bootstrap` too soon after fails and leaves keyd unloaded. Install and
-  uninstall wait until `launchctl print` stops finding the label.
-- The stamp is written last, so a failed load is retried by the next
-  preflight.
-- `--if-changed` installs nothing when the stamp already holds the
-  candidate's source hash and the agent already runs the program it would
-  register: the preflight's call, and the app's own check at startup.
-- `status` compares the installed stamp, the stamp of the keyd this CLI would
-  install, and the source hash the running keyd reports. A release CLI with no
-  keyd beside it reports a broken install there, and `install` says so instead
-  of asking for `bun run keyd`.
+- macOS install and uninstall wait until `launchctl print` stops finding the
+  old label before proceeding; `bootout` returns before launchd releases it.
+- The stamp is written last, so a failed load is retried at the next startup.
+- `--if-changed` installs nothing when the stamp holds the candidate's source
+  hash and the registration already runs the expected program.
+
+On Windows, the GUI starts the bundled resident broker and updates its
+registration and stamp. `keyd install` cannot start it from the CLI: open
+Oculus. `keyd status` only connects to an existing broker and never activates
+one. `keyd uninstall` stops the verified broker before removing its
+registration; the vault and DPAPI-protected master key remain. The release
+broker requires the MSIX installation ([windows.md](./windows.md)).
+
+On both platforms, `status` compares the installed stamp, the candidate's
+source hash and the running keyd's reply. A release CLI with no keyd beside
+it reports a broken installation.
 
 ## `run` and `index` take minutes per file, and that is not a hang
 
@@ -221,8 +225,11 @@ Each file has one of four lifetimes:
   carried under their headings, and each `MEMORY.md` is rebuilt from the
   memories beside it. Prose under a heading, or missing headings, is reported
   and left alone rather than guessed at.
-- **Linked, never clobbered**: every link is relative, so the library can
-  move. A wrong target is relinked; a real file is left with a warning. A real
+- **Linked, never clobbered**: Unix links are relative, so the library can
+  move. Windows copies `AGENTS.md` and skills with a content-hash sidecar: a
+  managed copy refreshes with the generated source, while a user edit is
+  preserved. Subject memory directories use Windows junctions. A wrong Unix
+  target is relinked; a real file is left with a warning. A real
   `agents/memories/` folder in a course has its files moved into the bucket
   before it becomes a link.
 
@@ -246,3 +253,7 @@ pull document that `AGENTS.md` says when to open.
 - An empty `search` result would read as "no answer" — keep failing loudly with the next command to run.
 - Ripgrep over `courses/` misses PDF text — use `oculus grep`.
 - A stale `oculus` documents and runs the wrong build — `bun run cli` deletes the binary before building ([development.md](./development.md#the-dev-cli-is-built-by-the-preflight-not-by-tauri-dev)).
+
+The app and CLI share `%USERPROFILE%/Oculus` on Windows. Database and IPC
+relative paths use `/`, filenames avoid Windows device names and trailing
+dots, and authentication prompts use hidden terminal input on both platforms.

@@ -18,6 +18,7 @@ const base: MusicSnapshot = {
   active: true,
   playing_on: null,
   output: null,
+  remote: null,
   track: {
     uri: "spotify:track:x",
     name: "x",
@@ -33,6 +34,7 @@ const base: MusicSnapshot = {
   shuffle: false,
   repeat: false,
   up_next: [],
+  context_uri: null,
   error: null,
 };
 

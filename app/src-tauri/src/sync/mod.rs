@@ -187,6 +187,8 @@ pub struct Course {
     pub code: String,
     pub name: String,
     pub term: Option<String>,
+    /// `terms::term_sort`, stored so every reader orders terms alike.
+    pub term_sort: Option<String>,
     pub workflow_state: String,
     pub is_current: bool,
 }
@@ -200,6 +202,7 @@ impl Course {
             "name": self.name,
             "workflow_state": self.workflow_state,
             "term": self.term.as_ref().map(|t| serde_json::json!({ "name": t })),
+            "_oculus_term_sort": self.term_sort,
             "_oculus_is_current": self.is_current,
         })
     }
@@ -213,7 +216,10 @@ pub struct SyncOptions {
     pub announcements: bool,
     pub assignments: bool,
     pub modules: bool,
+    /// Ed Discussion threads.
     pub ed: bool,
+    /// Ed Lessons: slides, their PDFs, challenge workspaces, quizzes.
+    pub ed_lessons: bool,
 }
 
 impl Default for SyncOptions {
@@ -223,6 +229,7 @@ impl Default for SyncOptions {
             assignments: true,
             modules: true,
             ed: true,
+            ed_lessons: true,
         }
     }
 }

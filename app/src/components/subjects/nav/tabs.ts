@@ -1,4 +1,5 @@
 import {
+  ChalkboardTeacher,
   ChatsCircle,
   Folder,
   House,
@@ -17,6 +18,7 @@ export const TABS = [
   { to: "announcements", label: "Announcements", icon: Megaphone,      end: false },
   { to: "assignments",   label: "Assignments",   icon: PencilLine,     end: false },
   { to: "discussion",    label: "Discussion",    icon: ChatsCircle,    end: false },
+  { to: "lessons",       label: "Lessons",       icon: ChalkboardTeacher, end: false },
   { to: "projects",      label: "Projects",      icon: Kanban,         end: false },
 ] as const;
 

@@ -18,14 +18,13 @@ use tokio::sync::watch;
 use super::audio::Choice;
 use super::devices::Cluster;
 use super::duck::Duck;
-use super::library::Library;
+use super::library::{Library, TrackRow};
+use super::remote::{self, RemotePlayback};
 use crate::shell::browser::MAIN;
 
 pub const EVENT: &str = "music-state";
 /// The name Spotify's device list shows.
 pub const DEVICE_NAME: &str = "Oculus";
-/// Tracks of what plays next kept in the snapshot.
-pub const UP_NEXT: usize = 20;
 /// Full scale: librespot's softvol is a 60 dB log curve, so 50% is about
 /// −30 dB. At 100% the Mac's own volume sets the loudness.
 pub const INITIAL_VOLUME: u8 = 100;
@@ -66,6 +65,9 @@ pub struct Snapshot {
     pub playing_on: Option<String>,
     /// The chosen output on this Mac; none is the system default.
     pub output: Option<String>,
+    /// What the active device plays while it is another one, from the
+    /// Connect cluster; the fields below stay Oculus's own.
+    pub remote: Option<RemotePlayback>,
     pub track: Option<Track>,
     /// The position at `position_at_ms` (epoch ms). While `playing`, the UI
     /// adds the time since; Rust sends no per-second ticks.
@@ -76,10 +78,22 @@ pub struct Snapshot {
     pub volume: u8,
     pub shuffle: bool,
     pub repeat: bool,
-    /// What plays next, queued tracks first, up to `UP_NEXT`: from the
-    /// Spirc's queue events while Oculus plays, from the Connect cluster's
-    /// player state otherwise. Catalogue tracks only.
+    /// What plays next, queued tracks first, every catalogue track Spotify
+    /// lists (librespot keeps up to 80): from the Spirc's queue events while
+    /// Oculus plays, from the Connect cluster's player state otherwise.
     pub up_next: Vec<NextTrack>,
+    /// The playlist, album or other context the active device plays from,
+    /// from the same two sources as `up_next`; none when unknown.
+    pub context_uri: Option<String>,
+    /// Oculus's previous goes back a track: the Spirc's queue event lists a
+    /// previous track, or the context repeats.
+    pub can_prev: bool,
+    /// The last queue event listed a previous track.
+    #[serde(skip)]
+    pub(super) has_prev: bool,
+    /// The context repeats (`repeat` also covers a repeated track).
+    #[serde(skip)]
+    pub(super) repeat_context: bool,
     /// The latest failure (connect, auth, keyd, a track that cannot play),
     /// kept until the next connect or load.
     pub error: Option<String>,
@@ -96,6 +110,7 @@ impl Default for Snapshot {
             active: false,
             playing_on: None,
             output: None,
+            remote: None,
             track: None,
             position_ms: 0,
             position_at_ms: 0,
@@ -104,6 +119,10 @@ impl Default for Snapshot {
             shuffle: false,
             repeat: false,
             up_next: Vec::new(),
+            context_uri: None,
+            can_prev: false,
+            has_prev: false,
+            repeat_context: false,
             error: None,
         }
     }
@@ -127,27 +146,48 @@ impl Snapshot {
         self.playing = false;
         self.active = false;
         self.playing_on = None;
+        self.remote = None;
         self.up_next.clear();
+        self.context_uri = None;
+        self.set_has_prev(false);
     }
 
-    /// `uri` started: it and everything before it leave `up_next`. The
-    /// Spirc sends no queue event when it moves on, only when the queue or
-    /// the context changes.
-    pub(super) fn advance_to(&mut self, uri: &str) {
-        if let Some(at) = self.up_next.iter().position(|t| t.uri == uri) {
-            self.up_next.drain(..=at);
-        }
+    pub(super) fn set_has_prev(&mut self, has_prev: bool) {
+        self.has_prev = has_prev;
+        self.can_prev = has_prev || self.repeat_context;
+    }
+
+    pub(super) fn set_repeat(&mut self, context: bool, track: bool) {
+        self.repeat = context || track;
+        self.repeat_context = context;
+        self.can_prev = self.has_prev || context;
     }
 }
 
+/// Whether previous tracks as the Spirc lists them hold one to go back to:
+/// delimiters are not tracks.
+pub(super) fn has_prev<'a>(uris: impl IntoIterator<Item = &'a str>) -> bool {
+    uris.into_iter().any(|uri| uri != "spotify:delimiter")
+}
+
+/// Whether a next track's URI goes into `up_next`: catalogue tracks only,
+/// so episodes, local files and delimiters are left out.
+pub(super) fn listed(uri: &str) -> bool {
+    uri.starts_with("spotify:track:")
+}
+
+/// A context URI as the snapshot keeps it: none when empty.
+pub(super) fn context(uri: &str) -> Option<String> {
+    Some(uri.to_string()).filter(|u| !u.is_empty())
+}
+
 /// Next tracks as (URI, provider) pairs, as the Spirc and the cluster list
-/// them, into `up_next`: Spotify's provider `queue` marks a queued one.
-/// Episodes, local files and delimiters are left out.
+/// them, into `up_next`, every one that is `listed`: Spotify's provider
+/// `queue` marks a queued one.
 pub(super) fn up_next<'a>(tracks: impl IntoIterator<Item = (&'a str, &'a str)>) -> Vec<NextTrack> {
     tracks
         .into_iter()
-        .filter(|(uri, _)| uri.starts_with("spotify:track:"))
-        .take(UP_NEXT)
+        .filter(|(uri, _)| listed(uri))
         .map(|(uri, provider)| NextTrack {
             uri: uri.to_string(),
             queued: provider == "queue",
@@ -408,7 +448,7 @@ pub(super) fn cluster(app: &AppHandle) -> Option<Cluster> {
 
 /// A cluster push heard on the session `session_id` of run `id`; a push
 /// from any other session is dropped.
-pub(super) fn set_cluster(app: &AppHandle, id: u64, session_id: &str, cluster: Cluster) {
+pub(super) fn set_cluster(app: &AppHandle, id: u64, session_id: &str, mut cluster: Cluster) {
     change(app, |inner| {
         let current = inner
             .session
@@ -417,12 +457,45 @@ pub(super) fn set_cluster(app: &AppHandle, id: u64, session_id: &str, cluster: C
         if inner.run.as_ref().map(|r| r.id) != Some(id) || !current {
             return false;
         }
-        inner.snapshot.playing_on = cluster.playing_on();
-        if let Some(next) = &cluster.up_next {
-            inner.snapshot.up_next = next.clone();
-        }
+        cluster.keep_queue(inner.cluster.take());
+        apply_cluster(&mut inner.snapshot, &mut cluster);
         inner.cluster = Some(cluster);
         true
+    });
+}
+
+/// A pushed cluster's effect on the snapshot. Another device active with no
+/// player state in the push keeps what was known of that device.
+pub(super) fn apply_cluster(s: &mut Snapshot, cluster: &mut Cluster) {
+    s.playing_on = cluster.playing_on();
+    if let Some(next) = &cluster.up_next {
+        s.up_next = next.clone();
+        s.context_uri = cluster.queue.as_ref().and_then(|q| context(&q.context_uri));
+    }
+    if cluster.active_id.is_empty() {
+        s.set_has_prev(false);
+    }
+    s.remote = match (cluster.remote.take(), &s.playing_on) {
+        (Some(remote), _) => Some(remote),
+        (None, Some(name)) => s.remote.take().filter(|r| &r.device_name == name),
+        (None, None) => None,
+    };
+}
+
+/// A track row for what the device playing elsewhere plays, fetched after
+/// the push that named it; dropped when that device has moved on.
+pub(super) fn set_remote_row(app: &AppHandle, id: u64, row: &TrackRow) {
+    change(app, |inner| {
+        if inner.run.as_ref().map(|r| r.id) != Some(id) {
+            return false;
+        }
+        match inner.snapshot.remote.as_mut() {
+            Some(playing) if playing.uri == row.uri => {
+                remote::with_row(playing, row);
+                true
+            }
+            _ => false,
+        }
     });
 }
 

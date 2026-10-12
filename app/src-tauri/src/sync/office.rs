@@ -56,7 +56,7 @@ pub(crate) fn office_ext_of(name: &str) -> Option<&'static str> {
 /// is removed whatever the outcome.
 pub(crate) fn office_to_pdf(bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> {
     let soffice = find_soffice().ok_or_else(|| {
-        "LibreOffice not installed — `brew install --cask libreoffice` enables Office → PDF conversion"
+        "LibreOffice not installed — install LibreOffice to enable Office → PDF conversion"
             .to_string()
     })?;
 
@@ -79,7 +79,7 @@ fn convert_in(soffice: &Path, dir: &Path, bytes: &[u8], ext: &str) -> Result<Vec
     // open — soffice otherwise refuses to start a second instance.
     let profile = url::Url::from_file_path(dir.join("profile"))
         .map_err(|_| "profile path not absolute".to_string())?;
-    let mut child = std::process::Command::new(soffice)
+    let mut child = crate::runtime::platform::command(soffice)
         .arg(format!("-env:UserInstallation={profile}"))
         .args(["--headless", "--norestore", "--convert-to", "pdf"])
         .arg("--outdir")
@@ -116,6 +116,24 @@ fn find_soffice() -> Option<PathBuf> {
             return Some(p);
         }
     }
+    installed_soffice()
+}
+
+#[cfg(windows)]
+fn installed_soffice() -> Option<PathBuf> {
+    for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(root) = std::env::var_os(variable) {
+            let path = PathBuf::from(root).join("LibreOffice/program/soffice.exe");
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+    crate::harness::cli::discover::tool("soffice")
+}
+
+#[cfg(not(windows))]
+fn installed_soffice() -> Option<PathBuf> {
     [
         "/Applications/LibreOffice.app/Contents/MacOS/soffice",
         "/opt/homebrew/bin/soffice",

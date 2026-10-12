@@ -10,7 +10,9 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Route table | `app/src/routes.tsx` |
 | Shell: sidebar rail, tab strip, floating card, zoom | `app/src/layouts/AppLayout.tsx`, `app/src/lib/ui/pageZoom.ts`, `app/src/components/sidebar/`, `app/src/components/tabs/TopTabBar.tsx` |
 | Tabs, side panels, per-pane routers, titles from paths | `app/src/stores/shell/tabStore.ts`, `app/src/lib/shell/sideStack.ts`, `app/src/components/tabs/TabPane.tsx`, `app/src/components/tabs/SidePanelHeader.tsx`, `app/src/components/tabs/PaneHeader.tsx`, `app/src/lib/shell/tabRouters.ts`, `app/src/components/tabs/tabInfo.tsx` |
-| Window shortcuts (all menu items) | `app/src-tauri/src/shell/menu.rs` |
+| Windows startup size in the monitor work area | `app/src-tauri/src/shell/window.rs` |
+| Window shortcuts (all menu items), platform labels, Windows caption controls | `app/src-tauri/src/shell/menu.rs`, `app/src/lib/platform.ts`, `app/src/components/tabs/WindowControls.tsx` |
+| WebView2 window shortcut dispatch | `app/src-tauri/src/shell/menu/windows.rs` |
 | ⌘-click → a new tab, app-wide | `app/src/lib/shell/newTabClicks.ts` |
 | Search (⌘K and the new-tab field), the new-tab page's Recent list | `app/src/lib/search/`, `app/src/lib/search/filters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/shell/recentTabsStore.ts` |
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/files/openFile.ts`, `app/src/pages/subject/files/FilePage.tsx`, `app/src/hooks/find/useLocateHighlight.ts` |
@@ -18,6 +20,15 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Subject page: the nav column, subject switcher and `/subjects` redirect | `app/src/layouts/SubjectLayout.tsx`, `app/src/components/subjects/SubjectNav.tsx`, `app/src/pages/start/SubjectsRedirect.tsx` |
 | Home: sections, the Recent row's query, the Activity chart and its pings | `app/src/pages/start/HomePage.tsx`, `app/src/components/home/`, `app/src/lib/activity/home.ts`, `app/src/lib/activity/usage/`, `app/src/lib/activity/usageContext.ts`, `app/src/hooks/backend/useActivityPing.ts` |
 | Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/search/settings.ts` |
+
+## Windows startup fits the monitor work area
+
+The Windows setup sizes and positions the main window inside its current
+monitor's work area before browser initialization. It uses physical pixels,
+accounts for the outer frame, and leaves the taskbar visible at high DPI.
+When the monitor has less logical space than the configured minimum, that
+minimum is capped to the available space. Displays large enough for the
+configured size keep it.
 
 ## Each pane has its own router, and the path is its only state
 
@@ -67,7 +78,12 @@ before leaving a playing lecture.
   `useOutletContext` reads the nearest Outlet and a different shape would make
   `useSubject()` lie. Downloads and Media split the `file` rows: Media lists the
   videos (`isVideoFile`), Downloads everything else, so no file shows twice; the
-  student's own videos stay in Uploads.
+  student's own videos stay in Uploads. Lessons
+  (`app/src/pages/subject/content/LessonsPage.tsx`) lists only the lesson docs,
+  `lessons/<id>-<slug>.md`, of the `lessons` rows. A lesson's PDFs and
+  challenge files share the category but sit in its folder: they open from its
+  links, open and title like downloads (`isLessonAsset` in
+  `app/src/lib/files/fileTypes.ts`), and stay out of the tab's never-opened count.
 - **`/subjects` is a redirect, not a page** (`SubjectsRedirect`): it replaces
   itself with the Overview of the last subject `SubjectLayout` resolved
   (`localStorage`, `oculus-last-subject`), else the first current subject,
@@ -112,16 +128,40 @@ section names.
 
 ## The shell owns tabs, side panels and every window shortcut
 
+The examples below use macOS glyphs; shared shortcuts use Ctrl on Windows.
+Windows has an undecorated main window (`app/src-tauri/tauri.windows.conf.json`)
+with minimize, maximize/restore and close controls in `WindowControls`. The
+buttons stay outside the draggable tab region, follow native resize state,
+and expose action failures beside the controls. Only the main app webview has
+the window-control permissions in `app/src-tauri/capabilities/default.json`.
+The Windows side-panel shortcut is Ctrl+Shift+Y; Find Previous is Ctrl+Shift+G,
+while Ctrl+Shift+Z is Redo.
+
 - **Window shortcuts are menu items** (`app/src-tauri/src/shell/menu.rs`): macOS
   gives the menu bar every ⌘-key before the app's webview sees it. They reach
   the frontend as `menu-*` events and the frontend owns what each means.
   Close Window is ⇧⌘W, and the Edit submenu must stay or ⌘C/⌘V die in every
   field.
+- **Windows attaches `AcceleratorKeyPressed` to the main and browser-page
+  WebView2 controllers** (`app/src-tauri/src/shell/menu/windows.rs`), because
+  focused webview keys need not reach the host's menu message loop. It invokes
+  the same menu handler after the callback returns, suppresses repeated presses,
+  and leaves Ctrl+Alt combinations alone for AltGr. Custom Ctrl menu items show
+  shortcut labels without native accelerators, so the host loop cannot consume
+  them before the controller applies its policy. Browser pages keep their
+  Ctrl+Z, Ctrl+A, clipboard and find keys; app tab, navigation and zoom keys
+  reach the shell. Search, Address and tab or side-panel changes from a browser
+  focus the main WebView2 controller before emitting their event, so DOM
+  autofocus receives typing and Escape. A destination browser reclaims focus
+  when placed; page reload, history and zoom retain their controller's focus.
 - **A browser page gets ⌘-keys before the menu**, as in Safari, so a site's
   own ⌘Z/⌘A/⌘F (Google Docs) work; a key the page doesn't take falls through
   to the menu. The app's tab and window keys (⌘T, ⌘W, ⌘N, ⌘K, ⌘L, ⌘1–9 and
   their ⇧/⌥ variants) never go to the page. The monitor is Rust's
-  (`app/src-tauri/src/shell/keys.rs`).
+  (`app/src-tauri/src/shell/keys/`). WebKit never hands an unhandled key back,
+  so the fall-through is ours: a script in every frame of every browser and
+  dock page reports a ⌘-keydown the page didn't cancel, and the menu gets
+  the key the user just sent that page (`keys/fallback.rs`).
 - **Undo and Redo are menu items that emit, not the predefined ones.** The
   predefined items hand ⌘Z to WebKit's own undo stack, which a note's
   CodeMirror history never fills. While a browser page holds focus Rust sends
@@ -143,7 +183,7 @@ section names.
   tab, and ⇧⌘T pops `tabStore`'s `closed` stack back to the old index. A
   browser tab is remembered by URL, recorded by `TopTabBar` *before* Rust
   destroys the page.
-- **⌥⌘T and the strip's far-right button toggle the side panel**
+- **⌥⌘T (Ctrl+Shift+Y on Windows) and the strip's far-right button toggle the side panel**
   (`toggleSide`). `AppTab extends PaneState`: the main pane carries the tab's
   id, and everything below a tab — router, playing lecture, Recent entry — is
   keyed by pane id. `tab.focus` (`"main"` / `"side"`) is set in the capture
@@ -203,7 +243,7 @@ section names.
 ## The side panel is a stack of items beside the page
 
 Left is the tab's main page; right is its side panel (`tab.side`, pure logic in
-`app/src/lib/shell/sideStack.ts`), a stack of up to `SIDE_CAP` (8) panes. ⌥⌘T on a
+`app/src/lib/shell/sideStack.ts`), a stack of up to `SIDE_CAP` (8) panes. The side-panel shortcut on a
 closed panel opens one on `/new`.
 
 - **`openBeside` is what file rows, citations and lecture rows call**
@@ -248,8 +288,10 @@ closed panel opens one on `/new`.
   becomes the strip's `sideRatio`, which every new or reopened panel takes
   (half, `SIDE_RATIO`, before any drag). A stored `split` pane restores as a
   one-item panel.
-- **Nothing floats over a pane**: a native browser or dock page covers anything drawn
-  above it, so the controls sit in the header and the focus marker on the seam.
+- **Nothing floats over a pane**: a native browser or dock page shows through
+  a hole the app opens, which hides anything inside `#root` drawn over the page
+  ([architecture.md](./architecture.md#native-pages-show-through-holes-the-app-opens)),
+  so the controls sit in the header and the focus marker on the seam.
 - **Shell navigation leaves the panel open**: the sidebar, ⌘K and crumbs go to
   the focused pane.
 

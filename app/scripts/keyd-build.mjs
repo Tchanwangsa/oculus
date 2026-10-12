@@ -91,7 +91,17 @@ function buildForMacos(variant, signedDir) {
 }
 
 // Each adapter's build step, by `process.platform`.
-const buildSteps = { darwin: buildForMacos };
+function buildForWindows(variant, signedDir) {
+  const built = join(crate, "target", "release", "oculus-keyd.exe");
+  rmSync(built, { force: true });
+  const args = ["build", "--release", "--locked", ...(variants[variant].features.length ? ["--features", variants[variant].features.join(",")] : [])];
+  execFileSync("cargo", args, { cwd: crate, stdio: "inherit", windowsHide: true });
+  if (!existsSync(built)) throw new Error(`cargo reported success but ${built} is not there`);
+  mkdirSync(signedDir, { recursive: true });
+  copyFileSync(built, join(signedDir, "oculus-keyd.exe"));
+  return signedDir;
+}
+const buildSteps = { darwin: buildForMacos, win32: buildForWindows };
 
 export const hasAdapter = () => process.platform in buildSteps;
 
@@ -119,6 +129,15 @@ export function buildKeyd(variant, signedDir = variants[variant].signedDir) {
  * the running app depends on.
  */
 export function installFromMainCheckout(helper) {
+  if (process.platform === "win32") {
+    // Only the GUI may start the broker, outside an agent's sandbox. Stage a
+    // debug sibling instead of asking the CLI to activate it.
+    const debugDir = join(app, "src-tauri", "target", "debug");
+    mkdirSync(debugDir, { recursive: true });
+    copyFileSync(helperProgram(helper), join(debugDir, "oculus-keyd.exe"));
+    log("staged dev keyd beside the app; Oculus starts it");
+    return;
+  }
   const git = (...args) =>
     execFileSync("git", ["rev-parse", "--path-format=absolute", ...args], {
       cwd: app,

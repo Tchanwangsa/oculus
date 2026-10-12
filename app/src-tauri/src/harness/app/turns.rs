@@ -6,7 +6,7 @@ use tauri::State;
 
 use crate::harness::manager::validate_effort;
 use crate::harness::store;
-use crate::harness::{HarnessEvent, Provider, QueuedMessage, SendOptions};
+use crate::harness::{HarnessEvent, Provider, QueuedMessage, RewindTo, SendOptions};
 use crate::runtime::blocking::run as blocking;
 
 use super::send::{dispatch, lecture_brief, studio_brief};
@@ -160,8 +160,10 @@ async fn rewind_provider(
             provider,
             Some(&resume),
             &opts,
-            &anchor,
-            last_seen.as_deref(),
+            RewindTo {
+                anchor: &anchor,
+                last_seen: last_seen.as_deref(),
+            },
             sink,
         )
     })

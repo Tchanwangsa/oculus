@@ -19,10 +19,10 @@ fn sha1(msg: &[u8]) -> [u8; 20] {
     }
     data.extend_from_slice(&bit_len.to_be_bytes());
 
-    for chunk in data.chunks_exact(64) {
+    for chunk in data.as_chunks::<64>().0 {
         let mut w = [0u32; 80];
-        for (i, word) in chunk.chunks_exact(4).enumerate() {
-            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+        for (i, word) in chunk.as_chunks::<4>().0.iter().enumerate() {
+            w[i] = u32::from_be_bytes(*word);
         }
         for i in 16..80 {
             w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
@@ -123,9 +123,11 @@ pub fn totp_at(secret: &[u8], unix_seconds: u64, step: u64, digits: u32) -> Stri
     format!("{code:0width$}", width = digits as usize)
 }
 
-/// The code an authenticator app would be showing right now.
-pub fn totp_now(secret_b32: &str) -> Result<String, String> {
-    totp_code(secret_b32, crate::clock::now_secs())
+/// The code an authenticator app would be showing right now, for a key as
+/// the user pasted it (`oculus auth setup` passes it straight through, so an
+/// `otpauth://` link works here as it does in the save).
+pub fn totp_now(pasted_key: &str) -> Result<String, String> {
+    totp_code(&super::setup_key(pasted_key)?, crate::clock::now_secs())
 }
 
 /// The code an authenticator app shows at `unix_seconds`.

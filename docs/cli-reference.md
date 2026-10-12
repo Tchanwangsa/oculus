@@ -70,6 +70,7 @@ Sign in to Canvas, or sign out
 Usage: oculus auth <COMMAND>
 
 Commands:
+  canvas    Show or set your university's Canvas address
   login     Open the app's Canvas sign-in window and wait for the session
   logout    Forget the saved session
   status    Whether the saved session still works
@@ -79,6 +80,27 @@ Commands:
   diagnose  Report what the Okta sign-in page looks like, when `auto` fails
   ed        Show the Ed Discussion session status, or set a token manually
   help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus auth canvas`
+
+```
+Show or set your university's Canvas address
+
+Everything else is detected from it: how the university signs in, and whether automatic
+sign-in (Okta only) is possible. The address cannot change while a library exists —
+Start over in Settings → Storage first.
+
+Usage: oculus auth canvas [ADDRESS]
+
+Arguments:
+  [ADDRESS]
+          The address you open Canvas at, e.g. canvas.youruni.edu or
+          youruni.instructure.com. Omit to show the current one
 
 Options:
   -h, --help
@@ -206,9 +228,9 @@ Install, inspect or remove oculus-keyd, the credential broker
 Usage: oculus keyd <COMMAND>
 
 Commands:
-  install    Install oculus-keyd and load its LaunchAgent
-  status     Whether keyd is installed, loaded, current and answering
-  uninstall  Unload keyd and remove its LaunchAgent, helper app and stamp
+  install    Install oculus-keyd on macOS; on Windows, open Oculus to start it
+  status     Whether keyd is registered, current and answering
+  uninstall  Stop keyd and remove its registration and stamp
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -219,24 +241,26 @@ Options:
 ### `oculus keyd install`
 
 ```
-Install oculus-keyd and load its LaunchAgent
+Install oculus-keyd on macOS; on Windows, open Oculus to start it
 
-A keyd whose helper app is nested in the Oculus app is registered where it is; any other
-has its helper app copied to `bin/` in the data dir first, so the LaunchAgent never
-points into a build tree. Loading it prompts for nothing: keyd reads the keychain only
-when something first uses a stored key.
+On macOS, a keyd whose signed helper app is nested in Oculus is registered in place; any
+other has its helper app copied to `bin/` in the data dir first. Its LaunchAgent never
+points into a build tree. Loading it reads no stored key.
+
+On Windows, only the GUI starts the resident broker. This command cannot activate it;
+open Oculus instead.
 
 Usage: oculus keyd install [OPTIONS]
 
 Options:
       --from <PATH>
-          The signed keyd to install: its helper app, or the executable inside it.
-          Defaults to the one in this binary's app bundle, or, in a debug build, `bun
-          run keyd`'s output
+          The signed keyd to install on macOS: its helper app or executable inside it.
+          Defaults to this binary's bundled keyd, or, in a debug build, `bun run keyd`'s
+          output
 
       --if-changed
-          Do nothing when the installed keyd was built from the same source and the
-          agent already runs it
+          Do nothing when the installed keyd was built from the same source and its
+          registration already runs it
 
   -h, --help
           Print help (see a summary with '-h')
@@ -245,10 +269,11 @@ Options:
 ### `oculus keyd status`
 
 ```
-Whether keyd is installed, loaded, current and answering
+Whether keyd is registered, current and answering
 
-Sends keyd a `ping`, which starts it if launchd has it loaded. Never reads or prints a
-stored key.
+Sends keyd a `ping`. On macOS, this starts it if launchd has it loaded. On Windows, it
+only checks the existing resident broker; open Oculus to start it. Never reads or prints
+a stored key.
 
 Usage: oculus keyd status
 
@@ -260,10 +285,11 @@ Options:
 ### `oculus keyd uninstall`
 
 ```
-Unload keyd and remove its LaunchAgent, helper app and stamp
+Stop keyd and remove its registration and stamp
 
-The vault and the keychain's master key stay, so a reinstall finds every stored key
-again.
+On macOS, unloads its LaunchAgent and removes its copied helper app. On Windows, stops
+the verified resident broker. The vault and its master key stay, so a reinstall finds
+every stored key again.
 
 Usage: oculus keyd uninstall
 
@@ -416,7 +442,7 @@ Options:
 
   -c, --category <CATEGORY>
           Only these categories (home, syllabus, upload, document, page, assignment,
-          quiz, announcement, ed, file, module, image, other). Repeatable
+          quiz, announcement, ed, lessons, file, module, image, other). Repeatable
 
   -F, --fixed
           Treat the pattern as literal text, not a regular expression
@@ -487,7 +513,7 @@ Options:
 
   -c, --category <CATEGORY>
           Only these categories (home, syllabus, upload, document, page, assignment,
-          quiz, announcement, ed, file, module, image, other). Repeatable
+          quiz, announcement, ed, lessons, file, module, image, other). Repeatable
 
   -m, --match <TEXT>
           Only paths containing this text (case-insensitive)

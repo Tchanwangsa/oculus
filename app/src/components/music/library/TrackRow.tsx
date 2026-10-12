@@ -10,15 +10,15 @@ export function TrackRow({
   current,
   disabled,
   onPlay,
-  queue = true,
+  onRemove,
 }: {
   uri: string;
   row: MusicTrackRow | null | undefined;
   current: boolean;
   disabled: boolean;
   onPlay?: () => void;
-  /** Offer "Add to queue". */
-  queue?: boolean;
+  /** Offer "Remove from queue" (up next), which calls this. */
+  onRemove?: () => void;
 }) {
   if (row === undefined) {
     return (
@@ -29,7 +29,7 @@ export function TrackRow({
     );
   }
   if (row === null) {
-    return <LibraryRow name="Unavailable track" subtitle="" images={[]} disabled />;
+    return <LibraryRow name="Unavailable track" subtitle="" images={[]} onRemove={onRemove} />;
   }
   return (
     <LibraryRow
@@ -37,10 +37,11 @@ export function TrackRow({
       subtitle={trackSubtitle(row)}
       images={row.image_url ? [row.image_url] : []}
       durationMs={row.duration_ms}
-      queueUri={queue ? uri : undefined}
+      queueUri={uri}
       current={current}
       disabled={disabled}
       onPlay={onPlay}
+      onRemove={onRemove}
     />
   );
 }

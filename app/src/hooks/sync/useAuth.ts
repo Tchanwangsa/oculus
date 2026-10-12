@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTauriEvent } from "@/hooks/backend/useEvents";
+import { navigateActive } from "@/lib/shell/tabRouters";
+import { currentInstitution } from "@/stores/sync/institutionStore";
 
 export type AuthStatus = "connected" | "disconnected" | "pending" | "expired";
 
@@ -8,6 +10,8 @@ const RECHECK_MS = 5 * 60_000;
 
 export function useAuth() {
   const [status, setStatus] = useState<AuthStatus>("disconnected");
+  // Why the last connect could not open the sign-in window, shown in place.
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<boolean>("get_auth_status").then((ok) => {
@@ -43,27 +47,43 @@ export function useAuth() {
     };
   }, []);
 
-  useTauriEvent("canvas-auth-success", () => setStatus("connected"));
+  useTauriEvent("canvas-auth-success", () => {
+    setStatus("connected");
+    setError(null);
+  });
   useTauriEvent("canvas-auth-cancelled", () =>
     setStatus((p) => (p === "pending" ? "disconnected" : p)),
   );
   useTauriEvent("canvas-auth-expired", () => setStatus("expired"));
+  useTauriEvent("canvas-signed-out", () => setStatus("disconnected"));
 
-  /** Tries headless Okta sign-in with stored credentials first; anything it
-   *  cannot answer (push, biometrics, no creds) falls through to the window. */
+  /** With no Canvas address yet, opens Settings → Canvas to enter one. At an
+   *  Okta university it tries headless sign-in with stored credentials first;
+   *  anything that cannot answer (push, biometrics, no creds, another IdP)
+   *  falls through to the window. A window that cannot open (no keyd that
+   *  knows the university, a university change in flight) sets `error`. */
   const connect = async () => {
-    setStatus("pending");
-    try {
-      await invoke<string>("okta_sign_in");
-      setStatus("connected");
+    setError(null);
+    const institution = await currentInstitution().catch(() => null);
+    if (!institution?.canvas) {
+      navigateActive("/settings/canvas");
       return;
-    } catch (err) {
-      console.warn("[oculus] headless sign-in unavailable:", err);
+    }
+    setStatus("pending");
+    if (institution.okta) {
+      try {
+        await invoke<string>("okta_sign_in");
+        setStatus("connected");
+        return;
+      } catch (err) {
+        console.warn("[oculus] headless sign-in unavailable:", err);
+      }
     }
     try {
       await invoke("launch_canvas_auth");
-    } catch {
+    } catch (err) {
       setStatus("disconnected");
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -76,5 +96,5 @@ export function useAuth() {
     }
   };
 
-  return { status, connect, disconnect };
+  return { status, error, connect, disconnect };
 }

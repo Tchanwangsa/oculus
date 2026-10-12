@@ -1,12 +1,18 @@
 import { useState, type ComponentType } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { WindowControls } from "@/components/tabs/WindowControls";
+import { useWindowFullscreen } from "@/hooks/shell/useWindowFullscreen";
+import { isWindows } from "@/lib/platform";
 import { STEP_IDS, type StepId } from "@/lib/onboarding/steps";
 import { finishOnboarding } from "@/stores/shell/onboardingStore";
 import { AgentStep } from "./AgentStep";
+import { Backdrop } from "./Backdrop";
 import { CanvasStep } from "./CanvasStep";
 import { DoneStep } from "./DoneStep";
 import { LibraryStep } from "./LibraryStep";
+import { isSetupStep } from "./stepMeta";
 import { StepNavContext } from "./stepNav";
+import { StepRail } from "./StepRail";
 import type { StepProps } from "./types";
 import { WelcomeStep } from "./WelcomeStep";
 
@@ -18,21 +24,20 @@ const STEPS: Record<StepId, ComponentType<StepProps>> = {
   done: DoneStep,
 };
 
-/** Welcome and Done frame the count; only the steps between are numbered. */
-const NUMBERED = STEP_IDS.slice(1, -1);
-
 /**
  * First-run setup, rendered by `App` in place of the shell while it is open
  * (docs/onboarding.md), so the persisted tab strip is never touched. Owns the
  * step order and the skipped list; finishing writes both to the settings row.
+ * Draws the backdrop and the card; the progress rail heads the card on the
+ * three setup steps, and Welcome and Done go without it.
  */
 export function Onboarding() {
+  const fullscreen = useWindowFullscreen();
   const [index, setIndex] = useState(0);
   const [skipped, setSkipped] = useState<StepId[]>([]);
   const [error, setError] = useState<string | null>(null);
   const id = STEP_IDS[index];
   const Step = STEPS[id];
-  const number = NUMBERED.indexOf(id);
 
   const advance = (skip: boolean) => {
     // Rebuilt in step order, so a step skipped and later finished drops out.
@@ -48,22 +53,39 @@ export function Onboarding() {
 
   return (
     <TooltipProvider delayDuration={500}>
-      <div data-select-scope className="flex h-full w-full flex-col bg-background">
+      <div data-select-scope className="relative flex h-full w-full flex-col bg-background">
+        <Backdrop />
         {/* Under the overlay title bar: drags the window like the tab strip. */}
-        <div data-tauri-drag-region className="h-11 shrink-0" />
-        <div className="flex flex-1 overflow-y-auto px-8 pb-8">
-          <div className="m-auto w-full max-w-lg flex-none rounded-xl border border-border bg-card p-8 shadow-panel">
-            <StepNavContext.Provider
-              value={{
-                number: number < 0 ? null : number + 1,
-                total: NUMBERED.length,
-                back: index > 0 ? () => setIndex(index - 1) : null,
-              }}
-            >
-              <Step key={id} onNext={() => advance(false)} onSkip={() => advance(true)} />
-            </StepNavContext.Provider>
+        <div
+          data-tauri-drag-region="deep"
+          className="relative flex h-11 shrink-0 items-center justify-end pr-2"
+        >
+          {isWindows && !fullscreen && <WindowControls />}
+        </div>
+        <div className="relative flex flex-1 overflow-y-auto px-8 pb-10">
+          <div className="m-auto w-full max-w-2xl flex-none">
+            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-panel">
+              {isSetupStep(id) && (
+                <div className="border-b border-border-subtle px-8 py-4">
+                  <StepRail current={id} skipped={skipped} />
+                </div>
+              )}
+              <StepNavContext.Provider
+                value={{ back: index > 0 ? () => setIndex(index - 1) : null, skipped }}
+              >
+                {/* Keyed, so each step fades in once; `will-change` keeps the
+                    layer for good, or icons jump half a pixel when it drops
+                    at a fractional page zoom (docs/ui.md). */}
+                <div
+                  key={id}
+                  className="animate-in duration-300 ease-out fade-in-0 slide-in-from-bottom-1 will-change-[opacity,transform] motion-reduce:animate-none"
+                >
+                  <Step onNext={() => advance(false)} onSkip={() => advance(true)} />
+                </div>
+              </StepNavContext.Provider>
+            </div>
             {error && (
-              <p data-selectable className="mt-4 text-xs text-destructive">
+              <p data-selectable className="mt-3 text-center text-xs text-destructive">
                 {error}
               </p>
             )}

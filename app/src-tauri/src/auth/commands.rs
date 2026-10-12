@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use super::{login_window, saved_session_probe, session, AuthProbe, AuthState};
 use crate::providers::credentials::Credentialed;
@@ -36,21 +36,22 @@ pub async fn check_canvas_session() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn launch_canvas_auth(
-    app: AppHandle,
-    state: tauri::State<'_, AuthState>,
-) -> Result<(), String> {
-    let auth_flag = Arc::clone(&state.0);
-    login_window::open_canvas_window(app, auth_flag);
-    Ok(())
+pub async fn launch_canvas_auth(app: AppHandle) -> Result<(), String> {
+    login_window::open_canvas_window(app)
 }
 
 #[tauri::command]
-pub async fn disconnect_canvas(
-    app: AppHandle,
-    state: tauri::State<'_, AuthState>,
-) -> Result<(), String> {
-    *state.0.lock().unwrap() = false;
+pub async fn disconnect_canvas(app: AppHandle) -> Result<(), String> {
+    end_session(&app).await
+}
+
+/// Signs the app out: closes the login window, empties WebKit's jar of the
+/// Canvas and SSO cookies, has keyd drop the sessions, and tells every
+/// `useAuth` (`canvas-signed-out`).
+pub async fn end_session(app: &AppHandle) -> Result<(), String> {
+    if let Some(state) = app.try_state::<AuthState>() {
+        *state.0.lock().unwrap() = false;
+    }
 
     if let Some(win) = app.get_webview_window("canvas-auth") {
         win.close().map_err(|e| e.to_string())?;
@@ -58,14 +59,16 @@ pub async fn disconnect_canvas(
 
     // The jar first, or a Canvas tab saves the session straight back.
     let (cleared, done) = tokio::sync::oneshot::channel();
-    crate::shell::browser::clear_sessions(&app, move || {
+    crate::shell::browser::clear_sessions(app, move || {
         cleared.send(()).ok();
     });
-    done.await.ok();
+    done.await
+        .map_err(|_| "Could not clear the browser’s Canvas and Okta cookies".to_string())?;
     tauri::async_runtime::spawn_blocking(|| {
         session::sign_out(&Credentialed::at(&crate::library::paths::data_dir()))
     })
     .await
     .map_err(|e| e.to_string())??;
+    app.emit("canvas-signed-out", "signed-out").ok();
     Ok(())
 }

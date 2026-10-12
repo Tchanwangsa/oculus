@@ -53,9 +53,16 @@ interface ParseState {
   update: (ev: ParseJob) => void;
   /** Merge in disk-derived statuses without touching live jobs. */
   merge: (statuses: Record<string, string>) => void;
-  /** Call on anything that plausibly fixed the latch, e.g. a token saved. */
-  clearLatch: () => void;
+  /** A MinerU token was stored: lifts the latch and forgets the failures
+   *  only a token caused (missing or rejected, both non-retryable), so the
+   *  sweep's first gate lets those files through again. Every other failure
+   *  stays: a new token can't fix a file MinerU couldn't read. */
+  tokenSaved: () => void;
 }
+
+/** The frozen `kind()`s of `ParseError::MissingCredentials` and
+ *  `RejectedCredentials` (parse/error.rs). */
+const TOKEN_KINDS = new Set(["missing_credentials", "rejected_credentials"]);
 
 export const useParseStore = create<ParseState>((set) => ({
   statuses: {},
@@ -102,5 +109,11 @@ export const useParseStore = create<ParseState>((set) => ({
   merge: (incoming) =>
     set((state) => ({ statuses: { ...incoming, ...state.statuses } })),
 
-  clearLatch: () => set({ latch: null }),
+  tokenSaved: () =>
+    set((state) => ({
+      latch: null,
+      failures: Object.fromEntries(
+        Object.entries(state.failures).filter(([, f]) => !f.kind || !TOKEN_KINDS.has(f.kind)),
+      ),
+    })),
 }));

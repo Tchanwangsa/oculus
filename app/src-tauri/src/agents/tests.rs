@@ -7,6 +7,7 @@ use super::links::SCANNED_SKILL_DIRS;
 use super::*;
 
 /// A hand-written AGENTS.md in a course folder must survive relinking.
+#[cfg(unix)]
 #[test]
 fn linking_replaces_stale_links_but_never_real_files() {
     let root = Scratch::new("agents-link");
@@ -76,10 +77,14 @@ fn memories_filed_in_a_course_folder_are_adopted() {
         .contains("[MST]"));
     // And the old path resolves to the same file.
     assert!(old.join("info30006-mst.md").is_file());
+    #[cfg(unix)]
     assert!(std::fs::symlink_metadata(&old)
         .unwrap()
         .file_type()
         .is_symlink());
+
+    #[cfg(windows)]
+    assert!(junction::exists(&old).unwrap());
 
     // Idempotent: a second sync neither re-moves nor re-links.
     link_all(&root).unwrap();
@@ -346,6 +351,7 @@ fn all_three_clis_reach_the_one_skills_directory() {
         let link = agents_dir(&root)
             .join(scanned)
             .join("skills/oculus-lectures");
+        #[cfg(unix)]
         assert_eq!(
             std::fs::read_link(&link).unwrap(),
             PathBuf::from("../../skills/oculus-lectures"),
@@ -407,11 +413,12 @@ fn nothing_is_written_outside_the_library() {
         home.join(".codex/skills").display()
     );
     assert!(agents_dir(&root)
-        .join(".agents/skills/oculus-plan")
-        .is_symlink());
+        .join(".agents/skills/oculus-plan/SKILL.md")
+        .is_file());
 }
 
 /// A link is ours and gets repointed; a real file is somebody's.
+#[cfg(unix)]
 #[test]
 fn a_real_skill_on_the_link_path_is_left_alone() {
     let root = Scratch::new("agents-skill-mine");
@@ -430,5 +437,40 @@ fn a_real_skill_on_the_link_path_is_left_alone() {
     assert_eq!(
         std::fs::read_link(into.join("oculus-lectures")).unwrap(),
         PathBuf::from("../../skills/oculus-lectures")
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_course_docs_are_managed_copies_and_memories_are_junctions() {
+    let root = Scratch::new("agents-windows-link");
+    let course = root.join("courses/X");
+    std::fs::create_dir_all(&course).unwrap();
+    ensure_library_docs(&root).unwrap();
+    assert_eq!(link_course(&root, "X").unwrap(), Link::Linked);
+    assert!(course.join("AGENTS.md.oculus-managed").is_file());
+    assert!(junction::exists(course.join("agents/memories")).unwrap());
+    assert_eq!(link_course(&root, "X").unwrap(), Link::Current);
+    let memories = course.join("agents/memories");
+    let wrong = root.join("wrong-bucket");
+    std::fs::create_dir_all(&wrong).unwrap();
+    std::fs::write(wrong.join("keep.md"), "keep").unwrap();
+    junction::delete(&memories).unwrap();
+    std::fs::remove_dir(&memories).unwrap();
+    junction::create(&wrong, &memories).unwrap();
+    assert_eq!(link_course(&root, "X").unwrap(), Link::Current);
+    assert_eq!(
+        std::fs::read_to_string(wrong.join("keep.md")).unwrap(),
+        "keep"
+    );
+    assert_eq!(
+        crate::runtime::platform::canonicalize(junction::get_target(&memories).unwrap()).unwrap(),
+        crate::runtime::platform::canonicalize(root.join("agents/memories/X")).unwrap()
+    );
+    std::fs::write(course.join("AGENTS.md"), "mine").unwrap();
+    assert_eq!(link_course(&root, "X").unwrap(), Link::Skipped);
+    assert_eq!(
+        std::fs::read_to_string(course.join("AGENTS.md")).unwrap(),
+        "mine"
     );
 }

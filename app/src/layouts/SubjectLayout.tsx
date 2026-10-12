@@ -1,3 +1,4 @@
+import { shortcut } from "@/lib/platform";
 import { useEffect, useMemo } from "react";
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
 import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
@@ -84,7 +85,7 @@ export default function SubjectLayout() {
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <PaneHeaderRow className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
-          <SideNavCollapseToggle collapsed={panel.collapsed} onToggle={panel.toggle} shortcut="⌘⌥B" />
+          <SideNavCollapseToggle collapsed={panel.collapsed} onToggle={panel.toggle} shortcut={shortcut("mod+alt+B")} />
           <PaneTrail>
             <nav
               aria-label="Breadcrumb"

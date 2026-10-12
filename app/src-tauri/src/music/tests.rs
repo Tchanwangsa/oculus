@@ -6,16 +6,19 @@ use librespot_protocol::authentication::AuthenticationType;
 use log::Level;
 
 use super::audio::{fallback_message, resolve, Choice};
-use super::control::{refusal, step, Need, Step};
+use super::control::{step, At, Need, Step, QUEUE_REFUSAL};
 use super::credentials::Saved;
 use super::devices::{connect_kind, from_cluster, with_this};
 use super::duck::Duck;
 use super::events::apply;
 use super::login::{callback_outcome, LoginError};
 use super::logs::is_track_failure;
+use super::queue::{find, nth, without};
 use super::session::{next_backoff, BACKOFF_MAX, BACKOFF_MIN};
 use super::startup::{parse, Prefs};
-use super::state::{from_percent, percent, up_next, NextTrack, Snapshot, INITIAL_VOLUME, UP_NEXT};
+use super::state::{
+    apply_cluster, from_percent, percent, up_next, NextTrack, Snapshot, INITIAL_VOLUME,
+};
 use super::track::cover_url;
 
 #[test]
@@ -149,6 +152,26 @@ fn a_missing_audio_key_is_a_track_failure() {
 }
 
 #[test]
+fn a_seek_with_nothing_loaded_is_not_a_track_failure() {
+    assert!(!is_track_failure(
+        Level::Error,
+        "librespot_playback::player",
+        "Player::seek called from invalid state: Stopped"
+    ));
+    assert!(!is_track_failure(
+        Level::Error,
+        "librespot_playback::player",
+        "Player::play called from invalid state: Stopped"
+    ));
+    // A load the player cannot start still is.
+    assert!(is_track_failure(
+        Level::Error,
+        "librespot_playback::player",
+        "Player::handle_command_load called from invalid state: Invalid"
+    ));
+}
+
+#[test]
 fn player_events_fold_into_the_snapshot() {
     let track_id = SpotifyUri::from_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQC").unwrap();
     let mut s = Snapshot::default();
@@ -235,23 +258,39 @@ fn a_new_device_starts_at_full_volume() {
 }
 
 #[test]
-fn an_inactive_device_pulls_activates_skips_or_refuses_by_command() {
-    for need in [Need::Pull, Need::Local, Need::IfActive, Need::Active] {
-        assert_eq!(step(true, need), Step::Send);
+fn a_command_goes_here_to_the_other_device_or_pulls_by_where_playback_is() {
+    use Need::*;
+    let all = [Pull, Control, NeverPull, Load, Queue, IfActive];
+    for need in all {
+        assert_eq!(step(At::Here, need), Step::Send, "{need:?}");
     }
-    assert_eq!(step(false, Need::Pull), Step::PullThenSend);
-    assert_eq!(step(false, Need::Local), Step::ActivateThenSend);
-    assert_eq!(step(false, Need::IfActive), Step::Skip);
-    // Queueing never moves playback here.
-    assert_eq!(step(false, Need::Active), Step::Refuse);
+    // Another device playing is controlled where it is, except by "Play
+    // here" and by what must never touch it (the exclusive rule, a duck).
+    let elsewhere: Vec<Step> = all.iter().map(|n| step(At::Elsewhere, *n)).collect();
     assert_eq!(
-        refusal(Some("Phone")),
-        "Playing on Phone: Oculus can add to the queue only while it plays here"
+        elsewhere,
+        [
+            Step::PullThenSend,
+            Step::Remote,
+            Step::Remote,
+            Step::Remote,
+            Step::Remote,
+            Step::Skip
+        ]
     );
+    let nowhere: Vec<Step> = all.iter().map(|n| step(At::Nowhere, *n)).collect();
     assert_eq!(
-        refusal(None),
-        "Play something here first, then add to the queue"
+        nowhere,
+        [
+            Step::PullThenSend,
+            Step::PullThenSend,
+            Step::Skip,
+            Step::ActivateThenSend,
+            Step::Refuse,
+            Step::Skip
+        ]
     );
+    assert_eq!(QUEUE_REFUSAL, "Play something first, then add to the queue");
 }
 
 #[test]
@@ -259,6 +298,18 @@ fn becoming_active_and_inactive_follow_the_spircs_session_events() {
     let mut s = Snapshot {
         connected: true,
         playing_on: Some("Phone".into()),
+        remote: Some(super::remote::RemotePlayback {
+            device_name: "Phone".into(),
+            track: None,
+            position_ms: 0,
+            position_at_ms: 0,
+            playing: true,
+            volume: None,
+            shuffle: false,
+            repeat: false,
+            can_prev: true,
+            uri: T1.into(),
+        }),
         ..Snapshot::default()
     };
     apply(
@@ -270,6 +321,7 @@ fn becoming_active_and_inactive_follow_the_spircs_session_events() {
     );
     assert!(s.active && s.connected);
     assert_eq!(s.playing_on, None);
+    assert_eq!(s.remote, None);
     s.playing = true;
     apply(
         &mut s,
@@ -412,7 +464,7 @@ const T2: &str = "spotify:track:7ouMYWpwJ422jRcDASZB7P";
 const T3: &str = "spotify:track:0eGsygTp906u18L0Oimnem";
 
 #[test]
-fn up_next_keeps_tracks_only_marks_queued_ones_and_caps() {
+fn up_next_keeps_every_track_only_and_marks_queued_ones() {
     let listed = [
         (T1, "queue"),
         ("spotify:delimiter", "context"),
@@ -421,42 +473,84 @@ fn up_next_keeps_tracks_only_marks_queued_ones_and_caps() {
         (T2, "context"),
     ];
     assert_eq!(up_next(listed), [next(T1, true), next(T2, false)]);
-    let many: Vec<(&str, &str)> = (0..UP_NEXT + 5).map(|_| (T3, "context")).collect();
-    assert_eq!(up_next(many).len(), UP_NEXT);
+    // librespot lists up to 80; none is cut.
+    let many: Vec<(&str, &str)> = (0..80).map(|_| (T3, "context")).collect();
+    assert_eq!(up_next(many).len(), 80);
 }
 
 #[test]
-fn a_queue_event_sets_up_next_and_a_track_change_moves_past_it() {
+fn a_queue_event_sets_up_next_and_whether_previous_goes_back() {
     use librespot_playback::player::QueueTrack;
     let queued = |uri: &str, provider: &str| QueueTrack {
         uri: uri.into(),
         provider: provider.into(),
     };
+    let set_queue = |next_tracks, prev_tracks| PlayerEvent::SetQueue {
+        context_uri: "spotify:playlist:x".into(),
+        current_track: None,
+        next_tracks,
+        prev_tracks,
+    };
     let mut s = Snapshot::default();
     apply(
         &mut s,
-        PlayerEvent::SetQueue {
-            context_uri: "spotify:playlist:x".into(),
-            current_track: None,
-            next_tracks: vec![
+        set_queue(
+            vec![
                 queued(T1, "queue"),
                 queued(T2, "context"),
                 queued(T3, "context"),
             ],
-            prev_tracks: vec![],
-        },
+            vec![queued("spotify:delimiter", "context")],
+        ),
     );
     assert_eq!(
         s.up_next,
         [next(T1, true), next(T2, false), next(T3, false)]
     );
-    s.advance_to(T2);
+    assert_eq!(s.context_uri.as_deref(), Some("spotify:playlist:x"));
+    // A delimiter is not a track to go back to.
+    assert!(!s.can_prev);
+
+    // A track starting changes nothing up next; the Spirc's next event does.
+    apply(
+        &mut s,
+        set_queue(vec![queued(T3, "context")], vec![queued(T2, "context")]),
+    );
     assert_eq!(s.up_next, [next(T3, false)]);
-    // A track that was not up next leaves the list alone.
-    s.advance_to(T1);
-    assert_eq!(s.up_next, [next(T3, false)]);
+    assert!(s.can_prev);
+
+    // With none behind it, previous goes back only round a repeated context.
+    apply(&mut s, set_queue(vec![], vec![]));
+    assert!(!s.can_prev);
+    apply(
+        &mut s,
+        PlayerEvent::RepeatChanged {
+            context: false,
+            track: true,
+        },
+    );
+    assert!(s.repeat && !s.can_prev);
+    apply(
+        &mut s,
+        PlayerEvent::RepeatChanged {
+            context: true,
+            track: false,
+        },
+    );
+    assert!(s.can_prev);
+
+    apply(
+        &mut s,
+        PlayerEvent::RepeatChanged {
+            context: false,
+            track: false,
+        },
+    );
+    apply(&mut s, set_queue(vec![], vec![queued(T1, "context")]));
     s.set_unlinked();
     assert!(s.up_next.is_empty());
+    assert_eq!(s.context_uri, None);
+    assert!(!s.can_prev);
 }
 
 #[test]
@@ -475,15 +569,106 @@ fn a_pushed_cluster_carries_what_the_active_device_plays_next() {
     // No player state: nothing known, so the snapshot's list is kept.
     assert_eq!(from_cluster(&cluster, "me").up_next, None);
     cluster.player_state = Some(PlayerState {
+        context_uri: "spotify:album:a".into(),
         next_tracks: vec![track(T1, "queue"), track(T2, "context")],
+        prev_tracks: vec![track(T3, "context")],
+        queue_revision: "42".into(),
         ..PlayerState::default()
     })
     .into();
+    let pushed = from_cluster(&cluster, "me");
+    assert_eq!(pushed.up_next, Some(vec![next(T1, true), next(T2, false)]));
+    let queue = pushed.queue.as_ref().unwrap();
     assert_eq!(
-        from_cluster(&cluster, "me").up_next,
-        Some(vec![next(T1, true), next(T2, false)])
+        (queue.next.len(), queue.prev.len(), queue.revision.as_str()),
+        (2, 1, "42")
     );
-    // Nothing active: nothing plays next.
+    let mut s = Snapshot::default();
+    apply_cluster(&mut s, &mut pushed.clone());
+    assert_eq!(s.context_uri.as_deref(), Some("spotify:album:a"));
+
+    // A push without a player state keeps the last queue of the same device.
+    let mut bare = cluster.clone();
+    bare.player_state.clear();
+    let mut later = from_cluster(&bare, "me");
+    later.keep_queue(Some(pushed.clone()));
+    assert_eq!(later.queue, pushed.queue);
+    apply_cluster(&mut s, &mut later);
+    assert_eq!(s.context_uri.as_deref(), Some("spotify:album:a"));
+    // Not another device's.
+    bare.active_device_id = "speaker".into();
+    let mut other = from_cluster(&bare, "me");
+    other.keep_queue(Some(pushed.clone()));
+    assert_eq!(other.queue, None);
+
+    // Nothing active: nothing plays next, from no context.
     cluster.active_device_id.clear();
-    assert_eq!(from_cluster(&cluster, "me").up_next, Some(vec![]));
+    let mut idle = from_cluster(&cluster, "me");
+    assert_eq!(idle.up_next, Some(vec![]));
+    idle.keep_queue(Some(pushed));
+    assert_eq!(idle.queue, None);
+    apply_cluster(&mut s, &mut idle);
+    assert_eq!(s.context_uri, None);
+}
+
+fn provided(uri: &str, uid: &str) -> librespot_protocol::player::ProvidedTrack {
+    librespot_protocol::player::ProvidedTrack {
+        uri: uri.into(),
+        uid: uid.into(),
+        provider: "context".into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn an_up_next_entry_is_found_by_its_place_among_the_listed_tracks() {
+    let next = [
+        provided(T1, "a"),
+        provided("spotify:episode:e", "b"),
+        provided(T2, "c"),
+        provided("spotify:delimiter", "d"),
+        provided(T1, "e"),
+    ];
+    // up_next is T1, T2, T1: the episode and the delimiter are not shown.
+    assert_eq!(find(&next, T1, 0), Some(0));
+    assert_eq!(find(&next, T2, 1), Some(2));
+    // A duplicate URI: the entry at that place, not the first.
+    assert_eq!(find(&next, T1, 2), Some(4));
+    // The list moved: the first entry with that URI.
+    assert_eq!(find(&next, T2, 0), Some(2));
+    assert_eq!(find(&next, T2, 9), Some(2));
+    assert_eq!(find(&next, T3, 0), None);
+    assert_eq!(find(&[], T1, 0), None);
+}
+
+#[test]
+fn a_removal_keeps_every_other_entry_episodes_and_delimiters_included() {
+    let next = [
+        provided(T1, "a"),
+        provided("spotify:episode:e", "b"),
+        provided(T2, "c"),
+        provided(T1, "d"),
+    ];
+    let at = find(&next, T1, 2).unwrap();
+    let uids: Vec<String> = without(&next, at).into_iter().map(|t| t.uid).collect();
+    assert_eq!(uids, ["a", "b", "c"]);
+    let uids: Vec<String> = without(&next, 0).into_iter().map(|t| t.uid).collect();
+    assert_eq!(uids, ["b", "c", "d"]);
+}
+
+#[test]
+fn oculus_names_an_up_next_entry_by_its_uri_and_which_of_its_tracks_it_is() {
+    let up = [
+        next(T1, true),
+        next(T2, false),
+        next(T1, false),
+        next(T1, false),
+    ];
+    assert_eq!(nth(&up, T1, 0), 0);
+    assert_eq!(nth(&up, T2, 1), 0);
+    assert_eq!(nth(&up, T1, 2), 1);
+    assert_eq!(nth(&up, T1, 3), 2);
+    // The entry moved or the list ended: the first track with that URI.
+    assert_eq!(nth(&up, T2, 3), 0);
+    assert_eq!(nth(&up, T1, 9), 0);
 }

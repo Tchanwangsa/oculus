@@ -1,12 +1,5 @@
-use std::collections::HashMap;
-use std::process::Command;
-use std::sync::atomic::AtomicI64;
-use std::sync::{mpsc, Mutex};
-use std::time::Duration;
-
 use serde_json::Value;
 
-use crate::harness::child::ChildProc;
 use crate::harness::event::{HarnessEvent, ToolKind};
 
 use super::translate::{translate, translate_account};
@@ -15,7 +8,13 @@ use super::{CodexServer, CodexThreadOpts, ThreadState};
 #[cfg(unix)]
 #[test]
 fn a_failed_request_write_does_not_leave_a_pending_reply() {
+    use crate::harness::child::ChildProc;
+    use std::collections::HashMap;
     use std::io::{BufRead, BufReader, Read};
+    use std::process::Command;
+    use std::sync::atomic::AtomicI64;
+    use std::sync::{mpsc, Mutex};
+    use std::time::Duration;
 
     // The child prints one line and exits, so its stdin's read end is
     // gone and the write meets a broken pipe. `kill` and `reap` would

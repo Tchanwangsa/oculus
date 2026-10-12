@@ -13,7 +13,7 @@ use crate::harness::discover;
 use crate::harness::opencode::{self, OpencodeSessionOpts};
 use crate::harness::{Provider, Sink};
 
-use super::handle::{Handle, Live};
+use super::handle::{Handle, Live, RewindTo};
 use super::instructions::{instructions, thread_cwd, thread_sections};
 use super::options::SendOptions;
 use super::raw_log::RawLog;
@@ -37,19 +37,15 @@ impl Harness {
     }
 
     /// Take a question and everything after it out of the provider's own
-    /// session, so the agent's context matches the timeline. `anchor` is the
-    /// provider's handle for that question, kept on its row; `last_seen` the
-    /// newest question's, so Claude knows which later turns the timeline holds.
-    /// A thread whose process has gone is resumed for this without starting a
-    /// turn.
+    /// session, so the agent's context matches the timeline. A thread whose
+    /// process has gone is resumed for this without starting a turn.
     pub fn rewind(
         &self,
         thread_id: i64,
         provider: Provider,
         resume: Option<&str>,
         opts: &SendOptions,
-        anchor: &str,
-        last_seen: Option<&str>,
+        to: RewindTo,
         sink: Sink,
     ) -> Result<(), String> {
         // Rewound outside the lock: it waits on the CLI, and holding the map
@@ -63,7 +59,7 @@ impl Harness {
             }
             live.get(&thread_id).ok_or("no session")?.handle.clone()
         };
-        handle.rewind(anchor, last_seen)
+        handle.rewind(to)
     }
 
     /// Make sure this thread has a session that can be talked to, spawning or

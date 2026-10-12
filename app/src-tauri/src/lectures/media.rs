@@ -8,7 +8,7 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tiny_http::{Header, Method, Response, Server};
@@ -62,7 +62,7 @@ pub fn start_media_server(data_dir: PathBuf) -> MediaServer {
     MediaServer { port, token }
 }
 
-fn handle(request: tiny_http::Request, data_dir: &PathBuf, token: &str) {
+fn handle(request: tiny_http::Request, data_dir: &Path, token: &str) {
     let respond_status = |request: tiny_http::Request, code: u16| {
         let _ = request.respond(Response::empty(code));
     };
@@ -87,12 +87,13 @@ fn handle(request: tiny_http::Request, data_dir: &PathBuf, token: &str) {
     };
 
     // Canonicalize before the scope check so `..` segments can't escape.
-    let Ok(path) = path.canonicalize() else {
+    let Ok(path) = crate::runtime::platform::canonicalize(path) else {
         return respond_status(request, 404);
     };
-    let in_scope = ["lectures", "courses", "studio/videos"]
-        .iter()
-        .any(|dir| path.starts_with(data_dir.join(dir)));
+    let in_scope = ["lectures", "courses", "studio/videos"].iter().any(|dir| {
+        crate::runtime::platform::canonicalize(data_dir.join(dir))
+            .is_ok_and(|scope| path.starts_with(scope))
+    });
     if !in_scope {
         return respond_status(request, 403);
     }
@@ -190,17 +191,12 @@ fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
     (start <= end).then_some((start, end))
 }
 
-/// Per-launch bearer token from /dev/urandom; the fallback avoids a panic.
+/// The loopback server requires an unpredictable per-launch bearer token.
 fn random_token() -> String {
+    use ring::rand::{SecureRandom, SystemRandom};
     let mut buf = [0u8; 16];
-    if let Ok(mut f) = File::open("/dev/urandom") {
-        if f.read_exact(&mut buf).is_ok() {
-            return buf.iter().map(|b| format!("{b:02x}")).collect();
-        }
-    }
-    format!(
-        "{:x}{:x}",
-        std::process::id(),
-        crate::runtime::clock::now_nanos()
-    )
+    SystemRandom::new()
+        .fill(&mut buf)
+        .expect("media bearer token entropy unavailable");
+    buf.iter().map(|b| format!("{b:02x}")).collect()
 }

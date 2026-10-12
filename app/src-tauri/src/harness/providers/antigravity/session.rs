@@ -1,6 +1,5 @@
 //! One `agy --print=` process per thread: spawn, send, interrupt.
 
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -62,7 +61,7 @@ impl AntigravitySession {
         // the spawn.
         install::install(&base.library, cfg.approved.clone())
             .map_err(|e| format!("Antigravity was not started: {e}"))?;
-        let mut cmd = Command::new(&base.bin);
+        let mut cmd = crate::runtime::platform::cli_command(&base.bin)?;
         cmd.args(launch_args(&base));
         cmd.current_dir(&base.cwd)
             .env_clear()

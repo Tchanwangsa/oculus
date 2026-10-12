@@ -11,12 +11,14 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Canvas scrape engine (modules driver, link crawl, Office conversion) | `app/src-tauri/src/sync/` |
 | Canvas HTTP through keyd's `canvas` route: redirects, retries, pagination, streamed downloads | `app/src-tauri/src/sources/canvas/` |
 | Ed Discussion: courses, threads, XML→md; its requests through keyd's `ed` route | `app/src-tauri/src/sources/ed/` |
+| Ed Lessons: lessons, quiz questions, workspace zips, the lesson renderer | `app/src-tauri/src/sources/ed/lessons.rs`, `app/src-tauri/src/sources/ed/workspace.rs`, `app/src-tauri/src/sources/ed/lesson_md.rs` |
+| The Ed phase (one course resolve for threads and lessons) and the lessons phase | `app/src-tauri/src/sync/phases/ed.rs`, `app/src-tauri/src/sync/phases/ed_lessons.rs` |
 | Echo360 core | `app/src-tauri/src/sources/echo360/` |
 | Echo360 Tauri commands, session cache, downloads | `app/src-tauri/src/lectures/commands.rs`, `app/src-tauri/src/lectures/mod.rs`, `app/src-tauri/src/lectures/downloads.rs` |
 | Canvas HTML → Markdown | `app/src-tauri/src/pages/md/` |
 | App-side entry: thread + `AppReporter`; on-demand module videos and page embeds | `app/src-tauri/src/sync/scrape/` |
 | Headless DB writes, subject list state | `app/src-tauri/src/db/store/`, `app/src-tauri/src/sync/subjects.rs` |
-| Chronological term ranking | `app/src-tauri/src/sync/terms.rs` |
+| Chronological term ordering (`term_sort`) | `app/src-tauri/src/sync/terms.rs` |
 | Agent docs written into the library | `app/src-tauri/src/agents/mod.rs` |
 | Frontend sync page, runner, options | `app/src/pages/tools/SyncPage.tsx`, `app/src/lib/pipeline/syncRunner.ts`, `app/src/components/sync/SyncSettings.tsx` |
 
@@ -68,10 +70,26 @@ is not running or not installed".
 `list_courses` marks the newest term that still has available courses as
 current; `oculus run` syncs it by default, `oculus list` marks it, and a
 search with no named subject falls back to it. Canvas term names do not sort
-chronologically (`"2026 Summer Term"` > `"2026 Semester 2"` as strings), so
-`app/src-tauri/src/sync/terms.rs` ranks within the year — summer, semester 1,
-winter, semester 2 — and a month-named intensive (`"2026 June"`) takes the rank
-of the term it falls inside.
+chronologically (`"2026 Summer Term"` > `"2026 Semester 2"` as strings) and
+mean different months in different places, so `app/src-tauri/src/sync/terms.rs`
+gives each term a `YYYY-MM` key, `subjects.term_sort`:
+
+- From the term's `start_at` when Canvas has one.
+- Otherwise from the name: the first 19xx/20xx anywhere in it, and the month
+  its words name — a season first (`"Summer Term 1"` is a summer term), then
+  numbered semesters, trimesters, terms and quarters (as whole words, so the
+  year in `"Fall Term 2026"` is no term number), then month names. Seasons
+  follow the hemisphere (`Institution::southern_hemisphere`, from the hosts'
+  country code): Summer opens a southern year and sits mid-year in a northern
+  one. A month-named southern intensive (`"2026 June"`, July) ranks with
+  Winter, and an unrecognised term sorts after every real one in its year.
+- An academic-year range (`"2025-26"`, `"2025/2026"`) puts a term opening in
+  the first half of a year — winter, spring, summer, or any numbered term —
+  in the later year, so `"Spring 2025-26"` follows `"Fall 2025"`.
+- Migration 45 fills the column for rows that have none from UniMelb's term
+  names, since an install that predates the institution profile is UniMelb's;
+  every course fetch rewrites it. Every reader — the frontend, the CLI —
+  sorts by the column and ranks no names itself.
 
 ## Modules drive the scrape, and every body feeds one link crawl
 
@@ -82,8 +100,8 @@ of the term it falls inside.
   into a per-course `LinkCrawl`, drained depth-first after the content phases
   with `seen` sets breaking cycles. Anything reachable from any scraped body
   lands on disk.
-- `SyncOptions` (announcements, assignments+quizzes, modules, Ed) gates the
-  phases; the app persists the choice from `SyncSettings.tsx`, the CLI syncs
+- `SyncOptions` (announcements, assignments+quizzes, modules, Ed threads,
+  Ed lessons) gates the phases; the app persists the choice from `SyncSettings.tsx`, the CLI syncs
   everything. The "Lectures" and "Calendar" toggles are not Rust phases: the
   frontend refreshes Echo360 lecture lists and the calendar
   ([calendar.md](./calendar.md)) after `scrape-complete`, database-only.
@@ -97,19 +115,71 @@ the output is markdown plus this contract:
 
 - **Text never reads as HTML.** Every text node turns `&` into `&amp;` and
   `<` into `&lt;` (`app/src-tauri/src/pages/md/escape.rs`), so prose like
-  `your <head> section` stays text. Code spans and `<pre>` fences are literal.
+  `your <head> section` stays text. Code spans and `<pre>` fences are literal;
+  so is an `amber-pre` code block, which becomes a fence even with no `<pre>`.
+- **A `$` in text is always `\$`**, so remark-math never pairs currency
+  (`$10 … $15`). Maths comes from two places only
+  (`app/src-tauri/src/pages/md/maths.rs`): a Canvas equation image
+  (`img.equation_image`) becomes `$<LaTeX>$` from its
+  `data-equation-content` (else `title`, the twice-encoded src path, or `alt`
+  minus `LaTeX: `), or a `$$` block on its own lines when it is all its
+  `<p>`/`<div>` holds; and MathJax `\(…\)` / `\[…\]` in text become `$…$`
+  and a `$$` block that splits its paragraph. Nothing is fetched, and
+  equation images are never downloaded as images. A table cell keeps maths
+  inline.
 - **`<details>` stays HTML around markdown**:
   `<details>\n<summary>text</summary>\n\n…\n\n</details>`. The summary is
   plain text, since it shares the open tag's HTML block; the blank lines are
   what make CommonMark parse the body. Nested ones nest.
-- **An Echo360 iframe becomes `<echo-video link-id src>`** with its open tag
-  alone on a line after a blank one (a CommonMark HTML block), splitting any
-  paragraph or indented under a list item. `src` is the Canvas
-  `external_tools/retrieve` URL made absolute, `link-id` the `linkId` inside
-  its `url` parameter (`app/src-tauri/src/pages/md/embeds.rs`). A table cell
-  keeps it on one line.
-- **Any other iframe becomes `[Embedded: <host>](<src>)`**; one without an
-  http(s) `src` is dropped.
+- **Show/hide widgets are collapsed `<details>`**, as the page shows them
+  (`app/src-tauri/src/pages/md/widgets/`): a `uom-ui-accordion` /
+  `uom-mspace-accordion` trigger with its panel, a `uom-ui-reveal` button with
+  the `uom-ui-hidden-content` after it, each tab of a `uom-ui-tablist` with its
+  panel (by `aria-controls`, else in order), and a Canvas `element_toggler`
+  with the element its `aria-controls` names, rendered at the toggler. The
+  paired body is not rendered again where it sits.
+- **Other widgets:** consecutive `p.uom-ui-checkbox` become one task list
+  (`- [ ] text`); a `table.uom-ui-tiles` becomes its cells' blocks, not a
+  table; a `uom-ui-notice`, a Bootstrap `alert` or a block with
+  `uom-ui-emphasise` becomes a blockquote, headed `> **Note**`
+  (info/primary), `> **Warning**` (warning/danger) or `> **Tip**` (success)
+  when the class names a kind. A `div` whose inline style has both a real
+  border and a background and that holds block elements is an unlabelled
+  blockquote; inline styles are otherwise ignored.
+- **Videos Oculus can play become tags**, each with its open tag alone on a
+  line after a blank one (a CommonMark HTML block), splitting any paragraph or
+  indented under a list item; a table cell keeps one on one line. Every
+  `title` is the iframe's, whitespace-collapsed, and left out when empty or a
+  player's name (`Kaltura Player`, `YouTube video player`, …)
+  (`app/src-tauri/src/pages/md/embeds.rs`):
+  - `<echo-video link-id src title>` for an Echo360 LTI launch: `src` is the
+    Canvas `external_tools/retrieve` URL made absolute, `link-id` the
+    `linkId` inside its `url` parameter.
+  - `<canvas-video file-id title>` for a Canvas
+    `/media_attachments_iframe/<id>` player, whose id is an ordinary Canvas
+    file; `title` drops the leading `Video player for `. The link crawl never
+    follows it: the video is downloaded only on request.
+  - `<web-video provider video-id hash title>` for a YouTube `/embed/<id>`
+    or `player.vimeo.com/video/<id>` player with a well-formed id; `provider`
+    is `youtube` or `vimeo`, and `hash` is Vimeo's `h` parameter, present only
+    for an unlisted video.
+- **Any other iframe becomes a named link**, `[<Label>: <title>](<src>)` or
+  `[<Label>](<src>)` when the title is a player's name or the label itself
+  (`app/src-tauri/src/pages/md/labels.rs`). A Canvas LTI launch is labelled by
+  the tool in its `url` parameter (`H5P`, `Kaltura`, else `Canvas tool`;
+  `Readings Online` for an `ERES_` title with no `url`); other hosts by
+  provider (`Padlet`, `Survey`, `Google Form`, `Mentimeter`, `SharePoint`,
+  `Echo360`, `Canvas media` for a legacy `/media_objects_iframe/`, …), else by
+  the host without `www.`. One without an http(s) `src` is dropped.
+- **Links are repaired** (`app/src-tauri/src/pages/md/links.rs`), and the link
+  crawl reads the same repaired href: a `google.<tld>/url?q=` redirect becomes
+  its target, a `mailto:` behind Canvas's origin loses the origin, and an
+  unresolved `$CANVAS_…_REFERENCE$` takes the `data-api-endpoint` beside it
+  when that names a course file or page (as a relative `/courses/…` path).
+  A dead placeholder, or an `<a>` with no href, leaves only its text.
+- **Pasted noise is dropped**: PDF.js text layers (`pdf-page-container`,
+  `plv-text-layer`, `textLayer`), Ally score badges, Canvas's own
+  `data-testid="message_title"` heading, and any image without a `src`.
 
 A sync never resolves an embed: the tag in the page is the only record of it.
 
@@ -128,7 +198,7 @@ cannot write it — see [cli.md](./cli.md).
 - `file-manifest.json` in the data dir maps Canvas file id → (`modified_at`,
   size); when the metadata call reports the same pair and the file is on disk,
   nothing is downloaded.
-- Bodies (pages, announcements, tasks, Ed threads) are always re-fetched;
+- Bodies (pages, announcements, tasks, Ed threads and lessons) are always re-fetched;
   the byte-compare in `library::paths::write_course_bytes` decides new/updated/unchanged.
 - An `updated` write purges the parse/embed artifacts
   (`library::paths::purge_parse_artifacts`) and the file's pages, so the parse re-runs.
@@ -217,14 +287,81 @@ arrive labelled `application/vnd.ms-excel`.
 A `.csv` counts under a CSV, plain-text, Excel or missing type
 (`is_csv_type`).
 
-## Ed threads are a custom XML dialect
+## Ed content is a custom XML dialect
 
-Ed returns threads as `<document>` XML, parsed with an HTML parser in
+Ed returns threads and lesson slides as `<document>` XML, parsed with an HTML parser in
 `app/src-tauri/src/sources/ed/document.rs`: `<link>` is renamed `edlink` (HTML-void), `<image>`
 becomes `<img>`, and `<break/>` swallows following siblings, so every renderer
-emits its marker and still recurses. Ed course codes are staff-typed free text
-("comp10002 2024s2"), matched to Canvas subjects by leading code + year +
-semester from `/api/user`. The token is in [auth.md](./auth.md).
+emits its marker and still recurses. The token is in [auth.md](./auth.md).
+
+- Ed course codes are staff-typed free text ("comp10002 2024s2", "CS 101"),
+  matched to Canvas subjects from `/api/user` on the subject token — the words
+  up to the first with a digit — then year, and a UniMelb `SM<n>` or a shared
+  season name. A tie that leaves is no match: the course's LTI launch, which
+  names the course exactly, decides instead, and `ed-courses.json` in the data
+  dir keeps what it named (Canvas course id → Ed course id). That answer comes
+  first on later syncs while the session is still enrolled in the course, so
+  a tie costs one launch, not one per sync (`app/src-tauri/src/sources/ed/courses.rs`).
+- The Ed tab is the external tool labelled "Ed Discussion", "Ed" or "EdStem".
+- A launch's landing page names Ed's web region (`edstem.org/<region>/courses/…`,
+  or a `<region>.edstem.org` host), and the region names the API: the bare
+  host's `edstem.org/api` for the home region, `<region>.edstem.org/api` for
+  every other (`app/src-tauri/src/sources/ed/region.rs`). The profile keeps both
+  (`ed_region`, `ed_api`), and the login token is exchanged on that API only
+  once the profile and oculus-keyd have taken it. A launch that lands off
+  Ed's hosts — a tab labelled like Ed that runs another tool — fails, and its
+  token goes nowhere. A profile with an `ed_api` and no `ed_region` reads the
+  region from the API host; with neither, lessons carry no Ed link and a
+  workspace fetch fails saying why.
+
+## Ed Lessons are one file per lesson, with their assets beside it
+
+The Ed phase resolves the subject's Ed course once and runs lessons, threads or
+both (`ed_lessons`, `ed`), so a course costs at most one LTI walk. Lessons run
+first: the board re-reads every thread and is what meets Ed's rate limit. Every
+Ed request that gets a 429 waits (`Retry-After`, capped at a minute, else 2, 4,
+8 … seconds) and is sent again, up to six times (`sources/ed/client.rs`). Lessons go
+in sidebar order (module, then `index` with unset ones last, then id), each to
+`lessons/<lessonId>-<slug>.md` with its slides in `index` order; the id leads
+so a renamed lesson keeps its prefix. Progress reports the phase `ed_lessons`.
+
+- Assets sit in `lessons/<lessonId>-<slug>/`: a PDF slide as
+  `<NN>-<slide-slug>.pdf`, a challenge's files under `<NN>-<slide-slug>/`
+  (`NN` is the slide's position). The lesson file links them relative to its
+  own folder, percent-encoded, which is the form the viewer resolves.
+- Every request is a read without `?view=1`, which would mark the slide seen,
+  except a challenge's workspace (`app/src-tauri/src/sources/ed/live.rs`):
+  1. `POST /challenges/<ch>/connect` attaches the student's own workspace
+     (what opening the slide does) and returns a session ticket.
+  2. Ed only hands out a download for a live workspace, so the sync opens
+     `wss://sahara.<region>.edstem.org/connect?ticket=…` directly over rustls, with
+     the web app's `Origin`, and waits up to 30 s for the `init` frame.
+  3. `POST /workspaces/<w>/download {"path": "."}` returns a one-shot ticket,
+     and the zip comes from `sahara.<region>.edstem.org/download/<ticket>` with no
+     credentials, through the same no-cookie fetch as a Canvas file CDN.
+  4. The socket closes once the zip is in.
+
+  Both tickets are credentials: neither goes through keyd, and no URL that
+  carries one reaches a log.
+- Zip entries are read with `enclosed_name` (an escaping path is refused and
+  logged); directories, dotfiles, dot-directories and `__MACOSX` are dropped,
+  and a file over 20 MB is skipped with a log line. Text files up to 20 KB are
+  also shown inline as fenced code. A workspace is fetched every sync, since
+  Ed gives it no version; the byte compare keeps unchanged files unchanged.
+- A PDF slide's `file_url` names its content, so `file-manifest.json` keeps it
+  under `ed-slide-<id>`, and a match with the file on disk skips the
+  download. The PDF is an ordinary library file: parsed and embedded.
+- A quiz lists each question's answers as `- [ ]` in Ed's order. Ed sends a
+  question's `solution` only once the lesson's solutions are released, and
+  only then does the file get a collapsed `<details>` naming the answer and
+  the explanation.
+- Slide bodies are Ed's `<document>` XML ([above](#ed-content-is-a-custom-xml-dialect)), except `html` slides,
+  which go through `app/src-tauri/src/pages/md/` as they are. A slide's own
+  headings are pushed two levels down (h1 → h3, capped at h6), below its
+  `## <slide title>`. Images stay remote, as in threads. An unknown slide type renders a one-line note.
+- A lesson Ed refuses (a password-gated quiz answers 403) is a warning and the
+  course carries on; a slide whose PDF, questions or workspace fails is a
+  warning and a note in the lesson file.
 
 ## Echo360 is an LTI launch with up to two streams
 
@@ -236,10 +373,25 @@ Workers share the course session cache and source-qualified cancellation flags.
   `echo360::connect` fetches through keyd; POSTing it to Echo360 (directly,
   with Echo360's own in-process cookies) creates the session, and the
   CloudFront cookies that come back are what the media CDN accepts.
+- The tool is found per course: tabs labelled Echo360, "lecture recording" or
+  "lecture capture" first, then the profile's `echo360_tool` (UniMelb's, since
+  its tab can be hidden). The first page with an `action="https://echo360…"`
+  form whose launch opens a `/section/…` is the session; a launch that opens
+  none (a tab can launch Echo360 elsewhere) gives the next candidate its turn,
+  and when every launch fails their errors surface together
+  (`echo360::auth::first_launch`). A course with no form at all answers
+  `echo360::NO_TOOL`, which `echo360_sync_lectures` turns into no lectures
+  rather than an error. A tool page that answers 401, 403 or 404 is skipped;
+  any other failure surfaces.
+- The launch lands on the university's Echo360 region (`echo360.org`,
+  `echo360.net.au`, …); `Session::base` keeps it for the syllabus,
+  transcripts and downloads.
 - A capture is one media id with the Presenter screen at `hd1.mp4` and the room
   camera at `hd2.mp4`. They land as `source1.mp4`/`source2.mp4`, trimmed
-  identically with the fetched ffmpeg so the player runs them off one clock;
-  VTT captions are aligned to the trimmed timeline.
+  identically so the player runs them off one clock. The trim is the
+  university's intro bumper, `echo360_lead_in_secs` in the profile (UniMelb's
+  is 14 s); with none the download is the file and ffmpeg is not run. VTT
+  captions are aligned to the trimmed timeline.
 - A sync fetches only source 1; the camera downloads per lecture from the
   player. Its existence is probed — the syllabus here carries no
   `secondaryFiles`, so each lecture asks for `hd2.mp4`, which 500s if absent
