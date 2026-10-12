@@ -10,6 +10,7 @@ mod components;
 mod g2p;
 mod gallery;
 mod narrate;
+mod pronounce;
 mod render;
 mod themes;
 mod videos;
@@ -18,6 +19,7 @@ mod voices;
 use crate::*;
 use app_lib::studio::tts::kokoro::{self, LexiconFiles};
 use app_lib::studio::voice::lint::{Note, VoiceLint};
+use app_lib::studio::voice::review::Store;
 use app_lib::studio::voice::{self, VoiceOverrides};
 use app_lib::studio::{libraries, videos as video_dirs};
 use std::time::Instant;
@@ -44,6 +46,7 @@ impl Ctx {
             StudioAction::Narrate(a) => self.studio_narrate(&a),
             StudioAction::Tts(a) => self.studio_tts(&a),
             StudioAction::G2p(a) => self.studio_g2p(&a),
+            StudioAction::Pronounce { action } => self.studio_pronounce(&action),
             StudioAction::Voices { action } => self.studio_voices(&action),
             StudioAction::Agents(a) => self.studio_agents(&a),
             StudioAction::Aligner { action } => self.studio_aligner(&action),
@@ -189,7 +192,8 @@ impl Ctx {
     pub(crate) fn studio_lint(&self, args: &StudioLintArgs) -> Result<(), String> {
         let project = libraries::open(&args.dir, None, None).map_err(studio_error)?;
         let mut report = project.lint().map_err(studio_error)?;
-        let spoken = voice_lint(&project);
+        let mut spoken = voice_lint(&project);
+        Store::app().annotate(project.video.subject.as_deref(), &mut spoken.notes);
         report.issues.extend(spoken.issues);
         let count = report.issues.len();
 
@@ -262,6 +266,7 @@ fn note_json(note: &Note) -> serde_json::Value {
         "word": note.word,
         "phonemes": note.phonemes,
         "guessed": note.guessed,
+        "review": note.review,
     })
 }
 

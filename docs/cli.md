@@ -41,6 +41,8 @@ agent queries and plans through. Flags are in
 | `studio narrate` | `narration/manifest.json` and `narration/<key>.wav` in the video folder; reads the `voice` settings row | Runs Kokoro or calls the TTS server for each scene whose text, voice or phonemes changed, and saves the manifest after each; deletes clips nothing names ([studio.md](./studio.md#narration-is-made-by-oculus-studio-narrate)) |
 | `studio tts` | One WAV, `tts.wav` unless `-o` says elsewhere | One clip; nothing else |
 | `studio g2p` | Nothing | Reads the G2P pack and the lexicon files only ([studio.md](./studio.md#kokoro-reads-text-through-the-g2p)) |
+| `studio pronounce suggest` | One file under `<app data>/studio/pronunciations/<CODE or _library>/` | Replaces an earlier suggestion for the same word; never writes a lexicon, which only the student's decision in the app does ([studio.md](./studio.md#the-student-reviews-the-agents-suggested-readings)) |
+| `studio pronounce list` | Nothing | Reads the suggestion files |
 | `studio voices download`, `studio voices delete` | Kokoro's `voice-kokoro` and `g2p-en-us` packs in `<app data>/models/voice/` (103 MB) | Checked against their pinned sha256 before they get their names; `voices` alone writes nothing |
 | `studio aligner download`, `studio aligner delete` | The aligner model in `<app data>/models/align/` (378 MB) | Checked against its pinned sha256 before it gets its name; `status` writes nothing |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |

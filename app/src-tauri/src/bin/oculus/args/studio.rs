@@ -3,7 +3,8 @@
 //! also takes a bare slug naming one of them. `frame`, `strip`, `lint` and
 //! `render` read a video folder on disk (no database, no network); `narrate`
 //! and `tts` run Kokoro or call the TTS server, `g2p` shows how Kokoro reads
-//! text, and `voices` and `aligner` manage the downloaded models.
+//! text, `pronounce` puts a reading up for the student's review, and
+//! `voices` and `aligner` manage the downloaded models.
 
 use crate::*;
 
@@ -28,6 +29,20 @@ pub(crate) enum StudioAction {
     Narrate(StudioNarrateArgs),
     Tts(StudioTtsArgs),
     G2p(StudioG2pArgs),
+    /// Suggest how Kokoro should say a word, for the student to review
+    ///
+    /// The lexicon (`lexicon.json`) is written only by the app: an agent
+    /// that doubts a guessed word suggests a reading with `suggest`, and the
+    /// student hears the word's sentence both ways in Settings -> Voice and
+    /// accepts the suggestion, keeps the guess, or marks it wrong with a
+    /// note. An accepted reading or a kept guess goes into the subject's
+    /// lexicon (the global library's for a video with no subject) and
+    /// applies at the next `narrate`. `list` shows what is still waiting
+    /// and what was marked wrong.
+    Pronounce {
+        #[command(subcommand)]
+        action: StudioPronounceAction,
+    },
     /// List Kokoro's voices, or download or delete its packs (103 MB)
     ///
     /// The Kokoro engine narrates inside the app from two packs, both kept
@@ -66,6 +81,55 @@ pub(crate) enum StudioAlignerAction {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum StudioPronounceAction {
+    Suggest(StudioPronounceSuggestArgs),
+    List(StudioPronounceListArgs),
+}
+
+/// Put a reading of a word up for the student's review
+///
+/// Checks `READING` as a lexicon value: a respelling in dictionary words
+/// joined by `-` or spaces, an all-caps part taking the main stress
+/// (`NESS-ter-off`), or raw phonemes in Kokoro's alphabet in slashes
+/// (`/nˈɛstəɹˌɔf/`). A part the dictionary lacks or a symbol Kokoro lacks
+/// fails, naming it. Then reads the video's narration with Kokoro's G2P to
+/// find `WORD` (any case; `Word's` counts): its first guessed place, else
+/// its first place, recording how Kokoro reads it now, its sentence, scene
+/// and script.md line. A word the narration never says fails. The
+/// suggestion is stored as pending under the video's subject, replacing an
+/// earlier one for the same word; it prints the reading's phonemes. The
+/// student reviews it in Settings -> Voice. Needs the `g2p-en-us` pack.
+///
+///     oculus studio pronounce suggest momentum Nesterov NESS-ter-off
+#[derive(Args)]
+pub(crate) struct StudioPronounceSuggestArgs {
+    /// The video folder (or its slug) whose narration says the word
+    #[arg(value_name = "DIR")]
+    pub(crate) dir: PathBuf,
+    /// The word, as the script spells it
+    #[arg(value_name = "WORD")]
+    pub(crate) word: String,
+    /// How to say it: `RE-spell-ing` or `/phonemes/`
+    #[arg(value_name = "READING")]
+    pub(crate) reading: String,
+}
+
+/// List the suggestions waiting for the student, and the ones marked wrong
+///
+/// Newest first: the status (`pending`, or `wrong` with the student's note
+/// on how the word is said), the word, the suggested reading, the subject,
+/// video, scene and line. A wrong one wants another suggestion that follows
+/// the note. Decided suggestions are gone: their reading is in the lexicon.
+///
+///     oculus studio pronounce list --video momentum
+#[derive(Args)]
+pub(crate) struct StudioPronounceListArgs {
+    /// Only this video's (a folder or slug)
+    #[arg(long, value_name = "DIR")]
+    pub(crate) video: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
 pub(crate) enum StudioVoicesAction {
     /// Each pack's status and size, and each voice and whether it is
     /// downloaded (the default)
@@ -88,6 +152,10 @@ impl StudioAction {
             StudioAction::Render(a) => Some(&mut a.dir),
             StudioAction::Narrate(a) => Some(&mut a.dir),
             StudioAction::G2p(a) => a.video.as_mut(),
+            StudioAction::Pronounce { action } => match action {
+                StudioPronounceAction::Suggest(a) => Some(&mut a.dir),
+                StudioPronounceAction::List(a) => a.video.as_mut(),
+            },
             StudioAction::Components { action } => match action {
                 StudioComponentsAction::List(a) => Some(&mut a.dir),
                 StudioComponentsAction::Show(a) => Some(&mut a.dir),
@@ -225,8 +293,9 @@ pub(crate) enum StudioEngineArg {
 /// any speech the script lacks (a mangled or added word: reword it, or
 /// listen). `lint` fails on the same words. With Kokoro, every word the
 /// guesser read is then a `note: check pronunciation` with its scene and
-/// script.md line: listen to it, try a lexicon entry with `oculus studio
-/// g2p`, and narrate again. Notes never change the exit code.
+/// script.md line, and the state of any suggestion for it: listen to it,
+/// and suggest a reading for a doubtful one with `oculus studio pronounce
+/// suggest`. Notes never change the exit code.
 ///
 ///     oculus studio narrate lectures/week-4
 ///
@@ -662,6 +731,42 @@ mod tests {
             "oculus", "studio", "tts", "Hello.", "-o", "x.wav", "--voice", "v"
         ]));
         assert!(ok(&["oculus", "studio", "aligner", "status"]));
+        assert!(ok(&[
+            "oculus",
+            "studio",
+            "pronounce",
+            "suggest",
+            "v",
+            "Nesterov",
+            "NESS-ter-off"
+        ]));
+        assert!(ok(&[
+            "oculus",
+            "studio",
+            "pronounce",
+            "suggest",
+            "v",
+            "Cauchy",
+            "/kˈOʃi/"
+        ]));
+        assert!(!ok(&[
+            "oculus",
+            "studio",
+            "pronounce",
+            "suggest",
+            "v",
+            "Nesterov"
+        ]));
+        assert!(ok(&["oculus", "studio", "pronounce", "list"]));
+        assert!(ok(&[
+            "oculus",
+            "studio",
+            "pronounce",
+            "list",
+            "--video",
+            "v"
+        ]));
+        assert!(!ok(&["oculus", "studio", "pronounce"]));
         assert!(!ok(&["oculus", "studio", "aligner"]));
         assert!(!ok(&["oculus", "studio", "narrate"]));
     }

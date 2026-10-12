@@ -6,6 +6,7 @@
 
 pub mod g2p;
 pub mod lint;
+pub mod review;
 #[cfg(test)]
 mod tests;
 

@@ -38,11 +38,12 @@ frames and contact sheets, lints, and narrates.
 | Narrating a video: the `Speaker` trait, the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
 | The Kokoro engine: its pack, reader, chunking and synthesis | `app/src-tauri/src/studio/tts/kokoro/` |
 | Text to Kokoro phonemes (the G2P), the lexicon, the guesser and its pack; the lint of a video's narration that needs them | `app/src-tauri/src/studio/voice/g2p/` (`guess/`, `lexicon.rs`), `app/src-tauri/src/studio/voice/lint/` |
+| The pronunciation review: suggestions stored one file each, the lexicon writer, finding a word in a video's narration; its Tauri commands and wrappers (no UI yet) | `app/src-tauri/src/studio/voice/review/` (`key.rs`, `lexicon.rs`, `locate.rs`), `app/src-tauri/src/studio/commands/pronunciations.rs`, `app/src/lib/studio/pronunciations.ts` |
 | Settings -> Voice: the `voice` row and its engine, the server's model list, Kokoro's packs and sample, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
 | Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `pronounce.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -173,7 +174,9 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
 
 Everything Studio keeps is under `<app data>/studio/`
 (`library::paths::studio_dir`): `videos/<slug>/` (one folder per video),
-`library/` (the global library) and `subjects/<CODE>/` (each subject's).
+`library/` (the global library), `subjects/<CODE>/` (each subject's) and
+`pronunciations/` (the readings waiting for the student's review, see
+"The student reviews the agent's suggested readings").
 `courses/` stays read-only to agents, so no library lives there. It is the
 one folder besides `agents/` and the database an agent thread may write
 ([harness.md](./harness.md#every-thread-runs-from-agents-and-that-is-the-containment)).
@@ -196,7 +199,8 @@ one folder besides `agents/` and the database an agent thread may write
   subject, scenes, narrated, renders, modified, problem}]`.
 - Every command that takes a video folder (`frame`, `strip`, `lint`,
   `gallery`, `components list|show|promote`, `themes promote`, `render`,
-  `narrate`) also takes a bare slug (`studio::videos::resolve`): a path
+  `narrate`, `g2p --video`, `pronounce suggest`, `pronounce list --video`)
+  also takes a bare slug (`studio::videos::resolve`): a path
   that exists is used as given, otherwise a slug names `videos/<slug>/`, and
   anything else fails naming both places.
 
@@ -241,9 +245,12 @@ fresh builder, and renders a draft, then `--final`. An agent whose role is
 off, or that cannot start helpers (agy), does the items itself in order.
 When `narrate` fails for want of a voice or the aligner, the agent stops and
 tells the student what to set in Settings -> Voice; it never downloads the
-aligner or the voice packs. After narrating with Kokoro it checks each
-guessed-word note, tries a reading with `oculus studio g2p`, adds a lexicon
-entry for a wrong one and narrates again. The story rules (explain with reasons, link each scene to the
+aligner or the voice packs. After narrating with Kokoro it judges each
+guessed-word note, suggests a reading for each doubtful word with `oculus
+studio pronounce suggest` (it never edits a lexicon), tells the student to
+review them in Settings -> Voice, and carries on: a decision applies at the
+next narrate, and a suggestion marked wrong comes back in the notes with
+the student's note for another try. The story rules (explain with reasons, link each scene to the
 last, numbers given meaning, example then rule, the payoff shown, the end
 answering the opening question, phrasing the voice cannot fuse) and the
 taste rules (the picture carries the idea, the frame filled, every motion
@@ -528,9 +535,10 @@ manifest. Scenes run one at a time, in video order.
 - **Guessed words.** With Kokoro, each word the guesser read in the scenes
   the run keyed is printed after the scenes as ``note: scene 1 `momentum`
   script.md:9: check pronunciation: "Nesterov" is guessed as
-  /nˈɛstəɹɔv/; ...`` (`voice::lint::notes`). A note never changes the exit
-  code; the fix is a lexicon entry (see "Kokoro reads text through the
-  G2P") and another `narrate`.
+  /nˈɛstəɹɔv/; ...`` (`voice::lint::notes`), ending with the state of the
+  word's suggestion when one is stored (see "The student reviews the
+  agent's suggested readings"). A note never changes the exit code; the
+  fix is a suggested reading the student accepts, then another `narrate`.
 - **Writes.** The manifest is rewritten atomically after each scene, so a
   failure keeps the scenes before it; the error names the scene and the
   command exits 1. After the last scene, entries whose id is no longer a
@@ -545,7 +553,8 @@ manifest. Scenes run one at a time, in video order.
   audio, duration, words, low_confidence, gaps, timings }], notes: [{
   scene, id, line, word, phonemes, guessed }], dropped, deleted, ms }`,
   `voice` being `{ engine: "server", server, model, voice, speed }` or `{
-  engine: "kokoro", voice, speed }`.
+  engine: "kokoro", voice, speed }`, and each note also has `review`
+  (`null`, or `{ status, reading, note }`).
 - `oculus studio tts "<text>"` makes one clip the same way and writes it
   (`tts.wav` unless `-o`), for hearing a voice; with Kokoro it reads the
   global library's lexicon only. `oculus studio g2p "<text>"` shows how
@@ -656,20 +665,83 @@ than one letter takes primary stress and the rest secondary. Keys starting
 case, then (ending `'s`) its stem's entry plus `-s`, then any key equal in
 lower case; `’` reads as `'` in keys and in the words looked up. Every
 entry is checked on load, and a bad phoneme or a respelling part the
-dictionary lacks fails naming the file and the key.
+dictionary lacks fails naming the file and the key. The app writes the
+lexicon files, from the student's review (next section); the agent's skill
+tells it never to edit them.
 
 **Guessed words are notes.** A guess never stops narration, but every
 guessed word is printed by `narrate` and `lint` as a `check pronunciation`
-note with its scene and script.md line. The loop is: listen to the word
-in the clip, try a reading with `oculus studio g2p "<text>"` (which reads
-the video's lexicon with `--video`, or in the video's folder), add the
-entry to the subject's or the library's `lexicon.json`, and narrate again;
-only the scenes whose phonemes changed are made again.
+note with its scene and script.md line. The agent suggests a reading for
+the doubtful ones and the student decides (next section); only the scenes
+whose phonemes a decision changed are made again at the next narrate.
 
 `oculus studio g2p "<text>"` prints each word, its phonemes and its
 source, marking guesses, then the phoneme string; `--json` gives `{ text,
 phonemes, subject, lexicon: [<files>], words: [{ word, phonemes, source,
 guessed }] }`. It needs only the `g2p-en-us` pack.
+
+## The student reviews the agent's suggested readings
+
+`app/src-tauri/src/studio/voice/review/` holds the readings an agent
+suggested for words it doubts, until the student decides on each.
+
+- **A suggestion is one file**,
+  `<app data>/studio/pronunciations/<CODE or _library>/<key>.json`: the
+  video's subject, or `_library` for a video without one, and the word
+  lower-cased with every character outside `a-z`, `0-9` and `-` written
+  `_<hex>_` (`don't` is `don_27_t`). Its id is `<folder>/<key>`. The CLI
+  and the app are two processes with no lock between them, so neither ever
+  rewrites a list the other holds: each writes one file, atomically
+  (`runtime::atomic_write::json`). The file is `{ word, reading, original,
+  guessed, subject, video, sentence, scene, line, status, note, created }`:
+  the word as the script spells it, the suggested lexicon value, the
+  phonemes Kokoro read it with when it was suggested, whether the guesser
+  read it, the subject (or `null`), the video's slug, the spoken sentence
+  it is in (whitespace collapsed), the scene id and script.md line,
+  `pending` or `wrong`, the student's note (or `null`) and the UTC time
+  (`YYYY-MM-DDTHH:MM:SS`). A new suggestion for the same subject and word
+  replaces the file, back to `pending`.
+- **`oculus studio pronounce suggest <DIR> <WORD> <READING>`** checks the
+  reading as a lexicon value (`review::check`, the lexicon's own
+  validation and wording, naming `the reading` as its file), then reads
+  the video's narrated sections with the reader `narrate` would use and
+  finds the word in any case, `Word's` counting as `Word`
+  (`review::locate`): its first guessed place, else its first place. A
+  possessive's original is the stem read alone. A word the narration never
+  says fails; a word that is not a guess is still stored, with the
+  phonemes it reads with now. It prints the reading's phonemes, how the
+  word reads now, the scene, line and sentence, and that the student
+  reviews it in Settings -> Voice (`--json`: the item plus `phonemes`).
+- **`oculus studio pronounce list [--video DIR]`** prints each item,
+  newest first: its status, word, reading, subject, video, scene and line,
+  and under a wrong one the student's note (`--json`: `[{ id, ...the
+  file's fields }]`). A file that does not parse is skipped and logged.
+- **Notes.** `narrate` and `lint` look up each guessed word's file under
+  the video's subject, a possessive's under its stem (`Store::annotate`),
+  and end its note with
+  `(suggested "NESS-ter-off", awaiting review in Settings -> Voice)` or
+  `(suggestion "NESS-ter-off" marked wrong: "<note>"; suggest again)`.
+- **Deciding** (`Store::decide`) writes the word into the subject's
+  `lexicon.json`, or the global library's for a video without a subject:
+  `correct` writes the suggestion, `fine` the original as `/phonemes/`, so
+  the word is no longer a guess. The value is checked first, against the
+  dictionary of the `g2p-en-us` pack. The writer (`review::write_entry`)
+  keeps every other key, `_` comments included, in its place (serde_json's
+  `preserve_order`), keeps a replaced key's place, creates a missing file,
+  and refuses a file that is not a JSON object rather than overwrite it.
+  The item's file is then deleted, unless a new suggestion replaced it
+  meanwhile. A decision applies at the video's next narrate.
+- **Tauri commands** (`commands/pronunciations.rs`, wrapped in
+  `lib/studio/pronunciations.ts`): `studio_pronunciations_list()` gives
+  every item; `studio_pronunciation_decide(id, decision: "correct" |
+  "fine")` gives `{ lexicon, word, reading }`;
+  `studio_pronunciation_wrong(id, note?)` gives the item, a blank note
+  stored as none; `studio_pronunciation_sample(id, which: "original" |
+  "suggestion")` synthesises the item's sentence as `studio_voice_sample`
+  does, in Settings -> Voice's voice and speed, reading the subject's
+  lexicon with one entry over it that pins the word to the original
+  phonemes or to the suggestion (`LexiconFiles::pin`), and gives the WAV's
+  bytes. Settings -> Voice has no section for them yet.
 
 ## Settings -> Voice chooses the engine and holds the models
 
@@ -1403,15 +1475,15 @@ server engine has nothing to check):
 - the `g2p-en-us` pack missing, as one problem (kind `lint`) saying how to
   download it;
 - a lexicon entry that is not valid (kind `lint`, naming the file and the
-  key);
+  key; the student fixes the file);
 - a word with no phonemes, a `$`, or a sentence too long for Kokoro with
   no comma to cut at (kind `script`, at the section's line).
 
 All of these are problems: any of them makes `oculus studio lint` exit 1.
 A voice that does not resolve is left to `narrate` to report. Lint's one
 other level is the note: each word Kokoro's guesser reads, as ``note: scene
-N `id` script.md:<line>: check pronunciation: ...``. Notes never change
-the exit code.
+N `id` script.md:<line>: check pronunciation: ...``, with the state of the
+word's suggestion when one is stored. Notes never change the exit code.
 
 ## Rendering a video
 
@@ -1538,8 +1610,10 @@ with the `Narration` error before any frame renders.
   `--force`, and `--engine`, `--voice`, `--speed`, `--server`, `--model`
   over the video's and Settings' voice); `oculus studio tts` makes one
   clip; `oculus studio g2p` shows how Kokoro reads text; `oculus studio
-  aligner` manages the aligner model. See "Narration is made by `oculus
-  studio narrate`".
+  pronounce suggest|list` puts a reading up for the student's review and
+  lists the waiting ones (see "The student reviews the agent's suggested
+  readings"); `oculus studio aligner` manages the aligner model. See
+  "Narration is made by `oculus studio narrate`".
 - `oculus studio voices` lists each Kokoro pack's status and size and each
   voice, downloaded or not, marking the one Settings -> Voice names;
   `voices download` fetches both packs with the aligner's progress lines,
@@ -1564,7 +1638,7 @@ with the `Narration` error before any frame renders.
   message, loc}` (`scene` and `component` null for a script section no
   scene matches, or for a problem of the whole video), then each note as
   `{level: "note", scene, id, line, kind: "guessed", message, word,
-  phonemes, guessed}`.
+  phonemes, guessed, review}`.
 
 - `oculus studio gallery <DIR> <Component>` renders each example of a
   component as `<DIR>/out/gallery/<Component>-<example>.png` (`--out`),
@@ -1646,11 +1720,16 @@ and aligner (caching, one-paragraph edits, per-scene writes, pruning,
 failures). `studio::voice::g2p` matches every golden row (1030) on the
 trimmed dictionary; `studio::tts::kokoro` covers chunking, the vocabulary
 and pad refusals, silence, the WAV and the pack; `studio::voice::lint`
-covers the missing pack, a bad lexicon entry and the notes' lines. Ignored
+covers the missing pack, a bad lexicon entry and the notes' lines;
+`studio::voice::review` covers the store (replace, list order, wrong,
+decide), the lexicon writer, finding a word and the notes' review state.
+Ignored
 tests run the real models: the full dictionary (`STUDIO_G2P_DATA`), the
 guesser's goldens and a real lint (`STUDIO_G2P_GUESSER`), and Kokoro's
 end-to-end narrate (`STUDIO_KOKORO`, `STUDIO_G2P_GUESSER`,
-`STUDIO_ALIGN_MODEL`), which prints its real-time factor and peak memory.
+`STUDIO_ALIGN_MODEL`), which prints its real-time factor and peak memory,
+and the review's two samples differing (`STUDIO_KOKORO`,
+`STUDIO_G2P_GUESSER`).
 `cargo test --lib studio::render` covers the render plan, segment keys and
 tree hashes, the audio placement, the reorder buffer and pruning, and,
 through the real ffmpeg (skipped without one), the join and cache check

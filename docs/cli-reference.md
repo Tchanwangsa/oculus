@@ -1410,6 +1410,7 @@ Commands:
   narrate     Synthesise and time a video's narration, writing narration/manifest.json
   tts         Synthesise one clip of text to a WAV, to hear a voice
   g2p         Show how Kokoro reads text: each word's phonemes and who read it
+  pronounce   Suggest how Kokoro should say a word, for the student to review
   voices      List Kokoro's voices, or download or delete its packs (103 MB)
   agents      Which models a chat agent's Studio subagents run on, and how to start one
   aligner     Download, check or delete the narration aligner model (378 MB)
@@ -1926,8 +1927,9 @@ Per scene it prints the id, `narrated` or `cached`, the clip's length, its word 
 and as warnings the words the aligner was unsure of and any speech the script lacks (a
 mangled or added word: reword it, or listen). `lint` fails on the same words. With
 Kokoro, every word the guesser read is then a `note: check pronunciation` with its scene
-and script.md line: listen to it, try a lexicon entry with `oculus studio g2p`, and
-narrate again. Notes never change the exit code.
+and script.md line, and the state of any suggestion for it: listen to it, and suggest a
+reading for a doubtful one with `oculus studio pronounce suggest`. Notes never change
+the exit code.
 
 oculus studio narrate lectures/week-4
 
@@ -2053,6 +2055,86 @@ Options:
 
       --subject <CODE>
           The subject whose lexicon to read, over the video's
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio pronounce`
+
+```
+Suggest how Kokoro should say a word, for the student to review
+
+The lexicon (`lexicon.json`) is written only by the app: an agent that doubts a guessed
+word suggests a reading with `suggest`, and the student hears the word's sentence both
+ways in Settings -> Voice and accepts the suggestion, keeps the guess, or marks it wrong
+with a note. An accepted reading or a kept guess goes into the subject's lexicon (the
+global library's for a video with no subject) and applies at the next `narrate`. `list`
+shows what is still waiting and what was marked wrong.
+
+Usage: oculus studio pronounce <COMMAND>
+
+Commands:
+  suggest  Put a reading of a word up for the student's review
+  list     List the suggestions waiting for the student, and the ones marked wrong
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio pronounce suggest`
+
+```
+Put a reading of a word up for the student's review
+
+Checks `READING` as a lexicon value: a respelling in dictionary words joined by `-` or
+spaces, an all-caps part taking the main stress (`NESS-ter-off`), or raw phonemes in
+Kokoro's alphabet in slashes (`/nˈɛstəɹˌɔf/`). A part the dictionary lacks or a symbol
+Kokoro lacks fails, naming it. Then reads the video's narration with Kokoro's G2P to
+find `WORD` (any case; `Word's` counts): its first guessed place, else its first place,
+recording how Kokoro reads it now, its sentence, scene and script.md line. A word the
+narration never says fails. The suggestion is stored as pending under the video's
+subject, replacing an earlier one for the same word; it prints the reading's phonemes.
+The student reviews it in Settings -> Voice. Needs the `g2p-en-us` pack.
+
+oculus studio pronounce suggest momentum Nesterov NESS-ter-off
+
+Usage: oculus studio pronounce suggest <DIR> <WORD> <READING>
+
+Arguments:
+  <DIR>
+          The video folder (or its slug) whose narration says the word
+
+  <WORD>
+          The word, as the script spells it
+
+  <READING>
+          How to say it: `RE-spell-ing` or `/phonemes/`
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio pronounce list`
+
+```
+List the suggestions waiting for the student, and the ones marked wrong
+
+Newest first: the status (`pending`, or `wrong` with the student's note on how the word
+is said), the word, the suggested reading, the subject, video, scene and line. A wrong
+one wants another suggestion that follows the note. Decided suggestions are gone: their
+reading is in the lexicon.
+
+oculus studio pronounce list --video momentum
+
+Usage: oculus studio pronounce list [OPTIONS]
+
+Options:
+      --video <DIR>
+          Only this video's (a folder or slug)
 
   -h, --help
           Print help (see a summary with '-h')

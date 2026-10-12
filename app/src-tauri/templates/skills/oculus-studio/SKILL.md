@@ -57,7 +57,7 @@ From your working directory (`agents/`):
   renders/                    made by render: draft.mp4, final.mp4
 ../studio/library/            the global library: read, never edit
 ../studio/subjects/<CODE>/    a subject's library: read, never edit
-../studio/subjects/<CODE>/lexicon.json   the one library file you edit: pronunciations (step 6)
+../studio/subjects/<CODE>/lexicon.json   pronunciations: never edit; suggest with `oculus studio pronounce suggest` (step 6)
 ```
 
 Every `oculus studio` command takes the video's **slug** where its usage
@@ -382,24 +382,30 @@ the server does not answer, say so; do not retry in a loop.
 **Check the guessed words.** With the Kokoro engine, narrate ends with a
 `note: … check pronunciation: "Nesterov" is guessed as /nˈɛstəɹɔv/` line
 for each word its dictionary lacks (lint prints the same notes). A note
-does not fail anything, but the guess may be wrong. For each one:
+does not fail anything, but the guess may be wrong. The student, not you,
+decides how a word is said: never edit a `lexicon.json`. For each note:
 
-1. Run `oculus studio g2p "Nesterov" --video <slug>` to see the reading,
-   and listen to that scene's clip if you can play audio; otherwise judge
-   from the phonemes and tell the student which words were guessed.
-2. If it is wrong, add an entry to the subject's
-   `../studio/subjects/<CODE>/lexicon.json` (a JSON object; create it
-   when missing). Prefer a respelling in dictionary words, `"Nesterov":
-   "NESS-ter-off"`: each `-` or space part is a dictionary word, and an
-   all-caps part takes the stress. Use raw phonemes in slashes,
-   `"Nesterov": "/nɛstˈɛɹɔf/"`, only when no respelling works.
-   `reference.md` ("Pronunciation") has the rules.
-3. Run `oculus studio g2p` again until the word reads `lexicon` with the
-   reading you want, then `narrate` again: only scenes whose reading
-   changed are made again.
+1. Judge the guess from its phonemes (and the scene's clip, if you can
+   play audio). A guess that reads right needs nothing.
+2. For a doubtful one only, suggest a reading:
+   `oculus studio pronounce suggest <slug> Nesterov NESS-ter-off`. Prefer a
+   respelling in dictionary words: each `-` or space part is a dictionary
+   word, and an all-caps part takes the stress. Use raw phonemes in
+   slashes, `/nɛstˈɛɹɔf/`, only when no respelling works. A bad reading
+   fails naming the part; the command prints the phonemes a good one
+   gives. `reference.md` ("Pronunciation") has the rules.
+3. Tell the student which words you suggested readings for, and that they
+   hear each one both ways and decide in Settings → Voice.
+4. Do not wait for the review: carry on with the video. A decision
+   applies at the next `narrate`, which re-makes only the scenes whose
+   reading changed. Later notes show each suggestion's state: `(suggested
+   "…", awaiting review in Settings -> Voice)`, or `(suggestion "…"
+   marked wrong: "<the student's note>"; suggest again)`. `oculus studio
+   pronounce list --video <slug>` lists them too. For a wrong one,
+   suggest again following the student's note.
 
-A lint problem naming `lexicon.json` is an entry you wrote that does not
-parse: fix it before narrating.
+A lint problem naming `lexicon.json` is an entry that does not parse: tell
+the student, who fixes it; never edit it yourself.
 
 **After building** (steps 7 and 8): read each builder's strip as it lands
 and send fixes back: a new scene builder with the same brief plus the fix

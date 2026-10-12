@@ -81,7 +81,7 @@ impl Ctx {
                 "{}",
                 paint(
                     &format!(
-                        "  {guessed} guessed; a lexicon.json entry fixes a wrong one: \"Word\": \"/phonemes/\" or \"Word\": \"RE-spell-ing\""
+                        "  {guessed} guessed; for a doubtful one, `oculus studio pronounce suggest <slug> Word RE-spell-ing` (or /phonemes/) puts a reading up for the student's review"
                     ),
                     DIM
                 )

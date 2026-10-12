@@ -9,6 +9,7 @@ use app_lib::studio::narrate::{
 };
 use app_lib::studio::tts::kokoro::{KokoroSpeaker, LexiconFiles, Packs};
 use app_lib::studio::voice::lint::{notes, Note};
+use app_lib::studio::voice::review::Store;
 use app_lib::studio::voice::{self, Engine, Voice, VoiceOverrides};
 use studio_core::{Project, LOW_CONFIDENCE};
 
@@ -48,7 +49,8 @@ impl Ctx {
         )
         .map_err(|e| e.to_string())?;
         let ms = started.elapsed().as_millis();
-        let notes = speaker.notes(&project);
+        let mut notes = speaker.notes(&project);
+        Store::app().annotate(project.video.subject.as_deref(), &mut notes);
 
         if self.json {
             return self.emit(&serde_json::json!({
