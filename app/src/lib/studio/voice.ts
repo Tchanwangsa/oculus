@@ -30,6 +30,28 @@ export const SPEED_MIN = 0.5;
 export const SPEED_MAX = 2;
 export const SPEED_STEP = 0.05;
 
+/** Where the voice is set up; the style chip and the New video error link here. */
+export const VOICE_SETTINGS_HREF = "/settings/voice";
+
+/**
+ * The sentence for what the saved settings still lack before a video can be
+ * narrated, or null when they are enough: an engine and a voice, and for the
+ * server engine also its URL and model. A thin mirror of Rust's
+ * `voice::resolve` (`app/src-tauri/src/studio/voice/mod.rs`), which stays the
+ * source of truth: it also reads a video's own voice block and the CLI's
+ * flags, and checks a Kokoro voice id, none of which a new video has yet.
+ */
+export function voiceProblem(settings: VoiceSettings): string | null {
+  const set = (v: string | null) => (v ?? "").trim() !== "";
+  if (!settings.engine) return "Choose a narration engine in Settings → Voice before making a video.";
+  if (settings.engine === "server") {
+    if (!set(settings.baseUrl)) return "Set a TTS server in Settings → Voice before making a video.";
+    if (!set(settings.model)) return "Set a TTS model in Settings → Voice before making a video.";
+  }
+  if (!set(settings.voice)) return "Choose a narration voice in Settings → Voice before making a video.";
+  return null;
+}
+
 export function readVoiceSettings(): Promise<VoiceSettings> {
   return invoke<VoiceSettings>("studio_voice_settings");
 }
