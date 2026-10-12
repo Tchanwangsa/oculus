@@ -49,7 +49,7 @@ const VOICE_PACKS: PackApi<VoicePacksStatus> = {
 const fmtSpeed = (s: number) => `${Number(s.toFixed(2))}×`;
 
 /**
- * Settings → Voice: the engine Studio narrates with (Kokoro in the app, or a
+ * Settings → Studio → Narration: the engine Studio narrates with (Kokoro in the app, or a
  * keyless OpenAI-compatible TTS server), its voice and the speed, written to
  * the `voice` row by Rust, which validates it and answers with what it
  * stored. Nothing here is billed: listing a server's models is free, and

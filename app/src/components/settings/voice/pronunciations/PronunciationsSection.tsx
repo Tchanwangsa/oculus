@@ -20,7 +20,7 @@ function decidedLine(item: Pronunciation, decision: PronunciationDecision): stri
 }
 
 /**
- * Settings → Voice's review of the readings the Studio agent suggested for
+ * Settings → Studio → Pronunciation's review of the readings the Studio agent suggested for
  * words Kokoro guessed (`app/src/lib/studio/pronunciations.ts`). The CLI
  * adds items while the page is open, so the list reloads on mount and
  * whenever the window regains focus. One clip plays at a time across the

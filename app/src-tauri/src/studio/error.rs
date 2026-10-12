@@ -23,7 +23,7 @@ impl fmt::Display for NarrationError {
         match self {
             Self::ModelMissing => write!(
                 f,
-                "the narration aligner model is not downloaded (378 MB, once); download it in Settings -> Voice or run `oculus studio aligner download`"
+                "the narration aligner model is not downloaded (378 MB, once); download it in Settings -> Studio -> Word timing or run `oculus studio aligner download`"
             ),
             Self::EmptyScript => write!(
                 f,

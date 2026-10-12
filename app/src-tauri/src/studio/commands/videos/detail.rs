@@ -48,7 +48,7 @@ pub struct RenderFile {
     pub captions: bool,
 }
 
-/// The video `slug` under `videos`. `settings_voice` is Settings -> Voice's
+/// The video `slug` under `videos`. `settings_voice` is Settings -> Studio -> Narration's
 /// voice id, shown when video.json names none. Scene times are known once
 /// every scene has a length: a hold, or narration that matches the script.
 /// Until then they are null, and so is a stale narration's, which the page

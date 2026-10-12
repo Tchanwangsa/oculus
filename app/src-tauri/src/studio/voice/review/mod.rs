@@ -1,6 +1,6 @@
 //! Pronunciation review: the Studio agent suggests a reading for a word it
 //! doubts (`oculus studio pronounce suggest`), and the student decides in
-//! Settings -> Voice. Accepting the suggestion writes it into the lexicon;
+//! Settings -> Studio -> Pronunciation. Accepting the suggestion writes it into the lexicon;
 //! keeping the guess pins the guessed phonemes there as `/…/`; rejecting it
 //! marks it `wrong` with the student's note for the agent to try again. The
 //! review is the only writer of `lexicon.json` (`lexicon`).
@@ -93,12 +93,12 @@ pub struct Review {
 }
 
 impl Review {
-    /// `(suggested "NESS-ter-off", awaiting review in Settings -> Voice)`,
+    /// `(suggested "NESS-ter-off", awaiting review in Settings -> Studio -> Pronunciation)`,
     /// or the student's verdict on a wrong one.
     pub fn suffix(&self) -> String {
         match (self.status, &self.note) {
             (Status::Pending, _) => format!(
-                "(suggested \"{}\", awaiting review in Settings -> Voice)",
+                "(suggested \"{}\", awaiting review in Settings -> Studio -> Pronunciation)",
                 self.reading
             ),
             (Status::Wrong, Some(note)) => format!(

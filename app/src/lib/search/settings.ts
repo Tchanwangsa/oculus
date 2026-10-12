@@ -10,6 +10,8 @@ import {
   PaintBrush,
   Robot,
   SpeakerHigh,
+  Timer,
+  Translate,
   Waveform,
   type Icon,
 } from "@phosphor-icons/react";
@@ -37,7 +39,9 @@ export type SettingsPageId =
   | "parsing"
   | "embeddings"
   | "transcription"
-  | "voice";
+  | "narration"
+  | "pronunciation"
+  | "word-timing";
 
 export interface SettingsPage {
   /** Route segment under `/settings`. */
@@ -50,7 +54,7 @@ export interface SettingsPage {
   fullBleed?: boolean;
 }
 
-export const SETTINGS_GROUPS = ["General", "AI", "Library"] as const;
+export const SETTINGS_GROUPS = ["General", "AI", "Library", "Studio"] as const;
 
 /** In nav order within each group. */
 export const SETTINGS_PAGES: readonly SettingsPage[] = [
@@ -66,7 +70,9 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "parsing", label: "Parsing", icon: FilePdf, group: "Library" },
   { id: "embeddings", label: "Embeddings", icon: Graph, group: "Library" },
   { id: "transcription", label: "Transcription", icon: Waveform, group: "Library" },
-  { id: "voice", label: "Voice", icon: SpeakerHigh, group: "Library" },
+  { id: "narration", label: "Narration", icon: SpeakerHigh, group: "Studio" },
+  { id: "pronunciation", label: "Pronunciation", icon: Translate, group: "Studio" },
+  { id: "word-timing", label: "Word timing", icon: Timer, group: "Studio" },
 ];
 
 const PAGE_BY_ID = new Map(SETTINGS_PAGES.map((p) => [p.id, p]));
@@ -196,8 +202,8 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["On-device speech", ["apple", "offline", "local", "mac"]],
   ]),
 
-  page("voice", ["studio", "narration", "tts", "text to speech", "speech"]),
-  ...section("voice", "Narration voice", ["tts", "text to speech", "kokoro", "mlx-audio", "openai", "studio"], [
+  page("narration", ["studio", "voice", "tts", "text to speech", "speech"]),
+  ...rows("narration", "Narration voice", [
     ["Engine", ["narration engine", "kokoro", "built in", "tts server"]],
     ["Kokoro voice packs", ["kokoro", "download", "delete", "offline", "g2p", "pronunciation"]],
     ["Server URL", ["address", "base url", "tts server", "openai compatible"]],
@@ -206,8 +212,11 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["Speed", ["rate", "pace"]],
     ["Sample", ["preview", "listen", "play", "hear"]],
   ]),
-  ...section("voice", "Pronunciations", ["pronunciation", "lexicon", "review", "suggestion", "guessed words", "studio"]),
-  ...section("voice", "Word timing", ["aligner", "alignment", "word cues", "studio"], [
+
+  page("pronunciation", ["studio", "lexicon", "review", "suggestion", "guessed words", "pronunciations"]),
+
+  page("word-timing", ["studio", "aligner", "alignment", "word cues", "timing"]),
+  ...rows("word-timing", "Word timing", [
     ["wav2vec2 base (English)", ["aligner model", "download", "delete", "wav2vec2"]],
   ]),
 ];

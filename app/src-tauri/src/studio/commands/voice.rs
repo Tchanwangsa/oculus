@@ -1,4 +1,4 @@
-//! The `voice` settings row as Settings -> Voice reads and writes it, and
+//! The `voice` settings row as Settings -> Studio -> Narration reads and writes it, and
 //! the server's model ids for its Model select.
 
 use serde::{Deserialize, Serialize};

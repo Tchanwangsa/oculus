@@ -66,7 +66,7 @@ impl Ctx {
                 paint("not downloaded", YELLOW)
             };
             let mark = if chosen.as_deref() == Some(id.as_str()) {
-                paint("  (Settings -> Voice)", DIM)
+                paint("  (Settings -> Studio -> Narration)", DIM)
             } else {
                 String::new()
             };

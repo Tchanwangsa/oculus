@@ -1,5 +1,5 @@
 //! Which engine, voice and speed narrate a video, and for the server engine
-//! which TTS server and model: the `voice` settings row (Settings -> Voice),
+//! which TTS server and model: the `voice` settings row (Settings -> Studio -> Narration),
 //! under a video's `voice` block in video.json, under the CLI's flags. The
 //! server engine is a keyless OpenAI-compatible server; the Kokoro engine
 //! runs in the app (`studio::tts::kokoro`).
@@ -26,16 +26,16 @@ pub const DEFAULT_SPEED: f64 = 0.9;
 /// What `narrate` says when no engine is chosen anywhere. There is no
 /// default: Kokoro needs a download, a server needs a URL.
 pub const NO_ENGINE: &str =
-    "no narration engine: choose Kokoro or a TTS server in Settings -> Voice, or pass --engine";
+    "no narration engine: choose Kokoro or a TTS server in Settings -> Studio -> Narration, or pass --engine";
 /// What `narrate` says when the server engine has no server set anywhere.
 pub const NO_SERVER: &str =
-    "no TTS server: set a TTS server in Settings -> Voice, or pass --server";
+    "no TTS server: set a TTS server in Settings -> Studio -> Narration, or pass --server";
 /// Model and voice ids differ per server (Kokoro-FastAPI `kokoro`, mlx-audio
 /// `mlx-community/Kokoro-82M-bf16`, OpenAI `tts-1`), so neither has a default.
 pub const NO_MODEL: &str =
-    "no TTS model: set a model in Settings -> Voice or video.json's voice block, or pass --model";
+    "no TTS model: set a model in Settings -> Studio -> Narration or video.json's voice block, or pass --model";
 pub const NO_VOICE: &str =
-    "no TTS voice: set a voice in Settings -> Voice or video.json's voice block, or pass --voice";
+    "no TTS voice: set a voice in Settings -> Studio -> Narration or video.json's voice block, or pass --voice";
 
 /// The `voice` row, `{ "engine", "baseUrl", "model", "voice", "speed" }`.
 /// A missing or ill-typed field reads as unset (speed: `DEFAULT_SPEED`),
@@ -167,7 +167,7 @@ pub fn settings_from(row: Option<&str>) -> VoiceSettings {
 }
 
 /// Write the row, keeping keys it does not own; a `None` base URL removes
-/// it. For Settings -> Voice.
+/// it. For Settings -> Studio -> Narration.
 pub async fn save(pool: &SqlitePool, settings: &VoiceSettings) -> Result<(), String> {
     if !valid_speed(settings.speed) {
         return Err(format!(

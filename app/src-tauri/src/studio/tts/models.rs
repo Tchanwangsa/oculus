@@ -1,5 +1,5 @@
 //! The model ids a TTS server offers: `GET {base}/v1/models`, OpenAI's
-//! listing. Free on every server, so Settings -> Voice may call it; it never
+//! listing. Free on every server, so Settings -> Studio -> Narration may call it; it never
 //! synthesises.
 
 use serde_json::Value;
