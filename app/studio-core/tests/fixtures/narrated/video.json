@@ -1,0 +1,9 @@
+{
+  "size": { "width": 640, "height": 360 },
+  "theme": "default",
+  "voice": { "voice": "af_heart", "speed": 1.0 },
+  "scenes": [
+    { "id": "intro", "component": "Cued", "props": { "title": "Gradient descent", "point": "Step downhill" } },
+    { "id": "outro", "component": "Outro", "hold": 1.5 }
+  ]
+}

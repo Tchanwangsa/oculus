@@ -15,6 +15,7 @@ pub mod providers;
 pub mod runtime;
 pub mod shell;
 pub mod sources;
+pub mod studio;
 pub mod sync;
 #[cfg(test)]
 mod test_support;
@@ -185,6 +186,15 @@ pub fn run() {
             transcribe::app::whisper_download_model,
             transcribe::app::whisper_cancel_download,
             transcribe::app::whisper_delete_model,
+            studio::commands::voice::studio_voice_settings,
+            studio::commands::voice::studio_set_voice_settings,
+            studio::commands::voice::studio_voice_models,
+            studio::commands::aligner::studio_aligner_status,
+            studio::commands::aligner::studio_aligner_download,
+            studio::commands::aligner::studio_aligner_cancel,
+            studio::commands::aligner::studio_aligner_delete,
+            studio::commands::render::studio_render,
+            studio::commands::render::studio_render_cancel,
             lectures::media::media_server_info,
             pages::retrieval::commands::embed_file,
             pages::retrieval::commands::search_pages,

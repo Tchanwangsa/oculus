@@ -33,6 +33,8 @@ fn render(tsx: &str, props: Value) -> StudioError {
         t: 0.0,
         duration: 1.0,
         index: 0,
+        id: None,
+        words: None,
     })
     .unwrap_err()
 }
@@ -142,6 +144,8 @@ fn undecodable_image() {
             t: 0.0,
             duration: 1.0,
             index: 0,
+            id: None,
+            words: None,
         })
         .unwrap_err();
     std::fs::remove_dir_all(&dir).ok();

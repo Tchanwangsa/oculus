@@ -25,10 +25,12 @@ pub struct MotionBlur {
     pub max_samples: u32,
 }
 
-impl Default for MotionBlur {
-    fn default() -> Self {
+impl MotionBlur {
+    /// A 180° shutter at `fps` (the video's, `Project::fps`), at most 32
+    /// sub-frames.
+    pub fn at(fps: u32) -> MotionBlur {
         MotionBlur {
-            fps: 30.0,
+            fps: f64::from(fps),
             shutter: 0.5,
             max_samples: 32,
         }
@@ -81,7 +83,7 @@ impl MotionBlur {
 pub(super) fn frame(r: &mut Renderer, index: usize, t: f64, mb: MotionBlur) -> Result<Frame> {
     let half = mb.shutter / mb.fps / 2.0;
     let t0 = (t - half).max(0.0);
-    let t1 = (t + half).min(last_moment(r.hold(index)));
+    let t1 = (t + half).min(last_moment(r.length(index)));
     let n = if t1 > t0 {
         mb.samples(moved(r, index, t0, t1)?)
     } else {

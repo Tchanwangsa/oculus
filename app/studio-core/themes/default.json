@@ -68,5 +68,9 @@
     "magicMove": "auto",
     "morphColor": "oklch",
     "motionBlur": "finals"
+  },
+  "narration": {
+    "lead": 0.25,
+    "tail": 0.6
   }
 }

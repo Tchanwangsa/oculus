@@ -18,6 +18,7 @@ struct ThemeFile {
     space: BTreeMap<String, f64>,
     radius: BTreeMap<String, f64>,
     motion: Motion,
+    narration: NarrationTokens,
 }
 
 #[derive(Deserialize)]
@@ -55,6 +56,15 @@ struct Spring {
     mass: f64,
 }
 
+/// Seconds of silence around a scene's narration clip: the clip starts
+/// `lead` into the scene, and the scene lasts at least `tail` past its end.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct NarrationTokens {
+    pub lead: f64,
+    pub tail: f64,
+}
+
 /// Type-scale entries are style fragments, spread into `style`.
 const TYPE_KEYS: &[&str] = &[
     "fontFamily",
@@ -71,6 +81,7 @@ pub struct Checked {
     pub body_font: String,
     pub motion: MotionSpec,
     pub easings: BTreeMap<String, [f64; 4]>,
+    pub narration: NarrationTokens,
 }
 
 pub fn check(tokens: &Value) -> Result<Checked, String> {
@@ -110,6 +121,14 @@ pub fn check(tokens: &Value) -> Result<Checked, String> {
     if let Some((k, v)) = file.motion.duration.iter().find(|(_, v)| **v < 0.0) {
         return Err(format!("motion.duration.{k} = {v}: must not be negative"));
     }
+    let n = file.narration;
+    for (k, v) in [("lead", n.lead), ("tail", n.tail)] {
+        if !(v.is_finite() && v >= 0.0) {
+            return Err(format!(
+                "narration.{k} = {v}: must be a non-negative number of seconds"
+            ));
+        }
+    }
     let background = *file
         .color
         .get("bg")
@@ -129,5 +148,6 @@ pub fn check(tokens: &Value) -> Result<Checked, String> {
             motion_blur: file.motion.motion_blur,
         },
         easings: file.motion.easing,
+        narration: n,
     })
 }

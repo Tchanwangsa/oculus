@@ -14,7 +14,7 @@ agent queries and plans through. Flags are in
 | `project` and `task` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs`, `app/src-tauri/src/db/projects/` |
 | `lecture` | `app/src-tauri/src/bin/oculus/commands/lecture.rs`, `app/src-tauri/src/bin/oculus/args/lecture.rs` |
 | `transcribe` | `app/src-tauri/src/bin/oculus/commands/transcribe.rs`, `app/src-tauri/src/transcribe/` |
-| `studio` | `app/src-tauri/src/bin/oculus/commands/studio.rs`, `app/src-tauri/src/bin/oculus/args/studio.rs`, `app/studio-core/` |
+| `studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`render.rs`, `narrate.rs` for `narrate` and `tts`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs`, `app/studio-core/`, `app/src-tauri/src/studio/` |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/commands/docs.rs`, `app/src-tauri/src/agents/` (`docs.rs`, `links.rs`) |
 | The memory store | `app/src-tauri/src/agents/memory/`, `app/src-tauri/src/bin/oculus/commands/memory.rs` |
 | `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/commands/keyd.rs`, `app/src-tauri/src/auth/keyd/`; the platform registrations in `app/keyd/core/src/platform/macos/registrar.rs` and `app/keyd/core/src/platform/windows/registrar.rs` |
@@ -33,6 +33,10 @@ agent queries and plans through. Flags are in
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
 | `studio frame` | One PNG, in the video folder's `out/` unless `-o` says elsewhere | Reads only the folder: no database, no network ([studio.md](./studio.md)) |
 | `studio lint` | Nothing | Renders every scene in memory; exits 1 on any problem |
+| `studio render` | `renders/draft.mp4` or `renders/final.mp4` in the video folder unless `-o` says elsewhere, and segments, the narration track and `renders.json` under its `.cache/` | Runs ffmpeg once per segment it renders and once to join; no network; deletes cache files neither quality's last render uses ([studio.md](./studio.md#rendering-a-video)) |
+| `studio narrate` | `narration/manifest.json` and `narration/<key>.wav` in the video folder; reads the `voice` settings row | Calls the TTS server for each scene whose text or voice changed, and saves the manifest after each; deletes clips nothing names ([studio.md](./studio.md#narration-is-made-by-oculus-studio-narrate)) |
+| `studio tts` | One WAV, `tts.wav` unless `-o` says elsewhere | One TTS request; nothing else |
+| `studio aligner download`, `studio aligner delete` | The aligner model in `<app data>/models/align/` (378 MB) | Checked against its pinned sha256 before it gets its name; `status` writes nothing |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |
 | `keyd install`, `keyd uninstall` | macOS: the LaunchAgent, copied helper app and stamp; Windows: uninstall stops the verified resident broker and removes its registration and stamp, while CLI install cannot start it | Keeps the vault and its master key ([below](#keyd-lifetime-follows-the-platform)) |
 | `keyd status` | Nothing | Pings keyd; macOS launchd can activate it, while Windows only checks an existing broker. Prints no secret |

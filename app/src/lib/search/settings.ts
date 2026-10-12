@@ -9,6 +9,7 @@ import {
   MusicNotes,
   PaintBrush,
   Robot,
+  SpeakerHigh,
   Waveform,
   type Icon,
 } from "@phosphor-icons/react";
@@ -35,7 +36,8 @@ export type SettingsPageId =
   | "jobs"
   | "parsing"
   | "embeddings"
-  | "transcription";
+  | "transcription"
+  | "voice";
 
 export interface SettingsPage {
   /** Route segment under `/settings`. */
@@ -64,6 +66,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "parsing", label: "Parsing", icon: FilePdf, group: "Library" },
   { id: "embeddings", label: "Embeddings", icon: Graph, group: "Library" },
   { id: "transcription", label: "Transcription", icon: Waveform, group: "Library" },
+  { id: "voice", label: "Voice", icon: SpeakerHigh, group: "Library" },
 ];
 
 const PAGE_BY_ID = new Map(SETTINGS_PAGES.map((p) => [p.id, p]));
@@ -191,6 +194,17 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["Local Whisper", ["whisper", "whisper.cpp", "local", "offline", "gpu", "metal"]],
     ["Whisper model", ["whisper", "model", "download", "large", "turbo", "memory", "ram"]],
     ["On-device speech", ["apple", "offline", "local", "mac"]],
+  ]),
+
+  page("voice", ["studio", "narration", "tts", "text to speech", "speech"]),
+  ...section("voice", "Narration voice", ["tts", "text to speech", "kokoro", "mlx-audio", "openai", "studio"], [
+    ["Server URL", ["address", "base url", "tts server", "openai compatible"]],
+    ["Model", ["list models", "tts model"]],
+    ["Voice", ["speaker", "af_heart"]],
+    ["Speed", ["rate", "pace"]],
+  ]),
+  ...section("voice", "Word timing", ["aligner", "alignment", "word cues", "studio"], [
+    ["wav2vec2 base (English)", ["aligner model", "download", "delete", "wav2vec2"]],
   ]),
 ];
 

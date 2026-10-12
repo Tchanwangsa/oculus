@@ -49,8 +49,9 @@ define('__studioExports', (ns) => {
   return JSON.stringify({ props: ns.props, examples: ns.examples === undefined ? {} : ns.examples });
 });
 const ONE_ELEMENT = 'the default export must return one element (Box, Text, Image, Path, Stack or Row)';
-define('__studioCall', (ns, propsJson, t, duration, width, height, callSeed) => {
+define('__studioCall', (ns, propsJson, t, duration, width, height, callSeed, wordsJson) => {
   seed = callSeed | 0;
+  cueJson = typeof wordsJson === 'string' ? wordsJson : null;
   const ctx = Object.freeze({ t, duration, theme, size: Object.freeze({ width, height }) });
   const out = ns.default(JSON.parse(propsJson), ctx);
   if (!isElement(out)) throw new TypeError(`${ONE_ELEMENT}, got ${describe(out)}`);

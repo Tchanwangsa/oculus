@@ -13,7 +13,7 @@ use studio_core::{MotionBlur, Project, Purpose, RenderOptions, Renderer, Time};
 
 fn blurred() -> RenderOptions {
     RenderOptions {
-        motion_blur: Some(MotionBlur::default()),
+        motion_blur: Some(MotionBlur::at(30)),
         ..RenderOptions::default()
     }
 }
@@ -90,7 +90,7 @@ fn the_token_picks_which_renders_blur() {
     assert_eq!(finals.motion_blur(Purpose::Draft).unwrap(), None);
     assert_eq!(
         finals.motion_blur(Purpose::Final).unwrap(),
-        Some(MotionBlur::default())
+        Some(MotionBlur::at(30))
     );
     let always = Project::load(with_motion(
         "always",

@@ -103,6 +103,7 @@ export const routes: RouteObject[] = [
           { path: "parsing", lazy: page(() => import("@/pages/settings/library/ParsingPage")) },
           { path: "embeddings", lazy: page(() => import("@/pages/settings/library/EmbeddingsPage")) },
           { path: "transcription", lazy: page(() => import("@/pages/settings/library/TranscriptionPage")) },
+          { path: "voice", lazy: page(() => import("@/pages/settings/library/VoicePage")) },
           // Legacy paths that restored tabs and Recent entries may carry.
           { path: "ai", element: <Navigate to="../agents" replace /> },
           { path: "library", element: <Navigate to="../parsing" replace /> },

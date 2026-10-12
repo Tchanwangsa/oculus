@@ -28,7 +28,7 @@ Commands:
   memory      Read and write the memory store the agents keep in the library
   lecture     Look inside a downloaded lecture recording
   transcribe  Transcribe a video that has no captions, on Groq or on this Mac
-  studio      Render and check Studio videos: TSX scenes drawn frame by frame
+  studio      Render, check and narrate Studio videos: TSX scenes drawn frame by frame
   docs        Write the agent-facing docs into the library
   agent       Run one prompt through a CLI agent (Claude Code, Codex, opencode or
               Antigravity)
@@ -1418,15 +1418,19 @@ Options:
 ## `oculus studio`
 
 ```
-Render and check Studio videos: TSX scenes drawn frame by frame
+Render, check and narrate Studio videos: TSX scenes drawn frame by frame
 
 Usage: oculus studio <COMMAND>
 
 Commands:
-  frame  Render one frame of a video to a PNG
-  strip  Render frames across a stretch of a video as one contact-sheet PNG
-  lint   Check a whole video without writing anything
-  help   Print this message or the help of the given subcommand(s)
+  frame    Render one frame of a video to a PNG
+  strip    Render frames across a stretch of a video as one contact-sheet PNG
+  lint     Check a whole video without writing anything
+  render   Render a video to an mp4
+  narrate  Synthesise and time a video's narration, writing narration/manifest.json
+  tts      Synthesise one clip of text to a WAV, to hear a voice
+  aligner  Download, check or delete the narration aligner model (378 MB)
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
@@ -1440,9 +1444,10 @@ Render one frame of a video to a PNG
 
 A video is a folder: `video.json` (size, theme and the scenes in order, each a
 component, its props and how many seconds it holds), `components/<Name>.tsx` (one TSX
-component per file, run in a sandbox) and `assets/` (the images `<Image src>` names).
-Every frame is a pure function of the folder and the time, so the same call always draws
-the same pixels.
+component per file, run in a sandbox), `assets/` (the images `<Image src>` names) and,
+for a narrated video, `script.md` and `narration/manifest.json`, which make a narrated
+scene last as long as its narration. Every frame is a pure function of the folder and
+the time, so the same call always draws the same pixels.
 
 Time is either global, `--t` seconds from the start of the video, or scene-relative,
 `--scene N --at S` (scenes count from 0). With neither it draws the first frame. The PNG
@@ -1478,8 +1483,8 @@ Options:
           [default: 1]
 
       --motion-blur
-          Average sub-frames over a 30 fps, 180° shutter, as many as the motion needs
-          (off unless given, whatever the theme's motionBlur says)
+          Average sub-frames over a 180° shutter at the video's fps, as many as the
+          motion needs (off unless given, whatever the theme's motionBlur says)
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1543,7 +1548,7 @@ Options:
           Render threads (default: half the cores, at most one per frame)
 
       --motion-blur
-          Blur each frame over a 30 fps, 180° shutter (see `frame --help`)
+          Blur each frame over a 180° shutter at the video's fps (see `frame --help`)
 
   -o, --out <OUT.png>
           Where to write the PNG (default: `<DIR>/out/strip-<from>-<to>.png`)
@@ -1559,9 +1564,11 @@ Check a whole video without writing anything
 
 Loads every component the video uses, checks each scene's props and each component's
 `examples` against its `props` schema, and renders every scene at its first and last
-moment. Every problem is reported, not just the first, each with its scene, component
-and, where there is one, the TSX line. Exits 1 when there is any problem, so it can gate
-a render.
+moment. For a narrated video it also checks `script.md` (sections no scene matches, text
+not written as it is said) and the narration (missing or stale clips, words the aligner
+was unsure of, unscripted speech). Every problem is reported, not just the first, each
+with its scene, component and, where there is one, the TSX line. Exits 1 when there is
+any problem, so it can gate a render.
 
 See `oculus studio frame --help` for what a video folder holds.
 
@@ -1570,6 +1577,212 @@ Usage: oculus studio lint <DIR>
 Arguments:
   <DIR>
           The video folder, the one holding `video.json`
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio render`
+
+```
+Render a video to an mp4
+
+Each scene is rendered frame by frame (in parallel, one renderer per thread) and encoded
+by ffmpeg as its own segment, which is kept in `<DIR>/.cache/segments/` under a hash of
+everything its frames depend on: the scene and the one before it, their narration, the
+theme, the `components/` and `assets/` folders and the render settings. A second render
+only renders the scenes an edit touched and prints `cached` for the rest. The segments
+are joined without re-encoding, beside the narration clips mixed into one track (AAC).
+Segments neither quality's last render used are deleted afterwards.
+
+`--draft` (the default) is a 540 px-high proxy on the hardware encoder, without motion
+blur unless the theme's `motionBlur` says `always`; `--final` is full size on libx264
+(crf 18), blurred unless `motionBlur` is `off`. Both are H.264, yuv420p, BT.709. The mp4
+goes to `<DIR>/renders/draft.mp4` or `final.mp4` unless `-o` names another file.
+
+Render never narrates: run `oculus studio narrate` first, or it stops with the stale
+narration's scene. A frame that fails stops the render, naming its time and scene; an
+ffmpeg failure quotes ffmpeg.
+
+oculus studio render lectures/week-4
+
+oculus studio render lectures/week-4 --final -o ~/Desktop/week-4.mp4
+
+Usage: oculus studio render [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json`
+
+Options:
+      --draft
+          A 540 px-high proxy on the hardware encoder (the default)
+
+      --final
+          Full size on libx264, with the theme's motion blur
+
+  -o, --out <OUT.mp4>
+          Where to write the mp4 (default: `<DIR>/renders/<quality>.mp4`)
+
+      --threads <T>
+          Render threads (default: half the cores, capped to keep memory under 2 GB)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio narrate`
+
+```
+Synthesise and time a video's narration, writing narration/manifest.json
+
+Each scene with a `## <id>` section in `script.md` gets a clip: its section text is sent
+to the TTS server (`POST <server>/v1/audio/speech`, WAV), the clip is saved as
+`narration/<key>.wav`, and its words are timed against the script with the aligner model
+(`oculus studio aligner download` fetches it once). The manifest then gives each
+narrated scene its length and its `word()` cues; `frame`, `strip` and `lint` read it.
+
+A clip's key hashes its text, the server, model, voice, speed and aligner model, so a
+run only requests scenes whose text or voice changed; the rest print `cached`. Scenes
+run one at a time in video order and the manifest is saved after each, so a failure
+keeps the scenes before it; the command then exits 1 naming the failed scene. At the
+end, entries for scenes no longer narrated and clips nothing names are deleted.
+
+Per scene it prints the id, `narrated` or `cached`, the clip's length, its word count,
+and as warnings the words the aligner was unsure of and any speech the script lacks (a
+mangled or added word: reword it, or listen). `lint` fails on the same words.
+
+oculus studio narrate lectures/week-4
+
+oculus studio narrate lectures/week-4 --scene steps --force --voice bf_emma
+
+Usage: oculus studio narrate [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The video folder, the one holding `video.json` and `script.md`
+
+Options:
+      --scene <ID>
+          Only this scene id
+
+      --force
+          Make the clips again even when the cached ones match
+
+      --server <URL>
+          An OpenAI-compatible TTS server, with or without a trailing `/v1` (e.g.
+          http://127.0.0.1:8880). Keyless servers only
+
+      --model <MODEL>
+          The server's model id (e.g. `kokoro`, or `mlx-community/Kokoro-82M-bf16` on
+          mlx-audio)
+
+      --voice <VOICE>
+          The voice (e.g. `af_heart`)
+
+      --speed <S>
+          Speaking rate; 1.0 is normal, 1.25 is a quarter faster
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio tts`
+
+```
+Synthesise one clip of text to a WAV, to hear a voice
+
+Sends `TEXT` to the TTS server as `narrate` would and writes the WAV it returns, then
+prints its path and length. An empty, non-WAV or silent reply is an error (Kokoro
+answers an unknown voice with silence). Uses Settings -> Voice unless the flags say
+otherwise; no video is involved.
+
+oculus studio tts "We follow the gradient downhill." --voice bf_emma -o /tmp/emma.wav
+
+Usage: oculus studio tts [OPTIONS] <TEXT>
+
+Arguments:
+  <TEXT>
+          What to say, written as it is said
+
+Options:
+  -o, --out <OUT.wav>
+          Where to write the WAV
+
+          [default: tts.wav]
+
+      --server <URL>
+          An OpenAI-compatible TTS server, with or without a trailing `/v1` (e.g.
+          http://127.0.0.1:8880). Keyless servers only
+
+      --model <MODEL>
+          The server's model id (e.g. `kokoro`, or `mlx-community/Kokoro-82M-bf16` on
+          mlx-audio)
+
+      --voice <VOICE>
+          The voice (e.g. `af_heart`)
+
+      --speed <S>
+          Speaking rate; 1.0 is normal, 1.25 is a quarter faster
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus studio aligner`
+
+```
+Download, check or delete the narration aligner model (378 MB)
+
+`narrate` times each clip's words by forced alignment with a wav2vec2 model run on the
+CPU. It is downloaded once, on request, to `<app data>/models/align/`, checked against a
+pinned size and sha256, and never bundled with the app.
+
+Usage: oculus studio aligner <COMMAND>
+
+Commands:
+  status    Whether the aligner model is downloaded, where, and its size
+  download  Download the aligner model, printing progress; does nothing when it is
+            already there
+  delete    Delete the aligner model and any partial download
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio aligner status`
+
+```
+Whether the aligner model is downloaded, where, and its size
+
+Usage: oculus studio aligner status
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio aligner download`
+
+```
+Download the aligner model, printing progress; does nothing when it is already there
+
+Usage: oculus studio aligner download
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus studio aligner delete`
+
+```
+Delete the aligner model and any partial download
+
+Usage: oculus studio aligner delete
 
 Options:
   -h, --help

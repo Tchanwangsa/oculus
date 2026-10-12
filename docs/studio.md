@@ -3,8 +3,12 @@
 Studio makes lecture videos from scenes written as TSX components.
 `app/studio-core/` is its renderer: a video folder plus a time in, one RGBA
 frame out, the same pixels on every machine, scene transitions included.
-Narration and encoding to video are not built yet; `oculus studio` renders
-single frames and contact sheets, and lints.
+A narrated scene lasts as long as its narration and can cue elements to its
+words, from clips and timings `oculus studio narrate` makes with a TTS server
+and a local aligner. `oculus studio render`, or the app's `studio_render`
+command, encodes a video to an mp4 with ffmpeg, one cached segment per
+scene. `oculus studio` also renders single
+frames and contact sheets, lints, and narrates.
 
 ## Where
 
@@ -13,7 +17,8 @@ single frames and contact sheets, and lints.
 | The crate (`oculus-studio-core`, lib `studio_core`), its own cargo root | `app/studio-core/` |
 | Public API: `Renderer`, `Engine`, `Frame`, `Time`; motion blur | `app/studio-core/src/render/` (`blur/`) |
 | Contact sheets (`strip`): parallel frames, the tiled sheet and its labels | `app/studio-core/src/strip/` |
-| Video folder, component lookup, timeline, lint | `app/studio-core/src/project/` |
+| Video folder, component lookup, the whole-frame timeline, scene fingerprints, lint | `app/studio-core/src/project/` (`timeline.rs`, `frames.rs`, `fingerprint.rs`, `lint/`) |
+| `script.md`, the narration manifest, scene lengths and word cues | `app/studio-core/src/project/` (`script/`, `narration/`, `scenes.rs`), `app/studio-core/src/host/prelude/words.js` |
 | Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
 | Magic move: matching and blending two laid-out trees, OKLab colour | `app/studio-core/src/morph/` |
 | Easings shared by transitions and the morph (the prelude's, in Rust) | `app/studio-core/src/easing/` |
@@ -24,7 +29,12 @@ single frames and contact sheets, and lints.
 | Themes and bundled fonts | `app/studio-core/themes/`, `app/studio-core/fonts/`, `app/studio-core/src/theme/`, `app/studio-core/src/fonts/` |
 | Every error and its message | `app/studio-core/src/error.rs` |
 | Fixture videos and golden frames | `app/studio-core/tests/fixtures/`, `app/studio-core/tests/golden/` |
-| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio.rs`, `app/src-tauri/src/bin/oculus/args/studio.rs` |
+| Narration audio decode and word timing (the aligner, its model download) | `app/src-tauri/src/studio/` (`audio/`, `timing/`), `app/src-tauri/src/runtime/onnx/` |
+| Narrating a video: the TTS client, the `voice` settings row, the cache, the manifest writer | `app/src-tauri/src/studio/` (`tts/`, `voice/`, `narrate/`) |
+| Settings -> Voice: the `voice` row, the server's model list, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` (`voice.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/`, `app/src-tauri/src/studio/tts/models.rs` |
+| Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
+| Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
+| `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`render.rs`, `narrate.rs`, `aligner.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
 ## A video is a folder, and a frame is a pure function of it and `t`
 
@@ -32,32 +42,82 @@ single frames and contact sheets, and lints.
 video.json
 components/   <Name>.tsx, one component per file
 assets/       images, named by <Image src>
+script.md     the narration, one `## <id>` section per narrated scene
+narration/    manifest.json and the clips it names
 ```
 
 ```json
 {
   "size": { "width": 1920, "height": 1080 },
+  "fps": 30,
   "theme": "default",
   "motion": { "transition": { "kind": "push", "dur": 0.6 }, "magicMove": "auto" },
+  "voice": { "voice": "af_heart", "speed": 1.0 },
   "scenes": [
-    { "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 4.0 },
-    { "component": "Steps", "hold": 6.0, "transition": { "kind": "wipe", "direction": "up" } }
+    { "id": "title", "component": "TitleCard", "props": { "title": "Gradient descent" }, "hold": 4.0 },
+    { "id": "steps", "component": "Steps", "transition": { "kind": "wipe", "direction": "up" } }
   ]
 }
 ```
 
-- `hold` is a scene's length in seconds. A global `t` maps to a scene and a
-  scene-relative `t` by summing holds (`Timeline`); a `t` past the end is an
-  error that states the video's length.
+- A scene's length is its `hold` in seconds, or for a narrated scene the
+  length of its narration (see "Narration"), rounded up to whole frames at
+  the video's `fps` (see "Frames"). A global `t` maps to a scene and a
+  scene-relative `t` by summing lengths (`Timeline`, from
+  `Project::timeline`); a `t` past the end is an error that states the
+  video's length.
+- `fps` (optional, default 30) is 24, 25, 30, 50 or 60; any other value
+  fails the load with the rates.
+- `id` (`[a-z0-9-]+`, unique) names the scene's section in `script.md`. It
+  is required on every scene once the folder has a `script.md`; a scene
+  whose id has no section is silent and needs a `hold`.
+- `voice` (optional: `model`, `voice`, `speed`) overrides Settings -> Voice
+  for this video. studio-core only stores it; the app's narrator reads it.
 - `theme` is a bundled theme's name or a `.json` path relative to the folder.
 - `motion` (optional) overrides the theme's transition and motion-blur
   defaults for this video; a scene's `transition` (optional) overrides
   both. See "Transitions" and "Motion blur".
-- `video.json` refuses unknown keys, an empty `scenes`, a non-positive `hold`
-  and sides outside 1–8192 px.
+- `video.json` refuses unknown keys, an empty `scenes`, a non-positive `hold`,
+  a bad or repeated `id`, a non-positive `voice.speed` and sides outside
+  1–8192 px.
 - Component names are PascalCase letters and digits and resolve to
   `components/<Name>.tsx` through the `ComponentSource` trait
   (`FolderComponents`); a missing one is an error listing the ones there are.
+
+## Frames: scenes are whole frames, and a scene has a fingerprint
+
+The timeline counts frames at the video's `fps`: each scene's length rounds
+up to whole frames (`ceil(length * fps)`, at most one frame longer, with a
+millionth of a frame of slack so `0.1 s * 30` is 3 frames), and every
+consumer (`Renderer`, `strip`, lint, `ctx.duration`, word cues, the
+transitions) reads that one timeline.
+
+- `Project::fps()`, `Project::frames()` (the frame count),
+  `Project::scene_frames(i) -> Range<u64>` (global frame indices) and
+  `Project::frame_time(k) -> Time` are what an encoder walks; `Timeline` has
+  the same methods. Frame `k` of scene `i` is `Time::Scene { index: i, t: j
+  / fps }` for its `j`th frame, so a scene's frames sample the same
+  scene-relative times wherever it sits. The last frame is one frame
+  before the video's end, never at it; a `k` past it is
+  `StudioError::FrameOutOfRange`.
+- A global `t` on the frame grid (`k / fps`) locates to exactly
+  `frame_time(k)`, so `oculus studio frame --t` at a frame's time is that
+  frame of the video. A `t` between frames renders as given.
+- `Project::scene_fingerprint(i)` is what in the folder scene `i`'s frames
+  depend on, as canonical JSON bytes (keys sorted, so key order in a file
+  never matters), for a per-scene segment cache key: the size and fps, the
+  theme's tokens and `video.json`'s `motion`, and for scene `i` and scene
+  `i - 1` (whose last moment the transition into `i` shows) the scene spec
+  (`id` included), the narration words as components see them (`text`,
+  `start`, `end`), the frame count and, for a scene without an `id` only,
+  its index (`Math.random` is seeded by component and id, or index when
+  there is no id). Words' confidence, the clip's file and `voice` reach no
+  frame and are left out. The caller adds the rest: the contents of
+  `components/` and `assets/`, the render settings (quality, scale, motion
+  blur, encoder arguments) and the build of studio-core. An id'd scene keeps
+  its fingerprint when scenes are inserted, removed or reordered around it,
+  as long as the scene before it is the same; an id-less scene, or one
+  right after an id-less scene, gets a new fingerprint when it moves.
 
 ## A component is `(props, ctx) => element` with a declared props schema
 
@@ -69,7 +129,7 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
 ```
 
 - `ctx` is `{ t, duration, theme, size: { width, height } }`, `t` in seconds
-  from the scene's start, frozen. Function components used inside the JSX
+  from the scene's start and `duration` the scene's length, frozen. Function components used inside the JSX
   are called as `(props, ctx)` with their subtree's ctx, which a `Sequence`
   or `Stagger` above them shifts (see "Motion").
 - The default export returns exactly one element. A component with no
@@ -90,7 +150,218 @@ export default ({ title, bullets, accent }, { t, duration, theme, size }) =>
   damping, mass })` (closed form, so any `t` samples directly), `linear`,
   `easeOutCubic`, `easeInOutCubic`, `cubicBezier(a, b, c, d)`, `mix(a, b, p)`
   for hex colours, `clamp`, `lerp`, `counter`, `revealProgress`, `series` and
-  `parallel`. The motion components are in "Motion" below.
+  `parallel`. The motion components are in "Motion" below; `word` and
+  `wordEnd` are in "Narration".
+
+## Narration sets a scene's length and cues its elements
+
+`script.md` holds what is said, and `narration/manifest.json` the timings of
+the clips made from it. studio-core reads both and never the audio. The
+manifest is written by `oculus studio narrate` (see "Narration is made by
+`oculus studio narrate`").
+
+```markdown
+## steps
+
+We follow the *gradient* downhill, one small step at a time.
+```
+
+- **`script.md`** is one `## <id>` section per narrated scene, written as it
+  is said. A section's text is its prose with `*`, `_` and backticks
+  removed and whitespace collapsed; nothing else is interpreted (`#` and
+  `###` lines are prose). Text before the first heading, a heading that is
+  not an id, a repeated id and an empty section fail `Project::load` with
+  the line. A section no scene's `id` matches is a lint error.
+- **The manifest** is `{ version: 1, scenes: { <id>: { key, text, audio,
+  duration, words: [{ text, start, end, confidence }], gaps: [{ after,
+  start, end, heard }] } } }` (`Manifest`). `text` is the section text the
+  clip says, `audio` the clip's file name in `narration/`, `key` its content
+  address (sha256 of the text, server, model, voice, speed and aligner
+  model), times are seconds from the clip's start, `confidence` is the
+  aligner's (mean log-probability of the word's letter frames; higher is
+  surer), and `gaps` (optional) is speech the aligner heard that the
+  script does not have, after word index `after` (`null`: before the first
+  word). Unknown keys, another
+  version, non-finite times and a word or gap ending before it starts fail
+  the load.
+- **Length.** A narrated scene lasts `max(hold, lead + duration + tail)`:
+  `hold` is optional and only a minimum. `lead` and `tail` are the theme's
+  `narration` tokens (0.25 s and 0.6 s in the bundled theme); the clip
+  starts `lead` into the scene. A silent scene (no section) lasts its
+  `hold`, and one without a `hold` has no length. Either rounds up to
+  whole frames: 3.85 s is 116 frames at 30 fps, 3.867 s.
+- **Stale narration fails, it is never estimated.** A scene with script
+  text whose manifest entry is missing or was made for other text makes
+  `Project::timeline`, `Renderer::new` and `strip` fail with
+  `StudioError::Narration` (kind `narration`): ``scene `steps`: no
+  narration for its current text (…); run `oculus studio narrate <dir>` ``.
+  `Project::load` still succeeds, so lint reports it with everything else.
+- **Word cues.** `word(phrase, nth = 1)` is the scene time (lead included)
+  at which the nth occurrence of `phrase` starts, and `wordEnd(phrase, nth
+  = 1)` when its last word ends, so `<Enter at={word("gradient")}>` enters
+  as it is said. Words match lowercased with only letters, digits and
+  apostrophes kept; a phrase is consecutive words. A phrase that is not
+  said, an `nth` past the last occurrence and a call in a silent scene
+  throw at the call's TSX line, with the closest phrase that is said:
+  ``Steps.tsx:12:20: `word("gradiant")`: no such word in scene `steps`;
+  closest: gradient``. Each call gets its own scene's words (`SceneCall::
+  words`, from `Project::word_cues`), so in a transition the outgoing scene
+  cues to its words and the incoming one to its own.
+
+## Narration timing is forced alignment on the CPU
+
+The app crate times a clip's words (`app/src-tauri/src/studio/timing/`):
+CTC forced alignment of the script against wav2vec2's letter emissions, run
+by ONNX Runtime on the CPU (`app/src-tauri/src/runtime/onnx/`). The model
+is Xenova's fp32 ONNX export of `facebook/wav2vec2-base-960h` (Apache-2.0,
+credit facebook/wav2vec2-base-960h), pinned to one commit, 378 MB. It is
+downloaded on request (Settings -> Voice, or `oculus studio aligner
+download`) to
+`<app data>/models/align/` and never bundled; the download is checked
+against its pinned size and sha256 before it gets its name. ONNX Runtime
+itself is linked statically. `STUDIO_ALIGN_MODEL=<model.onnx>` points the
+aligner at a copy elsewhere instead, for development and the parity tests.
+
+- **Input.** The server's WAV is decoded with hound (any integer or float
+  format, downmixed to mono) and resampled to 16 kHz with rubato
+  (`app/src-tauri/src/studio/audio/`). A clip whose whole RMS is under
+  -80 dBFS, or that holds a second or more of exact zeros, is digitally
+  silent: a failed narration, not a pause.
+- **Words.** Each script word is upper-cased to A-Z and `'`. A word with no
+  letters (a dash, `&`) is left out of the result rather than given a
+  made-up time; each word carries its index in the script.
+- **Times.** 20 ms frames. A word starts at its first letter frame minus
+  65 ms (clamped at 0) and ends after its last letter frame, unbiased. The
+  bias was measured against PyTorch wav2vec2, which the fp32 ONNX model
+  matches frame for frame.
+- **Confidence** is the mean log-probability of the word's letter frames;
+  below `LOW_CONFIDENCE` (-8.0) the word was mangled or not said.
+- **Gaps.** A word the voice said but the script lacks lowers no
+  confidence, so the aligner also reports each stretch between words with
+  4 or more frames whose best label is a letter, with what it heard there
+  ("THICK").
+- **Long clips run in windows** (`timing/windows.rs`), since the model's
+  self-attention makes its memory grow with the square of the audio it sees
+  (over 2 GB for a 57 s clip in one pass). A clip of up to 40 s runs in one
+  pass. A longer one is cut into `ceil(length / 30 s)` windows of even
+  length, each cut moved to the quietest 20 ms frame (least energy, ties to
+  the nearest) within 3 s of its even position, and no window under 15 s.
+  Each window runs with 2 s of context audio on both sides, normalised on
+  its own, and keeps only its own frames, so the stitched emissions have
+  exactly the frames one pass would (a frame per 320 samples whose 400
+  sample receptive field fits). The Viterbi then runs once over the whole
+  clip: words never meet a seam. No run sees more than 40 s, so peak
+  memory stays about 1.3-1.6 GB at any length.
+- **Windows change a few edges.** wav2vec2 attends over everything it is
+  given, so a window's emissions differ from one pass's throughout, not only
+  near its cuts (the cuts themselves sit in silence). On a 57 s clip, two
+  windows moved 15 of 304 word edges by one frame (20 ms) and none further,
+  and confidences by up to 1.1; shorter windows move more (20 s: 10%, some
+  by two frames). Appending a second of silence to a one-pass clip moves an
+  edge too.
+- **Sessions and threads.** Each model run (the clip, or each window) opens
+  its own session and drops it, since a reused one keeps growing (two
+  windows of a 57 s clip: 1.8 GB on one session, 1.3 GB on one each); a
+  load is about 0.2 s. Threads: half the cores, at most 4. No timeouts.
+- **The Viterbi** keeps two bits of backpointer per frame and state (two
+  states per letter or word break, plus one), four to a byte: about 1.5 MB
+  per minute squared of speech, 40 MB at 5 minutes, 155 MB at 10.
+- **Measured** (debug build, Kokoro `af_heart`): a 170 s clip timed in
+  9.2 s and a 371 s clip (13 windows) in 22.5 s, both at a 1.6 GB peak,
+  no word under -4.2, no gaps, and the last word ending within 40 ms of
+  the speech.
+
+## Narration is made by `oculus studio narrate`
+
+`narrate` (`app/src-tauri/src/studio/narrate/`) turns each scene's
+`script.md` section into a clip and its word times, and writes the
+manifest. Scenes run one at a time, in video order.
+
+- **Voice.** Each of server, model, voice and speed comes from the first
+  that sets it: the CLI flags, the video's `voice` block, then the `voice`
+  settings row (`{ baseUrl, model, voice, speed }`, which Settings -> Voice
+  writes; `studio::voice`). A missing or ill-typed field in the row
+  reads as unset; only speed has a default (1.0). Server, model and voice
+  have none, since ids differ per server (Kokoro-FastAPI `kokoro`, mlx-audio
+  `mlx-community/Kokoro-82M-bf16`, OpenAI `tts-1`): narrate fails with
+  ``set a TTS server in Settings -> Voice, or pass --server`` and the same
+  for `--model` and `--voice`.
+- **The TTS server** is OpenAI-compatible (Kokoro-FastAPI, mlx-audio):
+  `POST <base>/v1/audio/speech` with `{ model, input, voice,
+  response_format: "wav", speed }`, one request per clip, no timeout
+  (`studio::tts`). The base URL is accepted with or without a trailing
+  `/v1`, normalised once. Keyless servers only: no API key is sent. A
+  non-2xx answer fails with its status and a short excerpt of the body; a
+  429 is retried with back-off (1, 2, 4, 8 s; five tries). A 200 whose body
+  is empty, is not a WAV, or is digitally silent (see "Input" above) is a
+  failure, never a pause: Kokoro answers an unknown voice with 200 and
+  nothing.
+- **Cache.** A clip's `key` is the sha256 hex of the section text, the
+  normalised server URL, model, voice, speed and the aligner's `MODEL_ID`,
+  each length-prefixed. A scene whose manifest entry has the same key and
+  whose `narration/<key>.wav` exists is kept (`cached`) unless `--force`;
+  editing one paragraph re-requests that one scene.
+- **A new clip** is saved byte for byte as the server sent it to
+  `narration/<key>.wav`; its duration comes from the decoded samples, and
+  it is resampled to 16 kHz and timed against the section's
+  whitespace-separated words, at any length. The aligner model is checked before
+  the first TTS request, so a missing one costs no synthesis and fails with
+  ``download it in Settings -> Voice or run `oculus studio aligner
+  download` ``.
+- **Writes.** The manifest is rewritten atomically after each scene, so a
+  failure keeps the scenes before it; the error names the scene and the
+  command exits 1. After the last scene, entries whose id is no longer a
+  narrated scene are dropped and every `.wav` (or interrupted `.wav.part`)
+  in `narration/` that no entry names is deleted; other files are left. A
+  manifest this build cannot read (another version, damaged) is rebuilt
+  from nothing, with a warning.
+- **Output.** Per scene: the id, `narrated` or `cached`, the clip's length,
+  its word count, and as warnings each word under `LOW_CONFIDENCE` and each
+  gap (times into the clip; lint fails on the same ones, at scene time).
+  `--json` gives `{ dir, voice, scenes: [{ id, outcome, audio, duration,
+  words, low_confidence, gaps, timings }], dropped, deleted, ms }`.
+- `oculus studio tts "<text>"` makes one clip the same way and writes it
+  (`tts.wav` unless `-o`), for hearing a voice. `oculus studio aligner
+  status|download|delete` manages the aligner model.
+- **Measured** on Kokoro (mlx-audio, `af_heart`, M-series Mac, debug
+  build): three scenes of 4 to 8 s narrated in 1.8 s with a 0.67 GB peak;
+  a re-run after one paragraph edit took 0.5 s. Kokoro's clips start with
+  about 0.2 s and end with about 0.4 s of exact zeros, well under the 1 s
+  zero-run limit.
+
+## Settings -> Voice sets the server and holds the aligner model
+
+Settings -> Voice (Library group) has two sections. Nothing on it
+synthesises, so it has no sample button: Settings never makes a billed
+call. Its one network call is listing models, which is free.
+
+- **Narration voice** edits the `voice` row: Server URL, Model, Voice
+  (typed: the OpenAI API cannot list voices) and Speed (a slider, 0.5 to
+  2.0 in 0.05 steps). A text field saves on blur or Enter; each save sends
+  the whole row to `studio_set_voice_settings`, which trims it, unsets
+  blanks, normalises the URL (`tts::normalise_base`), refuses a speed that
+  is not a positive number, and answers with what it stored. A refusal shows
+  under its row. "List models" calls `studio_voice_models` with the URL as
+  typed: `GET <base>/v1/models`, the `data[].id`s in the server's order,
+  with only ureq's connect timeout (`studio::tts::list_models`). A non-empty
+  list turns the Model field into a select (the stored model stays in it
+  when the server does not list it); an empty list or a failure leaves the
+  text field, with the reason inline. Editing the URL drops the list. API
+  keys are not supported; the page says so.
+- **Word timing** is the aligner model's row, like a Local Whisper model:
+  "wav2vec2 base (English)", its 378 MB size and status, Download (then a
+  percentage, a progress bar and Cancel) or Delete behind a confirmation,
+  and the credit line. `studio_aligner_status` gives `{ status: missing |
+  downloading | present, bytes }` from the disk alone;
+  `studio_aligner_download` resolves when the model is on disk, rejects
+  `cancelled` on `studio_aligner_cancel`, and emits
+  `studio-aligner-progress` `{ phase: downloading | complete | cancelled |
+  error, received, total, error? }` about every 150 ms;
+  `studio_aligner_delete` returns the bytes freed. A download started on an
+  earlier visit shows at 0 % until its next event.
+
+There is no narrate command in the app yet: narration runs from `oculus
+studio narrate`.
 
 ## Four primitives and a closed set of style keys
 
@@ -205,9 +476,9 @@ out to the left). `morphColor` is under "Magic move". `video.json`'s
 `motionBlur`.
 
 - **Timing.** It plays over `[0, dur)` of the incoming scene B, with the
-  outgoing scene A held at its last moment (the left limit of its hold,
+  outgoing scene A held at its last moment (the left limit of its length,
   since Sequence and Stagger windows are half-open). The video's length
-  stays the sum of holds, and past `dur` a frame is B alone. `p =
+  stays the sum of scene lengths, and past `dur` a frame is B alone. `p =
   easing(t / dur)`. Each frame calls both components, each in its own fresh
   context, so a transition frame is seekable like any other. A's logs come
   first, prefixed `scene N:`.
@@ -291,8 +562,8 @@ inside another is an error for now.
 
 ## Motion blur averages sub-frames, off unless asked
 
-`RenderOptions::motion_blur` (`MotionBlur { fps, shutter, max_samples }`,
-default 30 fps, a 180° shutter of 0.5 and at most 32 samples) makes
+`RenderOptions::motion_blur` (`MotionBlur { fps, shutter, max_samples }`;
+`MotionBlur::at(fps)` is a 180° shutter of 0.5 and at most 32 samples) makes
 `Renderer` average sub-frames spread evenly over the shutter, `t ± shutter
 / fps / 2`, kept inside the frame's scene so a cut stays a cut. It is off
 by default (`None`); `Engine` renders single calls and ignores it.
@@ -313,11 +584,11 @@ by default (`None`); `Engine` renders single calls and ignores it.
   `motion`; the bundled theme ships `finals`) says which renders blur:
   `finals` the export, `always` drafts and previews too, `off` none.
   `Project::motion_blur(Purpose::Final | Purpose::Draft)` resolves it into
-  the `RenderOptions` value, and the export (a later stage) asks for
-  `Final`. A bad value is an error naming its level (`video.json
-  motion.motionBlur`), and lint reports it. `oculus studio frame` and
-  `strip` are inspection tools and blur only with `--motion-blur`, whatever
-  the token says.
+  the `RenderOptions` value at the video's fps; a `--final` render asks
+  for `Final` and a `--draft` one for `Draft`. A bad value is an error naming its level
+  (`video.json motion.motionBlur`), and lint reports it. `oculus studio
+  frame` and `strip` are inspection tools and blur only with
+  `--motion-blur`, whatever the token says.
 - At the default shutter, sharp edges moving fast show as N copies about 6
   px apart in a single frame; in motion they read as blur.
 
@@ -391,11 +662,13 @@ centroid smoothly.
   never loaded, so a frame is the same on every machine; an unknown
   `fontFamily` is an error naming the bundled families.
 - A theme is tokens only: `color`, `font` (`heading` and `body` families),
-  `type` (style fragments to spread into `style`), `space`, `radius` and
+  `type` (style fragments to spread into `style`), `space`, `radius`,
   `motion` (`duration`, `easing` as cubic-bezier points, `spring` presets,
   and optionally `transition`, `magicMove`, `morphColor` and `motionBlur`,
   the bottom of the motion cascade; the bundled theme sets `morphColor:
-  "oklch"` and `motionBlur: "finals"`). Components read it as `ctx.theme` and it is frozen.
+  "oklch"` and `motionBlur: "finals"`) and `narration` (`lead` and `tail`,
+  non-negative seconds; see "Narration"). Components read it as
+  `ctx.theme` and it is frozen.
 - `color.bg` is the canvas under every frame, `color.text` the colour and
   `font.body` the family of `Text` that sets none.
 - The bundled `default` theme is neutral greys with the app's indigo
@@ -420,7 +693,10 @@ centroid smoothly.
   component, not a hang.
 - No `Date`, `performance`, `WeakRef` or `FinalizationRegistry`, no module
   loader (an `import` is an error at its line), no I/O. `Math.random` is
-  reseeded before every call from the component name and scene index.
+  reseeded before every call from the component name and the scene's `id`,
+  or its index when it has none (`host::seed`; a tag byte keeps an id seed
+  from ever hashing as an index seed), so an id'd scene draws the same
+  numbers wherever it sits.
 - `console.log` and friends go to `Frame::logs`, at most 200 lines a call.
 
 ## Errors are written for an agent to act on
@@ -448,16 +724,133 @@ gallery drive `Engine` directly.
 
 `Project::lint` loads each component once, checks every scene's props and
 every component's `examples`, and renders each scene at `t = 0` and just
-before `hold`, at scale 0.25, writing nothing; a key on two nodes of a
+before its length, at scale 0.25, writing nothing; a key on two nodes of a
 scene's tree is reported there too. When a scene and the one before it both
 render cleanly, it also renders the middle of the transition between them,
 so a morph error shows. It checks the transition values through the cascade
 (reported at the first scene that uses a bad one, naming its level) and the
 video's `morphColor` and `motionBlur`, a
 `transition` on the first scene, and a `dur` longer than the incoming
-scene's hold. It collects every problem with its scene and component instead
-of stopping at the first; an error is reported once even if several renders
-hit it.
+scene's length. A scene whose length is unknown (stale narration, or silent
+with no `hold`) is reported and not rendered. It collects every problem
+with its scene, scene id and component instead of stopping at the first;
+an error is reported once even if several renders hit it.
+
+For a narrated video lint also reports, each naming the scene id:
+
+- a `script.md` section no scene matches (kind `script`, with its line);
+- script text that is not spoken form (kind `script`, `script.md:<line>:`
+  and the token): digits, `%`, `^`, `=`, `/`, `+`, `<`, `>`, a lone `*`, maths
+  symbols such as `×`, `÷`, `±`, `√`, `∑`, `∫`, `∈`, `≤`, `≠`, `≈`, Greek
+  letters, any other symbol, and dotted abbreviations (`e.g.`, `i.e.`,
+  `etc.`, `U.S.`), each with what to write instead (`` say `%` as
+  `percent` ``). Letters and `, . ; : ! ? ' " - — ( )` pass, and `*` or `_`
+  inside a word is emphasis. The rules are in
+  `app/studio-core/src/project/lint/spoken.rs`;
+- each word whose aligner confidence is below `LOW_CONFIDENCE` (-8.0,
+  measured on Kokoro, where clean words stayed above -4.83; re-check it for
+  another TTS engine), since a mangled word smears its neighbours' timing;
+- each manifest gap: ``the audio has unscripted speech after `word` (heard
+  "…")``, or ``before the first word``.
+
+All of these are errors: lint has no warning level, so any of them makes
+`oculus studio lint` exit 1.
+
+## Rendering a video
+
+`render` (`app/src-tauri/src/studio/render/`) turns a video folder into an
+mp4: H.264, yuv420p, BT.709, 48 kHz AAC narration, `+faststart`. It never
+narrates and never touches the network: stale or missing narration fails
+with the `Narration` error before any frame renders.
+
+- **Two qualities.** `draft` renders at the scale that makes the frame 540
+  px high (never above 1) on the hardware encoder (`h264_videotoolbox -q:v
+  65`); `final` renders full size on `libx264 -preset medium -crf 18
+  -threads 8`. Motion blur follows the `motionBlur` token for the purpose
+  (`Draft` or `Final`): with the bundled `finals`, only `final` blurs. An
+  odd output side is an error naming the size and scale, since yuv420p
+  needs even sides; nothing is padded.
+- **Colour.** Frames go to ffmpeg as raw RGBA on stdin (`-f rawvideo
+  -pix_fmt rgba -s WxH -r fps -i -`), converted with `-vf
+  scale=out_color_matrix=bt709:out_range=tv -pix_fmt yuv420p` and tagged
+  `-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range
+  tv`. Untagged, swscale converts with BT.601 and the indigo shifts.
+- **Segments.** Each scene is one segment, `.cache/segments/<key>.mp4`,
+  covering its whole frames (`scene_frames`), each frame sampled at
+  `Time::Scene { t: j / fps }`, so a scene's segment does not depend on
+  where it sits. The key is the sha256 of the scene's fingerprint
+  (`scene_fingerprint`, which covers the scene before it), a hash of every
+  file under `components/` and `assets/`, the render settings (quality,
+  scale, size, fps, blur, filter, codec and tag arguments) and
+  `STUDIO_RENDER_BUILD`, which `app/src-tauri/build.rs` hashes from
+  studio-core's `src/`, `fonts/` and `themes/`, `src/studio/render/` and
+  `app/src-tauri/Cargo.lock` (the versions of vello_cpu, parley, taffy and
+  the rest), so a renderer, font or dependency change in development never
+  reuses an old segment. Editing one scene re-renders it
+  and the scene after it (whose transition shows it); the rest print
+  `cached`.
+- **Frames in parallel, written in order.** Worker threads (half the cores,
+  or `--threads`, capped so the renderers, their frames and the reorder
+  slots are estimated under 2 GB: `strip`'s policy) each build their own
+  `Renderer` and claim frames from a reorder buffer that holds at most two
+  per worker; the calling thread takes them in order and writes each to the
+  current segment's ffmpeg, one process per segment. The earliest failing
+  frame stops the render with `StudioError::Frame` (its time and scene).
+- **Joining.** The segments are joined by the concat demuxer as a stream
+  copy (`-f concat -safe 0 -c:v copy`, absolute paths in
+  `.cache/concat-<quality>.txt`). x264's B-frames do not drop or repeat a
+  frame at the joins: the joined file decodes (`-f framemd5`) to each
+  segment's frames in turn, and a render that reused cached segments
+  decodes to the same frames as a cold one.
+- **Narration track.** Mixed in Rust, not with `amix` (which divides by its
+  input count): each clip is decoded, resampled to 48 kHz mono (rubato) and
+  added into one buffer as long as the video at sample `round((first frame
+  / fps + lead) * 48000)`. It is written as 16-bit WAV to
+  `.cache/narration-<key>.wav` (keyed by the clips and their offsets) and
+  encoded with `-c:a aac -b:a 160k`. A video without narration has no audio
+  stream.
+- **Output.** `<dir>/renders/draft.mp4` or `final.mp4` (`-o` for another
+  path). Segments, the track and the output are written as `.part` and
+  renamed. After a render, `.cache/renders.json` records what that quality
+  used, and segments and tracks neither quality's last render used, and
+  any `.part`, are deleted.
+- **Failure and cancel.** ffmpeg's non-zero exit is an error quoting its
+  last stderr lines. Cancel (an `&AtomicBool`, checked before every frame
+  and while joining) kills ffmpeg, deletes the partial segment and returns
+  `Finished::Cancelled`, which is not an error. No timeouts.
+- **Progress.** A sync `&mut dyn FnMut(Progress)`: `Planned` (segments,
+  cached, frames to render, threads), `Segment`, `Frame` (frame of frames
+  and frames a second), `Done` per segment in video order, `Muxing`.
+- **From the app.** `studio_render(dir, quality)` (`"draft"` or `"final"`,
+  to `<dir>/renders/<quality>.mp4`, half the cores) runs `render` on a
+  blocking thread, finding ffmpeg like the CLI does plus the app's
+  resources. It resolves to the report (`--json`'s `report`), or `null`
+  when cancelled; it rejects with the failure's message. One render per
+  folder: `render::RENDERS` maps each canonical folder to its quality and
+  an `Arc<AtomicBool>` cancel flag, and a second start for the same folder
+  is refused at once ("a draft render of <dir> is already running"), with
+  no event. A guard frees the folder however the render ends, before the
+  last event. `studio_render_cancel(dir)` sets the flag (false when none
+  runs). Each step is a `studio-render-progress` event `{ dir, phase, ...
+  }`, `dir` as given: `planning` at the start and again with `plan:
+  {segments, cached, frames, threads}`; `rendering` with `{segment, of,
+  scene, frame, frames, fps}` (1-based segment and frame), at most one per
+  100 ms besides each segment's first and last frame; `muxing`; then
+  `complete` with `{path, report}`, `cancelled`, or `error` with `{error}`.
+  Each ending is logged.
+- **Measured** (debug build, 18-core M-series Mac, a 15.5 s narrated
+  three-scene 1080p video at 30 fps, 465 frames, 9 render threads; the
+  spread is other load on the machine): `draft` (960×540) in 1.7 to 1.8 s
+  wall, 390 to 700 frames/s, 0.2 GB peak for oculus and ffmpeg together;
+  `final` in 2.3 to 3.8 s, 135 to 220 frames/s, 1.2 GB peak (oculus 0.49
+  GB, x264 0.75 GB; x264's default threads held 1.1 GB on their own).
+  After one paragraph edit (and its narration), `final` re-rendered that
+  one scene and reused the other two. The mixed track put each clip on its
+  exact sample (cross-correlated against the clip), and a card cued to a
+  word appeared on the first frame at or after the word, matching the frame
+  `oculus studio frame` draws at that frame's time (41 to 48 dB PSNR, 23 dB
+  against its neighbour). The scenes were mostly still; motion-blurred
+  motion costs up to 32 sub-frames a frame.
 
 ## `oculus studio` renders and lints from the terminal
 
@@ -473,11 +866,27 @@ hit it.
   sheet and tile sizes, the render time and the thread count; `--json`
   gives `{path, times, width, height, tile: {width, height}, cols, ms,
   threads}`.
-- `frame` and `strip` take `--motion-blur` (30 fps, 180° shutter); `frame`
-  then reports the sub-frames it averaged.
+- `frame` and `strip` take `--motion-blur` (a 180° shutter at the video's
+  fps); `frame` then reports the sub-frames it averaged.
+- `frame` and `strip` read `script.md` and the narration manifest; stale or
+  missing narration stops them with the `Narration` error, while `lint`
+  lists it with the rest.
+- `oculus studio narrate <DIR>` makes the narration (`--scene ID`,
+  `--force`, and `--server`, `--model`, `--voice`, `--speed` over the
+  video's and Settings' voice); `oculus studio tts` makes one clip; `oculus
+  studio aligner` manages the aligner model. See "Narration is made by
+  `oculus studio narrate`".
+- `oculus studio render <DIR>` writes an mp4 (`--draft`, the default, or
+  `--final`; `-o`, `--threads`). It prints the plan, then per scene
+  `rendered` with its frames, seconds and frames a second, or `cached`,
+  then the path and a summary; `--json` gives `{dir, report: {path,
+  quality, width, height, fps, frames, duration, audio, threads, segments:
+  [{scene, id, outcome, frames, ms, fps}], pruned, ms}}`. See "Rendering a
+  video".
 - `oculus studio lint <DIR>` prints each problem and exits 1 if there is
-  any. With `--json` it prints the issues as an array of `{scene, component,
-  example, kind, message, loc}`.
+  any. With `--json` it prints the issues as an array of `{scene, id,
+  component, example, kind, message, loc}`; `scene` and `component` are
+  null for a script section no scene matches.
 
 Flags are in [cli-reference.md](./cli-reference.md#oculus-studio).
 
@@ -498,6 +907,23 @@ transitions fixture and its sameness across thread counts,
 `tests/dither.rs` the dark-gradient measurement. The transition and strip
 goldens are 640x360 or smaller to keep the repo small; there is no
 dark-gradient golden, since a dithered 1080p frame is a 2.4 MB PNG.
+`tests/frames.rs` covers the whole-frame timeline at other rates, frame
+times against global times, blur at the video's fps, strips across thread
+counts, which edits move which scene fingerprints, and (the `random`
+fixture) that an id'd scene using `Math.random` keeps its fingerprint and
+its exact pixels when moved behind the same scene.
+`tests/narration.rs` covers scene lengths, stale and missing narration, the
+load errors and `word`/`wordEnd`; the `narrated` fixture (a hand-written
+manifest, no audio) pins a card entering at its word. In the app crate, `cargo test --lib studio::` covers the TTS client
+against a loopback fake server (WAV, empty, non-WAV, silent, 404, 429),
+the `/v1/models` listing (parsing, 404, non-JSON, unreachable), the Settings
+row's validation (`studio::commands`),
+the voice resolution, the cache key and `narrate` with a stubbed aligner
+(caching, one-paragraph edits, per-scene writes, pruning, failures).
+`cargo test --lib studio::render` covers the render plan, segment keys and
+tree hashes, the audio placement, the reorder buffer and pruning, and,
+through the real ffmpeg (skipped without one), the join and cache check
+above, a narrated fixture's audio onset, cancel and a failing frame.
 
 From `app/studio-core`: `cargo test`, `cargo clippy --all-targets -- -D
 warnings`, `cargo fmt`. CI runs these in the `studio-core` job on macOS.

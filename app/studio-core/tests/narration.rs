@@ -1,0 +1,409 @@
+//! Narration: script.md and the manifest set narrated scenes' lengths, stale
+//! or missing narration fails renders (not the load), and `word()` /
+//! `wordEnd()` cue elements to the narration.
+#![allow(clippy::unwrap_used, clippy::panic)] // helpers outside #[test] fns
+
+mod common;
+
+use common::fixture;
+use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
+use studio_core::{Project, RenderOptions, Renderer, StripOptions, StudioError, Time, strip};
+
+/// A project folder in the temp dir, removed on drop.
+struct Temp(PathBuf);
+
+impl Temp {
+    fn new(name: &str) -> Temp {
+        let dir =
+            std::env::temp_dir().join(format!("studio-narration-{name}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("components")).unwrap();
+        std::fs::create_dir_all(dir.join("narration")).unwrap();
+        Temp(dir)
+    }
+
+    fn file(&self, rel: &str, content: &str) -> &Temp {
+        std::fs::write(self.0.join(rel), content).unwrap();
+        self
+    }
+
+    fn video(&self, scenes: Value) -> &Temp {
+        let video =
+            json!({ "size": { "width": 64, "height": 36 }, "theme": "default", "scenes": scenes });
+        self.file("video.json", &video.to_string())
+    }
+
+    fn manifest(&self, scenes: Value) -> &Temp {
+        self.file(
+            "narration/manifest.json",
+            &json!({ "version": 1, "scenes": scenes }).to_string(),
+        )
+    }
+
+    fn load(&self) -> Project {
+        Project::load(&self.0).unwrap()
+    }
+
+    fn load_err(&self) -> String {
+        Project::load(&self.0).err().unwrap().to_string()
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Temp {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+/// A manifest entry: `words` are `(text, start, end)` at confidence -0.5.
+fn clip(text: &str, duration: f64, words: &[(&str, f64, f64)]) -> Value {
+    let words: Vec<Value> = words
+        .iter()
+        .map(|(t, s, e)| json!({ "text": t, "start": s, "end": e, "confidence": -0.5 }))
+        .collect();
+    json!({ "key": "k", "text": text, "audio": "k.wav", "duration": duration, "words": words })
+}
+
+const BLANK: &str = "export const props = {};\nexport default () => <Box />;\n";
+
+fn near(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-9
+}
+
+/// `n` frames at the default 30 fps, in seconds.
+fn frames(n: u32) -> f64 {
+    f64::from(n) / 30.0
+}
+
+#[test]
+fn the_fixture_is_narrated_then_silent() {
+    let p = Project::load(fixture("narrated")).unwrap();
+    // lead + clip + tail is 0.25 + 3.0 + 0.6 = 3.85 s, 115.5 frames: 116.
+    assert!(near(p.scene_length(0).unwrap(), frames(116)));
+    assert!(near(p.scene_length(1).unwrap(), 1.5));
+    let tl = p.timeline().unwrap();
+    assert!(near(tl.length(), frames(161)));
+    assert!(near(tl.start(1), frames(116)));
+    assert!(near(p.length().unwrap(), frames(161)));
+    assert_eq!(p.scene_frames(1).unwrap(), 116..161);
+    assert_eq!(
+        p.video.voice.as_ref().unwrap().voice.as_deref(),
+        Some("af_heart")
+    );
+    assert_eq!(
+        p.section(0).unwrap().text,
+        "We follow the gradient downhill, one small step at a time."
+    );
+    assert!(p.narration(0).unwrap().is_some());
+    assert!(p.narration(1).unwrap().is_none() && p.section(1).is_none());
+    assert!(p.word_cues(0).unwrap().is_some());
+    assert!(p.word_cues(1).unwrap().is_none());
+}
+
+#[test]
+fn the_card_enters_at_its_word() {
+    // `word("gradient")` is 0.62 s into the clip plus the 0.25 s lead.
+    let p = Project::load(fixture("narrated")).unwrap();
+    let mut r = Renderer::new(&p, RenderOptions::default()).unwrap();
+    let mut at = |t: f64| r.frame(Time::Scene { index: 0, t }).unwrap().rgba;
+    let start = at(0.0);
+    assert!(at(0.86) == start, "nothing has entered before the cue");
+    assert!(at(0.9) != start, "the card is entering just after it");
+}
+
+#[test]
+fn hold_is_a_minimum_for_narrated_scenes() {
+    let t = Temp::new("hold");
+    t.video(json!([
+        { "id": "a", "component": "Blank", "hold": 1.0 },
+        { "id": "b", "component": "Blank", "hold": 5.0 },
+        { "id": "c", "component": "Blank", "hold": 2.0 }
+    ]))
+    .file("components/Blank.tsx", BLANK)
+    .file("script.md", "## a\nFirst.\n\n## b\nSecond.\n")
+    .manifest(json!({
+        "a": clip("First.", 2.0, &[("First.", 0.0, 2.0)]),
+        "b": clip("Second.", 1.0, &[("Second.", 0.0, 1.0)]),
+    }));
+    let p = t.load();
+    let lengths: Vec<f64> = (0..3).map(|i| p.scene_length(i).unwrap()).collect();
+    assert!(
+        near(lengths[0], frames(86)),
+        "the clip outlasts the hold: {lengths:?}"
+    );
+    assert!(
+        near(lengths[1], 5.0),
+        "the hold outlasts the clip: {lengths:?}"
+    );
+    assert!(
+        near(lengths[2], 2.0),
+        "a silent scene is its hold: {lengths:?}"
+    );
+    assert!(near(p.length().unwrap(), frames(86 + 150 + 60)));
+    let e = p.scene_length(3).unwrap_err();
+    assert!(matches!(e, StudioError::SceneOutOfRange { .. }), "{e}");
+}
+
+#[test]
+fn missing_or_stale_narration_fails_renders_not_the_load() {
+    let t = Temp::new("stale");
+    t.video(json!([{ "id": "update", "component": "Blank" }]))
+        .file("components/Blank.tsx", BLANK)
+        .file("script.md", "## update\nThe *new* text.\n");
+    let check = |why: &str| {
+        let p = t.load();
+        let e = p.timeline().unwrap_err();
+        assert_eq!(e.kind(), "narration");
+        let message = e.to_string();
+        let want = format!(
+            "scene `update`: no narration for its current text ({why}); run `oculus studio narrate {}`",
+            t.path().display()
+        );
+        assert_eq!(message, want);
+        let e = Renderer::new(&p, RenderOptions::default()).err().unwrap();
+        assert_eq!(e.to_string(), want);
+        let e = strip(&p, StripOptions::default()).err().unwrap();
+        assert_eq!(e.to_string(), want);
+        assert!(p.word_cues(0).is_err());
+        let report = p.lint().unwrap();
+        assert_eq!(report.issues.len(), 1, "{report}");
+        assert_eq!(report.issues[0].error.kind(), "narration");
+        assert_eq!(report.issues[0].id.as_deref(), Some("update"));
+    };
+    check("there is no narration/manifest.json");
+    t.manifest(json!({ "other": clip("The new text.", 1.0, &[]) }));
+    check("narration/manifest.json has no clip for it");
+    t.manifest(json!({ "update": clip("The old text.", 1.0, &[]) }));
+    check("its clip in narration/manifest.json is for older text");
+    // Emphasis and line breaks are not part of the text it must match.
+    t.manifest(json!({ "update": clip("The new text.", 1.0, &[]) }));
+    assert!(near(t.load().length().unwrap(), frames(56)));
+}
+
+#[test]
+fn a_silent_scene_needs_a_hold() {
+    let t = Temp::new("silent");
+    t.video(json!([
+        { "id": "a", "component": "Blank", "hold": 1.0 },
+        { "id": "b", "component": "Blank" }
+    ]))
+    .file("components/Blank.tsx", BLANK)
+    .file("script.md", "## a\nHello.\n")
+    .manifest(json!({ "a": clip("Hello.", 1.0, &[]) }));
+    let p = t.load();
+    let e = p.timeline().unwrap_err().to_string();
+    assert!(
+        e.contains("scenes[1] has no hold and no narration") && e.contains("`## b` section"),
+        "{e}"
+    );
+    let report = p.lint().unwrap();
+    assert_eq!(report.issues.len(), 1, "{report}");
+    assert_eq!(report.issues[0].scene, Some(1));
+}
+
+#[test]
+fn script_ids_and_manifest_errors_fail_the_load() {
+    let t = Temp::new("load");
+    t.file("components/Blank.tsx", BLANK);
+    let scenes = json!([{ "id": "a", "component": "Blank", "hold": 1 }]);
+    t.video(scenes.clone())
+        .file("script.md", "Intro.\n## a\nHello.\n");
+    let e = t.load_err();
+    assert!(
+        e.contains("script.md") && e.contains("line 1: text before the first `## <id>` heading"),
+        "{e}"
+    );
+    t.file("script.md", "## a\nHello.\n## a\nAgain.\n");
+    assert!(
+        t.load_err()
+            .contains("line 3: `## a` repeats the section at line 1")
+    );
+    t.file("script.md", "## a\nHello.\n");
+
+    t.video(json!([{ "component": "Blank", "hold": 1 }]));
+    assert!(t.load_err().contains("scenes[0] has no id"));
+    t.video(json!([{ "id": "Intro", "component": "Blank", "hold": 1 }]));
+    assert!(
+        t.load_err()
+            .contains("scenes[0].id `Intro` must be lowercase")
+    );
+    t.video(json!([
+        { "id": "a", "component": "Blank", "hold": 1 },
+        { "id": "a", "component": "Blank", "hold": 1 }
+    ]));
+    assert!(
+        t.load_err()
+            .contains("scenes[1].id `a` is also scenes[0].id")
+    );
+
+    t.video(scenes.clone());
+    t.file(
+        "narration/manifest.json",
+        r#"{ "version": 2, "scenes": {} }"#,
+    );
+    let e = t.load_err();
+    assert!(
+        e.contains("manifest.json") && e.contains("version 2"),
+        "{e}"
+    );
+    t.file(
+        "narration/manifest.json",
+        r#"{ "version": 1, "scenes": {}, "extra": 1 }"#,
+    );
+    assert!(t.load_err().contains("unknown field `extra`"));
+    t.manifest(
+        json!({ "a": { "key": "k", "text": "Hello.", "audio": "k.wav", "duration": 1.0,
+        "words": [{ "text": "Hello.", "start": 0.6, "end": 0.2, "confidence": 0 }] } }),
+    );
+    assert!(t.load_err().contains("scenes.a.words[0]"));
+    t.manifest(
+        json!({ "a": { "key": "k", "text": "Hello.", "audio": "k.wav", "duration": 1.0,
+        "words": [{ "text": "Hello.", "start": 0.0, "end": 0.5, "confidence": 0 }],
+        "gaps": [{ "after": 1, "start": 0.5, "end": 0.7, "heard": "uh" }] } }),
+    );
+    assert!(
+        t.load_err()
+            .contains("scenes.a.gaps[0] follows word 1 of 1")
+    );
+    t.manifest(
+        json!({ "a": { "key": "k", "text": "Hello.", "audio": "k.wav", "duration": 1.0,
+        "words": [{ "text": "Hello.", "start": 0.3, "end": 0.5, "confidence": 0 }],
+        "gaps": [{ "after": null, "start": 0.0, "end": 0.2, "heard": "uh" }] } }),
+    );
+    let gap = &t.load().manifest.unwrap().scenes["a"].gaps[0];
+    assert_eq!(gap.after, None, "null is speech before the first word");
+    t.manifest(json!({}));
+
+    let video = |voice: Value| {
+        json!({ "size": { "width": 64, "height": 36 }, "theme": "default", "voice": voice, "scenes": scenes })
+            .to_string()
+    };
+    t.file("video.json", &video(json!({ "speed": 0 })));
+    assert!(t.load_err().contains("voice.speed is 0"));
+    t.file("video.json", &video(json!({ "pitch": 1 })));
+    assert!(t.load_err().contains("unknown field `pitch`"));
+    t.file(
+        "video.json",
+        &video(json!({ "model": "kokoro", "voice": "af_heart", "speed": 1.1 })),
+    );
+    let voice = t.load().video.voice.unwrap();
+    assert_eq!(voice.model.as_deref(), Some("kokoro"));
+    assert_eq!(voice.speed, Some(1.1));
+}
+
+/// A project whose two narrated scenes call `Probe`, which runs `body`.
+fn probe(name: &str, body: &str) -> Temp {
+    let t = Temp::new(name);
+    t.video(json!([
+        { "id": "a", "component": "Probe" },
+        { "id": "b", "component": "Probe" },
+        { "id": "quiet", "component": "Probe", "hold": 1, "transition": { "kind": "cut" } }
+    ]))
+    .file(
+        "components/Probe.tsx",
+        &format!(
+            "export const props = {{}};\nexport default () => {{\n{body}\n  return <Box />;\n}};\n"
+        ),
+    )
+    .file(
+        "script.md",
+        "## a\nThe gradient, the *small* step. It's time.\n\n## b\nHello there.\n",
+    )
+    .manifest(json!({
+        "a": clip("The gradient, the small step. It's time.", 2.1, &[
+            ("The", 0.0, 0.2), ("gradient,", 0.2, 0.7), ("the", 0.8, 0.9), ("small", 0.9, 1.2),
+            ("step.", 1.2, 1.5), ("It\u{2019}s", 1.6, 1.8), ("time.", 1.8, 2.1),
+        ]),
+        "b": clip("Hello there.", 1.0, &[("Hello", 0.1, 0.5), ("there.", 0.5, 1.0)]),
+    }));
+    t
+}
+
+fn logs(p: &Project, at: Time) -> Vec<String> {
+    let mut r = Renderer::new(p, RenderOptions::default()).unwrap();
+    r.frame(at).unwrap().logs
+}
+
+#[test]
+fn word_cues_are_scene_seconds_with_the_lead() {
+    let t = probe(
+        "cues",
+        r#"  console.log(JSON.stringify([word("gradient"), wordEnd("gradient"), word("small step"),
+    wordEnd("small  STEP"), word("the", 2), word("THE"), word("it's"), wordEnd("time")]));"#,
+    );
+    let p = t.load();
+    let got: Vec<f64> =
+        serde_json::from_str(&logs(&p, Time::Scene { index: 0, t: 1.0 })[0]).unwrap();
+    let want = [0.45, 0.95, 1.15, 1.75, 1.05, 0.25, 1.85, 2.35];
+    assert_eq!(got.len(), want.len());
+    for (g, w) in got.iter().zip(want) {
+        assert!(near(*g, w), "{got:?} != {want:?}");
+    }
+}
+
+#[test]
+fn word_errors_name_the_call_its_line_and_the_closest_word() {
+    let cases = [
+        (
+            "  word(\"gradiant\");",
+            "`word(\"gradiant\")`: no such word in scene `a`; closest: gradient",
+        ),
+        (
+            "  wordEnd(\"small stop\");",
+            "`wordEnd(\"small stop\")`: no such word in scene `a`; closest: small step",
+        ),
+        (
+            "  word(\"gradient\", 2);",
+            "`word(\"gradient\", 2)`: scene `a` says \"gradient\" once, so there is no occurrence 2",
+        ),
+        (
+            "  word(\"zebra\");",
+            "`word(\"zebra\")`: no such word in scene `a`",
+        ),
+        (
+            "  word(\"...\");",
+            "`word(\"...\")`: the phrase has no words",
+        ),
+    ];
+    for (i, (body, want)) in cases.iter().enumerate() {
+        let t = probe(&format!("err{i}"), body);
+        let p = t.load();
+        let mut r = Renderer::new(&p, RenderOptions::default()).unwrap();
+        let e = r.frame(Time::Scene { index: 0, t: 0.0 }).unwrap_err();
+        assert_eq!(e.kind(), "component");
+        let loc = e.loc().unwrap_or_else(|| panic!("no TSX line: {e}"));
+        assert_eq!(loc.line, 3, "{e}");
+        assert!(e.to_string().contains(want), "{e}\nwanted: {want}");
+        if !want.contains("closest") {
+            assert!(!e.to_string().contains("closest"), "{e}");
+        }
+    }
+    let t = probe("silent", "  word(\"hello\");");
+    let p = t.load();
+    let mut r = Renderer::new(&p, RenderOptions::default()).unwrap();
+    let e = r.frame(Time::Scene { index: 2, t: 0.0 }).unwrap_err();
+    assert!(
+        e.to_string()
+            .contains("`word(\"hello\")`: this scene is not narrated"),
+        "{e}"
+    );
+    assert_eq!(e.loc().unwrap().line, 3);
+}
+
+#[test]
+fn transition_calls_get_their_own_scenes_words() {
+    let t = probe(
+        "transition",
+        "  let w = [];\n  try { w.push(word(\"hello\")); } catch (e) { w.push(word(\"gradient\")); }\n  console.log(String(w[0]));",
+    );
+    let p = t.load();
+    let start = p.timeline().unwrap().start(1);
+    // 0.2 s into the default 0.7 s dissolve into scene b.
+    let got = logs(&p, Time::Global(start + 0.2));
+    assert_eq!(got, ["scene 0: 0.45", "0.35"]);
+}

@@ -42,6 +42,7 @@ export const PLACES: { label: string; path: string; icon: PhosphorIcon }[] = [
   { label: "Settings · Parsing", path: "/settings/parsing", icon: GearSix },
   { label: "Settings · Embeddings", path: "/settings/embeddings", icon: GearSix },
   { label: "Settings · Transcription", path: "/settings/transcription", icon: GearSix },
+  { label: "Settings · Voice", path: "/settings/voice", icon: GearSix },
 ];
 
 /** Per-kind caps for a typed query, so no one kind pushes the others off. */
