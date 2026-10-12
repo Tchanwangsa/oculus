@@ -86,6 +86,13 @@ impl Engine {
         }
     }
 
+    /// An element tree the engine made itself (captions), laid out at the
+    /// frame's size; `label` names it in an error.
+    pub(crate) fn lay_out_json(&mut self, label: &str, json: &serde_json::Value) -> Result<LNode> {
+        let tree = parse_tree(json).map_err(|e| self.node_error(label, e))?;
+        self.lay_out(label, tree)
+    }
+
     fn lay_out(&mut self, name: &str, tree: Node) -> Result<LNode> {
         let mut layouter = Layouter {
             typeset: &mut self.typeset,

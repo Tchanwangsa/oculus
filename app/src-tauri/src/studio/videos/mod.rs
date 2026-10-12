@@ -5,6 +5,7 @@
 //! directory"). `scoped_in` is `resolve_in` for the app's commands, which may
 //! name only a video; `slug` makes a unique slug from a title.
 
+mod captions;
 mod slug;
 #[cfg(test)]
 mod tests;
@@ -18,6 +19,7 @@ use studio_core::{valid_subject, valid_theme_name, Video};
 
 use crate::library::paths::{data_dir, studio_dir};
 
+pub use captions::{set_captions, with_captions};
 pub use slug::{slug_from_title, unique_slug};
 
 /// `<data dir>/studio/videos`.
@@ -126,7 +128,8 @@ pub struct NewVideo {
 }
 
 /// Scaffolds `videos/<slug>/`: a `video.json` (30 fps, the theme, the
-/// subject, an optional voice, and one silent `TitleCard` scene), an empty
+/// subject, an optional voice, captions on, and one silent `TitleCard`
+/// scene), an empty
 /// `script.md`, and empty `components/` and `assets/`. Refuses a slug that
 /// exists. Returns the folder.
 pub fn create_in(videos: &Path, new: &NewVideo) -> Result<PathBuf, String> {
@@ -205,6 +208,7 @@ fn video_json(new: &NewVideo) -> String {
     if let Some(voice) = new.voice.as_ref().and_then(voice_json) {
         lines.push(format!("  \"voice\": {voice},"));
     }
+    lines.push("  \"captions\": true,".to_owned());
     lines.push(format!("  \"scenes\": [\n    {scene}\n  ]"));
     format!("{{\n{}\n}}\n", lines.join("\n"))
 }

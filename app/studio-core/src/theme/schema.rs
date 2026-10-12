@@ -1,6 +1,7 @@
 //! The theme file's shape. Sections are open maps of named tokens, but the
 //! section names and each token's shape are fixed.
 
+use crate::captions::{self, CaptionStyle};
 use crate::fonts::{MONO_FAMILY, bundled_families};
 use crate::project::MAX_PAUSE;
 use crate::scene::{Color, Style};
@@ -20,6 +21,9 @@ struct ThemeFile {
     radius: BTreeMap<String, f64>,
     motion: Motion,
     narration: NarrationTokens,
+    /// Burned-in captions; `fill_defaults` supplies it, so every theme has
+    /// one (`captions::check`).
+    captions: Value,
 }
 
 #[derive(Deserialize)]
@@ -82,8 +86,9 @@ fn default_pause() -> f64 {
 }
 
 /// Adds the tokens a theme written before they existed lacks, so components
-/// can always read `theme.font.mono` and `theme.type.code`. Called on the
-/// parsed file before `check`, so the filled values are validated too.
+/// can always read `theme.font.mono` and `theme.type.code`, and captions
+/// always have a style. Called on the parsed file before `check`, so the
+/// filled values are validated too.
 pub fn fill_defaults(tokens: &mut Value) {
     let Some(root) = tokens.as_object_mut() else {
         return;
@@ -102,6 +107,7 @@ pub fn fill_defaults(tokens: &mut Value) {
             })
         });
     }
+    captions::fill_defaults(root);
 }
 
 /// Type-scale entries are style fragments, spread into `style`.
@@ -121,6 +127,7 @@ pub struct Checked {
     pub motion: MotionSpec,
     pub easings: BTreeMap<String, [f64; 4]>,
     pub narration: NarrationTokens,
+    pub captions: CaptionStyle,
 }
 
 pub fn check(tokens: &Value) -> Result<Checked, String> {
@@ -175,6 +182,12 @@ pub fn check(tokens: &Value) -> Result<Checked, String> {
             n.pause
         ));
     }
+    let no_colours = Map::new();
+    let colours = tokens
+        .get("color")
+        .and_then(Value::as_object)
+        .unwrap_or(&no_colours);
+    let captions = captions::check(&file.captions, colours, &families)?;
     let background = *file
         .color
         .get("bg")
@@ -195,5 +208,6 @@ pub fn check(tokens: &Value) -> Result<Checked, String> {
         },
         easings: file.motion.easing,
         narration: n,
+        captions,
     })
 }

@@ -57,6 +57,7 @@ video's slug as `DIR`; `oculus studio <command> --help` has the full flags.
 | `scenes` | The scenes in order (below). At least one. |
 | `motion` | Optional: `transition`, `magicMove`, `morphColor`, `motionBlur` for the whole video (see "Transitions"). |
 | `voice` | Optional: `{ model, voice, speed }` over Settings → Voice for this video. Leave it out unless the student asks for a voice. |
+| `captions` | `true` burns word-highlight captions into the renders and `frame`: the phrase being said on a plate near the bottom edge, the current word highlighted. `new` writes `true`; leave it unless the student asks. Styled by the theme's `captions` tokens. |
 
 A scene:
 

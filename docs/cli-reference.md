@@ -2101,8 +2101,9 @@ motion blur unless the theme's `motionBlur` says `always`.
 `subtitles`: the captions as WebVTT, with SubRip (`.srt`) beside it.
 
 Video presets are H.264, yuv420p, BT.709, and write the captions as a `.vtt` beside the
-mp4 when the video is narrated. Before anything renders, ffmpeg is asked what it was
-built with: a missing encoder or demuxer is an error naming it.
+mp4 when the video is narrated. With video.json's `"captions": true` the captions are
+also burned into the frames. Before anything renders, ffmpeg is asked what it was built
+with: a missing encoder or demuxer is an error naming it.
 
 Render never narrates: run `oculus studio narrate` first, or it stops with the stale
 narration's scene. A frame that fails stops the render, naming its time and scene; an

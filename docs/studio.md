@@ -24,7 +24,7 @@ crops library PDF pages into slides (`slide`), and narrates.
 | `script.md`, the narration manifest, scene lengths and word cues | `app/studio-core/src/project/` (`script/`, `narration/`, `scenes.rs`), `app/studio-core/src/host/prelude/words.js` |
 | Scene transitions: the cascade, compositing two scenes | `app/studio-core/src/transition/` |
 | Magic move: matching and blending two laid-out trees, OKLab colour, lag and fades | `app/studio-core/src/morph/` (`clock.rs`, `fade.rs`) |
-| Captions from the word timings: phrasing, timing, the subtitle files | `app/studio-core/src/captions/` (`phrase.rs`, `timing.rs`, `subtitles.rs`) |
+| Burned-in captions: phrasing, timing, the caption's element tree, the subtitle files, the theme's `captions` tokens | `app/studio-core/src/captions/` (`phrase.rs`, `timing.rs`, `tree.rs`, `subtitles.rs`, `style.rs`) |
 | Overlays bound to keys (Brace, Surround, Underline, Indicate, a keyed Arrow), drawn after layout and morphing | `app/studio-core/src/overlay/`, `app/studio-core/src/host/prelude/overlays.js` |
 | Easings shared by transitions and the morph (the prelude's, in Rust) | `app/studio-core/src/easing/` |
 | TSX → JS (oxc), the QuickJS sandbox, the prelude every component sees | `app/studio-core/src/host/` (`prelude/*.js`, one module scope, concatenated in order) |
@@ -95,6 +95,9 @@ narration/    manifest.json and the clips it names
   folder name (letters, digits, `-` and `_`, up to 64 characters), whose
   library (`<app data>/studio/subjects/<CODE>/`) is read before the global
   one.
+- `captions` (optional, default `false`) burns word-highlight captions into
+  every frame of a render (see "Captions are burned in from the word
+  timings"). `oculus studio new` and the app write `true`.
 - `motion` (optional) overrides the theme's transition and motion-blur
   defaults for this video; a scene's `transition` (optional) overrides
   both. See "Transitions" and "Motion blur".
@@ -127,7 +130,8 @@ transitions) reads that one timeline.
 - `Project::scene_fingerprint(i)` is what in the folder scene `i`'s frames
   depend on, as canonical JSON bytes (keys sorted, so key order in a file
   never matters), for a per-scene segment cache key: the size and fps, the
-  theme's tokens and `video.json`'s `motion`, and for scene `i` and scene
+  theme's tokens (its `captions` block included), `video.json`'s `motion`
+  and `captions`, and for scene `i` and scene
   `i - 1` (whose last moment the transition into `i` shows) the scene spec
   (`id` included), the narration words as components see them (`text`,
   `start`, `end`), the frame count and, for a scene without an `id` only,
@@ -191,7 +195,7 @@ one folder besides `agents/` and the database an agent thread may write
 - `oculus studio new <slug> [--subject CODE] [--title T] [--portrait]`
   (`studio::videos::create_in`) makes `videos/<slug>/`: `video.json` at
   1920x1080 (1080x1920 with `--portrait`), 30 fps, the default theme, the
-  subject, and one silent `TitleCard` scene (`id` `title`, 4 s) whose title
+  subject, `"captions": true`, and one silent `TitleCard` scene (`id` `title`, 4 s) whose title
   is `--title` or the slug with spaces; an empty `script.md`; and empty
   `components/` and `assets/`. The default theme is the subject library's
   `library.json` `defaultTheme`, else the global library's, else `default`
@@ -1378,18 +1382,21 @@ between their two targets' boxes.
   so its Paths morph like any others: a Surround or Underline whose box
   changed, or a Brace of a new width, swaps in halves rather than gliding.
 
-## Captions come from the word timings
+## Captions are burned in from the word timings
 
-`src/captions/` turns the narration's word timings into subtitle cues: the
-`.vtt` beside every narrated render, which the Studio player offers as CC,
-and the `subtitles` export (see "Rendering a video"). Nothing is drawn into
-the frames.
+With video.json's `captions` on, `Renderer` ends every frame of a narrated
+scene with a caption: the phrase being said on a rounded plate, the word
+being said highlighted, the words still to come faded (`src/captions/`).
+`renderer.without_captions()` leaves them out; `strip` and the app's stills
+(thumbnails, the scene strip) use it, and `gallery`, lint and the
+playground draw through `Engine` and never have them. `oculus studio frame`
+shows them, so a builder can check what a frame will look like.
 
 - **Phrases** (`phrase.rs`) come from one scene's words (`cued_words`, the
   script's spelling and punctuation as said, spoken forms such as "thirteen
-  mod twelve" included), never across scenes, at most two lines of 42
-  characters (`LINE_CHARS`, `MAX_LINES`). A `[pause]`, a silence of 0.6 s
-  or more, and a sentence's end (`.`, `!`, `?`, `…`) always end a phrase.
+  mod twelve" included), never across scenes, so a scene's captions depend
+  on its own words and the theme only. A `[pause]`, a silence of 0.6 s or
+  more, and a sentence's end (`.`, `!`, `?`, `…`) always end a phrase.
   Longer stretches take as many words as fit the lines, ending at the last
   clause break (`,` `;` `:` a dash, or a 0.25 s silence) that leaves the
   phrase at least half full, and give a word back rather than leave one
@@ -1402,10 +1409,36 @@ the frames.
 - **Timing** (`timing.rs`): a phrase shows 0.15 s before its first word
   (never before the one before it hides) and stays until the next shows;
   before a silence of 0.6 s or more, and at the scene's end, it hides 0.4 s
-  after its last word, so a long pause has no caption.
-- **Cues.** `Project::caption_cues()` is every phrase in video seconds, a
-  cue never past its scene's end, and `captions::vtt` and `captions::srt`
-  write them.
+  after its last word, so a long pause has no caption. The current word is
+  the last one that has started, lit until 0.3 s after it ends; before the
+  first word nothing is lit.
+- **Drawing** (`tree.rs`): the caption is an element tree like a
+  component's, laid out at the frame's size and painted as the last layer,
+  each word its own `Text` in a padded box so the highlight moves without
+  reflowing the line. Under motion blur every sub-frame takes the caption
+  of the frame's own time, so it is drawn once and sharp.
+- **Style** is the theme's `captions` block (`style.rs`). A theme without
+  one gets it filled from its own tokens, so it is in `ctx.theme` too:
+  `fontFamily` (default the theme's body font), `fontSize` 44 and
+  `fontWeight` 600, `color` (`onInk`), `upcoming` (0.6, the opacity of
+  words not yet said), `highlight` (`accent`), `highlightText`
+  (`onAccent`), `highlightStyle` (`pill`, a pill of the highlight behind
+  the word in `highlightText`, or `color`, the word in the highlight),
+  `plate` (`ink`, or `"none"`) at `plateOpacity` (0.8), `position`
+  (`bottom` or `top`), `margin` (0.05 of the height from that edge),
+  `maxChars` (42 a line) and `maxLines` (2). A colour is a `color` token's
+  name or a `#hex`. Sizes are px on a 1080 px short side and scale with the
+  frame's shorter side, so portrait text is as big as landscape; a line on
+  a frame narrower than 16:9 holds proportionally fewer characters (24 on
+  9:16, never under 12). Each value is checked when the theme loads, and a
+  bad one is named (``captions.position = `middle`: must be `bottom` or `top` ``).
+- **Subtitles.** `Project::caption_cues()` is the same phrases in video
+  seconds, captions on or not, and `captions::vtt` and `captions::srt`
+  write them (the `subtitles` export and each render's `.vtt` sidecar, see
+  "Rendering a video").
+- **Not linted.** Lint does not check what a scene draws under the caption
+  band; the skill tells builders to keep key content above the bottom
+  sixth of the frame when captions are on.
 
 ## Motion blur averages sub-frames, off unless asked
 
@@ -1847,8 +1880,8 @@ error before any frame renders.
   stream.
 - **Output.** `Preset::default_out` (`-o` for another path). A narrated
   video's render also writes its captions as WebVTT beside the mp4, the
-  same name with `.vtt` (`renders/draft.vtt`), which the app's player
-  shows as CC.
+  same name with `.vtt` (`renders/draft.vtt`), whether or not they are
+  burned in; the app's player shows them as CC when they are not.
   Segments, the track and the output are written as `.part` and renamed.
   After a render, `.cache/renders.json` records, under the preset's name,
   the segments and track it used, the file it wrote and, for `subtitles`,
@@ -1912,9 +1945,10 @@ on disk now; nothing is cached but thumbnails.
 | Command | Does |
 | --- | --- |
 | `studio_videos(subject?)` | `videos::list_in` plus `title` and `threadId`, newest change first (a video whose video.json does not load sorts last and carries `problem`) |
-| `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to the subject's default theme (see "Libraries cascade"); `voice` is video.json's `voice` block (`{engine?, model?, voice?, speed?}`, `engine` being `kokoro` or `server`). The scaffold is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
-| `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `scenes` and `renders` |
+| `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to the subject's default theme (see "Libraries cascade"); `voice` is video.json's `voice` block (`{engine?, model?, voice?, speed?}`, `engine` being `kokoro` or `server`). The scaffold has `"captions": true`. It is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
+| `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `captions`, `scenes` and `renders` |
 | `studio_render_captions(slug, preset)` | the WebVTT text beside that preset's render (`renders/<preset>.vtt`), for the player's CC |
+| `studio_set_captions(slug, on)` | sets video.json's `captions`: the `true`/`false` literal is replaced in the text, or the key is added before `scenes` on a line of its own, so the rest of the file keeps its formatting (`videos::set_captions`) |
 | `studio_exports(dir)` | each preset's status (`render::exports`, see "Rendering a video") as `{preset, path, modified, current, problem}`; it asks ffmpeg for its toolkit, renders nothing and makes no network call |
 | `studio_frame(slug, at, width)` | a PNG `width` px wide (1 to 4096), the layout of the full-size frame, as bytes through `tauri::ipc::Response` |
 | `studio_thumbnail(slug)` | the video's cached thumbnail PNG |
@@ -2355,10 +2389,15 @@ placement, the reorder buffer and pruning, and, through the real ffmpeg
 (each test skipped, saying why, without one or when it lacks the encoder,
 demuxer or libx264 the test needs), the join and cache check above, a
 narrated fixture's audio onset, cancel, a failing frame, and every export
-with its sidecars and `current` status.
+with its sidecars and `current` status. `studio::videos` covers the
+captions edit of video.json.
 
-`tests/subtitles.rs` pins the `narrated` fixture's cues, and
-`src/captions/tests/` covers phrasing, timing and the VTT and SRT text.
+`tests/captions.rs` pins two captioned frames of the `captions` fixture
+(the `narrated` one with `captions` on: a word lit mid-phrase and late in
+it), that captions are off without the switch and on no silent scene, that
+a blurred frame's caption matches the sharp frame's, the fingerprint, and
+the subtitle cues. `src/captions/tests/` covers phrasing, timing, the style
+tokens and the VTT and SRT text.
 
 `tests/math.rs` pins a corpus of KaTeX constructs beside text labels on
 their baselines (`math-corpus`) and a Morph from `2^4 - 1` to
