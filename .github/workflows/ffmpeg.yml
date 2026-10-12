@@ -1,9 +1,9 @@
-# Builds the LGPL ffmpeg the Windows app ships from pinned upstream tarballs,
-# smoke-tests every command shape the app runs on Windows, and stages the
-# binary with its exact sources in a draft release for a maintainer to
-# publish. Pushes that touch the build trigger it as well as the Actions tab,
+# Builds the LGPL ffmpeg the Windows and macOS apps ship from pinned upstream
+# tarballs, smoke-tests every command shape the app runs on each OS, and stages
+# the binaries with their exact sources in one draft release for a maintainer
+# to publish. Pushes that touch the build trigger it as well as the Actions tab,
 # so a branch can run it before the file reaches master. See
-# docs/development.md#windows-ffmpeg-is-our-own-lgpl-build.
+# docs/development.md#ffmpeg-is-our-own-lgpl-build.
 name: ffmpeg
 
 on:
@@ -22,33 +22,45 @@ concurrency:
 
 jobs:
   build:
-    name: Build (Windows x64)
-    runs-on: ubuntu-latest
+    name: Build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            os: ubuntu-latest
+          - target: macos-arm64
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - name: Install the MinGW-w64 cross toolchain
+        if: matrix.target == 'windows-x64'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mingw-w64 nasm meson ninja-build pkg-config gnupg
+      - name: Install the build tools
+        if: matrix.target == 'macos-arm64'
+        run: brew install meson ninja pkgconf gnupg
       - name: Build
         env:
           FFMPEG_WORK_DIR: ${{ runner.temp }}/ffmpeg-work
-        run: app/scripts/ffmpeg/build.sh windows-x64 "$RUNNER_TEMP/ffmpeg-windows-x64"
+        run: app/scripts/ffmpeg/build.sh ${{ matrix.target }} "$RUNNER_TEMP/ffmpeg-${{ matrix.target }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-windows-x64
+          name: ffmpeg-${{ matrix.target }}
           if-no-files-found: error
-          path: ${{ runner.temp }}/ffmpeg-windows-x64
+          path: ${{ runner.temp }}/ffmpeg-${{ matrix.target }}
       - name: Retain the build logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-windows-x64-logs
+          name: ffmpeg-${{ matrix.target }}-logs
           path: |
-            ${{ runner.temp }}/ffmpeg-work/windows-x64/build/*.log
-            ${{ runner.temp }}/ffmpeg-work/windows-x64/build/ffmpeg/ffbuild/config.log
-            ${{ runner.temp }}/ffmpeg-work/windows-x64/build/ffmpeg/*.out
-            ${{ runner.temp }}/ffmpeg-work/windows-x64/build/ffmpeg/*.log
+            ${{ runner.temp }}/ffmpeg-work/${{ matrix.target }}/build/*.log
+            ${{ runner.temp }}/ffmpeg-work/${{ matrix.target }}/build/ffmpeg/ffbuild/config.log
+            ${{ runner.temp }}/ffmpeg-work/${{ matrix.target }}/build/ffmpeg/*.out
+            ${{ runner.temp }}/ffmpeg-work/${{ matrix.target }}/build/ffmpeg/*.log
 
   fixtures:
     name: Smoke-test fixtures
@@ -67,9 +79,19 @@ jobs:
           path: ${{ runner.temp }}/fixtures
 
   smoke:
-    name: Smoke test (Windows x64)
+    name: Smoke test (${{ matrix.target }})
     needs: [build, fixtures]
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            os: windows-latest
+            binary: ffmpeg-windows-x64.exe
+          - target: macos-arm64
+            os: macos-latest
+            binary: ffmpeg-macos-arm64
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
@@ -77,18 +99,21 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
-          name: ffmpeg-windows-x64
+          name: ffmpeg-${{ matrix.target }}
           path: build
       - uses: actions/download-artifact@v4
         with:
           name: ffmpeg-fixtures
           path: fixtures
+      # Artifacts lose the execute bit.
       - name: Run every command shape the app uses
-        run: app/scripts/ffmpeg/smoke.sh build/ffmpeg-windows-x64.exe fixtures report
+        run: |
+          chmod +x build/${{ matrix.binary }}
+          app/scripts/ffmpeg/smoke.sh build/${{ matrix.binary }} fixtures report
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ffmpeg-windows-x64-smoke
+          name: ffmpeg-${{ matrix.target }}-smoke
           path: report
 
   draft-release:
@@ -100,11 +125,15 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: ffmpeg-windows-x64
-          path: assets
+          pattern: ffmpeg-*-x64
+          path: builds
       - uses: actions/download-artifact@v4
         with:
-          name: ffmpeg-windows-x64-smoke
+          pattern: ffmpeg-*-arm64
+          path: builds
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ffmpeg-*-smoke
           path: smoke
       # Only a draft is ever created or replaced. Once a maintainer publishes
       # the release its assets are fixed: changing the build means raising
@@ -114,16 +143,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
+          # Each build carries the same source tarballs and build files; the
+          # per-target files (configure, config.log, toolchain) are named by
+          # target already.
+          mkdir assets
+          for f in builds/*/*; do [ -e "assets/$(basename "$f")" ] || cp "$f" assets/; done
           tag=$(cat assets/release-tag.txt)
           rm assets/release-tag.txt assets/SHA256SUMS
-          for f in buildconf license version; do cp "smoke/$f.txt" "assets/$f-windows-x64.txt"; done
+          for dir in smoke/ffmpeg-*-smoke; do
+            target=${dir#smoke/ffmpeg-}; target=${target%-smoke}
+            for f in buildconf license version; do cp "$dir/$f.txt" "assets/$f-$target.txt"; done
+          done
           (cd assets && sha256sum * > SHA256SUMS)
           {
-            echo "FFmpeg for Oculus on Windows x64, built from commit $GITHUB_SHA by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
+            echo "FFmpeg for Oculus on Windows x64 and macOS arm64, built from commit $GITHUB_SHA by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
             echo
-            echo "\`ffmpeg-windows-x64.exe\` is FFmpeg under the GNU LGPL version 3 or later, statically linked with libopus (BSD-3-Clause) and dav1d (BSD-2-Clause)."
-            echo "This release is its complete corresponding source: the unmodified upstream tarballs, the build script \`build.sh\` with \`configure-flags.txt\`, the full configure line, \`config.log\` and the toolchain versions."
-            echo "Rebuild with \`build.sh windows-x64 <out-dir>\` on Ubuntu with the packages listed in \`toolchain-windows-x64.txt\`."
+            echo "\`ffmpeg-windows-x64.exe\` and \`ffmpeg-macos-arm64\` are FFmpeg under the GNU LGPL version 3 or later, statically linked with libopus (BSD-3-Clause) and dav1d (BSD-2-Clause); the Mac build also uses Apple's VideoToolbox, the Windows one Windows' Media Foundation."
+            echo "This release is their complete corresponding source: the unmodified upstream tarballs, the build script \`build.sh\` with \`configure-flags.txt\`, the full configure lines, \`config.log\` files and the toolchain versions."
+            echo "Rebuild with \`build.sh <target> <out-dir>\` (\`windows-x64\` on Ubuntu, \`macos-arm64\` on an Apple Silicon Mac) with the packages listed in \`toolchain-<target>.txt\`."
             echo
             echo '```'
             cat assets/SHA256SUMS
@@ -139,4 +176,9 @@ jobs:
             gh release create "$tag" --draft --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
           fi
           gh release upload "$tag" assets/* --clobber
-          echo "Draft release $tag staged; ffmpeg-windows-x64.exe $(sha256sum assets/ffmpeg-windows-x64.exe | cut -d' ' -f1)" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "Draft release $tag staged:"
+            for f in assets/ffmpeg-windows-x64.exe assets/ffmpeg-macos-arm64; do
+              echo "- $(basename "$f") $(sha256sum "$f" | cut -d' ' -f1)"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

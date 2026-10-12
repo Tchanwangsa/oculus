@@ -112,3 +112,13 @@ test("CI's Windows job stages what beforeBuildCommand would before skipping it",
     expect(at, step).toBeLessThan(build);
   }
 });
+
+test("every licence and notice a bundle lists as a resource exists", () => {
+  const windows = json(join(rust, "tauri.windows.conf.json"));
+  for (const conf of [macos, windows]) {
+    const resources = Object.keys(conf.bundle.resources);
+    expect(resources).toContain("../../LICENSE");
+    expect(resources).toContain("ffmpeg-notices/FFMPEG-LICENSE.txt");
+    for (const source of resources) expect(existsSync(join(rust, source)), source).toBe(true);
+  }
+});

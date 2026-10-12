@@ -16,7 +16,7 @@ and stable Rust, plus the MSVC toolchain, Windows SDK and WebView2.
 | The app and CLI dev profile | `[profile.dev]` in `app/src-tauri/Cargo.toml` |
 | Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
 | Native binary fetcher (ffmpeg) | `app/scripts/fetch-ffmpeg.mjs` |
-| Builds and smoke-tests the Windows LGPL ffmpeg, and stages its release | `app/scripts/ffmpeg/`, `.github/workflows/ffmpeg.yml` |
+| Builds and smoke-tests the Windows and macOS LGPL ffmpeg, and stages their release | `app/scripts/ffmpeg/`, `.github/workflows/ffmpeg.yml` |
 | Builds the editor core's wasm for dev shadow mode | `app/scripts/build-editor-wasm.mjs` |
 | Compiles the on-device speech helper | `app/scripts/build-speech.mjs`, `app/src-tauri/speech/main.swift` |
 | Builds whisper.cpp's `whisper-cli` from a pinned release | `app/scripts/build-whisper.mjs` |
@@ -32,7 +32,7 @@ and stable Rust, plus the MSVC toolchain, Windows SDK and WebView2.
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
 | How an agent thread finds `oculus` | `app/src-tauri/src/harness/cli/discover/` |
 | Windows native manifest, Store manifest template and MSIX packaging | `app/src-tauri/windows-app-manifest.xml`, `app/src-tauri/windows/AppxManifest.xml`, `app/src-tauri/windows/logo.svg`, `app/scripts/windows-icons.mjs`, `app/scripts/package-msix.mjs`, `app/scripts/package-msix.ps1`, `app/scripts/package-msix.test.mjs` |
-| Windows ffmpeg distribution notices and release gate | `app/src-tauri/windows/distribution/README.md` |
+| ffmpeg licence notices, source offer and the Windows release gate | `app/src-tauri/ffmpeg-notices/README.md` |
 | CI checks and the release bundle | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
 ## Commands
@@ -293,8 +293,9 @@ the draft is a manual step on GitHub.
   `com.apple.security.cs.disable-library-validation`, which Tauri would put on
   every sidecar. A downloaded copy
   is quarantined — `xattr -dr com.apple.quarantine /Applications/Oculus.app` —
-  and, having no team identifier, re-prompts for keychain items after every
-  update. A Developer ID certificate plus notarisation (the `APPLE_*` secrets
+  and, having no team identifier, re-prompts for keychain items whenever
+  keyd's own bytes change (an app update that leaves keyd alone does not). A
+  Developer ID certificate plus notarisation (the `APPLE_*` secrets
   tauri-action reads) removes both.
 - The installed app and `tauri dev` share the identifier `com.tchan.oculus`, so
   they open the same library, database and keychain items. Never run both at
@@ -318,7 +319,7 @@ and validate all four executables plus the NSIS installer before upload, under
 `src-tauri/target/release` on the native runner. Tauri documents the
 [main binary rename](https://v2.tauri.app/reference/config/#mainbinaryname).
 Its payload includes ffmpeg's licence, README and written source offer
-([below](#windows-ffmpeg-is-our-own-lgpl-build)), which the generated release
+([below](#ffmpeg-is-our-own-lgpl-build)), which the generated release
 config adds as resources. The public-release attachment job additionally
 requires `OCULUS_WINDOWS_DISTRIBUTION_APPROVED=true`, set once a maintainer has
 published the ffmpeg source release and reviewed the offer; it then attaches
@@ -360,11 +361,14 @@ sidecar; the dev preflight stages it beside the debug app and the GUI starts
 it. There is no `.app` helper layout on Windows. The shared Windows library is
 `%USERPROFILE%\Oculus` ([windows.md](./windows.md)).
 
-## Windows ffmpeg is our own LGPL build
+## ffmpeg is our own LGPL build
 
-The Windows sidecar is FFmpeg built by `app/scripts/ffmpeg/build.sh` without
-`--enable-gpl` or `--enable-nonfree` and with `--enable-version3`, so it is
-LGPL v3 or later; every source it is built from can be published beside it.
+The Windows x64 and macOS arm64 sidecars are FFmpeg built by
+`app/scripts/ffmpeg/build.sh` without `--enable-gpl` or `--enable-nonfree` and
+with `--enable-version3`, so they are LGPL v3 or later. It is upstream FFmpeg
+unmodified: the build number in the tag (`ffmpeg-8.1.3-oculus2`) counts our
+rebuilds, not patches, and every source it is built from is published beside
+the binaries.
 The script pins the FFmpeg, libopus and dav1d release tarballs by SHA-256,
 checks FFmpeg's signature against the committed `ffmpeg-release-key.asc`
 (fingerprint pinned), and builds libopus and dav1d as static libraries, then
@@ -372,44 +376,54 @@ FFmpeg with `configure-flags.txt`: file and pipe protocols, the demuxers and
 decoders for the containers and codecs a student's videos and recordings
 arrive in, libopus, PCM, MJPEG and rawvideo encoders, what Studio renders
 need (the rawvideo and concat demuxers, the rawvideo decoder, the native AAC
-encoder, and for Windows `--enable-mediafoundation` with its `h264_mf`
-encoder, set in `build.sh`'s target flags), and the filters the app
-names plus the ones the ffmpeg CLI inserts for format conversion, `-ss`/`-t`,
-cropping and rotation. It refuses a configuration whose licence is not LGPL v3,
-and for Windows a binary that imports any DLL but Windows' own. The Windows
-target cross-compiles with MinGW-w64, Win32 threads and a static link,
+encoder, and the OS's own H.264 encoder: `h264_mf` through
+`--enable-mediafoundation` on Windows, `h264_videotoolbox` through
+`--enable-videotoolbox` on macOS, both set in `build.sh`'s target flags), and
+the filters the app names plus the ones the ffmpeg CLI inserts for format
+conversion, `-ss`/`-t`, cropping and rotation. No x264 is built in, so a
+Studio render is only as good as the OS encoder. It refuses a configuration
+whose licence is not LGPL v3, for Windows a binary that imports any DLL but
+Windows' own, and for macOS one that links anything outside `/usr/lib` and
+`/System/Library`, is not arm64-only or needs a newer macOS than 13.3 (the
+hardened runtime's library validation allows nothing else).
+Windows cross-compiles with MinGW-w64, Win32 threads and a static link,
 stripped by the linker so a rebuild on the same toolchain is byte-identical;
-`build.sh <target> <out-dir>` is target-keyed so another can be added.
+macOS builds natively on an Apple Silicon runner. `build.sh <target> <out-dir>`
+is target-keyed so another can be added; Intel Macs and Linux have none.
 
 `.github/workflows/ffmpeg.yml` runs on any push that touches `app/scripts/ffmpeg/`
-or the workflow, and from the Actions tab. It builds on Ubuntu, writes
-fixtures with Ubuntu's full ffmpeg (`fixtures.sh`), and on a Windows runner
-`smoke.sh` runs every command shape the app uses — the Echo360 trim, the Opus
-extraction with its `Duration:` and "matches no streams" stderr, the WAV
-decode and Ogg part copies, thumbnails and 160×90 grey frames, and
-Studio's render (raw RGBA frames encoded by `h264_mf` as two segments, joined
-by the concat demuxer beside AAC, and an m4a) — against
-mp4, mov, webm, mkv, AV1, MPEG-TS, AVI, WMV, MP3, M4A, WAV, FLAC, Ogg, a
-video without audio and a rotated one, and checks that `-L` reports LGPL v3.
-It then creates or updates the draft release `ffmpeg-<version>-oculus<build>`
-with the binary, the byte-identical upstream tarballs, the build files, the
-full configure line, `config.log`, the toolchain versions, `-buildconf` and
-`SHA256SUMS`. It only ever touches a draft: once a maintainer publishes the
-release its assets are fixed, and a changed build raises `OCULUS_BUILD` in
-`build.sh`, which names a new tag.
+or the workflow, and from the Actions tab. It builds each target (Windows on
+Ubuntu, macOS on a macOS runner), writes fixtures with Ubuntu's full ffmpeg
+(`fixtures.sh`), and `smoke.sh` runs on a runner of each OS. It checks that
+the components the app needs are built in and libx264 is not, then every
+command shape the app uses — the Echo360 trim, the Opus extraction with its
+`Duration:` and "matches no streams" stderr, the WAV decode and Ogg part
+copies, thumbnails and 160×90 grey frames, and Studio's render (raw RGBA
+frames encoded by the OS encoder as two segments, joined by the concat demuxer
+beside AAC, and an m4a) — against mp4, mov, webm, mkv, AV1, MPEG-TS, AVI, WMV,
+MP3, M4A, WAV, FLAC, Ogg, a video without audio and a rotated one, and that
+`-L` reports LGPL v3. A runner whose OS cannot encode H.264 (a VM without a
+media engine) warns and joins stream-copied segments instead, so the encoder
+itself is only proved on a real machine.
+It then creates or updates one draft release
+`ffmpeg-<version>-oculus<build>` with both binaries, the byte-identical
+upstream tarballs, the build files, the full configure lines, `config.log`s,
+the toolchain versions, `-buildconf`s and `SHA256SUMS`. It only ever touches a
+draft: once a maintainer publishes the release its assets are fixed, and a
+changed build raises `OCULUS_BUILD` in `build.sh`, which names a new tag.
 
-`fetch-ffmpeg.mjs` downloads the Windows binary from that release and refuses
-it unless it matches the pinned SHA-256, the hash the workflow's summary
-reports; a cached copy with another hash is fetched again. A draft's assets
-are not public, so the Windows fetch fails until the release is published.
-Other targets
-download ffmpeg-static's builds. `app/src-tauri/windows/distribution/` holds
-the notices the Windows packages ship: the LGPL v3 and GPL v3 texts with
-libopus's and dav1d's licences, a README with the versions, hashes and
-configure line, and the written source offer pointing at the release
-([README](../app/src-tauri/windows/distribution/README.md)). Upgrading means
-changing the pins in `build.sh`, the release URL and hash in
-`fetch-ffmpeg.mjs`, and those notices together.
+`fetch-ffmpeg.mjs` downloads each binary from that release and refuses it
+unless it matches the pinned SHA-256, the hash the workflow's summary reports;
+a cached copy with another hash is fetched again. A draft's assets are not
+public, so the fetch fails until the release is published. Targets without a
+build there (Intel Macs, Linux) have no ffmpeg and the fetch says so.
+`app/src-tauri/ffmpeg-notices/` holds the notices both packages ship: the LGPL
+v3 and GPL v3 texts with libopus's and dav1d's licences, a README with the
+versions, hashes and configure lines, and the written source offer pointing at
+the release ([README](../app/src-tauri/ffmpeg-notices/README.md)). The `.app`
+and the installer also carry Oculus's own `LICENSE`. Upgrading means changing
+the pins in `build.sh`, the release URL and hashes in `fetch-ffmpeg.mjs`, and
+those notices together.
 
 ## `oculus-keyd` is built apart so its signature only changes with its source
 

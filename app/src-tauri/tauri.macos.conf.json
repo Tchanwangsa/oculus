@@ -10,6 +10,12 @@
       "files": {
         "Helpers/Oculus Helper.app": "binaries/Oculus Helper.app"
       }
+    },
+    "resources": {
+      "../../LICENSE": "LICENSE",
+      "ffmpeg-notices/FFMPEG-LICENSE.txt": "FFMPEG-LICENSE.txt",
+      "ffmpeg-notices/FFMPEG-README.txt": "FFMPEG-README.txt",
+      "ffmpeg-notices/FFMPEG-SOURCE-OFFER.txt": "FFMPEG-SOURCE-OFFER.txt"
     }
   }
 }

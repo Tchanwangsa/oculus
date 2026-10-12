@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Runs every ffmpeg command shape the app uses against fixtures.sh's files and
 # checks exit codes and outputs, then records the binary's -version,
-# -buildconf and -L in the report directory. The shapes mirror the call sites
+# -buildconf and -L in the report directory. Runs on Windows and macOS: Studio's
+# H.264 encoder is the OS's own (h264_mf, h264_videotoolbox), so that shape
+# falls back to stream-copied segments on a runner whose OS cannot encode. The shapes mirror the call sites
 # in app/src-tauri/src (sources/echo360/, transcribe/, the frame readers,
 # studio/render/).
 #
@@ -35,6 +37,21 @@ if grep -q "GNU Lesser General Public License" "$report/license.txt" && grep -q 
 else
   fail "-L does not report LGPL version 3: $(head -3 "$report/license.txt")"
 fi
+
+# The components the app's command shapes need, and no x264.
+has() { "$ff" -hide_banner "-$1" 2>&1 | awk -v n="$2" '{ k = split($2, a, ","); for (i = 1; i <= k; i++) if (a[i] == n) found = 1; if ($1 == n) found = 1 } END { exit !found }'; }
+missing=
+for c in encoders:aac encoders:libopus encoders:mjpeg encoders:pcm_s16le \
+  demuxers:rawvideo demuxers:concat demuxers:mov demuxers:ogg demuxers:wav \
+  muxers:mp4 muxers:ogg muxers:wav muxers:image2 muxers:rawvideo \
+  filters:scale filters:fps filters:format bsfs:aac_adtstoasc protocols:fd protocols:pipe; do
+  has "${c%%:*}" "${c#*:}" || missing="$missing ${c#*:}"
+done
+[ -z "$missing" ] && pass "every component the app needs is built in" || fail "built without:$missing"
+if has encoders libx264; then fail "libx264 is built in"; else pass "libx264 is not built in"; fi
+os_encoder=
+for e in h264_videotoolbox h264_mf; do has encoders "$e" && os_encoder=$e; done
+[ -n "$os_encoder" ] && pass "OS H.264 encoder built in: $os_encoder" || fail "no OS H.264 encoder (h264_videotoolbox, h264_mf)"
 
 # Echo360's lead-in trim: a stream copy into mp4.
 if "$ff" -y -ss 14 -i "$fixtures/h264-aac.mp4" -c copy source.mp4 2> trim.err; then
@@ -93,24 +110,58 @@ for input in h264-aac.mp4 h264-aac.mov vp9-opus.webm hevc-ac3.mkv av1-opus.mp4 m
   pass "$input: thumbnail $(size out.jpg) bytes, frame, $((all / FRAME)) scan frames, $((end / FRAME)) tail frames"
 done
 
-# Studio: raw RGBA frames on stdin encoded by h264_mf as two segments, joined
-# by the concat demuxer beside AAC narration, and the narration alone as m4a.
-studio_ok=1
-for seg in 1 2; do
-  "$ff" -v error -nostdin -ss "$seg" -i "$fixtures/h264-aac.mp4" -frames:v 30 -vf scale=320:180,format=rgba \
+# Studio's stdin: raw frames in through `-i -`, which the CLI opens as fd:, and
+# back out through a pipe, with no encoder involved.
+stdin_bytes=$("$ff" -v error -nostdin -ss 1 -i "$fixtures/h264-aac.mp4" -frames:v 30 -vf scale=320:180,format=rgba -f rawvideo - 2> raw.err |
+  "$ff" -hide_banner -v error -f rawvideo -pix_fmt rgba -s 320x180 -r 30 -i - -pix_fmt gray -f rawvideo - 2> stdin.err | wc -c | tr -d ' ')
+[ "$stdin_bytes" -eq $((30 * 320 * 180)) ] && pass "studio: raw frames read from stdin" ||
+  fail "studio: stdin read $stdin_bytes bytes: $(tail -3 stdin.err)"
+
+# Studio: raw RGBA frames on stdin encoded by the OS encoder as two segments,
+# joined by the concat demuxer beside AAC narration, and the narration alone as
+# m4a. The encoder args are quality.rs's. A runner without the OS encoder (a
+# VM without a media engine) cannot run it, so the segments are then stream
+# copies of the H.264 fixture: the concat and AAC mux are still checked.
+case "$os_encoder" in
+  h264_videotoolbox) encoder_args=(-q:v 65) ;;
+  *) encoder_args=(-rate_control u_vbr -b:v 2000k) ;;
+esac
+encode_segment() {
+  "$ff" -v error -nostdin -ss "$1" -i "$fixtures/h264-aac.mp4" -frames:v 30 -vf scale=320:180,format=rgba \
     -f rawvideo - 2> raw.err |
     "$ff" -hide_banner -v error -y -f rawvideo -pix_fmt rgba -s 320x180 -r 30 -i - -an \
-      -vf scale=out_color_matrix=bt709:out_range=tv -pix_fmt yuv420p -c:v h264_mf -rate_control u_vbr -b:v 2000k \
-      -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -f mp4 "seg$seg.mp4" 2> seg.err ||
-    { fail "studio: segment $seg: $(tail -3 seg.err) $(tail -3 raw.err)"; studio_ok=0; }
+      -vf scale=out_color_matrix=bt709:out_range=tv -pix_fmt yuv420p -c:v "$os_encoder" "${encoder_args[@]}" \
+      -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -f mp4 "seg$1.mp4" 2> seg.err
+}
+studio_ok=1
+encoded=1
+if [ -n "$os_encoder" ] && ! encode_segment 1; then
+  echo "::warning::$os_encoder cannot encode on this runner; Studio's segments are stream copies here"
+  encoded=0
+fi
+[ -n "$os_encoder" ] || encoded=0
+for seg in 1 2; do
+  if [ "$encoded" = 1 ]; then
+    [ "$seg" = 1 ] || encode_segment "$seg" ||
+      { fail "studio: segment $seg: $(tail -3 seg.err) $(tail -3 raw.err)"; studio_ok=0; }
+  else
+    "$ff" -v error -nostdin -y -ss "$seg" -t 1 -i "$fixtures/h264-aac.mp4" -an -c:v copy "seg$seg.mp4" 2> seg.err ||
+      { fail "studio: segment $seg copy: $(tail -3 seg.err)"; studio_ok=0; }
+  fi
 done
 if [ "$studio_ok" = 1 ]; then
-  printf "file '%s'\nfile '%s'\n" "$PWD/seg1.mp4" "$PWD/seg2.mp4" > concat.txt
+  # Relative to the list, which a native Windows exe resolves; $PWD is an MSYS path.
+  printf "file 'seg1.mp4'\nfile 'seg2.mp4'\n" > concat.txt
   if "$ff" -hide_banner -v error -y -f concat -safe 0 -i concat.txt -i "$fixtures/speech.wav" -map 0:v -c:v copy \
     -map 1:a -c:a aac -b:a 160k -movflags +faststart -f mp4 joined.mp4 2> join.err; then
     frames=$("$ff" -v error -nostdin -i joined.mp4 -vf scale=160:90,format=gray -f rawvideo - 2> joined.err | wc -c)
-    [ "$frames" -eq $((60 * FRAME)) ] && pass "studio: h264_mf segments joined with AAC, 60 frames" ||
-      fail "studio: joined.mp4 decodes to $((frames / FRAME)) frames: $(tail -3 joined.err)"
+    if [ "$encoded" = 1 ]; then
+      [ "$frames" -eq $((60 * FRAME)) ] && pass "studio: $os_encoder segments joined with AAC, 60 frames" ||
+        fail "studio: joined.mp4 decodes to $((frames / FRAME)) frames: $(tail -3 joined.err)"
+    else
+      [ "$frames" -gt 0 ] && [ $((frames % FRAME)) -eq 0 ] && pass "studio: stream-copied segments joined with AAC, $((frames / FRAME)) frames" ||
+        fail "studio: joined.mp4 decodes to $frames bytes: $(tail -3 joined.err)"
+    fi
   else
     fail "studio: concat and AAC mux: $(tail -3 join.err)"
   fi
