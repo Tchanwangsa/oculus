@@ -30,6 +30,24 @@ const RESEARCH_MS = 150;
 const SKIP =
   "script, style, noscript, template, textarea, input, select, [data-find-skip], .sr-only, .katex-mathml";
 
+function findRoot(root: HTMLElement): HTMLElement {
+  return root.querySelector<HTMLElement>("[data-dom-find-content]") ?? root;
+}
+
+function matchTextParents(range: Range): Set<HTMLElement> {
+  const parents = new Set<HTMLElement>();
+  const common = range.commonAncestorContainer;
+  if (common instanceof Text) {
+    if (common.parentElement) parents.add(common.parentElement);
+    return parents;
+  }
+  const walker = document.createTreeWalker(common, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (range.intersectsNode(node) && node.parentElement) parents.add(node.parentElement);
+  }
+  return parents;
+}
+
 /** The root's drawn text nodes in document order, with block boundaries. */
 function collect(root: HTMLElement): { nodes: Text[]; segments: TextSegment[] } {
   const skip = nestedFindRoots(root);
@@ -107,8 +125,8 @@ function selectedIn(root: HTMLElement): string {
 
 export interface DomFind {
   open: boolean;
-  /** ⌘F: opens the bar, seeding it from a selection in the root, and
-   *  selects the query. */
+  /** ⌘F: opens the bar, seeds from a selection in the find scope, clears that
+   *  selection, and selects the query. */
   openFind(): void;
   /** ⌘G / ⇧⌘G and the bar's arrows: wraps around; opens the bar if closed. */
   step(backwards: boolean): void;
@@ -131,6 +149,7 @@ export function useDomFind(rootRef: RefObject<HTMLElement | null>): DomFind {
     /** Painted into the shared highlights, to take back out. */
     painted: [] as Range[],
     paintedCurrent: null as Range | null,
+    selectable: new Set<HTMLElement>(),
     /** The DOM changed while the root was hidden. */
     stale: false,
     /** Focus before the bar opened, given back on close. */
@@ -141,12 +160,21 @@ export function useDomFind(rootRef: RefObject<HTMLElement | null>): DomFind {
     const match = shared("find-match");
     const current = shared("find-current", 1);
     if (!match || !current) return;
+    for (const el of s.selectable) el.removeAttribute("data-dom-find-match");
+    s.selectable.clear();
     for (const r of s.painted) match.delete(r);
     if (s.paintedCurrent) current.delete(s.paintedCurrent);
     s.painted = s.ranges.filter((_, i) => i !== s.current);
     s.paintedCurrent = s.ranges[s.current] ?? null;
-    for (const r of s.painted) match.add(r);
-    if (s.paintedCurrent) current.add(s.paintedCurrent);
+    for (const r of s.painted) {
+      match.add(r);
+      for (const el of matchTextParents(r)) s.selectable.add(el);
+    }
+    if (s.paintedCurrent) {
+      current.add(s.paintedCurrent);
+      for (const el of matchTextParents(s.paintedCurrent)) s.selectable.add(el);
+    }
+    for (const el of s.selectable) el.setAttribute("data-dom-find-match", "");
     const n = s.ranges.length;
     setStatus(
       !s.query.trim() ? undefined : n ? `${s.current + 1} of ${n}${s.capped ? "+" : ""}` : "No results",
@@ -157,8 +185,9 @@ export function useDomFind(rootRef: RefObject<HTMLElement | null>): DomFind {
    *  otherwise the first match not above the root's top is current. */
   const search = useCallback(
     (keep: boolean, scroll: boolean) => {
-      const root = rootRef.current;
-      if (!root) return;
+      const pane = rootRef.current;
+      if (!pane) return;
+      const root = findRoot(pane);
       if (!onScreen(root)) {
         s.stale = true;
         return;
@@ -211,14 +240,16 @@ export function useDomFind(rootRef: RefObject<HTMLElement | null>): DomFind {
   );
 
   const openFind = useCallback(() => {
-    const root = rootRef.current;
-    if (!root) return;
+    const pane = rootRef.current;
+    if (!pane) return;
+    const root = findRoot(pane);
     if (!s.open) {
       const active = document.activeElement;
       s.restore =
         active instanceof HTMLElement && active !== document.body ? active : null;
     }
     const picked = document.activeElement === inputRef.current ? "" : selectedIn(root);
+    if (picked) window.getSelection()?.removeAllRanges();
     const wasOpen = s.open;
     s.open = true;
     setOpen(true);
@@ -265,8 +296,9 @@ export function useDomFind(rootRef: RefObject<HTMLElement | null>): DomFind {
 
   // Re-search on DOM changes, ignoring the bar's own and nested targets'.
   useEffect(() => {
-    const root = rootRef.current;
-    if (!open || !root) return;
+    const pane = rootRef.current;
+    if (!open || !pane) return;
+    const root = findRoot(pane);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const observer = new MutationObserver((records) => {
       const skip = nestedFindRoots(root);

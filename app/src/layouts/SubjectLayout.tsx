@@ -98,7 +98,7 @@ export default function SubjectLayout() {
         </PaneHeaderRow>
 
         {/* Keyed so switching subjects remounts the tab. */}
-        <div key={subject.id} className="min-h-0 flex-1 overflow-hidden">
+        <div key={subject.id} data-dom-find-content className="min-h-0 flex-1 overflow-hidden">
           <Outlet context={subject satisfies Subject} />
         </div>
       </div>

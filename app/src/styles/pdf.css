@@ -106,10 +106,10 @@
 /* DOM find (`useDomFind.ts`): every match a tint of the accent, the current
  * one stronger. */
 ::highlight(find-match) {
-  background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+  background-color: color-mix(in srgb, var(--color-brand) 42%, transparent);
 }
 ::highlight(find-current) {
-  background-color: color-mix(in srgb, var(--color-brand) 50%, transparent);
+  background-color: color-mix(in srgb, var(--color-brand) 72%, transparent);
 }
 /* A PDF selection, in the accent rather than the system's colour. */
 .pdf-surface .textLayer ::selection {
