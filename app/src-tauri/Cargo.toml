@@ -134,6 +134,9 @@ rubato = "=5.0.1"
 # Verifies a downloaded model against its pinned checksum (`src/runtime/onnx/pack/`).
 # Already in the lock tree.
 sha2 = "0.10"
+# The G2P guesser's NFKD and combining-mark stripping (`src/studio/voice/g2p/guess/`).
+# Already in the lock tree.
+unicode-normalization = "0.1.25"
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_sessions` in src/shell/browser/seed.rs). WebKit cookie ordering uses

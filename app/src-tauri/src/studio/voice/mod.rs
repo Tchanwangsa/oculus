@@ -2,6 +2,7 @@
 //! settings row (Settings -> Voice), under a video's `voice` block in
 //! video.json, under the CLI's flags. Keyless OpenAI-compatible servers only.
 
+pub mod g2p;
 #[cfg(test)]
 mod tests;
 
