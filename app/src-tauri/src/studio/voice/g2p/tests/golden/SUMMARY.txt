@@ -1,0 +1,108 @@
+script163       11 units   163 words  dict 161  rule 1  lexicon 1  guess 0
+maths16         16 units   268 words  dict 260  rule 1  lexicon 7  guess 0
+propernouns     45 units   331 words  dict 293  rule 2  lexicon 36  guess 0
+lecture1       136 units  1792 words  dict 1738  rule 44  lexicon 10  guess 0
+lecture2       120 units  1498 words  dict 1439  rule 52  lexicon 7  guess 0
+lecture3       103 units  1480 words  dict 1442  rule 34  lexicon 4  guess 0
+heteronyms30    30 units   238 words  dict 213  rule 25  lexicon 0  guess 0
+nolex/script163   11 units   163 words  dict 161  rule 1  lexicon 0  guess 1
+    guess  'optimizers'                 ˈɑptəmˌIzəɹz   parts ['optimizers']
+nolex/maths16   16 units   268 words  dict 260  rule 1  lexicon 0  guess 7
+    guess  "Euler's"                    jˈuləɹz   parts ["Euler's"]
+    guess  'Cauchy'                     kˈɔʃi   parts ['Cauchy']
+    guess  'Euler'                      jˈuləɹ   parts ['Euler']
+    guess  'Kullback-Leibler'           kˌʊlbæklˈAbᵊləɹ   parts ['Leibler', 'Kullback']
+    guess  'softmax'                    sˈɔftmæks   parts ['softmax']
+    guess  'heteroscedasticity'         hˌɛTəɹəsˌidæstˈɪsəTi   parts ['heteroscedasticity']
+    guess  'Schrödinger'                ʃɹˈɑɹOdɪŋəɹ   parts ['Schrödinger']
+nolex/propernouns   45 units   331 words  dict 294  rule 2  lexicon 0  guess 35
+    guess  'Cauchy'                     kˈɔʃi   parts ['Cauchy']
+    guess  'Euler'                      jˈuləɹ   parts ['Euler']
+    guess  'Kullback-Leibler'           kˌʊlbæklˈAbᵊləɹ   parts ['Leibler', 'Kullback']
+    guess  'softmax'                    sˈɔftmæks   parts ['softmax']
+    guess  'Heteroscedasticity'         hˌɛTəɹəsˌidˈæstəsˈɪsəTi   parts ['Heteroscedasticity']
+    guess  'Schrödinger'                ʃɹˈɑɹOdɪŋəɹ   parts ['Schrödinger']
+    guess  'Hadamard'                   hˈædəmˌɑɹd   parts ['Hadamard']
+    guess  'Laplace'                    lˈæpləs   parts ['Laplace']
+    guess  'Lagrangian'                 læɡɹˈænʤiən   parts ['Lagrangian']
+    guess  'Riemann'                    ɹˈimən   parts ['Riemann']
+    guess  'Poisson'                    pˈYsᵊn   parts ['Poisson']
+    guess  'Markov'                     mˈɑɹkˌɔv   parts ['Markov']
+    guess  'Nyquist'                    nˈikwɪst   parts ['Nyquist']
+    guess  'Gödel'                      ɡˈOdᵊl   parts ['Gödel']
+    guess  'Hilbert'                    hˈɪlbəɹt   parts ['Hilbert']
+    guess  'Lipschitz'                  lˈɪpʃˌɪts   parts ['Lipschitz']
+    guess  'Levenshtein'                lˈɛvənʃˌItˌIn   parts ['Levenshtein']
+    guess  'Kolmogorov'                 kˈOlməɡˌɔf   parts ['Kolmogorov']
+    guess  "Chebyshev's"                ˈɛbiʃˌɛvz   parts ["Chebyshev's"]
+    guess  'Wasserstein'                wˈɑsəɹstˌIn   parts ['Wasserstein']
+    guess  'Kalman'                     kˈɑlmən   parts ['Kalman']
+    guess  'Cholesky'                   kˈOlski   parts ['Cholesky']
+    guess  'Lebesgue'                   lˈɛbɛsɡ   parts ['Lebesgue']
+    guess  'Galois'                     ɡəlˈY   parts ['Galois']
+    guess  "Noether's"                  nˈOðəɹz   parts ["Noether's"]
+    guess  'Voronoi'                    vəɹˈOnˌY   parts ['Voronoi']
+    guess  'Nesterov'                   nˈɛstəɹɔv   parts ['Nesterov']
+    guess  'tanh'                       tˈæn   parts ['tanh']
+    guess  'PyTorch'                    pˌItˈɔɹʧ   parts ['Py']
+    guess  'Matplotlib'                 mˈætplˌɑtlɪb   parts ['Matplotlib']
+    guess  'NumPy'                      nˌʌmpˈI   parts ['Py']
+    guess  'Kubernetes'                 kˌubəɹnˈits   parts ['Kubernetes']
+    guess  'PostgreSQL'                 pˈOstɡəɹsˌikwəl   parts ['Postgre']
+    guess  'scikit-learn'               sˈIkɪtlˌɜɹn   parts ['scikit']
+    guess  'whistleblower'              wˈɪsᵊlblˌWəɹ   parts ['whistleblower']
+nolex/lecture1  136 units  1792 words  dict 1741  rule 44  lexicon 0  guess 7
+    guess  'ancilla'                    ˈænsələ   parts ['ancilla']
+    guess  'ancilla'                    ˈænsələ   parts ['ancilla']
+    guess  'ancilla'                    ˈænsələ   parts ['ancilla']
+    guess  'Hadamard'                   hˈædəmˌɑɹd   parts ['Hadamard']
+    guess  'Hadamard'                   hˈædəmˌɑɹd   parts ['Hadamard']
+    guess  'Hadamard'                   hˈædəmˌɑɹd   parts ['Hadamard']
+    guess  'Hadamard'                   hˈædəmˌɑɹd   parts ['Hadamard']
+nolex/lecture2  120 units  1498 words  dict 1439  rule 52  lexicon 0  guess 7
+    guess  'formulae'                   fˈɔɹmjəli   parts ['formulae']
+    guess  'formulae'                   fˈɔɹmjəli   parts ['formulae']
+    guess  'formulae'                   fˈɔɹmjəli   parts ['formulae']
+    guess  'Louise'                     lˈuz   parts ['Louise']
+    guess  'Heidi'                      hˈIdi   parts ['Heidi']
+    guess  'unsatisfiable'              ʌnsˈæTəsfˌIəbᵊl   parts ['unsatisfiable']
+    guess  'formulae'                   fˈɔɹmjəli   parts ['formulae']
+nolex/lecture3  103 units  1480 words  dict 1443  rule 34  lexicon 0  guess 3
+    guess  'quo'                        kwˈO   parts ['quo']
+    guess  'waitlist'                   wˈAtlɪst   parts ['waitlist']
+    guess  'Skynet'                     skˈInət   parts ['Skynet']
+nolex/heteronyms30   30 units   238 words  dict 213  rule 25  lexicon 0  guess 0
+special        104 units  1064 words  dict 890  rule 116  lexicon 35  guess 23
+    guess  "O'Brien"                    ˌObɹˈin   parts ['rien', "O'B"]
+    guess  "d'Alembert"                 dˌilˈɛmbəɹt   parts ['lembert', "d'A"]
+    guess  'scikit-image'               sˈIkɪtˌɪmɪʤ   parts ['scikit']
+    guess  'SymPy'                      sˌɪmpˈI   parts ['Py', 'Sym']
+    guess  'FooBar'                     fˌubˈɑɹ   parts ['Foo']
+    guess  'QuxBaz'                     kˈʌksbˌɑz   parts ['Baz', 'Qux']
+    guess  'zorp-learn'                 zˌɔɹplˈɜɹn   parts ['zorp']
+    guess  'Xyzzy'                      sˈɪzi   parts ['Xyzzy']
+    guess  'blorptastic'                blˌɔɹptˈæstɪk   parts ['blorptastic']
+    guess  'plugh'                      plˈʌɡ   parts ['plugh']
+    guess  'pytest'                     pˈItɪst   parts ['pytest']
+    guess  'mypy'                       mˈIpi   parts ['mypy']
+    guess  'wibbleframe'                wˈɪbᵊlfɹˌAm   parts ['wibbleframe']
+    guess  'Poincaré'                   pˈYnkˌɛɹ   parts ['Poincaré']
+    guess  'café'                       kˈAf   parts ['café']
+    guess  'naïve'                      nˈAv   parts ['naïve']
+    guess  'résumé'                     ɹᵻsˈum   parts ['résumé']
+    guess  'Erdős'                      ˈɛɹdˌOs   parts ['Erdős']
+    guess  "L'Hôpital's"                ˌɛlˈɑpəTᵊlz   parts ["ôpital's", "L'H"]
+    guess  'Cauchy-Schwarz'             kˌOʃiʃvˈɑɹts   parts ['Schwarz']
+    guess  'Euler-Lagrange'             ˌYləɹlˈAɡɹˌAnʤ   parts ['Lagrange']
+    guess  'Lovelace'                   lˈʌvələs   parts ['Lovelace']
+    guess  'Babbage'                    bæbˈɑʒ   parts ['Babbage']
+
+guesser golden: 375 words (305 verify, 72 guessed by A2C)
+
+no lexicon: A2C guesses 46 distinct words; C's fallback was 50
+  C fell back, A2C resolves without the guesser (dict/rule): authorisation, factorisation, multiplied, renormalise
+  A2C guesses, C did not (sub-token split): 
+  both guess, different phonemes: Kullback-Leibler, NumPy, PostgreSQL, PyTorch, scikit-learn
+units equal to A2: 461/461
+units equal to C: 348/461
+heteronyms30 right reading: 30/30

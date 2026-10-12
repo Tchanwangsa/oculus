@@ -18,6 +18,7 @@ use std::path::Path;
 use ort::session::Session;
 use ort::value::Tensor;
 
+use super::Guess;
 use crate::runtime::onnx;
 pub use model::{dir, CONFIG_FILE, DECODER_FILE, ENCODER_FILE, GOLD_FILE, PACK, SILVER_FILE};
 use vocab::{normalise, Vocab, START, STOP};
@@ -27,10 +28,6 @@ use vocab::{normalise, Vocab, START, STOP};
 const POSITIONS: usize = 64;
 /// Most decoder steps one guess runs, the first being the start id.
 pub const MAX_STEPS: usize = POSITIONS - 1;
-
-pub trait Guess {
-    fn guess(&mut self, part: &str) -> Result<String, String>;
-}
 
 pub struct Guesser {
     encoder: Session,
