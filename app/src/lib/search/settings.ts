@@ -137,10 +137,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ...(isMac
       ? [["Window frame", ["glass", "translucent", "transparent", "vibrancy", "frosted", "blur"]] satisfies Row]
       : []),
-  ]),
-  ...section("appearance", "Code", ["code theme", "syntax", "highlighting"], [
-    ["Code theme", ["syntax", "highlighting", "colours", "colors"]],
-    ["Code font", ["monospace", "font", "typeface", "terminal"]],
+    ["Code font", ["monospace", "font", "typeface", "terminal", "code"]],
   ]),
 
   page("browser"),

@@ -50,7 +50,7 @@ const STATUS: Record<ThemeMode, { destructive: string; success: string; warning:
 
 const INK = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900];
 
-export function syntaxTokens(syntax: SyntaxColors): TokenMap {
+function syntaxTokens(syntax: SyntaxColors): TokenMap {
   return Object.fromEntries(SYNTAX_SLOTS.map((slot) => [`--color-syntax-${slot}`, syntax[slot]]));
 }
 

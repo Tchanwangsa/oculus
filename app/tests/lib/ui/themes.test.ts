@@ -132,8 +132,6 @@ describe("appearance prefs", () => {
       accent: null,
       frame: "frosted",
       codeFont: "",
-      codeLight: "match",
-      codeDark: "match",
     });
     expect(defaultAppearance(false).frame).toBe("solid");
   });
@@ -156,8 +154,6 @@ describe("appearance prefs", () => {
         accent: "#E5484D",
         frame: "clear",
         codeFont: "JetBrains Mono",
-        codeLight: "github-light",
-        codeDark: "dracula",
       },
       true,
     );
@@ -174,8 +170,6 @@ describe("appearance prefs", () => {
         accent: "#12345678",
         frame: "glass",
         codeFont: 'Fira"; color: red',
-        codeLight: "dracula",
-        codeDark: 7,
       },
       true,
     );
@@ -183,6 +177,11 @@ describe("appearance prefs", () => {
     expect(validateAppearance({ accent: "blue" }, true).accent).toBeNull();
     expect(validateAppearance({ frame: "clear" }, false).frame).toBe("solid");
     expect(validateAppearance(null, true)).toEqual(defaultAppearance(true));
+  });
+
+  test("drops keys it does not know, such as the old per-mode code themes", () => {
+    const stored = JSON.stringify({ mode: "dark", codeLight: "github-light", codeDark: "dracula" });
+    expect(readAppearance(stored, null, true)).toEqual({ ...defaultAppearance(true), mode: "dark" });
   });
 });
 
@@ -213,12 +212,6 @@ describe("appearanceTokens", () => {
     expect(tokens["--color-ring"]).toBe("#e5484d");
     expect(contrast(tokens["--color-primary-foreground"], "#e5484d")).toBeGreaterThanOrEqual(4.5);
     expect(tokens["--color-card"]).toBeUndefined();
-  });
-
-  test("a code theme replaces only the syntax slots", () => {
-    const tokens = appearanceTokens({ ...solid, codeDark: "dracula" }, "dark");
-    expect(Object.keys(tokens).sort()).toEqual(SYNTAX_SLOTS.map((s) => `--color-syntax-${s}`).sort());
-    expect(tokens["--color-syntax-keyword"]).toBe(getTheme("dracula", "dark").syntax.keyword);
   });
 
   test("the monospace stack is the stylesheet's", () => {

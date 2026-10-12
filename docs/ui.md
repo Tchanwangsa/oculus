@@ -9,7 +9,7 @@ Read this before any UI work.
 | --- | --- |
 | Tokens, base resets, utilities (`page-scroll`, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
 | Themes, appearance prefs and the frame | `app/src/lib/ui/themes/` (`samplesLight.ts`, `samplesDark.ts` for the palettes, `derive.ts` for the tokens, `store.ts` for the prefs) |
-| Settings → Appearance: mode, theme cards, accent, window frame, code theme and font | `app/src/pages/settings/AppearancePage.tsx`, `app/src/components/settings/appearance/` |
+| Settings → Appearance: mode, theme cards, accent, window frame, code font | `app/src/pages/settings/AppearancePage.tsx`, `app/src/components/settings/appearance/` |
 | Platform detection and shortcut labels | `app/src/lib/platform.ts` |
 | Text selection scopes | `app/src/styles/base.css`, `app/src/lib/ui/selectScope.ts` |
 | shadcn primitives (flat) | `app/src/components/ui/` |
@@ -58,8 +58,8 @@ themes are opt-in and keep the same structure.
   name wraps. Call sites don't override these — don't restore what
   `shadcn add` generates.
 - **Monospace is for code and terminal output only** — `font-mono` appears in
-  `app/src/components/markdown/MdComponents.tsx` and, for the code preview and
-  the code-font field, in `app/src/components/settings/appearance/`; the note editor's theme
+  `app/src/components/markdown/MdComponents.tsx` and the code-font field
+  (`app/src/components/settings/appearance/CodeFontRow.tsx`); the note editor's theme
   (`app/src/components/documents/editor/theme/`) gives `--font-mono` to code
   and LaTeX source. A command's output (`AnsiText`, the one-line
   `TerminalLine` on a running install or update) keeps its colours via
@@ -107,7 +107,7 @@ themes are opt-in and keep the same structure.
   own pane.
 - **Appearance is one stored pref** (`AppearancePrefs` in localStorage
   `oculus-appearance`): light/dark/system, a theme per mode, an accent
-  override, the frame, a code font and a code theme per mode.
+  override, the frame and a code font.
   `applyAppearance` (`app/src/lib/ui/themes/apply.ts`), run from `main.tsx`
   before the first render, is the only writer of the `.dark` class and
   `data-theme` on `<html>`; it writes the theme's tokens inline there and
@@ -118,7 +118,9 @@ themes are opt-in and keep the same structure.
 - **A theme preview sets that theme's tokens inline on its wrapper**
   (`previewStyle` in `app/src/components/settings/appearance/`) and draws with
   plain token utilities, never `dark:` variants, so a dark card stays dark on
-  a light page. Settings → Appearance's theme cards and code previews do this.
+  a light page. Settings → Appearance's theme cards do this; each mode's grid
+  shows one row (the chosen theme always in it) until "See all" opens it,
+  remembered per mode.
 - **Full pages scroll through `page-scroll`**, which reserves the scrollbar
   gutter so a page that starts overflowing doesn't jog sideways.
 - **Every scroller fades its overflowing edges through `useScrollFade`**
