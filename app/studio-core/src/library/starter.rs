@@ -9,20 +9,15 @@ use crate::project::{ComponentSource, valid_name};
 /// scene component), and the title card.
 pub const STARTER_COMPONENTS: &[(&str, &str)] = &[
     ("Axes", include_str!("../../library/components/Axes.tsx")),
-    (
-        "DotGrid",
-        include_str!("../../library/components/DotGrid.tsx"),
-    ),
-    (
-        "ModClock",
-        include_str!("../../library/components/ModClock.tsx"),
-    ),
+    ("Bars", include_str!("../../library/components/Bars.tsx")),
+    ("Code", include_str!("../../library/components/Code.tsx")),
+    ("Graph", include_str!("../../library/components/Graph.tsx")),
+    ("Grid", include_str!("../../library/components/Grid.tsx")),
     (
         "NumberLine",
         include_str!("../../library/components/NumberLine.tsx"),
     ),
     ("Table", include_str!("../../library/components/Table.tsx")),
-    ("Tiles", include_str!("../../library/components/Tiles.tsx")),
     (
         "TitleCard",
         include_str!("../../library/components/TitleCard.tsx"),
