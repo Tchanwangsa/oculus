@@ -12,7 +12,7 @@ mod tests;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
-pub use crate::sources::echo360::CANCELLED;
+pub use crate::runtime::stream::CANCELLED;
 use claim::Claim;
 pub use claim::{cancel, downloading};
 
