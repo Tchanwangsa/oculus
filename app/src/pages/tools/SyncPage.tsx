@@ -26,7 +26,7 @@ import { useSyncBoot } from "./sync/useSyncBoot";
 import { useSyncEvents } from "./sync/useSyncEvents";
 
 export default function SyncPage() {
-  const { status: authStatus, connect } = useAuth();
+  const { status: authStatus, error: authError, connect } = useAuth();
   const institution = useInstitution();
   const active = useTabActive();
   const [loadingSubjects, setLoadingSubjects] = useState(false);
@@ -237,6 +237,15 @@ export default function SyncPage() {
           </>
         )}
       </div>
+
+      {authError && (
+        <div className="shrink-0 px-5 pb-2.5">
+          <Alert variant="destructive" className="px-3 py-2.5">
+            <WarningCircle />
+            <AlertDescription className="text-xs">{authError}</AlertDescription>
+          </Alert>
+        </div>
+      )}
 
       {subjectsError && (
         <div className="shrink-0 px-5 pb-2.5">

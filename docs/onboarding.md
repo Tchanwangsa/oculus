@@ -110,6 +110,8 @@ Skip adds the step to `skipped`; Next removes it. Next on Done writes
   or *Reconnect* once connected) is `useAuth().connect()`: the saved
   credentials first, then the login window; the finish arrives as
   `canvas-auth-*` events ([auth.md](./auth.md#every-sign-in-ends-in-one-place)).
+  A window that refuses to open puts its reason on the card in place of the
+  sign-in line.
 - **Never sign in again** shows only at a university that signs in through
   Okta, the one sign-in it answers. Folded by default, it says what the automated
   sign-in does, that push-only (Okta Verify) accounts can't use it, and how

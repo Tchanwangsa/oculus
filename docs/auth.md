@@ -133,8 +133,9 @@ read it; a vault without one is UniMelb's.
   telling it first when it has not (keyd was absent at launch, or the CLI
   moved it). A keyd too old for `site_set` serves UniMelb and passes only
   there; anywhere else every call fails with `KeydError::Site` saying keyd
-  needs an update, the login window refuses to open with that message, and a
-  launch with a stored session reports it expired. While Settings moves to a
+  needs an update, the login window refuses to open with that message (which
+  `useAuth`'s `error` puts beside the button that asked), and a launch with a
+  stored session reports it expired. While Settings moves to a
   new address the check refuses everything, and a profile change holds it
   from telling keyd to saving the file.
 - **keyd checks the claim too.** `session_put` and `forward` carry the Canvas
