@@ -20,6 +20,10 @@ pub struct TransitionSpec {
     /// oklch or oklab, for a magic move into this scene.
     #[serde(rename = "morphColor")]
     pub morph_color: Option<String>,
+    /// 0..1, a magic move's stagger in reading order (`<Morph lag>`).
+    pub lag: Option<f64>,
+    /// overlap or sequential, a magic move's fades (`<Morph fade>`).
+    pub fade: Option<String>,
 }
 
 /// `video.json`'s top-level `motion` and the theme's motion defaults.

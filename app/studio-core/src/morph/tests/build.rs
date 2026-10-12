@@ -6,10 +6,21 @@ const INK: Ink = Ink {
     text: Color::BLACK,
     colour: MorphColor::Oklch,
 };
-use crate::scene::Color;
+use crate::scene::{Color, Fade, Timing};
 
 fn run(a: LNode, b: LNode, p: f32) -> LNode {
-    morph(a, b, p, &mut Typeset::new(), INK).unwrap()
+    run_with(a, b, p, &Timing::default())
+}
+
+fn run_with(a: LNode, b: LNode, p: f32, timing: &Timing) -> LNode {
+    morph(a, b, p, timing, &mut Typeset::new(), INK).unwrap()
+}
+
+fn sequential() -> Timing {
+    Timing {
+        fade: Fade::Sequential,
+        ..Timing::default()
+    }
 }
 
 fn keys(n: &LNode) -> Vec<&str> {
@@ -72,7 +83,7 @@ fn matched_nodes_move_and_unmatched_ones_fade_in_their_windows() {
         ],
     );
     let at = |p: f32| {
-        let out = run(
+        let out = run_with(
             bx(
                 0.0,
                 0.0,
@@ -91,6 +102,7 @@ fn matched_nodes_move_and_unmatched_ones_fade_in_their_windows() {
                 ],
             ),
             p,
+            &sequential(),
         );
         let find = |k: &str| {
             out.children
@@ -173,7 +185,11 @@ fn outside_a_morph_nodes_match_by_path_and_move_at_its_p() {
     use crate::scene::{Kind, Scope};
     let scoped = |mut n: LNode, kind: Kind| {
         n.kind = kind;
-        n.scope = Some(Scope { id: 0, p: 0.25 });
+        n.scope = Some(Scope {
+            id: 0,
+            p: 0.25,
+            timing: sequential(),
+        });
         n
     };
     // The Morph swaps a Text for a taller Box; the footer after it moves.

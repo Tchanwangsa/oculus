@@ -1,13 +1,17 @@
 //! A `\color{…}` value: a theme colour's name (`\color{accent}`), else a
 //! hex colour as KaTeX accepts it (`#rgb`, `#rgba`, `#rrggbb`,
 //! `#rrggbbaa`, or six digits without `#`). CSS colour names are refused,
-//! as everywhere in Studio: colours come from the theme.
+//! as everywhere in Studio: colours come from the theme. `transparent` is
+//! what `\phantom` writes; its pieces are left out (`build`).
 
 use crate::scene::Color;
 use crate::suggest::did_you_mean;
 use serde_json::{Map, Value};
 
 pub fn resolve(c: &str, colours: Option<&Map<String, Value>>) -> Result<Color, String> {
+    if c == "transparent" {
+        return Ok(Color::CLEAR);
+    }
     if let Some(v) = colours.and_then(|m| m.get(c)).and_then(Value::as_str) {
         return Color::parse(v);
     }

@@ -116,5 +116,6 @@ fn wrap(size: (f64, f64), style: Style, children: Vec<LNode>) -> LNode {
         key: None,
         loc: None,
         scope: None,
+        overlay: None,
     }
 }

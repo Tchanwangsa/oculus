@@ -7,9 +7,11 @@
 //!
 //! `tex` calls KaTeX; `walk` lays its HTML tree out as katex.css would;
 //! `keys` names the pieces; `expand` finds Math elements in a scene tree
-//! and `build` turns a typeset formula into nodes; `colour` resolves
-//! `\color`; `cache` keeps typeset formulas across frames.
+//! and `build` turns a typeset formula into nodes; `write` draws them on
+//! for `<Write>`; `colour` resolves `\color`; `cache` keeps typeset
+//! formulas across frames; `brace` is KaTeX's brace for `<Brace>`.
 
+mod brace;
 mod build;
 mod cache;
 mod colour;
@@ -18,7 +20,9 @@ mod fonts;
 mod keys;
 mod tex;
 mod walk;
+mod write;
 
+pub use brace::{BRACE_HEIGHT, brace};
 pub use cache::MathCache;
 pub use expand::{MathEnv, expand};
 
@@ -47,6 +51,8 @@ pub struct Formula {
 pub struct Item {
     /// Unique within the formula.
     pub key: String,
+    /// The `\k` groups it is in, innermost first.
+    pub groups: Vec<String>,
     pub rect: Rect,
     pub shape: Shape,
     /// The colour `\color` gave it, as written; `None` takes the Math's.

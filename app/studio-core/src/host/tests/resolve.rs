@@ -367,7 +367,7 @@ fn morph_is_a_host_node_with_two_resolved_children() {
     .unwrap();
     let (tree, _) = call(&mut h, "M").unwrap();
     assert_eq!(tree["k"], "morph");
-    assert_eq!(tree["p"], 1.0);
+    assert_eq!(tree["p"], 1.4, "p is not clamped, so springs overshoot");
     assert_eq!(tree["children"].as_array().unwrap().len(), 2);
     h.load(
         "Bad",
