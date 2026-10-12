@@ -8,6 +8,7 @@ mod validate;
 pub use validate::validate_props;
 
 use serde::Deserialize;
+use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +31,36 @@ pub struct PropSpec {
     pub kind: PropKind,
     pub optional: bool,
     pub default: Option<Value>,
+}
+
+/// Serialises to the JSON the builder wrote (`kind`, `optional`, `default`,
+/// and `of`, `values` or `token` by kind), so a client reads the schema in
+/// the shape the component exported it.
+impl Serialize for PropSpec {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
+        let kind = match &self.kind {
+            PropKind::Str => "str",
+            PropKind::Num => "num",
+            PropKind::Bool => "bool",
+            PropKind::List(_) => "list",
+            PropKind::OneOf(_) => "oneOf",
+            PropKind::Token(_) => "token",
+            PropKind::Latex => "latex",
+        };
+        map.serialize_entry("kind", kind)?;
+        map.serialize_entry("optional", &self.optional)?;
+        if let Some(default) = &self.default {
+            map.serialize_entry("default", default)?;
+        }
+        match &self.kind {
+            PropKind::List(of) => map.serialize_entry("of", of)?,
+            PropKind::OneOf(values) => map.serialize_entry("values", values)?,
+            PropKind::Token(token) => map.serialize_entry("token", token)?,
+            PropKind::Str | PropKind::Num | PropKind::Bool | PropKind::Latex => {}
+        }
+        map.end()
+    }
 }
 
 /// The JSON one builder serialises to.

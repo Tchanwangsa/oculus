@@ -490,3 +490,43 @@ async fn an_echo_embed_refresh_keeps_its_file_and_poster_and_cascades_with_the_s
         .unwrap();
     assert_eq!(echo_embed(&pool, "link-a").await.unwrap(), None);
 }
+
+#[tokio::test]
+async fn a_studio_video_links_to_its_thread_and_survives_the_thread() {
+    let pool = migrated_pool().await;
+    let thread = |pool: SqlitePool| async move {
+        sqlx::query("INSERT INTO harness_threads (provider, status) VALUES ('claude', 'idle')")
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_rowid()
+    };
+    let (first, second) = (thread(pool.clone()).await, thread(pool.clone()).await);
+
+    assert_eq!(studio_link_of_thread(&pool, first).await.unwrap(), None);
+    link_studio_video(&pool, "gradient-descent", first, Some(60))
+        .await
+        .unwrap();
+    let link = studio_link_of_thread(&pool, first).await.unwrap().unwrap();
+    assert_eq!(link.slug, "gradient-descent");
+    assert_eq!(link.length_secs, Some(60));
+
+    // A deleted video's row is replaced when its slug is made again.
+    link_studio_video(&pool, "gradient-descent", second, None)
+        .await
+        .unwrap();
+    assert_eq!(studio_link_of_thread(&pool, first).await.unwrap(), None);
+    let links = studio_links(&pool).await.unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links["gradient-descent"].thread_id, Some(second));
+    assert_eq!(links["gradient-descent"].length_secs, None);
+
+    // Deleting the thread keeps the video, unlinked.
+    sqlx::query("DELETE FROM harness_threads WHERE id = ?1")
+        .bind(second)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let links = studio_links(&pool).await.unwrap();
+    assert_eq!(links["gradient-descent"].thread_id, None);
+}

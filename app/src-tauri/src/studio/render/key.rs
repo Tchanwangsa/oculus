@@ -127,3 +127,24 @@ pub(super) fn segment_key(fingerprint: &[u8], trees: &Trees, settings: &Settings
         settings.as_bytes(),
     ])
 }
+
+/// The key of a still of scene `index` over `settings` (the caller's own
+/// description of the shot): the same inputs as a segment's, so an edit to
+/// the scene, a component, an asset or the renderer makes a new key.
+pub fn still_key(
+    dir: &Path,
+    project: &Project,
+    index: usize,
+    settings: &str,
+) -> Result<String, RenderError> {
+    let fingerprint = project.scene_fingerprint(index)?;
+    let trees = Trees::of(dir, project)?;
+    Ok(hash_parts([
+        SCHEME.as_bytes(),
+        BUILD.as_bytes(),
+        fingerprint.as_slice(),
+        trees.components.as_bytes(),
+        trees.assets.as_bytes(),
+        settings.as_bytes(),
+    ]))
+}

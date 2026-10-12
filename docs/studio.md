@@ -32,7 +32,7 @@ and narrates.
 | `<Math>`: KaTeX through math-core, the layout of its HTML tree, keys, the expansion into glyphs, `<Write>`, KaTeX's brace; the KaTeX fonts | `app/studio-core/src/math/` (`walk/` one file per construct, `write.rs`, `brace.rs`), `app/studio-core/fonts/katex/` |
 | Props schemas and their validation | `app/studio-core/src/schema/` |
 | Component and theme libraries: the starter set, seeding, the snapshot write path, promoting a video's own file | `app/studio-core/src/library/`, `app/studio-core/library/` (the starter files), `app/src-tauri/src/studio/libraries/` (the app's data-dir roots, `promote.rs`) |
-| Videos in the data directory: `new`, `list`, slug resolution | `app/src-tauri/src/studio/videos/`, `app/src-tauri/src/library/paths/studio.rs` (`studio_dir`, `agent_write_dirs`) |
+| Videos in the data directory: `new`, `list`, slug resolution, slugs from titles, the app's scope | `app/src-tauri/src/studio/videos/` (`slug.rs`), `app/src-tauri/src/library/paths/studio.rs` (`studio_dir`, `agent_write_dirs`) |
 | Galleries: each example of a component as a still, and its contact sheet | `app/studio-core/src/gallery/` |
 | Themes and bundled fonts | `app/studio-core/themes/`, `app/studio-core/fonts/`, `app/studio-core/src/theme/`, `app/studio-core/src/fonts/` |
 | Every error and its message | `app/studio-core/src/error.rs` |
@@ -44,7 +44,9 @@ and narrates.
 | The pronunciation review: suggestions stored one file each, the lexicon writer, finding a word in a video's narration; its Tauri commands and wrappers | `app/src-tauri/src/studio/voice/review/` (`key.rs`, `lexicon.rs`, `locate.rs`), `app/src-tauri/src/studio/commands/pronunciations.rs`, `app/src/lib/studio/pronunciations.ts` |
 | Settings -> Voice: the `voice` row and its engine, the server's model list, Kokoro's packs and sample, the pronunciation review, the aligner download; its Tauri commands | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/` (`pronunciations/`), `app/src/lib/studio/` (`voice.ts`, `voicePacks.ts`, `aligner.ts`), `app/src-tauri/src/studio/commands/` (`voice.rs`, `kokoro.rs`, `aligner.rs`, `progress.rs`), `app/src-tauri/src/studio/tts/models.rs` |
 | Rendering a video: plan, workers and the reorder buffer, ffmpeg, the segment cache, the narration track, mux, one render per folder | `app/src-tauri/src/studio/render/`, `app/src-tauri/build.rs` (`STUDIO_RENDER_BUILD`) |
-| Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers (no UI yet) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
+| Rendering from the app: `studio_render`, `studio_render_cancel`, the `studio-render-progress` event and their wrappers; the page over them is [studio-page.md](./studio-page.md) | `app/src-tauri/src/studio/commands/render.rs`, `app/src/lib/studio/render.ts` |
+| The Studio page's commands: the video list, `studio_new_video`, a video's detail, stills and thumbnails; the `studio_videos` link table; a video thread's brief | `app/src-tauri/src/studio/commands/videos/`, `app/src-tauri/src/db/store/studio_videos.rs`, `app/src-tauri/src/harness/manager/studio.rs`, `app/src/lib/studio/videos.ts` |
+| The playground's commands: `studio_themes`, the component list, source, frame, validated write, history and restore | `app/src-tauri/src/studio/commands/components/`, `commands/themes/`, `commands/levels.rs`, `app/src/lib/studio/components.ts`, `app/src/lib/studio/themes.ts` |
 | The agent flow: the `oculus-studio` skill and the prelude's globals, typed | `app/src-tauri/templates/skills/oculus-studio/` (`SKILL.md`, `reference.md`), `app/studio-core/studio.d.ts` (its test: `src/host/tests/globals.rs`) |
 | `oculus studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs`, `videos.rs`, `lint.rs`, `brief.rs`, `beats.rs`, `render.rs`, `narrate.rs`, `voices.rs`, `g2p.rs`, `pronounce.rs`, `aligner.rs`, `gallery.rs`, `components.rs`, `themes.rs`), `app/src-tauri/src/bin/oculus/args/studio.rs` |
 
@@ -206,11 +208,25 @@ one folder besides `agents/` and the database an agent thread may write
   also takes a bare slug (`studio::videos::resolve`): a path
   that exists is used as given, otherwise a slug names `videos/<slug>/`, and
   anything else fails naming both places.
+- The app's commands take a slug and reach only a video (`videos::scoped_in`,
+  `video_in`): a bare slug that names a folder in `videos/` wins over a path
+  of that name, and a path must, once symlinks are followed, be a folder
+  directly inside `videos/`. `videos/`, `components/` and any folder
+  elsewhere are refused ("is not a video").
+- A title makes a slug (`slug_from_title`): ASCII letters and digits
+  lowercased, any other run one `-`, at most 56 characters (room for a
+  suffix), `untitled` when none is left. `unique_slug` appends `-2`, `-3`...
+  until no folder has the name.
+- video.json has no title field. The Videos list and the detail call a video
+  by its slug spelled out (`title_of`: `gradient-descent` -> `Gradient
+  descent`); the scaffold's `TitleCard` carries the title the student typed,
+  and an agent may rewrite it.
 
 ## Agent flow: a chat agent makes a video with the `oculus-studio` skill
 
-A video is made in an ordinary Chat thread by the student's own CLI agent,
-through the `oculus` CLI and its file tools; there is no Studio page yet.
+A video is made in a Chat thread by the student's own CLI agent, through
+the `oculus` CLI and its file tools; the Studio page's New video starts that
+thread beside the video's player ([studio-page.md](./studio-page.md)).
 The `oculus-studio` skill ([harness.md](./harness.md#the-brief-is-appended-except-on-opencode))
 is the whole brief, and `AGENTS.md` only points at it. The target is a
 3Blue1Brown-style explainer: maths written term by term as it is said and
@@ -1734,7 +1750,8 @@ with the `Narration` error before any frame renders.
   blocking thread, finding ffmpeg like the CLI does plus the app's
   resources. It resolves to the report (`--json`'s `report`), or `null`
   when cancelled; it rejects with the failure's message. One render per
-  folder: `render::RENDERS` maps each canonical folder to its quality and
+  folder (a slug or a video's folder; any other folder is refused, see "The
+  Studio page's commands"): `render::RENDERS` maps each canonical folder to its quality and
   an `Arc<AtomicBool>` cancel flag, and a second start for the same folder
   is refused at once ("a draft render of <dir> is already running"), with
   no event. A guard frees the folder however the render ends, before the
@@ -1759,6 +1776,146 @@ with the `Narration` error before any frame renders.
   `oculus studio frame` draws at that frame's time (41 to 48 dB PSNR, 23 dB
   against its neighbour). The scenes were mostly still; motion-blurred
   motion costs up to 32 sub-frames a frame.
+
+## The Studio page's commands
+
+`studio::commands::videos` is what the Studio page calls
+(`app/src/lib/studio/videos.ts` is the typed wrapper; JSON is camelCase).
+Each takes a slug, resolves it with `videos::video_in`, and returns what is
+on disk now; nothing is cached but thumbnails.
+
+| Command | Does |
+| --- | --- |
+| `studio_videos(subject?)` | `videos::list_in` plus `title` and `threadId`, newest change first (a video whose video.json does not load sorts last and carries `problem`) |
+| `studio_new_video(options)` | `{title?, subject?, theme?, portrait?, voice?}` -> `{slug, dir}`. The slug is `unique_slug(title)`; `theme` defaults to `default`, which a subject's `themes/default.json` replaces through the cascade; `voice` is video.json's `voice` block (`{engine?, model?, voice?, speed?}`, `engine` being `kokoro` or `server`). The scaffold is loaded over the libraries before it is returned, and removed again if it does not load (a theme nothing defines, say) |
+| `studio_video_detail(slug)` | the row, `fps`, `width`, `height`, `theme`, `voice`, `scenes` and `renders` |
+| `studio_frame(slug, at, width)` | a PNG `width` px wide (1 to 4096), the layout of the full-size frame, as bytes through `tauri::ipc::Response` |
+| `studio_thumbnail(slug)` | the video's cached thumbnail PNG |
+| `studio_render`, `studio_render_cancel` | see "Rendering a video"; they take a slug or a video's folder and refuse any other |
+
+- **The detail's voice** is video.json's `voice.voice`, else Settings ->
+  Voice's voice, else null. **Scenes** are `{id, component, start, duration,
+  text}`; `text` is the scene's `## id` section of `script.md` (null when it
+  has none). `start` and `duration` are seconds from `Project::timeline`, so
+  they are known once every scene has a length (a hold, or narration that
+  matches the script) and null for every scene until then, stale narration
+  included. **Renders** are the `draft.mp4` and `final.mp4` that exist, with
+  their absolute path and mtime in Unix seconds.
+- **A frame is of the video as narrated.** `at` is `{scene, t}` (seconds into
+  a scene, counting from 0) or `{global}`. Stale or missing narration makes
+  `Renderer::new` fail, and the command rejects with studio-core's message
+  (``run `oculus studio narrate` ``); it never falls back to a silent frame.
+- **A render plays from the media server.** `lectures/media.rs` serves
+  files under `studio/videos/` (Range requests, so a seek works), and the
+  asset protocol's scope in `tauri.conf.json` names `$APPDATA/studio/videos/**`;
+  the page reaches `renders/draft.mp4` with `mediaSrc(path)`.
+- **Stills share render slots**, half the cores (`slot.rs`, as the PDF
+  viewer's `on_render_slot`), so a page of thumbnails queues without holding
+  threads, and each renders on the blocking pool.
+- **Thumbnails** are `<video>/.cache/thumbs/<key>.png`, 640 px on the long
+  side. The key is `render::still_key` over scene 0 (its fingerprint, the
+  components it can use, `assets/`, the build) and the shot, so an edit to
+  the scene, a component or an asset is a new file and writing it deletes
+  the others. A narrated video (every scene has a length) shows scene 0 one
+  second in. One that is not draws scene 0 silent from a copy of the project
+  without `script.md` and manifest, every scene given its hold (3 s if it
+  has none), at the end of its hold. A scene that cues `word()` cannot draw
+  silent, so its video has no thumbnail until it is narrated: the command
+  rejects with ``no thumbnail for `slug`: `` and the reason, and the page
+  shows a placeholder. `renders/` is never written.
+
+### A video has a thread
+
+A video made in the app is made by an ordinary harness thread, so it is also
+in Chat. `studio_videos(slug PK, thread_id, length_secs, created_at)`
+(migration 45) links them; `thread_id` references `harness_threads` `ON
+DELETE SET NULL` (deleting the thread keeps the video), is unique, and the
+row is written only by `db::store::link_studio_video`. It lives in the
+database, not in video.json, which is `deny_unknown_fields` and writable by
+the agent.
+
+`harness_send` takes `SendOptions.studio` (`{slug, lengthSecs?}`; the TS
+`format` is not read, since the brief takes the format from video.json's
+size). When the send creates the thread it checks the folder exists
+(`video_in`), creates the thread, then links it; a link that fails deletes
+the thread again. Every send reads the link back (`StudioBrief::read`) and
+the thread's brief gets a "The video being made" section, rebuilt like the
+lecture's: the folder (absolute) and that the app made it, the format
+(landscape or portrait, from the size), the theme, the subject and its
+library, the length target, and the instruction to direct the video with
+this skill (its step 1, the folder, done), render a draft and say it is
+ready, and ask before the final. The agent is told not to run `oculus
+studio new`. See
+[harness.md](./harness.md#a-studio-thread-carries-its-video).
+
+### The playground's commands
+
+`studio::commands::components` and `studio::commands::themes` serve the
+Components page and the style chip (`app/src/lib/studio/components.ts` and
+`themes.ts` are the typed wrappers; JSON is camelCase). They read and write
+only the two libraries, `<data>/studio/library/` and
+`<data>/studio/subjects/<CODE>/`: a command takes a component name, a level
+(`subject` or `global`) and a subject code, never a path
+(`commands/levels.rs`), and a name that is not a PascalCase identifier (for a
+theme, lowercase letters, digits and `-`) or a subject that is not a course
+code's folder name is refused. Without a subject only the global library is
+read. Each call loads the global library first, so the starter set is
+there. Nothing is cached.
+
+| Command | Does |
+| --- | --- |
+| `studio_themes(subject?)` | one row per theme name: `{name, level, swatch, tokens, problem}` |
+| `studio_components(subject?)` | one row per component name: `{name, level, kind, props, examples, problem}` |
+| `studio_component_source(name, subject?)` | `{level, text}` from the nearest level that has it |
+| `studio_component_frame(name, subject?, theme, props?, example?, t, width, duration?)` | a PNG `width` px wide (1 to 4096), as bytes through `tauri::ipc::Response` |
+| `studio_component_write(name, level, subject?, text)` | writes once the text loads; returns `{level, text}` |
+| `studio_component_history(name, level, subject?)` | `[{id, savedAt}]`, newest first |
+| `studio_component_restore(name, level, subject?, id)` | writes snapshot `id` back; returns `{level, text}` |
+
+- **Themes** are the bundled names, `themes/*.json` in the global library and
+  in the subject's, resolved as a video resolves its theme: the subject's
+  over the global one over the bundled one, one row per name with the level
+  that won (`bundled`, `global`, `subject`), `default` first, then by name.
+  `tokens` is the parsed theme file and `swatch` up to four CSS colours from
+  its `color` tokens in the order `bg`, `text`, `accent`, `surface`. A file
+  that does not parse is a row with `problem` (the `Theme::parse` message),
+  no `tokens` and an empty `swatch`, not a failed call.
+- **Components** are read through the cascade without a video: the subject's
+  `components/` over the global one, `level` being the one that won. Every
+  one is loaded in a single engine for its `props` (the builders' own JSON
+  in declaration order, each prop `{name, kind, optional, default?}` with
+  `of` for a list, `values` for `oneOf` and `token` for a token) and its
+  `examples` (name to props, in declaration order); a component that does
+  not load is a row with `problem`, an empty `props` and no examples.
+  `PropSpec` serialises to that JSON in studio-core. `kind` is `shell` when
+  the name ends in `Shell` (a library's own; no starter is one), else
+  `component`: nothing in a component's code
+  says which, so the name does.
+- **A frame** draws the component alone in a 1920x1080 frame scaled to
+  `width`, in the theme `theme` names (resolved through the same levels).
+  `t` is seconds into the component and must be in `[0, duration)`;
+  `duration` is what the component sees as `ctx.duration` (default 4 s).
+  The props are `props` if given, else the example `example` names, else the
+  first example, else none. They are checked against the schema, so a wrong
+  one is refused with the engine's sentence and nothing is drawn as a guess;
+  so is a theme that does not parse or an error in the TSX. There is no
+  narration, so `word()` finds no cues. It takes a render slot
+  (`videos/slot.rs`) and builds one `Engine` for the call, since QuickJS is
+  not Send: a 480 px frame took about 3 ms and a 1920 px one about 6 ms
+  (a starter component, test build).
+- **A write** loads the text as the component first (a fresh engine; at most
+  512 KB), so a text with a syntax error, no default export or a bad
+  `props` is refused with the engine's message and the file, its history and
+  the library are untouched. Then it goes through `studio_core::write_library`,
+  which copies the text it replaces to `<library>/.history/` (see
+  "Libraries cascade"). A subject write creates the subject's version of a
+  global component; a global write may create a new component. The same text
+  again writes nothing.
+- **History and restore.** `history` lists `<Name>.<unix-ms>.tsx` files in
+  the level's `.history/`; `id` is the milliseconds as a string and `savedAt`
+  the same number. `restore` takes an id from that list, loads the old text
+  (it must still load) and writes it through the same path, so the text it
+  replaces is snapshotted as the newest entry and an Undo can be undone.
 
 ## `oculus studio` renders and lints from the terminal
 

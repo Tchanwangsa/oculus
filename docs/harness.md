@@ -32,6 +32,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Subagents (Studio's research and scene helpers) | `app/src-tauri/src/harness/studio_agents.rs`, `app/src-tauri/templates/STUDIO_*.template.md`, `oculus studio agents` (`app/src-tauri/src/bin/oculus/commands/studio/agents.rs`) |
 | One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends | `app/src-tauri/src/harness/manager/one_off.rs`, `app/src-tauri/src/harness/app/suggest.rs`, `app/src-tauri/src/harness/suggest/`, `app/src-tauri/src/lectures/lecture_end/` |
 | `@` menu and mention input | `app/src/components/harness/mentions/useMentionMenu.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
+| Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
 | Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/agents/useAttachments.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
@@ -723,6 +724,20 @@ chapter list inline — rebuilt on every send and before any spawn.
   so nothing re-renders the memoised transcript. Lecture docks and Chat tabs
   use counted `hold`/`unhold` ownership of cached rows; closing one view does
   not release a thread still displayed by another.
+
+## A Studio thread carries its video
+
+A thread that makes a Studio video is linked to its folder by a
+`studio_videos` row, written when `harness_send` creates the thread with
+`SendOptions.studio` ([studio.md](./studio.md#a-video-has-a-thread)). Like the
+lecture, the link is read back on every send and before any spawn
+(`studio_brief` in `harness/app/send.rs`, a rewind's included), and
+`instructions()` / `thread_sections()` append the "The video being made"
+section after the subject and lecture ones: the absolute folder, format,
+theme, subject library and length target read from video.json and the link,
+and the order of work (direct it with the skill, draft, ask before the
+final). It is the per-thread half the opencode and `agy` bridges send ahead
+of the first message.
 
 ## Gotchas
 

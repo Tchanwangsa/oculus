@@ -9,6 +9,7 @@ library files; the rest of the frontend has its own pages:
 | --- | --- |
 | [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, window shortcuts, ⌘F, search |
 | [ui.md](./ui.md) | The design rules, and the WebKit and CSS traps |
+| [studio-page.md](./studio-page.md) | The Studio page: New video, a video's thread and player, the Videos grid |
 | [viewers.md](./viewers.md) | Markdown, PDFs, the media player (lectures and library videos) and the in-app browser |
 | [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |
 | [editor-maths.md](./editor-maths.md) | Maths in the note editor: the visual field, the toolbox, shorthands |
@@ -25,7 +26,7 @@ library files; the rest of the frontend has its own pages:
 | Chat | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/chat/harnessStore.ts` |
 | Settings → Parsing, Embeddings, Transcription: parser, embedding, index run, transcription (the language, the engine order and switches, a dialog per engine: Groq key, local Whisper models, on-device speech) | `app/src/pages/settings/library/ParsingPage.tsx`, `app/src/components/settings/library/ParserSection.tsx`, `app/src/components/settings/library/EmbeddingSection.tsx`, `app/src/stores/sync/indexStore.ts`, `app/src/components/settings/transcription/TranscriptionSection.tsx`, `app/src/components/settings/transcription/GroqDialog.tsx`, `app/src/components/settings/transcription/LocalWhisper.tsx`, `app/src/components/settings/transcription/OnDeviceSpeech.tsx` |
 | Settings → Voice: Studio's narration engine (Kokoro with its pack download, voice and sample, or a TTS server's URL, model with List models and voice), the speed, and the aligner model download ([studio.md](./studio.md)) | `app/src/pages/settings/library/VoicePage.tsx`, `app/src/components/settings/voice/`, `app/src/lib/studio/` |
-| Studio rendering: the `studio_render` wrappers and the `studio-render-progress` listener, no UI yet ([studio.md](./studio.md)) | `app/src/lib/studio/render.ts` |
+| Studio rendering: the `studio_render` wrappers, the `studio-render-progress` listener and the render store behind the Studio page ([studio-page.md](./studio-page.md)) | `app/src/lib/studio/render.ts`, `app/src/hooks/backend/useStudioEvents.ts`, `app/src/stores/studio/renderStore.ts` |
 | Parser and embedding engine selection UI | `app/src/components/settings/shared/EngineSelect.tsx` |
 | Parse state, pipeline ledger, recovery sweep | `app/src/lib/pipeline/parseState.ts`, `app/src/stores/sync/parseStore.ts`, `app/src/stores/sync/pipelineStore.ts`, `app/src/hooks/sync/useQualitySweep.ts` |
 | Scraped document metadata loaders | `app/src/hooks/data/useCourseFileData.ts`, `app/src/hooks/data/useModuleTocs.ts` |

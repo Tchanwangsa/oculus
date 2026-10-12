@@ -272,8 +272,9 @@ a WebView.
 WebKit refuses `<video>` sources on custom URL schemes: an `asset://` URL
 fetches but the media element fails with error code 4 (macOS 26). So
 `app/src-tauri/src/lectures/media.rs` serves lecture video on an ephemeral localhost
-port with a per-launch token and Range support, scoped to `lectures/` and
-`courses/`. The frontend gets URLs from `mediaSrc()` in `app/src/lib/lectures/media/src.ts`.
+port with a per-launch token and Range support, scoped to `lectures/`,
+`courses/` and `studio/videos/` (rendered videos), and serving PNG, JPEG and
+WebP as images. The frontend gets URLs from `mediaSrc()` in `app/src/lib/lectures/media/src.ts`.
 
 ## One data directory, resolved without a Tauri handle
 
@@ -336,6 +337,9 @@ never creates the database, so a fresh machine opens the app once first.
 - `echo_embeds` caches each Canvas page embed's Echo360 identity and its
   downloaded file, written only by Rust (`db::store::upsert_echo_embed`);
   it cascades with the subject ([sync.md](./sync.md#an-embedded-echo360-video-is-resolved-and-downloaded-by-its-card)).
+- `studio_videos` links each Studio video (a folder under `studio/videos/`) to
+  the harness thread that makes it; the thread going away keeps the video
+  ([studio.md](./studio.md#a-video-has-a-thread)).
 - `calendar_events` is the one table a sync replaces rather than upserts, so a
   cancelled class disappears ([calendar.md](./calendar.md)).
 - `projects`, `project_tasks` and `local_events` hold the student's own rows,

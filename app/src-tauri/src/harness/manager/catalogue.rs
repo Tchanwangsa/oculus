@@ -129,7 +129,7 @@ impl Harness {
         opencode::write_config(
             &directory,
             &self.data_dir,
-            &instructions(&self.data_dir, None, None),
+            &instructions(&self.data_dir, None, None, None),
             &opencode::OneOffPrompts {
                 naming: NAMING_INSTRUCTIONS,
                 writer: crate::harness::suggest::INSTRUCTIONS,

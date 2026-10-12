@@ -2,8 +2,10 @@
 //! video. `create` scaffolds one, `list` reads them all, and `resolve` turns
 //! a command's DIR argument into a folder: a path that exists wins, else a
 //! bare slug names a video here (docs/studio.md, "Videos live in the data
-//! directory").
+//! directory"). `scoped_in` is `resolve_in` for the app's commands, which may
+//! name only a video; `slug` makes a unique slug from a title.
 
+mod slug;
 #[cfg(test)]
 mod tests;
 
@@ -15,6 +17,8 @@ use serde_json::json;
 use studio_core::{valid_subject, Video};
 
 use crate::library::paths::{data_dir, studio_dir};
+
+pub use slug::{slug_from_title, unique_slug};
 
 /// `<data dir>/studio/videos`.
 pub fn videos_dir() -> PathBuf {
@@ -57,7 +61,55 @@ pub fn resolve_in(videos: &Path, arg: &Path) -> Result<PathBuf, String> {
     ))
 }
 
-/// What `oculus studio new` makes.
+/// [`scoped_in`] over the app's videos.
+pub fn scoped(arg: &Path) -> Result<PathBuf, String> {
+    scoped_in(&videos_dir(), arg)
+}
+
+/// The folder of the video `arg` names, canonical: a bare slug, or a path to
+/// a video's folder. Anything that is not directly inside `videos` once
+/// symlinks are followed is refused, so an app command never renders or
+/// reads an arbitrary folder.
+pub fn scoped_in(videos: &Path, arg: &Path) -> Result<PathBuf, String> {
+    let named = arg
+        .to_str()
+        .filter(|s| valid_slug(s))
+        .map(|slug| videos.join(slug))
+        .filter(|dir| dir.is_dir());
+    let dir = match named {
+        Some(dir) => dir,
+        None => resolve_in(videos, arg)?,
+    };
+    let root = videos
+        .canonicalize()
+        .map_err(|e| format!("no videos in {}: {e}", videos.display()))?;
+    let dir = dir
+        .canonicalize()
+        .map_err(|e| format!("cannot look at {}: {e}", dir.display()))?;
+    if dir.parent() != Some(root.as_path()) {
+        return Err(format!(
+            "{} is not a video: Studio only works on the folders directly inside {}",
+            dir.display(),
+            root.display()
+        ));
+    }
+    Ok(dir)
+}
+
+/// The folder of the video `slug` under `videos`, as `list_in` gives it.
+/// Refuses a slug that is not one, or whose folder is a link out of
+/// `videos` (see [`scoped_in`]).
+pub fn video_in(videos: &Path, slug: &str) -> Result<PathBuf, String> {
+    if !valid_slug(slug) {
+        return Err(format!(
+            "`{slug}` is not a video's slug: lowercase letters, digits and `-`, at most 64 characters"
+        ));
+    }
+    scoped_in(videos, Path::new(slug))?;
+    Ok(videos.join(slug))
+}
+
+/// What `oculus studio new` and the app's `studio_new_video` make.
 #[derive(Debug, Clone, Default)]
 pub struct NewVideo {
     pub slug: String,
@@ -65,11 +117,15 @@ pub struct NewVideo {
     pub title: Option<String>,
     /// 1080x1920 instead of 1920x1080.
     pub portrait: bool,
+    /// A bundled or library theme name; `default` when unset, which a
+    /// subject's own `themes/default.json` replaces through the cascade.
+    pub theme: Option<String>,
+    /// Written as video.json's `voice` block when any field is set.
+    pub voice: Option<studio_core::Voice>,
 }
 
-/// Scaffolds `videos/<slug>/`: a `video.json` (30 fps, theme `default`,
-/// which a subject's own `themes/default.json` replaces through the
-/// cascade, the subject, and one silent `TitleCard` scene), an empty
+/// Scaffolds `videos/<slug>/`: a `video.json` (30 fps, the theme, the
+/// subject, an optional voice, and one silent `TitleCard` scene), an empty
 /// `script.md`, and empty `components/` and `assets/`. Refuses a slug that
 /// exists. Returns the folder.
 pub fn create_in(videos: &Path, new: &NewVideo) -> Result<PathBuf, String> {
@@ -83,6 +139,15 @@ pub fn create_in(videos: &Path, new: &NewVideo) -> Result<PathBuf, String> {
         return Err(format!(
             "subject `{s}` must be a course code's folder name: letters, digits, `-` and `_`"
         ));
+    }
+    if let Some(t) = new.theme.as_deref().filter(|t| !valid_theme(t)) {
+        return Err(format!(
+            "theme `{t}` must be a theme's name: letters, digits, `-` and `_`"
+        ));
+    }
+    let speed = new.voice.as_ref().and_then(|v| v.speed);
+    if let Some(speed) = speed.filter(|s| !(s.is_finite() && *s > 0.0)) {
+        return Err(format!("voice speed {speed} must be a positive number"));
     }
     std::fs::create_dir_all(videos)
         .map_err(|e| format!("cannot create {}: {e}", videos.display()))?;
@@ -128,17 +193,52 @@ fn video_json(new: &NewVideo) -> String {
     let mut lines = vec![
         format!("  \"size\": {{ \"width\": {width}, \"height\": {height} }},"),
         "  \"fps\": 30,".to_owned(),
-        "  \"theme\": \"default\",".to_owned(),
+        format!(
+            "  \"theme\": {},",
+            json!(new.theme.as_deref().unwrap_or("default"))
+        ),
     ];
     if let Some(s) = &new.subject {
         lines.push(format!("  \"subject\": {},", json!(s)));
+    }
+    if let Some(voice) = new.voice.as_ref().and_then(voice_json) {
+        lines.push(format!("  \"voice\": {voice},"));
     }
     lines.push(format!("  \"scenes\": [\n    {scene}\n  ]"));
     format!("{{\n{}\n}}\n", lines.join("\n"))
 }
 
-/// `gradient-descent` -> `Gradient descent`.
-fn title_of(slug: &str) -> String {
+/// A theme name, not a `.json` path: a scaffold names a theme the cascade
+/// finds.
+fn valid_theme(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// The `voice` block of the fields that are set, or `None` when none is.
+fn voice_json(voice: &studio_core::Voice) -> Option<String> {
+    let mut fields = serde_json::Map::new();
+    if let Some(engine) = voice.engine {
+        fields.insert("engine".into(), json!(engine.as_str()));
+    }
+    if let Some(model) = &voice.model {
+        fields.insert("model".into(), json!(model));
+    }
+    if let Some(v) = &voice.voice {
+        fields.insert("voice".into(), json!(v));
+    }
+    if let Some(speed) = voice.speed {
+        fields.insert("speed".into(), json!(speed));
+    }
+    (!fields.is_empty()).then(|| serde_json::Value::Object(fields).to_string())
+}
+
+/// `gradient-descent` -> `Gradient descent`; what a video is called, since
+/// video.json has no title.
+pub fn title_of(slug: &str) -> String {
     let words = slug.replace('-', " ");
     let mut chars = words.trim().chars();
     match chars.next() {
@@ -190,7 +290,8 @@ pub fn list_in(videos: &Path, subject: Option<&str>) -> Result<Vec<VideoRow>, St
     Ok(rows)
 }
 
-fn row(dir: &Path) -> VideoRow {
+/// The row of the video in `dir`.
+pub fn row(dir: &Path) -> VideoRow {
     let slug = dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -230,11 +331,15 @@ fn modified(dir: &Path) -> Option<u64> {
     let components = std::fs::read_dir(dir.join("components"))
         .map(|rd| rd.flatten().map(|e| e.path()).collect::<Vec<_>>())
         .unwrap_or_default();
-    [dir.join("video.json"), dir.join("script.md")]
-        .into_iter()
-        .chain(components)
-        .filter_map(|p| p.metadata().and_then(|m| m.modified()).ok())
-        .filter_map(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .max()
+    [
+        dir.join("video.json"),
+        dir.join("script.md"),
+        dir.join(studio_core::MANIFEST_PATH),
+    ]
+    .into_iter()
+    .chain(components)
+    .filter_map(|p| p.metadata().and_then(|m| m.modified()).ok())
+    .filter_map(|t| t.duration_since(UNIX_EPOCH).ok())
+    .map(|d| d.as_secs())
+    .max()
 }

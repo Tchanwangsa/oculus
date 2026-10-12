@@ -32,7 +32,8 @@
         "scope": [
           "$APPDATA/courses/**",
           "$APPDATA/lectures/**",
-          "$APPDATA/agents/**"
+          "$APPDATA/agents/**",
+          "$APPDATA/studio/videos/**"
         ]
       }
     }
