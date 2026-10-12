@@ -1,6 +1,6 @@
 //! The pronunciation review in Settings -> Voice (`studio::voice::review`):
 //! the agent's suggestions, the student's three verdicts, and a sample of
-//! the word's sentence read either way, synthesised by Kokoro on this Mac.
+//! the word's sentence read either way, synthesised by Kokoro on this computer.
 
 use serde::Deserialize;
 

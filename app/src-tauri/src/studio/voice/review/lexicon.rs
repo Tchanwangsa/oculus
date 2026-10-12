@@ -3,11 +3,16 @@
 //! student accepts a suggestion or keeps the guess.
 
 use std::path::Path;
+use std::sync::Mutex;
 
 use serde_json::{Map, Value};
 
 use crate::runtime::atomic_write;
 use crate::studio::voice::g2p::{Dictionary, Lexicon};
+
+/// Held across a lexicon's read-modify-write: two decisions on blocking
+/// threads would otherwise each write the file without the other's entry.
+static LOCK: Mutex<()> = Mutex::new(());
 
 /// The phonemes `reading` gives `word`, or the lexicon's error for it
 /// (a phoneme Kokoro lacks, a respelling part the dictionary lacks),
@@ -36,6 +41,7 @@ pub fn write_entry(
 ) -> Result<(), String> {
     let file = path.display().to_string();
     check(&file, word, reading, dict)?;
+    let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut entries = match std::fs::read_to_string(path) {
         Ok(text) => match serde_json::from_str::<Value>(&text) {
             Ok(Value::Object(map)) => map,
