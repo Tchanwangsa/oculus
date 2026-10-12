@@ -33,14 +33,39 @@ WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-
 | Institution profile: the Canvas address, sign-in detection, the UniMelb migration, telling keyd | `app/src-tauri/src/sources/institution/` |
 | The site keyd sends the session to, and `site_set` | `app/keyd/core/src/site.rs`, `app/keyd/core/src/ops/site.rs` |
 | Canvas address UI, the profile on the frontend | `app/src/components/settings/web/CanvasAddress.tsx`, `app/src/stores/sync/institutionStore.ts` |
+| The guard that no university or single region is named in app code | `app/tests/repo/uniAgnostic.test.ts` |
 | Start over | `app/src-tauri/src/library/storage/start_over.rs`, `app/src/components/settings/library/StartOver.tsx` |
+
+## Oculus works at any university
+
+Every student types their own Canvas address, so nothing in app code may
+assume which university, or which region of a service, they are at.
+
+- **What differs per university comes from the profile**
+  ([below](#one-institution-profile-says-which-university)): Rust through
+  `sources::institution` (`canvas_base`, `current`, `load`), the frontend
+  through `institutionStore`. A link the frontend builds before the profile
+  has loaded is resolved when clicked (`canvasFileLink` in
+  `app/src/lib/files/canvasLinks.ts`).
+- **What a launch reveals is learned, then saved to the profile**: Ed's API
+  host and web region from the page its LTI launch lands on, the Echo360
+  tool from the course's tabs. A feature that needs one before any launch
+  says so in its error rather than guessing a region.
+- **A regional service is checked against all of its regions**, never one:
+  Echo360's hosts are listed in `app/src-tauri/src/sources/echo360/embed/region.rs`, and
+  the calls after a launch go to the host it landed on.
+- **UniMelb appears only where an install from before the profile needs it**:
+  `institution::unimelb()`, keyd's `Site::unimelb()` and tests.
+  `app/tests/repo/uniAgnostic.test.ts` scans app code (comments, tests and
+  fixtures aside) for a university's domain or a single Echo360 or Ed region
+  and fails `bun run test` on a hit outside those files.
 
 ## One institution profile says which university
 
 `institution.json` in the data dir holds the Canvas address (`https://host`),
 the path the sign-in window opens, the IdP type (`okta` or `other`) and its
 host, and what launches have learned: the Echo360 tool fallback and lead-in,
-Ed's API base, course-code prefixes that are never subjects. It is a file, not
+Ed's API base and web region, course-code prefixes that are never subjects. It is a file, not
 a `settings` row, because synchronous code needs the Canvas host without a
 database pool; reads are cached on the file's mtime, so the CLI and the app see
 each other's writes.
