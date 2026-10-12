@@ -166,7 +166,7 @@
     "highlightText": "onAccent",
     "highlightStyle": "pill",
     "plate": "ink",
-    "plateOpacity": 0.72,
+    "plateOpacity": 0.8,
     "position": "bottom",
     "margin": 0.05,
     "maxChars": 42,
