@@ -239,7 +239,7 @@ export const music = {
   /** From the stored login; `needs_login` when there is none. */
   connect: () => invoke("music_connect"),
   /** Sent whenever the player opens (the rail popover, `/music`): Rust
-   *  checks the connection now and reconnects one that died or slept,
+   *  checks the session now and reconnects one that died,
    *  cuts a backoff short, or starts a session while Settings → Music is on.
    *  Otherwise nothing, and no network call. */
   wake: () => invoke("music_wake"),

@@ -68,7 +68,7 @@ impl Stamp {
         self.wall.elapsed().unwrap_or_else(|_| self.mono.elapsed())
     }
 
-    /// Whether the Mac slept since this stamp.
+    /// Whether the Mac slept since this stamp, taken a poll tick ago.
     pub(super) fn slept(&self) -> bool {
         let wall = self.wall.elapsed().unwrap_or_default();
         slept(wall, self.mono.elapsed())

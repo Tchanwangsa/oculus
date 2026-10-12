@@ -40,17 +40,19 @@ fn a_connection_that_keeps_dropping_at_once_backs_off() {
 }
 
 #[test]
-fn wall_time_running_ahead_of_awake_time_means_the_mac_slept() {
-    let awake = Duration::from_secs(100);
-    assert!(!slept(awake, awake));
-    // Clocks drift and wake late by a few seconds; that is not sleep.
-    assert!(!slept(awake + Duration::from_secs(5), awake));
-    assert!(!slept(awake + SLEPT_AFTER, awake));
-    assert!(slept(awake + SLEPT_AFTER + Duration::from_secs(1), awake));
-    assert!(slept(
-        Duration::from_secs(8 * 3600),
-        Duration::from_secs(20)
-    ));
+fn a_tick_whose_wall_time_ran_ahead_of_its_awake_time_means_the_mac_just_woke() {
+    // One poll tick apart: a second on both clocks is no sleep.
+    let tick = Duration::from_secs(1);
+    assert!(!slept(tick, tick));
+    // A night between two ticks, about a second of it awake.
+    assert!(slept(Duration::from_secs(8 * 3600), tick));
+    // A tick held up while awake is late on both clocks: no sleep.
+    let late = Duration::from_secs(100);
+    assert!(!slept(late, late));
+    // Clocks drift by a few seconds; that is not sleep.
+    assert!(!slept(tick + Duration::from_secs(5), tick));
+    assert!(!slept(tick + SLEPT_AFTER, tick));
+    assert!(slept(tick + SLEPT_AFTER + Duration::from_secs(1), tick));
     // A wall clock set back is not sleep.
-    assert!(!slept(Duration::ZERO, awake));
+    assert!(!slept(Duration::ZERO, tick));
 }

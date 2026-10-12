@@ -1,8 +1,8 @@
 //! The session task: one player, and a Session + Spirc pair rebuilt whenever
 //! the connection drops without a stop. A Session cannot be reused once its
 //! Spirc has ended (its dealer listeners stay registered), so each attempt
-//! gets a new one and the player is handed it. A drop is noticed within a
-//! second (`link.rs`) and reconnects at once; attempts that fail back off
+//! gets a new one and the player is handed it. A drop, or the Mac waking, is
+//! noticed within a second (`link.rs`) and reconnects at once; attempts that fail back off
 //! (`policy.rs`). What Oculus was playing at the drop is resumed once the new
 //! connection is up (`resume.rs`). An auth error stops the task with the
 //! reason in the snapshot: it is never retried in a loop.
@@ -253,7 +253,7 @@ impl Link<'_> {
 
                     let connected = Stamp::now();
                     tokio::pin!(task);
-                    let why = self.linked(&session, task.as_mut(), &connected).await;
+                    let why = self.linked(&session, task.as_mut()).await;
                     if why == Unlinked::Stopped {
                         // `stop_run` has sent the Spirc its shutdown.
                         if tokio::time::timeout(SHUTDOWN_GRACE, &mut task)

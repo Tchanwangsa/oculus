@@ -228,7 +228,11 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    Spirc checks only on its next wake (a push, a player event, a command).
    So while a link is up the task polls `is_invalid()` every second
    (`session/link.rs`), and also ends the link when the Spirc's task ends by
-   itself.
+   itself. The same tick sees the Mac wake: more than 30 s more wall-clock
+   time than `Instant` time (which stops during macOS sleep) since the tick
+   before ends the link at once, since a socket dead across sleep is
+   otherwise noticed only after up to 80 s awake. A link that has lived
+   through a sleep and stayed up is never torn down for it later.
 5. **A drop reconnects at once.** The link's end keeps what Oculus played for
    the resume (below), pauses the player there, shuts the session down and
    wakes a Spirc still running with `disconnect(false)` (an inactive one
@@ -256,11 +260,9 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    another device.
 8. **`music_wake`**, sent whenever the rail popover opens or `/music` comes
    into view, makes the connection sound when the user looks: the running
-   task checks its link at once and reconnects when the session is invalid
-   or when the Mac slept since it connected (wall-clock time ahead of
-   `Instant`, which stops during macOS sleep, by more than 30 s; a socket
-   dead across sleep is otherwise noticed only after up to 80 s awake), and
-   a backoff in progress is cut short. With no run it starts one from the
+   task checks its session at once and reconnects when it is invalid, and
+   a backoff in progress is cut short. Sleep is the link's own tick's to
+   see, not `music_wake`'s. With no run it starts one from the
    stored login while Settings → Music is on, unless a login is needed or
    waiting, or the user pressed Disconnect. Otherwise it does nothing and
    makes no network call.
@@ -491,7 +493,7 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_state` | The snapshot |
 | `music_login` | Stops any session, opens the login, connects once it is approved |
 | `music_connect` | Connects from keyd's credentials; `needs_login` when there are none |
-| `music_wake` | Sent when the player opens: reconnects a dead or slept link, cuts a backoff short, or starts a session while the switch is on ([above](#one-session-task-reconnects-at-once-and-stops-on-an-auth-error)) |
+| `music_wake` | Sent when the player opens: reconnects a dead session, cuts a backoff short, or starts a session while the switch is on ([above](#one-session-task-reconnects-at-once-and-stops-on-an-auth-error)) |
 | `music_disconnect` | Stops the session and any waiting login; keeps the credentials; nothing reconnects by itself until a connect |
 | `music_sign_out` | Disconnects and deletes `music.spotify` from keyd |
 | `music_play_pause`, `music_play`, `music_pause_player`, `music_next`, `music_prev` | Playback of the device playing, here or another ([routing](#commands-control-the-device-playing-wherever-it-is)); with nothing playing, play loads what the player shows; `music_prev` sends nothing to a device that forbids it |
@@ -519,7 +521,7 @@ session.
 - A command sent right after `transfer` is still dropped — wait for `active` (`control.rs`).
 - A Session whose Spirc ended cannot connect again — make a new one and `set_session`.
 - A closed Session is seen by the Spirc only on its next wake — the link polls `is_invalid()` every second (`session/link.rs`).
-- `Instant` stops while the Mac sleeps — the sleep check compares it with the wall clock; positions advance by it on purpose.
+- `Instant` stops while the Mac sleeps — the per-tick sleep check compares it with the wall clock; positions advance by it on purpose.
 - `Playing` is not proof of audio — a missing audio key plays silence; watch `error`.
 - Constructing librespot's `Cache` writes the account's credentials to disk in plain text — never use it.
 - `music_play_pause` from the exclusive-playback rule would start music it meant to stop, and `music_pause_player` would pause a phone — the rule uses `music_pause`.

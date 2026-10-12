@@ -2,6 +2,8 @@
 //! Session invalid but has no notifier, and the Spirc only checks on its next
 //! wake (a push, a player event or a command), so a drop could go unseen
 //! until the user acted: the link polls the session every second instead.
+//! The same poll sees the Mac wake, and reconnects at once: a socket that
+//! died in sleep is otherwise only noticed after up to 80 s awake.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -26,8 +28,8 @@ pub(super) enum Unlinked {
     Ended,
     /// librespot marked the session invalid: its connection closed.
     Closed,
-    /// `music_wake` found the Mac slept since the link was made: a socket
-    /// that died in sleep is only noticed after up to 80 s awake.
+    /// The Mac has just woken: a poll tick found more wall-clock time than
+    /// awake time since the one before.
     Slept,
 }
 
@@ -43,15 +45,16 @@ impl Unlinked {
 }
 
 impl Link<'_> {
-    /// Waits while the link is up, which `connected` stamps.
+    /// Waits while the link is up. `music_wake` checks the session at once;
+    /// a sleep is seen by the tick after it, whoever is looking.
     pub(super) async fn linked<F: Future<Output = ()>>(
         &mut self,
         session: &Session,
         mut task: Pin<&mut F>,
-        connected: &Stamp,
     ) -> Unlinked {
         let mut poll = tokio::time::interval(POLL);
         poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let mut last_tick = Stamp::now();
         loop {
             tokio::select! {
                 _ = task.as_mut() => return Unlinked::Ended,
@@ -60,14 +63,15 @@ impl Link<'_> {
                     if session.is_invalid() {
                         return Unlinked::Closed;
                     }
+                    if last_tick.slept() {
+                        return Unlinked::Slept;
+                    }
+                    last_tick = Stamp::now();
                     state::tick(self.app);
                 }
                 _ = self.wake.notified() => {
                     if session.is_invalid() {
                         return Unlinked::Closed;
-                    }
-                    if connected.slept() {
-                        return Unlinked::Slept;
                     }
                 }
             }

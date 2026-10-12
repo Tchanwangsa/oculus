@@ -80,8 +80,8 @@ pub fn music_connect(app: AppHandle) {
 
 /// What opening the rail's player or `/music` sends, on every open, so the
 /// connection is sound when the user looks: the session task checks its
-/// link now (a closed session, or the Mac having slept since it connected,
-/// reconnects) and a backoff is cut short. With no session, one starts from
+/// session now (a closed one reconnects) and a backoff is cut short.
+/// Sleep is not its to check: the link reconnects on waking by itself. With no session, one starts from
 /// the stored login while Settings → Music is on, unless a login is needed
 /// or the user disconnected. Otherwise nothing, and no network call.
 #[tauri::command]
