@@ -4,7 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NowPlaying } from "@/components/music/NowPlaying";
 import { shownPlayback } from "@/lib/music";
-import { navigateActive } from "@/lib/shell/tabRouters";
+import { openBeside } from "@/lib/shell/tabRouters";
 import { cn } from "@/lib/utils";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
 import { useMusicPrefsStore } from "@/stores/music/musicPrefsStore";
@@ -69,7 +69,7 @@ export function MusicTile() {
           error={error}
           onOpenPlayer={() => {
             setOpen(false);
-            navigateActive("/music");
+            openBeside("/music");
           }}
         />
       </PopoverContent>

@@ -21,6 +21,9 @@ function noEditorShadowInBuild(): Plugin {
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss(), noEditorShadowInBuild()],
+  // Per checkout, not in node_modules: a worktree that symlinks the main
+  // checkout's node_modules would otherwise re-optimize the live dev server's deps.
+  cacheDir: ".vite",
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
