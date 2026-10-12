@@ -1,8 +1,10 @@
 import { LectureRow } from "@/components/lectures/LectureRow";
 import { SubjectPage } from "@/components/subjects/SubjectPage";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowsClockwise,
+  CaretDown,
+  CaretRight,
   Play,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -14,16 +16,17 @@ import {
   wasCancelled,
 } from "@/stores/lectures/lectureDownloadStore";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { ListCard } from "@/components/ui/layout/PageParts";
 import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   getLectures,
+  getCalendarEvents,
   setLectureDone,
   upsertLectures,
   type Lecture,
   type LectureData,
+  type DbCalendarEvent,
 } from "@/lib/db";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { sideFront, useTabStore } from "@/stores/shell/tabStore";
@@ -37,11 +40,14 @@ import {
   lecturePageId,
   lecturePagePath,
 } from "@/lib/lectures";
+import { groupLecturesByWeek } from "@/lib/lectures/weeks";
+import { CALENDAR_UPDATED_EVENT } from "@/lib/planning/calendar/model";
 
 /** The subject's lectures. Selecting one opens its page in the side panel. */
 export default function SubjectLecturesPage() {
   const subject = useSubject();
   const [lectures, setLectures] = useState<Lecture[]>([]);
+  const [calendar, setCalendar] = useState<DbCalendarEvent[]>([]);
   // The row lit is the lecture in front of this tab's side panel, so sending
   // it to the back or closing the panel un-highlights it.
   const { tabId } = usePaneTab();
@@ -52,6 +58,8 @@ export default function SubjectLecturesPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Lecture | null>(null);
+  const [collapsedWeeks, setCollapsedWeeks] = useState<Set<number>>(new Set());
+  const weeks = useMemo(() => groupLecturesByWeek(lectures, calendar), [lectures, calendar]);
 
   const refreshLectures = useCallback(async () => {
     const rows = await getLectures(subject.id);
@@ -62,6 +70,19 @@ export default function SubjectLecturesPage() {
   useEffect(() => {
     refreshLectures();
   }, [refreshLectures]);
+
+  const refreshCalendar = useCallback(async () => {
+    const rows = await getCalendarEvents();
+    setCalendar(rows.filter((event) => event.subject_id === subject.id));
+  }, [subject.id]);
+  useEffect(() => {
+    setCollapsedWeeks(new Set());
+    setCalendar([]);
+    refreshCalendar().catch((e) => setSyncError(`Could not load the calendar: ${e}`));
+  }, [refreshCalendar]);
+  useWindowEvent(CALENDAR_UPDATED_EVENT, () => {
+    refreshCalendar().catch((e) => setSyncError(`Could not load the calendar: ${e}`));
+  });
 
   // Re-read on any lecture write: a player beside the list (the side panel)
   // saving progress, a download once the finished file is in the DB.
@@ -151,19 +172,50 @@ export default function SubjectLecturesPage() {
             <p className="text-sm text-muted-foreground">No lectures synced yet.</p>
           </div>
         ) : (
-          <ListCard>
-            {lectures.map((lec) => (
-              <LectureRow
-                key={lec.id}
-                lecture={lec}
-                active={selectedId === lec.id}
-                onSelect={handleSelectLecture}
-                onDownload={handleDownload}
-                onDelete={setPendingDelete}
-                onToggleDone={handleToggleDone}
-              />
-            ))}
-          </ListCard>
+          <div>
+            {weeks.map(({ key, week, isBreak, lectures: weekLectures, start, end }) => {
+              const open = !collapsedWeeks.has(key);
+              return (
+                <section key={key} className={`mb-5 last:mb-0 ${isBreak ? "rounded-lg bg-muted/40 px-2" : ""}`}>
+                  <button
+                    type="button"
+                    aria-expanded={open}
+                    disabled={weekLectures.length === 0}
+                    onClick={() => setCollapsedWeeks((prev) => {
+                      const next = new Set(prev);
+                      if (open) next.add(key);
+                      else next.delete(key);
+                      return next;
+                    })}
+                    className="mb-1 flex w-full items-center gap-2 py-2 text-left"
+                  >
+                    {weekLectures.length === 0 ? <span className="w-3" /> : open ? <CaretDown size={12} className="text-muted-foreground" /> : <CaretRight size={12} className="text-muted-foreground" />}
+                    <span className={`text-[13px] font-medium ${isBreak ? "text-muted-foreground" : "text-foreground"}`}>{isBreak ? "Break" : week === null ? "Undated" : `Week ${week}`}</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {weekLectures.length > 0 ? `${weekLectures.length} ${weekLectures.length === 1 ? "lecture" : "lectures"}` : isBreak ? "No scheduled lectures" : "No recordings"}
+                      {start && (start === end ? ` · ${start}` : ` · ${start} – ${end}`)}
+                    </span>
+                  </button>
+                  {open && weekLectures.length > 0 && (
+                    <div className="divide-y divide-border-subtle border-y border-border-subtle">
+                      {weekLectures.map((lec) => (
+                        <LectureRow
+                          key={lec.id}
+                          lecture={lec}
+                          muted={isBreak}
+                          active={selectedId === lec.id}
+                          onSelect={handleSelectLecture}
+                          onDownload={handleDownload}
+                          onDelete={setPendingDelete}
+                          onToggleDone={handleToggleDone}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
         )}
       </SubjectPage>
 

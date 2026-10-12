@@ -67,7 +67,7 @@ export default function SubjectModulesPage() {
         </Button>
       </div>
 
-      <div className="space-y-2.5">
+      <div>
         {modules.map((mod) => (
           <ModuleCard
             key={mod.relPath}

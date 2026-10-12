@@ -40,17 +40,30 @@ export function ItemRow({
     : null;
   const Icon = itemIcon(item, target);
 
+  const itemTone = item.kind === "quiz" || item.kind === "assignment"
+    ? "text-reference-task"
+    : item.kind === "external"
+      ? "text-reference-discussion"
+      : target?.category === "document" || target?.category === "page"
+        ? "text-reference-page"
+        : /\.pdf$/i.test(target?.filename ?? item.href ?? "")
+          ? "text-reference-pdf"
+          : /\.(docx?|pptx?)$/i.test(target?.filename ?? item.href ?? "")
+            ? "text-reference-document"
+          : item.kind === "video"
+            ? "text-reference-lecture"
+            : "text-muted-foreground";
+
   const inner = (
     <>
-      <span className="shrink-0" style={{ width: item.indent * 14 }} />
-      <Icon size={13} className="shrink-0 opacity-60" />
+      <Icon size={14} className={`shrink-0 ${itemTone}`} />
       <span className="text-[12px] truncate flex-1">{item.title}</span>
       {target && <FileRecency file={target} />}
     </>
   );
 
   const rowClass =
-    "w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors";
+    "w-full flex items-center gap-2.5 px-0 py-2 text-left transition-colors";
 
   if (target) {
     return (

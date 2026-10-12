@@ -76,6 +76,7 @@
   /* Content reference glyphs, kept separate from the shell's brand colour. */
   --color-reference-pdf:        #d74747;
   --color-reference-page:       #8654c8;
+  --color-reference-document:   #3682b6;
   --color-reference-task:       #24876a;
   --color-reference-project:    #b17b22;
   --color-reference-discussion: #3682b6;
