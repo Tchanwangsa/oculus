@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::harness::child::{self, ChildProc};
-use crate::harness::event::Provider;
+use crate::harness::event::{HarnessEvent, Provider};
 use crate::harness::Sink;
 
 use super::settings::settings_json;
@@ -23,9 +23,11 @@ pub struct ClaudeSession {
     pub(super) interrupting: Arc<AtomicBool>,
     /// Control requests (only `rewind`) waiting on their `control_response`.
     pub(super) pending: Mutex<HashMap<String, mpsc::Sender<Value>>>,
-    /// Set between a message going in and the `result` that closes its turn,
-    /// so a process that dies before its first stream event (a rejected model
-    /// name) still emits the `TurnFinished` the manager's queue waits on.
+    /// Set between a message going in and its turn opening (or, for a turn
+    /// that never opens, its `result`), so a process that dies before its
+    /// first stream event (a rejected model name) still emits the
+    /// `TurnFinished` the manager's queue waits on. A turn that opens without
+    /// it is the CLI's own ([`crate::harness::HarnessEvent::UnpromptedTurn`]).
     pub(super) expecting: Arc<AtomicBool>,
 }
 
@@ -102,8 +104,19 @@ impl ClaudeSession {
                     sink(ev);
                 }
             });
+            for ev in state.close() {
+                sink(ev);
+            }
             reader_session.proc.finish(&sink, Provider::Claude, || {
-                expecting.swap(false, Ordering::SeqCst) || state.turn_open
+                let sent = expecting.swap(false, Ordering::SeqCst);
+                // A send that raced a turn the CLI started itself: both
+                // claims need their `TurnFinished`.
+                if sent && state.turn_open {
+                    sink(HarnessEvent::TurnFinished {
+                        status: "failed".into(),
+                    });
+                }
+                sent || state.turn_open
             });
         });
 

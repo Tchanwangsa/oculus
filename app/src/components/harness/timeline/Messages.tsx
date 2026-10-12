@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format/format";
-import { messageAt, type HarnessItem } from "@/lib/harness";
+import { messageAt, unpromptedAfter, type HarnessItem } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { Action, Assistant, CopyAction, MessageActions } from "./MessageActions";
 import { QuestionBubble } from "./QuestionBubble";
@@ -67,6 +67,18 @@ export const Reply = memo(function Reply({
 export const Stopped = memo(function Stopped() {
   return (
     <div className="py-1 text-center text-[11px] text-muted-foreground">You stopped the response</div>
+  );
+});
+
+/** Where the agent went on without a message: a background task finished. */
+export const Unprompted = memo(function Unprompted({ item }: { item: HarnessItem }) {
+  const names = unpromptedAfter(item).map((n) => `“${n}”`);
+  const list =
+    names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+  return (
+    <div className="py-1 text-center text-[11px] text-muted-foreground">
+      {list ? `Continued after ${list} finished` : "Continued on its own"}
+    </div>
   );
 });
 

@@ -48,6 +48,14 @@ pub async fn apply(
                 .map(Some)
         }
         HarnessEvent::TurnStarted => set_status(pool, thread_id, "running").await.map(|_| None),
+        // A row, so a reload still shows why the agent went on unasked.
+        HarnessEvent::UnpromptedTurn { after } => {
+            set_status(pool, thread_id, "running").await?;
+            let meta = serde_json::json!({ "after": after }).to_string();
+            insert_item(pool, thread_id, "unprompted", None, None, Some(meta))
+                .await
+                .map(Some)
+        }
         HarnessEvent::TurnAnchor { anchor } => {
             // The newest question is this turn's: one turn per thread runs at a time.
             sqlx::query(

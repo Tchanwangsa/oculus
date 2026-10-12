@@ -74,6 +74,11 @@ pub fn init(app: &AppHandle) -> HarnessState {
                     }
                 }
             }
+            // A turn the provider started itself holds the thread like a
+            // send, so a message typed meanwhile waits its own turn.
+            if thread_id > 0 && matches!(&ev, HarnessEvent::UnpromptedTurn { .. }) {
+                queued.lock().unwrap().hold(thread_id);
+            }
             // A closed turn releases the next queued message; its send is
             // spawned, since a send may start a process.
             if thread_id > 0 && matches!(&ev, HarnessEvent::TurnFinished { .. }) {

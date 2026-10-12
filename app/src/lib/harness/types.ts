@@ -15,6 +15,10 @@ type HarnessEvent =
   | { type: "session_started"; provider_session_id: string; model: string | null; cwd: string }
   /** `at`: playhead second for a message sent from the lecture dock. */
   | { type: "user_message"; text: string; at?: number | null }
+  /** A turn the agent started itself (Claude picking up a finished
+   *  background task); `after` names those tasks. Holds the thread until its
+   *  `turn_finished`, like a sent message. */
+  | { type: "unprompted_turn"; after: string[] }
   | { type: "turn_started" }
   | { type: "assistant_delta"; text: string }
   | { type: "thinking_delta"; text: string }
@@ -93,7 +97,9 @@ type ItemKind =
   | "error"
   | "interrupted"
   /** `meta` is `PermissionMeta`. */
-  | "permission";
+  | "permission"
+  /** Marks a turn the agent started itself; `meta` is `{ after: string[] }`. */
+  | "unprompted";
 
 /** Held in Rust's memory, not the database, until it goes out. */
 export interface QueuedMessage {

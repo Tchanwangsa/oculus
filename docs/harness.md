@@ -47,8 +47,8 @@ Settings row directs installation and updates to a terminal.
 ## Four dialects become one event stream
 
 Every bridge translates into `HarnessEvent` (session, user message, turn,
-text/reasoning deltas, tool started/output/finished, usage, rate limits,
-error, exited). `ThreadTitled`, `Queued`/`Unqueued`, `Rewound` and
+unprompted turn, text/reasoning deltas, tool started/output/finished, usage,
+rate limits, error, exited). `ThreadTitled`, `Queued`/`Unqueued`, `Rewound` and
 `TurnAnchor` have no provider behind them but ride the same path so they are
 persisted the same way. `classify` in `event/classify.rs` is the one tool table.
 
@@ -411,10 +411,23 @@ turn (the first answer can vanish), and opencode's v1 API has no queue. A
 queued message has no row, so it can be edited or removed; `harness_queued`
 restores it after a reload.
 
-The queue drains only if every accepted message gets exactly one
-`TurnFinished`: Claude's `expecting` flag closes a turn whose process died
-early, and Codex takes the turn id from the `turn/start` reply, not the later
-`turn/started`.
+The queue drains only if every accepted message, and every turn the provider
+starts itself, gets exactly one `TurnFinished`: Claude's `expecting` flag
+closes a turn whose process died early, and Codex takes the turn id from the
+`turn/start` reply, not the later `turn/started`.
+
+Claude runs `Agent` (and a backgrounded Bash) in the background, and when one
+finishes the CLI starts a turn on its own. The bridge drops the subagent's
+lines (tagged `parent_tool_use_id`), keeps the tool row running until the
+task's `task_notification`, and announces the CLI's turn with
+`UnpromptedTurn`: a row ("Continued after … finished") and a `Queue::hold`,
+so a message typed meanwhile waits. `expecting` is what tells the two apart —
+set by `send`, consumed when a turn opens. The turn gets no anchor, since its
+question is the CLI's synthetic notification row; rewinds name the student's
+question. Recorded in
+`app/src-tauri/fixtures/harness/claude-background-agent.ndjson` (the task
+outlives its turn) and `claude-background-agent-fast.ndjson` (it finishes
+inside it).
 
 **Stop** interrupts and hands queued text back to the composer
 (`harness_interrupt`); `restore` is `ChatPage`'s own state, since a store slot
