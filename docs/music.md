@@ -67,7 +67,9 @@ switch is on.
   rule, only while the switch is on and a session is up or a track is
   loaded; otherwise it is not drawn. It shows the cover (a note glyph without
   one) with the rail's corner marks: a spinner while connecting, a brand dot
-  while playing. A click opens a popover below and to its right: the track,
+  while playing. The tile is selected while its popover is open or the focused
+  pane is on `/music`; without a cover, its selected note glyph is filled.
+  A click opens a popover below and to its right: the track,
   seek, previous / play-pause / next, volume with the device button, and
   "Open player".
 - **The device button** (`DeviceMenu`, ending the volume row here and on
