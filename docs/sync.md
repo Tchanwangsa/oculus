@@ -335,6 +335,8 @@ and `url` (`/courses/<c>/discussion/<t>`, also the file's `source_url`). A
 top-level category takes Ed's colour for its position among the course's
 `settings.discussion.categories`, from the `/api/user` enrolment; past Ed's 16
 colours, or with no list, it is `null` (`app/src-tauri/src/sources/ed/palette.rs`).
+When the URL is known, a thread's text carries `[Open in Ed](url)` under its
+**By:** line, and a slide's under its title.
 
 The sync reads threads and slides without `?view=1`, so a scrape never counts
 as reading them in Ed. Opening a thread or a lesson slide in the app sends the

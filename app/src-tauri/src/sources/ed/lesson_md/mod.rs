@@ -244,7 +244,11 @@ pub fn slide_md(lesson: &Value, place: &LessonPlace, slide: &SlideFile) -> Optio
         ("url", json!(place.slide_url(slide.id))),
     ]);
     let body = slide_body(slide.slide, &title, &slide.extras, &place.slide_dir());
-    Some(front + &finish(&format!("# {title}\n\n{body}\n")))
+    let open = place
+        .slide_url(slide.id)
+        .map(|url| format!("[Open in Ed]({url})\n\n"))
+        .unwrap_or_default();
+    Some(front + &finish(&format!("# {title}\n\n{open}{body}\n")))
 }
 
 /// `path` relative to `dir`, as written in front matter (not encoded).

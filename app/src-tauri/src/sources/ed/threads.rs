@@ -124,10 +124,18 @@ pub fn thread_md(listing: &serde_json::Value, detail: &serde_json::Value, board:
     }
     md.push_str(&format!("**{}**  \n", meta.join(" · ")));
     md.push_str(&format!(
-        "**By:** {} · {}\n\n---\n\n",
+        "**By:** {} · {}",
         author_name(thread, &users),
         fmt_ts(thread["created_at"].as_str().unwrap_or(""))
     ));
+    let id = thread["id"].as_i64().or(listing["id"].as_i64());
+    if let (Some(region), Some(id)) = (board.region, id) {
+        md.push_str(&format!(
+            "  \n[Open in Ed]({})",
+            thread_url(region, board.course_id, id)
+        ));
+    }
+    md.push_str("\n\n---\n\n");
 
     md.push_str(&content_md(thread));
     md.push('\n');

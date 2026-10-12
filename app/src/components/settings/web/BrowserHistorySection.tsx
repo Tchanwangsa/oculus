@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Section } from "@/components/settings/shared/section";
 import { cn } from "@/lib/utils";
-import { openExternal } from "@/lib/browser";
+import { openLink } from "@/lib/shell/tabRouters";
 import { fmtDayHeading, sqliteUtcToMs } from "@/lib/format/format";
 import {
   clearHistory,
@@ -139,7 +139,7 @@ export function BrowserHistorySection() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => void openExternal(entry.url)}
+                      onClick={() => void openLink(entry.url)}
                       className="min-w-0 flex-1 text-left"
                     >
                       <span className="block truncate text-[12px] text-foreground">

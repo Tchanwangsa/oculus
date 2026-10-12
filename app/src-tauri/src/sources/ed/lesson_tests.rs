@@ -301,6 +301,7 @@ fn a_slide_file_is_its_front_matter_title_and_content() {
          url: \"https://edstem.org/au/courses/38775/lessons/120619/slides/563686\"\n\
          ---\n\
          # Lecture 18 Missed Segment\n\n\
+         [Open in Ed](https://edstem.org/au/courses/38775/lessons/120619/slides/563686)\n\n\
          [Lecture 18 Missed Segment](https://echo360.net.au/media/57d34ab4-6eeb-41cd-bb8d-08f47ea8f441/public)\n"
     );
 }
@@ -327,7 +328,11 @@ fn the_fixture_lesson_renders_every_slide_type() {
         "https://edstem.org/au/courses/38775/lessons/120619/slides/831114"
     );
     assert!(
-        body.starts_with("# Q1: Tutorial [3 marks]\n\nThe player starts"),
+        body.starts_with(
+            "# Q1: Tutorial [3 marks]\n\n\
+             [Open in Ed](https://edstem.org/au/courses/38775/lessons/120619/slides/831114)\n\n\
+             The player starts"
+        ),
         "{body}"
     );
     assert!(
@@ -360,8 +365,7 @@ fn the_fixture_lesson_renders_every_slide_type() {
     assert!(quiz.contains("### Question 1"), "{quiz}");
     // jupyter with no files: the note
     assert!(
-        md(582857)
-            .contains("# Text Processing & BoW\n\n_The challenge's files could not be fetched._"),
+        md(582857).contains("/slides/582857)\n\n_The challenge's files could not be fetched._"),
         "{}",
         md(582857)
     );

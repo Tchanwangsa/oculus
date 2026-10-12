@@ -1,9 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowSquareOut, Globe } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
-import { isWebUrl, openExternal } from "@/lib/browser";
-import { edThreadId, isEdUrl } from "@/lib/ed/links";
+import { isWebUrl } from "@/lib/browser";
+import { edThreadId } from "@/lib/ed/links";
+import { OpenOriginal } from "@/components/files/OpenOriginal";
 import { markEdViewed } from "@/lib/ed/views";
 import {
   DocumentControls,
@@ -176,16 +175,7 @@ export default function SubjectFilePage() {
             this opens the original, embeds and styling included, in a
             browser tab. The lesson view has its own, for the shown slide. */}
         {!isDocument && !isLessonView && isWebUrl(file.source_url) && (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={isEdUrl(file.source_url) ? "Open in Ed" : "Open in browser"}
-            title={isEdUrl(file.source_url) ? "Open in Ed" : "Open in browser"}
-            onClick={(e) => void openExternal(file.source_url!, e.metaKey)}
-            className="shrink-0 text-muted-foreground hover:text-foreground"
-          >
-            {isEdUrl(file.source_url) ? <ArrowSquareOut size={14} /> : <Globe size={14} />}
-          </Button>
+          <OpenOriginal href={file.source_url!} />
         )}
       </PaneHeaderRow>
       <div ref={setBody} className="flex-1 min-h-0 overflow-hidden flex flex-col">

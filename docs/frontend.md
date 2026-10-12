@@ -86,8 +86,7 @@ the row and in its filter's options (`discussion/ThreadIcons.tsx`): a Phosphor
 icon per thread type, a filled tick for answered and a hollow circle for
 unanswered questions, and Ed's own colour square before a category (muted when
 the colour is unknown). A row with an Ed link shows *Open in Ed* on hover
-(⌘ opens the system browser); a thread's file page offers the same in its
-header, decided by the `source_url` host (`isEdUrl`, `app/src/lib/ed/links.ts`).
+(⌘ for a new tab); a thread's file page offers the same in its header, decided by the `source_url` host (`isEdUrl`, `app/src/lib/ed/links.ts`).
 
 `parseEdThread` reads a thread's JSON front matter (number, type, answered,
 category path, category colour, URL) and falls back to the

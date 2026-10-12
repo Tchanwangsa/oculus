@@ -420,7 +420,8 @@ has applied the migrations fail quietly and later ones retry.
 
 ## The main window holds one webview per browser tab and messaging service
 
-External links open as in-app browser tabs: each is a child webview of remote
+External links open as in-app browser pages, beside the page or (⌘-click) as
+a tab (`openLink`, [shell.md](./shell.md)): each is a child webview of remote
 content placed under the slot the `/browse/:id` route leaves in the content
 card ([viewers.md](./viewers.md#the-in-app-browser-is-a-native-page-per-tab-owned-by-rust)). The frontend reports that slot as window
 insets and Rust lays pages out from them, so a resize never waits on
