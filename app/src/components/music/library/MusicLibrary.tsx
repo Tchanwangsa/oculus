@@ -3,6 +3,7 @@ import { ArrowClockwise, CaretLeft } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { SkeletonRows } from "@/components/ui/layout/PageParts";
 import { PillTabs } from "@/components/ui/table/PillTabs";
+import { useRecentlyPlayed } from "@/hooks/music/useRecentlyPlayed";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { cn } from "@/lib/utils";
 import {
@@ -17,6 +18,7 @@ import {
 import { LibraryRow } from "./LibraryRow";
 import { LibrarySearch } from "./LibrarySearch";
 import { PlaylistView, type OpenedList } from "./PlaylistView";
+import { RecentlyPlayed } from "./RecentlyPlayed";
 import { SearchGroups, searchFilters, type SearchFilter } from "./SearchGroups";
 
 interface Search {
@@ -30,6 +32,13 @@ interface Search {
 const AUTO_MIN_CHARS = 4;
 const AUTO_DELAY_MS = 500;
 
+type LibraryTab = "playlists" | "recent";
+
+const LIBRARY_TABS: ReadonlyArray<{ value: LibraryTab; label: string }> = [
+  { value: "playlists", label: "Playlists" },
+  { value: "recent", label: "Recently played" },
+];
+
 /** Playlists Spotify gives no picture for, which get one made. */
 function coverless(list: MusicPlaylist[]): string[] {
   return list.filter((p) => p.images.length === 0).map((p) => p.uri);
@@ -37,15 +46,19 @@ function coverless(list: MusicPlaylist[]): string[] {
 
 /**
  * The player's browser: the account's playlists, one of them opened to its
- * tracks, and a search that replaces them while it has results, its albums
- * and playlists opening to their tracks over the results. All are
- * calls Spotify can rate-limit, so the playlists load once per mount (Rust
- * answers later mounts from memory until the refresh button asks again),
- * covers for playlists without a picture are filled in after the list, and
- * search runs on Enter or a pause in typing, never per keystroke.
+ * tracks, or, on the other tab, the tracks it played lately (Recently
+ * played), and a search that replaces them while it has results, its albums
+ * and playlists opening to their tracks over the results. All are calls
+ * Spotify can rate-limit, so the playlists load once per mount, and Recently
+ * played the first time its tab shows (Rust answers later mounts from memory
+ * until the refresh button asks again), covers for playlists without a
+ * picture are filled in after the list, and search runs on Enter or a pause
+ * in typing, never per keystroke.
  */
 export function MusicLibrary({ snapshot }: { snapshot: MusicSnapshot }) {
   const [playlists, setPlaylists] = useState<MusicPlaylist[] | null>(null);
+  const [tab, setTab] = useState<LibraryTab>("playlists");
+  const recent = useRecentlyPlayed(tab === "recent", snapshot.connected);
   /** The playlist opened to its tracks. */
   const [openUri, setOpenUri] = useState<string | null>(null);
   /** The playlists' scroll position when one was opened, put back on Back. */
@@ -64,7 +77,7 @@ export function MusicLibrary({ snapshot }: { snapshot: MusicSnapshot }) {
   const searched = useRef<string | null>(null);
   const asked = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  useScrollFade(scrollRef, "y", search ? `search:${filter}` : (openUri ?? "playlists"));
+  useScrollFade(scrollRef, "y", search ? `search:${filter}` : (openUri ?? tab));
 
   // A failure leaves the glyph: Rust logs it, and a rate limit already shows
   // on the next call that needs Spotify.
@@ -152,10 +165,10 @@ export function MusicLibrary({ snapshot }: { snapshot: MusicSnapshot }) {
     savedScroll.current = null;
   }, [openUri, search]);
 
-  // Another filter starts at the top of its list.
+  // Another filter or tab starts at the top of its list.
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
-  }, [filter]);
+  }, [filter, tab]);
 
   const clearSearch = () => {
     searchSeq.current++;
@@ -221,12 +234,14 @@ export function MusicLibrary({ snapshot }: { snapshot: MusicSnapshot }) {
             onClick={() => setOpenUri(null)}
           >
             <CaretLeft />
-            Your playlists
+            Playlists
           </Button>
-        ) : (
+        ) : search ? (
           <h2 className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-            {search ? `Results for “${search.query}”` : "Your playlists"}
+            Results for “{search.query}”
           </h2>
+        ) : (
+          <PillTabs tabs={LIBRARY_TABS} value={tab} onChange={setTab} className="-ml-2" />
         )}
         {search && !fromSearch && filters.length > 2 && (
           <PillTabs tabs={filters} value={filter} onChange={setFilter} className="shrink-0" />
@@ -235,9 +250,9 @@ export function MusicLibrary({ snapshot }: { snapshot: MusicSnapshot }) {
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label="Refresh playlists"
-            disabled={disabled || loading}
-            onClick={() => load(true)}
+            aria-label={tab === "recent" ? "Refresh recently played" : "Refresh playlists"}
+            disabled={disabled || (tab === "recent" ? recent.loading : loading)}
+            onClick={() => (tab === "recent" ? recent.load(true) : load(true))}
           >
             <ArrowClockwise size={12} />
           </Button>
@@ -281,6 +296,13 @@ export function MusicLibrary({ snapshot }: { snapshot: MusicSnapshot }) {
                     disabled={disabled}
                   />
                 )
+              ) : tab === "recent" ? (
+                <RecentlyPlayed
+                  played={recent.played}
+                  error={recent.error}
+                  currentUri={currentUri}
+                  disabled={disabled}
+                />
               ) : (
                 <>
                   {listError && <p className="px-2 pb-1 text-xs text-destructive">{listError}</p>}
@@ -297,6 +319,7 @@ export function MusicLibrary({ snapshot }: { snapshot: MusicSnapshot }) {
                         name={p.name}
                         subtitle={playlistSubtitle(p)}
                         images={p.images}
+                        pinned={p.pinned}
                         onPlay={() => openPlaylist(p.uri)}
                       />
                     ))

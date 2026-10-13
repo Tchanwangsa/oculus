@@ -1,7 +1,8 @@
 //! What the frontend mirrors (`Snapshot`, sent whole as `music-state` on every
 //! change) and the handles behind it: the live `Spirc` and `Session`, the
-//! running session task, a pending login, a held duck and what Oculus last
-//! played (`remembered.rs`, followed on every change). A session task tags
+//! running session task, a pending login, a held duck, what Oculus last
+//! played (`remembered.rs`) and the tracks it played (`recent_tracks/`),
+//! both followed on every change. A session task tags
 //! its writes with its run id, so a stopped one cannot change what the user
 //! sees (`run.rs`). The library's caches sit beside it (`library::Library`),
 //! under their own lock.
@@ -30,6 +31,7 @@ use super::devices::Cluster;
 use super::duck::Duck;
 use super::last_played::{LastPlayed, Memory, Saver};
 use super::library::{Library, TrackRow};
+use super::recent_tracks::Recorder;
 use super::remote::{self, RemotePlayback};
 use crate::shell::browser::MAIN;
 
@@ -252,6 +254,8 @@ struct Inner {
     /// What Oculus last played, and its settings row's writer.
     memory: Memory,
     saver: Saver,
+    /// Notes the tracks Oculus plays in their settings row.
+    recent: Recorder,
     /// The user disconnected: `music_wake` starts nothing until they connect.
     held: bool,
 }
@@ -298,6 +302,7 @@ fn change(app: &AppHandle, f: impl FnOnce(&mut Inner) -> bool) {
         if let Some(row) = inner.memory.follow(&inner.snapshot, Instant::now()) {
             inner.save(row);
         }
+        inner.recent.follow(&inner.snapshot, now_ms());
         if inner.snapshot == before {
             return None;
         }

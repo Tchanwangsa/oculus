@@ -349,6 +349,7 @@ fn row(uri: &str) -> TrackRow {
         name: "Song (Remastered)".into(),
         artists: vec!["Artist".into()],
         album: "Album".into(),
+        album_uri: None,
         image_url: Some("https://i.scdn.co/image/ab67616d00001e02aa".into()),
         duration_ms: 199_000,
         album_key: String::new(),

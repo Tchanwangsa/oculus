@@ -25,6 +25,8 @@ pub struct Playlist {
     /// The cover: one URL, or four for a 2×2 grid; none until one is known
     /// (`covers.rs` makes one for a playlist Spotify gives none).
     pub images: Vec<String>,
+    /// Pinned to the top of the account's library in Spotify (`order.rs`).
+    pub pinned: bool,
 }
 
 /// What a row shows of a playlist, from its rootlist decorations or, when
@@ -45,6 +47,7 @@ impl Header {
             owner: self.owner,
             track_count: self.track_count,
             images: self.image_url.into_iter().collect(),
+            pinned: false,
         }
     }
 }

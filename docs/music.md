@@ -18,13 +18,14 @@ is on, or from `music_wake` when the player is opened with none running.
 | The snapshot, the `music-state` event, the Spirc, run and login handles, `music_wake`'s nudge | `app/src-tauri/src/music/state/` |
 | What Oculus last played: in memory, its settings row, its writer | `app/src-tauri/src/music/last_played/`, `app/src-tauri/src/music/state/remembered.rs` |
 | Loading it back: after a reconnect, and from Play with nothing playing | `app/src-tauri/src/music/resume.rs` |
+| The tracks Oculus played, for the library's Recently played: noted from the snapshot, their settings row | `app/src-tauri/src/music/recent_tracks/` |
 | Player events folded into the snapshot | `app/src-tauri/src/music/events.rs` |
 | Where a command goes: here, the device playing elsewhere, a pull, an activate or nothing | `app/src-tauri/src/music/control.rs` |
 | Remote control of another device: its commands' requests, its playback for the snapshot | `app/src-tauri/src/music/remote/` |
 | Connect devices and transfer | `app/src-tauri/src/music/devices.rs` |
 | The output on this Mac: the choice, cpal's devices, the player's sink | `app/src-tauri/src/music/audio/` |
 | A track and its cover URL | `app/src-tauri/src/music/track.rs` |
-| The library: rate-limit gate, playlists and their tracks, covers, search | `app/src-tauri/src/music/library/` |
+| The library: rate-limit gate, playlists and their tracks, covers, Recently played, search | `app/src-tauri/src/music/library/` |
 | The duck a focus mode calls | `app/src-tauri/src/music/duck.rs` |
 | The OAuth login and its callback on port 8898 | `app/src-tauri/src/music/login.rs` |
 | The stored credentials in keyd; keyd's `get` and its allowlist | `app/src-tauri/src/music/credentials.rs`, `app/keyd/core/src/ops/get.rs`, `app/keyd/core/src/names.rs` |
@@ -328,6 +329,9 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
   track, loaded here in its context at its position (`Restore` in the table
   below). With nothing remembered, Play pulls Spotify's last playback here.
   Another device playing wins the display (`remote`).
+- **The tracks Oculus plays are kept too**, in the `music_recent_tracks`
+  settings row (`recent_tracks/`), for the library's Recently played
+  ([music-library.md](./music-library.md#the-tracks-oculus-played-are-a-settings-row)).
 
 ## Commands control the device playing, wherever it is
 
@@ -536,7 +540,7 @@ added later needs `https://i.scdn.co` in `img-src`.
 | `music_skip_to(uri, index)`, `music_queue_remove(uri, index)` | Plays the `up_next` entry at `index`, or takes it out of the queue, on the device playing, Oculus or another ([music-library.md](./music-library.md#skipping-to-and-removing-a-track-up-next)) |
 | `music_play_here()` | Moves playback here and plays |
 | `music_duck(level?)` | A level ducks to that share of the kept volume; null restores it; nothing while inactive |
-| `music_playlists(refresh)`, `music_search(query)`, `music_search_more(query, kind, offset)` | The playlists, kept until `refresh`; up to ten each of tracks, artists, albums and playlists; a page of 20 of one kind and the next offset ([music-library.md](./music-library.md)) |
+| `music_playlists(refresh)`, `music_recently_played(refresh)`, `music_search(query)`, `music_search_more(query, kind, offset)` | The playlists, kept until `refresh`; the tracks played lately, newest first, Oculus's own merged in, Spotify's list kept until its `refresh`; up to ten each of tracks, artists, albums and playlists; a page of 20 of one kind and the next offset ([music-library.md](./music-library.md)) |
 | `music_playlist_covers(uris)`, `music_playlist_tracks(uri)`, `music_album_tracks(uri)`, `music_tracks(uris)` | Covers made for playlists without one; a playlist's or album's track URIs; track rows by URI ([music-library.md](./music-library.md)) |
 | `music_devices()`, `music_transfer(device_id)` | Connect devices from the last cluster; move playback and play ([music-library.md](./music-library.md#the-device-list-is-spotifys-pushed-cluster)) |
 | `music_outputs()`, `music_set_output(name?)` | This Mac's outputs, the default marked; choose one, null for the system default |
