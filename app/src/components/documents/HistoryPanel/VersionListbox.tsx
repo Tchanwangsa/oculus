@@ -33,7 +33,6 @@ export function VersionListbox({
   versions,
   selectedId,
   onSelect,
-  onOpen,
   renaming,
   onRelabel,
   onCancelRename,
@@ -41,8 +40,6 @@ export function VersionListbox({
   versions: DocumentVersion[];
   selectedId: number | null;
   onSelect: (id: number) => void;
-  /** A row clicked (or Enter on it), after `onSelect`: the narrow tier shows it. */
-  onOpen?: (id: number) => void;
   /** The selected checkpoint's label is being edited in its row. */
   renaming: boolean;
   onRelabel: (v: DocumentVersion, label: string) => void;
@@ -121,10 +118,7 @@ export function VersionListbox({
                       version={v}
                       delta={lengthDelta(versions, index)}
                       selected={v.id === selectedId}
-                      onSelect={() => {
-                        onSelect(v.id);
-                        onOpen?.(v.id);
-                      }}
+                      onSelect={() => onSelect(v.id)}
                     />
                   )}
                 </Fragment>

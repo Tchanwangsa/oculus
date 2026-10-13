@@ -15,7 +15,6 @@ Read this before any UI work.
 | shadcn primitives (flat) | `app/src/components/ui/` |
 | Composites built on them | `app/src/components/ui/layout/`, `app/src/components/ui/table/`, `app/src/components/ui/search/`, `app/src/components/ui/lightbox/` |
 | Persisted view state and collapsed groups | `app/src/hooks/ui/useStoredState.ts` |
-| Which of three width tiers an element's own box falls in, by ResizeObserver (panes split, so not the window's width) | `app/src/hooks/ui/useWidthTier.ts` |
 | Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/layout/PageParts.tsx` |
 | A page's nav column (Settings, subjects, Chat) | `app/src/components/ui/layout/SideNav.tsx` |
 | Drag gestures | `app/src/hooks/gestures/usePointerDrag.ts`, `app/src/hooks/gestures/useCardDrag.ts`, `app/src/hooks/gestures/useFileDrop.ts` |

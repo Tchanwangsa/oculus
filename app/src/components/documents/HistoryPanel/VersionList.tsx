@@ -1,39 +1,32 @@
-import { X } from "@phosphor-icons/react";
+import { SidebarSimple } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 import { SkeletonRows } from "@/components/ui/layout/PageParts";
 import type { DocumentVersion } from "@/lib/notes/documentVersions";
 
-import { NoVersions } from "./NoVersions";
-import { PanelError } from "./PanelError";
 import { VersionListbox } from "./VersionListbox";
 
-/** The list side of History, wherever the tier puts it (docked, floating, or
- *  the whole pane): a header that closes History, then the rows, skeletons
- *  while the first read is out, or why there are none — unless the page
- *  beside it already says so (`emptyCopy` false). */
+/** History's sidebar: a header that hides it (History stays open), then the
+ *  rows, or skeletons while the first read is out. The page beside it says
+ *  why there are none, or why the read failed. */
 export function VersionList({
   versions,
   listError,
   selectedId,
   onSelect,
-  onOpen,
   renaming,
   onRelabel,
   onCancelRename,
-  onClose,
-  emptyCopy,
+  onHide,
 }: {
   versions: DocumentVersion[] | null;
   listError: string | null;
   selectedId: number | null;
   onSelect: (id: number) => void;
-  onOpen?: (id: number) => void;
   renaming: boolean;
   onRelabel: (v: DocumentVersion, label: string) => void;
   onCancelRename: () => void;
-  onClose: () => void;
-  emptyCopy: boolean;
+  onHide: () => void;
 }) {
   return (
     <>
@@ -42,27 +35,24 @@ export function VersionList({
         <Button
           variant="ghost"
           size="icon-xs"
-          aria-label="Close history"
-          title="Close history"
+          aria-label="Hide versions"
+          title="Hide versions"
           className="text-muted-foreground"
-          onClick={onClose}
+          onClick={onHide}
         >
-          <X size={13} />
+          <SidebarSimple size={14} mirrored />
         </Button>
       </div>
-
-      {listError && <PanelError message={listError} />}
 
       {versions === null ? (
         !listError && <SkeletonRows count={4} rowClassName="h-10" className="p-3" />
       ) : versions.length === 0 ? (
-        emptyCopy && <NoVersions className="px-4 py-8" />
+        <p className="px-3 py-3 text-[12px] text-muted-foreground">No versions yet</p>
       ) : (
         <VersionListbox
           versions={versions}
           selectedId={selectedId}
           onSelect={onSelect}
-          onOpen={onOpen}
           renaming={renaming}
           onRelabel={onRelabel}
           onCancelRename={onCancelRename}

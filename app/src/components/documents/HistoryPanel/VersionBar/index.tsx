@@ -1,41 +1,31 @@
 import type { RefObject } from "react";
-import {
-  ArrowCounterClockwise,
-  ArrowLeft,
-  CircleNotch,
-  CopySimple,
-  ListBullets,
-  PencilSimple,
-  Trash,
-  X,
-} from "@phosphor-icons/react";
+import { ArrowCounterClockwise, CircleNotch, CopySimple, PencilSimple, Trash } from "@phosphor-icons/react";
 
 import type { VersionViewHandle, VersionViewInfo } from "@/components/documents/VersionView";
 import { Button } from "@/components/ui/button";
-import type { WidthTier } from "@/hooks/ui/useWidthTier";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format/format";
 import { displayLocale } from "@/lib/format/locale";
 import { versionTitle, type DocumentVersion } from "@/lib/notes/documentVersions";
-import { cn } from "@/lib/utils";
 
 import { SNAPSHOT_HINT } from "../constants";
 import type { CompareWith } from "../useCompare";
+import { BackButton, VersionsToggle } from "./BarButtons";
 import { ChangeNav } from "./ChangeNav";
 import { ComparePill } from "./ComparePill";
 import { wordStats } from "./labels";
 
+export { HistoryBar } from "./HistoryBar";
+
 /**
- * Over the version on the page: which version it is, its actions, and the
- * changes — stepped through, counted, compared with the previous version or
- * the note now, or hidden (one pill, `ComparePill`). Two rows: who and what
- * to do; then the changes, always one line. At narrow the actions but Restore
- * as copy go icon-only and the title truncates, so the bar stays two rows;
- * wider, the first row may wrap its actions under the title.
+ * Over the version on the page: Back to the note, which version it is, its
+ * actions, and the changes — stepped through, counted, compared with the
+ * previous version or the note now, or hidden (one pill, `ComparePill`).
+ * Always two rows: who and what to do, then the changes. Nothing wraps: the
+ * title truncates, and as the bar's own width shrinks (container queries on
+ * `bar`) the action labels drop to icons, Replace current first.
  */
 export function VersionBar({
   version: v,
-  tier,
-  onBack,
   listShown,
   onToggleList,
   onClose,
@@ -54,14 +44,11 @@ export function VersionBar({
   onDelete,
 }: {
   version: DocumentVersion;
-  tier: WidthTier;
-  /** Narrow: back to the list. */
-  onBack: () => void;
-  /** Medium: the floating list, shown or not. */
+  /** The versions sidebar, shown or not. */
   listShown: boolean;
   onToggleList: () => void;
-  /** Set when no list header (and its close) is on screen. */
-  onClose?: () => void;
+  /** Leaves History. */
+  onClose: () => void;
   info: VersionViewInfo | null;
   handle: RefObject<VersionViewHandle | null>;
   showChanges: boolean;
@@ -84,24 +71,11 @@ export function VersionBar({
     : (v.label ?? SNAPSHOT_HINT[v.kind]);
   const words = info && showChanges && info.hunks > 0 ? wordStats(info) : null;
 
-  const narrow = tier === "narrow";
-
   return (
-    <div className="shrink-0 border-b border-border-subtle bg-card px-3 pt-2 pb-1.5">
-      <div className={cn("flex items-center gap-x-2 gap-y-1.5", narrow ? "flex-nowrap" : "flex-wrap")}>
-        <div className={cn("flex min-w-0 flex-1 items-center gap-1.5", !narrow && "min-w-[12rem]")}>
-          {narrow && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label="Back to versions"
-              title="Back to versions"
-              className="-ml-1 text-muted-foreground"
-              onClick={onBack}
-            >
-              <ArrowLeft size={14} />
-            </Button>
-          )}
+    <div className="@container/bar shrink-0 border-b border-border-subtle bg-card px-3 pt-2 pb-1.5">
+      <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <BackButton onClick={onClose} />
           <div className="min-w-0 flex-1">
             <p className="truncate font-display text-[15px] leading-tight font-semibold text-foreground">
               {versionTitle(v)}
@@ -118,35 +92,23 @@ export function VersionBar({
             size="xs"
             disabled={busy !== null || !canCopy}
             onClick={onRestoreCopy}
+            aria-label="Restore as copy"
             title="Open this version as a new note"
           >
             {busy === "copy" ? <CircleNotch className="animate-spin" /> : <CopySimple />}
-            Restore as copy
+            <span className="@max-[28rem]/bar:hidden">Restore as copy</span>
           </Button>
-          {narrow ? (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              disabled={busy !== null}
-              onClick={onReplace}
-              aria-label="Replace current"
-              title="Replace the note's text with this version"
-              className="text-muted-foreground"
-            >
-              <ArrowCounterClockwise size={13} />
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="xs"
-              disabled={busy !== null}
-              onClick={onReplace}
-              title="Replace the note's text with this version"
-            >
-              <ArrowCounterClockwise />
-              Replace current
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={busy !== null}
+            onClick={onReplace}
+            aria-label="Replace current"
+            title="Replace the note's text with this version"
+          >
+            <ArrowCounterClockwise />
+            <span className="@max-[36rem]/bar:hidden">Replace current</span>
+          </Button>
           {checkpoint && (
             <>
               <Button
@@ -173,30 +135,7 @@ export function VersionBar({
               </Button>
             </>
           )}
-          {tier === "medium" && (
-            <Button
-              variant="ghost"
-              size="xs"
-              aria-pressed={listShown}
-              onClick={onToggleList}
-              className={cn(listShown ? "text-foreground" : "text-muted-foreground")}
-            >
-              <ListBullets />
-              Versions
-            </Button>
-          )}
-          {onClose && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label="Close history"
-              title="Close history"
-              className="text-muted-foreground"
-              onClick={onClose}
-            >
-              <X size={13} />
-            </Button>
-          )}
+          <VersionsToggle shown={listShown} onToggle={onToggleList} />
         </div>
       </div>
 
@@ -207,7 +146,7 @@ export function VersionBar({
           <span className="shrink-0 text-[12px] whitespace-nowrap tabular-nums">
             <span className="text-success">{words.inserted}</span>{" "}
             <span className="text-destructive">{words.deleted}</span>
-            {!narrow && <span className="text-muted-foreground"> words</span>}
+            <span className="text-muted-foreground @max-[28rem]/bar:hidden"> words</span>
           </span>
         )}
         <div className="ml-auto shrink-0">

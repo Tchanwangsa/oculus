@@ -188,10 +188,17 @@ selected.
   per changed line, and a construct drawn as a widget tinted whole
   (`outerDecorations` inline, a block wrapper for block constructs); hunks are
   what ↑/↓ steps through.
-- **The list's layout follows the editor root's width**
-  (`useWidthTier`, `HISTORY_TIERS` in `HistoryPanel/constants.ts`): docked beside
-  the page when wide, a floating card when medium, and when narrow a pane of its
-  own that a version opens from (master–detail). The list groups by day with
+- **History is laid out like Google Docs' version history, at any width**:
+  the list is a sidebar docked right (resizable, never more than half the
+  width, `PANEL_MAX_SHARE` in `HistoryPanel/constants.ts`), hidden or shown
+  from its header or the bar's *Versions* toggle without leaving History, and
+  remembered. The version's column is fixed at the note's full column width
+  (`VersionPage`), so it wraps the same at any pane width; a narrower page
+  scrolls sideways while the bar above stays put. The bar is
+  there in every state — loading, empty and failed reads get one with only
+  Back and *Versions* — and its Back arrow (or Esc) leaves History. The bar
+  stays two rows: its title truncates and its action labels drop to icons as
+  its own width shrinks (container queries). The list groups by day with
   size deltas and takes arrow keys. The version bar
   (`app/src/components/documents/HistoryPanel/VersionBar/`) holds the actions,
   change navigation and *Show changes*. The header's Save version (⇧⌘S, focused

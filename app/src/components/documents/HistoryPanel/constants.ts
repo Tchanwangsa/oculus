@@ -5,13 +5,13 @@ export const PANEL = {
   minWidth: 260,
   maxWidth: 640,
   side: "right",
-  // Closing is the header's toggle, so a drag never folds it.
+  // Hiding is the header's button or the bar's Versions toggle, never a drag.
   collapseThreshold: 0,
   storageKey: "oculus-document-history",
 } as const;
 
-/** Editor-root widths (CSS px) where the list floats over the page, then docks. */
-export const HISTORY_TIERS = { medium: 560, wide: 880 } as const;
+/** The most of History's width the sidebar may take, so the page keeps room. */
+export const PANEL_MAX_SHARE = "50%";
 
 /** What a snapshot row says when it has no label of its own. */
 export const SNAPSHOT_HINT: Record<Exclude<VersionKind, "checkpoint">, string> = {

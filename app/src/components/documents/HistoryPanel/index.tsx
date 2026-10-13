@@ -5,11 +5,11 @@ import { VersionView, type VersionViewHandle, type VersionViewInfo } from "@/com
 import { SkeletonRows } from "@/components/ui/layout/PageParts";
 import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
 import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
-import type { WidthTier } from "@/hooks/ui/useWidthTier";
+import { useStoredState } from "@/hooks/ui/useStoredState";
 import type { DbFile } from "@/lib/db";
 
 import type { NoteHost } from "../editor/core/host";
-import { PANEL } from "./constants";
+import { PANEL, PANEL_MAX_SHARE } from "./constants";
 import { HistoryDialogs } from "./HistoryDialogs";
 import { NoVersions } from "./NoVersions";
 import { useCompare } from "./useCompare";
@@ -17,9 +17,12 @@ import { useShownVersion } from "./useShownVersion";
 import { useVersionActions } from "./useVersionActions";
 import { useVersionList } from "./useVersionList";
 import { useVersionTexts } from "./useVersionTexts";
-import { VersionBar } from "./VersionBar";
+import { HistoryBar, VersionBar } from "./VersionBar";
 import { VersionList } from "./VersionList";
 import { VersionPage } from "./VersionPage";
+
+const readListShown = (raw: string | null) => raw !== "0";
+const writeListShown = (on: boolean) => (on ? "1" : "0");
 
 /**
  * A note's saved versions (`@/lib/notes/documentVersions`), laid over the
@@ -27,19 +30,19 @@ import { VersionPage } from "./VersionPage";
  * on the page, read-only and marked against the previous version or the note
  * now (`VersionView`) — skeletons until it lands, or why there is none. The
  * note stays mounted underneath, hidden by the editor while History is open.
- * The list docks right on a wide pane, floats over the page's edge on
- * a medium one, and on a narrow one is a pane of its own the version opens
- * from. A version can come back as a new note (the default) or replace the
- * open one — after a `restore` snapshot, as one undoable edit through the
- * editor so it saves like typing. Checkpoints can be renamed or deleted;
- * snapshots are the app's to prune. Esc inside any of it closes History.
+ * The list is a sidebar docked right at any width, resizable, and hidden or
+ * shown from its header or the bar's Versions toggle without leaving History;
+ * the bar's Back arrow (or Esc anywhere inside) leaves. A version can come
+ * back as a new note (the default) or replace the open one — after a
+ * `restore` snapshot, as one undoable edit through the editor so it saves
+ * like typing. Checkpoints can be renamed or deleted; snapshots are the app's
+ * to prune.
  */
 export function HistoryPanel({
   file,
   subject,
   title,
   host,
-  tier,
   currentText,
   replaceText,
   findBar,
@@ -53,7 +56,6 @@ export function HistoryPanel({
   title: string;
   /** The note's own host: the version's pictures and links resolve as the note's. */
   host: NoteHost;
-  tier: WidthTier;
   /** The editor's text now, or null with no editor. */
   currentText: () => string | null;
   /** Swap the editor's whole text as one undoable edit; false with no editor. */
@@ -81,19 +83,19 @@ export function HistoryPanel({
   const [info, setInfo] = useState<VersionViewInfo | null>(null);
   const handleRef = useRef<VersionViewHandle>(null);
 
-  /** Medium: the floating list. Narrow: which pane is up. */
-  const [listShown, setListShown] = useState(true);
-  const [narrowPane, setNarrowPane] = useState<"list" | "version">("list");
-  // Narrowed while reading a version: stay on it rather than jump to the list.
-  const lastTier = useRef(tier);
+  /** The sidebar, kept across notes. */
+  const [listShown, setListShown] = useStoredState("oculus-history-list-shown", readListShown, writeListShown);
+  // Focusable, so a click on the read-only text keeps focus (and Esc) here.
+  const pageRef = useRef<HTMLDivElement>(null);
+  // With the sidebar hidden no row takes focus, so the page does, for Esc.
   useEffect(() => {
-    if (tier === "narrow" && lastTier.current !== "narrow") setNarrowPane(shown ? "version" : "list");
-    lastTier.current = tier;
-  }, [tier, shown]);
+    if (!listShown) pageRef.current?.focus({ preventScroll: true });
+    // Only on open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const pageShown = shown != null && selected != null;
-  const listCovers = tier === "narrow" && (narrowPane === "list" || !pageShown);
-  const listHeaderShown = tier === "wide" || (tier === "medium" && listShown) || listCovers;
+  const toggleList = () => setListShown((s) => !s);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Escape" || e.defaultPrevented) return;
@@ -103,49 +105,17 @@ export function HistoryPanel({
     onClose();
   };
 
-  const list = (
-    <VersionList
-      versions={versions}
-      listError={listError}
-      selectedId={selectedId}
-      onSelect={setSelectedId}
-      onOpen={() => tier === "narrow" && setNarrowPane("version")}
-      renaming={renaming}
-      onRelabel={relabel}
-      onCancelRename={() => setRenaming(false)}
-      onClose={onClose}
-      // The page says it when it is on screen; a covering list says it itself.
-      emptyCopy={listCovers}
-    />
-  );
-  const float = tier === "medium" && listShown && (
-    <div
-      role="region"
-      aria-label="Version history"
-      className="absolute top-2 right-2 bottom-2 z-10 flex w-[min(320px,calc(100%_-_16px))] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-lg"
-    >
-      {list}
-    </div>
-  );
-
   return (
     <div className="absolute inset-0 z-20 flex" onKeyDown={onKeyDown}>
-      <div
-        // Focusable, so a click on the read-only text keeps focus (and Esc) here.
-        tabIndex={-1}
-        inert={listCovers}
-        className="relative min-w-0 flex-1 bg-card outline-none"
-      >
+      <div ref={pageRef} tabIndex={-1} className="relative min-w-0 flex-1 bg-card outline-none">
         {pageShown ? (
           <VersionPage
             bar={
               <VersionBar
                 version={selected}
-                tier={tier}
-                onBack={() => setNarrowPane("list")}
                 listShown={listShown}
-                onToggleList={() => setListShown((s) => !s)}
-                onClose={listHeaderShown ? undefined : onClose}
+                onToggleList={toggleList}
+                onClose={onClose}
                 info={info}
                 handle={handleRef}
                 showChanges={showChanges}
@@ -159,17 +129,15 @@ export function HistoryPanel({
                 onReplace={() => setConfirm("replace")}
                 onRename={() => {
                   // The label is edited in its row, so the row must be on screen.
-                  if (tier === "medium") setListShown(true);
-                  if (tier === "narrow") setNarrowPane("list");
+                  setListShown(true);
                   setRenaming(true);
                 }}
                 onDelete={() => setConfirm("delete")}
               />
             }
             findBar={findBar}
-            actionError={actionError}
+            errors={[listError, actionError]}
             title={title}
-            float={float}
           >
             {shownError && <p className="mt-3 text-[11px] text-destructive">{shownError}</p>}
             <VersionView
@@ -183,30 +151,24 @@ export function HistoryPanel({
             />
           </VersionPage>
         ) : (
-          <VersionPage title={title} float={float}>
+          <VersionPage
+            bar={<HistoryBar title={title} onClose={onClose} listShown={listShown} onToggleList={toggleList} />}
+            errors={[listError, actionError]}
+            title={title}
+          >
             {versions?.length === 0 ? (
               <NoVersions className="py-16" />
             ) : shownError ? (
               <p className="mt-3 text-[11px] text-destructive">{shownError}</p>
             ) : (
-              // Loading; a failed list read says so in the list instead.
+              // Loading; a failed list read says so over the page instead.
               !listError && <SkeletonRows count={6} rowClassName="h-4" className="mt-6" />
             )}
           </VersionPage>
         )}
       </div>
 
-      {listCovers && (
-        <div
-          role="region"
-          aria-label="Version history"
-          className="absolute inset-0 z-10 flex flex-col bg-card"
-        >
-          {list}
-        </div>
-      )}
-
-      {tier === "wide" && (
+      {listShown && (
         <>
           {/* On the seam: negative margins cost no layout width. */}
           <ResizeHandle
@@ -217,10 +179,23 @@ export function HistoryPanel({
           />
           <aside
             aria-label="Version history"
-            style={{ width: panel.width, maxWidth: "50%" }}
+            style={{ width: panel.width, maxWidth: PANEL_MAX_SHARE }}
             className="flex min-h-0 shrink-0 flex-col border-l border-border-subtle bg-card"
           >
-            {list}
+            <VersionList
+              versions={versions}
+              listError={listError}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              renaming={renaming}
+              onRelabel={relabel}
+              onCancelRename={() => setRenaming(false)}
+              onHide={() => {
+                setListShown(false);
+                // The button goes with the sidebar; keep focus (and Esc) in History.
+                pageRef.current?.focus({ preventScroll: true });
+              }}
+            />
           </aside>
         </>
       )}

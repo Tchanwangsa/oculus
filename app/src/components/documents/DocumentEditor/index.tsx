@@ -8,13 +8,11 @@ import { FindBar } from "@/components/ui/search/FindBar";
 import { useTabActive } from "@/components/tabs/TabContext";
 import { useFileDrop } from "@/hooks/gestures/useFileDrop";
 import { useSubjects } from "@/hooks/data/useSubjects";
-import { useWidthTier } from "@/hooks/ui/useWidthTier";
 import type { DbFile } from "@/lib/db";
 
 import { Toolbar } from "../editor/chrome/Toolbar";
 import { useEditorFind } from "../editor/chrome/useEditorFind";
 import { HistoryPanel } from "../HistoryPanel";
-import { HISTORY_TIERS } from "../HistoryPanel/constants";
 import type { DocumentActions, EditorMode, SaveStatus, SuggestStatus } from "../DocumentControls";
 import { DocumentMeta } from "./DocumentMeta";
 import { useNoteHost } from "./useNoteHost";
@@ -71,9 +69,8 @@ export function DocumentEditor({
   const toolbarRef = useRef<HTMLDivElement>(null);
   /** The whole page is the drop target, not just the text. */
   const pageRef = useRef<HTMLDivElement>(null);
-  /** The note and History over it: the find target, and what the tier measures. */
+  /** The note and History over it: the find target. */
   const rootRef = useRef<HTMLDivElement>(null);
-  const tier = useWidthTier(rootRef, HISTORY_TIERS);
   /** The version on the page, when History shows one. */
   const [versionView, setVersionView] = useState<EditorView | null>(null);
 
@@ -197,7 +194,6 @@ export function DocumentEditor({
           subject={subject}
           title={title}
           host={host}
-          tier={tier ?? "wide"}
           currentText={currentText}
           replaceText={replaceText}
           findBar={findBar}
