@@ -7,7 +7,7 @@ export interface ProsePiece { box: Box; baseline: number }
 export function proseBands(pieces: readonly ProsePiece[]): Box[] {
   const rows: { box: Box; baseline: number }[] = [];
   for (const piece of [...pieces].sort((a, b) => a.baseline - b.baseline)) {
-    const row = rows.find(r => Math.abs(r.baseline - piece.baseline) <= 2);
+    const row = rows.find(r => Math.abs(r.baseline - piece.baseline) <= 3);
     if (row) row.box = union(row.box, piece.box);
     else rows.push({ box: { ...piece.box }, baseline: piece.baseline });
   }

@@ -8,8 +8,8 @@ const LAYER = { attribute: "data-math-prose-selecting", className: "md-prose-ban
 const ACTIVE = "data-math-prose-highlight";
 const SKIP = '.katex, .md-prose-bands, button, [role="button"], [role="tab"], [data-copy-skip], [aria-hidden="true"]';
 
-/** One paragraph’s native selection drawn as uniform visual lines. Inline
- *  arrays with several rows keep their structural maths bands instead. */
+/** One paragraph’s native selection drawn as uniform visual lines. Each top-level
+ *  inline atom, including a matrix, stays whole in a prose selection. */
 export class ProseBands {
   readonly layer: HTMLElement;
   range: Range;
@@ -30,8 +30,7 @@ export class ProseBands {
     const formulas = selectedFormulas(root, range);
     return formulas.length > 0 && formulas.every(formula => {
       const slots = fieldOf(formula)?.slots;
-      return slots && slots.filter(s => s.parent == null).length <= 1 &&
-        new Set(slots.filter(s => s.kind === "cell").map(s => s.row)).size <= 1;
+      return slots && slots.filter(s => s.parent == null).length <= 1;
     });
   }
 
@@ -58,11 +57,16 @@ export class ProseBands {
       }
     }
     for (const formula of selectedFormulas(this.root, this.range)) {
-      const layout = readLayout(formula.html, this.layer);
-      for (const box of bands(layout, 0, Number.MAX_SAFE_INTEGER, fieldOf(formula)?.slots)) {
-        const atoms = layout.items.filter(item => item.ink.left >= box.left - 1 && item.ink.right <= box.right + 1 && item.ink.top < box.bottom && item.ink.bottom > box.top);
-        atoms.sort((a, b) => b.size - a.size || (b.to - b.from) - (a.to - a.from));
-        if (atoms[0]) pieces.push({ box, baseline: atoms[0].baseline });
+      for (const base of formula.html.querySelectorAll(":scope > .katex-base")) {
+        const strut = base.querySelector(":scope > .katex-strut");
+        if (!strut) continue;
+        // The base’s strut ends its depth below the actual line baseline.
+        // Matrix cells and tall delimiters have baselines of their own.
+        const baseline = strut.getBoundingClientRect().bottom - origin.y +
+          (parseFloat(getComputedStyle(strut).verticalAlign) || 0);
+        const layout = readLayout(base, this.layer);
+        // A prose selection takes each inline structure whole, including its cells.
+        for (const box of bands(layout, 0, Number.MAX_SAFE_INTEGER)) pieces.push({ box, baseline });
       }
     }
     paintBands(this.layer, proseBands(pieces), "md-math-band", 0);

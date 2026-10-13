@@ -23,3 +23,8 @@ test("fractional baselines from different faces join the same line", () => {
   expect(proseBands([piece(0,20,0,18,14),piece(20,40,-1,20,14.5)]))
     .toEqual([{left:0,right:40,top:-1,bottom:20}]);
 });
+
+test("WebKit text metrics and matrix struts still join after pixel rounding", () => {
+  expect(proseBands([piece(0,40,16.51,43.47,36.51),piece(40,90,0,64,38.586),piece(90,150,16.51,43.47,36.51)]))
+    .toEqual([{left:0,right:150,top:0,bottom:64}]);
+});
