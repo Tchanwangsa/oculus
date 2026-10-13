@@ -26,7 +26,9 @@ It lives in `app/src/components/documents/editor/`; nothing is re-serialised.
 student document; its lightweight header controls live in
 `app/src/components/documents/DocumentControls.tsx`. `FilePage` keys the
 whole editor by row id: image attachments belong to one note, while a
-rename keeps its editor. **Live** mode renders markdown in place —
+rename keeps its editor. The note and History's version share one column,
+`NoteColumn.tsx`, fixed at the note's full width: a narrower pane scrolls it
+sideways rather than re-wrapping the text. **Live** mode renders markdown in place —
 headings, marks, links, lists and checkboxes, quotes, rules, code, pictures,
 maths and mermaid diagrams — and shows a construct's source while the selection touches
 it (a heading, quote or list marker while the caret is on its line); maths
@@ -192,9 +194,8 @@ selected.
   the list is a sidebar docked right (resizable, never more than half the
   width, `PANEL_MAX_SHARE` in `HistoryPanel/constants.ts`), hidden or shown
   from its header or the bar's *Versions* toggle without leaving History, and
-  remembered. The version's column is fixed at the note's full column width
-  (`VersionPage`), so it wraps the same at any pane width; a narrower page
-  scrolls sideways while the bar above stays put. The bar is
+  remembered. The version sits in the note's column (`NoteColumn`), so it
+  scrolls sideways under a narrow pane while the bar above stays put. The bar is
   there in every state — loading, empty and failed reads get one with only
   Back and *Versions* — and its Back arrow (or Esc) leaves History. The bar
   stays two rows: its title truncates and its action labels drop to icons as

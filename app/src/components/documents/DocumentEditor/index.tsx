@@ -13,6 +13,7 @@ import type { DbFile } from "@/lib/db";
 import { Toolbar } from "../editor/chrome/Toolbar";
 import { useEditorFind } from "../editor/chrome/useEditorFind";
 import { HistoryPanel } from "../HistoryPanel";
+import { NoteColumn } from "../NoteColumn";
 import type { DocumentActions, EditorMode, SaveStatus, SuggestStatus } from "../DocumentControls";
 import { DocumentMeta } from "./DocumentMeta";
 import { useNoteHost } from "./useNoteHost";
@@ -154,36 +155,34 @@ export function DocumentEditor({
         inert={history}
         className="relative min-w-0 flex-1"
       >
-        <div className="page-scroll">
-          <div className="mx-auto w-full max-w-3xl px-6 py-8">
-            <input
-              ref={titleRef}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={() => void commitTitle()}
-              onKeyDown={onTitleKeyDown}
-              placeholder="Untitled"
-              aria-label="Title"
-              spellCheck={false}
-              className="block w-full border-0 bg-transparent p-0 font-display text-[22px] font-semibold leading-tight text-foreground outline-none placeholder:text-muted-foreground/40"
+        <NoteColumn>
+          <input
+            ref={titleRef}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => void commitTitle()}
+            onKeyDown={onTitleKeyDown}
+            placeholder="Untitled"
+            aria-label="Title"
+            spellCheck={false}
+            className="block w-full border-0 bg-transparent p-0 font-display text-[22px] font-semibold leading-tight text-foreground outline-none placeholder:text-muted-foreground/40"
+          />
+          <DocumentMeta file={file} subject={subject} savedAt={savedAt} words={words} />
+          {attachError && (
+            <p className="mt-3 text-[11px] text-destructive">{attachError}</p>
+          )}
+          {/* The find row sticks with the toolbar; both are the caret's top margin. */}
+          <div ref={toolbarRef} className="sticky top-0 z-10 -mx-2 mt-3 bg-card">
+            <Toolbar
+              view={view}
+              active={active}
+              onImage={pickImages}
+              className="static z-auto mx-0 mt-0"
             />
-            <DocumentMeta file={file} subject={subject} savedAt={savedAt} words={words} />
-            {attachError && (
-              <p className="mt-3 text-[11px] text-destructive">{attachError}</p>
-            )}
-            {/* The find row sticks with the toolbar; both are the caret's top margin. */}
-            <div ref={toolbarRef} className="sticky top-0 z-10 -mx-2 mt-3 bg-card">
-              <Toolbar
-                view={view}
-                active={active}
-                onImage={pickImages}
-                className="static z-auto mx-0 mt-0"
-              />
-              {!history && findBar}
-            </div>
-            <div ref={editorRef} data-selectable className="mt-4" />
+            {!history && findBar}
           </div>
-        </div>
+          <div ref={editorRef} data-selectable className="mt-4" />
+        </NoteColumn>
 
         {/* Over the whole note, since that is the drop target. */}
         <DropOverlay show={dropping && !history} label="Drop to add a picture" />
