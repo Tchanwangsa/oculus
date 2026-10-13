@@ -29,7 +29,8 @@
   position: relative;
   isolation: isolate;
 }
-.md-math-bands {
+.md-math-bands,
+.md-prose-bands {
   position: absolute;
   left: 0;
   top: 0;
@@ -44,4 +45,15 @@
   position: absolute;
   border-radius: 2px;
   background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+}
+
+/* Selected prose and inline maths share one band per visual line. Keep
+ * positioning while old layers drain, but restore native paint at once. */
+[data-math-prose-selecting] {
+  position: relative;
+  isolation: isolate;
+}
+[data-math-prose-highlight]::selection,
+[data-math-prose-highlight] ::selection {
+  background-color: transparent;
 }

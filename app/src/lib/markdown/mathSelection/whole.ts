@@ -1,3 +1,4 @@
+import { ProseBands } from "./prose";
 import { bands, paintBands, readLayout, type BandSlot } from "@/lib/maths/geometry";
 import { mathAround } from "../selection";
 import { fieldOf, formulaOf, type Formula } from "./formula";
@@ -61,11 +62,13 @@ function touches(node: Node, range: Range): boolean {
  */
 export function watchMathSelection() {
   const painted = new Map<Element, WholeBands | null>();
+  const prose = new Map<HTMLElement, ProseBands>();
   document.addEventListener("selectionchange", () => {
     const selection = window.getSelection();
     const next = new Set<Element>();
+    let range: Range | null = null;
     if (selection && selection.rangeCount && !selection.isCollapsed) {
-      const range = selection.getRangeAt(0);
+      range = selection.getRangeAt(0);
       const inside = mathAround(range.commonAncestorContainer);
       if (inside) next.add(inside);
       else {
@@ -75,6 +78,24 @@ export function watchMathSelection() {
           if (mathAround(el) === el && touches(el, range)) next.add(el);
         }
       }
+    }
+    const paragraphs = new Set<HTMLElement>();
+    if (range && !mathAround(range.commonAncestorContainer)) {
+      for (const el of next) {
+        const p = el.closest("p");
+        if (p instanceof HTMLElement && !p.closest('.cm-editor, [contenteditable="true"]') && ProseBands.accepts(p, range)) paragraphs.add(p);
+      }
+    }
+    for (const [p, layer] of prose) {
+      if (paragraphs.has(p) && p.isConnected) continue;
+      layer.close();
+      prose.delete(p);
+    }
+    for (const p of paragraphs) {
+      const layer = prose.get(p);
+      if (layer) layer.update(range!);
+      else prose.set(p, new ProseBands(p, range!));
+      for (const el of next) if (!el.classList.contains("katex-display") && p.contains(el)) next.delete(el);
     }
     for (const [el, bands] of painted) {
       if (next.has(el) && el.isConnected) continue;

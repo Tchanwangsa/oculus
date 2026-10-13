@@ -145,8 +145,11 @@ once letters are typed, every palette and completion template whose command
 starts with the name, one row per template (`\sqrt` offers `\sqrt{}` and
 `\sqrt[]{}`), the command typed exactly first, its bare form before its
 templates, then common commands and shorter names. For a name nothing starts
-with there is no list. Wherever it opens, it sits under the caret, flips
-above when it would pass the bottom of what is visible (the window, the
+with there is no list. Space’s picks use the visible caret before the empty-row
+prompt
+(`hintCaret` in `math/field/rustField/hint.ts`), which also anchors the full
+toolbox; other rows use the field’s measured caret. Wherever it opens, it sits
+under the caret, flips above when it would pass the bottom of what is visible (the window, the
 note's scroller, any clipping ancestor) and there is more room above, and
 slides sideways to stay inside them (`placeList`). The first row is
 highlighted; ↑/↓ move the highlight and Space, Tab or Enter accept it, as a
@@ -242,7 +245,8 @@ shows while
 the caret is in maths (`mathAt` in `math/mathContext.ts`) until it is asked
 for: Σ in the toolbar or ⌘⇧Space (Mod-Shift-Space; Ctrl-Space is
 completion, and macOS reserves Ctrl- and ⌘-Space) opens or closes it, and
-it stays open until Esc, its close button, or the caret leaving that maths
+the toolbar’s tooltip shows Space, which opens the field’s picks first. The
+toolbox stays open until Esc, its close button, or the caret leaving that maths
 (`mathToolsField` holds what is open and on which maths, mapped through
 edits). It is a CodeMirror tooltip centred under the maths (a block on the
 text column): a live preview (the parse error in red; empty until the maths
@@ -316,7 +320,7 @@ slots become empty slots, the first taking the selection) and its TeX control
 switches to TeX mode; there a Visual control switches back. Neither toolbox
 ever takes focus. A block's field says so on any empty line (`syncHint` in
 `rustField/hint.ts`): an empty block, or one empty row of its lines, centres
-"Start typing or 'Space'" on that line with the caret drawn
+"Start typing or 'Space' for math tools" on that line with the caret drawn
 just before it (the hint's `::before`; the view's own is hidden). It goes
 once the line has anything in it. An inline field shows no prompt.
 

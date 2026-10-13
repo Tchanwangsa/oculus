@@ -189,9 +189,12 @@ classes work even when there are no dollar delimiters.
   `watchMathSelection` (`mathSelection/whole.ts`) paints bands over all its
   atoms, as a press-and-drag over all of it would, instead of KaTeX's
   per-glyph highlight; the display wrapper also suppresses native selection
-  paint so WebKit leaves no full-width stripes. Whole inline selections follow
-  their ink without extra vertical padding, keeping them close to the prose
-  highlight; nothing boxes the whole formula. A press on a formula
+  paint so WebKit leaves no full-width stripes. In a prose paragraph, selected text and single-line inline maths share one
+  band per visual baseline (`mathSelection/prose.ts`): the taller ink sets the
+  band’s height, so small maths fills the text height and a tall fraction
+  gives the adjacent text the same height. The native range and clipboard
+  stay unchanged. Multi-row arrays and note widgets keep structural bands;
+  nothing boxes a whole display formula. A press on a formula
   selects by structure — a cell, a matrix, a run of atoms — and copies that
   part's LaTeX wrapped by its shape (`copied` in `mathSelection/clipboard.ts`,
   shared with the note's field): within one line as `$…$`, over more than
@@ -449,7 +452,7 @@ commands typed in `app/src/lib/ed/workspace.ts`.
   edits, the other clean buffers on next open.
 - **`ed-workspace` events for this challenge**: `status` updates the line;
   `files` replaces the tabs (when the open file leaves the list, the first opens)
-  and drops buffers no longer listed unless unsaved; a `commit` with
+  and drops buffers absent from the new list unless unsaved; a `commit` with
   `ours: false` (Ed's web app saved) re-reads the open file unless it has
   unsaved edits, and forgets the other clean buffers so they read again;
   `conflict` marks a file in conflict; `error` shows as a warning `Alert`

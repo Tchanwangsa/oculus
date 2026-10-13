@@ -5,11 +5,11 @@ import type { Formula } from "./formula";
 import { watchLayout } from "./resize";
 
 /** Marks the formula a selection is drawn in (`styles/math.css`). */
-const SELECTING = "data-math-selecting";
+const MATH_LAYER = { attribute: "data-math-selecting", className: "md-math-bands" };
 
 /**
  * Takes a closed selection's bands off the formula: the bands at once, the
- * layer and the formula's stacking (`SELECTING`) two frames later. A band
+ * layer and the formula's stacking (`kind.attribute`) two frames later. A band
  * reaches past the formula's box, and when both go in one paint WebKit
  * repaints only that box, leaving the bands' edges above and below it on
  * screen. A selection reopened on the formula meanwhile keeps its stacking.
@@ -18,25 +18,25 @@ export function dropLayer(
   layer: Pick<Element, "replaceChildren" | "remove">,
   root: Pick<Element, "querySelector" | "removeAttribute">,
   frame: (run: () => void) => void = requestAnimationFrame,
+  kind = MATH_LAYER,
 ) {
   layer.replaceChildren();
   frame(() =>
     frame(() => {
       layer.remove();
-      if (!root.querySelector(":scope > .md-math-bands")) root.removeAttribute(SELECTING);
+      if (!root.querySelector(`:scope > .${kind.className}`)) root.removeAttribute(kind.attribute);
     }),
   );
 }
 
-/** A band layer in `root` (a formula's `.katex`): an absolutely positioned
- *  zero-size span whose own corner is the frame every box is read in, so
- *  an inline formula broken over lines still lines up. `dropLayer` takes
- *  it off. */
-export function openLayer(root: Element): HTMLElement {
+/** A zero-size band layer in a formula or paragraph. Its corner is the
+ *  frame every box is read in, so wrapped inline maths still lines up.
+ *  `dropLayer` removes it without leaving paint outside the root. */
+export function openLayer(root: Element, kind = MATH_LAYER): HTMLElement {
   const layer = document.createElement("span");
-  layer.className = "md-math-bands";
+  layer.className = kind.className;
   layer.setAttribute("aria-hidden", "true");
-  root.setAttribute(SELECTING, "");
+  root.setAttribute(kind.attribute, "");
   root.append(layer);
   return layer;
 }

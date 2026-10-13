@@ -23,6 +23,8 @@ import { drawBands } from "./selection";
 
 /** What the view tells its host, and the keys the host takes first. */
 export interface MathViewHost {
+  /** The visible caret when the host draws a prompt in place of ours. */
+  caretAnchor?(): Box | null;
   /** After each step, once the view has redrawn: apply its `changes`, then
    *  its `rewrite`, and act on its `effect`. */
   onStep?(step: Step, view: MathView): void;
