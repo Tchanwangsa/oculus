@@ -352,6 +352,7 @@ pub fn run() {
             music::commands::music_play_context,
             music::commands::music_play_track,
             music::commands::music_playlists,
+            music::commands::music_recently_played,
             music::commands::music_playlist_covers,
             music::commands::music_playlist_tracks,
             music::commands::music_album_tracks,

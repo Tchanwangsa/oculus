@@ -31,6 +31,9 @@ pub struct TrackRow {
     pub name: String,
     pub artists: Vec<String>,
     pub album: String,
+    /// The album as `spotify:album:<id>`, which a track plays from; none
+    /// when its gid is not one.
+    pub album_uri: Option<String>,
     /// The album's cover at its `DEFAULT` size, else its largest.
     pub image_url: Option<String>,
     pub duration_ms: u32,
@@ -108,6 +111,9 @@ pub(super) fn row(uri: &str, track: &Track) -> Option<TrackRow> {
     let album = track.album.as_ref();
     let image_url = album.and_then(cover);
     let album_name = album.map(|a| a.name().to_string()).unwrap_or_default();
+    let album_uri = album
+        .and_then(|a| SpotifyId::from_raw(a.gid()).ok())
+        .map(|id| format!("spotify:album:{}", id.to_base62()));
     let album_key = match album.map(|a| a.gid()).filter(|g| !g.is_empty()) {
         Some(gid) => hex(gid),
         None => image_url.clone().unwrap_or_else(|| album_name.clone()),
@@ -122,6 +128,7 @@ pub(super) fn row(uri: &str, track: &Track) -> Option<TrackRow> {
             .filter(|n| !n.is_empty())
             .collect(),
         album: album_name,
+        album_uri,
         image_url,
         duration_ms: u32::try_from(track.duration()).unwrap_or(0),
         album_key,

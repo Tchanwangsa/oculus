@@ -1,10 +1,11 @@
 //! The account's playlists, their tracks and search, from the session's own
 //! spclient host with its Login5 token: the rootlist (`rootlist.rs`), a
 //! playlist's contents (`contents.rs`), track metadata in batches
-//! (`metadata.rs`), covers for playlists Spotify gives none (`covers.rs`)
-//! and search through pathfinder (`search.rs`). Spotify's public Web API is
-//! never called; its shared client id is throttled. Calls stay few all the
-//! same: what is fetched is kept per account (`cache.rs`) until asked again,
+//! (`metadata.rs`), covers for playlists Spotify gives none (`covers.rs`),
+//! the playlists' order in Spotify's own library (`order.rs`), the tracks
+//! played lately (`recently_played/`) and search (`search.rs`), all three
+//! through pathfinder. Spotify's public Web API is never called; its shared
+//! client id is throttled. Calls stay few all the same: what is fetched is kept per account (`cache.rs`) until asked again,
 //! search runs only when asked, a 429 closes a gate until its `Retry-After`
 //! (`gate.rs`), and nothing is retried.
 //!
@@ -16,6 +17,8 @@ mod covers;
 mod error;
 mod gate;
 mod metadata;
+mod order;
+mod recently_played;
 mod rootlist;
 mod search;
 pub(super) mod spclient;
@@ -34,6 +37,7 @@ use tauri::AppHandle;
 pub use cache::Library;
 pub(super) use error::LibraryError;
 pub use metadata::TrackRow;
+pub(super) use recently_played::recently_played;
 pub use rootlist::Playlist;
 pub use search::{SearchKind, SearchPage, SearchResults};
 
@@ -47,10 +51,10 @@ use spclient::{Method, Target, PROTOBUF};
 /// pages for covers.
 const HEADER_CONCURRENCY: usize = 4;
 
-/// The account's playlists in rootlist order, from memory unless `refresh`
-/// or the account changed. Up to `rootlist::CAP`. Covers made earlier are
-/// filled in; a refresh drops them and every playlist's contents, to be
-/// read again.
+/// The account's playlists in Spotify's library order (`library_order`),
+/// from memory unless `refresh` or the account changed. Up to
+/// `rootlist::CAP`. Covers made earlier are filled in; a refresh drops them
+/// and every playlist's contents, to be read again.
 pub(super) async fn playlists(
     app: &AppHandle,
     refresh: bool,
@@ -83,6 +87,18 @@ pub(super) async fn playlists(
     }
     entries.truncate(rootlist::CAP);
     let list = named(app, &session, &account, entries).await?;
+    let list = match library_order(app, &session).await {
+        Ok((order, received)) => {
+            let (list, applied) = order::apply(list, &order);
+            elog!(
+                "[music] library order: {received} items, {} matched, {} pinned",
+                applied.matched,
+                applied.pinned
+            );
+            list
+        }
+        Err(_) => list,
+    };
     library.with(|inner| inner.playlists = Some((account.clone(), list.clone())));
     Ok(library.with_covers(&account, list))
 }
@@ -133,6 +149,39 @@ async fn named(
         .collect()
         .await;
     fetched.into_iter().filter_map(Result::transpose).collect()
+}
+
+/// Spotify's own order of the account's playlists, Recents with pins first:
+/// every page of `libraryV3` up to `rootlist::CAP` items, and how many items
+/// came of any kind. Never fails the list: any failure, logged once here,
+/// leaves the rootlist order.
+async fn library_order(
+    app: &AppHandle,
+    session: &Session,
+) -> Result<(Vec<order::Placed>, usize), LibraryError> {
+    const WHAT: &str = "library order, rootlist order kept";
+    let mut placed = Vec::new();
+    let mut received = 0;
+    let mut offset = 0;
+    loop {
+        let body = call_to(
+            app,
+            session,
+            WHAT,
+            Target::Url(search::PATHFINDER),
+            Method::PostJson(order::body(offset)),
+        )
+        .await?;
+        let page = logged(WHAT, order::parse_page(&body))?;
+        let next = page.next(offset);
+        received += page.received;
+        placed.extend(page.items);
+        match next {
+            Some(next) if (next as usize) < rootlist::CAP => offset = next,
+            _ => break,
+        }
+    }
+    Ok((placed, received))
 }
 
 /// Covers for playlists that have none, by URI (`tracks::covers`).

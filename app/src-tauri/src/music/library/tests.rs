@@ -20,6 +20,7 @@ use super::covers::pick;
 use super::error::LibraryError;
 use super::gate::{retry_after, Gate, DEFAULT_WAIT};
 use super::metadata::{self, TrackRow};
+use super::order::{self, Applied, Placed};
 use super::rootlist::{
     self, encode, parse_page, parse_playlist, playlist_endpoint, playlist_uri, Entry, Header,
 };
@@ -585,7 +586,7 @@ fn a_metadata_answer_decodes_into_track_rows() {
             B,
             track(
                 "Blue in Green",
-                &[0x0c],
+                &[0x0c; 16],
                 vec![image(&[0x01], Size::SMALL), image(&[0x02], Size::XLARGE)],
             ),
         ),
@@ -601,6 +602,8 @@ fn a_metadata_answer_decodes_into_track_rows() {
             name: "So What".into(),
             artists: vec!["Miles Davis".into(), "John Coltrane".into()],
             album: "Kind of Blue".into(),
+            // A gid that is not 16 bytes names no album.
+            album_uri: None,
             image_url: Some("https://i.scdn.co/image/300f".into()),
             duration_ms: 201_000,
             album_key: "0a0b".into(),
@@ -609,6 +612,11 @@ fn a_metadata_answer_decodes_into_track_rows() {
     assert_eq!(
         rows[B].image_url.as_deref(),
         Some("https://i.scdn.co/image/02")
+    );
+    let album = SpotifyId::from_raw(&[0x0c; 16]).unwrap().to_base62();
+    assert_eq!(
+        rows[B].album_uri.as_deref(),
+        Some(format!("spotify:album:{album}").as_str())
     );
     // The album key never reaches the frontend.
     let json = serde_json::to_value(&rows[A]).unwrap();
@@ -625,6 +633,7 @@ fn row(uri: &str, album: &str, image: Option<&str>) -> (String, TrackRow) {
         name: "t".into(),
         artists: vec![],
         album: String::new(),
+        album_uri: None,
         image_url: image.map(Into::into),
         duration_ms: 0,
         album_key: album.into(),
@@ -785,4 +794,161 @@ fn a_playlist_shows_its_header_picture_as_a_one_cover_image_list() {
         ..header
     };
     assert!(bare.playlist("spotify:playlist:a".into()).images.is_empty());
+}
+
+/// A `libraryV3` page as the web player gets it: a pinned folder, a pinned
+/// playlist in the older user form, Liked Songs, a null item, an item with
+/// nulls for its fields and one known only by its data's URI.
+const LIBRARY: &str = r#"{"data":{"me":{"libraryV3":{
+    "__typename":"LibraryPage",
+    "availableSortOrders":[{"id":"Recents","name":"Recents"},{"id":"Custom Order","name":"Custom order"}],
+    "pagingInfo":{"offset":0,"limit":50},
+    "totalCount":6,
+    "items":[
+        {"pinned":true,"pinnable":true,"addedAt":null,"playedAt":null,"depth":0,
+         "item":{"__typename":"FolderResponseWrapper","_uri":"spotify:user:tanat:folder:f1","data":{"__typename":"Folder"}}},
+        {"pinned":true,"pinnable":true,"addedAt":{"isoString":"2024-01-01T00:00:00Z"},"playedAt":null,"depth":0,
+         "item":{"__typename":"PlaylistResponseWrapper","_uri":"spotify:user:tanat:playlist:1a2b","data":null}},
+        {"pinned":false,"pinnable":true,"depth":0,
+         "item":{"__typename":"PseudoPlaylistResponseWrapper","_uri":"spotify:user:tanat:collection","data":null}},
+        null,
+        {"pinned":null,"pinnable":null,"addedAt":null,"playedAt":null,"depth":null,"item":null},
+        {"pinned":false,"item":{"__typename":"PlaylistResponseWrapper","_uri":null,
+         "data":{"__typename":"Playlist","uri":"spotify:playlist:3c4d","name":"Gym"}}}
+    ]}}}}"#;
+
+fn listed(uri: &str) -> super::Playlist {
+    Header {
+        name: uri.into(),
+        owner: None,
+        track_count: None,
+        image_url: None,
+    }
+    .playlist(uri.into())
+}
+
+#[test]
+fn the_library_order_reads_playlists_with_their_pins() {
+    let page = order::parse_page(LIBRARY.as_bytes()).unwrap();
+    assert_eq!(
+        page.items,
+        [
+            Placed {
+                uri: "spotify:playlist:1a2b".into(),
+                pinned: true
+            },
+            Placed {
+                uri: "spotify:playlist:3c4d".into(),
+                pinned: false
+            },
+        ]
+    );
+    assert_eq!(page.received, 6);
+    assert_eq!(page.next(0), None);
+}
+
+#[test]
+fn the_library_order_pages_until_nothing_more_follows() {
+    let page = |count: usize, extra: &str| {
+        let items = vec![r#"{"pinned":false,"item":{"_uri":"spotify:playlist:aa"}}"#; count];
+        let body = format!(
+            r#"{{"data":{{"me":{{"libraryV3":{{"items":[{}]{extra}}}}}}}}}"#,
+            items.join(",")
+        );
+        order::parse_page(body.as_bytes()).unwrap()
+    };
+    assert_eq!(page(50, r#","totalCount":120"#).next(50), Some(100));
+    assert_eq!(page(20, r#","totalCount":120"#).next(100), None);
+    assert_eq!(page(50, "").next(0), Some(50));
+    assert_eq!(page(12, "").next(50), None);
+    assert_eq!(page(0, r#","totalCount":120"#).next(0), None);
+    assert_eq!(
+        page(50, r#","pagingInfo":{"nextOffset":50},"totalCount":120"#).next(0),
+        Some(50)
+    );
+}
+
+#[test]
+fn the_library_order_request_is_recents_of_playlists() {
+    let body: serde_json::Value = serde_json::from_slice(&order::body(50)).unwrap();
+    assert_eq!(body["operationName"], "libraryV3");
+    assert_eq!(
+        body["variables"]["filters"],
+        serde_json::json!(["Playlists"])
+    );
+    assert_eq!(body["variables"]["order"], "Recents");
+    assert_eq!(body["variables"]["limit"], 50);
+    assert_eq!(body["variables"]["offset"], 50);
+    assert_eq!(body["variables"]["flatten"], false);
+    assert!(body["variables"]["folderUri"].is_null());
+    assert_eq!(body["extensions"]["persistedQuery"]["version"], 1);
+    assert_eq!(
+        body["extensions"]["persistedQuery"]["sha256Hash"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+}
+
+#[test]
+fn the_library_order_puts_spotifys_first_and_keeps_the_rest_in_rootlist_order() {
+    let rootlist = ["a", "b", "c", "d", "e"].map(|id| listed(&format!("spotify:playlist:{id}")));
+    let placed = |id: &str, pinned| Placed {
+        uri: format!("spotify:playlist:{id}"),
+        pinned,
+    };
+    let order = [
+        placed("d", true),
+        placed("zz", true),
+        placed("b", false),
+        placed("d", false),
+    ];
+    let (list, applied) = order::apply(rootlist.to_vec(), &order);
+    let ids: Vec<&str> = list
+        .iter()
+        .map(|p| p.uri.trim_start_matches("spotify:playlist:"))
+        .collect();
+    assert_eq!(ids, ["d", "b", "a", "c", "e"]);
+    assert_eq!(
+        list.iter().map(|p| p.pinned).collect::<Vec<_>>(),
+        [true, false, false, false, false]
+    );
+    assert_eq!(
+        applied,
+        Applied {
+            matched: 2,
+            pinned: 1
+        }
+    );
+    let (unchanged, applied) = order::apply(rootlist.to_vec(), &[]);
+    assert_eq!(unchanged, rootlist);
+    assert_eq!(applied.matched, 0);
+}
+
+#[test]
+fn a_library_order_error_fails_the_order() {
+    let unreadable = |body: &str| {
+        matches!(
+            order::parse_page(body.as_bytes()),
+            Err(LibraryError::Unreadable(_))
+        )
+    };
+    assert!(unreadable(
+        r#"{"errors":[{"message":"PersistedQueryNotFound"}]}"#
+    ));
+    assert_eq!(
+        order::parse_page(br#"{"errors":[{"message":"Variable missing"}],"data":null}"#),
+        Err(LibraryError::Unreadable("Variable missing".into()))
+    );
+    assert_eq!(
+        order::parse_page(
+            br#"{"data":{"me":{"libraryV3":{"__typename":"LibraryInvalidSortOrderIdError","message":"bad"}}}}"#
+        ),
+        Err(LibraryError::Unreadable(
+            "LibraryInvalidSortOrderIdError".into()
+        ))
+    );
+    assert!(unreadable(r#"{"data":{"me":null}}"#));
+    assert!(unreadable("<html>"));
 }

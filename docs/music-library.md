@@ -1,8 +1,9 @@
 # Music: playlists, search, the queue and Connect devices
 
 What Spotify Connect playback alone does not show: the account's playlists
-and their tracks, search, the queue and what plays next, and the account's
-devices with a way to move between them. All of it comes over the session
+and their tracks, the tracks it played lately (Recently played), search,
+the queue and what plays next, and the account's devices with a way to move
+between them. All of it comes over the session
 librespot already holds; Spotify's public Web API is never called. Playback
 itself is [music.md](./music.md).
 
@@ -14,32 +15,56 @@ itself is [music.md](./music.md).
 | What it keeps per account, and the rate-limit gate | `app/src-tauri/src/music/library/cache.rs`, `app/src-tauri/src/music/library/gate.rs` |
 | The one spclient request (GET, POST of a protobuf or JSON, PUT of JSON), shared with remote commands | `app/src-tauri/src/music/library/spclient.rs` |
 | The rootlist and a playlist's header, decoded | `app/src-tauri/src/music/library/rootlist.rs` |
+| The playlists' order in Spotify's library: the pathfinder `libraryV3` request, its answer, and applying it | `app/src-tauri/src/music/library/order.rs` |
 | A playlist's tracks, decoded and paged | `app/src-tauri/src/music/library/contents.rs` |
 | Track metadata batches, decoded into rows | `app/src-tauri/src/music/library/metadata.rs` |
 | A cover made from a playlist's tracks | `app/src-tauri/src/music/library/covers.rs` |
 | The pathfinder `searchDesktop` request and its answer | `app/src-tauri/src/music/library/search.rs` |
+| Recently played: Spotify's pathfinder `recents` list, the merge by day with Oculus's own, and what is kept | `app/src-tauri/src/music/library/recently_played/` (`list.rs`, `merge.rs`) |
+| The tracks Oculus played: noted from the snapshot, and their settings row | `app/src-tauri/src/music/recent_tracks/` |
 | Queueing, here or on the device playing elsewhere | `app/src-tauri/src/music/commands.rs` (`music_add_to_queue`), `app/src-tauri/src/music/control.rs`, `app/src-tauri/src/music/remote/` |
 | Skipping to and removing a track up next | `app/src-tauri/src/music/queue.rs` (`music_skip_to`, `music_queue_remove` in `commands.rs`), `app/src-tauri/src/music/remote/command.rs` |
 | Up next and the context in the snapshot | `app/src-tauri/src/music/state/`, `app/src-tauri/src/music/events.rs`, `app/src-tauri/src/music/devices.rs` |
 | The Connect cluster, the device list and transfer | `app/src-tauri/src/music/devices.rs` |
-| Up next, playlists, a playlist's tracks and search under the player | `app/src/components/music/library/` (up next: `UpNext.tsx`, `RemoveAction.tsx`; search: `SearchGroups.tsx`, `SearchPages.tsx`; an opened playlist or album: `PlaylistView.tsx`) |
+| Up next, playlists, Recently played, a playlist's tracks and search under the player | `app/src/components/music/library/` (up next: `UpNext.tsx`, `RemoveAction.tsx`; Recently played: `RecentlyPlayed.tsx`, loaded by `app/src/hooks/music/useRecentlyPlayed.ts`; search: `SearchGroups.tsx`, `SearchPages.tsx`; an opened playlist or album: `PlaylistView.tsx`) |
 | Track rows fetched a page at a time | `app/src/hooks/music/useTrackRows.ts` |
 | The rest of the context after Spotify's next tracks | `app/src/hooks/music/useContextRest.ts`, `app/src/lib/music/contextRest.ts` |
 | The device menu | `app/src/components/music/devices/` |
 
-## Under the player, up next, the account's playlists and a search
+## Under the player, up next, the account's playlists, Recently played and a search
 
-- **"Your playlists" loads once per mount**, the first time the session is
+- **Two `PillTabs` head the list, Playlists and Recently played**, while no search
+  runs and nothing is open; the tab is component state, Playlists at each
+  mount. The refresh button beside them asks Spotify again for the tab
+  showing.
+- **Playlists loads once per mount**, the first time the session is
   connected; Rust answers from memory after its first fetch, so reopening
-  the player costs no call. The refresh button beside the heading asks
-  Spotify again. Rows show the cover, the name, and owner · N tracks.
+  the player costs no call. Rows show the cover, the name, and owner · N
+  tracks.
+- **The list is in Spotify's own library order**: Recents (most recently
+  played first) with the account's pinned playlists on top, as Spotify's
+  apps list them, a filled pin glyph before a pinned row's owner · N
+  tracks. When that order cannot be had, the list keeps rootlist order
+  ([below](#the-order-is-pathfinders-libraryv3-and-never-fails-the-list)).
 - **A playlist without a picture gets a cover after the list**: the page
   asks `music_playlist_covers` for every playlist with none, and covers
   swap in as they arrive. Four URLs draw as a 2×2 grid inside the row's
   rounded square (tiles unrounded, no gaps, as Spotify draws it), one as a
   plain cover, none as the note glyph (`PlaylistCover`).
-- **A click opens the playlist** in place of the list: "Your playlists"
-  becomes a back button, which puts the list's scroll position back. The
+- **Recently played lists the tracks the account played lately on any
+  device**, newest first, up to 50, with what Oculus itself played merged in
+  ([below](#recently-played-is-spotifys-recents-tracks-merged-with-oculuss-own)).
+  It loads the first time its tab shows, not at mount, and Rust answers
+  later loads from memory until its refresh. Rows are track rows like a
+  playlist's (`TrackRow`, rows from `useTrackRows`; 50 rows need no virtual
+  list): the album cover, title, artists · album, duration, "Add to queue"
+  on hover, the playing track in brand colour, "Unavailable track" for one
+  Spotify describes nothing for. A click plays the track from its place in
+  its album, as a search hit does (`music_play_track` with the row's
+  `album_uri`), or alone when its row names no album. A load error sits
+  inline; with nothing to show it reads "Nothing played recently."
+- **A click opens the playlist** in place of the list: "Playlists" becomes a
+  back button, which puts the list's scroll position back. The
   header shows the cover, name, owner · N tracks, Play and Shuffle play (an
   outline icon button; `music_play_context` in order or shuffled). The
   tracks are a virtual list (TanStack Virtual, 48 px rows), since a playlist runs to thousands: `music_playlist_tracks`
@@ -50,7 +75,7 @@ itself is [music.md](./music.md).
   playlist as context); the playing track is in brand colour. Local files
   and episodes are left out; a track Spotify describes nothing for reads
   "Unavailable track".
-- **Every track row offers "Add to queue"** (a playlist's, search's and up next's): an
+- **Every track row offers "Add to queue"** (a playlist's, search's, Recently played's and up next's): an
   icon shown on the row's hover, a `RowAction` inside the row's button. It
   turns to a brand tick for 1.5 s once queued; a refusal shows as the
   player's error, like any command.
@@ -111,8 +136,8 @@ itself is [music.md](./music.md).
 
 `library/spclient.rs` sends `GET <spclient>/<endpoint>`, or a POST of a
 protobuf body with `Content-Type: application/x-protobuf` (what
-`SpClient::request_with_protobuf` sets), or, for search only, a POST of
-JSON to pathfinder's full URL. Each is sent once, with the session's Login5
+`SpClient::request_with_protobuf` sets), or, for search, the library order
+and Recently played, a POST of JSON to pathfinder's full URL. Each is sent once, with the session's Login5
 token, its client token (when librespot has one) and librespot's user
 agent. librespot's own client also appends `product=0`, `country` and a
 cache-busting `salt` to each URL; these requests do not. The host is the spclient access point librespot
@@ -130,7 +155,7 @@ other). A non-2xx answer's first 512 bytes are logged as
 | `GET /playlist/v2/playlist/<id>` | A playlist's header when the rootlist carries none for it; its tracks (`SpClient::get_playlist`) |
 | `GET /playlist/v2/playlist/<id>?from&length=500` | The rest of a playlist whose answer is `truncated` |
 | `POST /extended-metadata/v0/extended-metadata` | Track rows, `TRACK_V4` for up to 100 tracks per request (`SpClient::get_extended_metadata`); an album's track list, `ALBUM_V4` for one album |
-| `POST https://api-partner.spotify.com/pathfinder/v2/query` | Search: `searchDesktop` for ten of each type, `searchTracks`, `searchAlbums` or `searchPlaylists` for a page of 20 of one; the one host that is not spclient |
+| `POST https://api-partner.spotify.com/pathfinder/v2/query` | Search: `searchDesktop` for ten of each type, `searchTracks`, `searchAlbums` or `searchPlaylists` for a page of 20 of one; the playlists' order: `libraryV3`, 50 items a page; Recently played: `recents`, 50 items a page, up to four pages; the one host that is not spclient |
 
 ## The rootlist is decoded with librespot-protocol's playlist4 types
 
@@ -150,6 +175,104 @@ other). A non-2xx answer's first 512 bytes are logged as
   the generated cover Spotify links on `*.scdn.co` (`default` size first),
   else none, and then one is made (below). A playlist's `images` holds one
   URL, four, or none.
+
+## The order is pathfinder's `libraryV3`, and never fails the list
+
+- **After the rootlist and its headers, `playlists()` asks pathfinder for
+  the persisted query `libraryV3`**, the one the web player's Your Library
+  sends, with its variables: `filters: ["Playlists"]`, `order: "Recents"`,
+  `features` as the web player lists them, `flatten: false`, no folder or
+  text filter, `limit` 50 and an `offset`. It pages while `pagingInfo`'s
+  `nextOffset` or `totalCount` says more follow, up to `rootlist::CAP`
+  items.
+- **The answer is `data.me.libraryV3.items`**, each `{pinned, item: {_uri,
+  data}}`, pins first. Items that are not playlists (folders, Liked Songs)
+  are skipped, and so are nulls; `spotify:user:<u>:playlist:<id>` becomes
+  `spotify:playlist:<id>` as in the rootlist.
+- **The rootlist's playlists take that order**: those it lists first, in
+  its order, marked `pinned` as it says; every other playlist (one inside a
+  folder, which `flatten: false` does not list) follows in rootlist order.
+- **Any failure keeps the rootlist order**: a status (a 429 closes the gate
+  as for any call), a GraphQL error arriving as a 200 (`PersistedQueryNotFound`
+  for a stale hash), a page typed as an error (`LibraryInvalidSortOrderIdError`),
+  or an unreadable body. It is logged once as `[music] library order,
+  rootlist order kept: <error>`, and nothing retries. A success logs
+  `[music] library order: N items, M matched, P pinned`.
+- **The order is kept with the list** in `cache.rs`: the cached list is
+  already ordered, reopening the player asks nothing, and the refresh button
+  asks for both again.
+- **The hash (`LIBRARY_V3` in `order.rs`) rotates like search's.** To find
+  the current one: fetch `https://open.spotify.com`, take its
+  `web-player.<hash>.js` bundle from `open.spotifycdn.com`, and grep the
+  bundle itself (not a route chunk) for `"libraryV3","query",`; the hash
+  follows it.
+
+## Recently played is Spotify's Recents tracks merged with Oculus's own
+
+- **Spotify's list is pathfinder's `recents`**, the persisted query the web
+  player's Recents page sends, with `{"uris": ["spotify:list:recents:page"],
+  "offset", "limit": 50}`. The answer is `data.lists[0]`, which must be a
+  `List` (the web player's own check; anything else fails it), its
+  `items.items` each `{entity: {_uri, data: {entityTypeTrait: {type}, …}},
+  addedAt: {year, month, day}}`, newest first, and
+  `items.pagingInfo.nextOffset` for the next page. Only the URI, the type and the date are
+  read; a track's name, artists, album and cover come from its metadata row
+  like any other's.
+- **The list mixes types** (`ENTITY_TYPE_TRACK`, `_ALBUM`, `_PLAYLIST`,
+  `_ARTIST`, `_PODCAST_EPISODE`, …), so it is read a page at a time until it
+  has given 50 tracks, names no next page, or four pages were read. Only
+  `spotify:track:<22 characters>` entries typed as a track (or typed as
+  nothing) are kept, in Spotify's order, each URI once. Each entry is read
+  on its own, so one of an unexpected shape drops alone.
+- **`addedAt` is a date without a time**: a missing month or day reads as
+  the first; an undated track takes the day of the one before it (the
+  first dated one's when it leads the list). A list dated nowhere ranks
+  below every day Oculus played on.
+- **Oculus's own are the `music_recent_tracks` settings row**
+  ([below](#the-tracks-oculus-played-are-a-settings-row)), read at each
+  call: librespot may not report its plays to Spotify, so its tracks could
+  be missing from Spotify's list.
+- **The merge goes by day** (`merge.rs`), Oculus's milliseconds read as a
+  UTC day like Spotify's dates are assumed to be: newest day first, and
+  within a day Oculus's tracks Spotify does not list (newest first), then
+  Spotify's tracks of that day in its order, then any track Spotify lists on
+  an older day that Oculus played on this one. Each URI shows once, at its
+  first place, up to 50. A day Oculus played on that is newer than any of
+  Spotify's comes first. The command answers `[{uri, played_at_ms}]`:
+  Oculus's own time, or the Spotify day's UTC midnight.
+- **Failures**: the first page failing (a status, a 429 closing the gate,
+  an unreadable body, a GraphQL error such as `PersistedQueryNotFound`)
+  leaves Oculus's own, logged once as `[music] recently played, Oculus's own
+  only: <error>`; a later page failing keeps what the earlier ones gave,
+  logged as `[music] recently played, the rest of Spotify's list left out:
+  <error>`.
+  The call fails only when Spotify's list failed and Oculus played nothing.
+  Nothing retries. Each read of Spotify's list logs `[music] recently
+  played: N items from Spotify (T tracks; types: ENTITY_TYPE_ALBUM 40, …), L
+  local, S shown`.
+- **Kept per account until Recently played's refresh** (`cache.rs`):
+  Spotify's tracks with their days. A later call reads the settings row
+  again and merges it with the kept list, so a track just played here shows
+  without a call. A failed list is not kept; the next call asks again.
+- **The hash (`RECENTS` in `recently_played/list.rs`) rotates like
+  search's.** To find the current one, fetch the web player's bundle as for
+  `libraryV3` ([above](#the-order-is-pathfinders-libraryv3-and-never-fails-the-list))
+  and grep it for `"recents","query",`; the hash follows it.
+
+## The tracks Oculus played are a settings row
+
+- **`Recorder` notes a track when Oculus starts playing it**
+  (`recent_tracks/recorder.rs`): on a change that finds Oculus the device
+  playing (`active` and `playing`) a `spotify:track:` it was not playing at
+  the last change, the account and URI are noted at that time. The same
+  account and track noted under a minute before are not noted again, so a
+  pause and resume writes nothing; a seek or any other change writes
+  nothing.
+- **The `music_recent_tracks` row** is `{"account", "items": [{"uri",
+  "played_at_ms"}]}`, newest first, each URI once, up to 50. A note is read,
+  merged and written back on a thread of its own (`setting_blocking`,
+  `set_setting_blocking`), one at a time. A row for another account reads as
+  empty and is replaced by the next note; sign-out leaves it.
 
 ## A playlist's tracks are its own answer's items
 
@@ -177,8 +300,9 @@ other). A non-2xx answer's first 512 bytes are logged as
   `ALBUM_V4`: its `metadata::Album` lists the tracks' gids disc by disc,
   turned into `spotify:track:` URIs, and the rows come from `music_tracks`
   like a playlist's. Not kept: an album is one request each time it opens.
-- **A row** is the track's name, artists' names, album name, duration and
-  the album's cover: `album.cover_group` (what librespot reads; `cover`
+- **A row** is the track's name, artists' names, album name and URI
+  (`spotify:album:` from its gid, which Recently played plays a track
+  from), duration and the album's cover: `album.cover_group` (what librespot reads; `cover`
   when empty), the `DEFAULT` size (300 px), else the largest, as
   `https://i.scdn.co/image/<file id hex>`. The album's gid tells albums
   apart.
@@ -326,6 +450,8 @@ its own.
 - `ListItems` has required fields — a test protobuf without `pos` and `truncated` will not encode.
 - The cluster is pushed only on a change — the announce's answer (`Spirc::announced`) is what fills the list at connect.
 - A search endpoint carries the query — log a label, never the endpoint.
+- `recents`' entries are read one by one (each as a JSON value first) — one of an unexpected shape drops alone instead of failing the page.
+- `libraryV3` with `flatten: false` lists a folder, not the playlists inside it — those keep their rootlist place after the ordered ones.
 - librespot finds `music_play_track`'s track by URI among the context's loaded tracks — one past a page the resolver has not loaded yet starts the playlist from its top.
 - Stock librespot sends no `SetQueue` on a move, a shuffle or a repeat, and a shuffled load's arrives unshuffled — the vendored Spirc sends one after each; never trim `up_next` on `TrackChanged`, which can arrive before or after it.
 - A virtual list's row array is new every snapshot — memoise `useTrackRows`' URIs by their joined key, or every snapshot asks again; up next's key carries `queued` too, or a track queued with the same URIs keeps its old group.

@@ -103,6 +103,16 @@ export interface MusicPlaylist {
    *  known. A playlist Spotify gives no picture gets one from
    *  `music.playlistCovers`. */
   images: string[];
+  /** Pinned to the top of the account's library in Spotify. */
+  pinned: boolean;
+}
+
+/** One track the account played lately (`music_recently_played`). */
+export interface MusicPlayed {
+  uri: string;
+  /** Epoch ms of an Oculus play; Spotify's own are dated only to the day,
+   *  at its UTC midnight. */
+  played_at_ms: number;
 }
 
 /** One track's row (`music_tracks`). */
@@ -111,6 +121,8 @@ export interface MusicTrackRow {
   name: string;
   artists: string[];
   album: string;
+  /** `spotify:album:…`, which the track plays from; null when unknown. */
+  album_uri: string | null;
   image_url: string | null;
   duration_ms: number;
 }
@@ -277,6 +289,10 @@ export const music = {
   /** Calls Spotify can rate-limit: Rust keeps the playlists after the first
    *  fetch, and a 429 refuses every call until its wait is over. */
   playlists: (refresh = false) => invoke<MusicPlaylist[]>("music_playlists", { refresh }),
+  /** Tracks played lately on any device, newest first, Oculus's own merged
+   *  in. Spotify's list is kept like the playlists until `refresh`. */
+  recentlyPlayed: (refresh = false) =>
+    invoke<MusicPlayed[]>("music_recently_played", { refresh }),
   /** Covers for playlists without one, made from their first tracks' albums
    *  and kept until a refresh. A URI missing from the answer was cut short
    *  (a rate limit) and may be asked for again. */

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PushPin } from "@phosphor-icons/react";
 import { fmtClockSecs } from "@/lib/lectures/media";
 import { cn } from "@/lib/utils";
 import { PlaylistCover } from "./PlaylistCover";
@@ -17,6 +18,7 @@ export function LibraryRow({
   durationMs,
   queueUri,
   current = false,
+  pinned = false,
   disabled = false,
   onPlay,
   onRemove,
@@ -30,6 +32,8 @@ export function LibraryRow({
   queueUri?: string;
   /** The track playing now. */
   current?: boolean;
+  /** A playlist pinned in Spotify: a pin before the subtitle. */
+  pinned?: boolean;
   disabled?: boolean;
   onPlay?: () => void;
   /** Offers "Remove from queue", which calls this. */
@@ -47,9 +51,10 @@ export function LibraryRow({
         >
           {name}
         </span>
-        {subtitle && (
-          <span className="block truncate text-xs text-muted-foreground tabular-nums">
-            {subtitle}
+        {(subtitle || pinned) && (
+          <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground tabular-nums">
+            {pinned && <PushPin size={12} weight="fill" className="shrink-0" aria-label="Pinned" />}
+            <span className="truncate">{subtitle}</span>
           </span>
         )}
       </span>
