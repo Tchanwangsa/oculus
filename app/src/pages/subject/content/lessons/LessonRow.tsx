@@ -4,13 +4,14 @@ import { FileRecency } from "@/components/files/FileRecency";
 import { filePageHref, filePagePath, recordFileAccess } from "@/lib/files/openFile";
 import { fmtDue } from "@/lib/format/format";
 import { lessonIcon, lessonProgress, type EdLesson } from "@/lib/ed/lessons";
+import { useLiveLessonIndex } from "@/lib/ed/slideStatus";
 
 /** A lesson: its type, title, deadline and how many slides are completed.
  *  It opens full page in this pane, not beside the list: the lesson view
  *  brings its own slide sidebar. */
 export function LessonRow({ lesson }: { lesson: EdLesson }) {
   const navigate = useNavigate();
-  const { index } = lesson;
+  const index = useLiveLessonIndex(lesson.index);
   const Icon = lessonIcon(index?.lessonType ?? null);
   const progress = index && index.slides.length > 0 ? lessonProgress(index) : null;
   return (

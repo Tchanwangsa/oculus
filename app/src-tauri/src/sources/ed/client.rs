@@ -1,4 +1,4 @@
-//! The session half of `Ed`: authenticated GETs through oculus-keyd, token
+//! The session half of `Ed`: authenticated requests through oculus-keyd, token
 //! renewal, and saving a pasted token.
 
 use super::{api_base, Ed, ED_API, TIMEOUT};
@@ -59,7 +59,18 @@ impl Ed {
 
     /// GET `/api{path}` with oculus-keyd attaching the token.
     pub(super) fn get(&self, path: &str) -> Result<serde_json::Value, String> {
-        self.send_paced("GET", path, &[], b"")
+        let (status, body) = self.send_paced("GET", path, &[], b"")?;
+        json_reply(status, &body, path)
+    }
+
+    /// PUT `/api{path}` with no body, for an action whose answer is only its
+    /// status.
+    pub(super) fn put(&self, path: &str) -> Result<(), String> {
+        let (status, _) = self.send_paced("PUT", path, &[], b"")?;
+        if (200..300).contains(&status) {
+            return Ok(());
+        }
+        Err(status_error(status, path))
     }
 
     /// POST `body` as JSON to `/api{path}` with oculus-keyd attaching the token.
@@ -68,24 +79,26 @@ impl Ed {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, String> {
-        self.send_paced(
+        let (status, answer) = self.send_paced(
             "POST",
             path,
             &[("content-type", "application/json")],
             body.to_string().as_bytes(),
-        )
+        )?;
+        json_reply(status, &answer, path)
     }
 
     /// One request, sent again after a pause while Ed answers 429. A sync
     /// re-reads every thread, which outruns Ed's rate limit; a refused
-    /// request did nothing, so a POST is as safe to repeat as a GET.
+    /// request did nothing, so a POST is as safe to repeat as a GET. The
+    /// answer's status and body.
     fn send_paced(
         &self,
         method: &str,
         path: &str,
         headers: &[(&str, &str)],
         body: &[u8],
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<(u16, Vec<u8>), String> {
         let mut tries = 0;
         loop {
             let reply = self
@@ -100,7 +113,7 @@ impl Ed {
                 )
                 .map_err(keyd_failure)?;
             if reply.status != 429 || tries >= RATE_LIMIT_RETRIES {
-                return json_reply(reply.status, &reply.body, path);
+                return Ok((reply.status, reply.body));
             }
             pause(rate_limit_wait(reply.header("retry-after"), tries));
             tries += 1;

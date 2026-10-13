@@ -451,6 +451,23 @@ mod tests {
     }
 
     #[test]
+    fn ed_takes_a_bodyless_put() {
+        let ed = FakeOrigin::start(|_| ok(b""));
+        let canvas = FakeOrigin::start(|_| ok(b""));
+        let dir = Scratch::new("fwd-ed-put");
+        let state = with_sessions(&dir, &canvas, &ed);
+        let req = json!({"op": "forward", "secret": "ed", "method": "PUT", "path": "/api/lessons/slides/7/complete"});
+        let reply = state.dispatch(&cli(), "forward", &req, b"").unwrap();
+        assert_eq!(reply.header["status"], 200);
+        let hit = &ed.hits()[0];
+        assert_eq!(
+            (hit.method.as_str(), hit.path.as_str(), hit.body.as_slice()),
+            ("PUT", "/api/lessons/slides/7/complete", &b""[..])
+        );
+        assert_eq!(hit.header("x-token"), Some(TOKEN));
+    }
+
+    #[test]
     fn a_session_route_forwards_range_and_validators() {
         let canvas = FakeOrigin::start(|_| {
             answer(206, vec![("Content-Range", "bytes 0-1/9".into())], b"ab")

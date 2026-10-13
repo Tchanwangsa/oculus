@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { FileViewer } from "@/components/files/FileViewer";
 import { PillTabs } from "@/components/ui/table/PillTabs";
 import type { DbFile } from "@/lib/db";
 import type { Submission } from "@/lib/ed/workspace";
-import { openFileSmart } from "@/lib/files/openFile";
 import { cn } from "@/lib/utils";
 
+import { BriefMarkdown } from "./BriefMarkdown";
 import { FeedbackPanel } from "./feedback/FeedbackPanel";
 
 export type SideTab = "description" | "feedback";
@@ -17,7 +16,7 @@ const TABS: ReadonlyArray<{ value: SideTab; label: string }> = [
 ];
 
 /**
- * Ed's left column: the slide's brief, and beside it a Feedback tab when the
+ * Ed's left column: the slide's brief (`BriefMarkdown`), and beside it a Feedback tab when the
  * challenge marks or gives feedback. Feedback mounts on its first open and
  * then stays, so switching back and forth keeps what it loaded.
  */
@@ -29,6 +28,7 @@ export function DescriptionColumn({
   tab,
   onTab,
   marked,
+  openWorkspaceFile,
 }: {
   challengeId: number;
   brief: DbFile;
@@ -38,6 +38,8 @@ export function DescriptionColumn({
   tab: SideTab;
   onTab: (tab: SideTab) => void;
   marked: Submission | null;
+  /** Opens a workspace file's tab from the brief's Files list. */
+  openWorkspaceFile: (path: string) => boolean;
 }) {
   const shown: SideTab = feedback ? tab : "description";
   const [opened, setOpened] = useState(shown === "feedback");
@@ -45,7 +47,7 @@ export function DescriptionColumn({
     if (shown === "feedback") setOpened(true);
   }, [shown]);
 
-  const viewer = <FileViewer file={brief} files={files} onOpenFile={openFileSmart} />;
+  const viewer = <BriefMarkdown brief={brief} files={files} openWorkspaceFile={openWorkspaceFile} />;
   if (!feedback) return viewer;
   return (
     <>

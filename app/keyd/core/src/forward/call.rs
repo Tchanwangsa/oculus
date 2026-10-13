@@ -17,11 +17,16 @@ impl Call {
     /// Checks the header's `method`, `path` and `headers` against `route`.
     /// Details name what was wrong, never a header's value.
     pub fn parse(req: &Value, route: &Route, body: &[u8]) -> Result<Call, OpError> {
-        let method = match req.get("method").and_then(Value::as_str) {
-            Some("GET") => "GET",
-            Some("POST") => "POST",
-            _ => return Err(OpError::new("request", "method must be GET or POST")),
-        };
+        let method = req
+            .get("method")
+            .and_then(Value::as_str)
+            .and_then(|m| route.methods.iter().copied().find(|allowed| *allowed == m))
+            .ok_or_else(|| {
+                OpError::new(
+                    "request",
+                    format!("method must be {}", route.methods.join(" or ")),
+                )
+            })?;
         if method == "GET" && !body.is_empty() {
             return Err(OpError::new("request", "a GET takes no body"));
         }
@@ -165,7 +170,6 @@ mod tests {
         for route in ["voyage", "canvas", "ed"] {
             let path = if route == "voyage" { "/v1/x" } else { "/api/x" };
             for method in [
-                json!("PUT"),
                 json!("PATCH"),
                 json!("DELETE"),
                 json!("HEAD"),
@@ -186,6 +190,26 @@ mod tests {
             );
             assert!(call_on(route, json!({"method": "GET", "path": path}), b"").is_ok());
             assert!(call_on(route, json!({"method": "POST", "path": path}), b"{}").is_ok());
+        }
+    }
+
+    #[test]
+    fn a_put_goes_to_ed_only() {
+        let put = |path: &str| json!({"method": "PUT", "path": path});
+        let c = call_on("ed", put("/api/lessons/slides/7/complete"), b"").unwrap();
+        assert_eq!(c.method, "PUT");
+        assert!(call_on("ed", put("/user"), b"").is_err());
+        assert!(call_on("ed", json!({"method": "put", "path": "/api/x"}), b"").is_err());
+        for (route, path) in [
+            ("canvas", "/api/x"),
+            ("voyage", "/v1/x"),
+            ("mineru", "/api/v4/x"),
+        ] {
+            let err = call_on(route, put(path), b"").unwrap_err();
+            assert_eq!(
+                (err.kind, err.detail.as_str()),
+                ("request", "method must be GET or POST")
+            );
         }
     }
 
