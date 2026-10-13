@@ -376,12 +376,17 @@ whose list has slides (`useLessonIndex`), its body is `LessonView`
   (`OpenOriginal`, ⌘-click for a new tab) opens the shown slide's page in
   Ed, else the lesson's.
 - **The sidebar folds to a 46px rail** of slide glyphs, its width easing as
-  the nav columns' do and the fold remembered (`useResizablePanel`,
-  `oculus-ed-lesson-sidebar`); the header keeps only the toggle. The labels
-  and ticks fade out, a small tick (completed) or a brand dot (not yet
-  opened in Ed) fades in on each glyph, and a glyph's tooltip is the slide's
-  title. The list's scrollbar is hidden, as `SideNav`'s is, so glyphs and
-  toggle share one centre line.
+  the app rail's does (width, min and max pinned together) and the fold
+  remembered (`useResizablePanel`, `oculus-ed-lesson-sidebar`). The column
+  stays laid out at its open width, so a fold clips it and nothing
+  re-truncates, and the header keeps one height, so the glyphs never move
+  up or down. Folded, each slide's button is a 30px square round its glyph,
+  as the app rail's are, so the active fill and the tooltip (the slide's
+  title) sit on the glyph; the label is the button's sibling, so it fades
+  (`SIDE_NAV_FOLDS`) rather than squeezing. The toggle centres on the slide
+  panes' 40px tab strips, and a small tick (completed) or a brand dot (not
+  yet opened in Ed) fades in on each glyph. The list's scrollbar is hidden,
+  as `SideNav`'s is, so glyphs and toggle share one centre line.
 - **The pane shows the selected slide through `FileViewer`**: a PDF slide's
   PDF, any other slide's `.md`, both found by path beside the index
   (`slideFiles`). A slide whose rows a sync has not stored yet says so

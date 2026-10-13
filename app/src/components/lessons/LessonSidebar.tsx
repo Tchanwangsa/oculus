@@ -1,10 +1,11 @@
 import { useRef, type KeyboardEvent } from "react";
 import { OpenOriginal } from "@/components/files/OpenOriginal";
-import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
+import { SIDE_NAV_FOLDS, SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { lessonProgress, type LessonIndex } from "@/lib/ed/lessons";
 import { fmtDue } from "@/lib/format/format";
+import { cn } from "@/lib/utils";
 import { SlideRow } from "./SlideRow";
 
 /** A fixed column that folds to a rail of glyphs, the fold remembered. The
@@ -58,40 +59,43 @@ export function LessonSidebar({
     <aside
       aria-label="Slides"
       data-collapsed={collapsed}
-      style={{ width: panel.width }}
-      className="group/nav flex shrink-0 flex-col overflow-hidden border-r border-border-subtle transition-[width] duration-200 ease-out"
+      // Pinned together, as the app rail's are, so flexbox can't clamp it to
+      // min-content mid-transition.
+      style={{ width: panel.width, minWidth: panel.width, maxWidth: panel.width }}
+      className="group/nav shrink-0 grow-0 overflow-hidden border-r border-border-subtle transition-[width,min-width,max-width] duration-200 ease-out"
     >
-      {/* Laid out at the open width, so a fold clips the title, never rewraps it. */}
-      <div style={{ width: panel.restWidth }} className="flex items-start gap-1.5 px-[7px] pt-3 pb-2">
-        <SideNavCollapseToggle collapsed={collapsed} onToggle={panel.toggle} />
-        {!collapsed && (
-          <>
-            <div className="min-w-0 flex-1 pt-1.5">
-              <h2 className="text-[13px] font-semibold leading-snug text-foreground">{title}</h2>
-              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                {index.dueAt && `Due ${fmtDue(index.dueAt)} · `}
-                <span className="tabular-nums">{done}/{total}</span> completed
-              </p>
-            </div>
-            {edUrl && <OpenOriginal href={edUrl} label="Open in Ed" />}
-          </>
-        )}
-      </div>
-      <div
-        ref={listRef}
-        onKeyDown={onKeyDown}
-        // The scrollbar hidden as in `SideNav`, so the rail keeps its centre line.
-        className="min-h-0 flex-1 space-y-px overflow-y-auto overflow-x-hidden px-2 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {index.slides.map((slide, position) => (
-          <SlideRow
-            key={slide.id ?? position}
-            slide={slide}
-            active={position === selected}
-            collapsed={collapsed}
-            onSelect={() => onSelect(position)}
-          />
-        ))}
+      <div style={{ width: panel.restWidth }} className="flex h-full min-h-0 flex-col">
+        <div className="flex items-start gap-1.5 px-[7px] pt-1 pb-2">
+          <SideNavCollapseToggle collapsed={collapsed} onToggle={panel.toggle} />
+          <div className={cn("min-w-0 flex-1 pt-1.5", SIDE_NAV_FOLDS)}>
+            <h2 className="text-[13px] font-semibold leading-snug text-foreground">{title}</h2>
+            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+              {index.dueAt && `Due ${fmtDue(index.dueAt)} · `}
+              <span className="tabular-nums">{done}/{total}</span> completed
+            </p>
+          </div>
+          {edUrl && (
+            <span className={cn("flex", SIDE_NAV_FOLDS, collapsed && "pointer-events-none")}>
+              <OpenOriginal href={edUrl} label="Open in Ed" />
+            </span>
+          )}
+        </div>
+        <div
+          ref={listRef}
+          onKeyDown={onKeyDown}
+          // The scrollbar hidden as in `SideNav`, so the rail keeps its centre line.
+          className="min-h-0 flex-1 space-y-px overflow-y-auto overflow-x-hidden px-2 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {index.slides.map((slide, position) => (
+            <SlideRow
+              key={slide.id ?? position}
+              slide={slide}
+              active={position === selected}
+              collapsed={collapsed}
+              onSelect={() => onSelect(position)}
+            />
+          ))}
+        </div>
       </div>
     </aside>
   );
