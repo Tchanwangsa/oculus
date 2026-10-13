@@ -1,5 +1,5 @@
-//! Ed's submission, as `mark` answers it and `GET /challenges/submissions/<id>`
-//! reads it back, shaped for the feedback panel: camelCase, a testcase's
+//! Ed's submission, as `mark` answers it and the student's list of them
+//! (`history`) holds it, shaped for the feedback panel: camelCase, a testcase's
 //! `run.output` as `output`, and its `check_diff` checks' word diffs as
 //! `diffs` (`diff`). An empty text is `null`.
 

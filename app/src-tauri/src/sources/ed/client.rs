@@ -167,9 +167,12 @@ fn pause(wait: Duration) {
     }
 }
 
-/// An Ed API answer as JSON.
+/// An Ed API answer as JSON; an empty success (a reset answers so) is null.
 fn json_reply(status: u16, body: &[u8], path: &str) -> Result<serde_json::Value, String> {
     if (200..300).contains(&status) {
+        if body.trim_ascii().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
         return serde_json::from_slice(body).map_err(|e| format!("bad JSON: {e}"));
     }
     Err(status_error(status, path))

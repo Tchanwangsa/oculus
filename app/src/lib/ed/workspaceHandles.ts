@@ -77,6 +77,12 @@ export function holdWorkspace(challengeId: number): WorkspaceHold {
   };
 }
 
+/** The saver of a challenge's open workspace, for a panel that replaces
+ *  its files (Restore) without holding the workspace itself. */
+export function heldSaver(challengeId: number): WorkspaceSaver | null {
+  return entries.get(challengeId)?.saver ?? null;
+}
+
 /** Writes every open workspace's unsaved text now. */
 export function flushWorkspaces(): Promise<void> {
   return Promise.all([...entries.values()].map((e) => e.saver.flush())).then(() => {});

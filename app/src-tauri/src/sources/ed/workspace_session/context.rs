@@ -30,6 +30,8 @@ pub struct Shared {
     pub status: Status,
     /// Ed's workspace and its server's host, while online.
     pub online: Option<(String, String)>,
+    /// The student's Ed id, from the last connect (reset needs it).
+    pub user_id: Option<i64>,
     pub commits: Commits,
     pub unrecorded: BTreeMap<String, Unrecorded>,
     pub terminals: Terminals,
@@ -71,6 +73,7 @@ impl Context {
             shared: Mutex::new(Shared {
                 status: Status::connecting(),
                 online: None,
+                user_id: None,
                 commits: Commits::default(),
                 unrecorded: BTreeMap::new(),
                 terminals: Terminals::default(),

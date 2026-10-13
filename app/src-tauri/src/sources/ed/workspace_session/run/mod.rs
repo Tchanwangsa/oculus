@@ -3,6 +3,7 @@
 //! (`wss://<host>/run?ticket=`) served by its own thread (`stream`). One run
 //! per challenge: a new Run stops the one before it.
 
+pub mod dump;
 pub mod frames;
 pub mod stream;
 
@@ -151,6 +152,14 @@ fn emit(core: &Context, run_id: &str, event: RunEvent) {
     let run_id = run_id.to_string();
     core.emit(match event {
         RunEvent::Output(data) => Body::Run { run_id, data },
+        RunEvent::Files(files) => {
+            let spill = spill_folder(core.challenge_id, &run_id);
+            let files = files
+                .into_iter()
+                .filter_map(|file| dump::for_pane(file, &spill))
+                .collect();
+            Body::RunFiles { run_id, files }
+        }
         RunEvent::Exit(exit) => Body::RunExit {
             run_id,
             code: exit.code,
@@ -158,4 +167,13 @@ fn emit(core: &Context, run_id: &str, event: RunEvent) {
             message: exit.message,
         },
     });
+}
+
+/// Where a run's files too big to send inline are written: a temporary
+/// folder, since they are the program's output and not the student's work.
+fn spill_folder(challenge_id: i64, run_id: &str) -> std::path::PathBuf {
+    std::env::temp_dir()
+        .join("oculus-ed-runs")
+        .join(challenge_id.to_string())
+        .join(run_id)
 }

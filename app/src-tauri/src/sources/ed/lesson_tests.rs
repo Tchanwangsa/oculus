@@ -803,22 +803,20 @@ fn a_workspace_sync_record_round_trips_beside_the_library() {
         )]
         .into_iter()
         .collect(),
-        submissions: vec![42],
     };
     save(&dir, 267880, &state).unwrap();
     assert!(has_state(&dir, 267880));
-    assert_eq!(load(&dir, 267880), Some(state));
+    assert_eq!(load(&dir, 267880), Some(state.clone()));
     let raw: Value = serde_json::from_slice(&std::fs::read(path(&dir, 267880)).unwrap()).unwrap();
     assert_eq!(
         raw.as_object().unwrap().keys().collect::<Vec<_>>(),
-        [
-            "workspace_id",
-            "slide_dir",
-            "base_commit",
-            "files",
-            "submissions"
-        ]
+        ["workspace_id", "slide_dir", "base_commit", "files"]
     );
+    // A record from before Ed listed submissions still reads.
+    let mut older = raw.clone();
+    older["submissions"] = serde_json::json!([42]);
+    std::fs::write(path(&dir, 2), older.to_string()).unwrap();
+    assert_eq!(load(&dir, 2), Some(state.clone()));
 
     // An unreadable record is still a record: the sync leaves the workspace be.
     std::fs::write(path(&dir, 1), b"{not json").unwrap();

@@ -124,7 +124,6 @@ fn first_connect(
             slide_dir: core.slide_dir.clone(),
             base_commit: init.head().map(str::to_string),
             files: record,
-            submissions: std::mem::take(&mut state.submissions),
         }
     })?;
     core.emit_files();

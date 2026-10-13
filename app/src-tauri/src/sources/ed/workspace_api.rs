@@ -1,10 +1,11 @@
 //! Ed's `/api` calls around a challenge workspace: attach it, ticket a
-//! download, an upload or a run, mark it, and read a submission back. Each
-//! ticket is a credential for the workspace server (`sahara`), so it is held
-//! in a [`Ticket`], whose `Debug` never shows it.
+//! download, an upload or a run, mark it, list the submissions and open one's
+//! code, and reset it. Each ticket is a credential for the workspace server
+//! (`sahara`), so it is held in a [`Ticket`], whose `Debug` never shows it.
 //!
-//! `mark` makes a real submission that counts in Ed's records: only the
-//! workspace's Mark button may call it, never a sync, a reconnect or an agent.
+//! `mark` makes a real submission that counts in Ed's records, and
+//! `reset_challenge` deletes the student's files on Ed: only the workspace's
+//! buttons may call them, never a sync, a reconnect or an agent.
 
 use super::Ed;
 
@@ -33,6 +34,9 @@ pub struct Connected {
     pub workspace_id: String,
     /// Opens `wss://<host>/connect`.
     pub ticket: Ticket,
+    /// The student's Ed user id, from the reply's `user` (an object with
+    /// `id`, or the id itself).
+    pub user_id: Option<i64>,
 }
 
 impl Ed {
@@ -49,7 +53,24 @@ impl Ed {
         Ok(Connected {
             workspace_id,
             ticket,
+            user_id: user_id_in(&reply["user"]),
         })
+    }
+
+    /// The signed-in user's Ed id (`GET /user`), for when a connect named none.
+    pub fn user_id(&self) -> Result<i64, String> {
+        user_id_in(&self.get("/user")?["user"]).ok_or_else(|| "Ed did not say who you are".into())
+    }
+
+    /// Ed's "Reset attempt": the challenge's files go back to the scaffold
+    /// on Ed's server. Only `ed_workspace_reset` calls it, after the pane's
+    /// confirm dialog.
+    pub fn reset_challenge(&self, user_id: i64, challenge_id: i64) -> Result<(), String> {
+        self.post(
+            &format!("/users/{user_id}/challenges/{challenge_id}/reset"),
+            &json!({}),
+        )
+        .map(|_| ())
     }
 
     /// A ticket for `GET <sahara>/download/<ticket>`: `"."` is the whole tree
@@ -105,11 +126,40 @@ impl Ed {
         submission_in(reply)
     }
 
-    /// One submission, by the id `mark` returned. Ed lists none for a
-    /// student, so the ids Oculus made are the history.
-    pub fn submission(&self, submission_id: i64) -> Result<Value, String> {
-        submission_in(self.get(&format!("/challenges/submissions/{submission_id}"))?)
+    /// The student's submissions for a challenge, with their marked
+    /// results, as Ed lists them (`/challenges/<ch>/submissions` is staff's).
+    pub fn user_submissions(&self, user_id: i64, challenge_id: i64) -> Result<Vec<Value>, String> {
+        let mut reply = self.get(&format!(
+            "/users/{user_id}/challenges/{challenge_id}/submissions"
+        ))?;
+        match reply["submissions"].take() {
+            Value::Array(list) => Ok(list),
+            _ => match reply {
+                Value::Array(list) => Ok(list),
+                _ => Err("Ed returned no list of submissions".into()),
+            },
+        }
     }
+
+    /// A ticket for `wss://<sahara>/connect` on a temporary workspace that
+    /// holds submission `submission_id`'s code; `init.wid` names it.
+    pub fn submission_ticket(&self, submission_id: i64) -> Result<Ticket, String> {
+        let reply = self.post(
+            &format!("/challenges/submissions/{submission_id}/connect"),
+            &json!({}),
+        )?;
+        ticket_in(&reply).ok_or_else(|| "Ed returned no ticket for the submission's code".into())
+    }
+}
+
+/// `user` as an object with `id`, or the id itself (a number or digits).
+pub(super) fn user_id_in(user: &Value) -> Option<i64> {
+    let id = match user {
+        Value::Object(o) => o.get("id")?,
+        other => other,
+    };
+    id.as_i64()
+        .or_else(|| id.as_str().and_then(|s| s.parse().ok()))
 }
 
 fn ticket_in(reply: &Value) -> Option<Ticket> {

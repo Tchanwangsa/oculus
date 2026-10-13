@@ -111,6 +111,9 @@ fn connect_and_serve(core: &Context, queue: &Receiver<Out>) -> Ended {
         }
     };
     let (attach, gone) = core.shared().terminals.connected(&init);
+    if connected.user_id.is_some() {
+        core.shared().user_id = connected.user_id;
+    }
     core.shared().online = Some((wid, host));
     core.set_status(State::Online, None);
     for id in gone {

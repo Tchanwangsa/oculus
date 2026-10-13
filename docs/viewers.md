@@ -16,7 +16,8 @@ transcript, and a web page.
 | An Ed lesson's view: the slide sidebar and pane, the index reader, statuses Ed answered this session | `app/src/components/lessons/`, `app/src/hooks/data/useLessonIndex.ts`, `app/src/lib/ed/lessons.ts`, `app/src/lib/ed/slideStatus.ts`, `app/src/lib/ed/views.ts` |
 | A challenge's workspace: the pane, its commands and events, the save loop, the shared session, the brief's Files | `app/src/components/lessons/workspace/`, `app/src/lib/ed/briefFiles.ts`, `app/src/lib/ed/workspace.ts`, `app/src/lib/ed/workspaceSaver.ts`, `app/src/lib/ed/workspaceHandles.ts`, `app/src/lib/ed/workspaceStatus.ts` |
 | A workspace file in conflict with Ed: the bar, Compare, Keep mine and Take Ed's | `app/src/components/lessons/workspace/conflict/`, `app/src/lib/ed/conflicts.ts`, `app/src/lib/ed/lineDiff.ts` |
-| The workspace's terminal drawer, Run, Mark and Feedback | `app/src/components/lessons/workspace/terminal/`, `app/src/components/lessons/workspace/mark/`, `app/src/components/lessons/workspace/feedback/`, `app/src/lib/ed/termOutput.ts`, `app/src/lib/ed/flushForEd.ts`, `app/src/lib/ed/markPrompts.ts`, `app/src/lib/ed/feedback.ts` |
+| The workspace's terminal drawer, Run and its files, Mark and Feedback | `app/src/components/lessons/workspace/terminal/`, `app/src/components/lessons/workspace/run/`, `app/src/components/lessons/workspace/mark/`, `app/src/components/lessons/workspace/feedback/`, `app/src/lib/ed/termOutput.ts`, `app/src/lib/ed/runFiles.ts`, `app/src/lib/ed/flushForEd.ts`, `app/src/lib/ed/markPrompts.ts`, `app/src/lib/ed/feedback.ts` |
+| Reset to scaffold and Restore: the header menu and the replace flow | `app/src/components/lessons/workspace/reset/` |
 | The code editor and a library source file's read-only view | `app/src/components/code/`, `app/src/components/files/CodeFileViewer.tsx`, `fileLanguage` in `app/src/components/documents/editor/syntax/codeLanguages.ts`, `CODE_EXTS` in `app/src/lib/files/fileTypes.ts` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/lectures/media/`, `app/src/stores/lectures/playerPrefsStore.ts`, `app/src/hooks/lectures/useTranscriptDock.ts` |
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lectures/playback/`, `app/src/lib/lectures/playbackOwner.ts` |
@@ -483,6 +484,22 @@ commands typed in `app/src/lib/ed/workspace.ts`.
   which ends in dim text with Ed's message, if any, and "Program exited
   with code N". Offline or connecting, Run is disabled with the reason as
   its tooltip; a failed start is an inline `Alert`.
+- **The files a run left** (`runFiles`, `run/RunFiles.tsx`) show under the
+  Run tab's output until the next Run: pictures at the strip's width on
+  white, as Ed draws them (a click opens `ImageLightbox`), text files as
+  chips that open in a dialog, anything else as a chip that shows it in
+  Finder or Explorer (`runFileView` in `lib/ed/runFiles.ts`).
+- **Reset to scaffold** is the one item of the header's overflow menu
+  (`reset/WorkspaceMenu.tsx`), disabled offline. It asks in Ed's words
+  ("Reset challenge attempt?") in `ConfirmDialog`; confirming drops every
+  buffer of the saver, unsaved text included, and waits out a write in
+  flight (`saver.discard`, `reset/useReplaceFlow.ts`), so no save of the old
+  text follows, then calls `ed_workspace_reset`. A failure is an inline
+  `Alert`. Restore shares the flow.
+- **A `reset` event** (a reset or a restore) drops every buffer again,
+  forgets each tab's undo history and remounts the editor, which reads the
+  files anew; `files` has already replaced the tabs, and the terminal's
+  `termState exited` offers "New terminal".
 - **Mark** shows when `features.mark` and only ever submits from its
   button (`mark/useMarkFlow.ts`): write pending saves, read the live
   standing (`ed_challenge_standing`), then ask in one in-app dialog what
@@ -494,15 +511,22 @@ commands typed in `app/src/lib/ed/workspace.ts`.
   mark is an inline `Alert` and is never retried by itself.
 - **Feedback** is a tab beside Description in the left column when
   `features.feedback` or `features.mark` (`feedback/FeedbackPanel.tsx`). It
-  loads `ed_workspace_submissions` (the submissions this install made,
-  newest first) on first open, and a finished Mark joins the list, is
-  shown and switches the column to it. A submission reads as Ed's panel:
+  loads `ed_workspace_submissions` (Ed's list of the student's
+  submissions, newest first) on first open, and a finished Mark joins the
+  list, is shown and switches the column to it. The shown submission has
+  Feedback and Code views and a Restore button. A submission reads as Ed's panel:
   "N / M passed, P points" (summed testcase scores, `lib/ed/feedback.ts`),
   Ed's feedback, a failed build's output, then each testcase with ✓ or ✗,
   its feedback, its output and its `check_diff` lines as word runs (your
   output red, expected green, a missing newline marked). Hidden and private
-  testcases show their name only. Older submissions are listed below to
-  pick from.
+  testcases show their name only. Code (`feedback/SubmissionCode.tsx`)
+  reads `ed_submission_files` and shows the files as it went in, in tabs
+  over a read-only `CodeEditor`. Restore asks "Restore this submission?"
+  with the submission's date, then replaces the workspace with its code
+  (`ed_workspace_restore`) through the same flow as Reset; disabled while a
+  status event says Ed is unreachable. Every submission is listed below as
+  Ed's table — its number, when it went in, testcases passed and ✓ or ✗ —
+  to pick from.
 
 ## One code editor for source files
 

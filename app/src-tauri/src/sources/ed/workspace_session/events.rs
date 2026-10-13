@@ -84,6 +84,12 @@ pub enum Body {
         run_id: String,
         data: String,
     },
+    /// The files the program left that Ed's web app shows (`run::dump`),
+    /// just before the run's `RunExit`.
+    RunFiles {
+        run_id: String,
+        files: Vec<RunFile>,
+    },
     /// The run is over: exactly one per run.
     RunExit {
         run_id: String,
@@ -92,6 +98,21 @@ pub enum Body {
         /// Why it ended without an exit code, in words.
         message: Option<String>,
     },
+    /// Ed reset the challenge to its scaffold: every buffer the pane holds
+    /// is stale, unsaved text included.
+    Reset,
+}
+
+/// One file a run left behind: a picture or text up to 5 MB inline as a
+/// `data:` URL, anything else written to a temporary folder (`path`,
+/// absolute).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunFile {
+    pub name: String,
+    pub mime: String,
+    pub data_url: Option<String>,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
