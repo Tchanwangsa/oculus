@@ -30,9 +30,8 @@ import { tableField, tableKeys } from "./tables";
 
 export { syncLiveFocus } from "../../core/liveFocus";
 
-/** Rendered maths draws its own selection, bands over its atoms
- *  (`MathWidget`), so the note's highlight skips it: a block with its line
- *  break, so the highlight doesn't run full width beside it. */
+/** Display maths draws structural bands of its own, so the text highlight
+ *  skips the block and its line break. Inline maths shares the text layer. */
 function renderedMaths(view: EditorView): SelectionGap[] {
   const out: SelectionGap[] = [];
   const { length } = view.state.doc;
@@ -40,8 +39,6 @@ function renderedMaths(view: EditorView): SelectionGap[] {
   for (let it = view.state.field(mathBlockField).iter(); it.value; it.next()) {
     if (drawn(it.value.spec.widget)) out.push({ from: it.from, to: Math.min(it.to + 1, length) });
   }
-  const inline = view.plugin(inlinePlugin)?.atoms;
-  for (let it = inline?.iter(); it?.value; it.next()) if (drawn(it.value.spec.widget)) out.push({ from: it.from, to: it.to });
   return out;
 }
 

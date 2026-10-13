@@ -106,7 +106,12 @@ nearest gap, and in a block the row whose vertical band holds the press, else
 the nearest, bounds that search. A selection whose ends sit at different
 depths — dragged from beside a matrix into a cell, or across two cells — is
 widened by the model to take each structure it reaches into whole, while a
-block's rows select as one run; ←/→ and Backspace/Delete at inline maths,
+block's rows select as one run. Double-click selects an atom and triple-click
+its nearest enclosing group; multi-click dragging extends by whole units.
+The field and read-only rendering share `unitAt` and `extendUnit` in
+`lib/maths/geometry/units.ts`.
+
+←/→ and Backspace/Delete at inline maths,
 and those and ↑/↓ from the line beside a block (below), enter it at that
 end.
 
@@ -186,11 +191,13 @@ The rendering is `MathWidget` in
 atomic ranges in `live-preview/livePreview/`. Once the maths
 engine has loaded, every rendering's range is atomic, so a drag or Shift+arrow
 covers maths whole and Shift-click extends the selection over it. A
-rendering a selection covers draws bands over its atoms, as chat does
-(`WholeBands`, `mathSelection/whole.ts`; the rendering is `fieldHtml`, the
-field's own, source map on), and the note's highlight leaves it out: the
-selection layer is `core/selectionLayer.ts`, `drawSelection`'s with the
-rendered maths cut out (`selectionGaps`, a block with its line break).
+covered inline rendering shares one highlight height with the selected text
+beside it, including matrices and fractions. The note and rendered Markdown
+both use `mathSelection/lines.ts` and `lib/maths/geometry/lineBands.ts`;
+`core/selectionMath.ts` only translates CodeMirror’s range and overlay origin.
+Display maths keeps structural bands (`WholeBands`, `mathSelection/whole.ts`),
+which the note’s selection layer skips (`selectionGaps`, the block with its
+line break). The rendering is `fieldHtml`, the field’s own, source map on.
 Native selection never paints the rendering, and a selection taking a
 whole block keeps it rendered rather than opening the field. Copy and cut always write the note's source (`$$…$$` lines), since
 a rendering passes clipboard events to CodeMirror. A rendered block takes

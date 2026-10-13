@@ -247,8 +247,9 @@ cannot wait on the blur (the chat's pasted text editor,
 - **The selection highlight is our own layer** (`core/selectionLayer.ts`):
   `drawSelection` draws the caret, and its highlight layer is hidden by the
   theme, since it has no option to skip spans; `noteSelection` draws the
-  same rectangles less the `selectionGaps`, which Live mode fills with
-  rendered maths, which bands its own atoms
+  text rectangles and the shared text-and-inline-maths geometry
+  (`mathSelection/lines.ts`, through `core/selectionMath.ts`). Display maths
+  fills the `selectionGaps` with structural bands
   ([editor-maths.md](./editor-maths.md#rendered-maths-is-one-unit-to-the-selection-the-clipboard-and-the-caret)).
 - **CodeMirror block decorations come from a `StateField`** — it throws for
   block widgets from a view plugin

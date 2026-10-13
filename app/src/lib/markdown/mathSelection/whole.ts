@@ -65,26 +65,33 @@ export function watchMathSelection() {
   const prose = new Map<HTMLElement, ProseBands>();
   document.addEventListener("selectionchange", () => {
     const selection = window.getSelection();
+    const selected = selection?.rangeCount && !selection.isCollapsed ? selection.getRangeAt(0) : null;
+    const editing = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest(".cm-editor, .cm-math-view");
     const next = new Set<Element>();
     let range: Range | null = null;
-    if (selection && selection.rangeCount && !selection.isCollapsed) {
-      range = selection.getRangeAt(0);
+    // Editable hosts own their range and call the shared geometry themselves.
+    if (selected && !editing(selected.startContainer) && !editing(selected.endContainer)) {
+      range = selected;
       const inside = mathAround(range.commonAncestorContainer);
       if (inside) next.add(inside);
       else {
         const root = range.commonAncestorContainer;
         const scope = root.nodeType === Node.ELEMENT_NODE ? (root as Element) : root.parentElement;
         for (const el of Array.from(scope?.querySelectorAll(".katex-display, .katex") ?? [])) {
-          if (mathAround(el) === el && touches(el, range)) next.add(el);
+          if (!el.closest(".cm-editor, .cm-math-view") && mathAround(el) === el && touches(el, range)) next.add(el);
         }
       }
     }
     const paragraphs = new Set<HTMLElement>();
     if (range && !mathAround(range.commonAncestorContainer)) {
       for (const el of next) {
-        const p = el.closest("p");
+        const p = el.closest("p, li, td, th, h1, h2, h3, h4, h5, h6, blockquote, figcaption") ?? el.closest("[data-selectable]");
         if (p instanceof HTMLElement && !p.closest('.cm-editor, [contenteditable="true"]') && ProseBands.accepts(p, range)) paragraphs.add(p);
       }
+    }
+    // One overlay owns nested text flows, so their tint cannot double.
+    for (const p of paragraphs) {
+      if ([...paragraphs].some(outer => outer !== p && outer.contains(p))) paragraphs.delete(p);
     }
     for (const [p, layer] of prose) {
       if (paragraphs.has(p) && p.isConnected) continue;

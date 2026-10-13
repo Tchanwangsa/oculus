@@ -12,6 +12,7 @@ import {
   type Layout,
   type Measured,
 } from "@/lib/maths/geometry";
+import { unitAt, type StopRange } from "@/lib/maths/geometry/units";
 import { drawCaret, restartBlink } from "./caret";
 import { compositionEnd, compositionStart, beforeInput, inputEvent } from "./input";
 import { keyDown } from "./keys";
@@ -203,6 +204,13 @@ export class MathView {
       if (e instanceof MathsTrap) this.#trap(e);
       else throw e;
     }
+  }
+
+  /** The atom or group under the pointer, shared with read-only maths. */
+  unitAtPoint(clientX: number, clientY: number, group: boolean): StopRange | null {
+    this.#ensureLayout();
+    const { x, y } = framePoint(this.frame, clientX, clientY);
+    return unitAt(this.layout, this.field, x, y, group);
   }
 
   /** The stop a press at this viewport point lands on. */

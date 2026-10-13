@@ -189,15 +189,17 @@ classes work even when there are no dollar delimiters.
   `watchMathSelection` (`mathSelection/whole.ts`) paints bands over all its
   atoms, as a press-and-drag over all of it would, instead of KaTeX's
   per-glyph highlight; the display wrapper also suppresses native selection
-  paint so WebKit leaves no full-width stripes. In a prose paragraph, selected text and inline maths on one top-level row share one
-  band per visual baseline (`mathSelection/prose.ts`): the taller ink sets the
+  paint so WebKit leaves no full-width stripes. Selected text and inline maths
+  in paragraphs, headings, list items and table cells share one highlight
+  height per visual baseline (`mathSelection/lines.ts`,
+  `lib/maths/geometry/lineBands.ts`), shared with the note editor: the taller ink sets the
   band’s height, so small maths fills the text height and a tall fraction
   gives the adjacent text the same height. An inline matrix stays whole with
   its brackets and cells, giving the surrounding prose its full height too.
   Each top-level base’s strut sets its baseline, independent of cell and
   delimiter fonts, with a small tolerance for WebKit’s text metric rounding.
-  The native range and clipboard stay unchanged. Direct selections inside maths,
-  multi-line formulas and note widgets keep structural bands;
+  The native range and clipboard stay unchanged. Direct selections inside maths
+  and display formulas keep structural bands;
   nothing boxes a whole display formula. A press on a formula
   selects by structure — a cell, a matrix, a run of atoms — and copies that
   part's LaTeX wrapped by its shape (`copied` in `mathSelection/clipboard.ts`,

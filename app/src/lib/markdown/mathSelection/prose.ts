@@ -1,15 +1,11 @@
-import { bands, frameOrigin, paintBands, readLayout } from "@/lib/maths/geometry";
-import { fontAscent } from "@/lib/maths/geometry/font";
-import { fieldOf, formulaOf, type Formula } from "./formula";
+import { paintBands } from "@/lib/maths/geometry";
+import { hasInlineMath, selectionLines } from "./lines";
 import { dropLayer, openLayer } from "./session";
-import { proseBands, type ProsePiece } from "./proseGeometry";
 
 const LAYER = { attribute: "data-math-prose-selecting", className: "md-prose-bands" };
 const ACTIVE = "data-math-prose-highlight";
-const SKIP = '.katex, .md-prose-bands, button, [role="button"], [role="tab"], [data-copy-skip], [aria-hidden="true"]';
 
-/** One paragraph’s native selection drawn as uniform visual lines. Each top-level
- *  inline atom, including a matrix, stays whole in a prose selection. */
+/** A native text-flow selection using the same line geometry as the note editor. */
 export class ProseBands {
   readonly layer: HTMLElement;
   range: Range;
@@ -27,11 +23,7 @@ export class ProseBands {
   }
 
   static accepts(root: HTMLElement, range: Range): boolean {
-    const formulas = selectedFormulas(root, range);
-    return formulas.length > 0 && formulas.every(formula => {
-      const slots = fieldOf(formula)?.slots;
-      return slots && slots.filter(s => s.parent == null).length <= 1;
-    });
+    return hasInlineMath(root, range);
   }
 
   update(range: Range) {
@@ -41,35 +33,7 @@ export class ProseBands {
 
   redraw() {
     if (!this.root.isConnected) return;
-    const pieces: ProsePiece[] = [];
-    const origin = frameOrigin(this.layer);
-    const walker = document.createTreeWalker(this.root, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node.parentElement?.closest(SKIP) || !this.range.intersectsNode(node)) continue;
-      const part = document.createRange();
-      part.selectNodeContents(node);
-      if (node === this.range.startContainer) part.setStart(node, this.range.startOffset);
-      if (node === this.range.endContainer) part.setEnd(node, this.range.endOffset);
-      const ascent = fontAscent(getComputedStyle(node.parentElement!));
-      for (const r of part.getClientRects()) {
-        if (r.width <= 0 || r.height <= 0) continue;
-        pieces.push({ box: { left: r.left - origin.x, right: r.right - origin.x, top: r.top - origin.y, bottom: r.bottom - origin.y }, baseline: r.top - origin.y + ascent });
-      }
-    }
-    for (const formula of selectedFormulas(this.root, this.range)) {
-      for (const base of formula.html.querySelectorAll(":scope > .katex-base")) {
-        const strut = base.querySelector(":scope > .katex-strut");
-        if (!strut) continue;
-        // The base’s strut ends its depth below the actual line baseline.
-        // Matrix cells and tall delimiters have baselines of their own.
-        const baseline = strut.getBoundingClientRect().bottom - origin.y +
-          (parseFloat(getComputedStyle(strut).verticalAlign) || 0);
-        const layout = readLayout(base, this.layer);
-        // A prose selection takes each inline structure whole, including its cells.
-        for (const box of bands(layout, 0, Number.MAX_SAFE_INTEGER)) pieces.push({ box, baseline });
-      }
-    }
-    paintBands(this.layer, proseBands(pieces), "md-math-band", 0);
+    paintBands(this.layer, selectionLines(this.root, this.range, this.layer) ?? [], "md-math-band", 0);
   }
 
   close() {
@@ -78,13 +42,4 @@ export class ProseBands {
     this.root.removeAttribute(ACTIVE);
     dropLayer(this.layer, this.root, undefined, LAYER);
   }
-}
-
-function selectedFormulas(root: HTMLElement, range: Range): Formula[] {
-  return Array.from(root.querySelectorAll(".katex")).filter(el =>
-    !el.closest(".katex-display") && range.intersectsNode(el),
-  ).flatMap(el => {
-    const formula = formulaOf(el);
-    return formula ? [formula] : [];
-  });
 }

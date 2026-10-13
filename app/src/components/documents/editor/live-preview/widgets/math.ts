@@ -62,15 +62,14 @@ function mathSpan(view: EditorView, start: number, block: boolean): { from: numb
 /** The widget each rendering was drawn or last updated from. */
 const drawnMath = new WeakMap<HTMLElement, MathWidget>();
 
-/** The bands over each rendering a selection covers. */
+/** Structural bands over a covered display rendering. */
 const covered = new WeakMap<HTMLElement, WholeBands>();
 
-/** Bands over the whole rendering while a selection covers it, as over a
- *  chat formula a text selection takes (`WholeBands`); the note's own
- *  highlight skips it (`selectionGaps`). */
+/** Display maths keeps structural bands, shared with rendered markdown.
+ *  Inline maths is painted with its surrounding text by noteSelection. */
 function showCovered(dom: HTMLElement, w: MathWidget, on: boolean) {
   const bands = covered.get(dom);
-  if (!on || !w.rendered()) {
+  if (!on || !w.display || !w.rendered()) {
     bands?.close();
     covered.delete(dom);
     return;
@@ -92,8 +91,8 @@ function showCovered(dom: HTMLElement, w: MathWidget, on: boolean) {
 /**
  * Rendered maths, one unit to the selection: its range is atomic in Live mode
  * (`live-preview/livePreview`), and while a selection covers it (`selected`)
- * it draws bands over its atoms, which the note's highlight leaves out. A
- * block (`block`) is drawn by the block layer. A press opens the visual
+ * inline maths shares the text highlight and display maths bands its atoms.
+ * A block (`block`) is drawn by the block layer. A press opens the visual
  * field where it landed (a block's padding: its first or last row); Shift
  * with a press extends the selection over the maths.
  */
