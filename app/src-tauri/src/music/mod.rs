@@ -11,14 +11,19 @@
 //! - **What Oculus last played** is remembered in memory and in the
 //!   `music_last_played` settings row (`last_played/`), shown paused after a
 //!   relaunch, and what Play plays when nothing plays anywhere.
+//! - **The tracks Oculus played** are kept in the `music_recent_tracks`
+//!   settings row (`recent_tracks/`), merged into the library's Recently
+//!   played.
 //! - **Credentials live in oculus-keyd** under `music.spotify`, read back with
 //!   keyd's app-only `get` (`credentials.rs`). No librespot `Cache`: neither the
 //!   login, the audio nor the volume is written to disk; the last-played row
-//!   holds only the account's username, the track and its place.
+//!   holds only the account's username, the track and its place, and the
+//!   recent-tracks row the username and track URIs with their times.
 //! - **Rust owns the state**; every change goes out whole as `music-state`
 //!   (`state/`), the `browser-state` discipline.
-//! - **The library** (`library/`) lists the account's playlists and searches
-//!   through the session's own spclient host, behind a rate-limit gate.
+//! - **The library** (`library/`) lists the account's playlists and what it
+//!   played lately, and searches, through the session's own spclient host,
+//!   behind a rate-limit gate.
 //! - **Commands control the device playing elsewhere** over Spotify's
 //!   connect-state API (`remote/`), and pull or activate playback here when
 //!   nothing is active (`control.rs`); `devices.rs` lists the account's
@@ -43,6 +48,7 @@ mod login;
 mod logs;
 mod netwatch;
 mod queue;
+mod recent_tracks;
 mod remote;
 mod resume;
 mod session;

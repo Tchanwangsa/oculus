@@ -1,6 +1,8 @@
 //! What the library keeps in memory, per account, and its rate-limit gate.
 //! Playlists, playlist contents and made covers are dropped on a refresh;
 //! headers and track rows describe things that rarely change and are kept.
+//! Spotify's recently played tracks are kept apart, dropped by their own
+//! refresh.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
@@ -10,6 +12,7 @@ use super::contents::Contents;
 use super::error::LibraryError;
 use super::gate::Gate;
 use super::metadata::TrackRow;
+use super::recently_played::Dated;
 use super::rootlist::{Header, Playlist};
 
 /// The account a map belongs to, and the map, by URI.
@@ -32,6 +35,9 @@ pub(super) struct Inner {
     pub(super) contents: PerAccount<Contents>,
     /// Track rows; `None` for a track Spotify sent nothing for.
     pub(super) tracks: PerAccount<Option<TrackRow>>,
+    /// The account they belong to, and the tracks of Spotify's recently
+    /// played list, dropped by that list's own refresh.
+    pub(super) recently_played: Option<(String, Vec<Dated>)>,
 }
 
 /// `slot`'s value for `key` when it belongs to `account`.

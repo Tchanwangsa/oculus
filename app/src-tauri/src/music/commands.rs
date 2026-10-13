@@ -3,9 +3,10 @@
 //! device and fail with "Not connected to Spotify" otherwise; while another
 //! device holds playback they control it remotely, and with nothing active
 //! anywhere they pull or activate playback here (`control.rs`). The lists
-//! (`music_playlists`, `music_playlist_covers`, `music_playlist_tracks`,
-//! `music_album_tracks`, `music_tracks`, `music_search`, `music_search_more`,
-//! `music_devices`, `music_outputs`) return their results.
+//! (`music_playlists`, `music_recently_played`, `music_playlist_covers`,
+//! `music_playlist_tracks`, `music_album_tracks`, `music_tracks`,
+//! `music_search`, `music_search_more`, `music_devices`, `music_outputs`)
+//! return their results.
 
 use std::collections::HashMap;
 
@@ -21,6 +22,7 @@ use super::devices::{self, Device};
 use super::library::{self, Playlist, SearchKind, SearchPage, SearchResults, TrackRow};
 use super::login::{self, LoginError};
 use super::queue;
+use super::recent_tracks::Played;
 use super::remote::{self, RemoteCommand};
 use super::session::{self, Start};
 use super::startup;
@@ -388,6 +390,14 @@ async fn load(app: &AppHandle, request: LoadRequest, remote: RemoteCommand) -> R
 #[tauri::command]
 pub async fn music_playlists(app: AppHandle, refresh: bool) -> Result<Vec<Playlist>, String> {
     Ok(library::playlists(&app, refresh).await?)
+}
+
+/// The tracks the account played lately on any device, with those Oculus
+/// played merged in, newest first: Spotify's list kept in memory after the
+/// first fetch, fetched again only on `refresh`.
+#[tauri::command]
+pub async fn music_recently_played(app: AppHandle, refresh: bool) -> Result<Vec<Played>, String> {
+    Ok(library::recently_played(&app, refresh).await?)
 }
 
 /// Covers for playlists that have none, by URI: one URL, or four for a
