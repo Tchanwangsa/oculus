@@ -69,8 +69,8 @@ pub fn run(
         files: record.files.clone(),
         ..Outcome::default()
     };
-    let unchanged_on_ed =
-        !head.changed && head.hash.is_some() && head.hash == record.base_commit.as_deref();
+    let unchanged_on_ed = !head.changed
+        && matches!((head.hash, record.base_commit.as_deref()), (Some(h), Some(b)) if same_tree(h, b));
     // With Ed unchanged since the base, Ed holds the base: no download.
     let Server {
         shas: server,
@@ -212,4 +212,11 @@ fn read_server(root: &Path, zip: &[u8]) -> Result<Server, String> {
         server.bytes.insert(file.path, file.bytes);
     }
     Ok(server)
+}
+
+/// Whether two commit ids name the same tree. An upload or `commit` answers
+/// `<tree>:::<suffix>`, `init.last_commits` the tree alone.
+pub(super) fn same_tree(a: &str, b: &str) -> bool {
+    let tree = |h: &str| h.split(":::").next().unwrap_or(h).to_string();
+    tree(a) == tree(b)
 }

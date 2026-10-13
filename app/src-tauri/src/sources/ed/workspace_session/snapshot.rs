@@ -1,8 +1,7 @@
-//! The commit Run and Mark take. Every upload is a commit and moves the
-//! record's `base_commit`, so after the pane's saves land that is the hash of
-//! what the user sees. A workspace that has none yet (Ed named no head and
-//! nothing was uploaded) asks the server for one: `commit {id}`, answered by
-//! the `new_commit` whose `context.id` echoes it.
+//! The commit Run and Mark take: a fresh `commit {id}` on the live session,
+//! answered by the `new_commit` whose `context.id` echoes it, as Ed's web app
+//! does. Run and Mark want the whole `<tree>:::<suffix>` id; `init.last_commits`
+//! names only the tree half, which Ed's run and mark answer with a 500.
 
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -11,7 +10,6 @@ use serde_json::{json, Value};
 
 use super::context::Context;
 use super::socket::Out;
-use crate::sources::ed::workspace_state;
 
 /// Commits asked of the server and not yet answered.
 #[derive(Default)]
@@ -59,15 +57,9 @@ pub fn commit_frame(id: u64) -> String {
     json!({ "type": "commit", "data": { "id": id } }).to_string()
 }
 
-/// The hash Run and Mark send: the record's base, else a commit asked of
-/// the live session. Waits for no longer than the session stays online.
+/// The hash Run and Mark send: a commit asked of the live session. Waits for
+/// no longer than the session stays online.
 pub fn latest(core: &Context, out: &Sender<Out>) -> Result<String, String> {
-    let base = workspace_state::load(&core.data_dir, core.challenge_id)
-        .and_then(|state| state.base_commit)
-        .filter(|hash| !hash.is_empty());
-    if let Some(hash) = base {
-        return Ok(hash);
-    }
     let gone = || "the workspace went offline before Ed saved a commit of it".to_string();
     let answer = {
         let mut shared = core.shared();
