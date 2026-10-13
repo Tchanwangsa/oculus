@@ -524,3 +524,38 @@ async fn a_studio_video_links_to_its_thread_and_survives_the_thread() {
     let links = studio_links(&pool).await.unwrap();
     assert_eq!(links["gradient-descent"].thread_id, None);
 }
+
+#[tokio::test]
+async fn term_sort_backfill_reads_names_and_keeps_stamped_keys() {
+    let pool = migrated_pool().await;
+    sqlx::raw_sql(
+        "INSERT INTO subjects (id, code, name, term_name, term_sort) VALUES
+           (1, 'A', 'Alpha', 'UGRD Semester 2 2026 (2650)', NULL),
+           (2, 'B', 'Beta', 'UGRD Semester 1 2026 (2610)', NULL),
+           (3, 'C', 'Gamma', 'STEM Program', NULL),
+           (4, 'D', 'Delta', 'UGRD Semester 2 2026 (2650)', '2026-08'),
+           (5, 'E', 'Empty', NULL, NULL);",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(backfill_term_sort(&pool, true).await.unwrap(), 2);
+    let sorts: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT term_sort FROM subjects ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        sorts,
+        [
+            Some("2026-07"),
+            Some("2026-03"),
+            None,
+            Some("2026-08"),
+            None
+        ]
+        .map(|s| s.map(str::to_string))
+    );
+    assert_eq!(backfill_term_sort(&pool, true).await.unwrap(), 0);
+}

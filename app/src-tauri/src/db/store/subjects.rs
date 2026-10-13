@@ -39,6 +39,32 @@ pub async fn upsert_subjects(pool: &SqlitePool, courses: &[Course]) -> Result<()
     Ok(())
 }
 
+/// Give a sort key to rows no course fetch has stamped since the column was
+/// added, read from the term name alone: only a fetch has `start_at`, and the
+/// next one overwrites these. Returns how many rows got one.
+pub async fn backfill_term_sort(pool: &SqlitePool, southern: bool) -> Result<usize, String> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, term_name FROM subjects WHERE term_sort IS NULL AND term_name IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut filled = 0;
+    for (id, name) in rows {
+        let Some(sort) = crate::sync::terms::term_sort(&name, None, southern) else {
+            continue;
+        };
+        sqlx::query("UPDATE subjects SET term_sort = ?1 WHERE id = ?2 AND term_sort IS NULL")
+            .bind(sort)
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        filled += 1;
+    }
+    Ok(filled)
+}
+
 pub async fn subjects(pool: &SqlitePool) -> Result<Vec<SubjectRow>, String> {
     // Derived, not stored: the latest completed run naming the subject. Mirrors
     // `getSubjects` in app/src/lib/db/subjects.ts — keep the two in step.

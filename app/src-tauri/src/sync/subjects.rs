@@ -10,6 +10,32 @@ pub fn get_subjects(state: tauri::State<SubjectsState>) -> Vec<serde_json::Value
     state.0.lock().unwrap().clone()
 }
 
+/// Startup: rows still without a `term_sort` get one from their term name, so
+/// the current term is found without waiting for a course fetch.
+pub fn backfill_term_sort_in_background() {
+    let spawned = std::thread::Builder::new()
+        .name("oculus-term-sort".into())
+        .spawn(|| {
+            let data_dir = crate::library::paths::data_dir();
+            let southern = crate::sources::institution::load(&data_dir)
+                .is_some_and(|i| i.southern_hemisphere());
+            let outcome = tauri::async_runtime::block_on(async {
+                let pool = crate::db::store::open_pool().await?;
+                let result = crate::db::store::backfill_term_sort(&pool, southern).await;
+                pool.close().await;
+                result
+            });
+            match outcome {
+                Ok(0) => {}
+                Ok(n) => elog!("[oculus] subjects: gave {n} term(s) a sort key"),
+                Err(e) => elog!("[oculus] subjects: term sort backfill: {e}"),
+            }
+        });
+    if let Err(e) = spawned {
+        elog!("[oculus] subjects: {e}");
+    }
+}
+
 /// Fetch the course list from Canvas and hand it to the frontend, which upserts
 /// it into `subjects`. Emits `subjects-loaded` on success, `subjects-error`
 /// otherwise — the same contract as before, now without a WebView in the middle.
