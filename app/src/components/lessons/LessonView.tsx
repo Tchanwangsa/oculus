@@ -3,7 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { FileViewer } from "@/components/files/FileViewer";
 import type { DbFile } from "@/lib/db";
 import { defaultSlide, slideFiles, slideKey, type LessonIndex } from "@/lib/ed/lessons";
-import { markEdViewed } from "@/lib/ed/views";
+import { useLiveLessonIndex } from "@/lib/ed/slideStatus";
+import { markSlideOpened } from "@/lib/ed/views";
 import { openFileSmart, recordFileAccess } from "@/lib/files/openFile";
 import { LessonSidebar } from "./LessonSidebar";
 import { WorkspacePane } from "./workspace/WorkspacePane";
@@ -29,6 +30,9 @@ export function LessonView({
   title: string;
 }) {
   const [params, setParams] = useSearchParams();
+  // Statuses as Ed has them since this session opened slides; the slide it
+  // opens on still comes from the synced index, so a tick never moves it.
+  const live = useLiveLessonIndex(index);
   const wanted = params.get("slide");
   const found = wanted == null ? -1 : index.slides.findIndex((s, i) => slideKey(s, i) === wanted);
   const fallback = defaultSlide(index.slides);
@@ -58,17 +62,20 @@ export function LessonView({
       if (id != null) recordFileAccess({ id, subject_id: file.subject_id });
     }
   }, [mdId, pdfId, file.subject_id]);
-  // …and tells Ed, which marks the slide seen.
+  // …and tells Ed, which marks the slide seen and completes a reading.
   const slideId = slide.id;
+  const slideType = slide.type;
+  const slideStatus = live.slides[selected]?.status ?? null;
   useEffect(() => {
-    if (slideId != null) markEdViewed("slide", slideId);
-  }, [slideId]);
+    // Sent once per app session, so the status Ed answers sends nothing more.
+    if (slideId != null) markSlideOpened(slideId, slideType, slideStatus);
+  }, [slideId, slideType, slideStatus]);
 
   return (
     <div className="flex min-h-0 flex-1">
       <LessonSidebar
         title={title}
-        index={index}
+        index={live}
         selected={selected}
         onSelect={select}
         edUrl={slide.url ?? index.url}

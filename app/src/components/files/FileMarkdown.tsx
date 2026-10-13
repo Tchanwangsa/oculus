@@ -65,11 +65,14 @@ export const FileMarkdown = memo(function FileMarkdown({
   relPath,
   components,
   link,
+  transform,
 }: {
   relPath: string;
   components: Components;
   /** The parsed PDF's shared state; absent for any other markdown. */
   link?: PdfMdLink;
+  /** Rewrites the text before it renders (not a parsed PDF's); keep it stable. */
+  transform?: (text: string) => string;
 }) {
   const [content, setContent] = useState<Content | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -85,12 +88,15 @@ export const FileMarkdown = memo(function FileMarkdown({
       ? loadPagesRecord(relPath, true).then(async (record) =>
           record ? { doc: buildBlockDoc(record) } : { text: await readCourseFile(relPath) },
         )
-      : readCourseFile(relPath).then((text) => ({ text: stripFrontmatter(text) }));
+      : readCourseFile(relPath).then((text) => {
+          const body = stripFrontmatter(text);
+          return { text: transform ? transform(body) : body };
+        });
     load.then((value) => live && setContent(value)).catch((e) => live && setErr(String(e)));
     return () => {
       live = false;
     };
-  }, [relPath, parsed]);
+  }, [relPath, parsed, transform]);
 
   if (err)
     return (

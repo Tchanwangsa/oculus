@@ -13,8 +13,8 @@ transcript, and a web page.
 | Inline file, web and planning references; hover metadata | `app/src/components/markdown/FileChip.tsx`, `app/src/components/markdown/ReferenceLink.tsx`, `app/src/components/markdown/ReferencePreview.tsx`, `app/src/components/markdown/referenceDetails.ts`, `app/src/lib/files/referenceAppearance.ts` |
 | The maths engine: loading, rendering, `rehypeMaths`, the visual field's edit model (`field.ts`) and the geometry of source-mapped maths (`geometry/`: where each caret stop is drawn, which stop a press lands on, a selection's bands); KaTeX's CSS and fonts | `app/src/lib/maths/`, `app/src/styles/katex/` |
 | A parsed PDF's faces: PDF, Markdown | `app/src/components/files/FileViewer.tsx`, `app/src/components/files/FileMarkdown.tsx`, `app/src/components/files/pdf/pdfMdLink.ts`, `app/src/lib/pdf/pdfBlocks.ts` |
-| An Ed lesson's view: the slide sidebar and pane, the index reader | `app/src/components/lessons/`, `app/src/hooks/data/useLessonIndex.ts`, `app/src/lib/ed/lessons.ts` |
-| A challenge's workspace: the pane, its commands and events, the save loop, the shared session | `app/src/components/lessons/workspace/`, `app/src/lib/ed/workspace.ts`, `app/src/lib/ed/workspaceSaver.ts`, `app/src/lib/ed/workspaceHandles.ts`, `app/src/lib/ed/workspaceStatus.ts` |
+| An Ed lesson's view: the slide sidebar and pane, the index reader, statuses Ed answered this session | `app/src/components/lessons/`, `app/src/hooks/data/useLessonIndex.ts`, `app/src/lib/ed/lessons.ts`, `app/src/lib/ed/slideStatus.ts`, `app/src/lib/ed/views.ts` |
+| A challenge's workspace: the pane, its commands and events, the save loop, the shared session, the brief's Files | `app/src/components/lessons/workspace/`, `app/src/lib/ed/briefFiles.ts`, `app/src/lib/ed/workspace.ts`, `app/src/lib/ed/workspaceSaver.ts`, `app/src/lib/ed/workspaceHandles.ts`, `app/src/lib/ed/workspaceStatus.ts` |
 | A workspace file in conflict with Ed: the bar, Compare, Keep mine and Take Ed's | `app/src/components/lessons/workspace/conflict/`, `app/src/lib/ed/conflicts.ts`, `app/src/lib/ed/lineDiff.ts` |
 | The workspace's terminal drawer, Run, Mark and Feedback | `app/src/components/lessons/workspace/terminal/`, `app/src/components/lessons/workspace/mark/`, `app/src/components/lessons/workspace/feedback/`, `app/src/lib/ed/termOutput.ts`, `app/src/lib/ed/flushForEd.ts`, `app/src/lib/ed/markPrompts.ts`, `app/src/lib/ed/feedback.ts` |
 | The code editor and a library source file's read-only view | `app/src/components/code/`, `app/src/components/files/CodeFileViewer.tsx`, `fileLanguage` in `app/src/components/documents/editor/syntax/codeLanguages.ts`, `CODE_EXTS` in `app/src/lib/files/fileTypes.ts` |
@@ -350,13 +350,21 @@ A lesson's index, `lessons/<id>-<slug>.md`, carries the lesson and an ordered
 whose list has slides (`useLessonIndex`), its body is `LessonView`
 (`app/src/components/lessons/`) instead of `FileViewer`, as in Ed:
 
-- **The sidebar** (`LessonSidebar`, 240px) holds the lesson's title, its due
-  date and how many slides are completed, then a row per slide: a glyph for
-  Ed's slide type (`slideIcon`), the title, a green tick once completed. A
-  slide not yet opened in Ed reads a shade darker; the selected row takes
-  the nav column's active fill. ↑/↓ step through the slides. Open in Ed
-  (`OpenOriginal`, ⌘-click for a new tab) opens the shown slide's
-  page in Ed, else the lesson's.
+- **The sidebar** (`LessonSidebar`, 240px) holds the fold toggle
+  (`SideNavCollapseToggle`), the lesson's title, its due date and how many
+  slides are completed, then a row per slide (`SlideRow`): a glyph for Ed's
+  slide type (`slideIcon`), the title, a green tick once completed. A slide
+  not yet opened in Ed reads a shade darker; the selected row takes the nav
+  column's active fill. ↑/↓ step through the slides. Open in Ed
+  (`OpenOriginal`, ⌘-click for a new tab) opens the shown slide's page in
+  Ed, else the lesson's.
+- **The sidebar folds to a 46px rail** of slide glyphs, its width easing as
+  the nav columns' do and the fold remembered (`useResizablePanel`,
+  `oculus-ed-lesson-sidebar`); the header keeps only the toggle. The labels
+  and ticks fade out, a small tick (completed) or a brand dot (not yet
+  opened in Ed) fades in on each glyph, and a glyph's tooltip is the slide's
+  title. The list's scrollbar is hidden, as `SideNav`'s is, so glyphs and
+  toggle share one centre line.
 - **The pane shows the selected slide through `FileViewer`**: a PDF slide's
   PDF, any other slide's `.md`, both found by path beside the index
   (`slideFiles`). A slide whose rows a sync has not stored yet says so
@@ -366,16 +374,24 @@ whose list has slides (`useLessonIndex`), its body is `LessonView`
   and other challenges keep the read-only view.
 - **The slide rides in the URL** (`&slide=<Ed id>`, written with
   `replace`), so a restored tab or Back reopens it; without one the view
-  opens on the first slide not completed. Showing a slide stamps its rows
-  accessed, as opening a file does; the page stamps the index.
+  opens on the first slide not completed (by the synced index, so a tick
+  gained here never moves it). Showing a slide stamps its rows accessed, as
+  opening a file does; the page stamps the index.
+- **Showing a slide tells Ed** (`markSlideOpened`, once per app session,
+  [sync.md](./sync.md) has the requests), and the status Ed then holds —
+  `seen`, or `completed` for a reading slide — goes into
+  `useSlideStatusStore` (`lib/ed/slideStatus.ts`). The sidebar, its count and
+  the Lessons tab's rows read the index through it (`useLiveLessonIndex`),
+  which only ever raises a status, so a tick shows at once rather than at
+  the next sync.
 - **A lesson file without front matter** (every slide in one file) renders
   as plain markdown, like any library file.
 
 ## A code challenge opens as its workspace
 
 `WorkspacePane` (`app/src/components/lessons/workspace/`) is Ed's challenge
-layout: the slide's `.md` (the brief, its Files list included) through
-`FileViewer` in a left column, drag-resizable and remembered
+layout: the slide's `.md` (the brief and its Files list, `BriefMarkdown`) in
+a left column, drag-resizable and remembered
 (`useResizablePanel`), and the challenge's files on the right as `PillTabs`
 over `CodeEditor`, the first file open. Run and Mark sit in the editor's
 header and the terminal drawer under it, each only where the challenge's
@@ -384,6 +400,15 @@ folder is the working copy; Rust owns the session
 ([sync.md](./sync.md) has the state file), the pane only calls the
 commands typed in `app/src/lib/ed/workspace.ts`.
 
+- **The brief leaves out the files' copies.** The sync writes each small
+  workspace file into the slide's `.md` as a `**<name>**` paragraph over a
+  fenced copy, after the Files list; `dropInlineFiles`
+  (`lib/ed/briefFiles.ts`) cuts every such copy whose name the list holds
+  before the Description renders (`FileMarkdown`'s `transform`), since the
+  editor shows the files. The file on disk keeps them, for search, agents
+  and the plain slide view. A link in the list (`workspaceFilePath`) opens
+  that file's editor tab; a file the workspace does not list, or a ⌘-click,
+  opens the library copy.
 - **One session per challenge, shared by every pane on it**
   (`holdWorkspace` in `workspaceHandles.ts`). The first hold calls
   `ed_workspace_open`, which returns the file list, the challenge's settings

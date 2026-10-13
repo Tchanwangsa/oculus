@@ -216,6 +216,11 @@ export function WorkspacePane({
             tab={sideTab}
             onTab={setSideTab}
             marked={marked}
+            openWorkspaceFile={(path) => {
+              if (!tabs?.includes(path)) return false;
+              select(path);
+              return true;
+            }}
           />
         </div>
       </section>

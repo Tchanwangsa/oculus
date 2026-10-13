@@ -64,7 +64,14 @@ pub struct Route {
     pub auth: Auth,
     /// The longest one read from the origin may take; `None` waits for ever.
     pub read_timeout: Option<Duration>,
+    /// The methods a client may send.
+    pub methods: &'static [&'static str],
 }
+
+/// What every route takes.
+const GET_POST: &[&str] = &["GET", "POST"];
+/// Ed's: its web app completes a lesson slide with a bodyless PUT.
+const GET_POST_PUT: &[&str] = &["GET", "POST", "PUT"];
 
 impl Route {
     fn cloud(secret: &'static str, origin: &str, prefix: &'static str) -> Route {
@@ -75,10 +82,17 @@ impl Route {
             prefix,
             auth: Auth::Bearer(secret),
             read_timeout: None,
+            methods: GET_POST,
         }
     }
 
-    fn session(name: &'static str, follows: SiteOrigin, prefix: &'static str, auth: Auth) -> Route {
+    fn session(
+        name: &'static str,
+        follows: SiteOrigin,
+        prefix: &'static str,
+        auth: Auth,
+        methods: &'static [&'static str],
+    ) -> Route {
         let mut route = Route {
             name,
             origin: String::new(),
@@ -86,6 +100,7 @@ impl Route {
             prefix,
             auth,
             read_timeout: Some(SESSION_READ_TIMEOUT),
+            methods,
         };
         route.origin = route.at(&Site::unimelb()).origin;
         route
@@ -140,6 +155,7 @@ impl Routes {
                 SiteOrigin::Canvas,
                 "/",
                 Auth::Cookie(names::SESSION_CANVAS),
+                GET_POST,
             ),
             Route::session(
                 ED,
@@ -149,6 +165,7 @@ impl Routes {
                     name: "x-token",
                     secret: names::SESSION_ED,
                 },
+                GET_POST_PUT,
             ),
         ])
     }
@@ -264,6 +281,15 @@ mod tests {
         ] {
             assert!(routes.get(name).is_none(), "{name}");
         }
+    }
+
+    #[test]
+    fn only_ed_takes_a_put() {
+        let routes = Routes::compiled();
+        for name in ["voyage", "mineru", "groq", "canvas"] {
+            assert_eq!(routes.get(name).unwrap().methods, ["GET", "POST"], "{name}");
+        }
+        assert_eq!(routes.get("ed").unwrap().methods, ["GET", "POST", "PUT"]);
     }
 
     #[test]

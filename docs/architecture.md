@@ -155,9 +155,9 @@ with the app's icon.
   `signin`) and `upstream`.
 - **`forward` sends one request with the credential added; the credential
   never leaves.** The request names a route (`secret`), `method` (GET or
-  POST), `path`, `headers`, and optionally `"stream": true`; keyd sends it to
-  the route's origin and attaches the credential from the vault. A cloud
-  route's origin is fixed; `canvas` and `ed` go to the site's
+  POST, and PUT on `ed`: a route's `methods`), `path`, `headers`, and
+  optionally `"stream": true`; keyd sends it to the route's origin and
+  attaches the credential from the vault. A cloud route's origin is fixed; `canvas` and `ed` go to the site's
   ([auth.md](./auth.md#keyd-sends-the-session-only-to-the-profiles-university)). Routes
   are `app/keyd/core/src/forward/route.rs`; a name with no route (Okta's, a
   `session.*` name) cannot be forwarded:

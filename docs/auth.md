@@ -660,8 +660,9 @@ launch (tool page → `oidc_login` → Canvas `/api/lti/authorize` → `launch` 
 one-shot `?_logintoken=` → `POST /api/login_token`). Tokens last about two
 weeks, are renewed with `POST /api/renew_token` on each sync, and a dead one
 is re-minted. The token lives in keyd's vault (`session.ed`) and is attached by
-keyd's `ed` route; `ed.rs` never reads it back, except that a renewal's body
-carries the new token, which it hands to `session_put`. The Canvas legs of the
+keyd's `ed` route, the one route that also takes a PUT (completing a lesson
+slide, [sync.md](./sync.md)); `ed.rs` never reads it back, except that a
+renewal's body carries the new token, which it hands to `session_put`. The Canvas legs of the
 walk go through the `canvas` route, the other hosts' cookies are jarred in the
 process, and `POST /api/login_token`, which has no session to attach, is a
 direct request. `oculus auth ed <TOKEN>` is a manual override: the token is

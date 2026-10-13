@@ -825,3 +825,67 @@ fn a_workspace_sync_record_round_trips_beside_the_library() {
     assert!(has_state(&dir, 1));
     assert_eq!(load(&dir, 1), None);
 }
+
+#[test]
+fn opening_a_reading_slide_views_then_completes_it_and_a_challenge_only_views() {
+    let dir = Scratch::new("ed-open-slide");
+    // Ed answers the completion with an empty body.
+    let keyd = FakeKeyd::start(&dir, |header, _| {
+        let body: &[u8] = if header["method"] == "PUT" {
+            b""
+        } else {
+            b"{}"
+        };
+        (json!({"status": 200, "headers": []}), body.to_vec())
+    });
+    let ed = Ed::open(&dir);
+    assert_eq!(
+        ed.open_slide(7, Some("document"), Some("unseen")),
+        Ok("completed")
+    );
+    assert_eq!(ed.open_slide(8, Some("code"), Some("unseen")), Ok("seen"));
+    assert_eq!(ed.open_slide(9, Some("quiz"), Some("seen")), Ok("seen"));
+    assert_eq!(
+        ed.open_slide(10, Some("pdf"), Some("completed")),
+        Ok("completed")
+    );
+    assert_eq!(ed.open_slide(11, None, None), Ok("seen"));
+
+    let sent: Vec<(String, String, usize)> = keyd
+        .requests()
+        .iter()
+        .map(|(h, body)| {
+            assert_eq!(h["secret"], "ed");
+            (
+                h["method"].as_str().unwrap().to_string(),
+                h["path"].as_str().unwrap().to_string(),
+                body.len(),
+            )
+        })
+        .collect();
+    let want = |m: &str, p: &str| (m.to_string(), p.to_string(), 0);
+    assert_eq!(
+        sent,
+        [
+            want("GET", "/api/lessons/slides/7?view=1"),
+            want("PUT", "/api/lessons/slides/7/complete"),
+            want("GET", "/api/lessons/slides/8?view=1"),
+            want("GET", "/api/lessons/slides/9?view=1"),
+            want("GET", "/api/lessons/slides/10?view=1"),
+            want("GET", "/api/lessons/slides/11?view=1"),
+        ]
+    );
+}
+
+#[test]
+fn a_refused_completion_is_an_error() {
+    let dir = Scratch::new("ed-complete-refused");
+    let _keyd = FakeKeyd::start(&dir, |header, _| {
+        let status = if header["method"] == "PUT" { 403 } else { 200 };
+        (json!({"status": status, "headers": []}), b"{}".to_vec())
+    });
+    let err = Ed::open(&dir)
+        .open_slide(7, Some("video"), Some("seen"))
+        .unwrap_err();
+    assert!(err.contains("HTTP 403"), "{err}");
+}
