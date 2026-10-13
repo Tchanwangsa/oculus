@@ -481,7 +481,10 @@ commands typed in `app/src/lib/ed/workspace.ts`.
   (`useResizablePanel` with `side: "bottom"`), and it folds to its tab bar,
   folded until first opened; folding keeps the views laid out at full
   height, so it never resizes Ed's PTY. The views fit their box
-  (`FitAddon` on a `ResizeObserver`) and report each new size to Rust; their
+  (`FitAddon` on a `ResizeObserver`) once a resize has settled for 250ms,
+  since a refit per frame stalled the lesson sidebar's fold ~100ms a view
+  (rewrapping the 1000-line scrollback is ~1ms of it, measured in WebKit);
+  each new size goes to Rust. Their
   colours and font are the theme's tokens and code font, read again when
   either changes. Output events carry base64, written to xterm as bytes;
   what lands before a view mounts or before an id is known is held and

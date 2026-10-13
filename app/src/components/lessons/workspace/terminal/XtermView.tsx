@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils";
 
 import { xtermFont, xtermTheme } from "./xtermTheme";
 
+/** Longer than the 200ms fold, so a fold refits once, after it ends. */
+const SETTLE_MS = 250;
+
 export interface XtermViewProps {
   /** Where its output comes from; the view attaches on mount. */
   sink: TermSink;
@@ -21,7 +24,7 @@ export interface XtermViewProps {
 }
 
 /**
- * One xterm.js terminal filling its box: refitted on every resize of it
+ * One xterm.js terminal filling its box: refitted once a resize of it settles
  * (`FitAddon`), themed from the app's tokens and code font. A box with no
  * size (a folded drawer) keeps the last fit.
  */
@@ -38,7 +41,7 @@ export function XtermView({ sink, onData, onResize, label, className }: XtermVie
       fontSize: 12.5,
       lineHeight: 1.2,
       theme: xtermTheme(),
-      scrollback: 5000,
+      scrollback: 1000,
       cursorBlink: true,
     });
     const fit = new FitAddon();
@@ -66,7 +69,13 @@ export function XtermView({ sink, onData, onResize, label, className }: XtermVie
     };
     sink.attach(view);
     const typed = term.onData((data) => latest.current.onData(data));
-    const observer = new ResizeObserver(refit);
+    // A refit per frame of a sidebar fold or drawer drag stalled it ~100ms a
+    // view in the app (the scrollback rewrap is ~1ms of that), so one per resize.
+    let settle = 0;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(settle);
+      settle = window.setTimeout(refit, SETTLE_MS);
+    });
     observer.observe(host);
     // Tokens are rewritten after the prefs change; read them a frame later.
     let frame = 0;
@@ -82,6 +91,7 @@ export function XtermView({ sink, onData, onResize, label, className }: XtermVie
     const offAppearance = subscribeAppearance(retheme);
     return () => {
       cancelAnimationFrame(frame);
+      clearTimeout(settle);
       offTheme();
       offAppearance();
       observer.disconnect();
