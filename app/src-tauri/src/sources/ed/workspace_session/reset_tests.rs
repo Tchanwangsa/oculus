@@ -165,6 +165,8 @@ fn the_user_id_is_read_from_either_shape() {
     assert_eq!(user_id_in(&json!("42")), Some(42));
     assert_eq!(user_id_in(&json!({"name": "Ada"})), None);
     assert_eq!(user_id_in(&Value::Null), None);
+    assert_eq!(user_id_in(&json!(0)), None);
+    assert_eq!(user_id_in(&json!({"id": 0})), None);
 }
 
 #[test]

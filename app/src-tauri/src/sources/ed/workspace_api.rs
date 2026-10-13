@@ -152,7 +152,9 @@ impl Ed {
     }
 }
 
-/// `user` as an object with `id`, or the id itself (a number or digits).
+/// `user` as an object with `id`, or the id itself (a number or digits). A
+/// zero or negative id is no user (a connect answer that carries `0`), so the
+/// caller falls back to `GET /user`.
 pub(super) fn user_id_in(user: &Value) -> Option<i64> {
     let id = match user {
         Value::Object(o) => o.get("id")?,
@@ -160,6 +162,7 @@ pub(super) fn user_id_in(user: &Value) -> Option<i64> {
     };
     id.as_i64()
         .or_else(|| id.as_str().and_then(|s| s.parse().ok()))
+        .filter(|id| *id > 0)
 }
 
 fn ticket_in(reply: &Value) -> Option<Ticket> {

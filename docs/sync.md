@@ -593,7 +593,8 @@ the working copy; Ed gets each save as an upload.
   status, attemptsRemaining, dueAt}`, `dueAt` falling back to the slide's
   front matter. Neither read needs the workspace open.
 - The user id those paths take is the `user` of the session's last
-  `connect` answer (an object with `id`, or the id), else `GET /user`'s.
+  `connect` answer (an object with `id`, or the id; a `0` is no user), else
+  `GET /user`'s.
 - A submission's code (`mark/code.rs`): `ed_submission_files
   {submissionId}` gets a ticket (`POST /challenges/submissions/<id>/connect
   {}`), opens the session socket with it, takes `init.wid` (a temporary copy
