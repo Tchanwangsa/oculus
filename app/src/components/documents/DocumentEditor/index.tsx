@@ -1,4 +1,4 @@
-import { useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import type { EditorView } from "@codemirror/view";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -8,11 +8,13 @@ import { FindBar } from "@/components/ui/search/FindBar";
 import { useTabActive } from "@/components/tabs/TabContext";
 import { useFileDrop } from "@/hooks/gestures/useFileDrop";
 import { useSubjects } from "@/hooks/data/useSubjects";
+import { useWidthTier } from "@/hooks/ui/useWidthTier";
 import type { DbFile } from "@/lib/db";
 
 import { Toolbar } from "../editor/chrome/Toolbar";
 import { useEditorFind } from "../editor/chrome/useEditorFind";
 import { HistoryPanel } from "../HistoryPanel";
+import { HISTORY_TIERS } from "../HistoryPanel/constants";
 import type { DocumentActions, EditorMode, SaveStatus, SuggestStatus } from "../DocumentControls";
 import { DocumentMeta } from "./DocumentMeta";
 import { useNoteHost } from "./useNoteHost";
@@ -31,8 +33,10 @@ import { useNoteView } from "./useNoteView";
  *
  * The text and its saves belong to the note's session (`@/lib/notes/documentSessions`),
  * shared with every other editor of the same note: they stay identical, and
- * one serialised write loop saves for all of them. Saved versions
- * (`@/lib/notes/documentVersions`) dock beside the note in `HistoryPanel`.
+ * one serialised write loop saves for all of them. While History is open
+ * (`HistoryPanel`) a saved version takes the note's place on the page; the
+ * note stays mounted underneath, hidden and inert, so its scroll position and
+ * caret are as they were when History closes.
  */
 export function DocumentEditor({
   file,
@@ -67,6 +71,11 @@ export function DocumentEditor({
   const toolbarRef = useRef<HTMLDivElement>(null);
   /** The whole page is the drop target, not just the text. */
   const pageRef = useRef<HTMLDivElement>(null);
+  /** The note and History over it: the find target, and what the tier measures. */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const tier = useWidthTier(rootRef, HISTORY_TIERS);
+  /** The version on the page, when History shows one. */
+  const [versionView, setVersionView] = useState<EditorView | null>(null);
 
   const { fileRef, statusRef, leaseRef, loadedId, loadError, savedAt, words, flush, currentText, replaceText } =
     useNoteSession(file, onStatus, actions, viewRef);
@@ -99,9 +108,32 @@ export function DocumentEditor({
   });
   useNoteShortcuts(tabActive, flush, mode, onMode);
 
-  const dropping = useFileDrop(pageRef, attachPaths);
-  // ⌘F anywhere on the page, title included, searches the note.
-  const find = useEditorFind(view, pageRef);
+  // Pictures dropped while History is open would land in the hidden note.
+  const dropping = useFileDrop(pageRef, (paths) => {
+    if (!history) attachPaths(paths);
+  });
+  // ⌘F anywhere on the page, title included, searches the note. While History
+  // is open it searches the version on the page, or nothing — never the
+  // hidden note.
+  const find = useEditorFind(history ? versionView : view, rootRef);
+  const findBar = find.open && (
+    <FindBar
+      {...find.bar}
+      placeholder={history ? "Find in version" : "Find in document"}
+      className="border-b border-border-subtle"
+    />
+  );
+
+  // Back from History: CodeMirror re-measures what changed while hidden, and
+  // focus that went with History's controls returns to the note.
+  const wasHistory = useRef(false);
+  useEffect(() => {
+    const back = wasHistory.current && !history;
+    wasHistory.current = history;
+    if (!back || !view) return;
+    view.requestMeasure();
+    if (!document.activeElement || document.activeElement === document.body) view.focus();
+  }, [history, view]);
 
   if (loadError) {
     return (
@@ -117,8 +149,14 @@ export function DocumentEditor({
   }
 
   return (
-    <div className="flex h-full min-h-0">
-      <div ref={pageRef} className="relative min-w-0 flex-1">
+    <div ref={rootRef} className="relative flex h-full min-h-0">
+      <div
+        ref={pageRef}
+        // Hidden, never unmounted or `display: none`, so scroll and caret hold.
+        style={history ? { visibility: "hidden" } : undefined}
+        inert={history}
+        className="relative min-w-0 flex-1"
+      >
         <div className="page-scroll">
           <div className="mx-auto w-full max-w-3xl px-6 py-8">
             <input
@@ -144,28 +182,26 @@ export function DocumentEditor({
                 onImage={pickImages}
                 className="static z-auto mx-0 mt-0"
               />
-              {find.open && (
-                <FindBar
-                  {...find.bar}
-                  placeholder="Find in document"
-                  className="border-b border-border-subtle"
-                />
-              )}
+              {!history && findBar}
             </div>
             <div ref={editorRef} data-selectable className="mt-4" />
           </div>
         </div>
 
         {/* Over the whole note, since that is the drop target. */}
-        <DropOverlay show={dropping} label="Drop to add a picture" />
+        <DropOverlay show={dropping && !history} label="Drop to add a picture" />
       </div>
       {history && (
         <HistoryPanel
           file={file}
-          files={files}
           subject={subject}
+          title={title}
+          host={host}
+          tier={tier ?? "wide"}
           currentText={currentText}
           replaceText={replaceText}
+          findBar={findBar}
+          onView={setVersionView}
           onClose={() => onHistory?.(false)}
         />
       )}

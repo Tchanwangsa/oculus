@@ -14,7 +14,8 @@ maths is [editor-maths.md](./editor-maths.md).
 | Extensions: live preview, Raw mode, code, tables, widgets, commands | `app/src/components/documents/editor/` |
 | One session per note | `app/src/lib/notes/documentSessions.ts` |
 | Find and replace | `app/src/components/documents/editor/chrome/find.ts`, `app/src/components/documents/editor/chrome/useEditorFind.ts` |
-| A note's versions and its History panel | `app/src/lib/notes/documentVersions.ts`, `app/src/components/documents/HistoryPanel/` |
+| A note's versions, its History list and bar | `app/src/lib/notes/documentVersions.ts`, `app/src/components/documents/HistoryPanel/` |
+| A version drawn on the page, and the word diff marking it | `app/src/components/documents/VersionView/`, `app/src/lib/notes/versionDiff/` |
 | The note editor as a form field (task body, a chat paste) | `app/src/components/documents/NoteField.tsx` |
 | The Rust editor core, and its shadow of every note editor in dev builds ([editor-core.md](./editor-core.md)) | `app/editor-core/`, `app/src/components/documents/editor/shadow/` |
 
@@ -168,15 +169,37 @@ selected.
   arrive. No record reads as the app's own text, never `external`. A note
   deleted or renamed outside the app gets a new row (or none) from
   `reconcileDocuments`, so its history goes with the old row.
-- **History docks inside the editor**
-  (`app/src/components/documents/HistoryPanel/`), not as a side panel
-  item, because Replace current goes through that editor's view and the note
-  stays beside the version. The header's Save version (⇧⌘S, focused pane
-  only; ⌘S stays a flush) flushes first so the checkpoint matches the file.
+- **A version takes the note's place on the page while History is open**
+  (`app/src/components/documents/VersionView/`): a read-only CodeMirror view
+  drawn by Live mode's render-only half, `livePreviewRender()` (`livePreview()`
+  is that plus the editing pieces), so pictures, maths, code and tables look as
+  they do in the note. It is read-only three ways — `readOnly`, `editable`
+  false and a change filter that refuses what widgets dispatch themselves, such
+  as a task's checkbox — and a table draws as a static grid when its view isn't
+  editable. The note stays mounted under it, hidden and `inert`, never
+  unmounted, so scroll and caret survive; ⌘F searches the version, never the
+  hidden note.
+- **Changes are marked against a base**, the next-older version or the note now
+  (*Compared with* in the version bar). `app/src/lib/notes/versionDiff/` is a
+  Myers diff over word, space, newline and punctuation tokens, cleaned up for
+  reading; two unrelated texts blow its work budget, so the middle is diffed by
+  line and each changed block refined by word while budget lasts. Marks are an
+  inserted tint, deleted text struck through inline or as a block, a margin bar
+  per changed line, and a construct drawn as a widget tinted whole
+  (`outerDecorations` inline, a block wrapper for block constructs); hunks are
+  what ↑/↓ steps through.
+- **The list's layout follows the editor root's width**
+  (`useWidthTier`, `HISTORY_TIERS` in `HistoryPanel/constants.ts`): docked beside
+  the page when wide, a floating card when medium, and when narrow a pane of its
+  own that a version opens from (master–detail). The list groups by day with
+  size deltas and takes arrow keys. The version bar
+  (`app/src/components/documents/HistoryPanel/VersionBar/`) holds the actions,
+  change navigation and *Show changes*. The header's Save version (⇧⌘S, focused
+  pane only; ⌘S stays a flush) flushes first so the checkpoint matches the file.
   **Restore as copy** is the default: a new note "<title> (v3)" in a new tab.
   **Replace current** takes a `restore` snapshot first, then swaps the text
-  as one `isolateHistory` transaction, so it saves like typing, reaches the
-  other views and ⌘Z takes it back.
+  as one `isolateHistory` transaction through the note's view, so it saves like
+  typing, reaches the other views and ⌘Z takes it back.
 
 ## Pictures, mentions and citations resolve to library files
 

@@ -10,13 +10,12 @@ export const PANEL = {
   storageKey: "oculus-document-history",
 } as const;
 
+/** Editor-root widths (CSS px) where the list floats over the page, then docks. */
+export const HISTORY_TIERS = { medium: 560, wide: 880 } as const;
+
 /** What a snapshot row says when it has no label of its own. */
 export const SNAPSHOT_HINT: Record<Exclude<VersionKind, "checkpoint">, string> = {
   auto: "Autosave snapshot",
   external: "Changed outside the editor",
   restore: "Before a restore",
 };
-
-/** Leading YAML frontmatter, which markdown would read as a rule and a
- *  heading; the preview shows it as the YAML it is. */
-export const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;

@@ -191,8 +191,7 @@ export function FileViewer({
  * paths, paths below the file's folder, and raw Canvas `/files/<id>` /
  * `/pages/<slug>` URLs) go to
  * `onOpenFile`, others open externally, and relative images resolve against the
- * file's directory (`app/src/lib/files/libraryLinks.ts`). Also draws a note's
- * saved versions (`HistoryPanel`).
+ * file's directory (`app/src/lib/files/libraryLinks.ts`).
  */
 export function useLibraryMdComponents(
   file: Pick<DbFile, "relative_path">,

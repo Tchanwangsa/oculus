@@ -94,10 +94,10 @@ classes work even when there are no dollar delimiters.
   spans, since a tag can land in a paragraph or table cell, and carries the
   tag as `data-md` so a copied selection keeps it. Echo360 and Canvas cards
   need the subject, which `MD_COMPONENTS` doesn't have, so `FileViewer` (every
-  library file) and a note's `VersionPreview` wrap the markdown in
+  library file) wraps the markdown in
   `EmbedSubjectProvider`, which looks the code up in the subjects list by id
   (a course folder is `safe_dir(code)`, not the code). For a subject absent from
-  the list, those two are `VideoLinkOut`, a button named by the tag’s
+  the list, it is `VideoLinkOut`, a button named by the tag’s
   title that opens Canvas. Chat replies don't parse raw HTML, so a tag in one
   shows as its literal text.
 - **`<echo-video>` is an Echo360 video**

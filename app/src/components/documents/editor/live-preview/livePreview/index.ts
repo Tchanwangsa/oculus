@@ -3,7 +3,7 @@ import type { EditorView } from "@codemirror/view";
 
 import { focusedField, trackFocus } from "../../core/liveFocus";
 import { selectionGaps, type SelectionGap } from "../../core/selectionLayer";
-import { mathField } from "../../math/field/mathField";
+import { mathField, visualMathField } from "../../math/field/mathField";
 import { MathWidget, mathsWatcher } from "../widgets";
 import { blockField } from "./blocks";
 import { dollarTyping, edgePaste, edgeTyping, fieldLatexPaste } from "./edges";
@@ -42,22 +42,34 @@ function renderedMaths(view: EditorView): SelectionGap[] {
   return out;
 }
 
-/** Everything Live mode adds over Raw; swapped through a compartment. */
-export function livePreview(): Extension {
+/** Live mode's drawing alone, with no way to edit: what a read-only view
+ *  of a note (a saved version) carries. Without `trackFocus` it never
+ *  counts as focused, so nothing but a find match reveals source.
+ *  `visualMathField` stays because the fields here read it. */
+export function livePreviewRender(): Extension {
   return [
     focusedField,
-    trackFocus,
-    mathField(),
+    visualMathField,
     blockField,
     tableField,
     mathBlockField,
+    inlinePlugin,
+    mathsWatcher,
+    selectionGaps.of(renderedMaths),
+  ];
+}
+
+/** Everything Live mode adds over Raw; swapped through a compartment. Each
+ *  facet sees its providers in the same order as when these were one list. */
+export function livePreview(): Extension {
+  return [
+    livePreviewRender(),
+    trackFocus,
+    mathField(),
     tableKeys,
     dollarTyping,
     edgeTyping,
     edgePaste,
     fieldLatexPaste,
-    inlinePlugin,
-    mathsWatcher,
-    selectionGaps.of(renderedMaths),
   ];
 }

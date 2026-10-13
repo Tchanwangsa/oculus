@@ -1,236 +1,241 @@
-import { shortcut } from "@/lib/platform";
-import { useRef } from "react";
-import { ArrowCounterClockwise, CircleNotch, CopySimple, PencilSimple, Trash, X } from "@phosphor-icons/react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import type { EditorView } from "@codemirror/view";
 
-import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { VersionView, type VersionViewHandle, type VersionViewInfo } from "@/components/documents/VersionView";
 import { SkeletonRows } from "@/components/ui/layout/PageParts";
 import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
-import { useNow } from "@/hooks/ui/useNow";
 import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
-import { useScrollFade } from "@/hooks/ui/useScrollFade";
+import type { WidthTier } from "@/hooks/ui/useWidthTier";
 import type { DbFile } from "@/lib/db";
-import { versionTitle } from "@/lib/notes/documentVersions";
-import { cn } from "@/lib/utils";
 
+import type { NoteHost } from "../editor/core/host";
 import { PANEL } from "./constants";
-import { LabelField } from "./LabelField";
-import { PanelError } from "./PanelError";
+import { HistoryDialogs } from "./HistoryDialogs";
+import { NoVersions } from "./NoVersions";
+import { useCompare } from "./useCompare";
+import { useShownVersion } from "./useShownVersion";
 import { useVersionActions } from "./useVersionActions";
 import { useVersionList } from "./useVersionList";
-import { useVersionPreview } from "./useVersionPreview";
-import { VersionPreview } from "./VersionPreview";
-import { VersionRow } from "./VersionRow";
+import { useVersionTexts } from "./useVersionTexts";
+import { VersionBar } from "./VersionBar";
+import { VersionList } from "./VersionList";
+import { VersionPage } from "./VersionPage";
 
 /**
- * A note's saved versions (`@/lib/notes/documentVersions`), docked right of the note
- * inside the editor, so the note stays beside what is being compared. Newest
- * first; a row previews its text read-only, and the version can come back as
- * a new note (the default) or replace the open one — after a `restore`
- * snapshot, as one undoable edit through the editor so it saves like typing
- * and reaches the note's other views. Checkpoints can be renamed or deleted;
- * snapshots are the app's to prune.
+ * A note's saved versions (`@/lib/notes/documentVersions`), laid over the
+ * editor while History is open. The selected version takes the note's place
+ * on the page, read-only and marked against the previous version or the note
+ * now (`VersionView`) — skeletons until it lands, or why there is none. The
+ * note stays mounted underneath, hidden by the editor while History is open.
+ * The list docks right on a wide pane, floats over the page's edge on
+ * a medium one, and on a narrow one is a pane of its own the version opens
+ * from. A version can come back as a new note (the default) or replace the
+ * open one — after a `restore` snapshot, as one undoable edit through the
+ * editor so it saves like typing. Checkpoints can be renamed or deleted;
+ * snapshots are the app's to prune. Esc inside any of it closes History.
  */
 export function HistoryPanel({
   file,
-  files,
   subject,
+  title,
+  host,
+  tier,
   currentText,
   replaceText,
+  findBar,
+  onView,
   onClose,
 }: {
   file: DbFile;
-  /** The subject's files, for the preview's links. */
-  files: DbFile[];
   /** Null while the subject list loads; a copy needs it. */
   subject: { id: number; code: string } | null;
+  /** The note's title, shown over the version. */
+  title: string;
+  /** The note's own host: the version's pictures and links resolve as the note's. */
+  host: NoteHost;
+  tier: WidthTier;
   /** The editor's text now, or null with no editor. */
   currentText: () => string | null;
   /** Swap the editor's whole text as one undoable edit; false with no editor. */
   replaceText: (text: string) => boolean;
+  /** The note's find bar, while it searches the version. */
+  findBar: ReactNode;
+  /** The version's view while one is on the page, for find. */
+  onView: (view: EditorView | null) => void;
   onClose: () => void;
 }) {
   const panel = useResizablePanel(PANEL);
-  const now = useNow();
-  const fileId = file.id;
-
-  const { versions, listError, selectedId, setSelectedId, selected } = useVersionList(fileId);
-  const { texts, preview, previewError, textOf } = useVersionPreview(selectedId);
+  const { versions, listError, selectedId, setSelectedId, selected } = useVersionList(file.id);
+  const { texts, textOf } = useVersionTexts();
   const { busy, actionError, confirm, setConfirm, renaming, setRenaming, restoreCopy, replace, relabel, remove } =
     useVersionActions({ file, subject, selectedId, setSelectedId, texts, textOf, currentText, replaceText });
+  const { compare, setCompare, showChanges, setShowChanges } = useCompare();
+  const { shown, shownError, older, effective, rereadCurrent } = useShownVersion({
+    versions,
+    selected,
+    compare,
+    showChanges,
+    textOf,
+    currentText,
+  });
+  const [info, setInfo] = useState<VersionViewInfo | null>(null);
+  const handleRef = useRef<VersionViewHandle>(null);
 
-  const listRef = useRef<HTMLDivElement>(null);
-  useScrollFade(listRef, "y", versions);
-  const previewRef = useRef<HTMLDivElement>(null);
-  useScrollFade(previewRef, "y", selected?.id);
+  /** Medium: the floating list. Narrow: which pane is up. */
+  const [listShown, setListShown] = useState(true);
+  const [narrowPane, setNarrowPane] = useState<"list" | "version">("list");
+  // Narrowed while reading a version: stay on it rather than jump to the list.
+  const lastTier = useRef(tier);
+  useEffect(() => {
+    if (tier === "narrow" && lastTier.current !== "narrow") setNarrowPane(shown ? "version" : "list");
+    lastTier.current = tier;
+  }, [tier, shown]);
+
+  const pageShown = shown != null && selected != null;
+  const listCovers = tier === "narrow" && (narrowPane === "list" || !pageShown);
+  const listHeaderShown = tier === "wide" || (tier === "medium" && listShown) || listCovers;
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Escape" || e.defaultPrevented) return;
+    // A portalled dialog's keys bubble here through React; they aren't ours.
+    if (!e.currentTarget.contains(e.target as Node) || confirm || renaming) return;
+    e.preventDefault();
+    onClose();
+  };
+
+  const list = (
+    <VersionList
+      versions={versions}
+      listError={listError}
+      selectedId={selectedId}
+      onSelect={setSelectedId}
+      onOpen={() => tier === "narrow" && setNarrowPane("version")}
+      renaming={renaming}
+      onRelabel={relabel}
+      onCancelRename={() => setRenaming(false)}
+      onClose={onClose}
+      // The page says it when it is on screen; a covering list says it itself.
+      emptyCopy={listCovers}
+    />
+  );
+  const float = tier === "medium" && listShown && (
+    <div
+      role="region"
+      aria-label="Version history"
+      className="absolute top-2 right-2 bottom-2 z-10 flex w-[min(320px,calc(100%_-_16px))] flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-lg"
+    >
+      {list}
+    </div>
+  );
 
   return (
-    <>
-      {/* On the seam: negative margins cost no layout width. */}
-      <ResizeHandle
-        onMouseDown={panel.onMouseDown}
-        dragging={panel.dragging}
-        label="Resize history"
-        className="-mx-0.5"
-      />
-      <aside
-        aria-label="Version history"
-        // A narrow pane keeps most of its width for the note.
-        style={{ width: panel.width, maxWidth: "60%" }}
-        className="flex min-h-0 shrink-0 flex-col border-l border-border-subtle bg-card"
+    <div className="absolute inset-0 z-20 flex" onKeyDown={onKeyDown}>
+      <div
+        // Focusable, so a click on the read-only text keeps focus (and Esc) here.
+        tabIndex={-1}
+        inert={listCovers}
+        className="relative min-w-0 flex-1 bg-card outline-none"
       >
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border-subtle pr-1.5 pl-3">
-          <h2 className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">History</h2>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Close history"
-            title="Close history"
-            className="text-muted-foreground"
-            onClick={onClose}
+        {pageShown ? (
+          <VersionPage
+            bar={
+              <VersionBar
+                version={selected}
+                tier={tier}
+                onBack={() => setNarrowPane("list")}
+                listShown={listShown}
+                onToggleList={() => setListShown((s) => !s)}
+                onClose={listHeaderShown ? undefined : onClose}
+                info={info}
+                handle={handleRef}
+                showChanges={showChanges}
+                onShowChanges={setShowChanges}
+                compare={effective}
+                onCompare={setCompare}
+                previousDisabled={!older}
+                busy={busy}
+                canCopy={!!subject}
+                onRestoreCopy={() => void restoreCopy(selected)}
+                onReplace={() => setConfirm("replace")}
+                onRename={() => {
+                  // The label is edited in its row, so the row must be on screen.
+                  if (tier === "medium") setListShown(true);
+                  if (tier === "narrow") setNarrowPane("list");
+                  setRenaming(true);
+                }}
+                onDelete={() => setConfirm("delete")}
+              />
+            }
+            findBar={findBar}
+            actionError={actionError}
+            title={title}
+            float={float}
           >
-            <X size={13} />
-          </Button>
-        </div>
-
-        {listError && <PanelError message={listError} />}
-
-        {versions === null ? (
-          !listError && <SkeletonRows count={4} rowClassName="h-10" className="p-3" />
-        ) : versions.length === 0 ? (
-          <div className="px-4 py-8 text-center">
-            <p className="text-[13px] text-foreground">No versions yet</p>
-            <p className="mt-1 text-[12px] text-muted-foreground">
-              Save a version ({shortcut("shift+mod+S")}) to keep the note as it is now. Snapshots are
-              also taken as you write.
-            </p>
-          </div>
+            {shownError && <p className="mt-3 text-[11px] text-destructive">{shownError}</p>}
+            <VersionView
+              text={shown.text}
+              base={shown.base}
+              host={host}
+              handleRef={handleRef}
+              onInfo={setInfo}
+              onView={onView}
+              className="mt-4"
+            />
+          </VersionPage>
         ) : (
-          <div
-            ref={listRef}
-            role="listbox"
-            aria-label="Versions"
-            className={cn(
-              "min-h-0 overflow-y-auto",
-              selected ? "max-h-[40%] shrink-0" : "flex-1",
+          <VersionPage title={title} float={float}>
+            {versions?.length === 0 ? (
+              <NoVersions className="py-16" />
+            ) : shownError ? (
+              <p className="mt-3 text-[11px] text-destructive">{shownError}</p>
+            ) : (
+              // Loading; a failed list read says so in the list instead.
+              !listError && <SkeletonRows count={6} rowClassName="h-4" className="mt-6" />
             )}
+          </VersionPage>
+        )}
+      </div>
+
+      {listCovers && (
+        <div
+          role="region"
+          aria-label="Version history"
+          className="absolute inset-0 z-10 flex flex-col bg-card"
+        >
+          {list}
+        </div>
+      )}
+
+      {tier === "wide" && (
+        <>
+          {/* On the seam: negative margins cost no layout width. */}
+          <ResizeHandle
+            onMouseDown={panel.onMouseDown}
+            dragging={panel.dragging}
+            label="Resize history"
+            className="-mx-0.5"
+          />
+          <aside
+            aria-label="Version history"
+            style={{ width: panel.width, maxWidth: "50%" }}
+            className="flex min-h-0 shrink-0 flex-col border-l border-border-subtle bg-card"
           >
-            {/* One child, so the fade's observer sees rows come and go. */}
-            <div className="py-1">
-              {versions.map((v) =>
-                renaming && v.id === selected?.id ? (
-                  <LabelField
-                    key={v.id}
-                    version={v}
-                    onDone={(label) => relabel(v, label)}
-                    onCancel={() => setRenaming(false)}
-                  />
-                ) : (
-                  <VersionRow
-                    key={v.id}
-                    version={v}
-                    now={now}
-                    selected={v.id === selectedId}
-                    onSelect={() => setSelectedId(v.id === selectedId ? null : v.id)}
-                  />
-                ),
-              )}
-            </div>
-          </div>
-        )}
+            {list}
+          </aside>
+        </>
+      )}
 
-        {selected && (
-          <>
-            <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-y border-border-subtle px-3 py-2">
-              <Button
-                size="xs"
-                disabled={busy !== null || !subject}
-                onClick={() => void restoreCopy(selected)}
-                title="Open this version as a new note"
-              >
-                {busy === "copy" ? <CircleNotch className="animate-spin" /> : <CopySimple />}
-                Restore as copy
-              </Button>
-              <Button
-                variant="outline"
-                size="xs"
-                disabled={busy !== null}
-                onClick={() => setConfirm("replace")}
-                title="Replace the note's text with this version"
-              >
-                <ArrowCounterClockwise />
-                Replace current
-              </Button>
-              {selected.kind === "checkpoint" && (
-                <span className="ml-auto flex items-center gap-0.5">
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label="Rename version"
-                    title="Rename"
-                    disabled={busy !== null}
-                    className="text-muted-foreground"
-                    onClick={() => setRenaming(true)}
-                  >
-                    <PencilSimple size={13} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label="Delete version"
-                    title="Delete"
-                    disabled={busy !== null}
-                    className="text-muted-foreground hover:text-destructive"
-                    onClick={() => setConfirm("delete")}
-                  >
-                    <Trash size={13} />
-                  </Button>
-                </span>
-              )}
-            </div>
-            {actionError && <PanelError message={actionError} />}
-            <div ref={previewRef} className="min-h-0 flex-1 overflow-y-auto">
-              {/* One child that grows as the text lands, for the fade. */}
-              <div className="px-4 py-3">
-                {previewError ? (
-                  <p className="text-[11px] text-destructive">{previewError}</p>
-                ) : preview?.id === selected.id ? (
-                  <VersionPreview text={preview.text} file={file} files={files} />
-                ) : (
-                  <SkeletonRows count={3} rowClassName="h-4" />
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </aside>
-
-      <ConfirmDialog
-        open={confirm === "replace" && !!selected}
+      <HistoryDialogs
+        selected={selected}
+        confirm={confirm}
+        busy={busy}
         onCancel={() => setConfirm(null)}
-        title={selected ? `Replace the note with ${versionTitle(selected)}?` : ""}
-        description={`The note's current text is saved as a snapshot first, and ${shortcut("mod+Z")} in the note undoes the replace.`}
-        confirmLabel="Replace"
-        busyLabel="Replacing…"
-        busy={busy === "replace"}
-        onConfirm={async () => {
-          if (selected) await replace(selected);
-          setConfirm(null);
+        onReplace={async (v) => {
+          await replace(v);
+          rereadCurrent();
         }}
+        onDelete={remove}
       />
-      <ConfirmDialog
-        open={confirm === "delete" && !!selected}
-        onCancel={() => setConfirm(null)}
-        title={selected ? `Delete ${versionTitle(selected)}?` : ""}
-        description="This saved version is gone for good. The note itself doesn't change."
-        confirmLabel="Delete"
-        busyLabel="Deleting…"
-        busy={busy === "delete"}
-        onConfirm={async () => {
-          if (selected) await remove(selected);
-          setConfirm(null);
-        }}
-      />
-    </>
+    </div>
   );
 }
