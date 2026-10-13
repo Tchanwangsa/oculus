@@ -1,38 +1,22 @@
-//! The submissions this install made, read back from Ed newest first. Ed
-//! answers bursts with 429, so the reads are spaced out.
-
-use std::path::Path;
-use std::time::Duration;
+//! The student's submissions for a challenge, from Ed's own list, newest
+//! first. Ed answers with each one's marked result, so one read does.
 
 use super::submission::{normalise, Submission};
-use crate::sources::ed::workspace_state;
 use crate::sources::ed::Ed;
 
-/// The gap between two reads.
-const PACE: Duration = Duration::from_millis(300);
-
-/// Each id in the challenge's record, newest first. One that cannot be read
-/// is logged and left out; an error only when none could be.
-pub fn submissions(ed: &Ed, data_dir: &Path, challenge_id: i64) -> Result<Vec<Submission>, String> {
-    let ids = workspace_state::load(data_dir, challenge_id)
-        .map(|state| state.submissions)
-        .unwrap_or_default();
-    let mut read = Vec::new();
-    let mut failed = None;
-    for (n, id) in ids.iter().rev().enumerate() {
-        if n > 0 && !cfg!(test) {
-            std::thread::sleep(PACE);
-        }
-        match ed.submission(*id).and_then(|raw| normalise(&raw)) {
-            Ok(submission) => read.push(submission),
+/// One Ed cannot shape (no id) is logged and left out.
+pub fn submissions(ed: &Ed, user_id: i64, challenge_id: i64) -> Result<Vec<Submission>, String> {
+    let mut read: Vec<Submission> = ed
+        .user_submissions(user_id, challenge_id)?
+        .iter()
+        .filter_map(|raw| match normalise(raw) {
+            Ok(submission) => Some(submission),
             Err(e) => {
-                elog!("[oculus] ed submission {id} of challenge {challenge_id}: {e}");
-                failed = Some(e);
+                elog!("[oculus] ed challenge {challenge_id}: a submission was left out: {e}");
+                None
             }
-        }
-    }
-    match failed {
-        Some(e) if read.is_empty() => Err(e),
-        _ => Ok(read),
-    }
+        })
+        .collect();
+    read.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
+    Ok(read)
 }

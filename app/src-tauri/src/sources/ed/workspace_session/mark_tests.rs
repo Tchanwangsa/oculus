@@ -182,8 +182,11 @@ fn fake_ed(dir: &std::path::Path) -> FakeKeyd {
     FakeKeyd::start(dir, |header, _| {
         let body = match header["path"].as_str().unwrap() {
             "/api/challenges/267880/mark" => json!({"submission": submission_json(31)}),
-            "/api/challenges/submissions/31" => json!({"submission": submission_json(31)}),
-            "/api/challenges/submissions/30" => json!({"submission": submission_json(30)}),
+            "/api/users/42/challenges/267880/submissions" => {
+                let mut older = submission_json(30);
+                older["created_at"] = json!("2026-10-12T01:00:00.000Z");
+                json!({"submissions": [older, submission_json(31), {"status": "no id"}]})
+            }
             _ => return (json!({"status": 404, "headers": []}), b"{}".to_vec()),
         };
         (
@@ -194,7 +197,7 @@ fn fake_ed(dir: &std::path::Path) -> FakeKeyd {
 }
 
 #[test]
-fn mark_submits_a_fresh_commit_and_records_the_id() {
+fn mark_submits_a_fresh_commit() {
     let dir = Scratch::new("ed-ws-mark");
     let keyd = fake_ed(&dir);
     let (context, _) = context(&dir, "http://127.0.0.1:1");
@@ -207,7 +210,6 @@ fn mark_submits_a_fresh_commit_and_records_the_id() {
     let state = WorkspaceState {
         workspace_id: "W1".into(),
         base_commit: Some("h7".into()),
-        submissions: vec![30],
         ..WorkspaceState::default()
     };
     workspace_state::save(&dir, 267880, &state).unwrap();
@@ -234,17 +236,15 @@ fn mark_submits_a_fresh_commit_and_records_the_id() {
         serde_json::from_slice::<Value>(&requests[0].1).unwrap(),
         json!({"hash": "h8:::s"})
     );
-    assert_eq!(
-        workspace_state::load(&dir, 267880).unwrap().submissions,
-        [30, 31]
-    );
+}
 
-    // The history reads newest first, and one Ed no longer has is left out.
-    let mut state = workspace_state::load(&dir, 267880).unwrap();
-    state.submissions.insert(0, 29);
-    workspace_state::save(&dir, 267880, &state).unwrap();
+#[test]
+fn the_history_is_eds_list_newest_first() {
+    let dir = Scratch::new("ed-ws-history");
+    let _keyd = fake_ed(&dir);
     let ed = Ed::open(&dir);
-    let read = history::submissions(&ed, &dir, 267880).unwrap();
+    let read = history::submissions(&ed, 42, 267880).unwrap();
     assert_eq!(read.iter().map(|s| s.id).collect::<Vec<_>>(), [31, 30]);
-    assert!(history::submissions(&ed, &dir, 1).unwrap().is_empty());
+    assert_eq!(read[0].testcase_total_count, Some(2));
+    assert!(history::submissions(&ed, 43, 267880).is_err());
 }

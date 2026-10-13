@@ -21,7 +21,7 @@ use crate::test_support::{FakeKeyd, FakeServer, Reply, Scratch};
 
 pub(super) const SLIDE_DIR: &str = "courses/COMP30026/lessons/1-week-1/03-tally";
 
-fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+pub(super) fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     for (name, bytes) in entries {
         w.start_file(*name, zip::write::SimpleFileOptions::default())
@@ -39,7 +39,8 @@ pub(super) fn fake_ed(dir: &Path) -> FakeKeyd {
             "/api/workspaces/W1/upload" => json!({"ticket": "T-UP"}),
             "/api/challenges/267880/run" => json!({"ticket": "T-RUN"}),
             "/api/challenges/267880/mark" => json!({"submission": {"id": 9, "status": "failed"}}),
-            "/api/challenges/submissions/9" => json!({"submission": {"id": 9}}),
+            "/api/users/42/challenges/267880/submissions" => json!({"submissions": [{"id": 9}]}),
+            "/api/challenges/submissions/9/connect" => json!({"ticket": "T-SUB"}),
             _ => json!({}),
         };
         (
@@ -367,7 +368,8 @@ fn the_run_mark_and_submission_calls_post_what_ed_expects() {
     assert_eq!(ticket.expose(), "T-RUN");
     assert_eq!(format!("{ticket:?}"), "Ticket(…)");
     assert_eq!(ed.mark(267880, "h1").unwrap()["status"], "failed");
-    assert_eq!(ed.submission(9).unwrap()["id"], 9);
+    assert_eq!(ed.user_submissions(42, 267880).unwrap()[0]["id"], 9);
+    assert_eq!(ed.submission_ticket(9).unwrap().expose(), "T-SUB");
     assert!(ed.upload_ticket("W2").is_err());
 
     let requests = keyd.requests();
@@ -379,5 +381,10 @@ fn the_run_mark_and_submission_calls_post_what_ed_expects() {
     );
     assert_eq!(body(1), json!({"hash": "h1"}));
     assert_eq!(requests[2].0["method"], "GET");
-    assert_eq!(requests[2].0["path"], "/api/challenges/submissions/9");
+    assert_eq!(
+        requests[2].0["path"],
+        "/api/users/42/challenges/267880/submissions"
+    );
+    assert_eq!(requests[3].0["method"], "POST");
+    assert_eq!(body(3), json!({}));
 }

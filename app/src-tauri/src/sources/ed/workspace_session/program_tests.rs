@@ -311,7 +311,10 @@ fn run_frames_are_read_and_exits_mapped() {
         parse(json!({"type": "run_frame", "data": {"pid": 0, "type": "stdin", "data": "aGk="}})),
         None
     );
-    assert_eq!(parse(json!({"type": "dump_files", "data": {}})), None);
+    assert_eq!(
+        parse(json!({"type": "dump_files", "data": {}})),
+        Some(RunIncoming::Files(json!({})))
+    );
     assert_eq!(
         parse(
             json!({"type": "run_exit", "data": {"exit_status": {"type": "normal", "value": 3, "wall_time": 0.4}}})
@@ -358,7 +361,7 @@ fn run_frames_are_read_and_exits_mapped() {
 
 /// Serve one run against a local WebSocket server playing `server`, with
 /// `queued` already sent by the commands.
-fn run_against(
+pub(super) fn run_against(
     server: impl FnOnce(&mut tungstenite::WebSocket<TcpStream>) + Send + 'static,
     queued: Vec<RunOut>,
 ) -> Vec<RunEvent> {

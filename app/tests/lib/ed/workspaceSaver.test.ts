@@ -173,4 +173,26 @@ describe("workspace saver", () => {
     saver.synced();
     expect(saver.status).toEqual({ state: "saved", where: "ed" });
   });
+
+  test("discarding forgets every buffer and the pending write, after the one in flight", async () => {
+    const { saver, writes } = fakeRust();
+    saver.loaded("a.py", "");
+    saver.loaded("b.py", "");
+    saver.edit("a.py", "x");
+    const run = saver.flush();
+    saver.edit("b.py", "unsaved");
+    let discarded = false;
+    const gone = saver.discard().then(() => (discarded = true));
+    await tick();
+    expect(discarded).toBe(false);
+    writes[0].done.resolve("ed");
+    await run;
+    await gone;
+    await tick(40);
+    expect(writes.map((w) => w.path)).toEqual(["a.py"]);
+    expect(saver.text("a.py")).toBeUndefined();
+    expect(saver.text("b.py")).toBeUndefined();
+    expect(saver.dirty()).toBe(false);
+    expect(saver.status).toEqual({ state: "idle" });
+  });
 });

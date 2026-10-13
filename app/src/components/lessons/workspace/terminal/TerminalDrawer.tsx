@@ -6,6 +6,7 @@ import { PillTabs } from "@/components/ui/table/PillTabs";
 import type { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
 import { cn } from "@/lib/utils";
 
+import { RunFiles } from "../run/RunFiles";
 import { LazyXtermView } from "./LazyXtermView";
 import { TerminalOverlay } from "./TerminalOverlay";
 import type { useRunSession } from "./useRunSession";
@@ -17,7 +18,7 @@ const LABELS: Record<DrawerTab, string> = { terminal: "Terminal", run: "Run" };
 
 /**
  * Ed's bottom drawer under the editor: a Terminal tab (Ed's bash) and a Run
- * tab (Run's output), each an xterm view kept mounted behind the other so
+ * tab (Run's output, the files it left beneath), each an xterm view kept mounted behind the other so
  * neither loses its scrollback. Drag its top edge to resize, or fold it to
  * its tab bar; the views stay laid out at the unfolded height meanwhile, so
  * a fold never resizes Ed's PTY.
@@ -86,8 +87,11 @@ export function TerminalDrawer({
             </div>
           )}
           {tabs.includes("run") && (
-            <div className={cn("absolute inset-0", tab !== "run" && "invisible")}>
-              <LazyXtermView sink={run.sink} onData={run.input} onResize={run.resize} label="Program input" />
+            <div className={cn("absolute inset-0 flex flex-col", tab !== "run" && "invisible")}>
+              <div className="relative min-h-0 flex-1">
+                <LazyXtermView sink={run.sink} onData={run.input} onResize={run.resize} label="Program input" />
+              </div>
+              {run.files.length > 0 && <RunFiles files={run.files} />}
             </div>
           )}
         </div>

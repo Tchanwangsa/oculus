@@ -1,6 +1,7 @@
 //! One run's thread: it owns the run socket, sends what the commands queue
-//! (stdin, a resize, stop) and reads for at most a turn between. It ends
-//! after reporting exactly one exit, however the run ends.
+//! (stdin, a resize, stop) and reads for at most a turn between. Ed sends
+//! `dump_files` after `run_exit`, so the run ends once both are in, or the
+//! socket closes. It reports exactly one exit, however the run ends.
 
 use std::io::{ErrorKind, Read, Write};
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -10,6 +11,7 @@ use base64::Engine as _;
 use tungstenite::protocol::frame::coding::CloseCode;
 use tungstenite::{Message, WebSocket};
 
+use super::dump::{self, Dumped};
 use super::frames::{self, Exit, RunIncoming};
 use crate::sources::ed::live::socket_error;
 
@@ -24,6 +26,8 @@ pub enum RunOut {
 pub enum RunEvent {
     /// Base64 of the program's (or the build's) output.
     Output(String),
+    /// The output files `dump_files` named, before the exit.
+    Files(Vec<Dumped>),
     Exit(Exit),
 }
 
@@ -45,16 +49,20 @@ fn serve_until_exit<S: Read + Write>(
     queue: &Receiver<RunOut>,
     emit: &dyn Fn(RunEvent),
 ) -> Exit {
+    // The program's exit, held until `dump_files` follows it.
+    let mut exited: Option<Exit> = None;
+    let mut dumped = false;
+    let end = |exited: Option<Exit>, why: &str| exited.unwrap_or_else(|| Exit::because(why));
     loop {
         loop {
             match queue.try_recv() {
                 Ok(RunOut::Frame(frame)) => {
                     if let Err(e) = socket.send(Message::text(frame)) {
-                        return Exit::because(&socket_error(&e));
+                        return end(exited, &socket_error(&e));
                     }
                 }
                 Ok(RunOut::Stop) | Err(TryRecvError::Disconnected) => {
-                    return Exit::because(frames::STOPPED)
+                    return end(exited, frames::STOPPED)
                 }
                 Err(TryRecvError::Empty) => break,
             }
@@ -70,16 +78,28 @@ fn serve_until_exit<S: Read + Write>(
                         return Exit::because(frames::BUILD_FAILED);
                     }
                 }
-                Some(RunIncoming::Exit(exit)) => return exit,
+                Some(RunIncoming::Exit(exit)) if dumped => return exit,
+                Some(RunIncoming::Exit(exit)) => exited = Some(exit),
+                Some(RunIncoming::Files(data)) => {
+                    let files = dump::decode(&data);
+                    if !files.is_empty() {
+                        emit(RunEvent::Files(files));
+                    }
+                    dumped = true;
+                    if let Some(exit) = exited.take() {
+                        return exit;
+                    }
+                }
                 None => {}
             },
             Ok(Message::Close(close)) => {
                 let busy = close.is_some_and(|c| c.code == CloseCode::from(frames::NO_CAPACITY));
-                return Exit::because(if busy {
+                let why = if busy {
                     frames::NO_RESOURCES
                 } else {
                     frames::CUT_OFF
-                });
+                };
+                return end(exited, why);
             }
             Ok(_) => {}
             Err(tungstenite::Error::Io(e))
@@ -88,9 +108,9 @@ fn serve_until_exit<S: Read + Write>(
                 let _ = socket.flush();
             }
             Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
-                return Exit::because(frames::CUT_OFF)
+                return end(exited, frames::CUT_OFF)
             }
-            Err(e) => return Exit::because(&socket_error(&e)),
+            Err(e) => return end(exited, &socket_error(&e)),
         }
     }
 }

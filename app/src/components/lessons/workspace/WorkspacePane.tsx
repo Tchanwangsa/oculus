@@ -10,6 +10,7 @@ import type { DbFile } from "@/lib/db";
 import { splitListing } from "@/lib/ed/conflicts";
 import {
   WORKSPACE_EVENT,
+  resetWorkspace,
   type Submission,
   type WorkspaceEvent,
   type WorkspaceInfo,
@@ -23,6 +24,8 @@ import { cn } from "@/lib/utils";
 import { ConflictFrame } from "./conflict/ConflictFrame";
 import { DescriptionColumn, type SideTab } from "./DescriptionColumn";
 import { MarkButton } from "./mark/MarkButton";
+import { useReplaceFlow } from "./reset/useReplaceFlow";
+import { WorkspaceMenu } from "./reset/WorkspaceMenu";
 import { MarkDialog } from "./mark/MarkDialog";
 import { useMarkFlow } from "./mark/useMarkFlow";
 import { RunButton } from "./terminal/RunButton";
@@ -54,8 +57,9 @@ const DRAWER_PANEL = {
  * A `code` slide as Ed shows it: the slide's brief (its `.md`) on the left
  * with its Feedback tab, the challenge's files in tabs over `CodeEditor` on
  * the right, saving to Ed as you type (`lib/ed/workspaceSaver.ts`), with
- * Run and Mark in its header and the terminal drawer under it, each as the
- * challenge's features allow. The session opens on mount and closes after
+ * Run, Mark and a menu (Reset to scaffold) in its header and the terminal
+ * drawer under it, each as the challenge's features allow. A `reset` event
+ * (reset or restore) drops every buffer and reads the files again. The session opens on mount and closes after
  * the last pane on it goes (`holdWorkspace`); `ed-workspace` events for this
  * challenge update the connection, the file list, the open file when
  * another client commits, and the files in conflict with Ed
@@ -86,6 +90,8 @@ export function WorkspacePane({
   const [save, setSave] = useState<SaveState>({ state: "idle" });
   const [notice, setNotice] = useState<string | null>(null);
   const [remote, setRemote] = useState(0);
+  /** Counts Ed's resets and restores; each remounts the editor to read again. */
+  const [replaced, setReplaced] = useState(0);
   /** Each file's undo history and caret, kept across tab switches. */
   const memories = useRef(new Map<string, unknown>());
 
@@ -147,6 +153,11 @@ export function WorkspacePane({
       case "error":
         setNotice(payload.message);
         break;
+      case "reset":
+        void hold?.saver.discard();
+        memories.current.clear();
+        setReplaced((n) => n + 1);
+        break;
     }
   });
 
@@ -164,6 +175,7 @@ export function WorkspacePane({
     connection.state === "online",
   );
   const run = useRunSession(challengeId, hold?.saver ?? null);
+  const reset = useReplaceFlow<true>(hold?.saver ?? null, () => resetWorkspace(challengeId));
   const startRun = () => {
     setDrawerTab("run");
     drawer.setCollapsed(false);
@@ -258,8 +270,9 @@ export function WorkspacePane({
           {!openError && <WorkspaceStatusLine connection={connection} save={save} />}
           {canRun && <RunButton phase={run.phase} offline={offline} onRun={startRun} onStop={run.stop} />}
           {features?.mark && <MarkButton step={mark.state.step} offline={offline} onClick={() => void mark.start()} />}
+          {info && <WorkspaceMenu reset={reset} offline={offline} />}
         </div>
-        {(openError || save.state === "error" || notice || run.error || mark.error) && (
+        {(openError || save.state === "error" || notice || run.error || mark.error || reset.error) && (
           <div className="shrink-0 space-y-2 px-3 pt-3">
             {openError && (
               <Alert variant="destructive">
@@ -284,6 +297,12 @@ export function WorkspacePane({
                 <AlertDescription className="text-xs">{run.error}</AlertDescription>
               </Alert>
             )}
+            {reset.error && (
+              <Alert variant="destructive">
+                <AlertTitle className="text-xs">Couldn't reset the challenge</AlertTitle>
+                <AlertDescription className="text-xs">{reset.error}</AlertDescription>
+              </Alert>
+            )}
             {mark.error && (
               <Alert variant="destructive">
                 <AlertTitle className="text-xs">{mark.error.title}</AlertTitle>
@@ -295,7 +314,7 @@ export function WorkspacePane({
         <div className="min-h-0 flex-1">
           {hold && shown != null ? (
             <ConflictFrame
-              key={shown}
+              key={`${replaced}:${shown}`}
               challengeId={challengeId}
               saver={hold.saver}
               path={shown}

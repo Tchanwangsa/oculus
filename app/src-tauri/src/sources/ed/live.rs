@@ -29,12 +29,19 @@ pub(super) type Socket = WebSocket<Tls>;
 pub struct LiveWorkspace {
     socket: Socket,
     head: Option<String>,
+    wid: Option<String>,
 }
 
 impl LiveWorkspace {
     /// The commit `init` named as the workspace's newest.
     pub fn head(&self) -> Option<&str> {
         self.head.as_deref()
+    }
+
+    /// The workspace `init` says the socket opened: a submission's
+    /// connect opens a temporary copy of its code, named only here.
+    pub fn wid(&self) -> Option<&str> {
+        self.wid.as_deref()
     }
 
     /// Send one text frame (an `fsop`).
@@ -58,7 +65,12 @@ pub fn open_live_workspace(host: &str, ticket: &str) -> Result<LiveWorkspace, St
     let mut socket = open_socket(host, "connect", ticket)?;
     let init = wait_for_init(&mut socket)?;
     let head = init["last_commits"][0]["hash"].as_str().map(str::to_string);
-    Ok(LiveWorkspace { socket, head })
+    let wid = match &init["wid"] {
+        serde_json::Value::String(w) => Some(w.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    };
+    Ok(LiveWorkspace { socket, head, wid })
 }
 
 /// Open `wss://<host>/<route>?ticket=` with the web app's origin.

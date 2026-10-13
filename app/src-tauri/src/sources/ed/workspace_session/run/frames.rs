@@ -14,6 +14,9 @@ pub enum RunIncoming {
     /// Program output, base64 (`stdout` and `stderr` both: a PTY merges them).
     Output(String),
     Exit(Exit),
+    /// `dump_files`: what the program left, as Ed sent it (`dump::decode`).
+    /// It follows `run_exit`, and the run is over only once it is in.
+    Files(Value),
 }
 
 /// How a run ended, as the `runExit` event carries it.
@@ -41,7 +44,7 @@ pub const BUILD_FAILED: &str = "The build failed";
 pub const CUT_OFF: &str = "The run ended before the program exited";
 
 /// One text frame; `None` for kinds a run does not use (`status_created`,
-/// `dump_files`, stdin echoes) and shapes this does not know.
+/// stdin echoes) and shapes this does not know.
 pub fn parse(text: &str) -> Option<RunIncoming> {
     let frame: Value = serde_json::from_str(text).ok()?;
     let data = &frame["data"];
@@ -55,6 +58,7 @@ pub fn parse(text: &str) -> Option<RunIncoming> {
             _ => return None,
         },
         "run_exit" => RunIncoming::Exit(exit_of(&data["exit_status"])),
+        "dump_files" => RunIncoming::Files(data.clone()),
         _ => return None,
     })
 }

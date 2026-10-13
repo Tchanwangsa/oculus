@@ -149,6 +149,20 @@ export function createWorkspaceSaver(io: SaverIO) {
       // A failed write of the discarded text no longer stands.
       if (status.state === "error" && !nextDirty()) emit({ state: "idle" });
     },
+    /** Ed's files are about to replace (or just replaced) the workspace:
+     *  forget every buffer, unsaved text included, and the pending write.
+     *  Resolves once a write already in flight has landed, so none follows. */
+    async discard(): Promise<void> {
+      if (timer != null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      buffers.clear();
+      const inFlight = writing;
+      if (inFlight) await inFlight;
+      buffers.clear();
+      emit({ state: "idle" });
+    },
     /** The socket is back and Rust's reconcile has uploaded what was kept on
      *  disk: "saved locally" becomes saved to Ed, unless something is pending. */
     synced() {

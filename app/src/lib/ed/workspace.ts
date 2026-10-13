@@ -58,6 +58,12 @@ export type WorkspaceEvent =
   | { challengeId: number; kind: "termState"; id: string; state: "running" | "exited" }
   /** Base64 output of a run; stdout and stderr arrive merged, through a PTY. */
   | { challengeId: number; kind: "run"; runId: string; data: string }
+  /** The files the program left that Ed shows (an automaton's diagram),
+   *  just before `runExit`. */
+  | { challengeId: number; kind: "runFiles"; runId: string; files: RunFile[] }
+  /** Ed's files replaced the workspace (reset or restore): every buffer is
+   *  stale, unsaved text included. */
+  | { challengeId: number; kind: "reset" }
   /** `message`: Ed's reason when there is one ("No resources available", a
    *  failed build's output). */
   | {
@@ -68,6 +74,15 @@ export type WorkspaceEvent =
       signal: string | null;
       message: string | null;
     };
+
+/** A file a run left: a picture or text up to 5 MB inline as a `data:` URL,
+ *  anything else written to a temporary folder (`path`, absolute). */
+export interface RunFile {
+  name: string;
+  mime: string;
+  dataUrl: string | null;
+  path: string | null;
+}
 
 export const WORKSPACE_EVENT = "ed-workspace";
 
@@ -177,9 +192,29 @@ export interface ChallengeStanding {
 export const markWorkspace = (challengeId: number) =>
   invoke<Submission>("ed_workspace_mark", { challengeId });
 
-/** The submissions this install made, newest first. */
+/** The student's submissions, as Ed lists them, newest first. */
 export const workspaceSubmissions = (challengeId: number) =>
   invoke<Submission[]>("ed_workspace_submissions", { challengeId });
+
+/** One file of a submission's code, as text. */
+export interface SubmissionFile {
+  path: string;
+  text: string;
+}
+
+/** A submission's files, read from Ed's copy of them once per app run. */
+export const submissionFiles = (challengeId: number, submissionId: number) =>
+  invoke<SubmissionFile[]>("ed_submission_files", { challengeId, submissionId });
+
+/** Replaces the workspace, here and on Ed, with a submission's code; `files`
+ *  and `reset` follow. Only from Restore, after its confirmation. */
+export const restoreSubmission = (challengeId: number, submissionId: number) =>
+  invoke<void>("ed_workspace_restore", { challengeId, submissionId });
+
+/** Ed's "Reset attempt": every file goes back to the challenge's original;
+ *  `files` and `reset` follow. Only from the menu, after its confirmation. */
+export const resetWorkspace = (challengeId: number) =>
+  invoke<void>("ed_workspace_reset", { challengeId });
 
 export const challengeStanding = (challengeId: number) =>
   invoke<ChallengeStanding>("ed_challenge_standing", { challengeId });

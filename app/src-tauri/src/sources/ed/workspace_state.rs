@@ -23,8 +23,6 @@ pub struct WorkspaceState {
     /// Each file's path inside the workspace → the SHA-256 (lower-case hex)
     /// of the bytes last synced.
     pub files: BTreeMap<String, String>,
-    /// The submissions this install made: Ed lists none for a student.
-    pub submissions: Vec<i64>,
 }
 
 /// Where a challenge's record lives.

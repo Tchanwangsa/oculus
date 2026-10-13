@@ -9,6 +9,7 @@ import {
   runInput,
   runWorkspace,
   stopRun,
+  type RunFile,
   type WorkspaceEvent,
 } from "@/lib/ed/workspace";
 import type { WorkspaceSaver } from "@/lib/ed/workspaceSaver";
@@ -17,19 +18,21 @@ export type RunPhase = "idle" | "starting" | "running" | "stopping";
 
 const FALLBACK_SIZE = { cols: 80, rows: 24 };
 
-type RunEvent = Extract<WorkspaceEvent, { kind: "run" } | { kind: "runExit" }>;
+type RunEvent = Extract<WorkspaceEvent, { kind: "run" } | { kind: "runFiles" } | { kind: "runExit" }>;
 
 /**
  * Run, as Ed's button: write pending saves (`flushForEd`), then
  * `ed_workspace_run` at the Run tab's size, its output streaming into a clean
  * Run view and typed input passed through. It ends with Ed's message and
- * "Program exited with code N", dim. Events that beat the run id back are
- * held and replayed.
+ * "Program exited with code N", dim, and the files it left (`runFiles`) show
+ * under the output. Events that beat the run id back are held and replayed.
  */
 export function useRunSession(challengeId: number, saver: WorkspaceSaver | null) {
   const [sink] = useState(createTermSink);
   const [phase, setPhase] = useState<RunPhase>("idle");
   const [error, setError] = useState<string | null>(null);
+  /** The last run's output files. */
+  const [files, setFiles] = useState<RunFile[]>([]);
   const runRef = useRef<string | null>(null);
   const early = useRef<RunEvent[] | null>(null);
   const mounted = useRef(true);
@@ -55,13 +58,17 @@ export function useRunSession(challengeId: number, saver: WorkspaceSaver | null)
       sink.write(decodeBase64(e.data));
       return false;
     }
+    if (e.kind === "runFiles") {
+      setFiles(e.files);
+      return false;
+    }
     finish(e);
     return true;
   };
 
   useTauriEvent<WorkspaceEvent>(WORKSPACE_EVENT, ({ payload }) => {
     if (payload.challengeId !== challengeId) return;
-    if (payload.kind !== "run" && payload.kind !== "runExit") return;
+    if (payload.kind !== "run" && payload.kind !== "runFiles" && payload.kind !== "runExit") return;
     if (early.current) early.current.push(payload);
     else apply(payload);
   });
@@ -87,6 +94,7 @@ export function useRunSession(challengeId: number, saver: WorkspaceSaver | null)
       return;
     }
     sink.reset();
+    setFiles([]);
     early.current = [];
     const size = sink.size() ?? FALLBACK_SIZE;
     try {
@@ -113,6 +121,7 @@ export function useRunSession(challengeId: number, saver: WorkspaceSaver | null)
     sink,
     phase,
     error,
+    files,
     dismissError: () => setError(null),
     start,
     stop() {

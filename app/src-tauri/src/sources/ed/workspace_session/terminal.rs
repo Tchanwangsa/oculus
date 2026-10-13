@@ -97,6 +97,17 @@ impl Terminals {
         self.held.remove(id);
     }
 
+    /// Forget every terminal (a reset ends them all on Ed). Returns the
+    /// ones to kill, the held ones first, and the held ones alone.
+    pub fn end_all(&mut self) -> (Vec<String>, Vec<String>) {
+        let held: Vec<String> = self.held.keys().cloned().collect();
+        let mut every = held.clone();
+        every.extend(self.listed.iter().filter(|id| !held.contains(id)).cloned());
+        self.held.clear();
+        self.listed.clear();
+        (every, held)
+    }
+
     fn started(&mut self, id: &str, persist: bool) {
         if persist && !self.listed.iter().any(|l| l == id) {
             self.listed.push(id.to_string());

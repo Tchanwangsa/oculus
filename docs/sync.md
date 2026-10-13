@@ -433,7 +433,7 @@ leaves the last whole lesson.
   in the app (its session reconciles it) or when the record names another
   folder (the lesson was renamed). A conflict is a `warning` line; a file
   reconcile wrote is reported `updated`. The record is
-  `{"workspace_id", "slide_dir", "base_commit", "files", "submissions"}`,
+  `{"workspace_id", "slide_dir", "base_commit", "files"}`,
   `files` mapping each path in the workspace to the SHA-256 (hex) of the
   bytes last synced. The slide's Files list is then those paths, read from
   the slide's folder on disk (one missing there is left out). A record that
@@ -508,7 +508,8 @@ the working copy; Ed gets each save as an upload.
   `files {files}` (after the first download writes, after each reconcile,
   and when a save or delete changes the list), `conflict {path, serverPath}`
   (one per file in conflict, after each reconcile), `error {message}`
-  (Ed's `display_error`, or a pull that failed), and the terminal and Run
+  (Ed's `display_error`, or a pull that failed), `reset` (a reset or a
+  restore replaced the files, after their `files`), and the terminal and Run
   kinds below.
   Each upload makes two `new_commit` frames: a snapshot commit whose hash
   the upload never returns, then its own, which can beat the HTTP answer.
@@ -556,26 +557,72 @@ the working copy; Ed gets each save as an upload.
   `ok` is false, ends with "The build failed"; `run_exit {exit_status: {type,
   value}}` becomes `runExit {runId, code | signal | message}` (`normal` →
   code, `signal` → signal, `killed`/`exec` → words); close code 1013 is "No
-  resources available". Every run ends with exactly one `runExit`.
+  resources available". Ed sends `dump_files` after `run_exit`, so the
+  thread holds the exit until it arrives or the socket closes (no timer),
+  and only then sends `runExit`. Every run ends with exactly one `runExit`.
+- `dump_files` (`run/dump.rs`) names the files the program left: an object
+  keyed by file name, or a list of entries naming theirs. Ed's web app
+  hides dotfiles, names without a dot and sources (`.py`, `.c`, `.java`,
+  `.o`… its list, `shown`), and so does Oculus. A value is a string —
+  a `data:` URL; base64, taken when it decodes to a known binary format, the
+  extension is binary or it decodes to UTF-8 text; else the text itself — or
+  an object whose `data`, `content`, `contents` or `url` is one
+  (`encoding: "base64"` forces base64). A link is not fetched. Any other
+  shape is logged by file name and kind (an object's keys), never its
+  contents. The type is sniffed from the bytes (PNG, JPEG, GIF, WebP, PDF,
+  SVG), else the extension. A non-empty dump becomes `runFiles {runId,
+  files: [{name, mime, dataUrl, path}]}` just before `runExit`: pictures and
+  text up to 5 MB inline as a `data:` URL, anything else written to
+  `<temp>/oculus-ed-runs/<challenge>/<runId>/` (`path`).
   `ed_run_input` sends `run_frame {pid: 0, type: "stdin", data}`,
   `ed_run_resize` `run_set_size`, `ed_run_stop` closes the socket ("Stopped");
   closing the workspace stops its run.
 - Mark (`mark/`): `ed_workspace_mark` (`POST /challenges/<ch>/mark {hash}`)
   is a real submission. Only the workspace's Mark button calls it, after the
   pane's confirm dialogs; a second Mark while one is in flight is refused,
-  nothing retries it, and no sync, reconnect, agent or CLI reaches it. Its id
-  is appended to the record's `submissions` before the answer is shaped.
+  nothing retries it, and no sync, reconnect, agent or CLI reaches it.
   The answer is the pane's `Submission`: camelCase, a testcase's
   `run.output` as `output`, and `diffs`, the lines of every `check_diff`
   check's `value.diff` in order. Ed writes a line as `[[sign], [sign|"=",
   text]…]`; each element becomes a `[sign, text]` pair, so a line starts
   with its sign (`-` observed, `+` expected) and empty text, and `["mn"]`
-  (missing newline) keeps its sign. `ed_workspace_submissions` reads the
-  record's ids newest first (`GET /challenges/submissions/<id>`, 300 ms
-  apart, since Ed 429s bursts); Ed lists none for a student.
+  (missing newline) keeps its sign. `ed_workspace_submissions` reads Ed's
+  list of the student's submissions (`GET /users/<uid>/challenges/<ch>/submissions`,
+  each with its marked result) and shapes them alike, newest first.
   `ed_challenge_standing` reads `GET /challenges/<ch>` live for `{score,
   status, attemptsRemaining, dueAt}`, `dueAt` falling back to the slide's
   front matter. Neither read needs the workspace open.
+- The user id those paths take is the `user` of the session's last
+  `connect` answer (an object with `id`, or the id), else `GET /user`'s.
+- A submission's code (`mark/code.rs`): `ed_submission_files
+  {submissionId}` gets a ticket (`POST /challenges/submissions/<id>/connect
+  {}`), opens the session socket with it, takes `init.wid` (a temporary copy
+  Ed makes of the submission), downloads its `"."` zip, closes the socket and
+  unpacks it as a workspace. Nothing is ever uploaded to or removed from that
+  copy. The files are kept in memory per submission for the app's run and
+  answered as `[{path, text}]` (UTF-8, lossy).
+- Reset (`reset.rs`): `ed_workspace_reset` is Ed's "Reset attempt", `POST
+  /users/<uid>/challenges/<ch>/reset {}`. Only the pane's menu calls it,
+  after its confirm dialog. It takes its place in the save queue and keeps
+  its turn to the end, so no save lands after it, and needs the session
+  online. After Ed's reset it kills every terminal it knows (`termState
+  exited` for the held ones) and forgets them, deletes the conflict copies,
+  records every local file's hash as the base (`base_commit` none) and
+  reconciles with Ed's head changed: every difference then goes Ed's way —
+  Ed's files written, the ones Ed lacks deleted — and nothing is uploaded.
+  `files` and then `reset` follow. If the download fails, the record set up
+  that way makes the next connect's reconcile finish it, and the command
+  says so.
+- Restore (`restore.rs`): `ed_workspace_restore {submissionId}` makes the
+  workspace a submission's code (`mark/code.rs`). Only the Feedback tab's
+  Restore calls it, after its confirm dialog; it takes its turn in the save
+  queue and needs the session online. The library copy becomes the
+  submission's files and nothing else, conflict copies included; then each
+  file whose bytes the record does not hold is uploaded and recorded, and
+  each recorded file the submission lacks is removed on Ed (`fsop remove`,
+  kept in the record until a reconcile finds it gone). `files` and then
+  `reset` follow; an upload cut short is sent by the next connect's
+  reconcile.
 
 ## Reconcile brings a recorded workspace in step with Ed
 
