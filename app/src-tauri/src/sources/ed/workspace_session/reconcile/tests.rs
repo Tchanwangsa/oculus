@@ -265,3 +265,11 @@ fn a_missing_folder_is_an_error_not_a_delete_of_everything() {
     assert!(run(&dir.join("nope"), &base, CHANGED, &mut ed).is_err());
     assert!(ed.removes.is_empty());
 }
+
+#[test]
+fn a_commit_id_and_its_tree_half_are_the_same_tree() {
+    use super::compare::same_tree;
+    assert!(same_tree("abc:::def", "abc"));
+    assert!(same_tree("abc", "abc:::xyz"));
+    assert!(!same_tree("abc:::def", "abd"));
+}

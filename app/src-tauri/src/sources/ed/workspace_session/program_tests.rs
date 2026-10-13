@@ -248,7 +248,7 @@ fn a_commit_asked_for_is_answered_by_its_context_id() {
 }
 
 #[test]
-fn run_and_mark_take_the_records_base_else_ask_for_a_commit() {
+fn run_and_mark_always_ask_for_a_fresh_commit() {
     let dir = Scratch::new("ed-ws-latest");
     let (context, _) = context(&dir, "http://127.0.0.1:1");
     let (out, queue) = mpsc::channel();
@@ -270,14 +270,26 @@ fn run_and_mark_take_the_records_base_else_ask_for_a_commit() {
         .answered(Some(&json!({ "id": id })), "fresh"));
     assert_eq!(asker.join().unwrap().unwrap(), "fresh");
 
+    // A recorded base is not reused: it may be `init`'s tree half alone.
     let state = WorkspaceState {
         base_commit: Some("base".into()),
         ..WorkspaceState::default()
     };
     workspace_state::save(&dir, 267880, &state).unwrap();
     let (out, queue) = mpsc::channel();
-    assert_eq!(snapshot::latest(&context, &out).unwrap(), "base");
-    assert!(queue.try_recv().is_err(), "nothing asked");
+    let asker = {
+        let context = context.clone();
+        std::thread::spawn(move || snapshot::latest(&context, &out))
+    };
+    let Ok(Out::Frame(frame)) = queue.recv_timeout(Duration::from_secs(5)) else {
+        panic!("no commit frame")
+    };
+    let id = value(&frame)["data"]["id"].clone();
+    assert!(context
+        .shared()
+        .snapshots
+        .answered(Some(&json!({ "id": id })), "fresh2"));
+    assert_eq!(asker.join().unwrap().unwrap(), "fresh2");
 }
 
 #[test]

@@ -532,12 +532,12 @@ the working copy; Ed gets each save as an upload.
   through), `program_init`/`program_update`/`program_close` become
   `termState {id, state: running|exited}`; programs whose id is not
   `term-…` are not the pane's. Offline, each command is an error.
-- Run and Mark take the workspace's latest commit (`snapshot.rs`), after the
-  saves asked before them have landed: the record's `base_commit`, which
-  every upload moves. A workspace with none (Ed named no head and nothing
-  was uploaded) sends `commit {id}` on the session socket and waits for the
+- Run and Mark take a fresh commit (`snapshot.rs`), after the saves asked
+  before them have landed: `commit {id}` on the session socket, then the
   `new_commit` whose `context.id` echoes it (announced as `commit {ours:
-  true}`); going offline ends the wait with an error.
+  true}`); going offline ends the wait with an error. They need the whole
+  `<tree>:::<suffix>` id that answer carries: `init.last_commits` names the
+  tree half alone, and Ed's `/run` and `/mark` answer that with a 500.
 - Run (`run/`): `ed_workspace_run {cols, rows}` needs a `run_command` and
   the session online, stops the challenge's run in progress, gets a ticket
   (`POST /challenges/<ch>/run {pty_size, hash, command: run_command,
@@ -601,7 +601,8 @@ bytes (`download "."`), and acts on the decision table in `table.rs`:
   online, uploads the file. `ed` writes the copy over the file, drops it from
   the record (recorded once Ed is found to agree, a conflict again if Ed has
   moved on) and deletes the copy.
-- `init.last_commits[0]` equal to `base_commit` means Ed has not changed:
+- `init.last_commits[0]` naming the same tree as `base_commit` (the part
+  before `:::`, `compare::same_tree`) means Ed has not changed:
   nothing is downloaded and only local changes go up. A pull that was owed
   (below) turns that off for the next connect.
 - After a reconcile the record holds the new hashes and `base_commit` is the

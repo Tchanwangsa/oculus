@@ -1,12 +1,15 @@
 //! Mark's shaping of Ed's submission, against the probe's shape (SWEN20003
 //! "Debugging", 207224), and Mark and the history against a fake keyd.
 
+use std::time::Duration;
+
 use serde_json::{json, Value};
 
 use super::mark::submission::{normalise, Build};
 use super::mark::{diff, history, standing};
 use super::session::Session;
 use super::session_tests::{context, go_online, slide};
+use super::socket::Out;
 use crate::sources::ed::workspace_state::{self, WorkspaceState};
 use crate::sources::ed::Ed;
 use crate::test_support::{FakeKeyd, Scratch};
@@ -191,11 +194,11 @@ fn fake_ed(dir: &std::path::Path) -> FakeKeyd {
 }
 
 #[test]
-fn mark_submits_the_base_commit_and_records_the_id() {
+fn mark_submits_a_fresh_commit_and_records_the_id() {
     let dir = Scratch::new("ed-ws-mark");
     let keyd = fake_ed(&dir);
     let (context, _) = context(&dir, "http://127.0.0.1:1");
-    let (session, _out) = Session::detached(context.clone(), slide());
+    let (session, queue) = Session::detached(context.clone(), slide());
 
     let offline = session.mark(session.place()).unwrap_err();
     assert!(offline.contains("offline"), "{offline}");
@@ -209,14 +212,27 @@ fn mark_submits_the_base_commit_and_records_the_id() {
     };
     workspace_state::save(&dir, 267880, &state).unwrap();
     go_online(&context);
-    let submission = session.mark(session.place()).unwrap();
+    // Mark asks Ed for a commit rather than reusing the recorded base.
+    let submission = std::thread::scope(|scope| {
+        let marking = scope.spawn(|| session.mark(session.place()));
+        let Ok(Out::Frame(frame)) = queue.recv_timeout(Duration::from_secs(5)) else {
+            panic!("no commit frame")
+        };
+        let id = serde_json::from_str::<Value>(&frame).unwrap()["data"]["id"].clone();
+        assert!(context
+            .shared()
+            .snapshots
+            .answered(Some(&json!({ "id": id })), "h8:::s"));
+        marking.join().unwrap()
+    })
+    .unwrap();
     assert_eq!(submission.id, 31);
     let requests = keyd.requests();
     assert_eq!(requests.len(), 1, "one mark, no retry");
     assert_eq!(requests[0].0["path"], "/api/challenges/267880/mark");
     assert_eq!(
         serde_json::from_slice::<Value>(&requests[0].1).unwrap(),
-        json!({"hash": "h7"})
+        json!({"hash": "h8:::s"})
     );
     assert_eq!(
         workspace_state::load(&dir, 267880).unwrap().submissions,
