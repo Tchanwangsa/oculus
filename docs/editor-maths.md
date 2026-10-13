@@ -67,7 +67,11 @@ a place. Its styles are the `.cm-math-view` rules in `theme/math.ts`; the
 field takes the rendering's box exactly (an inline field's 2px of tint each
 side are taken back by a negative margin, a block's padding is the
 rendering's at the note's font size), so opening or closing maths moves
-neither it nor the text around it. The controller focuses it and places the caret once the
+neither it nor the text around it. Inline renderings and fields each have
+one inline-block layout box, keeping scripts with their formula when prose
+beside them is indented or wraps. Spacing atoms' caret positions include
+their signed margin advance, so Tab's `\qquad` puts the caret after the gap.
+The controller focuses it and places the caret once the
 widget is in the document.
 
 The model's source is the note's LaTeX, so a step's changes are written as

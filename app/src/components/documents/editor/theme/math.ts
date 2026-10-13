@@ -3,6 +3,9 @@ import { brand, muted, mono, type ThemeSpec } from "./tokens";
 
 export const math: ThemeSpec = {
   ".cm-math": { cursor: "text" },
+  // Keep scripts in their formula's layout box when surrounding text moves
+  // or wraps, as the visual field does.
+  ".cm-math:not(.cm-math-display)": { display: "inline-block" },
   // `contain` keeps a too-wide formula scrolling in its block rather than
   // widening the whole note, as `.cm-math-view-block` does for the field.
   ".cm-math-display": { textAlign: "center", padding: "0.4em 0", overflowX: "auto", contain: "inline-size" },

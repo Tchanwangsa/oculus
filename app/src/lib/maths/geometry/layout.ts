@@ -20,6 +20,8 @@ export interface MappedBox {
    *  an index's is smaller): where a caret beside it is drawn. */
   baseline: number;
   size: number;
+  /** A spacing atom's end, including its signed CSS margin advance. */
+  afterX?: number;
 }
 
 /** A rendering's mapped elements in document order, in `frame`'s
@@ -91,7 +93,8 @@ export function readLayout(root: Element, frame: Element = root): Layout {
       const placeholder = el.classList.contains("oc-placeholder") || el.classList.contains("oc-empty-row");
       const style = getComputedStyle(el);
       const baseline = baselineOf(el, style, own, o);
-      items.push({ from, to, box: own, ink: own, placeholder, baseline, size: parseFloat(style.fontSize) });
+      const afterX = el.classList.contains("mspace") ? own.right + (parseFloat(style.marginRight) || 0) : undefined;
+      items.push({ from, to, box: own, ink: own, placeholder, baseline, size: parseFloat(style.fontSize), afterX });
     }
     for (const child of el.children) {
       const c = walk(child);

@@ -57,7 +57,7 @@ export function measure(layout: Layout, field: FieldShape): Measured {
       }
     }
     const at: [number, MappedBox | null] =
-      before ? [edges(before).right, before]
+      before ? [before.afterX ?? edges(before).right, before]
       : after ? [edges(after).left, after]
       : marker ? [marker.box.left, marker]
       : fallback(layout, slot);

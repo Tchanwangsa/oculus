@@ -66,6 +66,31 @@ describe("measure", () => {
     expect(mm.x[stopOf(f, 8, 1)]).toBe(12);
   });
 
+  test("Tab's spacing atom advances the caret by its margin", () => {
+    const f = MathField.open("x", false).run("tab").field;
+    expect(f.source).toBe("x\\qquad");
+    const layout: Layout = { items: [
+      item(0, 1, box(0, 0, 10, 14)),
+      { ...item(1, 7, box(10, 0, 10, 14)), afterX: 38 },
+    ] };
+    const mm = measure(layout, f);
+    expect(mm.x[f.head]).toBe(38);
+    expect(mm.x[stopOf(f, 1, 0)]).toBe(10);
+  });
+
+  test("a leading or negative spacing atom keeps its signed advance", () => {
+    for (const advance of [28, -4]) {
+      const f = MathField.open("\\qquad x", false);
+      const layout: Layout = { items: [
+        { ...item(0, 6, box(0, 0, 0, 14)), afterX: advance },
+        item(7, 8, box(advance, 0, advance + 10, 14)),
+      ] };
+      const mm = measure(layout, f);
+      expect(mm.x[stopOf(f, 0, 0)]).toBe(0);
+      expect(mm.x[stopOf(f, 7, 0)]).toBe(advance);
+    }
+  });
+
   test("an empty slot's caret is at its placeholder", () => {
     const f = MathField.open("\\frac{}{b}", false);
     const layout: Layout = {
