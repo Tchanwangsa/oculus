@@ -91,8 +91,11 @@ export default function TaskPage() {
             onPatch={patch}
           />
 
+          {/* Keyed by task so another task starts fresh. Siblings never share a
+              key: a shared one makes React drop an old sibling from the tree
+              without unmounting it, leaving its editor on the page. */}
           <TaskBody
-            key={task.id}
+            key={`body-${task.id}`}
             task={task}
             project={project}
             onSave={(body) => patch({ body })}
@@ -112,7 +115,7 @@ export default function TaskPage() {
             />
           )}
 
-          <TaskFiles key={task.id} taskId={task.id} />
+          <TaskFiles key={`files-${task.id}`} taskId={task.id} />
 
           <TaskMeta task={task} />
         </div>

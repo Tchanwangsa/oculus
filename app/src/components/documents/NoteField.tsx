@@ -22,7 +22,6 @@ import {
 } from "./editor/commands";
 import { noteExtensions } from "./editor/core/extensions";
 import { hostCompartment, noteHost, type NoteHost } from "./editor/core/host";
-import { ViewSlot } from "./editor/core/viewSlot";
 import { Toolbar } from "./editor/chrome/Toolbar";
 import { useEditorFind } from "./editor/chrome/useEditorFind";
 
@@ -91,7 +90,6 @@ export function NoteField({
   const [pressing, setPressing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const slot = useMemo(() => new ViewSlot<EditorView>(), []);
   const releasePress = useRef<(() => void) | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -205,57 +203,49 @@ export function NoteField({
     // tooltip is outside the modal's reach.
     const tooltipParent =
       parent.closest<HTMLElement>('[role="dialog"]') ?? parent.ownerDocument.body;
-    // Exactly one view lives in the host, whatever the effect's history.
-    parent.replaceChildren();
-    const v = slot.mount(
-      () =>
-        new EditorView({
-          parent,
-          doc: textRef.current,
-          extensions: [
-            noteExtensions({
-              live: true,
-              host: hostRef.current,
-              suggest: [],
-              onUpdate,
-              onPictures: pastePictures,
-              placeholder,
-              label,
-              tooltipParent,
-            }),
-            fieldTheme,
-            Prec.highest(
-              keymap.of([
-                {
-                  key: "Mod-Enter",
-                  run: () => {
-                    commit();
-                    return true;
-                  },
-                },
-              ]),
-            ),
-          ],
+    const v = new EditorView({
+      parent,
+      doc: textRef.current,
+      extensions: [
+        noteExtensions({
+          live: true,
+          host: hostRef.current,
+          suggest: [],
+          onUpdate,
+          onPictures: pastePictures,
+          placeholder,
+          label,
+          tooltipParent,
         }),
-    );
+        fieldTheme,
+        Prec.highest(
+          keymap.of([
+            {
+              key: "Mod-Enter",
+              run: () => {
+                commit();
+                return true;
+              },
+            },
+          ]),
+        ),
+      ],
+    });
     const unregisterLink = registerNoteLinkCommand(v.dom, () => toggleLink(v));
     viewRef.current = v;
     setView(v);
     setFormats(activeFormats(v.state));
     return () => {
-      try {
-        // Leaving the row (a key change, the page closing) saves what was typed.
-        commit();
-        unregisterLink();
-      } finally {
-        slot.unmount(v);
-        viewRef.current = null;
-        setView(null);
-      }
+      // Leaving the row (a key change, the page closing) saves what was typed.
+      commit();
+      unregisterLink();
+      v.destroy();
+      viewRef.current = null;
+      setView(null);
     };
     // Placeholder and label are fixed for a field's life.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commit, embed, slot]);
+  }, [commit, embed]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: hostCompartment.reconfigure(noteHost.of(host)) });

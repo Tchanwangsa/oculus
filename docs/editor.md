@@ -278,11 +278,11 @@ losing focus (the picture picker) is not leaving. The field's text scroller
 clips and masks its contents, so `NoteField` passes `noteExtensions` a
 `tooltipParent`: the completion list and maths popover are mounted in
 `document.body` (inside the dialog when the field is in one, which would
-otherwise shut on a click outside it) instead of the editor. `ViewSlot`
-(`editor/core/viewSlot.ts`) keeps the host to one `EditorView`: it destroys any
-view still held before mounting the next and destroys even when the effect's
-own cleanup threw first. Leaving, ⌘↵ and unmounting hand an edited doc to
-`onCommit`; a new `text` replaces an unedited doc, outside history.
+otherwise shut on a click outside it) instead of the editor. Leaving, ⌘↵ and
+unmounting hand an edited doc to `onCommit`; a new `text` replaces an unedited
+doc, outside history. A caller keys the field by its row, with a key no sibling
+shares ([frontend.md](./frontend.md#gotchas)): React unmounts the old field only
+when the key is its own, and one it fails to unmount keeps its editor on the page.
 `noteExtensions` takes its placeholder and aria label. An optional `onChange`
 hears the doc on every change, for a caller whose buttons read the text and
 cannot wait on the blur (the chat's pasted text editor,

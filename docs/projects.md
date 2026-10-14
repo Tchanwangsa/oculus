@@ -177,8 +177,10 @@ whose parent is missing rather than dropping it.
   written to `agents/attachments/` on arrival (`writeAttachment`) and linked
   as `![name](agents/attachments/…)`. Blur or ⌘↵ writes through
   `updateTask`; `taskBodyEdit` makes an unchanged body write nothing and an
-  empty one write `null`. The page keys the body by task, so switching tasks
-  saves to the task left. A write from elsewhere (the agent through the CLI)
+  empty one write `null`. The page keys the body by task (`body-<id>`, the
+  related files being `files-<id>`), so switching tasks saves to the task left;
+  the two keys differ because siblings sharing one are not unmounted, and each
+  task left would keep its body on the page. A write from elsewhere (the agent through the CLI)
   replaces the text while the field is at rest; while it is edited, the
   user's text stands.
 - **Dates go through `DateTimeField`**, never a native input
