@@ -7,7 +7,7 @@ import { syncScrollFade } from "@/lib/ui/scrollFade";
 import { activeMathField, setMathMode, visualToggle } from "../../field/mathField";
 import { MATH_TABS, matrixTemplate, type MathEntry, type MatrixKind } from "../mathPalette";
 import { popularEntries, readRecents, usageVersion } from "../mathUsage";
-import { CLOSE_ICON, button, cellButton, el, sideways, syncHidden } from "./dom";
+import { CLOSE_ICON, button, cellButton, el, followCommandMode, sideways, syncHidden } from "./dom";
 import { insertEntry } from "./insert";
 import { shapeToggle, toggleShape } from "./shape";
 import { mathToolsField, openMathTools } from "./state";
@@ -46,6 +46,7 @@ export class MathToolsView implements TooltipView {
   private close = button("cm-math-close", "Close (Esc)", () => {
     this.view.dispatch({ effects: openMathTools.of(null) });
   });
+  private stopCommandMode: () => void;
   private shown: string | null = null;
   /** `usageVersion()` the Recent row was drawn at. */
   private usage = -1;
@@ -56,6 +57,7 @@ export class MathToolsView implements TooltipView {
     this.dom.setAttribute("role", "group");
     this.dom.setAttribute("aria-label", "Maths tools");
     this.dom.addEventListener("mousedown", (e) => e.preventDefault());
+    this.stopCommandMode = followCommandMode(view, this.dom);
 
     this.close.innerHTML = CLOSE_ICON;
     const tabbar = el("div", "cm-math-tabbar");
@@ -77,6 +79,10 @@ export class MathToolsView implements TooltipView {
   mount() {
     this.syncHidden(this.view.state);
     this.revealTab();
+  }
+
+  destroy() {
+    this.stopCommandMode();
   }
 
   /** Fade whichever end of the tab strip has more tabs behind it. */

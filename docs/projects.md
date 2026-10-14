@@ -171,7 +171,7 @@ whose parent is missing rather than dropping it.
   (`app/src/components/documents/NoteField.tsx`; see
   [editor.md](./editor.md#notefield-is-the-note-editor-as-a-form-field)):
   always Live mode, so the preview is the read view, with the note's maths
-  tools, tables and shortcuts, and its formatting toolbar under the text
+  tools, tables and shortcuts, and its formatting toolbar above the text
   while it is edited. `@` searches the project's subject, or the whole
   library for a task without one. A picture pasted, dropped or picked is
   written to `agents/attachments/` on arrival (`writeAttachment`) and linked

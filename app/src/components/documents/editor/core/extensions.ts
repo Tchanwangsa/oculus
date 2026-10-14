@@ -7,6 +7,7 @@ import {
   dropCursor,
   keymap,
   placeholder,
+  tooltips,
   type ViewUpdate,
 } from "@codemirror/view";
 
@@ -60,8 +61,13 @@ export function noteExtensions(opts: {
   onPictures: (files: File[]) => boolean;
   placeholder?: string;
   label?: string;
+  /** Where the completion list and the maths popover are mounted, in place
+   *  of inside the editor, for an editor in a box that clips or masks its
+   *  contents (`NoteField`'s scroller). */
+  tooltipParent?: HTMLElement;
 }): Extension {
   return [
+    opts.tooltipParent ? tooltips({ parent: opts.tooltipParent }) : [],
     history(),
     editorShadow(),
     noteUndoRouting(),

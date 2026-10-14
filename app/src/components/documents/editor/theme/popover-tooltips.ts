@@ -1,15 +1,17 @@
-import { brand, muted, type ThemeSpec } from "./tokens";
+import { brand, muted, tooltipRoot, type ThemeSpec } from "./tokens";
 
 export const popoverTooltips: ThemeSpec = {
-  // Tooltips (the maths popover, the completion list). `&.cm-editor` beats
+  // Tooltips (the maths popover, the completion list). `tooltipRoot` beats
   // the base theme's light-mode tooltip rules.
-  "&.cm-editor .cm-tooltip.cm-math-tools, &.cm-editor .cm-tooltip.cm-tooltip-autocomplete": {
+  [`${tooltipRoot} .cm-tooltip.cm-math-tools, ${tooltipRoot} .cm-tooltip.cm-tooltip-autocomplete`]: {
     backgroundColor: "var(--color-popover)",
     color: "var(--color-popover-foreground)",
     border: "1px solid var(--color-border)",
     borderRadius: "12px",
     boxShadow: "var(--shadow-lg)",
     fontFamily: "var(--font-sans)",
+    // Under a modal's `pointer-events: none` body, a tooltip kept in the body is still clickable.
+    pointerEvents: "auto",
   },
 
   ".cm-math-tools": {
@@ -21,7 +23,7 @@ export const popoverTooltips: ThemeSpec = {
     fontSize: "12px",
     lineHeight: "1.4",
   },
-  ".cm-math-tools.cm-math-tools-hidden, &.cm-math-command .cm-math-tools": { display: "none" },
+  ".cm-math-tools.cm-math-tools-hidden, .cm-math-tools.cm-math-tools-command": { display: "none" },
   // Under the visual field: no preview, the field is the preview.
   ".cm-math-tools-visual .cm-math-preview, .cm-math-tools-visual .cm-math-error-text": { display: "none" },
   ".cm-math-tools-visual .cm-math-recents": { marginTop: "0" },
