@@ -1,4 +1,4 @@
-import { X } from "@phosphor-icons/react";
+import { ChipRemove } from "@/components/ui/ChipRemove";
 import { cn } from "@/lib/utils";
 import type { DbTaskTag } from "@/lib/planning/projects";
 import { tagColorClasses } from "./tagColors";
@@ -21,7 +21,6 @@ export function TagChip({
   const color = tagColorClasses(tag.color);
   return (
     <span
-      title={tag.name}
       className={cn(
         "inline-flex h-5 max-w-full min-w-0 items-center gap-1.5 rounded-full px-2 text-[11px] leading-none font-medium",
         color.soft,
@@ -32,17 +31,12 @@ export function TagChip({
       <TagDot color={tag.color} />
       <span className="min-w-0 truncate">{tag.name}</span>
       {onRemove && (
-        <button
-          type="button"
-          aria-label={`Remove ${tag.name}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          className="-mr-1 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full opacity-60 transition-opacity hover:opacity-100"
-        >
-          <X size={9} weight="bold" />
-        </button>
+        <ChipRemove
+          label={`Remove ${tag.name}`}
+          onRemove={onRemove}
+          size="sm"
+          className="-mr-1"
+        />
       )}
     </span>
   );

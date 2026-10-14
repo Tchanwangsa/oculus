@@ -151,8 +151,9 @@ whose parent is missing rather than dropping it.
   `boardOf`'s default board and `useTaskList` rows for an unfiled task.
 - **The task page is a header, a pill row and four blocks.** The header holds
   the nav fold toggle (only inside `TasksLayout`; `useTasksPanel()` is null in
-  the side panel), back, the trail `Tasks › title` and a `…` menu with Delete.
-  The pills are Status, Project (read-only "follows parent" on a subtask), Due,
+  the side panel), back, the trail `project › title` (`Tasks › title` while
+  unfiled; the first crumb links to the project or the list) and a `…` menu with
+  Delete. The pills are Status, Project (read-only on a subtask), Due,
   Starts, Estimate (whole minutes in a popover; 0 clears), the task's tags with
   a `+` (`TagPicker`, writing `updateTask({ tagIds })`) and, on a parent, the
   checklist progress. Below: the description, the subtasks as a checklist (a tick is
@@ -161,7 +162,7 @@ whose parent is missing rather than dropping it.
 - **Related files open through `openLibraryPath`**, the opener every citation
   takes, so a PDF or note lands in the side panel and a binary in the system
   viewer; ⌘-click opens a tab. A chip is a container with two sibling buttons
-  (open, ×), never nested ([ui.md](./ui.md#gotchas)). The attach picker is
+  (open, `ChipRemove`), never nested ([ui.md](./ui.md#gotchas)). The attach picker is
   `searchAttachableFiles`, ranked like ⌘K, with recents on an empty query.
 - **Names ride in the query** (`?n=`, via `projectHref` / `taskHref`), because
   `tabInfo` titles a tab from the path alone. Renaming re-navigates to the new

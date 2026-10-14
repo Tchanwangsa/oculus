@@ -55,12 +55,13 @@ export function TaskProperties({
           a readout, not a picker. */}
       {task.parent_id != null ? (
         <span
-          title="A subtask follows its parent's project"
-          className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-full border border-border-subtle px-2.5 text-xs text-muted-foreground"
+          className={cn(
+            PILL,
+            "cursor-default text-muted-foreground hover:bg-transparent",
+          )}
         >
           <FolderSimple size={13} className="shrink-0" />
           <span className="truncate">{projectName}</span>
-          <span className="shrink-0 text-[11px] text-muted-foreground/70">follows parent</span>
         </span>
       ) : (
         <ProjectPicker
