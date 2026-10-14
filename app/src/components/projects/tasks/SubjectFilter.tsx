@@ -1,4 +1,4 @@
-import { GraduationCap } from "@phosphor-icons/react";
+import { GraduationCap, User } from "@phosphor-icons/react";
 import { FilterFold } from "@/components/ui/filter/FilterFold";
 import { FilterList } from "@/components/ui/filter/FilterList";
 import { FilterPopover, FilterRow } from "@/components/ui/filter/FilterPopover";
@@ -29,7 +29,9 @@ export function SubjectFilter({
       label={label}
       active={value !== "any"}
       icon={
-        value !== "any" && value !== "personal" ? (
+        value === "personal" ? (
+          <User size={13} />
+        ) : value !== "any" ? (
           <SubjectIcon code={value} size={13} />
         ) : (
           <GraduationCap size={13} className={value === "any" ? "text-muted-foreground" : undefined} />
@@ -57,6 +59,7 @@ export function SubjectFilter({
             <FilterRow label="Any subject" selected={value === "any"} onPick={() => pick("any")} />
             <FilterRow
               label="Personal"
+              icon={<User size={13} className="shrink-0 text-muted-foreground" />}
               hint="No subject — personal projects, and anything unfiled"
               selected={value === "personal"}
               onPick={() => pick("personal")}
