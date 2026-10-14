@@ -64,7 +64,7 @@ export function sortTasks(
     switch (sort.key) {
       case "title":
         return a.title.localeCompare(b.title);
-      // By the cell's text, so "Unfiled" sorts among the names.
+      // By the cell's text, so "No project" sorts among the names.
       case "project":
         return projectLabel(a).localeCompare(projectLabel(b));
       // By board column order — not by name, and not by kind (Todo and In

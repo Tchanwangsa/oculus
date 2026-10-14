@@ -233,7 +233,7 @@ describe("grouping", () => {
     expect(groups.map((g) => g.label)).toEqual(["Planning", "Done"]);
   });
 
-  test("project groups put Unfiled first, then names", () => {
+  test("project groups put No project first, then names", () => {
     const groups = groupTasks(
       [
         task({ project_id: 2, project_name: "Zed" }),
@@ -243,7 +243,7 @@ describe("grouping", () => {
       "project",
       ctx,
     );
-    expect(groups.map((g) => g.label)).toEqual(["Unfiled", "Alpha", "Zed"]);
+    expect(groups.map((g) => g.label)).toEqual(["No project", "Alpha", "Zed"]);
   });
 
   test("due groups: Overdue, Today, This week, Later, No date", () => {

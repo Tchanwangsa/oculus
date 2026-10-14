@@ -92,7 +92,7 @@ impl Ctx {
         let unfiled: Vec<&projects::Task> =
             tasks.iter().filter(|t| t.project_id.is_none()).collect();
         if !unfiled.is_empty() {
-            println!("{}", paint("Unfiled", BOLD));
+            println!("{}", paint("No project", BOLD));
             // The default board, which an unfiled task's column is checked against.
             let rows: Vec<projects::Task> = unfiled.into_iter().cloned().collect();
             print_columns(&projects::default_columns(), &rows, &tags);
