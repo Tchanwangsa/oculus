@@ -63,12 +63,11 @@ export function GroqDialog({ open, onOpenChange, connected, onConnected }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="settings-content sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Groq</DialogTitle>
           <DialogDescription>
-            Whisper Large v3 Turbo on Groq's servers: the audio is uploaded, in parts when it is
-            too large for one upload.
+            Uploads audio to Groq for Whisper transcription.
           </DialogDescription>
         </DialogHeader>
         <div className="min-w-0">
@@ -95,8 +94,7 @@ export function GroqDialog({ open, onOpenChange, connected, onConnected }: {
             ) : null}
           </CredentialField>
           <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-            Groq's free tier caps the audio it takes an hour and a day; past that, the next engine
-            in the list answers.
+            Hourly and daily limits apply; then the next engine is tried.
           </p>
         </div>
       </DialogContent>

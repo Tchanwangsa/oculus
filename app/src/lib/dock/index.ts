@@ -32,7 +32,7 @@ export const DOCK_SERVICES: readonly DockService[] = [
     id: "whatsapp",
     label: "WhatsApp",
     icon: WhatsappLogo,
-    description: "WhatsApp Web, linked from your phone with a QR code.",
+    description: "Link your phone with a QR code.",
   },
   {
     id: "instagram",
@@ -44,7 +44,7 @@ export const DOCK_SERVICES: readonly DockService[] = [
     id: "messenger",
     label: "Messenger",
     icon: MessengerLogo,
-    description: "Messenger on facebook.com; it asks for your Messenger PIN to restore chats.",
+    description: "Restore chats with your Messenger PIN.",
   },
   {
     id: "discord",

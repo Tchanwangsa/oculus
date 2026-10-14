@@ -120,9 +120,9 @@ export function AutoSignIn({
   return (
     <div>
       {(!embedded || configured) && (
-        <div className="flex items-center justify-between gap-4 py-2">
+        <div className="settings-row flex items-center justify-between gap-4 py-2">
           {title}
-          <div className="flex items-center gap-1.5">
+          <div className="settings-actions flex items-center gap-1.5">
             {configured && !editing && !embedded && (
               <span className="text-xs text-muted-foreground">
                 {status?.username}
@@ -186,7 +186,7 @@ export function AutoSignIn({
               authenticator.
             </p>
           )}
-          <div className="flex items-center gap-1.5">
+          <div className="settings-actions flex items-center gap-1.5">
             <Button
               size="xs"
               onClick={save}

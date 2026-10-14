@@ -114,8 +114,7 @@ export function ModelsTable({
 
   return (
     <>
-      {/* Fixed height so switching tabs doesn't jump the table. */}
-      <div className="flex h-12 shrink-0 items-center gap-2 px-5">
+      <div className="settings-actions flex min-h-12 shrink-0 items-center gap-2 px-5 py-2">
         <SearchField
           value={query}
           onChange={setQuery}
@@ -177,6 +176,8 @@ export function ModelsTable({
 
       <div className="min-h-0 flex-1">
         <GridTable
+          minWidth={1100}
+          empty={empty}
           cols={COLS}
           header={
             <>
@@ -214,7 +215,7 @@ export function ModelsTable({
             summary: loaded ? v.status : undefined,
           }}
         >
-          {empty ?? (
+          {!empty && (
             <div className="divide-y divide-border-subtle">
               {v.pageRows.map((m) => (
                 <ModelRow

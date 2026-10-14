@@ -60,7 +60,7 @@ export function JobRow({
       : "Add fallbacks";
 
   return (
-    <div className="flex items-start justify-between gap-4 py-2.5">
+    <div className="settings-row flex items-start justify-between gap-4 py-2.5">
       <div className="min-w-0">
         <div className="text-[13px] text-foreground">{label}</div>
         <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
@@ -68,7 +68,7 @@ export function JobRow({
       </div>
       {/* A fixed width, so a long model name truncates instead of narrowing
           the description, and every row's text wraps at the same edge. */}
-      <div className="-mr-1.5 flex w-56 shrink-0 items-center justify-end gap-0.5">
+      <div className="settings-actions -mr-1.5 flex w-56 shrink-0 items-center justify-end gap-0.5">
         <ChainPicker
           providers={offered}
           entry={chain[0] ?? null}

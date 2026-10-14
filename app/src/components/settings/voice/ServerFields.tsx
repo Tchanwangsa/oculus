@@ -77,7 +77,7 @@ export function ServerFields({ settings, errors, save, clearError }: {
     <>
       <SettingRow
         label="Server URL"
-        hint="Where the server answers, with or without /v1."
+        hint="Your TTS endpoint; /v1 is optional."
         error={errors.baseUrl}
       >
         <Input
@@ -90,7 +90,7 @@ export function ServerFields({ settings, errors, save, clearError }: {
           onBlur={() => void commit("baseUrl", urlDraft)}
           onKeyDown={blurOnEnter}
           placeholder="http://127.0.0.1:8880"
-          className="h-7 w-80 text-xs"
+          className="h-7 w-80 max-w-full text-xs"
         />
       </SettingRow>
 
@@ -98,13 +98,13 @@ export function ServerFields({ settings, errors, save, clearError }: {
         label="Model"
         hint={
           options
-            ? "The models the server lists."
-            : "The server's model id, e.g. kokoro. List models asks the server for its ids."
+            ? "Choose a server model."
+            : "Enter an ID or list server models."
         }
         error={errors.model ?? listError}
         note={models?.length === 0 ? "The server listed no models: type the model id." : null}
       >
-        <div className="flex w-80 items-center gap-2">
+        <div className="flex w-80 max-w-full items-center gap-2">
           {options ? (
             <Select
               value={settings.model ?? ""}
@@ -151,7 +151,7 @@ export function ServerFields({ settings, errors, save, clearError }: {
 
       <SettingRow
         label="Voice"
-        hint="The server's voice name, e.g. af_heart. Servers can't list their voices, so type it."
+        hint="Voice ID, such as af_heart."
         error={errors.voice}
       >
         <Input
@@ -163,7 +163,7 @@ export function ServerFields({ settings, errors, save, clearError }: {
           onBlur={() => void commit("voice", voiceDraft)}
           onKeyDown={blurOnEnter}
           placeholder="af_heart"
-          className="h-7 w-80 text-xs"
+          className="h-7 w-80 max-w-full text-xs"
         />
       </SettingRow>
     </>

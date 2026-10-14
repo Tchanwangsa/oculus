@@ -72,7 +72,7 @@ export function PronunciationsSection() {
   return (
     <Section
       title="Pronunciations"
-      description="The agent suggests a reading for words the voice had to guess; a decision applies the next time that video is narrated."
+      description="Review readings before the next narration."
     >
       {loadError ? (
         <p className="py-2 text-[11px] leading-relaxed text-destructive" data-selectable>

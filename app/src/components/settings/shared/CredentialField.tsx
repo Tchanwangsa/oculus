@@ -21,14 +21,14 @@ export function CredentialField({
 }) {
   return (
     <div className="py-2">
-      <div className="flex items-center justify-between gap-4">
+      <div className="settings-row flex items-center justify-between gap-4">
         <div>
           <p className="text-xs text-foreground">{label}</p>
           <p className="text-[11px] text-muted-foreground">
-            Stored in your operating system’s credential store, never in the library database.
+            Saved in your system credential store.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="settings-actions flex items-center gap-2">
           {connected ? (
             <>
               <span className="text-xs text-success">Connected</span>

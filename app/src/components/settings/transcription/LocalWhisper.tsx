@@ -151,13 +151,11 @@ export function LocalWhisperDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="settings-content sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Local Whisper</DialogTitle>
           <DialogDescription>
-            whisper.cpp on this Mac
-            {catalogue?.gpu === false ? ", on the CPU" : ", on the GPU through Metal"}: free and
-            offline after a one-time model download.
+            Offline after downloading a model. Uses {catalogue?.gpu === false ? "the CPU" : "Metal"}.
           </DialogDescription>
         </DialogHeader>
         {catalogue && settings ? (
@@ -241,7 +239,7 @@ function Models({ catalogue, settings, downloads, onChange, onModelsChanged }: {
       <div role="radiogroup" aria-label="Whisper model" className="mt-2">
         <div className="flex items-center gap-2.5 py-1.5">
           <Radio label="Automatic" checked={settings.model === null} onSelect={() => onChange({ model: null })} />
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 basis-40 flex-1">
             <p className="text-xs text-foreground">Automatic</p>
             <p className="text-[11px] text-muted-foreground">
               {picked ? `Uses ${picked.label}` : "Picks a model once one is downloaded"}
@@ -337,11 +335,11 @@ function ModelRow({
 
   return (
     <div className="py-1.5">
-      <div className="flex items-center gap-2.5">
+      <div className="flex flex-wrap items-center gap-2.5">
         <Radio label={model.label} checked={selected} onSelect={onSelect} hidden={!model.downloaded} />
 
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 text-xs text-foreground">
+        <div className="min-w-0 basis-40 flex-1">
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-foreground">
             <span className="truncate">{model.label}</span>
             {model.fit === "recommended" ? (
               <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-brand">
@@ -357,7 +355,7 @@ function ModelRow({
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="settings-actions flex shrink-0 items-center gap-2">
           {download ? (
             <>
               <span className="w-9 text-right text-[11px] text-brand tabular-nums">{done}%</span>

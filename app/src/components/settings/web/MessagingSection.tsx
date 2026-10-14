@@ -19,7 +19,7 @@ export function MessagingSection() {
   return (
     <Section
       title="Messaging"
-      description="Each service you turn on gets a place in the sidebar and keeps running while you work elsewhere."
+      description="Choose messaging apps for the sidebar."
     >
       <div>
         {DOCK_SERVICES.map((service) => (

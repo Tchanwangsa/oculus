@@ -54,12 +54,12 @@ export function PackDownloadRow<S extends { status: AlignerState; bytes: number 
 
   return (
     <div className="py-2">
-      <div className="flex items-center justify-between gap-4">
+      <div className="settings-row flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs text-foreground">{name}</p>
           <div className="text-[11px] text-muted-foreground tabular-nums">{detail}</div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="settings-actions flex shrink-0 items-center gap-2">
           {download ? (
             <>
               <span className="w-9 text-right text-[11px] text-brand tabular-nums">{done}%</span>

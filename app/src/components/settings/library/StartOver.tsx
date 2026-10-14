@@ -69,9 +69,9 @@ export function StartOver() {
   return (
     <Section
       title="Start over"
-      description="Clear the library and sign out, to set Oculus up again — for another university, say."
+      description="Clear the library and sign out."
     >
-      <div className="flex items-center justify-between gap-4 py-2">
+      <div className="settings-row flex items-center justify-between gap-4 py-2">
         <p className="text-xs text-muted-foreground">
           Your API keys and cloud usage limits are kept.
         </p>

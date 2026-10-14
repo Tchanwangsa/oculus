@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { HeaderLabels } from "@/components/ui/table/GridTable";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -8,6 +8,7 @@ import { useVoiceSample } from "../useVoiceSample";
 import { VOICE_COLS } from "./constants";
 import type { KokoroVoices } from "./useKokoroVoices";
 import { VoiceRow, voiceSize } from "./VoiceRow";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
 
 /**
  * Kokoro's voices as a table in the grammar of `SyncHistoryTable`: a row each
@@ -28,6 +29,8 @@ export function KokoroVoicesTable({ files, chosen, speed, canSample }: {
   const sample = useVoiceSample();
   const [deleting, setDeleting] = useState<KokoroVoice | null>(null);
   const [busy, setBusy] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useScrollFade(scrollRef, "x");
 
   const present = voices?.filter((v) => v.status === "present").length ?? 0;
   const missing = voices?.filter((v) => v.status === "missing").length ?? 0;
@@ -46,20 +49,20 @@ export function KokoroVoicesTable({ files, chosen, speed, canSample }: {
 
   return (
     <div className="py-2">
-      <div className="flex items-center justify-between gap-4">
+      <div className="settings-row flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs text-foreground">Voices</p>
           <p className="text-[11px] text-muted-foreground tabular-nums">
             {[
               voices && `${present} of ${voices.length} downloaded · ${voiceSize(voices[0]?.bytes ?? 0)} each`,
-              "Sample needs the model and pronunciation pack.",
+              "Samples need both packs.",
             ]
               .filter(Boolean)
               .join(" · ")}
           </p>
         </div>
         {queue ? (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="settings-actions flex shrink-0 items-center gap-2">
             <span className="text-[11px] text-brand tabular-nums">
               {queue.done + 1} of {queue.total}
             </span>
@@ -80,28 +83,30 @@ export function KokoroVoicesTable({ files, chosen, speed, canSample }: {
         )}
       </div>
 
-      <div className="mt-2 overflow-hidden rounded-lg border border-border-subtle bg-card">
-        <div className={cn(VOICE_COLS, "border-b border-border-subtle px-3 py-2")}>
-          <HeaderLabels labels={["Voice", "Accent", "Grade", "Size", "Status", ""]} />
-        </div>
-        <div className="divide-y divide-border-subtle">
-          {voices?.map((voice) => (
-            <VoiceRow
-              key={voice.id}
-              voice={voice}
-              chosen={voice.id === chosen}
-              download={downloads[voice.id]}
-              error={errors[voice.id] ?? (sample.error?.key === voice.id ? sample.error.message : undefined)}
-              sample={sample.phaseOf(voice.id)}
-              canSample={canSample}
-              onSample={() =>
-                sample.phaseOf(voice.id) === "playing" ? sample.stop() : void sample.play(voice.id, speed)
-              }
-              onDownload={() => files.start(voice)}
-              onCancel={() => files.cancel(voice.id)}
-              onDelete={() => askDelete(voice)}
-            />
-          )) ?? <p className="px-3 py-6 text-center text-xs text-muted-foreground">Reading the voices…</p>}
+      <div ref={scrollRef} className="mt-2 overflow-x-auto rounded-lg border border-border-subtle bg-card" tabIndex={0} role="region" aria-label="Voices; scroll horizontally for more columns">
+        <div className="min-w-[680px]">
+          <div className={cn(VOICE_COLS, "border-b border-border-subtle px-3 py-2")}>
+            <HeaderLabels labels={["Voice", "Accent", "Grade", "Size", "Status", ""]} />
+          </div>
+          <div className="divide-y divide-border-subtle">
+            {voices?.map((voice) => (
+              <VoiceRow
+                key={voice.id}
+                voice={voice}
+                chosen={voice.id === chosen}
+                download={downloads[voice.id]}
+                error={errors[voice.id] ?? (sample.error?.key === voice.id ? sample.error.message : undefined)}
+                sample={sample.phaseOf(voice.id)}
+                canSample={canSample}
+                onSample={() =>
+                  sample.phaseOf(voice.id) === "playing" ? sample.stop() : void sample.play(voice.id, speed)
+                }
+                onDownload={() => files.start(voice)}
+                onCancel={() => files.cancel(voice.id)}
+                onDelete={() => askDelete(voice)}
+              />
+            )) ?? <p className="px-3 py-6 text-center text-xs text-muted-foreground">Reading the voices…</p>}
+          </div>
         </div>
       </div>
       {loadError ? (

@@ -15,7 +15,7 @@ export function ModeRow() {
   return (
     <AppearanceRow
       label="Mode"
-      description="System follows your system and changes with it while Oculus is open."
+      description="System follows your device’s theme."
     >
       <SegmentToggle label="Mode" value={mode} options={OPTIONS} onChange={(next) => setAppearance({ mode: next })} />
     </AppearanceRow>

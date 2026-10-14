@@ -62,7 +62,7 @@ export function RunEstimate({
       </AlertTitle>
       <AlertDescription className="gap-2 text-[11px]">
         {upgrade ? (
-          <div className="flex w-full items-center gap-3">
+          <div className="flex w-full flex-wrap items-center gap-3">
             <span className="tabular-nums">
               {roughly(estimate.seconds)} now · {roughly(estimate.seconds_tier1)} on tier 1
             </span>

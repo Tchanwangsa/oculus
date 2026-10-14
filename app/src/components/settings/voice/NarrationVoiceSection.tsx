@@ -128,11 +128,11 @@ export function NarrationVoiceSection() {
   return (
     <Section
       title="Narration voice"
-      description="Studio reads narration with Kokoro on this Mac, or with a text-to-speech server you run."
+      description="Choose a local voice or your TTS server."
     >
       <p className="text-xs text-foreground">Engine</p>
       <p className="text-[11px] text-muted-foreground">
-        Every video uses this one unless its own voice says otherwise.
+        Default for new videos.
       </p>
       <EngineChoice
         engine={engine}
@@ -170,8 +170,8 @@ export function NarrationVoiceSection() {
             />
           )}
 
-          <SettingRow label="Speed" hint="1× is the voice's own pace; 0.9× is the default." error={errors.speed}>
-            <div className="flex w-80 items-center gap-3">
+          <SettingRow label="Speed" hint="Default: 0.9×." error={errors.speed}>
+            <div className="flex w-80 max-w-full items-center gap-3">
               <Slider
                 aria-label="Narration speed"
                 min={SPEED_MIN}
@@ -194,8 +194,7 @@ export function NarrationVoiceSection() {
             </p>
           ) : (
             <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
-              API keys aren't supported yet: use a server that needs none. A server has no sample
-              here, since it could bill.
+              Use a keyless server. Samples are disabled to avoid charges.
             </p>
           )}
         </div>

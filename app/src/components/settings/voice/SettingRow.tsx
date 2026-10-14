@@ -16,12 +16,12 @@ export function SettingRow({ label, hint, error, note, children }: {
 }) {
   return (
     <div className="py-2">
-      <div className="flex items-center justify-between gap-4">
+      <div className="settings-row flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs text-foreground">{label}</p>
           <p className="text-[11px] text-muted-foreground">{hint}</p>
         </div>
-        <div className="shrink-0">{children}</div>
+        <div className="settings-controls shrink-0">{children}</div>
       </div>
       {error ? (
         <p className="mt-2 text-[11px] leading-relaxed text-destructive" data-selectable>

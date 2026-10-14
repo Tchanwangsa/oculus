@@ -75,7 +75,7 @@ export function ThemeGrid({ mode, inUse }: { mode: ThemeMode; inUse: boolean }) 
 
   return (
     <div className="py-2">
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         <p className="text-xs text-foreground">{LABEL[mode]}</p>
         {inUse && <span className="text-[11px] text-muted-foreground">In use</span>}
         {folds && (
@@ -94,7 +94,7 @@ export function ThemeGrid({ mode, inUse }: { mode: ThemeMode; inUse: boolean }) 
         role="radiogroup"
         aria-label={LABEL[mode]}
         onKeyDown={onKeyDown}
-        className="mt-2 grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(168px,1fr))]"
+        className="mt-2 grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(168px,100%),1fr))]"
       >
         {visible.map((theme) => (
           <ThemeCard

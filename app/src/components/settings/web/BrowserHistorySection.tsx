@@ -78,10 +78,10 @@ export function BrowserHistorySection() {
   return (
     <Section
       title="History"
-      description="Pages opened in Oculus's own browser tabs. The address bar suggests from this list."
+      description="Visited pages and address-bar suggestions."
     >
-      <div className="flex items-center gap-2">
-        <div className="flex h-8 flex-1 items-center gap-2 rounded-lg border border-border bg-card px-2.5 focus-within:border-brand/50">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex h-8 min-w-0 basis-40 flex-1 items-center gap-2 rounded-lg border border-border bg-card px-2.5 focus-within:border-brand/50">
           <MagnifyingGlass size={13} className="shrink-0 text-muted-foreground" />
           <input
             value={query}

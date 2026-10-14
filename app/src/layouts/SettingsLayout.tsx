@@ -4,6 +4,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import SettingsNav from "@/components/settings/SettingsNav";
 import { SETTINGS_PAGES, type SettingsJump } from "@/lib/search/settings";
 import { settingsSectionId } from "@/components/settings/shared/section";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
 
 /** How long a jump waits for its section, and keeps it aligned while the page
  *  above it fills in. */
@@ -18,6 +19,7 @@ export default function SettingsLayout() {
   const lastPath = useRef(location.pathname);
   const segment = location.pathname.split("/").filter(Boolean).pop();
   const fullBleed = SETTINGS_PAGES.some((p) => p.id === segment && p.fullBleed);
+  useScrollFade(scrollerRef, "y", fullBleed);
 
   // A search result carries a section in `state` (not a hash: panes run memory
   // routers). Pages are lazy and load their rows async, so poll for the section
@@ -60,23 +62,25 @@ export default function SettingsLayout() {
   }, [location]);
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <SettingsNav />
+    <div className="settings-shell h-full overflow-hidden">
+      <div className="settings-layout flex h-full overflow-hidden">
+        <SettingsNav />
 
-      {fullBleed ? (
-        // A table page scrolls its own rows (`GridTable`); with no scroller
-        // here, a jump is the page's to handle.
-        <div className="flex h-full min-w-0 flex-1 flex-col">
-          <Outlet />
-        </div>
-      ) : (
-        // `scroll`, not `auto` + `scrollbar-gutter`, which reserves nothing in WebKit.
-        <div ref={scrollerRef} className="min-w-0 flex-1 overflow-y-scroll">
-          <div className="mx-auto max-w-3xl px-8 py-8">
+        {fullBleed ? (
+          // A table page scrolls its own rows (`GridTable`); with no scroller
+          // here, a jump is the page's to handle.
+          <div className="settings-content flex min-h-0 min-w-0 flex-1 flex-col">
             <Outlet />
           </div>
-        </div>
-      )}
+        ) : (
+          // `scroll`, not `auto` + `scrollbar-gutter`, which reserves nothing in WebKit.
+          <div ref={scrollerRef} className="settings-content min-h-0 min-w-0 flex-1 overflow-y-scroll">
+            <div className="settings-gutters mx-auto max-w-3xl py-6">
+              <Outlet />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

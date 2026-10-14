@@ -32,14 +32,14 @@ export default function SettingsCanvasPage() {
     <>
       <Section
         title="Canvas"
-        description="Your university's Canvas, and the session Oculus syncs with."
+        description="University address and sign-in."
       >
         <div>
           <CanvasAddress />
 
           {configured && (
-          <div className="flex items-center justify-between gap-4 py-2">
-            <div className="flex items-center gap-2">
+          <div className="settings-row flex items-center justify-between gap-4 py-2">
+            <div className="settings-actions flex items-center gap-2">
               <span
                 className={cn(
                   "w-1.5 h-1.5 rounded-full",
@@ -66,7 +66,7 @@ export default function SettingsCanvasPage() {
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="settings-actions flex items-center gap-1.5">
               <Button
                 variant={authStatus === "connected" ? "ghost" : "default"}
                 size="xs"

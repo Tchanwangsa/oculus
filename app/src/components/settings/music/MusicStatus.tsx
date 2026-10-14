@@ -49,12 +49,12 @@ export function MusicStatus({ snapshot }: { snapshot: MusicSnapshot }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-4 py-2">
+      <div className="settings-row flex items-center justify-between gap-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className={cn("size-1.5 shrink-0 rounded-full", DOT[status])} />
           <span className="truncate text-xs text-foreground">{text[status]}</span>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="settings-actions flex shrink-0 items-center gap-1.5">
           {snapshot.needs_login ? (
             <Button size="xs" onClick={() => act(music.login)}>
               <SignIn size={13} /> Log in with Spotify
