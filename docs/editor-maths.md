@@ -148,8 +148,10 @@ the text (mode `text`); → or Tab at the end of the text goes back to maths. A
 draws it in the rendering, as the model would type it at the caret
 (`mathView/pending.ts`: `\texttt{\textbackslash name}` inserted as a
 template, display only), so the maths after it moves aside; its elements
-carry no source range, every other keeps its own, and it shows monospace in
-the brand colour at 0.8em (the maths' x-height), the caret after it.
+carry no source range, every other keeps its own. The preview's source map
+includes the whole inserted template, even when the model's minimal diff
+shares its backslash with a following command or row break. It shows monospace
+in the brand colour at 0.8em (the maths' x-height), the caret after it.
 
 The field has one list (`mathView/popover/`), which a pending `\command` and
 Space open. While a `\command` is pending it hangs from the start of that

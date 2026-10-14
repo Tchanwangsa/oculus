@@ -66,13 +66,20 @@ export function pendingHtml(field: MathField, display: boolean): string | null {
   try {
     const step = caret.run({ template: marked });
     const next = step.field.source;
+    const at = step.field.selected[1] - marked.length;
     step.field.free();
     const [change] = step.changes;
     if (step.changes.length !== 1 || !change) return null;
-    const at = next.indexOf(marked, change.from);
-    if (at < 0) return null;
+    // The minimal diff can reuse the pending text's prefix or suffix from
+    // the source (its backslash before another control word). Include those
+    // characters so the displaced source keeps its own range.
+    if (at < 0 || next.slice(at, at + marked.length) !== marked) return null;
+    const changedEnd = change.from + change.insert.length;
+    const from = Math.min(change.from, at);
+    const end = Math.max(changedEnd, at + marked.length);
+    const expanded = { from, to: change.to + end - changedEnd, insert: next.slice(from, end) };
     const html = fieldHtml(next, display);
-    return unpendMap(html, backMap(field.source, change, at, marked.length), field.source.length, at, marked.length);
+    return unpendMap(html, backMap(field.source, expanded, at, marked.length), field.source.length, at, marked.length);
   } catch {
     // Display only: a trap here leaves the plain rendering.
     return null;

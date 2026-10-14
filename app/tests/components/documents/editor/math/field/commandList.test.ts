@@ -227,6 +227,61 @@ describe("the pending \\name in the rendering", () => {
     expect(ranges(html)).toEqual(plain.filter((r) => r !== "6-6"));
   });
 
+  test("before a control word, the shared backslash belongs to the pending command", () => {
+    const source = "|-\\rangle";
+    const field = pendingAt(source, 2).withPending("rangle");
+    const html = pendingHtml(field, false)!;
+    expect(html).not.toBeNull();
+    expect(html).toContain("data-pending");
+    expect(html).toContain("\\rangle");
+    expect(ranges(html)).toEqual(ranges(fieldHtml(source, false)));
+    expect(field.source).toBe(source);
+  });
+
+  test("an identical template in the source keeps its range beside the pending command", () => {
+    const source = String.raw`\texttt{\textbackslash sin}`;
+    const html = pendingHtml(pendingAt(source, 0), false)!;
+    expect(html).not.toBeNull();
+    expect(html).toContain("data-pending");
+    expect(ranges(html)).toEqual(ranges(fieldHtml(source, false)));
+    expect(html.indexOf("data-pending")).toBeLessThan(html.indexOf('data-s="0"'));
+  });
+
+  test("before a row break, both rows keep their source ranges", () => {
+    const source = "a\\\\b";
+    const html = pendingHtml(pendingAt(source, 1), true)!;
+    expect(html).not.toBeNull();
+    expect(html).toContain("data-pending");
+    expect(ranges(html)).toEqual(ranges(fieldHtml(source, true)));
+  });
+
+  test("is visible at every caret stop of a quantum formula", () => {
+    const source = String.raw`|\psi_3\rangle = H\frac{1}{\sqrt{2}}\left(|0\rangle + (-1)^{s_{n-1}}|1\rangle\right)\otimes\cdots\otimes H\frac{1}{\sqrt{2}}\left(|0\rangle + (-1)^{s_0}|1\rangle\right)\otimes I|-\rangle`;
+    const opened = MathField.open(source, true);
+    try {
+      for (let id = 0; id < opened.stops.length; id++) {
+        const selected = opened.select(id, id);
+        const field = selected.withPending("rangle");
+        try {
+          const html = pendingHtml(field, true)!;
+          expect(html).not.toBeNull();
+          expect(html).toContain("data-pending");
+          expect(field.source).toBe(source);
+          for (const range of ranges(html)) {
+            const [from, to] = range.split("-").map(Number);
+            expect(from).toBeLessThanOrEqual(to);
+            expect(to).toBeLessThanOrEqual(source.length);
+          }
+        } finally {
+          field.free();
+          selected.free();
+        }
+      }
+    } finally {
+      opened.free();
+    }
+  });
+
   test("nothing without a pending command", () => {
     expect(pendingHtml(MathField.open("a", false), false)).toBeNull();
   });
