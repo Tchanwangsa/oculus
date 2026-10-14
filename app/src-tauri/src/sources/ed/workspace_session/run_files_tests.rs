@@ -2,6 +2,7 @@
 //! what the pane gets, and the run waiting for it after `run_exit`.
 
 use std::net::TcpStream;
+use std::path::Path;
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -137,7 +138,7 @@ fn small_pictures_and_text_go_inline_and_the_rest_to_a_folder() {
     };
     let file = dump::for_pane(pdf, &spill.join("run-1")).unwrap();
     assert_eq!(file.data_url, None);
-    assert!(file.path.unwrap().ends_with("run-1/dfa.pdf"));
+    assert!(Path::new(&file.path.unwrap()).ends_with("run-1/dfa.pdf"));
     let large = Dumped {
         name: "out/big.txt".into(),
         mime: "text/plain",
