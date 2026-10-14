@@ -25,14 +25,14 @@ function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-6 py-2.5">
+    <div className="settings-row flex items-start justify-between gap-6 py-2.5">
       <div className="min-w-0">
         <div className="text-xs text-foreground">{label}</div>
         {hint && (
           <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>
         )}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="settings-controls shrink-0">{children}</div>
     </div>
   );
 }
@@ -53,12 +53,12 @@ export function BrowserSection() {
   return (
     <Section
       title="Browser"
-      description="Links in Oculus open as tabs here, signed in to Canvas — this is what that browser does."
+      description="Search and link preferences."
     >
       <div>
         <SettingRow
           label="Search engine"
-          hint={`Where a typed query goes, from the address bar and from ${shortcut("mod+K")}.`}
+          hint={`Address bar and ${shortcut("mod+K")} searches.`}
         >
           <Select value={engine} onValueChange={(id) => void setEngine(id)}>
             <SelectTrigger aria-label="Search engine" size="sm" className="h-7 w-48 text-xs">
@@ -76,7 +76,7 @@ export function BrowserSection() {
 
         <SettingRow
           label="Open links in"
-          hint={`Oculus keeps you signed in to Canvas, Ed and Echo360; your default browser does not. ${shortcut("mod")}+click always leaves for the default browser.`}
+          hint={`${shortcut("mod")}+click uses your default browser.`}
         >
           <Select
             value={openLinksIn}

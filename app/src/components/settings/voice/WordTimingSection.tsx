@@ -33,7 +33,7 @@ export function WordTimingSection() {
   return (
     <Section
       title="Word timing"
-      description="Studio times each narrated word on this Mac, so a scene can bring things in on a word."
+      description="Sync scene animations to narrated words."
     >
       <PackDownloadRow
         name={MODEL_NAME}

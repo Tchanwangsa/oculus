@@ -32,7 +32,7 @@ export default function SettingsParsingPage() {
 
   return (
     <>
-      <Section title="Pipeline" description="Where synced PDFs are in the parse pipeline.">
+      <Section title="Pipeline" description="PDF processing status.">
         <div>
           <StatRow label="PDFs tracked" value={counts ? String(counts.tracked) : "—"} />
           <StatRow

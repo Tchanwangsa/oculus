@@ -42,21 +42,20 @@ export function EmbeddingSection() {
       setSettings((prev) => (prev ? { ...prev, credentials_ready: false, credentials_error: null } : prev)),
   });
 
-  const selected = settings?.engines.find((engine) => engine.id === settings.engine) ?? null;
 
   const usage = settings?.usage ?? null;
 
   return (
     <Section
       title="Search index"
-      description="Search runs against the embedding model chosen here, and only that one."
+      description="Choose the model used for library search."
     >
       <div className="space-y-1">
-        <div className="flex items-center justify-between gap-4 py-2">
+        <div className="settings-row flex items-center justify-between gap-4 py-2">
           <div>
             <p className="text-xs text-foreground">Embedding model</p>
             <p className="text-[11px] text-muted-foreground">
-              {selected?.detail ?? "Where page images are turned into vectors."}
+              Page images power library search.
             </p>
           </div>
           <EngineSelect
@@ -74,7 +73,7 @@ export function EmbeddingSection() {
           </p>
         ) : settings && !settings.credentials_ready && settings.engine === "cloud" ? (
           <p className="text-[11px] leading-relaxed text-warning">
-            Nothing can be indexed or searched until a Voyage API key is saved below.
+            Add a Voyage key to enable search.
           </p>
         ) : null}
 

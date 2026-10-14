@@ -17,6 +17,7 @@ Read this before any UI work.
 | Persisted view state and collapsed groups | `app/src/hooks/ui/useStoredState.ts` |
 | Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/layout/PageParts.tsx` |
 | A page's nav column (Settings, subjects, Chat) | `app/src/components/ui/layout/SideNav.tsx` |
+| Settings pane layout, stacking rows and compact navigation | `app/src/styles/settings.css`, `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx` |
 | Drag gestures | `app/src/hooks/gestures/usePointerDrag.ts`, `app/src/hooks/gestures/useCardDrag.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
 | Flat divided lists, table chrome | `app/src/components/ui/layout/PageParts.tsx`, `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
@@ -126,6 +127,16 @@ themes are opt-in and keep the same structure.
   remembered per mode.
 - **Full pages scroll through `page-scroll`**, which reserves the scrollbar
   gutter so a page that starts overflowing doesn't jog sideways.
+- **Settings respond to their pane's width**, including split panes and page
+  zoom. `settings.css` stacks `settings-row` labels and controls below 34rem
+  and replaces the nav column with a page picker below 42rem, keeping page
+  icons and labelled groups separated by dividers. The picker scrolls within
+  20rem or the available popup height; it and the page scroller use
+  `useScrollFade`. Use
+  `settings-controls` for bounded fields and `settings-actions` for wrapping
+  button groups. Descriptions are short hints; errors and confirmation copy
+  retain the detail needed to act. Dense tables scroll sideways with readable
+  column widths; `GridTable`'s optional `minWidth` keeps header and rows together.
 - **A long list's rows can skip layout off screen with `skip-offscreen`**
   (`content-visibility: auto`, remembering each row's drawn height), so a
   resize lays out only what is visible. The row clips its paint to its box:

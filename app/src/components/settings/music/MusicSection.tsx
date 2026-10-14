@@ -26,13 +26,11 @@ export function MusicSection() {
 
   return (
     <Section title="Music" description="Spotify, played in Oculus.">
-      <div className="flex items-start justify-between gap-6 py-2.5">
+      <div className="settings-row flex items-start justify-between gap-6 py-2.5">
         <label htmlFor="music-enabled" className="min-w-0">
           <span className="text-xs text-foreground">Play Spotify in Oculus</span>
           <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-            Needs Spotify Premium. Oculus shows up in Spotify as a device called
-            Oculus and plays through librespot, an unofficial Spotify client, so
-            use it at your own risk.
+            Requires Premium. Uses librespot, an unofficial client.
           </p>
         </label>
         <Switch

@@ -45,7 +45,7 @@ export function EngineChoice({ engine, status, disabled, onChoose }: {
           <Radio label={ENGINE_NAMES[id]} checked={engine === id} onSelect={() => {}} />
           <div className="min-w-0 flex-1">
             <p className="text-xs text-foreground">{ENGINE_NAMES[id]}</p>
-            <p className="truncate text-[11px] text-muted-foreground tabular-nums">
+            <p className="text-[11px] text-muted-foreground tabular-nums">
               {status[id] || " "}
             </p>
           </div>

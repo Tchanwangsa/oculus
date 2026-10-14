@@ -27,7 +27,7 @@ export function SegmentToggle<T extends string>({
       aria-label={label}
       value={value}
       onValueChange={(v) => v && onChange(v as T)}
-      className="bg-surface rounded-md p-0.5"
+      className="max-w-full flex-wrap bg-surface rounded-md p-0.5"
     >
       {options.map(({ value: option, label: name, icon: Glyph }) => (
         <ToggleGroupItem

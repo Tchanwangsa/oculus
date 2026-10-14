@@ -60,7 +60,7 @@ export function IndexRunRow({
 
   return (
     <div className="pt-2">
-      <div className="flex items-center justify-between gap-4">
+      <div className="settings-row flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs text-foreground">Build the index</p>
           <p className="text-[11px] text-muted-foreground">

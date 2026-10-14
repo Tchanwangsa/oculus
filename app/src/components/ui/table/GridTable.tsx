@@ -1,6 +1,7 @@
-import type { ComponentProps, ReactNode } from "react";
+import { useRef, type ComponentProps, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { TablePagination } from "@/components/ui/table/TablePagination";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
 
 /**
  * The shell every full-bleed table shares (`SyncHistoryTable` is the model):
@@ -18,6 +19,7 @@ export function GridTable({
   empty,
   pagination,
   children,
+  minWidth,
 }: {
   /** The `grid grid-cols-[…] … px-5` class every row also uses. */
   cols: string;
@@ -26,20 +28,42 @@ export function GridTable({
   empty?: ReactNode;
   pagination: ComponentProps<typeof TablePagination>;
   children: ReactNode;
+  /** Keep dense columns readable, scrolling header and rows together. */
+  minWidth?: number;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useScrollFade(scrollRef, "x", `${minWidth}:${Boolean(empty)}`);
+  useScrollFade(rowsRef, "y", `${minWidth}:${Boolean(empty)}`);
+  const headerRow = (
+    <div className="shrink-0 pr-1.5">
+      <div className={cn(cols, "border-b border-border-subtle bg-card py-2")}>{header}</div>
+    </div>
+  );
+  const rows = (
+    <div ref={rowsRef} className="flex-1 min-h-0 overflow-y-scroll">
+      {typeof empty === "string" ? (
+        <p className="px-5 py-16 text-center text-xs text-muted-foreground">{empty}</p>
+      ) : empty}
+      {children}
+    </div>
+  );
+  const content = <>{headerRow}{rows}</>;
+
   return (
     <div className="flex h-full flex-col">
-      <div className="shrink-0 pr-1.5">
-        <div className={cn(cols, "border-b border-border-subtle bg-card py-2")}>{header}</div>
-      </div>
-
-      <div className="flex-1 min-h-0 overflow-y-scroll">
-        {empty && (
-          <p className="px-5 py-16 text-center text-xs text-muted-foreground">{empty}</p>
-        )}
-        {children}
-      </div>
-
+      {minWidth && empty ? (
+        <>
+          <div ref={scrollRef} className="shrink-0 overflow-x-auto" tabIndex={0} role="region" aria-label="Table columns; scroll horizontally for more columns">
+            <div style={{ minWidth }}>{headerRow}</div>
+          </div>
+          {rows}
+        </>
+      ) : minWidth ? (
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-x-auto" tabIndex={0} role="region" aria-label="Table; scroll horizontally for more columns">
+          <div className="flex h-full flex-col" style={{ minWidth }}>{content}</div>
+        </div>
+      ) : content}
       <TablePagination {...pagination} />
     </div>
   );

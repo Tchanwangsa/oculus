@@ -14,7 +14,7 @@ export function FrameRow() {
   return (
     <AppearanceRow
       label="Window frame"
-      description="Frosted and Clear let the desktop show through the frame around the page."
+      description="Let the desktop show through."
     >
       <SegmentToggle label="Window frame" value={frame} options={OPTIONS} onChange={(next) => setAppearance({ frame: next })} />
     </AppearanceRow>

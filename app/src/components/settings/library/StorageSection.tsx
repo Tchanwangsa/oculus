@@ -209,7 +209,7 @@ export function StorageSection() {
 
   return (
     <div>
-      <div className="flex items-end justify-between mb-3">
+      <div className="settings-row flex items-end justify-between mb-3">
         <div>
           <p className="text-sm font-semibold text-foreground tabular-nums leading-none">
             {report ? fmtBytes(used) : "—"}
@@ -360,11 +360,11 @@ export function StorageSection() {
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-4 mt-6">
+      <div className="settings-row flex items-center justify-between gap-4 mt-6">
         <div>
           <p className="text-xs font-medium text-foreground">Storage limit</p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Warns when Oculus's data goes past this size.
+            Warn when usage exceeds this size.
           </p>
         </div>
         <Select

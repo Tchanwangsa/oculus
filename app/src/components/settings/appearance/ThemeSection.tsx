@@ -14,7 +14,7 @@ import { ThemeGrid } from "./ThemeGrid";
 export function ThemeSection() {
   const mode = useSyncExternalStore(subscribeDark, isDark) ? "dark" : "light";
   return (
-    <Section title="Appearance" description="How Oculus looks on this machine.">
+    <Section title="Appearance" description="Theme, colour and fonts.">
       <ModeRow />
       <ThemeGrid mode="light" inUse={mode === "light"} />
       <ThemeGrid mode="dark" inUse={mode === "dark"} />

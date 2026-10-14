@@ -34,12 +34,11 @@ export function OnDeviceSpeechDialog({ open, onOpenChange, status, language }: {
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="settings-content sm:max-w-md">
         <DialogHeader>
           <DialogTitle>On-device speech</DialogTitle>
           <DialogDescription>
-            Apple's speech recogniser in macOS 26: free and offline, the audio never leaves this
-            Mac, and an hour of it takes about a minute.
+            Free, offline transcription on macOS 26.
           </DialogDescription>
         </DialogHeader>
         <Body status={status} language={language} />

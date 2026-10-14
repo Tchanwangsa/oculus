@@ -51,7 +51,7 @@ export function AllowanceMeter({
 
   return (
     <div className="py-2">
-      <div className="flex items-baseline justify-between gap-4">
+      <div className="settings-row flex items-baseline justify-between gap-4">
         <p className="flex items-center gap-1 text-xs text-foreground">
           Free allowance
           <Tooltip>
@@ -89,7 +89,7 @@ export function AllowanceMeter({
         ) : null}
       </div>
 
-      <div className="mt-2 flex items-center justify-between gap-4">
+      <div className="settings-row mt-2 flex items-center justify-between gap-4">
         <p className="text-[11px] text-muted-foreground">
           {runPixels > 0 ? `This run adds ${si(runPixels)}. ` : ""}
           {usage.stop_at_percent === 0

@@ -164,8 +164,7 @@ export function ProvidersTable({
 
   return (
     <>
-      {/* Fixed height so switching tabs doesn't jump the table. */}
-      <div className="flex h-12 shrink-0 items-center gap-3 px-5">
+      <div className="settings-actions flex min-h-12 shrink-0 items-center gap-3 px-5 py-2">
         <SearchField
           value={query}
           onChange={setQuery}
@@ -196,11 +195,13 @@ export function ProvidersTable({
 
       <div className="min-h-0 flex-1">
         <GridTable
+          minWidth={760}
+          empty={empty}
           cols={COLS}
           header={<HeaderLabels labels={["Provider", "Status", "Source", "Models", ""]} />}
           pagination={{ page, pageCount, onPage: setPage, total: rows.length, unit: "provider" }}
         >
-          {empty ?? (
+          {!empty && (
             <>
               <div className="divide-y divide-border-subtle border-b border-border-subtle">
                 {pageRows.map((p) => (
@@ -221,8 +222,8 @@ export function ProvidersTable({
               <div className="space-y-1.5 px-5 py-3 text-xs text-muted-foreground">
                 <p>
                   {scope === "all"
-                    ? "Providers with a sign-in flow come first. Every other provider takes an API key."
-                    : "Add a provider under All: those with a sign-in flow open the browser, every other one takes an API key."}
+                    ? "Sign-in providers first; others use API keys."
+                    : "Add providers under All. Sign in or use an API key."}
                 </p>
                 {list?.stale && (
                   <p>

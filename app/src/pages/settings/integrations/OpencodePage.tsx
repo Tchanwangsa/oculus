@@ -61,19 +61,18 @@ export default function SettingsOpencodePage() {
       <div className="shrink-0 px-5 pt-6">
         <h2 className="text-[15px] font-semibold text-foreground">opencode</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Chat offers every model from the providers opencode is signed in to, unless you untick
-          it. Sign-ins are shared with opencode in your terminal.
+          Choose Chat’s models. Sign-ins are shared with your terminal.
         </p>
       </div>
 
       {installed === "missing" ? (
         <p className="px-5 py-4 text-xs text-muted-foreground">
-          opencode is not installed, so there is nothing to sign in to. Install it and press{" "}
+          Install opencode, then press{" "}
           <span className="text-foreground">Recheck</span> on the Agents page.
         </p>
       ) : (
         <>
-          <div className="flex shrink-0 items-end border-b border-border-subtle px-5 pt-3">
+          <div className="settings-actions flex shrink-0 items-end border-b border-border-subtle px-5 pt-3">
             <ViewTabs tabs={VIEWS} value={view} onChange={setView} />
           </div>
 

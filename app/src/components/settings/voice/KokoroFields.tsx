@@ -70,8 +70,8 @@ export function KokoroFields({ settings, errors, save, packs, files, speed }: {
         label="Voice"
         hint={
           files.voices && downloaded.length === 0
-            ? `Download a voice above first: ${starters.join(" and ")} are the suggested starters.`
-            : "One of the voices you have downloaded."
+            ? `Start with ${starters.join(" or ")}.`
+            : "Choose a downloaded voice."
         }
         error={
           errors.voice ??
@@ -87,7 +87,7 @@ export function KokoroFields({ settings, errors, save, packs, files, speed }: {
           disabled={files.voices === null}
           onValueChange={(voice) => void save("voice", { voice })}
         >
-          <SelectTrigger aria-label="Kokoro voice" size="sm" className="h-7 w-80 text-xs">
+          <SelectTrigger aria-label="Kokoro voice" size="sm" className="h-7 w-80 max-w-full text-xs">
             <SelectValue placeholder="Choose a voice" />
           </SelectTrigger>
           <SelectContent>

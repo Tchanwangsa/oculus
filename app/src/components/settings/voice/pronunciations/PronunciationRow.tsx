@@ -69,7 +69,7 @@ export function PronunciationRow({ item, player, onPlay, onDecide, onWrong }: {
 
   return (
     <li className="py-3">
-      <div className="flex items-start justify-between gap-4">
+      <div className="settings-row flex items-start justify-between gap-4">
         <div className={cn("min-w-0", wrong && "text-muted-foreground")}>
           <p className="text-[13px]">
             <span className={cn("font-medium", !wrong && "text-foreground")}>{item.word}</span>
@@ -83,7 +83,7 @@ export function PronunciationRow({ item, player, onPlay, onDecide, onWrong }: {
             {item.subject ? displayCode(item.subject) : "Library"} · {humanizeSlug(item.video)} · scene {item.scene}
           </p>
         </div>
-        <div className="flex shrink-0 gap-1.5">
+        <div className="settings-actions flex shrink-0 gap-1.5">
           {sample("original", "Original")}
           {sample("suggestion", "Suggestion")}
         </div>
@@ -96,7 +96,7 @@ export function PronunciationRow({ item, player, onPlay, onDecide, onWrong }: {
       ) : asking ? (
         <div className="mt-2.5">
           <p className="text-[11px] text-muted-foreground">How is it said? (optional)</p>
-          <div className="mt-1 flex items-center gap-1.5">
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <Input
               autoFocus
               value={note}

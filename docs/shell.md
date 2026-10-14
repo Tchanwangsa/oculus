@@ -124,7 +124,9 @@ indexing, a brand dot on Subjects while any subject has never-opened files
 ## Settings has its own nav column
 
 `/settings` is one route with a page per nav row; `SettingsLayout` puts
-`SettingsNav` beside the page, the rows grouped from `SETTINGS_PAGES`. Its
+`SettingsNav` beside the page, the rows grouped from `SETTINGS_PAGES`. Below
+42rem of available pane width, the navigation becomes a page picker above
+the content ([ui.md](./ui.md)). Its wide-layout
 search reads a hand-kept list in `app/src/lib/search/settings.ts`, because the
 pages are lazy and unmounted: entry titles are the on-screen text, and each
 names the `Section` title it jumps to. Rename a section or row and update the
