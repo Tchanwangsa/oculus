@@ -2,12 +2,21 @@ import { memo, useMemo, useState } from "react";
 import { copyAsMarkdown, dragAsMarkdown } from "@/lib/markdown/selection";
 import type { HarnessItem, Provider } from "@/lib/harness";
 import { useSignInStatus } from "@/hooks/agents/useSignInStatus";
+import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
+import { EXPANDABLE } from "@/lib/ui/expandable";
 import { SignInDialog, useSignIn } from "../SignInDialog";
 import { Bundle, Item } from "./ItemRows";
 import { ContextDrift } from "./Messages";
 import { LiveTail, Pending } from "./Pending";
 import { buildRows } from "./rows";
 import type { PendingActions, QuestionActions } from "./types";
+import { useRowWindow } from "./useRowWindow";
+import { useRowVisibility } from "./useRowVisibility";
+import { RetainedRow } from "./RetainedRow";
+
+/** A committed row: an anchor for `useStickToBottom`, with off-screen layout
+ *  skipped by `useRowVisibility`. Padding on all edges preserves focus rings. */
+const ROW = `${ANCHOR_ROW} skip-offscreen min-w-0 min-h-0`;
 
 export type { PendingActions, QuestionActions } from "./types";
 
@@ -19,7 +28,8 @@ export type { PendingActions, QuestionActions } from "./types";
  *
  * **Nothing here re-renders for the turn in flight.** Committed rows never
  * change, so all are memoised; only `LiveTail` and a running `Tool` subscribe
- * to the stream.
+ * to the stream. Only the newest rows mount until the reader scrolls up
+ * (`useRowWindow`).
  */
 export const Timeline = memo(function Timeline({
   items,
@@ -60,25 +70,34 @@ export const Timeline = memo(function Timeline({
     for (let i = items.length - 1; i >= 0; i--) if (items[i].kind === "permission") return items[i].id;
     return undefined;
   }, [items]);
+  const { start, rootRef, sentinelRef } = useRowWindow(rows, threadId);
+  useRowVisibility(rootRef, threadId);
+  const shown = start ? rows.slice(start) : rows;
   return (
     <div
+      ref={rootRef}
+      {...{ [EXPANDABLE]: "" }}
       className="flex min-w-0 flex-col gap-2"
       onCopy={copyAsMarkdown}
       onDragStart={dragAsMarkdown}
     >
-      {rows.map((r) =>
+      {start > 0 && <div ref={sentinelRef} aria-hidden className="h-px shrink-0" />}
+      {shown.map((r) =>
         r.kind === "bundle" ? (
-          <Bundle key={r.id} items={r.items} />
+          <RetainedRow key={r.id} className={ROW}>
+            <Bundle items={r.items} />
+          </RetainedRow>
         ) : (
-          <Item
-            key={r.item.id}
-            item={r.item}
-            dim={r.dim}
-            actions={questions}
-            asked={asked.get(r.item.id)}
-            onSignIn={setSignIn}
-            latest={r.item.id === latestPermission}
-          />
+          <RetainedRow key={r.item.id} className={ROW} questionId={r.item.kind === "user" ? r.item.id : undefined}>
+            <Item
+              item={r.item}
+              dim={r.dim}
+              actions={questions}
+              asked={asked.get(r.item.id)}
+              onSignIn={setSignIn}
+              latest={r.item.id === latestPermission}
+            />
+          </RetainedRow>
         ),
       )}
       {threadId != null && <ContextDrift threadId={threadId} />}

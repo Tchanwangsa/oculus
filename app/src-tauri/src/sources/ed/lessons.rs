@@ -1,5 +1,5 @@
 //! Ed Lessons: a course's lessons, one lesson's slides, a quiz's questions,
-//! and a challenge's workspace as a zip.
+//! a challenge's settings, and a challenge's workspace as a zip.
 //!
 //! Every call is a read except `workspace_zip`, whose POSTs and live session
 //! attach the student's own workspace the way opening the slide does. No request sends
@@ -71,9 +71,30 @@ impl Ed {
         Ok(questions)
     }
 
+    /// A challenge's settings (`type`, `settings.run_command`, `features`,
+    /// `due_at`) and the student's standing on it. The answer wraps it in
+    /// `challenge`; a bare object is taken as it is.
+    pub fn challenge(&self, challenge_id: i64) -> Result<serde_json::Value, String> {
+        let reply = self.get(&format!("/challenges/{challenge_id}"))?;
+        match &reply["challenge"] {
+            serde_json::Value::Object(_) => Ok(reply["challenge"].clone()),
+            _ if reply.is_object() => Ok(reply),
+            _ => Err(format!(
+                "no challenge in the answer for challenge {challenge_id}"
+            )),
+        }
+    }
+
     /// Ed's web region, once a launch has named it.
     pub fn region(&self) -> Option<String> {
         region(&self.data_dir)
+    }
+
+    /// The workspace server for this install's Ed region.
+    pub fn workspace_host(&self) -> Result<String, String> {
+        self.region().map(|r| workspace_host(&r)).ok_or_else(|| {
+            "Ed's region is not known yet; it is learned when Oculus next signs in to Ed".into()
+        })
     }
 
     /// The student's current workspace for a challenge, as a zip. Ed only
@@ -88,33 +109,11 @@ impl Ed {
         open_live: impl FnOnce(&str, &str) -> Result<G, String>,
         download: impl FnOnce(&str) -> Result<Vec<u8>, String>,
     ) -> Result<Vec<u8>, String> {
-        let host = workspace_host(&self.region().ok_or(
-            "Ed's region is not known yet; it is learned when Oculus next signs in to Ed",
-        )?);
-        let connected = self.post(
-            &format!("/challenges/{challenge_id}/connect"),
-            &serde_json::json!({}),
-        )?;
-        let workspace = connected["workspace_id"]
-            .as_str()
-            .map(str::to_string)
-            .or_else(|| connected["workspace_id"].as_i64().map(|n| n.to_string()))
-            .ok_or("Ed returned no workspace for the challenge")?;
-        let session = connected["ticket"]
-            .as_str()
-            .filter(|t| !t.is_empty())
-            .ok_or("Ed returned no session ticket for the workspace")?;
-        let _live = open_live(&host, session)?;
-        // `"."` is the whole tree; `""` is refused and `"/"` errors.
-        let ticket = self.post(
-            &format!("/workspaces/{workspace}/download"),
-            &serde_json::json!({ "path": "." }),
-        )?;
-        let ticket = ticket["ticket"]
-            .as_str()
-            .filter(|t| !t.is_empty())
-            .ok_or("Ed returned no download ticket for the workspace")?;
-        download(&format!("https://{host}/download/{ticket}"))
+        let host = self.workspace_host()?;
+        let connected = self.connect(challenge_id)?;
+        let _live = open_live(&host, connected.ticket.expose())?;
+        let ticket = self.download_ticket(&connected.workspace_id, ".")?;
+        download(&format!("https://{host}/download/{}", ticket.expose()))
     }
 }
 

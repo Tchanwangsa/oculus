@@ -1,5 +1,6 @@
 import { EditorSelection, Facet, type Extension } from "@codemirror/state";
 import { EditorView, RectangleMarker, drawSelection, layer } from "@codemirror/view";
+import { selectedMathLines } from "./selectionMath";
 
 /** A span the selection highlight skips. */
 export interface SelectionGap {
@@ -7,9 +8,8 @@ export interface SelectionGap {
   to: number;
 }
 
-/** Spans whose own drawing shows them selected, which the highlight leaves
- *  out: Live mode's rendered maths, which paints bands over its atoms
- *  (`MathWidget`) rather than sitting in a box of highlight. */
+/** Spans with their own selection drawing: Live mode’s display maths.
+ *  Inline maths and its surrounding text use the shared line geometry. */
 export const selectionGaps = Facet.define<(view: EditorView) => readonly SelectionGap[]>();
 
 /** `[from, to)` less the gaps, in order. */
@@ -28,7 +28,8 @@ export function withoutGaps(from: number, to: number, gaps: readonly SelectionGa
 /**
  * The note's selection highlight: CodeMirror's `drawSelection` (its cursor,
  * the native selection hidden) with its highlight layer swapped for one that
- * skips the `selectionGaps`. `drawSelection` offers no option to leave its
+ * shares text-and-maths line geometry and skips the `selectionGaps`.
+ * `drawSelection` offers no option to leave its
  * layer out, so the theme hides it (`.cm-selectionLayer`).
  */
 export function noteSelection(): Extension {
@@ -39,13 +40,16 @@ export function noteSelection(): Extension {
       class: "cm-noteSelectionLayer",
       markers(view) {
         const gaps = view.state.facet(selectionGaps).flatMap((f) => f(view));
-        return view.state.selection.ranges.flatMap((r) =>
-          r.empty
-            ? []
-            : withoutGaps(r.from, r.to, gaps).flatMap((part) =>
-                RectangleMarker.forRange(view, "cm-selectionBackground", EditorSelection.range(part.from, part.to)),
-              ),
-        );
+        return view.state.selection.ranges.flatMap((r) => {
+          if (r.empty) return [];
+          const shared = selectedMathLines(view, r);
+          return [
+            ...shared.markers,
+            ...withoutGaps(r.from, r.to, [...gaps, ...shared.gaps]).flatMap((part) =>
+              RectangleMarker.forRange(view, "cm-selectionBackground", EditorSelection.range(part.from, part.to)),
+            ),
+          ];
+        });
       },
       update: (u) => u.docChanged || u.selectionSet || u.viewportChanged || u.geometryChanged || u.transactions.length > 0,
     }),

@@ -1,4 +1,6 @@
+import { unitAt, extendUnit } from "@/lib/maths/geometry/units";
 import { describe, expect, test } from "bun:test";
+import { paddedBands } from "@/lib/maths/geometry/paint";
 import { MathField } from "@/lib/maths";
 import { bands, measure, stopAt, type Box, type Layout, type MappedBox } from "@/lib/maths/geometry";
 
@@ -15,7 +17,7 @@ const item = (
   placeholder = false,
   size = b.bottom - b.top,
   baseline = b.top + 0.75 * size,
-): MappedBox => ({ from, to, box: b, ink, placeholder, baseline, size });
+): MappedBox => ({ from, to, box: b, ink, placeholder, baseline, size, parent: null });
 
 /** `\frac{a+x}{b}` laid out by hand: the numerator's glyphs on top, the
  *  denominator under them, the fraction's own inline box on the baseline. */
@@ -23,12 +25,12 @@ const FRAC = "\\frac{a+x}{b}";
 const fracLayout: Layout = {
   items: [
     item(0, 13, box(0, 10, 30, 22), box(0, 0, 30, 30)),
-    item(10, 13, box(12, 18, 18, 30)),
-    item(11, 12, box(12, 18, 18, 30)),
-    item(5, 10, box(5, 0, 25, 12)),
-    item(6, 7, box(5, 0, 11, 12)),
-    item(7, 8, box(13, 0, 19, 12)),
-    item(8, 9, box(20, 0, 25, 12)),
+    { ...item(10, 13, box(12, 18, 18, 30)), parent: 0 },
+    { ...item(11, 12, box(12, 18, 18, 30)), parent: 1 },
+    { ...item(5, 10, box(5, 0, 25, 12)), parent: 0 },
+    { ...item(6, 7, box(5, 0, 11, 12)), parent: 3 },
+    { ...item(7, 8, box(13, 0, 19, 12)), parent: 3 },
+    { ...item(8, 9, box(20, 0, 25, 12)), parent: 3 },
   ],
 };
 
@@ -58,10 +60,150 @@ describe("measure", () => {
   test("source whitespace between a stop and its atom is skipped", () => {
     const source = "\\left( x \\right)";
     const f = MathField.open(source, false);
-    const layout: Layout = { items: [item(0, 16, box(0, 0, 20, 14)), item(7, 8, box(6, 2, 12, 14))] };
+    const layout: Layout = { items: [item(0, 16, box(0, 0, 20, 14)), { ...item(7, 8, box(6, 2, 12, 14)), parent: 0 }] };
     const mm = measure(layout, f);
     expect(mm.x[stopOf(f, 6, 1)]).toBe(6);
     expect(mm.x[stopOf(f, 8, 1)]).toBe(12);
+  });
+
+  test("Tab's spacing atom advances the caret by its margin", () => {
+    const f = MathField.open("x", false).run("tab").field;
+    expect(f.source).toBe("x\\qquad");
+    const layout: Layout = { items: [
+      item(0, 1, box(0, 0, 10, 14)),
+      { ...item(1, 7, box(10, 0, 10, 14)), afterX: 38 },
+    ] };
+    const mm = measure(layout, f);
+    expect(mm.x[f.head]).toBe(38);
+    expect(mm.x[stopOf(f, 1, 0)]).toBe(10);
+  });
+
+  test("a macro's shared source range measures all its rendered pieces", () => {
+    const f = MathField.open("C^d\\bmod n", false);
+    // The leading space, operator wrappers, glyphs and trailing space all
+    // map to `\bmod `; the first space must not stand in for the whole atom.
+    const pieces = [
+      { ...item(3, 9, box(20, 0, 20, 14)), afterX: 21 },
+      item(3, 9, box(25, 0, 50, 14)),
+      item(3, 9, box(25, 0, 50, 14)),
+      { ...item(3, 9, box(50, 0, 50, 14)), afterX: 51 },
+    ];
+    const layout: Layout = { items: [
+      item(0, 3, box(0, 0, 20, 14)),
+      ...pieces,
+      item(9, 10, box(55, 0, 65, 14)),
+    ] };
+    const mm = measure(layout, f);
+    const end = stopOf(f, 9, 0);
+    expect(mm.x[end]).toBe(51);
+    expect(stopAt(layout, f, mm, 52, 7)).toBe(end);
+    const selected = f.select(end, end);
+    const typed = selected.run({ insert: "d" }).field;
+    expect(typed.source).toBe("C^d\\bmod dn");
+    typed.free();
+    selected.free();
+    f.free();
+  });
+
+  test.each(["\\iff ", "\\implies ", "\\colon ", "\\dotsb "])(
+    "%s uses its last sibling, including its spacing advance", (macro) => {
+      const f = MathField.open(macro + "z", false);
+      const n = macro.length;
+      const layout: Layout = { items: [
+        { ...item(0, n, box(0, 0, 0, 14)), afterX: 4 },
+        item(0, n, box(4, 0, 24, 14)),
+        { ...item(0, n, box(24, 0, 24, 14)), afterX: 28 },
+        item(n, n + 1, box(28, 0, 38, 14)),
+      ] };
+      expect(measure(layout, f).x[stopOf(f, n, 0)]).toBe(28);
+      f.free();
+    },
+  );
+
+  test.each(["\\mod{n}", "\\pmod{n}", "\\pod{n}"])(
+    "%s includes argument siblings with narrower source ranges", (macro) => {
+      const f = MathField.open(macro + " z", false);
+      const n = macro.length;
+      const arg = macro.indexOf("{n}") + 1;
+      const layout: Layout = { items: [
+        item(0, n, box(0, 0, 0, 14)),
+        item(0, n, box(4, 0, 24, 14)),
+        item(arg, arg + 1, box(28, 0, 38, 14)),
+        item(n + 1, n + 2, box(38, 0, 48, 14)),
+      ] };
+      expect(measure(layout, f).x[stopOf(f, n, 0)]).toBe(38);
+      f.free();
+    },
+  );
+
+  test("a user macro's trailing negative space keeps its signed advance", () => {
+    const source = "\\def\\foo{ab\\!}\\foo z";
+    const f = MathField.open(source, false);
+    const from = source.lastIndexOf("\\foo");
+    const to = source.length - 1;
+    const layout: Layout = { items: [
+      item(from, to, box(0, 0, 30, 14)),
+      { ...item(from, to, box(30, 0, 30, 14)), afterX: 26 },
+      item(to, to + 1, box(26, 0, 36, 14)),
+    ] };
+    const mm = measure(layout, f);
+    expect(mm.x[stopOf(f, to, 0)]).toBe(26);
+    expect(mm.x[stopOf(f, 0, 0)]).toBe(0);
+    f.free();
+  });
+
+  test("a leading negative space keeps the caret before the macro's advance", () => {
+    const source = "\\def\\foo{\\!a}\\foo z";
+    const f = MathField.open(source, false);
+    const from = source.lastIndexOf("\\foo");
+    const to = source.length - 1;
+    const layout: Layout = { items: [
+      { ...item(from, to, box(0, 0, 0, 14)), afterX: -4 },
+      item(from, to, box(-4, 0, 6, 14)),
+      item(to, to + 1, box(6, 0, 16, 14)),
+    ] };
+    expect(measure(layout, f).x[stopOf(f, 0, 0)]).toBe(0);
+    f.free();
+  });
+
+  test.each(["\\notin ", "\\neq ", "\\TeX "])(
+    "%s keeps its enclosing box instead of an overlapping or raised child", (macro) => {
+      const f = MathField.open(macro + "z", false);
+      const n = macro.length;
+      const layout: Layout = { items: [
+        item(0, n, box(0, 0, 30, 14)),
+        { ...item(0, n, box(-2, -5, 34, 5)), parent: 0 },
+        item(n, n + 1, box(30, 0, 40, 14)),
+      ] };
+      const mm = measure(layout, f);
+      const end = stopOf(f, n, 0);
+      expect([mm.x[end], mm.top[end], mm.bottom[end]]).toEqual([30, 0, 14]);
+      f.free();
+    },
+  );
+
+  test("a leading macro's first stop uses its first rendered sibling", () => {
+    const f = MathField.open("\\bmod n", false);
+    const layout: Layout = { items: [
+      { ...item(0, 6, box(0, 0, 0, 14)), afterX: 1 },
+      item(0, 6, box(5, 0, 30, 14)),
+      item(6, 7, box(35, 0, 45, 14)),
+    ] };
+    expect(measure(layout, f).x[stopOf(f, 0, 0)]).toBe(0);
+    f.free();
+  });
+
+  test("a leading or negative spacing atom keeps its signed advance", () => {
+    for (const advance of [28, -4]) {
+      const f = MathField.open("\\qquad x", false);
+      const layout: Layout = { items: [
+        { ...item(0, 6, box(0, 0, 0, 14)), afterX: advance },
+        item(7, 8, box(advance, 0, advance + 10, 14)),
+      ] };
+      const mm = measure(layout, f);
+      expect(mm.x[stopOf(f, 0, 0)]).toBe(0);
+      expect(mm.x[stopOf(f, 7, 0)]).toBe(advance);
+    }
   });
 
   test("an empty slot's caret is at its placeholder", () => {
@@ -69,8 +211,8 @@ describe("measure", () => {
     const layout: Layout = {
       items: [
         item(0, 10, box(0, 10, 20, 22), box(0, 0, 20, 30)),
-        item(6, 6, box(4, 0, 12, 12), box(4, 0, 12, 12), true),
-        item(8, 9, box(6, 18, 12, 30)),
+        { ...item(6, 6, box(4, 0, 12, 12), box(4, 0, 12, 12), true), parent: 0 },
+        { ...item(8, 9, box(6, 18, 12, 30)), parent: 0 },
       ],
     };
     const mm = measure(layout, f);
@@ -85,15 +227,15 @@ describe("measure", () => {
     const layout: Layout = {
       items: [
         item(0, 4, box(0, 1, 17, 21), box(0, -2, 17, 21), false, 16, 16),
-        item(0, 1, box(0, 4, 7, 20), box(0, 4, 7, 20), false, 16, 16),
-        item(3, 3, box(8, -2, 17, 15), box(8, -2, 17, 15), true, 12, 8),
+        { ...item(0, 1, box(0, 4, 7, 20), box(0, 4, 7, 20), false, 16, 16), parent: 0 },
+        { ...item(3, 3, box(8, -2, 17, 15), box(8, -2, 17, 15), true, 12, 8), parent: 0 },
       ],
     };
     const mm = measure(layout, f);
     const inSup = stopOf(f, 3, 1);
     expect([mm.x[inSup], mm.top[inSup], mm.bottom[inSup]]).toEqual([8, -1, 11]);
     const end = stopOf(f, 4, 0);
-    expect([mm.top[end], mm.bottom[end]]).toEqual([4, 20]);
+    expect([mm.x[end], mm.top[end], mm.bottom[end]]).toEqual([17, 4, 20]);
   });
 
   test("an empty slot with no marker takes the enclosing element's font, not its ink", () => {
@@ -206,4 +348,96 @@ describe("bands", () => {
       expect(bands(layout, 75, 100, slots)).toEqual([box(339.44, 3.08, 473.3, 24.63)]);
     });
   });
+});
+
+describe("band padding", () => {
+  test("clips rows even with an array delimiter between them in paint order", () => {
+    const rows = [box(20, 0, 80, 10), box(0, 1, 10, 30), box(20, 11, 80, 21)];
+    expect(paddedBands(rows)).toEqual([box(20, -2, 80, 10.5), box(0, -1, 10, 32), box(20, 10.5, 80, 23)]);
+    expect(rows[0].bottom).toBe(10);
+  });
+
+  test("keeps padding beside a tall structure and across a wide line gap", () => {
+    expect(paddedBands([box(0, 0, 10, 30), box(20, 1, 40, 10), box(20, 20, 40, 30)]))
+      .toEqual([box(0, -2, 10, 32), box(20, -1, 40, 12), box(20, 18, 40, 32)]);
+  });
+
+  test("whole inline maths can follow its ink without extra vertical padding", () => {
+    expect(paddedBands([box(0, 0, 20, 14)], 0)).toEqual([box(0, 0, 20, 14)]);
+  });
+});
+
+describe("math multi-click units", () => {
+  const field = MathField.open(FRAC, false);
+  const sourceAt = (x: number, y: number, group = false) => {
+    const range = unitAt(fracLayout, field, x, y, group)!;
+    const selection = field.select(...range);
+    const source = selection.source.slice(...selection.selected);
+    selection.free();
+    return source;
+  };
+
+  test("double-click chooses a numerator atom, including either half of its ink", () => {
+    expect(sourceAt(6, 6)).toBe("a");
+    expect(sourceAt(10, 6)).toBe("a");
+    expect(sourceAt(15, 6)).toBe("+");
+    expect(sourceAt(23, 6)).toBe("x");
+  });
+
+  test("a glyph beats an equally sized source wrapper in the denominator", () => {
+    expect(sourceAt(15, 25)).toBe("b");
+  });
+
+  test("triple-click takes the whole fraction from either argument or its bar", () => {
+    expect(sourceAt(6, 6, true)).toBe(FRAC);
+    expect(sourceAt(15, 25, true)).toBe(FRAC);
+    expect(sourceAt(15, 15, true)).toBe(FRAC);
+  });
+
+  test("a plain atom’s group is its row, and commands stay whole", () => {
+    const source = "x+\\alpha";
+    const f = MathField.open(source, false);
+    const layout = { items: [item(0, 1, box(0, 0, 10, 14)), item(1, 2, box(12, 0, 22, 14)), item(2, 8, box(24, 0, 34, 14))] };
+    for (const [group, expected] of [[false, "\\alpha"], [true, source]] as const) {
+      const sel = f.select(...unitAt(layout, f, 30, 6, group)!);
+      expect(sel.source.slice(...sel.selected)).toBe(expected);
+      sel.free();
+    }
+    f.free();
+  });
+
+  test("scripts group with their base while a double-click keeps just the exponent", () => {
+    const f = MathField.open("x^2+y", false);
+    const layout = { items: [item(0, 3, box(0, 0, 20, 20)), item(0, 1, box(0, 6, 10, 20)), item(2, 3, box(10, 0, 20, 10)), item(3, 4, box(22, 6, 32, 20)), item(4, 5, box(34, 6, 44, 20))] };
+    for (const [x, y, group, expected] of [[15, 5, false, "2"], [15, 5, true, "x^2"], [5, 15, true, "x^2"]] as const) {
+      const sel = f.select(...unitAt(layout, f, x, y, group)!);
+      expect(sel.source.slice(...sel.selected)).toBe(expected);
+      sel.free();
+    }
+    f.free();
+  });
+
+  test("no ink offers no unit, and multi-click drag extends whole units backwards too", () => {
+    expect(unitAt({ items: [] }, field, 0, 0)).toBeNull();
+    expect(extendUnit([3, 5], [7, 9])).toEqual([3, 9]);
+    expect(extendUnit([3, 5], [0, 2])).toEqual([5, 0]);
+    expect(extendUnit([3, 5], [3, 4])).toEqual([3, 5]);
+  });
+});
+
+test("triple-click chooses an inner fraction before its surrounding radical", () => {
+  const source = "\\sqrt{\\frac{a+b}{c}}";
+  const f = MathField.open(source, false);
+  const layout = { items: [
+    item(0, 20, box(0, 0, 50, 40)),
+    item(6, 19, box(10, 5, 40, 35)),
+    item(17, 18, box(24, 23, 30, 35)),
+    item(12, 15, box(12, 5, 37, 17)),
+    item(12, 13, box(12, 5, 19, 17)),
+    item(14, 15, box(30, 5, 37, 17)),
+  ] };
+  const selected = f.select(...unitAt(layout, f, 15, 10, true)!);
+  expect(source.slice(...selected.selected)).toBe("\\frac{a+b}{c}");
+  selected.free();
+  f.free();
 });

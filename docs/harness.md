@@ -38,6 +38,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/agents/useAttachments.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
 | Library paths in rows and prose; copy as markdown | `app/src/lib/files/openFile.ts`, `app/src/lib/markdown/selection.ts` |
+| Timeline window, off-screen layout, scroll anchoring, the expand protocol | `app/src/components/harness/timeline/useRowWindow.ts`, `app/src/components/harness/timeline/rowWindow.ts`, `app/src/components/harness/timeline/useRowVisibility.ts`, `app/src/components/harness/timeline/RetainedRow.tsx`, `app/src/hooks/ui/useStickToBottom.ts`, `app/src/lib/ui/scrollAnchor.ts`, `app/src/lib/ui/expandable.ts` |
 | The lecture dock's chat | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx`, `lecture_grab_frames` in `app/src-tauri/src/lectures/chapters/app.rs` |
 
 Windows offers Codex and opencode; native Claude Code is disabled because its
@@ -378,6 +379,70 @@ still update the picker.
 `Harness::name_thread` runs one on the `threadNaming` job's model;
 `harness::store::claim_naming` flips `title_generated` atomically so only one turn pays
 and a failure never retries; `clean_title` rejects prose.
+
+## The timeline mounts its newest rows and holds the view still
+
+Opening a long thread mounts only its newest 30 rows (`PAGE` in
+`app/src/components/harness/timeline/rowWindow.ts`); a 113-row thread with 35
+maths-heavy replies mounts a page at a time.
+
+- **The window is an item id, not a row index.** A row mounts from the row
+  holding item `from` onwards; rows fold into bundles and append, and an
+  index would drift with both. A bundle mounts whole. Appended rows never move
+  the boundary; a rewind or edit that took its item re-opens on the newest
+  page. The boundary is kept per thread, since a tab's `Timeline` outlives a
+  thread switch.
+- **A sentinel loads the page above.** A 1px row above the window is watched
+  by an `IntersectionObserver` rooted at the nearest scrolling ancestor, with
+  a viewport of top margin, so each page lands before the reader reaches it.
+  The observer is re-hung per boundary, so a sentinel still in reach after a
+  short page loads the next.
+- **The view is anchored by hand**, because WebKit has no `overflow-anchor`.
+  Off the bottom, `useStickToBottom` records on each scroll the first
+  anchor row (`ANCHOR_ROW`) crossing the scroller's top, refined down to the
+  block child being read, and its `ResizeObserver` scrolls by however far that
+  node moved: rows above re-wrapping as the column is resized, growing, or
+  arriving from the sentinel. It ignores a scroll event at the position it
+  last wrote itself (`s.at`): that event arrives a frame later, when the next
+  resize may have changed layout, and measuring then would lose the
+  correction or unpin. Rects scale with page zoom and `scrollTop` doesn't, so
+  rect deltas are divided by the scroller's rect height over `offsetHeight`;
+  `ThreadMap`'s tops do the same. A placeholder anchor is refined to the
+  paragraph being read when its host reconnects.
+- **Off-screen rows leave the document without losing React state.**
+  `RetainedRow` renders into a stable portal host. `useRowVisibility` watches
+  row boxes within 200px of the scroller; outside that range it detaches the
+  host and leaves a fixed-height box using the last observed content height.
+  Resizing does not lay out or restyle those detached maths and text trees.
+  Revealing reattaches the same host, so expanded tools and edits survive;
+  native scroll offsets inside the host are recorded on scroll and restored.
+  Frames and media stay connected with their layout skipped, because
+  detaching an iframe destroys its browsing context. A focused or selected
+  row and the row holding the scroll anchor stay connected. Height and
+  intersection observers are shared, and adding rows scans direct children.
+  `LiveTail` stays connected without a placeholder because its size changes
+  on every fold. `useOverflows` retains a disconnected question's fold state
+  instead of reading its zero `scrollHeight`; revealing measures it again.
+  Row padding extends the paint box 4px on each edge without changing content
+  width or gaps. Anything a row draws outside itself must portal (tooltips,
+  hover cards and lightboxes do).
+- **Positions in skipped rows are estimates until they draw**, so DOM find
+  reveals a match, then reveals it again two frames later, and a `ThreadMap`
+  jump is instant with a second pass (a smooth scroll would be cancelled by
+  the anchoring as rows draw on the way). The rail measures a live collection
+  of `thread-map-question-row` boxes, including newly mounted history, so resizing
+  does not search through each reply's markdown and maths descendants. For
+  a skipped question it measures the cached row box, and a jump explicitly
+  reveals that question before reading its bubble's position.
+- **Find, Select All and rail jumps mount what they need first**, through
+  `app/src/lib/ui/expandable.ts`: `Timeline`'s root is marked expandable, and
+  `expandWithin` asks every marked element in a root to mount. DOM find and
+  Select All mount everything, synchronously, so the walk and the selection
+  (and its markdown copy) see every message; they also reconnect
+  detached row content before the DOM walk. A jump to an unmounted question
+  mounts back to that question. A synchronous expand keeps the first mounted
+  row in place itself, since the caller reads layout before the anchoring
+  observer runs. Expanded, a thread stays expanded until it changes.
 
 ## One-off turns
 

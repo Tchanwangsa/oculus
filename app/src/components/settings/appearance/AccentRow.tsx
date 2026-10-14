@@ -21,7 +21,7 @@ export function AccentRow({ mode }: { mode: ThemeMode }) {
   return (
     <AppearanceRow
       label="Accent colour"
-      description="Buttons, links and selection. Theme colour uses each theme's own."
+      description="Buttons, links and selection."
       note={faint.length ? `May be hard to read on ${faint.join(" and ")}.` : null}
     >
       {prefs.accent && (

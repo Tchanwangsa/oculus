@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { expandWithin } from "@/lib/ui/expandable";
+import { inSkippedSubtree, SKIPPED_CONTENT, zoomScale } from "@/lib/ui/scrollAnchor";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,6 +19,8 @@ const MIN_PITCH = 4;
 const COLUMN = 760;
 /** With no question on screen, the one above this viewport fraction is active. */
 const ACTIVE_LINE = 0.35;
+/** Where a jump leaves the question, below the scroller's top. */
+const JUMP_GAP = 16;
 
 export const ThreadMap = memo(function ThreadMap({
   scrollRef,
@@ -48,19 +52,27 @@ export const ThreadMap = memo(function ThreadMap({
       bottoms.current = [];
       return;
     }
-    const base = el.getBoundingClientRect().top - el.scrollTop;
-    // One DOM walk per resize, instead of one tree search per question.
+    // Rects scale with page zoom and `scrollTop` doesn't; tops are in scroll px.
+    const view = el.getBoundingClientRect();
+    const scale = zoomScale(view.height, el.offsetHeight);
+    const at = (y: number) => (y - view.top) / scale + el.scrollTop;
+    // The live class collection includes newly mounted history without walking
+    // through every reply's markdown and maths subtree on each resize frame.
     const nodes = new Map<number, HTMLElement>();
-    for (const node of content.querySelectorAll<HTMLElement>("[data-msg-id]")) {
-      nodes.set(Number(node.dataset.msgId), node);
+    for (const node of content.getElementsByClassName("thread-map-question-row")) {
+      const question = node as HTMLElement;
+      nodes.set(Number(question.dataset.questionId), question);
     }
     const t: number[] = [];
     const b: number[] = [];
     for (const m of markers) {
-      const node = nodes.get(m.id);
+      const row = nodes.get(m.id);
+      // A hidden bubble's rect would force its layout; its row box is cached.
+      const node = row?.hasAttribute(SKIPPED_CONTENT) ? row : row?.querySelector<HTMLElement>("[data-msg-id]") ?? row;
       const r = node?.getBoundingClientRect();
-      t.push(r ? r.top - base : 0);
-      b.push(r ? r.bottom - base : 0);
+      // A question the timeline hasn't mounted is above every mounted one.
+      t.push(r ? at(r.top) : -Infinity);
+      b.push(r ? at(r.bottom) : -Infinity);
     }
     tops.current = t;
     bottoms.current = b;
@@ -121,9 +133,26 @@ export const ThreadMap = memo(function ThreadMap({
 
   const hovered = hover == null ? undefined : markers[hover];
 
+  // Instant, not smooth: rows WebKit skipped draw on the way and change
+  // height, and the anchoring scroll that holds the view through that would
+  // cancel a smooth scroll midway. A second pass catches what they moved.
   const jump = (i: number) => {
     const el = scrollRef.current;
-    if (el) el.scrollTo({ top: Math.max(0, tops.current[i] - 16), behavior: "smooth" });
+    const content = contentRef.current;
+    const selector = `[data-msg-id="${markers[i].id}"]`;
+    const current = content?.querySelector(selector);
+    if (!current || inSkippedSubtree(current)) expandWithin(content, { sync: true, upToId: markers[i].id });
+    const node = content?.querySelector(selector);
+    if (!el || !node) return;
+    const settle = () => {
+      const view = el.getBoundingClientRect();
+      const off = (node.getBoundingClientRect().top - view.top) / zoomScale(view.height, el.offsetHeight);
+      if (Math.abs(off - JUMP_GAP) >= 1) el.scrollTop += off - JUMP_GAP;
+    };
+    settle();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (node.isConnected) settle();
+    }));
   };
 
   return (

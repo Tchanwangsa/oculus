@@ -43,7 +43,7 @@ export function StatRow({
   hint?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2">
+    <div className="settings-row flex items-center justify-between gap-4 py-2">
       <span className="flex items-center gap-1 text-xs text-muted-foreground">
         {label}
         {hint ? (

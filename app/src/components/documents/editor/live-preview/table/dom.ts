@@ -58,7 +58,7 @@ function makeEditable(el: HTMLElement) {
   }
 }
 
-function buildTable(layout: TableLayout): HTMLTableElement {
+function buildTable(layout: TableLayout, editable: boolean): HTMLTableElement {
   const table = document.createElement("table");
   const head = table.createTHead();
   const body = table.createTBody();
@@ -68,8 +68,10 @@ function buildTable(layout: TableLayout): HTMLTableElement {
       const td = document.createElement(r === 0 ? "th" : "td");
       const cell = document.createElement("div");
       cell.className = "cm-table-cell";
-      makeEditable(cell);
-      cell.spellcheck = true;
+      if (editable) {
+        makeEditable(cell);
+        cell.spellcheck = true;
+      }
       cell.dataset.r = String(r);
       cell.dataset.c = String(c);
       cell.style.textAlign = align ?? "";
@@ -95,7 +97,7 @@ export function render(dom: HTMLElement, layout: TableLayout) {
 
   if (scroll.dataset.shape !== shape || !scroll.firstChild) {
     const was = focused ? { r: Number(focused.dataset.r), c: Number(focused.dataset.c), at: caretIn(focused) } : null;
-    scroll.replaceChildren(buildTable(layout));
+    scroll.replaceChildren(buildTable(layout, !dom.classList.contains("cm-table-static")));
     scroll.dataset.shape = shape;
     const range = ranges.get(dom);
     if (range) {

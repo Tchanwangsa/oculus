@@ -7,7 +7,7 @@ Read this before any UI work.
 
 | Piece | Location |
 | --- | --- |
-| Tokens, base resets, utilities (`page-scroll`, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
+| Tokens, base resets, utilities (`page-scroll`, `skip-offscreen`, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
 | Themes, appearance prefs and the frame | `app/src/lib/ui/themes/` (`samplesLight.ts`, `samplesDark.ts` for the palettes, `derive.ts` for the tokens, `store.ts` for the prefs) |
 | Settings → Appearance: mode, theme cards, accent, window frame, code font | `app/src/pages/settings/AppearancePage.tsx`, `app/src/components/settings/appearance/` |
 | Platform detection and shortcut labels | `app/src/lib/platform.ts` |
@@ -17,6 +17,7 @@ Read this before any UI work.
 | Persisted view state and collapsed groups | `app/src/hooks/ui/useStoredState.ts` |
 | Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/layout/PageParts.tsx` |
 | A page's nav column (Settings, subjects, Chat) | `app/src/components/ui/layout/SideNav.tsx` |
+| Settings pane layout, stacking rows and compact navigation | `app/src/styles/settings.css`, `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx` |
 | Drag gestures | `app/src/hooks/gestures/usePointerDrag.ts`, `app/src/hooks/gestures/useCardDrag.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
 | Flat divided lists, table chrome | `app/src/components/ui/layout/PageParts.tsx`, `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
@@ -61,7 +62,9 @@ themes are opt-in and keep the same structure.
   `app/src/components/markdown/MdComponents.tsx` and the code-font field
   (`app/src/components/settings/appearance/CodeFontRow.tsx`); the note editor's theme
   (`app/src/components/documents/editor/theme/`) gives `--font-mono` to code
-  and LaTeX source. A command's output (`AnsiText`, the one-line
+  and LaTeX source, and `CodeEditor` (`app/src/components/code/`) and the Ed workspace's terminal
+  (`XtermView` in `app/src/components/lessons/workspace/terminal/`) are
+  monospace throughout. A command's output (`AnsiText`, the one-line
   `TerminalLine` on a running install or update) keeps its colours via
   `app/src/lib/format/ansi.ts`, which drops every escape but SGR. Timestamps, counts, IDs and badges take the body font,
   with `tabular-nums` when digits hold a column.
@@ -97,7 +100,7 @@ themes are opt-in and keep the same structure.
   `user-select: none`; text selects again only inside a `data-selectable`
   block — a file's Markdown or PDF pages, a chat message (`CompactMd`, the
   question bubble, thinking), `CodeText`, a note's editor (maths fields
-  included), a document version, an error's
+  included), `CodeEditor`, a document version, an error's
   detail — and never on a button or tab inside one. Page chrome (titles,
   cards, lists, tables, the sidebar) never highlights. Mark a new surface
   `data-selectable` only if its text is worth copying. A drag-select stays in
@@ -124,6 +127,22 @@ themes are opt-in and keep the same structure.
   remembered per mode.
 - **Full pages scroll through `page-scroll`**, which reserves the scrollbar
   gutter so a page that starts overflowing doesn't jog sideways.
+- **Settings respond to their pane's width**, including split panes and page
+  zoom. `settings.css` stacks `settings-row` labels and controls below 34rem
+  and replaces the nav column with a page picker below 42rem, keeping page
+  icons and labelled groups separated by dividers. The picker scrolls within
+  20rem or the available popup height; it and the page scroller use
+  `useScrollFade`. Use
+  `settings-controls` for bounded fields and `settings-actions` for wrapping
+  button groups. Descriptions are short hints; errors and confirmation copy
+  retain the detail needed to act. Dense tables scroll sideways with readable
+  column widths; `GridTable`'s optional `minWidth` keeps header and rows together.
+- **A long list's rows can skip layout off screen with `skip-offscreen`**
+  (`content-visibility: auto`, remembering each row's drawn height), so a
+  resize lays out only what is visible. The row clips its paint to its box:
+  4px of padding on each edge, cancelled by the margin, keeps focus rings in, but
+  anything drawn past its sides is cut, and popups must portal. The chat
+  timeline uses it ([harness.md](./harness.md#the-timeline-mounts-its-newest-rows-and-holds-the-view-still)).
 - **Every scroller fades its overflowing edges through `useScrollFade`**
   (`app/src/hooks/ui/useScrollFade.ts`; `syncScrollFade` in
   `app/src/lib/ui/scrollFade.ts` for non-React callers like the maths palette).
@@ -150,7 +169,11 @@ themes are opt-in and keep the same structure.
   drag-resizable and fold away to nothing (`useResizablePanel`, width and
   fold remembered) from ⌘⌥B, from `SideNavCollapseToggle` at the start of the
   page's 48px header row, beside its title, or by dragging it narrow. Labels
-  fade as the width eases shut (`SIDE_NAV_FOLDS`).
+  fade as the width eases shut (`SIDE_NAV_FOLDS`). Drag samples are coalesced
+  into one width update per animation frame; release applies the last sample
+  even before that frame arrives. The width and fold are saved to storage
+  only after dragging ends, so synchronous storage stays out of the resize
+  loop. Unmounting cancels the pending frame and clears the drag cursor.
 - **Subject tabs share `SubjectPage` for width and gutters** under
   `SubjectLayout`'s header row (the toggle, the subject crumb, the tab's
   name) and beside the subject's nav column, `SubjectLoading` for skeleton

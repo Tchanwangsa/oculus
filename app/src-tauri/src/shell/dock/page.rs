@@ -97,6 +97,7 @@ pub(super) fn create(app: &AppHandle, service: &'static DockService) -> Result<(
         }
     };
     adopt_page(&webview);
+    crate::shell::native_layer::apply_page_theme(&webview);
     configure_store(&webview, service);
     channel::install(&webview, app, service);
     #[cfg(target_os = "macos")]

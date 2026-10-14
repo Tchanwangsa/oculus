@@ -8,7 +8,7 @@ export default function SettingsStoragePage() {
     <>
       <Section
         title="Storage"
-        description="Everything Oculus keeps on disk — downloads, parses, lecture videos, the search index."
+        description="Disk usage and storage limit."
       >
         <StorageSection />
       </Section>

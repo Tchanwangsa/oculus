@@ -30,7 +30,7 @@ export function CanvasAddress() {
     if (loadError === null) return null;
     return (
       <div className="pb-1">
-        <div className="flex items-center justify-between gap-4 py-2">
+        <div className="settings-row flex items-center justify-between gap-4 py-2">
           <AddressLabel />
           <Button
             variant="ghost"
@@ -61,11 +61,11 @@ export function CanvasAddress() {
 
   return (
     <div className="pb-1">
-      <div className="flex items-center justify-between gap-4 py-2">
+      <div className="settings-row flex items-center justify-between gap-4 py-2">
         <AddressLabel />
         {showField ? (
           <form
-            className="flex items-center gap-1.5 min-w-0 flex-1 justify-end"
+            className="settings-controls flex flex-wrap items-center gap-1.5 min-w-0 flex-1"
             onSubmit={(e) => {
               e.preventDefault();
               void save();
@@ -142,8 +142,7 @@ export function CanvasAddress() {
       )}
       {!institution.canvas && !error && (
         <p className="text-xs text-muted-foreground pb-1">
-          Enter your university's Canvas address to connect. Tested at UniMelb and
-          RMIT; other universities usually work, since you sign in in a normal window.
+          Enter your university’s Canvas address.
         </p>
       )}
       {error && <p className="text-xs text-destructive pb-1">{error}</p>}
@@ -153,7 +152,7 @@ export function CanvasAddress() {
 
 function AddressLabel() {
   return (
-    <Label className="text-xs font-normal text-foreground flex items-center gap-1.5 shrink-0">
+    <Label className="settings-actions text-xs font-normal text-foreground flex items-center gap-1.5 shrink-0">
       Canvas address
       <Tooltip>
         <TooltipTrigger asChild>

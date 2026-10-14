@@ -14,11 +14,11 @@ export function SetupSection() {
 
   return (
     <Section title="Setup">
-      <div className="flex items-center justify-between gap-4 py-2">
+      <div className="settings-row flex items-center justify-between gap-4 py-2">
         <div className="min-w-0">
           <div className="text-[13px] text-foreground">Run setup again</div>
           <div className="mt-0.5 text-xs text-muted-foreground">
-            Walk through connecting Canvas, the library keys and an agent.
+            Connect Canvas, keys and an agent.
           </div>
         </div>
         <Button variant="outline" size="xs" className="shrink-0" onClick={reopen}>

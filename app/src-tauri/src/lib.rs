@@ -51,8 +51,10 @@ pub fn run() {
         .manage(sync::scrape::embeds::EmbedBearer::default())
         .manage(shell::browser::BrowserState::default())
         .manage(shell::dock::DockState::default())
+        .manage(shell::native_layer::PageTheme::default())
         .manage(shell::usage::UsageState::default())
         .manage(music::MusicState::default())
+        .manage(sources::ed::workspace_session::EdWorkspaces::default())
         .setup(|app| {
             // WebKit's WebCrypto master key comes from keyd. First, so the
             // default store has its delegate before any page can ask.
@@ -141,6 +143,26 @@ pub fn run() {
             sources::institution::commands::institution_get,
             sources::institution::commands::institution_configure,
             sources::ed::views::ed_mark_viewed,
+            sources::ed::workspace_session::commands::ed_workspace_open,
+            sources::ed::workspace_session::commands::ed_workspace_close,
+            sources::ed::workspace_session::commands::ed_workspace_read,
+            sources::ed::workspace_session::commands::ed_workspace_save,
+            sources::ed::workspace_session::commands::ed_workspace_delete,
+            sources::ed::workspace_session::terminal_commands::ed_terminal_open,
+            sources::ed::workspace_session::terminal_commands::ed_terminal_input,
+            sources::ed::workspace_session::terminal_commands::ed_terminal_resize,
+            sources::ed::workspace_session::terminal_commands::ed_terminal_kill,
+            sources::ed::workspace_session::run_commands::ed_workspace_run,
+            sources::ed::workspace_session::run_commands::ed_run_input,
+            sources::ed::workspace_session::run_commands::ed_run_resize,
+            sources::ed::workspace_session::run_commands::ed_run_stop,
+            sources::ed::workspace_session::mark_commands::ed_workspace_mark,
+            sources::ed::workspace_session::submission_commands::ed_workspace_submissions,
+            sources::ed::workspace_session::submission_commands::ed_submission_files,
+            sources::ed::workspace_session::submission_commands::ed_workspace_restore,
+            sources::ed::workspace_session::mark_commands::ed_challenge_standing,
+            sources::ed::workspace_session::reconcile::command::ed_workspace_resolve,
+            sources::ed::workspace_session::reset_commands::ed_workspace_reset,
             auth::okta::commands::okta_credential_status,
             auth::okta::commands::okta_save_credentials,
             auth::okta::commands::okta_clear_credentials,
@@ -307,6 +329,7 @@ pub fn run() {
             shell::browser::commands::browser_hide_tab,
             shell::native_layer::native_set_blocked,
             shell::native_layer::native_set_glass,
+            shell::native_layer::page_theme::native_set_page_theme,
             #[cfg(windows)]
             shell::native_layer::windows::native_set_holes,
             shell::browser::commands::browser_hide,

@@ -3,7 +3,7 @@ import type { EditorView } from "@codemirror/view";
 
 import { focusedField, trackFocus } from "../../core/liveFocus";
 import { selectionGaps, type SelectionGap } from "../../core/selectionLayer";
-import { mathField } from "../../math/field/mathField";
+import { mathField, visualMathField } from "../../math/field/mathField";
 import { MathWidget, mathsWatcher } from "../widgets";
 import { blockField } from "./blocks";
 import { dollarTyping, edgePaste, edgeTyping, fieldLatexPaste } from "./edges";
@@ -30,9 +30,8 @@ import { tableField, tableKeys } from "./tables";
 
 export { syncLiveFocus } from "../../core/liveFocus";
 
-/** Rendered maths draws its own selection, bands over its atoms
- *  (`MathWidget`), so the note's highlight skips it: a block with its line
- *  break, so the highlight doesn't run full width beside it. */
+/** Display maths draws structural bands of its own, so the text highlight
+ *  skips the block and its line break. Inline maths shares the text layer. */
 function renderedMaths(view: EditorView): SelectionGap[] {
   const out: SelectionGap[] = [];
   const { length } = view.state.doc;
@@ -40,27 +39,37 @@ function renderedMaths(view: EditorView): SelectionGap[] {
   for (let it = view.state.field(mathBlockField).iter(); it.value; it.next()) {
     if (drawn(it.value.spec.widget)) out.push({ from: it.from, to: Math.min(it.to + 1, length) });
   }
-  const inline = view.plugin(inlinePlugin)?.atoms;
-  for (let it = inline?.iter(); it?.value; it.next()) if (drawn(it.value.spec.widget)) out.push({ from: it.from, to: it.to });
   return out;
 }
 
-/** Everything Live mode adds over Raw; swapped through a compartment. */
-export function livePreview(): Extension {
+/** Live mode's drawing alone, with no way to edit: what a read-only view
+ *  of a note (a saved version) carries. Without `trackFocus` it never
+ *  counts as focused, so nothing but a find match reveals source.
+ *  `visualMathField` stays because the fields here read it. */
+export function livePreviewRender(): Extension {
   return [
     focusedField,
-    trackFocus,
-    mathField(),
+    visualMathField,
     blockField,
     tableField,
     mathBlockField,
+    inlinePlugin,
+    mathsWatcher,
+    selectionGaps.of(renderedMaths),
+  ];
+}
+
+/** Everything Live mode adds over Raw; swapped through a compartment. Each
+ *  facet sees its providers in the same order as when these were one list. */
+export function livePreview(): Extension {
+  return [
+    livePreviewRender(),
+    trackFocus,
+    mathField(),
     tableKeys,
     dollarTyping,
     edgeTyping,
     edgePaste,
     fieldLatexPaste,
-    inlinePlugin,
-    mathsWatcher,
-    selectionGaps.of(renderedMaths),
   ];
 }

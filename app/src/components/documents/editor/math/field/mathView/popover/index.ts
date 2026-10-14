@@ -210,7 +210,8 @@ export function drawPopover(view: MathView) {
   popover.hidden = false;
   highlight(view, state);
   const o = frameOrigin(frame);
-  const caret = { left: o.x + at.left, right: o.x + at.left, top: o.y + at.top, bottom: o.y + at.bottom };
+  const caret = (field.mode !== "command" ? view.host.caretAnchor?.() : null) ??
+    { left: o.x + at.left, right: o.x + at.left, top: o.y + at.top, bottom: o.y + at.bottom };
   const size = { width: popover.offsetWidth, height: popover.offsetHeight };
   const { left, top } = placeList(caret, size, visibleBounds(dom));
   const box = dom.getBoundingClientRect();

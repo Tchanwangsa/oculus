@@ -45,7 +45,6 @@ export function ParserSection() {
   // raise. "Expired" is session-scoped because each parse re-reads the keychain.
   const latch = useParseStore((state) => state.latch);
 
-  const selected = settings?.engines.find((engine) => engine.id === settings.engine) ?? null;
   const unavailable = settings?.engines.filter((engine) => !engine.available) ?? [];
 
   const tokenExpired = hasToken === true && Boolean(latch && tokenish(latch.kind, latch.message));
@@ -55,14 +54,14 @@ export function ParserSection() {
   return (
     <Section
       title="PDF processing"
-      description="Which MinerU reads your PDFs — its cloud service, or a server running on this computer."
+      description="Process PDFs with cloud or local MinerU."
     >
       <div className="space-y-1">
-        <div className="flex items-center justify-between gap-4 py-2">
+        <div className="settings-row flex items-center justify-between gap-4 py-2">
           <div>
             <p className="text-xs text-foreground">Parser</p>
             <p className="text-[11px] text-muted-foreground">
-              {selected?.detail ?? "Where PDFs are turned into per-page markdown."}
+              Cloud or local processing.
             </p>
           </div>
           <EngineSelect
@@ -102,14 +101,12 @@ export function ParserSection() {
           >
             {tokenExpired ? (
               <p className="mt-2 text-[11px] leading-relaxed text-warning">
-                MinerU refused this token during a parse. Nothing is being parsed until you paste a
-                new one — a parse never falls back to another engine on its own.
+                Token refused. Add a new token to resume parsing.
               </p>
             ) : null}
             {hasToken === false && !tokenExpired ? (
               <p className="mt-2 text-[11px] text-warning">
-                Without a token the cloud engine cannot parse anything, so no PDF is searchable
-                or can be mentioned in chat.
+                Add a token to process and search PDFs.
               </p>
             ) : null}
             {/* The refusal itself is shown above, from the settings answer. */}
@@ -125,12 +122,11 @@ export function ParserSection() {
 
         {isCloud ? (
           <div className="py-2">
-            <div className="flex items-center justify-between gap-4">
+            <div className="settings-row flex items-center justify-between gap-4">
               <label htmlFor="accept-expired-cert">
                 <p className="text-xs text-foreground">Accept an expired download certificate</p>
                 <p className="text-[11px] text-muted-foreground">
-                  Only for MinerU's result server, and only while its certificate has expired.
-                  Everything else about it is still checked.
+                  MinerU downloads only; other checks stay enabled.
                 </p>
               </label>
               <Switch
@@ -156,14 +152,14 @@ export function ParserSection() {
 
         {isLocal ? (
           <div className="py-2">
-            <div className="flex items-center justify-between gap-4">
+            <div className="settings-row flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs text-foreground">Server address</p>
                 <p className="text-[11px] text-muted-foreground">
                   Empty uses {settings?.default_base_url ?? "the default"}.
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="settings-actions flex items-center gap-2">
                 <Input
                   aria-label="MinerU server address"
                   type="url"
@@ -190,7 +186,7 @@ export function ParserSection() {
 
         {isLocal ? (
           <div className="py-2">
-            <div className="flex items-center justify-between gap-4">
+            <div className="settings-row flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-xs text-foreground">Server status</p>
                 <ProbeLine probe={probe} probing={probing} probeError={probeError} />
@@ -220,16 +216,12 @@ export function ParserSection() {
 
         {isCloud ? (
           <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
-            Lecture PDFs are uploaded to MinerU and its PRC-hosted OSS storage. Results may be
-            cached by MinerU (its documented default cache tolerance is 15 minutes, not a
-            deletion guarantee).
+            PDFs go to MinerU’s PRC-hosted storage. Cached results have no deletion guarantee.
           </p>
         ) : null}
         {isLocal ? (
           <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
-            Lecture PDFs are read by the MinerU server on this computer. Nothing is uploaded to
-            MinerU’s cloud service or its PRC-hosted OSS storage, and nothing leaves this
-            machine.
+            PDFs stay on this computer.
           </p>
         ) : null}
 

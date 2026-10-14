@@ -1,3 +1,4 @@
+import type { Box } from "@/lib/maths/geometry";
 import type { RustFieldController } from "./controller";
 
 /** The caret is alone on a top-level row holding nothing: an empty field,
@@ -30,4 +31,11 @@ export function syncHint(ctl: RustFieldController) {
   const half = hint.offsetHeight / 2;
   const centre = (caret.top + caret.bottom) / 2 - box.top;
   hint.style.top = `${Math.min(Math.max(centre, half), box.height - half)}px`;
+}
+
+/** The hint’s visible caret is at its left edge, before the centred text. */
+export function hintCaret(ctl: RustFieldController): Box | null {
+  if (!ctl.hint || ctl.hint.hidden) return null;
+  const r = ctl.hint.getBoundingClientRect();
+  return { left: r.left, right: r.left, top: r.top, bottom: r.bottom };
 }

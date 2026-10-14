@@ -161,7 +161,7 @@ export function Toolbar({
       </Tool>
       <Tool
         label={active.math ? "Maths tools" : "Equation"}
-        keys={active.math ? shortcut("mod+shift+Space") : undefined}
+        keys={active.math ? "Space" : undefined}
         on={active.math}
         onRun={() => view && (toggleMathTools(view) || (!active.math && run(insertMath)))}
       >

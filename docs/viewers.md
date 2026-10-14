@@ -1,8 +1,9 @@
-# Viewers: markdown, PDFs, lectures and web pages
+# Viewers: markdown, PDFs, code, lectures and web pages
 
 How a pane shows content: library markdown (with maths, diagrams and a
-lightbox) and PDFs, an Ed lesson's slides, a lecture or a library video in
-the media player, a video's transcript, and a web page.
+lightbox), PDFs and source files, an Ed lesson's slides and a challenge's
+workspace, a lecture or a library video in the media player, a video's
+transcript, and a web page.
 
 ## Where
 
@@ -12,7 +13,12 @@ the media player, a video's transcript, and a web page.
 | Inline file, web and planning references; hover metadata | `app/src/components/markdown/FileChip.tsx`, `app/src/components/markdown/ReferenceLink.tsx`, `app/src/components/markdown/ReferencePreview.tsx`, `app/src/components/markdown/referenceDetails.ts`, `app/src/lib/files/referenceAppearance.ts` |
 | The maths engine: loading, rendering, `rehypeMaths`, the visual field's edit model (`field.ts`) and the geometry of source-mapped maths (`geometry/`: where each caret stop is drawn, which stop a press lands on, a selection's bands); KaTeX's CSS and fonts | `app/src/lib/maths/`, `app/src/styles/katex/` |
 | A parsed PDF's faces: PDF, Markdown | `app/src/components/files/FileViewer.tsx`, `app/src/components/files/FileMarkdown.tsx`, `app/src/components/files/pdf/pdfMdLink.ts`, `app/src/lib/pdf/pdfBlocks.ts` |
-| An Ed lesson's view: the slide sidebar and pane, the index reader | `app/src/components/lessons/`, `app/src/hooks/data/useLessonIndex.ts`, `app/src/lib/ed/lessons.ts` |
+| An Ed lesson's view: the slide sidebar and pane, the index reader, statuses Ed answered this session | `app/src/components/lessons/`, `app/src/hooks/data/useLessonIndex.ts`, `app/src/lib/ed/lessons.ts`, `app/src/lib/ed/slideStatus.ts`, `app/src/lib/ed/views.ts` |
+| A challenge's workspace: the pane, its commands and events, the save loop, the shared session, the brief's Files | `app/src/components/lessons/workspace/`, `app/src/lib/ed/briefFiles.ts`, `app/src/lib/ed/workspace.ts`, `app/src/lib/ed/workspaceSaver.ts`, `app/src/lib/ed/workspaceHandles.ts`, `app/src/lib/ed/workspaceStatus.ts` |
+| A workspace file in conflict with Ed: the bar, Compare, Keep mine and Take Ed's | `app/src/components/lessons/workspace/conflict/`, `app/src/lib/ed/conflicts.ts`, `app/src/lib/ed/lineDiff.ts` |
+| The workspace's terminal drawer, Run and its files, Mark and Feedback | `app/src/components/lessons/workspace/terminal/`, `app/src/components/lessons/workspace/run/`, `app/src/components/lessons/workspace/mark/`, `app/src/components/lessons/workspace/feedback/`, `app/src/lib/ed/termOutput.ts`, `app/src/lib/ed/runFiles.ts`, `app/src/lib/ed/flushForEd.ts`, `app/src/lib/ed/markPrompts.ts`, `app/src/lib/ed/feedback.ts` |
+| Reset to scaffold and Restore: the header menu and the replace flow | `app/src/components/lessons/workspace/reset/` |
+| The code editor and a library source file's read-only view | `app/src/components/code/`, `app/src/components/files/CodeFileViewer.tsx`, `fileLanguage` in `app/src/components/documents/editor/syntax/codeLanguages.ts`, `CODE_EXTS` in `app/src/lib/files/fileTypes.ts` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/lectures/media/`, `app/src/stores/lectures/playerPrefsStore.ts`, `app/src/hooks/lectures/useTranscriptDock.ts` |
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lectures/playback/`, `app/src/lib/lectures/playbackOwner.ts` |
 | Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectures/end.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/lectures/chapters/app.rs` |
@@ -25,6 +31,7 @@ the media player, a video's transcript, and a web page.
 | Settings → Transcription: the language, the engine list and each engine's dialog | `app/src/components/settings/transcription/TranscriptionSection.tsx`, `app/src/components/settings/transcription/GroqDialog.tsx`, `app/src/components/settings/transcription/OnDeviceSpeech.tsx`, `app/src/components/settings/transcription/LocalWhisper.tsx` |
 | The on-device speech helper | `app/src-tauri/speech/main.swift`, `app/scripts/build-speech.mjs`, `app/src-tauri/src/transcribe/engines/apple.rs` |
 | Local Whisper: the engine, its model files | `app/src-tauri/src/transcribe/engines/whisper.rs`, `app/src-tauri/src/transcribe/engines/whisper_models/`, `app/scripts/build-whisper.mjs` |
+| Native light/dark preference for browser and messaging pages | `app/src-tauri/src/shell/native_layer/page_theme.rs`, `app/src/lib/ui/themes/apply.ts` |
 | In-app browser | `app/src/pages/tools/BrowserPage.tsx`, `app/src/hooks/shell/useBrowserTabs.ts`, `app/src/lib/browser/history/`, `app/src-tauri/src/shell/browser/` |
 
 ## One markdown renderer serves every surface
@@ -88,10 +95,10 @@ classes work even when there are no dollar delimiters.
   spans, since a tag can land in a paragraph or table cell, and carries the
   tag as `data-md` so a copied selection keeps it. Echo360 and Canvas cards
   need the subject, which `MD_COMPONENTS` doesn't have, so `FileViewer` (every
-  library file) and a note's `VersionPreview` wrap the markdown in
+  library file) wraps the markdown in
   `EmbedSubjectProvider`, which looks the code up in the subjects list by id
-  (a course folder is `safe_dir(code)`, not the code). For a subject the list
-  list does not contain, those two are `VideoLinkOut`, a button named by the tag's
+  (a course folder is `safe_dir(code)`, not the code). For a subject absent from
+  the list, it is `VideoLinkOut`, a button named by the tag’s
   title that opens Canvas. Chat replies don't parse raw HTML, so a tag in one
   shows as its literal text.
 - **`<echo-video>` is an Echo360 video**
@@ -156,13 +163,22 @@ classes work even when there are no dollar delimiters.
   boot without waiting. Until it is ready `rehypeMaths` writes a formula's
   source as a placeholder (`.md-math-pending`), and each component that
   renders markdown calls `useMathsReady` to redraw then; a `memo` one
-  (`Body` in `FileMarkdown.tsx`) must call it itself. A formula that traps
+  (`Body` in `FileMarkdown.tsx`) must call it itself. Renders are cached
+  in two layers: `renderToString` (`render.ts`) keeps the HTML or the
+  `ParseError` by source and every option that changes output (macros
+  included), up to 2000 entries and 4M characters; above it `rehypeMaths`
+  keeps the last 2000 formulas' trees by display mode and source, hands out
+  a copy of each and reports a cached error to the file each time, so
+  reopening a maths-heavy chat neither typesets nor reparses it. A formula that traps
   the engine (a few hundred levels of nesting) is a render error, and a spare
   instance takes over (`engine.ts`). KaTeX's CSS and fonts are vendored in
   `app/src/styles/katex/`, imported unlayered.
 - **A spreadsheet opens as its text** (`marks.xlsx.md`, a table per sheet),
   in-app like a PDF rather than in the system viewer (`lib/files/openFile.ts`), with no
   PDF ↔ Markdown toggle.
+- **A source file opens read-only in `CodeEditor`** (`CodeFileViewer`), not
+  as markdown: any extension in `CODE_EXTS`, each held by a test to a grammar
+  `fileLanguage` knows. See [the code editor](#one-code-editor-for-source-files).
 - **A file with a web `source_url` has an Open in Canvas / Open in Ed button**
   (`OpenOriginal` in `FilePage`'s header, ⌘-click for a new tab). A synced
   Canvas page or Ed thread is our markdown of it; the button opens the
@@ -179,7 +195,19 @@ classes work even when there are no dollar delimiters.
   as `$…$`, display as `$$` lines, `formulaMarkdown`), and
   `watchMathSelection` (`mathSelection/whole.ts`) paints bands over all its
   atoms, as a press-and-drag over all of it would, instead of KaTeX's
-  per-glyph highlight; nothing boxes the whole formula. A press on a formula
+  per-glyph highlight; the display wrapper also suppresses native selection
+  paint so WebKit leaves no full-width stripes. Selected text and inline maths
+  in paragraphs, headings, list items and table cells share one highlight
+  height per visual baseline (`mathSelection/lines.ts`,
+  `lib/maths/geometry/lineBands.ts`), shared with the note editor: the taller ink sets the
+  band’s height, so small maths fills the text height and a tall fraction
+  gives the adjacent text the same height. An inline matrix stays whole with
+  its brackets and cells, giving the surrounding prose its full height too.
+  Each top-level base’s strut sets its baseline, independent of cell and
+  delimiter fonts, with a small tolerance for WebKit’s text metric rounding.
+  The native range and clipboard stay unchanged. Direct selections inside maths
+  and display formulas keep structural bands;
+  nothing boxes a whole display formula. A press on a formula
   selects by structure — a cell, a matrix, a run of atoms — and copies that
   part's LaTeX wrapped by its shape (`copied` in `mathSelection/clipboard.ts`,
   shared with the note's field): within one line as `$…$`, over more than
@@ -187,7 +215,13 @@ classes work even when there are no dollar delimiters.
   the model takes whole with its environment) or a whole display formula as
   `$$` lines, one row each, also as `BLOCK_MATH_TYPE`; the bare TeX goes as
   `application/x-latex`. A press outside it, Esc or focus moving ends it. It selects in place
-  (`app/src/lib/markdown/mathSelection/`): `rehypeMaths` renders every
+  (`app/src/lib/markdown/mathSelection/`): a double-click selects the atom under
+  the pointer; a triple-click selects its nearest enclosing structure (a
+  fraction, radical or scripted base), or its row when there is none.
+  `unitAt` in `lib/maths/geometry/units.ts` maps the glyphs to the model’s stops;
+  multi-click dragging extends by whole units. A triple-click on prose takes
+  the full DOM paragraph (`mathSelection/paragraph.ts`), including every inline
+  formula and the text after it. `rehypeMaths` renders every
   formula with the source map, and the press runs the note field's edit model
   (`MathField`) read-only over the drawing: the geometry finds the stop under
   the pointer, a drag selects to it (the model widening over whole
@@ -195,11 +229,15 @@ classes work even when there are no dollar delimiters.
   inside `.katex`, so no glyph moves. A band covers the selected atoms of
   one line (`bands` in `lib/maths/geometry`): a display's row, or a row of
   an array whose rows are all selected, its delimiter and the atoms beside
-  it banded apart, so a whole `cases` reads as its rows, not one box. A band reaches past the
-  formula's box, so closing clears the bands first and drops the layer two
+  it banded apart, so a whole `cases` reads as its rows, not one box. Padding
+  checks every pair of bands that shares horizontal space so the tint does not
+  double between rows. Bands and pointer geometry track the containing
+  block and KaTeX’s inline blocks for wrapping and font changes
+  (`mathSelection/resize.ts`); non-replaced inline spans do not send resize
+  notifications. A band reaches past the formula's box, so closing clears the bands first and drops the layer two
   frames later: gone in the same paint as `.katex`'s stacking, WebKit
   repaints only that box and leaves the bands' edges on screen. The press's `mousedown` is
-  cancelled (no text selection, focus is blurred), never its `pointerdown`. A
+  cancelled (no text selection, focus is blurred), never its `pointerdown`. A single
   press with no drag selects nothing; ⌘A widens in the formula
   (`lib/menu/editRouting.ts`); copy is taken in the capture phase, after
   cancelling `beforecopy` so WebKit enables Copy. The source map's offsets
@@ -342,23 +380,205 @@ A lesson's index, `lessons/<id>-<slug>.md`, carries the lesson and an ordered
 whose list has slides (`useLessonIndex`), its body is `LessonView`
 (`app/src/components/lessons/`) instead of `FileViewer`, as in Ed:
 
-- **The sidebar** (`LessonSidebar`, 240px) holds the lesson's title, its due
-  date and how many slides are completed, then a row per slide: a glyph for
-  Ed's slide type (`slideIcon`), the title, a green tick once completed. A
-  slide not yet opened in Ed reads a shade darker; the selected row takes
-  the nav column's active fill. ↑/↓ step through the slides. Open in Ed
-  (`OpenOriginal`, ⌘-click for a new tab) opens the shown slide's
-  page in Ed, else the lesson's.
+- **The sidebar** (`LessonSidebar`, 240px) holds the fold toggle
+  (`SideNavCollapseToggle`), the lesson's title, its due date and how many
+  slides are completed, then a row per slide (`SlideRow`): a glyph for Ed's
+  slide type (`slideIcon`), the title, a green tick once completed. A slide
+  not yet opened in Ed reads a shade darker; the selected row takes the nav
+  column's active fill. ↑/↓ step through the slides. Open in Ed
+  (`OpenOriginal`, ⌘-click for a new tab) opens the shown slide's page in
+  Ed, else the lesson's.
+- **The sidebar folds to a 46px rail** of slide glyphs, its width easing as
+  the app rail's does (width, min and max pinned together) and the fold
+  remembered (`useResizablePanel`, `oculus-ed-lesson-sidebar`). The column
+  stays laid out at its open width, so a fold clips it and nothing
+  re-truncates, and the header keeps one height, so the glyphs never move
+  up or down. Folded, each slide's button is a 30px square round its glyph,
+  as the app rail's are, so the active fill and the tooltip (the slide's
+  title) sit on the glyph; the label is the button's sibling, so it fades
+  (`SIDE_NAV_FOLDS`) rather than squeezing. The toggle centres on the slide
+  panes' 40px tab strips, and a small tick (completed) or a brand dot (not
+  yet opened in Ed) fades in on each glyph. The list's scrollbar is hidden,
+  as `SideNav`'s is, so glyphs and toggle share one centre line.
 - **The pane shows the selected slide through `FileViewer`**: a PDF slide's
   PDF, any other slide's `.md`, both found by path beside the index
   (`slideFiles`). A slide whose rows a sync has not stored yet says so
-  quietly. Links inside a slide open beside the page, as any file's do.
+  quietly. Links inside a slide open beside the page, as any file's do. A
+  `code` slide with a `challenge_id` is its
+  [workspace](#a-code-challenge-opens-as-its-workspace) instead; `jupyter`
+  and other challenges keep the read-only view.
 - **The slide rides in the URL** (`&slide=<Ed id>`, written with
   `replace`), so a restored tab or Back reopens it; without one the view
-  opens on the first slide not completed. Showing a slide stamps its rows
-  accessed, as opening a file does; the page stamps the index.
+  opens on the first slide not completed (by the synced index, so a tick
+  gained here never moves it). Showing a slide stamps its rows accessed, as
+  opening a file does; the page stamps the index.
+- **Showing a slide tells Ed** (`markSlideOpened`, once per app session,
+  [sync.md](./sync.md) has the requests), and the status Ed then holds —
+  `seen`, or `completed` for a reading slide — goes into
+  `useSlideStatusStore` (`lib/ed/slideStatus.ts`). The sidebar, its count and
+  the Lessons tab's rows read the index through it (`useLiveLessonIndex`),
+  which only ever raises a status, so a tick shows at once rather than at
+  the next sync.
 - **A lesson file without front matter** (every slide in one file) renders
   as plain markdown, like any library file.
+
+## A code challenge opens as its workspace
+
+`WorkspacePane` (`app/src/components/lessons/workspace/`) is Ed's challenge
+layout: the slide's `.md` (the brief and its Files list, `BriefMarkdown`) in
+a left column, drag-resizable and remembered
+(`useResizablePanel`), and the challenge's files on the right as `PillTabs`
+over `CodeEditor`, the first file open. Run and Mark sit in the editor's
+header and the terminal drawer under it, each only where the challenge's
+`features` (from `ed_workspace_open`) allow. The library copy under the slide's
+folder is the working copy; Rust owns the session
+([sync.md](./sync.md) has the state file), the pane only calls the
+commands typed in `app/src/lib/ed/workspace.ts`.
+
+- **The brief leaves out the files' copies.** The sync writes each small
+  workspace file into the slide's `.md` as a `**<name>**` paragraph over a
+  fenced copy, after the Files list; `dropInlineFiles`
+  (`lib/ed/briefFiles.ts`) cuts every such copy whose name the list holds
+  before the Description renders (`FileMarkdown`'s `transform`), since the
+  editor shows the files. The file on disk keeps them, for search, agents
+  and the plain slide view. A link in the list (`workspaceFilePath`) opens
+  that file's editor tab; a file the workspace does not list, or a ⌘-click,
+  opens the library copy.
+- **One session per challenge, shared by every pane on it**
+  (`holdWorkspace` in `workspaceHandles.ts`). The first hold calls
+  `ed_workspace_open`, which returns the file list, the challenge's settings
+  and `connecting` at once; the last release writes what is unsaved, then
+  calls `ed_workspace_close` a tick later, so a remount keeps the session. A
+  new open waits for its challenge's close still in flight.
+- **Files are read on first open** (`ed_workspace_read`) into the saver's
+  buffers, which keep them across tab switches; each tab keeps its undo
+  history and caret for as long as the pane is up.
+- **Saving mirrors notes' loop** (`createWorkspaceSaver`): 600 ms after
+  typing stops the file goes to `ed_workspace_save`, one write in flight
+  across the workspace, looping until every buffer matches what was written.
+  A tab switch, closing the pane and `pagehide` write at once. A rejected
+  save is an inline `Alert` ("Not saved to Ed") and is retried by the next
+  edit; nothing retries on a timer.
+- **The status line is Ed's** (`workspaceStatusText`): "Saving…", "Not
+  saved to Ed", "Offline — saved on this Mac" (a save that landed only on
+  disk, or the socket down; "PC" on Windows, with Rust's reason under it in
+  dim text), "Connecting…", else "All changes saved".
+- **Offline, the editor keeps saving to the library copy.** Rust reconciles
+  with Ed on every connect before it reports `online`, so `online` with
+  nothing unsaved turns "saved on this Mac" back into "All changes saved"
+  (`saver.synced`), and the open file reads again unless it has unsaved
+  edits, the other clean buffers on next open.
+- **`ed-workspace` events for this challenge**: `status` updates the line;
+  `files` replaces the tabs (when the open file leaves the list, the first opens)
+  and drops buffers absent from the new list unless unsaved; a `commit` with
+  `ours: false` (Ed's web app saved) re-reads the open file unless it has
+  unsaved edits, and forgets the other clean buffers so they read again;
+  `conflict` marks a file in conflict; `error` shows as a warning `Alert`
+  until the socket is back online.
+- **A conflict** is a file both sides changed since the last sync: Rust
+  keeps the library copy and writes Ed's beside it as
+  `<name>.ed-server.<ext>` (`<name>.ed-server` without an extension).
+  `splitListing` (`lib/ed/conflicts.ts`) reads conflicts off the file list,
+  so they survive a reload, adds those `conflict` events named, and hides
+  the server copies from the tabs. A file in conflict has a warning dot on
+  its tab and a bar over its editor (`conflict/ConflictFrame.tsx`): "Ed has
+  a different version of this file" with Compare, Keep mine and Take Ed's.
+  Compare swaps the editor for a read-only line diff of the buffer against
+  Ed's copy (`lineDiff`: LCS of lines, unchanged runs folded), yours red and
+  Ed's green as in Feedback. Editing stays open and saves as usual. Keep
+  mine writes pending saves and calls `ed_workspace_resolve` with
+  `keep: "mine"`; Take Ed's asks first in an in-app dialog, then resolves
+  with `keep: "ed"` and reads the replaced file into the buffer over
+  anything typed (`saver.replace`). The editor is read-only while a resolve
+  runs, both need Ed (disabled offline with the reason), and a failure is
+  an inline `Alert`.
+- **The terminal drawer** (`terminal/TerminalDrawer.tsx`) is Ed's bottom
+  drawer: a Terminal tab when `features.terminal`, a Run tab when Run
+  exists, each an xterm.js view (`XtermView`, loaded on demand) kept
+  mounted behind the other. Its top edge drags its height
+  (`useResizablePanel` with `side: "bottom"`), and it folds to its tab bar,
+  folded until first opened; folding keeps the views laid out at full
+  height, so it never resizes Ed's PTY. The views fit their box
+  (`FitAddon` on a `ResizeObserver`) once a resize has settled for 250ms,
+  since a refit per frame stalled the lesson sidebar's fold ~100ms a view
+  (rewrapping the 1000-line scrollback is ~1ms of it, measured in WebKit);
+  each new size goes to Rust. Their
+  colours and font are the theme's tokens and code font, read again when
+  either changes. Output events carry base64, written to xterm as bytes;
+  what lands before a view mounts or before an id is known is held and
+  replayed (`createTermSink` in `lib/ed/termOutput.ts`).
+- **The terminal opens on first show** (`useTerminalSession`): the first
+  time its tab is showing, unfolded and online, `ed_terminal_open` starts
+  Ed's bash, or re-attaches the one still running on Ed (`resumed`, noted
+  in dim text). A dropped connection notes it and opens again on reconnect;
+  a closed terminal offers "New terminal", a failed open "Try again".
+  Nothing kills the terminal when the pane closes: it persists on Ed.
+- **Run** shows when `features.run` and the challenge has a `runCommand`;
+  without one the terminal is the way to run. A click writes pending saves
+  (`flushForEd`, which stops on a save that failed), unfolds the drawer on
+  Run, clears it and calls `ed_workspace_run` at its size; output streams
+  in, typing goes to the program, and Stop replaces Run until `runExit`,
+  which ends in dim text with Ed's message, if any, and "Program exited
+  with code N". Offline or connecting, Run is disabled with the reason as
+  its tooltip; a failed start is an inline `Alert`.
+- **The files a run left** (`runFiles`, `run/RunFiles.tsx`) show under the
+  Run tab's output until the next Run: pictures at the strip's width on
+  white, as Ed draws them (a click opens `ImageLightbox`), text files as
+  chips that open in a dialog, anything else as a chip that shows it in
+  Finder or Explorer (`runFileView` in `lib/ed/runFiles.ts`).
+- **Reset to scaffold** is the one item of the header's overflow menu
+  (`reset/WorkspaceMenu.tsx`), disabled offline. It asks in Ed's words
+  ("Reset challenge attempt?") in `ConfirmDialog`; confirming drops every
+  buffer of the saver, unsaved text included, and waits out a write in
+  flight (`saver.discard`, `reset/useReplaceFlow.ts`), so no save of the old
+  text follows, then calls `ed_workspace_reset`. A failure is an inline
+  `Alert`. Restore shares the flow.
+- **A `reset` event** (a reset or a restore) drops every buffer again,
+  forgets each tab's undo history and remounts the editor, which reads the
+  files anew; `files` has already replaced the tabs, and the terminal's
+  `termState exited` offers "New terminal".
+- **Mark** shows when `features.mark` and only ever submits from its
+  button (`mark/useMarkFlow.ts`): write pending saves, read the live
+  standing (`ed_challenge_standing`), then ask in one in-app dialog what
+  `markPrompts` (`lib/ed/markPrompts.ts`) says applies — past the due date
+  ("Submit late?"), the last attempt (`attemptsRemaining` 1), or
+  `features.confirmSubmit` — and submit (`ed_workspace_mark`) on Submit. No
+  prompt applies, no dialog. It is disabled offline and while a mark is in
+  flight, and a second click is ignored; a failed save, standing read or
+  mark is an inline `Alert` and is never retried by itself.
+- **Feedback** is a tab beside Description in the left column when
+  `features.feedback` or `features.mark` (`feedback/FeedbackPanel.tsx`). It
+  loads `ed_workspace_submissions` (Ed's list of the student's
+  submissions, newest first) on first open, and a finished Mark joins the
+  list, is shown and switches the column to it. The shown submission has
+  Feedback and Code views and a Restore button. A submission reads as Ed's panel:
+  "N / M passed, P points" (summed testcase scores, `lib/ed/feedback.ts`),
+  Ed's feedback, a failed build's output, then each testcase with ✓ or ✗,
+  its feedback, its output and its `check_diff` lines as word runs (your
+  output red, expected green, a missing newline marked). Hidden and private
+  testcases show their name only. Code (`feedback/SubmissionCode.tsx`)
+  reads `ed_submission_files` and shows the files as it went in, in tabs
+  over a read-only `CodeEditor`. Restore asks "Restore this submission?"
+  with the submission's date, then replaces the workspace with its code
+  (`ed_workspace_restore`) through the same flow as Reset; disabled while a
+  status event says Ed is unreachable. Every submission is listed below as
+  Ed's table — its number, when it went in, testcases passed and ✓ or ✗ —
+  to pick from.
+
+## One code editor for source files
+
+`CodeEditor` (`app/src/components/code/CodeEditor.tsx`, loaded on demand
+through `LazyCodeEditor`) is a CodeMirror view that fills its box and
+scrolls itself, with a fixed gutter on the card's fill. It borrows the note
+editor's Raw look and line numbers (`rawCodeChrome` in
+`components/documents/editor/chrome/rawMode.ts`) and its code colours
+(`codeHighlight`), and takes the grammar from the file name
+(`fileLanguage`: language-data's extensions, `.m` as MATLAB), loaded on
+first use. The indent unit is the one the file uses (`detectIndent`: tabs,
+or the commonest step of 2–8 spaces, else 4); Tab indents. A new `text`
+prop it does not hold is applied as one minimal change outside the undo
+history (`textChange`), so another copy's edit keeps the caret. `readOnly`
+turns editing off; the Edit menu's Undo and Redo reach it while focused.
 
 ## One media player plays lectures and library videos
 
@@ -707,6 +927,15 @@ macOS, WebView2 on Windows) that
 `app/src-tauri/src/shell/browser/` places at an empty slot in `BrowserPage`, seen
 through a hole the app opens ([architecture.md](./architecture.md#native-pages-show-through-holes-the-app-opens)).
 Canvas refuses iframes.
+
+Browser and messaging pages receive the app's light/dark preference at
+creation and whenever Appearance changes, including System mode. macOS sets
+each child WKWebView's `NSAppearance`; the main webview keeps the OS
+appearance so its System media query remains independent. On Windows,
+Tauri forwards the window theme to WebView2 and new pages inherit it.
+This supplies `prefers-color-scheme` to the sites, without rewriting their
+colours or images. A site's explicit theme setting takes precedence; sites
+without a dark theme retain their own colours.
 
 - **Rust owns the tab list** and pushes `browser-state` on every change;
   `useBrowserTabs` reconciles it per *pane*. The mirror preserves unchanged

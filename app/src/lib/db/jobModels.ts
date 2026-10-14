@@ -45,38 +45,38 @@ export const JOBS: {
     id: "lectureChapters",
     label: "Lecture chapters",
     description:
-      "Reads a recording's slide frames and transcript and names its topics. One long turn, eight to eleven minutes.",
+      "Name topics from lecture slides and transcripts.",
   },
   {
     id: "lectureEnd",
     label: "Lecture end",
     description:
-      "Finds where a lecture's content ends, so Done and Up Next don't wait for the Q&A. One short turn per lecture.",
+      "Find the lecture’s end before Q&A.",
   },
   {
     id: "threadNaming",
     label: "Chat thread names",
     description:
-      "One line naming a conversation from its first exchange, once, after the first reply.",
+      "Name chats after the first reply.",
   },
   {
     id: "documentSuggestions",
     label: "Document suggestions",
     description:
-      "Inline ghost-text completions in notes, half a second after you stop typing. One short turn per pause.",
+      "Suggest note completions as you type.",
   },
   {
     id: "studioResearch",
     label: "Studio research",
     description:
-      "While a chat agent makes a video, its helpers that read the lecture, a slice each, and write notes. A small, fast model.",
+      "Read lectures and prepare video notes.",
     perAgent: SUBAGENT_AGENTS,
   },
   {
     id: "studioScene",
     label: "Studio scenes",
     description:
-      "While a chat agent makes a video, its helpers that build the scenes' animation, one scene each. A strong model.",
+      "Build animations for each video scene.",
     perAgent: SUBAGENT_AGENTS,
   },
 ];

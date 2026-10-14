@@ -3,13 +3,16 @@ import { useSearchParams } from "react-router-dom";
 import { FileViewer } from "@/components/files/FileViewer";
 import type { DbFile } from "@/lib/db";
 import { defaultSlide, slideFiles, slideKey, type LessonIndex } from "@/lib/ed/lessons";
-import { markEdViewed } from "@/lib/ed/views";
+import { useLiveLessonIndex } from "@/lib/ed/slideStatus";
+import { markSlideOpened } from "@/lib/ed/views";
 import { openFileSmart, recordFileAccess } from "@/lib/files/openFile";
 import { LessonSidebar } from "./LessonSidebar";
+import { WorkspacePane } from "./workspace/WorkspacePane";
 
 /**
  * An Ed lesson as Ed shows it: its slides down the left, the selected one on
- * the right — a PDF slide in the PDF viewer, any other as its markdown. The
+ * the right — a PDF slide in the PDF viewer, a `code` challenge as its
+ * workspace (brief and editor), any other as its markdown. The
  * slide rides in the URL (`&slide=<id>`), so a restored tab or Back reopens
  * it; without one the lesson opens on its first slide not yet completed.
  */
@@ -27,6 +30,9 @@ export function LessonView({
   title: string;
 }) {
   const [params, setParams] = useSearchParams();
+  // Statuses as Ed has them since this session opened slides; the slide it
+  // opens on still comes from the synced index, so a tick never moves it.
+  const live = useLiveLessonIndex(index);
   const wanted = params.get("slide");
   const found = wanted == null ? -1 : index.slides.findIndex((s, i) => slideKey(s, i) === wanted);
   const fallback = defaultSlide(index.slides);
@@ -45,6 +51,8 @@ export function LessonView({
   // A PDF slide's PDF until it is synced falls back to the slide's own page,
   // which links to it.
   const shown = (slide.pdf ? pdf : undefined) ?? md;
+  // Only `code` challenges edit here; jupyter and the rest stay read-only.
+  const workspace = slide.type === "code" && !slide.pdf ? slide.challengeId : null;
 
   // Each slide opened clears its never-opened mark, as a file page does.
   const mdId = md?.id;
@@ -54,23 +62,28 @@ export function LessonView({
       if (id != null) recordFileAccess({ id, subject_id: file.subject_id });
     }
   }, [mdId, pdfId, file.subject_id]);
-  // …and tells Ed, which marks the slide seen.
+  // …and tells Ed, which marks the slide seen and completes a reading.
   const slideId = slide.id;
+  const slideType = slide.type;
+  const slideStatus = live.slides[selected]?.status ?? null;
   useEffect(() => {
-    if (slideId != null) markEdViewed("slide", slideId);
-  }, [slideId]);
+    // Sent once per app session, so the status Ed answers sends nothing more.
+    if (slideId != null) markSlideOpened(slideId, slideType, slideStatus);
+  }, [slideId, slideType, slideStatus]);
 
   return (
     <div className="flex min-h-0 flex-1">
       <LessonSidebar
         title={title}
-        index={index}
+        index={live}
         selected={selected}
         onSelect={select}
         edUrl={slide.url ?? index.url}
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {shown ? (
+        {workspace != null && md ? (
+          <WorkspacePane key={workspace} challengeId={workspace} brief={md} files={files} />
+        ) : shown ? (
           /* In-slide links open the linked file beside this page. */
           <FileViewer key={shown.id} file={shown} files={files} onOpenFile={openFileSmart} />
         ) : (

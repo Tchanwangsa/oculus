@@ -31,36 +31,60 @@ const NO_CLASSES: readonly unknown[] = [];
 /** Where a failed formula is, for the file's message. */
 type Where = { ancestors: (Root | Element)[]; place: Element["position"] };
 
+/** A formula's render, and the strict pass's error when it had one. */
+type Outcome = { children: ElementContent[]; error?: Error };
+
+// Reopening a thread re-renders every formula in it, so each render is kept by
+// display mode and source, least recently used dropped first. Hits are cloned:
+// later plugins and react-markdown may mutate the nodes they are handed.
+const CACHE_MAX = 2000;
+const cache = new Map<string, Outcome>();
+
+function outcome(value: string, displayMode: boolean): Outcome {
+  let result: string;
+  let error: Error | undefined;
+  try {
+    result = renderToString(value, { displayMode, sourceMap: true, throwOnError: true });
+  } catch (e) {
+    error = e as Error;
+    try {
+      result = renderToString(value, { displayMode, sourceMap: true, strict: "ignore", throwOnError: false });
+    } catch {
+      const span: Element = {
+        type: "element",
+        tagName: "span",
+        properties: { className: ["katex-error"], style: "color:#cc0000", title: String(error) },
+        children: [{ type: "text", value }],
+      };
+      return { children: [span], error };
+    }
+  }
+  return { children: fromHtmlIsomorphic(result, { fragment: true }).children as ElementContent[], error };
+}
+
 function rendered(value: string, displayMode: boolean, file: VFile, where: Where): ElementContent[] {
   if (!mathsReady()) {
     const className = displayMode ? ["md-math-pending", "md-math-pending-display"] : ["md-math-pending"];
     return [{ type: "element", tagName: "span", properties: { className }, children: [{ type: "text", value }] }];
   }
-  let result: string;
-  try {
-    result = renderToString(value, { displayMode, sourceMap: true, throwOnError: true });
-  } catch (error) {
-    const cause = error as Error;
+  const key = `${displayMode ? "D" : "I"}${value}`;
+  let found = cache.get(key);
+  if (found) {
+    cache.delete(key);
+  } else {
+    found = outcome(value, displayMode);
+    if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!);
+  }
+  cache.set(key, found);
+  if (found.error) {
     file.message("Could not render maths", {
       ...where,
-      cause,
-      ruleId: cause.name.toLowerCase(),
+      cause: found.error,
+      ruleId: found.error.name.toLowerCase(),
       source: "rehype-maths",
     });
-    try {
-      result = renderToString(value, { displayMode, sourceMap: true, strict: "ignore", throwOnError: false });
-    } catch {
-      return [
-        {
-          type: "element",
-          tagName: "span",
-          properties: { className: ["katex-error"], style: "color:#cc0000", title: String(error) },
-          children: [{ type: "text", value }],
-        },
-      ];
-    }
   }
-  return fromHtmlIsomorphic(result, { fragment: true }).children as ElementContent[];
+  return structuredClone(found.children);
 }
 
 export default function rehypeMaths() {

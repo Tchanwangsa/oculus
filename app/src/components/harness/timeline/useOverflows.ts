@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { inSkippedSubtree } from "@/lib/ui/scrollAnchor";
 
 /** How much of a long question is left showing when it is folded. */
 export const QUESTION_MAX_H = 208;
@@ -15,7 +16,11 @@ export function useOverflows(text: string, shown: boolean) {
     // While editing the node is gone; the observer re-hangs when it returns.
     if (!el || !shown) return;
     // `scrollHeight` is the full text even while `max-height` is clipping it.
-    const measure = () => setOver(el.scrollHeight > QUESTION_MAX_H + FOLD_SLACK);
+    const measure = () => {
+      // Reading a hidden descendant's scrollHeight can force its text layout.
+      // Reveal produces another resize; retain the fold until then.
+      if (el.isConnected && !inSkippedSubtree(el)) setOver(el.scrollHeight > QUESTION_MAX_H + FOLD_SLACK);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);

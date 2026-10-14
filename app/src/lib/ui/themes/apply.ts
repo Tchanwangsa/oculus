@@ -40,6 +40,7 @@ let applied = 0;
 /** The last `native_set_glass` arguments sent; a drag on the accent re-applies
  *  every step and the native side needn't hear it. */
 let sent = "";
+let pageThemeSent = "";
 
 /** Toggles `.dark`, writes the theme's tokens inline on `<html>` (clearing
  *  what the last call wrote) and asks the native side for glass. The only
@@ -53,6 +54,14 @@ export function applyAppearance(prefs: AppearancePrefs) {
   for (const [name, value] of Object.entries(tokens)) root.style.setProperty(name, value);
   written = new Set(Object.keys(tokens));
   root.dataset.theme = getTheme(prefs[mode], mode).id;
+
+  const pageThemeKey = `${mode}:${prefs.mode === "system"}`;
+  if (pageThemeKey !== pageThemeSent) {
+    pageThemeSent = pageThemeKey;
+    void invoke("native_set_page_theme", { dark: mode === "dark", followSystem: prefs.mode === "system" }).catch(() => {
+      if (pageThemeSent === pageThemeKey) pageThemeSent = "";
+    });
+  }
 
   if (!isMac) return;
   const glass = prefs.frame !== "solid";

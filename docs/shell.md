@@ -124,7 +124,9 @@ indexing, a brand dot on Subjects while any subject has never-opened files
 ## Settings has its own nav column
 
 `/settings` is one route with a page per nav row; `SettingsLayout` puts
-`SettingsNav` beside the page, the rows grouped from `SETTINGS_PAGES`. Its
+`SettingsNav` beside the page, the rows grouped from `SETTINGS_PAGES`. Below
+42rem of available pane width, the navigation becomes a page picker above
+the content ([ui.md](./ui.md)). Its wide-layout
 search reads a hand-kept list in `app/src/lib/search/settings.ts`, because the
 pages are lazy and unmounted: entry titles are the on-screen text, and each
 names the `Section` title it jumps to. Rename a section or row and update the
@@ -187,6 +189,8 @@ while Ctrl+Shift+Z is Redo.
   whole window. Within that, `selectContents` spans only its first to last
   `data-selectable` block (`ui.md`), since WebKit paints a scripted selection
   over `user-select: none` text; a page with no content selects nothing.
+  A find or Select All first mounts windowed content in full
+  (`app/src/lib/ui/expandable.ts`), so the chat's unmounted rows are included.
 - **⌘1–⌘8 are strip positions** (a missing slot is a no-op), ⌘9 is the last
   tab, and ⇧⌘T pops `tabStore`'s `closed` stack back to the old index. A
   browser tab is remembered by URL, recorded by `TopTabBar` *before* Rust

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { cn } from "@/lib/utils";
@@ -17,7 +17,7 @@ export function PillTabs<T extends string>({
   className,
   scroll,
 }: {
-  tabs: ReadonlyArray<{ value: T; label: string }>;
+  tabs: ReadonlyArray<{ value: T; label: ReactNode }>;
   value: T;
   onChange: (value: T) => void;
   className?: string;

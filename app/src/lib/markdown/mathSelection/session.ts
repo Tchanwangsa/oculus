@@ -1,13 +1,15 @@
 import { type MathField, MathsTrap } from "@/lib/maths";
 import { bands, framePoint, measure, paintBands, readLayout, stopAt, type Layout, type Measured } from "@/lib/maths/geometry";
+import { unitAt, type StopRange } from "@/lib/maths/geometry/units";
 import type { Formula } from "./formula";
+import { watchLayout } from "./resize";
 
 /** Marks the formula a selection is drawn in (`styles/math.css`). */
-const SELECTING = "data-math-selecting";
+const MATH_LAYER = { attribute: "data-math-selecting", className: "md-math-bands" };
 
 /**
  * Takes a closed selection's bands off the formula: the bands at once, the
- * layer and the formula's stacking (`SELECTING`) two frames later. A band
+ * layer and the formula's stacking (`kind.attribute`) two frames later. A band
  * reaches past the formula's box, and when both go in one paint WebKit
  * repaints only that box, leaving the bands' edges above and below it on
  * screen. A selection reopened on the formula meanwhile keeps its stacking.
@@ -16,25 +18,25 @@ export function dropLayer(
   layer: Pick<Element, "replaceChildren" | "remove">,
   root: Pick<Element, "querySelector" | "removeAttribute">,
   frame: (run: () => void) => void = requestAnimationFrame,
+  kind = MATH_LAYER,
 ) {
   layer.replaceChildren();
   frame(() =>
     frame(() => {
       layer.remove();
-      if (!root.querySelector(":scope > .md-math-bands")) root.removeAttribute(SELECTING);
+      if (!root.querySelector(`:scope > .${kind.className}`)) root.removeAttribute(kind.attribute);
     }),
   );
 }
 
-/** A band layer in `root` (a formula's `.katex`): an absolutely positioned
- *  zero-size span whose own corner is the frame every box is read in, so
- *  an inline formula broken over lines still lines up. `dropLayer` takes
- *  it off. */
-export function openLayer(root: Element): HTMLElement {
+/** A zero-size band layer in a formula or paragraph. Its corner is the
+ *  frame every box is read in, so wrapped inline maths still lines up.
+ *  `dropLayer` removes it without leaving paint outside the root. */
+export function openLayer(root: Element, kind = MATH_LAYER): HTMLElement {
   const layer = document.createElement("span");
-  layer.className = "md-math-bands";
+  layer.className = kind.className;
   layer.setAttribute("aria-hidden", "true");
-  root.setAttribute(SELECTING, "");
+  root.setAttribute(kind.attribute, "");
   root.append(layer);
   return layer;
 }
@@ -51,7 +53,7 @@ export class Session {
   anchor = 0;
   #layout: Layout = { items: [] };
   #measured: Measured = { x: new Float64Array(), top: new Float64Array(), bottom: new Float64Array() };
-  #resize: ResizeObserver;
+  #unwatch: () => void;
 
   constructor(
     readonly formula: Formula,
@@ -61,9 +63,7 @@ export class Session {
     this.field = base;
     this.layer = openLayer(formula.root);
     this.#relayout();
-    // Fonts arriving or the column resizing move the glyphs.
-    this.#resize = new ResizeObserver(() => this.redraw());
-    this.#resize.observe(formula.html);
+    this.#unwatch = watchLayout(formula, () => this.redraw());
   }
 
   get connected(): boolean {
@@ -74,6 +74,12 @@ export class Session {
   stopAt(clientX: number, clientY: number): number | null {
     const { x, y } = framePoint(this.layer, clientX, clientY);
     return stopAt(this.#layout, this.base, this.#measured, x, y);
+  }
+
+  /** The atom or enclosing structure under this viewport point. */
+  unitAt(clientX: number, clientY: number, group: boolean): StopRange | null {
+    const { x, y } = framePoint(this.layer, clientX, clientY);
+    return unitAt(this.#layout, this.base, x, y, group);
   }
 
   /** Selects between two stops, widened by the model over whole
@@ -100,7 +106,7 @@ export class Session {
   }
 
   close() {
-    this.#resize.disconnect();
+    this.#unwatch();
     dropLayer(this.layer, this.formula.root);
     if (this.field !== this.base) this.field.free();
     this.field = this.base;

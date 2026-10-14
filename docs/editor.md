@@ -14,7 +14,8 @@ maths is [editor-maths.md](./editor-maths.md).
 | Extensions: live preview, Raw mode, code, tables, widgets, commands | `app/src/components/documents/editor/` |
 | One session per note | `app/src/lib/notes/documentSessions.ts` |
 | Find and replace | `app/src/components/documents/editor/chrome/find.ts`, `app/src/components/documents/editor/chrome/useEditorFind.ts` |
-| A note's versions and its History panel | `app/src/lib/notes/documentVersions.ts`, `app/src/components/documents/HistoryPanel/` |
+| A note's versions, its History list and bar | `app/src/lib/notes/documentVersions.ts`, `app/src/components/documents/HistoryPanel/` |
+| A version drawn on the page, and the word diff marking it | `app/src/components/documents/VersionView/`, `app/src/lib/notes/versionDiff/` |
 | The note editor as a form field (task body, a chat paste) | `app/src/components/documents/NoteField.tsx` |
 | The Rust editor core, and its shadow of every note editor in dev builds ([editor-core.md](./editor-core.md)) | `app/editor-core/`, `app/src/components/documents/editor/shadow/` |
 
@@ -25,7 +26,9 @@ It lives in `app/src/components/documents/editor/`; nothing is re-serialised.
 student document; its lightweight header controls live in
 `app/src/components/documents/DocumentControls.tsx`. `FilePage` keys the
 whole editor by row id: image attachments belong to one note, while a
-rename keeps its editor. **Live** mode renders markdown in place —
+rename keeps its editor. The note and History's version share one column,
+`NoteColumn.tsx`, fixed at the note's full width: a narrower pane scrolls it
+sideways rather than re-wrapping the text. **Live** mode renders markdown in place —
 headings, marks, links, lists and checkboxes, quotes, rules, code, pictures,
 maths and mermaid diagrams — and shows a construct's source while the selection touches
 it (a heading, quote or list marker while the caret is on its line); maths
@@ -168,15 +171,43 @@ selected.
   arrive. No record reads as the app's own text, never `external`. A note
   deleted or renamed outside the app gets a new row (or none) from
   `reconcileDocuments`, so its history goes with the old row.
-- **History docks inside the editor**
-  (`app/src/components/documents/HistoryPanel/`), not as a side panel
-  item, because Replace current goes through that editor's view and the note
-  stays beside the version. The header's Save version (⇧⌘S, focused pane
-  only; ⌘S stays a flush) flushes first so the checkpoint matches the file.
+- **A version takes the note's place on the page while History is open**
+  (`app/src/components/documents/VersionView/`): a read-only CodeMirror view
+  drawn by Live mode's render-only half, `livePreviewRender()` (`livePreview()`
+  is that plus the editing pieces), so pictures, maths, code and tables look as
+  they do in the note. It is read-only three ways — `readOnly`, `editable`
+  false and a change filter that refuses what widgets dispatch themselves, such
+  as a task's checkbox — and a table draws as a static grid when its view isn't
+  editable. The note stays mounted under it, hidden and `inert`, never
+  unmounted, so scroll and caret survive; ⌘F searches the version, never the
+  hidden note.
+- **Changes are marked against a base**, the next-older version or the note now
+  (*Compared with* in the version bar). `app/src/lib/notes/versionDiff/` is a
+  Myers diff over word, space, newline and punctuation tokens, cleaned up for
+  reading; two unrelated texts blow its work budget, so the middle is diffed by
+  line and each changed block refined by word while budget lasts. Marks are an
+  inserted tint, deleted text struck through inline or as a block, a margin bar
+  per changed line, and a construct drawn as a widget tinted whole
+  (`outerDecorations` inline, a block wrapper for block constructs); hunks are
+  what ↑/↓ steps through.
+- **History is laid out like Google Docs' version history, at any width**:
+  the list is a sidebar docked right (resizable, never more than half the
+  width, `PANEL_MAX_SHARE` in `HistoryPanel/constants.ts`), hidden or shown
+  from its header or the bar's *Versions* toggle without leaving History, and
+  remembered. The version sits in the note's column (`NoteColumn`), so it
+  scrolls sideways under a narrow pane while the bar above stays put. The bar is
+  there in every state — loading, empty and failed reads get one with only
+  Back and *Versions* — and its Back arrow (or Esc) leaves History. The bar
+  stays two rows: its title truncates and its action labels drop to icons as
+  its own width shrinks (container queries). The list groups by day with
+  size deltas and takes arrow keys. The version bar
+  (`app/src/components/documents/HistoryPanel/VersionBar/`) holds the actions,
+  change navigation and *Show changes*. The header's Save version (⇧⌘S, focused
+  pane only; ⌘S stays a flush) flushes first so the checkpoint matches the file.
   **Restore as copy** is the default: a new note "<title> (v3)" in a new tab.
   **Replace current** takes a `restore` snapshot first, then swaps the text
-  as one `isolateHistory` transaction, so it saves like typing, reaches the
-  other views and ⌘Z takes it back.
+  as one `isolateHistory` transaction through the note's view, so it saves like
+  typing, reaches the other views and ⌘Z takes it back.
 
 ## Pictures, mentions and citations resolve to library files
 
@@ -219,7 +250,12 @@ lands only if it is the newest request and the text and caret are
 unchanged. Tab takes it (one undo step), Mod-→ the next word, Esc drops it;
 typing its front eats it, anything else drops it. Its keymap is
 `Prec.highest` but passes without a ghost, so the note's and snippets' Tab
-are untouched. Blur, toggle-off and note switch call
+are untouched. In Live mode, complete inline and display maths in the ghost
+renders with the note's maths engine (`chrome/ghostMath.ts`); code, escaped
+delimiters and invalid or incomplete maths stay as source. Raw mode shows
+the original text. Acceptance always inserts the original markdown and
+LaTeX. A preview redraws when the maths engine becomes ready.
+Blur, toggle-off and note switch call
 `document_suggest_cancel`. A failure is a red dot on the toggle until a
 request succeeds.
 
@@ -247,8 +283,9 @@ cannot wait on the blur (the chat's pasted text editor,
 - **The selection highlight is our own layer** (`core/selectionLayer.ts`):
   `drawSelection` draws the caret, and its highlight layer is hidden by the
   theme, since it has no option to skip spans; `noteSelection` draws the
-  same rectangles less the `selectionGaps`, which Live mode fills with
-  rendered maths, which bands its own atoms
+  text rectangles and the shared text-and-inline-maths geometry
+  (`mathSelection/lines.ts`, through `core/selectionMath.ts`). Display maths
+  fills the `selectionGaps` with structural bands
   ([editor-maths.md](./editor-maths.md#rendered-maths-is-one-unit-to-the-selection-the-clipboard-and-the-caret)).
 - **CodeMirror block decorations come from a `StateField`** — it throws for
   block widgets from a view plugin

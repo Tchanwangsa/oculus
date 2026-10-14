@@ -183,7 +183,7 @@ fn a_brief_has_the_scene_its_neighbours_entry_notes_words_and_commands() {
     let out = dir.join("out");
     assert!(text.contains(&format!(
         "oculus studio strip counting --scene 1 --n 16 --cols 4 -o {}",
-        out.join("count-strip.png").display()
+        shell_word(&out.join("count-strip.png").to_string_lossy())
     )));
     assert!(text.contains("oculus studio gallery counting Count --sheet"));
     assert!(

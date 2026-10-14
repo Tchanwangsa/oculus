@@ -13,7 +13,7 @@ import { markFieldTrap } from "../mathField/trapped";
 import { setMathMode, type ActiveMath } from "../mathField/visual-state";
 import { MathView } from "../mathView";
 import { beforeClipboard, copy, paste } from "./clipboard";
-import { syncHint } from "./hint";
+import { hintCaret, syncHint } from "./hint";
 import { historyInput, hostKey } from "./keys";
 import { placeCaret, pressBeside } from "./mount";
 import { resync, writableTarget, writeStep, type FieldText } from "./write";
@@ -57,6 +57,7 @@ export class RustFieldController implements VisualField {
   ) {
     this.text = { id, shown: source, written: source };
     this.mv = new MathView(source, display, block, {
+      caretAnchor: () => this.caretRect(),
       onStep: (step) => this.step(step),
       onSelectionChange: () => this.selectionChanged(),
       onTrap: (_error, view) => this.trapped(view),
@@ -70,7 +71,7 @@ export class RustFieldController implements VisualField {
     this.dom = this.mv.dom;
     this.hint = document.createElement("span");
     this.hint.className = "cm-math-hint";
-    this.hint.textContent = "Start typing or 'Space'";
+    this.hint.textContent = "Start typing or 'Space' for math tools";
     this.hint.hidden = true;
     this.dom.append(this.hint);
 
@@ -133,7 +134,8 @@ export class RustFieldController implements VisualField {
   }
 
   caretRect(): Box | null {
-    return this.mv.caretRect();
+    syncHint(this);
+    return hintCaret(this) ?? this.mv.caretRect();
   }
 
   insertTemplate(template: string) {

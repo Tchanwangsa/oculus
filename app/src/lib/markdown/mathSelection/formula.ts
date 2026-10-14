@@ -2,7 +2,7 @@ import { MathField } from "@/lib/maths";
 import { mathAround } from "../selection";
 
 /** What a press on maths inside belongs to rather than the maths. */
-export const NOT_MATHS_PRESS = "button, a, [role='button'], [contenteditable='true']";
+export const NOT_MATHS_PRESS = "button, a, [role='button'], [contenteditable='true'], .cm-math-view";
 
 /** A rendered formula drawn with the source map (`rehypeMaths`). */
 export interface Formula {

@@ -6,7 +6,7 @@ import { FileChip } from "@/components/markdown/FileChip";
 import { ReferenceLink } from "@/components/markdown/ReferenceLink";
 import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
 import { PDFViewer } from "@/components/files/pdf/PDFViewer";
-import { docPdfRelPath, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath } from "@/lib/files/fileTypes";
+import { docPdfRelPath, isCodeFile, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath } from "@/lib/files/fileTypes";
 import { openLibraryPath, type FileLocate } from "@/lib/files/openFile";
 import { libraryImageSrc, libraryLinkTarget } from "@/lib/files/libraryLinks";
 import { useDataDir } from "@/hooks/backend/useDataDir";
@@ -15,6 +15,7 @@ import { courseFileHasContent } from "@/lib/files/courseFiles";
 import { FileMarkdown } from "@/components/files/FileMarkdown";
 import { createPdfMdLink, type PdfMdLink } from "@/components/files/pdf/pdfMdLink";
 import { VideoFileViewer } from "@/components/files/VideoFileViewer";
+import { CodeFileViewer } from "@/components/files/CodeFileViewer";
 import { EmbedSubjectProvider } from "@/components/markdown/embed/EmbedSubject";
 import { useParseStore } from "@/stores/sync/parseStore";
 
@@ -114,7 +115,8 @@ interface FileViewerProps {
 
 /**
  * Renders one scraped file: markdown pages/announcements, PDFs, spreadsheets
- * (as their text), images, and videos (in the media player, `VideoFileViewer`).
+ * (as their text), images, videos (in the media player, `VideoFileViewer`)
+ * and source files (read-only in `CodeEditor`, `CodeFileViewer`).
  * Chrome-free — the host owns the header (title + PdfMdToggle).
  */
 export function FileViewer({
@@ -157,6 +159,8 @@ export function FileViewer({
 
   if (isVideoFile(file.filename)) return <VideoFileViewer file={file} />;
 
+  if (isCodeFile(file.filename)) return <CodeFileViewer file={file} />;
+
   // A spreadsheet is shown as the text Rust converted it to, a table per sheet.
   if (isSheetFile(file.filename) && mdRelPath) {
     return markdown(mdRelPath);
@@ -187,8 +191,7 @@ export function FileViewer({
  * paths, paths below the file's folder, and raw Canvas `/files/<id>` /
  * `/pages/<slug>` URLs) go to
  * `onOpenFile`, others open externally, and relative images resolve against the
- * file's directory (`app/src/lib/files/libraryLinks.ts`). Also draws a note's
- * saved versions (`HistoryPanel`).
+ * file's directory (`app/src/lib/files/libraryLinks.ts`).
  */
 export function useLibraryMdComponents(
   file: Pick<DbFile, "relative_path">,

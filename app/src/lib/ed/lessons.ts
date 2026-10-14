@@ -24,7 +24,8 @@ export const isLessonDoc = (file: Pick<DbFile, "relative_path">): boolean =>
   LESSON_DOC.test(file.relative_path);
 
 /** One slide as the lesson index lists it. `file` and `pdf` are relative to
- *  the index's folder; `status` is Ed's `unseen` | `seen` | `completed`. */
+ *  the index's folder; `status` is Ed's `unseen` | `seen` | `completed`;
+ *  `challengeId` is set on a `code` or `jupyter` slide, whose workspace it is. */
 export interface LessonSlide {
   id: number | null;
   title: string;
@@ -33,6 +34,29 @@ export interface LessonSlide {
   file: string | null;
   pdf: string | null;
   url: string | null;
+  challengeId: number | null;
+}
+
+/** What a challenge slide's file says about its workspace (docs/sync.md).
+ *  A feature Ed did not name is null, not off; `runCommand` null means Ed
+ *  has none, so Run does nothing. */
+export interface ChallengeSnapshot {
+  type: string | null;
+  runCommand: string | null;
+  features: {
+    run: boolean | null;
+    mark: boolean | null;
+    terminal: boolean | null;
+    feedback: boolean | null;
+    confirmSubmit: boolean | null;
+  };
+  dueAt: Date | null;
+}
+
+/** A slide file's challenge: its id, and the snapshot when the sync got one. */
+export interface SlideChallenge {
+  challengeId: number;
+  challenge: ChallengeSnapshot | null;
 }
 
 /** A lesson index's front matter (the contract is in docs/sync.md). */
@@ -66,6 +90,39 @@ function parseSlide(value: FrontValue, index: number): LessonSlide | null {
     file: frontString(value.file),
     pdf: frontString(value.pdf),
     url: frontString(value.url),
+    challengeId: frontNumber(value.challenge_id),
+  };
+}
+
+const frontBool = (value: FrontValue | undefined): boolean | null =>
+  typeof value === "boolean" ? value : null;
+
+const isObject = (value: FrontValue | undefined): value is { [key: string]: FrontValue } =>
+  value != null && typeof value === "object" && !Array.isArray(value);
+
+/** The challenge in a slide file's front matter, or null for a slide that
+ *  is not a challenge's. */
+export function parseSlideChallenge(markdown: string): SlideChallenge | null {
+  const { data } = splitFrontmatter(markdown);
+  const challengeId = frontNumber(data.ed_challenge_id);
+  if (challengeId == null) return null;
+  const snapshot = data.challenge;
+  if (!isObject(snapshot)) return { challengeId, challenge: null };
+  const features = isObject(snapshot.features) ? snapshot.features : {};
+  return {
+    challengeId,
+    challenge: {
+      type: frontString(snapshot.type),
+      runCommand: frontString(snapshot.run_command),
+      features: {
+        run: frontBool(features.run),
+        mark: frontBool(features.mark),
+        terminal: frontBool(features.terminal),
+        feedback: frontBool(features.feedback),
+        confirmSubmit: frontBool(features.confirm_submit),
+      },
+      dueAt: frontDate(snapshot.due_at),
+    },
   };
 }
 

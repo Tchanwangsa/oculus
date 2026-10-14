@@ -39,7 +39,7 @@ export function JobsSection() {
   return (
     <Section
       title="Jobs"
-      description="Work the app hands to an agent on its own — no conversation, no timeline — and the helpers a chat agent starts. Each job names the agent, the model and the reasoning level it runs on, with fallbacks for a failed run, or a model per agent for a chat agent's helpers; a CLI flag overrides that for one run."
+      description="Choose agents, models and fallbacks for background work."
     >
       <div className="divide-y divide-border-subtle">
         {jobs &&

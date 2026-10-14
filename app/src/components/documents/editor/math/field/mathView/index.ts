@@ -12,6 +12,7 @@ import {
   type Layout,
   type Measured,
 } from "@/lib/maths/geometry";
+import { unitAt, type StopRange } from "@/lib/maths/geometry/units";
 import { drawCaret, restartBlink } from "./caret";
 import { compositionEnd, compositionStart, beforeInput, inputEvent } from "./input";
 import { keyDown } from "./keys";
@@ -23,6 +24,8 @@ import { drawBands } from "./selection";
 
 /** What the view tells its host, and the keys the host takes first. */
 export interface MathViewHost {
+  /** The visible caret when the host draws a prompt in place of ours. */
+  caretAnchor?(): Box | null;
   /** After each step, once the view has redrawn: apply its `changes`, then
    *  its `rewrite`, and act on its `effect`. */
   onStep?(step: Step, view: MathView): void;
@@ -201,6 +204,13 @@ export class MathView {
       if (e instanceof MathsTrap) this.#trap(e);
       else throw e;
     }
+  }
+
+  /** The atom or group under the pointer, shared with read-only maths. */
+  unitAtPoint(clientX: number, clientY: number, group: boolean): StopRange | null {
+    this.#ensureLayout();
+    const { x, y } = framePoint(this.frame, clientX, clientY);
+    return unitAt(this.layout, this.field, x, y, group);
   }
 
   /** The stop a press at this viewport point lands on. */

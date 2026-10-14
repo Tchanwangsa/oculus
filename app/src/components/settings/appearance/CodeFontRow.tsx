@@ -19,7 +19,7 @@ export function CodeFontRow() {
   return (
     <AppearanceRow
       label="Code font"
-      description="Code blocks and terminal output. Any monospace font installed on this machine."
+      description="Use an installed monospace font."
     >
       <Input
         aria-label="Code font"

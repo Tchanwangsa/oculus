@@ -66,7 +66,7 @@ function CliAgentsSection() {
   return (
     <Section
       title="CLI agents"
-      description="Chat runs Claude Code, Codex, opencode or Antigravity from your own machine, signed in as you — no API key, no per-token billing."
+      description="Manage the local agents Chat uses."
     >
       <div className="divide-y divide-border-subtle">
         {(health ?? []).map((h) => {
@@ -81,7 +81,7 @@ function CliAgentsSection() {
           const liveLines = run && !run.result && !run.error ? run.lines : undefined;
           const failed = !!run && (run.error !== null || run.result?.ok === false);
           return (
-            <div key={h.provider} className="flex items-start justify-between gap-4 py-2.5">
+            <div key={h.provider} className="settings-row flex items-start justify-between gap-4 py-2.5">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] text-foreground">
                   <ProviderMark provider={h.provider} className="size-4 shrink-0" />
@@ -121,7 +121,7 @@ function CliAgentsSection() {
                   </div>
                 )}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="settings-actions flex shrink-0 items-center gap-2">
                 {update?.available && (
                   <Button
                     variant="outline"
@@ -284,11 +284,11 @@ function AntigravityApprovalsSection() {
   return (
     <Section
       title="Antigravity approvals"
-      description="What you let Antigravity do when it stopped to ask. They are kept in agy's own global settings, so agy in your terminal follows them too."
+      description="Saved permissions, shared with agy in your terminal."
     >
       <div className="divide-y divide-border-subtle">
         {rules.map((rule) => (
-          <div key={rule} className="flex items-center justify-between gap-4 py-2.5">
+          <div key={rule} className="settings-row flex items-center justify-between gap-4 py-2.5">
             <div className="min-w-0 truncate text-[13px] text-foreground" title={rule}>
               {ruleWords(rule)}
             </div>

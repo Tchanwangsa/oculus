@@ -1,7 +1,9 @@
+import { ProseBands } from "./prose";
 import { bands, paintBands, readLayout, type BandSlot } from "@/lib/maths/geometry";
 import { mathAround } from "../selection";
 import { fieldOf, formulaOf, type Formula } from "./formula";
 import { dropLayer, openLayer } from "./session";
+import { watchLayout } from "./resize";
 
 /**
  * A rendered formula a selection takes whole — a text selection over it in
@@ -11,7 +13,7 @@ import { dropLayer, openLayer } from "./session";
  */
 export class WholeBands {
   readonly layer: HTMLElement;
-  #resize: ResizeObserver;
+  #unwatch: () => void;
 
   constructor(
     readonly formula: Formula,
@@ -20,19 +22,19 @@ export class WholeBands {
   ) {
     this.layer = openLayer(formula.root);
     this.redraw();
-    // Fonts arriving, the column resizing, or the rendering first laid out.
-    this.#resize = new ResizeObserver(() => this.redraw());
-    this.#resize.observe(formula.html);
+    this.#unwatch = watchLayout(formula, () => this.redraw());
   }
 
   redraw() {
     if (!this.formula.root.isConnected) return;
     const layout = readLayout(this.formula.html, this.layer);
-    paintBands(this.layer, bands(layout, 0, Number.MAX_SAFE_INTEGER, this.slots), "md-math-band");
+    // Inline prose already supplies the line’s height; extra pad makes bumps.
+    const pad = this.formula.display ? undefined : 0;
+    paintBands(this.layer, bands(layout, 0, Number.MAX_SAFE_INTEGER, this.slots), "md-math-band", pad);
   }
 
   close() {
-    this.#resize.disconnect();
+    this.#unwatch();
     dropLayer(this.layer, this.formula.root);
   }
 }
@@ -60,20 +62,47 @@ function touches(node: Node, range: Range): boolean {
  */
 export function watchMathSelection() {
   const painted = new Map<Element, WholeBands | null>();
+  const prose = new Map<HTMLElement, ProseBands>();
   document.addEventListener("selectionchange", () => {
     const selection = window.getSelection();
+    const selected = selection?.rangeCount && !selection.isCollapsed ? selection.getRangeAt(0) : null;
+    const editing = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest(".cm-editor, .cm-math-view");
     const next = new Set<Element>();
-    if (selection && selection.rangeCount && !selection.isCollapsed) {
-      const range = selection.getRangeAt(0);
+    let range: Range | null = null;
+    // Editable hosts own their range and call the shared geometry themselves.
+    if (selected && !editing(selected.startContainer) && !editing(selected.endContainer)) {
+      range = selected;
       const inside = mathAround(range.commonAncestorContainer);
       if (inside) next.add(inside);
       else {
         const root = range.commonAncestorContainer;
         const scope = root.nodeType === Node.ELEMENT_NODE ? (root as Element) : root.parentElement;
         for (const el of Array.from(scope?.querySelectorAll(".katex-display, .katex") ?? [])) {
-          if (mathAround(el) === el && touches(el, range)) next.add(el);
+          if (!el.closest(".cm-editor, .cm-math-view") && mathAround(el) === el && touches(el, range)) next.add(el);
         }
       }
+    }
+    const paragraphs = new Set<HTMLElement>();
+    if (range && !mathAround(range.commonAncestorContainer)) {
+      for (const el of next) {
+        const p = el.closest("p, li, td, th, h1, h2, h3, h4, h5, h6, blockquote, figcaption") ?? el.closest("[data-selectable]");
+        if (p instanceof HTMLElement && !p.closest('.cm-editor, [contenteditable="true"]') && ProseBands.accepts(p, range)) paragraphs.add(p);
+      }
+    }
+    // One overlay owns nested text flows, so their tint cannot double.
+    for (const p of paragraphs) {
+      if ([...paragraphs].some(outer => outer !== p && outer.contains(p))) paragraphs.delete(p);
+    }
+    for (const [p, layer] of prose) {
+      if (paragraphs.has(p) && p.isConnected) continue;
+      layer.close();
+      prose.delete(p);
+    }
+    for (const p of paragraphs) {
+      const layer = prose.get(p);
+      if (layer) layer.update(range!);
+      else prose.set(p, new ProseBands(p, range!));
+      for (const el of next) if (!el.classList.contains("katex-display") && p.contains(el)) next.delete(el);
     }
     for (const [el, bands] of painted) {
       if (next.has(el) && el.isConnected) continue;

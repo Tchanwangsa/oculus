@@ -5,6 +5,7 @@ import { Check, CaretDown, CaretUp, CaretUpDown } from "@phosphor-icons/react";
 import { Select as SelectPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
 
 function Select({
   ...props
@@ -55,18 +56,14 @@ function SelectContent({
   children,
   // Popper, not "item-aligned", so it anchors and flips like every other popup.
   position = "popper",
+  scrollFade = false,
+  viewportClassName,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
-  // Radix shows a scroll arrow whenever scrollHeight exceeds clientHeight, and
-  // under page zoom WebKit rounds those a pixel apart on a list that fits.
+}: React.ComponentProps<typeof SelectPrimitive.Content> & {
+  scrollFade?: boolean;
+  viewportClassName?: string;
+}) {
   const [overflows, setOverflows] = React.useState(false);
-  const viewportRef = React.useCallback((el: HTMLDivElement | null) => {
-    if (!el) return;
-    const measure = () => setOverflows(el.scrollHeight - el.clientHeight > 1);
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   return (
     <SelectPrimitive.Portal>
@@ -82,20 +79,60 @@ function SelectContent({
         position={position}
         {...props}
       >
-        <SelectScrollUpButton className={cn(!overflows && "hidden")} />
-        <SelectPrimitive.Viewport
-          ref={viewportRef}
-          className={cn(
-            "p-1",
-            position === "popper" &&
-              "h-[var(--radix-select-trigger-height)] w-full scroll-my-1 min-w-[var(--radix-select-trigger-width)]",
-          )}
+        <SelectScrollUpButton className={cn((scrollFade || !overflows) && "hidden")} />
+        <SelectViewport
+          position={position}
+          scrollFade={scrollFade}
+          className={viewportClassName}
+          onOverflow={setOverflows}
         >
           {children}
-        </SelectPrimitive.Viewport>
-        <SelectScrollDownButton className={cn(!overflows && "hidden")} />
+        </SelectViewport>
+        <SelectScrollDownButton className={cn((scrollFade || !overflows) && "hidden")} />
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
+  );
+}
+
+/** Mounted with the popup, so the fade observes its live viewport. */
+function SelectViewport({ position, scrollFade, className, onOverflow, children }: {
+  position: "popper" | "item-aligned";
+  scrollFade: boolean;
+  className?: string;
+  onOverflow: (overflows: boolean) => void;
+  children: React.ReactNode;
+}) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const fadeRef = React.useRef<HTMLDivElement>(null);
+  useScrollFade(fadeRef, "y", scrollFade);
+  const viewportRef = React.useCallback((el: HTMLDivElement | null) => {
+    ref.current = el;
+    fadeRef.current = scrollFade ? el : null;
+  }, [scrollFade]);
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // WebKit can round a fitting list's heights a pixel apart under page zoom.
+    const measure = () => onOverflow(el.scrollHeight - el.clientHeight > 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [onOverflow]);
+
+  return (
+    <SelectPrimitive.Viewport
+      ref={viewportRef}
+      className={cn(
+        "p-1",
+        position === "popper" &&
+          "h-[var(--radix-select-trigger-height)] w-full scroll-my-1 min-w-[var(--radix-select-trigger-width)]",
+        className,
+      )}
+    >
+      {children}
+    </SelectPrimitive.Viewport>
   );
 }
 

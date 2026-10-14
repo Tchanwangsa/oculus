@@ -147,7 +147,7 @@ export function TranscriptionSection() {
   return (
     <Section
       title="Transcription"
-      description={isWindows ? "Videos without captions are transcribed on Groq’s free tier." : "Videos without captions are transcribed on Groq’s free tier or on this computer."}
+      description={isWindows ? "Transcribe videos without captions using Groq." : "Transcribe videos without captions."}
     >
       <LanguageRow
         language={language}
@@ -160,7 +160,7 @@ export function TranscriptionSection() {
       <div className="mt-3">
         <p className="text-xs text-foreground">Engines</p>
         <p id="transcribe-engines-hint" className="text-[11px] text-muted-foreground">
-          {isWindows ? "Add a Groq key to transcribe videos." : "Tried top to bottom: the next one answers only when the one above isn’t set up or hits its limit."}
+          {isWindows ? "Add a Groq key to transcribe videos." : "Tried in order if unavailable or at its limit."}
         </p>
         <EngineList
           order={order}
@@ -172,7 +172,7 @@ export function TranscriptionSection() {
         />
         {settled && !anyReady ? (
           <p className="mt-2 text-[11px] text-warning">
-            No engine is set up, so videos without captions stay without a transcript.
+            Set up an engine to transcribe videos.
           </p>
         ) : null}
         {note ? (
@@ -223,15 +223,15 @@ function LanguageRow({ language, speech, defaultLocale, disabled, onChange }: {
   const fallback = appleLocale("auto", defaultLocale);
 
   return (
-    <div className="flex items-center justify-between gap-4 py-2">
+    <div className="settings-row flex items-center justify-between gap-4 py-2">
       <div className="min-w-0">
         <p className="text-xs text-foreground">Language</p>
         <p className="text-[11px] text-muted-foreground">
           {value === "auto"
-            ? `Whisper and Groq judge it from the first 30 seconds heard.${
-                fallback ? ` On-device speech has no auto-detect and uses ${localeName(fallback)}.` : ""
+            ? `Groq and Whisper auto-detect.${
+                fallback ? ` On-device uses ${localeName(fallback)}.` : ""
               }`
-            : "Every engine transcribes in this language."}
+            : "Used by every engine."}
         </p>
       </div>
       <Select value={value} disabled={disabled} onValueChange={onChange}>
@@ -323,7 +323,7 @@ function EngineList({ order, settings, status, onReorder, onToggle, onOpen }: {
               }}
               style={strip.styleFor(engine, i)}
               className={cn(
-                "flex items-center gap-2 bg-card py-2 pr-2.5 pl-1.5 first:rounded-t-lg last:rounded-b-lg",
+                "flex flex-wrap items-center gap-2 bg-card py-2 pr-2.5 pl-1.5 first:rounded-t-lg last:rounded-b-lg",
                 !reorderable && "pl-3",
                 grabbed
                   ? "relative z-10 rounded-lg shadow-md"
@@ -348,9 +348,9 @@ function EngineList({ order, settings, status, onReorder, onToggle, onOpen }: {
                 <DotsSixVertical size={14} weight="bold" />
               </button>}
               {reorderable && <span className="w-3 shrink-0 text-[11px] text-muted-foreground tabular-nums">{i + 1}</span>}
-              <div className={cn("min-w-0 flex-1", !enabled && settings && "opacity-60")}>
+              <div className={cn("min-w-0 basis-28 flex-1", !enabled && settings && "opacity-60")}>
                 <p className="text-xs text-foreground">{NAMES[engine]}</p>
-                <p className="truncate text-[11px] text-muted-foreground">{text || "\u00a0"}</p>
+                <p className="text-[11px] text-muted-foreground">{text || "\u00a0"}</p>
               </div>
               <Switch
                 aria-label={`Use ${NAMES[engine]}`}

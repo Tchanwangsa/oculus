@@ -5,10 +5,13 @@ export const PANEL = {
   minWidth: 260,
   maxWidth: 640,
   side: "right",
-  // Closing is the header's toggle, so a drag never folds it.
+  // Hiding is the header's button or the bar's Versions toggle, never a drag.
   collapseThreshold: 0,
   storageKey: "oculus-document-history",
 } as const;
+
+/** The most of History's width the sidebar may take, so the page keeps room. */
+export const PANEL_MAX_SHARE = "50%";
 
 /** What a snapshot row says when it has no label of its own. */
 export const SNAPSHOT_HINT: Record<Exclude<VersionKind, "checkpoint">, string> = {
@@ -16,7 +19,3 @@ export const SNAPSHOT_HINT: Record<Exclude<VersionKind, "checkpoint">, string> =
   external: "Changed outside the editor",
   restore: "Before a restore",
 };
-
-/** Leading YAML frontmatter, which markdown would read as a rule and a
- *  heading; the preview shows it as the YAML it is. */
-export const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;

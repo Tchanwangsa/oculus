@@ -1,4 +1,4 @@
-import { WidgetType, type EditorView } from "@codemirror/view";
+import { EditorView, WidgetType } from "@codemirror/view";
 
 import type { TableLayout } from "../tableModel";
 import { attach } from "./attach";
@@ -75,6 +75,15 @@ export class TableWidget extends WidgetType {
     frame.className = "cm-table-frame";
     const scroll = document.createElement("div");
     scroll.className = "cm-table-scroll";
+    // A read-only view (a saved version) draws the grid alone: no editable
+    // cells, handles or add buttons, and no handlers to write back.
+    if (!view.state.facet(EditorView.editable)) {
+      dom.classList.add("cm-table-static");
+      frame.append(scroll);
+      dom.appendChild(frame);
+      render(dom, this.layout);
+      return dom;
+    }
     // Holds focus while a block of cells is selected.
     scroll.tabIndex = -1;
     const drop = document.createElement("div");

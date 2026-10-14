@@ -32,6 +32,9 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import { ancestorAt } from "../syntax/syntax";
+import { liveMode } from "../core/mode";
+import { ghostParts } from "./ghostMath";
+import { mathsReady, onMathsReady } from "@/lib/maths";
 import { SUGGEST_IDLE, type SuggestStatus } from "@/components/documents/DocumentControls";
 
 /** Quiet time after the last edit before a request goes out. */
@@ -69,6 +72,7 @@ interface Ghost {
 }
 
 const setGhost = StateEffect.define<Ghost | null>();
+const redrawGhost = StateEffect.define<null>();
 
 /** The ghost after an edit: kept, shorter, only when the edit typed its
  *  front at the caret. */
@@ -92,24 +96,36 @@ function consume(ghost: Ghost, tr: Transaction): Ghost | null {
 }
 
 class GhostWidget extends WidgetType {
-  constructor(readonly text: string) {
+  readonly maths = mathsReady();
+
+  constructor(readonly text: string, readonly live: boolean) {
     super();
   }
 
   eq(other: GhostWidget): boolean {
-    return other.text === this.text;
+    return other.text === this.text && other.live === this.live && other.maths === this.maths;
   }
 
   toDOM(): HTMLElement {
     const span = document.createElement("span");
     span.className = "cm-ghost";
     span.setAttribute("aria-hidden", "true");
-    span.textContent = this.text;
+    this.updateDOM(span);
     return span;
   }
 
   updateDOM(dom: HTMLElement): boolean {
-    dom.textContent = this.text;
+    dom.replaceChildren();
+    for (const part of ghostParts(this.text, this.live)) {
+      if (part.html == null) {
+        dom.append(document.createTextNode(part.text));
+      } else {
+        const math = document.createElement("span");
+        math.className = part.display ? "cm-ghost-math cm-ghost-math-display" : "cm-ghost-math";
+        math.innerHTML = part.html;
+        dom.append(math);
+      }
+    }
     return true;
   }
 }
@@ -119,6 +135,7 @@ const ghostField = StateField.define<Ghost | null>({
   update(ghost, tr) {
     for (const e of tr.effects) if (e.is(setGhost)) return e.value;
     if (!ghost) return null;
+    if (tr.effects.some((e) => e.is(redrawGhost))) return { ...ghost };
     // An open completion list owns the caret's keys; the two never overlap.
     if (completionStatus(tr.state) === "active") return null;
     if (tr.docChanged) return consume(ghost, tr);
@@ -131,11 +148,14 @@ const ghostField = StateField.define<Ghost | null>({
     return ghost;
   },
   provide: (f) =>
-    EditorView.decorations.from(f, (g) =>
-      g
-        ? Decoration.set(Decoration.widget({ widget: new GhostWidget(g.text), side: 1 }).range(g.pos))
-        : Decoration.none,
-    ),
+    EditorView.decorations.compute([f, liveMode], (state) => {
+      const ghost = state.field(f);
+      return ghost
+        ? Decoration.set(Decoration.widget({
+            widget: new GhostWidget(ghost.text, state.facet(liveMode)), side: 1,
+          }).range(ghost.pos))
+        : Decoration.none;
+    }),
 });
 const NO_SUGGEST = new Set(["FencedCode", "CodeBlock", "Frontmatter"]);
 const WORD_CHAR = /[\p{L}\p{N}]/u;
@@ -155,6 +175,7 @@ function canSuggest(state: EditorState): boolean {
 let nextRequestId = 0;
 
 class SuggestPlugin {
+  private readonly offMaths: () => void;
   private timer: number | null = null;
   /** The request being awaited; 0 when none. Any other answer is stale. */
   private latest = 0;
@@ -163,6 +184,7 @@ class SuggestPlugin {
 
   constructor(readonly view: EditorView) {
     this.config = view.state.facet(suggestConfig);
+    this.offMaths = onMathsReady(() => view.dispatch({ effects: redrawGhost.of(null) }));
   }
 
   update(u: ViewUpdate) {
@@ -183,6 +205,7 @@ class SuggestPlugin {
   }
 
   destroy() {
+    this.offMaths();
     this.stop();
     this.config?.onStatus(SUGGEST_IDLE);
   }
@@ -291,6 +314,9 @@ const ghostTheme = EditorView.theme({
     userSelect: "none",
     WebkitUserSelect: "none",
   },
+  ".cm-ghost-math": { display: "inline-block", whiteSpace: "normal" },
+  ".cm-ghost-math-display": { display: "block", padding: "0.4em 0" },
+  ".cm-ghost-math-display .katex-display": { margin: "0" },
 });
 
 export function aiSuggest(config: SuggestConfig): Extension {

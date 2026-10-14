@@ -70,6 +70,38 @@ describe("rehypeMaths", () => {
     expect(node.children).toEqual([{ type: "text", value: deep(320) }]);
   });
 
+  test("a repeated formula is served as a fresh copy of the same render", () => {
+    const first = transform("\\sqrt{a^2+b^2}").node;
+    const second = transform("\\sqrt{a^2+b^2}").node;
+    expect(second).toEqual(first);
+    expect(second).not.toBe(first);
+    expect(second.children[0]).not.toBe(first.children[0]);
+    first.properties.className = ["mutated"];
+    first.children.length = 0;
+    const third = transform("\\sqrt{a^2+b^2}").node;
+    expect(third.properties.className).toEqual(["katex"]);
+    expect(third).toEqual(second);
+  });
+
+  test("inline and display renders of one source are kept apart", () => {
+    const inline = transform("y^3").node;
+    const display = transform("y^3", "math-display").node;
+    expect(inline.properties.className).toEqual(["katex"]);
+    expect(display.properties.className).toEqual(["katex-display"]);
+    expect(transform("y^3").node).toEqual(inline);
+    expect(transform("y^3", "math-display").node).toEqual(display);
+  });
+
+  test("a cached parse error is reported on every render", () => {
+    const first = transform("\\frac{z");
+    const second = transform("\\frac{z");
+    expect(first.messages).toHaveLength(1);
+    expect(second.messages).toHaveLength(1);
+    expect(second.messages[0].options.ruleId).toBe("parseerror");
+    expect(second.node).toEqual(first.node);
+    expect(second.node).not.toBe(first.node);
+  });
+
   test("before the engine is ready a formula is a placeholder, still anchored", async () => {
     await ready();
     // Exhaust the current instance and any spare without a cached formula

@@ -18,7 +18,7 @@ export function SearchField({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex h-7 w-56 shrink-0 items-center gap-2 rounded-full border border-border bg-card px-2.5 focus-within:border-brand/50">
+    <div className="flex h-7 w-56 max-w-full shrink-0 items-center gap-2 rounded-full border border-border bg-card px-2.5 focus-within:border-brand/50">
       <MagnifyingGlass size={13} className="shrink-0 text-muted-foreground" />
       <input
         value={value}

@@ -1,3 +1,5 @@
+import { extendUnit, type StopRange } from "@/lib/maths/geometry/units";
+import { selectParagraph } from "./paragraph";
 import { copied } from "./clipboard";
 import { fieldOf, formulaAt } from "./formula";
 import { Session } from "./session";
@@ -5,21 +7,15 @@ import { Session } from "./session";
 export { watchMathSelection } from "./whole";
 
 /**
- * Selecting inside a rendered formula (a chat reply, a markdown file) in
- * place. `rehypeMaths` draws the maths with the source map,
- * and a press runs the note field's edit model (`MathField`) read-only over
- * that drawing: the geometry (`lib/maths/geometry`) finds the stop under
- * the pointer, a drag selects from the press to it, the model widening the
- * selection over whole structures, and bands over the selected atoms are
- * drawn under the glyphs. Nothing is swapped in and no glyph moves.
+ * Read-only selection in rendered chat and file maths. The source map and
+ * field model choose caret stops for a drag, atoms for a double-click and
+ * enclosing structures for a triple-click. Bands draw under the glyphs.
+ * A third prose click takes the whole paragraph, including inline maths.
  *
- * A press with no drag selects nothing (no caret is drawn) and closes on
- * release; Shift extends from the last press. A press elsewhere, Esc,
- * focus moving or a text selection starting closes it. Copy writes the
- * selected TeX wrapped by its shape (`clipboard.ts`), Select All takes the
- * model's select-all.
- * Maths the model cannot open selects as text does, whole
- * (`selection.ts`).
+ * An empty press closes on release; Shift extends from the last press.
+ * A press elsewhere, Esc, focus moving or native selection closes maths.
+ * Copy wraps the selected TeX by its shape; Select All takes the formula.
+ * Maths the model cannot open stays with native selection and copies whole.
  */
 
 let active: Session | null = null;
@@ -27,6 +23,7 @@ let active: Session | null = null;
  *  selection starts and focus stays put (cancelling the `pointerdown`
  *  would kill WebKit's click, docs/ui.md). */
 let taken = false;
+let press: { session: Session; unit: StopRange | null; group: boolean } | null = null;
 
 function close() {
   active?.close();
@@ -54,6 +51,8 @@ function pointerDown(e: PointerEvent) {
     return;
   }
   active = session;
+  const gesture = { session, unit: null as StopRange | null, group: false };
+  press = gesture;
   taken = true;
   window.getSelection()?.removeAllRanges();
   blurFocus();
@@ -64,13 +63,23 @@ function pointerDown(e: PointerEvent) {
   let head = at;
   const move = (m: PointerEvent) => {
     m.preventDefault();
-    if (active !== session) return;
+    if (active !== session || m.pointerId !== e.pointerId) return;
+    if (gesture.unit) {
+      const next = session.unitAt(m.clientX, m.clientY, gesture.group);
+      if (next) {
+        const range = extendUnit(gesture.unit, next);
+        session.anchor = range[0];
+        if (!session.select(...range)) close();
+      }
+      return;
+    }
     const next = session.stopAt(m.clientX, m.clientY);
     if (next == null || next === head) return;
     head = next;
     if (!session.select(anchor, head)) close();
   };
   const end = () => {
+    if (press === gesture) press = null;
     taken = false;
     window.removeEventListener("pointermove", move, true);
     window.removeEventListener("pointerup", end, true);
@@ -104,7 +113,18 @@ export function watchMathSelect() {
   document.addEventListener(
     "mousedown",
     (e) => {
-      if (taken) e.preventDefault();
+      if (taken) {
+        e.preventDefault();
+        if (!press || e.detail < 2 || e.shiftKey) return;
+        press.group = e.detail >= 3;
+        press.unit = press.session.unitAt(e.clientX, e.clientY, press.group);
+        if (press.unit) {
+          press.session.anchor = press.unit[0];
+          if (!press.session.select(...press.unit)) close();
+        }
+      } else if (e.button === 0 && e.detail === 3 && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && selectParagraph(e.target)) {
+        e.preventDefault();
+      }
     },
     true,
   );

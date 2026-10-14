@@ -40,8 +40,8 @@ The field opens only once the maths engine (`app/src/lib/maths`) has loaded,
 and only on maths its edit model opens on (it parses, and the engine doesn't
 trap: `readsCleanly`). Until the engine has loaded, the rendering is the
 maths' source in muted text (`cm-math-pending`), and `mathsWatcher` redraws it
-once it is ready. When it has, the rendering is the engine's KaTeX markup
-([viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface)), which
+once it is ready. When it has, the rendering is the engine's KaTeX markup,
+cached by source and options ([viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface)), which
 the field draws too, so entering maths moves neither it nor its line.
 
 `MathView` is the field over the edit model (`MathField` in
@@ -67,7 +67,15 @@ a place. Its styles are the `.cm-math-view` rules in `theme/math.ts`; the
 field takes the rendering's box exactly (an inline field's 2px of tint each
 side are taken back by a negative margin, a block's padding is the
 rendering's at the note's font size), so opening or closing maths moves
-neither it nor the text around it. The controller focuses it and places the caret once the
+neither it nor the text around it. Inline renderings and fields each have
+one inline-block layout box, keeping scripts with their formula when prose
+beside them is indented or wraps. Spacing atoms' caret positions include
+their signed margin advance, so Tab's `\qquad` puts the caret after the gap.
+When a macro expands into several rendered siblings, its caret uses their
+first or last edge in DOM order, including arguments inside the invocation's
+source range and signed spacing advances. Mapped DOM ancestry keeps a
+structure's children from replacing its outer boundary.
+The controller focuses it and places the caret once the
 widget is in the document.
 
 The model's source is the note's LaTeX, so a step's changes are written as
@@ -106,7 +114,12 @@ nearest gap, and in a block the row whose vertical band holds the press, else
 the nearest, bounds that search. A selection whose ends sit at different
 depths — dragged from beside a matrix into a cell, or across two cells — is
 widened by the model to take each structure it reaches into whole, while a
-block's rows select as one run; ←/→ and Backspace/Delete at inline maths,
+block's rows select as one run. Double-click selects an atom and triple-click
+its nearest enclosing group; multi-click dragging extends by whole units.
+The field and read-only rendering share `unitAt` and `extendUnit` in
+`lib/maths/geometry/units.ts`.
+
+←/→ and Backspace/Delete at inline maths,
 and those and ↑/↓ from the line beside a block (below), enter it at that
 end.
 
@@ -145,8 +158,11 @@ once letters are typed, every palette and completion template whose command
 starts with the name, one row per template (`\sqrt` offers `\sqrt{}` and
 `\sqrt[]{}`), the command typed exactly first, its bare form before its
 templates, then common commands and shorter names. For a name nothing starts
-with there is no list. Wherever it opens, it sits under the caret, flips
-above when it would pass the bottom of what is visible (the window, the
+with there is no list. Space’s picks use the visible caret before the empty-row
+prompt
+(`hintCaret` in `math/field/rustField/hint.ts`), which also anchors the full
+toolbox; other rows use the field’s measured caret. Wherever it opens, it sits
+under the caret, flips above when it would pass the bottom of what is visible (the window, the
 note's scroller, any clipping ancestor) and there is more room above, and
 slides sideways to stay inside them (`placeList`). The first row is
 highlighted; ↑/↓ move the highlight and Space, Tab or Enter accept it, as a
@@ -183,11 +199,13 @@ The rendering is `MathWidget` in
 atomic ranges in `live-preview/livePreview/`. Once the maths
 engine has loaded, every rendering's range is atomic, so a drag or Shift+arrow
 covers maths whole and Shift-click extends the selection over it. A
-rendering a selection covers draws bands over its atoms, as chat does
-(`WholeBands`, `mathSelection/whole.ts`; the rendering is `fieldHtml`, the
-field's own, source map on), and the note's highlight leaves it out: the
-selection layer is `core/selectionLayer.ts`, `drawSelection`'s with the
-rendered maths cut out (`selectionGaps`, a block with its line break).
+covered inline rendering shares one highlight height with the selected text
+beside it, including matrices and fractions. The note and rendered Markdown
+both use `mathSelection/lines.ts` and `lib/maths/geometry/lineBands.ts`;
+`core/selectionMath.ts` only translates CodeMirror’s range and overlay origin.
+Display maths keeps structural bands (`WholeBands`, `mathSelection/whole.ts`),
+which the note’s selection layer skips (`selectionGaps`, the block with its
+line break). The rendering is `fieldHtml`, the field’s own, source map on.
 Native selection never paints the rendering, and a selection taking a
 whole block keeps it rendered rather than opening the field. Copy and cut always write the note's source (`$$…$$` lines), since
 a rendering passes clipboard events to CodeMirror. A rendered block takes
@@ -242,7 +260,8 @@ shows while
 the caret is in maths (`mathAt` in `math/mathContext.ts`) until it is asked
 for: Σ in the toolbar or ⌘⇧Space (Mod-Shift-Space; Ctrl-Space is
 completion, and macOS reserves Ctrl- and ⌘-Space) opens or closes it, and
-it stays open until Esc, its close button, or the caret leaving that maths
+the toolbar’s tooltip shows Space, which opens the field’s picks first. The
+toolbox stays open until Esc, its close button, or the caret leaving that maths
 (`mathToolsField` holds what is open and on which maths, mapped through
 edits). It is a CodeMirror tooltip centred under the maths (a block on the
 text column): a live preview (the parse error in red; empty until the maths
@@ -316,7 +335,7 @@ slots become empty slots, the first taking the selection) and its TeX control
 switches to TeX mode; there a Visual control switches back. Neither toolbox
 ever takes focus. A block's field says so on any empty line (`syncHint` in
 `rustField/hint.ts`): an empty block, or one empty row of its lines, centres
-"Start typing or 'Space'" on that line with the caret drawn
+"Start typing or 'Space' for math tools" on that line with the caret drawn
 just before it (the hint's `::before`; the view's own is hidden). It goes
 once the line has anything in it. An inline field shows no prompt.
 

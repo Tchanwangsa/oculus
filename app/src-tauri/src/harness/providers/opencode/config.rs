@@ -136,7 +136,7 @@ mod tests {
             .collect();
         let last_deny = rules.iter().rposition(|(_, v)| v == "deny").unwrap();
         for dir in crate::library::paths::agent_write_dirs(lib) {
-            let key = format!("{}/**", dir.display());
+            let key = format!("{}/**", crate::library::paths::slash_path(&dir));
             let at = rules
                 .iter()
                 .position(|(k, v)| *k == key && v == "allow")

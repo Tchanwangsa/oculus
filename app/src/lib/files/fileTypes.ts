@@ -93,6 +93,22 @@ export function isVideoFile(filename: string): boolean {
   return VIDEO_EXTS.includes(ext(filename));
 }
 
+/** Source files that open in the code viewer (`CodeEditor`, read-only)
+ *  rather than as markdown. Each names a grammar `fileLanguage` knows
+ *  (`codeLanguages.ts`, held to it by a test); kept here so the file page
+ *  can tell without loading CodeMirror. */
+export const CODE_EXTS = [
+  "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "cs", "java", "kt", "kts", "scala", "swift", "go", "rs",
+  "py", "pyw", "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "php", "rb", "pl", "pm",
+  "lua", "r", "jl", "dart", "hs", "ml", "mli", "erl", "clj", "lisp", "scm", "m",
+  "sh", "bash", "sql", "css", "scss", "json", "yaml", "yml", "toml", "xml", "tex", "vhd", "vhdl", "sv",
+];
+
+/** True for a source file the code viewer shows. */
+export function isCodeFile(filename: string): boolean {
+  return CODE_EXTS.includes(ext(filename));
+}
+
 /** The derived markdown of a PDF-backed file or spreadsheet: "a.pdf" →
  *  "a.md", "deck.pptx" → "deck.pptx.md", "marks.xlsx" → "marks.xlsx.md". */
 export function parsedMdRelPath(file: { filename: string; relative_path: string }): string | null {

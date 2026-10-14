@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type { FindBarProps } from "@/components/ui/search/FindBar";
 import { nestedFindRoots, onScreen } from "@/lib/menu/find";
 import { buildCorpus, findMatches, locate, type TextSegment } from "@/lib/menu/findText";
+import { expandWithin } from "@/lib/ui/expandable";
+import { inSkippedSubtree } from "@/lib/ui/scrollAnchor";
 
 /**
  * Find in rendered DOM: plain-text, case-insensitive, painted with the CSS
@@ -10,6 +12,7 @@ import { buildCorpus, findMatches, locate, type TextSegment } from "@/lib/menu/f
  * skipped — `[data-find-skip]` subtrees (the bars, virtualised lists), other
  * find targets' roots, collapsed `<details>`, hidden elements. While open it
  * re-searches on DOM changes under the root, so a streaming reply stays lit.
+ * Windowed content mounts in full before a search (`lib/ui/expandable.ts`).
  */
 
 /** Highlights are document-wide, so every DOM find shares one per name and
@@ -94,6 +97,15 @@ function scrollsOn(el: Element, axis: "x" | "y"): boolean {
   return axis === "y" ? el.scrollHeight > el.clientHeight : el.scrollWidth > el.clientWidth;
 }
 
+/** The range's rect, or inside a `content-visibility: auto` box whose contents
+ *  are skipped, that box's rect: skipped text has no position until it draws. */
+function rectOf(range: Range): DOMRect {
+  const start = range.startContainer.parentElement;
+  let el = start;
+  while (el && inSkippedSubtree(el)) el = el.parentElement;
+  return el && el !== start ? el.getBoundingClientRect() : range.getBoundingClientRect();
+}
+
 /** Centres `range` in each scrolling ancestor it sits outside of. Rects scale
  *  with page zoom and `scrollTop` doesn't, so offsets are rescaled by each
  *  scroller's rect-to-layout ratio. */
@@ -102,7 +114,7 @@ function reveal(range: Range): void {
     const y = scrollsOn(el, "y");
     const x = scrollsOn(el, "x");
     if (!x && !y) continue;
-    const r = range.getBoundingClientRect();
+    const r = rectOf(range);
     const box = el.getBoundingClientRect();
     if (y && (r.top < box.top || r.bottom > box.bottom)) {
       const scale = el.offsetHeight ? box.height / el.offsetHeight : 1;
@@ -181,6 +193,21 @@ export function useDomFind(rootRef: RefObject<HTMLElement | null>): DomFind {
     );
   }, [s]);
 
+  /** Reveals the current match, then once more two frames on: rows that drew
+   *  on the way (skipped `content-visibility` ones) move it. One frame draws
+   *  them, the next reads the settled layout. */
+  const show = useCallback(
+    (range: Range) => {
+      reveal(range);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (s.open && s.ranges[s.current] === range && range.startContainer.isConnected) reveal(range);
+        }),
+      );
+    },
+    [s],
+  );
+
   /** Searches again. `keep` holds the current match across a DOM change;
    *  otherwise the first match not above the root's top is current. */
   const search = useCallback(
@@ -199,6 +226,9 @@ export function useDomFind(rootRef: RefObject<HTMLElement | null>): DomFind {
         paint();
         return;
       }
+      // Synchronously: the walk below must see what was windowed out, and
+      // nothing re-searches for rows mounted before the observer hangs.
+      expandWithin(root, { sync: true });
       const previous = s.ranges[s.current];
       const { nodes, segments } = collect(root);
       const corpus = buildCorpus(segments);
@@ -220,14 +250,14 @@ export function useDomFind(rootRef: RefObject<HTMLElement | null>): DomFind {
         current = s.ranges.findIndex((r) => after(r, previous));
       } else if (!keep) {
         const top = root.getBoundingClientRect().top;
-        current = s.ranges.findIndex((r) => r.getBoundingClientRect().bottom > top);
+        current = s.ranges.findIndex((r) => rectOf(r).bottom > top);
       }
       if (current < 0) current = keep ? Math.min(Math.max(s.current, 0), s.ranges.length - 1) : 0;
       s.current = s.ranges.length ? current : -1;
       paint();
-      if (scroll && s.ranges[s.current]) reveal(s.ranges[s.current]);
+      if (scroll && s.ranges[s.current]) show(s.ranges[s.current]);
     },
-    [rootRef, s, paint],
+    [rootRef, s, paint, show],
   );
 
   const setQuery = useCallback(
@@ -289,9 +319,9 @@ export function useDomFind(rootRef: RefObject<HTMLElement | null>): DomFind {
       if (!n) return;
       s.current = (s.current + (backwards ? -1 : 1) + n) % n;
       paint();
-      reveal(s.ranges[s.current]);
+      show(s.ranges[s.current]);
     },
-    [s, openFind, search, paint],
+    [s, openFind, search, paint, show],
   );
 
   // Re-search on DOM changes, ignoring the bar's own and nested targets'.
