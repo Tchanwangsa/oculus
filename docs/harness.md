@@ -34,6 +34,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends | `app/src-tauri/src/harness/manager/one_off.rs`, `app/src-tauri/src/harness/app/suggest.rs`, `app/src-tauri/src/harness/suggest/`, `app/src-tauri/src/lectures/lecture_end/` |
 | `@` menu and mention input | `app/src/components/harness/mentions/useMentionMenu.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
 | Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
+| Voice dictation, microphone capture and cleanup job | `app/src/components/harness/dictation/`, `app/src/lib/dictation/recording.ts`, `app/src-tauri/src/harness/app/dictation.rs` |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
 | Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/agents/useAttachments.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
@@ -642,6 +643,35 @@ mean capable), it is not Zen, and neither it nor its provider is hidden (one
 `settings` value, `opencode_catalogue`). `filterOffered` is the composer's
 only path and the opencode page counts through it. A stale key or a
 provider-verified model (Meta's Muse Spark) fails once in the timeline.
+
+## Dictation adds an editable message to the draft
+
+Chat, Studio and the lecture dock have a microphone beside Send. Recording
+replaces its toolbar with a live amplitude trace, elapsed time, Cancel and
+Finish. Finish stops the microphone, transcribes the clip through the same
+engine order and language as videos ([viewers.md](./viewers.md#dictation-transcribes-private-microphone-clips)),
+then runs the `dictationCleanup` job in a separate one-off session. The brief
+allows only hesitation and accidental repetition removal plus punctuation,
+capitalization, spacing and paragraph cleanup. It keeps the original wording,
+language, script, slang and mixed-language speech, with no translation,
+paraphrasing or grammar rewriting. Dictated requests remain text to preserve. The cleaned text appends to the existing draft; it
+never sends automatically. Settings → Jobs selects its model and fallbacks,
+defaulting to a small model.
+
+A read-only readiness check opens transcription setup when no engine is ready.
+The microphone is owned by one composer across split panes. Clips stop after
+ten minutes and are capped at 24 MiB. Cancel, switching drafts and unmounting
+release capture and invalidate pending results. Hiding a tab also cancels
+active capture, so a parked pane never keeps the microphone open. An already submitted engine
+or model call may finish, but a cancelled transcription never starts cleanup
+and no cancelled result enters another draft. Sending is blocked while a
+recording or conversion is pending; typing and attachments stay available.
+
+Failures keep the clip in memory for Retry transcription, or the successful
+transcript for Retry cleanup and Use original transcript. Dismiss releases
+both. An empty cleanup model chain surfaces the job's Settings hint and keeps
+the original transcript. No dictation creates a thread or timeline row.
+opencode uses the hidden, tool-denied `oculus-dictation` agent.
 
 ## Per-job models
 

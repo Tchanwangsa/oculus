@@ -61,6 +61,13 @@
       "prompt": "{{NAMING_PROMPT}}",
       "permission": { "*": "deny" }
     },
+    "oculus-dictation": {
+      "mode": "primary",
+      "hidden": true,
+      "description": "Tidies a dictated message",
+      "prompt": "{{DICTATION_PROMPT}}",
+      "permission": { "*": "deny" }
+    },
     "oculus-writer": {
       "mode": "primary",
       "hidden": true,

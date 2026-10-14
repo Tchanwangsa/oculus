@@ -43,6 +43,7 @@ pub const AGENT: &str = "oculus";
 /// The hidden agents the one-off turns run as (`Harness::one_off`): no tools,
 /// and the turn's brief as the whole prompt.
 pub const NAMING_AGENT: &str = "oculus-namer";
+pub const DICTATION_AGENT: &str = "oculus-dictation";
 pub const WRITER_AGENT: &str = "oculus-writer";
 pub const LECTURE_END_AGENT: &str = "oculus-lecture-end";
 

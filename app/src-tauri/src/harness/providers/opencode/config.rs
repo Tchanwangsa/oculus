@@ -47,6 +47,10 @@ fn render_config(library: &Path, prompt: &str, one_off: &OneOffPrompts, subagent
         .replace("\"{{NAMING_PROMPT}}\"", &json_string(one_off.naming))
         .replace("\"{{WRITER_PROMPT}}\"", &json_string(one_off.writer))
         .replace(
+            "\"{{DICTATION_PROMPT}}\"",
+            &json_string(crate::harness::app::dictation::INSTRUCTIONS),
+        )
+        .replace(
             "\"{{LECTURE_END_PROMPT}}\"",
             &json_string(one_off.lecture_end),
         )
@@ -66,7 +70,7 @@ fn json_fragment(s: &str) -> String {
 mod tests {
     use serde_json::{json, Value};
 
-    use super::super::{AGENT, LECTURE_END_AGENT, NAMING_AGENT, WRITER_AGENT};
+    use super::super::{AGENT, DICTATION_AGENT, LECTURE_END_AGENT, NAMING_AGENT, WRITER_AGENT};
     use super::*;
 
     /// opencode has no OS sandbox, so `oculus` reaches keyd's socket with no
@@ -261,6 +265,10 @@ mod tests {
         // The one-off agents are hidden, tool-less (a trailing `*` deny is the
         // last rule for every tool) and carry their own prompt.
         for (agent, prompt) in [
+            (
+                DICTATION_AGENT,
+                crate::harness::app::dictation::INSTRUCTIONS,
+            ),
             (NAMING_AGENT, "You name conversations."),
             (WRITER_AGENT, "You complete \"notes\"."),
             (LECTURE_END_AGENT, "You find where lectures end."),
