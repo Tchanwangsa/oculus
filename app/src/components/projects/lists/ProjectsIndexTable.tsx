@@ -11,7 +11,7 @@ import { TaskRow } from "./TaskRow";
 import { ProjectIndexRow } from "./ProjectIndexRow";
 import { TaskTableHeaders } from "./TaskTableHeaders";
 import { columnIds, gridTemplate, tableMinWidth } from "./tasksColumns";
-import type { ProjectRowActions } from "./ProjectList";
+import type { ProjectRowActions } from "./useProjectActions";
 import type { ProjectBranch } from "./projectTableData";
 
 const PROPERTIES: PropertyId[] = ["tags", "subject", "due", "updated"];

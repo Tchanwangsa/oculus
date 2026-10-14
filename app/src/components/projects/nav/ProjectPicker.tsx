@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CaretRight, Check, Circle, Kanban } from "@phosphor-icons/react";
+import { CaretRight, Check, Circle } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import {
   Collapsible,
@@ -7,7 +7,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { SubjectIcon } from "@/components/subjects/SubjectIcon";
+import { ProjectIcon } from "../icons/ProjectIcon";
 import { displayCode } from "@/lib/format/format";
 import type { DbProject } from "@/lib/planning/projects";
 
@@ -162,10 +162,8 @@ function DestinationRow({
     >
       {project == null ? (
         <Circle size={13} className="shrink-0" />
-      ) : project.subject_code ? (
-        <SubjectIcon code={project.subject_code} size={13} />
       ) : (
-        <Kanban size={13} className="shrink-0" />
+        <ProjectIcon project={project} size={13} />
       )}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {project?.subject_code && (

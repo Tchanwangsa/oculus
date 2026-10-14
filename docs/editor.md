@@ -16,7 +16,7 @@ maths is [editor-maths.md](./editor-maths.md).
 | Find and replace | `app/src/components/documents/editor/chrome/find.ts`, `app/src/components/documents/editor/chrome/useEditorFind.ts` |
 | A note's versions, its History list and bar | `app/src/lib/notes/documentVersions.ts`, `app/src/components/documents/HistoryPanel/` |
 | A version drawn on the page, and the word diff marking it | `app/src/components/documents/VersionView/`, `app/src/lib/notes/versionDiff/` |
-| The note editor as a form field (task body, a chat paste) | `app/src/components/documents/NoteField.tsx` |
+| The note editor as a form field (task body, project About, a chat paste) | `app/src/components/documents/NoteField.tsx` |
 | The Rust editor core, and its shadow of every note editor in dev builds ([editor-core.md](./editor-core.md)) | `app/editor-core/`, `app/src/components/documents/editor/shadow/` |
 
 ## The note editor is CodeMirror 6 over the file's exact text

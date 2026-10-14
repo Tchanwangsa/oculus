@@ -1,7 +1,7 @@
-import { navigateActive } from "@/lib/shell/tabRouters";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { useSubjects } from "@/hooks/data/useSubjects";
-import { TrailMore, useInSidePanel, useTrailCollapsed } from "@/components/tabs/PaneHeader";
+import { useInSidePanel } from "@/components/tabs/PaneHeader";
+import { BreadcrumbItems, type BreadcrumbItem } from "@/components/ui/Breadcrumb";
 import { displayCode } from "@/lib/format/format";
 import { isVideoFile } from "@/lib/files/fileTypes";
 
@@ -41,72 +41,16 @@ export const fileCrumbTab = (file: { category: string | null; filename: string }
     ? MEDIA_TAB
     : (file.category && FILE_TAB[file.category]) || null;
 
-/**
- * The subject → tab trail for full pages outside `SubjectLayout` (a file or
- * lecture page); `ProjectCrumbs` is the other half. A Fragment, so it drops
- * into the page's own crumb row.
- *
- * Buttons with `data-tab-href`, not `Link`s: the click must go through
- * `navigateActive`, which runs the departure rule (a playing lecture) that
- * the pane's own router skips; ⌘-click opens a new tab
- * (`app/src/lib/shell/newTabClicks.ts`). Resolves the subject from the id itself.
- * In the side panel the subject drops its icon (the switcher shows the
- * item's) and the tab folds behind `TrailMore` (`PaneHeader.tsx`).
- */
-export function SubjectCrumbs({
-  subjectId,
-  tab,
-}: {
-  subjectId: number;
-  tab?: CrumbTab | null;
-}) {
+/** The subject and category before a file or lecture's leaf title. */
+export function SubjectCrumbs({ subjectId, tab }: { subjectId: number; tab?: CrumbTab | null }) {
   const { subjects } = useSubjects();
-  const subject = subjects.find((s) => s.id === subjectId) ?? null;
+  const subject = subjects.find((s) => s.id === subjectId);
   const inSide = useInSidePanel();
-  const folded = useTrailCollapsed();
-
-  // Nothing rather than a placeholder; the leaf is already the title.
   if (!subject) return null;
-
-  return (
-    <>
-      <button
-        type="button"
-        data-tab-href={`/subjects/${subject.id}`}
-        onClick={() => navigateActive(`/subjects/${subject.id}`)}
-        className="flex shrink-0 cursor-pointer items-center gap-1.5 transition-colors hover:text-foreground"
-      >
-        {!inSide && <SubjectIcon code={subject.code} size={12} />}
-        {displayCode(subject.code)}
-      </button>
-      <Separator />
-      {tab && folded && (
-        <>
-          <TrailMore />
-          <Separator />
-        </>
-      )}
-      {tab && !folded && (
-        <>
-          <button
-            type="button"
-            data-tab-href={`/subjects/${subject.id}/${tab.to}`}
-            onClick={() => navigateActive(`/subjects/${subject.id}/${tab.to}`)}
-            className="shrink-0 cursor-pointer transition-colors hover:text-foreground"
-          >
-            {tab.label}
-          </button>
-          <Separator />
-        </>
-      )}
-    </>
-  );
-}
-
-function Separator() {
-  return (
-    <span aria-hidden className="shrink-0 text-border">
-      /
-    </span>
-  );
+  const items: BreadcrumbItem[] = [{
+    label: displayCode(subject.code), href: `/subjects/${subject.id}`,
+    icon: !inSide ? <SubjectIcon code={subject.code} size={12} /> : undefined,
+  }];
+  if (tab) items.push({ label: tab.label, href: `/subjects/${subject.id}/${tab.to}` });
+  return <BreadcrumbItems items={items} visible={inSide ? 0 : 2} trailing />;
 }

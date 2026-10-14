@@ -8,6 +8,7 @@ import {
   SIDE_NAV_ROW_ACTIVE,
   SIDE_NAV_ROW_IDLE,
   SideNav,
+  SideNavHeading,
 } from "@/components/ui/layout/SideNav";
 import type { HarnessThread } from "@/lib/harness";
 import type { Subject } from "@/lib/db";
@@ -135,19 +136,7 @@ export const ThreadList = memo(function ThreadList({
         animate={!panel.dragging}
         header={
           <>
-            <div className="px-4 pt-4 pb-3">
-              <div className="-mx-2 flex items-center gap-2.5 px-2 py-1">
-                <Chat size={16} className="shrink-0 text-foreground" />
-                <h1
-                  className={cn(
-                    "min-w-0 flex-1 truncate font-display text-[16px] font-semibold leading-none tracking-tight text-foreground",
-                    SIDE_NAV_FOLDS,
-                  )}
-                >
-                  Chat
-                </h1>
-              </div>
-            </div>
+            <SideNavHeading icon={Chat}>Chat</SideNavHeading>
             <div className="px-2 pb-2">
               <button
                 type="button"

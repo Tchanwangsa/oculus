@@ -6,7 +6,7 @@ import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { SubjectIconPicker } from "@/components/subjects/SubjectIconPicker";
 import { SubjectSearchResults } from "@/components/subjects/nav/SubjectSearchResults";
 import { SubjectSwitcher } from "@/components/subjects/nav/SubjectSwitcher";
-import { TABS } from "@/components/subjects/nav/tabs";
+import { TABS, subjectTabHref } from "@/components/subjects/nav/tabs";
 import {
   SideNav,
   SideNavLink,
@@ -123,7 +123,7 @@ export function SubjectNav({
         ) : TABS.map((tab, index) => (
           <SideNavLink
             key={tab.to}
-            to={tab.to}
+            to={subjectTabHref(tab.to, subject.id)}
             end={tab.end}
             icon={tab.icon}
             label={tab.label}

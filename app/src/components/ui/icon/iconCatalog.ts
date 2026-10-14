@@ -44,7 +44,7 @@ const e = (name: string, Icon: Icon, ...keywords: string[]): IconCatalogEntry =>
   keywords,
 });
 
-/** Curated Phosphor icons for subject identities, ordered by theme. */
+/** Curated Phosphor icons for subject and project identities, ordered by theme. */
 export const ICON_CATALOG: IconCatalogEntry[] = [
   // Study & school
   e("Book", Book, "read", "study"),

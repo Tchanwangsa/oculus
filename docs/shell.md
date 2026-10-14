@@ -301,10 +301,12 @@ closed panel opens one on `/new`.
   and expand and × after the page's buttons. Claims land in a layout effect,
   so any other page — or one still on `LoadingFill` — shows the standalone
   `SidePanelHeader` (switcher, front item's title, controls). In a claimed
-  row `PaneTrail` makes crumbs and title a sideways scroller with faded edges,
-  the subject crumb drops its icon, and every crumb but the subject (or, on a
-  task, the project) folds behind a "…" in place, which expands inline for
-  that page view. Expand
+  row `PaneTrail` makes crumbs and title a sideways scroller with faded edges.
+  Subject paths hide their ancestors behind a "…" popover. Planning pages
+  keep the immediate parent and current page visible and put earlier
+  ancestors in the same shared `Breadcrumb` popover
+  (`app/src/components/ui/Breadcrumb.tsx`). Selecting a parent navigates
+  without changing the trail's layout. Expand
   (`expandSide`) makes the front item the main page, or a new tab on ⌘-click,
   and removes it with `handover`: a lecture it owned is claimed for the main
   pane (or the new tab), so whatever comes to the panel's front next waits and

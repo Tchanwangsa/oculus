@@ -1,23 +1,17 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { ICON_CATALOG } from "@/components/subjects/iconCatalog";
-import {
-  courseColor,
-  ICON_COLORS,
-  iconKey,
-  useSubjectIconStore,
-} from "@/stores/planning/subjectIconStore";
+import { ICON_CATALOG } from "./iconCatalog";
+import { ICON_COLORS } from "@/lib/ui/iconPreferences";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
+import type { IconPickerProps } from "./IconPicker";
 
-/** The catalogue grid, mounted only while its picker is open. */
-export default function SubjectIconPickerBody({ code }: { code: string }) {
-  const pref = useSubjectIconStore((s) => s.prefs[iconKey(code)]);
-  const setPref = useSubjectIconStore((s) => s.setPref);
-  const clearPref = useSubjectIconStore((s) => s.clearPref);
+/** The same searchable catalogue and palette for subjects and projects. */
+export default function IconPickerBody({ value, defaultColor, defaultName, weight = "fill", onChange, onReset }: Omit<IconPickerProps, "children">) {
   const [query, setQuery] = useState("");
-
-  const activeColor = pref?.color ?? courseColor(code);
-
+  const ref = useRef<HTMLDivElement>(null);
+  useScrollFade(ref, "y", query);
+  const activeColor = value?.color ?? defaultColor;
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return ICON_CATALOG;
@@ -36,15 +30,16 @@ export default function SubjectIconPickerBody({ code }: { code: string }) {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter…"
+            placeholder="Search icons…"
+            aria-label="Search icons"
             autoFocus
             className="w-full bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground outline-none"
           />
         </div>
-        {pref && (
+        {value && (
           <button
             type="button"
-            onClick={() => clearPref(code)}
+            onClick={onReset}
             className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
           >
             Reset
@@ -53,12 +48,12 @@ export default function SubjectIconPickerBody({ code }: { code: string }) {
       </div>
 
       <div className="flex items-center gap-1.5 px-3 py-2.5">
-        {/* Auto = the hashed course colour; a stored colour overrides it. */}
+        {/* Auto follows the subject colour (or grey for Personal projects). */}
         <ColorSwatch
-          color={courseColor(code)}
+          color={defaultColor}
           label="Auto"
-          selected={pref?.color == null}
-          onClick={() => setPref(code, { color: undefined })}
+          selected={value?.color == null}
+          onClick={() => onChange({ color: undefined })}
         />
         <div className="mx-0.5 h-4 w-px bg-border-subtle" />
         {ICON_COLORS.map((c) => (
@@ -66,25 +61,27 @@ export default function SubjectIconPickerBody({ code }: { code: string }) {
             key={c.value}
             color={c.value}
             label={c.name}
-            selected={pref?.color === c.value}
-            onClick={() => setPref(code, { color: c.value })}
+            selected={value?.color === c.value}
+            onClick={() => onChange({ color: c.value })}
           />
         ))}
       </div>
 
-      <div className="grid max-h-52 grid-cols-8 gap-0.5 overflow-y-auto px-2 pb-2">
+      <div ref={ref} className="grid max-h-52 grid-cols-8 gap-0.5 overflow-y-auto px-2 pb-2">
         {shown.map(({ name, Icon }) => (
           <button
             key={name}
             type="button"
             title={name}
-            onClick={() => setPref(code, { icon: name })}
+            aria-label={`Use ${name} icon`}
+            aria-pressed={(value?.icon ?? defaultName) === name}
+            onClick={() => onChange({ icon: name })}
             className={cn(
               "flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-surface",
-              pref?.icon === name && "bg-surface-raised",
+              (value?.icon ?? defaultName) === name && "bg-surface-raised",
             )}
           >
-            <Icon size={17} weight="fill" color={activeColor} />
+            <Icon size={17} weight={weight} color={activeColor} />
           </button>
         ))}
         {shown.length === 0 && (

@@ -1,3 +1,4 @@
+import { ProjectIcon } from "../icons/ProjectIcon";
 import { Flag, FolderSimple, CalendarBlank } from "@phosphor-icons/react";
 import { StatusPill } from "@/components/projects/board/StatusPill";
 import { DateTimeField } from "@/components/projects/fields/DateTimeField";
@@ -60,7 +61,7 @@ export function TaskProperties({
             "cursor-default text-muted-foreground hover:bg-transparent",
           )}
         >
-          <FolderSimple size={13} className="shrink-0" />
+          {project ? <ProjectIcon project={project} size={13} /> : <FolderSimple size={13} className="shrink-0" />}
           <span className="truncate">{projectName}</span>
         </span>
       ) : (
@@ -76,7 +77,7 @@ export function TaskProperties({
             aria-label={`Project: ${projectName}`}
             className={cn(PILL, project ? "text-foreground" : "text-muted-foreground")}
           >
-            <FolderSimple size={13} className="shrink-0 text-muted-foreground" />
+            {project ? <ProjectIcon project={project} size={13} /> : <FolderSimple size={13} className="shrink-0 text-muted-foreground" />}
             <span className="truncate">{projectName}</span>
           </button>
         </ProjectPicker>

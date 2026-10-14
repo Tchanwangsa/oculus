@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
+import { useTaskFilterState } from "@/components/projects/tasks/useTaskFilterState";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { TasksBoard } from "@/components/projects/board/TasksBoard";
 import { DisplayMenu } from "@/components/projects/display/DisplayMenu";
@@ -8,11 +9,9 @@ import { NewTaskButton } from "@/components/projects/nav/NewTaskButton";
 import { useCreateTask } from "@/components/projects/nav/useCreateTask";
 import { SectionHeader } from "@/components/projects/page/SectionHeader";
 import {
-  DEFAULT_FILTER,
   filteredColumns,
   isFiltered,
   matchesFilter,
-  type TaskFilter,
 } from "@/components/projects/tasks/filterRules";
 import { taskFilterCounts } from "@/components/projects/tasks/filterCounts";
 import { ProjectFilter } from "@/components/projects/tasks/ProjectFilter";
@@ -27,13 +26,12 @@ import {
   parseView,
   viewLabel,
 } from "@/components/projects/tasks/taskViews";
-import { appendNeighbour } from "@/components/projects/tasks/universalTasks";
+import { useTaskActions } from "@/components/projects/tasks/useTaskActions";
 import { useTaskList } from "@/hooks/data/useTaskList";
 import { useTaskTags } from "@/hooks/data/useTaskTags";
 import { useStoredState } from "@/hooks/ui/useStoredState";
 import { useTasksPanel } from "@/layouts/TasksLayout";
-import { createTaskTag, type DbTaskTag, type DbTaskWithProject } from "@/lib/planning/projects";
-import { useProjectsStore } from "@/stores/planning/projectsStore";
+import { type DbTaskTag } from "@/lib/planning/projects";
 
 /**
  * Every task across every project, plus unfiled ones.
@@ -51,7 +49,7 @@ export default function TasksPage() {
   const tagParam = parseTagParam(params.get("tag"));
 
   const [display, setDisplay] = useStoredState(DISPLAY_KEY, readDisplay, writeDisplay);
-  const [pickedFilter, setFilter] = useState<TaskFilter>(DEFAULT_FILTER);
+  const [pickedFilter, setFilter] = useTaskFilterState();
   const [query, setQuery] = useState("");
   const panel = useTasksPanel();
 
@@ -72,10 +70,7 @@ export default function TasksPage() {
     [pickedFilter, tagById, tagsLoaded],
   );
 
-  // Writes go through the store's wrappers; the refresh is the event's.
-  const moveTask = useProjectsStore((s) => s.moveTask);
-  const updateTask = useProjectsStore((s) => s.updateTask);
-  const refileTask = useProjectsStore((s) => s.refileTask);
+  const actions = useTaskActions(tasks);
   const create = useCreateTask();
 
   // Search, nav and completion apply to rows and option counts alike. Each
@@ -99,37 +94,6 @@ export default function TasksPage() {
   }, [candidates, filter, display.sort, projectById]);
 
   const columns = useMemo(() => filteredColumns(filter), [filter]);
-
-  /** A drag or a status pick. Appends to the destination column (there is no
-   *  manual order here), computed against the whole list, not the filtered one:
-   *  a hidden neighbour is still a neighbour for `position`. */
-  const move = useCallback(
-    (task: DbTaskWithProject, columnId: string) => {
-      const before = appendNeighbour(tasks, task, columnId);
-      moveTask(task.id, columnId, before, null).catch((e) => console.error("move task failed", e));
-    },
-    [moveTask, tasks],
-  );
-
-  /** From the table's Project cell; the whole write is `refileTask`'s. */
-  const refile = useCallback(
-    (task: DbTaskWithProject, projectId: number | null) => {
-      refileTask(task.id, projectId).catch((e) => console.error("refile task failed", e));
-    },
-    [refileTask],
-  );
-
-  const actions = useMemo(
-    () => ({
-      onMove: move,
-      onRefile: refile,
-      onTags: (task: DbTaskWithProject, tagIds: number[]) => {
-        updateTask(task.id, { tagIds }).catch((e) => console.error("update task tags failed", e));
-      },
-      onCreateTag: (name: string) => createTaskTag(name),
-    }),
-    [move, refile, updateTask],
-  );
 
   const title = tag ? (view === "all" ? tag.name : `${tag.name} · ${viewLabel(view)}`) : viewLabel(view);
   const empty =
@@ -169,7 +133,7 @@ export default function TasksPage() {
             <p className="max-w-sm text-center text-xs text-muted-foreground">{empty}</p>
           </div>
         ) : display.view === "board" ? (
-          <TasksBoard tasks={shown} columns={columns} projectById={projectById} tagById={tagById} onMove={move} />
+          <TasksBoard tasks={shown} columns={columns} projectById={projectById} tagById={tagById} onMove={actions.onMove} />
         ) : (
           <TasksTable
             tasks={shown}
