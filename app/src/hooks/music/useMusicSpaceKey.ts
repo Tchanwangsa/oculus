@@ -1,13 +1,9 @@
 import { useEffect, useRef } from "react";
-import { music, musicControllable, shownPlayback, type MusicSnapshot } from "@/lib/music";
+import type { MusicSnapshot } from "@/lib/music";
+import { handleMusicSpaceKey } from "@/lib/music/spaceKey";
 import { useMusicStore } from "@/stores/music/musicStore";
 import { useTabId } from "@/components/tabs/TabContext";
 import { useActivePaneId } from "@/stores/shell/tabs/selectors";
-
-/** Where Space belongs to the focused control: typing, and open popups that
- *  use it to pick. */
-const OWNS_SPACE =
-  'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], [data-slot="popover-content"]';
 
 /**
  * Space plays and pauses what the player shows, while this page is the
@@ -22,15 +18,7 @@ export function useMusicSpaceKey(snapshot: MusicSnapshot | null) {
 
   useEffect(() => {
     if (!focused) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== " " || e.metaKey || e.ctrlKey || e.altKey) return;
-      const target = e.target as HTMLElement | null;
-      if (target?.closest(OWNS_SPACE)) return;
-      e.preventDefault();
-      const s = snapshotRef.current;
-      if (e.repeat || !s || !musicControllable(s)) return;
-      void run(shownPlayback(s).playing ? music.pausePlayer : music.play);
-    };
+    const handler = (e: KeyboardEvent) => handleMusicSpaceKey(e, snapshotRef.current, run);
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [focused, run]);

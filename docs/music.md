@@ -107,9 +107,11 @@ is on, or from `music_wake` when the player is opened with none running.
   made again. Without a track the title says "Reconnecting…" or
   "Connecting…" meanwhile; with one, the track stays.
 - **Space plays and pauses on `/music`** while it is the focused pane
-  (`useMusicSpaceKey`), sending the same play or pause as the button. It is
+  (`useMusicSpaceKey`), and inside the rail's open player popover. Both use
+  `app/src/lib/music/spaceKey.ts`, sending the same play or pause as the button. It is
   taken from a focused button too, so it never re-clicks the track or toggle
-  just clicked; text fields, menus, dialogs and popovers keep their Space.
+  just clicked; holding Space sends only one command. Text fields, menus,
+  dialogs and other popovers (including the device menu) keep their Space.
 - **The clock ticks in the UI**: `useMusicPosition` re-renders on each whole
   second of `positionNow` while playing, the pane is on screen and the
   window is visible. A slider keeps its dragged value until the next

@@ -4,6 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NowPlaying } from "@/components/music/NowPlaying";
 import { music, shownPlayback } from "@/lib/music";
+import { handleMusicSpaceKey } from "@/lib/music/spaceKey";
 import { openBeside } from "@/lib/shell/tabRouters";
 import { cn } from "@/lib/utils";
 import { musicError, useMusicStore } from "@/stores/music/musicStore";
@@ -23,6 +24,7 @@ export function MusicTile() {
   const shown = useMusicTileShown();
   const snapshot = useMusicStore((s) => s.snapshot);
   const error = useMusicStore(musicError);
+  const run = useMusicStore((s) => s.run);
   const [open, setOpen] = useState(false);
   const path = useActivePath().split("?")[0];
   const isActive = open || path === "/music" || path.startsWith("/music/");
@@ -74,7 +76,13 @@ export function MusicTile() {
         </TooltipTrigger>
         {!open && <TooltipContent side="right">{label}</TooltipContent>}
       </Tooltip>
-      <PopoverContent side="right" align="start" sideOffset={8} className="w-72">
+      <PopoverContent
+        side="right"
+        align="start"
+        sideOffset={8}
+        className="w-72"
+        onKeyDownCapture={(e) => handleMusicSpaceKey(e, snapshot, run, e.currentTarget)}
+      >
         <NowPlaying
           snapshot={snapshot}
           error={error}
