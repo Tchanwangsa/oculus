@@ -14,6 +14,7 @@ export function FilterPopover({
   active,
   icon,
   className,
+  triggerClassName,
   children,
 }: {
   label: string;
@@ -21,6 +22,8 @@ export function FilterPopover({
   icon?: ReactNode;
   /** The popover's width and padding, over `w-56 p-1.5`. */
   className?: string;
+  /** Over the pill's `h-7 px-2.5 text-xs`, e.g. to match the buttons beside it. */
+  triggerClassName?: string;
   children: (close: () => void) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -33,6 +36,7 @@ export function FilterPopover({
           className={cn(
             "h-7 shrink-0 gap-1.5 px-2.5 text-xs font-normal",
             active ? "border-brand/40 text-brand" : "text-foreground",
+            triggerClassName,
           )}
         >
           {icon}

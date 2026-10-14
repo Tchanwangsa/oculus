@@ -160,7 +160,10 @@ themes are opt-in and keep the same structure.
   narrowing); a multi-select is a `FilterChecklist` (an option may carry the
   glyph its rows draw, before the label, with the count on the right), and the
   applied values sit under the toolbar as `FilterChips` — one line that scrolls
-  with faded edges, never wraps.
+  with faded edges, never wraps. Inside a popover, `ChipRow` + `ToggleChip` do
+  the same for a row of toggle chips; a long single-choice list sits in
+  `FilterList` (fixed max height, `overflow-y: scroll` so the gutter is always
+  reserved) with `FilterFold` for a collapsed group such as Archived.
 - **Settings, subjects and Chat share one nav column**, `SideNav`: a 208px column
   on the window's `background` beside the page, a pinned header, rows with a
   16px icon and the active row filled, never an underline strip, and
