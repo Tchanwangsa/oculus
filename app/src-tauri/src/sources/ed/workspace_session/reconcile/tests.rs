@@ -238,6 +238,8 @@ fn an_unchanged_head_skips_the_download_and_only_pushes() {
     assert_eq!(ed.downloads, 1);
 }
 
+// Windows cannot hold a file named with a colon, which is the point of it.
+#[cfg(unix)]
 #[test]
 fn a_file_ed_left_out_of_the_zip_is_not_taken_for_deleted() {
     let dir = Scratch::new("ed-reconcile-unknown");

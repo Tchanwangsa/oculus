@@ -72,6 +72,24 @@ fn run(dir: &Path, speaker: &KokoroSpeaker) -> Report {
 }
 
 /// The process's peak resident set so far, in bytes.
+#[cfg(windows)]
+fn peak_rss() -> u64 {
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    let mut counters = std::mem::MaybeUninit::<PROCESS_MEMORY_COUNTERS>::zeroed();
+    // SAFETY: the struct is zeroed and its size passed, as the call requires.
+    unsafe {
+        let size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        GetProcessMemoryInfo(GetCurrentProcess(), counters.as_mut_ptr(), size);
+        counters.assume_init().PeakWorkingSetSize as u64
+    }
+}
+
+/// The process's peak resident set so far, in bytes.
+#[cfg(not(windows))]
 fn peak_rss() -> u64 {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
     // SAFETY: getrusage fills the struct it is given.
