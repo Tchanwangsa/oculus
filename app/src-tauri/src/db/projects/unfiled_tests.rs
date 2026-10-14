@@ -56,12 +56,30 @@ async fn pre_37() -> SqlitePool {
     pool
 }
 
+/// The task reads join the tag and file link tables (migration 47), and the
+/// file links reference `files`.
+async fn add_tag_tables(pool: &SqlitePool) {
+    sqlx::raw_sql("CREATE TABLE files (id INTEGER PRIMARY KEY);")
+        .execute(pool)
+        .await
+        .expect("files stub");
+    let tags = crate::db::migrations::all()
+        .into_iter()
+        .find(|migration| migration.version == 47)
+        .expect("migration 47");
+    sqlx::raw_sql(tags.sql)
+        .execute(pool)
+        .await
+        .expect("migration 47");
+}
+
 async fn migrated() -> SqlitePool {
     let pool = pre_37().await;
     sqlx::raw_sql(UNFILED_TASKS_SQL)
         .execute(&pool)
         .await
         .expect("migration 37");
+    add_tag_tables(&pool).await;
     pool
 }
 
@@ -119,6 +137,7 @@ async fn the_rebuild_keeps_parents_children_and_their_cascades() {
         .execute(&pool)
         .await
         .expect("migration 37");
+    add_tag_tables(&pool).await;
 
     assert_eq!(count(&pool).await, 4, "every row survived the rebuild");
     assert_eq!(

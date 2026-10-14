@@ -116,7 +116,8 @@ impl Ctx {
             );
             return Ok(());
         }
-        print_board(&project, &tasks);
+        let tags = self.rt.block_on(projects::list_tags(&pool))?;
+        print_board(&project, &tasks, &tags);
         Ok(())
     }
 

@@ -4,12 +4,12 @@ import type { HarnessEnvelope } from "@/lib/harness";
 import { useTauriEvent } from "@/hooks/backend/useEvents";
 import { notifyProjectsUpdated } from "@/lib/planning/projects";
 
-const WRITES_PLANNING = /\boculus\s+(project|task)\b/;
+const WRITES_PLANNING = /\boculus\s+(project|task|tag)\b/;
 
 /** Feeds the chat store and tells the planning board to re-read when an agent
  *  writes to it. */
 export function useHarnessEvents() {
-  // An agent's `oculus project`/`oculus task` writes from another process,
+  // An agent's `oculus project`/`task`/`tag` writes from another process,
   // so the board is told to re-read when such a call finishes (ids are
   // remembered from `tool_started`; `tool_finished` has no command). Match
   // the command text, not `kind === "oculus_cli"`: `is_oculus_cli`

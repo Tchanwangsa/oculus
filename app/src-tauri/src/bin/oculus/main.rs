@@ -81,6 +81,13 @@ fn main() {
             TaskAction::Refile(a) => ctx.task_refile(&a),
             TaskAction::Rm(a) => ctx.task_rm(&a),
         },
+        Some(Command::Tag { action }) => match action {
+            TagAction::List(a) => ctx.tag_list(&a),
+            TagAction::Add(a) => ctx.tag_add(&a),
+            TagAction::Rm(a) => ctx.tag_rm(&a),
+            TagAction::Rename(a) => ctx.tag_rename(&a),
+            TagAction::Color(a) => ctx.tag_color(&a),
+        },
         Some(Command::Lecture { action }) => match action {
             LectureAction::Candidates(a) => ctx.lecture_candidates(&a),
             LectureAction::Chapters(a) => ctx.lecture_chapters(&a),

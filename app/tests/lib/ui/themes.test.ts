@@ -26,11 +26,11 @@ function tokensIn(file: string): Record<string, string> {
 
 const LIGHT_CSS = tokensIn("colors.css");
 const DARK_CSS = tokensIn("dark.css");
-/** What a theme owns: chart and reference glyph slots stay the stylesheet's,
- *  the indigo ramp is the named indigo (nothing reads it), and the frame is
- *  set by the prefs. */
+/** What a theme owns: chart, reference glyph and task-tag slots stay the
+ *  stylesheet's, the indigo ramp is the named indigo (nothing reads it), and
+ *  the frame is set by the prefs. */
 const THEME_TOKENS = Object.keys(LIGHT_CSS).filter(
-  (name) => !/^--color-(chart-|reference-|indigo-|frame$)/.test(name),
+  (name) => !/^--color-(chart-|reference-|tag-|indigo-|frame$)/.test(name),
 );
 const RESOLVED = /^#[0-9a-f]{6}$/;
 
