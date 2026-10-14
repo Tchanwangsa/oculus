@@ -19,7 +19,7 @@ lists each message the pages report while Oculus is open.
 | Capability invariant test | `app/src-tauri/src/shell/dock/capabilities_test.rs` |
 | Unread from the title | `app/src-tauri/src/shell/dock/title.rs` |
 | The `dock` message handler and its origin check; parsing a message | `app/src-tauri/src/shell/dock/channel.rs`, `app/src-tauri/src/shell/dock/message.rs` |
-| Injected scripts: Notification shim, chat-list row watcher, one-hop guard, trim sheets, leave-on-park | `app/src-tauri/src/shell/dock/scripts.rs`, `app/src-tauri/src/shell/dock/scripts/` |
+| Injected scripts: Notification shim, chat-list row watcher, one-hop guard, trim sheets, Instagram scrollbar, leave-on-park | `app/src-tauri/src/shell/dock/scripts.rs`, `app/src-tauri/src/shell/dock/scripts/` |
 | The one-hop rule table and its matcher; the native navigation guard | `app/src-tauri/src/shell/dock/scripts/rules/instagram.json`, `app/src-tauri/src/shell/dock/rules.rs`, `app/src-tauri/src/shell/dock/scripts/hop.js`; `navigation_guard` in `app/src-tauri/src/shell/dock/page.rs` |
 | The rule fixture and the JS guard's test | `app/src-tauri/src/shell/dock/scripts/rules/instagram.cases.json`, `app/tests/lib/dock/hop.test.ts` |
 | The Inbox (memory only) | `app/src-tauri/src/shell/dock/inbox.rs` |
@@ -105,6 +105,14 @@ browser page ([shell.md](./shell.md#the-shell-owns-tabs-side-panels-and-every-wi
   asks for the Messenger PIN to restore end-to-end-encrypted history; the
   user types it.
 
+## Pages receive the app's light/dark preference
+
+Dock pages share the browser's native appearance module
+([viewers.md](./viewers.md#the-in-app-browser-is-a-native-page-per-tab-owned-by-rust)).
+Sites using their own Automatic/System theme follow it; an explicitly
+selected site theme takes precedence. There is no injected theme script on
+WhatsApp or Discord.
+
 ## Popups go to the default browser
 
 `on_new_window` opens http(s) URLs with the opener plugin and denies the
@@ -164,7 +172,11 @@ top bar on `/messages/`, with `--header-height` zeroed on every element so
 the chats take the full height (`scripts/facebook.css`). It is a `<style>` added at document start
 (`scripts/style.js`), on the root element since `<head>` may not exist yet,
 and put back if removed. Facebook gets the sheet only, no guard. WhatsApp and
-Discord get neither, since both forbid client modification. Both sheets
+Discord get neither, since both forbid client modification. Instagram's
+`scripts/instagram-scroll.js` marks the thread list's vertical scroller; its
+trim sheet reserves 16px beside the rows for WebKit's overlay scrollbar,
+so positioned thread rows cannot paint over it. It follows list remounts without
+changing the horizontal Notes tray or the composer. Both sheets
 assume the sites' current markup (Instagram's `data-visualcompletion`
 wrapper and `main > section` layout, Facebook's `role=banner` and CSS
 variable), so a redesign can bring the chrome back; the guard still blocks
@@ -190,9 +202,8 @@ Facebook's number includes its other notifications.
 ## The Inbox hears from two read-only scripts
 
 Both are injected into each page's main frame (`scripts/`) and post to a
-`dock` WKScriptMessageHandler. Neither changes what the page shows; the guard
-and trim sheets above are the only scripts that do, and only on Instagram and
-Facebook.
+`dock` WKScriptMessageHandler. Neither changes what the page shows; the guard,
+trim sheets and Instagram scrollbar above are the scripts that do.
 
 - **Notification shim** (all four): replaces `window.Notification` and
   reports it as granted, so a site that notifies (Discord, once its own

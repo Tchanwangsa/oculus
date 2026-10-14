@@ -7,8 +7,8 @@
 //!   and the chat-list row watcher. They change nothing the page shows.
 //! - Page-modifying, only where the service has the data for it: the one-hop
 //!   guard (`rules`, Instagram) and the trim sheet (`trim_css`, Instagram and
-//!   Facebook). WhatsApp and Discord forbid client modification, so they get
-//!   neither.
+//!   Facebook), and the thread-list scrollbar (Instagram). WhatsApp and
+//!   Discord forbid client modification, so they get none of these.
 //!
 //! `leave_script` is not an init script: `page.rs` evaluates it when a page
 //! is parked.
@@ -22,6 +22,7 @@ const HOP: &str = include_str!("scripts/hop.js");
 const GUARD: &str = include_str!("scripts/guard.js");
 const STYLE: &str = include_str!("scripts/style.js");
 const LEAVE: &str = include_str!("scripts/leave.js");
+const INSTAGRAM_SCROLL: &str = include_str!("scripts/instagram-scroll.js");
 
 fn wrap(prelude: &str, body: &str) -> String {
     format!("(() => {{\n'use strict';\n{prelude}{POST}\n{body}\n}})();\n")
@@ -47,6 +48,9 @@ pub(super) fn init_scripts(service: &DockService) -> Vec<String> {
     }
     if let Some(rules) = service.rules {
         scripts.push(wrap(&hop_prelude(rules), GUARD));
+    }
+    if service.id == "instagram" {
+        scripts.push(wrap("", INSTAGRAM_SCROLL));
     }
     scripts
 }
@@ -82,6 +86,7 @@ mod tests {
             let scripts = init_scripts(s);
             assert!(scripts[0].contains("class DockNotification"), "{}", s.id);
             assert_eq!(has(&scripts, "const sites"), s.watches_rows, "{}", s.id);
+            assert_eq!(has(&scripts, "let scroller = null"), s.id == "instagram");
         }
         let whatsapp = init_scripts(service("whatsapp").unwrap());
         assert!(has(&whatsapp, "const SERVICE = \"whatsapp\";"));

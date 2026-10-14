@@ -51,6 +51,7 @@ pub fn run() {
         .manage(sync::scrape::embeds::EmbedBearer::default())
         .manage(shell::browser::BrowserState::default())
         .manage(shell::dock::DockState::default())
+        .manage(shell::native_layer::PageTheme::default())
         .manage(shell::usage::UsageState::default())
         .manage(music::MusicState::default())
         .manage(sources::ed::workspace_session::EdWorkspaces::default())
@@ -326,6 +327,7 @@ pub fn run() {
             shell::browser::commands::browser_hide_tab,
             shell::native_layer::native_set_blocked,
             shell::native_layer::native_set_glass,
+            shell::native_layer::page_theme::native_set_page_theme,
             #[cfg(windows)]
             shell::native_layer::windows::native_set_holes,
             shell::browser::commands::browser_hide,
