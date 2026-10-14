@@ -157,20 +157,21 @@ export function TaskSubject({ code, unfiled = false }: { code: string | null; un
 }
 
 /** Reserve the caret's space even when the task has no children. */
-export function SubtaskToggle({ expandable, expanded, onToggle }: {
+export function SubtaskToggle({ expandable, expanded, onToggle, label }: {
   expandable: boolean;
   expanded: boolean;
+  label?: string;
   onToggle: () => void;
 }) {
   return expandable ? (
     <button
       type="button"
-      aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
+      aria-label={label ?? (expanded ? "Collapse subtasks" : "Expand subtasks")}
       aria-expanded={expanded}
       onClick={onToggle}
-      className="shrink-0 cursor-pointer p-0.5 text-muted-foreground/50 transition-colors hover:text-foreground"
+      className="flex size-[13px] shrink-0 cursor-pointer items-center justify-center text-muted-foreground/50 transition-colors hover:text-foreground"
     >
       <CaretRight size={9} className={cn("transition-transform will-change-transform", expanded && "rotate-90")} />
     </button>
-  ) : <span aria-hidden className="w-[13px] shrink-0" />;
+  ) : <span aria-hidden className="block size-[13px] shrink-0" />;
 }

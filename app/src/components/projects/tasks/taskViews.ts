@@ -1,9 +1,9 @@
 import type { DbTaskWithProject } from "@/lib/planning/projects";
 
 /**
- * The Tasks nav column's views and tag, which live in the URL
+ * The Tasks nav column's view, tag and subject scope live in the URL
  * (`/tasks?view=agent&tag=3`) so ⌘-click, tab restore and history keep them.
- * Both compose with the page's search and filters.
+ * They compose with the page's search and filters.
  */
 
 export const TASK_VIEWS = [
@@ -27,11 +27,18 @@ export function parseTagParam(raw: string | null): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
-/** `/tasks`, naming the view only off the default. */
-export function tasksHref(view: TaskViewId, tag: number | null): string {
+export type TaskSubjectScope = number | "personal" | null;
+
+export function parseSubjectParam(raw: string | null): TaskSubjectScope {
+  return raw === "personal" ? "personal" : parseTagParam(raw);
+}
+
+/** `/tasks`, with optional view, tag and subject scope. */
+export function tasksHref(view: TaskViewId, tag: number | null, subject: TaskSubjectScope = null): string {
   const query = new URLSearchParams();
   if (view !== DEFAULT_VIEW) query.set("view", view);
   if (tag != null) query.set("tag", String(tag));
+  if (subject != null) query.set("subject", String(subject));
   const text = query.toString();
   return text ? `/tasks?${text}` : "/tasks";
 }

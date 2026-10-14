@@ -856,13 +856,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_videos_thread
         Migration {
             version: 47,
             description: "tasks: a registry of coloured tags, and related library files",
-            // Unlike `projects.tags` (JSON, a label only that project reads), a task tag is
-            // one shared row: renaming or recolouring it changes every task at once and
-            // deleting it removes it everywhere, which a string copied into each task's
-            // JSON cannot do. `color` is a palette key (`slate`, `indigo`, …), never a hex
-            // value, so the palette can be retuned without a data migration. Names are
-            // unique ignoring case. `task_files.file_id` cascades safely because a re-sync
-            // upserts `files` and keeps its ids.
+            // Tags have one registry row with a palette key and a case-insensitive
+            // unique name. File links cascade safely because re-sync keeps file ids.
             sql: r#"
 CREATE TABLE task_tags (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -895,6 +890,12 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
     ('Study', 'amber', 4),
     ('Admin', 'slate', 5);
                         "#,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 48,
+            description: "projects and tasks share the tag registry",
+            sql: include_str!("projects/shared_tags.sql"),
             kind: MigrationKind::Up,
         },
     ]

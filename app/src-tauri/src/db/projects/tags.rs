@@ -1,8 +1,8 @@
-//! The task tag registry (`task_tags`) and the links from tasks to it
+//! The shared tag registry (`task_tags`) and the links from tasks to it
 //! (`task_tag_links`) — migration 47, mirrored by `app/src/lib/planning/projects/`.
 //!
 //! A tag is one shared row, so renaming or recolouring changes every task that
-//! carries it and deleting removes it everywhere. Names are unique ignoring
+//! carries it; migration 48 synchronizes project names on rename/delete. Names are unique ignoring
 //! case; colours are palette keys, never hex values.
 
 use serde::Serialize;
@@ -33,7 +33,11 @@ pub struct TaskTag {
 }
 
 const TAG_SELECT: &str = r#"SELECT g.id, g.name, g.color, g.position, g.created_at,
-       (SELECT COUNT(*) FROM task_tag_links l WHERE l.tag_id = g.id) AS uses
+       (SELECT COUNT(*) FROM project_tasks t
+         WHERE EXISTS (SELECT 1 FROM task_tag_links l WHERE l.task_id = t.id AND l.tag_id = g.id)
+            OR (NOT EXISTS (SELECT 1 FROM task_tag_links l WHERE l.task_id = t.id)
+                AND g.name COLLATE NOCASE IN (
+                    SELECT j.value FROM projects p, json_each(p.tags) j WHERE p.id = t.project_id))) AS uses
   FROM task_tags g"#;
 
 fn to_tag(r: &sqlx::sqlite::SqliteRow) -> TaskTag {

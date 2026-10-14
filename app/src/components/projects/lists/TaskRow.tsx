@@ -24,6 +24,8 @@ export function TaskRow({
   task,
   parent,
   nested = false,
+  reserveToggle = false,
+  depth = nested ? 1 : 0,
   childrenCount = 0,
   childrenProgress,
   childrenOpen = true,
@@ -42,6 +44,8 @@ export function TaskRow({
   /** `null` unless the parent is in the list. */
   parent: DbTaskWithProject | null;
   nested?: boolean;
+  reserveToggle?: boolean;
+  depth?: number;
   childrenCount?: number;
   childrenProgress?: SubtaskProgress;
   childrenOpen?: boolean;
@@ -58,8 +62,8 @@ export function TaskRow({
 }) {
   return (
     <div style={colsStyle} className={cn(cols, "py-1.5 transition-colors hover:bg-surface/60")}>
-      <div className={cn("flex min-w-0 items-center gap-1.5", nested && "pl-6")}>
-        {childrenCount > 0 && onToggleChildren && <SubtaskToggle expandable expanded={childrenOpen} onToggle={onToggleChildren} />}
+      <div style={depth ? { paddingLeft: depth * 24 } : undefined} className="flex min-w-0 items-center gap-1.5">
+        {(reserveToggle || childrenCount > 0) && <SubtaskToggle expandable={childrenCount > 0 && onToggleChildren != null} expanded={childrenOpen} onToggle={() => onToggleChildren?.()} />}
         <StatusPill project={projectOf(task, projectById)} columnId={task.column_id} onPick={(id) => actions.onMove(task, id)} glyphOnly />
         {parent && (
           <span title={`Subtask of ${parent.title}`} className="shrink-0 text-muted-foreground/60">
@@ -83,12 +87,12 @@ export function TaskRow({
               aria-label={`${childrenProgress.done} of ${childrenProgress.total} subtasks complete; ${childrenOpen ? "collapse" : "expand"} subtasks`}
               aria-expanded={childrenOpen}
               onClick={onToggleChildren}
-              className="ml-auto shrink-0 cursor-pointer rounded-full outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="shrink-0 cursor-pointer rounded-full outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               <SubtaskProgressIndicator progress={childrenProgress} />
             </button>
           ) : (
-            <Link to={taskHref(task.project_id, task)} aria-label={`${childrenProgress.done} of ${childrenProgress.total} subtasks complete; open subtasks`} className="ml-auto shrink-0 rounded-full outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50">
+            <Link to={taskHref(task.project_id, task)} aria-label={`${childrenProgress.done} of ${childrenProgress.total} subtasks complete; open subtasks`} className="shrink-0 rounded-full outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50">
               <SubtaskProgressIndicator progress={childrenProgress} />
             </Link>
           )

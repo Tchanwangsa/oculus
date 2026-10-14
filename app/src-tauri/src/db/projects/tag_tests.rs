@@ -519,3 +519,87 @@ fn batch_items_accept_tags_and_files() {
     assert!(items[1].tags.is_none() && items[1].files.is_none());
     assert!(serde_json::from_str::<Vec<NewTask>>(r#"[{"title":"x","tag":["a"]}]"#).is_err());
 }
+
+#[tokio::test]
+async fn untagged_tasks_follow_shared_project_tags_and_explicit_tags_override() {
+    let pool = migrated_pool().await;
+    let project = seed_project(&pool, "Tagged project").await;
+    update_project(
+        &pool,
+        project,
+        &ProjectPatch {
+            tags: Some(vec!["assignment".into(), "Project only".into()]),
+            ..ProjectPatch::default()
+        },
+    )
+    .await
+    .unwrap();
+    let inherited = add(&pool, Some(project), item("Inherited")).await;
+    let child = add(
+        &pool,
+        Some(project),
+        NewTask {
+            parent: Some(ParentRef::Id(inherited)),
+            ..item("Child")
+        },
+    )
+    .await;
+    let explicit = add(
+        &pool,
+        Some(project),
+        NewTask {
+            tags: Some(vec!["Reading".into()]),
+            ..item("Explicit")
+        },
+    )
+    .await;
+    let unfiled = add(&pool, None, item("Unfiled")).await;
+    assert_eq!(
+        tag_names(&pool, inherited).await,
+        vec!["Assignment", "Project only"]
+    );
+    assert_eq!(
+        tag_names(&pool, child).await,
+        vec!["Assignment", "Project only"]
+    );
+    assert_eq!(tag_names(&pool, explicit).await, vec!["Reading"]);
+    assert!(tag_names(&pool, unfiled).await.is_empty());
+
+    let shared = find_tag(&pool, "Project only").await.unwrap().unwrap();
+    assert_eq!(shared.uses, 2);
+    update_tag(&pool, shared.id, Some("Renamed"), Some("teal"))
+        .await
+        .unwrap();
+    assert_eq!(
+        super::project(&pool, project).await.unwrap().unwrap().tags,
+        vec!["assignment", "Renamed"]
+    );
+    assert_eq!(
+        tag_names(&pool, inherited).await,
+        vec!["Assignment", "Renamed"]
+    );
+    delete_tag(&pool, shared.id).await.unwrap();
+    assert_eq!(tag_names(&pool, inherited).await, vec!["Assignment"]);
+    assert_eq!(
+        super::project(&pool, project).await.unwrap().unwrap().tags,
+        vec!["assignment"]
+    );
+
+    update_project(
+        &pool,
+        project,
+        &ProjectPatch {
+            tags: Some(vec!["Exam".into()]),
+            ..ProjectPatch::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(tag_names(&pool, inherited).await, vec!["Exam"]);
+    assert_eq!(tag_names(&pool, explicit).await, vec!["Reading"]);
+    set_task_tags(&pool, explicit, &[]).await.unwrap();
+    assert_eq!(tag_names(&pool, explicit).await, vec!["Exam"]);
+    refile_task(&pool, inherited, None).await.unwrap();
+    assert!(tag_names(&pool, inherited).await.is_empty());
+    pool.close().await;
+}

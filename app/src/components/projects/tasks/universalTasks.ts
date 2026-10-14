@@ -3,6 +3,7 @@ import {
   DEFAULT_COLUMNS,
   type ColumnKind,
   type DbProject,
+  type DbProjectTask,
   type DbTaskWithProject,
   type ProjectColumn,
 } from "@/lib/planning/projects";
@@ -32,7 +33,7 @@ const HOME_OF_KIND: Record<ColumnKind, string> = {
 
 /** The task's project, or `null` when unfiled (the default board). */
 export function projectOf(
-  task: DbTaskWithProject,
+  task: Pick<DbProjectTask, "project_id">,
   projectById: Map<number, DbProject>,
 ): DbProject | null {
   return task.project_id != null ? projectById.get(task.project_id) ?? null : null;
@@ -44,7 +45,7 @@ export function projectOf(
  * column its board no longer has falls to Planning rather than vanishing.
  */
 export function universalColumnOf(
-  task: DbTaskWithProject,
+  task: Pick<DbProjectTask, "project_id" | "column_id">,
   projectById: Map<number, DbProject>,
 ): ProjectColumn {
   const backlog = UNIVERSAL_COLUMNS[0];

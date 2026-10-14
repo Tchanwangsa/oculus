@@ -12,14 +12,15 @@ repair a bad row.
 
 | Piece | Location |
 | --- | --- |
-| Tables: `projects`, `project_tasks` (27), tags + `event_id` (33), nullable `project_id` (37), `task_tags` + `task_tag_links` + `task_files` (47) | `app/src-tauri/src/db/migrations.rs`, `UNFILED_TASKS_SQL` in `app/src-tauri/src/db/projects/migration37.rs` |
+| Tables: `projects`, `project_tasks` (27), tags + `event_id` (33), nullable `project_id` (37), `task_tags` + `task_tag_links` + `task_files` (47), shared tag triggers (48) | `app/src-tauri/src/db/migrations.rs`, `UNFILED_TASKS_SQL` in `app/src-tauri/src/db/projects/migration37.rs` |
 | Frontend reads and writes (direct SQL) | `app/src/lib/planning/projects/` (`reads.ts`, `taskWrites.ts`, `projectWrites.ts`, `columns.ts`, `rows.ts`, `events.ts`, `tags.ts`, `taskFiles.ts`, `touch.ts`) |
 | Headless writes (CLI, and so the agent) | `app/src-tauri/src/db/projects/` (`tasks/`, `tags.rs`, `tasks/links.rs`, `project_writes.rs`, `columns.rs`, `rows.rs`) |
 | `oculus project` / `oculus task` / `oculus tag` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs` |
 | One open project and its tasks | `app/src/stores/planning/projectsStore.ts` |
 | Index, one project, one task, every task | `app/src/pages/work/ProjectsIndexPage.tsx`, `app/src/pages/work/ProjectPage.tsx`, `app/src/pages/work/TaskPage.tsx`, `app/src/pages/work/TasksPage.tsx` |
 | A task page's parts | `app/src/components/projects/task/` (header, property pills, tags, related files, footer), `app/src/pages/work/task/` (title, body, checklist, mutations, data) |
-| Index subject groups and collapsed preferences (shared with chat) | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
+| Subject project groups and collapsed preferences (shared with chat) | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
+| Project index table, rows, filters and task tree | `app/src/components/projects/lists/ProjectsIndexTable.tsx`, `app/src/components/projects/lists/ProjectIndexRow.tsx`, `app/src/components/projects/lists/projectTableData.ts`, `app/src/components/projects/lists/projectFilters.ts`, `app/src/components/ui/table/TableGroup.tsx` |
 | A subject's Projects tab | `app/src/pages/work/ProjectsPage.tsx` |
 | The section's nav column and its fold | `app/src/layouts/TasksLayout.tsx`, `app/src/components/projects/nav/TasksNav.tsx`, `app/src/components/projects/nav/TagsGroup.tsx`, `app/src/components/projects/nav/panel.ts` |
 | The page header row; the rail item | `app/src/components/projects/page/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx` |
@@ -53,12 +54,15 @@ repair a bad row.
 - **A project's tags are JSON on the project** (`NOT NULL DEFAULT '[]'`),
   normalised on the way in by both writers (`normaliseTags` / `normalise_tags`:
   trim, collapse whitespace, dedupe case-insensitively, cap 24), so "used
-  before?" is a plain string compare everywhere else.
-- **A task's tags are a registry, not JSON**: `task_tags` (name unique ignoring
+  before?" is a case-insensitive name lookup in the shared tag registry.
+- **Projects and tasks share a tag registry**: `task_tags` (name unique ignoring
   case, a palette *key* for colour — never a hex value, so the palette can be
   retuned) and `task_tag_links` (cascades from both sides). Renaming,
   recolouring or deleting a tag is one row and reaches every task, which a name
-  copied into each task cannot do. The palette (`slate`, `indigo`, `green`,
+  copied into each task cannot do. Projects retain JSON names for CLI compatibility;
+  `app/src-tauri/src/db/projects/shared_tags.sql` seeds existing names and registers
+  project tags on every insert/update, for both writers. Registry rename/delete
+  triggers update matching project names case-insensitively. The palette (`slate`, `indigo`, `green`,
   `amber`, `rose`, `purple`, `teal`, `orange`) is validated by both writers;
   the tag tokens are in `colors.css` and are not theme-derived. Migration 47
   seeds Assignment, Exam, Reading, Study and Admin.
@@ -68,7 +72,12 @@ repair a bad row.
   - **A tag set is replaced, not patched**: new links go in before the rest come
     out, so a failure never leaves fewer tags (the TS side has no transaction).
     Every read returns `tag_ids` through one column expression and one mapper
-    (`TASK_TAG_IDS_SQL`, `toTask`), in registry order.
+    (`TASK_TAG_IDS_SQL`, `toTask`), in registry order. With no explicit task links,
+    reads resolve the project's current tags instead, including for subtasks.
+    Explicit task tags replace inheritance; clearing them resumes it. Refiling
+    an untagged task follows the destination project, and unfiled tasks inherit
+    nothing. The Rust `TASK_SELECT` applies the same rule, so CLI reads, search,
+    grouping, tag navigation and both tables agree.
 - **A task's related files are `task_files`**, keyed by `files.id`. That id
   survives a re-sync (the upsert keeps it), so the cascade FK is safe, unlike
   `event_id`. The CLI names a file by `relative_path` and refuses a path that
@@ -201,11 +210,23 @@ whose parent is missing rather than dropping it.
 - **`ProjectCrumbs`** starts at Projects and links the subject to its Projects
   tab. Segments are buttons with `data-tab-href` (`app/src/lib/shell/newTabClicks.ts`)
   so ⌘-click opens a tab; it is a Fragment so it inherits each page's gap.
-- **The index** draws a subject group only once it has a project, plus
-  Personal always; `NewProjectButton` is the door for a subject's first
-  project. Its picker folds past-term subjects behind `Past subjects (n)`,
-  forced open when the selection is inside. Archived projects sit in a
-  collapsed section at the bottom; a subject's Projects tab shows active only.
+- **The index is one `GridTable`**, with the Tasks page's Name, Tags,
+  Subject, Due and Updated columns and sortable headers. Projects open their
+  task rows in place; parents can open their subtasks. `TaskRow` owns the
+  same status and tag editors on both pages. A project's progress counts
+  all its tasks, including completed tasks and subtasks. Task and project
+  progress pills sit directly after the name and agent indicator.
+  Expanded projects persist under `oculus-projects-expanded`; archived projects
+  appear with Show archived enabled and sit in a collapsed group using the
+  shared `TableGroup`. The task-style Filter and Subject pills compose with
+  search. Due and tags match project properties; Status keeps projects with
+  any matching task (including subtasks), with empty projects matching Planning.
+  Status examines the full tree even when search hides rows. Subject option
+  counts count projects and exclude their own selection. Search matches
+  projects and tasks, retains a matching subtask's project and parent, and
+  opens matching branches. Search folds are local to the query and do not
+  change saved expansion. `NewProjectButton` creates projects in any subject
+  or Personal; its picker folds past subjects.
 - **Rename has two doors** — `ProjectMenu`'s dialog (a list row is a `Link`)
   and the header's in-place edit — both through `useProjectActions`.
 - **The timeline** packs overlapping bars with `packLanes`, shared with
