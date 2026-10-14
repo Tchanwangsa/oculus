@@ -98,6 +98,12 @@ export function DisplaySettings({
         </Row>
       )}
 
+      {table && (
+        <Row label="Group subtasks">
+          <Switch aria-label="Group subtasks under parents" checked={display.groupSubtasks} onCheckedChange={(groupSubtasks) => onChange({ ...display, groupSubtasks })} />
+        </Row>
+      )}
+
       <Row label="Sort">
         <div className="flex items-center gap-1.5">
           <Select
@@ -153,17 +159,16 @@ export function DisplaySettings({
         </button>
       )}
 
-      {!isDefaultDisplay(display) && (
-        <div className="mt-1.5 border-t border-border-subtle pt-2 pl-1">
-          <button
-            type="button"
-            onClick={() => onChange(resetDisplay())}
-            className="cursor-pointer rounded text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          >
-            Reset to default
-          </button>
-        </div>
-      )}
+      <div className="mt-1.5 border-t border-border-subtle pt-2 pl-1">
+        <button
+          type="button"
+          disabled={isDefaultDisplay(display)}
+          onClick={() => onChange(resetDisplay())}
+          className="cursor-pointer rounded disabled:cursor-default disabled:opacity-50 text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          Reset defaults
+        </button>
+      </div>
     </div>
   );
 }

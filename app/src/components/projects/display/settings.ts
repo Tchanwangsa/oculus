@@ -12,12 +12,11 @@ import { isSortKey, type TaskSort } from "../tasks/taskSort";
 export const DISPLAY_KEY = "oculus-tasks-display-v2";
 
 /** Every table column but Name, in the order the panel lists hidden ones. */
-export const PROPERTIES = ["status", "tags", "project", "subject", "due", "updated", "created"] as const;
+export const PROPERTIES = ["tags", "project", "subject", "due", "updated", "created"] as const;
 
 export type PropertyId = (typeof PROPERTIES)[number];
 
 export const PROPERTY_LABELS: Record<PropertyId, string> = {
-  status: "Status",
   tags: "Tags",
   project: "Project",
   subject: "Subject",
@@ -34,6 +33,8 @@ export interface TasksDisplay {
   group: GroupBy;
   sort: TaskSort;
   showCompleted: boolean;
+  /** Table only: nest visible subtasks beneath their visible parent. */
+  groupSubtasks: boolean;
   /** The shown columns after Name, left to right. Name is always first and
    *  is not in the list; every id missing from it is hidden. */
   properties: PropertyId[];
@@ -44,7 +45,8 @@ export const DEFAULT_DISPLAY: TasksDisplay = {
   group: "none",
   sort: { key: "due", dir: "asc" },
   showCompleted: false,
-  properties: ["status", "tags", "project", "due", "updated"],
+  groupSubtasks: false,
+  properties: ["tags", "project", "due", "updated"],
 };
 
 export function isPropertyId(value: unknown): value is PropertyId {
@@ -85,6 +87,8 @@ export function readDisplay(raw: string | null): TasksDisplay {
     },
     showCompleted:
       typeof stored.showCompleted === "boolean" ? stored.showCompleted : DEFAULT_DISPLAY.showCompleted,
+    groupSubtasks:
+      typeof stored.groupSubtasks === "boolean" ? stored.groupSubtasks : DEFAULT_DISPLAY.groupSubtasks,
     properties: readProperties(stored.properties) ?? [...DEFAULT_DISPLAY.properties],
   };
 }

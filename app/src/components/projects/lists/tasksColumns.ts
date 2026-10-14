@@ -15,7 +15,6 @@ interface ColumnSpec {
 
 export const COLUMNS: Record<ColumnId, ColumnSpec> = {
   name: { label: "Name", width: null, sort: "title" },
-  status: { label: "Status", width: 140, sort: "status" },
   tags: { label: "Tags", width: 190, sort: null },
   project: { label: "Project", width: 150, sort: "project" },
   subject: { label: "Subject", width: 110, sort: null },

@@ -20,6 +20,9 @@ describe("the default display", () => {
   test("sorts by due date ascending and hides finished tasks", () => {
     expect(DEFAULT_DISPLAY.sort).toEqual({ key: "due", dir: "asc" });
     expect(DEFAULT_DISPLAY.showCompleted).toBe(false);
+    expect(DEFAULT_DISPLAY.groupSubtasks).toBe(false);
+    expect(readDisplay("{}").groupSubtasks).toBe(false);
+    expect(readDisplay(JSON.stringify({ groupSubtasks: "yes" })).groupSubtasks).toBe(false);
     expect(readDisplay(null).showCompleted).toBe(false);
     expect(isDefaultDisplay(resetDisplay())).toBe(true);
   });
@@ -43,7 +46,8 @@ describe("reading the stored display", () => {
       group: "tag",
       sort: { key: "updated", dir: "desc" },
       showCompleted: false,
-      properties: ["due", "status"],
+      groupSubtasks: true,
+      properties: ["due", "project"],
     };
     expect(readDisplay(writeDisplay(display))).toEqual(display);
   });
@@ -66,25 +70,25 @@ describe("reading the stored display", () => {
   });
 
   test("an unknown or repeated property id is dropped, and Name is not a property", () => {
-    const read = readDisplay(JSON.stringify({ properties: ["due", "assignee", "due", "name", "status"] }));
-    expect(read.properties).toEqual(["due", "status"]);
+    const read = readDisplay(JSON.stringify({ properties: ["due", "assignee", "due", "name", "project"] }));
+    expect(read.properties).toEqual(["due", "project"]);
   });
 
   test("an empty list is a choice, a missing one is not", () => {
     expect(readDisplay(JSON.stringify({ properties: [] })).properties).toEqual([]);
-    expect(readDisplay(JSON.stringify({ properties: "status" })).properties).toEqual(
+    expect(readDisplay(JSON.stringify({ properties: "tags" })).properties).toEqual(
       DEFAULT_DISPLAY.properties,
     );
     expect(readDisplay("{}").properties).toEqual(DEFAULT_DISPLAY.properties);
   });
 
   test("a property absent from the stored list is hidden, so a new one starts hidden", () => {
-    const read = readDisplay(JSON.stringify({ properties: ["status"] }));
-    expect(hiddenProperties(read)).toEqual(["tags", "project", "subject", "due", "updated", "created"]);
+    const read = readDisplay(JSON.stringify({ properties: ["tags"] }));
+    expect(hiddenProperties(read)).toEqual(["project", "subject", "due", "updated", "created"]);
   });
 
-  test("the default shows Status, Tags, Project, Due and Updated, hiding Subject and Created", () => {
-    expect(DEFAULT_DISPLAY.properties).toEqual(["status", "tags", "project", "due", "updated"]);
+  test("the default shows Tags, Project, Due and Updated, hiding Subject and Created", () => {
+    expect(DEFAULT_DISPLAY.properties).toEqual(["tags", "project", "due", "updated"]);
     expect(hiddenProperties(DEFAULT_DISPLAY)).toEqual(["subject", "created"]);
   });
 });
@@ -92,15 +96,14 @@ describe("reading the stored display", () => {
 describe("editing properties", () => {
   test("hiding drops one, showing appends it last", () => {
     const hidden = hideProperty(DEFAULT_DISPLAY, "tags");
-    expect(hidden.properties).toEqual(["status", "project", "due", "updated"]);
-    expect(showProperty(hidden, "tags").properties).toEqual(["status", "project", "due", "updated", "tags"]);
-    expect(showProperty(DEFAULT_DISPLAY, "status")).toBe(DEFAULT_DISPLAY);
+    expect(hidden.properties).toEqual(["project", "due", "updated"]);
+    expect(showProperty(hidden, "tags").properties).toEqual(["project", "due", "updated", "tags"]);
+    expect(showProperty(DEFAULT_DISPLAY, "tags")).toBe(DEFAULT_DISPLAY);
   });
 
   test("Hide all empties the list and Show all appends the rest in order", () => {
     expect(hideAllProperties(DEFAULT_DISPLAY).properties).toEqual([]);
     expect(showAllProperties(DEFAULT_DISPLAY).properties).toEqual([
-      "status",
       "tags",
       "project",
       "due",
@@ -111,8 +114,8 @@ describe("editing properties", () => {
   });
 
   test("moving stays inside the list", () => {
-    expect(moveProperty(DEFAULT_DISPLAY, "tags", -1).properties[0]).toBe("tags");
-    expect(moveProperty(DEFAULT_DISPLAY, "status", -1)).toBe(DEFAULT_DISPLAY);
+    expect(moveProperty(DEFAULT_DISPLAY, "project", -1).properties[0]).toBe("project");
+    expect(moveProperty(DEFAULT_DISPLAY, "tags", -1)).toBe(DEFAULT_DISPLAY);
     expect(moveProperty(DEFAULT_DISPLAY, "updated", 1)).toBe(DEFAULT_DISPLAY);
   });
 
@@ -123,6 +126,13 @@ describe("editing properties", () => {
     expect(DEFAULT_DISPLAY.properties).not.toContain("created");
     expect(isDefaultDisplay(hideProperty(DEFAULT_DISPLAY, "due"))).toBe(false);
   });
+});
+
+test("saved Status columns are dropped while other display choices survive", () => {
+  const read = readDisplay(JSON.stringify({ properties: ["status", "due", "tags"], groupSubtasks: true, group: "project" }));
+  expect(read.properties).toEqual(["due", "tags"]);
+  expect(read.groupSubtasks).toBe(true);
+  expect(read.group).toBe("project");
 });
 
 describe("a column header click", () => {

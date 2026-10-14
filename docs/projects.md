@@ -26,7 +26,7 @@ repair a bad row.
 | Overview, project tags, pinned calendar event | `app/src/components/projects/page/ProjectOverview.tsx`, `app/src/components/projects/fields/TagEditor.tsx`, `app/src/components/projects/page/EventLink.tsx` |
 | Task tags: registry hook, chips, picker, palette | `app/src/hooks/data/useTaskTags.ts`, `app/src/components/projects/tags/`, `--color-tag-*` in `app/src/styles/colors.css` |
 | Board, table, timeline, and the shaping behind them | `app/src/components/projects/board/ProjectBoard.tsx`, `app/src/components/projects/lists/ProjectTable.tsx`, `app/src/components/projects/timeline/ProjectTimeline.tsx`, `app/src/components/projects/tasks/taskTree.ts` |
-| The universal view: hook, views, filters, sort, groups, shared rules | `app/src/hooks/data/useTaskList.ts`, `app/src/components/projects/tasks/` (`taskViews.ts`, `filterRules.ts`, `taskSort.ts`, `taskGroups.ts`, `universalTasks.ts`, `TaskFilters.tsx`, `ProjectFilter.tsx`, `SubjectFilter.tsx`) |
+| The universal view: hook, views, filters, sort, groups, shared rules | `app/src/hooks/data/useTaskList.ts`, `app/src/components/projects/tasks/` (`taskViews.ts`, `filterRules.ts`, `filterCounts.ts`, `taskSort.ts`, `taskGroups.ts`, `universalTasks.ts`, `TaskFilters.tsx`, `ProjectFilter.tsx`, `SubjectFilter.tsx`) |
 | The universal table, its columns and the Display menu | `app/src/components/projects/lists/` (`TasksTable.tsx`, `TaskRow.tsx`, `TaskCells.tsx`, `tasksColumns.ts`), `app/src/components/projects/display/`, `app/src/components/projects/board/TasksBoard.tsx` |
 | Card drag and board chrome | `app/src/hooks/gestures/useCardDrag.ts` (on `app/src/hooks/gestures/usePointerDrag.ts`), `app/src/components/projects/board/BoardParts.tsx` |
 | Subject chips, subtask expansion, status and progress marks | `app/src/components/projects/tasks/TaskMarks.tsx` |
@@ -239,7 +239,7 @@ click, not an anchor or button, because it contains controls; it carries
 
 ## The universal view
 
-`/tasks` shows every task, filed or not, as a flat table or a four-column board
+`/tasks` shows every task, filed or not, as a table or a four-column board
 (`app/src/pages/work/TasksPage.tsx`), beside `TasksNav`. What it shows is three
 independent layers, all predicates and orderings over one `getAllTasks`.
 
@@ -250,27 +250,49 @@ independent layers, all predicates and orderings over one `getAllTasks`.
   both. Off `/tasks` neither is selected.
 - **Search and Filter narrow further.** Search matches title, project name and
   tag names. The toolbar reads Search, then the pills Filter, Project, Subject
-  and Display. The Filter popover holds status, due and tags
+  and Display. The Filter popover holds archived visibility, status, due and tags
   (`filterRules.ts`); Due is one scrolling line of quick options plus Custom,
   which reveals From and To day pills over the calendar popover — either end
   optional, the To day counted whole, a To before the From swapped, an undated
   task never matching, no ends meaning Any time. Tags are one scrolling line.
   Project (Any, No project, one project; archived projects fold behind
   `Archived (n)`) and Subject (Any, Personal, one subject; past-term subjects
-  fold behind `Past subjects (n)`) are their own pills, a fold forced open while
-  the pick is inside it. Their lists scroll in a fixed-height region that always
-  keeps its scrollbar gutter, so a popover never changes width. All start empty
-  and nothing persists.
+  fold behind `Past subjects (n)`) are their own pills. Folds initially reveal
+  a selected item and remain clickable to close. Picking an active filter again
+  restores Any; the four status chips stay on one line, and clearing the last
+  status restores all statuses. Status and Tags have a grey Select all action
+  at default, switching to a brand-coloured Reset when any chip is selected.
+  Select all explicitly selects every chip; Reset restores only that section.
+  Empty status and tag selections mean Any. The Filter pill is tinted with a `(N)` count of
+  changed sections, including Project and Subject. Custom due counts as changed
+  before its bounds are set. Archived projects'
+  tasks start hidden; Show archived includes them, and choosing an archived
+  project enables it. Filter's footer resets all filters, including Project and
+  Subject. Filters do not persist.
+  Project options show only projects with matching tasks in the selected subject;
+  No project is hidden when empty. Subject options remain visible at zero.
+  Both lists show task counts on the right (`filterCounts.ts`), respecting
+  search, nav, completion, status, due and tags. Counts exclude their own filter;
+  subject counts also exclude Project because choosing a subject clears Project.
+  Archived project choices count the tasks selecting them would reveal.
+  Their lists keep a scrollbar gutter, so a popover never changes width.
 - **Display shapes the result** (`components/projects/display/`): view, grouping
   (none, status, project, tag, due), sort, show completed and which table
-  properties show, in what order — one JSON object under `oculus-tasks-display-v2`,
+  properties show, in what order, plus Group subtasks — one JSON object under `oculus-tasks-display-v2`,
   validated field by field on read, so a property added later starts hidden and
   an unknown stored one is dropped. The default is due date ascending with
   finished tasks hidden; a stored object overrides every default, so changing
   one means bumping the key. Grouping and properties are table-only; a
   task with several tags appears under each tag group. Name is always first and
   cannot be hidden. A column header sets the same sort, so there is one source
-  of truth.
+  of truth. Group subtasks is table-only and starts off: visible children nest
+  beneath their visible parent with a disclosure, in the Display sort's
+  order. The parent decides the group; a child whose parent is filtered out is
+  promoted to a visible top-level row. A circular done/total badge on the right
+  of the name (`SubtaskProgressIndicator.tsx`) counts every child, including those
+  hidden by filters or completion.
+  It toggles grouped children, or opens the task checklist when shown flat.
+  Display's footer resets its saved choices.
 
 - **It does not use `projectsStore`**, which holds one open project.
   `useTaskList` reads `getAllTasks` plus the project list (a column id means
@@ -289,9 +311,12 @@ independent layers, all predicates and orderings over one `getAllTasks`.
   other active column by rank (the last is in flight, earlier ones queued).
   `TaskGlyph` (dashed circle, empty, half-filled brand, check) and `StatusPill`'s
   tint, including the picker's row glyphs, both read it, so they cannot disagree.
+  Status editing opens a compact list: arrows and Enter choose a column, and
+  1–9 choose the numbered columns. Every choice writes
+  through `moveTask` on the task's own board.
 - **No project is a value of the project filter**, and filtering is a predicate
   over one `getAllTasks`, not a query per question.
-  - The status set decides which columns the board draws, and is never empty.
+  - The status set decides which columns the board draws; clearing its last pick restores all columns.
   - Due compares through `sqliteUtcToMs`: `due_at` is ISO from the UI and
     `YYYY-MM-DD HH:MM:SS` from the CLI, and string order differs. *This week*
     is the calendar's `startOfWeek` ([calendar.md](./calendar.md)); *Overdue*

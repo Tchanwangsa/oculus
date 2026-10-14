@@ -4,14 +4,16 @@ import { ArrowElbowDownRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import type { DbProject, DbTaskTag, DbTaskWithProject } from "@/lib/planning/projects";
 import { taskHref } from "../nav/taskHref";
-import { AgentMark, TaskGlyph } from "../tasks/TaskMarks";
-import { universalVariant } from "../tasks/universalTasks";
+import { StatusPill } from "../board/StatusPill";
+import { SubtaskProgressIndicator } from "../tasks/SubtaskProgressIndicator";
+import type { SubtaskProgress } from "../tasks/taskTree";
+import { AgentMark, SubtaskToggle } from "../tasks/TaskMarks";
+import { projectOf } from "../tasks/universalTasks";
 import type { PropertyId } from "../display/settings";
 import {
   DueCell,
   ProjectCell,
   StampCell,
-  StatusCell,
   SubjectCell,
   TagsCell,
   type CellActions,
@@ -21,6 +23,11 @@ import {
 export function TaskRow({
   task,
   parent,
+  nested = false,
+  childrenCount = 0,
+  childrenProgress,
+  childrenOpen = true,
+  onToggleChildren,
   properties,
   cols,
   colsStyle,
@@ -34,6 +41,11 @@ export function TaskRow({
   task: DbTaskWithProject;
   /** `null` unless the parent is in the list. */
   parent: DbTaskWithProject | null;
+  nested?: boolean;
+  childrenCount?: number;
+  childrenProgress?: SubtaskProgress;
+  childrenOpen?: boolean;
+  onToggleChildren?: () => void;
   properties: readonly PropertyId[];
   cols: string;
   colsStyle: CSSProperties;
@@ -46,8 +58,9 @@ export function TaskRow({
 }) {
   return (
     <div style={colsStyle} className={cn(cols, "py-1.5 transition-colors hover:bg-surface/60")}>
-      <div className="flex min-w-0 items-center gap-1.5">
-        <TaskGlyph variant={universalVariant(task, projectById)} />
+      <div className={cn("flex min-w-0 items-center gap-1.5", nested && "pl-6")}>
+        {childrenCount > 0 && onToggleChildren && <SubtaskToggle expandable expanded={childrenOpen} onToggle={onToggleChildren} />}
+        <StatusPill project={projectOf(task, projectById)} columnId={task.column_id} onPick={(id) => actions.onMove(task, id)} glyphOnly />
         {parent && (
           <span title={`Subtask of ${parent.title}`} className="shrink-0 text-muted-foreground/60">
             <ArrowElbowDownRight size={11} />
@@ -63,12 +76,27 @@ export function TaskRow({
           {task.title}
         </Link>
         <AgentMark source={task.source} />
+        {childrenProgress && childrenProgress.total > 0 && (
+          childrenCount > 0 && onToggleChildren ? (
+            <button
+              type="button"
+              aria-label={`${childrenProgress.done} of ${childrenProgress.total} subtasks complete; ${childrenOpen ? "collapse" : "expand"} subtasks`}
+              aria-expanded={childrenOpen}
+              onClick={onToggleChildren}
+              className="ml-auto shrink-0 cursor-pointer rounded-full outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <SubtaskProgressIndicator progress={childrenProgress} />
+            </button>
+          ) : (
+            <Link to={taskHref(task.project_id, task)} aria-label={`${childrenProgress.done} of ${childrenProgress.total} subtasks complete; open subtasks`} className="ml-auto shrink-0 rounded-full outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50">
+              <SubtaskProgressIndicator progress={childrenProgress} />
+            </Link>
+          )
+        )}
       </div>
 
       {properties.map((id) => {
         switch (id) {
-          case "status":
-            return <StatusCell key={id} task={task} projectById={projectById} onMove={actions.onMove} />;
           case "tags":
             return (
               <TagsCell

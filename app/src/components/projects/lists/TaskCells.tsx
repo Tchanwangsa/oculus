@@ -2,17 +2,16 @@ import { CaretDown } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { fmtFullStamp, fmtRelativeDay, sqliteUtcToMs } from "@/lib/format/format";
 import type { DbProject, DbTaskTag, DbTaskWithProject } from "@/lib/planning/projects";
-import { StatusPill } from "../board/StatusPill";
 import { ProjectPicker } from "../nav/ProjectPicker";
 import { TagList } from "../tags/TagList";
 import { TagPicker } from "../tags/TagPicker";
 import { DueChip, TaskSubject } from "../tasks/TaskMarks";
-import { projectLabel, projectOf } from "../tasks/universalTasks";
+import { projectLabel } from "../tasks/universalTasks";
 
 /** The trigger every editable cell shares: quiet until hovered, a caret at
  *  the end. A `button`, so nothing inside it may be one. */
 const CELL_TRIGGER =
-  "flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50";
+  "flex w-full min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 const QUIET = "text-[11px] text-muted-foreground/50";
 
@@ -23,27 +22,6 @@ export interface CellActions {
   onRefile: (task: DbTaskWithProject, projectId: number | null) => void;
   onTags: (task: DbTaskWithProject, tagIds: number[]) => void;
   onCreateTag: (name: string) => Promise<DbTaskTag>;
-}
-
-export function StatusCell({
-  task,
-  projectById,
-  onMove,
-}: {
-  task: DbTaskWithProject;
-  projectById: Map<number, DbProject>;
-} & Pick<CellActions, "onMove">) {
-  // The task's own board — the default four when unfiled.
-  return (
-    <span className="flex min-w-0">
-      <StatusPill
-        project={projectOf(task, projectById)}
-        columnId={task.column_id}
-        onPick={(columnId) => onMove(task, columnId)}
-        chevron
-      />
-    </span>
-  );
 }
 
 export function TagsCell({
@@ -70,7 +48,7 @@ export function TagsCell({
         ) : (
           <span className={QUIET}>—</span>
         )}
-        <CaretDown size={9} weight="bold" className="shrink-0 text-muted-foreground/50" />
+        <CaretDown size={9} weight="bold" className="ml-auto shrink-0 text-muted-foreground/50" />
       </button>
     </TagPicker>
   );
@@ -121,7 +99,7 @@ export function ProjectCell({
         >
           {projectLabel(task)}
         </span>
-        <CaretDown size={9} weight="bold" className="shrink-0 text-muted-foreground/50" />
+        <CaretDown size={9} weight="bold" className="ml-auto shrink-0 text-muted-foreground/50" />
       </button>
     </ProjectPicker>
   );

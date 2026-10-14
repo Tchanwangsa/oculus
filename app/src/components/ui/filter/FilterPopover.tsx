@@ -55,6 +55,7 @@ export function FilterPopover({
 export function FilterRow({
   label,
   hint,
+  count,
   icon,
   selected,
   onPick,
@@ -63,6 +64,7 @@ export function FilterRow({
 }: {
   label: string;
   hint?: string;
+  count?: number;
   icon?: ReactNode;
   selected: boolean;
   onPick: () => void;
@@ -86,6 +88,7 @@ export function FilterRow({
       {icon}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {selected && <Check size={12} weight="bold" className="shrink-0 text-brand" />}
+      {count != null && <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">({count})</span>}
     </button>
   );
 }
