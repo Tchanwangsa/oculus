@@ -17,7 +17,7 @@ const item = (
   placeholder = false,
   size = b.bottom - b.top,
   baseline = b.top + 0.75 * size,
-): MappedBox => ({ from, to, box: b, ink, placeholder, baseline, size });
+): MappedBox => ({ from, to, box: b, ink, placeholder, baseline, size, parent: null });
 
 /** `\frac{a+x}{b}` laid out by hand: the numerator's glyphs on top, the
  *  denominator under them, the fraction's own inline box on the baseline. */
@@ -25,12 +25,12 @@ const FRAC = "\\frac{a+x}{b}";
 const fracLayout: Layout = {
   items: [
     item(0, 13, box(0, 10, 30, 22), box(0, 0, 30, 30)),
-    item(10, 13, box(12, 18, 18, 30)),
-    item(11, 12, box(12, 18, 18, 30)),
-    item(5, 10, box(5, 0, 25, 12)),
-    item(6, 7, box(5, 0, 11, 12)),
-    item(7, 8, box(13, 0, 19, 12)),
-    item(8, 9, box(20, 0, 25, 12)),
+    { ...item(10, 13, box(12, 18, 18, 30)), parent: 0 },
+    { ...item(11, 12, box(12, 18, 18, 30)), parent: 1 },
+    { ...item(5, 10, box(5, 0, 25, 12)), parent: 0 },
+    { ...item(6, 7, box(5, 0, 11, 12)), parent: 3 },
+    { ...item(7, 8, box(13, 0, 19, 12)), parent: 3 },
+    { ...item(8, 9, box(20, 0, 25, 12)), parent: 3 },
   ],
 };
 
@@ -60,7 +60,7 @@ describe("measure", () => {
   test("source whitespace between a stop and its atom is skipped", () => {
     const source = "\\left( x \\right)";
     const f = MathField.open(source, false);
-    const layout: Layout = { items: [item(0, 16, box(0, 0, 20, 14)), item(7, 8, box(6, 2, 12, 14))] };
+    const layout: Layout = { items: [item(0, 16, box(0, 0, 20, 14)), { ...item(7, 8, box(6, 2, 12, 14)), parent: 0 }] };
     const mm = measure(layout, f);
     expect(mm.x[stopOf(f, 6, 1)]).toBe(6);
     expect(mm.x[stopOf(f, 8, 1)]).toBe(12);
@@ -76,6 +76,121 @@ describe("measure", () => {
     const mm = measure(layout, f);
     expect(mm.x[f.head]).toBe(38);
     expect(mm.x[stopOf(f, 1, 0)]).toBe(10);
+  });
+
+  test("a macro's shared source range measures all its rendered pieces", () => {
+    const f = MathField.open("C^d\\bmod n", false);
+    // The leading space, operator wrappers, glyphs and trailing space all
+    // map to `\bmod `; the first space must not stand in for the whole atom.
+    const pieces = [
+      { ...item(3, 9, box(20, 0, 20, 14)), afterX: 21 },
+      item(3, 9, box(25, 0, 50, 14)),
+      item(3, 9, box(25, 0, 50, 14)),
+      { ...item(3, 9, box(50, 0, 50, 14)), afterX: 51 },
+    ];
+    const layout: Layout = { items: [
+      item(0, 3, box(0, 0, 20, 14)),
+      ...pieces,
+      item(9, 10, box(55, 0, 65, 14)),
+    ] };
+    const mm = measure(layout, f);
+    const end = stopOf(f, 9, 0);
+    expect(mm.x[end]).toBe(51);
+    expect(stopAt(layout, f, mm, 52, 7)).toBe(end);
+    const selected = f.select(end, end);
+    const typed = selected.run({ insert: "d" }).field;
+    expect(typed.source).toBe("C^d\\bmod dn");
+    typed.free();
+    selected.free();
+    f.free();
+  });
+
+  test.each(["\\iff ", "\\implies ", "\\colon ", "\\dotsb "])(
+    "%s uses its last sibling, including its spacing advance", (macro) => {
+      const f = MathField.open(macro + "z", false);
+      const n = macro.length;
+      const layout: Layout = { items: [
+        { ...item(0, n, box(0, 0, 0, 14)), afterX: 4 },
+        item(0, n, box(4, 0, 24, 14)),
+        { ...item(0, n, box(24, 0, 24, 14)), afterX: 28 },
+        item(n, n + 1, box(28, 0, 38, 14)),
+      ] };
+      expect(measure(layout, f).x[stopOf(f, n, 0)]).toBe(28);
+      f.free();
+    },
+  );
+
+  test.each(["\\mod{n}", "\\pmod{n}", "\\pod{n}"])(
+    "%s includes argument siblings with narrower source ranges", (macro) => {
+      const f = MathField.open(macro + " z", false);
+      const n = macro.length;
+      const arg = macro.indexOf("{n}") + 1;
+      const layout: Layout = { items: [
+        item(0, n, box(0, 0, 0, 14)),
+        item(0, n, box(4, 0, 24, 14)),
+        item(arg, arg + 1, box(28, 0, 38, 14)),
+        item(n + 1, n + 2, box(38, 0, 48, 14)),
+      ] };
+      expect(measure(layout, f).x[stopOf(f, n, 0)]).toBe(38);
+      f.free();
+    },
+  );
+
+  test("a user macro's trailing negative space keeps its signed advance", () => {
+    const source = "\\def\\foo{ab\\!}\\foo z";
+    const f = MathField.open(source, false);
+    const from = source.lastIndexOf("\\foo");
+    const to = source.length - 1;
+    const layout: Layout = { items: [
+      item(from, to, box(0, 0, 30, 14)),
+      { ...item(from, to, box(30, 0, 30, 14)), afterX: 26 },
+      item(to, to + 1, box(26, 0, 36, 14)),
+    ] };
+    const mm = measure(layout, f);
+    expect(mm.x[stopOf(f, to, 0)]).toBe(26);
+    expect(mm.x[stopOf(f, 0, 0)]).toBe(0);
+    f.free();
+  });
+
+  test("a leading negative space keeps the caret before the macro's advance", () => {
+    const source = "\\def\\foo{\\!a}\\foo z";
+    const f = MathField.open(source, false);
+    const from = source.lastIndexOf("\\foo");
+    const to = source.length - 1;
+    const layout: Layout = { items: [
+      { ...item(from, to, box(0, 0, 0, 14)), afterX: -4 },
+      item(from, to, box(-4, 0, 6, 14)),
+      item(to, to + 1, box(6, 0, 16, 14)),
+    ] };
+    expect(measure(layout, f).x[stopOf(f, 0, 0)]).toBe(0);
+    f.free();
+  });
+
+  test.each(["\\notin ", "\\neq ", "\\TeX "])(
+    "%s keeps its enclosing box instead of an overlapping or raised child", (macro) => {
+      const f = MathField.open(macro + "z", false);
+      const n = macro.length;
+      const layout: Layout = { items: [
+        item(0, n, box(0, 0, 30, 14)),
+        { ...item(0, n, box(-2, -5, 34, 5)), parent: 0 },
+        item(n, n + 1, box(30, 0, 40, 14)),
+      ] };
+      const mm = measure(layout, f);
+      const end = stopOf(f, n, 0);
+      expect([mm.x[end], mm.top[end], mm.bottom[end]]).toEqual([30, 0, 14]);
+      f.free();
+    },
+  );
+
+  test("a leading macro's first stop uses its first rendered sibling", () => {
+    const f = MathField.open("\\bmod n", false);
+    const layout: Layout = { items: [
+      { ...item(0, 6, box(0, 0, 0, 14)), afterX: 1 },
+      item(0, 6, box(5, 0, 30, 14)),
+      item(6, 7, box(35, 0, 45, 14)),
+    ] };
+    expect(measure(layout, f).x[stopOf(f, 0, 0)]).toBe(0);
+    f.free();
   });
 
   test("a leading or negative spacing atom keeps its signed advance", () => {
@@ -96,8 +211,8 @@ describe("measure", () => {
     const layout: Layout = {
       items: [
         item(0, 10, box(0, 10, 20, 22), box(0, 0, 20, 30)),
-        item(6, 6, box(4, 0, 12, 12), box(4, 0, 12, 12), true),
-        item(8, 9, box(6, 18, 12, 30)),
+        { ...item(6, 6, box(4, 0, 12, 12), box(4, 0, 12, 12), true), parent: 0 },
+        { ...item(8, 9, box(6, 18, 12, 30)), parent: 0 },
       ],
     };
     const mm = measure(layout, f);
@@ -112,15 +227,15 @@ describe("measure", () => {
     const layout: Layout = {
       items: [
         item(0, 4, box(0, 1, 17, 21), box(0, -2, 17, 21), false, 16, 16),
-        item(0, 1, box(0, 4, 7, 20), box(0, 4, 7, 20), false, 16, 16),
-        item(3, 3, box(8, -2, 17, 15), box(8, -2, 17, 15), true, 12, 8),
+        { ...item(0, 1, box(0, 4, 7, 20), box(0, 4, 7, 20), false, 16, 16), parent: 0 },
+        { ...item(3, 3, box(8, -2, 17, 15), box(8, -2, 17, 15), true, 12, 8), parent: 0 },
       ],
     };
     const mm = measure(layout, f);
     const inSup = stopOf(f, 3, 1);
     expect([mm.x[inSup], mm.top[inSup], mm.bottom[inSup]]).toEqual([8, -1, 11]);
     const end = stopOf(f, 4, 0);
-    expect([mm.top[end], mm.bottom[end]]).toEqual([4, 20]);
+    expect([mm.x[end], mm.top[end], mm.bottom[end]]).toEqual([17, 4, 20]);
   });
 
   test("an empty slot with no marker takes the enclosing element's font, not its ink", () => {

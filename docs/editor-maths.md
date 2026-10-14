@@ -71,6 +71,10 @@ neither it nor the text around it. Inline renderings and fields each have
 one inline-block layout box, keeping scripts with their formula when prose
 beside them is indented or wraps. Spacing atoms' caret positions include
 their signed margin advance, so Tab's `\qquad` puts the caret after the gap.
+When a macro expands into several rendered siblings, its caret uses their
+first or last edge in DOM order, including arguments inside the invocation's
+source range and signed spacing advances. Mapped DOM ancestry keeps a
+structure's children from replacing its outer boundary.
 The controller focuses it and places the caret once the
 widget is in the document.
 

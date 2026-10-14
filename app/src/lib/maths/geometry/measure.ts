@@ -26,13 +26,29 @@ const line = (item: MappedBox): [number, number] => [
 
 /** Its own box for x, or its ink when its own box has no width. */
 const edges = (item: MappedBox): Box => (item.box.right > item.box.left ? item.box : item.ink);
+const endX = (item: MappedBox): number => item.afterX ?? edges(item).right;
+
+/** A macro's expansion can be several mapped siblings, including arguments
+ *  whose ranges are inside its invocation. DOM order preserves negative
+ *  spacing; descendants belong to their enclosing box, not its boundary. */
+function atomEdge(layout: Layout, atom: MappedBox, end: boolean): MappedBox {
+  let edge = atom;
+  for (const item of layout.items) {
+    if (item.placeholder || item.parent !== atom.parent || item.to <= item.from || !inSlot(item, atom)) continue;
+    edge = item;
+    if (!end) break;
+  }
+  return edge;
+}
 
 /**
  * Each stop's caret. A stop at offset `o` in slot `S` sits at the right
  * edge of the atom ending at `o` (the widest, so `x^2` beats its `2`), else
  * the left edge of the atom starting there, else at the empty slot's
- * marker; only source whitespace may lie between. Only elements inside
- * `S`'s interior count.
+ * marker; source whitespace is skipped. The next model stop bounds the first
+ * visible piece after non-drawing syntax. Only elements inside `S` count.
+ * An atom expanded into several mapped siblings takes
+ * its first or last sibling's edge, including signed spacing advances.
  */
 export function measure(layout: Layout, field: FieldShape): Measured {
   const n = field.stops.length;
@@ -56,8 +72,23 @@ export function measure(layout: Layout, field: FieldShape): Measured {
         if (!after || item.from < after.from || (item.from === after.from && item.to > after.to)) after = item;
       }
     }
+    // Definitions and style switches can precede the first visible piece
+    // of an atom. The model's next stop bounds that atom even when the
+    // source before its rendering is more than whitespace.
+    if (!before && !after && !marker) {
+      let next = slot.to;
+      for (let k = id + 1; k < n; k++) {
+        if (field.stopSlots[k] === field.stopSlots[id]) { next = field.stops[k]; break; }
+      }
+      for (const item of layout.items) {
+        if (item.placeholder || item.to <= item.from || item.from < o || item.to > next) continue;
+        if (!after || item.from < after.from || (item.from === after.from && item.to > after.to)) after = item;
+      }
+    }
+    if (before) before = atomEdge(layout, before, true);
+    if (after) after = atomEdge(layout, after, false);
     const at: [number, MappedBox | null] =
-      before ? [before.afterX ?? edges(before).right, before]
+      before ? [endX(before), before]
       : after ? [edges(after).left, after]
       : marker ? [marker.box.left, marker]
       : fallback(layout, slot);

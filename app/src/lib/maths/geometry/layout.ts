@@ -6,6 +6,9 @@ export interface MappedBox {
   /** Its UTF-16 range of the source (`data-s`/`data-e`). */
   from: number;
   to: number;
+  /** Nearest mapped DOM ancestor's index in `Layout.items`, or null.
+   *  Source ranges alone cannot distinguish a macro's siblings from children. */
+  parent: number | null;
   /** Its own border box. An inline span's is its font face's ascent and
    *  descent, which differ between KaTeX's faces (KaTeX_AMS's `□` is 1.43em,
    *  KaTeX_Math 0.94em), so a caret is sized from `baseline` and `size`. */
@@ -80,7 +83,7 @@ export function framePoint(frame: Element, clientX: number, clientY: number): { 
 export function readLayout(root: Element, frame: Element = root): Layout {
   const o = frameOrigin(frame);
   const items: MappedBox[] = [];
-  const walk = (el: Element): Box | null => {
+  const walk = (el: Element, parent: number | null): Box | null => {
     if (undrawn(el)) return null;
     const r = el.getBoundingClientRect();
     const own: Box = { left: r.left - o.x, top: r.top - o.y, right: r.right - o.x, bottom: r.bottom - o.y };
@@ -94,15 +97,15 @@ export function readLayout(root: Element, frame: Element = root): Layout {
       const style = getComputedStyle(el);
       const baseline = baselineOf(el, style, own, o);
       const afterX = el.classList.contains("mspace") ? own.right + (parseFloat(style.marginRight) || 0) : undefined;
-      items.push({ from, to, box: own, ink: own, placeholder, baseline, size: parseFloat(style.fontSize), afterX });
+      items.push({ from, to, parent, box: own, ink: own, placeholder, baseline, size: parseFloat(style.fontSize), afterX });
     }
     for (const child of el.children) {
-      const c = walk(child);
+      const c = walk(child, at >= 0 ? at : parent);
       if (c) ink = ink ? union(ink, c) : c;
     }
     if (at >= 0 && ink) items[at].ink = ink;
     return ink;
   };
-  walk(root);
+  walk(root, null);
   return { items };
 }
