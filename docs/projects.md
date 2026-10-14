@@ -253,7 +253,7 @@ independent layers, all predicates and orderings over one `getAllTasks`.
   which reveals From and To day pills over the calendar popover — either end
   optional, the To day counted whole, a To before the From swapped, an undated
   task never matching, no ends meaning Any time. Tags are one scrolling line.
-  Project (Any, Unfiled, one project; archived projects fold behind
+  Project (Any, No project, one project; archived projects fold behind
   `Archived (n)`) and Subject (Any, Personal, one subject; past-term subjects
   fold behind `Past subjects (n)`) are their own pills, a fold forced open while
   the pick is inside it. Their lists scroll in a fixed-height region that always
@@ -287,7 +287,7 @@ independent layers, all predicates and orderings over one `getAllTasks`.
   other active column by rank (the last is in flight, earlier ones queued).
   `TaskGlyph` (dashed circle, empty, half-filled brand, check) and `StatusPill`'s
   tint, including the picker's row glyphs, both read it, so they cannot disagree.
-- **Unfiled is a value of the project filter**, and filtering is a predicate
+- **No project is a value of the project filter**, and filtering is a predicate
   over one `getAllTasks`, not a query per question.
   - The status set decides which columns the board draws, and is never empty.
   - Due compares through `sqliteUtcToMs`: `due_at` is ISO from the UI and

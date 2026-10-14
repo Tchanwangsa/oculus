@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Kanban, Tray } from "@phosphor-icons/react";
+import { Circle, Kanban } from "@phosphor-icons/react";
 import { FilterFold } from "@/components/ui/filter/FilterFold";
 import { FilterList } from "@/components/ui/filter/FilterList";
 import { FilterPopover, FilterRow } from "@/components/ui/filter/FilterPopover";
@@ -34,7 +34,7 @@ function ProjectRow({
 }
 
 /**
- * The Project pill: Any, Unfiled or one project. Archived projects sit in a
+ * The Project pill: Any, No project or one project. Archived projects sit in a
  * fold, open while one of them is picked. Picking closes the popover.
  */
 export function ProjectFilter({
@@ -57,8 +57,8 @@ export function ProjectFilter({
 
   const value = filter.project;
   const label =
-    value === "any" ? "Project" : value === "unfiled" ? "Unfiled" : (projects.find((p) => p.id === value)?.name ?? "Project");
-  const Glyph = value === "unfiled" ? Tray : Kanban;
+    value === "any" ? "Project" : value === "unfiled" ? "No project" : (projects.find((p) => p.id === value)?.name ?? "Project");
+  const Glyph = value === "unfiled" ? Circle : Kanban;
 
   return (
     <FilterPopover
@@ -77,8 +77,8 @@ export function ProjectFilter({
           <FilterList>
             <FilterRow label="Any project" selected={value === "any"} onPick={() => pick("any")} />
             <FilterRow
-              label="Unfiled"
-              icon={<Tray size={13} className="shrink-0" />}
+              label="No project"
+              icon={<Circle size={13} className="shrink-0" />}
               selected={value === "unfiled"}
               onPick={() => pick("unfiled")}
             />

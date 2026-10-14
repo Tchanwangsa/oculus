@@ -102,5 +102,5 @@ export function appendNeighbour(
 }
 
 export function projectLabel(task: DbTaskWithProject): string {
-  return task.project_name ?? "Unfiled";
+  return task.project_name ?? "No project";
 }

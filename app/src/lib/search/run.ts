@@ -113,7 +113,7 @@ export async function runSearch(
           key: `task:${t.id}`,
           icon: glyph(CheckSquare),
           label: t.title,
-          meta: t.project_name ?? "Unfiled",
+          meta: t.project_name ?? "No project",
           target: {
             kind: "route" as const,
             path: taskHref(t.project_id, t),
