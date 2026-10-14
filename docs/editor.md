@@ -250,7 +250,12 @@ lands only if it is the newest request and the text and caret are
 unchanged. Tab takes it (one undo step), Mod-→ the next word, Esc drops it;
 typing its front eats it, anything else drops it. Its keymap is
 `Prec.highest` but passes without a ghost, so the note's and snippets' Tab
-are untouched. Blur, toggle-off and note switch call
+are untouched. In Live mode, complete inline and display maths in the ghost
+renders with the note's maths engine (`chrome/ghostMath.ts`); code, escaped
+delimiters and invalid or incomplete maths stay as source. Raw mode shows
+the original text. Acceptance always inserts the original markdown and
+LaTeX. A preview redraws when the maths engine becomes ready.
+Blur, toggle-off and note switch call
 `document_suggest_cancel`. A failure is a red dot on the toggle until a
 request succeeds.
 

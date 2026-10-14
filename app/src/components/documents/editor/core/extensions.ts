@@ -17,6 +17,7 @@ import { noteKeymap } from "../commands";
 import { findExtension } from "../chrome/find";
 import { hostCompartment, linkAt, noteHost, type NoteHost } from "./host";
 import { noteMarkdown } from "./language";
+import { liveMode } from "./mode";
 import { noteSelection } from "./selectionLayer";
 import { livePreview } from "../live-preview/livePreview";
 import { mathShorthand } from "../math/tools/shorthand";
@@ -31,7 +32,7 @@ import { noteUndoRouting } from "./undoRouting";
 export const liveCompartment = new Compartment();
 
 export function modeExtension(live: boolean): Extension {
-  return live ? livePreview() : rawMode();
+  return [liveMode.of(live), live ? livePreview() : rawMode()];
 }
 
 /** ⌘/Ctrl-click opens a link in either mode; a plain click edits it. */
