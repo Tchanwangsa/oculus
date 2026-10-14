@@ -18,7 +18,7 @@ import {
 } from "../tasks/universalTasks";
 
 /**
- * Every task on the default board (Backlog, Todo, In progress, Done). A card
+ * Every task on the default board (Planning, Todo, In progress, Done). A card
  * sits in the column matching its own board's column id, else its kind; a drop
  * writes back onto the card's own board the same way, and a board with no such
  * column refuses the drop.

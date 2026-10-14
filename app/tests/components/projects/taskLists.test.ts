@@ -167,7 +167,7 @@ describe("grouping", () => {
 
   test("status groups follow the board and skip empty ones", () => {
     const groups = groupTasks([task({ column_id: "done" }), task({ column_id: "backlog" })], "status", ctx);
-    expect(groups.map((g) => g.label)).toEqual(["Backlog", "Done"]);
+    expect(groups.map((g) => g.label)).toEqual(["Planning", "Done"]);
   });
 
   test("project groups put Unfiled first, then names", () => {

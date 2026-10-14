@@ -10,7 +10,7 @@ import type { DbProject } from "@/lib/planning/projects";
 /**
  * Add a task from the universal page, unfiled by default. The destination pick
  * only sets where it will be created; `createTask` puts it in the board's
- * first column (Backlog).
+ * first column (Planning).
  */
 export function NewTaskButton({
   projects,
