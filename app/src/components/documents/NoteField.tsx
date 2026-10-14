@@ -22,6 +22,7 @@ import {
 } from "./editor/commands";
 import { noteExtensions } from "./editor/core/extensions";
 import { hostCompartment, noteHost, type NoteHost } from "./editor/core/host";
+import { ViewSlot } from "./editor/core/viewSlot";
 import { Toolbar } from "./editor/chrome/Toolbar";
 import { useEditorFind } from "./editor/chrome/useEditorFind";
 
@@ -33,8 +34,9 @@ const fieldTheme = Prec.highest(EditorView.theme({ ".cm-content": { minHeight: "
  * A markdown field on the note editor (`./editor/`) in Live mode — a short
  * text kept in a database row rather than a note file, so no session, title,
  * Raw mode or AI suggestions. At rest it reads as prose; while edited it has
- * a brand border and the `Toolbar` under the text, so the toolbar never
- * pushes the line just clicked.
+ * a brand border and the `Toolbar` above the text. The toolbar waits for a
+ * press that focused the field to end, so the line being clicked or dragged
+ * over never moves under the pointer.
  *
  * The text is the caller's: `onCommit` gets it when focus leaves, on ⌘↵ and
  * on unmount, but only if edited since `text` last landed. A new `text` (an
@@ -85,8 +87,12 @@ export function NoteField({
   const [view, setView] = useState<EditorView | null>(null);
   const [formats, setFormats] = useState<ActiveFormats>(NO_FORMATS);
   const [editing, setEditing] = useState(false);
+  /** A press that began on a field at rest is down; the toolbar waits for it. */
+  const [pressing, setPressing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const slot = useMemo(() => new ViewSlot<EditorView>(), []);
+  const releasePress = useRef<(() => void) | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -178,7 +184,8 @@ export function NoteField({
   };
 
   useEffect(() => {
-    if (!editorRef.current) return;
+    const parent = editorRef.current;
+    if (!parent) return;
     const onUpdate = (u: ViewUpdate) => {
       if (u.docChanged) changeRef.current?.(u.state.doc.toString());
       if (u.docChanged || u.selectionSet || syntaxTree(u.state) !== syntaxTree(u.startState)) {
@@ -193,48 +200,62 @@ export function NoteField({
       return true;
     };
     baseRef.current = textRef.current;
-    const v = new EditorView({
-      parent: editorRef.current,
-      doc: textRef.current,
-      extensions: [
-        noteExtensions({
-          live: true,
-          host: hostRef.current,
-          suggest: [],
-          onUpdate,
-          onPictures: pastePictures,
-          placeholder,
-          label,
+    // The completion list and maths popover leave the scroller below, which
+    // would clip and mask them; a modal keeps its own, since a body-level
+    // tooltip is outside the modal's reach.
+    const tooltipParent =
+      parent.closest<HTMLElement>('[role="dialog"]') ?? parent.ownerDocument.body;
+    // Exactly one view lives in the host, whatever the effect's history.
+    parent.replaceChildren();
+    const v = slot.mount(
+      () =>
+        new EditorView({
+          parent,
+          doc: textRef.current,
+          extensions: [
+            noteExtensions({
+              live: true,
+              host: hostRef.current,
+              suggest: [],
+              onUpdate,
+              onPictures: pastePictures,
+              placeholder,
+              label,
+              tooltipParent,
+            }),
+            fieldTheme,
+            Prec.highest(
+              keymap.of([
+                {
+                  key: "Mod-Enter",
+                  run: () => {
+                    commit();
+                    return true;
+                  },
+                },
+              ]),
+            ),
+          ],
         }),
-        fieldTheme,
-        Prec.highest(
-          keymap.of([
-            {
-              key: "Mod-Enter",
-              run: () => {
-                commit();
-                return true;
-              },
-            },
-          ]),
-        ),
-      ],
-    });
+    );
     const unregisterLink = registerNoteLinkCommand(v.dom, () => toggleLink(v));
     viewRef.current = v;
     setView(v);
     setFormats(activeFormats(v.state));
     return () => {
-      // Leaving the row (a key change, the page closing) saves what was typed.
-      commit();
-      unregisterLink();
-      v.destroy();
-      viewRef.current = null;
-      setView(null);
+      try {
+        // Leaving the row (a key change, the page closing) saves what was typed.
+        commit();
+        unregisterLink();
+      } finally {
+        slot.unmount(v);
+        viewRef.current = null;
+        setView(null);
+      }
     };
     // Placeholder and label are fixed for a field's life.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commit, embed]);
+  }, [commit, embed, slot]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: hostCompartment.reconfigure(noteHost.of(host)) });
@@ -248,9 +269,27 @@ export function NoteField({
   useEffect(
     () => () => {
       if (leaveTimer.current != null) window.clearTimeout(leaveTimer.current);
+      releasePress.current?.();
     },
     [],
   );
+
+  /** The toolbar mounts above the text and pushes it down, so a press that
+   *  gives a field at rest its focus holds the toolbar back until it ends:
+   *  the caret lands, or a drag selects, on text that has not yet moved. */
+  const onPointerDown = () => {
+    if (editingRef.current || releasePress.current) return;
+    const release = () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+      releasePress.current = null;
+      setPressing(false);
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    releasePress.current = release;
+    setPressing(true);
+  };
 
   /**
    * Focus anywhere in the card's React tree counts as editing — that includes
@@ -289,6 +328,7 @@ export function NoteField({
         ref={cardRef}
         onFocus={onFocus}
         onBlur={onBlur}
+        onPointerDown={onPointerDown}
         onMouseDown={(e) => {
           // The padding around the text edits it rather than dropping focus.
           if (e.target !== e.currentTarget && e.target !== scrollRef.current) return;
@@ -301,16 +341,8 @@ export function NoteField({
           dropping && "border-brand ring-[3px] ring-brand/25",
         )}
       >
-        {/* Bounded so a long text scrolls inside and what follows stays reachable. */}
-        <div
-          ref={scrollRef}
-          className={cn("max-h-[420px] overflow-x-hidden overflow-y-auto px-2 py-1.5", scrollClassName)}
-        >
-          <div ref={editorRef} data-selectable />
-        </div>
         {/* In the card, so focus in the bar still counts as editing. */}
-        {find.open && <FindBar {...find.bar} variant="floating" placeholder="Find in note" />}
-        {editing && (
+        {editing && !pressing && (
           <div
             onMouseDown={(e) => {
               // A click between the buttons must not blur the editor.
@@ -325,9 +357,25 @@ export function NoteField({
                   .then(attachPaths)
                   .catch((e) => setError(String(e)))
               }
-              className="static z-auto mx-0 mt-0 cursor-default rounded-b-lg border-t border-b-0"
+              className="static z-auto mx-0 mt-0 cursor-default rounded-t-lg"
             />
           </div>
+        )}
+        {/* Bounded so a long text scrolls inside and what follows stays reachable. */}
+        <div
+          ref={scrollRef}
+          className={cn("max-h-[420px] overflow-x-hidden overflow-y-auto px-2 py-1.5", scrollClassName)}
+        >
+          <div ref={editorRef} data-selectable />
+        </div>
+        {/* Floats under the toolbar, at the card's top right. */}
+        {find.open && (
+          <FindBar
+            {...find.bar}
+            variant="floating"
+            placeholder="Find in note"
+            className="top-[3.25rem]"
+          />
         )}
       </div>
     </div>

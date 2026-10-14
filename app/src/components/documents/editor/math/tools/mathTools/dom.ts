@@ -63,6 +63,19 @@ export function cellButton(entry: MathEntry, onClick: () => void): HTMLButtonEle
   return b;
 }
 
+/** Mirrors the editor's `cm-math-command` class (set while a `\command` is
+ *  typed in the field) onto the tooltip as `cm-math-tools-command`, which
+ *  hides it. A descendant selector from the editor cannot do this: tooltips
+ *  can sit outside the editor (`tooltips({ parent })`). Returns the stop. */
+export function followCommandMode(view: EditorView, dom: HTMLElement): () => void {
+  const sync = () =>
+    dom.classList.toggle("cm-math-tools-command", view.dom.classList.contains("cm-math-command"));
+  sync();
+  const observer = new MutationObserver(sync);
+  observer.observe(view.dom, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
+}
+
 /** Hidden while neither the editor nor its field has focus, and while the
  *  completion list is up. True when it has just come back. */
 export function syncHidden(view: EditorView, dom: HTMLElement, state: EditorState): boolean {

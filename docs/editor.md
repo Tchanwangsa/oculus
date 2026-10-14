@@ -222,7 +222,9 @@ selected.
   searches every file, parsed or not, of the host's subject — or of the whole
   library when the host has none, each row then naming its subject — leaving
   out the note itself (`searchNoteLinkFiles`); an empty query lists recently
-  opened files. It is a source in the one `autocompletion()`. Accepting writes
+  opened files. A row's glyph and colour, and the type in its detail
+  (`PDF`, `Discussion`, `File`…), are `fileReferenceAppearance`'s, the same as
+  a task's related-file chip. It is a source in the one `autocompletion()`. Accepting writes
   the backticked library path the chat composer sends,
   `` `courses/<code>/files/week-3.pdf` `` (`syntax/mentionSyntax.ts`). The subject
   and note path reach the editor through `NoteHost`; an editor with no file
@@ -268,9 +270,18 @@ only, with no session, title, Raw mode or AI suggestions; the caller
 supplies the `@` subject, picture resolution and picture writes. At rest it
 reads as prose; focus anywhere in its React tree — including the
 `Toolbar`'s portaled Select and table popover, whose focus events bubble
-through React — shows the brand border and the toolbar below the text. A
-blur is judged a tick later, and a window losing focus (the picture picker)
-is not leaving. Leaving, ⌘↵ and unmounting hand an edited doc to
+through React — shows the brand border and the toolbar above the text. A
+press that gives a field at rest its focus holds the toolbar back until the
+pointer is released, since mounting it pushes the text down and would move the
+line being clicked or dragged over. A blur is judged a tick later, and a window
+losing focus (the picture picker) is not leaving. The field's text scroller
+clips and masks its contents, so `NoteField` passes `noteExtensions` a
+`tooltipParent`: the completion list and maths popover are mounted in
+`document.body` (inside the dialog when the field is in one, which would
+otherwise shut on a click outside it) instead of the editor. `ViewSlot`
+(`editor/core/viewSlot.ts`) keeps the host to one `EditorView`: it destroys any
+view still held before mounting the next and destroys even when the effect's
+own cleanup threw first. Leaving, ⌘↵ and unmounting hand an edited doc to
 `onCommit`; a new `text` replaces an unedited doc, outside history.
 `noteExtensions` takes its placeholder and aria label. An optional `onChange`
 hears the doc on every change, for a caller whose buttons read the text and
@@ -279,6 +290,14 @@ cannot wait on the blur (the chat's pasted text editor,
 `scrollClassName` replaces the text scroller's 420px bound.
 
 ## Gotchas
+
+- **Tooltip rules cannot assume the editor is their ancestor.** With
+  `tooltips({ parent })` CodeMirror mounts them in a container that carries
+  the theme class but not `cm-editor`, so theme rules hang from `tooltipRoot`
+  (`theme/tokens.ts`), never `&.cm-editor`, and state that the editor holds
+  reaches the tooltip as a class on the tooltip itself: the maths popover
+  hides in command mode through `followCommandMode`
+  (`math/tools/mathTools/dom.ts`), not a `cm-math-command` ancestor rule.
 
 - **The selection highlight is our own layer** (`core/selectionLayer.ts`):
   `drawSelection` draws the caret, and its highlight layer is hidden by the
