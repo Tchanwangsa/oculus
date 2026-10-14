@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CaretRight, Check, Kanban, Plus } from "@phosphor-icons/react";
+import { CaretRight, Check, Plus, User } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -176,7 +176,7 @@ function GroupRow({
       {group.subject ? (
         <SubjectIcon code={group.subject.code} size={13} />
       ) : (
-        <Kanban size={13} className="shrink-0" />
+        <User size={13} className="shrink-0 text-muted-foreground" />
       )}
       <span className="min-w-0 flex-1 truncate">{group.label}</span>
       {selected && <Check size={12} weight="bold" className="shrink-0 text-brand" />}

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { User } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { displayCode } from "@/lib/format/format";
@@ -45,7 +46,10 @@ export function ProjectOverview({
                     {displayCode(project.subject_code)}
                   </>
                 ) : (
-                  "Personal"
+                  <>
+                    <User size={13} className="shrink-0 text-muted-foreground" />
+                    Personal
+                  </>
                 )}
               </span>
             </Row>
