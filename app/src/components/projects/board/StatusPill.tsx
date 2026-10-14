@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check } from "@phosphor-icons/react";
+import { CaretDown, Check } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { boardOf, type DbProject, type ProjectColumn } from "@/lib/planning/projects";
@@ -31,12 +31,18 @@ export function StatusPill({
   project,
   columnId,
   onPick,
+  dot = false,
+  chevron = false,
   className,
 }: {
   /** `null` for an unfiled task (default board). */
   project: DbProject | null;
   columnId: string;
   onPick: (columnId: string) => void;
+  /** A leading dot in the pill's own colour, for the task page's larger pill. */
+  dot?: boolean;
+  /** A quiet caret after the name, marking the pill as a dropdown. */
+  chevron?: boolean;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -55,7 +61,9 @@ export function StatusPill({
             className,
           )}
         >
+          {dot && <span aria-hidden className="mr-1.5 size-2 shrink-0 rounded-full bg-current" />}
           <span className="truncate">{column?.name ?? columnId}</span>
+          {chevron && <CaretDown size={9} weight="bold" className="ml-1 shrink-0 opacity-60" />}
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-44 p-1">

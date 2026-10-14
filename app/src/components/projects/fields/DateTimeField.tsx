@@ -1,9 +1,10 @@
 import { lazy, Suspense, useState } from "react";
-import { CalendarBlank, X } from "@phosphor-icons/react";
+import { CalendarBlank, X, type Icon } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { sqliteUtcToMs } from "@/lib/format/format";
 import { displayLocale } from "@/lib/format/locale";
+import { PILL } from "./pill";
 
 const Calendar = lazy(() =>
   import("@/components/ui/calendar").then((module) => ({ default: module.Calendar })),
@@ -37,6 +38,9 @@ export function DateTimeField({
   onCommit,
   defaultTime = "end",
   placeholder = "Empty",
+  variant = "field",
+  icon: Glyph = CalendarBlank,
+  label: fieldLabel,
   className,
 }: {
   /** As stored: SQLite's naive UTC, or an ISO instant. `null` is unset. */
@@ -45,6 +49,13 @@ export function DateTimeField({
   onCommit: (iso: string | null) => void;
   defaultTime?: "start" | "end";
   placeholder?: string;
+  /** `pill` is the task page's rounded property pill; `field` the quiet inline
+   *  field the dialogs and Overview use. */
+  variant?: "field" | "pill";
+  /** The trigger's glyph. */
+  icon?: Icon;
+  /** What the date is ("Due date"), for the trigger's tooltip and name. */
+  label?: string;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -79,16 +90,28 @@ export function DateTimeField({
       <PopoverTrigger asChild>
         <button
           type="button"
+          title={fieldLabel}
+          aria-label={
+            fieldLabel ? `${fieldLabel}: ${current ? label(current) : "not set"}` : undefined
+          }
           className={cn(
-            "inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-xs transition-colors",
-            "hover:border-border-subtle hover:bg-surface",
-            open && "border-border-subtle bg-surface",
-            current ? "text-foreground" : "text-muted-foreground/60",
+            variant === "pill"
+              ? PILL
+              : [
+                  "inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-xs transition-colors",
+                  "hover:border-border-subtle hover:bg-surface",
+                  open && "border-border-subtle bg-surface",
+                ],
+            current
+              ? "text-foreground"
+              : variant === "pill"
+                ? "text-muted-foreground"
+                : "text-muted-foreground/60",
             className,
           )}
         >
-          <CalendarBlank size={13} className="shrink-0 text-muted-foreground" />
-          {current ? label(current) : placeholder}
+          <Glyph size={13} className="shrink-0 text-muted-foreground" />
+          <span className="truncate">{current ? label(current) : placeholder}</span>
         </button>
       </PopoverTrigger>
 

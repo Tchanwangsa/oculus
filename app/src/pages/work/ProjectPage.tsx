@@ -21,6 +21,9 @@ import { ProjectCrumbs } from "@/components/projects/page/ProjectCrumbs";
 import { boardProgress, taskTree } from "@/components/projects/tasks/taskTree";
 import { useProjectActions } from "@/components/projects/lists/useProjectActions";
 import { PaneHeaderRow, PaneTrail, useInSidePanel } from "@/components/tabs/PaneHeader";
+import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
+import { useTasksPanel } from "@/layouts/TasksLayout";
+import { shortcut } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { PROJECTS_UPDATED_EVENT, type DbProject } from "@/lib/planning/projects";
 import { useProjectsStore } from "@/stores/planning/projectsStore";
@@ -67,6 +70,8 @@ export default function ProjectPage() {
   const id = Number(projectId);
   const navigate = useNavigate();
   const inSide = useInSidePanel();
+  // The nav column's fold toggle; null in the side panel, outside the layout.
+  const panel = useTasksPanel();
 
   const project = useProjectsStore((s) => s.projects.find((p) => p.id === id) ?? null);
   const tasks = useProjectsStore((s) => s.tasks);
@@ -160,6 +165,13 @@ export default function ProjectPage() {
   // The title row; in the side panel it leads, as the panel's header.
   const titleRow = (
     <PaneHeaderRow className="shrink-0 flex h-12 items-center gap-2.5 px-5">
+      {panel && (
+        <SideNavCollapseToggle
+          collapsed={panel.collapsed}
+          onToggle={panel.toggle}
+          shortcut={shortcut("mod+alt+B")}
+        />
+      )}
       <PaneTrail>
         <nav
           aria-label="Breadcrumb"

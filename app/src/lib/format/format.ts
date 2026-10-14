@@ -160,6 +160,21 @@ export function fmtRecent(ms: number, now: Date = new Date()): string {
   return d.toLocaleDateString(displayLocale, opts);
 }
 
+/** "Today", "Yesterday", a weekday for the rest of the past week, else
+ *  "15 Aug" (+ year when it is not this one). Pass `now` to pin the clock. */
+export function fmtRelativeDay(ms: number, now: Date = new Date()): string {
+  const d = new Date(ms);
+  const daysAgo = Math.round(
+    (startOfDay(now).getTime() - startOfDay(d).getTime()) / 86_400_000,
+  );
+  if (daysAgo === 0) return "Today";
+  if (daysAgo === 1) return "Yesterday";
+  if (daysAgo > 1 && daysAgo < 7) return d.toLocaleDateString(displayLocale, { weekday: "long" });
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(displayLocale, opts);
+}
+
 /** The whole stamp, for a tooltip: "Friday 2 October 2026 at 2:18 pm". */
 export function fmtFullStamp(ms: number): string {
   return new Date(ms).toLocaleString(displayLocale, {

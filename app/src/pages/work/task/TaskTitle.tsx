@@ -41,7 +41,7 @@ export function TaskTitle({
   };
 
   const shared =
-    "mt-2 w-full text-[22px] font-semibold leading-tight tracking-tight outline-none";
+    "w-full font-display text-[30px] leading-tight font-bold tracking-tight break-words outline-none";
 
   if (editing) {
     return (

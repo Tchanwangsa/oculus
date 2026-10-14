@@ -1,4 +1,4 @@
-import { useRef, type ComponentProps, type ReactNode } from "react";
+import { useRef, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { TablePagination } from "@/components/ui/table/TablePagination";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
@@ -6,7 +6,7 @@ import { useScrollFade } from "@/hooks/ui/useScrollFade";
 /**
  * The shell every full-bleed table shares (`SyncHistoryTable` is the model):
  * one `cols` grid class for the header and every row, the header outside the
- * scroller, and a pagination footer.
+ * scroller, and an optional pagination footer.
  *
  * Column alignment rests on the 6px classic scrollbar (`index.css`): the
  * header's `pr-1.5` stands in for it, and the body is `overflow-y: scroll` so
@@ -15,6 +15,7 @@ import { useScrollFade } from "@/hooks/ui/useScrollFade";
  */
 export function GridTable({
   cols,
+  colsStyle,
   header,
   empty,
   pagination,
@@ -23,10 +24,15 @@ export function GridTable({
 }: {
   /** The `grid grid-cols-[…] … px-5` class every row also uses. */
   cols: string;
+  /** For a table whose columns are only known at run time: `cols` carries
+   *  `grid items-center gap-3 px-5` and this the `gridTemplateColumns`, which
+   *  every row sets the same way. Tailwind cannot build the class at run time. */
+  colsStyle?: CSSProperties;
   header: ReactNode;
   /** Shown above the rows when set — pass it only while the table is empty. */
   empty?: ReactNode;
-  pagination: ComponentProps<typeof TablePagination>;
+  /** Omit for a table that is one scrolling list. */
+  pagination?: ComponentProps<typeof TablePagination>;
   children: ReactNode;
   /** Keep dense columns readable, scrolling header and rows together. */
   minWidth?: number;
@@ -37,7 +43,7 @@ export function GridTable({
   useScrollFade(rowsRef, "y", `${minWidth}:${Boolean(empty)}`);
   const headerRow = (
     <div className="shrink-0 pr-1.5">
-      <div className={cn(cols, "border-b border-border-subtle bg-card py-2")}>{header}</div>
+      <div style={colsStyle} className={cn(cols, "border-b border-border-subtle bg-card py-2")}>{header}</div>
     </div>
   );
   const rows = (
@@ -64,7 +70,7 @@ export function GridTable({
           <div className="flex h-full flex-col" style={{ minWidth }}>{content}</div>
         </div>
       ) : content}
-      <TablePagination {...pagination} />
+      {pagination && <TablePagination {...pagination} />}
     </div>
   );
 }

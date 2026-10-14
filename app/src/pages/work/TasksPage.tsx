@@ -1,97 +1,94 @@
-import { useStoredState } from "@/hooks/ui/useStoredState";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { PillTabs } from "@/components/ui/table/PillTabs";
-import { NewTaskButton } from "@/components/projects/nav/NewTaskButton";
-import { SectionHeader } from "@/components/projects/page/SectionHeader";
+import { useCallback, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { TasksBoard } from "@/components/projects/board/TasksBoard";
+import { DisplayMenu } from "@/components/projects/display/DisplayMenu";
+import { DISPLAY_KEY, readDisplay, writeDisplay } from "@/components/projects/display/settings";
 import { TasksTable } from "@/components/projects/lists/TasksTable";
+import { NewTaskButton } from "@/components/projects/nav/NewTaskButton";
+import { useCreateTask } from "@/components/projects/nav/useCreateTask";
+import { SectionHeader } from "@/components/projects/page/SectionHeader";
 import {
   DEFAULT_FILTER,
-  TaskFilters,
   filteredColumns,
   isFiltered,
   matchesFilter,
   type TaskFilter,
-} from "@/components/projects/tasks/TaskFilters";
+} from "@/components/projects/tasks/filterRules";
+import { TaskFilters } from "@/components/projects/tasks/TaskFilters";
+import { TaskSearch } from "@/components/projects/tasks/TaskSearch";
+import { sortTasks } from "@/components/projects/tasks/taskSort";
 import {
-  UNIVERSAL_COLUMNS,
-  appendNeighbour,
-} from "@/components/projects/tasks/universalTasks";
+  matchesSearch,
+  matchesView,
+  parseTagParam,
+  parseView,
+  viewLabel,
+} from "@/components/projects/tasks/taskViews";
+import { appendNeighbour } from "@/components/projects/tasks/universalTasks";
 import { useTaskList } from "@/hooks/data/useTaskList";
-import type { DbTaskWithProject } from "@/lib/planning/projects";
+import { useTaskTags } from "@/hooks/data/useTaskTags";
+import { useStoredState } from "@/hooks/ui/useStoredState";
+import { useTasksPanel } from "@/layouts/TasksLayout";
+import { createTaskTag, type DbTaskTag, type DbTaskWithProject } from "@/lib/planning/projects";
 import { useProjectsStore } from "@/stores/planning/projectsStore";
 
 /**
- * Every task across every project, plus unfiled ones — the section's second
- * tab under `SectionHeader`'s `Projects · Tasks` strip.
+ * Every task across every project, plus unfiled ones.
  *
- * Spanning projects costs manual order: `position` is only comparable inside
- * one project's column, so board columns are sorted and a drag within one is a
- * no-op (`app/src/components/projects/tasks/universalTasks.ts`).
- *
- * Filters' meaning lives in `TaskFilters.tsx`; this page holds their state. The
- * status filter decides which columns the board has, deliberately.
+ * What is listed is the nav column's view and tag (`?view=`, `?tag=`), the
+ * search, and the filter popover, ANDed; how it is drawn is the Display menu
+ * (`app/src/components/projects/display/`). Spanning projects costs manual
+ * order: `position` is only comparable inside one project's column, so lists
+ * are sorted and a board drag within a column is a no-op
+ * (`app/src/components/projects/tasks/universalTasks.ts`).
  */
-type TaskView = "board" | "table";
-
-const VIEW_KEY = "oculus-tasks-view";
-
-/** Only the status filter persists (beside `VIEW_KEY`); project, subject and
- *  due start empty each time. */
-const STATUS_KEY = "oculus-tasks-status";
-
-const VIEWS = [
-  { value: "board", label: "Board" },
-  { value: "table", label: "Table" },
-] as const satisfies ReadonlyArray<{ value: TaskView; label: string }>;
-
-function isView(v: string | null): v is TaskView {
-  return v === "board" || v === "table";
-}
-
-function storedStatus(): readonly string[] {
-  try {
-    const raw = localStorage.getItem(STATUS_KEY);
-    if (!raw) return DEFAULT_FILTER.status;
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_FILTER.status;
-    // Only ids that still exist, in board order; an empty set would leave a
-    // board with no columns.
-    const ids = UNIVERSAL_COLUMNS.filter((c) => parsed.includes(c.id)).map((c) => c.id);
-    return ids.length > 0 ? ids : DEFAULT_FILTER.status;
-  } catch {
-    return DEFAULT_FILTER.status;
-  }
-}
-
 export default function TasksPage() {
-  const [view, setView] = useStoredState<TaskView>(VIEW_KEY, (stored) =>
-    isView(stored) ? stored : "board",
-  );
-  const [filter, setFilter] = useState<TaskFilter>(() => ({
-    ...DEFAULT_FILTER,
-    status: storedStatus(),
-  }));
+  const [params] = useSearchParams();
+  const view = parseView(params.get("view"));
+  const tagParam = parseTagParam(params.get("tag"));
 
-
-  useEffect(() => {
-    localStorage.setItem(STATUS_KEY, JSON.stringify(filter.status));
-  }, [filter.status]);
+  const [display, setDisplay] = useStoredState(DISPLAY_KEY, readDisplay, writeDisplay);
+  const [pickedFilter, setFilter] = useState<TaskFilter>(DEFAULT_FILTER);
+  const [query, setQuery] = useState("");
+  const panel = useTasksPanel();
 
   // Not `projectsStore`, which holds one open project. One read of everything;
-  // the filter is a predicate over it. Refreshes on `PROJECTS_UPDATED_EVENT`.
+  // the view, search and filter are predicates over it. Refreshes on
+  // `PROJECTS_UPDATED_EVENT`.
   const { tasks, projects, projectById, loaded } = useTaskList("all");
+  const { tags, byId: tagById, loaded: tagsLoaded } = useTaskTags();
+  // A tag deleted from elsewhere leaves a stale link; it selects nothing.
+  const tagId = tagParam != null && (!tagsLoaded || tagById.has(tagParam)) ? tagParam : null;
+  const tag: DbTaskTag | undefined = tagId != null ? tagById.get(tagId) : undefined;
+  // Likewise a deleted tag still ticked in the filter popover.
+  const filter = useMemo(
+    () =>
+      !tagsLoaded || pickedFilter.tags.every((id) => tagById.has(id))
+        ? pickedFilter
+        : { ...pickedFilter, tags: pickedFilter.tags.filter((id) => tagById.has(id)) },
+    [pickedFilter, tagById, tagsLoaded],
+  );
 
   // Writes go through the store's wrappers; the refresh is the event's.
   const moveTask = useProjectsStore((s) => s.moveTask);
-  const createTask = useProjectsStore((s) => s.createTask);
+  const updateTask = useProjectsStore((s) => s.updateTask);
   const refileTask = useProjectsStore((s) => s.refileTask);
+  const create = useCreateTask();
 
   /** One clock for the pass, so "overdue" is consistent across rows. */
   const shown = useMemo(() => {
     const now = Date.now();
-    return tasks.filter((t) => matchesFilter(t, filter, projectById, now));
-  }, [tasks, filter, projectById]);
+    const tagName = (id: number) => tagById.get(id)?.name;
+    const rows = tasks.filter(
+      (t) =>
+        (display.showCompleted || t.done_at == null) &&
+        matchesView(t, view, now) &&
+        (tagId == null || t.tag_ids.includes(tagId)) &&
+        matchesSearch(t, query, tagName) &&
+        matchesFilter(t, filter, projectById, now),
+    );
+    return sortTasks(rows, display.sort, projectById);
+  }, [tasks, display.showCompleted, display.sort, view, tagId, query, filter, projectById, tagById]);
 
   const columns = useMemo(() => filteredColumns(filter), [filter]);
 
@@ -101,9 +98,7 @@ export default function TasksPage() {
   const move = useCallback(
     (task: DbTaskWithProject, columnId: string) => {
       const before = appendNeighbour(tasks, task, columnId);
-      moveTask(task.id, columnId, before, null).catch((e) =>
-        console.error("move task failed", e),
-      );
+      moveTask(task.id, columnId, before, null).catch((e) => console.error("move task failed", e));
     },
     [moveTask, tasks],
   );
@@ -116,47 +111,42 @@ export default function TasksPage() {
     [refileTask],
   );
 
-  const create = useCallback(
-    (projectId: number | null, title: string) => {
-      // No `columnId`: `createTask` uses the destination's first column.
-      createTask({ projectId, title }).catch((e) =>
-        console.error("create task failed", e),
-      );
-    },
-    [createTask],
+  const actions = useMemo(
+    () => ({
+      onMove: move,
+      onRefile: refile,
+      onTags: (task: DbTaskWithProject, tagIds: number[]) => {
+        updateTask(task.id, { tagIds }).catch((e) => console.error("update task tags failed", e));
+      },
+      onCreateTag: (name: string) => createTaskTag(name),
+    }),
+    [move, refile, updateTask],
   );
 
-  const narrowed = isFiltered(filter);
-  const done = shown.filter((t) => t.done_at != null).length;
-
-  /** Under a filter, the empty state names the filter. */
-  const empty = narrowed
-    ? "Nothing matches these filters — widen one, or clear them back to Any."
-    : "No tasks yet — add one above, or break a project down on its board.";
+  const title = tag ? (view === "all" ? tag.name : `${tag.name} · ${viewLabel(view)}`) : viewLabel(view);
+  const empty =
+    tasks.length === 0
+      ? "No tasks yet — add one with New task, or break a project down on its board."
+      : isFiltered(filter) || query.trim() || tagId != null || view !== "all" || !display.showCompleted
+        ? "Nothing matches — change the view, the search or the filters."
+        : "Nothing to show.";
 
   return (
     <div className="flex h-full flex-col">
-      <SectionHeader>
+      <SectionHeader title={title}>
         <span className="flex-1" />
-        {/* `done/total` summarises everything, so under a filter show a count. */}
-        {narrowed ? (
-          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-            {shown.length} shown
-          </span>
-        ) : (
-          tasks.length > 0 && (
-            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-              {done}/{tasks.length} done
-            </span>
-          )
-        )}
-        <NewTaskButton projects={projects} onCreate={create} />
+        {/* The nav column holds New task; folded away, it moves here. */}
+        {panel?.collapsed && <NewTaskButton projects={projects} onCreate={create} />}
+        <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">
+          {shown.length} {shown.length === 1 ? "task" : "tasks"}
+        </span>
       </SectionHeader>
 
-      <div className="shrink-0 flex h-9 items-center gap-2.5 px-5">
-        <PillTabs tabs={VIEWS} value={view} onChange={setView} />
+      <div className="shrink-0 flex h-11 items-center gap-2 px-5">
+        <TaskSearch value={query} onChange={setQuery} />
         <span className="flex-1" />
-        <TaskFilters filter={filter} projects={projects} onChange={setFilter} />
+        <TaskFilters filter={filter} projects={projects} tags={tags} onChange={setFilter} />
+        <DisplayMenu display={display} onChange={setDisplay} />
       </div>
 
       <div className="min-h-0 flex-1">
@@ -164,25 +154,23 @@ export default function TasksPage() {
           <div className="flex h-full items-center justify-center px-6">
             <p className="text-xs text-muted-foreground">Loading…</p>
           </div>
-        ) : view === "board" && shown.length === 0 ? (
+        ) : display.view === "board" && shown.length === 0 ? (
           <div className="flex h-full items-start justify-center px-6 py-16">
             <p className="max-w-sm text-center text-xs text-muted-foreground">{empty}</p>
           </div>
-        ) : view === "board" ? (
-          <TasksBoard
-            tasks={shown}
-            columns={columns}
-            projectById={projectById}
-            onMove={move}
-          />
+        ) : display.view === "board" ? (
+          <TasksBoard tasks={shown} columns={columns} projectById={projectById} tagById={tagById} onMove={move} />
         ) : (
           <TasksTable
             tasks={shown}
             projects={projects}
             projectById={projectById}
+            tags={tags}
+            tagById={tagById}
+            display={display}
+            onSort={(sort) => setDisplay((d) => ({ ...d, sort }))}
             empty={empty}
-            onMove={move}
-            onRefile={refile}
+            actions={actions}
           />
         )}
       </div>

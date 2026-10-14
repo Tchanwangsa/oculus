@@ -124,8 +124,8 @@ function Sections() {
       />
     ),
     calendar: <RailItem to="/calendar" icon={CalendarBlank} label="Calendar" />,
-    // One item for Projects and Tasks: lands on `/projects`, lights on `/tasks` too.
-    tasks: <RailItem to="/projects" match={["/tasks"]} icon={ListChecks} label="Tasks" />,
+    // One item for Tasks and Projects: lands on `/tasks`, lights on `/projects` too.
+    tasks: <RailItem to="/tasks" match={["/projects"]} icon={ListChecks} label="Tasks" />,
     subjects: (
       <RailItem
         to="/subjects"
