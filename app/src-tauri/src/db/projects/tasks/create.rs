@@ -99,7 +99,7 @@ pub async fn create_tasks(
         }
 
         // A subtask with no `--column` inherits its parent's, not the first
-        // column: the Backlog view lists only top-level tasks, so it would vanish.
+        // column: the Planning view lists only top-level tasks, so it would vanish.
         let board = board_of(project.as_ref());
         let column = match &item.column {
             Some(id) => {
