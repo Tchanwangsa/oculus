@@ -803,6 +803,9 @@ structural changes (bumping `key`), and `revealCaret` scrolls the box because
 a contenteditable follows its caret only for edits it made. The menu anchors
 on a range over the `@` token, since a collapsed range's rect can be zeros in
 WebKit.
+The menu's rows draw the chip's own glyph and colour
+(`fileReferenceAppearance`), and the lecture dock's composer uses the same input
+and menu, scoped to the lecture's subject.
 A note's or task body's `@` (the note editor's own completion) writes the
 same backticked path and draws the same chip
 ([editor.md](./editor.md#pictures-mentions-and-citations-resolve-to-library-files)).
@@ -850,8 +853,10 @@ row above the words ahead of the pictures, and only the remaining prose is
 measured and folded; a sent card opens `PastedTextViewer` (rendered markdown
 and Copy), and a copied selection across one takes its block (`data-md`).
 Words handed back by Stop or a rewind go through `useAttachments.takeBack`,
-so their blocks return as cards and only the rest lands in the box. The
-bubble's own edit box still shows the raw blocks, as it shows picture paths.
+so their blocks return as cards, their pictures as thumbnails (kept
+attachments, sent again by the same path rather than copied) and only the rest
+lands in the box. The bubble's own edit box still shows the raw blocks, as it
+shows picture paths.
 
 ### File drop
 

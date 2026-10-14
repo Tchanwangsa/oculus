@@ -137,8 +137,8 @@ export function useDockProps({
 
   // Stable across `timeupdate`: the playhead travels by ref.
   const chatProps: LectureChatPanelProps = useMemo(
-    () => ({ lectureId: lecture.id, atRef, buildMoment }),
-    [lecture.id, atRef, buildMoment],
+    () => ({ lectureId: lecture.id, subjectId: lecture.subject_id, atRef, buildMoment }),
+    [lecture.id, lecture.subject_id, atRef, buildMoment],
   );
 
   return { chaptersProps, transcribeProps, chatProps };
