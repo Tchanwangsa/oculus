@@ -162,7 +162,13 @@ classes work even when there are no dollar delimiters.
   boot without waiting. Until it is ready `rehypeMaths` writes a formula's
   source as a placeholder (`.md-math-pending`), and each component that
   renders markdown calls `useMathsReady` to redraw then; a `memo` one
-  (`Body` in `FileMarkdown.tsx`) must call it itself. A formula that traps
+  (`Body` in `FileMarkdown.tsx`) must call it itself. Renders are cached
+  in two layers: `renderToString` (`render.ts`) keeps the HTML or the
+  `ParseError` by source and every option that changes output (macros
+  included), up to 2000 entries and 4M characters; above it `rehypeMaths`
+  keeps the last 2000 formulas' trees by display mode and source, hands out
+  a copy of each and reports a cached error to the file each time, so
+  reopening a maths-heavy chat neither typesets nor reparses it. A formula that traps
   the engine (a few hundred levels of nesting) is a render error, and a spare
   instance takes over (`engine.ts`). KaTeX's CSS and fonts are vendored in
   `app/src/styles/katex/`, imported unlayered.

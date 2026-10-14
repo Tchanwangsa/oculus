@@ -40,8 +40,8 @@ The field opens only once the maths engine (`app/src/lib/maths`) has loaded,
 and only on maths its edit model opens on (it parses, and the engine doesn't
 trap: `readsCleanly`). Until the engine has loaded, the rendering is the
 maths' source in muted text (`cm-math-pending`), and `mathsWatcher` redraws it
-once it is ready. When it has, the rendering is the engine's KaTeX markup
-([viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface)), which
+once it is ready. When it has, the rendering is the engine's KaTeX markup,
+cached by source and options ([viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface)), which
 the field draws too, so entering maths moves neither it nor its line.
 
 `MathView` is the field over the edit model (`MathField` in
