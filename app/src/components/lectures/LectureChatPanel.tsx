@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ClockCounterClockwise, NotePencil } from "@phosphor-icons/react";
 
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
@@ -7,11 +7,12 @@ import { ProviderMark } from "@/components/icons/ProviderMark";
 import { Timeline } from "@/components/harness/timeline/Timeline";
 import { useThreadActions } from "@/components/harness/threads/useThreadActions";
 import { LectureChatComposer } from "@/components/lectures/LectureChatComposer";
+import { useRateLimits } from "@/hooks/agents/useRateLimits";
 import { useProviderModels } from "@/hooks/agents/useProviderModels";
 import { useStickToBottom } from "@/hooks/ui/useStickToBottom";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { fmtAgo, sqliteUtcToMs } from "@/lib/format/format";
-import { defaultSelection, getLectureThreads, type HarnessThread } from "@/lib/harness";
+import { defaultSelection, getLectureThreads, parseUsage, type HarnessThread } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/chat/harnessStore";
 import { draftKey } from "@/stores/chat/draftStore";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,8 @@ const dockThread = new Map<string, number | null>();
 
 export interface LectureChatPanelProps {
   lectureId: string;
+  /** The lecture's subject, which the composer's `@` searches. */
+  subjectId: number;
   /** The playhead as a ref, not a number, so nothing time-varying reaches the
    *  memoised `TranscriptPanel`. */
   atRef: RefObject<number>;
@@ -43,6 +46,7 @@ export interface LectureChatPanelProps {
  */
 export const LectureChatPanel = memo(function LectureChatPanel({
   lectureId,
+  subjectId,
   atRef,
   buildMoment,
 }: LectureChatPanelProps) {
@@ -74,6 +78,8 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   const thread = storeThread ?? threads.find((t) => t.id === threadId) ?? null;
   const activeProvider = thread?.provider ?? provider;
   const activeModel = thread ? thread.model : model;
+  const usage = useMemo(() => parseUsage(thread), [thread]);
+  const rateLimits = useRateLimits(activeProvider);
 
   // `touchThread` only patches a thread the store's list holds, and the Chat
   // page may never have loaded it.
@@ -260,9 +266,12 @@ export const LectureChatPanel = memo(function LectureChatPanel({
       <div className="shrink-0 px-2 pb-2">
         <LectureChatComposer
           draftKey={draftKey(threadId, `lecture:${lectureId}`)}
+          subjectId={subjectId}
           providers={pickerProviders}
           provider={activeProvider}
           providerLocked={thread != null}
+          usage={usage}
+          rateLimits={rateLimits}
           model={activeModel}
           reasoning={reasoning}
           running={running}
