@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CaretRight, Plus } from "@phosphor-icons/react";
+import { CaretRight, Plus, User } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { groupBySubject } from "@/lib/ui/subjectGroups";
@@ -193,7 +193,11 @@ export function ProjectGroups({
                 onClick={() => setOpen(g.key, !open)}
                 className="flex min-w-0 items-center gap-1.5 text-left transition-colors hover:opacity-70"
               >
-                {subject && <SubjectIcon code={subject.code} size={12} />}
+                {subject ? (
+                  <SubjectIcon code={subject.code} size={12} />
+                ) : g.key === "personal" ? (
+                  <User size={12} className="shrink-0 text-muted-foreground" />
+                ) : null}
                 {/* Not an <h2>: headings can't nest in a button. */}
                 <span className="truncate font-display text-[13px] font-semibold tracking-tight text-foreground">
                   {g.label}

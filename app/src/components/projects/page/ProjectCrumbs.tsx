@@ -1,3 +1,4 @@
+import { User } from "@phosphor-icons/react";
 import { navigateActive } from "@/lib/shell/tabRouters";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { TrailMore, useInSidePanel, useTrailCollapsed } from "@/components/tabs/PaneHeader";
@@ -35,7 +36,10 @@ export function ProjectCrumbs({
         {displayCode(project.subject_code)}
       </button>
     ) : (
-      <span className="shrink-0">Personal</span>
+      <span className="flex shrink-0 items-center gap-1.5">
+        {!inSide && <User size={12} />}
+        Personal
+      </span>
     );
 
   if (folded) {
