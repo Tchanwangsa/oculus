@@ -41,7 +41,7 @@ export function projectOf(
 /**
  * Which of {@link UNIVERSAL_COLUMNS} a task is drawn in: same id first (keeps
  * Todo and In progress apart — both are `active`), then the kind's home. A
- * column its board no longer has falls to Backlog rather than vanishing.
+ * column its board no longer has falls to Planning rather than vanishing.
  */
 export function universalColumnOf(
   task: DbTaskWithProject,

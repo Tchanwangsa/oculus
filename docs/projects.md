@@ -264,11 +264,11 @@ independent layers, all predicates and orderings over one `getAllTasks`.
   `useTaskList` reads `getAllTasks` plus the project list (a column id means
   nothing without its board) and reloads on `PROJECTS_UPDATED_EVENT`.
   `getUnfiledTasks` resolves an unfiled task's page.
-- **Its columns are `DEFAULT_COLUMNS`** (Backlog / Todo / In progress / Done),
+- **Its columns are `DEFAULT_COLUMNS`** (Planning / Todo / In progress / Done),
   aliased as `UNIVERSAL_COLUMNS`.
   - `universalColumnOf` places a card **id first, kind second**: its own
     column if that is a default id, else the kind's home (`active` → In
-    progress); a column missing from its board falls to Backlog.
+    progress); a column missing from its board falls to Planning.
   - `columnForUniversal` maps a drop onto column X to the task's own board:
     the column with id X, else the first of X's kind, else nothing. A drop
     resolving to the current column writes nothing.

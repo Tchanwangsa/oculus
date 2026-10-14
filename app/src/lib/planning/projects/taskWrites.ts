@@ -83,7 +83,7 @@ async function hasChildren(id: number): Promise<boolean> {
  * column is born finished, as {@link moveTask} would make it.
  *
  * A subtask with no explicit column inherits its parent's, not the board's
- * first (Backlog), which views that list top-level tasks would never draw.
+ * first (Planning), which views that list top-level tasks would never draw.
  * Mirrors `create_tasks` in `app/src-tauri/src/db/projects/tasks/create.rs`.
  */
 export async function createTask(input: CreateTaskInput): Promise<number> {
