@@ -14,6 +14,8 @@ import {
   matchesFilter,
   type TaskFilter,
 } from "@/components/projects/tasks/filterRules";
+import { ProjectFilter } from "@/components/projects/tasks/ProjectFilter";
+import { SubjectFilter } from "@/components/projects/tasks/SubjectFilter";
 import { TaskFilters } from "@/components/projects/tasks/TaskFilters";
 import { TaskSearch } from "@/components/projects/tasks/TaskSearch";
 import { sortTasks } from "@/components/projects/tasks/taskSort";
@@ -36,8 +38,8 @@ import { useProjectsStore } from "@/stores/planning/projectsStore";
  * Every task across every project, plus unfiled ones.
  *
  * What is listed is the nav column's view and tag (`?view=`, `?tag=`), the
- * search, and the filter popover, ANDed; how it is drawn is the Display menu
- * (`app/src/components/projects/display/`). Spanning projects costs manual
+ * search, and the Filter, Project and Subject pills, ANDed; how it is drawn is
+ * the Display menu (`app/src/components/projects/display/`). Spanning projects costs manual
  * order: `position` is only comparable inside one project's column, so lists
  * are sorted and a board drag within a column is a no-op
  * (`app/src/components/projects/tasks/universalTasks.ts`).
@@ -145,7 +147,9 @@ export default function TasksPage() {
       <div className="shrink-0 flex h-11 items-center gap-2 px-5">
         <TaskSearch value={query} onChange={setQuery} />
         <span className="flex-1" />
-        <TaskFilters filter={filter} projects={projects} tags={tags} onChange={setFilter} />
+        <TaskFilters filter={filter} tags={tags} onChange={setFilter} />
+        <ProjectFilter filter={filter} projects={projects} onChange={setFilter} />
+        <SubjectFilter filter={filter} onChange={setFilter} />
         <DisplayMenu display={display} onChange={setDisplay} />
       </div>
 

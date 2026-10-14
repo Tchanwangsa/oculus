@@ -119,6 +119,13 @@ export function fmtShortDate(d: Date): string {
   return d.toLocaleDateString(displayLocale, { day: "numeric", month: "short" });
 }
 
+/** "12 Aug", with the year when it is not this one. */
+export function fmtDay(d: Date): string {
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(displayLocale, opts);
+}
+
 /** "Sat 16 Aug — Today", "Fri 15 Aug — Yesterday", else "Thu 14 Aug" (+ year). */
 export function fmtDayHeading(ms: number): string {
   const d = new Date(ms);

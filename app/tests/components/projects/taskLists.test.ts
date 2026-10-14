@@ -3,6 +3,8 @@ import {
   DEFAULT_FILTER,
   activeFilterCount,
   matchesFilter,
+  normaliseRange,
+  popoverFilterCount,
 } from "@/components/projects/tasks/filterRules";
 import { dueBucket, groupTasks } from "@/components/projects/tasks/taskGroups";
 import { sortTasks } from "@/components/projects/tasks/taskSort";
@@ -109,6 +111,67 @@ describe("the filter", () => {
     expect(matchesFilter(hit, filter, NO_PROJECTS, NOW)).toBe(true);
     expect(matchesFilter(task({ column_id: "todo", due_at: at(20) }), filter, NO_PROJECTS, NOW)).toBe(false);
     expect(matchesFilter(task({ column_id: "backlog", due_at: at(10) }), filter, NO_PROJECTS, NOW)).toBe(false);
+  });
+});
+
+describe("the custom due range", () => {
+  const day = (d: number) => new Date(2026, 9, d).getTime();
+  const range = (from: number | null, to: number | null) => ({
+    ...DEFAULT_FILTER,
+    due: "custom" as const,
+    dueRange: { from: from == null ? null : day(from), to: to == null ? null : day(to) },
+  });
+  const hit = (dueAt: string | null, filter: ReturnType<typeof range>) =>
+    matchesFilter(task({ due_at: dueAt }), filter, NO_PROJECTS, NOW);
+
+  test("the last day counts whole, the next midnight does not", () => {
+    const f = range(12, 14);
+    expect(hit(new Date(2026, 9, 14, 23, 59, 59).toISOString(), f)).toBe(true);
+    expect(hit(new Date(2026, 9, 15, 0, 0, 0).toISOString(), f)).toBe(false);
+    expect(hit(new Date(2026, 9, 12, 0, 0, 0).toISOString(), f)).toBe(true);
+    expect(hit(new Date(2026, 9, 11, 23, 59, 59).toISOString(), f)).toBe(false);
+  });
+
+  test("either end may be open", () => {
+    expect(hit(at(2), range(null, 14))).toBe(true);
+    expect(hit(at(15), range(null, 14))).toBe(false);
+    expect(hit(at(30), range(20, null))).toBe(true);
+    expect(hit(at(19), range(20, null))).toBe(false);
+  });
+
+  test("an SQLite UTC due date is read as UTC, an ISO one as its instant", () => {
+    const f = range(12, 12);
+    const local = new Date(2026, 9, 12, 10);
+    const sqlite = local.toISOString().slice(0, 19).replace("T", " ");
+    expect(hit(sqlite, f)).toBe(true);
+    expect(hit(local.toISOString(), f)).toBe(true);
+    const next = new Date(2026, 9, 13, 10);
+    expect(hit(next.toISOString().slice(0, 19).replace("T", " "), f)).toBe(false);
+  });
+
+  test("a task without a due date never matches a range", () => {
+    expect(hit(null, range(12, 14))).toBe(false);
+    expect(hit(null, range(null, 14))).toBe(false);
+  });
+
+  test("no ends is Any time, and does not count as narrowing", () => {
+    const f = range(null, null);
+    expect(hit(null, f)).toBe(true);
+    expect(hit(at(30), f)).toBe(true);
+    expect(popoverFilterCount(f)).toBe(0);
+    expect(popoverFilterCount(range(12, null))).toBe(1);
+  });
+
+  test("swapped bounds are swapped back, in the predicate too", () => {
+    expect(normaliseRange({ from: day(14), to: day(12) })).toEqual({ from: day(12), to: day(14) });
+    expect(hit(at(13), range(14, 12))).toBe(true);
+    expect(hit(at(15), range(14, 12))).toBe(false);
+  });
+
+  test("project and subject are not the Filter popover's", () => {
+    const f = { ...DEFAULT_FILTER, project: "unfiled" as const, subject: "personal" };
+    expect(popoverFilterCount(f)).toBe(0);
+    expect(activeFilterCount(f)).toBe(2);
   });
 });
 

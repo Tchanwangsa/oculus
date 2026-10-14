@@ -26,7 +26,7 @@ repair a bad row.
 | Overview, project tags, pinned calendar event | `app/src/components/projects/page/ProjectOverview.tsx`, `app/src/components/projects/fields/TagEditor.tsx`, `app/src/components/projects/page/EventLink.tsx` |
 | Task tags: registry hook, chips, picker, palette | `app/src/hooks/data/useTaskTags.ts`, `app/src/components/projects/tags/`, `--color-tag-*` in `app/src/styles/colors.css` |
 | Board, table, timeline, and the shaping behind them | `app/src/components/projects/board/ProjectBoard.tsx`, `app/src/components/projects/lists/ProjectTable.tsx`, `app/src/components/projects/timeline/ProjectTimeline.tsx`, `app/src/components/projects/tasks/taskTree.ts` |
-| The universal view: hook, views, filters, sort, groups, shared rules | `app/src/hooks/data/useTaskList.ts`, `app/src/components/projects/tasks/` (`taskViews.ts`, `filterRules.ts`, `taskSort.ts`, `taskGroups.ts`, `universalTasks.ts`, `TaskFilters.tsx`) |
+| The universal view: hook, views, filters, sort, groups, shared rules | `app/src/hooks/data/useTaskList.ts`, `app/src/components/projects/tasks/` (`taskViews.ts`, `filterRules.ts`, `taskSort.ts`, `taskGroups.ts`, `universalTasks.ts`, `TaskFilters.tsx`, `ProjectFilter.tsx`, `SubjectFilter.tsx`) |
 | The universal table, its columns and the Display menu | `app/src/components/projects/lists/` (`TasksTable.tsx`, `TaskRow.tsx`, `TaskCells.tsx`, `tasksColumns.ts`), `app/src/components/projects/display/`, `app/src/components/projects/board/TasksBoard.tsx` |
 | Card drag and board chrome | `app/src/hooks/gestures/useCardDrag.ts` (on `app/src/hooks/gestures/usePointerDrag.ts`), `app/src/components/projects/board/BoardParts.tsx` |
 | Subject chips, subtask expansion, status and progress marks | `app/src/components/projects/tasks/TaskMarks.tsx` |
@@ -247,8 +247,18 @@ independent layers, all predicates and orderings over one `getAllTasks`.
   the registry, means none. They are real links so ⌘-click and restored tabs carry
   both. Off `/tasks` neither is selected.
 - **Search and Filter narrow further.** Search matches title, project name and
-  tag names. The Filter popover holds status, project, subject, due and tags
-  (`filterRules.ts`); it starts empty and nothing in it persists.
+  tag names. The toolbar reads Search, then the pills Filter, Project, Subject
+  and Display. The Filter popover holds status, due and tags
+  (`filterRules.ts`); Due is one scrolling line of quick options plus Custom,
+  which reveals From and To day pills over the calendar popover — either end
+  optional, the To day counted whole, a To before the From swapped, an undated
+  task never matching, no ends meaning Any time. Tags are one scrolling line.
+  Project (Any, Unfiled, one project; archived projects fold behind
+  `Archived (n)`) and Subject (Any, Personal, one subject; past-term subjects
+  fold behind `Past subjects (n)`) are their own pills, a fold forced open while
+  the pick is inside it. Their lists scroll in a fixed-height region that always
+  keeps its scrollbar gutter, so a popover never changes width. All start empty
+  and nothing persists.
 - **Display shapes the result** (`components/projects/display/`): view, grouping
   (none, status, project, tag, due), sort, show completed and which table
   properties show, in what order — one JSON object under `oculus-tasks-display-v2`,
