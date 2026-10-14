@@ -147,7 +147,7 @@ fn small_pictures_and_text_go_inline_and_the_rest_to_a_folder() {
     let file = dump::for_pane(large, &spill.join("run-1")).unwrap();
     assert_eq!(file.data_url, None);
     let path = file.path.unwrap();
-    assert!(path.ends_with("run-1/big.txt"), "{path}");
+    assert!(Path::new(&path).ends_with("run-1/big.txt"), "{path}");
     assert_eq!(
         std::fs::metadata(&path).unwrap().len() as usize,
         INLINE_LIMIT + 1
