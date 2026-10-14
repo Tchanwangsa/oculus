@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArrowLeft, CaretRight, DotsThree, TrashSimple } from "@phosphor-icons/react";
 import { projectHref } from "@/components/projects/nav/projectHref";
-import { columnOf } from "@/components/projects/tasks/taskTree";
+import { taskVariant } from "@/components/projects/tasks/columnVariant";
 import { TaskGlyph } from "@/components/projects/tasks/TaskMarks";
 import { PaneHeaderRow, PaneTrail, useInSidePanel } from "@/components/tabs/PaneHeader";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -68,7 +68,7 @@ export function TaskHeader({
             {project?.name ?? "Tasks"}
           </button>
           <CaretRight size={10} className="shrink-0" />
-          <TaskGlyph kind={columnOf(project, task.column_id)?.kind ?? null} size={14} />
+          <TaskGlyph variant={taskVariant(project, task.column_id)} size={14} />
           <span
             className={cn(
               "font-medium text-foreground",
