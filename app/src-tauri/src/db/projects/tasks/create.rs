@@ -3,7 +3,9 @@ use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use crate::db::projects::columns::{board_of, require_column};
 use crate::db::projects::read::project_on;
+use crate::db::projects::tags::{ensure_tags_on, replace_task_tags_on};
 
+use super::links::{attach_files_on, resolve_files_on};
 use super::lookup::touch_project;
 
 /// An existing task's id, or the `key` of an earlier item in the same batch.
@@ -35,6 +37,13 @@ pub struct NewTask {
     /// Referred to by a later item's `parent`. Never stored.
     #[serde(default)]
     pub key: Option<String>,
+    /// Tag names; one the registry lacks is made, in the default colour.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    /// Library `relative_path`s to attach; a path that names no single file
+    /// refuses the batch.
+    #[serde(default)]
+    pub files: Option<Vec<String>>,
 }
 
 /// Create tasks and return their ids in input order. One transaction: any
@@ -138,6 +147,10 @@ pub async fn create_tasks(
         .map_err(|e| format!("{}{e}", where_()))?
         .last_insert_rowid();
 
+        link_new_task(&mut tx, id, item)
+            .await
+            .map_err(|e| format!("{}{e}", where_()))?;
+
         if let Some(key) = item.key.as_deref() {
             by_key.insert(key, id);
         }
@@ -147,6 +160,23 @@ pub async fn create_tasks(
     touch_project(&mut tx, project_id).await?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(ids)
+}
+
+/// Write a new task's tag and file links, inside the batch's transaction.
+async fn link_new_task(
+    conn: &mut SqliteConnection,
+    task_id: i64,
+    item: &NewTask,
+) -> Result<(), String> {
+    if let Some(names) = &item.tags {
+        let ids = ensure_tags_on(conn, names).await?;
+        replace_task_tags_on(conn, task_id, &ids).await?;
+    }
+    if let Some(paths) = &item.files {
+        let ids = resolve_files_on(conn, paths).await?;
+        attach_files_on(conn, task_id, &ids).await?;
+    }
+    Ok(())
 }
 
 /// Check a would-be parent exists, is in the same project (NULL included) and

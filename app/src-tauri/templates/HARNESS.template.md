@@ -63,7 +63,11 @@ a timestamp and says nothing.
   task add "…"` with no `-p` writes one, which is where something goes when it
   has to be written down before it has been decided about, and `oculus task
   refile` files it under a project later, subtasks and all. `oculus task list`
-  with no `-p` shows every task there is, the unfiled ones first. Plan when you
+  with no `-p` shows every task there is, the unfiled ones first. A task can
+  carry tags (`--tags "Assignment,Exam"`; `oculus tag list` shows the existing
+  ones, so reuse a name rather than coin a near-duplicate) and link library
+  files (`--file <path>` on `add`, `--attach` / `--detach` on `update`; the path
+  is what `oculus files` prints). Plan when you
   are asked to; do not quietly turn an answer into a board.
 - **Memory is not optional, and it is the section below.** `./memories/`,
   `./memories/<CODE>/` and `./TASTE.md` are what make the next conversation

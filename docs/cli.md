@@ -11,7 +11,7 @@ agent queries and plans through. Flags are in
 | --- | --- |
 | The binary (`main.rs` dispatches, `args/` is the clap tree, `commands/` the handlers) | `app/src-tauri/src/bin/oculus/` |
 | Query commands, category filter, file lookup | `app/src-tauri/src/bin/oculus/commands/query/` (`subjects.rs` for scope and `filter_categories`, `files.rs`), `app/src-tauri/src/bin/oculus/args/query.rs` |
-| `project` and `task` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs`, `app/src-tauri/src/db/projects/` |
+| `project`, `task` and `tag` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs`, `app/src-tauri/src/db/projects/` |
 | `lecture` | `app/src-tauri/src/bin/oculus/commands/lecture.rs`, `app/src-tauri/src/bin/oculus/args/lecture.rs` |
 | `transcribe` | `app/src-tauri/src/bin/oculus/commands/transcribe.rs`, `app/src-tauri/src/transcribe/` |
 | `studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs` resolves a slug and dispatches; `videos.rs` for `new` and `list`, `lint.rs`, `brief.rs`, `beats.rs`, `components.rs`, `themes.rs`, `gallery.rs`, `render.rs`, `narrate.rs` for `narrate` and `tts`, `aligner.rs`, `slide.rs` for `slide` and `blocks`), `app/src-tauri/src/bin/oculus/args/studio.rs`, `app/studio-core/`, `app/src-tauri/src/studio/` (`videos/`, `libraries/`, `brief/`) |
@@ -27,7 +27,7 @@ agent queries and plans through. Flags are in
 | --- | --- | --- |
 | `run`, `index`, `auth` | Copies of what the university has | A bad run is repaired by running it again |
 | `search`, `grep`, `read`, `files`, `calendar`, `list`, `status` | Nothing | Safe for any caller |
-| `project`, `task` | The student's own plans | No upstream copy: unknown columns are refused, batches are one transaction, `task rm` says in `--help` there is no undo |
+| `project`, `task`, `tag` | The student's own plans | No upstream copy: unknown columns are refused, batches are one transaction, `task rm` and `tag rm` say in `--help` there is no undo |
 | `memory` | Agents' notes in `agents/memories/` | Files, not rows, because the thread writing them cannot open the database ([harness.md](./harness.md)) |
 | `lecture chapters`, `lecture end` | Derived rows, regenerable from the recording | They spend model quota, so an existing result is kept unless `--force` |
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
@@ -172,7 +172,7 @@ rewriting itself in place is how a long run is told from a stuck one.
 - With `--json`, success is one document on stdout and failure is
   `{"error": "..."}` on stderr with exit 1.
 
-## `project` and `task` are the agent's only door to the board
+## `project`, `task` and `tag` are the agent's only door to the board
 
 The app's board reads these rows live, so no agent opens `oculus.db`. The rules
 are in [projects.md](./projects.md); the CLI-shaped parts:
@@ -192,6 +192,15 @@ are in [projects.md](./projects.md); the CLI-shaped parts:
   mapping the column by kind; a lone subtask is refused.
 - `-s` resolves a code matching two terms to the current term, and reports a
   tie that survives that. Omitting `-s` makes a personal project.
+- `--tags "A,B"` (a `tags` array of names in a batch item) tags a task by name,
+  ignoring case, and creates a name the registry lacks in the default colour,
+  so an agent needs no separate step; on `task update` it replaces the set and
+  `""` clears it. `--file PATH` / `--attach` / `--detach` link library files
+  by the `relative_path` `oculus files` prints; a path matching no file, or
+  several subjects' files, is refused and a batch with one rolls back whole.
+  `task list` prints `#Tag` names after a title, `N files` as a count, and
+  `--tag NAME` filters. `oculus tag` edits the shared registry (add, rename,
+  recolour with a palette key, rm).
 - Batch task input and memory bodies share the UTF-8 file/stdin reader in
   `main.rs`; `-` is stdin and each command retains its own input validation.
 - Every project and task it writes is marked `source: agent`.

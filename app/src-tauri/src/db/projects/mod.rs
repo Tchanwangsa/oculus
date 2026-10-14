@@ -10,14 +10,19 @@
 //! - **Subtasks are one level deep**, enforced in code (SQLite cannot express it).
 //! - **A task may belong to no project** (`project_id` NULL): its board is the
 //!   default one.
+//! - **Tags are a registry** (`tags.rs`) linked to tasks by id; a task's files
+//!   are named by their library `relative_path` (`tasks/links.rs`).
 //!
-//! Schema: migrations 27, 33 and 37 in `db/migrations.rs`. Nothing here creates it.
+//! Schema: migrations 27, 33, 37 and 47 in `db/migrations.rs`. Nothing here creates it.
 
 mod columns;
 mod migration37;
 mod project_writes;
 mod read;
 mod rows;
+#[cfg(test)]
+mod tag_tests;
+mod tags;
 mod tasks;
 #[cfg(test)]
 mod tests;
@@ -30,5 +35,6 @@ pub use migration37::UNFILED_TASKS_SQL;
 pub use project_writes::*;
 pub use read::*;
 pub use rows::*;
+pub use tags::*;
 pub use tasks::*;
 pub use time::*;
