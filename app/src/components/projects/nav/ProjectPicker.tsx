@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CaretRight, Check, Kanban, Tray } from "@phosphor-icons/react";
+import { CaretRight, Check, Circle } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import {
   Collapsible,
@@ -7,12 +7,12 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { SubjectIcon } from "@/components/subjects/SubjectIcon";
+import { ProjectIcon } from "../icons/ProjectIcon";
 import { displayCode } from "@/lib/format/format";
 import type { DbProject } from "@/lib/planning/projects";
 
 /**
- * Where a task lives: Unfiled or one project, archived ones behind a fold.
+ * Where a task lives: no project or one project, archived ones behind a fold.
  * A plain list, not a `Select` — that would be a portal inside the popover.
  */
 export function ProjectDestinations({
@@ -37,15 +37,12 @@ export function ProjectDestinations({
     }),
     [projects],
   );
-  const [archivedOpen, setArchivedOpen] = useState(false);
-
-  // The fold never hides the current selection.
-  const archivedSelected = archived.some((p) => p.id === value);
+  const [archivedOpen, setArchivedOpen] = useState(() => archived.some((p) => p.id === value));
 
   return (
     <div className={cn("-mx-1 max-h-52 overflow-y-auto px-1", className)}>
       <DestinationRow
-        label="Unfiled"
+        label="No project"
         hint={unfiledHint ?? "Not part of any project"}
         project={null}
         selected={value == null}
@@ -63,7 +60,7 @@ export function ProjectDestinations({
 
       {archived.length > 0 && (
         <Collapsible
-          open={archivedOpen || archivedSelected}
+          open={archivedOpen}
           onOpenChange={setArchivedOpen}
           className="mt-1"
         >
@@ -71,8 +68,8 @@ export function ProjectDestinations({
             <CaretRight
               size={9}
               className={cn(
-                "shrink-0 transition-transform",
-                (archivedOpen || archivedSelected) && "rotate-90",
+                "shrink-0 transition-transform will-change-transform",
+                (archivedOpen) && "rotate-90",
               )}
             />
             Archived ({archived.length})
@@ -164,11 +161,9 @@ function DestinationRow({
       )}
     >
       {project == null ? (
-        <Tray size={13} className="shrink-0" />
-      ) : project.subject_code ? (
-        <SubjectIcon code={project.subject_code} size={13} />
+        <Circle size={13} className="shrink-0" />
       ) : (
-        <Kanban size={13} className="shrink-0" />
+        <ProjectIcon project={project} size={13} />
       )}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {project?.subject_code && (

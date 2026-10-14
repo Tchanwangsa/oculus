@@ -1,11 +1,14 @@
 import { getDb, matchSql, type SearchScope } from "@/lib/db";
 import {
+  TASK_TAG_IDS_SQL,
   toProject,
+  toTask,
   type DbOpenTask,
   type DbProject,
   type DbProjectTask,
   type DbTaskWithProject,
   type ProjectRow,
+  type RawTask,
 } from "./rows";
 
 export interface GetProjectsOptions {
@@ -148,17 +151,19 @@ export async function getProject(id: number): Promise<DbProject | null> {
  */
 export async function getTasks(projectId: number): Promise<DbProjectTask[]> {
   const db = await getDb();
-  return db.select<DbProjectTask[]>(
-    `SELECT * FROM project_tasks
-      WHERE project_id = $1
-      ORDER BY position ASC, id ASC`,
+  const rows = await db.select<RawTask[]>(
+    `SELECT t.*, ${TASK_TAG_IDS_SQL}
+       FROM project_tasks t
+      WHERE t.project_id = $1
+      ORDER BY t.position ASC, t.id ASC`,
     [projectId],
   );
+  return rows.map(toTask);
 }
 
 /** Cross-project reads join the project with LEFT joins, so unfiled tasks
  *  (no project row) are kept. */
-const WITH_PROJECT = `SELECT t.*, p.name AS project_name, p.subject_id AS project_subject_id,
+const WITH_PROJECT = `SELECT t.*, ${TASK_TAG_IDS_SQL}, p.name AS project_name, p.subject_id AS project_subject_id,
             s.code AS project_subject_code
        FROM project_tasks t
        LEFT JOIN projects p ON p.id = t.project_id
@@ -167,11 +172,12 @@ const WITH_PROJECT = `SELECT t.*, p.name AS project_name, p.subject_id AS projec
 /** Dated, unfinished tasks across every project — the calendar's task layer. */
 export async function getAllOpenTasks(): Promise<DbOpenTask[]> {
   const db = await getDb();
-  return db.select<DbOpenTask[]>(
+  const rows = await db.select<RawTask<DbOpenTask>[]>(
     `${WITH_PROJECT}
       WHERE t.due_at IS NOT NULL AND t.done_at IS NULL
       ORDER BY t.due_at ASC`,
   );
+  return rows.map(toTask);
 }
 
 /** Order for lists that span projects. `position` only compares within one
@@ -184,20 +190,22 @@ const UNIVERSAL_ORDER = `ORDER BY t.due_at IS NULL, t.due_at ASC,
 /** Every unfiled task, with the (null) project columns still selected. */
 export async function getUnfiledTasks(): Promise<DbTaskWithProject[]> {
   const db = await getDb();
-  return db.select<DbTaskWithProject[]>(
+  const rows = await db.select<RawTask<DbTaskWithProject>[]>(
     `${WITH_PROJECT}
       WHERE t.project_id IS NULL
       ${UNIVERSAL_ORDER}`,
   );
+  return rows.map(toTask);
 }
 
 /** Every task in the library, finished ones included. */
 export async function getAllTasks(): Promise<DbTaskWithProject[]> {
   const db = await getDb();
-  return db.select<DbTaskWithProject[]>(
+  const rows = await db.select<RawTask<DbTaskWithProject>[]>(
     `${WITH_PROJECT}
       ${UNIVERSAL_ORDER}`,
   );
+  return rows.map(toTask);
 }
 
 export interface ProjectTaskCounts {

@@ -12,9 +12,9 @@ import { InlineAdd } from "../fields/InlineAdd";
 import { StatusPill } from "../board/StatusPill";
 import { taskHref } from "../nav/taskHref";
 import { AgentMark, DueChip, SubtaskProgressBar, SubtaskToggle, TaskGlyph, TaskSubject } from "../tasks/TaskMarks";
+import { taskVariant } from "../tasks/columnVariant";
 import {
   appendSlot,
-  columnOf,
   promotionTarget,
   subtaskProgress,
   type TaskNode,
@@ -172,7 +172,7 @@ function TaskRow({
       <div className={cn("flex min-w-0 items-center gap-1.5", depth === 1 && "pl-5")}>
         <SubtaskToggle expandable={expandable} expanded={expanded} onToggle={onToggle} />
 
-        <TaskGlyph kind={columnOf(project, task.column_id)?.kind ?? null} size={depth ? 11 : 13} />
+        <TaskGlyph variant={taskVariant(project, task.column_id)} size={depth ? 11 : 13} />
         {/* Title-only link: a whole-row link would swallow the other controls. */}
         <Link
           to={taskHref(project.id, task)}

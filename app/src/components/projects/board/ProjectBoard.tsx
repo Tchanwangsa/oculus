@@ -1,12 +1,13 @@
 import { useMemo, useRef } from "react";
 import { ArrowElbowDownRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import type { ColumnKind, DbProject } from "@/lib/planning/projects";
+import type { DbProject } from "@/lib/planning/projects";
 import { useCardDrag, useSettledList } from "@/hooks/gestures/useCardDrag";
 import { BoardView } from "./BoardParts";
 import { CardTitle } from "./CardTitle";
 import { InlineAdd } from "../fields/InlineAdd";
 import { taskHref } from "../nav/taskHref";
+import { columnVariant, type ColumnVariant } from "../tasks/columnVariant";
 import { AgentMark, DueChip, SubtaskProgressBar, TaskGlyph } from "../tasks/TaskMarks";
 import {
   boardColumns,
@@ -103,7 +104,7 @@ export function ProjectBoard({
         <CardBody
           projectId={project.id}
           entry={entry}
-          kind={columns.find((c) => c.id === entry.task.column_id)?.kind ?? null}
+          variant={columnVariant(columns, entry.task.column_id)}
         />
       )}
       footer={(column) => (
@@ -125,11 +126,11 @@ export function ProjectBoard({
 function CardBody({
   projectId,
   entry,
-  kind,
+  variant,
 }: {
   projectId: number;
   entry: ColumnEntry;
-  kind: ColumnKind | null;
+  variant: ColumnVariant | null;
 }) {
   const sub = entry.depth === 1;
   const progress = entry.node ? subtaskProgress(entry.node) : null;
@@ -144,7 +145,7 @@ function CardBody({
       )}
 
       <div className="flex min-w-0 items-start gap-1.5">
-        <TaskGlyph kind={kind} size={sub ? 11 : 13} className="mt-0.5" />
+        <TaskGlyph variant={variant} size={sub ? 11 : 13} className="mt-0.5" />
         <CardTitle
           title={entry.task.title}
           href={taskHref(projectId, entry.task)}

@@ -16,13 +16,15 @@ Read this before any UI work.
 | Composites built on them | `app/src/components/ui/layout/`, `app/src/components/ui/table/`, `app/src/components/ui/search/`, `app/src/components/ui/lightbox/` |
 | Persisted view state and collapsed groups | `app/src/hooks/ui/useStoredState.ts` |
 | Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/layout/PageParts.tsx` |
+| Page headers, titles and breadcrumb parent popovers | `app/src/components/tabs/PaneHeader.tsx` (`PageHeader`, `PaneTitle`, `PaneTrail`), `app/src/components/ui/Breadcrumb.tsx` |
 | A page's nav column (Settings, subjects, Chat) | `app/src/components/ui/layout/SideNav.tsx` |
 | Settings pane layout, stacking rows and compact navigation | `app/src/styles/settings.css`, `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx` |
 | Drag gestures | `app/src/hooks/gestures/usePointerDrag.ts`, `app/src/hooks/gestures/useCardDrag.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
-| Flat divided lists, table chrome | `app/src/components/ui/layout/PageParts.tsx`, `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
+| Flat divided lists, table chrome | `app/src/components/ui/layout/PageParts.tsx`, `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/TableGroup.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
 | Toolbar filters: pill popovers, checklists, applied-filter chips | `app/src/components/ui/filter/` |
 | The colour control: a swatch that opens a pad, hue and opacity strips and hex text (`opaque` drops the opacity strip) | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
+| Identity icons, shared picker and colour palette | `app/src/components/ui/icon/`, `app/src/lib/ui/iconPreferences.ts` |
 | A titled block that folds, its state kept by the caller | `app/src/components/ui/CollapsibleSection.tsx` |
 
 ## One colour, two fonts, and a floating card
@@ -160,7 +162,12 @@ themes are opt-in and keep the same structure.
   narrowing); a multi-select is a `FilterChecklist` (an option may carry the
   glyph its rows draw, before the label, with the count on the right), and the
   applied values sit under the toolbar as `FilterChips` — one line that scrolls
-  with faded edges, never wraps.
+  with faded edges, never wraps. Inside a popover, `ChipRow` + `ToggleChip` do
+  the same for a row of toggle chips; a long single-choice list sits in
+  `FilterList` (fixed max height, `overflow-y: scroll` so the gutter is always
+  reserved) with `FilterFold` for a collapsed group such as Archived. Rows
+  and fold triggers draw keyboard focus inside their bounds, so the list
+  cannot clip the highlight when the popover focuses its first option.
 - **Settings, subjects and Chat share one nav column**, `SideNav`: a 208px column
   on the window's `background` beside the page, a pinned header, rows with a
   16px icon and the active row filled, never an underline strip, and
@@ -188,12 +195,14 @@ themes are opt-in and keep the same structure.
 - Slugs display through `humanizeSlug`, Canvas codes through `displayCode`
   ("MULT20015", not "MULT20015_2026_SM2"), both in `app/src/lib/format/format.ts`.
 
-Subject glyphs load the full Phosphor catalogue (`loadIconCatalogue` in
-`app/src/components/subjects/SubjectIcon.tsx`, cached for every glyph) only
-for a stored custom icon or an opened picker; default Books stay in the
-startup bundle. With a custom icon stored, `main.tsx` awaits the catalogue
-before the first render so the icon never paints as a Book. The picker grid
-mounts on open and loads through the same cache.
+Subjects and projects share `CatalogueIcon` and the searchable `IconPicker`
+under `app/src/components/ui/icon/`. The catalogue loads only for a stored
+custom glyph or an opened picker; Book and Cube defaults stay in the startup
+bundle. `main.tsx` awaits that catalogue before its first render when either
+identity store has a custom icon. The grid mounts only while open and shares
+the same cache. Palette and partial-reset rules live in
+`app/src/lib/ui/iconPreferences.ts`; subject preferences keep their existing
+`oculus-subject-icons` key.
 
 ## Gotchas
 
@@ -257,3 +266,9 @@ mounts on open and loads through the same cache.
   `justify-content: center`, which makes the start-edge overflow unreachable.
 - **Never nest a `<button>` in a row that is a button** — WebKit drops the inner
   clicks; use `RowAction` (`app/src/components/ui/RowAction.tsx`).
+- **A chip's × is `ChipRemove`** (`app/src/components/ui/ChipRemove.tsx`), the
+  tab strip's close button as a component: muted to foreground over a subtle
+  fill, a colour change only. `TagChip` and the task page's `FileChip` use it, as
+  a sibling of the chip's open action; its `group` reveal fades in on a wrapper
+  that already has `will-change`, so hovering does not move the icon. Never
+  fade the button's own `opacity`.

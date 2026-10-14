@@ -129,6 +129,8 @@ oculus task add -p 3 --batch -                    # a whole breakdown in one cal
 oculus task add "email the tutor"                 # no -p: filed nowhere, for now
 oculus task list                                  # every task, unfiled ones first
 oculus task refile 12 -p 3                        # file it, subtasks and all
+oculus task update 12 --tags "Exam,Study"         # replace its tags; --attach PATH links a library file
+oculus tag list                                   # the tags a task can carry (task add/update create new ones)
 oculus memory list -s COMP30026                   # what is already known
 oculus memory write --type reference --about "…" --text "…" -s COMP30026
 ```
@@ -161,6 +163,13 @@ what to reach for when something has to be written down before anyone has
 decided where it goes. `oculus task refile` files it later and takes its
 subtasks with it. Do not invent an "Inbox" project for this; there is nothing
 to clean up if an unfiled task is never filed.
+
+A task can carry **tags** (`--tags "Assignment,Exam"` on `task add` / `task
+update`, or `tags` in a batch item; `update` replaces the set) and link
+**library files** (`--file PATH` on `add`, `--attach` / `--detach PATH` on
+`update`, or `files` in a batch item), by the path `oculus files` prints. Tags
+are one shared list (`oculus tag list`): use an existing name rather than a
+near-duplicate.
 
 Pass this folder's own subject code to `-s`: the CLI has no notion of the
 working directory, so without it you get the whole library back. `search`

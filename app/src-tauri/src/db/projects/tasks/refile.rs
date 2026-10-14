@@ -2,7 +2,7 @@ use sqlx::SqlitePool;
 
 use crate::db::projects::columns::board_of;
 use crate::db::projects::read::project_on;
-use crate::db::projects::rows::{to_task, Task};
+use crate::db::projects::rows::{to_task, Task, TASK_SELECT};
 
 use super::lookup::{task_on, touch_project};
 use super::mover::kind_of;
@@ -54,9 +54,9 @@ pub async fn refile_task(
     };
 
     // Parent first, so it takes the lower position in a shared column.
-    let rows = sqlx::query(
-        "SELECT * FROM project_tasks WHERE parent_id = ?1 ORDER BY position ASC, id ASC",
-    )
+    let rows = sqlx::query(&format!(
+        "{TASK_SELECT} WHERE t.parent_id = ?1 ORDER BY t.position ASC, t.id ASC"
+    ))
     .bind(id)
     .fetch_all(&mut *tx)
     .await

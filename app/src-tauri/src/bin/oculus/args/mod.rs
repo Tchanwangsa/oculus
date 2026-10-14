@@ -30,7 +30,7 @@ pub(crate) struct Cli {
     /// Print machine-readable JSON instead of formatted text
     ///
     /// Honoured by every command that prints: status, list, search, grep,
-    /// read, files, calendar, project, task, keyd and studio. On failure the JSON is
+    /// read, files, calendar, project, task, tag, keyd and studio. On failure the JSON is
     /// `{"error": "..."}` on stderr and the exit code is 1.
     #[arg(long, global = true)]
     pub(crate) json: bool,
@@ -74,6 +74,11 @@ pub(crate) enum Command {
     Task {
         #[command(subcommand)]
         action: TaskAction,
+    },
+    /// List, add, rename, recolour and delete the tags tasks carry
+    Tag {
+        #[command(subcommand)]
+        action: TagAction,
     },
     /// Read and write the memory store the agents keep in the library
     Memory {

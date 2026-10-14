@@ -1,94 +1,22 @@
-import { useMemo } from "react";
-import { CalendarBlank, Kanban, Tray } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
+import { FunnelSimple } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { FilterPopover, FilterRow } from "@/components/ui/filter/FilterPopover";
-import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { useSubjects } from "@/hooks/data/useSubjects";
-import { addDays, startOfWeek } from "@/lib/planning/calendar";
-import { displayCode, sqliteUtcToMs, startOfDay } from "@/lib/format/format";
-import type { DbProject, DbTaskWithProject, ProjectColumn } from "@/lib/planning/projects";
-import { UNIVERSAL_COLUMNS, universalColumnOf } from "./universalTasks";
-
-/**
- * The universal Tasks view's filters. The page holds the state; filtering is
- * {@link matchesFilter} over the one `getAllTasks` list, not a query per filter.
- */
-
-type DueFilter = "any" | "overdue" | "today" | "week" | "undated";
-
-export interface TaskFilter {
-  /** {@link UNIVERSAL_COLUMNS} ids to show — on the board, the columns that
-   *  exist. Never empty: the control won't uncheck the last one. */
-  status: readonly string[];
-  /** Not `number | null`: `ProjectPicker`'s `null` already means Unfiled. */
-  project: "any" | "unfiled" | number;
-  /** `"personal"` is no subject at all; otherwise a subject code. */
-  subject: "any" | "personal" | string;
-  due: DueFilter;
-}
-
-export const DEFAULT_FILTER: TaskFilter = {
-  status: ["todo"],
-  project: "any",
-  subject: "any",
-  due: "any",
-};
-
-/** Includes the default, whose status set is narrowed to Todo. */
-export function isFiltered(filter: TaskFilter): boolean {
-  return (
-    filter.status.length !== UNIVERSAL_COLUMNS.length ||
-    filter.project !== "any" ||
-    filter.subject !== "any" ||
-    filter.due !== "any"
-  );
-}
-
-export function filteredColumns(filter: TaskFilter): readonly ProjectColumn[] {
-  return UNIVERSAL_COLUMNS.filter((c) => filter.status.includes(c.id));
-}
-
-/** `now` is passed in so one pass over the list reads one clock. */
-export function matchesFilter(
-  task: DbTaskWithProject,
-  filter: TaskFilter,
-  projectById: Map<number, DbProject>,
-  now: number,
-): boolean {
-  if (!filter.status.includes(universalColumnOf(task, projectById).id)) return false;
-
-  if (filter.project === "unfiled") {
-    if (task.project_id != null) return false;
-  } else if (filter.project !== "any") {
-    if (task.project_id !== filter.project) return false;
-  }
-
-  if (filter.subject === "personal") {
-    if (task.project_subject_code != null) return false;
-  } else if (filter.subject !== "any") {
-    if (task.project_subject_code !== filter.subject) return false;
-  }
-
-  return matchesDue(task.due_at, filter.due, now);
-}
-
-/** Parsed, not string-compared: `due_at` may be ISO or SQLite's format (see
- *  `TasksTable`'s `dueCmp`). "This week" is the calendar's week (`startOfWeek`),
- *  not a rolling seven days. */
-function matchesDue(dueAt: string | null, due: DueFilter, now: number): boolean {
-  if (due === "any") return true;
-  const ms = sqliteUtcToMs(dueAt);
-  if (due === "undated") return ms == null;
-  if (ms == null) return false;
-  if (due === "overdue") return ms < now;
-  const today = new Date(now);
-  if (due === "today") {
-    const from = startOfDay(today).getTime();
-    return ms >= from && ms < addDays(today, 1).getTime();
-  }
-  const from = startOfWeek(today).getTime();
-  return ms >= from && ms < addDays(startOfWeek(today), 7).getTime();
-}
+import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
+import { ChipRow, ToggleChip } from "@/components/ui/filter/ChipRow";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import type { DbTaskTag } from "@/lib/planning/projects";
+import { TagDot } from "../tags/TagDot";
+import { DueRangeFields } from "./DueRange";
+import {
+  DEFAULT_FILTER,
+  isDefaultFilter,
+  activeFilterCount,
+  toggleStatusFilter,
+  type DueFilter,
+  type TaskFilter,
+} from "./filterRules";
+import { UNIVERSAL_COLUMNS } from "./universalTasks";
 
 const DUE_LABELS: Record<DueFilter, string> = {
   any: "Any time",
@@ -96,180 +24,165 @@ const DUE_LABELS: Record<DueFilter, string> = {
   today: "Today",
   week: "This week",
   undated: "Undated",
+  custom: "Custom",
 };
 
+function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="py-2">
+      <div className="mb-1.5 flex items-baseline justify-between px-0.5">
+        <span className="text-[11px] font-medium text-muted-foreground">{title}</span>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SelectionAction({ changed, label, onClick, disabled = false }: {
+  changed: boolean;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={changed ? `Reset ${label}` : `Select all ${label}`}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "cursor-pointer rounded text-[11px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50",
+        changed ? "text-brand hover:text-brand/80" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {changed ? "Reset" : "Select all"}
+    </button>
+  );
+}
+
+/**
+ * The Filter pill and the popover behind it: archived visibility, status, due and tags, with a
+ * row of chips (Due and Tags scroll sideways), at a fixed width so
+ * nothing resizes it. Project and subject are their own toolbar pills
+ * (`ProjectFilter`, `SubjectFilter`). The page holds the state and
+ * `filterRules.ts` gives it meaning; the pill counts sections changed from
+ * default. Picking never closes the popover, so several can be set at once.
+ */
 export function TaskFilters({
   filter,
-  projects,
+  tags,
   onChange,
-  className,
+  target = "tasks",
 }: {
+  target?: "tasks" | "projects";
   filter: TaskFilter;
-  /** Archived included. */
-  projects: DbProject[];
+  tags: DbTaskTag[];
   onChange: (next: TaskFilter) => void;
-  className?: string;
 }) {
-  const { subjects } = useSubjects();
+  const count = activeFilterCount(filter);
 
-  const projectName = useMemo(() => {
-    if (filter.project === "any") return "Any project";
-    if (filter.project === "unfiled") return "Unfiled";
-    return projects.find((p) => p.id === filter.project)?.name ?? "Project";
-  }, [filter.project, projects]);
+  const toggleStatus = (id: string) =>
+    onChange({ ...filter, status: toggleStatusFilter(filter.status, id) });
 
-  const subjectName = useMemo(() => {
-    if (filter.subject === "any") return "Any subject";
-    if (filter.subject === "personal") return "Personal";
-    return displayCode(filter.subject);
-  }, [filter.subject]);
-
-  const statusName =
-    filter.status.length === UNIVERSAL_COLUMNS.length
-      ? "Any status"
-      : filter.status.length === 1
-        ? UNIVERSAL_COLUMNS.find((c) => c.id === filter.status[0])?.name ?? "Status"
-        : `${filter.status.length} statuses`;
-
-  // The last checked status can't be unchecked — see `TaskFilter.status`.
-  const toggleStatus = (id: string) => {
-    const on = filter.status.includes(id);
-    if (on && filter.status.length === 1) return;
+  const toggleTag = (id: number) =>
     onChange({
       ...filter,
-      status: on
-        ? filter.status.filter((s) => s !== id)
-        : UNIVERSAL_COLUMNS.filter((c) => c.id === id || filter.status.includes(c.id)).map(
-            (c) => c.id,
-          ),
+      tags: filter.tags.includes(id) ? filter.tags.filter((t) => t !== id) : [...filter.tags, id],
     });
-  };
 
   return (
-    <div className={cn("flex min-w-0 items-center gap-1.5", className)}>
-      <FilterPopover label={statusName} active={filter.status.length !== UNIVERSAL_COLUMNS.length}>
-        {() => (
-          <>
-            {/* Multi-select: picking doesn't close. */}
-            {UNIVERSAL_COLUMNS.map((c) => (
-              <FilterRow
-                key={c.id}
-                label={c.name}
-                selected={filter.status.includes(c.id)}
-                onPick={() => toggleStatus(c.id)}
-              />
-            ))}
-            <FilterRow
-              label="Any status"
-              selected={filter.status.length === UNIVERSAL_COLUMNS.length}
-              onPick={() =>
-                onChange({ ...filter, status: UNIVERSAL_COLUMNS.map((c) => c.id) })
-              }
-              className="mt-1 border-t border-border-subtle pt-1.5"
-            />
-          </>
-        )}
-      </FilterPopover>
-
-      <FilterPopover label={projectName} active={filter.project !== "any"}>
-        {(close) => (
-          <div className="-mx-1 max-h-52 overflow-y-auto px-1">
-            <FilterRow
-              label="Any project"
-              selected={filter.project === "any"}
-              onPick={() => {
-                close();
-                onChange({ ...filter, project: "any" });
-              }}
-            />
-            <FilterRow
-              label="Unfiled"
-              icon={<Tray size={13} className="shrink-0" />}
-              selected={filter.project === "unfiled"}
-              onPick={() => {
-                close();
-                onChange({ ...filter, project: "unfiled" });
-              }}
-            />
-            {projects.map((p) => (
-              <FilterRow
-                key={p.id}
-                label={p.name}
-                icon={
-                  p.subject_code ? (
-                    <SubjectIcon code={p.subject_code} size={13} />
-                  ) : (
-                    <Kanban size={13} className="shrink-0" />
-                  )
-                }
-                selected={filter.project === p.id}
-                onPick={() => {
-                  close();
-                  onChange({ ...filter, project: p.id });
-                }}
-              />
-            ))}
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn("shrink-0 gap-1.5 font-normal", count > 0 && "border-brand/40 text-brand")}
+        >
+          <FunnelSimple size={13} className={count > 0 ? undefined : "text-muted-foreground"} />
+          Filter
+          {count > 0 && (
+            <span className="tabular-nums">
+              ({count})
+            </span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80 p-0">
+        <div className="px-4 py-3">
+          <div className="flex min-h-9 items-center justify-between gap-3">
+            <span className="text-xs text-foreground">Show archived</span>
+            <Switch aria-label={target === "projects" ? "Show archived projects" : "Show tasks in archived projects"} checked={filter.showArchived} onCheckedChange={(showArchived) => onChange({ ...filter, showArchived })} />
           </div>
-        )}
-      </FilterPopover>
+          {target === "projects" && <p className="pb-1 text-[11px] text-muted-foreground">Status matches tasks in a project. Due and tags match the project.</p>}
+          <Section title="Status" action={
+            <SelectionAction
+              changed={filter.status.length > 0}
+              label="statuses"
+              onClick={() => onChange({
+                ...filter,
+                status: filter.status.length > 0 ? DEFAULT_FILTER.status : UNIVERSAL_COLUMNS.map((c) => c.id),
+              })}
+            />
+          }>
+            <ChipRow>
+              {UNIVERSAL_COLUMNS.map((c) => (
+                <ToggleChip key={c.id} selected={filter.status.includes(c.id)} onClick={() => toggleStatus(c.id)}>
+                  {c.name}
+                </ToggleChip>
+              ))}
+            </ChipRow>
+          </Section>
 
-      <FilterPopover label={subjectName} active={filter.subject !== "any"}>
-        {(close) => (
-          <div className="-mx-1 max-h-52 overflow-y-auto px-1">
-            <FilterRow
-              label="Any subject"
-              selected={filter.subject === "any"}
-              onPick={() => {
-                close();
-                onChange({ ...filter, subject: "any" });
-              }}
+          <Section title="Due">
+            <ChipRow>
+              {(Object.keys(DUE_LABELS) as DueFilter[]).map((d) => (
+                <ToggleChip key={d} selected={filter.due === d} onClick={() => onChange({ ...filter, due: filter.due === d ? "any" : d })}>
+                  {DUE_LABELS[d]}
+                </ToggleChip>
+              ))}
+            </ChipRow>
+            {filter.due === "custom" && (
+              <DueRangeFields range={filter.dueRange} onChange={(dueRange) => onChange({ ...filter, dueRange })} />
+            )}
+          </Section>
+
+          <Section title="Tags" action={
+            <SelectionAction
+              changed={filter.tags.length > 0}
+              label="tags"
+              disabled={tags.length === 0 && filter.tags.length === 0}
+              onClick={() => onChange({
+                ...filter,
+                tags: filter.tags.length > 0 ? DEFAULT_FILTER.tags : tags.map((tag) => tag.id),
+              })}
             />
-            <FilterRow
-              label="Personal"
-              hint="No subject — personal projects, and anything unfiled"
-              selected={filter.subject === "personal"}
-              onPick={() => {
-                close();
-                onChange({ ...filter, subject: "personal" });
-              }}
-            />
-            {subjects.map((s) => (
-              <FilterRow
-                key={s.id}
-                label={displayCode(s.code)}
-                icon={<SubjectIcon code={s.code} size={13} />}
-                selected={filter.subject === s.code}
-                onPick={() => {
-                  close();
-                  onChange({ ...filter, subject: s.code });
-                }}
-              />
-            ))}
+          }>
+            {tags.length === 0 ? (
+              <span className="px-0.5 text-xs text-muted-foreground/70">No tags yet.</span>
+            ) : (
+              <ChipRow>
+                {tags.map((tag) => (
+                  <ToggleChip key={tag.id} selected={filter.tags.includes(tag.id)} onClick={() => toggleTag(tag.id)}>
+                    <TagDot color={tag.color} />
+                    {tag.name}
+                  </ToggleChip>
+                ))}
+              </ChipRow>
+            )}
+          </Section>
+          <div className="mt-1.5 border-t border-border-subtle pt-2 pl-0.5">
+            <button
+              type="button"
+              disabled={isDefaultFilter(filter)}
+              onClick={() => onChange(DEFAULT_FILTER)}
+              className="cursor-pointer rounded text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
+            >
+              Reset defaults
+            </button>
           </div>
-        )}
-      </FilterPopover>
-
-      <FilterPopover
-        label={DUE_LABELS[filter.due]}
-        active={filter.due !== "any"}
-        icon={<CalendarBlank size={12} className="shrink-0 text-muted-foreground" />}
-      >
-        {(close) => (
-          <>
-            {(Object.keys(DUE_LABELS) as DueFilter[]).map((d) => (
-              <FilterRow
-                key={d}
-                label={DUE_LABELS[d]}
-                selected={filter.due === d}
-                onPick={() => {
-                  close();
-                  onChange({ ...filter, due: d });
-                }}
-              />
-            ))}
-          </>
-        )}
-      </FilterPopover>
-    </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

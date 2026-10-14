@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import type { Icon } from "@phosphor-icons/react";
 
 import { searchNoteLinkFiles, type NoteLinkFile } from "@/lib/db";
-import { categoryIconFor } from "@/lib/files/fileTypes";
+import { fileReferenceAppearance } from "@/lib/files/referenceAppearance";
 import { displayCode } from "@/lib/format/format";
 import { fileTitle } from "@/lib/files/openFile";
 
@@ -42,13 +42,16 @@ function folderLabel(file: NoteLinkFile): string {
   return dir || file.category || "";
 }
 
-/** One menu row; across the whole library its detail leads with the subject,
- *  as the chat's `@` menu does. */
+/** One menu row; its detail names the type, as a related-file chip does, then
+ *  across the whole library the subject (as the chat's `@` menu does) and the
+ *  folder. */
 function mentionOption(file: NoteLinkFile, wholeLibrary: boolean): Completion {
-  const folder = folderLabel(file);
+  const { kind } = fileReferenceAppearance(file, file.relative_path);
   const option: Completion = {
     label: fileTitle(file),
-    detail: wholeLibrary ? [displayCode(file.subject_code), folder].filter(Boolean).join(" · ") : folder,
+    detail: [kind, wholeLibrary ? displayCode(file.subject_code) : null, folderLabel(file)]
+      .filter(Boolean)
+      .join(" · "),
     apply: mentionText(file.relative_path),
   };
   optionFiles.set(option, file);
@@ -97,15 +100,17 @@ function iconHtml(icon: Icon): string {
   return html;
 }
 
-/** `addToOptions` entry: the file-type glyph left of a mention's title. */
+/** `addToOptions` entry: the glyph left of a mention's title, in the file's
+ *  reference colour (`fileReferenceAppearance`, the related-file chips'). */
 export const mentionOptionIcon = {
   position: 20,
   render(completion: Completion): Node | null {
     const file = optionFiles.get(completion);
     if (!file) return null;
+    const { Icon, tone } = fileReferenceAppearance(file, file.relative_path);
     const dom = document.createElement("span");
-    dom.className = "cm-mention-icon";
-    dom.innerHTML = iconHtml(categoryIconFor(file));
+    dom.className = `cm-mention-icon ${tone}`;
+    dom.innerHTML = iconHtml(Icon);
     return dom;
   },
 };

@@ -12,24 +12,30 @@ repair a bad row.
 
 | Piece | Location |
 | --- | --- |
-| Tables: `projects`, `project_tasks` (27), tags + `event_id` (33), nullable `project_id` (37) | `app/src-tauri/src/db/migrations.rs`, `UNFILED_TASKS_SQL` in `app/src-tauri/src/db/projects/migration37.rs` |
-| Frontend reads and writes (direct SQL) | `app/src/lib/planning/projects/` (`reads.ts`, `taskWrites.ts`, `projectWrites.ts`, `columns.ts`, `rows.ts`, `events.ts`) |
-| Headless writes (CLI, and so the agent) | `app/src-tauri/src/db/projects/` (`tasks/`, `project_writes.rs`, `columns.rs`, `rows.rs`) |
-| `oculus project` / `oculus task` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs` |
+| Tables: `projects`, `project_tasks` (27), tags + `event_id` (33), nullable `project_id` (37), `task_tags` + `task_tag_links` + `task_files` (47), shared tag triggers (48) | `app/src-tauri/src/db/migrations.rs`, `UNFILED_TASKS_SQL` in `app/src-tauri/src/db/projects/migration37.rs` |
+| Frontend reads and writes (direct SQL) | `app/src/lib/planning/projects/` (`reads.ts`, `taskWrites.ts`, `projectWrites.ts`, `columns.ts`, `rows.ts`, `events.ts`, `tags.ts`, `taskFiles.ts`, `touch.ts`) |
+| Headless writes (CLI, and so the agent) | `app/src-tauri/src/db/projects/` (`tasks/`, `tags.rs`, `tasks/links.rs`, `project_writes.rs`, `columns.rs`, `rows.rs`) |
+| `oculus project` / `oculus task` / `oculus tag` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs` |
 | One open project and its tasks | `app/src/stores/planning/projectsStore.ts` |
 | Index, one project, one task, every task | `app/src/pages/work/ProjectsIndexPage.tsx`, `app/src/pages/work/ProjectPage.tsx`, `app/src/pages/work/TaskPage.tsx`, `app/src/pages/work/TasksPage.tsx` |
-| Index subject groups and collapsed preferences (shared with chat) | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
-| A subject's Projects tab | `app/src/pages/work/ProjectsPage.tsx` |
-| The Projects / Tasks strip and its sidebar item | `app/src/components/projects/page/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx` |
-| Overview, tags, pinned calendar event | `app/src/components/projects/page/ProjectOverview.tsx`, `app/src/components/projects/fields/TagEditor.tsx`, `app/src/components/projects/page/EventLink.tsx` |
+| Shared detail title and markdown field | `app/src/components/projects/detail/DetailTitle.tsx`, `app/src/components/projects/detail/DetailBody.tsx` |
+| A task page's parts | `app/src/components/projects/task/` (header, property pills, tags, related files, footer), `app/src/pages/work/task/` (title, body, checklist, mutations, data) |
+| Project appearance and picker | `app/src/components/projects/icons/`, `app/src/stores/planning/projectIconStore.ts` |
+| Project index table, rows and search tree | `app/src/components/projects/lists/ProjectsIndexTable.tsx`, `app/src/components/projects/lists/ProjectIndexRow.tsx`, `app/src/components/projects/lists/projectTableData.ts`, `app/src/components/projects/lists/projectFilters.ts` |
+| Subject Tasks link and scoped redirects | `app/src/components/subjects/nav/tabs.ts`, `app/src/pages/work/SubjectTasksRedirect.tsx`, `app/src/components/projects/tasks/useTaskFilterState.ts` |
+| The section's nav column and its fold | `app/src/layouts/TasksLayout.tsx`, `app/src/components/projects/nav/TasksNav.tsx`, `app/src/components/projects/nav/TagsGroup.tsx`, `app/src/components/projects/nav/panel.ts` |
+| The page header row; the rail item | `app/src/components/projects/page/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx` |
+| Overview, project tags, pinned calendar event | `app/src/components/projects/page/ProjectOverview.tsx`, `app/src/components/projects/page/ProjectProperties.tsx`, `app/src/components/projects/fields/TagEditor.tsx`, `app/src/components/projects/page/EventLink.tsx` |
+| Task tags: registry hook, chips, picker, palette | `app/src/hooks/data/useTaskTags.ts`, `app/src/components/projects/tags/`, `--color-tag-*` in `app/src/styles/colors.css` |
 | Board, table, timeline, and the shaping behind them | `app/src/components/projects/board/ProjectBoard.tsx`, `app/src/components/projects/lists/ProjectTable.tsx`, `app/src/components/projects/timeline/ProjectTimeline.tsx`, `app/src/components/projects/tasks/taskTree.ts` |
-| The universal view: hook, filters, views, shared rules | `app/src/hooks/data/useTaskList.ts`, `app/src/components/projects/tasks/TaskFilters.tsx`, `app/src/components/projects/board/TasksBoard.tsx`, `app/src/components/projects/lists/TasksTable.tsx`, `app/src/components/projects/tasks/universalTasks.ts` |
+| The universal view: hook, views, filters, sort, groups, shared rules | `app/src/hooks/data/useTaskList.ts`, `app/src/components/projects/tasks/` (`taskViews.ts`, `filterRules.ts`, `filterCounts.ts`, `taskSort.ts`, `taskGroups.ts`, `universalTasks.ts`, `TaskFilters.tsx`, `ProjectFilter.tsx`, `SubjectFilter.tsx`) |
+| Shared task rows, headers, mutations and the Display menu | `app/src/components/projects/lists/` (`TasksTable.tsx`, `TaskRow.tsx`, `TaskCells.tsx`, `TaskTableHeaders.tsx`, `tasksColumns.ts`), `app/src/components/projects/tasks/useTaskActions.ts`, `app/src/components/projects/display/`, `app/src/components/projects/board/TasksBoard.tsx` |
 | Card drag and board chrome | `app/src/hooks/gestures/useCardDrag.ts` (on `app/src/hooks/gestures/usePointerDrag.ts`), `app/src/components/projects/board/BoardParts.tsx` |
 | Subject chips, subtask expansion, status and progress marks | `app/src/components/projects/tasks/TaskMarks.tsx` |
 | A card's title | `app/src/components/projects/board/CardTitle.tsx` |
 | Filing a task; creating one | `app/src/components/projects/nav/ProjectPicker.tsx`, `app/src/components/projects/nav/NewTaskButton.tsx` |
 | Rename / archive / delete | `app/src/components/projects/lists/ProjectMenu.tsx`, `app/src/components/projects/lists/useProjectActions.ts` |
-| Routes and the breadcrumb trail | `app/src/components/projects/nav/projectHref.ts`, `app/src/components/projects/nav/taskHref.ts`, `app/src/components/projects/page/ProjectCrumbs.tsx` |
+| Routes and the breadcrumb trail | `app/src/components/projects/nav/projectHref.ts`, `app/src/components/projects/nav/taskHref.ts`, `app/src/components/projects/nav/projectBreadcrumbs.tsx`, `app/src/components/projects/nav/taskBreadcrumbs.tsx`, `app/src/components/ui/Breadcrumb.tsx` |
 | Date and time picking | `app/src/components/projects/fields/DateTimeField.tsx` |
 | Overlap packing, shared with the calendar | `app/src/lib/planning/lanes.ts` |
 | The agent's instructions | `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/HARNESS.template.md` |
@@ -46,10 +52,39 @@ repair a bad row.
   neighbours; both writers renumber the column to whole numbers when the gap
   underflows.
 - **`source` is `'manual'` or `'agent'`**; everything the CLI writes is `agent`.
-- **Tags are JSON on the project** (`NOT NULL DEFAULT '[]'`), normalised on the
-  way in by both writers (`normaliseTags` / `normalise_tags`: trim, collapse
-  whitespace, dedupe case-insensitively, cap 24), so "used before?" is a
-  plain string compare everywhere else.
+- **A project's tags are JSON on the project** (`NOT NULL DEFAULT '[]'`),
+  normalised on the way in by both writers (`normaliseTags` / `normalise_tags`:
+  trim, collapse whitespace, dedupe case-insensitively, cap 24), so "used
+  before?" is a case-insensitive name lookup in the shared tag registry.
+- **Projects and tasks share a tag registry**: `task_tags` (name unique ignoring
+  case, a palette *key* for colour — never a hex value, so the palette can be
+  retuned) and `task_tag_links` (cascades from both sides). Renaming,
+  recolouring or deleting a tag is one row and reaches every task, which a name
+  copied into each task cannot do. Projects retain JSON names for CLI compatibility;
+  `app/src-tauri/src/db/projects/shared_tags.sql` seeds existing names and registers
+  project tags on every insert/update, for both writers. Registry rename/delete
+  triggers update matching project names case-insensitively. The palette (`slate`, `indigo`, `green`,
+  `amber`, `rose`, `purple`, `teal`, `orange`) is validated by both writers;
+  the tag tokens are in `colors.css` and are not theme-derived. Migration 47
+  seeds Assignment, Exam, Reading, Study and Admin.
+  - **Creating by name is idempotent**: a name matching a tag ignoring case
+    returns that tag. The CLI makes unknown names on the fly (`slate`); a
+    picker's "Create" never fails on a tag typed twice.
+  - **A tag set is replaced, not patched**: new links go in before the rest come
+    out, so a failure never leaves fewer tags (the TS side has no transaction).
+    Every read returns `tag_ids` through one column expression and one mapper
+    (`TASK_TAG_IDS_SQL`, `toTask`), in registry order. With no explicit task links,
+    reads resolve the project's current tags instead, including for subtasks.
+    Explicit task tags replace inheritance; clearing them resumes it. Refiling
+    an untagged task follows the destination project, and unfiled tasks inherit
+    nothing. The Rust `TASK_SELECT` applies the same rule, so CLI reads, search,
+    grouping, tag navigation and both tables agree.
+- **A task's related files are `task_files`**, keyed by `files.id`. That id
+  survives a re-sync (the upsert keeps it), so the cascade FK is safe, unlike
+  `event_id`. The CLI names a file by `relative_path` and refuses a path that
+  matches no file, or several subjects' files.
+- **Tag and file link writes bump the task's and its project's `updated_at`**
+  (`touchTask` / `touch_task`); the Tasks table's Updated column reads it.
 - **`project_tasks.project_id` is nullable**: NULL is a task filed under no
   project — not an "Inbox" project the user could rename or delete.
   `column_id` stays NOT NULL and holds a **default board** id; every reader
@@ -124,45 +159,94 @@ whose parent is missing rather than dropping it.
   because a status is a column on *that* board — or `/tasks/:taskId` when
   unfiled. `taskHref` picks the route; `TaskPage.tsx` serves both, with
   `boardOf`'s default board and `useTaskList` rows for an unfiled task.
+- **The task page is a header, a pill row and four blocks.** The header holds
+  the nav fold toggle (only inside `TasksLayout`; `useTasksPanel()` is null in
+  the side panel), back, the shared breadcrumb and a `…` menu with Delete. A subtask
+  shows `… › parent task › subtask`; its back arrow opens the parent. Root
+  tasks show `… › project › task` or `Tasks › task` while unfiled. The
+  breadcrumb popover lists hidden ancestors in path order. The pills are Status, Project (read-only on a subtask), Due,
+  Starts, Estimate (whole minutes in a popover; 0 clears), the task's tags with
+  a `+` (`TagPicker`, writing `updateTask({ tagIds })`) and, on a parent, the
+  checklist progress. Below: the description, the subtasks as a checklist (a tick is
+  `moveTask`; a subtask has none), **Related files** and a created/updated
+  footer. There is no comment box.
+- **Related files open through `openLibraryPath`**, the opener every citation
+  takes, so a PDF or note lands in the side panel and a binary in the system
+  viewer; ⌘-click opens a tab. A chip is a container with two sibling buttons
+  (open, `ChipRemove`), never nested ([ui.md](./ui.md#gotchas)). The attach picker is
+  `searchAttachableFiles`, ranked like ⌘K, with recents on an empty query.
 - **Names ride in the query** (`?n=`, via `projectHref` / `taskHref`), because
   `tabInfo` titles a tab from the path alone. Renaming re-navigates to the new
   href so the tab re-titles.
-- **The task body is markdown in the note editor**, through `NoteField`
+- **Task descriptions and project About share `DetailBody`**, through `NoteField`
   (`app/src/components/documents/NoteField.tsx`; see
   [editor.md](./editor.md#notefield-is-the-note-editor-as-a-form-field)):
   always Live mode, so the preview is the read view, with the note's maths
-  tools, tables and shortcuts, and its formatting toolbar under the text
+  tools, tables and shortcuts, and its formatting toolbar above the text
   while it is edited. `@` searches the project's subject, or the whole
   library for a task without one. A picture pasted, dropped or picked is
   written to `agents/attachments/` on arrival (`writeAttachment`) and linked
-  as `![name](agents/attachments/…)`. Blur or ⌘↵ writes through
-  `updateTask`; `taskBodyEdit` makes an unchanged body write nothing and an
-  empty one write `null`. The page keys the body by task, so switching tasks
-  saves to the task left. A write from elsewhere (the agent through the CLI)
+  as `![name](agents/attachments/…)`. Blur, ⌘↵ or leaving the page writes
+  through `updateTask` (body) or `updateProject` (brief); `taskBodyEdit`
+  makes unchanged text write nothing and empty text write `null`. The page keys the body by task (`body-<id>`, the
+  related files being `files-<id>`), so switching tasks saves to the task left;
+  the two keys differ because siblings sharing one are not unmounted, and each
+  task left would keep its body on the page. A write from elsewhere (the agent through the CLI)
   replaces the text while the field is at rest; while it is edited, the
   user's text stands.
 - **Dates go through `DateTimeField`**, never a native input
   ([ui.md](./ui.md#gotchas)). A `Date` built from local parts is
   the instant meant and `toISOString()` is the only zone conversion. Picking a
   day keeps the set time, else defaults to 23:59 for a due date and the
-  morning for a start.
-- **The project page's strip is `Overview | Tasks`**, with Board / Table /
-  Timeline as a quieter third row below the toolbar. `isView` in
+  morning for a start. `variant="pill"` draws it as a property pill.
+- **The project page starts with the shared breadcrumb header**, followed
+  by `Overview | Tasks`. Overview shares the task page's editable title,
+  then property pills (status, subject, dates, progress and tags), calendar
+  link, About editor and upcoming tasks. Board / Table / Timeline sit
+  below the tabs when Tasks is selected. `isView` in
   `ProjectPage.tsx` sends an unknown stored `oculus-project-view` to the
   board.
-- **`SectionHeader` navigates** between `/projects` and `/tasks` rather than
-  swapping state, so both keep history, ⌘-click and tab restore. The sidebar
-  has one item, **Tasks**, leading to `/projects`.
-- **`ProjectCrumbs`** starts at Projects and links the subject to its Projects
-  tab. Segments are buttons with `data-tab-href` (`app/src/lib/shell/newTabClicks.ts`)
-  so ⌘-click opens a tab; it is a Fragment so it inherits each page's gap.
-- **The index** draws a subject group only once it has a project, plus
-  Personal always; `NewProjectButton` is the door for a subject's first
-  project. Its picker folds past-term subjects behind `Past subjects (n)`,
-  forced open when the selection is inside. Archived projects sit in a
-  collapsed section at the bottom; a subject's Projects tab shows active only.
+- **`TasksLayout` wraps every route in the section** with a resizable, foldable
+  `SideNav` column (`TasksNav`; width and fold under `oculus-tasks-nav-width`,
+  ⌘⌥B). Its rows navigate rather than swap state, so both pages keep history,
+  ⌘-click and tab restore. The rail has one item, **Tasks**, opening `/tasks`
+  and lit on `/projects*` too. `SectionHeader` uses the same `PageHeader`
+  and `PaneTitle` as Chat and Studio. Their nav columns share `SideNavHeading`; New task is a nav row.
+- **`projectParents`** starts at Projects and links the subject to
+  `/tasks?subject=<id>` (Personal uses `subject=personal`). Projects, tasks and subject file paths use `Breadcrumb` /
+  `BreadcrumbItems`; hidden ancestors open in a popover. Segments are
+  buttons with `data-tab-href` (`app/src/lib/shell/newTabClicks.ts`) so
+  ⌘-click opens a tab.
+- **The index is one `GridTable`**, with the Tasks page's Name, Tags,
+  Subject, Due and Updated columns and sortable headers. Projects open their
+  task rows in place; parents can open their subtasks. `TaskRow` owns the
+  same status and tag editors on both pages. A project's progress counts
+  all its tasks, including completed tasks and subtasks. Task and project
+  progress pills sit directly after the name and agent indicator.
+  Expanded projects persist under `oculus-projects-expanded`; archived projects
+  appear with Show archived enabled and sit in a collapsed group using the
+  shared `TableGroup`. The task-style Filter and Subject pills compose with
+  search. Due and tags match project properties; Status keeps projects with
+  any matching task (including subtasks), with empty projects matching Planning.
+  Status examines the full tree even when search hides rows. Subject option
+  counts count projects and exclude their own selection. Search matches
+  projects and tasks, retains a matching subtask's project and parent, and
+  opens matching branches. Search folds are local to the query and do not
+  change saved expansion. `NewProjectButton` creates projects in any subject
+  or Personal; its picker folds past subjects.
+- **Project identities default to a cube**, in the subject's current colour
+  (including its custom colour) or grey for Personal. The shared icon picker
+  opens from the table glyph and Overview title. Overrides are keyed by
+  project id under `oculus-project-icons`; Auto clears only the colour override,
+  Reset clears both, and deleting a project clears its preference. The same
+  `ProjectIcon` renders in rows (including Tasks table Project cells), breadcrumbs, project pickers, task properties
+  and tabs. Disclosure slots retain their width on empty projects and sibling
+  tasks so glyphs and titles stay aligned.
+- **A subject's Tasks link opens the central Tasks page**, scoped through
+  `?subject=<id>`. `/subjects/:subjectId/projects` and
+  `/subjects/:subjectId/tasks` redirect there outside `SubjectLayout`.
 - **Rename has two doors** — `ProjectMenu`'s dialog (a list row is a `Link`)
-  and the header's in-place edit — both through `useProjectActions`.
+  and the Overview title's in-place edit — both through `useProjectActions`.
 - **The timeline** packs overlapping bars with `packLanes`, shared with
   `app/src/components/calendar/WeekView.tsx` and generic over how a span is
   measured. Range and axis geometry follow the calendar day rather than each
@@ -194,36 +278,100 @@ click, not an anchor or button, because it contains controls; it carries
 
 ## The universal view
 
-`/tasks` shows every task, filed or not, as a four-column board or a flat
-table (`app/src/pages/work/TasksPage.tsx`), under the same strip as `/projects`.
+`/tasks` shows every task, filed or not, as a table or a four-column board
+(`app/src/pages/work/TasksPage.tsx`), beside `TasksNav`. What it shows is three
+independent layers, all predicates and orderings over one `getAllTasks`.
+
+- **View, tag and subject scope are URL state** —
+  `/tasks?view=all|agent&tag=<id>&subject=<id|personal>` (`taskViews.ts`).
+  They compose, and nav links preserve all three; an unknown value, or a tag id missing from
+  the registry, means none. They are real links so ⌘-click and restored tabs carry
+  the scope. Off `/tasks` no view or tag is selected.
+- **Search and Filter narrow further.** Search matches title, project name and
+  tag names. The toolbar reads Search, then the pills Filter, Project, Subject
+  and Display. The Filter popover holds archived visibility, status, due and tags
+  (`filterRules.ts`); Due is one scrolling line of quick options plus Custom,
+  which reveals From and To day pills over the calendar popover — either end
+  optional, the To day counted whole, a To before the From swapped, an undated
+  task never matching, no ends meaning Any time. Tags are one scrolling line.
+  Project (Any, No project, one project; archived projects fold behind
+  `Archived (n)`) and Subject (Any, Personal, one subject; past-term subjects
+  fold behind `Past subjects (n)`) are their own pills. Folds initially reveal
+  a selected item and remain clickable to close. Picking an active filter again
+  restores Any; the four status chips stay on one line, and clearing the last
+  status restores all statuses. Status and Tags have a grey Select all action
+  at default, switching to a brand-coloured Reset when any chip is selected.
+  Select all explicitly selects every chip; Reset restores only that section.
+  Empty status and tag selections mean Any. The Filter pill is tinted with a `(N)` count of
+  changed sections, including Project and Subject. Custom due counts as changed
+  before its bounds are set. Archived projects'
+  tasks start hidden; Show archived includes them, and choosing an archived
+  project enables it. Filter's footer resets all filters, including Project and
+  Subject. Subject is kept in the URL; other filters are local to the page.
+  A subject change clears Project, including navigation from another subject.
+  Project options show only projects with matching tasks in the selected subject;
+  No project is hidden when empty. Subject options remain visible at zero.
+  Both lists show task counts on the right (`filterCounts.ts`), respecting
+  search, nav, completion, status, due and tags. Counts exclude their own filter;
+  subject counts also exclude Project because choosing a subject clears Project.
+  Archived project choices count the tasks selecting them would reveal.
+  Their lists keep a scrollbar gutter, so a popover never changes width.
+- **Display shapes the result** (`components/projects/display/`): view, grouping
+  (none, status, project, tag, due), sort, show completed and which table
+  properties show, in what order, plus Group subtasks — one JSON object under `oculus-tasks-display-v2`,
+  validated field by field on read, so a property added later starts hidden and
+  an unknown stored one is dropped. The default is due date ascending with
+  finished tasks hidden; a stored object overrides every default, so changing
+  one means bumping the key. Grouping and properties are table-only; a
+  task with several tags appears under each tag group. Name is always first and
+  cannot be hidden. A column header sets the same sort, so there is one source
+  of truth. Group subtasks is table-only and starts off: visible children nest
+  beneath their visible parent with a disclosure, in the Display sort's
+  order. The parent decides the group; a child whose parent is filtered out is
+  promoted to a visible top-level row. A circular done/total badge on the right
+  of the name (`SubtaskProgressIndicator.tsx`) counts every child, including those
+  hidden by filters or completion.
+  It toggles grouped children, or opens the task checklist when shown flat.
+  Display's footer resets its saved choices.
 
 - **It does not use `projectsStore`**, which holds one open project.
   `useTaskList` reads `getAllTasks` plus the project list (a column id means
   nothing without its board) and reloads on `PROJECTS_UPDATED_EVENT`.
   `getUnfiledTasks` resolves an unfiled task's page.
-- **Its columns are `DEFAULT_COLUMNS`** (Backlog / Todo / In progress / Done),
+- **Its columns are `DEFAULT_COLUMNS`** (Planning / Todo / In progress / Done),
   aliased as `UNIVERSAL_COLUMNS`.
   - `universalColumnOf` places a card **id first, kind second**: its own
     column if that is a default id, else the kind's home (`active` → In
-    progress); a column missing from its board falls to Backlog.
+    progress); a column missing from its board falls to Planning.
   - `columnForUniversal` maps a drop onto column X to the task's own board:
     the column with id X, else the first of X's kind, else nothing. A drop
     resolving to the current column writes nothing.
-- **Four filters — status, project, subject, due — open on Todo**
-  (`TaskFilters.tsx`). Unfiled is a value of the project filter. Filtering is
-  a predicate over one `getAllTasks`, not a query per question.
-  - The status set decides which columns the board draws, and is never empty.
+- **A column's look is its variant** (`columnVariant.ts`: backlog, todo, doing,
+  done): backlog and done by kind, a default `todo` / `doing` id by id, any
+  other active column by rank (the last is in flight, earlier ones queued).
+  `TaskGlyph` (dashed circle, empty, half-filled brand, check) and `StatusPill`'s
+  tint, including the picker's row glyphs, both read it, so they cannot disagree.
+  Status editing opens a compact list: arrows and Enter choose a column, and
+  1–9 choose the numbered columns. Every choice writes
+  through `moveTask` on the task's own board.
+- **No project is a value of the project filter**, and filtering is a predicate
+  over one `getAllTasks`, not a query per question.
+  - The status set decides which columns the board draws; clearing its last pick restores all columns.
   - Due compares through `sqliteUtcToMs`: `due_at` is ISO from the UI and
     `YYYY-MM-DD HH:MM:SS` from the CLI, and string order differs. *This week*
-    is the calendar's `startOfWeek` ([calendar.md](./calendar.md)).
-  - Only status and view persist (`oculus-tasks-status`, `oculus-tasks-view`).
-  - Under a filter the counter reads `N shown` rather than `done/total`.
+    is the calendar's `startOfWeek` ([calendar.md](./calendar.md)); *Overdue*
+    is unfinished and past due, the same as the red on `DueChip`.
+- **The table's grid is built at run time** (`tasksColumns.ts`) and handed to
+  `GridTable` as `colsStyle`, because Tailwind cannot scan class names made from
+  the shown properties. Cells edit inline — `StatusPill`, `TagPicker`,
+  `ProjectPicker` (a subtask's Project stays text) — and it has no pagination.
+  Updated and Created read SQLite's naive UTC through `sqliteUtcToMs`.
 - **There is no manual order here.** `position` is a slot inside one project's
-  column, so positions across projects are unrelated numbers. Columns are
-  sorted by `UNIVERSAL_ORDER` (due, nulls last; then project, unfiled first;
-  then `position`), a same-column drag is a no-op, and a move to another
-  column appends after the last card of *that task's own project*
-  (`appendNeighbour`).
+  column, so positions across projects are unrelated numbers. Rows and cards
+  sort by the Display sort, whose default (due, nulls last; then project, unfiled
+  first; then `position`) mirrors `UNIVERSAL_ORDER`; a same-column drag is a
+  no-op, and a move to another column appends after the last card of *that
+  task's own project* (`appendNeighbour`).
 - **⌘K finds unfiled tasks** because `searchTasks` LEFT JOINs the project and
   `COALESCE`s its name — SQLite's `||` yields NULL if either side is NULL.
 - **Refiling** (`refileTask` / `refile_task` / `oculus task refile`, from
@@ -258,4 +406,7 @@ remain in `app/src/lib/planning/projects/`.
 - `toISOString().slice(0, 16)` renders UTC into a local field and shifts the date.
 - A card's `pointerdown` must not be cancelled, or no card opens its task.
 - Never order across projects by `position`; the numbers are per-column.
-- Keep `useBackendEvents` matching command text, not tool kind, or chained `cd … && oculus task` writes never refresh the board.
+- Keep the harness hook matching command text (`oculus project|task|tag`), not tool kind, or chained `cd … && oculus task` writes never refresh the board.
+- Store a tag's colour as a palette key, never a hex value; both writers refuse an unknown key.
+- Never nest a removable `TagChip` (it renders a button) inside a button or a row that is one.
+- Never build the universal table's grid from class names assembled at run time; pass `colsStyle`.

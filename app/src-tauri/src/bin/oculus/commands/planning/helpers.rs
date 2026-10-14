@@ -48,11 +48,30 @@ pub(crate) fn nullable_date(value: Option<&String>) -> Result<Option<Option<Stri
 }
 
 /// A comma-separated `--tags` list, split only: `projects::normalise_tags`
-/// owns the rest.
+/// (project labels) and the tag registry (task tags) own the rest.
 pub(crate) fn split_tags(value: Option<&str>) -> Vec<String> {
     value
         .map(|v| v.split(',').map(str::to_string).collect())
         .unwrap_or_default()
+}
+
+/// The registry tag with this name, ignoring case. A name it lacks is an error
+/// listing the real ones, since an empty result would read as "nothing is tagged".
+pub(crate) fn tag_named<'a>(
+    tags: &'a [projects::TaskTag],
+    name: &str,
+) -> Result<&'a projects::TaskTag, String> {
+    let wanted = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    tags.iter()
+        .find(|t| t.name.eq_ignore_ascii_case(&wanted))
+        .ok_or_else(|| {
+            let known: Vec<&str> = tags.iter().map(|t| t.name.as_str()).collect();
+            format!(
+                "no tag called \"{}\" (has: {}) \u{2014} oculus tag add creates one",
+                name.trim(),
+                known.join(", ")
+            )
+        })
 }
 
 pub(crate) fn nullable_minutes(value: Option<&String>) -> Result<Option<Option<i64>>, String> {
@@ -71,13 +90,21 @@ pub(crate) fn nullable_minutes(value: Option<&String>) -> Result<Option<Option<i
 ///
 /// Headings carry the column id, which `--column` takes. A subtask sits under
 /// its parent in a shared column, and on its own otherwise.
-pub(crate) fn print_board(project: &projects::Project, tasks: &[projects::Task]) {
-    print_columns(&project.columns, tasks);
+pub(crate) fn print_board(
+    project: &projects::Project,
+    tasks: &[projects::Task],
+    tags: &[projects::TaskTag],
+) {
+    print_columns(&project.columns, tasks, tags);
 }
 
 /// The same, given the columns alone — as for an unfiled task, whose board is
 /// `projects::default_columns()`.
-pub(crate) fn print_columns(columns: &[projects::Column], tasks: &[projects::Task]) {
+pub(crate) fn print_columns(
+    columns: &[projects::Column],
+    tasks: &[projects::Task],
+    tags: &[projects::TaskTag],
+) {
     for column in columns {
         let here: Vec<&projects::Task> =
             tasks.iter().filter(|t| t.column_id == column.id).collect();
@@ -90,27 +117,39 @@ pub(crate) fn print_columns(columns: &[projects::Column], tasks: &[projects::Tas
             paint(&format!("[{}]", column.id), DIM)
         );
         for task in here.iter().filter(|t| t.parent_id.is_none()) {
-            print_task_line(task, 0);
+            print_task_line(task, 0, tags);
             for child in here.iter().filter(|c| c.parent_id == Some(task.id)) {
-                print_task_line(child, 1);
+                print_task_line(child, 1, tags);
             }
         }
         for orphan in here
             .iter()
             .filter(|t| t.parent_id.is_some() && !here.iter().any(|p| Some(p.id) == t.parent_id))
         {
-            print_task_line(orphan, 1);
+            print_task_line(orphan, 1, tags);
         }
     }
 }
 
-pub(crate) fn print_task_line(task: &projects::Task, depth: usize) {
+/// One task: id, done mark, title, then `#Tag` names, due date, estimate and
+/// the number of attached files, all dim after the title.
+pub(crate) fn print_task_line(task: &projects::Task, depth: usize, tags: &[projects::TaskTag]) {
     let mut trail = String::new();
+    for id in &task.tag_ids {
+        if let Some(tag) = tags.iter().find(|t| t.id == *id) {
+            trail.push_str(&format!("  #{}", tag.name));
+        }
+    }
     if let Some(due) = &task.due_at {
         trail.push_str(&format!("  due {due}"));
     }
     if let Some(minutes) = task.estimate_minutes {
         trail.push_str(&format!("  {minutes}m"));
+    }
+    match task.file_count {
+        0 => {}
+        1 => trail.push_str("  1 file"),
+        n => trail.push_str(&format!("  {n} files")),
     }
     println!(
         "  {}{} {} {}{}",

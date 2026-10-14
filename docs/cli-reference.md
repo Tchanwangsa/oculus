@@ -25,6 +25,7 @@ Commands:
   calendar    Class times and assignment due dates
   project     Plan work: projects, their boards, and what is on them
   task        Add, move, refile, finish and delete tasks, on a board or on none
+  tag         List, add, rename, recolour and delete the tags tasks carry
   memory      Read and write the memory store the agents keep in the library
   lecture     Look inside a downloaded lecture recording
   transcribe  Transcribe a video that has no captions, on Groq or on this Mac
@@ -40,7 +41,7 @@ Options:
           Print machine-readable JSON instead of formatted text
 
           Honoured by every command that prints: status, list, search, grep, read,
-          files, calendar, project, task, keyd and studio. On failure the JSON is
+          files, calendar, project, task, tag, keyd and studio. On failure the JSON is
           `{"error": "..."}` on stderr and the exit code is 1.
 
   -h, --help
@@ -719,7 +720,7 @@ Usage: oculus task <COMMAND>
 Commands:
   list    List tasks — one project's, or every task there is
   add     Add one task, or a whole breakdown in one call
-  update  Change a task's title, notes, dates or estimate
+  update  Change a task's title, notes, dates, estimate, tags or attached files
   move    Move a task to another column, or reorder it within one
   refile  File a task under another project, or under none at all
   rm      Delete a task, and its subtasks with it
@@ -743,6 +744,9 @@ printed as one board per project under its name, with the unfiled ones first.
 `--unfiled` lists only those: the pile with no board of its own, which is the one that
 needs looking at.
 
+A task's tags follow its title as `#Name`, then its due date, estimate and how many
+library files are attached (`2 files`). `--tag` keeps only the tasks carrying one tag.
+
 Usage: oculus task list [OPTIONS]
 
 Options:
@@ -759,6 +763,9 @@ Options:
       --due-before <ISO>
           Only tasks due before this ISO 8601 timestamp. Compared as text, so pass the
           same shape the dates were written in (UTC, usually)
+
+      --tag <NAME>
+          Only tasks with this tag (its name, any case; `oculus tag list` has them)
 
   -h, --help
           Print help (see a summary with '-h')
@@ -785,6 +792,11 @@ moving it there would.
 `--parent` makes the task a subtask. Subtasks are one level deep: a subtask cannot
 itself be given children.
 
+`--tags "Assignment,Exam"` tags it by name, ignoring case; a name the registry (`oculus
+tag list`) lacks is created on the spot in the default colour. `--file PATH`
+(repeatable) attaches a library file by the path `oculus files` prints; a path that
+matches no file, or more than one, is refused.
+
 BREAKDOWNS: `--batch -` reads a JSON array of tasks from stdin (or a file, `--batch
 tasks.json`) and writes them in one call — use it for anything past two or three:
 
@@ -792,10 +804,10 @@ tasks.json`) and writes them in one call — use it for anything past two or thr
 {"title":"Outline","key":"outline"}, {"title":"Draft intro","parent":"outline"}]
 
 Per task: `title` (required), `column`, `body`, `due`, `starts`, `estimate` (minutes),
-`parent`, `key`. `parent` is either an existing task's id (a number) or the `key` of an
-**earlier task in the same batch**, which is how a parent and its subtasks go in
-together. `key` is never stored. An unknown field is an error rather than a silent
-no-op.
+`tags` (an array of tag names), `files` (an array of library paths), `parent`, `key`.
+`parent` is either an existing task's id (a number) or the `key` of an **earlier task in
+the same batch**, which is how a parent and its subtasks go in together. `key` is never
+stored. An unknown field is an error rather than a silent no-op.
 
 The batch is **all or nothing**: one transaction, so a bad item — unknown column, a
 parent that is already a subtask, a date that is not a date — writes none of them and
@@ -832,6 +844,12 @@ Options:
       --body <TEXT>
           Notes on the task
 
+      --tags <NAMES>
+          Comma-separated tag names (Assignment,Exam); new names are created
+
+      --file <PATH>
+          Attach a library file by its relative path; repeat for several
+
       --batch <FILE>
           Read a JSON array of tasks from stdin (-) or a file
 
@@ -842,10 +860,15 @@ Options:
 ### `oculus task update`
 
 ```
-Change a task's title, notes, dates or estimate.
+Change a task's title, notes, dates, estimate, tags or attached files.
 
 Only the flags you pass are written. Pass an **empty string** to clear a field: `--due
-""`, `--estimate ""`.
+""`, `--estimate ""`, `--tags ""`.
+
+`--tags "A,B"` **replaces** the whole tag set (names, any case; unknown ones are
+created). `--attach PATH` and `--detach PATH` add or remove one library file by the path
+`oculus files` prints, and may be repeated; attaching a file already attached, or
+detaching one that is not, changes nothing.
 
 Where a task *sits* is not here: column, order and done-ness are one fact, and `oculus
 task move` is their only writer — it is the command that reads the board to learn
@@ -872,6 +895,15 @@ Options:
 
       --estimate <MIN>
           Minutes, or "" to clear
+
+      --tags <NAMES>
+          Replace every tag with this comma-separated list of names, or "" to clear them
+
+      --attach <PATH>
+          Attach a library file by its relative path; repeat for several
+
+      --detach <PATH>
+          Detach a library file by its relative path; repeat for several
 
   -h, --help
           Print help (see a summary with '-h')
@@ -959,6 +991,126 @@ Usage: oculus task rm <ID>
 Arguments:
   <ID>
           Task id
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus tag`
+
+```
+List, add, rename, recolour and delete the tags tasks carry
+
+Usage: oculus tag <COMMAND>
+
+Commands:
+  list    List the tags a task can carry
+  add     Add a tag to the registry
+  rm      Delete a tag, taking it off every task that carries it
+  rename  Rename a tag everywhere
+  color   Recolour a tag
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus tag list`
+
+```
+List the tags a task can carry.
+
+One registry shared by every task, in the order the app shows it: id, name, colour, and
+how many tasks carry it. The names are what `oculus task add --tags` and `oculus task
+list --tag` take.
+
+Usage: oculus tag list
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus tag add`
+
+```
+Add a tag to the registry.
+
+A name that matches an existing tag, ignoring case, changes nothing and reports that
+tag. Names are at most 40 characters. `--color` is a palette key: slate (the default),
+indigo, green, amber, rose, purple, teal or orange. A task is tagged with `oculus task
+add --tags` or `oculus task update --tags`, which create missing tags themselves.
+
+Usage: oculus tag add [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          What the tag is called
+
+Options:
+      --color <KEY>
+          Palette key: slate, indigo, green, amber, rose, purple, teal or orange
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus tag rm`
+
+```
+Delete a tag, taking it off every task that carries it.
+
+There is no undo; the tasks stay and only lose the tag.
+
+Usage: oculus tag rm <NAME>
+
+Arguments:
+  <NAME>
+          The tag's name, any case
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus tag rename`
+
+```
+Rename a tag everywhere.
+
+Refused when another tag already has the new name, ignoring case.
+
+Usage: oculus tag rename <OLD> <NEW>
+
+Arguments:
+  <OLD>
+          The tag's current name, any case
+
+  <NEW>
+          Its new name
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus tag color`
+
+```
+Recolour a tag.
+
+KEY is a palette key: slate, indigo, green, amber, rose, purple, teal or orange.
+
+Usage: oculus tag color <NAME> <KEY>
+
+Arguments:
+  <NAME>
+          The tag's name, any case
+
+  <KEY>
+          Palette key: slate, indigo, green, amber, rose, purple, teal or orange
 
 Options:
   -h, --help

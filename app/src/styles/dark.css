@@ -63,6 +63,31 @@
   --color-reference-lecture:    #e899bc;
   --color-reference-lesson:     #76c6be;
 
+  --color-tag-slate:         #8c93a1;
+  --color-tag-slate-soft:    #2e3138;
+  --color-tag-slate-text:    #b3b9c5;
+  --color-tag-indigo:        #8b93e8;
+  --color-tag-indigo-soft:   #2b2d47;
+  --color-tag-indigo-text:   #a9b0f0;
+  --color-tag-green:         #4fb585;
+  --color-tag-green-soft:    #223a2f;
+  --color-tag-green-text:    #8dd4b0;
+  --color-tag-amber:         #d9a13a;
+  --color-tag-amber-soft:    #3b3220;
+  --color-tag-amber-text:    #e5bf70;
+  --color-tag-rose:          #e07489;
+  --color-tag-rose-soft:     #402630;
+  --color-tag-rose-text:     #f0a1b1;
+  --color-tag-purple:        #a98be0;
+  --color-tag-purple-soft:   #342a47;
+  --color-tag-purple-text:   #c6b0f0;
+  --color-tag-teal:          #45b3b0;
+  --color-tag-teal-soft:     #1f3a3a;
+  --color-tag-teal-text:     #85d3d0;
+  --color-tag-orange:        #e68b4f;
+  --color-tag-orange-soft:   #402d20;
+  --color-tag-orange-text:   #f0b184;
+
   --color-sidebar:           #171717;
   --color-sidebar-border:    #333333;
   --color-sidebar-item-hover:#262626;

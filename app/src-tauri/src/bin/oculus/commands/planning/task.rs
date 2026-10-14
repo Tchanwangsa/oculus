@@ -30,6 +30,8 @@ impl Ctx {
             let before = projects::check_iso8601(before)?;
             tasks.retain(|t| t.due_at.as_deref().is_some_and(|d| d < before.as_str()));
         }
+        let tags = self.rt.block_on(projects::list_tags(&pool))?;
+        keep_tagged(&mut tasks, &tags, args.tag.as_deref())?;
 
         if self.json {
             return self.emit(&tasks);
@@ -38,7 +40,7 @@ impl Ctx {
             println!("{}", paint("no matching tasks", DIM));
             return Ok(());
         }
-        print_board(&project, &tasks);
+        print_board(&project, &tasks, &tags);
         Ok(())
     }
 
@@ -56,6 +58,8 @@ impl Ctx {
             let before = projects::check_iso8601(before)?;
             tasks.retain(|t| t.due_at.as_deref().is_some_and(|d| d < before.as_str()));
         }
+        let tags = self.rt.block_on(projects::list_tags(pool))?;
+        keep_tagged(&mut tasks, &tags, args.tag.as_deref())?;
         if self.json {
             return self.emit(&tasks);
         }
@@ -63,7 +67,9 @@ impl Ctx {
             println!(
                 "{}",
                 paint(
-                    if args.unfiled {
+                    if args.tag.is_some() {
+                        "no matching tasks"
+                    } else if args.unfiled {
                         "nothing unfiled \u{2014} every task you have belongs to a project"
                     } else {
                         "no tasks yet \u{2014} oculus task add \"something to do\""
@@ -86,10 +92,10 @@ impl Ctx {
         let unfiled: Vec<&projects::Task> =
             tasks.iter().filter(|t| t.project_id.is_none()).collect();
         if !unfiled.is_empty() {
-            println!("{}", paint("Unfiled", BOLD));
+            println!("{}", paint("No project", BOLD));
             // The default board, which an unfiled task's column is checked against.
             let rows: Vec<projects::Task> = unfiled.into_iter().cloned().collect();
-            print_columns(&projects::default_columns(), &rows);
+            print_columns(&projects::default_columns(), &rows, &tags);
             written = true;
         }
         for project in &all {
@@ -114,7 +120,7 @@ impl Ctx {
                     None => String::new(),
                 }
             );
-            print_board(project, &here);
+            print_board(project, &here, &tags);
         }
         Ok(())
     }
@@ -144,6 +150,8 @@ impl Ctx {
                     starts: args.starts.clone(),
                     estimate: args.estimate,
                     key: None,
+                    tags: args.tags.as_deref().map(|t| split_tags(Some(t))),
+                    files: (!args.file.is_empty()).then(|| args.file.clone()),
                 }]
             }
         };
@@ -200,15 +208,24 @@ impl Ctx {
             starts_at: nullable_date(args.starts.as_ref())?,
             due_at: nullable_date(args.due.as_ref())?,
             estimate_minutes: nullable_minutes(args.estimate.as_ref())?,
+            // `--tags ""` clears: `Some(vec![])`, not `None`.
+            tags: args.tags.as_deref().map(|t| split_tags(Some(t))),
+            attach: args.attach.clone(),
+            detach: args.detach.clone(),
         };
         if patch.title.is_none()
             && patch.body.is_none()
             && patch.starts_at.is_none()
             && patch.due_at.is_none()
             && patch.estimate_minutes.is_none()
+            && patch.tags.is_none()
+            && patch.attach.is_empty()
+            && patch.detach.is_empty()
         {
             return Err(
-                "nothing to change: pass --title, --body, --due, --starts or --estimate".into(),
+                "nothing to change: pass --title, --body, --due, --starts, --estimate, \
+                 --tags, --attach or --detach"
+                    .into(),
             );
         }
         self.rt
@@ -321,4 +338,18 @@ impl Ctx {
         );
         Ok(())
     }
+}
+
+/// `task list --tag NAME`: keep the tasks carrying that tag. A name the
+/// registry lacks is an error that lists the real ones, since an empty list
+/// would read as "nothing is tagged".
+fn keep_tagged(
+    tasks: &mut Vec<projects::Task>,
+    tags: &[projects::TaskTag],
+    name: Option<&str>,
+) -> Result<(), String> {
+    let Some(name) = name else { return Ok(()) };
+    let tag = tag_named(tags, name)?;
+    tasks.retain(|t| t.tag_ids.contains(&tag.id));
+    Ok(())
 }

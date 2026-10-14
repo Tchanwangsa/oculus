@@ -1,30 +1,33 @@
-import { useLocation, useNavigate } from "react-router-dom";
-import { ViewTabs } from "@/components/ui/table/ViewTabs";
+import { PageHeader, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
+import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
+import { useTasksPanel } from "@/layouts/TasksLayout";
+import { shortcut } from "@/lib/platform";
 
 /**
- * The Projects/Tasks section header: a view strip plus the page's toolbar.
- * The strip navigates routes rather than holding local state, because crumbs,
- * `taskHref`, ⌘-click, tab restore and `tabInfo.tsx` all key off the path.
+ * The Tasks/Projects pages' 48px header row: the nav column's fold toggle at
+ * its start (absent where there is no column, e.g. in the side panel), the
+ * page's title, then its own toolbar as `children`.
  */
-const TABS = [
-  { value: "/projects", label: "Projects" },
-  { value: "/tasks", label: "Tasks" },
-] as const satisfies ReadonlyArray<{ value: string; label: string }>;
-
-type SectionPath = (typeof TABS)[number]["value"];
-
-export function SectionHeader({ children }: { children?: React.ReactNode }) {
-  const navigate = useNavigate();
-  const active: SectionPath =
-    useLocation().pathname === "/tasks" ? "/tasks" : "/projects";
+export function SectionHeader({
+  title,
+  children,
+}: {
+  title?: string;
+  children?: React.ReactNode;
+}) {
+  const panel = useTasksPanel();
 
   return (
-    <>
-      <div className="shrink-0 flex items-end border-b border-border-subtle px-5 pt-4">
-        <ViewTabs tabs={TABS} value={active} onChange={(to) => navigate(to)} />
-      </div>
-
-      <div className="shrink-0 flex h-12 items-center gap-2.5 px-5">{children}</div>
-    </>
+    <PageHeader>
+      {panel && (
+        <SideNavCollapseToggle
+          collapsed={panel.collapsed}
+          onToggle={panel.toggle}
+          shortcut={shortcut("mod+alt+B")}
+        />
+      )}
+      {title && <PaneTrail><PaneTitle>{title}</PaneTitle></PaneTrail>}
+      {children}
+    </PageHeader>
   );
 }

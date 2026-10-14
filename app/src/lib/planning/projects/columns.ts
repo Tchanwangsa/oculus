@@ -13,7 +13,7 @@ export interface ProjectColumn {
 /** The board a new project opens with; only `kind` is load-bearing. Frozen
  *  because it is shared — mutate a {@link freshColumns} copy instead. */
 export const DEFAULT_COLUMNS: readonly ProjectColumn[] = Object.freeze([
-  Object.freeze({ id: "backlog", name: "Backlog", kind: "backlog" }),
+  Object.freeze({ id: "backlog", name: "Planning", kind: "backlog" }),
   Object.freeze({ id: "todo", name: "Todo", kind: "active" }),
   Object.freeze({ id: "doing", name: "In progress", kind: "active" }),
   Object.freeze({ id: "done", name: "Done", kind: "done" }),
