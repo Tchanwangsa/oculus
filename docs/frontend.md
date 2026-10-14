@@ -318,5 +318,10 @@ The editor a document opens in is [editor.md](./editor.md).
 
 ## Gotchas
 
+- **Sibling elements never share a `key`.** React finds a child's previous render by key
+  among its siblings; with a shared key one old sibling is dropped from the tree
+  without being unmounted, so its DOM stays on the page and its effects never clean up
+  (a task page would stack every body it had left). `app/tests/repo/siblingKeys.test.ts`
+  fails on two JSX siblings written with the same key.
 - **Import `app/src/lib/platform/tauriEvents.ts` before `./App`** — it patches an
   `unlisten` that throws under StrictMode's remount and leaks the subscription.
