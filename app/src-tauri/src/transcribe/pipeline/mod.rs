@@ -92,10 +92,10 @@ impl Drop for Claim {
 
 /// A private temp directory for the run's audio, removed however it ends.
 /// Outside the library, so no folder scan ever sees a half-written file.
-struct Scratch(PathBuf);
+pub(super) struct Scratch(PathBuf);
 
 impl Scratch {
-    fn new() -> Result<Self, String> {
+    pub(super) fn new() -> Result<Self, String> {
         let dir = std::env::temp_dir().join(format!(
             "oculus-transcribe-{}-{}",
             std::process::id(),
@@ -105,7 +105,7 @@ impl Scratch {
         Ok(Self(dir))
     }
 
-    fn file(&self, name: &str) -> PathBuf {
+    pub(super) fn file(&self, name: &str) -> PathBuf {
         self.0.join(name)
     }
 }
@@ -165,8 +165,8 @@ pub fn run(
     })
 }
 
-struct Heard {
-    segments: Vec<Segment>,
+pub(super) struct Heard {
+    pub(super) segments: Vec<Segment>,
     engine: &'static str,
     chunks: usize,
 }
@@ -174,7 +174,7 @@ struct Heard {
 /// Each engine in turn over the extracted audio, cut to that engine's cap.
 /// One that declines (`NotConfigured`, `RateLimited`) at any chunk hands over
 /// to the next, and what it heard is dropped; `Failed` ends the run.
-fn transcribe_audio(
+pub(super) fn transcribe_audio(
     engines: &[Box<dyn Engine>],
     extracted: &audio::Extracted,
     audio: &Path,

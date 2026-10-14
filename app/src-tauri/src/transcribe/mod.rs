@@ -10,6 +10,7 @@
 
 pub mod app;
 pub(crate) mod audio;
+pub mod dictation;
 mod engine;
 mod engines;
 mod pipeline;

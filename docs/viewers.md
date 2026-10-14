@@ -27,6 +27,7 @@ transcript, and a web page.
 | YouTube and Vimeo metadata (`web_video_info`) | `app/src-tauri/src/sources/oembed.rs` |
 | Transcribe from a player | `app/src/hooks/lectures/useTranscription.ts`, `app/src/components/media/TranscribeEmpty.tsx` |
 | Transcript search and source-index mapping | `app/src/hooks/lectures/useTranscriptSearch.ts` |
+| Microphone clip transcription | `app/src-tauri/src/transcribe/dictation.rs` |
 | Transcription of videos without captions | `app/src-tauri/src/transcribe/`, `app/src-tauri/src/providers/groq.rs`, `app/src/lib/lectures/transcribe/` |
 | Settings → Transcription: the language, the engine list and each engine's dialog | `app/src/components/settings/transcription/TranscriptionSection.tsx`, `app/src/components/settings/transcription/GroqDialog.tsx`, `app/src/components/settings/transcription/OnDeviceSpeech.tsx`, `app/src/components/settings/transcription/LocalWhisper.tsx` |
 | The on-device speech helper | `app/src-tauri/speech/main.swift`, `app/scripts/build-speech.mjs`, `app/src-tauri/src/transcribe/engines/apple.rs` |
@@ -725,6 +726,20 @@ lecture player shows bottom-right in the frame once the lecture is over.
   server. Not downloaded, it returns nothing and the card shows the subject's
   icon and a Download pill (`lectureDownloadStore`) in place of Play; the
   download's event re-reads the next lecture.
+
+## Dictation transcribes private microphone clips
+
+`dictation_status` checks the same configured engines and ffmpeg as video
+transcription without running inference. `dictation_transcribe` accepts a
+nonempty clip of at most 24 MiB, writes it into the pipeline's scratch
+directory, decodes it with ffmpeg, and reuses the engine-order and chunking
+logic. It returns joined segment text with no timestamps or VTT file; scratch
+audio is removed on success and failure. No speech is an error. The macOS
+`app/src-tauri/Info.plist` supplies the microphone permission description for
+the WebView's capture request; `app/src-tauri/Entitlements.plist` grants
+audio input to the hardened release bundle. The composer owns recording and
+the subsequent
+[cleanup job](./harness.md#dictation-adds-an-editable-message-to-the-draft).
 
 ## Videos without captions are transcribed
 

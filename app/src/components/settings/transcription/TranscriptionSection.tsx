@@ -147,7 +147,7 @@ export function TranscriptionSection() {
   return (
     <Section
       title="Transcription"
-      description={isWindows ? "Transcribe videos without captions using Groq." : "Transcribe videos without captions."}
+      description={isWindows ? "Transcribe dictation and videos using Groq." : "Transcribe dictation and videos."}
     >
       <LanguageRow
         language={language}
@@ -160,7 +160,7 @@ export function TranscriptionSection() {
       <div className="mt-3">
         <p className="text-xs text-foreground">Engines</p>
         <p id="transcribe-engines-hint" className="text-[11px] text-muted-foreground">
-          {isWindows ? "Add a Groq key to transcribe videos." : "Tried in order if unavailable or at its limit."}
+          {isWindows ? "Add a Groq key to transcribe speech." : "Tried in order if unavailable or at its limit."}
         </p>
         <EngineList
           order={order}
@@ -172,7 +172,7 @@ export function TranscriptionSection() {
         />
         {settled && !anyReady ? (
           <p className="mt-2 text-[11px] text-warning">
-            Set up an engine to transcribe videos.
+            Set up an engine to use dictation and transcribe videos.
           </p>
         ) : null}
         {note ? (

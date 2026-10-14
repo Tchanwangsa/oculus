@@ -20,6 +20,8 @@ import { AttachmentStrip } from "@/components/harness/attachments/AttachmentStri
 import { useDraftStore } from "@/stores/chat/draftStore";
 import { signInState, useSignInStatus } from "@/hooks/agents/useSignInStatus";
 import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
+import { useDictation } from "@/components/harness/dictation/useDictation";
+import { DictationBar, DictationMic, DictationFeedback } from "@/components/harness/dictation/DictationControls";
 import { cn } from "@/lib/utils";
 
 /**
@@ -95,6 +97,7 @@ export function Composer({
   const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
   const setDraft = useDraftStore((s) => s.setDraft);
   const ref = useRef<MentionInputHandle>(null);
+  const dictation = useDictation(draftKey, (transcript) => ref.current?.append(transcript));
   const mentions = useMentionMenu({ subjectId, input: ref });
   /** The drop target for attachments: the whole box, not just the editor. */
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -139,6 +142,7 @@ export function Composer({
 
   /** Send or queue. Pictures are written first; if that fails the box is kept as is. */
   const send = async () => {
+    if (dictation.busy) return;
     const message = await att.prepare(text);
     if (message == null) return;
 
@@ -166,6 +170,8 @@ export function Composer({
 
       {/* Portals out and positions itself at the caret. */}
       <MentionMenu {...mentions.menu} />
+
+      <DictationFeedback dictation={dictation} />
 
       {att.error && (
         <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>
@@ -243,7 +249,7 @@ export function Composer({
             }
           />
         </div>
-        <div className="flex items-center gap-1">
+        {dictation.busy ? <DictationBar dictation={dictation} /> : <div className="flex items-center gap-1">
           <ModelPicker
             className="-ml-1.5"
             providers={pickerProviders}
@@ -257,8 +263,9 @@ export function Composer({
           />
           <div className="flex-1" />
           <UsageMeter usage={usage} rateLimits={rateLimits} />
+          <DictationMic dictation={dictation} />
           <SendControls running={running} ready={ready} writing={att.writing} onSend={() => void send()} onStop={onStop} />
-        </div>
+        </div>}
       </div>
     </div>
   );

@@ -32,6 +32,8 @@ pub enum Job {
     ThreadNaming,
     /// The document editor's inline completion (`document_suggest`).
     DocumentSuggestions,
+    /// Turns dictated speech into a readable message.
+    DictationCleanup,
     /// A chat agent's subagent that reads lecture material for a video
     /// (`harness::studio_agents`).
     StudioResearch,
@@ -47,6 +49,7 @@ impl Job {
             Job::LectureEnd => "lectureEnd",
             Job::ThreadNaming => "threadNaming",
             Job::DocumentSuggestions => "documentSuggestions",
+            Job::DictationCleanup => "dictationCleanup",
             Job::StudioResearch => "studioResearch",
             Job::StudioScene => "studioScene",
         }
@@ -59,6 +62,7 @@ impl Job {
             Job::LectureEnd => "Lecture end",
             Job::ThreadNaming => "Chat thread names",
             Job::DocumentSuggestions => "Document suggestions",
+            Job::DictationCleanup => "Dictation cleanup",
             Job::StudioResearch => "Studio research",
             Job::StudioScene => "Studio scenes",
         }
@@ -93,7 +97,7 @@ pub fn default_chain(job: Job) -> Vec<JobSelection> {
     if cfg!(windows)
         && matches!(
             job,
-            Job::LectureEnd | Job::ThreadNaming | Job::DocumentSuggestions
+            Job::LectureEnd | Job::ThreadNaming | Job::DocumentSuggestions | Job::DictationCleanup
         )
     {
         return vec![one(Provider::Codex, "gpt-5.6-luna", Some("medium"))];
@@ -108,6 +112,7 @@ pub fn default_chain(job: Job) -> Vec<JobSelection> {
         Job::DocumentSuggestions => {
             vec![one(Provider::Claude, "claude-sonnet-5-5", Some("medium"))]
         }
+        Job::DictationCleanup => vec![one(Provider::Claude, "claude-haiku-5-5", None)],
         // Small and fast: notes from a slice of a lecture.
         Job::StudioResearch => vec![
             one(Provider::Claude, "claude-haiku-5-5", None),
@@ -462,6 +467,23 @@ mod tests {
         );
         assert!(for_agent(&chain, Provider::Claude).is_none());
         assert!(from_json(r#"{"studioScene":[]}"#, Job::StudioScene).is_empty());
+    }
+
+    #[test]
+    fn dictation_cleanup_uses_its_own_chain_and_respects_off() {
+        assert_eq!(Job::DictationCleanup.key(), "dictationCleanup");
+        assert_eq!(Job::DictationCleanup.label(), "Dictation cleanup");
+        assert!(from_json(r#"{"dictationCleanup":[]}"#, Job::DictationCleanup).is_empty());
+        let chain = from_json(
+            r#"{"dictationCleanup":[{"provider":"opencode","model":"small","reasoningEffort":null}]}"#,
+            Job::DictationCleanup,
+        );
+        assert_eq!(chain[0].model, "small");
+        assert_eq!(chain[0].provider, Provider::Opencode);
+        assert!(is_default(
+            &from_json(r#"{"dictationCleanup":[]}"#, Job::ThreadNaming),
+            Job::ThreadNaming
+        ));
     }
 
     #[test]

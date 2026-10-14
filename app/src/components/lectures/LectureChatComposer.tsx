@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { Camera, CameraSlash } from "@phosphor-icons/react";
 
+import { useDictation } from "@/components/harness/dictation/useDictation";
+import { DictationBar, DictationMic, DictationFeedback } from "@/components/harness/dictation/DictationControls";
 import { SendControls } from "@/components/harness/composer/SendControls";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -176,6 +178,8 @@ export function LectureChatComposer({
     });
   };
 
+  const dictation = useDictation(draftKey, putBack);
+
   // Autosize in a layout effect: in the change handler the textarea still holds
   // the old string. The card is held at its height while the field collapses to
   // measure: the thread above would grow, clamp its scroll and come unpinned.
@@ -192,6 +196,7 @@ export function LectureChatComposer({
   // Pictures are written before the message is assembled; if that fails the
   // box is kept as it was.
   const send = async () => {
+    if (dictation.busy) return;
     const message = await att.prepare(text);
     if (message == null) return;
 
@@ -202,6 +207,7 @@ export function LectureChatComposer({
 
   return (
     <div ref={wrapRef} className="flex flex-col gap-1.5">
+      <DictationFeedback dictation={dictation} />
       {att.error && <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>}
 
       <div
@@ -249,7 +255,7 @@ export function LectureChatComposer({
           className="min-h-[16px] w-full resize-none overflow-x-hidden overflow-y-auto rounded-none border-0 bg-transparent p-0 text-[12px]! leading-[16px] shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
           style={{ height: `${LINE_H}px`, maxHeight: MAX_H }}
         />
-        <div className="flex items-center gap-1">
+        {dictation.busy ? <DictationBar dictation={dictation} /> : <div className="flex items-center gap-1">
           <ModelPicker
             className="-ml-1 min-w-0"
             providers={providers}
@@ -263,10 +269,11 @@ export function LectureChatComposer({
           />
           <div className="ml-auto flex shrink-0 items-center gap-1">
             <MomentChip atRef={atRef} on={moment} onToggle={() => onMoment(!moment)} />
+            <DictationMic dictation={dictation} />
             <SendControls running={running} ready={ready} writing={att.writing}
               onSend={() => void send()} onStop={onStop} />
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   );

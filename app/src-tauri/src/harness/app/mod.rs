@@ -3,6 +3,7 @@
 //! and releases queued messages as turns close. One module per command
 //! family, registered in `lib.rs` by the module that defines it.
 
+pub mod dictation;
 pub mod lifecycle;
 pub mod models;
 mod send;

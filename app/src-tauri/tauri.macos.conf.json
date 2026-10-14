@@ -9,7 +9,8 @@
     "macOS": {
       "files": {
         "Helpers/Oculus Helper.app": "binaries/Oculus Helper.app"
-      }
+      },
+      "entitlements": "Entitlements.plist"
     },
     "resources": {
       "../../LICENSE": "LICENSE",
