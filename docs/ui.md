@@ -7,7 +7,7 @@ Read this before any UI work.
 
 | Piece | Location |
 | --- | --- |
-| Tokens, base resets, utilities (`page-scroll`, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
+| Tokens, base resets, utilities (`page-scroll`, `skip-offscreen`, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
 | Themes, appearance prefs and the frame | `app/src/lib/ui/themes/` (`samplesLight.ts`, `samplesDark.ts` for the palettes, `derive.ts` for the tokens, `store.ts` for the prefs) |
 | Settings → Appearance: mode, theme cards, accent, window frame, code font | `app/src/pages/settings/AppearancePage.tsx`, `app/src/components/settings/appearance/` |
 | Platform detection and shortcut labels | `app/src/lib/platform.ts` |
@@ -126,6 +126,12 @@ themes are opt-in and keep the same structure.
   remembered per mode.
 - **Full pages scroll through `page-scroll`**, which reserves the scrollbar
   gutter so a page that starts overflowing doesn't jog sideways.
+- **A long list's rows can skip layout off screen with `skip-offscreen`**
+  (`content-visibility: auto`, remembering each row's drawn height), so a
+  resize lays out only what is visible. The row clips its paint to its box:
+  4px of padding on each edge, cancelled by the margin, keeps focus rings in, but
+  anything drawn past its sides is cut, and popups must portal. The chat
+  timeline uses it ([harness.md](./harness.md#the-timeline-mounts-its-newest-rows-and-holds-the-view-still)).
 - **Every scroller fades its overflowing edges through `useScrollFade`**
   (`app/src/hooks/ui/useScrollFade.ts`; `syncScrollFade` in
   `app/src/lib/ui/scrollFade.ts` for non-React callers like the maths palette).
@@ -152,7 +158,11 @@ themes are opt-in and keep the same structure.
   drag-resizable and fold away to nothing (`useResizablePanel`, width and
   fold remembered) from ⌘⌥B, from `SideNavCollapseToggle` at the start of the
   page's 48px header row, beside its title, or by dragging it narrow. Labels
-  fade as the width eases shut (`SIDE_NAV_FOLDS`).
+  fade as the width eases shut (`SIDE_NAV_FOLDS`). Drag samples are coalesced
+  into one width update per animation frame; release applies the last sample
+  even before that frame arrives. The width and fold are saved to storage
+  only after dragging ends, so synchronous storage stays out of the resize
+  loop. Unmounting cancels the pending frame and clears the drag cursor.
 - **Subject tabs share `SubjectPage` for width and gutters** under
   `SubjectLayout`'s header row (the toggle, the subject crumb, the tab's
   name) and beside the subject's nav column, `SubjectLoading` for skeleton

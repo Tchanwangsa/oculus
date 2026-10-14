@@ -6,3 +6,15 @@
   overflow-y: scroll;
   padding-left: 6px;
 }
+
+/* A list row whose layout WebKit skips while off screen, so a resize re-lays
+   out only visible rows (`auto` remembers each row's drawn height). It clips
+   its paint; the 4px padding, cancelled by the margin, keeps focus rings in. */
+@utility skip-offscreen {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 160px;
+  margin-block: -4px;
+  padding-block: 4px;
+  margin-inline: -4px;
+  padding-inline: 4px;
+}

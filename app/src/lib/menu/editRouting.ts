@@ -1,6 +1,7 @@
 import { isMac } from "@/lib/platform";
 import { selectAllMaths } from "@/lib/markdown/mathSelection";
 import { OVERLAY, currentFindTarget, selectContents } from "@/lib/menu/find";
+import { expandWithin } from "@/lib/ui/expandable";
 
 /**
  * What the Edit menu's Undo, Redo and Select All do (`shell/menu.rs` only emits
@@ -67,6 +68,8 @@ export function routeSelectAll(pane: number | undefined): void {
   }
   const target = currentFindTarget(pane);
   if (!target) return;
+  // Windowed content mounts first, so the selection and its copy hold all of it.
+  expandWithin(target.root, { sync: true });
   if (target.selectAll) target.selectAll();
   else selectContents(target.root);
 }

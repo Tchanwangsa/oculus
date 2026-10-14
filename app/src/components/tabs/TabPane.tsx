@@ -60,6 +60,10 @@ const TabPane = memo(function TabPane({
     [tabId, sidePanel, claim],
   );
 
+  // Detaches a drag in progress; an unmount mid-drag calls it.
+  const detachDrag = useRef<(() => void) | null>(null);
+  useEffect(() => () => detachDrag.current?.(), []);
+
   // A fraction, not a width, so the divider holds its place when the stack resizes.
   const onHandleDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -67,23 +71,37 @@ const TabPane = memo(function TabPane({
     document.body.style.cursor = "col-resize";
     document.body.style.webkitUserSelect = "none";
     let latest: number | null = null;
+    // At most one re-render per frame: mouse events outpace the display, and
+    // each one re-lays out both panes.
+    let frame = 0;
     const onMove = (ev: MouseEvent) => {
       const box = stackRef.current?.getBoundingClientRect();
       if (!box || box.width === 0) return;
       latest = clampRatio((ev.clientX - box.left) / box.width);
-      setDragRatio(latest);
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setDragRatio(latest);
+      });
     };
-    const end = () => {
+    const detach = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", end);
+      cancelAnimationFrame(frame);
+      frame = 0;
       document.body.style.cursor = "";
       document.body.style.webkitUserSelect = "";
+      detachDrag.current = null;
+    };
+    const end = () => {
+      detach();
       if (latest != null) setSideRatio(tabId, latest);
       setDragRatio(null);
       setDragging(false);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", end);
+    detachDrag.current = detach;
   }, [tabId, setSideRatio]);
 
   const ratio = dragRatio ?? tab.side?.ratio ?? SIDE_RATIO;

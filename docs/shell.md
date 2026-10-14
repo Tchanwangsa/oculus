@@ -187,6 +187,8 @@ while Ctrl+Shift+Z is Redo.
   whole window. Within that, `selectContents` spans only its first to last
   `data-selectable` block (`ui.md`), since WebKit paints a scripted selection
   over `user-select: none` text; a page with no content selects nothing.
+  A find or Select All first mounts windowed content in full
+  (`app/src/lib/ui/expandable.ts`), so the chat's unmounted rows are included.
 - **⌘1–⌘8 are strip positions** (a missing slot is a no-op), ⌘9 is the last
   tab, and ⇧⌘T pops `tabStore`'s `closed` stack back to the old index. A
   browser tab is remembered by URL, recorded by `TopTabBar` *before* Rust

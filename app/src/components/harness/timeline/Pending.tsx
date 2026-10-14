@@ -1,12 +1,16 @@
 import { CircleNotch } from "@phosphor-icons/react";
 import { useShallow } from "zustand/react/shallow";
+import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
+import { cn } from "@/lib/utils";
 import { ThinkingRow } from "./WorkRow";
 import { Assistant } from "./MessageActions";
 import { QuestionBubble } from "./QuestionBubble";
 import type { PendingActions } from "./types";
 
-/** The turn in flight: reasoning and text with no row yet, or "Working…". */
+/** The turn in flight: reasoning and text with no row yet, or "Working…".
+ *  One anchor row, never `skip-offscreen`: it changes size every fold and is
+ *  on screen whenever it is read. */
 export function LiveTail({ threadId }: { threadId: number }) {
   const { running, streaming, thinking } = useHarnessStore(useShallow((s) => ({
     running: s.live[threadId]?.running ?? false,
@@ -14,8 +18,9 @@ export function LiveTail({ threadId }: { threadId: number }) {
     thinking: s.live[threadId]?.thinking ?? "",
   })));
   const quiet = running && !streaming && !thinking;
+  if (!thinking && !streaming && !quiet) return null;
   return (
-    <>
+    <div className={cn(ANCHOR_ROW, "flex flex-col gap-2")}>
       {thinking && <ThinkingRow text={thinking} live />}
       {streaming && <Assistant text={streaming} />}
       {quiet && (
@@ -24,7 +29,7 @@ export function LiveTail({ threadId }: { threadId: number }) {
           <span className="animate-pulse">Working…</span>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -36,13 +41,14 @@ export function Pending({ threadId, actions }: { threadId: number; actions: Pend
   return (
     <>
       {queued.map((q) => (
-        <QuestionBubble
-          key={q.id}
-          text={q.text}
-          pending
-          onSubmit={(text) => actions.editQueued(q.id, text)}
-          onRemove={() => actions.unqueue(q.id)}
-        />
+        <div key={q.id} className={ANCHOR_ROW}>
+          <QuestionBubble
+            text={q.text}
+            pending
+            onSubmit={(text) => actions.editQueued(q.id, text)}
+            onRemove={() => actions.unqueue(q.id)}
+          />
+        </div>
       ))}
     </>
   );
