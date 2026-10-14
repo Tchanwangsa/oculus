@@ -2,9 +2,12 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_FILTER,
   activeFilterCount,
+  filteredColumns,
+  isDefaultFilter,
   matchesFilter,
   normaliseRange,
   popoverFilterCount,
+  toggleStatusFilter,
 } from "@/components/projects/tasks/filterRules";
 import { dueBucket, groupTasks } from "@/components/projects/tasks/taskGroups";
 import { sortTasks } from "@/components/projects/tasks/taskSort";
@@ -15,6 +18,8 @@ import {
   parseView,
   tasksHref,
 } from "@/components/projects/tasks/taskViews";
+import { DEFAULT_COLUMNS, type DbProject } from "@/lib/planning/projects";
+import { taskTree } from "@/components/projects/tasks/taskTree";
 import { NO_PROJECTS, tag, task } from "./fixtures";
 
 // Wednesday 14 Oct 2026, noon: the calendar week runs Mon 12 to Sun 18.
@@ -154,11 +159,13 @@ describe("the custom due range", () => {
     expect(hit(null, range(null, 14))).toBe(false);
   });
 
-  test("no ends is Any time, and does not count as narrowing", () => {
+  test("a Custom range without ends matches Any time and still counts as changed", () => {
     const f = range(null, null);
     expect(hit(null, f)).toBe(true);
     expect(hit(at(30), f)).toBe(true);
-    expect(popoverFilterCount(f)).toBe(0);
+    expect(popoverFilterCount(f)).toBe(1);
+    expect(isDefaultFilter(f)).toBe(false);
+    expect(isDefaultFilter(DEFAULT_FILTER)).toBe(true);
     expect(popoverFilterCount(range(12, null))).toBe(1);
   });
 
@@ -268,5 +275,72 @@ describe("grouping", () => {
     expect(dueBucket(done, NOW)).toBe("earlier");
     const earlierToday = task({ due_at: at(14, 8), done_at: "2026-10-14 08:00:00" });
     expect(dueBucket(earlierToday, NOW)).toBe("today");
+  });
+});
+
+
+describe("archived visibility and status toggles", () => {
+  const project: DbProject = {
+    id: 7, name: "Archive", status: "archived", columns: [...DEFAULT_COLUMNS],
+    subject_id: null, subject_code: null, brief: null, starts_at: null, due_at: null,
+    tags: [], event_id: null, position: 0, source: "manual",
+    created_at: "2026-10-01 00:00:00", updated_at: "2026-10-01 00:00:00",
+  };
+  const projects = new Map([[project.id, project]]);
+
+  test("archived parents and children are hidden by default; unfiled work stays", () => {
+    for (const parent_id of [null, 20]) {
+      const archived = task({ project_id: 7, parent_id });
+      expect(matchesFilter(archived, DEFAULT_FILTER, projects, NOW)).toBe(false);
+      expect(matchesFilter(archived, { ...DEFAULT_FILTER, showArchived: true }, projects, NOW)).toBe(true);
+    }
+    expect(matchesFilter(task(), DEFAULT_FILTER, projects, NOW)).toBe(true);
+    expect(matchesFilter(task({ project_id: 7 }), DEFAULT_FILTER, new Map([[7, { ...project, status: "active" }]]), NOW)).toBe(true);
+  });
+
+  test("picking from Any isolates one status; clearing the last restores Any", () => {
+    expect(toggleStatusFilter(DEFAULT_FILTER.status, "todo")).toEqual(["todo"]);
+    expect(toggleStatusFilter(["todo"], "doing")).toEqual(["todo", "doing"]);
+    expect(toggleStatusFilter(["todo", "doing"], "todo")).toEqual(["doing"]);
+    expect(toggleStatusFilter(["doing"], "doing")).toEqual(DEFAULT_FILTER.status);
+    expect(popoverFilterCount({ ...DEFAULT_FILTER, showArchived: true })).toBe(1);
+  });
+
+  test("explicit Select all stays selected and can be narrowed, while Reset means Any", () => {
+    const all = filteredColumns(DEFAULT_FILTER).map((c) => c.id);
+    const selected = { ...DEFAULT_FILTER, status: all };
+    expect(activeFilterCount(selected)).toBe(1);
+    expect(isDefaultFilter(selected)).toBe(false);
+    expect(filteredColumns(selected)).toEqual(filteredColumns(DEFAULT_FILTER));
+    expect(matchesFilter(task({ column_id: "done" }), selected, NO_PROJECTS, NOW)).toBe(true);
+    expect(toggleStatusFilter(all, "todo")).toEqual(all.filter((id) => id !== "todo"));
+    expect(filteredColumns({ ...selected, status: DEFAULT_FILTER.status })).toEqual(filteredColumns(DEFAULT_FILTER));
+  });
+});
+
+describe("nesting filtered subtasks", () => {
+  const parent = task({ id: 800, title: "Parent", column_id: "todo" });
+  const child = task({ id: 801, parent_id: 800, title: "Child", column_id: "doing" });
+  const other = task({ id: 802, title: "Other" });
+
+  test("a child sorted before its parent nests under it, preserving sibling order", () => {
+    const second = task({ id: 803, parent_id: 800 });
+    const nodes = taskTree([child, other, parent, second]);
+    expect(nodes.map((n) => n.task.id)).toEqual([802, 800]);
+    expect(nodes[1].children.map((t) => t.id)).toEqual([801, 803]);
+    expect(nodes[1].children[0].project_name).toBeNull();
+  });
+
+  test("filtering out a parent promotes its matching child instead of hiding it", () => {
+    const nodes = taskTree([child, other]);
+    expect(nodes.map((n) => n.task.id)).toEqual([801, 802]);
+    expect(nodes[0].children).toEqual([]);
+  });
+
+  test("parent grouping keeps a child of another status under its parent", () => {
+    const nodes = taskTree([child, parent]);
+    const groups = groupTasks(nodes.map((n) => n.task), "status", { projectById: NO_PROJECTS, tags: [], now: NOW });
+    expect(groups.map((g) => g.key)).toEqual(["todo"]);
+    expect(nodes[0].children[0].column_id).toBe("doing");
   });
 });

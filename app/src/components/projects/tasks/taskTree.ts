@@ -6,9 +6,9 @@ import { boardOf, type DbProject, type DbProjectTask, type ProjectColumn } from 
  */
 
 /** A top-level task with its subtasks, in `position` order. */
-export interface TaskNode {
-  task: DbProjectTask;
-  children: DbProjectTask[];
+export interface TaskNode<T extends DbProjectTask = DbProjectTask> {
+  task: T;
+  children: T[];
 }
 
 /**
@@ -16,14 +16,14 @@ export interface TaskNode {
  * missing (a half-applied agent write) is promoted to top level, not dropped:
  * a row nothing draws is a row nobody can fix.
  */
-export function taskTree(tasks: DbProjectTask[]): TaskNode[] {
+export function taskTree<T extends DbProjectTask>(tasks: T[]): TaskNode<T>[] {
   const byId = new Map(tasks.map((t) => [t.id, t]));
-  const nodes: TaskNode[] = [];
-  const byParent = new Map<number, TaskNode>();
+  const nodes: TaskNode<T>[] = [];
+  const byParent = new Map<number, TaskNode<T>>();
 
   for (const task of tasks) {
     if (task.parent_id != null && byId.has(task.parent_id)) continue;
-    const node: TaskNode = { task, children: [] };
+    const node: TaskNode<T> = { task, children: [] };
     nodes.push(node);
     byParent.set(task.id, node);
   }

@@ -2,7 +2,6 @@ import {
   BookOpen,
   CalendarBlank,
   CalendarPlus,
-  CircleHalf,
   ClockClockwise,
   Kanban,
   Tag,
@@ -16,7 +15,6 @@ import { PROPERTY_LABELS, type PropertyId } from "./settings";
 export const NAME_PROPERTY = { label: "Name", icon: TextT } as const;
 
 const ICONS: Record<PropertyId, Icon> = {
-  status: CircleHalf,
   tags: Tag,
   project: Kanban,
   subject: BookOpen,

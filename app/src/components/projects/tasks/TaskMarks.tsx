@@ -170,7 +170,7 @@ export function SubtaskToggle({ expandable, expanded, onToggle }: {
       onClick={onToggle}
       className="shrink-0 cursor-pointer p-0.5 text-muted-foreground/50 transition-colors hover:text-foreground"
     >
-      <CaretRight size={9} className={cn("transition-transform", expanded && "rotate-90")} />
+      <CaretRight size={9} className={cn("transition-transform will-change-transform", expanded && "rotate-90")} />
     </button>
   ) : <span aria-hidden className="w-[13px] shrink-0" />;
 }

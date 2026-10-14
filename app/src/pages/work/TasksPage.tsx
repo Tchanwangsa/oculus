@@ -14,6 +14,7 @@ import {
   matchesFilter,
   type TaskFilter,
 } from "@/components/projects/tasks/filterRules";
+import { taskFilterCounts } from "@/components/projects/tasks/filterCounts";
 import { ProjectFilter } from "@/components/projects/tasks/ProjectFilter";
 import { SubjectFilter } from "@/components/projects/tasks/SubjectFilter";
 import { TaskFilters } from "@/components/projects/tasks/TaskFilters";
@@ -77,20 +78,25 @@ export default function TasksPage() {
   const refileTask = useProjectsStore((s) => s.refileTask);
   const create = useCreateTask();
 
-  /** One clock for the pass, so "overdue" is consistent across rows. */
-  const shown = useMemo(() => {
-    const now = Date.now();
+  // Search, nav and completion apply to rows and option counts alike. Each
+  // filter menu counts its alternatives before its own selection is applied.
+  const candidates = useMemo(() => {
     const tagName = (id: number) => tagById.get(id)?.name;
-    const rows = tasks.filter(
-      (t) =>
-        (display.showCompleted || t.done_at == null) &&
-        matchesView(t, view) &&
-        (tagId == null || t.tag_ids.includes(tagId)) &&
-        matchesSearch(t, query, tagName) &&
-        matchesFilter(t, filter, projectById, now),
+    return tasks.filter((t) =>
+      (display.showCompleted || t.done_at == null) &&
+      matchesView(t, view) &&
+      (tagId == null || t.tag_ids.includes(tagId)) &&
+      matchesSearch(t, query, tagName),
     );
-    return sortTasks(rows, display.sort, projectById);
-  }, [tasks, display.showCompleted, display.sort, view, tagId, query, filter, projectById, tagById]);
+  }, [tasks, display.showCompleted, view, tagId, query, tagById]);
+
+  const { shown, counts } = useMemo(() => {
+    const now = Date.now();
+    return {
+      shown: sortTasks(candidates.filter((t) => matchesFilter(t, filter, projectById, now)), display.sort, projectById),
+      counts: taskFilterCounts(candidates, filter, projectById, now),
+    };
+  }, [candidates, filter, display.sort, projectById]);
 
   const columns = useMemo(() => filteredColumns(filter), [filter]);
 
@@ -148,8 +154,8 @@ export default function TasksPage() {
         <TaskSearch value={query} onChange={setQuery} />
         <span className="flex-1" />
         <TaskFilters filter={filter} tags={tags} onChange={setFilter} />
-        <ProjectFilter filter={filter} projects={projects} onChange={setFilter} />
-        <SubjectFilter filter={filter} onChange={setFilter} />
+        <ProjectFilter filter={filter} projects={projects} counts={counts} onChange={setFilter} />
+        <SubjectFilter filter={filter} counts={counts} onChange={setFilter} />
         <DisplayMenu display={display} onChange={setDisplay} />
       </div>
 
@@ -167,6 +173,7 @@ export default function TasksPage() {
         ) : (
           <TasksTable
             tasks={shown}
+            allTasks={tasks}
             projects={projects}
             projectById={projectById}
             tags={tags}
