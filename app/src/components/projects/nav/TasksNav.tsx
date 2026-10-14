@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { CalendarCheck, CalendarX, Kanban, ListChecks, Sparkle, type Icon } from "@phosphor-icons/react";
+import { Kanban, ListChecks, Sparkle, type Icon } from "@phosphor-icons/react";
 import { NewTaskButton } from "@/components/projects/nav/NewTaskButton";
 import { TagsGroup } from "@/components/projects/nav/TagsGroup";
 import { TasksNavRow } from "@/components/projects/nav/TasksNavRow";
@@ -17,8 +17,6 @@ import { cn } from "@/lib/utils";
 
 const VIEW_ICONS: Record<TaskViewId, Icon> = {
   all: ListChecks,
-  week: CalendarCheck,
-  undated: CalendarX,
   agent: Sparkle,
 };
 

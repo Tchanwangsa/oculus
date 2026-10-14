@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import type { DbProject, DbTaskTag, DbTaskWithProject } from "@/lib/planning/projects";
 import { taskHref } from "../nav/taskHref";
 import { AgentMark, TaskGlyph } from "../tasks/TaskMarks";
-import { universalColumnOf } from "../tasks/universalTasks";
+import { universalVariant } from "../tasks/universalTasks";
 import type { PropertyId } from "../display/settings";
 import {
   DueCell,
@@ -47,7 +47,7 @@ export function TaskRow({
   return (
     <div style={colsStyle} className={cn(cols, "py-1.5 transition-colors hover:bg-surface/60")}>
       <div className="flex min-w-0 items-center gap-1.5">
-        <TaskGlyph kind={universalColumnOf(task, projectById).kind} />
+        <TaskGlyph variant={universalVariant(task, projectById)} />
         {parent && (
           <span title={`Subtask of ${parent.title}`} className="shrink-0 text-muted-foreground/60">
             <ArrowElbowDownRight size={11} />

@@ -3,11 +3,13 @@ import { isSortKey, type TaskSort } from "../tasks/taskSort";
 
 /**
  * How the Tasks page draws its list: one object, kept as JSON in localStorage
- * (`oculus-tasks-display`) and read back field by field, so an old or edited
- * value costs only the field it spoils.
+ * (`oculus-tasks-display-v2`) and read back field by field, so an old or edited
+ * value costs only the field it spoils. The key is versioned because a stored
+ * object overrides every default: a changed default reaches existing installs
+ * only under a new key.
  */
 
-export const DISPLAY_KEY = "oculus-tasks-display";
+export const DISPLAY_KEY = "oculus-tasks-display-v2";
 
 /** Every table column but Name, in the order the panel lists hidden ones. */
 export const PROPERTIES = ["status", "tags", "project", "subject", "due", "updated", "created"] as const;
@@ -41,7 +43,7 @@ export const DEFAULT_DISPLAY: TasksDisplay = {
   view: "table",
   group: "none",
   sort: { key: "due", dir: "asc" },
-  showCompleted: true,
+  showCompleted: false,
   properties: ["status", "tags", "project", "due", "updated"],
 };
 

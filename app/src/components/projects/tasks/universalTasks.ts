@@ -6,6 +6,7 @@ import {
   type DbTaskWithProject,
   type ProjectColumn,
 } from "@/lib/planning/projects";
+import { columnVariant, type ColumnVariant } from "./columnVariant";
 import { columnOf } from "./taskTree";
 
 /**
@@ -54,6 +55,14 @@ export function universalColumnOf(
     UNIVERSAL_COLUMNS.find((c) => c.id === HOME_OF_KIND[own.kind]) ??
     backlog
   );
+}
+
+/** The glyph and pill variant of the universal column the task is drawn in. */
+export function universalVariant(
+  task: DbTaskWithProject,
+  projectById: Map<number, DbProject>,
+): ColumnVariant | null {
+  return columnVariant(UNIVERSAL_COLUMNS, universalColumnOf(task, projectById).id);
 }
 
 /**

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_DISPLAY,
+  DISPLAY_KEY,
   hiddenProperties,
   hideAllProperties,
   hideProperty,
@@ -14,6 +15,19 @@ import {
   writeDisplay,
   type TasksDisplay,
 } from "@/components/projects/display/settings";
+
+describe("the default display", () => {
+  test("sorts by due date ascending and hides finished tasks", () => {
+    expect(DEFAULT_DISPLAY.sort).toEqual({ key: "due", dir: "asc" });
+    expect(DEFAULT_DISPLAY.showCompleted).toBe(false);
+    expect(readDisplay(null).showCompleted).toBe(false);
+    expect(isDefaultDisplay(resetDisplay())).toBe(true);
+  });
+
+  test("is stored under a key the first Tasks page never wrote", () => {
+    expect(DISPLAY_KEY).not.toBe("oculus-tasks-display");
+  });
+});
 
 describe("reading the stored display", () => {
   test("nothing, malformed JSON and a non-object all give the default", () => {

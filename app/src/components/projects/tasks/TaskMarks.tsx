@@ -1,34 +1,39 @@
-import { CaretRight, CheckCircle, Circle, CircleDashed, Sparkle } from "@phosphor-icons/react";
+import { CaretRight, CheckCircle, Circle, CircleDashed, CircleHalf, Sparkle } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 import { displayCode, fmtClock, sqliteUtcToMs } from "@/lib/format/format";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import type { ColumnKind, ProjectTaskCounts } from "@/lib/planning/projects";
+import type { ColumnVariant } from "./columnVariant";
 import type { SubtaskProgress } from "./taskTree";
 
-/** Reads the column's *kind*, never its user-editable name. */
+/**
+ * A column's status glyph: dashed circle (backlog), empty (todo), half-filled
+ * brand (in progress), filled check (done). `variant` is the precise one
+ * ({@link columnVariant}); a caller that only knows the column's *kind* passes
+ * `kind`, where every active column reads as todo. Never the user-editable name.
+ */
 export function TaskGlyph({
-  kind,
+  variant,
+  kind = null,
   size = 13,
   className,
 }: {
-  kind: ColumnKind | null;
+  variant?: ColumnVariant | null;
+  kind?: ColumnKind | null;
   size?: number;
   className?: string;
 }) {
-  if (kind === "done") {
-    return (
-      <CheckCircle
-        size={size}
-        weight="fill"
-        className={cn("shrink-0 text-success", className)}
-      />
-    );
+  const v: ColumnVariant | null =
+    variant ?? (kind === "done" ? "done" : kind === "backlog" ? "backlog" : kind === "active" ? "todo" : null);
+  if (v === "done") {
+    return <CheckCircle size={size} weight="fill" className={cn("shrink-0 text-success", className)} />;
   }
-  if (kind === "backlog") {
-    return (
-      <CircleDashed size={size} className={cn("shrink-0 text-muted-foreground/60", className)} />
-    );
+  if (v === "doing") {
+    return <CircleHalf size={size} className={cn("shrink-0 text-brand", className)} />;
+  }
+  if (v === "backlog") {
+    return <CircleDashed size={size} className={cn("shrink-0 text-muted-foreground/60", className)} />;
   }
   return <Circle size={size} className={cn("shrink-0 text-muted-foreground/70", className)} />;
 }

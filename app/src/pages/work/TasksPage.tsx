@@ -82,7 +82,7 @@ export default function TasksPage() {
     const rows = tasks.filter(
       (t) =>
         (display.showCompleted || t.done_at == null) &&
-        matchesView(t, view, now) &&
+        matchesView(t, view) &&
         (tagId == null || t.tag_ids.includes(tagId)) &&
         matchesSearch(t, query, tagName) &&
         matchesFilter(t, filter, projectById, now),

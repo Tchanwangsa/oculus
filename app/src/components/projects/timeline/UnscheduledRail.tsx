@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import type { DbProject, DbProjectTask } from "@/lib/planning/projects";
 import { TaskGlyph } from "../tasks/TaskMarks";
-import { columnOf } from "../tasks/taskTree";
+import { taskVariant } from "../tasks/columnVariant";
 
 /** Undated tasks are listed rather than hidden, like the calendar's "Due"
  *  strip. */
@@ -25,7 +25,7 @@ export function UnscheduledRail({
             title={t.title}
             className="inline-flex max-w-52 items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2 py-0.5 text-[11px]"
           >
-            <TaskGlyph kind={columnOf(project, t.column_id)?.kind ?? null} size={10} />
+            <TaskGlyph variant={taskVariant(project, t.column_id)} size={10} />
             <span
               className={cn(
                 "truncate",

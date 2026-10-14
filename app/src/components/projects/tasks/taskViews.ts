@@ -1,16 +1,13 @@
 import type { DbTaskWithProject } from "@/lib/planning/projects";
-import { matchesDue } from "./filterRules";
 
 /**
  * The Tasks nav column's views and tag, which live in the URL
- * (`/tasks?view=week&tag=3`) so ⌘-click, tab restore and history keep them.
+ * (`/tasks?view=agent&tag=3`) so ⌘-click, tab restore and history keep them.
  * Both compose with the page's search and filters.
  */
 
 export const TASK_VIEWS = [
   { id: "all", label: "All tasks" },
-  { id: "week", label: "Due this week" },
-  { id: "undated", label: "No due date" },
   { id: "agent", label: "Added by the agent" },
 ] as const;
 
@@ -43,15 +40,10 @@ export function viewLabel(view: TaskViewId): string {
   return TASK_VIEWS.find((v) => v.id === view)?.label ?? "All tasks";
 }
 
-/** `now` is passed in so one pass over the list reads one clock. */
-export function matchesView(task: DbTaskWithProject, view: TaskViewId, now: number): boolean {
+export function matchesView(task: DbTaskWithProject, view: TaskViewId): boolean {
   switch (view) {
     case "all":
       return true;
-    case "week":
-      return matchesDue(task.due_at, "week", now);
-    case "undated":
-      return matchesDue(task.due_at, "undated", now);
     case "agent":
       return task.source === "agent";
   }

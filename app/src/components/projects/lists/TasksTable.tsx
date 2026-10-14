@@ -7,6 +7,7 @@ import { sortByHeader, type TasksDisplay } from "../display/settings";
 import { TagDot } from "../tags/TagDot";
 import { groupTasks, type TaskGroup } from "../tasks/taskGroups";
 import type { TaskSort } from "../tasks/taskSort";
+import { columnVariant } from "../tasks/columnVariant";
 import { TaskGlyph } from "../tasks/TaskMarks";
 import { UNIVERSAL_COLUMNS } from "../tasks/universalTasks";
 import type { CellActions } from "./TaskCells";
@@ -171,7 +172,7 @@ function GroupSection({
           className={cn("shrink-0 text-muted-foreground transition-transform will-change-transform", !open && "-rotate-90")}
         />
         {group.tag && <TagDot color={group.tag.color} />}
-        {status && <TaskGlyph kind={status.kind} />}
+        {status && <TaskGlyph variant={columnVariant(UNIVERSAL_COLUMNS, status.id)} />}
         <span className="min-w-0 truncate text-xs font-medium text-foreground">{group.label}</span>
         <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{group.tasks.length}</span>
       </button>

@@ -3,24 +3,21 @@ import { CaretDown, Check } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { boardOf, type DbProject, type ProjectColumn } from "@/lib/planning/projects";
+import { columnVariant, type ColumnVariant } from "../tasks/columnVariant";
+import { TaskGlyph } from "../tasks/TaskMarks";
 
-/**
- * A column pill's tint, by kind plus rank among the active columns (Todo and
- * In progress are both `active`): backlog outline → queued grey → in flight
- * brand → done success. An unknown column is painted destructive.
- */
+const PILL_CLASS: Record<ColumnVariant, string> = {
+  backlog: "border-border bg-transparent text-muted-foreground",
+  todo: "border-border bg-secondary text-foreground",
+  doing: "border-brand/25 bg-brand-muted text-brand",
+  done: "border-success/20 bg-success/15 text-success",
+};
+
+/** A column pill's tint, by {@link columnVariant}, so it agrees with the glyph.
+ *  An unknown column is painted destructive. */
 function columnPillClass(columns: ProjectColumn[], columnId: string): string {
-  const column = columns.find((c) => c.id === columnId) ?? null;
-  if (!column) return "border-destructive/20 bg-destructive/10 text-destructive";
-  if (column.kind === "done") return "border-success/20 bg-success/15 text-success";
-  if (column.kind === "backlog") return "border-border bg-transparent text-muted-foreground";
-
-  const active = columns.filter((c) => c.kind === "active");
-  const rank = active.findIndex((c) => c.id === column.id);
-  const last = active.length - 1;
-  if (rank === last) return "border-brand/25 bg-brand-muted text-brand";
-  if (rank === 0) return "border-border bg-secondary text-foreground";
-  return "border-brand/20 bg-brand-muted/50 text-brand/80";
+  const variant = columnVariant(columns, columnId);
+  return variant ? PILL_CLASS[variant] : "border-destructive/20 bg-destructive/10 text-destructive";
 }
 
 /**
@@ -77,13 +74,7 @@ export function StatusPill({
             }}
             className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground transition-colors hover:bg-accent"
           >
-            <span
-              aria-hidden
-              className={cn(
-                "size-2 shrink-0 rounded-full border",
-                columnPillClass(columns, c.id),
-              )}
-            />
+            <TaskGlyph variant={columnVariant(columns, c.id)} />
             <span className="min-w-0 flex-1 truncate">{c.name}</span>
             {c.id === columnId && <Check size={12} className="shrink-0 text-brand" />}
           </button>

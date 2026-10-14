@@ -241,7 +241,7 @@ click, not an anchor or button, because it contains controls; it carries
 independent layers, all predicates and orderings over one `getAllTasks`.
 
 - **The nav column picks a view and a tag, as URL state** —
-  `/tasks?view=all|week|undated|agent&tag=<id>` (`taskViews.ts`). The two compose
+  `/tasks?view=all|agent&tag=<id>` (`taskViews.ts`). The two compose
   and each link keeps the other; an unknown value, or a tag id missing from
   the registry, means none. They are real links so ⌘-click and restored tabs carry
   both. Off `/tasks` neither is selected.
@@ -250,9 +250,11 @@ independent layers, all predicates and orderings over one `getAllTasks`.
   (`filterRules.ts`); it starts empty and nothing in it persists.
 - **Display shapes the result** (`components/projects/display/`): view, grouping
   (none, status, project, tag, due), sort, show completed and which table
-  properties show, in what order — one JSON object under `oculus-tasks-display`,
+  properties show, in what order — one JSON object under `oculus-tasks-display-v2`,
   validated field by field on read, so a property added later starts hidden and
-  an unknown stored one is dropped. Grouping and properties are table-only; a
+  an unknown stored one is dropped. The default is due date ascending with
+  finished tasks hidden; a stored object overrides every default, so changing
+  one means bumping the key. Grouping and properties are table-only; a
   task with several tags appears under each tag group. Name is always first and
   cannot be hidden. A column header sets the same sort, so there is one source
   of truth.
@@ -269,6 +271,11 @@ independent layers, all predicates and orderings over one `getAllTasks`.
   - `columnForUniversal` maps a drop onto column X to the task's own board:
     the column with id X, else the first of X's kind, else nothing. A drop
     resolving to the current column writes nothing.
+- **A column's look is its variant** (`columnVariant.ts`: backlog, todo, doing,
+  done): backlog and done by kind, a default `todo` / `doing` id by id, any
+  other active column by rank (the last is in flight, earlier ones queued).
+  `TaskGlyph` (dashed circle, empty, half-filled brand, check) and `StatusPill`'s
+  tint, including the picker's row glyphs, both read it, so they cannot disagree.
 - **Unfiled is a value of the project filter**, and filtering is a predicate
   over one `getAllTasks`, not a query per question.
   - The status set decides which columns the board draws, and is never empty.

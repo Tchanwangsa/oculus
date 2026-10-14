@@ -21,7 +21,8 @@ const at = (day: number, hour = 9) => new Date(2026, 9, day, hour).toISOString()
 
 describe("the nav column's URL state", () => {
   test("an unknown view is All tasks", () => {
-    expect(parseView("week")).toBe("week");
+    expect(parseView("agent")).toBe("agent");
+    expect(parseView("week")).toBe("all");
     expect(parseView("nonsense")).toBe("all");
     expect(parseView(null)).toBe("all");
   });
@@ -37,7 +38,7 @@ describe("the nav column's URL state", () => {
 
   test("a link names only what is off the default", () => {
     expect(tasksHref("all", null)).toBe("/tasks");
-    expect(tasksHref("week", null)).toBe("/tasks?view=week");
+    expect(tasksHref("agent", null)).toBe("/tasks?view=agent");
     expect(tasksHref("all", 4)).toBe("/tasks?tag=4");
     expect(tasksHref("agent", 4)).toBe("/tasks?view=agent&tag=4");
   });
@@ -45,27 +46,17 @@ describe("the nav column's URL state", () => {
 
 describe("the views", () => {
   const dated = task({ due_at: at(15) });
-  const nextWeek = task({ due_at: at(20) });
   const undated = task();
   const agent = task({ source: "agent" });
 
   test("All tasks keeps everything, including finished ones", () => {
     const done = task({ done_at: "2026-10-10 00:00:00" });
-    expect([dated, undated, done].every((t) => matchesView(t, "all", NOW))).toBe(true);
+    expect([dated, undated, done].every((t) => matchesView(t, "all"))).toBe(true);
   });
 
-  test("Due this week is the calendar week, not seven days", () => {
-    expect(matchesView(dated, "week", NOW)).toBe(true);
-    expect(matchesView(nextWeek, "week", NOW)).toBe(false);
-    expect(matchesView(task({ due_at: at(12, 1) }), "week", NOW)).toBe(true);
-    expect(matchesView(undated, "week", NOW)).toBe(false);
-  });
-
-  test("No due date and Added by the agent", () => {
-    expect(matchesView(undated, "undated", NOW)).toBe(true);
-    expect(matchesView(dated, "undated", NOW)).toBe(false);
-    expect(matchesView(agent, "agent", NOW)).toBe(true);
-    expect(matchesView(undated, "agent", NOW)).toBe(false);
+  test("Added by the agent", () => {
+    expect(matchesView(agent, "agent")).toBe(true);
+    expect(matchesView(undated, "agent")).toBe(false);
   });
 });
 

@@ -14,6 +14,7 @@ import {
   columnForUniversal,
   projectLabel,
   universalColumnOf,
+  universalVariant,
 } from "../tasks/universalTasks";
 
 /**
@@ -157,7 +158,7 @@ function TaskCard({
 
       <div className="mt-1 flex min-w-0 items-start gap-1.5">
         <TaskGlyph
-          kind={universalColumnOf(task, projectById).kind}
+          variant={universalVariant(task, projectById)}
           size={13}
           className="mt-0.5"
         />

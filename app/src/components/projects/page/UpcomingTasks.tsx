@@ -5,7 +5,8 @@ import { sqliteUtcToMs } from "@/lib/format/format";
 import type { DbProject, DbProjectTask } from "@/lib/planning/projects";
 import { DueChip, TaskGlyph } from "../tasks/TaskMarks";
 import { taskHref } from "../nav/taskHref";
-import { columnOf, type TaskNode } from "../tasks/taskTree";
+import { taskVariant } from "../tasks/columnVariant";
+import type { TaskNode } from "../tasks/taskTree";
 import { Heading } from "./overviewParts";
 
 const MAX_UPCOMING = 5;
@@ -55,7 +56,7 @@ export function UpcomingTasks({ project, nodes }: { project: DbProject; nodes: T
     <Section title="Upcoming tasks">
       {rows.map(({ task, parentTitle }) => (
         <Link key={task.id} to={taskHref(project.id, task)} className={ROW}>
-          <TaskGlyph kind={columnOf(project, task.column_id)?.kind ?? null} />
+          <TaskGlyph variant={taskVariant(project, task.column_id)} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[12px] text-foreground">{task.title}</span>
             {parentTitle && (
