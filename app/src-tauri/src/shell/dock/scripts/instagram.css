@@ -9,3 +9,9 @@ div[data-visualcompletion="ignore-dynamic"]:has(a[role="link"][href="/explore/"]
 main > section > div > div {
   padding-left: 0 !important;
 }
+
+/* WebKit's overlay scrollbar needs space outside the positioned rows. */
+[data-oculus-thread-scroll] {
+  box-sizing: border-box !important;
+  padding-inline-end: 16px !important;
+}

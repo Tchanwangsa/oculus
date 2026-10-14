@@ -28,6 +28,9 @@ mod gdi;
 mod glass;
 #[cfg(target_os = "macos")]
 mod hit_test;
+pub(crate) mod page_theme;
+pub(crate) use page_theme::apply as apply_page_theme;
+pub use page_theme::PageTheme;
 #[cfg(any(windows, test))]
 mod region;
 #[cfg(windows)]

@@ -199,6 +199,7 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     crate::shell::menu::windows::install(&webview, true);
     adopt_page(&webview);
+    crate::shell::native_layer::apply_page_theme(&webview);
     #[cfg(target_os = "macos")]
     crate::shell::keys::install_fallback(&webview);
     if with_state(app, |s| s.shown.contains(&id)) {
