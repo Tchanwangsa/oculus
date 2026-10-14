@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 
+import { useDataDir } from "@/hooks/backend/useDataDir";
 import { useFileDrop } from "@/hooks/gestures/useFileDrop";
 import {
   imagePaths,
   isLongPaste,
   pastedText,
   pendingFromFile,
+  pendingFromKept,
   pendingFromPath,
   releaseAttachment,
+  splitAttachments,
   splitPastedText,
   writeAttachment,
   withAttachments,
@@ -37,8 +40,9 @@ export interface Attachments {
   attachText: (text: string) => boolean;
   editText: (id: string, text: string) => void;
   detachText: (id: string) => void;
-  /** Lifts the pasted blocks out of handed-back words (a stop, a rewind) into
-   *  cards ahead of any held, returning the rest for the box. */
+  /** Lifts the pasted blocks and pictures out of handed-back words (a stop, a
+   *  rewind) into cards and thumbnails ahead of any held, returning the rest
+   *  for the box. */
   takeBack: (message: string) => string;
   /** Prepare a trimmed message and its attachments; null keeps the editor intact. */
   prepare: (text: string) => Promise<string | null>;
@@ -61,6 +65,7 @@ export function useAttachments(
   const [items, setItems] = useState<PendingAttachment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [writing, setWriting] = useState(false);
+  const dataDir = useDataDir();
 
   const disabled = opts?.disabled ?? false;
   const notAPicture = opts?.notAPicture ?? NOT_A_PICTURE;
@@ -112,7 +117,10 @@ export function useAttachments(
   }
 
   function takeBack(message: string): string {
-    const { text, pasted } = splitPastedText(message);
+    const { text: unpictured, paths } = splitAttachments(message);
+    const kept = paths.flatMap((p) => pendingFromKept(p, dataDir) ?? []);
+    if (kept.length) setItems((a) => [...kept, ...a]);
+    const { text, pasted } = splitPastedText(unpictured);
     if (pasted.length) setPastes(draftKey, [...pasted.map(pastedText), ...currentTexts()]);
     return text;
   }

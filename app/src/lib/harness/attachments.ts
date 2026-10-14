@@ -12,7 +12,12 @@ export interface PendingAttachment {
   name: string;
   /** A blob URL for pasted bytes, an asset URL for a file on disk. */
   preview: string;
-  source: { kind: "bytes"; file: File } | { kind: "path"; path: string };
+  source:
+    | { kind: "bytes"; file: File }
+    | { kind: "path"; path: string }
+    /** Already in `agents/attachments/`, handed back by a stop or a rewind;
+     *  `path` is the message's own spelling and is sent as it is. */
+    | { kind: "kept"; path: string };
 }
 
 /** Picture extensions, for a drop's paths and the open panel's filter; Rust
@@ -55,6 +60,19 @@ export function pendingFromPath(path: string): PendingAttachment {
   };
 }
 
+/** A picture a sent message carried, back as a pending one. Null when `path`
+ *  is not an attachment path. */
+export function pendingFromKept(path: string, dataDir: string): PendingAttachment | null {
+  const rel = attachmentPath(path);
+  if (!rel) return null;
+  return {
+    id: nextId(),
+    name: rel.slice(rel.lastIndexOf("/") + 1),
+    preview: attachmentSrc(dataDir, rel),
+    source: { kind: "kept", path },
+  };
+}
+
 export function releaseAttachment(a: PendingAttachment): void {
   if (a.source.kind === "bytes") URL.revokeObjectURL(a.preview);
 }
@@ -76,6 +94,7 @@ export function base64(file: Blob): Promise<string> {
 /** Write one pending picture, returning `./attachments/<name>` — relative to
  *  `agents/`, every thread's working directory. */
 export async function writeAttachment(a: PendingAttachment): Promise<string> {
+  if (a.source.kind === "kept") return a.source.path;
   if (a.source.kind === "path") {
     return invoke<string>("harness_attach_file", { path: a.source.path });
   }
@@ -186,4 +205,16 @@ export function splitPastedText(message: string): { text: string; pasted: string
  *  a mention so `splitLibraryPaths` finds them. */
 export function withAttachments(text: string, paths: string[]): string {
   return [text, paths.map((p) => `\`${p}\``).join(" ")].filter(Boolean).join("\n\n");
+}
+
+/** `withAttachments` undone: the message without its trailing line of picture
+ *  paths, and those paths. A last paragraph holding anything else is text. */
+export function splitAttachments(message: string): { text: string; paths: string[] } {
+  const cut = message.lastIndexOf("\n\n");
+  const tail = message.slice(cut < 0 ? 0 : cut + 2).trim();
+  const fenced = tail.match(/`[^`\s]+`/g);
+  if (!fenced || fenced.join(" ") !== tail) return { text: message, paths: [] };
+  const paths = fenced.map((f) => f.slice(1, -1));
+  if (!paths.every((p) => attachmentPath(p))) return { text: message, paths: [] };
+  return { text: cut < 0 ? "" : message.slice(0, cut), paths };
 }

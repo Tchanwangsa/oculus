@@ -11,11 +11,10 @@ import { PageHeader, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
+import { useRateLimits } from "@/hooks/agents/useRateLimits";
 import { useStickToBottom } from "@/hooks/ui/useStickToBottom";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import {
-  getHarnessRateLimits,
-  harnessRefreshRateLimits,
   harnessDeleteThread,
   chatHref,
   chatThreadId,
@@ -50,7 +49,6 @@ export default function ChatPage() {
   const threads = useHarnessStore((s) => s.threads);
   const threadsLoaded = useHarnessStore((s) => s.threadsLoaded);
   const items = useHarnessStore((s) => itemsFor(activeId, s.items));
-  const rateLimits = useHarnessStore((s) => s.rateLimits);
   const provider = useHarnessStore((s) => s.provider);
   const model = useHarnessStore((s) => s.model);
   const reasoning = useHarnessStore((s) => s.reasoning);
@@ -82,6 +80,7 @@ export default function ChatPage() {
   // An open thread keeps its own scope; only a new one reads the composer's.
   const activeSubject = thread ? thread.subject_id : subjectId;
   const usage = useMemo(() => parseUsage(thread), [thread]);
+  const rateLimits = useRateLimits(activeProvider);
 
   useEffect(() => {
     store.getState().loadThreads();
@@ -120,19 +119,6 @@ export default function ChatPage() {
     if (`${here.pathname}${here.search}` !== want) navigate(want, { replace: true });
   }, [activeId, thread, tabName, here.pathname, here.search, navigate]);
 
-  // Draw the stored snapshot straight away, per provider account.
-  useEffect(() => {
-    if (rateLimits[activeProvider]) return;
-    getHarnessRateLimits(activeProvider).then((w) => {
-      if (w.length) store.setState((s) => ({ rateLimits: { ...s.rateLimits, [activeProvider]: w } }));
-    });
-  }, [activeProvider, rateLimits, store]);
-
-  // Then refresh (Codex only; Claude's arrive with the next turn). The answer
-  // lands in `rateLimits` via an event, so depend on the provider alone.
-  useEffect(() => {
-    void harnessRefreshRateLimits(activeProvider).catch(() => {});
-  }, [activeProvider]);
 
   // The rail's landmarks: the questions asked, from committed rows.
   const markers = useMemo(
@@ -212,7 +198,7 @@ export default function ChatPage() {
       subjectLocked={thread != null}
       running={running}
       usage={usage}
-      rateLimits={rateLimits[activeProvider] ?? []}
+      rateLimits={rateLimits}
       restore={restore}
       onRestored={onRestored}
       onProvider={onProvider}

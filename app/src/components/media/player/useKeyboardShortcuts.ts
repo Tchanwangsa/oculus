@@ -31,7 +31,7 @@ export function useKeyboardShortcuts({
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
       // An open popover (speed, layout, source) owns its arrows and space bar.
       if (target?.closest('[data-slot="popover-content"]')) return;
 

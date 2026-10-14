@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { categoryIconFor } from "@/lib/files/fileTypes";
+import { fileReferenceAppearance } from "@/lib/files/referenceAppearance";
 import { fileTitle } from "@/lib/files/openFile";
 import { displayCode } from "@/lib/format/format";
 import { PARSE_SWEEP_NOTE } from "@/lib/pipeline/parseState";
@@ -94,7 +94,8 @@ export function MentionMenu({
       className={cn(POPUP, "overflow-y-auto overflow-x-hidden py-1")}
     >
       {files.map((f, i) => {
-        const Icon = categoryIconFor(f);
+        // The chip's own glyph and colour, so the row previews what a pick draws.
+        const { Icon, tone } = fileReferenceAppearance(f, f.relative_path);
         return (
           <button
             key={f.id}
@@ -110,7 +111,7 @@ export function MentionMenu({
               i === index ? "bg-accent text-foreground" : "text-muted-foreground",
             )}
           >
-            <Icon size={12} className="shrink-0" />
+            <Icon size={12} className={cn("shrink-0", tone)} />
             <span className="truncate">{fileTitle(f)}</span>
             {subjectId == null && (
               <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/70">
