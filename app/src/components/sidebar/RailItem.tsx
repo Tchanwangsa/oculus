@@ -19,7 +19,7 @@ interface RailItemProps {
   icon: PhosphorIcon;
   label: string;
   /** Other paths this item also lights on, tested like `to` — for a section
-   *  whose tabs aren't under one prefix (Tasks: `/projects` + `/tasks`). */
+   *  whose tabs aren't under one prefix (Tasks: `/tasks` + `/projects`). */
   match?: readonly string[];
   /** Pinned to the top-right corner: a job spinner or a new-files dot. */
   indicator?: React.ReactNode;

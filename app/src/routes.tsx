@@ -5,6 +5,7 @@ import { RouteError } from "@/components/ErrorBoundary";
 import SubjectLayout from "@/layouts/SubjectLayout";
 import SettingsLayout from "@/layouts/SettingsLayout";
 import StudioLayout from "@/layouts/StudioLayout";
+import TasksLayout from "@/layouts/TasksLayout";
 import HomePage from "@/pages/start/HomePage";
 import NewTabPage from "@/pages/start/NewTabPage";
 import SubjectsRedirect from "@/pages/start/SubjectsRedirect";
@@ -34,13 +35,19 @@ export const routes: RouteObject[] = [
       { path: "new", element: <NewTabPage /> },
       { path: "chat", lazy: page(() => import("@/pages/tools/ChatPage")) },
       { path: "calendar", lazy: page(() => import("@/pages/tools/CalendarPage")) },
-      { path: "projects", lazy: page(() => import("@/pages/work/ProjectsIndexPage")) },
-      { path: "projects/:projectId", lazy: page(() => import("@/pages/work/ProjectPage")) },
-      // Nested under the project, whose columns define its statuses.
-      { path: "projects/:projectId/tasks/:taskId", lazy: page(() => import("@/pages/work/TaskPage")) },
-      { path: "tasks", lazy: page(() => import("@/pages/work/TasksPage")) },
-      // An unfiled task: same page, with a null project and the default board.
-      { path: "tasks/:taskId", lazy: page(() => import("@/pages/work/TaskPage")) },
+      {
+        // One nav column beside the projects and tasks pages.
+        element: <TasksLayout />,
+        children: [
+          { path: "projects", lazy: page(() => import("@/pages/work/ProjectsIndexPage")) },
+          { path: "projects/:projectId", lazy: page(() => import("@/pages/work/ProjectPage")) },
+          // Nested under the project, whose columns define its statuses.
+          { path: "projects/:projectId/tasks/:taskId", lazy: page(() => import("@/pages/work/TaskPage")) },
+          { path: "tasks", lazy: page(() => import("@/pages/work/TasksPage")) },
+          // An unfiled task: same page, with a null project and the default board.
+          { path: "tasks/:taskId", lazy: page(() => import("@/pages/work/TaskPage")) },
+        ],
+      },
       // No page: reopens the last subject (SubjectsRedirect).
       { path: "subjects", element: <SubjectsRedirect /> },
       // A file or lecture as a whole page (a tab, or the side panel), outside

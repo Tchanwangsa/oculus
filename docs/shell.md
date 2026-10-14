@@ -57,13 +57,13 @@ before leaving a playing lecture.
   (`chatHref`). Every tab has its own router, so two Chat tabs hold two threads
   and a restored tab or Recent row reopens its own; a bare `/chat` is a
   new thread ([harness.md](./harness.md#each-chat-tab-owns-its-conversation-in-its-route)).
-- **`/projects` and `/tasks` are one section**, switched by
-  `app/src/components/projects/page/SectionHeader.tsx`, which *navigates* because
-  crumbs, ⌘-click, restored tabs and `tabInfo` all key off the path; `RailItem`'s
-  `match` lights one sidebar item for both. A project is top-level because it may
-  have no subject; a filed task sits under its project, an unfiled one at
-  `/tasks/:taskId`, so `tabInfo` tests the task route first. The model is
-  [projects.md](./projects.md).
+- **`/projects` and `/tasks` are one section**, under `TasksLayout`
+  (`app/src/layouts/TasksLayout.tsx`): one nav column whose rows *navigate*
+  because crumbs, ⌘-click, restored tabs and `tabInfo` all key off the path.
+  The rail's Tasks item opens `/tasks` and `RailItem`'s `match` lights it on
+  `/projects*` too. A project is top-level because it may have no subject; a
+  filed task sits under its project, an unfiled one at `/tasks/:taskId`, so
+  `tabInfo` tests the task route first. The model is [projects.md](./projects.md).
 - **`SubjectLayout` resolves the subject once** and hands it down as outlet
   context; tab pages must not re-fetch it. Its nav column
   (`app/src/components/subjects/SubjectNav.tsx`) holds the icon picker, the

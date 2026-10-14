@@ -50,14 +50,15 @@ export function TaskBody({
 
   return (
     <NoteField
-      className="mt-6"
+      // The field's own 8px inset puts its text under the title's edge.
+      className="-mx-2 mt-5"
       text={task.body ?? ""}
       subjectId={project?.subject_id ?? null}
       imageSrc={imageSrc}
       writePicture={writePicture}
       pickerTitle="Add pictures to this task"
       notAPicture="Only images can go in a task body — use @ for a course file."
-      placeholder="Write what this actually involves…"
+      placeholder="Add a description…"
       label="Description"
       onCommit={(text) => {
         const body = taskBodyEdit(text, task.body);

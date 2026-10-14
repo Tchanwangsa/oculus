@@ -54,7 +54,7 @@ export default function ProjectsIndexPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <SectionHeader>
+      <SectionHeader title="Projects">
         <span className="flex-1" />
         {/* Empty groups don't draw, so a subject's first project starts here. */}
         <NewProjectButton subjects={subjects} onCreate={create} />

@@ -4,7 +4,8 @@ import { cn } from "@/lib/utils";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { useCardDrag, useSettledList } from "@/hooks/gestures/useCardDrag";
 import { displayCode } from "@/lib/format/format";
-import type { DbProject, DbTaskWithProject, ProjectColumn } from "@/lib/planning/projects";
+import type { DbProject, DbTaskTag, DbTaskWithProject, ProjectColumn } from "@/lib/planning/projects";
+import { TagList } from "../tags/TagList";
 import { BoardView } from "./BoardParts";
 import { CardTitle } from "./CardTitle";
 import { taskHref } from "../nav/taskHref";
@@ -22,7 +23,7 @@ import {
  * column refuses the drop.
  *
  * There is no manual order across projects, so a column is *sorted*
- * (`UNIVERSAL_ORDER`, carried in from `getAllTasks` — nothing here re-sorts)
+ * (the page's Display sort, carried in — nothing here re-sorts)
  * and a drag within one is a no-op; see `../tasks/universalTasks.ts`. Subtasks are
  * plain cards naming their parent, since the sort puts them anywhere.
  */
@@ -30,13 +31,16 @@ export function TasksBoard({
   tasks,
   columns,
   projectById,
+  tagById,
   onMove,
 }: {
-  /** In `UNIVERSAL_ORDER`. */
+  /** In the Display sort's order. */
   tasks: DbTaskWithProject[];
   /** Which of `UNIVERSAL_COLUMNS` to draw, in order (the page filters it). */
   columns: readonly ProjectColumn[];
   projectById: Map<number, DbProject>;
+  /** The tag registry by id, for the chips on a card. */
+  tagById: Map<number, DbTaskTag>;
   /** Given a column id off the task's own board, never an invented one. */
   onMove: (task: DbTaskWithProject, columnId: string) => void;
 }) {
@@ -101,6 +105,7 @@ export function TasksBoard({
           task={task}
           parent={task.parent_id != null ? byId.get(task.parent_id) ?? null : null}
           projectById={projectById}
+          tagById={tagById}
         />
       )}
     />
@@ -116,12 +121,14 @@ function TaskCard({
   task,
   parent,
   projectById,
+  tagById,
 }: {
   task: DbTaskWithProject;
   /** `null` unless the parent is in the list; a subtask whose parent was
    *  filtered out reads as a plain task. */
   parent: DbTaskWithProject | null;
   projectById: Map<number, DbProject>;
+  tagById: Map<number, DbTaskTag>;
 }) {
   return (
     <>
@@ -161,6 +168,12 @@ function TaskCard({
         />
         <AgentMark source={task.source} className="mt-0.5" />
       </div>
+
+      {task.tag_ids.length > 0 && (
+        <div className="mt-1.5 flex min-w-0 pl-[18px]">
+          <TagList tagIds={task.tag_ids} byId={tagById} max={3} />
+        </div>
+      )}
 
       {task.due_at && (
         <div className="mt-1.5 pl-[18px]">
