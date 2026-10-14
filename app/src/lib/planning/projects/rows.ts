@@ -43,7 +43,7 @@ export interface DbProjectTask {
   estimate_minutes: number | null;
   /** Set while the task sits in a `kind: "done"` column; `moveTask` owns it. */
   done_at: string | null;
-  /** `task_tags` ids in registry order; `[]` when untagged, never `null`. */
+  /** Effective registry ids: own links, or project tags when there are no links. */
   tag_ids: number[];
   source: string;
   created_at: string;
@@ -86,9 +86,11 @@ export type RawTask<T extends DbProjectTask = DbProjectTask> = Omit<T, "tag_ids"
 /** The `tag_ids` column every task read selects, as a JSON array in registry
  *  order. `t` is the `project_tasks` alias. */
 export const TASK_TAG_IDS_SQL = `(SELECT json_group_array(tag_id) FROM (
-          SELECT l.tag_id FROM task_tag_links l
-            JOIN task_tags g ON g.id = l.tag_id
-           WHERE l.task_id = t.id
+          SELECT g.id AS tag_id FROM task_tags g
+           WHERE g.id IN (SELECT l.tag_id FROM task_tag_links l WHERE l.task_id = t.id)
+              OR (NOT EXISTS (SELECT 1 FROM task_tag_links l WHERE l.task_id = t.id)
+                  AND g.name COLLATE NOCASE IN (
+                    SELECT j.value FROM projects p, json_each(p.tags) j WHERE p.id = t.project_id))
            ORDER BY g.position ASC, g.id ASC)) AS tag_ids`;
 
 /** The `tag_ids` JSON, or `[]`; anything but whole numbers is dropped. */

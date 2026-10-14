@@ -73,7 +73,9 @@ export function TaskFilters({
   filter,
   tags,
   onChange,
+  target = "tasks",
 }: {
+  target?: "tasks" | "projects";
   filter: TaskFilter;
   tags: DbTaskTag[];
   onChange: (next: TaskFilter) => void;
@@ -110,8 +112,9 @@ export function TaskFilters({
         <div className="px-4 py-3">
           <div className="flex min-h-9 items-center justify-between gap-3">
             <span className="text-xs text-foreground">Show archived</span>
-            <Switch aria-label="Show tasks in archived projects" checked={filter.showArchived} onCheckedChange={(showArchived) => onChange({ ...filter, showArchived })} />
+            <Switch aria-label={target === "projects" ? "Show archived projects" : "Show tasks in archived projects"} checked={filter.showArchived} onCheckedChange={(showArchived) => onChange({ ...filter, showArchived })} />
           </div>
+          {target === "projects" && <p className="pb-1 text-[11px] text-muted-foreground">Status matches tasks in a project. Due and tags match the project.</p>}
           <Section title="Status" action={
             <SelectionAction
               changed={filter.status.length > 0}

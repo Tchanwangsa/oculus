@@ -43,7 +43,7 @@ pub struct Task {
     pub source: String,
     pub created_at: String,
     pub updated_at: String,
-    /// Registry tag ids in registry order (`position`, then id); `[]` when untagged.
+    /// Effective registry ids: own links, or project tags when there are no links.
     pub tag_ids: Vec<i64>,
     /// How many library files are attached (`task_files`).
     pub file_count: i64,
@@ -54,12 +54,13 @@ pub struct Task {
 pub(super) const TASK_SELECT: &str = r#"SELECT t.id, t.project_id, t.parent_id, t.title, t.body,
        t.column_id, t.position, t.starts_at, t.due_at, t.estimate_minutes, t.done_at,
        t.source, t.created_at, t.updated_at,
-       COALESCE((SELECT json_group_array(tag_id)
-                   FROM (SELECT l.tag_id
-                           FROM task_tag_links l
-                           JOIN task_tags g ON g.id = l.tag_id
-                          WHERE l.task_id = t.id
-                          ORDER BY g.position ASC, g.id ASC)), '[]') AS tag_ids,
+       (SELECT json_group_array(tag_id) FROM (
+          SELECT g.id AS tag_id FROM task_tags g
+           WHERE g.id IN (SELECT l.tag_id FROM task_tag_links l WHERE l.task_id = t.id)
+              OR (NOT EXISTS (SELECT 1 FROM task_tag_links l WHERE l.task_id = t.id)
+                  AND g.name COLLATE NOCASE IN (
+                    SELECT j.value FROM projects p, json_each(p.tags) j WHERE p.id = t.project_id))
+           ORDER BY g.position ASC, g.id ASC)) AS tag_ids,
        (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id) AS file_count
   FROM project_tasks t"#;
 

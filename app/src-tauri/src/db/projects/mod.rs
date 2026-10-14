@@ -13,7 +13,7 @@
 //! - **Tags are a registry** (`tags.rs`) linked to tasks by id; a task's files
 //!   are named by their library `relative_path` (`tasks/links.rs`).
 //!
-//! Schema: migrations 27, 33, 37 and 47 in `db/migrations.rs`. Nothing here creates it.
+//! Schema: migrations 27, 33, 37, 47 and 48 in `db/migrations.rs`. Nothing here creates it.
 
 mod columns;
 mod migration37;
