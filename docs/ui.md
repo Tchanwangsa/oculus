@@ -257,3 +257,9 @@ mounts on open and loads through the same cache.
   `justify-content: center`, which makes the start-edge overflow unreachable.
 - **Never nest a `<button>` in a row that is a button** — WebKit drops the inner
   clicks; use `RowAction` (`app/src/components/ui/RowAction.tsx`).
+- **A chip's × is `ChipRemove`** (`app/src/components/ui/ChipRemove.tsx`), the
+  tab strip's close button as a component: muted to foreground over a subtle
+  fill, a colour change only. `TagChip` and the task page's `FileChip` use it, as
+  a sibling of the chip's open action; its `group` reveal fades in on a wrapper
+  that already has `will-change`, so hovering does not move the icon. Never
+  fade the button's own `opacity`.

@@ -13,9 +13,10 @@ import { cn } from "@/lib/utils";
 
 /**
  * The task page's header row: the nav column's toggle, a way back, the trail
- * `Tasks › <glyph> title`, and the task's menu. A filed task's project is a
- * pill on the page, so the trail does not name it. In the side panel the row
- * is the panel's header (`PaneHeaderRow`) and the trail scrolls sideways.
+ * `<project> › <glyph> title` (`Tasks` while unfiled; a subtask shows its
+ * parent's project), and the task's menu. The first crumb links to the
+ * project, or to the Tasks list. In the side panel the row is the panel's
+ * header (`PaneHeaderRow`) and the trail scrolls sideways.
  */
 export function TaskHeader({
   task,
@@ -57,11 +58,14 @@ export function TaskHeader({
         >
           <button
             type="button"
-            data-tab-href="/tasks"
-            onClick={() => navigateActive("/tasks")}
-            className="shrink-0 cursor-pointer transition-colors hover:text-foreground"
+            data-tab-href={back}
+            onClick={() => navigateActive(back)}
+            className={cn(
+              "cursor-pointer transition-colors hover:text-foreground",
+              inSide ? "shrink-0 whitespace-nowrap" : "max-w-[40%] min-w-0 shrink truncate",
+            )}
           >
-            Tasks
+            {project?.name ?? "Tasks"}
           </button>
           <CaretRight size={10} className="shrink-0" />
           <TaskGlyph kind={columnOf(project, task.column_id)?.kind ?? null} size={14} />
