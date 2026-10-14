@@ -97,6 +97,8 @@ pub fn run() {
             lectures::lecture_end::app::reconcile(app.handle());
             // Spreadsheets on record without their text (`docs/parsing.md`).
             pages::sheets::reconcile_in_background();
+            // Subjects fetched before `term_sort` existed (`docs/sync.md`).
+            sync::subjects::backfill_term_sort_in_background();
 
             // Open and active time per hour, from the window and the frontend's pings.
             shell::usage::start(app.handle());

@@ -91,8 +91,13 @@ gives each term a `YYYY-MM` key, `subjects.term_sort`:
   the first half of a year — winter, spring, summer, or any numbered term —
   in the later year, so `"Spring 2025-26"` follows `"Fall 2025"`.
 - Migration 45 fills the column for rows that have none from UniMelb's term
-  names, since an install that predates the institution profile is UniMelb's;
-  every course fetch rewrites it. Every reader — the frontend, the CLI —
+  names, since an install that predates the institution profile is UniMelb's.
+  At every app launch `sync::subjects::backfill_term_sort_in_background` gives
+  the rows still without one a key from their name (no `start_at`) with the
+  profile's hemisphere, so another university's rows have a current term
+  before their next fetch. If it runs before the frontend has applied
+  migration 45, it logs the missing column and the next launch fills it.
+  Every course fetch rewrites the column. Every reader — the frontend, the CLI —
   sorts by the column and ranks no names itself.
 
 ## Modules drive the scrape, and every body feeds one link crawl
