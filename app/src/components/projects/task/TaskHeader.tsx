@@ -1,44 +1,36 @@
 import { useState } from "react";
-import { ArrowLeft, CaretRight, DotsThree, TrashSimple } from "@phosphor-icons/react";
+import { ArrowLeft, DotsThree, TrashSimple } from "@phosphor-icons/react";
 import { projectHref } from "@/components/projects/nav/projectHref";
-import { taskVariant } from "@/components/projects/tasks/columnVariant";
-import { TaskGlyph } from "@/components/projects/tasks/TaskMarks";
-import { PaneHeaderRow, PaneTrail, useInSidePanel } from "@/components/tabs/PaneHeader";
+import { PageHeader, PaneTrail, useInSidePanel } from "@/components/tabs/PaneHeader";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import { useTasksPanel } from "@/layouts/TasksLayout";
 import { navigateActive } from "@/lib/shell/tabRouters";
 import type { DbProject, DbProjectTask } from "@/lib/planning/projects";
-import { cn } from "@/lib/utils";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
+import { taskBreadcrumbs } from "@/components/projects/nav/taskBreadcrumbs";
+import { taskHref } from "@/components/projects/nav/taskHref";
 
-/**
- * The task page's header row: the nav column's toggle, a way back, the trail
- * `<project> › <glyph> title` (`Tasks` while unfiled; a subtask shows its
- * parent's project), and the task's menu. The first crumb links to the
- * project, or to the Tasks list. In the side panel the row is the panel's
- * header (`PaneHeaderRow`) and the trail scrolls sideways.
- */
+/** The task path includes its parent immediately before a subtask. */
 export function TaskHeader({
   task,
   project,
+  parent,
   onDelete,
 }: {
   task: DbProjectTask;
   /** `null` on an unfiled task. */
   project: DbProject | null;
+  parent: DbProjectTask | null;
   onDelete: () => void;
 }) {
   const inSide = useInSidePanel();
   const panel = useTasksPanel();
-  const back = project ? projectHref(project) : "/tasks";
+  const back = parent ? taskHref(task.project_id, parent) : project ? projectHref(project) : "/tasks";
+  const items = taskBreadcrumbs(task, project, parent);
 
   return (
-    <PaneHeaderRow
-      className={cn(
-        "flex shrink-0 items-center gap-2.5 border-b border-border-subtle",
-        inSide ? "h-11 px-5" : "h-12 px-6",
-      )}
-    >
+    <PageHeader>
       {panel && <SideNavCollapseToggle collapsed={panel.collapsed} onToggle={panel.toggle} />}
       {!inSide && (
         <button
@@ -52,36 +44,11 @@ export function TaskHeader({
         </button>
       )}
       <PaneTrail>
-        <nav
-          aria-label="Breadcrumb"
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] text-muted-foreground"
-        >
-          <button
-            type="button"
-            data-tab-href={back}
-            onClick={() => navigateActive(back)}
-            className={cn(
-              "cursor-pointer transition-colors hover:text-foreground",
-              inSide ? "shrink-0 whitespace-nowrap" : "max-w-[40%] min-w-0 shrink truncate",
-            )}
-          >
-            {project?.name ?? "Tasks"}
-          </button>
-          <CaretRight size={10} className="shrink-0" />
-          <TaskGlyph variant={taskVariant(project, task.column_id)} size={14} />
-          <span
-            className={cn(
-              "font-medium text-foreground",
-              inSide ? "shrink-0 whitespace-nowrap" : "min-w-0 truncate",
-            )}
-          >
-            {task.title}
-          </span>
-        </nav>
+        <Breadcrumb items={items} />
       </PaneTrail>
       {/* The side panel's own controls follow this in the row. */}
       <TaskMenu onDelete={onDelete} />
-    </PaneHeaderRow>
+    </PageHeader>
   );
 }
 

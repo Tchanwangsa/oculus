@@ -6,6 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_COLUMNS, type DbProject } from "@/lib/planning/projects";
 import { projectTableData } from "@/components/projects/lists/projectTableData";
 import { ProjectsIndexTable } from "@/components/projects/lists/ProjectsIndexTable";
+import { subjectTabHref, TABS } from "@/components/subjects/nav/tabs";
+import { parseSubjectParam, tasksHref } from "@/components/projects/tasks/taskViews";
 import { task } from "./fixtures";
 
 const project: DbProject = {id: 40, subject_id: 1, subject_code: "SUBJ101", name: "The report", brief: null,
@@ -67,6 +69,16 @@ test("search opens matching branches without requiring saved expansion", () => {
   expect(html).not.toContain('Review the bibliography');
 });
 
+test("subject navigation goes straight to scoped Tasks and preserves scope when changing view or tag", () => {
+  expect(TABS.some(t => t.to === "tasks")).toBe(true);
+  expect(TABS.some(t => (t.to as string) === "projects")).toBe(false);
+  expect(subjectTabHref("tasks", 7)).toBe("/tasks?subject=7");
+  expect(subjectTabHref("modules", 7)).toBe("modules");
+  expect(tasksHref("agent", 3, 7)).toBe("/tasks?view=agent&tag=3&subject=7");
+  expect(tasksHref("all", null, "personal")).toBe("/tasks?subject=personal");
+  for (const raw of ["", "0", "-1", "7.5", "abc"]) expect(parseSubjectParam(raw)).toBeNull();
+  expect(parseSubjectParam("7")).toBe(7);
+});
 
 test("project filters compose due, shared tags, subject, archive and task status", () => {
   const tags = new Map([[1, {id: 1, name: "assignment", color: "indigo" as const, position: 1}]]);

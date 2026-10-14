@@ -3,7 +3,7 @@ import { Circle, Kanban } from "@phosphor-icons/react";
 import { FilterFold } from "@/components/ui/filter/FilterFold";
 import { FilterList } from "@/components/ui/filter/FilterList";
 import { FilterPopover, FilterRow } from "@/components/ui/filter/FilterPopover";
-import { SubjectIcon } from "@/components/subjects/SubjectIcon";
+import { ProjectIcon } from "../icons/ProjectIcon";
 import type { DbProject } from "@/lib/planning/projects";
 import { TOOLBAR_PILL } from "./toolbarPill";
 import type { TaskFilterCounts } from "./filterCounts";
@@ -24,13 +24,7 @@ function ProjectRow({
     <FilterRow
       label={project.name}
       count={count}
-      icon={
-        project.subject_code ? (
-          <SubjectIcon code={project.subject_code} size={13} />
-        ) : (
-          <Kanban size={13} className="shrink-0" />
-        )
-      }
+      icon={<ProjectIcon project={project} size={13} />}
       selected={selected}
       onPick={onPick}
     />
@@ -64,13 +58,14 @@ export function ProjectFilter({
   const value = filter.project;
   const label =
     value === "any" ? "Project" : value === "unfiled" ? "No project" : (projects.find((p) => p.id === value)?.name ?? "Project");
+  const selectedProject = typeof value === "number" ? projects.find(p => p.id === value) : undefined;
   const Glyph = value === "unfiled" ? Circle : Kanban;
 
   return (
     <FilterPopover
       label={label}
       active={value !== "any"}
-      icon={<Glyph size={13} className={value === "any" ? "text-muted-foreground" : undefined} />}
+      icon={selectedProject ? <ProjectIcon project={selectedProject} size={13} /> : <Glyph size={13} className={value === "any" ? "text-muted-foreground" : undefined} />}
       className="w-64"
       triggerClassName={TOOLBAR_PILL}
     >

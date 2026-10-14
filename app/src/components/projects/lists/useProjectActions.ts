@@ -1,6 +1,14 @@
+import { useProjectIconStore } from "@/stores/planning/projectIconStore";
 import { useMemo } from "react";
 import { useProjectsStore } from "@/stores/planning/projectsStore";
-import type { ProjectRowActions } from "./ProjectList";
+import type { DbProject } from "@/lib/planning/projects";
+
+export interface ProjectRowActions {
+  onRename: (project: DbProject, name: string) => void;
+  onArchive: (project: DbProject) => void;
+  onUnarchive: (project: DbProject) => void;
+  onDelete: (project: DbProject) => void;
+}
 
 /**
  * Project row writes bound to the store. Pages refresh via
@@ -27,7 +35,7 @@ export function useProjectActions(): ProjectRowActions {
           console.error("unarchive project failed", e),
         ),
       onDelete: (project) =>
-        void deleteProject(project.id).catch((e) =>
+        void deleteProject(project.id).then(() => useProjectIconStore.getState().clearPref(project.id)).catch((e) =>
           console.error("delete project failed", e),
         ),
     }),

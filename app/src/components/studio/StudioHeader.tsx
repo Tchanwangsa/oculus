@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft } from "@phosphor-icons/react";
 
-import { PaneHeaderRow, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
+import { PageHeader, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import { useStudioPanel } from "@/layouts/StudioLayout";
 
@@ -21,7 +21,7 @@ export function StudioHeader({
   const panel = useStudioPanel();
   const navigate = useNavigate();
   return (
-    <PaneHeaderRow className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
+    <PageHeader>
       <SideNavCollapseToggle collapsed={panel.collapsed} onToggle={panel.toggle} shortcut="⌘⌥B" />
       {back && (
         <button
@@ -38,6 +38,6 @@ export function StudioHeader({
         <PaneTitle>{title}</PaneTitle>
       </PaneTrail>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
-    </PaneHeaderRow>
+    </PageHeader>
   );
 }

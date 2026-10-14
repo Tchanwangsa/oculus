@@ -18,23 +18,24 @@ repair a bad row.
 | `oculus project` / `oculus task` / `oculus tag` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs` |
 | One open project and its tasks | `app/src/stores/planning/projectsStore.ts` |
 | Index, one project, one task, every task | `app/src/pages/work/ProjectsIndexPage.tsx`, `app/src/pages/work/ProjectPage.tsx`, `app/src/pages/work/TaskPage.tsx`, `app/src/pages/work/TasksPage.tsx` |
+| Shared detail title and markdown field | `app/src/components/projects/detail/DetailTitle.tsx`, `app/src/components/projects/detail/DetailBody.tsx` |
 | A task page's parts | `app/src/components/projects/task/` (header, property pills, tags, related files, footer), `app/src/pages/work/task/` (title, body, checklist, mutations, data) |
-| Subject project groups and collapsed preferences (shared with chat) | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
-| Project index table, rows, filters and task tree | `app/src/components/projects/lists/ProjectsIndexTable.tsx`, `app/src/components/projects/lists/ProjectIndexRow.tsx`, `app/src/components/projects/lists/projectTableData.ts`, `app/src/components/projects/lists/projectFilters.ts`, `app/src/components/ui/table/TableGroup.tsx` |
-| A subject's Projects tab | `app/src/pages/work/ProjectsPage.tsx` |
+| Project appearance and picker | `app/src/components/projects/icons/`, `app/src/stores/planning/projectIconStore.ts` |
+| Project index table, rows and search tree | `app/src/components/projects/lists/ProjectsIndexTable.tsx`, `app/src/components/projects/lists/ProjectIndexRow.tsx`, `app/src/components/projects/lists/projectTableData.ts`, `app/src/components/projects/lists/projectFilters.ts` |
+| Subject Tasks link and scoped redirects | `app/src/components/subjects/nav/tabs.ts`, `app/src/pages/work/SubjectTasksRedirect.tsx`, `app/src/components/projects/tasks/useTaskFilterState.ts` |
 | The section's nav column and its fold | `app/src/layouts/TasksLayout.tsx`, `app/src/components/projects/nav/TasksNav.tsx`, `app/src/components/projects/nav/TagsGroup.tsx`, `app/src/components/projects/nav/panel.ts` |
 | The page header row; the rail item | `app/src/components/projects/page/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx` |
-| Overview, project tags, pinned calendar event | `app/src/components/projects/page/ProjectOverview.tsx`, `app/src/components/projects/fields/TagEditor.tsx`, `app/src/components/projects/page/EventLink.tsx` |
+| Overview, project tags, pinned calendar event | `app/src/components/projects/page/ProjectOverview.tsx`, `app/src/components/projects/page/ProjectProperties.tsx`, `app/src/components/projects/fields/TagEditor.tsx`, `app/src/components/projects/page/EventLink.tsx` |
 | Task tags: registry hook, chips, picker, palette | `app/src/hooks/data/useTaskTags.ts`, `app/src/components/projects/tags/`, `--color-tag-*` in `app/src/styles/colors.css` |
 | Board, table, timeline, and the shaping behind them | `app/src/components/projects/board/ProjectBoard.tsx`, `app/src/components/projects/lists/ProjectTable.tsx`, `app/src/components/projects/timeline/ProjectTimeline.tsx`, `app/src/components/projects/tasks/taskTree.ts` |
 | The universal view: hook, views, filters, sort, groups, shared rules | `app/src/hooks/data/useTaskList.ts`, `app/src/components/projects/tasks/` (`taskViews.ts`, `filterRules.ts`, `filterCounts.ts`, `taskSort.ts`, `taskGroups.ts`, `universalTasks.ts`, `TaskFilters.tsx`, `ProjectFilter.tsx`, `SubjectFilter.tsx`) |
-| The universal table, its columns and the Display menu | `app/src/components/projects/lists/` (`TasksTable.tsx`, `TaskRow.tsx`, `TaskCells.tsx`, `tasksColumns.ts`), `app/src/components/projects/display/`, `app/src/components/projects/board/TasksBoard.tsx` |
+| Shared task rows, headers, mutations and the Display menu | `app/src/components/projects/lists/` (`TasksTable.tsx`, `TaskRow.tsx`, `TaskCells.tsx`, `TaskTableHeaders.tsx`, `tasksColumns.ts`), `app/src/components/projects/tasks/useTaskActions.ts`, `app/src/components/projects/display/`, `app/src/components/projects/board/TasksBoard.tsx` |
 | Card drag and board chrome | `app/src/hooks/gestures/useCardDrag.ts` (on `app/src/hooks/gestures/usePointerDrag.ts`), `app/src/components/projects/board/BoardParts.tsx` |
 | Subject chips, subtask expansion, status and progress marks | `app/src/components/projects/tasks/TaskMarks.tsx` |
 | A card's title | `app/src/components/projects/board/CardTitle.tsx` |
 | Filing a task; creating one | `app/src/components/projects/nav/ProjectPicker.tsx`, `app/src/components/projects/nav/NewTaskButton.tsx` |
 | Rename / archive / delete | `app/src/components/projects/lists/ProjectMenu.tsx`, `app/src/components/projects/lists/useProjectActions.ts` |
-| Routes and the breadcrumb trail | `app/src/components/projects/nav/projectHref.ts`, `app/src/components/projects/nav/taskHref.ts`, `app/src/components/projects/page/ProjectCrumbs.tsx` |
+| Routes and the breadcrumb trail | `app/src/components/projects/nav/projectHref.ts`, `app/src/components/projects/nav/taskHref.ts`, `app/src/components/projects/nav/projectBreadcrumbs.tsx`, `app/src/components/projects/nav/taskBreadcrumbs.tsx`, `app/src/components/ui/Breadcrumb.tsx` |
 | Date and time picking | `app/src/components/projects/fields/DateTimeField.tsx` |
 | Overlap packing, shared with the calendar | `app/src/lib/planning/lanes.ts` |
 | The agent's instructions | `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/HARNESS.template.md` |
@@ -160,9 +161,10 @@ whose parent is missing rather than dropping it.
   `boardOf`'s default board and `useTaskList` rows for an unfiled task.
 - **The task page is a header, a pill row and four blocks.** The header holds
   the nav fold toggle (only inside `TasksLayout`; `useTasksPanel()` is null in
-  the side panel), back, the trail `project › title` (`Tasks › title` while
-  unfiled; the first crumb links to the project or the list) and a `…` menu with
-  Delete. The pills are Status, Project (read-only on a subtask), Due,
+  the side panel), back, the shared breadcrumb and a `…` menu with Delete. A subtask
+  shows `… › parent task › subtask`; its back arrow opens the parent. Root
+  tasks show `… › project › task` or `Tasks › task` while unfiled. The
+  breadcrumb popover lists hidden ancestors in path order. The pills are Status, Project (read-only on a subtask), Due,
   Starts, Estimate (whole minutes in a popover; 0 clears), the task's tags with
   a `+` (`TagPicker`, writing `updateTask({ tagIds })`) and, on a parent, the
   checklist progress. Below: the description, the subtasks as a checklist (a tick is
@@ -176,7 +178,7 @@ whose parent is missing rather than dropping it.
 - **Names ride in the query** (`?n=`, via `projectHref` / `taskHref`), because
   `tabInfo` titles a tab from the path alone. Renaming re-navigates to the new
   href so the tab re-titles.
-- **The task body is markdown in the note editor**, through `NoteField`
+- **Task descriptions and project About share `DetailBody`**, through `NoteField`
   (`app/src/components/documents/NoteField.tsx`; see
   [editor.md](./editor.md#notefield-is-the-note-editor-as-a-form-field)):
   always Live mode, so the preview is the read view, with the note's maths
@@ -184,9 +186,9 @@ whose parent is missing rather than dropping it.
   while it is edited. `@` searches the project's subject, or the whole
   library for a task without one. A picture pasted, dropped or picked is
   written to `agents/attachments/` on arrival (`writeAttachment`) and linked
-  as `![name](agents/attachments/…)`. Blur or ⌘↵ writes through
-  `updateTask`; `taskBodyEdit` makes an unchanged body write nothing and an
-  empty one write `null`. The page keys the body by task (`body-<id>`, the
+  as `![name](agents/attachments/…)`. Blur, ⌘↵ or leaving the page writes
+  through `updateTask` (body) or `updateProject` (brief); `taskBodyEdit`
+  makes unchanged text write nothing and empty text write `null`. The page keys the body by task (`body-<id>`, the
   related files being `files-<id>`), so switching tasks saves to the task left;
   the two keys differ because siblings sharing one are not unmounted, and each
   task left would keep its body on the page. A write from elsewhere (the agent through the CLI)
@@ -197,19 +199,24 @@ whose parent is missing rather than dropping it.
   the instant meant and `toISOString()` is the only zone conversion. Picking a
   day keeps the set time, else defaults to 23:59 for a due date and the
   morning for a start. `variant="pill"` draws it as a property pill.
-- **The project page's strip is `Overview | Tasks`**, with Board / Table /
-  Timeline as a quieter third row below the toolbar. `isView` in
+- **The project page starts with the shared breadcrumb header**, followed
+  by `Overview | Tasks`. Overview shares the task page's editable title,
+  then property pills (status, subject, dates, progress and tags), calendar
+  link, About editor and upcoming tasks. Board / Table / Timeline sit
+  below the tabs when Tasks is selected. `isView` in
   `ProjectPage.tsx` sends an unknown stored `oculus-project-view` to the
   board.
 - **`TasksLayout` wraps every route in the section** with a resizable, foldable
   `SideNav` column (`TasksNav`; width and fold under `oculus-tasks-nav-width`,
   ⌘⌥B). Its rows navigate rather than swap state, so both pages keep history,
   ⌘-click and tab restore. The rail has one item, **Tasks**, opening `/tasks`
-  and lit on `/projects*` too. `SectionHeader` is just the page's header row,
-  with the fold toggle at its start.
-- **`ProjectCrumbs`** starts at Projects and links the subject to its Projects
-  tab. Segments are buttons with `data-tab-href` (`app/src/lib/shell/newTabClicks.ts`)
-  so ⌘-click opens a tab; it is a Fragment so it inherits each page's gap.
+  and lit on `/projects*` too. `SectionHeader` uses the same `PageHeader`
+  and `PaneTitle` as Chat and Studio. Their nav columns share `SideNavHeading`; New task is a nav row.
+- **`projectParents`** starts at Projects and links the subject to
+  `/tasks?subject=<id>` (Personal uses `subject=personal`). Projects, tasks and subject file paths use `Breadcrumb` /
+  `BreadcrumbItems`; hidden ancestors open in a popover. Segments are
+  buttons with `data-tab-href` (`app/src/lib/shell/newTabClicks.ts`) so
+  ⌘-click opens a tab.
 - **The index is one `GridTable`**, with the Tasks page's Name, Tags,
   Subject, Due and Updated columns and sortable headers. Projects open their
   task rows in place; parents can open their subtasks. `TaskRow` owns the
@@ -227,8 +234,19 @@ whose parent is missing rather than dropping it.
   opens matching branches. Search folds are local to the query and do not
   change saved expansion. `NewProjectButton` creates projects in any subject
   or Personal; its picker folds past subjects.
+- **Project identities default to a cube**, in the subject's current colour
+  (including its custom colour) or grey for Personal. The shared icon picker
+  opens from the table glyph and Overview title. Overrides are keyed by
+  project id under `oculus-project-icons`; Auto clears only the colour override,
+  Reset clears both, and deleting a project clears its preference. The same
+  `ProjectIcon` renders in rows (including Tasks table Project cells), breadcrumbs, project pickers, task properties
+  and tabs. Disclosure slots retain their width on empty projects and sibling
+  tasks so glyphs and titles stay aligned.
+- **A subject's Tasks link opens the central Tasks page**, scoped through
+  `?subject=<id>`. `/subjects/:subjectId/projects` and
+  `/subjects/:subjectId/tasks` redirect there outside `SubjectLayout`.
 - **Rename has two doors** — `ProjectMenu`'s dialog (a list row is a `Link`)
-  and the header's in-place edit — both through `useProjectActions`.
+  and the Overview title's in-place edit — both through `useProjectActions`.
 - **The timeline** packs overlapping bars with `packLanes`, shared with
   `app/src/components/calendar/WeekView.tsx` and generic over how a span is
   measured. Range and axis geometry follow the calendar day rather than each
@@ -264,11 +282,11 @@ click, not an anchor or button, because it contains controls; it carries
 (`app/src/pages/work/TasksPage.tsx`), beside `TasksNav`. What it shows is three
 independent layers, all predicates and orderings over one `getAllTasks`.
 
-- **The nav column picks a view and a tag, as URL state** —
-  `/tasks?view=all|agent&tag=<id>` (`taskViews.ts`). The two compose
-  and each link keeps the other; an unknown value, or a tag id missing from
+- **View, tag and subject scope are URL state** —
+  `/tasks?view=all|agent&tag=<id>&subject=<id|personal>` (`taskViews.ts`).
+  They compose, and nav links preserve all three; an unknown value, or a tag id missing from
   the registry, means none. They are real links so ⌘-click and restored tabs carry
-  both. Off `/tasks` neither is selected.
+  the scope. Off `/tasks` no view or tag is selected.
 - **Search and Filter narrow further.** Search matches title, project name and
   tag names. The toolbar reads Search, then the pills Filter, Project, Subject
   and Display. The Filter popover holds archived visibility, status, due and tags
@@ -289,7 +307,8 @@ independent layers, all predicates and orderings over one `getAllTasks`.
   before its bounds are set. Archived projects'
   tasks start hidden; Show archived includes them, and choosing an archived
   project enables it. Filter's footer resets all filters, including Project and
-  Subject. Filters do not persist.
+  Subject. Subject is kept in the URL; other filters are local to the page.
+  A subject change clears Project, including navigation from another subject.
   Project options show only projects with matching tasks in the selected subject;
   No project is hidden when empty. Subject options remain visible at zero.
   Both lists show task counts on the right (`filterCounts.ts`), respecting

@@ -10,7 +10,7 @@ import {
   type DbTaskTag,
 } from "@/lib/planning/projects";
 import { TagDot } from "../tags/TagDot";
-import { tasksHref, type TaskViewId } from "../tasks/taskViews";
+import { tasksHref, type TaskSubjectScope, type TaskViewId } from "../tasks/taskViews";
 import { TagNavRow } from "./TagNavRow";
 
 /**
@@ -24,6 +24,7 @@ export function TagsGroup({
   counts,
   view,
   selected,
+  subject = null,
   onDeleted,
 }: {
   tags: DbTaskTag[];
@@ -32,6 +33,7 @@ export function TagsGroup({
   /** The view a tag link keeps. */
   view: TaskViewId;
   selected: number | null;
+  subject?: TaskSubjectScope;
   /** The tag is gone; `id` lets the caller leave a page that was showing it. */
   onDeleted: (id: number) => void;
 }) {
@@ -126,7 +128,7 @@ export function TagsGroup({
           <TagNavRow
             key={tag.id}
             tag={tag}
-            to={tasksHref(view, selected === tag.id ? null : tag.id)}
+            to={tasksHref(view, selected === tag.id ? null : tag.id, subject)}
             active={selected === tag.id}
             count={counts.get(tag.id) ?? 0}
             onDeleted={() => onDeleted(tag.id)}

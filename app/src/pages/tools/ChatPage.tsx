@@ -7,7 +7,7 @@ import { THREAD_LIST_PANEL, ThreadList } from "@/components/harness/threads/Thre
 import { ThreadMap } from "@/components/harness/timeline/ThreadMap";
 import { Timeline } from "@/components/harness/timeline/Timeline";
 import { useThreadActions } from "@/components/harness/threads/useThreadActions";
-import { PaneHeaderRow, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
+import { PageHeader, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
@@ -240,12 +240,12 @@ export default function ChatPage() {
       />
 
       <div ref={columnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
-        <PaneHeaderRow className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
+        <PageHeader>
           <SideNavCollapseToggle collapsed={listPanel.collapsed} onToggle={listPanel.toggle} shortcut={shortcut("mod+alt+B")} />
           <PaneTrail>
             <PaneTitle>{fresh ? "New thread" : thread ? thread.title?.trim() || "Untitled" : ""}</PaneTitle>
           </PaneTrail>
-        </PaneHeaderRow>
+        </PageHeader>
 
         {fresh ? (
           <div ref={recentScroll} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6">

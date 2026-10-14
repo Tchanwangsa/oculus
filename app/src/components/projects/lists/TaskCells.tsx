@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { fmtFullStamp, fmtRelativeDay, sqliteUtcToMs } from "@/lib/format/format";
 import type { DbProject, DbTaskTag, DbTaskWithProject } from "@/lib/planning/projects";
 import { ProjectPicker } from "../nav/ProjectPicker";
+import { ProjectIcon } from "../icons/ProjectIcon";
 import { TagList } from "../tags/TagList";
 import { TagPicker } from "../tags/TagPicker";
 import { DueChip, TaskSubject } from "../tasks/TaskMarks";
@@ -62,18 +63,22 @@ export function ProjectCell({
   task: DbTaskWithProject;
   projects: DbProject[];
 } & Pick<CellActions, "onRefile">) {
+  const icon = task.project_id != null ? (
+    <ProjectIcon project={{ id: task.project_id, subject_code: task.project_subject_code }} size={13} className="shrink-0" />
+  ) : null;
   // Gated on `parent_id`, not on the parent being in this list:
   // `refileTask` refuses any subtask.
   if (task.parent_id != null) {
     return (
       <span
         className={cn(
-          "truncate px-1 text-[11px]",
+          "flex min-w-0 items-center gap-1 px-1 text-[11px]",
           task.project_id == null ? "text-muted-foreground/60" : "text-foreground",
         )}
         title={`${projectLabel(task)} — a subtask sits in its parent's project`}
       >
-        {projectLabel(task)}
+        {icon}
+        <span className="min-w-0 truncate">{projectLabel(task)}</span>
       </span>
     );
   }
@@ -91,6 +96,7 @@ export function ProjectCell({
         title={`${projectLabel(task)} — click to refile`}
         className={CELL_TRIGGER}
       >
+        {icon}
         <span
           className={cn(
             "min-w-0 truncate text-[11px]",

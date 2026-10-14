@@ -21,7 +21,7 @@ export function FilterFold({
   const [shown, setOpen] = useState(defaultOpen);
   return (
     <Collapsible open={shown} onOpenChange={setOpen} className="mt-1">
-      <CollapsibleTrigger className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground">
+      <CollapsibleTrigger className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50">
         <CaretRight size={9} className={cn("shrink-0 transition-transform will-change-transform", shown && "rotate-90")} />
         {label} ({count})
       </CollapsibleTrigger>

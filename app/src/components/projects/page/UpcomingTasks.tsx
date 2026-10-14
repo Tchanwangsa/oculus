@@ -45,8 +45,8 @@ export function UpcomingTasks({ project, nodes }: { project: DbProject; nodes: T
         <Heading>Upcoming tasks</Heading>
         <p className="px-0.5 text-xs text-muted-foreground">
           {anyTasks
-            ? "Nothing here has a date on it yet. A task needs a due date before it can be next — and before the calendar can draw it."
-            : "No tasks yet. Break this down on the Tasks tab and what is next will show up here."}
+            ? "Add a due date to a task to see what’s next."
+            : "Add your first task on the Tasks tab."}
         </p>
       </section>
     );

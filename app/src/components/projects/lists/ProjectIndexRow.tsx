@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
-import { FolderSimple } from "@phosphor-icons/react";
+import { ProjectIcon } from "../icons/ProjectIcon";
+import { ProjectIconPicker } from "../icons/ProjectIconPicker";
 import { TagChip } from "../tags/TagChip";
 import type { DbTaskTag } from "@/lib/planning/projects";
 import { cn } from "@/lib/utils";
@@ -9,7 +10,7 @@ import { AgentMark, DueChip, SubtaskToggle, TaskSubject } from "../tasks/TaskMar
 import { SubtaskProgressIndicator } from "../tasks/SubtaskProgressIndicator";
 import { ProjectMenu } from "./ProjectMenu";
 import { StampCell } from "./TaskCells";
-import type { ProjectRowActions } from "./ProjectList";
+import type { ProjectRowActions } from "./useProjectActions";
 import type { ProjectBranch } from "./projectTableData";
 
 /** A project occupies the same property columns as the task rows below it. */
@@ -26,7 +27,11 @@ export function ProjectIndexRow({ branch: {project, progress}, open, onToggle, c
   return <div style={colsStyle} className={cn(cols, "group/project min-h-10 py-1.5 transition-colors hover:bg-surface/60")}>
     <div className="flex min-w-0 items-center gap-1.5">
       <SubtaskToggle expandable={progress.total > 0} expanded={open} onToggle={onToggle} label={`${open ? "Collapse" : "Expand"} tasks in ${project.name}`} />
-      <FolderSimple size={15} className="shrink-0 text-reference-project" />
+      <ProjectIconPicker project={project}>
+        <button type="button" aria-label={`Change icon for ${project.name}`} className="-mx-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50">
+          <ProjectIcon project={project} size={15} />
+        </button>
+      </ProjectIconPicker>
       <Link to={projectHref(project)} className={cn("truncate text-[13px] font-medium hover:underline", project.status === "archived" ? "text-muted-foreground" : "text-foreground")}>
         {project.name}
       </Link>

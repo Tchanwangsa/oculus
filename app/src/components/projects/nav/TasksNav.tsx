@@ -5,10 +5,10 @@ import { NewTaskButton } from "@/components/projects/nav/NewTaskButton";
 import { TagsGroup } from "@/components/projects/nav/TagsGroup";
 import { TasksNavRow } from "@/components/projects/nav/TasksNavRow";
 import { useCreateTask } from "@/components/projects/nav/useCreateTask";
-import { parseTagParam, parseView, tasksHref, TASK_VIEWS, type TaskViewId } from "@/components/projects/tasks/taskViews";
+import { parseSubjectParam, parseTagParam, parseView, tasksHref, TASK_VIEWS, type TaskViewId } from "@/components/projects/tasks/taskViews";
 import { useTabActive } from "@/components/tabs/TabContext";
 import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
-import { SIDE_NAV_FOLDS, SideNav } from "@/components/ui/layout/SideNav";
+import { SIDE_NAV_FOLDS, SideNav, SideNavHeading } from "@/components/ui/layout/SideNav";
 import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { useTaskList } from "@/hooks/data/useTaskList";
 import { useTaskTags } from "@/hooks/data/useTaskTags";
@@ -22,8 +22,8 @@ const VIEW_ICONS: Record<TaskViewId, Icon> = {
 
 /**
  * The Tasks section's nav column: New task, the views, Projects and the tag
- * registry. A view and a tag are URL state on `/tasks` and compose, each link
- * keeping the other, so ⌘-click and tab restore carry both. ⌘⌥B folds it.
+ * registry. View, tag and subject scope are URL state on `/tasks`, each link
+ * keeping the others, so ⌘-click and tab restore carry both. ⌘⌥B folds it.
  */
 export function TasksNav({ panel }: { panel: ReturnType<typeof useResizablePanel> }) {
   const { pathname, search } = useLocation();
@@ -38,12 +38,17 @@ export function TasksNav({ panel }: { panel: ReturnType<typeof useResizablePanel
   // Off the Tasks page neither is selected, and a link starts clean.
   const view = onTasks ? parseView(params.get("view")) : null;
   const tag = onTasks ? parseTagParam(params.get("tag")) : null;
+  const subject = onTasks ? parseSubjectParam(params.get("subject")) : null;
 
   const counts = useMemo(() => {
     const byTag = new Map<number, number>();
-    for (const t of tasks) for (const id of t.tag_ids) byTag.set(id, (byTag.get(id) ?? 0) + 1);
+    for (const t of tasks) {
+      if (typeof subject === "number" && t.project_subject_id !== subject) continue;
+      if (subject === "personal" && t.project_subject_id != null) continue;
+      for (const id of t.tag_ids) byTag.set(id, (byTag.get(id) ?? 0) + 1);
+    }
     return byTag;
-  }, [tasks]);
+  }, [tasks, subject]);
 
   // Every tab stays mounted, so only the one in front answers the chord.
   // `e.code`, not `e.key`: on macOS ⌥B arrives as `∫`.
@@ -64,18 +69,9 @@ export function TasksNav({ panel }: { panel: ReturnType<typeof useResizablePanel
         animate={!panel.dragging}
         header={
           <>
-            <div className="px-4 pt-4 pb-3">
-              <h1
-                className={cn(
-                  "font-display text-[16px] font-semibold leading-none tracking-tight text-foreground",
-                  SIDE_NAV_FOLDS,
-                )}
-              >
-                Tasks
-              </h1>
-            </div>
-            <div className={cn("px-3 pb-2", SIDE_NAV_FOLDS)}>
-              <NewTaskButton projects={projects} onCreate={create} align="start" className="w-full" />
+            <SideNavHeading icon={ListChecks}>Tasks</SideNavHeading>
+            <div className={cn("px-2 pb-2", SIDE_NAV_FOLDS)}>
+              <NewTaskButton projects={projects} onCreate={create} align="start" variant="nav" className="w-full" />
             </div>
           </>
         }
@@ -84,7 +80,7 @@ export function TasksNav({ panel }: { panel: ReturnType<typeof useResizablePanel
           {TASK_VIEWS.map((v) => (
             <TasksNavRow
               key={v.id}
-              to={tasksHref(v.id, tag)}
+              to={tasksHref(v.id, tag, subject)}
               active={view === v.id}
               icon={VIEW_ICONS[v.id]}
               label={v.label}
@@ -103,8 +99,9 @@ export function TasksNav({ panel }: { panel: ReturnType<typeof useResizablePanel
           counts={counts}
           view={view ?? "all"}
           selected={tag}
+          subject={subject}
           onDeleted={(id) => {
-            if (id === tag && view) navigate(tasksHref(view, null), { replace: true });
+            if (id === tag && view) navigate(tasksHref(view, null, subject), { replace: true });
           }}
         />
       </SideNav>

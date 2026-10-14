@@ -63,7 +63,7 @@ export default function TaskPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <TaskHeader task={task} project={project} onDelete={() => setConfirmDelete(true)} />
+      <TaskHeader task={task} project={project} parent={parent} onDelete={() => setConfirmDelete(true)} />
 
       <div className="page-scroll min-h-0 flex-1">
         <div className="mx-auto max-w-3xl px-6 pt-8 pb-16">

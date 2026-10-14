@@ -71,6 +71,16 @@ export function SideNav({
   );
 }
 
+/** A consistent title and glyph at the top of a section's nav column. */
+export function SideNavHeading({ icon: Icon, children }: { icon: Icon; children: ReactNode }) {
+  return <div className="px-4 pt-4 pb-3">
+    <div className="-mx-2 flex items-center gap-2.5 px-2 py-1">
+      <Icon size={16} className="shrink-0 text-foreground" />
+      <h1 className={cn("min-w-0 flex-1 truncate font-display text-[16px] font-semibold leading-none tracking-tight text-foreground", SIDE_NAV_FOLDS)}>{children}</h1>
+    </div>
+  </div>;
+}
+
 /** Folds or unfolds the column, from the page's header row beside its title,
  *  so it stays in one place in both states. */
 export function SideNavCollapseToggle({

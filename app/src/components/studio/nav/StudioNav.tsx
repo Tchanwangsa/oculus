@@ -5,8 +5,8 @@ import { Cube, FilmSlate, Palette, Plus, SquaresFour } from "@phosphor-icons/rea
 import { RecentVideoRow } from "@/components/studio/nav/RecentVideoRow";
 import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
 import {
-  SIDE_NAV_FOLDS,
   SideNav,
+  SideNavHeading,
   SideNavGroupLabel,
   SideNavLink,
   SideNavSearch,
@@ -18,7 +18,6 @@ import { COMPONENTS_HREF, NEW_VIDEO_HREF, THEMES_HREF, VIDEOS_HREF, videoHref } 
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { useRenderStore } from "@/stores/studio/renderStore";
 import { useVideosStore } from "@/stores/studio/videosStore";
-import { cn } from "@/lib/utils";
 
 /** Videos listed under Recent before a search widens it. */
 const RECENT = 8;
@@ -75,19 +74,7 @@ export function StudioNav({ panel }: { panel: ReturnType<typeof useResizablePane
         animate={!panel.dragging}
         header={
           <>
-            <div className="px-4 pt-4 pb-3">
-              <div className="-mx-2 flex items-center gap-2.5 px-2 py-1">
-                <FilmSlate size={16} className="shrink-0 text-foreground" />
-                <h1
-                  className={cn(
-                    "min-w-0 flex-1 truncate font-display text-[16px] font-semibold leading-none tracking-tight text-foreground",
-                    SIDE_NAV_FOLDS,
-                  )}
-                >
-                  Studio
-                </h1>
-              </div>
-            </div>
+            <SideNavHeading icon={FilmSlate}>Studio</SideNavHeading>
             <SideNavSearch
               value={query}
               onChange={setQuery}
