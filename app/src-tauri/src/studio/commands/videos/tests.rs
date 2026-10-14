@@ -248,7 +248,7 @@ fn the_detail_of_a_narrated_video_has_scene_times_and_words() {
     assert_eq!(detail.renders.len(), 2, "{:?}", detail.renders);
     assert_eq!(
         detail.renders[0].path,
-        dir.join("renders/draft.mp4").to_string_lossy()
+        dir.join("renders").join("draft.mp4").to_string_lossy()
     );
     assert!(detail.renders[0].modified > 0);
 
