@@ -93,6 +93,7 @@ async fn seed_project(pool: &SqlitePool, name: &str) -> i64 {
             starts_at: None,
             due_at: None,
             tags: vec![],
+            event_id: None,
             source: "manual".to_string(),
         },
     )

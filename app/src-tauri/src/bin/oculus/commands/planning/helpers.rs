@@ -33,6 +33,19 @@ impl Ctx {
 /// `source` lets the app show which cards the agent put there.
 pub(crate) const AGENT_SOURCE: &str = "agent";
 
+/// File input preserves Markdown verbatim, including trailing newlines.
+pub(crate) fn planning_text(
+    inline: Option<&String>,
+    file: Option<&String>,
+    field: &str,
+) -> Result<Option<String>, String> {
+    match (inline, file) {
+        (Some(_), Some(_)) => Err(format!("use --{field} or --{field}-file, not both")),
+        (_, Some(path)) => read_input(path, field).map(Some),
+        (value, None) => Ok(value.cloned()),
+    }
+}
+
 /// A nullable text field on a patch: absent leaves it, `--flag ""` clears it.
 pub(crate) fn nullable_text(value: Option<&String>) -> Option<Option<String>> {
     value.map(|v| Some(v.clone()).filter(|v| !v.trim().is_empty()))

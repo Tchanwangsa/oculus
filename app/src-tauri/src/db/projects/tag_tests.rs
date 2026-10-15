@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 
 use super::*;
 
-async fn migrated_pool() -> SqlitePool {
+pub(super) async fn migrated_pool() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -29,6 +29,7 @@ async fn seed_project(pool: &SqlitePool, name: &str) -> i64 {
             starts_at: None,
             due_at: None,
             tags: vec![],
+            event_id: None,
             source: "manual".to_string(),
         },
     )
@@ -281,6 +282,14 @@ async fn files_attach_and_detach_by_path() {
     .await
     .unwrap();
     assert_eq!(task(&pool, id).await.unwrap().unwrap().file_count, 2);
+    let attached = task_files(&pool, id).await.unwrap();
+    assert_eq!(attached.len(), 2);
+    let attached_brief = attached.iter().find(|file| file.file_id == brief).unwrap();
+    assert_eq!(
+        attached_brief.relative_path,
+        "courses/COMP1/assignments/brief.pdf"
+    );
+    assert_eq!(attached_brief.subject_code.as_deref(), Some("COMP1"));
     assert_ne!(
         updated(&pool, "project_tasks", id).await,
         "2000-01-01 00:00:00"

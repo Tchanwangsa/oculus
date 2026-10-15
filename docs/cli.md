@@ -192,6 +192,16 @@ are in [projects.md](./projects.md); the CLI-shaped parts:
   mapping the column by kind; a lone subtask is refused.
 - `-s` resolves a code matching two terms to the current term, and reports a
   tie that survives that. Omitting `-s` makes a personal project.
+- `project update -s CODE` changes the subject and `--personal` clears it,
+  keeping every task on the project. `project events [-s CODE]` lists the
+  app's linkable calendar ids, including personal notes and fallback lectures;
+  tasks and recordings hidden by a Canvas timetable are excluded. Project
+  create/update takes `--event ID`; update with `--event ""` unpins. A missing
+  id rejects the whole write. Pins are pointers, never foreign keys.
+- Project create/update accepts `--brief-file FILE`, and task add/update
+  accepts `--body-file FILE`; `-` reads stdin. These preserve UTF-8 Markdown
+  verbatim and avoid multiline shell argument permission failures. Inline
+  text and file input conflict; on update an empty file clears the field.
 - `--tags "A,B"` (a `tags` array of names in a batch item) tags a task by name,
   ignoring case, and creates a name the registry lacks in the default colour,
   so an agent needs no separate step; on `task update` it replaces the set and
@@ -201,8 +211,12 @@ are in [projects.md](./projects.md); the CLI-shaped parts:
   `task list` prints `#Tag` names after a title, `N files` as a count, and
   `--tag NAME` filters. `oculus tag` edits the shared registry (add, rename,
   recolour with a palette key, rm).
-- Batch task input and memory bodies share the UTF-8 file/stdin reader in
-  `main.rs`; `-` is stdin and each command retains its own input validation.
+- `task show ID` reads the full notes, properties, effective tags, subtasks
+  and related library paths. Its JSON has `task`, `tags`, `files` and
+  `subtasks`, so agents can verify attachments rather than only a count.
+- Planning Markdown, batch task input and memory bodies share the UTF-8
+  file/stdin reader in `main.rs`; `-` is stdin and each command retains its
+  own input validation.
 - Every project and task it writes is marked `source: agent`.
 
 ## `oculus docs` writes the agents folder
@@ -229,7 +243,7 @@ Each file has one of four lifetimes:
 
 - **Generated, always overwritten**: `OCULUS-CLI.md` (walked from clap's tree,
   with a test asserting coverage), `AGENTS.md` and `skills/`, where a file a
-  skill no longer ships is deleted. An agent trusts these over `--help` and
+  skill does not ship is deleted. An agent trusts these over `--help` and
   follows a skill as a procedure, so a stale one is worse than none.
 - **Stubbed once**: `OCULUS.md`, which a human authors.
 - **Merged**: `TASTE.md`'s guidance is re-rendered with the user's bullets

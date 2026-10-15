@@ -70,11 +70,13 @@ fn main() {
         Some(Command::Project { action }) => match action {
             ProjectAction::List(a) => ctx.project_list(&a),
             ProjectAction::Show(a) => ctx.project_show(&a),
+            ProjectAction::Events(a) => ctx.project_events(&a),
             ProjectAction::Create(a) => ctx.project_create(&a),
             ProjectAction::Update(a) => ctx.project_update(&a),
         },
         Some(Command::Task { action }) => match action {
             TaskAction::List(a) => ctx.task_list(&a),
+            TaskAction::Show(a) => ctx.task_show(&a),
             TaskAction::Add(a) => ctx.task_add(&a),
             TaskAction::Update(a) => ctx.task_update(&a),
             TaskAction::Move(a) => ctx.task_move(&a),

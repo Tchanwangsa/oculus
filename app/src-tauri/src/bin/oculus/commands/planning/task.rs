@@ -145,7 +145,7 @@ impl Ctx {
                     title,
                     column: args.column.clone(),
                     parent: args.parent.map(projects::ParentRef::Id),
-                    body: args.body.clone(),
+                    body: planning_text(args.body.as_ref(), args.body_file.as_ref(), "body")?,
                     due: args.due.clone(),
                     starts: args.starts.clone(),
                     estimate: args.estimate,
@@ -201,9 +201,10 @@ impl Ctx {
 
     pub(crate) fn task_update(&self, args: &TaskUpdateArgs) -> Result<(), String> {
         let pool = self.planning_db()?;
+        let body = planning_text(args.body.as_ref(), args.body_file.as_ref(), "body")?;
         let patch = projects::TaskPatch {
             title: args.title.clone().filter(|t| !t.trim().is_empty()),
-            body: nullable_text(args.body.as_ref()),
+            body: nullable_text(body.as_ref()),
             parent_id: None,
             starts_at: nullable_date(args.starts.as_ref())?,
             due_at: nullable_date(args.due.as_ref())?,
@@ -223,7 +224,7 @@ impl Ctx {
             && patch.detach.is_empty()
         {
             return Err(
-                "nothing to change: pass --title, --body, --due, --starts, --estimate, \
+                "nothing to change: pass --title, --body, --body-file, --due, --starts, --estimate, \
                  --tags, --attach or --detach"
                     .into(),
             );

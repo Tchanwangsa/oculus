@@ -17,8 +17,7 @@ pub struct Project {
     pub columns: Vec<Column>,
     /// Parsed from JSON; `[]` when untagged, never null.
     pub tags: Vec<String>,
-    /// A `CalEvent.id` (`app/src/lib/planning/calendar/`). Read-only here: pinning is
-    /// the app's.
+    /// A non-task `CalEvent.id` (`app/src/lib/planning/calendar/`).
     pub event_id: Option<String>,
     pub position: f64,
     pub source: String,

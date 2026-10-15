@@ -16,6 +16,7 @@ repair a bad row.
 | Frontend reads and writes (direct SQL) | `app/src/lib/planning/projects/` (`reads.ts`, `taskWrites.ts`, `projectWrites.ts`, `columns.ts`, `rows.ts`, `events.ts`, `tags.ts`, `taskFiles.ts`, `touch.ts`) |
 | Headless writes (CLI, and so the agent) | `app/src-tauri/src/db/projects/` (`tasks/`, `tags.rs`, `tasks/links.rs`, `project_writes.rs`, `columns.rs`, `rows.rs`) |
 | `oculus project` / `oculus task` / `oculus tag` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs` |
+| Linkable calendar ids for the CLI | `app/src-tauri/src/db/projects/events.rs` (`project events` and pin validation; mirrors the non-task layers in `loadCalendar`) |
 | One open project and its tasks | `app/src/stores/planning/projectsStore.ts` |
 | Index, one project, one task, every task | `app/src/pages/work/ProjectsIndexPage.tsx`, `app/src/pages/work/ProjectPage.tsx`, `app/src/pages/work/TaskPage.tsx`, `app/src/pages/work/TasksPage.tsx` |
 | Shared detail title and markdown field | `app/src/components/projects/detail/DetailTitle.tsx`, `app/src/components/projects/detail/DetailBody.tsx` |

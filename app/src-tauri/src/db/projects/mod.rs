@@ -16,7 +16,10 @@
 //! Schema: migrations 27, 33, 37, 47 and 48 in `db/migrations.rs`. Nothing here creates it.
 
 mod columns;
+mod events;
 mod migration37;
+#[cfg(test)]
+mod project_tests;
 mod project_writes;
 mod read;
 mod rows;
@@ -31,6 +34,7 @@ mod time;
 mod unfiled_tests;
 
 pub use columns::*;
+pub use events::*;
 pub use migration37::UNFILED_TASKS_SQL;
 pub use project_writes::*;
 pub use read::*;
