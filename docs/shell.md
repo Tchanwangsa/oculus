@@ -63,7 +63,9 @@ before leaving a playing lecture.
   The rail's Tasks item opens `/tasks` and `RailItem`'s `match` lights it on
   `/projects*` too. A project is top-level because it may have no subject; a
   filed task sits under its project, an unfiled one at `/tasks/:taskId`, so
-  `tabInfo` tests the task route first. The model is [projects.md](./projects.md).
+  `tabInfo` tests the task route first. Filed task tabs inherit their project's
+  icon and colour; unfiled task tabs use a checkbox. The model is [projects.md](./projects.md).
+  The Projects breadcrumb uses the same Kanban icon as its tab and search entry.
 - **`SubjectLayout` resolves the subject once** and hands it down as outlet
   context; tab pages must not re-fetch it. Its nav column
   (`app/src/components/subjects/SubjectNav.tsx`) holds the icon picker, the

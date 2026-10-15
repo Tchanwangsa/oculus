@@ -25,6 +25,11 @@ export const TABS = [
 
 export const TAB_PATHS = new Set<string>(TABS.map((tab) => tab.to));
 
+/** Breadcrumb categories use the same glyph as their subject navigation row. */
+export function subjectTabIcon(path: string) {
+  return TABS.find(tab => tab.to === path.split("/")[0])?.icon ?? House;
+}
+
 /** Tasks lives in the planning section; the rest stay within the subject. */
 export function subjectTabHref(tab: string, subjectId: number): string {
   return tab === "tasks" ? tasksHref("all", null, subjectId) : tab;
