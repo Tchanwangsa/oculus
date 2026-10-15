@@ -130,6 +130,7 @@ oculus task add "email the tutor"                 # no -p: filed nowhere, for no
 oculus task list                                  # every task, unfiled ones first
 oculus task refile 12 -p 3                        # file it, subtasks and all
 oculus task update 12 --tags "Exam,Study"         # replace its tags; --attach PATH links a library file
+oculus task show 12 --json                        # full notes, subtasks and related file paths
 oculus tag list                                   # the tags a task can carry (task add/update create new ones)
 oculus memory list -s COMP30026                   # what is already known
 oculus memory write --type reference --about "…" --text "…" -s COMP30026
@@ -146,9 +147,11 @@ the turn carries on without the answer. So:
   subject code is short; expanding it saves nothing and costs the command. A
   code with spaces is quoted (`-s "CS 101"`) or written with `_` or `-`
   instead — the CLI matches them alike.
-- **No newline inside an argument.** A long `--brief` or task title is one
-  line. If it genuinely needs paragraphs, write the file first and pass the
-  path.
+- **Use files for multiline Markdown.** Write the description under `agents/`,
+  then pass `--brief-file agents/brief.md` on project create/update or
+  `--body-file agents/notes.md` on task add/update. These preserve paragraphs,
+  lists and code fences without newlines inside a shell argument. Batch task
+  JSON uses `\n` inside its `body` strings.
 - Pipes and `&&` are fine, and so is `| head`. It is the loops, the variables
   and the multi-line arguments that fail.
 - `oculus` is already on `PATH`. Call it by name, never by an absolute path,

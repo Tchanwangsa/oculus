@@ -4,6 +4,32 @@ use super::*;
 use crate::*;
 
 impl Ctx {
+    pub(crate) fn project_events(&self, args: &ProjectEventsArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        let subject = args
+            .subject
+            .as_deref()
+            .map(|s| self.one_subject(&pool, s))
+            .transpose()?;
+        let events = self.rt.block_on(projects::project_events(&pool, subject))?;
+        if self.json {
+            return self.emit(&events);
+        }
+        for event in &events {
+            println!(
+                "{}  {}  {}  {}",
+                event.id,
+                event.start_at,
+                event.subject_code.as_deref().unwrap_or("personal"),
+                event.title
+            );
+        }
+        if events.is_empty() {
+            println!("no linkable calendar events");
+        }
+        Ok(())
+    }
+
     pub(crate) fn project_list(&self, args: &ProjectListArgs) -> Result<(), String> {
         let pool = self.planning_db()?;
         let filter = if args.personal {
@@ -97,9 +123,8 @@ impl Ctx {
         if !project.tags.is_empty() {
             meta.push(project.tags.join(", "));
         }
-        // Said, not resolved: the CLI has no reader for the calendar grid.
-        if project.event_id.is_some() {
-            meta.push("pinned to a calendar event".to_string());
+        if let Some(id) = &project.event_id {
+            meta.push(format!("calendar event {id}"));
         }
         println!("{}", paint(&meta.join("  ·  "), DIM));
         if let Some(brief) = project.brief.as_deref().filter(|b| !b.trim().is_empty()) {
@@ -130,7 +155,7 @@ impl Ctx {
         let input = projects::NewProject {
             name: args.name.trim().to_string(),
             subject_id,
-            brief: args.brief.clone(),
+            brief: planning_text(args.brief.as_ref(), args.brief_file.as_ref(), "brief")?,
             starts_at: args
                 .starts
                 .as_deref()
@@ -142,6 +167,7 @@ impl Ctx {
                 .map(projects::check_iso8601)
                 .transpose()?,
             tags: split_tags(args.tags.as_deref()),
+            event_id: nullable_text(args.event.as_ref()).flatten(),
             source: AGENT_SOURCE.to_string(),
         };
         if input.name.is_empty() {
@@ -161,15 +187,25 @@ impl Ctx {
 
     pub(crate) fn project_update(&self, args: &ProjectUpdateArgs) -> Result<(), String> {
         let pool = self.planning_db()?;
+        let brief = planning_text(args.brief.as_ref(), args.brief_file.as_ref(), "brief")?;
+        let subject_id = if args.personal {
+            Some(None)
+        } else {
+            args.subject
+                .as_deref()
+                .map(|s| self.one_subject(&pool, s).map(Some))
+                .transpose()?
+        };
         let patch = projects::ProjectPatch {
             name: args.name.clone(),
-            subject_id: None,
-            brief: nullable_text(args.brief.as_ref()),
+            subject_id,
+            brief: nullable_text(brief.as_ref()),
             status: args.status.clone(),
             starts_at: nullable_date(args.starts.as_ref())?,
             due_at: nullable_date(args.due.as_ref())?,
             // `--tags ""` clears, like the other "" flags: `Some(vec![])`, not `None`.
             tags: args.tags.as_deref().map(|t| split_tags(Some(t))),
+            event_id: nullable_text(args.event.as_ref()),
         };
         if patch.name.is_none()
             && patch.brief.is_none()
@@ -177,9 +213,11 @@ impl Ctx {
             && patch.starts_at.is_none()
             && patch.due_at.is_none()
             && patch.tags.is_none()
+            && patch.subject_id.is_none()
+            && patch.event_id.is_none()
         {
             return Err(
-                "nothing to change: pass --name, --due, --starts, --brief, --tags or --status"
+                "nothing to change: pass --name, --subject, --personal, --due, --starts, --brief, --brief-file, --tags, --event or --status"
                     .into(),
             );
         }

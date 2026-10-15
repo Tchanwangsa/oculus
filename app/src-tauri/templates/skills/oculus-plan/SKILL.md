@@ -1,6 +1,6 @@
 ---
 name: oculus-plan
-description: Puts work on the student's board in an Oculus course library — creates a project, breaks an assignment into tasks, moves or refiles a task. Use for "put this on the board", "break this down", "make a plan for the assignment", "mark that done", or any request that should end as rows the app draws rather than as a written-out list.
+description: Manages projects and tasks in an Oculus course library, including Markdown descriptions, dates, calendar links, tags and related library files. Use for requests to put work on the board, break down an assignment, update project properties, attach files, move or refile tasks, or mark work done.
 ---
 
 # Planning
@@ -12,10 +12,10 @@ the next sync.
 
 ## The shape of a breakdown
 
-Three calls, not thirty:
+Create the project, inspect its board, then add its tasks:
 
 ```bash
-oculus project create "INFO30006 Assignment 2" -s INFO30006 --due 2026-10-03T23:59:00Z --brief "Censorship and evasion report, 2000 words, in pairs"
+oculus project create "INFO30006 Assignment 2" -s INFO30006 --due 2026-10-03T23:59:00Z --tags "Assignment" --brief-file agents/brief.md
 ```
 
 ```bash
@@ -23,7 +23,7 @@ oculus project show 7
 ```
 
 ```bash
-oculus task add -p 7 --batch -
+oculus task add -p 7 --batch agents/tasks.json
 ```
 
 `project show` is not optional. It prints each column's **id** in brackets
@@ -31,6 +31,38 @@ after the heading, and `--column` takes that id. A new project opens with
 `backlog`, `todo`, `doing`, `done`, but an older one or a hand-made board need
 not, and an unknown column is **refused** — a task filed under a column that
 does not exist is drawn by nothing, in any view.
+
+## Markdown and project properties
+
+Write multiline Markdown to a UTF-8 file under `agents/`, then pass its path:
+
+```bash
+oculus project update 7 --brief-file agents/brief.md
+oculus task update 12 --body-file agents/task-notes.md
+```
+
+`project create` also takes `--brief-file`; `task add` takes `--body-file`.
+Both accept `-` for stdin when the calling tool can supply it. The file's
+newlines, lists, maths and code fences are preserved. Inline `--brief` and
+`--body` suit short text; avoid literal newlines in shell arguments because
+an agent's shell permission analyser can refuse them. Do not flatten a
+formatted description into one paragraph to get around that.
+
+- Create with `-s CODE` for a subject, or omit it for Personal. On an existing
+  project, `project update 7 -s CODE` changes subject and `--personal` clears
+  it; its tasks stay on the project.
+- Project create/update accept `--due`, `--starts` (ISO 8601) and `--tags`.
+  Dates with a time should include the intended timezone offset or `Z`.
+- `project update 7 --status archived` archives it; `--status active` restores
+  it. Progress is calculated from tasks, never set directly.
+- `oculus project events -s CODE` lists calendar ids, including past events.
+  Omit `-s` to reach other subjects and personal events. Pass an exact id to
+  `project create ... --event ID` or `project update 7 --event ID`; `--event ""`
+  unlinks it. Tasks and hidden fallback recordings cannot be pinned.
+- An empty inline value or empty file clears About/notes on update. Omitted
+  flags leave existing fields alone. Choose inline text or file input per field.
+- Project icons and colours are app appearance preferences; board columns
+  use the project's existing configuration, as `project show` prints it.
 
 ## The `--batch` contract
 
@@ -40,14 +72,15 @@ per task is what leaves half a plan on the board when one is rejected.
 
 ```json
 [
-  {"title": "Read the brief", "column": "todo", "due": "2026-09-22T23:59:00Z"},
+  {"title": "Read the brief", "column": "todo", "due": "2026-09-22T23:59:00Z", "body": "## Read\n\n- Mark requirements\n- Note questions", "tags": ["Assignment"], "files": ["courses/INFO30006/assignments/brief.pdf"]},
   {"title": "Outline", "key": "outline"},
   {"title": "Draft intro", "parent": "outline"}
 ]
 ```
 
 Per task: `title` (**required**), `column`, `body`, `due`, `starts`,
-`estimate` (minutes), `parent`, `key`.
+`estimate` (minutes), `tags` (array of names), `files` (array of library
+relative paths), `parent`, `key`.
 
 - `parent` is either an existing task's numeric id or the `key` of an
   **earlier item in the same array** — that is how a parent and its subtasks
@@ -57,9 +90,37 @@ Per task: `title` (**required**), `column`, `body`, `due`, `starts`,
 - All or nothing: a bad item writes none of them and says which one failed.
   Fix it and re-send.
 
-Write the JSON to a file and pass the path when it is long. Do **not** put a
-newline inside a shell argument — a multi-line `--body` or `--brief` is
-refused before the CLI ever sees it.
+Write the JSON to a file and pass the path. Encode newlines inside JSON
+strings as `\n`; literal newlines inside a JSON string are invalid JSON.
+`--batch` supplies all per-task properties, so it cannot be mixed with
+single-task flags such as `--body-file` or `--file`.
+
+## Related files and shared tags
+
+Discover the real library paths before attaching them:
+
+```bash
+oculus files INFO30006 --match brief
+oculus task add "Read the brief" -p 7 --file "courses/INFO30006/assignments/brief.pdf" --tags "Reading"
+oculus task update 12 --attach "courses/INFO30006/lectures/week1.pdf"
+oculus task show 12 --json
+oculus task update 12 --detach "courses/INFO30006/lectures/week1.pdf"
+```
+
+Use exact `relative_path` values from `oculus files`, not invented paths or
+absolute filesystem paths. These are links to existing library files, not
+uploads. Repeat `--file` on creation or `--attach` / `--detach` on update for
+several files. In a batch, use `files: ["path", ...]`. Duplicate attachment is
+a no-op; an unknown or ambiguous path rejects the write, and a bad batch
+rolls back every task. `task show` prints full notes and related paths;
+`--json` returns `task`, effective `tags`, `files` and `subtasks` for checking.
+
+`--tags "Reading,Assignment"` works on project and task create/update; on
+update it replaces the whole set and `--tags ""` clears it. Names match
+ignoring case; missing names are registered automatically. Tasks without
+explicit tags inherit the project's current tags; clearing task tags resumes
+inheritance. `oculus tag list` shows the shared registry; `tag add`, `rename`,
+`color` and `rm` manage it (`--help` lists their arguments and colour palette).
 
 ## Moving, finishing, filing
 
@@ -72,7 +133,8 @@ refused before the CLI ever sees it.
   refused and told to refile its parent. The column maps across by *kind*, and
   a destination with no column of that kind is refused rather than given the
   nearest one; the task lands at the end, so `task move` is how it is placed.
-- `oculus task update` is for the title, notes, dates and estimate. An **empty
+- `oculus task update` is for the title, notes, dates, estimate, tags and
+  related-file links. An **empty
   string clears** a field: `--due ""`.
 
 ## A task does not need a project

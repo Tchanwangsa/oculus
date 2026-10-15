@@ -7,6 +7,7 @@ use crate::*;
 pub(crate) enum ProjectAction {
     List(ProjectListArgs),
     Show(ProjectShowArgs),
+    Events(ProjectEventsArgs),
     Create(ProjectCreateArgs),
     Update(ProjectUpdateArgs),
 }
@@ -41,6 +42,17 @@ pub(crate) struct ProjectShowArgs {
     pub(crate) id: i64,
 }
 
+/// List calendar events that a project can link to, including past events.
+///
+/// Includes Canvas events, personal calendar notes and fallback lectures, with
+/// the same ids the app uses. Tasks are excluded. Pass an id to --event.
+#[derive(Args)]
+pub(crate) struct ProjectEventsArgs {
+    /// Only this subject's events; omit for every subject and personal events
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    pub(crate) subject: Option<String>,
+}
+
 /// Create a project.
 ///
 /// It opens with the app's default board — `backlog`, `todo`, `doing`, `done`
@@ -64,15 +76,21 @@ pub(crate) struct ProjectCreateArgs {
     /// When work on it starts, ISO 8601
     #[arg(long, value_name = "ISO")]
     pub(crate) starts: Option<String>,
-    /// A paragraph of what it is — the assignment brief, the plan
-    #[arg(long, value_name = "TEXT")]
+    /// Markdown About text; use --brief-file for multiple lines
+    #[arg(long, value_name = "TEXT", conflicts_with = "brief_file")]
     pub(crate) brief: Option<String>,
+    /// Read Markdown About text from a UTF-8 file, or - for stdin
+    #[arg(long, value_name = "FILE")]
+    pub(crate) brief_file: Option<String>,
+    /// Link a calendar event by the id printed by project events
+    #[arg(long, value_name = "ID")]
+    pub(crate) event: Option<String>,
     /// Comma-separated labels for the About page (report,group,week-5)
     #[arg(long, value_name = "TAGS")]
     pub(crate) tags: Option<String>,
 }
 
-/// Change a project's name, dates, brief, tags or status.
+/// Change a project's name, subject, dates, brief, tags, calendar link or status.
 ///
 /// Only the flags you pass are written; everything else is left alone. Pass an
 /// **empty string** to clear a field: `--due ""` takes the due date off.
@@ -87,6 +105,17 @@ pub(crate) struct ProjectUpdateArgs {
     /// Rename it
     #[arg(long, value_name = "NAME")]
     pub(crate) name: Option<String>,
+    /// Move the project to this subject; its tasks follow
+    #[arg(
+        short = 's',
+        long,
+        value_name = "SUBJECT_CODE",
+        conflicts_with = "personal"
+    )]
+    pub(crate) subject: Option<String>,
+    /// Make the project personal (clear its subject)
+    #[arg(long)]
+    pub(crate) personal: bool,
     /// Due date, ISO 8601, or "" to clear
     #[arg(long, value_name = "ISO")]
     pub(crate) due: Option<String>,
@@ -94,8 +123,14 @@ pub(crate) struct ProjectUpdateArgs {
     #[arg(long, value_name = "ISO")]
     pub(crate) starts: Option<String>,
     /// Replace the brief, or "" to clear it
-    #[arg(long, value_name = "TEXT")]
+    #[arg(long, value_name = "TEXT", conflicts_with = "brief_file")]
     pub(crate) brief: Option<String>,
+    /// Read Markdown About text from a UTF-8 file, or - for stdin; empty clears
+    #[arg(long, value_name = "FILE")]
+    pub(crate) brief_file: Option<String>,
+    /// Link a calendar event (project events lists ids), or "" to unlink
+    #[arg(long, value_name = "ID")]
+    pub(crate) event: Option<String>,
     /// active or archived
     #[arg(long, value_parser = ["active", "archived"])]
     pub(crate) status: Option<String>,
@@ -118,11 +153,20 @@ pub(crate) enum TagAction {
 #[derive(Subcommand)]
 pub(crate) enum TaskAction {
     List(TaskListArgs),
+    Show(TaskShowArgs),
     Add(TaskAddArgs),
     Update(TaskUpdateArgs),
     Move(TaskMoveArgs),
     Refile(TaskRefileArgs),
     Rm(TaskRmArgs),
+}
+
+/// Show a task's full Markdown notes, properties, subtasks and related files.
+#[derive(Args)]
+pub(crate) struct TaskShowArgs {
+    /// Task id
+    #[arg(value_name = "ID")]
+    pub(crate) id: i64,
 }
 
 /// List tasks — one project's, or every task there is.
@@ -227,9 +271,12 @@ pub(crate) struct TaskAddArgs {
     /// How long you think it will take, in minutes
     #[arg(long, value_name = "MIN")]
     pub(crate) estimate: Option<i64>,
-    /// Notes on the task
-    #[arg(long, value_name = "TEXT")]
+    /// Markdown notes; use --body-file for multiple lines
+    #[arg(long, value_name = "TEXT", conflicts_with = "body_file")]
     pub(crate) body: Option<String>,
+    /// Read Markdown notes from a UTF-8 file, or - for stdin
+    #[arg(long, value_name = "FILE")]
+    pub(crate) body_file: Option<String>,
     /// Comma-separated tag names (Assignment,Exam); new names are created
     #[arg(long, value_name = "NAMES")]
     pub(crate) tags: Option<String>,
@@ -237,7 +284,7 @@ pub(crate) struct TaskAddArgs {
     #[arg(long, value_name = "PATH")]
     pub(crate) file: Vec<String>,
     /// Read a JSON array of tasks from stdin (-) or a file
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["title", "column", "parent", "due", "starts", "estimate", "body", "tags", "file"])]
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["title", "column", "parent", "due", "starts", "estimate", "body", "body_file", "tags", "file"])]
     pub(crate) batch: Option<String>,
 }
 
@@ -264,8 +311,11 @@ pub(crate) struct TaskUpdateArgs {
     #[arg(long, value_name = "TEXT")]
     pub(crate) title: Option<String>,
     /// Replace the notes, or "" to clear
-    #[arg(long, value_name = "TEXT")]
+    #[arg(long, value_name = "TEXT", conflicts_with = "body_file")]
     pub(crate) body: Option<String>,
+    /// Read Markdown notes from a UTF-8 file, or - for stdin; empty clears
+    #[arg(long, value_name = "FILE")]
+    pub(crate) body_file: Option<String>,
     /// Due date, ISO 8601, or "" to clear
     #[arg(long, value_name = "ISO")]
     pub(crate) due: Option<String>,

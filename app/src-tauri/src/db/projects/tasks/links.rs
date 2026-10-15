@@ -1,7 +1,39 @@
 //! Task → library file links (`task_files`, migration 47), addressed by the
 //! file's `relative_path` — what `oculus files` prints.
 
-use sqlx::{Row, SqliteConnection};
+use serde::Serialize;
+use sqlx::{Row, SqliteConnection, SqlitePool};
+
+#[derive(Debug, Serialize)]
+pub struct TaskFile {
+    pub file_id: i64,
+    pub filename: String,
+    pub relative_path: String,
+    pub subject_code: Option<String>,
+}
+
+/// The related files in the same order as the app's task page.
+pub async fn task_files(pool: &SqlitePool, task_id: i64) -> Result<Vec<TaskFile>, String> {
+    let rows = sqlx::query(
+        "SELECT f.id AS file_id, f.filename, f.relative_path, s.code AS subject_code
+         FROM task_files tf JOIN files f ON f.id = tf.file_id
+         LEFT JOIN subjects s ON s.id = f.subject_id WHERE tf.task_id = ?1
+         ORDER BY tf.created_at ASC, f.filename ASC",
+    )
+    .bind(task_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .map(|r| TaskFile {
+            file_id: r.get("file_id"),
+            filename: r.get("filename"),
+            relative_path: r.get("relative_path"),
+            subject_code: r.get("subject_code"),
+        })
+        .collect())
+}
 
 /// The `files` row a `relative_path` names. The column is unique only together
 /// with `subject_id`, so a path two subjects share is refused and lists them
