@@ -1,4 +1,5 @@
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
+import { subjectTabIcon } from "@/components/subjects/nav/tabs";
 import { useSubjects } from "@/hooks/data/useSubjects";
 import { useInSidePanel } from "@/components/tabs/PaneHeader";
 import { BreadcrumbItems, type BreadcrumbItem } from "@/components/ui/Breadcrumb";
@@ -49,8 +50,11 @@ export function SubjectCrumbs({ subjectId, tab }: { subjectId: number; tab?: Cru
   if (!subject) return null;
   const items: BreadcrumbItem[] = [{
     label: displayCode(subject.code), href: `/subjects/${subject.id}`,
-    icon: !inSide ? <SubjectIcon code={subject.code} size={12} /> : undefined,
+    icon: <SubjectIcon code={subject.code} size={12} />,
   }];
-  if (tab) items.push({ label: tab.label, href: `/subjects/${subject.id}/${tab.to}` });
+  if (tab) {
+    const Icon = subjectTabIcon(tab.to);
+    items.push({ label: tab.label, href: `/subjects/${subject.id}/${tab.to}`, icon: <Icon size={12} /> });
+  }
   return <BreadcrumbItems items={items} visible={inSide ? 0 : 2} trailing />;
 }

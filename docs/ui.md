@@ -204,6 +204,10 @@ the same cache. Palette and partial-reset rules live in
 `app/src/lib/ui/iconPreferences.ts`; subject preferences keep their existing
 `oculus-subject-icons` key.
 
+Every `BreadcrumbItem` requires an icon, shown both inline and in the parent
+popover, including side panels. Subject categories use their navigation row's
+glyph; subject and project crumbs retain their custom identity icons.
+
 ## Gotchas
 
 - **Drag in-window on pointer events via `usePointerDrag`** (tab strip,

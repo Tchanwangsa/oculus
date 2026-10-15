@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState, type ReactNode } from "react";
+import { Fragment, useRef, useState, type ReactElement } from "react";
 import { CaretRight, DotsThree } from "@phosphor-icons/react";
 import { navigateActive } from "@/lib/shell/tabRouters";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 export interface BreadcrumbItem {
   label: string;
   href?: string;
-  icon?: ReactNode;
+  icon: ReactElement;
 }
 
 /** Shared page path; hidden ancestors stay navigable in a popover. */

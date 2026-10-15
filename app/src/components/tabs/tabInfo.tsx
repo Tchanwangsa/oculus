@@ -110,10 +110,11 @@ export function tabInfo(
   if (pathname.startsWith("/calendar"))
     return { title: "Calendar", icon: <CalendarBlank size={size} /> };
   // Task routes are tested before their prefix routes (project, task list).
-  if (/^\/projects\/\d+\/tasks\/\d+/.test(pathname)) {
+  const task = /^\/projects\/(\d+)\/tasks\/\d+/.exec(pathname);
+  if (task) {
     return {
       title: new URLSearchParams(search).get("n") || "Task",
-      icon: <CheckSquare size={size} />,
+      icon: <ProjectIcon project={{ id: Number(task[1]) }} size={size} />,
     };
   }
   const proj = /^\/projects\/(\d+)/.exec(pathname);
