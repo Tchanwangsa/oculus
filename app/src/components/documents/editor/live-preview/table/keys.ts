@@ -1,6 +1,6 @@
 import { redo, undo } from "@codemirror/commands";
 
-import { caretAtEdge, cellAt, focusCell, onEdgeLine } from "./caret";
+import { allSelected, caretAtEdge, cellAt, focusCell, onEdgeLine } from "./caret";
 import { isCell, type TableCtx } from "./ctx";
 import { addRow, leave } from "./edits";
 import { rangeKeys, selectRange } from "./selection";
@@ -63,6 +63,12 @@ export function cellKeydown(t: TableCtx, e: KeyboardEvent) {
     if (to < 0 || to >= rows || !onEdgeLine(cell, up)) return;
     e.preventDefault();
     selectRange(t, { ar: r, ac: c, hr: to, hc: c });
+  } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && e.shiftKey && !mod && !e.altKey) {
+    // With the cell's text all selected, Shift selects the cell itself; the
+    // next arrows stretch that block (`rangeKeys`).
+    if (!allSelected(cell)) return;
+    e.preventDefault();
+    selectRange(t, { ar: r, ac: c, hr: r, hc: c });
   } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !mod && !e.altKey && !e.shiftKey) {
     const left = e.key === "ArrowLeft";
     const edge = left ? r === 0 && c === 0 : r === rows - 1 && c === cols - 1;
