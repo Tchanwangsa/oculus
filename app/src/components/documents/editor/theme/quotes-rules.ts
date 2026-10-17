@@ -8,5 +8,5 @@ export const quotesRules: ThemeSpec = {
   },
   ".cm-hr": { display: "flex", alignItems: "center", height: "1.7em", cursor: "text" },
   ".cm-hr::before": { content: '""', flex: "1", borderTop: "1px solid var(--color-border)" },
-  ".cm-line.cm-hr-gap": { lineHeight: "0.6" },
+  ".cm-line.cm-block-gap": { lineHeight: "0.6" },
 };

@@ -60,6 +60,10 @@ last updated (`modified_at` or the session's last save) and a word count.
   use `app/src/components/documents/editor/live-preview/tableModel.ts` for source-preserving
   edits. A cell writes back only its own source range, Tab/Enter move between
   cells, and the frame scrolls sideways.
+  A cell holding markup draws it like the rest of the note — marks, code,
+  links, file chips and `$…$` maths (`table/rich.ts`, parsed with the note
+  grammar): the cell's own element stays the editor, invisible over the
+  drawing, and focusing it shows the source until it blurs.
   A drag across cells (or Shift with a click or ↑/↓) selects a block, which
   the scroller holds focus for: Delete empties it, and on a block already
   empty removes the whole rows (never the header) or columns it spans, or
@@ -73,8 +77,13 @@ last updated (`modified_at` or the session's last save) and a word count.
   it into the last row, ↓/→ from the line over it into the header, Backspace
   and Delete likewise (deleting an empty line in between when no text would
   end up against the table). Arrows at the grid's edges, and Esc, hand it back.
-  Text typed or pasted at a table's edge goes on its own line, after a blank
-  line below it, since GFM reads a line straight under a table as a row.
+  Text typed, pasted or dropped at a table's edge goes on its own line, after a
+  blank line below it, since GFM reads a line straight under a table as a row.
+  Pasted text that ends in a table gets a blank line after it the same way
+  (`livePreview/tableTail.ts`), wherever it lands. The blank lines beside a table (and a rule) draw as a
+  small gap, not a full line, unless the caret is on one (`shrinkBlanksAround`
+  in `livePreview/blocks.ts`). Lezer reads a line with a pipe in it directly
+  above a table as part of its paragraph, so that blank line above is needed too.
   **Leading YAML frontmatter** parses as `Frontmatter`
   (`app/src/components/documents/editor/syntax/frontmatter.ts`) and draws as a
   Properties card, revealing its source when touched. Only a `---` first line

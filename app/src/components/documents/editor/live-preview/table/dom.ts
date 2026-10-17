@@ -2,6 +2,7 @@ import type { EditorView } from "@codemirror/view";
 
 import { cellText, type TableLayout } from "../tableModel";
 import { caretIn, cellAt, focusCell } from "./caret";
+import { disposeRich, paintRich } from "./rich";
 import { bounds, cellValue, layouts, ranges } from "./state";
 
 /** Mark the selected cells, or none. */
@@ -75,9 +76,11 @@ function buildTable(layout: TableLayout, editable: boolean): HTMLTableElement {
       cell.dataset.r = String(r);
       cell.dataset.c = String(c);
       cell.style.textAlign = align ?? "";
-      cell.textContent = cellText(layout, r, c);
+      const text = cellText(layout, r, c);
+      cell.textContent = text;
       td.appendChild(cell);
       tr.appendChild(td);
+      paintRich(cell, text);
     });
   });
   return table;
@@ -97,6 +100,7 @@ export function render(dom: HTMLElement, layout: TableLayout) {
 
   if (scroll.dataset.shape !== shape || !scroll.firstChild) {
     const was = focused ? { r: Number(focused.dataset.r), c: Number(focused.dataset.c), at: caretIn(focused) } : null;
+    disposeRich(scroll);
     scroll.replaceChildren(buildTable(layout, !dom.classList.contains("cm-table-static")));
     scroll.dataset.shape = shape;
     const range = ranges.get(dom);
@@ -131,8 +135,9 @@ export function render(dom: HTMLElement, layout: TableLayout) {
         cell.textContent = text;
         focusCell(cell);
       }
-    } else if (cell.textContent !== text) {
-      cell.textContent = text;
+    } else {
+      if (cell.textContent !== text) cell.textContent = text;
+      paintRich(cell, text);
     }
   }
   placeHandles(dom);

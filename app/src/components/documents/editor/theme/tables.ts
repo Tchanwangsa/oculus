@@ -27,6 +27,7 @@ export const tables: ThemeSpec = {
     padding: "0",
     textAlign: "left",
     verticalAlign: "top",
+    position: "relative",
   },
   ".cm-table th": { fontWeight: "600", backgroundColor: "var(--color-surface)" },
   ".cm-table-scroll:focus": { outline: "none" },
@@ -86,6 +87,30 @@ export const tables: ThemeSpec = {
     outline: "none",
     cursor: "text",
   },
+  // A cell holding markup: the drawing sizes the cell, and the source (the
+  // editor) lies invisible over it until the cell takes focus.
+  ".cm-table-rich": {
+    display: "none",
+    minWidth: "7em",
+    maxWidth: "28em",
+    padding: "6px 10px",
+    whiteSpace: "pre-wrap",
+    wordBreak: "normal",
+    overflowWrap: "break-word",
+    pointerEvents: "none",
+  },
+  ".cm-cell-rich > .cm-table-rich": { display: "block" },
+  ".cm-cell-rich > .cm-table-cell": {
+    position: "absolute",
+    inset: "0",
+    minWidth: "0",
+    maxWidth: "none",
+    minHeight: "0",
+    overflow: "hidden",
+    opacity: "0",
+  },
+  ".cm-table-rich .cm-citation": { verticalAlign: "baseline" },
+  ".cm-table-link": { color: brand, textDecoration: "underline" },
   ".cm-table-add": {
     border: "0",
     padding: "0",
