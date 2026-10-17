@@ -1,6 +1,6 @@
 import { redo, undo } from "@codemirror/commands";
-import { copyText } from "@/lib/utils";
 
+import { gridToHtml, gridToText, type Grid } from "../tableGrid";
 import { cellText, type TableLayout } from "../tableModel";
 import { caretUnder, cellAt, focusCell } from "./caret";
 import { place, type TableCtx } from "./ctx";
@@ -30,16 +30,36 @@ export function clearRange(t: TableCtx) {
   if (ranges.delete(dom)) paintRange(dom);
 }
 
-/** The selected block as tab-separated rows, as spreadsheets paste it. */
-function rangeText(layout: TableLayout, range: CellRange) {
+/** The selected block's cell texts. */
+function rangeGrid(layout: TableLayout, range: CellRange): Grid {
   const { r0, r1, c0, c1 } = bounds(range);
-  const lines: string[] = [];
+  const grid: Grid = [];
   for (let r = r0; r <= r1; r++) {
     const row: string[] = [];
     for (let c = c0; c <= c1; c++) row.push(cellText(layout, r, c).trim());
-    lines.push(row.join("\t"));
+    grid.push(row);
   }
-  return lines.join("\n");
+  return grid;
+}
+
+/** Whether the clipboard commands belong to a selected block: the scroller
+ *  holds focus then, with no text selected. */
+export function blockHeld(t: TableCtx, e: Event): boolean {
+  return t.scroll === e.target && ranges.has(t.dom);
+}
+
+/** Copy or cut of the selected block: tab-separated rows, as spreadsheets
+ *  paste them, and an HTML table, as documents do. It runs on the clipboard
+ *  event, which the Edit menu raises too; ⌘C alone would miss it. */
+export function copyBlock(t: TableCtx, e: ClipboardEvent, cut: boolean) {
+  const range = ranges.get(t.dom);
+  const layout = layouts.get(t.dom);
+  if (!range || !layout || !blockHeld(t, e) || !e.clipboardData) return;
+  e.preventDefault();
+  const grid = rangeGrid(layout, range);
+  e.clipboardData.setData("text/plain", gridToText(grid));
+  e.clipboardData.setData("text/html", gridToHtml(grid));
+  if (cut) deleteRange(t, false);
 }
 
 const ARROWS: Record<string, [number, number]> = {
@@ -71,10 +91,6 @@ export function rangeKeys(t: TableCtx, e: KeyboardEvent) {
   } else if (mod && !e.altKey && key === "a") {
     e.preventDefault();
     selectRange(t, { ar: 0, ac: 0, hr: rows - 1, hc: cols - 1 });
-  } else if (mod && !e.altKey && (key === "c" || key === "x")) {
-    e.preventDefault();
-    void copyText(rangeText(layout, range));
-    if (key === "x") deleteRange(t, false);
   } else if (key in ARROWS && !mod && !e.altKey) {
     e.preventDefault();
     const [dr, dc] = ARROWS[key];

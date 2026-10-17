@@ -1,4 +1,5 @@
-import { appendCell, cellChange, removeCells, type Insert } from "../tableModel";
+import { appendCell, cellChange, cellText, removeCells, type Insert } from "../tableModel";
+import { gridToMarkdown, type Grid } from "../tableGrid";
 import { caretIn, cellAt, focusCell } from "./caret";
 import { current, dispatch, goTo, type TableCtx } from "./ctx";
 import { tableAt } from "./dom";
@@ -121,4 +122,35 @@ export function deleteRange(t: TableCtx, structural: boolean) {
     dispatch(t, changes, "delete");
     goTo(t, base, 0, Math.min(c0, cols - 1 - (c1 - c0 + 1)));
   }
+}
+
+/** A grid pasted with its top-left corner at cell `r0`, `c0`. Cells within
+ *  the table change alone; one reaching past it grows the table, which is
+ *  rewritten whole. */
+export function pasteGrid(t: TableCtx, r0: number, c0: number, grid: Grid) {
+  const now = current(t);
+  if (!now) return;
+  const { layout, base } = now;
+  const rows = layout.rows.length;
+  const cols = layout.align.length;
+  const w = grid.reduce((n, row) => Math.max(n, row.length), 0);
+  const needRows = Math.max(rows, r0 + grid.length);
+  const needCols = Math.max(cols, c0 + w);
+  if (needRows === rows && needCols === cols) {
+    const changes: Insert[] = [];
+    grid.forEach((row, i) =>
+      row.forEach((value, j) => {
+        const change = cellChange(layout, base, r0 + i, c0 + j, value.trim());
+        if (change) changes.push(change);
+      }),
+    );
+    if (changes.length) dispatch(t, changes, "input.paste");
+  } else {
+    const matrix: Grid = Array.from({ length: needRows }, (_, r) =>
+      Array.from({ length: needCols }, (_, c) => (r < rows && c < cols ? cellText(layout, r, c).trim() : "")),
+    );
+    grid.forEach((row, i) => row.forEach((value, j) => (matrix[r0 + i][c0 + j] = value.trim())));
+    dispatch(t, { from: base, to: base + layout.length, insert: gridToMarkdown(matrix, layout.align) }, "input.paste");
+  }
+  goTo(t, base, r0, c0);
 }

@@ -69,7 +69,12 @@ last updated (`modified_at` or the session's last save) and a word count.
   A drag across cells (or Shift with a click or ↑/↓) selects a block, which
   the scroller holds focus for: Delete empties it, and on a block already
   empty removes the whole rows (never the header) or columns it spans, or
-  the table. ⌘C copies it tab-separated. Edge handles for the row and column
+  the table. ⌘C (or Edit → Copy, on the clipboard event, with `beforecopy` claimed since WebKit would leave Copy off with no text selected) copies it as tab-separated text and an HTML table, and ⌘V
+  into a cell or a selected block fills cells from there with a pasted grid
+  (an HTML table or tab-separated rows), growing the table when it reaches
+  past it (`tableGrid.ts`, `pasteGrid` in `table/edits.ts`). A spreadsheet's
+  or web page's table pasted into the note's text becomes a pipe table
+  (`livePreview/gridPaste.ts`). Edge handles for the row and column
   under the pointer select them on a click and move them on a drag; a moved
   row keeps its bytes, a moved column rewrites rows with outer pipes, and the
   header row never moves (a body row may be short of cells).
