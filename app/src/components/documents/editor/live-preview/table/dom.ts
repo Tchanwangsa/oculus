@@ -37,6 +37,13 @@ export function placeHandles(dom: HTMLElement) {
   const td = table.rows[r]?.cells[c];
   if (!td) return;
   const tr = table.rows[r];
+  // Before the table is in the page every offset is 0, which would park both
+  // handles on its corner; `toDOM` places them again once it is.
+  if (!td.offsetWidth) {
+    colHandle.hidden = rowHandle.hidden = true;
+    return;
+  }
+  rowHandle.hidden = false;
 
   const mid = td.offsetLeft + td.offsetWidth / 2 - scroll.scrollLeft;
   colHandle.hidden = mid < 0 || mid > scroll.clientWidth;
