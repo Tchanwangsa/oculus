@@ -68,7 +68,7 @@ export function attach(dom: HTMLElement, view: EditorView) {
     aim(t, e.target);
   });
   dom.addEventListener("focusout", (e) => {
-    if (isCell(e.target)) paintRich(e.target, cellValue(e.target));
+    if (isCell(e.target)) paintRich(e.target, cellValue(e.target), false);
   });
   scroll.addEventListener("scroll", () => placeHandles(dom));
 
