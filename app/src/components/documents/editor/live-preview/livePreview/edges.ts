@@ -13,7 +13,7 @@ import { tailPadding } from "./tableTail";
  *  line straight under a table as a row, so text at its end or on the empty
  *  line under it starts after a blank line; at its start, it gets its own
  *  line. */
-function edgePadding(state: EditorState, pos: number): [string, string] | null {
+export function edgePadding(state: EditorState, pos: number): [string, string] | null {
   if (tableAt(state, pos, "to")) return ["\n\n", ""];
   if (tableAt(state, pos, "from")) return ["", "\n"];
   if (!state.doc.lineAt(pos).length && tableBeside(state, pos, true)) return ["\n", ""];

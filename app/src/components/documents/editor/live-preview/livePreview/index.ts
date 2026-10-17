@@ -7,6 +7,7 @@ import { mathField, visualMathField } from "../../math/field/mathField";
 import { MathWidget, mathsWatcher } from "../widgets";
 import { blockField } from "./blocks";
 import { dollarTyping, edgePaste, edgeTyping, fieldLatexPaste } from "./edges";
+import { gridPaste } from "./gridPaste";
 import { inlinePlugin } from "./inline";
 import { mathBlockField } from "./math-blocks";
 import { tableField, tableKeys } from "./tables";
@@ -70,6 +71,7 @@ export function livePreview(): Extension {
     dollarTyping,
     edgeTyping,
     edgePaste,
+    gridPaste,
     fieldLatexPaste,
   ];
 }
