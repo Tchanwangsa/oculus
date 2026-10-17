@@ -796,8 +796,10 @@ takes. Words are ANDed against filenames (`safe_filename` turns spaces into
 `_`); the token is bounded (no space after `@`, four words, 60 characters, a
 backtick ends it) and the menu opens only on a match.
 
-**A mention is a chip on screen and a path on the wire** (`FileChip`, built
-from the path alone), which is why `MentionInput.tsx` is a contenteditable:
+**A mention is a glyph and a name on screen and a path on the wire**
+(`FileChip`, built from the path alone, drawn as a note draws a reference:
+underlined, `referenceRestClass`, with no hover since a click there belongs to
+the caret), which is why `MentionInput.tsx` is a contenteditable:
 the DOM is the source of truth while typing, React re-renders only on
 structural changes (bumping `key`), and `revealCaret` scrolls the box because
 a contenteditable follows its caret only for edits it made. The menu anchors
@@ -807,7 +809,7 @@ The menu's rows draw the chip's own glyph and colour
 (`fileReferenceAppearance`), and the lecture dock's composer uses the same input
 and menu, scoped to the lecture's subject.
 A note's or task body's `@` (the note editor's own completion) writes the
-same backticked path and draws the same chip
+same backticked path and draws the same reference
 ([editor.md](./editor.md#pictures-mentions-and-citations-resolve-to-library-files)).
 
 ## Attachments are files in `agents/attachments/`
@@ -816,6 +818,11 @@ The page and lecture dock share `SendControls` for send/queue/stop controls
 and `useAttachments.prepare` for message assembly. Preparation writes pictures
 before clearing the composer; a failed write keeps the draft and attachments.
 A message reads: the typed text, each pasted text's block, then the pictures'
+A web link (`https://…` or `[words](https://…)`, `lib/harness/links.ts`) draws
+the same way (`LinkChip`: the site's icon and its words or host) in the
+composer and in the sent bubble. It becomes one when pasted or when the space
+or line break after it is typed, and a restored draft draws its links too; the
+text on the wire is the link as written, so a conversion never moves the caret.
 paths, blank-line separated.
 
 A CLI reads files, so a picture becomes one — in `agents/`, the one folder

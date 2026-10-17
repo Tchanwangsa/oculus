@@ -1,9 +1,14 @@
 import { splitLibraryPaths } from "@/lib/files/openFile";
+import { splitLinks } from "@/lib/harness/links";
 
-/** Runs of text with atomic mentions (a mention is only its path). The DOM, not
- *  this model, is the truth while typing: React renders it once per structural
- *  change, because a contenteditable re-rendered per keystroke drops the caret. */
-export type Chunk = { kind: "text"; text: string } | { kind: "chip"; path: string };
+/** Runs of text with atomic mentions (a mention is only its path) and links
+ *  (only their text as written). The DOM, not this model, is the truth while
+ *  typing: React renders it once per structural change, because a
+ *  contenteditable re-rendered per keystroke drops the caret. */
+export type Chunk =
+  | { kind: "text"; text: string }
+  | { kind: "chip"; path: string }
+  | { kind: "link"; raw: string };
 
 /** A mention as the message spells it: the backticked path `oculus read` takes. */
 export function chipText(path: string): string {
@@ -23,7 +28,9 @@ export type Point = { node: Node; offset: number };
 export type Reading = { text: string; caret: number | null; chunks: Chunk[] };
 
 export function isChip(node: Node): boolean {
-  return node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).hasAttribute("data-path");
+  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+  const el = node as HTMLElement;
+  return el.hasAttribute("data-path") || el.hasAttribute("data-raw");
 }
 
 /** Walks the nodes into the sent text, its chunks and the caret's offset in one
@@ -59,6 +66,12 @@ export function readEditor(root: HTMLElement, point: Point | null): Reading {
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
     if (isChip(el)) {
+      const raw = el.getAttribute("data-raw");
+      if (raw != null) {
+        chunks.push({ kind: "link", raw });
+        text += raw;
+        return;
+      }
       const path = el.getAttribute("data-path") ?? "";
       chunks.push({ kind: "chip", path });
       text += chipText(path);
@@ -86,7 +99,8 @@ export function readEditor(root: HTMLElement, point: Point | null): Reading {
 }
 
 export function chunkText(c: Chunk): string {
-  return c.kind === "chip" ? chipText(c.path) : c.text.replace(ZWSP_RE, "");
+  if (c.kind === "chip") return chipText(c.path);
+  return c.kind === "link" ? c.raw : c.text.replace(ZWSP_RE, "");
 }
 
 export function chunksText(chunks: Chunk[]): string {
@@ -98,7 +112,7 @@ export function chunksText(chunks: Chunk[]): string {
 export function normalize(chunks: Chunk[]): Chunk[] {
   const out: Chunk[] = [];
   for (const c of chunks) {
-    if (c.kind === "chip") {
+    if (c.kind !== "text") {
       out.push(c);
       continue;
     }
@@ -108,7 +122,7 @@ export function normalize(chunks: Chunk[]): Chunk[] {
     if (last?.kind === "text") out[out.length - 1] = { kind: "text", text: last.text + text };
     else out.push({ kind: "text", text });
   }
-  if (out[0]?.kind === "chip") out.unshift({ kind: "text", text: ZWSP });
+  if (out[0] && out[0].kind !== "text") out.unshift({ kind: "text", text: ZWSP });
   return out;
 }
 
@@ -130,7 +144,7 @@ export function caretChunk(chunks: Chunk[], offset: number): { chunk: number; of
   for (let i = 0; i < chunks.length; i++) {
     const c = chunks[i];
     const len = chunkText(c).length;
-    if (c.kind === "chip") {
+    if (c.kind !== "text") {
       if (offset <= at + len) return { chunk: i + 1, offset: 0 };
     } else if (offset <= at + len) {
       return { chunk: i, offset: domOffset(c.text, offset - at) };
@@ -140,15 +154,22 @@ export function caretChunk(chunks: Chunk[], offset: number): { chunk: number; of
   return { chunk: chunks.length, offset: 0 };
 }
 
+/** The links in text runs, as chunks; the message text does not change. `settled`:
+ *  see `splitLinks`. */
+export function linkChunks(chunks: Chunk[], settled = false): Chunk[] {
+  return chunks.flatMap((c): Chunk[] => (c.kind === "text" ? splitLinks(c.text, settled) : [c]));
+}
+
 /** Text back into chunks via `splitLibraryPaths`, so a restored draft chips the
- *  same runs a sent message does. */
+ *  same runs a sent message does, and its links draw as links. */
 export function toChunks(text: string): Chunk[] {
-  return splitLibraryPaths(text).map((p) => {
-    if (p.kind === "path") return { kind: "chip" as const, path: p.path };
+  const paths = splitLibraryPaths(text).map((p): Chunk => {
+    if (p.kind === "path") return { kind: "chip", path: p.path };
     // A picture is not a mention the box can redraw; it stays text.
-    if (p.kind === "image") return { kind: "text" as const, text: `\`${p.raw}\`` };
-    return { kind: "text" as const, text: p.text };
+    if (p.kind === "image") return { kind: "text", text: `\`${p.raw}\`` };
+    return { kind: "text", text: p.text };
   });
+  return linkChunks(paths);
 }
 
 /** True when nothing but WebKit's placeholder `<br>` follows the caret — the one
@@ -159,7 +180,7 @@ function atEnd(el: HTMLElement, caret: Range): boolean {
   tail.setStart(caret.startContainer, caret.startOffset);
   if (tail.toString().replace(ZWSP_RE, "").replace(/\n/g, "").trim()) return false;
   const rest = tail.cloneContents();
-  if (rest.querySelector("[data-path]")) return false;
+  if (rest.querySelector("[data-path], [data-raw]")) return false;
   // One break is the placeholder; more are blank lines below the caret.
   return rest.querySelectorAll("br").length + (tail.toString().match(/\n/g)?.length ?? 0) <= 1;
 }
