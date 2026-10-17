@@ -317,3 +317,8 @@ cannot wait on the blur (the chat's pasted text editor,
   any box whose `scrollHeight` beat `clientHeight`, and under page zoom the
   editor's `overflow: visible` wrappers round a pixel over, so drag-select never
   scrolled `page-scroll`. The sticky toolbar's height is a `scrollMargins` top.
+- **Tooltips are never clipped to the editor** (`core/unclippedTooltips.ts`):
+  CodeMirror adds the toolbar's `scrollMargins` top to the editor's own top
+  when it decides a tooltip's anchor is outside the editor, and parks the
+  tooltip at -10000px, so the `@` and maths lists on the first lines never
+  showed. The plugin sets `clip: false` on tooltips while a top margin exists.
