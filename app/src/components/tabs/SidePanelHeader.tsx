@@ -36,7 +36,7 @@ export function SidePanelHeader({
 }) {
   const tabInfo = useTabInfo();
   const claimed = useSyncExternalStore(claim.subscribe, claim.claimed);
-  if (claimed) return null;
+  if (claimed || side.hidden) return null;
 
   return (
     <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-border-subtle px-2">
@@ -54,12 +54,15 @@ export function SidePanelHeader({
 /** The switcher, for a page row holding the header slot. */
 export function PanelSwitcher({ tabId, side }: { tabId: number; side: SidePanel }) {
   const tabInfo = useTabInfo();
-  return <Switcher tabId={tabId} side={side} tabInfo={tabInfo} />;
+  return side.hidden ? null : <Switcher tabId={tabId} side={side} tabInfo={tabInfo} />;
 }
 
 /** Expand (⌘-click: a new tab) and close; a group that never shrinks. */
 export function PanelActions({ tabId }: { tabId: number }) {
-  const closeSide = useTabStore((s) => s.closeSide);
+  const front = useTabStore((s) => s.tabs.find((t) => t.id === tabId)?.side?.front);
+  const hidden = useTabStore((s) => s.tabs.find((t) => t.id === tabId)?.side?.hidden);
+  const removeSide = useTabStore((s) => s.removeSide);
+  if (hidden) return null;
   return (
     <div className="flex shrink-0 items-center gap-0.5">
       <Tooltip>
@@ -85,14 +88,14 @@ export function PanelActions({ tabId }: { tabId: number }) {
           <Button
             variant="ghost"
             size="icon-xs"
-            onClick={() => closeSide(tabId)}
-            aria-label="Close side panel"
+            onClick={() => front != null && removeSide(tabId, front)}
+            aria-label="Close side tab"
             className="text-muted-foreground hover:text-foreground"
           >
             <X size={14} />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Close side panel</TooltipContent>
+        <TooltipContent>Close side tab</TooltipContent>
       </Tooltip>
     </div>
   );
