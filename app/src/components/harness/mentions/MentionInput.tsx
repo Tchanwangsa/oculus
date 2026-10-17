@@ -21,6 +21,10 @@ import type { Landing, MentionInputHandle } from "./types";
 
 export type { MentionInputHandle } from "./types";
 
+/** Nothing typed: a space counts as text, so the placeholder gives way to it.
+ *  Line breaks don't, as WebKit's trailing `<br>` reads as one. */
+const isBlank = (text: string) => text.replace(/[\r\n]/g, "") === "";
+
 /**
  * A contenteditable whose `@` mentions are inline `contenteditable="false"`
  * chips. Drawn and sent text differ: `readEditor` turns each chip back into its
@@ -58,7 +62,7 @@ export function MentionInput({
    *  the typist edited underneath React. */
   const [version, setVersion] = useState(0);
   /** Placeholder flag — `:empty` can't do it, WebKit's trailing `<br>` isn't empty. */
-  const [blank, setBlank] = useState(!(initialText ?? "").trim());
+  const [blank, setBlank] = useState(isBlank(initialText ?? ""));
   const landing = useRef<Landing | null>(null);
   /** The pending `repaintCaret`; one is enough for a burst of line breaks. */
   const repaint = useRef(0);
@@ -76,7 +80,7 @@ export function MentionInput({
     const el = box.current;
     if (!el) return;
     const r = readEditor(el, point(el));
-    setBlank(!r.text.trim());
+    setBlank(isBlank(r.text));
     onEdit(r.text, r.caret ?? r.text.length);
   }
 
@@ -90,7 +94,7 @@ export function MentionInput({
     setChunks(norm);
     setVersion((v) => v + 1);
     const text = chunksText(norm);
-    setBlank(!text.trim());
+    setBlank(isBlank(text));
     onEdit(text, caret);
   }
 
