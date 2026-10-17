@@ -276,7 +276,8 @@ while Ctrl+Shift+Z is Redo.
 
 Left is the tab's main page; right is its side panel (`tab.side`, pure logic in
 `app/src/lib/shell/sideStack.ts`), a stack of up to `SIDE_CAP` (8) panes. The side-panel shortcut on a
-closed panel opens one on `/new`.
+panel with no items opens one on `/new`; a hidden panel reopens its existing
+items with the same front item and width.
 
 - **`openBeside` is what file rows, citations and lecture rows call**
   (`openFileSmart`, `openCitation`, `LecturesPage`, Home's `RecentRow`, the
@@ -296,7 +297,9 @@ closed panel opens one on `/new`.
   stored in `oculus-tabs`.
 - **The header is a switcher** — up to three stacked item icons, then `+N`,
   opening a list with a × per item and a "New side tab" row that pushes `/new`
-  — then expand and ×, which closes the panel and clears the stack. A page with its own top row (file, lecture, task,
+  — then expand and ×, which removes only the front item and shows the most
+  recently viewed item left. Removing the last item closes the panel. A page
+  with its own top row (file, lecture, task,
   project, chat thread) builds it on `PaneHeaderRow`
   (`app/src/components/tabs/PaneHeader.tsx`), which in the side panel claims
   the header slot `TabPane` provides and draws the switcher at the row's start
@@ -313,6 +316,12 @@ closed panel opens one on `/new`.
   and removes it with `handover`: a lecture it owned is claimed for the main
   pane (or the new tab), so whatever comes to the panel's front next waits and
   the expanded lecture plays on, and a browser page stays open.
+- **The strip toggle hides the panel and keeps its stack**. Its badge counts
+  hidden tabs; toggling again restores the same front item. The hidden front
+  page stays mounted at its split width, preserving drafts and scroll, while
+  main takes the full card and receives shell navigation. Native browser
+  views hide without closing their pages; a hidden lecture pauses. Hidden
+  state is stored with the stack in `oculus-tabs`, and opening beside reveals it.
 - **Only the front item is mounted**; the rest are a path and a router. A
   lecture sent to the back pauses; a browser item sent to the back has its
   native view taken down as it unmounts, and a removed one has its page

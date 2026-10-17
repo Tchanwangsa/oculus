@@ -75,11 +75,11 @@ interface TabState {
   remember: (entry: ClosedTab) => void;
   /** ⇧⌘T. A browser tab reopens by URL; `useBrowserTabs` adopts the page. */
   reopenTab: () => void;
-  /** Opens a side panel on `/new`, or — already open — focuses it. */
+  /** Reveals and focuses the side panel, creating `/new` only when empty. */
   openSide: (tabId: number) => void;
-  /** Closes the side panel and clears its stack. */
-  closeSide: (tabId: number) => void;
-  /** ⌥⌘T and the strip button: open the side panel if closed, else close it. */
+  /** Hides the side panel, retaining its items and routers. */
+  hideSide: (tabId: number) => void;
+  /** ⌥⌘T and the strip button: reveal or hide the side panel. */
   toggleSide: (tabId: number) => void;
   /** Opens `path` in the side panel and focuses it (`pushItem`): a new item,
    *  or the one naming the same thing, brought to the front and navigated
@@ -152,21 +152,26 @@ export const useTabStore = create<TabState>((set, get) => ({
   openSide: (tabId) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    if (tab.side) get().focusPane(tabId, "side");
-    else get().pushSide(tabId, HOME);
+    if (tab.side) {
+      set((s) => withTab(s, tabId, (t) => ({
+        ...t, side: { ...t.side!, hidden: false }, focus: "side",
+      })));
+    } else get().pushSide(tabId, HOME);
   },
 
-  closeSide: (tabId) => {
+  hideSide: (tabId) => {
     const tab = get().tabs.find((t) => t.id === tabId);
-    if (!tab?.side) return;
-    for (const item of tab.side.items) releaseItem(item);
-    set((s) => withTab(s, tabId, (t) => ({ ...t, side: null, focus: "main" })));
+    if (!tab?.side || tab.side.hidden) return;
+    leaveFront(tab.side, null);
+    set((s) => withTab(s, tabId, (t) => ({
+      ...t, side: { ...t.side!, hidden: true }, focus: "main",
+    })));
   },
 
   toggleSide: (tabId) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    if (tab.side) get().closeSide(tabId);
+    if (tab.side && !tab.side.hidden) get().hideSide(tabId);
     else get().openSide(tabId);
   },
 
@@ -225,7 +230,7 @@ export const useTabStore = create<TabState>((set, get) => ({
   focusPane: (tabId, side) =>
     set((s) => {
       const tab = s.tabs.find((t) => t.id === tabId);
-      if (!tab || tab.focus === side || (side === "side" && !tab.side)) return s;
+      if (!tab || tab.focus === side || (side === "side" && (!tab.side || tab.side.hidden))) return s;
       return { tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, focus: side } : t)) };
     }),
 

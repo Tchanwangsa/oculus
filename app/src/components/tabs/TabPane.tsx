@@ -46,6 +46,7 @@ const TabPane = memo(function TabPane({
 }) {
   const tabId = tab.id;
   const front = sideFront(tab);
+  const sideVisible = !!tab.side && !tab.side.hidden;
   const focusPane = useTabStore((s) => s.focusPane);
   const setSideRatio = useTabStore((s) => s.setSideRatio);
   // The ratio on screen mid-drag; the store hears it once, on release.
@@ -123,26 +124,28 @@ const TabPane = memo(function TabPane({
         side="main"
         tabActive={active}
         onFocus={focusPane}
-        style={front ? { flex: `0 0 ${ratio * 100}%` } : undefined}
+        style={sideVisible ? { flex: `0 0 ${ratio * 100}%` } : undefined}
       />
       {tab.side && front && (
         <>
           {/* The divider carries the focus marker (indigo edge on the focused
               side): inside a pane, a native browser page's hole would cut it out. */}
-          <ResizeHandle
-            onMouseDown={onHandleDown}
-            dragging={dragging}
-            label="Resize side panel"
-            className="bg-border"
-          >
-            <span
-              aria-hidden
-              className={cn(
-                "pointer-events-none absolute inset-y-0 w-px bg-brand",
-                tab.focus === "main" ? "left-0" : "right-0",
-              )}
-            />
-          </ResizeHandle>
+          {sideVisible && (
+            <ResizeHandle
+              onMouseDown={onHandleDown}
+              dragging={dragging}
+              label="Resize side panel"
+              className="bg-border"
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "pointer-events-none absolute inset-y-0 w-px bg-brand",
+                  tab.focus === "main" ? "left-0" : "right-0",
+                )}
+              />
+            </ResizeHandle>
+          )}
           {/* Only the front item is mounted; the rest are a path and a
               router (`lib/shell/tabRouters.ts`). Focus is taken on the column, so
               a click on the header focuses the side panel too. */}
@@ -150,6 +153,17 @@ const TabPane = memo(function TabPane({
             onPointerDownCapture={() => focusPane(tabId, "side")}
             onFocusCapture={() => focusPane(tabId, "side")}
             className="flex min-w-0 flex-1 flex-col"
+            // Keep the front page mounted at its split width while collapsed,
+            // preserving drafts and scroll without taking space from main.
+            style={sideVisible ? undefined : {
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              right: 0,
+              width: `${(1 - ratio) * 100}%`,
+              visibility: "hidden",
+            }}
+            inert={!active || !sideVisible}
           >
             <SidePanelHeader tabId={tabId} side={tab.side} claim={claim} />
             <SideSlotProvider value={slot}>
@@ -158,7 +172,7 @@ const TabPane = memo(function TabPane({
                 pane={front}
                 tabId={tabId}
                 side="side"
-                tabActive={active}
+                tabActive={active && sideVisible}
                 claim={claim}
               />
             </SideSlotProvider>
