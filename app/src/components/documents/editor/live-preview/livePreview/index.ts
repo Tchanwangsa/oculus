@@ -10,7 +10,7 @@ import { dollarTyping, edgePaste, edgeTyping, fieldLatexPaste } from "./edges";
 import { gridPaste } from "./gridPaste";
 import { inlinePlugin } from "./inline";
 import { mathBlockField } from "./math-blocks";
-import { tableField, tableKeys } from "./tables";
+import { tableCaret, tableField, tableKeys } from "./tables";
 
 /**
  * Live mode: markdown renders in place and a construct shows its source while
@@ -68,6 +68,7 @@ export function livePreview(): Extension {
     trackFocus,
     mathField(),
     tableKeys,
+    tableCaret,
     dollarTyping,
     edgeTyping,
     edgePaste,

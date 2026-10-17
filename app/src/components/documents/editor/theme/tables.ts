@@ -31,6 +31,19 @@ export const tables: ThemeSpec = {
   },
   ".cm-table th": { fontWeight: "600", backgroundColor: "var(--color-surface)" },
   ".cm-table-scroll:focus": { outline: "none" },
+  // The caret at a table's edge: CodeMirror's own would be table-tall.
+  "&.cm-focused.cm-caret-at-table .cm-cursorLayer": { display: "none" },
+  "&.cm-focused .cm-table-caret-from .cm-table-frame::before, &.cm-focused .cm-table-caret-to .cm-table-frame::after": {
+    content: '""',
+    position: "absolute",
+    left: "-4px",
+    height: "1.5em",
+    borderLeft: `1.5px solid ${brand}`,
+    animation: "cm-blink 1.2s steps(1) infinite",
+    pointerEvents: "none",
+  },
+  ".cm-table-caret-from .cm-table-frame::before": { top: "0" },
+  ".cm-table-caret-to .cm-table-frame::after": { bottom: "0" },
   ".cm-table-handle": {
     position: "absolute",
     zIndex: "2",
