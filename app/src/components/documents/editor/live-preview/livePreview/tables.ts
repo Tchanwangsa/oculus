@@ -1,5 +1,5 @@
 import { EditorSelection, Prec, StateField, type ChangeSpec, type EditorState, type Range } from "@codemirror/state";
-import { Decoration, EditorView, keymap, type Command, type DecorationSet } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, keymap, type Command, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 
 import { enterTable, TableWidget } from "../table";
 import { blockField } from "./blocks";
@@ -110,3 +110,49 @@ export const tableKeys = Prec.highest(
     { key: "Delete", run: deleteIntoTable(true) },
   ]),
 );
+
+/** The drawn table the caret rests at an edge of, and which edge. */
+function caretEdge(state: EditorState): { table: Span; edge: "from" | "to" } | null {
+  const pos = caretOf(state);
+  if (pos == null) return null;
+  for (const edge of ["from", "to"] as const) {
+    const table = tableAt(state, pos, edge);
+    if (table) return { table, edge };
+  }
+  return null;
+}
+
+/** At a table's edge CodeMirror's cursor would be as tall as the table, so
+ *  it is hidden (`cm-caret-at-table`) and the table draws a short one of its
+ *  own (`cm-table-caret-from` / `-to`). */
+export const tableCaret = [
+  EditorView.editorAttributes.compute(["selection", tableField], (state) =>
+    caretEdge(state) ? { class: "cm-caret-at-table" } : { class: "" }),
+  ViewPlugin.fromClass(class {
+    marked: HTMLElement | null = null;
+
+    update(u: ViewUpdate) {
+      if (!u.selectionSet && !u.docChanged && !u.viewportChanged) return;
+      u.view.requestMeasure({
+        key: this,
+        read: (view) => {
+          const at = caretEdge(view.state);
+          if (!at) return null;
+          for (const el of view.contentDOM.querySelectorAll<HTMLElement>(".cm-table")) {
+            if (view.posAtDOM(el) === at.table.from) return { el, cls: `cm-table-caret-${at.edge}` };
+          }
+          return null;
+        },
+        write: (found) => {
+          this.marked?.classList.remove("cm-table-caret-from", "cm-table-caret-to");
+          this.marked = found?.el ?? null;
+          if (found) found.el.classList.add(found.cls);
+        },
+      });
+    }
+
+    destroy() {
+      this.marked?.classList.remove("cm-table-caret-from", "cm-table-caret-to");
+    }
+  }),
+];

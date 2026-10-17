@@ -85,6 +85,9 @@ last updated (`modified_at` or the session's last save) and a word count.
   it into the last row, ↓/→ from the line over it into the header, Backspace
   and Delete likewise (deleting an empty line in between when no text would
   end up against the table). Arrows at the grid's edges, and Esc, hand it back.
+  CodeMirror's cursor there would be as tall as the table, so it is hidden and
+  the table draws a short blinking one of its own at that edge
+  (`tableCaret`, `livePreview/tables.ts`).
   Text typed, pasted or dropped at a table's edge goes on its own line, after a
   blank line below it, since GFM reads a line straight under a table as a row.
   Pasted text that ends in a table gets a blank line after it the same way
