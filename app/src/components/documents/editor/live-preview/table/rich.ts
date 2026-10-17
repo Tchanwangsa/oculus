@@ -127,13 +127,15 @@ function dispose(rich: HTMLElement) {
 }
 
 /** Draw `cell`'s markup (`text`, its source) in its place, or show the
- *  source: a focused cell is always source, and one with no markup too. */
-export function paintRich(cell: HTMLElement, text: string) {
+ *  source: a focused cell is always source, and one with no markup too.
+ *  A `focusout` handler passes `editing` false: WebKit still reports the
+ *  cell as active while it is blurring. */
+export function paintRich(cell: HTMLElement, text: string, editing = cell === cell.ownerDocument.activeElement) {
   const td = cell.parentElement;
   if (!td) return;
   let rich = richOf(td);
   const ready = String(mathsReady());
-  const focused = cell === cell.ownerDocument.activeElement;
+  const focused = editing;
   if (!focused && rich && rich.dataset.src === text && rich.dataset.ready === ready) {
     td.classList.add("cm-cell-rich");
     return;

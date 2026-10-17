@@ -36,7 +36,7 @@ export function noteSelection(): Extension {
   return [
     drawSelection(),
     layer({
-      above: false,
+      above: true,
       class: "cm-noteSelectionLayer",
       markers(view) {
         const gaps = view.state.facet(selectionGaps).flatMap((f) => f(view));
@@ -53,6 +53,8 @@ export function noteSelection(): Extension {
       },
       update: (u) => u.docChanged || u.selectionSet || u.viewportChanged || u.geometryChanged || u.transactions.length > 0,
     }),
-    EditorView.theme({ ".cm-selectionLayer": { display: "none" } }),
+    // Above the text, so code's own fill (opaque) does not hide it; the tint is
+    // translucent and the layer takes no clicks.
+    EditorView.theme({ ".cm-selectionLayer": { display: "none" }, ".cm-noteSelectionLayer": { pointerEvents: "none" } }),
   ];
 }
