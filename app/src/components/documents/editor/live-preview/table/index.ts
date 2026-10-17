@@ -3,7 +3,7 @@ import { EditorView, WidgetType } from "@codemirror/view";
 import type { TableLayout } from "../tableModel";
 import { attach } from "./attach";
 import { cellAt, focusCell } from "./caret";
-import { render, tableAt, tableButton } from "./dom";
+import { placeHandles, render, tableAt, tableButton } from "./dom";
 import { disposeRich } from "./rich";
 import { layouts } from "./state";
 
@@ -101,6 +101,7 @@ export class TableWidget extends WidgetType {
     dom.appendChild(frame);
     render(dom, this.layout);
     attach(dom, view);
+    requestAnimationFrame(() => dom.isConnected && placeHandles(dom));
     return dom;
   }
 
