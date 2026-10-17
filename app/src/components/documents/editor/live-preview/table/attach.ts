@@ -7,7 +7,9 @@ import { addColumn, addRow, write as writeCell } from "./edits";
 import { aim, handlePress } from "./handles";
 import { cellKeydown } from "./keys";
 import { cellMousedown } from "./press";
+import { paintRich, showSource } from "./rich";
 import { clearRange } from "./selection";
+import { cellValue } from "./state";
 
 /** Wires one table element's events. Everything is delegated from the root,
  *  which outlives the grid inside it. */
@@ -61,7 +63,12 @@ export function attach(dom: HTMLElement, view: EditorView) {
     if (cell && dom.contains(cell)) aim(t, cell);
   });
   dom.addEventListener("focusin", (e) => {
-    if (isCell(e.target)) aim(t, e.target);
+    if (!isCell(e.target)) return;
+    showSource(e.target);
+    aim(t, e.target);
+  });
+  dom.addEventListener("focusout", (e) => {
+    if (isCell(e.target)) paintRich(e.target, cellValue(e.target));
   });
   scroll.addEventListener("scroll", () => placeHandles(dom));
 

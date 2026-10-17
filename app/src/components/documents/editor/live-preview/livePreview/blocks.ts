@@ -23,6 +23,20 @@ import {
   touchesLines,
 } from "./shared";
 
+/** The blank lines just above and below a block shrink to a gap, unless the
+ *  caret is on them. */
+function shrinkBlanksAround(state: EditorState, from: number, to: number, out: Range<Decoration>[]) {
+  const first = state.doc.lineAt(from).number;
+  const last = state.doc.lineAt(to).number;
+  for (const n of [first - 1, last + 1]) {
+    if (n < 1 || n > state.doc.lines) continue;
+    const blank = state.doc.line(n);
+    if (blank.text.trim() === "" && !touches(state, blank.from, blank.to)) {
+      out.push(line("cm-block-gap").range(blank.from));
+    }
+  }
+}
+
 function buildBlocks(state: EditorState): DecorationSet {
   const host = state.facet(noteHost);
   const out: Range<Decoration>[] = [];
@@ -42,17 +56,8 @@ function buildBlocks(state: EditorState): DecorationSet {
         }
         case "HorizontalRule": {
           if (!ownsLines(state, node)) return false;
-          // A rule needs a blank line above it, or it underlines a heading; the
-          // blank lines beside it shrink to a gap unless the caret is on them.
-          const first = state.doc.lineAt(node.from).number;
-          const last = state.doc.lineAt(node.to).number;
-          for (const n of [first - 1, last + 1]) {
-            if (n < 1 || n > state.doc.lines) continue;
-            const blank = state.doc.line(n);
-            if (blank.text.trim() === "" && !touches(state, blank.from, blank.to)) {
-              out.push(line("cm-hr-gap").range(blank.from));
-            }
-          }
+          // A rule needs a blank line above it, or it underlines a heading.
+          shrinkBlanksAround(state, node.from, node.to, out);
           if (touchesLines(state, node.from, node.to)) return false;
           out.push(
             Decoration.replace({ widget: new RuleWidget(), block: true }).range(
@@ -69,6 +74,8 @@ function buildBlocks(state: EditorState): DecorationSet {
           const source = state.sliceDoc(node.from, to);
           const layout = parseTable(source);
           if (layout) {
+            // GFM needs a blank line under a table, and above one after text with a pipe in it.
+            shrinkBlanksAround(state, node.from, node.to, out);
             out.push(Decoration.replace({ widget: new TableWidget(source, layout), block: true }).range(node.from, to));
           }
           return false;

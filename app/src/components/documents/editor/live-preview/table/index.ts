@@ -4,6 +4,7 @@ import type { TableLayout } from "../tableModel";
 import { attach } from "./attach";
 import { cellAt, focusCell } from "./caret";
 import { render, tableAt, tableButton } from "./dom";
+import { disposeRich } from "./rich";
 import { layouts } from "./state";
 
 /**
@@ -108,6 +109,10 @@ export class TableWidget extends WidgetType {
     render(dom, this.layout);
     view.requestMeasure();
     return true;
+  }
+
+  destroy(dom: HTMLElement) {
+    disposeRich(dom);
   }
 
   /** Cells take their own clicks and keys. */
