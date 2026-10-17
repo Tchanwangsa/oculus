@@ -4,7 +4,7 @@ import { fileTitle, pathFile } from "@/lib/files/openFile";
 import { citationText, parsedSourceOf, type Citation } from "@/lib/citations";
 import { useCitedPage } from "@/hooks/agents/useCitation";
 import { cn } from "@/lib/utils";
-import { ReferencePreview, referenceClass } from "./ReferencePreview";
+import { ReferencePreview, referenceClass, referenceRestClass } from "./ReferencePreview";
 import { fileReferenceDetails } from "./referenceDetails";
 
 /** The chip's location suffix: a page, else a line range. */
@@ -84,7 +84,7 @@ export function FileChip({
         className={cn(
           "mx-px inline box-decoration-clone",
           typeof label === "string" && label.length <= 40 && "whitespace-nowrap",
-          onClick ? cn(referenceClass, "cursor-pointer") : "rounded bg-accent px-1 text-accent-foreground",
+          onClick ? cn(referenceClass, "cursor-pointer") : referenceRestClass,
           className,
         )}
       >

@@ -1,5 +1,6 @@
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
 import { FileChip } from "@/components/markdown/FileChip";
+import { LinkChip } from "@/components/markdown/LinkChip";
 import { imageFiles } from "@/lib/harness/attachments";
 import {
   caretChunk,
@@ -8,6 +9,7 @@ import {
   chunksText,
   domOffset,
   isChip,
+  linkChunks,
   normalize,
   readEditor,
   repaintCaret,
@@ -26,10 +28,12 @@ export type { MentionInputHandle } from "./types";
 const isBlank = (text: string) => text.replace(/[\r\n]/g, "") === "";
 
 /**
- * A contenteditable whose `@` mentions are inline `contenteditable="false"`
- * chips. Drawn and sent text differ: `readEditor` turns each chip back into its
- * backticked library path, so the agent never sees a display name. Only
- * Shift+Enter and chip-eating Backspace/Delete are intercepted.
+ * A contenteditable whose `@` mentions and web links are inline
+ * `contenteditable="false"` references. Drawn and sent text differ:
+ * `readEditor` turns each mention back into its backticked library path, so the
+ * agent never sees a display name, and each link back into the text as written.
+ * A link becomes a reference when pasted, or when the space after it is typed.
+ * Only Shift+Enter and chip-eating Backspace/Delete are intercepted.
  */
 export function MentionInput({
   ref,
@@ -82,6 +86,26 @@ export function MentionInput({
     const r = readEditor(el, point(el));
     setBlank(isBlank(r.text));
     onEdit(r.text, r.caret ?? r.text.length);
+  }
+
+  /** Draws the links in the typed text as references. The message text does not
+   *  change, so the caret keeps its offset. `settled`: see `splitLinks`. */
+  function linkify(settled: boolean): boolean {
+    const el = box.current;
+    if (!el) return false;
+    const r = readEditor(el, point(el));
+    const next = linkChunks(r.chunks, settled);
+    if (next.length === r.chunks.length && next.every((c, i) => c.kind === r.chunks[i].kind)) return false;
+    commit(next, r.caret ?? r.text.length);
+    return true;
+  }
+
+  /** A typed space or line break ends the word before it. */
+  function input(e: FormEvent<HTMLDivElement>) {
+    const { inputType, data } = e.nativeEvent as InputEvent;
+    const ends = inputType === "insertParagraph" || inputType === "insertLineBreak" || (inputType === "insertText" && data != null && /\s/.test(data));
+    if (ends && linkify(true)) return;
+    sync();
   }
 
   function commit(next: Chunk[], caret: number, focus?: boolean) {
@@ -266,7 +290,7 @@ export function MentionInput({
         // WebKit can barely edit the box. `overflow-x-hidden`:
         // y=auto computes x to auto, and always-on scrollbars paint a bar across a one-line box.
         className="max-h-[160px] min-h-[16px] w-full overflow-x-hidden overflow-y-auto break-words whitespace-pre-wrap select-text text-[13px] leading-[16px] outline-none"
-        onInput={sync}
+        onInput={input}
         onKeyUp={sync}
         onClick={sync}
         onKeyDown={keyDown}
@@ -284,10 +308,12 @@ export function MentionInput({
           if (plain && onPasteText?.(plain)) return;
           if (plain) document.execCommand("insertText", false, plain);
           if (box.current) revealCaret(box.current);
-          sync();
+          if (!linkify(false)) sync();
         }}
       >
-        {chunks.map((c, i) => (c.kind === "text" ? c.text : <FileChip key={i} path={c.path} />))}
+        {chunks.map((c, i) =>
+          c.kind === "text" ? c.text : c.kind === "link" ? <LinkChip key={i} raw={c.raw} /> : <FileChip key={i} path={c.path} />,
+        )}
       </div>
       {blank && (
         <div className="pointer-events-none absolute inset-0 select-none text-[13px] leading-[16px] text-muted-foreground">
