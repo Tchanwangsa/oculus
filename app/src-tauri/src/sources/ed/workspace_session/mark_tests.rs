@@ -248,3 +248,97 @@ fn the_history_is_eds_list_newest_first() {
     assert_eq!(read[0].testcase_total_count, Some(2));
     assert!(history::submissions(&ed, 43, 267880).is_err());
 }
+
+/// Mark on a slide whose id is 777, Ed answering the mark with `status` and
+/// the completion with `complete_status`. Returns the submission's id and
+/// the paths Ed was asked, in order.
+fn mark_answered(status: &str, complete_status: u16) -> (i64, Vec<String>) {
+    let dir = Scratch::new("ed-ws-mark-complete");
+    let status = status.to_string();
+    let keyd = FakeKeyd::start(&dir, move |header, _| {
+        match header["path"].as_str().unwrap() {
+            "/api/challenges/267880/mark" => {
+                let mut raw = submission_json(31);
+                raw["status"] = json!(status);
+                (
+                    json!({"status": 200, "headers": []}),
+                    json!({"submission": raw}).to_string().into_bytes(),
+                )
+            }
+            _ => (
+                json!({"status": complete_status, "headers": []}),
+                b"{}".to_vec(),
+            ),
+        }
+    });
+    let (context, _) = context(&dir, "http://127.0.0.1:1");
+    let mut on_slide = slide();
+    on_slide.slide_id = Some(777);
+    let (session, queue) = Session::detached(context.clone(), on_slide);
+    workspace_state::save(
+        &dir,
+        267880,
+        &WorkspaceState {
+            workspace_id: "W1".into(),
+            base_commit: Some("h7".into()),
+            ..WorkspaceState::default()
+        },
+    )
+    .unwrap();
+    go_online(&context);
+    let id = std::thread::scope(|scope| {
+        let marking = scope.spawn(|| session.mark(session.place()));
+        let Ok(Out::Frame(frame)) = queue.recv_timeout(Duration::from_secs(5)) else {
+            panic!("no commit frame")
+        };
+        let id = serde_json::from_str::<Value>(&frame).unwrap()["data"]["id"].clone();
+        context
+            .shared()
+            .snapshots
+            .answered(Some(&json!({ "id": id })), "h8:::s");
+        marking.join().unwrap()
+    })
+    .expect("the submission stands whatever the completion does")
+    .id;
+    let paths = keyd
+        .requests()
+        .iter()
+        .map(|(h, _)| {
+            format!(
+                "{} {}",
+                h["method"].as_str().unwrap(),
+                h["path"].as_str().unwrap()
+            )
+        })
+        .collect();
+    (id, paths)
+}
+
+#[test]
+fn a_passing_mark_completes_the_slide_on_ed() {
+    for status in ["passed", "submitted"] {
+        let (id, asked) = mark_answered(status, 200);
+        assert_eq!(id, 31);
+        assert_eq!(
+            asked,
+            [
+                "POST /api/challenges/267880/mark",
+                "PUT /api/lessons/slides/777/complete"
+            ],
+            "{status}"
+        );
+    }
+}
+
+#[test]
+fn a_failed_mark_leaves_the_slide_alone() {
+    let (_, asked) = mark_answered("failed", 200);
+    assert_eq!(asked, ["POST /api/challenges/267880/mark"]);
+}
+
+#[test]
+fn a_refused_completion_does_not_fail_the_mark() {
+    let (id, asked) = mark_answered("passed", 500);
+    assert_eq!(id, 31);
+    assert_eq!(asked.len(), 2, "{asked:?}");
+}
