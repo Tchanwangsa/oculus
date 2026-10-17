@@ -71,3 +71,11 @@ export function caretUnder(cell: HTMLElement, x: number, y: number): Caret | nul
     ? { node: range.startContainer, offset: range.startOffset }
     : null;
 }
+
+/** Whether a point is over the cell's drawn text, not its padding or the
+ *  empty width beside a shorter line. */
+export function overText(cell: HTMLElement, x: number, y: number): boolean {
+  const range = cell.ownerDocument.createRange();
+  range.selectNodeContents(cell);
+  return [...range.getClientRects()].some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom);
+}
