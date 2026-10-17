@@ -66,7 +66,8 @@ last updated (`modified_at` or the session's last save) and a word count.
   links, file chips and `$…$` maths (`table/rich.ts`, parsed with the note
   grammar): the cell's own element stays the editor, invisible over the
   drawing, and focusing it shows the source until it blurs.
-  A drag across cells (or Shift with a click or ↑/↓) selects a block, which
+  A drag across cells (or Shift with a click or ↑/↓, or any arrow once a cell's
+  text is all selected, which selects just that cell first) selects a block, which
   the scroller holds focus for: Delete empties it, and on a block already
   empty removes the whole rows (never the header) or columns it spans, or
   the table. ⌘C (or Edit → Copy, on the clipboard event, with `beforecopy` claimed since WebKit would leave Copy off with no text selected) copies it as tab-separated text and an HTML table, and ⌘V

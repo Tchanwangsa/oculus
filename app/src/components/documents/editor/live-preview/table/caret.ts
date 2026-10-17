@@ -14,6 +14,14 @@ export function caretIn(cell: HTMLElement): number {
   return range.toString().length;
 }
 
+/** Whether the selection covers all of the cell's text (an empty cell
+ *  always does), which Shift with ←/→ then stretches into the next cell. */
+export function allSelected(cell: HTMLElement): boolean {
+  const sel = cell.ownerDocument.getSelection();
+  if (!sel?.rangeCount || !cell.contains(sel.anchorNode) || !cell.contains(sel.focusNode)) return false;
+  return sel.toString().length === (cell.textContent ?? "").length;
+}
+
 /** Whether a collapsed caret sits at the cell's start, or its end. */
 export function caretAtEdge(cell: HTMLElement, end: boolean): boolean {
   if (!cell.ownerDocument.getSelection()?.isCollapsed) return false;
