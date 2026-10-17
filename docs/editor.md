@@ -59,7 +59,9 @@ last updated (`modified_at` or the session's last save) and a word count.
   (`app/src/components/documents/editor/live-preview/table/`): its DOM and input handlers
   use `app/src/components/documents/editor/live-preview/tableModel.ts` for source-preserving
   edits. A cell writes back only its own source range, Tab/Enter move between
-  cells, and the frame scrolls sideways.
+  cells, and the frame scrolls sideways. A double click on a word selects it
+  natively; a triple click, or a double click off the text, selects the whole
+  cell (`press.ts`), since the native selection would take its padding too.
   A cell holding markup draws it like the rest of the note — marks, code,
   links, file chips and `$…$` maths (`table/rich.ts`, parsed with the note
   grammar): the cell's own element stays the editor, invisible over the
