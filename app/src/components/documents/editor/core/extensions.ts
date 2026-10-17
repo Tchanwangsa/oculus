@@ -28,6 +28,7 @@ import { rawMode } from "../chrome/rawMode";
 import { editorShadow } from "../shadow";
 import { noteHighlight, noteTheme } from "../theme";
 import { noteUndoRouting } from "./undoRouting";
+import { unclippedTooltips } from "./unclippedTooltips";
 
 /** Live decorations, or Raw's code-editor look in their place. */
 export const liveCompartment = new Compartment();
@@ -97,6 +98,7 @@ export function noteExtensions(opts: {
       addToOptions: [mathOptionPreview, mentionOptionIcon],
       optionClass: mentionOptionClass,
     }),
+    unclippedTooltips,
     hostCompartment.of(noteHost.of(opts.host)),
     liveCompartment.of(modeExtension(opts.live)),
     suggestCompartment.of(opts.suggest),
