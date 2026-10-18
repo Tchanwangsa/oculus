@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { ColorPicker } from "@/components/ui/color/ColorPicker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { parseHex } from "@/lib/ui/color";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { cn } from "@/lib/utils";
 
 /** The checkerboard a see-through colour is drawn over. */
@@ -32,6 +33,7 @@ export function ColorPopover({
   onChange,
   label,
   align = "end",
+  side = "bottom",
   opaque,
   className,
   children,
@@ -41,20 +43,30 @@ export function ColorPopover({
   /** What the colour is, for the button's accessible name. */
   label: string;
   align?: "start" | "center" | "end";
+  side?: "top" | "right" | "bottom" | "left";
   /** No alpha: edits always come back as `#rrggbb`. */
   opaque?: boolean;
   className?: string;
   children: ReactNode;
 }) {
   const ok = parseHex(value) != null;
+  const [open, setOpen] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  useScrollFade(contentRef, "y", open);
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button type="button" aria-label={`${label}: ${value}`} className={cn("cursor-pointer text-left", className)}>
           {children}
         </button>
       </PopoverTrigger>
-      <PopoverContent align={align} className="w-60 p-3">
+      <PopoverContent
+        ref={contentRef}
+        align={align}
+        side={side}
+        collisionPadding={12}
+        className="w-60 max-w-[var(--radix-popover-content-available-width)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-3"
+      >
         <ColorPicker value={ok ? value : "#000000"} onChange={onChange} opaque={opaque} />
       </PopoverContent>
     </Popover>
@@ -70,12 +82,16 @@ export function ColorField({
   value,
   onChange,
   label,
+  align,
+  side,
   opaque,
   className,
 }: {
   value: string;
   onChange: (hex: string) => void;
   label: string;
+  align?: "start" | "center" | "end";
+  side?: "top" | "right" | "bottom" | "left";
   opaque?: boolean;
   className?: string;
 }) {
@@ -85,6 +101,8 @@ export function ColorField({
       value={value}
       onChange={onChange}
       label={label}
+      align={align}
+      side={side}
       opaque={opaque}
       className={cn(
         "group flex min-w-0 items-center gap-2 rounded-full py-0.5 pl-0.5 pr-2 transition-colors hover:bg-accent",

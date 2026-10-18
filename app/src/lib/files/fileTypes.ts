@@ -1,5 +1,6 @@
 import {
   ChalkboardTeacher,
+  Scribble,
   ChatsCircle,
   File,
   FileArchive,
@@ -135,6 +136,7 @@ export function categoryIconFor(file: {
     case "upload":
     case "image": return fileIconFor(file.filename);
     case "document": return NotePencil;
+    case "canvas": return Scribble;
     default: return FileText;
   }
 }
@@ -142,6 +144,7 @@ export function categoryIconFor(file: {
 /** Phosphor's per-format file icon, `File` when the extension has none. */
 export function fileIconFor(filename: string): Icon {
   switch (ext(filename)) {
+    case "canvas": return Scribble;
     case "pdf": return FilePdf;
     case "doc":
     case "docx": return FileDoc;

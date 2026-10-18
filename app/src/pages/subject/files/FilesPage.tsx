@@ -19,7 +19,7 @@ const SUB_TABS = [
   { value: "downloads", label: "Downloads" },
   { value: "media", label: "Media" },
   { value: "uploads", label: "Uploads" },
-  { value: "documents", label: "Documents" },
+  { value: "drive", label: "Drive" },
 ] as const satisfies ReadonlyArray<{ value: string; label: string }>;
 
 type SubTab = (typeof SUB_TABS)[number]["value"];
@@ -40,7 +40,7 @@ export function useFilesTab(): FilesTab {
 }
 
 /**
- * One subject tab for every file: Downloads, Media, Uploads, Documents as routed
+ * One subject tab for every file: Downloads, Media, Uploads and Drive as routed
  * sub-tabs (so restore, crumbs and ⌘-click key off the path), drawn as
  * `PillTabs` under the subject's underline strip.
  *

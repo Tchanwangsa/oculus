@@ -75,7 +75,7 @@ before leaving a playing lecture.
   (`newFilesStore`); a switcher row's is the sum of its subject's tabs. A switch
   navigates the pane's router to the same top-level tab of the other subject;
   anything deeper lands on that tab's default. Files is one tab whose sub-tabs are
-  routes (`files/downloads`, `files/media`, `files/uploads`, `files/documents`),
+  routes (`files/downloads`, `files/media`, `files/uploads`, `files/drive`),
   and its `useFilesTab()` context *extends* the subject, because
   `useOutletContext` reads the nearest Outlet and a different shape would make
   `useSubject()` lie. Downloads and Media split the `file` rows: Media lists the
@@ -181,6 +181,11 @@ while Ctrl+Shift+Z is Redo.
   `routeEdit` (`app/src/lib/menu/editRouting.ts`): a note editor's history
   (`app/src/components/documents/editor/core/undoRouting.ts`, which also remembers the last focused note and acts only
   while it is visible), else `execCommand` on the focused input.
+- **Back and Forward (⌘[ / ⌘]) can be claimed.** `menu-back` / `menu-forward`
+  step the pane's history unless a handler registered with `onBackForward`
+  (`app/src/lib/menu/backForwardRouting.ts`) takes them first; a drawing
+  canvas with a selection does, to step its layer order. No handler is
+  offered the key while `document.hasFocus()` is false.
 - **Select All is a custom item too**, because WebKit's `selectAll:` with no
   field focused selects the whole window. A focused browser page gets the
   native `selectAll:`; otherwise `menu-select-all` goes to `routeSelectAll`:

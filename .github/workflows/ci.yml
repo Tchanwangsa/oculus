@@ -59,6 +59,7 @@ jobs:
           (cd keyd && cargo fmt --check)
           (cd keyd/core && cargo fmt --check)
           # Only our crates: the vendored katex/ keeps upstream's formatting.
+          (cd canvas-core && cargo fmt --check)
           (cd math-core && cargo fmt --check -p oculus-math -p oculus-math-edit -p oracle)
 
       - name: Install frontend dependencies
@@ -86,6 +87,8 @@ jobs:
           (cd keyd && cargo clippy --locked --all-targets -- -D warnings)
           (cd keyd && cargo clippy --locked --all-targets --features dev -- -D warnings)
           # --no-deps keeps the vendored katex/ out, as the fmt check does.
+          (cd canvas-core && cargo clippy --locked --all-targets -- -D warnings)
+          (cd canvas-core && cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings)
           (cd math-core && cargo clippy --locked --all-targets --no-deps -p oculus-math -p oculus-math-edit -p oracle -- -D warnings)
           (cd math-core && cargo clippy --locked --no-deps -p oculus-math --target wasm32-unknown-unknown -- -D warnings)
       - name: Rust tests
@@ -97,6 +100,9 @@ jobs:
       - name: keyd tests, release policy and dev
         working-directory: app/keyd
         run: cargo test --locked && cargo test --locked --features dev
+      - name: Canvas engine tests
+        working-directory: app/canvas-core
+        run: cargo test --locked
       - name: Maths engine tests
         working-directory: app/math-core
         run: cargo test --locked
@@ -149,6 +155,9 @@ jobs:
       - name: keyd core Rust is formatted
         working-directory: app/keyd/core
         run: cargo fmt --check
+      - name: Canvas Rust is formatted
+        working-directory: app/canvas-core
+        run: cargo fmt --check
       - name: Maths Rust is formatted
         working-directory: app/math-core
         run: cargo fmt --check -p oculus-math -p oculus-math-edit -p oracle
@@ -188,6 +197,9 @@ jobs:
       - name: keyd tests with dev admission
         working-directory: app/keyd
         run: cargo test --locked --features dev
+      - name: Canvas engine tests
+        working-directory: app/canvas-core
+        run: cargo test --locked
       - name: Maths engine tests
         working-directory: app/math-core
         run: cargo test --locked

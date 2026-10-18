@@ -21,8 +21,8 @@ library files; the rest of the frontend has its own pages:
 | Entry, the event shim, the last-resort error overlay | `app/src/main.tsx`, `app/src/lib/platform/tauriEvents.ts` |
 | The first-run gate: onboarding or the shell ([onboarding.md](./onboarding.md)) | `app/src/App.tsx`, `app/src/hooks/shell/useOnboardingGate.ts` |
 | Backend events → SQLite and stores | `app/src/hooks/backend/useBackendEvents.ts`, `app/src/hooks/backend/useEvents.ts`, `app/src/lib/pipeline/parseStatusWriter.ts`, `app/src/lib/db/connection.ts` |
-| Files tab: uploads and documents | `app/src/pages/subject/files/FilesPage.tsx`, `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src-tauri/src/library/files/commands.rs` |
-| Subject file rows and category icons | `app/src/components/files/DownloadRow.tsx`, `app/src/pages/subject/files/DocumentsPage.tsx` |
+| Files tab: uploads and Drive (notes and drawing canvases) | `app/src/pages/subject/files/FilesPage.tsx`, `app/src/pages/subject/files/DrivePage.tsx`, `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src/lib/canvas/files.ts`, `app/src-tauri/src/library/files/commands.rs` |
+| Subject file rows and category icons | `app/src/components/files/DownloadRow.tsx`, `app/src/pages/subject/files/DrivePage.tsx` |
 | Ed board, keyword search and filters | `app/src/pages/subject/content/DiscussionPage.tsx`, `app/src/pages/subject/content/discussion/`, `app/src/lib/ed/threads.ts` |
 | Ed lessons under their modules; the lesson index reader | `app/src/pages/subject/content/LessonsPage.tsx`, `app/src/pages/subject/content/lessons/`, `app/src/lib/ed/lessons.ts` |
 | Weekly lecture groups and collapsible Canvas modules | `app/src/pages/subject/content/LecturesPage.tsx`, `app/src/components/lectures/LectureRow.tsx`, `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/pages/subject/content/modules/` |
@@ -314,7 +314,9 @@ its last-opened time.
   moves the file and keeps the row id. `reconcileDocuments` brings rows in line
   with the folder on mount, so a note written elsewhere just appears.
 
-The editor a document opens in is [editor.md](./editor.md).
+The editor a document opens in is [editor.md](./editor.md). Drawing canvases have
+the Drive list, a `canvas` category and versioned `.canvas` files; see
+[drawing-canvas.md](./drawing-canvas.md).
 
 ## Gotchas
 

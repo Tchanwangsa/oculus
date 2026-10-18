@@ -242,7 +242,9 @@ glyph; subject and project crumbs retain their custom identity icons.
 - **No native colour inputs** — `<input type="color">` opens the OS panel
   and has no alpha; use `ColorField` (`app/src/components/ui/color/`), whose
   pad and strips measure the pointer as a fraction of their own box, so page
-  zoom cannot skew them.
+  zoom cannot skew them. Its popover stays inside the viewport with a 12px
+  collision inset and scrolls when height is limited. Controls on a left edge
+  can open it to the right with start alignment.
 - **No native date/time inputs** — segmented hover, an OS picker in Buddhist-era
   years, and a half-typed value reads empty. Use
   `app/src/components/projects/fields/DateTimeField.tsx`; bare `type="time"` is fine.

@@ -31,6 +31,8 @@ import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { PaneHeaderRow, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { useDocumentPrefsStore } from "@/stores/documents/documentPrefsStore";
 
+const CanvasEditor = lazy(() => import("@/components/canvas/CanvasEditor"));
+
 const DocumentEditor = lazy(() =>
   import("@/components/documents/DocumentEditor").then((m) => ({ default: m.DocumentEditor })),
 );
@@ -53,22 +55,22 @@ export default function SubjectFilePage() {
   const locate = useMemo(() => routeLocate(routeState), [routeState]);
   const parseDetails = routeParseDetails(routeState);
 
-  const { files, loading } = useSubjectFiles(Number.isFinite(id) ? id : null);
+  const { files, loading, loaded } = useSubjectFiles(Number.isFinite(id) ? id : null);
   const found = useMemo(
     () => files.find((f) => f.relative_path === relPath) ?? null,
     [files, relPath],
   );
 
-  // A document renamed under this page keeps its row but loses its path:
+  // An authored file renamed under this page keeps its row but loses its path:
   // follow the row by id and update the route, so the editor stays mounted.
-  // Only documents; any other stale path falls through to the subject.
+  // Notes and canvases retain their editors; other stale paths leave the file.
   const heldId = useRef<number | null>(null);
-  if (found) heldId.current = found.category === "document" ? found.id : null;
+  if (found) heldId.current = (found.category === "document" || found.category === "canvas") ? found.id : null;
   const moved = useMemo(
     () =>
       found || heldId.current == null
         ? null
-        : files.find((f) => f.id === heldId.current && f.category === "document") ?? null,
+        : files.find((f) => f.id === heldId.current && (f.category === "document" || f.category === "canvas")) ?? null,
     [found, files],
   );
   const file = found ?? moved;
@@ -77,6 +79,7 @@ export default function SubjectFilePage() {
   }, [moved, navigate]);
 
   const pdf = usePdfMd(file);
+  const isCanvas = file?.category === "canvas";
   const isDocument = file?.category === "document";
   // An Ed lesson whose index lists its slides opens as the lesson view.
   const lesson = useLessonIndex(file);
@@ -129,7 +132,7 @@ export default function SubjectFilePage() {
   if (!Number.isFinite(id) || !relPath) return <Navigate to="/subjects" replace />;
 
   if (!file) {
-    if (loading || files.length === 0) {
+    if (loading || !loaded) {
       return (
         <LoadingFill />
       );
@@ -179,7 +182,9 @@ export default function SubjectFilePage() {
         )}
       </PaneHeaderRow>
       <div ref={setBody} className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        {isDocument ? (
+        {isCanvas ? (
+          <Suspense fallback={<LoadingFill />}><CanvasEditor key={file.id} file={file} /></Suspense>
+        ) : isDocument ? (
           <Suspense fallback={<LoadingFill />}>
             <DocumentEditor
               key={file.id}
