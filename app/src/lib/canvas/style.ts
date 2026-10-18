@@ -1,9 +1,9 @@
-import { CANVAS_DEFAULTS, LABELLED_TYPES, type CanvasElement, type CanvasTextAlign } from './model';
+import { CANVAS_DEFAULTS, LABELLED_TYPES, roundnessOf, type CanvasElement, type CanvasTextAlign } from './model';
 
 /** Appearance fields the inspector edits; everything else on an element is geometry or content. */
 export const STYLE_KEYS = [
   'stroke', 'fill', 'strokeWidth', 'style', 'opacity', 'strokeStyle',
-  'fontFamily', 'fontSize', 'textAlign', 'verticalAlign', 'startArrowhead', 'endArrowhead',
+  'fontFamily', 'fontSize', 'textAlign', 'verticalAlign', 'startArrowhead', 'endArrowhead', 'roundness', 'arrowType',
 ] as const;
 export type StyleKey = typeof STYLE_KEYS[number];
 export type StylePatch = Partial<Pick<CanvasElement, StyleKey>>;
@@ -16,7 +16,8 @@ export const DEFAULT_DRAWING_STYLE: DrawingStyle = {
   stroke: '#292b32', fill: 'transparent', strokeWidth: 2, style: 'sketch', opacity: CANVAS_DEFAULTS.opacity,
   strokeStyle: CANVAS_DEFAULTS.strokeStyle, fontFamily: CANVAS_DEFAULTS.fontFamily, fontSize: CANVAS_DEFAULTS.fontSize,
   textAlign: CANVAS_DEFAULTS.textAlign, labelAlign: CANVAS_DEFAULTS.labelAlign, verticalAlign: CANVAS_DEFAULTS.verticalAlign,
-  startArrowhead: CANVAS_DEFAULTS.startArrowhead, endArrowhead: CANVAS_DEFAULTS.endArrowhead,
+  startArrowhead: CANVAS_DEFAULTS.startArrowhead, endArrowhead: CANVAS_DEFAULTS.endArrowhead, roundness: CANVAS_DEFAULTS.roundness,
+  arrowType: CANVAS_DEFAULTS.arrowType,
 };
 
 const ALL: ElementType[] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text'];
@@ -26,6 +27,7 @@ const TEXTUAL: ElementType[] = ['text', ...SHAPES];
 const KEY_TYPES: Record<StyleKey, readonly ElementType[]> = {
   stroke: ALL, opacity: ALL, fill: SHAPES, strokeWidth: ALL.filter(type => type !== 'text'), strokeStyle: OUTLINED, style: OUTLINED,
   fontFamily: TEXTUAL, fontSize: TEXTUAL, textAlign: TEXTUAL, verticalAlign: SHAPES, startArrowhead: ['arrow'], endArrowhead: ['arrow'],
+  roundness: ['rectangle', 'diamond'], arrowType: ['arrow'],
 };
 const LABEL_KEYS: ReadonlySet<StyleKey> = new Set(['fontFamily', 'fontSize', 'textAlign', 'verticalAlign']);
 
@@ -35,6 +37,7 @@ export const appliesTo = (key: StyleKey, type: ElementType) => KEY_TYPES[key].in
 /** What an element without the field draws with; base fields are always present. */
 export function defaultValue<K extends StyleKey>(key: K, type: ElementType): StyleValues[K] {
   if (key === 'textAlign') return (type === 'text' ? CANVAS_DEFAULTS.textAlign : CANVAS_DEFAULTS.labelAlign) as StyleValues[K];
+  if (key === 'roundness') return roundnessOf({ type } as CanvasElement) as StyleValues[K];
   return (CANVAS_DEFAULTS as Record<string, unknown>)[key] as StyleValues[K];
 }
 export const elementValue = <K extends StyleKey>(el: CanvasElement, key: K): StyleValues[K] => (el[key] ?? defaultValue(key, el.type)) as StyleValues[K];
@@ -88,10 +91,10 @@ export function patchElementStyle(el: CanvasElement, patch: StylePatch): CanvasE
   return next;
 }
 
-export type InspectorSection = 'stroke' | 'fill' | 'text' | 'verticalAlign' | 'strokeWidth' | 'strokeStyle' | 'sketch' | 'arrowheads' | 'opacity';
+export type InspectorSection = 'stroke' | 'fill' | 'text' | 'verticalAlign' | 'strokeWidth' | 'strokeStyle' | 'sketch' | 'roundness' | 'arrowType' | 'arrowheads' | 'opacity';
 const SECTION_KEYS: [InspectorSection, StyleKey][] = [
   ['stroke', 'stroke'], ['fill', 'fill'], ['text', 'fontSize'], ['verticalAlign', 'verticalAlign'], ['strokeWidth', 'strokeWidth'],
-  ['strokeStyle', 'strokeStyle'], ['sketch', 'style'], ['arrowheads', 'endArrowhead'], ['opacity', 'opacity'],
+  ['strokeStyle', 'strokeStyle'], ['sketch', 'style'], ['roundness', 'roundness'], ['arrowType', 'arrowType'], ['arrowheads', 'endArrowhead'], ['opacity', 'opacity'],
 ];
 
 /** What the inspector describes: a selected element, an element being written in, or the active tool's next element. */

@@ -2,25 +2,33 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { initSync } from '../../../canvas-core/pkg/oculus_canvas_core';
 import { getCanvasEngineStatus, hitTest, loadCanvasEngine, simplifyPoints, visibleElements } from '../../../src/lib/canvas/engine';
 import { boundsIntersect, elementBounds, elementHitTest, simplifyPolyline } from '../../../src/lib/canvas/geometry';
-import type { CanvasArrowhead, CanvasElement } from '../../../src/lib/canvas/model';
+import { arrowPath } from '../../../src/lib/canvas/arrow/path';
+import type { CanvasArrowhead, CanvasArrowType, CanvasElement } from '../../../src/lib/canvas/model';
 
 beforeAll(async () => {
   initSync({ module: await Bun.file(new URL('../../../canvas-core/pkg/oculus_canvas_core_bg.wasm', import.meta.url)).arrayBuffer() });
   await loadCanvasEngine();
 });
 
+const arrowheads: CanvasArrowhead[] = ['none', 'arrow', 'triangle', 'dot', 'bar', 'diamond'];
+const arrowTypes: CanvasArrowType[] = ['sharp', 'curved', 'elbow'];
+function heads(i: number) { return { startArrowhead: arrowheads[i % 6], endArrowhead: arrowheads[(i * 5 + 1) % 6] }; }
 const types: CanvasElement['type'][] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text'];
 const elements: CanvasElement[] = Array.from({ length: 280 }, (_, i) => ({
   id: String(i), type: types[i % types.length], x: (i % 20) * 200 - 1000, y: Math.floor(i / 20) * 160 - 400,
   width: i % 3 ? 100 : -100, height: 90, stroke: '#111111', fill: i % 2 ? 'transparent' : '#dddddd', strokeWidth: 1 + i % 4,
   style: 'clean', seed: i, ...(i % 7 >= 3 && i % 7 <= 5 ? { points: [{ x: 0, y: 0 }, { x: 30, y: 70 }, { x: 100, y: 90 }] } : {}),
-  ...(i % 7 === 4 ? heads[i % heads.length] : {}), ...(i % 7 <= 2 && i % 5 === 1 ? { text: 'Label' } : {}),
+  ...(i % 7 === 4 ? { ...heads(i), arrowType: arrowTypes[i % 3] } : {}), ...(i % 7 <= 2 && i % 5 === 1 ? { text: 'Label' } : {}),
 }));
-const arrowheads: CanvasArrowhead[] = ['none', 'arrow', 'triangle', 'dot', 'bar', 'diamond'];
-function heads(i: number) { return { startArrowhead: arrowheads[i % 6], endArrowhead: arrowheads[(i * 5 + 1) % 6] }; }
 const arrows: CanvasElement[] = arrowheads.flatMap((start, i) => (['none', 'arrow'] as const).map((end, j) => ({
   id: `arrow-${i}-${j}`, type: 'arrow' as const, x: i * 300, y: j * 300, width: 120, height: -60, stroke: '#111111', fill: 'transparent', strokeWidth: 1 + i % 3,
   style: 'clean' as const, seed: i, startArrowhead: start, endArrowhead: end, ...(i % 2 ? { points: [{ x: 0, y: 0 }, { x: 40, y: 10 }, { x: 120, y: -60 }] } : {}),
+})));
+/** Curves end on a tangent that no flattened segment shares; an elbow's last segment is shorter than its head. */
+const shaped: CanvasElement[] = arrowheads.flatMap((start, i) => arrowTypes.map((arrowType, j) => ({
+  id: `shaped-${i}-${j}`, type: 'arrow' as const, x: i * 300, y: 1000 + j * 300, width: 120, height: -6, stroke: '#111111', fill: 'transparent', strokeWidth: 1 + j,
+  style: 'clean' as const, seed: i, arrowType, startArrowhead: start, endArrowhead: arrowheads[(i + 1) % 6],
+  points: arrowType === 'elbow' ? [{ x: 0, y: 0 }, { x: 0, y: 40 }, { x: 120, y: 40 }, { x: 120, y: -6 }] : [{ x: 0, y: 0 }, { x: 30, y: 60 }, { x: 90, y: -50 }, { x: 120, y: -6 }],
 })));
 
 describe('retained Rust canvas engine', () => {
@@ -40,6 +48,13 @@ describe('retained Rust canvas engine', () => {
         expect(hitTest(arrows, point, 2)).toBe([...arrows].reverse().find(el => elementHitTest(el, point, 2))?.id ?? null);
       }
     }
+    for (const arrow of shaped) {
+      const path = arrowPath(arrow);
+      for (const end of [path[0], path[path.length - 1]]) for (let dy = -24; dy <= 24; dy += 1.5) for (let dx = -24; dx <= 24; dx += 1.5) {
+        const point = { x: arrow.x + end.x + dx, y: arrow.y + end.y + dy };
+        expect(hitTest(shaped, point, 2)).toBe([...shaped].reverse().find(el => elementHitTest(el, point, 2))?.id ?? null);
+      }
+    }
     expect(hitTest(arrows, { x: 12, y: 1 }, 0)).toBeNull();
     expect(hitTest(arrows, { x: 612, y: 1 }, 0)).toBe('arrow-2-0');
   });
@@ -55,6 +70,8 @@ describe('retained Rust canvas engine', () => {
       return boundsIntersect({ x: b.x - pad, y: b.y - pad, width: b.width + pad * 2, height: b.height + pad * 2 }, bounds);
     });
     expect(visibleElements(elements, bounds)).toEqual(expected);
+    const curvedBounds = elementBounds(shaped[1]);
+    expect(visibleElements(shaped, { x: curvedBounds.x, y: curvedBounds.y + curvedBounds.height - 1, width: 1, height: 1 })).toContain(shaped[1]);
     expect(visibleElements([], bounds)).toEqual([]);
   });
   test('rebuilds edited scene geometry and safely evicts retained scenes', () => {

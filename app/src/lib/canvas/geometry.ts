@@ -1,11 +1,17 @@
-import { arrowheadOf, hasLabel, type CanvasArrowhead, type CanvasElement, type CanvasViewport, type Point } from './model';
+import { arrowheadOf, hasLabel, roundnessOf, type CanvasArrowhead, type CanvasElement, type CanvasViewport, type Point } from './model';
+import { arrowPath, linePath, pathEnd, polylineEnd, polylineLength, type PathEnd } from './arrow/path';
+
+export { arrowPath, polylinePoints } from './arrow/path';
 
 export interface Bounds { x: number; y: number; width: number; height: number }
 
+const LINEAR: ReadonlySet<CanvasElement['type']> = new Set(['line', 'arrow', 'freedraw']);
+
+/** A line, arrow or stroke spans its rendered path, so a curve's overshoot past its points counts. */
 export function elementBounds(element: CanvasElement): Bounds {
-  if (element.points?.length && ['line', 'arrow', 'freedraw'].includes(element.type)) {
+  if (LINEAR.has(element.type)) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const p of element.points) {
+    for (const p of arrowPath(element)) {
       minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
       maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
     }
@@ -60,14 +66,21 @@ export interface ArrowheadShape {
   dot?: { center: Point; radius: number };
 }
 
-export const polylinePoints = (el: CanvasElement): Point[] => el.points?.length ? el.points : [{ x: 0, y: 0 }, { x: el.width, y: el.height }];
+/**
+ * A third of the whole path, so a short last segment of a curve or elbow does not
+ * shrink the head; at most 16 so the arrow's 16-unit culling pad in Rust covers every head.
+ */
+export const arrowheadSize = (pathLength: number) => Math.min(16, pathLength / 3);
 
-/** Size stays at most 16 so the arrow's 16-unit culling pad in Rust covers every head. */
+/** A head on a polyline, aimed along its end segment; the inspector's glyphs draw with this. */
 export function arrowheadShape(points: readonly Point[], end: 'start' | 'end', type: CanvasArrowhead): ArrowheadShape | null {
-  if (type === 'none' || points.length < 2) return null;
-  const [tip, prev] = end === 'end' ? [points[points.length - 1], points[points.length - 2]] : [points[0], points[1]];
-  const angle = Math.atan2(tip.y - prev.y, tip.x - prev.x);
-  const size = Math.min(16, Math.hypot(tip.x - prev.x, tip.y - prev.y) / 3);
+  if (points.length < 2) return null;
+  return arrowheadAt(type, polylineEnd(points, end), arrowheadSize(polylineLength(points)));
+}
+
+/** A head at `tip`, pointing along `angle` (the direction the path arrives in). */
+export function arrowheadAt(type: CanvasArrowhead, { tip, angle }: PathEnd, size: number): ArrowheadShape | null {
+  if (type === 'none') return null;
   const [left, right] = [-Math.PI / 6, Math.PI / 6].map(a => ({ x: tip.x - Math.cos(angle + a) * size, y: tip.y - Math.sin(angle + a) * size }));
   const along = (d: number, side = 0) => ({ x: tip.x - Math.cos(angle) * d - Math.sin(angle) * side, y: tip.y - Math.sin(angle) * d + Math.cos(angle) * side });
   const head = { type, tip, size, wings: [left, right] as [Point, Point], closed: type === 'triangle' || type === 'diamond' };
@@ -77,10 +90,32 @@ export function arrowheadShape(points: readonly Point[], end: 'start' | 'end', t
   return { ...head, points: [left, tip, right] };
 }
 
+/** Each head aims along the path's end tangent and is sized from the whole path; the engine record carries the same numbers to Rust. */
 export function elementArrowheads(el: CanvasElement): ArrowheadShape[] {
   if (el.type !== 'arrow') return [];
-  const points = polylinePoints(el);
-  return (['start', 'end'] as const).flatMap(end => arrowheadShape(points, end, arrowheadOf(el, end)) ?? []);
+  const size = arrowheadSize(linePath(el).length);
+  return (['start', 'end'] as const).flatMap(end => arrowheadAt(arrowheadOf(el, end), pathEnd(el, end), size) ?? []);
+}
+
+/** A round rectangle's corner radius, from its size so a resize keeps its look; 0 when sharp. */
+export const rectangleRadius = (el: CanvasElement) =>
+  roundnessOf(el) === 'round' ? Math.min(8, Math.abs(el.width) / 8, Math.abs(el.height) / 8) : 0;
+
+/** A diamond's top, right, bottom and left vertices, local to its x/y. */
+export const diamondVertices = (w: number, h: number): Point[] => [{ x: w / 2, y: 0 }, { x: w, y: h / 2 }, { x: w / 2, y: h }, { x: 0, y: h / 2 }];
+
+/**
+ * A round diamond's corners: each is a quadratic curve from `from` to `to` with
+ * the vertex as its control, cut a fifth of an edge (at most 12 units) back
+ * along both edges. Canvas2D and SVG both draw from this, edges joining the corners.
+ */
+export function diamondCorners(w: number, h: number): { from: Point; vertex: Point; to: Point }[] {
+  const vertices = diamondVertices(w, h), cut = Math.min(12, Math.hypot(w / 2, h / 2) / 5);
+  const toward = (a: Point, b: Point) => {
+    const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    return { x: a.x + (b.x - a.x) * cut / length, y: a.y + (b.y - a.y) * cut / length };
+  };
+  return vertices.map((vertex, i) => ({ from: toward(vertex, vertices[(i + 3) % 4]), vertex, to: toward(vertex, vertices[(i + 1) % 4]) }));
 }
 
 /** Dash lengths grow with the stroke; dotted relies on round caps. Arrowheads always draw solid. */
@@ -97,8 +132,8 @@ export const elementFilled = (el: CanvasElement) => (el.fill !== 'transparent' &
 export function elementHitTest(el: CanvasElement, world: Point, tolerance = 6): boolean {
   const p = { x: world.x - el.x, y: world.y - el.y };
   const pad = Math.max(0, tolerance) + el.strokeWidth / 2;
-  if (['line', 'arrow', 'freedraw'].includes(el.type)) {
-    const points = polylinePoints(el);
+  if (LINEAR.has(el.type)) {
+    const points = arrowPath(el);
     if (points.length === 1) return Math.hypot(p.x - points[0].x, p.y - points[0].y) <= pad;
     for (let i = 1; i < points.length; i++) if (segmentDistance(p, points[i - 1], points[i]) <= pad) return true;
     return elementArrowheads(el).some(head => head.wings.some(wing => segmentDistance(p, wing, head.tip) <= pad));

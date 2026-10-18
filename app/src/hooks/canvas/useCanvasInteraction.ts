@@ -2,14 +2,18 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Poin
 import { LABELLED_TYPES, type CanvasDocument, type CanvasElement, type CanvasTool, type Point } from '@/lib/canvas/model';
 import { boundsIntersect, elementBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/canvas/geometry';
 import { hitTest, simplifyPoints } from '@/lib/canvas/engine';
-import { paintCanvas, resizeHandles, elementResizeHandles, selectedBounds } from '@/lib/canvas/render';
+import { paintCanvas, pointEditTarget, resizeHandles, elementResizeHandles, selectedBounds } from '@/lib/canvas/render';
+import { pointDrag, pointHandleAt } from '@/lib/canvas/arrow/handles';
+import { endAt, movePoint, removePoint } from '@/lib/canvas/arrow/points';
 import { EDITABLE, onEdit } from '@/lib/menu/editRouting';
 import { onBackForward } from '@/lib/menu/backForwardRouting';
 import { CANVAS_CLIPBOARD_MIME, serializeCanvasClipboard, parseCanvasClipboard, cloneCanvasElements } from '@/lib/canvas/renderClipboard';
 import { applyElementChanges, type ElementChanges } from '@/lib/canvas/changes';
 import { canReorder, reorderElements, type LayerMove } from '@/lib/canvas/layers';
-import { bindArrowEnd, findBindingSnap, followBindings, moveElements, sameSnap, type BindingSnap } from '@/lib/canvas/bindings';
-import { commitTextEdit, growToFitLabel, labelTargetAt, stylePatchChanges } from '@/lib/canvas/labels';
+import { bindArrowEnd, findBindingSnap, followBindings, moveElements, sameSnap, sceneLookup, type BindingSnap } from '@/lib/canvas/bindings';
+import { moveSegment, releaseSegment } from '@/lib/canvas/elbow/segments';
+import { commitTextEdit, labelTargetAt, stylePatchChanges } from '@/lib/canvas/labels';
+import { resizeElements } from '@/lib/canvas/resize';
 import {
   adoptElementStyle, colorLabel, DEFAULT_DRAWING_STYLE, inspectorSections, inspectorTarget, inspectorValues, newElementStyle, patchDrawingStyle,
   patchElementStyle, type DrawingStyle, type InspectorTarget, type StylePatch,
@@ -18,7 +22,7 @@ import {
 /** `text` writes standalone text (`element` is the existing one or a template for a new one); `label` writes into a shape. */
 export interface TextDraft { kind: 'text' | 'label'; element: CanvasElement; text: string; existing: boolean }
 type Gesture = {
-  mode: 'pan' | 'draw' | 'move' | 'resize' | 'marquee' | 'erase';
+  mode: 'pan' | 'draw' | 'move' | 'resize' | 'point' | 'segment' | 'marquee' | 'erase';
   start: Point;
   screen: Point;
   original: CanvasDocument;
@@ -26,7 +30,9 @@ type Gesture = {
   pointerId: number;
   id?: string;
   handle?: number;
-  endpoint?: number;
+  /** A point drag: the line or arrow being edited (with a midpoint's new point in it) and the point that follows the pointer; a segment drag: the elbow arrow and the segment's index. */
+  base?: CanvasElement;
+  index?: number;
   bounds?: Bounds;
   shift?: boolean;
 };
@@ -269,9 +275,13 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const bounds = selectedBounds(current, selected.current);
       const selectedElements = current.elements.filter(element => selected.current.has(element.id));
       const handle = bounds ? elementResizeHandles(selectedElements, bounds).findIndex(p => Math.hypot(p.x - point.x, p.y - point.y) < 10 / current.viewport.zoom) : -1;
+      const editing = pointEditTarget(selectedElements), pointHandle = editing && pointHandleAt(editing, point, current.viewport.zoom);
       const id = hitTest(current.elements, point, 6 / current.viewport.zoom);
-      if (handle >= 0 && bounds) { initial.mode = 'resize'; initial.bounds = bounds; initial.handle = handle;
-        if (selectedElements.length === 1 && ['line', 'arrow'].includes(selectedElements[0].type)) { initial.id = selectedElements[0].id; initial.endpoint = handle; } }
+      if (editing && pointHandle) {
+        initial.id = editing.id;
+        if (pointHandle.kind === 'segment') Object.assign(initial, { mode: 'segment', base: editing, index: pointHandle.segment });
+        else { initial.mode = 'point'; Object.assign(initial, pointDrag(editing, pointHandle)); }
+      } else if (handle >= 0 && bounds) { initial.mode = 'resize'; initial.bounds = bounds; initial.handle = handle; }
       else if (id) {
         initial.mode = 'move';
         if (event.shiftKey) {
@@ -333,31 +343,18 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       let dx = point.x - active.start.x, dy = point.y - active.start.y;
       if (event.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
       previewChanges(moveElements(active.original.elements, selected.current, dx, dy));
-    } else if (active.mode === 'resize' && active.endpoint !== undefined && active.id) {
-      const element = active.original.elements.find(item => item.id === active.id)!;
-      const points = element.points?.length ? element.points : [{ x: 0, y: 0 }, { x: element.width, y: element.height }];
-      const start = active.endpoint === 0 ? point : { x: element.x + points[0].x, y: element.y + points[0].y };
-      const end = active.endpoint === 1 ? point : { x: element.x + points[points.length - 1].x, y: element.y + points[points.length - 1].y };
-      const next = { ...element, x: start.x, y: start.y, width: end.x - start.x, height: end.y - start.y, points: [{ x: 0, y: 0 }, { x: end.x - start.x, y: end.y - start.y }] };
-      previewChanges(new Map([[element.id, next.type === 'arrow' ? bindEnd(next, active.endpoint === 0 ? 'start' : 'end', point, event) : next]]));
+    } else if (active.mode === 'point' && active.base && active.index !== undefined) {
+      // An arrow end binds where the pointer is; Shift aligns the dragged point's segment to 45°.
+      const next = movePoint(active.base, active.index, point, event.shiftKey);
+      const end = next.type === 'arrow' ? endAt(next, active.index) : undefined;
+      previewChanges(new Map([[next.id, end ? bindEnd(next, end, point, event) : next]]));
+    } else if (active.mode === 'segment' && active.base && active.index !== undefined) {
+      const delta = { x: point.x - active.start.x, y: point.y - active.start.y };
+      previewChanges(new Map([[active.base.id, moveSegment(active.base, active.index, delta, sceneLookup(documentRef.current.elements, overrides.current))]]));
     } else if (active.mode === 'resize' && active.bounds && active.handle !== undefined) {
       const original = active.bounds;
       const opposite = resizeHandles(original)[(active.handle + 2) % 4];
-      const next = normalize(point, opposite);
-      const sx = next.width / Math.max(original.width, 1), sy = next.height / Math.max(original.height, 1);
-      const changes = new Map<string, CanvasElement>();
-      for (const element of active.original.elements) {
-        if (!selected.current.has(element.id)) continue;
-        // Text scales its font; a shape keeps its label's size, rewraps it and grows if the label no longer fits.
-        const resized: CanvasElement = {
-          ...element, x: next.x + (element.x - original.x) * sx, y: next.y + (element.y - original.y) * sy,
-          width: element.width * (element.type === 'text' ? sy : sx), height: element.height * sy,
-          points: element.points?.map(p => ({ x: p.x * sx, y: p.y * sy })),
-          ...(element.type === 'text' ? { fontSize: Math.max(8, (element.fontSize ?? 24) * sy) } : {}),
-        };
-        changes.set(element.id, growToFitLabel(resized));
-      }
-      previewChanges(changes);
+      previewChanges(resizeElements(active.original.elements, selected.current, original, normalize(point, opposite)));
     } else if (active.mode === 'marquee') marquee.current = normalize(active.start, point);
     else if (active.mode === 'erase') {
       const id = hitTest(active.original.elements, point, 10 / documentRef.current.viewport.zoom);
@@ -511,6 +508,11 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const doubleClick = (event: MouseEvent<HTMLCanvasElement>) => {
     if (tool !== 'select') return;
     const { point } = coordinates(event);
+    // Double-clicking an arrow's interior point removes it; an elbow segment's handle releases the segment.
+    const current = documentRef.current, editing = pointEditTarget(current.elements.filter(item => selected.current.has(item.id)));
+    const handle = editing && pointHandleAt(editing, point, current.viewport.zoom);
+    if (editing && handle?.kind === 'point' && !endAt(editing, handle.index)) { commitChanges(new Map([[editing.id, removePoint(editing, handle.index)]])); return; }
+    if (editing && handle?.kind === 'segment') { commitChanges(new Map([[editing.id, releaseSegment(editing, handle.segment, sceneLookup(current.elements))]])); return; }
     const element = writableAt(point);
     if (element) startWriting(point, element);
   };

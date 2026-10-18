@@ -3,6 +3,8 @@ import { elementBounds, elementHitTest } from './geometry';
 import { LABEL_PADDING, labelBox, layoutShapeLabel, measureCanvasText, measureTextElement, type TextMeasure } from './renderText';
 import { patchElementStyle, type StylePatch } from './style';
 import type { ElementChanges } from './changes';
+import { retypeArrow } from './arrow/retype';
+import type { Lookup } from './elbow';
 
 const LABEL_SCALE: Partial<Record<CanvasElement['type'], number>> = { ellipse: Math.SQRT1_2, diamond: 0.5 };
 
@@ -50,9 +52,12 @@ export function labelTargetAt(elements: readonly CanvasElement[], p: Point, tole
   return undefined;
 }
 
-/** A font change re-measures standalone text and re-runs the grow rule on labelled shapes. */
-export function restyleElement(el: CanvasElement, patch: StylePatch, measure: TextMeasure = measureCanvasText): CanvasElement {
-  const next = patchElementStyle(el, patch);
+/**
+ * A font change re-measures standalone text and re-runs the grow rule on labelled shapes; an arrow type change
+ * reshapes its points (`retypeArrow`, which finds an elbow arrow's targets with `lookup`).
+ */
+export function restyleElement(el: CanvasElement, patch: StylePatch, measure: TextMeasure = measureCanvasText, lookup: Lookup = () => undefined): CanvasElement {
+  const next = retypeArrow(patchElementStyle(el, patch), el, lookup);
   if (next === el || (next.fontSize === el.fontSize && next.fontFamily === el.fontFamily)) return next;
   if (next.type === 'text') return measureTextElement(next, measure);
   return growToFitLabel(next, measure);
@@ -61,9 +66,11 @@ export function restyleElement(el: CanvasElement, patch: StylePatch, measure: Te
 /** Only elements the patch actually changes, so an inapplicable patch commits nothing. */
 export function stylePatchChanges(elements: readonly CanvasElement[], ids: ReadonlySet<string>, patch: StylePatch, measure: TextMeasure = measureCanvasText): ElementChanges {
   const changes = new Map<string, CanvasElement>();
+  let index: Map<string, CanvasElement> | undefined;
+  const lookup = (id: string) => (index ??= new Map(elements.map(el => [el.id, el]))).get(id);
   for (const el of elements) {
     if (!ids.has(el.id)) continue;
-    const next = restyleElement(el, patch, measure);
+    const next = restyleElement(el, patch, measure, lookup);
     if (next !== el) changes.set(el.id, next);
   }
   return changes;

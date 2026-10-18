@@ -1,5 +1,6 @@
-import { CANVAS_DEFAULTS, hasLabel, type CanvasDocument, type CanvasElement } from './model';
-import { elementArrowheads, polylinePoints, selectionBounds, strokeDash } from './geometry';
+import { CANVAS_DEFAULTS, hasLabel, roundnessOf, type CanvasDocument, type CanvasElement } from './model';
+import { diamondCorners, diamondVertices, elementArrowheads, rectangleRadius, selectionBounds, strokeDash } from './geometry';
+import { linePath } from './arrow/path';
 import { CANVAS_FONT_STACKS, layoutShapeLabel, layoutTextElement, measureCanvasText, type TextLayout, type TextMeasure } from './renderText';
 
 const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -17,15 +18,23 @@ function outlineSvg(element: CanvasElement, strokeWidth: number, filled: boolean
   const stroke = `stroke="${escape(element.stroke)}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"`;
   const dash = strokeDash(element), dashed = dash.length ? ` stroke-dasharray="${dash.map(number).join(' ')}"` : '';
   const paint = `fill="${filled ? escape(element.fill) : 'none'}" ${stroke}${dashed}`;
-  if (element.type === 'rectangle') return `<rect x="${Math.min(0, w)}" y="${Math.min(0, h)}" width="${Math.abs(w)}" height="${Math.abs(h)}" rx="${Math.min(8, Math.abs(w) / 8, Math.abs(h) / 8)}" ${paint}/>`;
+  if (element.type === 'rectangle') {
+    const radius = rectangleRadius(element);
+    return `<rect x="${Math.min(0, w)}" y="${Math.min(0, h)}" width="${Math.abs(w)}" height="${Math.abs(h)}"${radius ? ` rx="${number(radius)}"` : ''} ${paint}/>`;
+  }
   if (element.type === 'ellipse') return `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${Math.abs(w / 2)}" ry="${Math.abs(h / 2)}" ${paint}/>`;
-  if (element.type === 'diamond') return `<polygon points="${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}" ${paint}/>`;
-  const points = polylinePoints(element);
+  if (element.type === 'diamond' && roundnessOf(element) === 'round') {
+    const d = diamondCorners(w, h).map(({ from, vertex, to }, i) => `${i ? 'L' : 'M'} ${number(from.x)} ${number(from.y)} Q ${number(vertex.x)} ${number(vertex.y)} ${number(to.x)} ${number(to.y)}`).join(' ');
+    return `<path d="${d} Z" ${paint}/>`;
+  }
+  if (element.type === 'diamond') return `<polygon points="${diamondVertices(w, h).map(p => `${p.x},${p.y}`).join(' ')}" ${paint}/>`;
+  const { points, curves } = linePath(element);
   let d = `M ${number(points[0].x)} ${number(points[0].y)}`;
   if (element.type === 'freedraw' && points.length > 2) {
     for (let i = 1; i < points.length - 1; i++) d += ` Q ${number(points[i].x)} ${number(points[i].y)} ${number((points[i].x + points[i + 1].x) / 2)} ${number((points[i].y + points[i + 1].y) / 2)}`;
     const last = points[points.length - 1]; d += ` L ${number(last.x)} ${number(last.y)}`;
-  } else for (const point of points.slice(1)) d += ` L ${number(point.x)} ${number(point.y)}`;
+  } else if (curves.length) for (const { c1, c2, to } of curves) d += ` C ${number(c1.x)} ${number(c1.y)} ${number(c2.x)} ${number(c2.y)} ${number(to.x)} ${number(to.y)}`;
+  else for (const point of points.slice(1)) d += ` L ${number(point.x)} ${number(point.y)}`;
   const heads = elementArrowheads(element).map(head => {
     const fill = `fill="${filled && (head.closed || head.dot) ? escape(element.stroke) : 'none'}" ${stroke}`;
     if (head.dot) return `<circle cx="${number(head.dot.center.x)}" cy="${number(head.dot.center.y)}" r="${number(head.dot.radius)}" ${fill}/>`;

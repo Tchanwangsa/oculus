@@ -64,3 +64,13 @@ export function hsvToRgb({ h, s, v }: Hsv, a = 1): Rgba {
 
 /** Clamps `n` into [0, 1]. */
 export const unit = (n: number) => Math.min(1, Math.max(0, n));
+
+/** Five shades of a colour, lightest first: mixed towards white by 85%, 60%
+ *  and 30%, the colour itself, then 30% towards black. Alpha is dropped;
+ *  null when the text is not a colour. */
+export function colorShades(hex: string): string[] | null {
+  const c = parseHex(hex);
+  if (!c) return null;
+  const mix = (t: number, to: number) => toHex({ r: c.r + (to - c.r) * t, g: c.g + (to - c.g) * t, b: c.b + (to - c.b) * t, a: 1 });
+  return [mix(0.85, 255), mix(0.6, 255), mix(0.3, 255), mix(0, 0), mix(0.3, 0)];
+}

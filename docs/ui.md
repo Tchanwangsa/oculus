@@ -23,7 +23,7 @@ Read this before any UI work.
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
 | Flat divided lists, table chrome | `app/src/components/ui/layout/PageParts.tsx`, `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/TableGroup.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
 | Toolbar filters: pill popovers, checklists, applied-filter chips | `app/src/components/ui/filter/` |
-| The colour control: a swatch that opens a pad, hue and opacity strips and hex text (`opaque` drops the opacity strip) | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
+| The colour control: a swatch that opens a pad, hue and opacity strips and hex text (`opaque` drops the opacity strip), or with a `palette` a grid of colours, their shades and the hex code with the pad behind Custom | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
 | Identity icons, shared picker and colour palette | `app/src/components/ui/icon/`, `app/src/lib/ui/iconPreferences.ts` |
 | A titled block that folds, its state kept by the caller | `app/src/components/ui/CollapsibleSection.tsx` |
 

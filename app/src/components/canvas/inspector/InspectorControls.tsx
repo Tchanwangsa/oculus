@@ -3,10 +3,12 @@ import type { InspectorSection, StylePatch, StyleValues } from '@/lib/canvas/sty
 import type { LayerMove } from '@/lib/canvas/layers';
 import { CanvasIconButton } from '../CanvasToolbar';
 import { ArrowheadSection } from './ArrowheadSection';
+import { ArrowTypeSection } from './ArrowTypeSection';
 import { ColorSection } from './ColorSection';
 import { FillSection } from './FillSection';
 import { LayerSection } from './LayerSection';
 import { OpacitySection } from './OpacitySection';
+import { RoundnessSection } from './RoundnessSection';
 import { SketchSection } from './SketchSection';
 import { StrokeStyleSection } from './StrokeStyleSection';
 import { StrokeWidthSection } from './StrokeWidthSection';
@@ -35,6 +37,8 @@ export function InspectorControls({ sections, values, colorLabel, onChange, onPr
     {has('strokeWidth') ? <StrokeWidthSection {...props} /> : null}
     {has('strokeStyle') ? <StrokeStyleSection {...props} /> : null}
     {has('sketch') ? <SketchSection {...props} /> : null}
+    {has('roundness') ? <RoundnessSection {...props} /> : null}
+    {has('arrowType') ? <ArrowTypeSection {...props} /> : null}
     {has('arrowheads') ? <ArrowheadSection {...props} /> : null}
     {has('opacity') ? <OpacitySection {...props} onPreview={onPreview} /> : null}
     {selectionCount ? <LayerSection moves={layerMoves} onReorder={onReorder} /> : null}

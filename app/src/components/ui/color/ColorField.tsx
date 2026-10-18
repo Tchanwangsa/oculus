@@ -1,5 +1,6 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ComponentProps, type ReactNode } from "react";
 
+import { ColorPalette, type PaletteColor } from "@/components/ui/color/ColorPalette";
 import { ColorPicker } from "@/components/ui/color/ColorPicker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { parseHex } from "@/lib/ui/color";
@@ -27,6 +28,8 @@ export function ColorSwatch({ value, className }: { value: string; className?: s
  * A button that opens the colour picker in a popover. `children` is the
  * button's face (`ColorField` draws a swatch and the hex, a tile may draw
  * more); edits come back as `#rrggbb`, or `#rrggbbaa` when not opaque.
+ * With a `palette` the popover opens on `ColorPalette` instead, which can
+ * also pick the palette's own values (`transparent`).
  */
 export function ColorPopover({
   value,
@@ -35,6 +38,8 @@ export function ColorPopover({
   align = "end",
   side = "bottom",
   opaque,
+  palette,
+  contentProps,
   className,
   children,
 }: {
@@ -46,6 +51,9 @@ export function ColorPopover({
   side?: "top" | "right" | "bottom" | "left";
   /** No alpha: edits always come back as `#rrggbb`. */
   opaque?: boolean;
+  palette?: PaletteColor[];
+  /** Focus and key handling for the popover, for a host that must keep focus where it is. */
+  contentProps?: Pick<ComponentProps<typeof PopoverContent>, "onOpenAutoFocus" | "onCloseAutoFocus" | "onKeyDown">;
   className?: string;
   children: ReactNode;
 }) {
@@ -65,9 +73,24 @@ export function ColorPopover({
         align={align}
         side={side}
         collisionPadding={12}
-        className="w-60 max-w-[var(--radix-popover-content-available-width)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-3"
+        className={cn(
+          "max-w-[var(--radix-popover-content-available-width)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-3",
+          palette ? "w-auto" : "w-60",
+        )}
+        {...contentProps}
+        onOpenAutoFocus={(e) => {
+          contentProps?.onOpenAutoFocus?.(e);
+          if (e.defaultPrevented || !palette) return;
+          // The popover itself takes focus: a ring on the first swatch reads as the picked colour.
+          e.preventDefault();
+          contentRef.current?.focus();
+        }}
       >
-        <ColorPicker value={ok ? value : "#000000"} onChange={onChange} opaque={opaque} />
+        {palette ? (
+          <ColorPalette value={value} onChange={onChange} colors={palette} label={label} opaque={opaque} />
+        ) : (
+          <ColorPicker value={ok ? value : "#000000"} onChange={onChange} opaque={opaque} />
+        )}
       </PopoverContent>
     </Popover>
   );

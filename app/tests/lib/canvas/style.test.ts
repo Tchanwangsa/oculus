@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   adoptElementStyle, colorLabel, DEFAULT_DRAWING_STYLE, inspectorSections, inspectorTarget, inspectorValues, newElementStyle, patchDrawingStyle,
+  patchElementStyle,
   type InspectorTarget,
 } from '../../../src/lib/canvas/style';
 import type { CanvasElement } from '../../../src/lib/canvas/model';
@@ -13,19 +14,21 @@ const tool = (type: CanvasElement['type']): InspectorTarget => ({ type, label: f
 describe('inspector sections', () => {
   test('follow the element type', () => {
     expect(inspectorSections([tool('text')])).toEqual(['stroke', 'text', 'opacity']);
-    expect(inspectorSections([tool('rectangle')])).toEqual(['stroke', 'fill', 'strokeWidth', 'strokeStyle', 'sketch', 'opacity']);
-    expect(inspectorSections([tool('arrow')])).toEqual(['stroke', 'strokeWidth', 'strokeStyle', 'sketch', 'arrowheads', 'opacity']);
+    expect(inspectorSections([tool('rectangle')])).toEqual(['stroke', 'fill', 'strokeWidth', 'strokeStyle', 'sketch', 'roundness', 'opacity']);
+    expect(inspectorSections([tool('diamond')])).toContain('roundness');
+    expect(inspectorSections([tool('ellipse')])).not.toContain('roundness');
+    expect(inspectorSections([tool('arrow')])).toEqual(['stroke', 'strokeWidth', 'strokeStyle', 'sketch', 'arrowType', 'arrowheads', 'opacity']);
     expect(inspectorSections([tool('line')])).toEqual(['stroke', 'strokeWidth', 'strokeStyle', 'sketch', 'opacity']);
     expect(inspectorSections([tool('freedraw')])).toEqual(['stroke', 'strokeWidth', 'opacity']);
     expect(inspectorSections([])).toEqual([]);
   });
   test('text options show on a shape once it has a label or one is being written', () => {
-    expect(inspectorSections([inspectorTarget({ ...rect, text: 'Label' })])).toEqual(['stroke', 'fill', 'text', 'verticalAlign', 'strokeWidth', 'strokeStyle', 'sketch', 'opacity']);
+    expect(inspectorSections([inspectorTarget({ ...rect, text: 'Label' })])).toEqual(['stroke', 'fill', 'text', 'verticalAlign', 'strokeWidth', 'strokeStyle', 'sketch', 'roundness', 'opacity']);
     expect(inspectorSections([inspectorTarget({ ...rect, text: '   ' })])).not.toContain('text');
     expect(inspectorSections([inspectorTarget(rect, true)])).toContain('verticalAlign');
   });
   test('a mixed selection shows the union', () => {
-    expect(inspectorSections([inspectorTarget(text), inspectorTarget({ ...rect, type: 'arrow' })])).toEqual(['stroke', 'text', 'strokeWidth', 'strokeStyle', 'sketch', 'arrowheads', 'opacity']);
+    expect(inspectorSections([inspectorTarget(text), inspectorTarget({ ...rect, type: 'arrow' })])).toEqual(['stroke', 'text', 'strokeWidth', 'strokeStyle', 'sketch', 'arrowType', 'arrowheads', 'opacity']);
   });
   test('the colour is called Color only when every target is text', () => {
     expect(colorLabel([tool('text')])).toBe('Color');
@@ -65,5 +68,25 @@ describe('drawing defaults', () => {
     const adopted = adoptElementStyle({ ...DEFAULT_DRAWING_STYLE, fill: '#e6e5fb' }, { ...text, textAlign: 'center' });
     expect(adopted).toMatchObject({ stroke: '#111111', fontFamily: 'serif', fontSize: 20, textAlign: 'center', labelAlign: 'center', fill: '#e6e5fb', strokeWidth: 2 });
     expect(adoptElementStyle(DEFAULT_DRAWING_STYLE, { ...rect, textAlign: 'right' })).toMatchObject({ labelAlign: 'right', textAlign: 'left', fill: 'transparent' });
+  });
+});
+
+describe('roundness', () => {
+  const diamond: CanvasElement = { ...rect, id: 'd', type: 'diamond' };
+  test('applies to rectangles and diamonds only, and a patch that changes nothing returns the element', () => {
+    expect(patchElementStyle(rect, { roundness: 'sharp' })).toMatchObject({ roundness: 'sharp' });
+    expect(patchElementStyle(rect, { roundness: 'round' })).toBe(rect);
+    expect(patchElementStyle(diamond, { roundness: 'sharp' })).toBe(diamond);
+    expect(patchElementStyle(diamond, { roundness: 'round' })).toMatchObject({ roundness: 'round' });
+    const ellipse: CanvasElement = { ...rect, type: 'ellipse' };
+    expect(patchElementStyle(ellipse, { roundness: 'sharp' })).toBe(ellipse);
+  });
+  test('reads each type default and is written only where it differs', () => {
+    expect(inspectorValues([inspectorTarget(rect)], DEFAULT_DRAWING_STYLE).roundness).toBe('round');
+    expect(inspectorValues([inspectorTarget(diamond)], DEFAULT_DRAWING_STYLE).roundness).toBe('sharp');
+    expect(newElementStyle('rectangle', DEFAULT_DRAWING_STYLE)).not.toHaveProperty('roundness');
+    expect(newElementStyle('diamond', DEFAULT_DRAWING_STYLE)).toMatchObject({ roundness: 'round' });
+    expect(newElementStyle('ellipse', { ...DEFAULT_DRAWING_STYLE, roundness: 'sharp' })).not.toHaveProperty('roundness');
+    expect(adoptElementStyle(DEFAULT_DRAWING_STYLE, diamond).roundness).toBe('sharp');
   });
 });

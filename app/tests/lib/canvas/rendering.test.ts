@@ -94,3 +94,25 @@ describe('canvas vector export', () => {
     for (const head of heads(svg({ startArrowhead: 'arrow', endArrowhead: 'triangle' }))) expect(head).not.toContain('dasharray');
   });
 });
+
+describe('roundness in SVG', () => {
+  const clean = { ...shape, style: 'clean' as const, x: 0, y: 0, width: 100, height: 60 };
+  const svg = (el: CanvasElement) => exportCanvasSvg(document([el]));
+  test('a rectangle is round by default and sharp without a radius', () => {
+    expect(svg(clean)).toContain('rx="7.5"');
+    expect(svg({ ...clean, roundness: 'sharp' })).toMatch(/<rect x="0" y="0" width="100" height="60" fill/);
+  });
+  test('a diamond is a polygon when sharp and curves at each corner when round', () => {
+    const diamond: CanvasElement = { ...clean, type: 'diamond' };
+    expect(svg(diamond)).toContain('<polygon points="50,0 100,30 50,60 0,30"');
+    const round = svg({ ...diamond, roundness: 'round' });
+    expect(round).not.toContain('<polygon');
+    expect(round.match(/ Q 50 0 /g)).toHaveLength(1);
+    expect(round.match(/ Q /g)).toHaveLength(4);
+  });
+  test('the sketch pass repeats the same corners', () => {
+    const round = svg({ ...clean, type: 'diamond', roundness: 'round', style: 'sketch' });
+    expect(round.match(/ Q /g)).toHaveLength(8);
+    expect(svg({ ...clean, style: 'sketch' }).match(/rx="7.5"/g)).toHaveLength(2);
+  });
+});

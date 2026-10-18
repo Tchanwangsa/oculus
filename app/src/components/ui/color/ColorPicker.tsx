@@ -19,10 +19,13 @@ export function ColorPicker({
   value,
   onChange,
   opaque: solid = false,
+  hex = true,
 }: {
   value: string;
   onChange: (hex: string) => void;
   opaque?: boolean;
+  /** False when the caller shows its own `HexInput`. */
+  hex?: boolean;
 }) {
   const parsed = parseHex(value) ?? { r: 0, g: 0, b: 0, a: 1 };
   const [hsv, setHsv] = useState<Hsv>(() => rgbToHsv(parsed));
@@ -102,7 +105,7 @@ export function ColorPicker({
           step={0.01}
         />
       )}
-      <HexInput value={value} onCommit={typed} />
+      {hex && <HexInput value={value} onCommit={typed} />}
     </div>
   );
 }
@@ -161,19 +164,23 @@ function Strip({
  *  six, so they are taken only when the field is left. */
 const whole = (text: string) => /^#?([0-9a-f]{6}|[0-9a-f]{8})$/i.test(text.trim());
 
+/** A value that is not hex (`transparent`) shows as an empty field. */
+const shown = (value: string) => (parseHex(value) ? value : "");
+
 /** The hex text: a draft while typing, taken once it is a whole colour (or
  *  on leaving the field, `#rgb` too), put back when left holding something
  *  that is not a colour. */
-function HexInput({ value, onCommit }: { value: string; onCommit: (hex: string) => void }) {
-  const [draft, setDraft] = useState(value);
+export function HexInput({ value, onCommit }: { value: string; onCommit: (hex: string) => void }) {
+  const [draft, setDraft] = useState(() => shown(value));
   useEffect(() => {
     // Keep what is being typed when it already names this colour.
     setDraft((d) => {
       const typed = parseHex(d);
-      return typed && toHex(typed) === value ? d : value;
+      return typed && toHex(typed) === value ? d : shown(value);
     });
   }, [value]);
   const valid = parseHex(draft) != null;
+  const bad = !valid && draft.trim() !== "";
   return (
     <Input
       aria-label="Hex colour"
@@ -183,12 +190,13 @@ function HexInput({ value, onCommit }: { value: string; onCommit: (hex: string) 
         setDraft(e.target.value);
         if (whole(e.target.value)) onCommit(e.target.value);
       }}
-      onBlur={() => (valid ? onCommit(draft) : setDraft(value))}
+      onBlur={() => (valid ? onCommit(draft) : setDraft(shown(value)))}
       onKeyDown={(e) => {
         if (e.key === "Enter" && valid) onCommit(draft);
       }}
-      aria-invalid={!valid}
-      className={cn("h-7 tabular-nums", !valid && "text-destructive")}
+      aria-invalid={bad}
+      placeholder="#rrggbb"
+      className={cn("h-7 tabular-nums", bad && "text-destructive")}
     />
   );
 }
