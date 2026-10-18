@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "vite",
     "predev": "node scripts/predev.mjs",
-    "build": "node scripts/build-math.mjs && tsc && vite build",
-    "test": "node scripts/build-math.mjs && node scripts/test.mjs",
+    "build": "node scripts/build-math.mjs && node scripts/build-canvas.mjs && tsc && vite build",
+    "test": "node scripts/build-math.mjs && node scripts/build-canvas.mjs && node scripts/test.mjs",
     "preview": "vite preview",
     "ffmpeg": "node scripts/fetch-ffmpeg.mjs",
     "speech": "node scripts/build-speech.mjs",
@@ -24,7 +24,8 @@
     "cli:install": "bun run cli && mkdir -p \"$HOME/.local/bin\" && ln -sf \"$PWD/src-tauri/target/release/oculus\" \"$HOME/.local/bin/oculus\" && \"$PWD/src-tauri/target/release/oculus\" docs",
     "stage-cli": "node scripts/stage-cli.mjs",
     "docs:cli": "node scripts/gen-cli-docs.mjs",
-    "studio:hashes": "node scripts/gen-starter-hashes.mjs"
+    "studio:hashes": "node scripts/gen-starter-hashes.mjs",
+    "canvas": "node scripts/build-canvas.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

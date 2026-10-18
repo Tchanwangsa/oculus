@@ -18,6 +18,7 @@ const REAL_FILENAME = new Set(["file", "image", "upload"]);
  *  two columns so the chat's `@` menu can label a path the same way. */
 export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
   // A document's filename was typed by the student: never humanise it.
+  if (file.category === "canvas") return file.filename.replace(/\.canvas$/i, "");
   if (file.category === "document") return file.filename.replace(/\.md$/i, "");
   return REAL_FILENAME.has(file.category ?? "") || isLessonAsset(file)
     ? file.filename
@@ -130,6 +131,7 @@ const CATEGORY_FOLDERS: Record<string, string> = {
   "modules/": "module",
   "images/": "image",
   "documents/": "document",
+  "canvases/": "canvas",
   "uploads/": "upload",
 };
 

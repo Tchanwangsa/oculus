@@ -37,6 +37,7 @@ fn every_category_the_scraper_writes_is_listed() {
         "syllabus.md",
         "uploads/notes.pdf",
         "documents/week-3-notes.md",
+        "canvases/ideas.canvas",
         "pages/week-01.md",
         "assignments/a2.md",
         "quizzes/mid.md",
@@ -140,6 +141,7 @@ fn categories_follow_the_directory() {
     assert_eq!(category_from_path("ed/0031-welcome.md"), "ed");
     assert_eq!(category_from_path("uploads/tutor-notes.pdf"), "upload");
     assert_eq!(category_from_path("documents/revision.md"), "document");
+    assert_eq!(category_from_path("canvases/ideas.canvas"), "canvas");
     assert_eq!(category_from_path("nope.txt"), "other");
 }
 

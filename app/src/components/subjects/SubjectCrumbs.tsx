@@ -25,7 +25,8 @@ const FILE_TAB: Record<string, CrumbTab> = {
   // Sub-tabs of one Files tab: the crumb says "Files", the path picks the sub-tab.
   file: { to: "files/downloads", label: "Files" },
   upload: { to: "files/uploads", label: "Files" },
-  document: { to: "files/documents", label: "Files" },
+  document: { to: "files/drive", label: "Drive" },
+  canvas: { to: "files/drive", label: "Drive" },
   announcement: { to: "announcements", label: "Announcements" },
   assignment: { to: "assignments", label: "Assignments" },
   quiz: { to: "assignments", label: "Assignments" },

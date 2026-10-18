@@ -1,6 +1,8 @@
 # Note editor
 
-A student document is a markdown file edited in CodeMirror 6, in a Live
+Files → Drive creates notes through New file → Note, alongside
+[drawing canvases](./drawing-canvas.md). A student document is a markdown file
+edited in CodeMirror 6, in a Live
 (rendered) or Raw mode; the same editor is a form field for markdown kept in a
 database row. A document's row and file are in
 [frontend.md](./frontend.md#uploads-and-documents-are-ordinary-library-files);

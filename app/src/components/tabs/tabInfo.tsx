@@ -17,6 +17,7 @@ import {
   ListChecks,
   MusicNotes,
   Palette,
+  Scribble,
 } from "@phosphor-icons/react";
 import { browseId, hostOf, type BrowserTab } from "@/lib/browser";
 import { DOCK_ROOT, dockService, type DockPageInfo } from "@/lib/dock";
@@ -174,6 +175,8 @@ export function tabInfo(
     if (m[2] === "file") {
       const rel = new URLSearchParams(search).get("path");
       const base = rel?.split("/").pop();
+      if (base && rel?.includes("/canvases/"))
+        return { title: base.replace(/\.canvas$/i, ""), icon: <Scribble size={size} /> };
       if (base && rel?.includes("/documents/"))
         return { title: base.replace(/\.md$/i, ""), icon };
       if (base)
@@ -183,7 +186,10 @@ export function tabInfo(
       return { title: new URLSearchParams(search).get("t") ?? "Lecture", icon };
     }
     const code = subject ? displayCode(subject.code) : "Subject";
-    // The first segment only: a sub-tab of Files is still the Files tab.
+    if (m[2] === "files" && /^\/subjects\/\d+\/files\/(drive|documents|canvases)\/?$/.test(pathname)) {
+      return { title: `${code} · Drive`, icon };
+    }
+    // The first segment only: other Files sub-tabs share the Files title.
     const section = m[2] ? SECTION_LABELS[m[2]] : null;
     return { title: section ? `${code} · ${section}` : code, icon };
   }
