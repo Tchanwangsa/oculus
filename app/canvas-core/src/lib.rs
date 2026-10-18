@@ -45,6 +45,16 @@ impl Bounds {
     }
 }
 
+/// Floats per shape record; see `CanvasScene::new`.
+const RECORD: usize = 14;
+
+/// An arrowhead's direction (the angle the path arrives at its tip) and size.
+#[derive(Clone, Copy, Debug)]
+struct Head {
+    angle: f64,
+    size: f64,
+}
+
 #[derive(Debug)]
 struct Shape {
     kind: u8,
@@ -53,6 +63,7 @@ struct Shape {
     stroke: f64,
     filled: bool,
     heads: u8,
+    head: [Head; 2],
     points: Vec<Point>,
 }
 
@@ -69,15 +80,14 @@ fn segment_distance(p: Point, a: Point, b: Point) -> f64 {
 }
 
 /// The chevron wing pair stands in for every arrowhead type, as in the JS reference.
-fn head_hit(p: Point, tip: Point, prev: Point, pad: f64) -> bool {
-    let angle = (tip.y - prev.y).atan2(tip.x - prev.x);
-    let size = 16.0_f64.min((tip.x - prev.x).hypot(tip.y - prev.y) / 3.0);
+/// The angle and size come from the record, so a curve's end tangent needs no curve code here.
+fn head_hit(p: Point, tip: Point, head: Head, pad: f64) -> bool {
     [-std::f64::consts::PI / 6.0, std::f64::consts::PI / 6.0]
         .iter()
         .any(|a| {
             let wing = Point {
-                x: tip.x - (angle + a).cos() * size,
-                y: tip.y - (angle + a).sin() * size,
+                x: tip.x - (head.angle + a).cos() * head.size,
+                y: tip.y - (head.angle + a).sin() * head.size,
             };
             segment_distance(p, wing, tip) <= pad
         })
@@ -108,12 +118,12 @@ impl Shape {
             if self.kind == 4 && self.points.len() >= 2 {
                 let n = self.points.len();
                 let ends = [
-                    (1, self.points[0], self.points[1]),
-                    (2, self.points[n - 1], self.points[n - 2]),
+                    (1, self.points[0], self.head[0]),
+                    (2, self.points[n - 1], self.head[1]),
                 ];
                 return ends
                     .iter()
-                    .any(|&(bit, tip, prev)| self.heads & bit != 0 && head_hit(p, tip, prev, pad));
+                    .any(|&(bit, tip, head)| self.heads & bit != 0 && head_hit(p, tip, head, pad));
             }
             return false;
         }
@@ -242,13 +252,15 @@ pub struct CanvasScene {
 
 #[wasm_bindgen]
 impl CanvasScene {
-    /// Each shape is kind,x,y,width,height,strokeWidth,filled,pointStart,pointCount,heads.
-    /// Point offsets count pairs, not scalar values. `heads` is a bitfield: 1 marks an
-    /// arrowhead at the first point, 2 at the last. Invalid records are skipped.
+    /// Each shape is kind,x,y,width,height,strokeWidth,filled,pointStart,pointCount,heads,
+    /// startAngle,startSize,endAngle,endSize. Point offsets count pairs, not scalar values;
+    /// an arrow's points are its flattened rendered path. `heads` is a bitfield: 1 marks an
+    /// arrowhead at the first point, 2 at the last; each head's angle is the direction the
+    /// path arrives at its tip. Invalid records are skipped.
     #[wasm_bindgen(constructor)]
     pub fn new(records: &[f64], coordinates: &[f64]) -> Self {
-        let mut shapes = Vec::with_capacity(records.len() / 10);
-        for record in records.as_chunks::<10>().0 {
+        let mut shapes = Vec::with_capacity(records.len() / RECORD);
+        for record in records.as_chunks::<RECORD>().0 {
             if !record.iter().all(|v| v.is_finite()) {
                 continue;
             }
@@ -306,6 +318,16 @@ impl CanvasScene {
                 stroke: record[5].max(0.0),
                 filled: record[6] != 0.0,
                 heads: record[9] as u8,
+                head: [
+                    Head {
+                        angle: record[10],
+                        size: record[11].max(0.0),
+                    },
+                    Head {
+                        angle: record[12],
+                        size: record[13].max(0.0),
+                    },
+                ],
                 points,
             });
         }
@@ -395,21 +417,37 @@ pub fn simplify_points(coordinates: &[f64], tolerance: f64) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn scene(records: &[[f64; 10]], points: &[f64]) -> CanvasScene {
+    use std::f64::consts::FRAC_PI_4;
+    fn scene(records: &[[f64; RECORD]], points: &[f64]) -> CanvasScene {
         CanvasScene::new(&records.concat(), points)
     }
-    fn rect(x: f64, y: f64, filled: bool) -> [f64; 10] {
+    fn rect(x: f64, y: f64, filled: bool) -> [f64; RECORD] {
+        let mut r = [0.0; RECORD];
+        r[1] = x;
+        r[2] = y;
+        r[3] = 100.0;
+        r[4] = 100.0;
+        r[5] = 2.0;
+        r[6] = if filled { 1.0 } else { 0.0 };
+        r
+    }
+    /// A two-point arrow from (20,30) by (100,100), its heads aimed along the segment.
+    fn diagonal(heads: f64) -> [f64; RECORD] {
         [
-            0.0,
-            x,
-            y,
+            4.0,
+            20.0,
+            30.0,
             100.0,
             100.0,
             2.0,
-            if filled { 1.0 } else { 0.0 },
             0.0,
             0.0,
-            0.0,
+            2.0,
+            heads,
+            -3.0 * FRAC_PI_4,
+            16.0,
+            FRAC_PI_4,
+            16.0,
         ]
     }
     #[test]
@@ -421,10 +459,7 @@ mod tests {
     }
     #[test]
     fn polyline_hits_segments_not_box() {
-        let s = scene(
-            &[[4.0, 20.0, 30.0, 100.0, 100.0, 2.0, 0.0, 0.0, 2.0, 2.0]],
-            &[0.0, 0.0, 100.0, 100.0],
-        );
+        let s = scene(&[diagonal(2.0)], &[0.0, 0.0, 100.0, 100.0]);
         assert_eq!(s.hit_test(70.0, 80.0, 2.0), 0);
         assert_eq!(s.hit_test(30.0, 120.0, 2.0), -1);
         assert_eq!(s.hit_test(108.0, 126.0, 2.0), 0);
@@ -432,21 +467,36 @@ mod tests {
     #[test]
     fn arrowheads_hit_only_at_ends_that_have_one() {
         for (heads, start, end) in [(0.0, -1, -1), (1.0, 0, -1), (2.0, -1, 0), (3.0, 0, 0)] {
-            let s = scene(
-                &[[4.0, 20.0, 30.0, 100.0, 100.0, 2.0, 0.0, 0.0, 2.0, heads]],
-                &[0.0, 0.0, 100.0, 100.0],
-            );
+            let s = scene(&[diagonal(heads)], &[0.0, 0.0, 100.0, 100.0]);
             assert_eq!(s.hit_test(22.0, 40.0, 2.0), start);
             assert_eq!(s.hit_test(108.0, 126.0, 2.0), end);
         }
     }
     #[test]
+    fn a_head_aims_along_the_recorded_angle_not_the_last_segment() {
+        // The path turns down for its last two units, but the head points right.
+        let mut arrow = [
+            4.0, 0.0, 0.0, 100.0, 2.0, 2.0, 0.0, 0.0, 3.0, 2.0, 0.0, 0.0, 0.0, 16.0,
+        ];
+        let points = [0.0, 0.0, 100.0, 0.0, 100.0, 2.0];
+        let wing = Point {
+            x: 100.0 - (std::f64::consts::PI / 6.0).cos() * 16.0,
+            y: 2.0 + 8.0,
+        };
+        let (x, y) = (
+            wing.x + (100.0 - wing.x) * 0.1,
+            wing.y + (2.0 - wing.y) * 0.1,
+        );
+        assert_eq!(scene(&[arrow], &points).hit_test(x, y, 0.5), 0);
+        arrow[12] = std::f64::consts::FRAC_PI_2;
+        assert_eq!(scene(&[arrow], &points).hit_test(x, y, 0.5), -1);
+    }
+    #[test]
     fn ellipse_and_diamond_leave_corners_empty() {
         for kind in [1.0, 2.0] {
-            let s = scene(
-                &[[kind, 0.0, 0.0, 100.0, 100.0, 2.0, 1.0, 0.0, 0.0, 0.0]],
-                &[],
-            );
+            let mut shape = rect(0.0, 0.0, true);
+            shape[0] = kind;
+            let s = scene(&[shape], &[]);
             assert_eq!(s.hit_test(2.0, 2.0, 0.0), -1);
             assert_eq!(s.hit_test(50.0, 50.0, 0.0), 0);
         }

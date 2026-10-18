@@ -1,5 +1,7 @@
-import { CANVAS_DEFAULTS, hasLabel, LABELLED_TYPES, type CanvasDocument, type CanvasElement, type Point } from './model';
-import { elementArrowheads, elementBounds, polylinePoints, selectionBounds, strokeDash, type Bounds } from './geometry';
+import { CANVAS_DEFAULTS, hasLabel, LABELLED_TYPES, roundnessOf, type CanvasDocument, type CanvasElement, type Point } from './model';
+import { diamondCorners, diamondVertices, elementArrowheads, elementBounds, rectangleRadius, selectionBounds, strokeDash, type Bounds } from './geometry';
+import { linePath } from './arrow/path';
+import { pointHandles } from './arrow/handles';
 import { canvasFont, layoutShapeLabel, layoutTextElement, type TextLayout } from './renderText';
 import { visibleElements } from './engine';
 import { outlineCenter, outlineMidpoints } from './outline';
@@ -31,13 +33,20 @@ function elementPaths(element: CanvasElement): ElementPaths {
   if (cached) return cached;
   const path = new Path2D(), paths: ElementPaths = { body: path };
   const { width: w, height: h } = element;
-  if (element.type === 'rectangle') path.roundRect(Math.min(0, w), Math.min(0, h), Math.abs(w), Math.abs(h), Math.min(8, Math.abs(w) / 8, Math.abs(h) / 8));
+  if (element.type === 'rectangle') path.roundRect(Math.min(0, w), Math.min(0, h), Math.abs(w), Math.abs(h), rectangleRadius(element));
   if (element.type === 'ellipse') path.ellipse(w / 2, h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
-  if (element.type === 'diamond') {
-    path.moveTo(w / 2, 0); path.lineTo(w, h / 2); path.lineTo(w / 2, h); path.lineTo(0, h / 2); path.closePath();
+  if (element.type === 'diamond' && roundnessOf(element) === 'round') {
+    diamondCorners(w, h).forEach(({ from, vertex, to }, i) => {
+      if (i) path.lineTo(from.x, from.y); else path.moveTo(from.x, from.y);
+      path.quadraticCurveTo(vertex.x, vertex.y, to.x, to.y);
+    });
+    path.closePath();
+  } else if (element.type === 'diamond') {
+    diamondVertices(w, h).forEach((p, i) => i ? path.lineTo(p.x, p.y) : path.moveTo(p.x, p.y));
+    path.closePath();
   }
   if (element.type === 'freedraw' || element.type === 'line' || element.type === 'arrow') {
-    const points = polylinePoints(element);
+    const { points, curves } = linePath(element);
     path.moveTo(points[0].x, points[0].y);
     if (element.type === 'freedraw' && points.length > 2) {
       for (let i = 1; i < points.length - 1; i++) {
@@ -45,7 +54,8 @@ function elementPaths(element: CanvasElement): ElementPaths {
         path.quadraticCurveTo(points[i].x, points[i].y, (points[i].x + next.x) / 2, (points[i].y + next.y) / 2);
       }
       const last = points[points.length - 1]; path.lineTo(last.x, last.y);
-    } else for (const point of points.slice(1)) path.lineTo(point.x, point.y);
+    } else if (curves.length) for (const { c1, c2, to } of curves) path.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, to.x, to.y);
+    else for (const point of points.slice(1)) path.lineTo(point.x, point.y);
     for (const head of elementArrowheads(element)) {
       const target = head.closed || head.dot ? (paths.filledHeads ??= new Path2D()) : (paths.heads ??= new Path2D());
       if (head.dot) { target.moveTo(head.dot.center.x + head.dot.radius, head.dot.center.y); target.arc(head.dot.center.x, head.dot.center.y, head.dot.radius, 0, Math.PI * 2); }
@@ -112,13 +122,33 @@ export function resizeHandles(bounds: Bounds): Point[] {
   ];
 }
 
+/** A single selected line or arrow edits its points (`pointHandles`) instead of resizing. */
+export const pointEditTarget = (elements: readonly CanvasElement[]) =>
+  elements.length === 1 && (elements[0].type === 'line' || elements[0].type === 'arrow') ? elements[0] : undefined;
+
 export function elementResizeHandles(elements: CanvasElement[], bounds: Bounds): Point[] {
-  const element = elements.length === 1 ? elements[0] : undefined;
-  if (element && (element.type === 'line' || element.type === 'arrow')) {
-    const points = polylinePoints(element);
-    return [points[0], points[points.length - 1]].map(point => ({ x: point.x + element.x, y: point.y + element.y }));
+  return pointEditTarget(elements) ? [] : resizeHandles(bounds);
+}
+
+/** The dashed frame drawn round a selection; a single line or arrow has none, only its point handles. */
+export const selectionFrame = (elements: CanvasElement[]): Bounds | null =>
+  pointEditTarget(elements) ? null : selectionBounds(elements);
+
+/** Points as the resize handles' squares; midpoints and elbow segment handles smaller, round and faint. */
+function paintPointHandles(context: CanvasRenderingContext2D, element: CanvasElement, background: string, zoom: number) {
+  for (const handle of pointHandles(element, zoom)) {
+    context.beginPath();
+    if (handle.kind === 'point') {
+      context.fillStyle = background;
+      context.roundRect(handle.at.x - 4 / zoom, handle.at.y - 4 / zoom, 8 / zoom, 8 / zoom, 2 / zoom);
+      context.fill(); context.stroke();
+    } else {
+      // Midpoint and segment handles are soft brand dots, so they read as "drag me" without competing with the points.
+      context.fillStyle = context.strokeStyle; context.globalAlpha = 0.4;
+      context.arc(handle.at.x, handle.at.y, 5.5 / zoom, 0, Math.PI * 2);
+      context.fill(); context.globalAlpha = 1;
+    }
   }
-  return resizeHandles(bounds);
 }
 
 /** The target's outline in the brand colour with its snap points; the active one is filled. Sizes stay constant on screen. */
@@ -183,13 +213,14 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   if (options.overrides) for (const element of options.overrides.values()) {
     if (element && selected.has(element.id)) selectionElements.push(element);
   }
-  const selection = selectionBounds(selectionElements);
-  if (selection) {
+  const editing = pointEditTarget(selectionElements), frame = selectionFrame(selectionElements);
+  if (editing) paintPointHandles(context, editing, document.background, zoom);
+  if (frame) {
     const pad = 5 / zoom;
     context.setLineDash([4 / zoom, 3 / zoom]);
-    context.strokeRect(selection.x - pad, selection.y - pad, selection.width + pad * 2, selection.height + pad * 2);
+    context.strokeRect(frame.x - pad, frame.y - pad, frame.width + pad * 2, frame.height + pad * 2);
     context.setLineDash([]);
-    for (const handle of elementResizeHandles(selectionElements, selection)) {
+    for (const handle of resizeHandles(frame)) {
       context.fillStyle = document.background;
       context.beginPath(); context.roundRect(handle.x - 4 / zoom, handle.y - 4 / zoom, 8 / zoom, 8 / zoom, 2 / zoom); context.fill(); context.stroke();
     }

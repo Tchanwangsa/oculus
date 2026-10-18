@@ -1,7 +1,9 @@
-import type { CanvasBinding, CanvasElement, Point } from './model';
+import { arrowTypeOf, type CanvasBinding, type CanvasElement, type Point } from './model';
 import { elementBounds, pointInBounds, polylinePoints } from './geometry';
 import { anchorPoint, isBindable, nearestOutlinePoint, outlineAlong, outlineAnchor, outlineCenter, outlineMidpoints, pointInsideOutline } from './outline';
 import type { ElementChanges } from './changes';
+import { routeElbow } from './elbow';
+import { withoutFixedSegments } from './elbow/lanes';
 
 /**
  * Arrow ends bound to shapes: where a pointer binds, where a bound end sits,
@@ -50,11 +52,24 @@ export function findBindingSnap(elements: readonly CanvasElement[], point: Point
 export const sameSnap = (a: BindingSnap | null, b: BindingSnap | null) =>
   a === b || (!!a && !!b && a.target === b.target && a.binding.mode === b.binding.mode && a.point.x === b.point.x && a.point.y === b.point.y);
 
-/** Binds one end of an arrow at the pointer, or unbinds it when nothing is there or `free` (⌘/Ctrl) is held. */
+/**
+ * Binds one end of an arrow at the pointer, or unbinds it when nothing is there or `free` (⌘/Ctrl) is held.
+ * An elbow arrow is re-routed here, bound or not, since `followBindings` only re-places bound arrows; binding an end
+ * to a different shape drops its fixed segments, which were placed for the old one.
+ */
 export function bindArrowEnd(arrow: CanvasElement, end: ArrowEnd, point: Point, elements: readonly CanvasElement[], zoom: number, options: { live?: Live; free?: boolean } = {}) {
   const other = arrow[bindingKey(end === 'start' ? 'end' : 'start')];
-  const snap = options.free ? null : findBindingSnap(elements, point, zoom, { live: options.live, avoidCenter: other?.mode === 'center' ? other.elementId : undefined });
-  return { arrow: snap ? { ...arrow, [bindingKey(end)]: snap.binding } : withoutBinding(arrow, end), snap };
+  const avoidCenter = other?.mode === 'center' ? other.elementId : undefined;
+  let snap = options.free ? null : findBindingSnap(elements, point, zoom, { live: options.live, avoidCenter });
+  // An elbow end leaves by a side: well inside a shape, the side facing the other end reads better than the nearest edge.
+  if (snap?.binding.mode === 'edge' && arrowTypeOf(arrow) === 'elbow' && snap.target.id !== avoidCenter && pointInsideOutline(snap.target, point)) {
+    const edge = nearestOutlinePoint(snap.target, point);
+    if (Math.hypot(point.x - edge.x, point.y - edge.y) > BIND_RANGE / zoom) snap = { ...snap, binding: { elementId: snap.target.id, mode: 'center' }, point: outlineCenter(snap.target) };
+  }
+  const rebound = snap && snap.target.id !== arrow[bindingKey(end)]?.elementId;
+  const bound = snap ? { ...(rebound ? withoutFixedSegments(arrow) : arrow), [bindingKey(end)]: snap.binding } : withoutBinding(arrow, end);
+  if (arrowTypeOf(bound) !== 'elbow') return { arrow: bound, snap };
+  return { arrow: routeElbow(bound, sceneLookup(elements, options.live)), snap };
 }
 
 const same = (a: Point, b: Point) => Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9;
@@ -76,7 +91,8 @@ function placeEnd(binding: CanvasBinding, target: CanvasElement, raw: Point, oth
 
 /**
  * Places an arrow's bound ends on its targets, each pulled back toward the other end by 4 + strokeWidth/2.
- * Both raw targets are found first so two bound ends aim at each other. Returns the arrow itself when nothing moves.
+ * Both raw targets are found first so two bound ends aim at each other. An elbow arrow is routed afresh instead
+ * (`routeElbow`). Returns the arrow itself when nothing moves.
  */
 export function resolveArrow(arrow: CanvasElement, lookup: (id: string) => CanvasElement | null | undefined): CanvasElement {
   if (arrow.type !== 'arrow') return arrow;
@@ -86,6 +102,7 @@ export function resolveArrow(arrow: CanvasElement, lookup: (id: string) => Canva
   };
   const startTarget = target(arrow.startBinding), endTarget = target(arrow.endBinding);
   if (!startTarget && !endTarget) return arrow;
+  if (arrowTypeOf(arrow) === 'elbow') return routeElbow(arrow, lookup);
   const world = polylinePoints(arrow).map(p => ({ x: arrow.x + p.x, y: arrow.y + p.y }));
   const last = world.length - 1, gap = 4 + arrow.strokeWidth / 2;
   const rawStart = startTarget ? targetPoint(arrow.startBinding!, startTarget) : world[0];
@@ -105,6 +122,12 @@ function indexOf(elements: readonly CanvasElement[]) {
   let index = indexes.get(elements);
   if (!index) indexes.set(elements, index = new Map(elements.map(el => [el.id, el])));
   return index;
+}
+
+/** Finds elements by ID, live geometry where `live` overrides the scene. */
+export function sceneLookup(elements: readonly CanvasElement[], live?: Live) {
+  const index = indexOf(elements);
+  return (id: string) => live?.has(id) ? live.get(id) : index.get(id);
 }
 
 /**

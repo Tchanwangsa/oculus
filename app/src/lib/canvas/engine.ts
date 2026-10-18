@@ -1,5 +1,6 @@
 import { arrowheadOf, type CanvasElement, type Point } from './model';
-import { boundsIntersect, elementBounds, elementFilled, elementHitTest, simplifyPolyline, type Bounds } from './geometry';
+import { arrowheadSize, arrowPath, boundsIntersect, elementBounds, elementFilled, elementHitTest, simplifyPolyline, type Bounds } from './geometry';
+import { linePath, pathEnd } from './arrow/path';
 
 type WasmModule = typeof import('../../../canvas-core/pkg/oculus_canvas_core');
 type Scene = InstanceType<WasmModule['CanvasScene']>;
@@ -8,6 +9,17 @@ let loading: Promise<void> | undefined;
 let status: 'loading' | 'rust' | 'javascript' = 'loading';
 const scenes = new Map<readonly CanvasElement[], Scene>();
 const kinds: CanvasElement['type'][] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text'];
+/** Floats per shape; the layout is documented on `CanvasScene::new` in canvas-core. */
+const RECORD = 14;
+
+/** An arrow sends its flattened path and each head's angle and size, so Rust tests the heads the JS reference draws. */
+function record(el: CanvasElement, start: number, count: number): number[] {
+  const base = [kinds.indexOf(el.type), el.x, el.y, el.width, el.height, el.strokeWidth, elementFilled(el) ? 1 : 0, start, count];
+  if (el.type !== 'arrow') return [...base, 0, 0, 0, 0, 0];
+  const heads = (arrowheadOf(el, 'start') !== 'none' ? 1 : 0) | (arrowheadOf(el, 'end') !== 'none' ? 2 : 0);
+  const size = arrowheadSize(linePath(el).length);
+  return [...base, heads, pathEnd(el, 'start').angle, size, pathEnd(el, 'end').angle, size];
+}
 
 export function getCanvasEngineStatus() { return status; }
 
@@ -28,13 +40,13 @@ function sceneFor(elements: readonly CanvasElement[]): Scene | undefined {
   if (!wasm) return;
   const current = scenes.get(elements);
   if (current) return current;
-  const records = new Float64Array(elements.length * 10);
+  const records = new Float64Array(elements.length * RECORD);
   const coordinates: number[] = [];
   elements.forEach((el, i) => {
     const start = coordinates.length / 2;
-    if (el.points) for (const p of el.points) coordinates.push(p.x, p.y);
-    const heads = el.type === 'arrow' ? (arrowheadOf(el, 'start') !== 'none' ? 1 : 0) | (arrowheadOf(el, 'end') !== 'none' ? 2 : 0) : 0;
-    records.set([kinds.indexOf(el.type), el.x, el.y, el.width, el.height, el.strokeWidth, elementFilled(el) ? 1 : 0, start, coordinates.length / 2 - start, heads], i * 10);
+    const points = el.type === 'arrow' ? arrowPath(el) : el.points;
+    if (points) for (const p of points) coordinates.push(p.x, p.y);
+    records.set(record(el, start, coordinates.length / 2 - start), i * RECORD);
   });
   const next = new wasm.CanvasScene(records, new Float64Array(coordinates));
   scenes.set(elements, next);

@@ -221,3 +221,15 @@ describe('cloning bound arrows', () => {
     expect('endBinding' in cx).toBe(false);
   });
 });
+
+describe('elbow ends inside a shape', () => {
+  const big = shape('big', 'rectangle', 0, 0, 200, 120);
+  const drawn = (extra: Partial<CanvasElement>) => arrowBetween('x', { x: 400, y: 300 }, { x: 140, y: 30 }, extra);
+  test('bind by the side facing the other end, not the nearest edge', () => {
+    expect(bindArrowEnd(drawn({ arrowType: 'elbow' }), 'end', { x: 140, y: 30 }, [big], 1).arrow.endBinding).toEqual({ elementId: 'big', mode: 'center' });
+    expect(bindArrowEnd(drawn({}), 'end', { x: 140, y: 30 }, [big], 1).arrow.endBinding?.mode).toBe('edge');
+  });
+  test('still bind to the edge near the outline', () => {
+    expect(bindArrowEnd(drawn({ arrowType: 'elbow' }), 'end', { x: 140, y: 8 }, [big], 1).arrow.endBinding?.mode).toBe('edge');
+  });
+});

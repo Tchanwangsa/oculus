@@ -19,10 +19,14 @@ beside another page.
 | Text fonts, measuring, wrapping and label layout | `app/src/lib/canvas/renderText.ts` |
 | Versioned document model and coordinate helpers | `app/src/lib/canvas/model.ts`, `app/src/lib/canvas/geometry.ts` |
 | Style fields, which element types take them, inspector sections | `app/src/lib/canvas/style.ts` |
-| Contextual inspector sections | `app/src/components/canvas/inspector/` |
+| Contextual inspector sections, palettes and popover guards | `app/src/components/canvas/inspector/` |
+| Colour palette popover | `app/src/components/ui/color/ColorPalette.tsx` |
 | Shape labels: commit, grow rule, restyling | `app/src/lib/canvas/labels.ts` |
 | Bindable outlines | `app/src/lib/canvas/outline.ts` |
 | Arrow binding, end placement, following | `app/src/lib/canvas/bindings.ts` |
+| Arrow path (the one rendered path), curve, point edits, handles, retyping | `app/src/lib/canvas/arrow/` |
+| Elbow routing: headings, ends, grid, A*, route, fixed segments and segment drags | `app/src/lib/canvas/elbow/` |
+| Scaling a selection | `app/src/lib/canvas/resize.ts` |
 | Element edits as replaceable maps | `app/src/lib/canvas/changes.ts` |
 | Layer order moves | `app/src/lib/canvas/layers.ts` |
 | Clipboard envelope and clone with remapped bindings | `app/src/lib/canvas/renderClipboard.ts` |
@@ -69,7 +73,10 @@ version stays 1, and an absent field means its default (`CANVAS_DEFAULTS` in
 | `textAlign` | `left` `center` `right` (left for text, center for labels) | text, labelled shapes |
 | `verticalAlign` | `top` `middle` `bottom` (middle) | labelled shapes |
 | `startArrowhead`, `endArrowhead` | `none` `arrow` `triangle` `dot` `bar` `diamond` (none, arrow) | arrow |
+| `roundness` | `sharp` `round` (round for a rectangle, sharp for a diamond) | rectangle, diamond |
+| `arrowType` | `sharp` `curved` `elbow` (sharp) | arrow |
 | `startBinding`, `endBinding` | `{elementId, mode: 'center'}` or `{elementId, mode: 'edge', anchor}` with `anchor` x/y in 0..1 of the target’s bounds | arrow |
+| `fixedSegments` | an array in path order of `{x}` (a vertical segment on that line) or `{y}` (a horizontal one), local to the element’s x/y (none) | elbow arrow |
 | `text`, `fontSize` on rectangle, ellipse, diamond | the shape’s label | shapes |
 
 A binding’s target ID is not checked at load, so a dangling binding never
@@ -89,11 +96,14 @@ buffers once per committed scene, with scalar coordinates for subsequent
 queries. There is no Tauri round trip for a pointer event. Rust scene storage
 is capped at eight scene arrays independently of undo history.
 
-Each shape is a record of 10 floats (`engine.ts`, documented on
+Each shape is a record of 14 floats (`engine.ts`, documented on
 `CanvasScene::new` in `app/canvas-core/src/lib.rs`): kind, x, y, width, height,
-strokeWidth, filled, point offset, point count, `heads`. `heads` is a bitfield:
-1 for a head at the first point, 2 at the last, so Rust tests a head only at
-the ends that draw one. `filled` is true for a hollow shape that has a label,
+strokeWidth, filled, point offset, point count, `heads`, startAngle, startSize,
+endAngle, endSize. `heads` is a bitfield: 1 for a head at the first point, 2 at
+the last, so Rust tests a head only at the ends that draw one. An arrow’s
+points are its flattened rendered path, and each head’s angle and size are
+computed in JavaScript (the end tangent of a curve, one size from the whole
+path), so Rust has no curve code. `filled` is true for a hollow shape that has a label,
 which makes its inside selectable. Changing the record layout needs both
 sides and the parity test.
 
@@ -136,8 +146,11 @@ commands remain scoped to notes.
 
 The editor supports selection, marquee, move and resize; rectangle, ellipse,
 diamond, line, arrow, freehand and text tools; an eraser; undo/redo;
-duplicate and copy/paste; layer order; grid, pan, zoom and fit. Line and arrow endpoint
-handles edit their endpoints.
+duplicate and copy/paste; layer order; grid, pan, zoom and fit. A single
+selected line or arrow edits its points instead of resizing
+([below](#arrows-are-sharp-curved-or-elbow-paths)), so it has no dashed
+selection frame or corner handles, only its point handles (`selectionFrame`
+in `render.ts`); any other selection, including several lines, has the frame.
 
 The canvas root scopes shortcuts and participates in native Edit menu
 routing. A visible note editor must not claim undo while a canvas owns focus.
@@ -149,7 +162,7 @@ chrome, selection, binding hints and grid. The native export command opens a
 Save dialog and writes only the path selected there. SVG text and attribute
 values are escaped. PNG export caps its dimensions to bound bitmap allocation.
 Canvas2D, SVG and hit testing all take dash lengths (`strokeDash`) and
-arrowhead outlines (`arrowheadShape`) from `geometry.ts`.
+arrowhead outlines (`elementArrowheads`) from `geometry.ts`.
 
 ## A shape holds its label as text
 
@@ -182,8 +195,8 @@ type, and `inspectorSections` derives the panel from it: the union of
 sections that apply to any selected element (or to the active tool’s next
 element when nothing is selected, or to the element being written in).
 Sections are Color or Stroke, Fill, Font and Align, Stroke width, Stroke
-style, Sketch, Arrowheads and Opacity, in a fixed order, then Layer whenever
-something is selected. A shape’s text
+style, Sketch, Edges, Arrow type, Arrowheads and Opacity, in a fixed order,
+then Layer whenever something is selected. A shape’s text
 options appear only once it has a label or one is being written. Each control
 reads its value from the first element that shows it.
 
@@ -191,7 +204,8 @@ A style patch writes only the fields that apply to each selected element and
 change what it draws; a patch that changes nothing commits nothing and makes
 no undo step (`patchElementStyle`, `stylePatchChanges`). A font size or family
 change re-measures standalone text and re-runs the grow rule on labelled
-shapes (`restyleElement`). A patch also becomes the default for the next
+shapes, and an arrow type change reshapes the arrow (`restyleElement`,
+`retypeArrow`). A patch also becomes the default for the next
 element of those kinds, and selecting an element adopts its look as the
 default. Opacity previews live while dragging and commits one undo step on
 release.
@@ -200,9 +214,17 @@ The panel is `CanvasStylePanel.tsx`, which only places it: a card on wide
 panes and a popover behind a Style button on narrow ones, scrolling inside
 instead of overflowing. One file per section lives in
 `app/src/components/canvas/inspector/` and `InspectorControls.tsx` assembles
-them. Arrowhead glyphs are drawn by `arrowheadShape`, so the picker previews
-exactly what the arrow gets. The panel keeps focus in an open text overlay so a style change restyles the
-text instead of committing it.
+them. Colour and Fill show five top picks and a button for the current
+colour, which opens `ColorPalette` (`app/src/components/ui/color/`) on the
+canvas palette in `inspector/palette.ts`: a grid of hues, the shades of the
+hue the colour belongs to (`colorShades`), the hex code and the full picker
+behind Custom. Strokes pick a hue's base and fills its palest shade. Edges is a Sharp/Round pair and Arrow type a
+Sharp/Curved/Elbow trio. Each arrow end is a button showing its head that opens
+a grid of the six types. These popovers focus themselves rather than their
+first option, leave focus in an open text overlay, and keep their keys from the
+canvas's shortcuts (`inspector/popoverGuards.ts`). Arrowhead glyphs are drawn
+by `arrowheadShape`, so the picker previews exactly what the arrow gets. The panel keeps focus in an open text overlay so a
+style change restyles the text instead of committing it.
 
 ## Layer order is array order
 
@@ -247,7 +269,15 @@ endpoint handle is dragged (`bindings.ts`):
 point, a centre binding where the line to the other end crosses the outline,
 each pulled back toward the other end by `4 + strokeWidth / 2`. Both raw
 targets are found first so two bound ends aim at each other. A centre-bound end
-whose other end is inside the shape stays at the centre. Arrows stay two-point.
+whose other end is inside the shape stays at the centre. A sharp or curved arrow
+keeps its interior points and aims each end at its neighbouring point; an elbow
+arrow is routed afresh (below). `bindArrowEnd` re-routes an elbow arrow whether
+or not the end bound, because `followBindings` only re-places bound arrows. An
+elbow end pressed well inside a shape (beyond the 16-pixel edge range) binds by
+centre, so it leaves by the side facing the other end rather than the nearest edge.
+
+Binding an elbow end to a different shape drops the arrow’s fixed segments
+([below](#elbow-segments-can-be-dragged-and-stay-where-they-are-put)).
 
 `followBindings(elements, changes)` returns the changes plus every bound arrow
 they affect, re-placed. A change that removes a target drops the binding on
@@ -261,13 +291,120 @@ gesture previews (into the overrides map) and `commitChanges` for committed
 edits, both of which run `followBindings`. This covers move, resize, nudge,
 label grow, font change, delete and erase.
 
+## Arrows are sharp, curved or elbow paths
+
+An arrow holds any number of `points`; `arrowType` decides how they are drawn.
+`linePath` (`arrow/path.ts`) is the one rendered path, cached per element:
+`points`, the `curves` through them, and a `polyline` flattened to 0.25 units.
+Canvas2D and SVG draw the curves; bounds, hit testing, culling and the WASM
+scene use the polyline. A curved arrow of three or more points is a uniform
+Catmull-Rom spline (tension 1/6, as roughjs draws; `arrow/curve.ts`), which is
+affine in its points, so resizing scales the points and the curve follows
+(`resize.ts`). Two points are always straight.
+
+A single selected line or arrow shows point handles (`arrow/handles.ts`): both
+ends always; a sharp or curved arrow also every interior point and a midpoint on
+each segment, an elbow arrow a segment handle on each segment, in both cases
+only on segments at least 28 screen pixels long. Dragging a midpoint inserts a
+point, double-clicking an interior point removes it, and Shift snaps a segment
+to 45 degrees. All edits go through `arrow/points.ts`, which keeps x/y at the
+first point so bindings place ends the same way. Elbow segment handles are
+[below](#elbow-segments-can-be-dragged-and-stay-where-they-are-put).
+
+Changing the type reshapes the arrow (`arrow/retype.ts`): becoming elbow routes
+it; leaving elbow keeps only its two ends, since its bends were routed, not
+placed; sharp and curved share their points. Any type change drops fixed
+segments.
+
+## Elbow arrows route around their targets
+
+`routeElbow` (`elbow/index.ts`) gives a right-angled route and returns the arrow
+itself when nothing changes, so a re-route that moves nothing is no edit.
+
+- `ends.ts` places each end. A bound end sits on a side of its target, pulled
+  out along that side’s normal by `4 + strokeWidth / 2`: an edge binding on the
+  side its anchor is on, a centre binding at the midpoint of the side facing the
+  other end (the next side clockwise when the other end is an edge binding on
+  the same shape). A free end keeps its point and heads along the dominant axis
+  toward the other end.
+- `grid.ts` pads each target box by 40 units, except that the sides facing each
+  other across a gap reach halfway, so the padded boxes meet on the midline and
+  never overlap. Each end’s dongle is where its stub leaves the padded box. The
+  grid is sparse: box edges, dongles and the midline between the bodies.
+- `astar.ts` searches the grid for the route with the fewest bends, then the
+  shortest length, without entering a padded box, leaving and arriving along the
+  end headings. `route.ts` simplifies it to corners.
+- With no grid route, two bound ends (overlapping targets) are joined without
+  avoiding the boxes; otherwise, or for a free end inside the other target, a
+  plain L or Z through the midpoint.
+
+## Elbow segments can be dragged and stay where they are put
+
+Dragging an elbow arrow’s segment handle moves that segment perpendicular to
+itself, live, as one undo step (the hook’s `segment` gesture,
+`elbow/segments.ts`). Its neighbours stretch to meet it and nothing else
+moves. The first or last segment cannot take a bound end with it: a stub of 40
+units (half the segment when it is shorter than 45) keeps leaving or entering
+the target along the segment’s direction, and the route turns onto the moved
+segment after it, as Excalidraw does. A free end turns straight onto it.
+
+A dragged segment is stored as a fixed segment, which pins the line it runs on,
+not its ends (`elbow/lanes.ts` calls a fixed line in world coordinates a lane).
+Its extent and position in the points come from its neighbours on every route,
+so there is no index to keep in step with the points. Lanes are local to x/y:
+moving, nudging, pasting and duplicating carry them along, a resize scales
+them, and `throughPoints` rebases them when x/y moves under points that stay.
+
+`routeElbow` keeps an arrow with fixed segments as it is while its points still
+fit its ends (`elbow/fits.ts`): they start and end there, are orthogonal, leave
+and enter a bound target along its heading, and run along every lane. Once an
+end moves (a target moved, resized or rebound at another anchor, an endpoint
+dragged) or a drag breaks a heading (a segment dragged past an end), it routes
+afresh:
+
+- The grid gains each lane’s line and a frame 40 units outside everything, and
+  A* (`astar.ts`) must run along the lanes in order. A lane may be crossed
+  instead at a cost of 2.5 bends, so when the ends come level across a lane the
+  segment shrinks away rather than becoming a detour, and comes back when they
+  separate.
+- A padded box is drawn in to a lane between the body and its padding
+  (`clipToLanes`), so the route can take a line the user placed close to a
+  target. A stub that already runs along the first or last lane counts.
+- A free end may turn at once, since its heading was only a guess.
+- A centre-bound end tries all four sides and the cheapest route wins
+  (`elbow/sides.ts`): bends, then crossed lanes and any target body crossed,
+  then length; the facing side wins ties. A fixed line on the far side of a
+  target would otherwise force a loop.
+- With no route clear of the targets the lanes still hold; with no route at
+  all, they are ignored for that route.
+
+Fixed segments are dropped when the arrow type changes, when an end binds to a
+different shape than before (unbinding keeps them), and one by one by
+double-clicking a fixed segment’s handle, which routes the arrow afresh along
+the rest (`releaseSegment`). Double-clicking a segment that is not fixed does
+nothing.
+
+## Corners are sharp or round, sized from the shape
+
+`roundness` is a choice, not a stored radius: the radius follows the shape's
+size, so a resize keeps its look and the panel needs two buttons rather than
+a slider. A round rectangle's radius is `min(8, side / 8)` (`rectangleRadius`).
+A round diamond cuts each corner a fifth of an edge back, at most 12 units,
+and joins the cuts with a quadratic curve whose control is the vertex
+(`diamondCorners`). Both live in `geometry.ts` so Canvas2D, SVG and the
+sketch pass draw the same outline. Hit testing, binding outlines and the Rust
+record keep the sharp shape; a round corner sits at most a few units inside
+it.
+
 ## Arrowheads are one geometry for every renderer
 
 An arrow has an independent head at each end: `none`, `arrow` (open chevron),
 `triangle` and `diamond` (filled with the stroke colour), `dot` and `bar`.
-`arrowheadShape` returns the outline, wing pair and size for a head. Size is
-`min(16, segment length / 3)`, which keeps every head inside Rust’s 16-unit
-arrow culling pad. Heads draw solid even on a dashed line. Hit testing covers
+`arrowheadAt` returns the outline, wing pair and size for a head, aimed along
+the path’s end tangent (`pathEnd`; `arrowheadShape` does so for a bare polyline,
+which the picker glyphs use). Size is `min(16, whole path length / 3)`, so a
+short last segment of a curve or elbow does not shrink the head, and no head
+leaves Rust’s 16-unit arrow culling pad. Heads draw solid even on a dashed line. Hit testing covers
 the tip-to-wing segments of any head type, and a `none` end has no head to hit.
 
 ## Build and verification include the WASM asset
@@ -286,6 +423,8 @@ formatting and Clippy as well as frontend format and WASM parity tests.
 - Canvas2D font names must match the loaded `"Inter Variable"` family (`CANVAS_FONT_STACKS`); a wrong name measures and wraps with a fallback font, and the label cache is dropped on `document.fonts` `loadingdone` for the same reason.
 - Keep `CANVAS_FONT_STACKS` in step with `theme.css`; drift makes the canvas, the overlay textarea and SVG export disagree on wrapping.
 - A hollow labelled shape counts as filled for hit testing in both the JS reference and the WASM record; change one and the parity test fails.
+- Re-place a line or arrow’s points with `throughPoints`; setting x/y by hand shifts an elbow arrow’s fixed segments, which are local to x/y.
+- A new arrow path kind must come out of `linePath`; computing a path elsewhere makes bounds, hit testing and the WASM scene disagree with what is drawn.
 - Add a new optional field to `STYLE_KEYS` and `KEY_TYPES` in `style.ts` as well as to `validate` in `model.ts`, or the inspector cannot patch it.
 - Unknown format versions must fail before writing; partial loading must never erase unfamiliar data.
 - Rename and delete through the shared session so pending writes cannot target an obsolete path.
