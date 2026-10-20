@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { blobToBase64 as base64 } from "@/lib/encoding/base64";
 
 /**
  * A picture on its way into a message. A CLI agent reads files, so on send it
@@ -77,19 +78,8 @@ export function releaseAttachment(a: PendingAttachment): void {
   if (a.source.kind === "bytes") URL.revokeObjectURL(a.preview);
 }
 
-/** A `File` as base64 for IPC — a byte array would cross as a JSON list of
- *  numbers. */
-export function base64(file: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = String(reader.result);
-      resolve(url.slice(url.indexOf(",") + 1));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("could not read the image"));
-    reader.readAsDataURL(file);
-  });
-}
+/** A `File` as base64 for IPC (`lib/encoding/base64.ts`). */
+export { base64 };
 
 /** Write one pending picture, returning `./attachments/<name>` — relative to
  *  `agents/`, every thread's working directory. */

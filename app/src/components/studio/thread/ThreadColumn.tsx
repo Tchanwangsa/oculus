@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Composer } from "@/components/harness/composer/Composer";
+import { JumpToLatest } from "@/components/harness/timeline/JumpToLatest";
 import { Timeline } from "@/components/harness/timeline/Timeline";
 import { useThreadActions } from "@/components/harness/threads/useThreadActions";
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
@@ -55,7 +56,7 @@ export function ThreadColumn({ threadId, onTurnEnd }: { threadId: number; onTurn
     wasRunning.current = running;
   }, [running, onTurnEnd]);
 
-  const scroll = useStickToBottom(threadId, true);
+  const scroll = useStickToBottom(threadId, true, running);
   useScrollFade(scroll.outer, "y");
 
   const threadRef = useRef(threadId);
@@ -73,10 +74,13 @@ export function ThreadColumn({ threadId, onTurnEnd }: { threadId: number; onTurn
     <div ref={columnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
       {/* `overflow-x-hidden` is load-bearing: `overflow-y: auto` makes x `auto`
           too, so one wide row would scroll the whole thread. */}
-      <div ref={scroll.outer} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6">
-        <div ref={scroll.inner} className="mx-auto w-full max-w-[640px]">
-          <Timeline items={items} threadId={threadId} running={running} questions={questions} pending={pending} />
+      <div className="relative min-h-0 flex-1">
+        <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 py-6">
+          <div ref={scroll.inner} className="mx-auto w-full max-w-[640px]">
+            <Timeline items={items} threadId={threadId} running={running} questions={questions} pending={pending} />
+          </div>
         </div>
+        <JumpToLatest show={scroll.showJump} onClick={scroll.scrollToBottom} />
       </div>
       <div className="shrink-0 px-6 pb-4">
         <div className="mx-auto max-w-[640px]">

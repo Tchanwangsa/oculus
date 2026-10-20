@@ -1,6 +1,5 @@
 import { memo, useMemo, useRef, useState } from "react";
 import { CaretRight, Chat, CircleNotch, Plus } from "@phosphor-icons/react";
-import { useTabActive } from "@/components/tabs/TabContext";
 import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
 import {
   SIDE_NAV_FOLDS,
@@ -14,7 +13,6 @@ import type { HarnessThread } from "@/lib/harness";
 import type { Subject } from "@/lib/db";
 import { groupBySubject } from "@/lib/ui/subjectGroups";
 import { useCollapsedGroups } from "@/hooks/shell/useCollapsedGroups";
-import { useWindowEvent } from "@/hooks/backend/useEvents";
 import type { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
 import { useStoredSet } from "@/hooks/ui/useStoredState";
 import { cn } from "@/lib/utils";
@@ -73,17 +71,6 @@ export const ThreadList = memo(function ThreadList({
     [threads, subjects, order],
   );
 
-  // ⌘⌥B folds the column, in the tab in front only: every tab stays mounted,
-  // and the subject column answers the same chord. `e.code`, not `e.key`: on
-  // macOS ⌥B arrives as `∫`.
-  const active = useTabActive();
-  useWindowEvent("keydown", (e) => {
-    const k = e as KeyboardEvent;
-    if (!active || !k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
-    k.preventDefault();
-    panel.toggle();
-  });
-
   // Header reorder on pointer events (see docs/ui.md). Groups
   // differ in height, so a drop line marks the gap instead of sliding boxes;
   // edges are measured once at lift.
@@ -140,6 +127,7 @@ export const ThreadList = memo(function ThreadList({
             <div className="px-2 pb-2">
               <button
                 type="button"
+                data-side-nav-close
                 aria-current={activeId == null ? "page" : undefined}
                 onClick={() => onNew()}
                 className={cn(SIDE_NAV_ROW, activeId == null ? SIDE_NAV_ROW_ACTIVE : SIDE_NAV_ROW_IDLE)}
@@ -207,6 +195,7 @@ export const ThreadList = memo(function ThreadList({
                 <div className="relative flex size-4 shrink-0 items-center justify-center">
                   <button
                     type="button"
+                    data-side-nav-close
                     aria-label={`New thread in ${g.label}`}
                     title={`New thread in ${g.label}`}
                     tabIndex={collapsed ? -1 : undefined}

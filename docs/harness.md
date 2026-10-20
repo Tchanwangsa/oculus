@@ -39,7 +39,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/agents/useAttachments.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
 | Library paths in rows and prose; copy as markdown | `app/src/lib/files/openFile.ts`, `app/src/lib/markdown/selection.ts` |
-| Timeline window, off-screen layout, scroll anchoring, the expand protocol | `app/src/components/harness/timeline/useRowWindow.ts`, `app/src/components/harness/timeline/rowWindow.ts`, `app/src/components/harness/timeline/useRowVisibility.ts`, `app/src/components/harness/timeline/RetainedRow.tsx`, `app/src/hooks/ui/useStickToBottom.ts`, `app/src/lib/ui/scrollAnchor.ts`, `app/src/lib/ui/expandable.ts` |
+| Timeline window, off-screen layout, scroll anchoring, the expand protocol | `app/src/components/harness/timeline/useRowWindow.ts`, `app/src/components/harness/timeline/rowWindow.ts`, `app/src/components/harness/timeline/useRowVisibility.ts`, `app/src/components/harness/timeline/RetainedRow.tsx`, `app/src/hooks/ui/useStickToBottom.ts`, `app/src/lib/ui/followTimeline.ts`, `app/src/lib/ui/scrollAnchor.ts`, `app/src/lib/ui/expandable.ts` |
 | The lecture dock's chat | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx`, `lecture_grab_frames` in `app/src-tauri/src/lectures/chapters/app.rs` |
 
 Windows offers Codex and opencode; native Claude Code is disabled because its
@@ -398,13 +398,26 @@ maths-heavy replies mounts a page at a time.
   a viewport of top margin, so each page lands before the reader reaches it.
   The observer is re-hung per boundary, so a sentinel still in reach after a
   short page loads the next.
+- **Following yields on any upward input.** `followTimeline` opens a thread at
+  its latest row, then follows size changes only during an active reply while
+  the reader is at the bottom (1px rounding tolerance). Upward wheel, touch
+  or navigation-key input releases immediately, before native scrolling; any
+  upward scroll movement also releases, including fractional pixels. Only a
+  downward return to the bottom or the floating arrow re-arms following.
+  `JumpToLatest` is shared by Chat, the lecture dock and Studio: an arrow over
+  a nearly opaque, blurred surface. It appears after 16px of separation,
+  stays at a fixed position, and fades out at the bottom over 150ms (instantly
+  with reduced motion). Native rubber-band overscroll does not reveal it or
+  trigger anchor corrections.
+  Resize handling samples pending native movement before correcting layout,
+  so it cannot undo a scroll whose event has not arrived yet.
 - **The view is anchored by hand**, because WebKit has no `overflow-anchor`.
-  Off the bottom, `useStickToBottom` records on each scroll the first
+  While reading, `followTimeline` records on each scroll the first
   anchor row (`ANCHOR_ROW`) crossing the scroller's top, refined down to the
   block child being read, and its `ResizeObserver` scrolls by however far that
   node moved: rows above re-wrapping as the column is resized, growing, or
   arriving from the sentinel. It ignores a scroll event at the position it
-  last wrote itself (`s.at`): that event arrives a frame later, when the next
+  last wrote itself (`at`): that event arrives a frame later, when the next
   resize may have changed layout, and measuring then would lose the
   correction or unpin. Rects scale with page zoom and `scrollTop` doesn't, so
   rect deltas are divided by the scroller's rect height over `offsetHeight`;
@@ -805,6 +818,11 @@ structural changes (bumping `key`), and `revealCaret` scrolls the box because
 a contenteditable follows its caret only for edits it made. The menu anchors
 on a range over the `@` token, since a collapsed range's rect can be zeros in
 WebKit.
+A web link (`https://…` or `[words](https://…)`, `lib/harness/links.ts`) draws
+the same way (`LinkChip`: the site's icon and its words or host) in the
+composer and in the sent bubble. It becomes one when pasted or when the space
+or line break after it is typed, and a restored draft draws its links too; the
+text on the wire is the link as written, so a conversion never moves the caret.
 The menu's rows draw the chip's own glyph and colour
 (`fileReferenceAppearance`), and the lecture dock's composer uses the same input
 and menu, scoped to the lecture's subject.
@@ -818,11 +836,6 @@ The page and lecture dock share `SendControls` for send/queue/stop controls
 and `useAttachments.prepare` for message assembly. Preparation writes pictures
 before clearing the composer; a failed write keeps the draft and attachments.
 A message reads: the typed text, each pasted text's block, then the pictures'
-A web link (`https://…` or `[words](https://…)`, `lib/harness/links.ts`) draws
-the same way (`LinkChip`: the site's icon and its words or host) in the
-composer and in the sent bubble. It becomes one when pasted or when the space
-or line break after it is typed, and a restored draft draws its links too; the
-text on the wire is the link as written, so a conversion never moves the caret.
 paths, blank-line separated.
 
 A CLI reads files, so a picture becomes one — in `agents/`, the one folder
