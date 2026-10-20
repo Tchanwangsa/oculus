@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { createCanvasSessions, type CanvasFileRef } from "@/lib/canvas/sessions";
+import { createCanvasSessions, type CanvasFileRef, type CanvasSessionIO } from "@/lib/canvas/sessions";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((r) => { resolve = r; }); return { promise, resolve }; }
-function harness(initial = "disk") {
+function harness(initial = "disk", overrides: Partial<CanvasSessionIO<CanvasFileRef>> = {}) {
   const drafts = new Map<string, string>();
   const files = new Map([["courses/X/canvases/Ideas.canvas", initial]]);
   const writes: { path: string; text: string; done: ReturnType<typeof deferred> }[] = [];
@@ -21,6 +21,7 @@ function harness(initial = "disk") {
     rename: async (ref, title) => { const moved = ref.relative_path.replace(/[^/]+$/, `${title}.canvas`); files.set(moved, files.get(ref.relative_path)!); files.delete(ref.relative_path); return { ...ref, relative_path: moved }; },
     remove: async (ref) => { files.delete(ref.relative_path); },
     validate: (text) => { if (text.startsWith("invalid")) throw new Error("Invalid drawing"); },
+    ...overrides,
   });
   return { file, drafts, files, writes, sessions, setFail(value: boolean) { fail = value; } };
 }
@@ -29,7 +30,7 @@ describe("canvas sessions", () => {
   test("panes share edits and writes preserve latest revision in order", async () => {
     const h = harness(); const session = h.sessions.open(h.file); await session.load();
     expect(h.sessions.open(h.file)).toBe(session);
-    session.update("one");
+    session.update("one"); await tick();
     expect(JSON.parse(h.drafts.values().next().value!).text).toBe("one");
     const flush = session.flush(); await tick();
     session.update("two"); expect(session.flush()).toBe(flush);
@@ -85,4 +86,42 @@ describe("canvas sessions", () => {
     session.update("pending"); await session.remove(); await session.flush();
     expect(h.files.has(h.file.relative_path)).toBe(false); expect(h.writes.length).toBe(1); expect(h.drafts.size).toBe(0);
   });
+
+  test("async recovery cannot reappear after the latest drawing is saved", async () => {
+    const gate = deferred();
+    const drafts = new Map<string, string>();
+    const h = harness('disk', { drafts: {
+      getItem: async key => drafts.get(key) ?? null,
+      setItem: async (key, text) => { await gate.promise; drafts.set(key, text); },
+      removeItem: async key => { drafts.delete(key); },
+    } });
+    const session = h.sessions.open(h.file); await session.load();
+    session.update('first');
+    const saved = session.flush(); await tick();
+    h.writes[0].done.resolve(); await tick();
+    session.update('latest');
+    gate.resolve(); await tick();
+    expect(h.writes[1].text).toBe('latest');
+    h.writes[1].done.resolve(); await saved;
+    expect(h.files.get(h.file.relative_path)).toBe('latest');
+    expect(drafts.size).toBe(0);
+    expect(session.snapshot().status).toBe('saved');
+  });
+
+  test("recovery storage failure does not mark a successful document save as failed", async () => {
+    const h = harness('disk', { drafts: {
+      getItem: async () => null,
+      setItem: async () => { throw new Error('recovery unavailable'); },
+      removeItem: async () => {},
+    } });
+    const session = h.sessions.open(h.file); await session.load();
+    session.update('new drawing'); await tick();
+    expect(session.snapshot().status).toBe('unsaved');
+    expect(session.snapshot().recoveryError).toContain('recovery unavailable');
+    const saved = session.flush(); await tick(); h.writes[0].done.resolve(); await saved;
+    expect(session.snapshot().status).toBe('saved');
+    expect(session.snapshot().error).toBeUndefined();
+    expect(h.files.get(h.file.relative_path)).toBe('new drawing');
+  });
+
 });

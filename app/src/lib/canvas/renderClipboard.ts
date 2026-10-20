@@ -1,4 +1,5 @@
 import { bindingKey, withoutBinding } from './bindings';
+import { secureId } from './ids';
 import { createCanvasDocument, parseCanvasDocument, serializeCanvasDocument, type CanvasElement, type Point } from './model';
 
 export const CANVAS_CLIPBOARD_MIME = 'application/vnd.oculus.canvas+json';
@@ -14,7 +15,7 @@ export function parseCanvasClipboard(text: string): CanvasElement[] | null {
 }
 
 /** Bindings to elements cloned in the same batch point at their clones; bindings to anything else are dropped. */
-export function cloneCanvasElements(elements: readonly CanvasElement[], offset: Point = { x: 24, y: 24 }, id: () => string = () => crypto.randomUUID()): CanvasElement[] {
+export function cloneCanvasElements(elements: readonly CanvasElement[], offset: Point = { x: 24, y: 24 }, id: () => string = secureId): CanvasElement[] {
   const ids = new Map(elements.map(element => [element.id, id()]));
   return elements.map(element => {
     let clone: CanvasElement = { ...structuredClone(element), id: ids.get(element.id)!, x: element.x + offset.x, y: element.y + offset.y };

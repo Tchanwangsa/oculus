@@ -65,7 +65,9 @@ It is bun's lifecycle hook for `dev`. `beforeDevCommand` calls
 `app/scripts/dev.mjs`, which supplies `OCULUS_CLI_WATCH=1` in the child
 environment before running bun, so every `tauri dev` runs it on either OS. In order it
 runs `bun install`, fetches ffmpeg, compiles the speech helper,
-`whisper-cli`, the maths wasm and the drawing canvas wasm, builds the editor core's wasm for
+`whisper-cli`, the maths wasm and the drawing canvas wasm, builds the
+device-sharing companion page when its inputs changed
+([device-sharing.md](./device-sharing.md#desktop-ui); never fatal), builds the editor core's wasm for
 [shadow mode](./editor-core.md#shadow-mode-checks-the-rust-core-against-every-note-editor)
 (skipped with one line without the `wasm32-unknown-unknown` target or the
 pinned `wasm-bindgen` CLI, and never fatal), builds and signs the dev
@@ -581,7 +583,9 @@ rebuild. Which files are overwritten versus merged is in
 
 ## A UI change is verified by screenshot, not by `tsc`
 
-- Frontend type-check and bundle: `cd app && bun run build`; editor, shared
+- Frontend type-check and bundle: `cd app && bun run build`, which ends by
+  building the device-sharing companion page into `app/dist/companion/`
+  ([frontend.md](./frontend.md#the-companion-page-is-a-second-entry)); editor, shared
   frontend logic and offline script regressions: `bun run test`.
 - Rust: `cargo fmt`, `cargo check` / `cargo test` in `app/src-tauri`, and
   the same in keyd's two crates

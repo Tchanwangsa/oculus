@@ -35,6 +35,10 @@ export function boundsIntersect(a: Bounds, b: Bounds): boolean {
   return a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y;
 }
 
+export function boundsContain(outer: Bounds, inner: Bounds): boolean {
+  return inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.width <= outer.x + outer.width && inner.y + inner.height <= outer.y + outer.height;
+}
+
 export function pointInBounds(p: Point, b: Bounds, padding = 0): boolean {
   return p.x >= b.x - padding && p.y >= b.y - padding && p.x <= b.x + b.width + padding && p.y <= b.y + b.height + padding;
 }
@@ -127,7 +131,7 @@ export function strokeDash(el: CanvasElement): number[] {
 }
 
 /** A label makes a hollow shape selectable across its inside. */
-export const elementFilled = (el: CanvasElement) => (el.fill !== 'transparent' && el.fill !== 'none' && el.fill !== '') || hasLabel(el);
+export const elementFilled = (el: CanvasElement) => el.type === 'image' || (el.fill !== 'transparent' && el.fill !== 'none' && el.fill !== '') || hasLabel(el);
 
 export function elementHitTest(el: CanvasElement, world: Point, tolerance = 6): boolean {
   const p = { x: world.x - el.x, y: world.y - el.y };

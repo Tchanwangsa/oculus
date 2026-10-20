@@ -33,12 +33,13 @@ export interface LibraryLectureHit {
 export async function searchLibraryFiles(
   query: string,
   limit = 8,
-  scope: SearchScope = {},
+  scope: SearchScope & { fileType?: string } = {},
 ): Promise<LibraryFileHit[]> {
   const db = await getDb();
   const { where, rank, params } = matchSql(FILE_HAYSTACK, query, [
     ["f.subject_id", scope.subjectId],
     ["f.category", scope.category],
+    ["f.file_type", scope.fileType],
   ]);
   return db.select<LibraryFileHit[]>(
     `SELECT f.*, s.code AS subject_code

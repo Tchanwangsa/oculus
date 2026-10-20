@@ -8,7 +8,7 @@ let wasm: WasmModule | undefined;
 let loading: Promise<void> | undefined;
 let status: 'loading' | 'rust' | 'javascript' = 'loading';
 const scenes = new Map<readonly CanvasElement[], Scene>();
-const kinds: CanvasElement['type'][] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text'];
+const kinds: CanvasElement['type'][] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text', 'image'];
 /** Floats per shape; the layout is documented on `CanvasScene::new` in canvas-core. */
 const RECORD = 14;
 

@@ -11,10 +11,16 @@ beside another page.
 | Drive list, type filters and creation menu | `app/src/pages/subject/files/DrivePage.tsx` |
 | File route and editor choice | `app/src/pages/subject/files/FilePage.tsx` |
 | Canvas file rows and native command wrappers | `app/src/lib/canvas/files.ts` |
-| Shared ordered saves and recovery | `app/src/lib/canvas/sessions.ts`, `app/src/lib/canvas/sessionRuntime.ts` |
-| Title, save state, recovery controls and editor host | `app/src/components/canvas/CanvasEditor.tsx` |
+| Shared ordered saves and the shared-canvas adapter | `app/src/lib/canvas/sessions.ts`, `app/src/lib/canvas/sessionRuntime.ts`, `app/src/lib/canvas/authority.ts` |
+| Desktop recovery drafts | `app/src/lib/canvas/drafts.ts`, `app/src-tauri/src/library/files/canvases/drafts.rs` |
+| Authority command wrappers and event listeners | `app/src/lib/canvas/files.ts` (`canvasAuthority`) |
+| Title, save state, recovery, conflict and pause controls, the Share button and editor host | `app/src/components/canvas/CanvasEditor.tsx` |
 | Drawing surface, label text overlay, tool bar and style panel shell | `app/src/components/canvas/CanvasSurface.tsx`, `app/src/components/canvas/CanvasToolbar.tsx`, `app/src/components/canvas/CanvasStylePanel.tsx` |
 | Pointer gestures, history and keyboard commands | `app/src/hooks/canvas/useCanvasInteraction.ts` |
+| Two-finger pan and pinch | `app/src/lib/canvas/touchViewport.ts` |
+| Content transactions (undo steps and shared edits) and rebasing | `app/src/lib/canvas/collaboration.ts`, `app/src/lib/canvas/clientReconciliation.ts` |
+| Device-local drawing preferences | `app/src/lib/canvas/toolPreferences.ts` |
+| Native selection, callout and touch defaults kept off the canvas | `app/src/lib/canvas/browserSelectionGuard.ts` |
 | Canvas2D drawing and image export | `app/src/lib/canvas/render.ts`, `app/src/lib/canvas/renderSvg.ts` |
 | Text fonts, measuring, wrapping and label layout | `app/src/lib/canvas/renderText.ts` |
 | Versioned document model and coordinate helpers | `app/src/lib/canvas/model.ts`, `app/src/lib/canvas/geometry.ts` |
@@ -27,13 +33,22 @@ beside another page.
 | Arrow path (the one rendered path), curve, point edits, handles, retyping | `app/src/lib/canvas/arrow/` |
 | Elbow routing: headings, ends, grid, A*, route, fixed segments and segment drags | `app/src/lib/canvas/elbow/` |
 | Scaling a selection | `app/src/lib/canvas/resize.ts` |
+| Image import modal, library PDF search and selectable pages | `app/src/components/canvas/CanvasImageDialog.tsx`, `app/src/components/canvas/CanvasLibraryPdfs.tsx`, `app/src/components/canvas/CanvasPdfPages.tsx` |
+| Image decoding and batch placement; native PDF import sessions | `app/src/lib/canvas/importMedia.ts`, `app/src/lib/canvas/mediaPlacement.ts`; `app/src/lib/canvas/importPdf.ts` |
+| What the surface takes from its host (export saving, library PDF search and opening): the browser default and the desktop's | `app/src/lib/canvas/platform/` |
+| Embedded raster validation and Canvas2D image cache | `app/src/lib/canvas/imageSource.ts`, `app/src/lib/canvas/renderImages.ts` |
+| Scoped library PDF sessions and page rasterisation | `app/src-tauri/src/library/files/canvases/imports.rs` |
 | Element edits as replaceable maps | `app/src/lib/canvas/changes.ts` |
 | Layer order moves | `app/src/lib/canvas/layers.ts` |
 | Clipboard envelope and clone with remapped bindings | `app/src/lib/canvas/renderClipboard.ts` |
 | Retained Rust scene and WebAssembly bridge | `app/canvas-core/src/`, `app/src/lib/canvas/engine.ts` |
 | Native file commands and scoped paths | `app/src-tauri/src/library/files/canvases.rs` |
+| Shared-canvas authority: validator, transactions, sessions, receipts, commands | `app/src-tauri/src/library/files/canvases/authority/` |
+| `files` row updates from Rust | `app/src-tauri/src/db/store/files.rs` (`touch_file_row`, `rename_file_row`, `delete_file_row`) |
+| Format and transaction parity fixtures (run by the TypeScript and Rust tests) | `app/tests/fixtures/canvas-model/`, `app/tests/fixtures/canvas-collab/`, `app/tests/lib/canvas/collabFixtures.test.ts` |
 | WebAssembly build | `app/scripts/build-canvas.mjs` |
 | Format, geometry, labels, style, bindings, layer order, WASM parity and save-session tests | `app/tests/lib/canvas/` |
+| Pen, touch, undo and outside-document tests that drive the hook's handlers | `app/tests/hooks/canvas/` |
 
 ## Drive groups authored files without changing their storage
 
@@ -123,14 +138,21 @@ not a guarantee of frame rate or pointer latency.
 
 Sessions are keyed by database file ID. Every mounted pane receives the same
 snapshot, and one queue orders writes, rename and delete. Updates during an
-in-flight write are drained before Saved is published. The debounce batches
-completed changes rather than sending every pointer point to disk.
+in-flight write are drained before Saved is published, and an update that lands
+as a save finishes is saved by that same flush. The debounce batches completed
+changes rather than sending every pointer point to disk.
 
-A recovery copy in localStorage records the document and its base disk text.
+A recovery record under `recovery/canvases/<file-id>.json` in the library
+records the document and its base disk text. Native commands write it atomically
+without the browser storage quota. Existing localStorage drafts migrate only
+after a successful disk write. Recovery operations are ordered separately from
+saves; a late recovery write cannot recreate a draft cleared after saving.
 It is validated before restore. When the disk has changed independently,
 the editor offers Use recovery copy or Keep disk version; recovery never
 silently overwrites a newer file. Invalid recovery stays recoverable until
-explicitly discarded. Save errors keep the draft and show Retry save.
+explicitly discarded. Save errors keep the draft and show Retry save. A
+recovery-storage failure is a separate notice over the canvas: it neither
+marks a successful document save as failed nor resizes the drawing area.
 
 Rename flushes pending edits before moving the file. Unmount and pagehide
 flush the session; a clean session is released after its final pane unmounts,
@@ -142,6 +164,144 @@ fsync. File commands accept only the four-part subject canvas path and reject
 symlinks in its components. Canvas paths use their own guard; note mutation
 commands remain scoped to notes.
 
+## A shared canvas has one writer
+
+While a canvas is shared, the canvas authority
+(`library/files/canvases/authority/`) is the only writer of its file. Desktop
+panes and paired devices send content transactions (`collaboration.ts`:
+per-element `before`/`after`, an optional layer order and background); the
+viewport never travels in one. An added element (`before: null`) goes on top
+unless the edit names `afterId`, the element just below it in the sender's
+scene (`null` for the bottom); it is then inserted above that element, or on
+top if that element is gone. `diffCanvasContent` sets `afterId` only on an
+addition with an older element above it, such as an undone delete, so
+additions on top from two devices both land, in arrival order. `afterId` on an
+edit that is not an addition, or naming the edit's own ID, is invalid. A session is keyed by the file's database ID
+and starts with `canvas_authority_open`, given the pane's flushed text, which
+must equal the file on disk. The native registry fences ordinary `write_canvas`,
+`rename_canvas` and `delete_canvas` commands against a session owning the same
+path, including a paused session. Opening and whole-file mutations take the
+same registry lock, so a delayed desktop autosave cannot overwrite shared
+changes between the ownership check and the write. One path cannot have two
+sessions under different file IDs. Outside a session, `write_canvas` saves as
+above.
+
+- One lock per session. A commit validates the transaction, applies it to the
+  canonical document, writes the file, bumps the revision and then broadcasts
+  `{fileId, epoch, revision, clientId, transaction}`: the Tauri event
+  `canvas-authority-change` to the main webview, and the in-process
+  `Subscribers` list a network transport reads. A conflict, invalid input or
+  failed write changes nothing.
+- Preconditions compare only the touched objects, by value: numbers as numbers
+  (`1` equals `1.0`), object keys in any order, arrays in order. An edit already
+  in place is skipped. Unknown fields at every level survive. The broadcast
+  transaction leaves out the parts that were already in place and keeps each
+  applied addition's `afterId`.
+- Each op carries a `clientId`, an increasing `seq` and an `opId`. The
+  authority keeps each client's last 64 receipts: a retried op gets its
+  original revision back without being applied again (a replayed ack has no
+  transaction), and an older `seq` is `stale-op`, so the client resyncs and
+  keeps its draft. The epoch is a random ID per session; an op naming another
+  epoch is `session-ended`.
+- Before every overwrite the authority compares the file's SHA-256 with the
+  bytes it last read or wrote. On a mismatch it writes nothing: the session
+  pauses (`external-edit`, and a `canvas-authority-state` event), keeping the
+  outside version on disk and its own document in memory until
+  `canvas_authority_resolve_external` adopts the disk version (broadcast as a
+  change with no client) or keeps its own. Another process can still write
+  between the check and the rename: this guards cooperating editors, it is not
+  a cross-process compare-and-swap.
+- Rename moves the file within the session. Delete removes the file and ends
+  the session; a later commit is `session-ended` and never recreates the file.
+  A file that vanishes underneath ends it too. Close and app exit end the epoch.
+- A desktop commit can carry a viewport hint. It is saved with the next write
+  or on close, never bumps the revision and is never broadcast.
+- After each write a background thread updates the `files` row (size and
+  modified/seen times, the path, or the row on delete), as `touchFileRow`,
+  `renameFileRow` and `deleteFileRow` do. A failed row update is only logged:
+  the file is the truth.
+
+Errors are `{code, message}` with `code` one of `conflict-shape`,
+`conflict-order`, `conflict-background`, `invalid`, `stale-op`,
+`session-ended`, `too-large` (over 256 MiB serialized), `external-edit` or
+`io`.
+
+The Rust validator and transaction code port `model.ts`, `imageSource.ts` and
+`collaboration.ts`. `app/tests/fixtures/canvas-model/` and `canvas-collab/`
+hold the cases both test suites run, so the two cannot drift. The authority
+writes the bytes `serializeCanvasDocument` writes: serde_json keeps key order
+(`preserve_order`) and parses floats exactly (`float_roundtrip`), and
+`authority/format.rs` prints numbers by JavaScript's rules. serde_json refuses
+two things `JSON.parse` reads, a lone surrogate escape and nesting deeper than
+128 levels; such a canvas cannot be shared.
+
+## Sharing turns the session's saves into commits
+
+Loading a desktop canvas first probes `canvas_authority_snapshot`, with its
+event listener and whole-file fence already installed. If a native session
+survived a webview reload, the desktop joins its canonical snapshot and replays
+changes buffered during the probe. This happens without opening Share, and
+does not write the disk file. Only `session-ended` means no authority owns the
+canvas and ordinary file loading and saves may resume; other probe failures
+surface as load errors. Recovery drafts still require the usual explicit
+choice. Refreshing an existing share also rejoins a detached desktop session.
+
+`attachAuthority()` runs on the session's queue: it finishes the whole-file
+flush, then calls `canvas_authority_open` with that flushed text and switches
+the session to commit mode. From the moment the open is sent until the file is
+reread after sharing, the session is fenced: its whole-file write throws, a
+save queued in that window writes nothing, and the step holding the fence saves
+when it finishes. Edits made
+while the open is awaited stay in the snapshot and are committed after it.
+`detachAuthority()` commits what it can, closes the authority and rereads the
+file; `snapshot().authority` (`off`, `attaching`, `live`, `paused`, `ended`)
+says where sharing stands. An attached session stays registered after its last
+pane unmounts, until it is detached.
+
+In commit mode a save diffs the session's canonical document (the authority's
+document at its last known revision) against the panes' document
+(`diffCanvasContent`) and commits that transaction under the session's
+`clientId`, an increasing `seq` and a fresh `opId`; a viewport that differs from
+the last one sent travels with it, or alone with no edits. One op is in flight.
+An ack whose revision follows the canonical one applies its transaction; one
+already covered changes nothing; any other (a replay, or a gap) refetches
+`canvas_authority_snapshot`. A failure with no code may not have reached the
+authority, so the same op is resent unchanged on retry and a replay answers it.
+A refused op frees its `seq`.
+
+`canvas-authority-change` events, our own included, advance the canonical
+document in revision order. Each advance redraws the panes as the canonical
+document with this desktop's unsent edits rebased on top
+(`reconcileClientDocument`) and this desktop's viewport, so a merge never
+resets a gesture. The sent operation and edits made after it are separate layers.
+Confirming our own operation removes only that first layer: a quick undo or a
+second move of the same shape stays on top and becomes the next commit. Events
+identify the sending client, and the operation stays tracked until its reply and
+revision are reconciled. Someone else's change past a gap refetches the snapshot,
+which is rebased under the unsent edits the same way.
+
+- **Conflict.** A `conflict-*` refusal, or a remote change that touches a shape
+  with an unsent edit, keeps the draft (and its recovery copy), stops commits
+  and makes the surface inert. The editor offers Use shared canvas (drop the
+  unsent change and show the canonical document) and Save draft as copy (a new
+  canvas in the same subject holding the draft).
+- **Paused.** `external-edit` pauses commits; edits keep collecting. Use file
+  on disk and Keep my version call `canvas_authority_resolve_external`
+  (`adopt-disk`, `keep-ours`) and then commit the unsent edits.
+- **Stale op.** The session takes a new `clientId`, refetches the snapshot and
+  commits again.
+- **Ended.** An `ended` state, or `session-ended`, puts the session back on the
+  whole-file path after rereading the file. Unsent edits become the Use
+  recovery copy / Keep disk version choice; a recovery copy made while shared
+  never matches the disk text, so after a restart it is offered, never applied.
+- **Rename and delete** go through `canvas_authority_rename` and
+  `canvas_authority_delete`. The authority updates the `files` row on a
+  background thread; the wrappers in `files.ts` update it too and announce
+  `CANVASES_CHANGED_EVENT`, so Drive's reload never reads the old row.
+
+The status line reads Sharing, Sharing paused or Sharing ended before the save
+state.
+
 ## Tools and exports share the same geometry
 
 The editor supports selection, marquee, move and resize; rectangle, ellipse,
@@ -152,17 +312,123 @@ selected line or arrow edits its points instead of resizing
 selection frame or corner handles, only its point handles (`selectionFrame`
 in `render.ts`); any other selection, including several lines, has the frame.
 
+A selection box includes an element only when its entire bounds fit inside,
+in either drag direction. Dragging on an unselected image or PDF page starts
+a selection box for its annotations. Clicking the page selects it; dragging
+an already selected page moves it. Shift adds enclosed elements to the current
+selection.
+
 The canvas root scopes shortcuts and participates in native Edit menu
 routing. A visible note editor must not claim undo while a canvas owns focus.
 Text inputs keep their own native editing behavior. Drawing gestures capture
-the active pointer and suppress WebKit text selection.
+the active pointer and suppress WebKit text selection: `installBrowserSelectionGuard`
+on the canvas root cancels `selectstart` and `contextmenu` outside text fields and
+the native touch defaults on the canvas element itself, which is not draggable.
 
 PNG and SVG export cover the whole drawing with padding, excluding editor
-chrome, selection, binding hints and grid. The native export command opens a
-Save dialog and writes only the path selected there. SVG text and attribute
+chrome, selection, binding hints and grid. The surface saves an export and
+opens a PDF for import through `useCanvasPlatform()`
+(`lib/canvas/platform/`), so its own imports never reach Tauri. The default is
+a plain browser's: an export downloads, and Choose PDF says to open Oculus
+desktop while image files still import. The desktop root (`main.tsx`) provides
+`tauriCanvasPlatform`, whose export command opens a native Save dialog and
+writes only the path selected there. Its library search uses
+`searchLibraryFiles` with a PDF type filter; its PDF opener is `importPdf.ts`. SVG text and attribute
 values are escaped. PNG export caps its dimensions to bound bitmap allocation.
 Canvas2D, SVG and hit testing all take dash lengths (`strokeDash`) and
 arrowhead outlines (`elementArrowheads`) from `geometry.ts`.
+
+## Pen, touch and mouse share one gesture
+
+One gesture runs at a time, owned by the pointer that started it; other
+pointers' moves, ups and cancels are ignored, so a palm resting on the screen
+neither cancels nor redirects a Pencil stroke.
+
+- A pen contact ends any finger gesture and claims the stroke. After the first
+  pen contact, one finger pans instead of drawing (Safari cannot say whether a
+  Pencil is paired); before it, a finger draws.
+- A second finger turns the first finger's gesture into navigation without
+  committing its preview: two fingers pan and pinch (`TouchViewportGesture`)
+  until every finger has lifted, whatever the tool. The Text tool opens its
+  overlay on a finger's release, not its press, so the second finger can still
+  arrive.
+- The release is the stroke's last sample, so a down and up with no move
+  between still draws, and a freedraw tap commits a dot. Coalesced pen samples
+  are kept before the stroke is simplified.
+- A pen move with its contact button down and no gesture starts the stroke
+  that WebKit's lost pointerdown should have; hover never inks. A fresh pen down
+  while a pen stroke is open commits that stroke's ink as its own stroke rather
+  than dropping it or joining the two.
+- Pointer capture can throw when the pointer is already gone; the gesture
+  continues without it.
+
+Drawing preferences (the sliders button beside the grid) hold settings for this
+device only, in localStorage (`toolPreferences.ts`). Return after erasing, off
+by default, switches back to the tool chosen before the eraser when an erase
+gesture ends; a cancelled erase or a pinch that takes over does not.
+
+## Undo is per pane and touches only its own edits
+
+Each committed edit records the content transaction from the scene before it
+to the scene after it, and its inverse (`diffCanvasContent`). Undo and redo
+apply that transaction to the current scene (`applyCanvasTransaction`), so a
+shape someone else added since stays. If they changed a shape the step would
+restore, the step is refused and dropped, and the surface shows why inline;
+it never overwrites or removes their work. Undo leaves the camera alone, waits
+while a gesture or a pinch is in progress, and keeps 100 steps. A step that re-adds deleted elements puts each back above the
+element it followed: the transaction carries `afterId`, and the step also
+remembers the layer order.
+
+## A document from outside the pane is a new base, not a reset
+
+The hook ignores a document it handed to `onChange` itself, including an echo
+with a fresh identity but the same content. Any other document (another pane on
+the same session, a collaborator's merged edit, a recovery copy) replaces the
+scene but keeps this pane's camera, the gesture in progress and its preview,
+the undo history, the text being written and the selection of shapes that still
+exist. A preview of a shape someone removed is dropped, and a point or segment
+drag ends when its line is removed.
+
+The camera belongs to the pane. Without `onViewportChange`, pan and zoom are
+saved in the document (a pan when it ends, wheel and buttons after 180 ms) as
+the file's initial view. With it, they go only to that callback and never
+through `onChange`, for a host that keeps its camera local.
+
+## Images and PDF pages are saved inside the canvas
+
+Add image opens a modal for local PNG, JPEG, WebP or GIF images, or PDFs
+already in the Oculus library. Choose PDF opens an in-app search by filename
+and subject code. The empty search lists library PDFs with current subjects
+and recently opened files first. The database filters to PDFs before limiting
+results; parsing is not required. Selecting a result opens its page thumbnails
+with a selection that survives moving between page groups. Import adds the selected pages in document order as
+independent image elements. A batch is one undo step, stacked vertically with the first page centred in
+the current view, and selected for moving or resizing. A single image keeps its
+proportions while resizing; Shift allows stretching it.
+
+An image element stores a base64 raster `dataUrl`, its source name and natural
+dimensions alongside its world bounds. The `.canvas` stays self-contained:
+reopening, copying and exporting do not depend on the original source file.
+Remote URLs and SVG input are rejected. Images use their rectangular bounds
+for selection and culling in both the JavaScript reference and Rust core.
+The inspector offers opacity and layer controls for images. The eraser skips
+images, including imported PDF pages, and erases shapes and ink through them.
+To delete an image, select it and use the inspector's trash button or Delete;
+that deletion is one undo step.
+
+PDF imports use the native viewer's renderer without running the document
+through the parse pipeline. A scoped library path opens a session owned by
+the calling webview; subsequent render requests use that session ID rather
+than accepting arbitrary filesystem paths. The
+native commands take `tauri::Webview`, since browser and dock child webviews
+share the desktop window. Closing or changing the modal source releases the
+session. PDF raster dimensions are bounded and share the viewer's render
+memory budget. Only selected pages are rendered at
+import resolution; previews render a bounded page group at thumbnail size.
+
+Decoded raster images share a cache across element edits and copies. Decode
+completion requests a repaint, and PNG export waits for all images to load.
+SVG export embeds the same raster data in image elements.
 
 ## A shape holds its label as text
 
@@ -171,8 +437,8 @@ four places, all opening the same overlay textarea on the label box:
 double-click a shape (including the inside of a hollow one), click a shape
 with the Text tool, Enter with one shape selected, and Enter or double-click
 on standalone text. The shape stays selected while its label is edited so the
-inspector shows its text options. Escape cancels; Cmd/Ctrl+Enter or blur
-commits. An empty label removes `text` and keeps the shape; empty standalone
+inspector shows its text options. Escape, Cmd/Ctrl+Enter or blur commits.
+An empty label removes `text` and keeps the shape; empty standalone
 text is removed.
 
 The label box is the shape’s bounds minus 8 units of padding, inset to the
@@ -419,6 +685,8 @@ formatting and Clippy as well as frontend format and WASM parity tests.
 
 - Replace elements and their array immutably; the retained spatial scene and Path2D cache use identity.
 - Keep gesture previews separate from the committed scene or every pointer move rebuilds the BVH.
+- Never write the scene during a gesture: previews live in overrides, so an outside document can replace the base underneath and the gesture commits onto it.
+- Key the surface by file (`FilePage` keys `CanvasEditor` by file ID); a different file's document is otherwise taken as an outside update and keeps the old undo history.
 - Route every element edit through `previewChanges` / `commitChanges`; writing `elements` directly leaves bound arrows detached from a moved target. Layer order is the one exception (`reorder`), since it moves no element.
 - Canvas2D font names must match the loaded `"Inter Variable"` family (`CANVAS_FONT_STACKS`); a wrong name measures and wraps with a fallback font, and the label cache is dropped on `document.fonts` `loadingdone` for the same reason.
 - Keep `CANVAS_FONT_STACKS` in step with `theme.css`; drift makes the canvas, the overlay textarea and SVG export disagree on wrapping.

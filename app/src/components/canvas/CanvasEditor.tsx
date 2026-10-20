@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ShareNetworkIcon } from "@phosphor-icons/react";
 import type { DbFile } from "@/lib/db";
 import { fileTitle } from "@/lib/files/openFile";
 import { parseCanvasDocument, serializeCanvasDocument, type CanvasDocument } from "@/lib/canvas/model";
 import { canvasSessions } from "@/lib/canvas/sessionRuntime";
+import { saveCanvasCopy } from "@/lib/canvas/files";
+import { errorMessage } from "@/lib/canvas/authority";
+import type { CanvasSnapshot } from "@/lib/canvas/sessions";
 import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { Button } from "@/components/ui/button";
+import { useSharing } from "@/lib/sharing/store";
+import { devices } from "@/lib/sharing/view";
+import { CanvasShareDialog } from "./CanvasShareDialog";
 import { CanvasSurface } from "./CanvasSurface";
+
+const SHARING: Partial<Record<CanvasSnapshot["authority"], string>> = { attaching: "Starting sharing", live: "Sharing", paused: "Sharing paused", ended: "Sharing ended" };
+const saveLabel = (status: CanvasSnapshot["status"]) =>
+  status === "saving" ? "Saving…" : status === "unsaved" ? "Unsaved changes" : status === "error" ? "Save failed" : "Saved";
 
 export default function CanvasEditor({ file }: { file: DbFile }) {
   const session = useMemo(() => canvasSessions.open(file), [file.id]);
@@ -14,6 +25,11 @@ export default function CanvasEditor({ file }: { file: DbFile }) {
   const [title, setTitle] = useState(() => fileTitle(file));
   const [renaming, setRenaming] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  // Mounted on first use, then kept so closing animates; sharing outlives the dialog.
+  const [shareMounted, setShareMounted] = useState(false);
+  const { share } = useSharing(file.id);
   useEffect(() => { setTitle(fileTitle(session.file)); }, [session, file.filename]);
   useEffect(() => {
     void session.load().catch(() => {});
@@ -38,9 +54,17 @@ export default function CanvasEditor({ file }: { file: DbFile }) {
     setRenaming(true);
     setRenameError(null);
     try { await session.rename(title); setTitle(fileTitle(session.file)); }
-    catch (error) { setRenameError(String(error)); }
+    catch (error) { setRenameError(errorMessage(error)); }
     finally { setRenaming(false); }
   };
+  const act = (action: () => Promise<unknown>) => { setNotice(null); void action().catch((error) => setNotice({ text: errorMessage(error), failed: true })); };
+  const keepDraftCopy = () => act(async () => {
+    const copy = await saveCanvasCopy(session.file, `${fileTitle(session.file)} (draft)`, snapshot.text!);
+    setNotice({ text: `Draft saved as ${fileTitle(copy)} in Drive.`, failed: false });
+  });
+  const clients = snapshot.authority === "live" && share?.clients ? ` · ${devices(share.clients)}` : "";
+  const sharing = SHARING[snapshot.authority] && `${SHARING[snapshot.authority]}${clients}`;
+  const blocked = !!snapshot.recovery || !!snapshot.conflict;
 
   if (snapshot.text == null && snapshot.status !== "error") return <LoadingFill />;
   if (!parsed.document) return (
@@ -61,16 +85,30 @@ export default function CanvasEditor({ file }: { file: DbFile }) {
           className="min-w-0 flex-1 bg-transparent text-xs font-medium outline-none"
         />
         <span role="status" className="shrink-0 text-[11px] text-muted-foreground">
-          {renaming ? "Renaming…" : snapshot.status === "saving" ? "Saving…" : snapshot.status === "unsaved" ? "Unsaved changes" : snapshot.status === "error" ? "Save failed" : "Saved"}
+          {sharing && `${sharing} · `}{renaming ? "Renaming…" : saveLabel(snapshot.status)}
         </span>
-        {snapshot.status === "error" && !snapshot.recovery && <Button size="sm" variant="outline" onClick={() => void session.flush().catch(() => {})}>Retry save</Button>}
+        {snapshot.status === "error" && !blocked && snapshot.authority !== "paused" && <Button size="sm" variant="outline" onClick={() => void session.flush().catch(() => {})}>Retry save</Button>}
+        <Button size="sm" variant="ghost" onClick={() => { setShareMounted(true); setShareOpen(true); }}><ShareNetworkIcon />Share</Button>
       </div>
+      {shareMounted && <CanvasShareDialog session={session} open={shareOpen} onOpenChange={setShareOpen} />}
       {(snapshot.error || renameError) && <p role="alert" className="shrink-0 border-b border-border-subtle px-4 py-2 text-xs text-destructive">{renameError ?? snapshot.error}</p>}
+      {notice && <p role={notice.failed ? "alert" : "status"} className={`shrink-0 border-b border-border-subtle px-4 py-2 text-xs ${notice.failed ? "text-destructive" : "text-muted-foreground"}`}>{notice.text}</p>}
       {snapshot.recovery && <div className="flex shrink-0 gap-2 px-4 py-2">
         <Button size="sm" variant="outline" disabled={!snapshot.recovery.valid} onClick={() => session.recoverDraft()}>Use recovery copy</Button>
         <Button size="sm" variant="outline" onClick={() => session.discardDraft()}>Keep disk version</Button>
       </div>}
-      <div inert={!!snapshot.recovery} className="min-h-0 flex-1"><CanvasSurface document={parsed.document} onChange={(document) => { const text = serializeCanvasDocument(document); lastDocument.current = { text, document }; session.update(text); }} /></div>
+      {snapshot.conflict && <div className="flex shrink-0 gap-2 px-4 py-2">
+        <Button size="sm" variant="outline" onClick={() => act(() => session.useSharedCanvas())}>Use shared canvas</Button>
+        <Button size="sm" variant="outline" onClick={keepDraftCopy}>Save draft as copy</Button>
+      </div>}
+      {snapshot.authority === "paused" && <div className="flex shrink-0 gap-2 px-4 py-2">
+        <Button size="sm" variant="outline" onClick={() => act(() => session.resolveExternal("adopt-disk"))}>Use file on disk</Button>
+        <Button size="sm" variant="outline" onClick={() => act(() => session.resolveExternal("keep-ours"))}>Keep my version</Button>
+      </div>}
+      <div className="relative min-h-0 flex-1">
+        {snapshot.recoveryError && <p role="status" className="absolute right-3 bottom-16 left-3 z-30 rounded-xl border border-border-subtle bg-card px-3 py-2 text-xs text-muted-foreground">{snapshot.recoveryError}</p>}
+        <div inert={blocked} className="h-full"><CanvasSurface document={parsed.document} onChange={(document) => { const text = serializeCanvasDocument(document); lastDocument.current = { text, document }; session.update(text); }} /></div>
+      </div>
     </div>
   );
 }

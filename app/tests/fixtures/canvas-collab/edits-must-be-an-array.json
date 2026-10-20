@@ -1,0 +1,20 @@
+{
+  "name": "edits must be an array",
+  "document": {
+    "type": "oculus-canvas",
+    "version": 1,
+    "elements": [],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "background": "#ffffff"
+  },
+  "transaction": {
+    "edits": {}
+  },
+  "expect": {
+    "error": "invalid"
+  }
+}

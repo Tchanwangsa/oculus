@@ -1,0 +1,118 @@
+{
+  "type": "oculus-canvas",
+  "version": 1,
+  "elements": [
+    {
+      "id": "target",
+      "type": "rectangle",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7
+    },
+    {
+      "id": "center",
+      "type": "arrow",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 10,
+          "y": 10
+        }
+      ],
+      "startBinding": {
+        "elementId": "target",
+        "mode": "center"
+      }
+    },
+    {
+      "id": "edges",
+      "type": "arrow",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 10,
+          "y": 10
+        }
+      ],
+      "startBinding": {
+        "elementId": "target",
+        "mode": "edge",
+        "anchor": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "endBinding": {
+        "elementId": "target",
+        "mode": "edge",
+        "anchor": {
+          "x": 1,
+          "y": 1
+        }
+      }
+    },
+    {
+      "id": "dangling",
+      "type": "arrow",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 10,
+          "y": 10
+        }
+      ],
+      "endBinding": {
+        "elementId": "gone",
+        "mode": "center"
+      }
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "background": "#ffffff"
+}

@@ -1,0 +1,77 @@
+{
+  "type": "oculus-canvas",
+  "version": 1,
+  "elements": [
+    {
+      "id": "elbow",
+      "type": "arrow",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "arrowType": "elbow",
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 40,
+          "y": 0
+        },
+        {
+          "x": 40,
+          "y": 80
+        },
+        {
+          "x": 120,
+          "y": 80
+        }
+      ],
+      "fixedSegments": [
+        {
+          "x": 40
+        },
+        {
+          "y": 80
+        }
+      ]
+    },
+    {
+      "id": "none",
+      "type": "arrow",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "arrowType": "elbow",
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 10,
+          "y": 10
+        }
+      ],
+      "fixedSegments": []
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "background": "#ffffff"
+}

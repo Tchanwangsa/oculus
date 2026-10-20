@@ -1,0 +1,25 @@
+{
+  "name": "viewport injection rejected",
+  "document": {
+    "type": "oculus-canvas",
+    "version": 1,
+    "elements": [],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "background": "#ffffff"
+  },
+  "transaction": {
+    "edits": [],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 2
+    }
+  },
+  "expect": {
+    "error": "invalid"
+  }
+}

@@ -2,10 +2,11 @@ import { CANVAS_DEFAULTS, hasLabel, LABELLED_TYPES, roundnessOf, type CanvasDocu
 import { diamondCorners, diamondVertices, elementArrowheads, elementBounds, rectangleRadius, selectionBounds, strokeDash, type Bounds } from './geometry';
 import { linePath } from './arrow/path';
 import { pointHandles } from './arrow/handles';
-import { canvasFont, layoutShapeLabel, layoutTextElement, type TextLayout } from './renderText';
+import { canvasFont, LINE_HEIGHT, layoutShapeLabel, layoutTextElement, lineBaseline, type TextLayout } from './renderText';
 import { visibleElements } from './engine';
 import { outlineCenter, outlineMidpoints } from './outline';
 import type { BindingSnap } from './bindings';
+import { drawCanvasImage, loadCanvasImages } from './renderImages';
 
 export interface CanvasPaintOptions {
   width: number;
@@ -76,9 +77,12 @@ function strokeOutline(context: CanvasRenderingContext2D, element: CanvasElement
 function drawLines(context: CanvasRenderingContext2D, element: CanvasElement, layout: TextLayout) {
   context.font = canvasFont(layout.fontSize, layout.fontFamily);
   context.textAlign = layout.textAlign;
-  context.textBaseline = 'top';
+  context.textBaseline = 'alphabetic';
   context.fillStyle = element.stroke;
-  for (const line of layout.lines) context.fillText(line.text, line.x, line.y);
+  // Measured at the on-screen size, so the glyphs sit exactly where the text editor's textarea puts them.
+  const zoom = context.getTransform().a / (globalThis.devicePixelRatio || 1), top = layout.fontSize * (LINE_HEIGHT - 1) / 2;
+  const baseline = lineBaseline(layout.fontSize * zoom, layout.fontFamily) / zoom;
+  for (const line of layout.lines) context.fillText(line.text, line.x, line.y - top + baseline);
 }
 
 export function drawElement(context: CanvasRenderingContext2D, element: CanvasElement, label = true) {
@@ -91,7 +95,8 @@ export function drawElement(context: CanvasRenderingContext2D, element: CanvasEl
   context.lineWidth = element.strokeWidth;
   context.lineCap = 'round';
   context.lineJoin = 'round';
-  if (element.type === 'text') drawLines(context, element, layoutTextElement(element));
+  if (element.type === 'image') drawCanvasImage(context, element);
+  else if (element.type === 'text') drawLines(context, element, layoutTextElement(element));
   else {
     const paths = elementPaths(element);
     if (element.fill !== 'transparent' && LABELLED_TYPES.has(element.type)) context.fill(paths.body);
@@ -232,16 +237,17 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   }
 }
 
-export function exportCanvasPng(document: CanvasDocument): Promise<Blob | null> {
+export async function exportCanvasPng(document: CanvasDocument): Promise<Blob | null> {
   const bounds = selectionBounds(document.elements);
-  if (!bounds) return Promise.resolve(null);
+  if (!bounds) return null;
+  await loadCanvasImages(document.elements);
   const padding = 32;
   const ratio = Math.min(2, 8192 / Math.max(bounds.width + padding * 2, bounds.height + padding * 2));
   const canvas = window.document.createElement('canvas');
   canvas.width = Math.ceil((bounds.width + padding * 2) * ratio);
   canvas.height = Math.ceil((bounds.height + padding * 2) * ratio);
   const context = canvas.getContext('2d');
-  if (!context) return Promise.resolve(null);
+  if (!context) return null;
   context.scale(ratio, ratio);
   context.fillStyle = document.background; context.fillRect(0, 0, canvas.width / ratio, canvas.height / ratio);
   context.translate(padding - bounds.x, padding - bounds.y);

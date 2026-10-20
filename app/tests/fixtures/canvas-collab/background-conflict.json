@@ -1,0 +1,24 @@
+{
+  "name": "background conflict",
+  "document": {
+    "type": "oculus-canvas",
+    "version": 1,
+    "elements": [],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "background": "grid"
+  },
+  "transaction": {
+    "edits": [],
+    "background": {
+      "before": "#ffffff",
+      "after": "dots"
+    }
+  },
+  "expect": {
+    "error": "conflict-background"
+  }
+}

@@ -19,6 +19,8 @@ library files; the rest of the frontend has its own pages:
 | Piece | Location |
 | --- | --- |
 | Entry, the event shim, the last-resort error overlay | `app/src/main.tsx`, `app/src/lib/platform/tauriEvents.ts` |
+| The device-sharing companion page a paired browser opens: its entry, header and build ([below](#the-companion-page-is-a-second-entry)) | `app/companion.html`, `app/src/companion/`, `app/vite.companion.config.ts` |
+| The companion's transport: share-link credentials, HTTP and socket client, stored drafts | `app/src/lib/companion/` |
 | The first-run gate: onboarding or the shell ([onboarding.md](./onboarding.md)) | `app/src/App.tsx`, `app/src/hooks/shell/useOnboardingGate.ts` |
 | Backend events → SQLite and stores | `app/src/hooks/backend/useBackendEvents.ts`, `app/src/hooks/backend/useEvents.ts`, `app/src/lib/pipeline/parseStatusWriter.ts`, `app/src/lib/db/connection.ts` |
 | Files tab: uploads and Drive (notes and drawing canvases) | `app/src/pages/subject/files/FilesPage.tsx`, `app/src/pages/subject/files/DrivePage.tsx`, `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src/lib/canvas/files.ts`, `app/src-tauri/src/library/files/commands.rs` |
@@ -32,6 +34,7 @@ library files; the rest of the frontend has its own pages:
 | Settings → Studio (Narration, Pronunciation, Word timing): Studio's narration engine (Kokoro with its pack download, voice and sample, or a TTS server's URL, model with List models and voice), the speed, and the aligner model download ([studio.md](./studio.md)) | `app/src/pages/settings/studio/`, `app/src/components/settings/voice/`, `app/src/lib/studio/` |
 | Studio rendering: the `studio_render` wrappers, the `studio-render-progress` listener and the render store behind the Studio page ([studio-page.md](./studio-page.md)) | `app/src/lib/studio/render.ts`, `app/src/hooks/backend/useStudioEvents.ts`, `app/src/stores/studio/renderStore.ts` |
 | Settings → Appearance: the mode, a card grid per mode, the accent, the window frame (macOS) and the code font ([ui.md](./ui.md)) | `app/src/pages/settings/AppearancePage.tsx`, `app/src/components/settings/appearance/`, `app/src/lib/ui/themes/` |
+| Settings → Device sharing: what sharing is, live shares with Stop and Stop all ([device-sharing.md](./device-sharing.md#desktop-ui)) | `app/src/pages/settings/integrations/DeviceSharingPage.tsx`, `app/src/components/settings/sharing/` |
 | Parser and embedding engine selection UI | `app/src/components/settings/shared/EngineSelect.tsx` |
 | Parse state, pipeline ledger, recovery sweep | `app/src/lib/pipeline/parseState.ts`, `app/src/stores/sync/parseStore.ts`, `app/src/stores/sync/pipelineStore.ts`, `app/src/hooks/sync/useQualitySweep.ts` |
 | Scraped document metadata loaders | `app/src/hooks/data/useCourseFileData.ts`, `app/src/hooks/data/useModuleTocs.ts` |
@@ -58,6 +61,60 @@ Credential descriptions and parse errors say credential store across platforms.
   adding banner comments to a long file.
 - Tests live under `app/tests/` at the same path as the file they cover and
   import it through the `@/` alias (`tests/lib/ui/scrollFade.test.ts`).
+
+## The companion page is a second entry
+
+A device paired with Share on a canvas ([device-sharing.md](./device-sharing.md))
+loads a page of its own, not the desktop app: `app/companion.html` and
+`app/src/companion/`, built by `vite.companion.config.ts` (`bun run
+companion:build`, the last step of `bun run build`, after the desktop bundle
+so the desktop build's `emptyOutDir` cannot delete it) into
+`app/dist/companion/`. The entry is renamed `index.html`, every URL is under
+`/c/`, and the canvas WebAssembly and the Inter and Manrope fonts are hashed
+files in `dist/companion/assets/` (`assetsInlineLimit: 0`, so nothing becomes a
+`data:` URL); the desktop's `public/` files are left out.
+
+- **No Tauri.** The page renders the real `CanvasSurface`, so the canvas's
+  host services come from `CanvasPlatformContext`
+  ([drawing-canvas.md](./drawing-canvas.md#tools-and-exports-share-the-same-geometry)),
+  whose default is the browser's. `app/tests/repo/companionGraph.test.ts` walks
+  the page's imports, lazy ones included, and fails on `@tauri-apps/*`,
+  `@/lib/db` or the SQL plugin; it also checks the desktop entry never imports
+  the page or its client. The build swaps `@/lib/menu/editRouting` for
+  `src/companion/editRouting.ts`: a browser has no Edit menu taking ⌘Z first,
+  and the real module would bring the maths engine in.
+- **The link.** `lib/companion/link.ts` reads `#<shareId>.<secret>`, strips the
+  fragment with `history.replaceState` before the first render and keeps it in
+  memory and this tab's sessionStorage, for a reload of the same tab. The secret
+  goes only in the `Authorization` header and the socket's hello; `redactSecret`
+  scrubs any text the page shows.
+- **The client.** `ShareClient` (`lib/companion/shareClient.ts`) takes its page
+  through `ShareClientEnv` (fetch, socket factory, clock, random, ids, storage,
+  lifecycle events), so its tests run it against an in-process server
+  (`tests/lib/companion/fakeShareServer.ts`) that applies commits with
+  `collaboration.ts`. The page builds that env with `browserShareEnv(page)`,
+  `window` by default; the end-to-end check passes a stand-in over bun's
+  globals ([device-sharing.md](./device-sharing.md#end-to-end-check)). The local drawing is the shared one with this device's
+  edits on top; one commit is in flight, its transaction the difference from
+  the last confirmed drawing, and a retry resends the same `(clientId, seq,
+  opId)`. Remote changes come in revision order (inline `change`, or `/changes`
+  after a `revision` announcement, or a snapshot when the log answers `gone`)
+  and the local edits are rebased onto them. Its status is one of `connecting`,
+  `connected`, `saving`, `reconnecting`, `offline-unsaved`, `conflict`,
+  `paused` or `ended`; the React side reads it with `useSyncExternalStore`
+  (`src/companion/useShareClient.ts`).
+- **Reconnecting.** A failure retries after 0.5 s, doubling to 8 s, up to a
+  quarter longer at random; `online`, a return to visible and `pageshow` try at
+  once. No frame for 45 s means the socket is dead, so the server must send
+  something (a `ping` frame, answered `pong`) more often than that: a browser
+  never sees WebSocket-level pings. A commit times out after 20 s plus 10 s per
+  MB and is then resent unchanged.
+- **Drafts.** The browser uses IndexedDB for complete recovery records, including
+  embedded page images, while the desktop uses disk. The operation identity,
+  replay rules and stable notice layout are described in
+  [device-sharing.md](./device-sharing.md#recovery-survives-a-browser-reload-without-moving-the-drawing).
+  A conflict keeps the drawing until Use shared canvas; Download draft saves
+  it as a `.canvas` file.
 
 ## Subject lists keep content flat and distinguish file types by colour
 
