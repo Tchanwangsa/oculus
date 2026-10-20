@@ -1,9 +1,5 @@
 /* Respond to the settings pane, including split panes and page zoom. */
 @layer utilities {
-  .settings-shell {
-    container: settings-shell / inline-size;
-  }
-
   .settings-content {
     container: settings / inline-size;
     overflow-wrap: anywhere;
@@ -11,10 +7,6 @@
 
   .settings-gutters {
     padding-inline: clamp(1rem, 4cqi, 2rem);
-  }
-
-  .settings-compact-nav {
-    display: none;
   }
 
   .settings-row > * {
@@ -36,21 +28,6 @@
   .settings-actions {
     flex-wrap: wrap;
     max-width: 100%;
-  }
-
-  @container settings-shell (width < 42rem) {
-    .settings-layout {
-      flex-direction: column;
-    }
-
-    .settings-nav {
-      display: none;
-    }
-
-    .settings-compact-nav {
-      display: block;
-      flex-shrink: 0;
-    }
   }
 
   @container settings (width < 34rem) {

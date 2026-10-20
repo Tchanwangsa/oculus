@@ -10,7 +10,8 @@ import { useThreadActions } from "@/components/harness/threads/useThreadActions"
 import { PageHeader, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
-import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
+import { useSideNavPanel } from "@/hooks/ui/useSideNavPanel";
+import { SideNavShell } from "@/components/ui/layout/SideNavShell";
 import { useRateLimits } from "@/hooks/agents/useRateLimits";
 import { useStickToBottom } from "@/hooks/ui/useStickToBottom";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
@@ -35,7 +36,7 @@ import { draftKey, useDraftStore } from "@/stores/chat/draftStore";
  */
 export default function ChatPage() {
   const store = useHarnessStore;
-  const listPanel = useResizablePanel(THREAD_LIST_PANEL);
+  const listPanel = useSideNavPanel(THREAD_LIST_PANEL);
   const navigate = useNavigate();
   const here = useLocation();
   // The conversation this tab is showing, read off this tab's own route —
@@ -129,7 +130,10 @@ export default function ChatPage() {
   const fresh = activeId == null;
   // Only a thread follows its bottom; the recent list is read from the top,
   // so it has a scroller of its own.
-  const scroll = useStickToBottom(activeId, !fresh);
+  // Borrowed rows belong to the outgoing thread; wait for this thread's
+  // history before choosing its initial bottom position.
+  const ownRows = items.length === 0 || items[0].thread_id === activeId;
+  const scroll = useStickToBottom(activeId, !fresh && ownRows);
   useScrollFade(scroll.outer, "y", !fresh);
   const recentScroll = useRef<HTMLDivElement>(null);
   useScrollFade(recentScroll, "y", fresh);
@@ -213,7 +217,7 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="flex h-full">
+    <SideNavShell panel={listPanel} nav={
       <ThreadList
         panel={listPanel}
         threads={threads}
@@ -224,6 +228,7 @@ export default function ChatPage() {
         onNew={onNew}
         onDelete={onDelete}
       />
+    }>
 
       <div ref={columnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
         <PageHeader>
@@ -263,6 +268,6 @@ export default function ChatPage() {
 
         <DropOverlay show={dropping} label="Drop to attach a picture" />
       </div>
-    </div>
+    </SideNavShell>
   );
 }

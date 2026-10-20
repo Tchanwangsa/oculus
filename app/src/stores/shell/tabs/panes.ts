@@ -19,7 +19,7 @@ export interface AppTab extends PaneState {
    *  `locate`), as `SideItem.entryState`. Never stored: a restored tab opens
    *  on its path alone. */
   entryState?: unknown;
-  /** The side panel, or null when it is closed. */
+  /** The side panel (possibly hidden), or null when it has no items. */
   side: SidePanel | null;
   /** The part the shell drives — the sidebar, ⌘K, breadcrumbs, the strip's
    *  arrows. */
@@ -41,7 +41,7 @@ export function sideFront(tab: AppTab): SideItem | null {
 }
 
 export function focusedPane(tab: AppTab): PaneState {
-  return (tab.focus === "side" && sideFront(tab)) || tab;
+  return (tab.focus === "side" && !tab.side?.hidden && sideFront(tab)) || tab;
 }
 
 /** The store update replacing tab `tabId` with `fn` of it. */

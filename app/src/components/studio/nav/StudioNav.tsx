@@ -11,8 +11,6 @@ import {
   SideNavLink,
   SideNavSearch,
 } from "@/components/ui/layout/SideNav";
-import { useTabActive } from "@/components/tabs/TabContext";
-import { useWindowEvent } from "@/hooks/backend/useEvents";
 import type { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
 import { COMPONENTS_HREF, NEW_VIDEO_HREF, THEMES_HREF, VIDEOS_HREF, videoHref } from "@/lib/studio/routes";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
@@ -54,16 +52,6 @@ export function StudioNav({ panel }: { panel: ReturnType<typeof useResizablePane
   );
   const first = useRef(listed[0]);
   first.current = listed[0];
-
-  // Every tab stays mounted, so only the one in front answers the chord.
-  // `e.code`, not `e.key`: on macOS ⌥B arrives as `∫`.
-  const active = useTabActive();
-  useWindowEvent("keydown", (e) => {
-    const k = e as KeyboardEvent;
-    if (!active || !k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
-    k.preventDefault();
-    panel.toggle();
-  });
 
   return (
     <>

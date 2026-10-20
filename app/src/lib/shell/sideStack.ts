@@ -29,6 +29,8 @@ export interface SideItem extends PaneState {
 }
 
 export interface SidePanel {
+  /** Collapsed out of view, with its items and routers retained. */
+  hidden?: boolean;
   /** Most recently opened first. */
   items: SideItem[];
   /** The id of the item on show. */
@@ -39,6 +41,7 @@ export interface SidePanel {
 
 /** What `oculus-tabs` keeps of a side panel: paths, not routers. */
 export interface StoredSide {
+  hidden?: boolean;
   items: { id: number; path: string }[];
   front: number;
   ratio: number;
@@ -189,6 +192,7 @@ export function storeSide(side: SidePanel): StoredSide {
     items: side.items.map((i) => ({ id: i.id, path: i.path })),
     front: side.front,
     ratio: side.ratio,
+    hidden: side.hidden,
   };
 }
 
@@ -222,13 +226,15 @@ export function restoreSide(stored: unknown, split: unknown, mainId: number): Si
   if (ids.size !== panes.length + 1) return null;
   const frontId = panes.some((p) => p.id === front) ? (front as number) : panes[0].id;
   const r = typeof ratio === "number" && Number.isFinite(ratio) ? clampRatio(ratio) : SIDE_RATIO;
-  return fromPanes(panes, frontId, r);
+  const side = fromPanes(panes, frontId, r);
+  if ((stored as StoredSide | null)?.hidden === true) side.hidden = true;
+  return side;
 }
 
 /** A stored `focus`: the side panel only if there is one. `"split"` is the
  *  side panel's other stored name. */
 export function restoreFocus(focus: unknown, side: SidePanel | null): PaneSide {
-  return side && (focus === "side" || focus === "split") ? "side" : "main";
+  return side && !side.hidden && (focus === "side" || focus === "split") ? "side" : "main";
 }
 
 /** A closed tab's side panel paths: `side`, else a lone `split` path. */
