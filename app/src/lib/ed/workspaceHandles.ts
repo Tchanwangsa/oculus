@@ -32,6 +32,7 @@ const closing = new Map<number, Promise<void>>();
 
 export function holdWorkspace(challengeId: number): WorkspaceHold {
   let entry = entries.get(challengeId);
+  const reused = entry != null;
   if (!entry) {
     const info = (closing.get(challengeId) ?? Promise.resolve()).then(() => openWorkspace(challengeId));
     // A failed open forgets the entry, so the next hold tries again.
@@ -50,8 +51,11 @@ export function holdWorkspace(challengeId: number): WorkspaceHold {
   const held = entry;
   held.holds += 1;
   let released = false;
+  // The first answer is a snapshot (`connecting`); a pane mounting later has
+  // missed the events since, so it asks again, which answers for the live session.
+  const info = reused ? held.info.then(() => openWorkspace(challengeId)) : held.info;
   return {
-    info: held.info,
+    info,
     saver: held.saver,
     release() {
       if (released) return;

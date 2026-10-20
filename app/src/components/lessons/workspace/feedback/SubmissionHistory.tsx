@@ -6,8 +6,9 @@ import type { Submission } from "@/lib/ed/workspace";
 import { cn } from "@/lib/utils";
 
 /** The student's submissions as Ed's table lists them, newest first: its
- *  number, when it went in, testcases passed and the result. Picking one
- *  shows it. */
+ *  number, when it went in, testcases passed and the result, which is Ed's
+ *  own `status` (a result's `passed` flag is not set for every challenge).
+ *  Picking one shows it. */
 export function SubmissionHistory({
   submissions,
   selected,
@@ -61,12 +62,12 @@ export function SubmissionHistory({
                 {sub.result ? `${passed} / ${total}` : "—"}
               </span>
               <span role="cell" className="flex w-12 shrink-0 justify-end">
-                {!sub.result ? (
-                  <span>{sub.status}</span>
-                ) : sub.result.passed ? (
+                {sub.status === "passed" ? (
                   <Check className="text-success" aria-label="Passed" />
-                ) : (
+                ) : sub.status === "failed" ? (
                   <X className="text-destructive" aria-label="Failed" />
+                ) : (
+                  <span>{sub.status}</span>
                 )}
               </span>
             </button>

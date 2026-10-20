@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { lessonProgress, type LessonIndex, type LessonSlide } from "@/lib/ed/lessons";
-import { recordSlideStatus, useSlideStatusStore, withSlideStatuses } from "@/lib/ed/slideStatus";
+import { completesSlide, recordSlideStatus, useSlideStatusStore, withSlideStatuses } from "@/lib/ed/slideStatus";
 
 const slide = (id: number | null, status: string | null): LessonSlide => ({
   id,
@@ -46,5 +46,16 @@ describe("slide statuses this session", () => {
     const lesson = index([slide(1, "completed")]);
     recordSlideStatus(1, "seen");
     expect(withSlideStatuses(lesson, useSlideStatusStore.getState().byId)).toBe(lesson);
+  });
+});
+
+describe("completesSlide", () => {
+  test("a passed or unmarked-submitted submission completes the slide", () => {
+    expect(completesSlide("passed")).toBe(true);
+    expect(completesSlide("submitted")).toBe(true);
+  });
+
+  test("a failed, errored or queued one does not", () => {
+    for (const status of ["failed", "errored", "queued", ""]) expect(completesSlide(status)).toBe(false);
   });
 });
