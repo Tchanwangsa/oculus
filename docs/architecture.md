@@ -26,6 +26,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/auth/keyd/` |
 | Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/providers/credentials/`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/voyage.rs`, `app/src-tauri/src/providers/groq.rs`, `app/src-tauri/src/auth/okta/` |
 | Lecture video server | `app/src-tauri/src/lectures/media.rs` |
+| This machine's addresses, observed once for the process and subscribed to by music | `app/src-tauri/src/runtime/network/` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/runtime/bundled.rs` |
 | ONNX Runtime (static): the CPU session and pinned, checksummed model-pack downloads | `app/src-tauri/src/runtime/onnx/` |
@@ -280,6 +281,22 @@ anything running in it mid-run with nothing to catch. So the scrape engine is
 `app/src-tauri/src/sync/`, and the headless Okta sign-in
 (`app/keyd/core/src/okta/`) runs in Rust too, inside keyd. Never move background work into
 a WebView.
+
+## One address observer
+
+`runtime/network/` owns the process's only `if-watch` stream
+(SCDynamicStore on macOS, the IP helper on Windows, netlink on Linux): a
+second watcher is unsafe on macOS, whose watcher thread outlives a dropped
+watcher and is never restarted. It starts with the first `snapshot()` or
+`subscribe`, and the addresses there at the start are its first snapshot
+(`generation` 1), never reported as appearing. Each edge (`Up`, `Down`)
+reaches subscribers at once; the first edge of a burst opens a 1 s window,
+after which the interface list (`if-addrs`, which names each address's
+interface) is re-read, and a list that moved gets the next `generation`
+and a `Changed`. `refresh()` re-reads at once when the app returns to the
+foreground. A stream error is logged once and ends the stream; the list then
+moves only on `refresh()`. Music ([music.md](./music.md)) nudges a reconnect
+on `Up`. Nothing polls an OS command.
 
 ## Lecture video streams over localhost HTTP
 

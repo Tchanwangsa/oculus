@@ -14,7 +14,7 @@ is on, or from `music_wake` when the player is opened with none running.
 | --- | --- |
 | The module and its rules | `app/src-tauri/src/music/mod.rs` |
 | The session task: player, connect, reconnect, stop; a link's watch and end; backoff and the sleep check | `app/src-tauri/src/music/session/` |
-| The network watcher that cuts a backoff short | `app/src-tauri/src/music/netwatch.rs` |
+| The network subscriber that cuts a backoff short (the observer is `app/src-tauri/src/runtime/network/`) | `app/src-tauri/src/music/netwatch.rs` |
 | The snapshot, the `music-state` event, the Spirc, run and login handles, `music_wake`'s nudge | `app/src-tauri/src/music/state/` |
 | What Oculus last played: in memory, its settings row, its writer | `app/src-tauri/src/music/last_played/`, `app/src-tauri/src/music/state/remembered.rs` |
 | Loading it back: after a reconnect, and from Play with nothing playing | `app/src-tauri/src/music/resume.rs` |
@@ -287,15 +287,17 @@ temporary file in the OS temp dir that is deleted when the track is dropped.
    stored login while Settings → Music is on, unless a login is needed or
    waiting, or the user pressed Disconnect. Otherwise it does nothing and
    makes no network call.
-9. **A network coming back retries at once.** One watcher per app run
-   (`netwatch.rs`, the `if-watch` crate: SCDynamicStore on macOS, the IP
-   helper on Windows, netlink on Linux), started with the first session,
-   sends `music_wake`'s nudge when an address appears: a wait in backoff
-   ends and the next attempt goes now, while an up link only checks its
-   session, so a healthy one is never torn down for a network change. A
+9. **A network coming back retries at once.** `netwatch.rs` subscribes,
+   once per app run with the first session, to the process's address
+   observer ([architecture.md](./architecture.md#one-address-observer)),
+   and sends `music_wake`'s nudge when an address appears: a wait in
+   backoff ends and the next attempt goes now, while an up link only checks
+   its session, so a healthy one is never torn down for a network change.
+   The addresses already there when the observer starts never count. A
    burst (Wi-Fi joining flaps several times) is one nudge, and one more if
    it is still going after 1 s. An address going away nudges nothing. A
-   watcher that cannot start is logged once, and backoff works without it.
+   watcher that cannot start or stops is logged once by the observer, and
+   backoff works without it.
 10. `PermissionDenied` or `Unauthenticated` ends the task with `needs_login`
     and the reason in `error`. It is never retried.
 11. A stop (disconnect, sign-out, a new login, app exit) sends the Spirc its
