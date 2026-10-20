@@ -9,6 +9,7 @@ const writing = () => document.activeElement instanceof HTMLTextAreaElement;
  * than committing it. Keys pressed inside stay out of the canvas's shortcuts.
  */
 export const inspectorPopoverProps = {
+  'data-canvas-inspector': 'true',
   onOpenAutoFocus: (event: Event) => {
     event.preventDefault();
     if (!writing()) (event.target as HTMLElement).focus();

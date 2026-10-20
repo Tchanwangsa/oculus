@@ -579,7 +579,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     commitChanges(new Map([...selected.current].map(id => [id, null])));
     choose([]);
   };
-  const commitText = (text: string) => {
+  const commitText = (text = draftValue.current) => {
     const draft = draftRef.current;
     if (!draft) return;
     draftRef.current = null;
@@ -601,10 +601,13 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   };
   const selectedTypes = () => documentRef.current.elements.filter(element => selected.current.has(element.id)).map(element => element.type);
   /** While writing, a style change restyles the draft (and its shape or text, if they exist) and the overlay follows; commit re-measures. */
-  const restyleDraft = (draft: TextDraft, patch: StylePatch) => {
+  const restyleDraft = (draft: TextDraft, patch: StylePatch, preview = false) => {
     const element = patchElementStyle(draft.element, patch);
+    if (draft.existing) {
+      const changes = new Map([[element.id, element]]);
+      if (preview) previewChanges(changes); else commitChanges(changes);
+    }
     if (element === draft.element) return;
-    if (draft.existing) commitChanges(new Map([[element.id, element]]));
     const next = { ...draft, element };
     draftRef.current = next; setTextDraft(next); redraw();
   };
@@ -619,9 +622,9 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   /** A live look at a continuous control (opacity) without an undo step; `changeStyle` commits it. */
   const previewStyle = (patch: StylePatch) => {
     if (gesture.current) return;
-    flushDraft();
     overrides.current.clear();
-    previewChanges(stylePatchChanges(documentRef.current.elements, selected.current, patch));
+    if (draftRef.current) restyleDraft(draftRef.current, patch, true);
+    else previewChanges(stylePatchChanges(documentRef.current.elements, selected.current, patch));
     redraw();
   };
   const fit = () => {
