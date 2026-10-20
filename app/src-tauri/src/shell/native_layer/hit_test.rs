@@ -115,8 +115,8 @@ unsafe extern "C-unwind" fn hit_test(
     }
 }
 
-/// The deepest view of the top-most visible page containing `point`. Hidden
-/// browser pages are `isHidden`; parked dock pages sit off the window.
+/// The deepest view of the top-most visible page containing `point`.
+/// Background browser pages are `isHidden`.
 unsafe fn page_at(this: &AnyObject, point: NSPoint) -> Option<*mut AnyObject> {
     let app_view = APP_VIEW.load(Ordering::Relaxed);
     // The glass covers the window too, but it is never a page.

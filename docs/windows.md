@@ -148,7 +148,8 @@ A check compiles platform branches but does not prove Windows linking,
 installation, WebView2 behavior, broker identity or Store certification.
 The `render_memory` example reports peak working-set bytes with
 `GetProcessMemoryInfo` on Windows and peak RSS with `getrusage` on Unix.
-Windows CI runs real builds and tests; [development.md](./development.md)
+Windows CI runs native builds and tests when build inputs change. The manual
+Release workflow creates installers; [development.md](./development.md)
 explains artifact packaging and Partner Center configuration.
 
 On a fresh Windows account, verify MSIX installation and `oculus` execution

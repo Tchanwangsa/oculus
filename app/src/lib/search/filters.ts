@@ -63,7 +63,7 @@ export type SearchFilter =
 
 export type FilterKey = SearchFilter["key"];
 
-/** The empty palette's rows that start a token, Discord's filter menu. */
+/** The empty palette's filter rows that start a token. */
 export const FILTER_KEYS: { key: FilterKey; label: string; hint: string; icon: PhosphorIcon }[] = [
   { key: "in", label: "In a subject", hint: "subject code", icon: BookOpen },
   { key: "type", label: "Of a type", hint: "file, lecture, task…", icon: Shapes },

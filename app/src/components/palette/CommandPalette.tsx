@@ -159,7 +159,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
 
   function onDraftKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Backspace" && atStart(e)) {
-      // Backspacing into `in:` drops it, as Discord does.
+      // Backspacing into `in:` drops the filter.
       e.preventDefault();
       setDraft(null);
       inputRef.current?.focus();

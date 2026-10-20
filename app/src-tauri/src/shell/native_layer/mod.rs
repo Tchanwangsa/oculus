@@ -1,4 +1,4 @@
-//! How native pages (browser tabs, dock services) share the window with the
+//! How native browser pages share the window with the
 //! app's webview, so popovers draw over a live page.
 //!
 //! On macOS every page is a child WKWebView of the main window, a sibling of

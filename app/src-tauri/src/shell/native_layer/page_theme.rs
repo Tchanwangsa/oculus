@@ -39,9 +39,7 @@ pub fn native_set_page_theme(
                 .lock()
                 .unwrap_or_else(|e| e.into_inner()) = Some(dark);
             for (label, page) in app.webviews() {
-                if label.starts_with(crate::shell::browser::LABEL_PREFIX)
-                    || label.starts_with(crate::shell::dock::LABEL_PREFIX)
-                {
+                if label.starts_with(crate::shell::browser::LABEL_PREFIX) {
                     apply(&page);
                 }
             }

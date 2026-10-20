@@ -1,5 +1,4 @@
 import {
-  ChatsCircle,
   FilePdf,
   Globe,
   GraduationCap,
@@ -34,7 +33,6 @@ export type SettingsPageId =
   | "browser"
   | "music"
   | "device-sharing"
-  | "messaging"
   | "storage"
   | "agents"
   | "opencode"
@@ -66,7 +64,6 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "browser", label: "Browser", icon: Globe, group: "General" },
   { id: "music", label: "Music", icon: MusicNotes, group: "General" },
   { id: "device-sharing", label: "Device sharing", icon: ShareNetwork, group: "General" },
-  { id: "messaging", label: "Messaging", icon: ChatsCircle, group: "General" },
   { id: "storage", label: "Storage", icon: HardDrives, group: "General" },
   { id: "agents", label: "Agents", icon: Robot, group: "AI" },
   { id: "opencode", label: "opencode", icon: OpencodeIcon, group: "AI", fullBleed: true },
@@ -161,14 +158,6 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   page("device-sharing", ["share", "ipad", "phone", "tablet", "pencil", "qr code", "link", "network", "lan", "vpn", "companion"]),
   ...section("device-sharing", "Active shares", ["shared canvases", "devices", "connected", "addresses"], [
     ["Stop all", ["stop sharing", "revoke", "end sharing"]],
-  ]),
-
-  page("messaging", ["dock", "chat", "direct messages", "dm", "social"]),
-  ...rows("messaging", "Messaging", [
-    ["WhatsApp"],
-    ["Instagram", ["direct messages"]],
-    ["Messenger", ["facebook"]],
-    ["Discord"],
   ]),
 
   page("storage", ["disk", "space", "videos"]),

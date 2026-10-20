@@ -51,7 +51,6 @@ pub fn run() {
         .manage(sync::scrape::embeds::EmbedCancels::default())
         .manage(sync::scrape::embeds::EmbedBearer::default())
         .manage(shell::browser::BrowserState::default())
-        .manage(shell::dock::DockState::default())
         .manage(shell::native_layer::PageTheme::default())
         .manage(shell::usage::UsageState::default())
         .manage(music::MusicState::default())
@@ -85,8 +84,6 @@ pub fn run() {
             shell::native_layer::init(app.handle());
             // Seeds WebKit with the Canvas session and follows window resizes.
             shell::browser::init(app.handle());
-            // Dock pages follow resizes; the frontend creates them (`dock_set_enabled`).
-            shell::dock::init(app.handle());
             // A focused browser page gets ⌘-keys before the menu.
             #[cfg(target_os = "macos")]
             shell::keys::install(app.handle());
@@ -408,14 +405,6 @@ pub fn run() {
             music::commands::music_play_here,
             music::commands::music_outputs,
             music::commands::music_set_output,
-            shell::dock::commands::dock_list,
-            shell::dock::commands::dock_set_enabled,
-            shell::dock::commands::dock_place,
-            shell::dock::commands::dock_park,
-            shell::dock::commands::dock_set_viewport,
-            shell::dock::commands::dock_reload,
-            shell::dock::commands::dock_inbox,
-            shell::dock::commands::dock_inbox_clear,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

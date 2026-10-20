@@ -77,7 +77,7 @@ fn float_noise_does_not_grow_an_exact_edge() {
 
 #[test]
 fn no_hole_over_a_page_is_an_empty_region() {
-    // A parked dock page: far left of the window, where no slot is.
+    // An off-window page has no slot over it.
     let frame = px(-5200, 80, -4000, 900);
     let region = page_region(
         &[hole(100.0, 60.0, 900.0, 700.0, 10.0, 10.0)],

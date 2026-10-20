@@ -37,7 +37,6 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | PDF viewer's render, text and links | `app/src-tauri/src/library/pdf_view/` |
 | In-app browser | `app/src-tauri/src/shell/browser/`, `app/src-tauri/capabilities/default.json` |
 | Spotify playback ([music.md](./music.md)) | `app/src-tauri/src/music/`, `app/src/lib/music/index.ts` |
-| Messaging dock ([dock.md](./dock.md)) | `app/src-tauri/src/shell/dock/` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes | `app/src-tauri/src/db/store/`, `app/src-tauri/src/db/projects/` |
 | App-usage ticker and its pinger | `app/src-tauri/src/shell/usage/`, `app/src/hooks/backend/useActivityPing.ts`, `app/src/lib/activity/usageContext.ts` |
@@ -447,7 +446,7 @@ context when input made it active, which wins over media, else the media
 context; with none reported yet, it credits `other`. Ticks before the frontend
 has applied the migrations fail quietly and later ones retry.
 
-## The main window holds one webview per browser tab and messaging service
+## The main window holds one webview per browser tab
 
 External links open as in-app browser pages, beside the page or (⌘-click) as
 a tab (`openLink`, [shell.md](./shell.md)): each is a child webview of remote
@@ -455,9 +454,6 @@ content placed under the slot the `/browse/:id` route leaves in the content
 card ([viewers.md](./viewers.md#the-in-app-browser-is-a-native-page-per-tab-owned-by-rust)). The frontend reports that slot as window
 insets and Rust lays pages out from them, so a resize never waits on
 JavaScript.
-
-The messaging dock's pages ([dock.md](./dock.md)) are the same kind of child
-webview, laid out the same way.
 
 - Tauri injects its IPC bridge into every child webview, remote pages
   included, so the capability ACL is the only guard. IPC from a remote origin
@@ -467,7 +463,7 @@ webview, laid out the same way.
   scoped to the `main` *webview*, not the window: window and webview scopes
   match by OR, so a window scope would hand every Tauri command to whatever
   page the user browsed to. `app/src-tauri/capabilities/canvas-auth.json`
-  gives `core:default` to the Canvas sign-in windows. The dock's
+  gives `core:default` to the Canvas sign-in windows. The browser's
   `capabilities_test.rs` fails the build on any capability that could reach a
   remote page.
 - Back-list state, find matches and zoom live only in the page, and
@@ -502,9 +498,9 @@ overlay inside `#root`, suspends every hole. `adopt_page`
   Then the app keeps the click, so clicking the page under a popover
   dismisses it.
 - **macOS: the keyboard never goes to a page nobody can see.** WebKit makes a
-  page first responder whenever its script focuses an element, so a parked
-  dock page focusing its composer would take every key and ⌘C from the page
-  in front, which also loses its selection. The main window refuses
+  page first responder whenever its script focuses an element, so a
+  background browser tab could take every key and ⌘C from the page in front,
+  which also loses its selection. The main window refuses
   `makeFirstResponder:` for a hidden or off-window page (`focus_guard.rs`),
   and browser pages are built unfocused, so a background tab never takes it
   either.

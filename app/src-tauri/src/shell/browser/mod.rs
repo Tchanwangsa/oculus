@@ -17,6 +17,8 @@
 //! before any load on the university's hosts, and each signed-in Canvas page
 //! hands both back (see `docs/auth.md`).
 
+#[cfg(test)]
+mod capabilities_test;
 pub(crate) mod commands;
 mod favicon;
 mod layout;
@@ -28,7 +30,6 @@ mod tests;
 #[cfg(any(target_os = "windows", test))]
 mod windows;
 
-pub(crate) use layout::{content_size, rect};
 pub use layout::{init, open_tab};
 pub use seed::{clear_sessions, seed_sessions};
 
@@ -47,8 +48,7 @@ pub const LABEL_PREFIX: &str = "browse-";
 /// WKWebView's default UA has no `Version/… Safari/…` suffix, and UA-sniffing
 /// sites (google.com) serve their no-JavaScript fallback to it. Keep the
 /// version roughly current. Deliberately separate from `auth/okta/`'s string.
-/// The messaging dock (`shell/dock/`) sends it too. WebView2 keeps its own
-/// Edge UA.
+/// WebView2 keeps its own Edge UA.
 #[cfg(not(target_os = "windows"))]
 pub(crate) const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15";
 

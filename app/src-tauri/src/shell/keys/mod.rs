@@ -1,4 +1,4 @@
-//! ⌘-keys reach a focused browser or dock page before the menu, as in Safari.
+//! ⌘-keys reach a focused browser page before the menu, as in Safari.
 //!
 //! Every webview is a child webview, and wry's `WryWebView` answers NO to
 //! `performKeyEquivalent:` for those, so a page never sees a ⌘-key. A local
@@ -75,8 +75,8 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
     std::mem::forget(monitor);
 }
 
-/// The app's own `WKWebView` as an address, 0 until `install` has run. A
-/// parked dock page hands first responder back to it (`shell/dock/focus.rs`).
+/// The app's own `WKWebView` as an address, 0 until `install` has run.
+/// The native focus guard distinguishes it from background browser pages.
 pub(crate) fn app_webview() -> usize {
     APP_WEBVIEW.load(Ordering::Relaxed)
 }

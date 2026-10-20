@@ -420,7 +420,7 @@ PDF imports use the native viewer's renderer without running the document
 through the parse pipeline. A scoped library path opens a session owned by
 the calling webview; subsequent render requests use that session ID rather
 than accepting arbitrary filesystem paths. The
-native commands take `tauri::Webview`, since browser and dock child webviews
+native commands take `tauri::Webview`, since browser child webviews
 share the desktop window. Closing or changing the modal source releases the
 session. PDF raster dimensions are bounded and share the viewer's render
 memory budget. Only selected pages are rendered at

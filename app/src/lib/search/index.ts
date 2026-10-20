@@ -10,7 +10,7 @@
  * Builds data only: icons are named and a row's destination is a `target`, so
  * each surface supplies its own navigation via {@link openSearchItem}.
  *
- * ⌘K also takes Discord-style filters: `in:<subject>` and `type:<kind>`, typed
+ * ⌘K also takes filters: `in:<subject>` and `type:<kind>`, typed
  * as tokens and kept as chips ({@link SearchFilter}); the palette owns the chips.
  */
 

@@ -1,17 +1,16 @@
 //! Tauri injects its IPC bridge into every child webview, remote pages
-//! included, so only the capability ACL keeps a dock page from the app's
+//! included, so only the capability ACL keeps a browser page from the app's
 //! commands. This fails the build on any capability that could reach one:
-//! a `remote` section, a `webviews` entry that could match `dock-*`, or a
+//! a `remote` section, a `webviews` entry that could match `browse-*`, or a
 //! `windows` entry that could match `main` (window and webview scopes match
-//! by OR, and dock pages are child webviews of `main`).
+//! by OR, and browser pages are child webviews of `main`).
 
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
 use super::label;
-use super::services::SERVICES;
-use crate::shell::browser::MAIN;
+use super::{LABEL_PREFIX, MAIN};
 
 const GLOB_CHARS: [char; 4] = ['*', '?', '[', '{'];
 
@@ -36,17 +35,21 @@ fn glob_matches(pattern: &str, text: &str) -> bool {
     go(&p, &t)
 }
 
-/// True when `entry` could name a dock page: it matches a real label, it is
-/// itself a `dock-` label, or it is a glob whose literal prefix is compatible
-/// with `dock-` (`*`, `d*`, `dock-w?`, …).
-fn could_match_dock(entry: &str) -> bool {
-    if SERVICES.iter().any(|s| glob_matches(entry, &label(s.id))) || entry.starts_with("dock-") {
+/// True when `entry` could name a browser page: it matches a real label, it is
+/// itself a `browse-` label, or it is a glob whose literal prefix is compatible
+/// with `browse-` (`*`, `b*`, `browse-4?`, …).
+fn could_match_browser(entry: &str) -> bool {
+    if [1, 42, u32::MAX]
+        .iter()
+        .any(|id| glob_matches(entry, &label(*id)))
+        || entry.starts_with(LABEL_PREFIX)
+    {
         return true;
     }
     match entry.find(GLOB_CHARS) {
         Some(at) => {
             let prefix = &entry[..at];
-            "dock-".starts_with(prefix) || prefix.starts_with("dock-")
+            LABEL_PREFIX.starts_with(prefix) || prefix.starts_with(LABEL_PREFIX)
         }
         None => false,
     }
@@ -66,21 +69,21 @@ fn strings(value: Option<&Value>) -> Vec<String> {
     }
 }
 
-/// Every reason `capability` could hand a dock page an app command.
+/// Every reason `capability` could hand a browser page an app command.
 fn violations(capability: &Value) -> Vec<String> {
     let mut found = vec![];
     if capability.get("remote").is_some() {
         found.push("has a `remote` section".to_string());
     }
     for entry in strings(capability.get("webviews")) {
-        if could_match_dock(&entry) {
-            found.push(format!("webviews entry {entry:?} can match a dock page"));
+        if could_match_browser(&entry) {
+            found.push(format!("webviews entry {entry:?} can match a browser page"));
         }
     }
     for entry in strings(capability.get("windows")) {
         if glob_matches(&entry, MAIN) {
             found.push(format!(
-                "windows entry {entry:?} matches `main`, which holds the dock pages"
+                "windows entry {entry:?} matches `main`, which holds the browser pages"
             ));
         }
     }
@@ -101,7 +104,7 @@ fn capability_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn no_capability_reaches_a_dock_page() {
+fn no_capability_reaches_a_browser_page() {
     let files = capability_files(&manifest_dir().join("capabilities"));
     assert!(!files.is_empty(), "no capability files found");
     let mut failures = vec![];
@@ -141,13 +144,13 @@ fn the_checks_catch_what_they_should() {
     use serde_json::json;
 
     for bad in [
-        json!({ "remote": { "urls": ["https://web.whatsapp.com"] }, "webviews": ["main"] }),
-        json!({ "webviews": ["dock-*"] }),
-        json!({ "webviews": ["dock-whatsapp"] }),
+        json!({ "remote": { "urls": ["https://example.com"] }, "webviews": ["main"] }),
+        json!({ "webviews": ["browse-*"] }),
+        json!({ "webviews": ["browse-42"] }),
         json!({ "webviews": ["*"] }),
-        json!({ "webviews": ["d*"] }),
-        json!({ "webviews": ["*-discord"] }),
-        json!({ "webviews": ["dock-[a-z]*"] }),
+        json!({ "webviews": ["b*"] }),
+        json!({ "webviews": ["*-42"] }),
+        json!({ "webviews": ["browse-[a-z]*"] }),
         json!({ "windows": ["main"] }),
         json!({ "windows": ["*"] }),
         json!({ "windows": ["ma?n"] }),
