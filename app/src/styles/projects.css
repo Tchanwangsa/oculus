@@ -1,0 +1,62 @@
+@layer utilities {
+  .task-toolbar {
+    container: task-toolbar / inline-size;
+  }
+
+  .task-toolbar-layout {
+    display: flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.5rem;
+    padding-inline: 1.25rem;
+  }
+
+  .task-toolbar-search {
+    display: flex;
+    flex: 1;
+    min-width: 12rem;
+    max-width: 18rem;
+  }
+
+  .task-toolbar-actions {
+    min-width: 0;
+    max-width: 100%;
+    margin: -0.25rem -0.25rem -0.25rem auto;
+    padding: 0.25rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .task-toolbar-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .task-toolbar-controls {
+    display: flex;
+    width: max-content;
+    min-width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .task-toolbar-controls > * {
+    flex-shrink: 0;
+  }
+
+  @container task-toolbar (width < 52rem) {
+    .task-toolbar-layout {
+      flex-direction: column;
+      align-items: stretch;
+      padding-block: 0.5rem;
+    }
+
+    .task-toolbar-search {
+      min-width: 0;
+      max-width: none;
+    }
+
+    .task-toolbar-actions {
+      margin-left: -0.25rem;
+    }
+  }
+}

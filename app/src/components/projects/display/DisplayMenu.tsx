@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { DisplaySettings } from "./DisplaySettings";
 import { PropertyPanel } from "./PropertyPanel";
 import { SlidePanels } from "./SlidePanels";
-import type { TasksDisplay } from "./settings";
+import { DEFAULT_DISPLAY, type TasksDisplay } from "./settings";
 
 /**
  * The Display pill and its popover: layout, grouping, sort, completed, and a
@@ -15,8 +15,12 @@ import type { TasksDisplay } from "./settings";
 export function DisplayMenu({
   display,
   onChange,
+  defaults = DEFAULT_DISPLAY,
+  showLayout = true,
 }: {
   display: TasksDisplay;
+  defaults?: TasksDisplay;
+  showLayout?: boolean;
   onChange: (next: TasksDisplay) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -54,6 +58,8 @@ export function DisplayMenu({
             <DisplaySettings
               display={display}
               onChange={onChange}
+              defaults={defaults}
+              showLayout={showLayout}
               active={panel === "first"}
               onOpenProperties={() => setPanel("second")}
             />

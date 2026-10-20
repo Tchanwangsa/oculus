@@ -1,6 +1,6 @@
 import { sqliteUtcToMs, startOfDay } from "@/lib/format/format";
 import { addDays, startOfWeek } from "@/lib/planning/calendar/dates";
-import type { DbProject, DbTaskTag, DbTaskWithProject } from "@/lib/planning/projects";
+import type { DbProject, DbTaskTag, DbTaskWithProject, ProjectColumn } from "@/lib/planning/projects";
 import { UNIVERSAL_COLUMNS, projectLabel, universalColumnOf } from "./universalTasks";
 
 export const GROUP_BYS = ["none", "status", "project", "tag", "due"] as const;
@@ -63,7 +63,7 @@ export function dueBucket(task: DbTaskWithProject, now: number): DueBucket {
 export function groupTasks(
   tasks: readonly DbTaskWithProject[],
   by: GroupBy,
-  ctx: { projectById: Map<number, DbProject>; tags: readonly DbTaskTag[]; now: number },
+  ctx: { projectById: Map<number, DbProject>; tags: readonly DbTaskTag[]; now: number; columns?: readonly ProjectColumn[] },
 ): TaskGroup[] {
   const groups = new Map<string, TaskGroup>();
   const add = (key: string, label: string, task: DbTaskWithProject, tag?: DbTaskTag) => {
@@ -79,10 +79,10 @@ export function groupTasks(
       break;
     case "status":
       for (const t of tasks) {
-        const column = universalColumnOf(t, ctx.projectById);
+        const column = ctx.columns?.find((c) => c.id === t.column_id) ?? universalColumnOf(t, ctx.projectById);
         add(column.id, column.name, t);
       }
-      order = UNIVERSAL_COLUMNS.map((c) => c.id);
+      order = (ctx.columns ?? UNIVERSAL_COLUMNS).map((c) => c.id);
       break;
     case "project":
       for (const t of tasks) add(t.project_id == null ? "unfiled" : `p${t.project_id}`, projectLabel(t), t);

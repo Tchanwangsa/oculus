@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArrowLeft, DotsThree, TrashSimple } from "@phosphor-icons/react";
 import { projectHref } from "@/components/projects/nav/projectHref";
-import { PageHeader, PaneTrail, useInSidePanel } from "@/components/tabs/PaneHeader";
+import { PageHeader, useInSidePanel } from "@/components/tabs/PaneHeader";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import { useTasksPanel } from "@/layouts/TasksLayout";
@@ -43,9 +43,7 @@ export function TaskHeader({
           <ArrowLeft size={15} />
         </button>
       )}
-      <PaneTrail>
-        <Breadcrumb items={items} />
-      </PaneTrail>
+      <Breadcrumb items={items} />
       {/* The side panel's own controls follow this in the row. */}
       <TaskMenu onDelete={onDelete} />
     </PageHeader>

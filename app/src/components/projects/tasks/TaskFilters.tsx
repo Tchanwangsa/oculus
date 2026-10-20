@@ -5,7 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { ChipRow, ToggleChip } from "@/components/ui/filter/ChipRow";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import type { DbTaskTag } from "@/lib/planning/projects";
+import type { DbTaskTag, ProjectColumn } from "@/lib/planning/projects";
 import { TagDot } from "../tags/TagDot";
 import { DueRangeFields } from "./DueRange";
 import {
@@ -74,8 +74,12 @@ export function TaskFilters({
   tags,
   onChange,
   target = "tasks",
+  columns = UNIVERSAL_COLUMNS,
+  showArchived = true,
 }: {
   target?: "tasks" | "projects";
+  columns?: readonly ProjectColumn[];
+  showArchived?: boolean;
   filter: TaskFilter;
   tags: DbTaskTag[];
   onChange: (next: TaskFilter) => void;
@@ -83,7 +87,7 @@ export function TaskFilters({
   const count = activeFilterCount(filter);
 
   const toggleStatus = (id: string) =>
-    onChange({ ...filter, status: toggleStatusFilter(filter.status, id) });
+    onChange({ ...filter, status: toggleStatusFilter(filter.status, id, columns) });
 
   const toggleTag = (id: number) =>
     onChange({
@@ -110,10 +114,10 @@ export function TaskFilters({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
         <div className="px-4 py-3">
-          <div className="flex min-h-9 items-center justify-between gap-3">
+          {showArchived && <div className="flex min-h-9 items-center justify-between gap-3">
             <span className="text-xs text-foreground">Show archived</span>
             <Switch aria-label={target === "projects" ? "Show archived projects" : "Show tasks in archived projects"} checked={filter.showArchived} onCheckedChange={(showArchived) => onChange({ ...filter, showArchived })} />
-          </div>
+          </div>}
           {target === "projects" && <p className="pb-1 text-[11px] text-muted-foreground">Status matches tasks in a project. Due and tags match the project.</p>}
           <Section title="Status" action={
             <SelectionAction
@@ -121,12 +125,12 @@ export function TaskFilters({
               label="statuses"
               onClick={() => onChange({
                 ...filter,
-                status: filter.status.length > 0 ? DEFAULT_FILTER.status : UNIVERSAL_COLUMNS.map((c) => c.id),
+                status: filter.status.length > 0 ? DEFAULT_FILTER.status : columns.map((c) => c.id),
               })}
             />
           }>
             <ChipRow>
-              {UNIVERSAL_COLUMNS.map((c) => (
+              {columns.map((c) => (
                 <ToggleChip key={c.id} selected={filter.status.includes(c.id)} onClick={() => toggleStatus(c.id)}>
                   {c.name}
                 </ToggleChip>

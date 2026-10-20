@@ -8,7 +8,7 @@ import { TaskGlyph } from "../tasks/TaskMarks";
 import { projectHref } from "./projectHref";
 import { taskHref } from "./taskHref";
 
-/** The final two items are always the immediate parent and current task. */
+/** The final two items identify the immediate parent and current task. */
 export function taskBreadcrumbs(task: DbProjectTask, project: DbProject | null, parent: DbProjectTask | null): BreadcrumbItem[] {
   const items: BreadcrumbItem[] = project
     ? [...projectParents(project), { label: project.name, href: projectHref(project), icon: <ProjectIcon project={project} size={14} /> }]

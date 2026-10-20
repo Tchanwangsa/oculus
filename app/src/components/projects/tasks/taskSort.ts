@@ -1,5 +1,5 @@
 import { sqliteUtcToMs } from "@/lib/format/format";
-import type { DbProject, DbTaskWithProject } from "@/lib/planning/projects";
+import type { DbProject, DbTaskWithProject, ProjectColumn } from "@/lib/planning/projects";
 import { UNIVERSAL_COLUMNS, projectLabel, universalColumnOf } from "./universalTasks";
 
 /** What the Display menu and the table's column headers sort by. */
@@ -59,6 +59,7 @@ export function sortTasks(
   tasks: readonly DbTaskWithProject[],
   sort: TaskSort,
   projectById: Map<number, DbProject>,
+  columns?: readonly ProjectColumn[],
 ): DbTaskWithProject[] {
   const keyCmp = (a: DbTaskWithProject, b: DbTaskWithProject): number => {
     switch (sort.key) {
@@ -71,8 +72,9 @@ export function sortTasks(
       // progress share a kind but are separate columns).
       case "status":
         return (
-          UNIVERSAL_COLUMNS.indexOf(universalColumnOf(a, projectById)) -
-          UNIVERSAL_COLUMNS.indexOf(universalColumnOf(b, projectById))
+          columns
+            ? columns.findIndex((c) => c.id === a.column_id) - columns.findIndex((c) => c.id === b.column_id)
+            : UNIVERSAL_COLUMNS.indexOf(universalColumnOf(a, projectById)) - UNIVERSAL_COLUMNS.indexOf(universalColumnOf(b, projectById))
         );
       case "due":
         return dueCmp(a, b);

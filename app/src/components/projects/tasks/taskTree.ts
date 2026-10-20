@@ -39,47 +39,6 @@ function nodesIn(nodes: TaskNode[], columnId: string): TaskNode[] {
   return nodes.filter((n) => n.task.column_id === columnId);
 }
 
-/** One card on the board. */
-export interface ColumnEntry {
-  task: DbProjectTask;
-  /** The schema allows one level of nesting. */
-  depth: 0 | 1;
-  /** The parent of a `depth: 1` entry, `null` at depth 0. */
-  parent: DbProjectTask | null;
-  /** A subtask in this column whose parent sits in another one — normal, and
-   *  the card names its parent so it doesn't read as homeless. */
-  orphaned: boolean;
-  /** For a parent card's progress meter; `null` at depth 1. */
-  node: TaskNode | null;
-}
-
-/**
- * One column's cards in drawing order: each top-level task followed by its
- * children that are also here, then the orphaned subtasks last. The grouping
- * is structural: a subtask's `position` only orders it among its siblings, so
- * it can never sit between unrelated cards (see {@link siblingDropSlot}).
- */
-export function columnEntries(nodes: TaskNode[], columnId: string): ColumnEntry[] {
-  const entries: ColumnEntry[] = [];
-  for (const node of nodes) {
-    if (node.task.column_id !== columnId) continue;
-    entries.push({ task: node.task, depth: 0, parent: null, orphaned: false, node });
-    for (const child of node.children) {
-      if (child.column_id !== columnId) continue;
-      entries.push({ task: child, depth: 1, parent: node.task, orphaned: false, node: null });
-    }
-  }
-  // Orphans go at the end of the column.
-  for (const node of nodes) {
-    if (node.task.column_id === columnId) continue;
-    for (const child of node.children) {
-      if (child.column_id !== columnId) continue;
-      entries.push({ task: child, depth: 1, parent: node.task, orphaned: true, node: null });
-    }
-  }
-  return entries;
-}
-
 export interface SubtaskProgress {
   done: number;
   total: number;
@@ -128,56 +87,6 @@ export function promotionTarget(project: DbProject | null): ProjectColumn | null
     board.find((c) => c.kind !== "backlog") ??
     null
   );
-}
-
-/** The subtask row with this id, or `null` if it is top-level or absent. */
-function subtaskById(nodes: TaskNode[], id: number): DbProjectTask | null {
-  for (const node of nodes) {
-    const hit = node.children.find((c) => c.id === id);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-/**
- * The `before`/`after` pair for `moveTask` when dropping `taskId` at `index`
- * in the column's flat visual list (dragged card removed, as `useCardDrag`
- * reports it). That list interleaves parents and subtasks, and a midpoint
- * against a non-sibling would be re-sorted away by {@link columnEntries} — so
- * the slot only counts how many of the card's own siblings lie above it, and
- * the pair comes from the siblings. No siblings here: append to the column.
- */
-export function siblingDropSlot(
-  nodes: TaskNode[],
-  columnId: string,
-  taskId: number,
-  index: number,
-): { before: number | null; after: number | null } {
-  const rest = columnEntries(nodes, columnId).filter((e) => e.task.id !== taskId);
-  const slot = Math.max(0, Math.min(index, rest.length));
-
-  // Level comes from the tree, not `parent_id`: `taskTree` promotes a subtask
-  // with a missing parent to top level.
-  const isTop = nodes.some((n) => n.task.id === taskId);
-  const parentId = isTop ? null : subtaskById(nodes, taskId)?.parent_id ?? null;
-  const isSibling = (e: ColumnEntry) =>
-    isTop ? e.depth === 0 : e.depth === 1 && e.task.parent_id === parentId;
-
-  const siblings: number[] = [];
-  let above = 0;
-  rest.forEach((e, i) => {
-    if (!isSibling(e)) return;
-    if (i < slot) above++;
-    siblings.push(e.task.id);
-  });
-
-  if (siblings.length === 0) {
-    return { before: rest[rest.length - 1]?.task.id ?? null, after: null };
-  }
-  return {
-    before: above > 0 ? siblings[above - 1] : null,
-    after: above < siblings.length ? siblings[above] : null,
-  };
 }
 
 /** The tail of a column — what an appended task is dropped after. */

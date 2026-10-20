@@ -1,15 +1,14 @@
 import { ProjectIcon } from "@/components/projects/icons/ProjectIcon";
 import { useStoredState } from "@/hooks/ui/useStoredState";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { PillTabs } from "@/components/ui/table/PillTabs";
 import { ViewTabs } from "@/components/ui/table/ViewTabs";
-import { ProjectBoard } from "@/components/projects/board/ProjectBoard";
+import { ProjectTasks } from "@/components/projects/page/ProjectTasks";
+import { useTaskList } from "@/hooks/data/useTaskList";
 import { ProjectMenu } from "@/components/projects/lists/ProjectMenu";
 import { ProjectOverview } from "@/components/projects/page/ProjectOverview";
-import { ProjectTable } from "@/components/projects/lists/ProjectTable";
 import {
-  ProjectTimeline,
   TIMELINE_ZOOM_KEY,
   TimelineZoomControl,
   isTimelineZoom,
@@ -19,13 +18,11 @@ import { projectParents } from "@/components/projects/nav/projectBreadcrumbs";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { boardProgress, taskTree } from "@/components/projects/tasks/taskTree";
 import { useProjectActions } from "@/components/projects/lists/useProjectActions";
-import { PageHeader, PaneTrail } from "@/components/tabs/PaneHeader";
+import { PageHeader } from "@/components/tabs/PaneHeader";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import { useTasksPanel } from "@/layouts/TasksLayout";
 import { shortcut } from "@/lib/platform";
-import { PROJECTS_UPDATED_EVENT } from "@/lib/planning/projects";
 import { useProjectsStore } from "@/stores/planning/projectsStore";
-import { useWindowEvent } from "@/hooks/backend/useEvents";
 
 /** Overview ("what was this again") and Tasks ("what now"). */
 type ProjectTab = "overview" | "tasks";
@@ -65,17 +62,11 @@ export default function ProjectPage() {
   // The nav column's fold toggle; null in the side panel, outside the layout.
   const panel = useTasksPanel();
 
-  const project = useProjectsStore((s) => s.projects.find((p) => p.id === id) ?? null);
-  const tasks = useProjectsStore((s) => s.tasks);
-  const loadProjects = useProjectsStore((s) => s.loadProjects);
-  const openProject = useProjectsStore((s) => s.open);
-  const reload = useProjectsStore((s) => s.reload);
-  const moveTask = useProjectsStore((s) => s.moveTask);
+  const { tasks, projects, projectById, loaded: listed } = useTaskList(Number.isFinite(id) ? id : null);
+  const project = projects.find((p) => p.id === id) ?? null;
   const createTask = useProjectsStore((s) => s.createTask);
   const updateProject = useProjectsStore((s) => s.updateProject);
   const actions = useProjectActions();
-
-  const [listed, setListed] = useState(false);
 
   const [tab, setTab] = useStoredState<ProjectTab>(TAB_KEY, (stored) =>
     isTab(stored) ? stored : "overview",
@@ -89,31 +80,8 @@ export default function ProjectPage() {
     isTimelineZoom(stored) ? stored : "week",
   );
 
-
-  // `status: "all"` so an archived project opened by its link still resolves.
-  useEffect(() => {
-    setListed(false);
-    loadProjects({ status: "all" }).finally(() => setListed(true));
-  }, [loadProjects, id]);
-
-  useEffect(() => {
-    if (Number.isFinite(id)) void openProject(id);
-  }, [openProject, id]);
-
-  // Writes from elsewhere (the agent, another page) arrive as this event.
-  useWindowEvent(PROJECTS_UPDATED_EVENT, () => void reload());
-
   const nodes = useMemo(() => taskTree(tasks), [tasks]);
   const progress = useMemo(() => boardProgress(nodes), [nodes]);
-
-  const handleMove = useCallback(
-    (taskId: number, columnId: string, before: number | null, after: number | null) => {
-      moveTask(taskId, columnId, before, after).catch((e) =>
-        console.error("move task failed", e),
-      );
-    },
-    [moveTask],
-  );
 
   const handleCreate = useCallback(
     (input: { title: string; columnId: string; parentId?: number }) => {
@@ -137,7 +105,7 @@ export default function ProjectPage() {
 
   if (!Number.isFinite(id)) return <Navigate to="/projects" replace />;
 
-  if (!project) {
+  if (!listed || !project) {
     return (
       <div className="flex h-full items-center justify-center px-6">
         {listed ? (
@@ -157,9 +125,7 @@ export default function ProjectPage() {
   const titleRow = (
     <PageHeader>
       {panel && <SideNavCollapseToggle collapsed={panel.collapsed} onToggle={panel.toggle} shortcut={shortcut("mod+alt+B")} />}
-      <PaneTrail>
-        <Breadcrumb items={[...projectParents(project), { label: project.name, icon: <ProjectIcon project={project} size={14} /> }]} />
-      </PaneTrail>
+      <Breadcrumb items={[...projectParents(project), { label: project.name, icon: <ProjectIcon project={project} size={14} /> }]} />
       {tab === "tasks" && <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{progress.done}/{progress.total} done</span>}
       <ProjectMenu
         project={project}
@@ -201,25 +167,9 @@ export default function ProjectPage() {
         {tab === "overview" && (
           <ProjectOverview project={project} nodes={nodes} onPatch={handlePatch} onRename={(name) => actions.onRename(project, name)} />
         )}
-        {tab === "tasks" && view === "board" && (
-          <ProjectBoard
-            project={project}
-            nodes={nodes}
-            onMove={handleMove}
-            onCreate={handleCreate}
-          />
-        )}
-        {tab === "tasks" && view === "table" && (
-          <ProjectTable
-            project={project}
-            nodes={nodes}
-            onMove={handleMove}
-            onCreate={handleCreate}
-          />
-        )}
-        {tab === "tasks" && view === "timeline" && (
-          <ProjectTimeline project={project} nodes={nodes} zoom={zoom} />
-        )}
+        {tab === "tasks" && <ProjectTasks key={project.id} project={project} tasks={tasks}
+          projects={projects} projectById={projectById} view={view} onView={setView}
+          zoom={zoom} onCreate={handleCreate} />}
       </div>
     </div>
   );

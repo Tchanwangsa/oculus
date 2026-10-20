@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { GROUP_BYS, GROUP_LABELS, isGroupBy } from "../tasks/taskGroups";
 import { SORT_KEYS, SORT_LABELS, isSortKey } from "../tasks/taskSort";
-import { isDefaultDisplay, resetDisplay, type TaskLayout, type TasksDisplay } from "./settings";
+import { DEFAULT_DISPLAY, isDefaultDisplay, resetDisplay, type TaskLayout, type TasksDisplay } from "./settings";
 
 const LAYOUTS: ReadonlyArray<{ value: TaskLayout; label: string; icon: typeof Rows }> = [
   { value: "table", label: "Table", icon: Rows },
@@ -24,16 +24,19 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * The Display menu's first panel: layout, grouping, sort and completed tasks,
- * then a door to the property list. Grouping and properties draw the table
- * only, so the board hides both.
+ * then a door to the property list. Grouping applies to the table; property visibility also controls board cards.
  */
 export function DisplaySettings({
   display,
   onChange,
   active,
   onOpenProperties,
+  defaults = DEFAULT_DISPLAY,
+  showLayout = true,
 }: {
   display: TasksDisplay;
+  defaults?: TasksDisplay;
+  showLayout?: boolean;
   onChange: (next: TasksDisplay) => void;
   /** Whether this panel is the one showing; coming back to it refocuses the
    *  Properties row, which the property panel was opened from. */
@@ -51,7 +54,7 @@ export function DisplaySettings({
 
   return (
     <div className="p-3">
-      <Row label="View">
+      {showLayout && <Row label="View">
         <div role="radiogroup" aria-label="View" className="flex items-center gap-0.5 rounded-full bg-secondary p-0.5">
           {LAYOUTS.map(({ value, label, icon: LayoutIcon }) => {
             const selected = display.view === value;
@@ -76,7 +79,7 @@ export function DisplaySettings({
             );
           })}
         </div>
-      </Row>
+      </Row>}
 
       {table && (
         <Row label="Grouping">
@@ -144,26 +147,24 @@ export function DisplaySettings({
         />
       </Row>
 
-      {table && (
-        <button
-          ref={properties}
-          type="button"
-          onClick={onOpenProperties}
-          className="-mx-0.5 flex min-h-9 w-[calc(100%+0.25rem)] cursor-pointer items-center justify-between gap-3 rounded-md px-1.5 text-left outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        >
-          <span className="text-[12.5px] text-foreground">Properties</span>
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <span className="tabular-nums">{display.properties.length + 1}</span>
-            <CaretRight size={11} />
-          </span>
-        </button>
-      )}
+      <button
+        ref={properties}
+        type="button"
+        onClick={onOpenProperties}
+        className="-mx-0.5 flex min-h-9 w-[calc(100%+0.25rem)] cursor-pointer items-center justify-between gap-3 rounded-md px-1.5 text-left outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      >
+        <span className="text-[12.5px] text-foreground">Properties</span>
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          <span className="tabular-nums">{display.properties.length + 1}</span>
+          <CaretRight size={11} />
+        </span>
+      </button>
 
       <div className="mt-1.5 border-t border-border-subtle pt-2 pl-1">
         <button
           type="button"
-          disabled={isDefaultDisplay(display)}
-          onClick={() => onChange(resetDisplay())}
+          disabled={isDefaultDisplay(display, defaults)}
+          onClick={() => onChange(resetDisplay(defaults))}
           className="cursor-pointer rounded disabled:cursor-default disabled:opacity-50 text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           Reset defaults

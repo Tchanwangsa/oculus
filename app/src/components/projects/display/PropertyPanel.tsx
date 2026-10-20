@@ -17,7 +17,7 @@ import {
 } from "./settings";
 
 /**
- * The second panel of the Display menu: which table columns show, and in what
+ * The second panel of the Display menu: which properties show, and in what
  * order. Shown rows drag (`useStripReorder`, the sidebar rail's gesture) or
  * move with the arrow keys on their handle; Name is first and locked. While a
  * search narrows the list the order is not draggable, since the rows on screen
@@ -140,11 +140,11 @@ export function PropertyPanel({
 
       <div ref={listRef} className="max-h-72 overflow-y-auto">
         {(nameMatches || visibleShown.length > 0) && (
-          <section aria-label="Shown in table">
+          <section aria-label="Shown properties">
             <PropertySectionLabel
               action={shown.length > 0 ? { label: "Hide all", onClick: () => onChange(hideAllProperties(display)) } : undefined}
             >
-              Shown in table
+              Shown properties
             </PropertySectionLabel>
             <ul className={cn(DRAG_SURFACE)}>
               {nameMatches && (
@@ -187,11 +187,11 @@ export function PropertyPanel({
         )}
 
         {visibleHidden.length > 0 && (
-          <section aria-label="Hidden in table" className="mt-1">
+          <section aria-label="Hidden properties" className="mt-1">
             <PropertySectionLabel
               action={{ label: "Show all", onClick: () => onChange(showAllProperties(display)) }}
             >
-              Hidden in table
+              Hidden properties
             </PropertySectionLabel>
             <ul>
               {visibleHidden.map((id) => (

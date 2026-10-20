@@ -11,7 +11,7 @@ import { isSortKey, type TaskSort } from "../tasks/taskSort";
 
 export const DISPLAY_KEY = "oculus-tasks-display-v2";
 
-/** Every table column but Name, in the order the panel lists hidden ones. */
+/** Every optional task property, in the order the panel lists hidden ones. */
 export const PROPERTIES = ["tags", "project", "subject", "due", "updated", "created"] as const;
 
 export type PropertyId = (typeof PROPERTIES)[number];
@@ -36,7 +36,7 @@ export interface TasksDisplay {
   /** Table only: nest visible subtasks beneath their visible parent. */
   groupSubtasks: boolean;
   /** The shown columns after Name, left to right. Name is always first and
-   *  is not in the list; every id missing from it is hidden. */
+   *  is not in the list; cards use the same visibility and property order. */
   properties: PropertyId[];
 }
 
@@ -48,6 +48,17 @@ export const DEFAULT_DISPLAY: TasksDisplay = {
   groupSubtasks: false,
   properties: ["tags", "project", "due", "updated"],
 };
+
+/** Project context supplies these identities; users can show them in Display. */
+export const PROJECT_DISPLAY: TasksDisplay = {
+  ...DEFAULT_DISPLAY,
+  view: "board",
+  showCompleted: true,
+  groupSubtasks: true,
+  properties: ["tags", "due", "updated"],
+};
+
+export const PROJECT_DISPLAY_KEY = "oculus-project-tasks-display";
 
 export function isPropertyId(value: unknown): value is PropertyId {
   return (PROPERTIES as readonly unknown[]).includes(value);
@@ -67,7 +78,7 @@ function readProperties(value: unknown): PropertyId[] | null {
 }
 
 /** The stored JSON, or the default for anything unreadable, field by field. */
-export function readDisplay(raw: string | null): TasksDisplay {
+export function readDisplay(raw: string | null, defaults: TasksDisplay = DEFAULT_DISPLAY): TasksDisplay {
   let stored: Record<string, unknown> = {};
   try {
     const parsed: unknown = raw == null ? null : JSON.parse(raw);
@@ -79,17 +90,17 @@ export function readDisplay(raw: string | null): TasksDisplay {
   }
   const sort = stored.sort as Record<string, unknown> | null | undefined;
   return {
-    view: stored.view === "board" || stored.view === "table" ? stored.view : DEFAULT_DISPLAY.view,
-    group: isGroupBy(stored.group) ? stored.group : DEFAULT_DISPLAY.group,
+    view: stored.view === "board" || stored.view === "table" ? stored.view : defaults.view,
+    group: isGroupBy(stored.group) ? stored.group : defaults.group,
     sort: {
-      key: isSortKey(sort?.key) ? sort.key : DEFAULT_DISPLAY.sort.key,
-      dir: sort?.dir === "asc" || sort?.dir === "desc" ? sort.dir : DEFAULT_DISPLAY.sort.dir,
+      key: isSortKey(sort?.key) ? sort.key : defaults.sort.key,
+      dir: sort?.dir === "asc" || sort?.dir === "desc" ? sort.dir : defaults.sort.dir,
     },
     showCompleted:
-      typeof stored.showCompleted === "boolean" ? stored.showCompleted : DEFAULT_DISPLAY.showCompleted,
+      typeof stored.showCompleted === "boolean" ? stored.showCompleted : defaults.showCompleted,
     groupSubtasks:
-      typeof stored.groupSubtasks === "boolean" ? stored.groupSubtasks : DEFAULT_DISPLAY.groupSubtasks,
-    properties: readProperties(stored.properties) ?? [...DEFAULT_DISPLAY.properties],
+      typeof stored.groupSubtasks === "boolean" ? stored.groupSubtasks : defaults.groupSubtasks,
+    properties: readProperties(stored.properties) ?? [...defaults.properties],
   };
 }
 
@@ -97,12 +108,12 @@ export function writeDisplay(display: TasksDisplay): string {
   return JSON.stringify(display);
 }
 
-export function resetDisplay(): TasksDisplay {
-  return clone(DEFAULT_DISPLAY);
+export function resetDisplay(defaults: TasksDisplay = DEFAULT_DISPLAY): TasksDisplay {
+  return clone(defaults);
 }
 
-export function isDefaultDisplay(display: TasksDisplay): boolean {
-  return writeDisplay(display) === writeDisplay(DEFAULT_DISPLAY);
+export function isDefaultDisplay(display: TasksDisplay, defaults: TasksDisplay = DEFAULT_DISPLAY): boolean {
+  return writeDisplay(display) === writeDisplay(defaults);
 }
 
 /** The properties not shown, in {@link PROPERTIES} order. */

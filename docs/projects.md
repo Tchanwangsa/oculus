@@ -17,18 +17,19 @@ repair a bad row.
 | Headless writes (CLI, and so the agent) | `app/src-tauri/src/db/projects/` (`tasks/`, `tags.rs`, `tasks/links.rs`, `project_writes.rs`, `columns.rs`, `rows.rs`) |
 | `oculus project` / `oculus task` / `oculus tag` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs` |
 | Linkable calendar ids for the CLI | `app/src-tauri/src/db/projects/events.rs` (`project events` and pin validation; mirrors the non-task layers in `loadCalendar`) |
-| One open project and its tasks | `app/src/stores/planning/projectsStore.ts` |
+| Writes and the task detail's open project | `app/src/stores/planning/projectsStore.ts` |
 | Index, one project, one task, every task | `app/src/pages/work/ProjectsIndexPage.tsx`, `app/src/pages/work/ProjectPage.tsx`, `app/src/pages/work/TaskPage.tsx`, `app/src/pages/work/TasksPage.tsx` |
 | Shared detail title and markdown field | `app/src/components/projects/detail/DetailTitle.tsx`, `app/src/components/projects/detail/DetailBody.tsx` |
 | A task page's parts | `app/src/components/projects/task/` (header, property pills, tags, related files, footer), `app/src/pages/work/task/` (title, body, checklist, mutations, data) |
 | Project appearance and picker | `app/src/components/projects/icons/`, `app/src/stores/planning/projectIconStore.ts` |
 | Project index table, rows and search tree | `app/src/components/projects/lists/ProjectsIndexTable.tsx`, `app/src/components/projects/lists/ProjectIndexRow.tsx`, `app/src/components/projects/lists/projectTableData.ts`, `app/src/components/projects/lists/projectFilters.ts` |
 | Subject Tasks link and scoped redirects | `app/src/components/subjects/nav/tabs.ts`, `app/src/pages/work/SubjectTasksRedirect.tsx`, `app/src/components/projects/tasks/useTaskFilterState.ts` |
+| Task and project search with responsive filter strip | `app/src/components/projects/tasks/TaskToolbar.tsx`, `app/src/styles/projects.css`, `app/src/components/projects/tasks/TaskSearch.tsx` |
 | The section's nav column and its fold | `app/src/layouts/TasksLayout.tsx`, `app/src/components/projects/nav/TasksNav.tsx`, `app/src/components/projects/nav/TagsGroup.tsx`, `app/src/components/projects/nav/panel.ts` |
 | The page header row; the rail item | `app/src/components/projects/page/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx` |
 | Overview, project tags, pinned calendar event | `app/src/components/projects/page/ProjectOverview.tsx`, `app/src/components/projects/page/ProjectProperties.tsx`, `app/src/components/projects/fields/TagEditor.tsx`, `app/src/components/projects/page/EventLink.tsx` |
 | Task tags: registry hook, chips, picker, palette | `app/src/hooks/data/useTaskTags.ts`, `app/src/components/projects/tags/`, `--color-tag-*` in `app/src/styles/colors.css` |
-| Board, table, timeline, and the shaping behind them | `app/src/components/projects/board/ProjectBoard.tsx`, `app/src/components/projects/lists/ProjectTable.tsx`, `app/src/components/projects/timeline/ProjectTimeline.tsx`, `app/src/components/projects/tasks/taskTree.ts` |
+| Shared task views and the project scope | `app/src/components/projects/tasks/TasksView.tsx`, `app/src/components/projects/page/ProjectTasks.tsx`, `app/src/components/projects/board/TaskCard.tsx`, `app/src/components/projects/timeline/ProjectTimeline.tsx`, `app/src/components/projects/tasks/taskTree.ts` |
 | The universal view: hook, views, filters, sort, groups, shared rules | `app/src/hooks/data/useTaskList.ts`, `app/src/components/projects/tasks/` (`taskViews.ts`, `filterRules.ts`, `filterCounts.ts`, `taskSort.ts`, `taskGroups.ts`, `universalTasks.ts`, `TaskFilters.tsx`, `ProjectFilter.tsx`, `SubjectFilter.tsx`) |
 | Shared task rows, headers, mutations and the Display menu | `app/src/components/projects/lists/` (`TasksTable.tsx`, `TaskRow.tsx`, `TaskCells.tsx`, `TaskTableHeaders.tsx`, `tasksColumns.ts`), `app/src/components/projects/tasks/useTaskActions.ts`, `app/src/components/projects/display/`, `app/src/components/projects/board/TasksBoard.tsx` |
 | Card drag and board chrome | `app/src/hooks/gestures/useCardDrag.ts` (on `app/src/hooks/gestures/usePointerDrag.ts`), `app/src/components/projects/board/BoardParts.tsx` |
@@ -165,7 +166,9 @@ whose parent is missing rather than dropping it.
   the side panel), back, the shared breadcrumb and a `…` menu with Delete. A subtask
   shows `… › parent task › subtask`; its back arrow opens the parent. Root
   tasks show `… › project › task` or `Tasks › task` while unfiled. The
-  breadcrumb popover lists hidden ancestors in path order. The pills are Status, Project (read-only on a subtask), Due,
+  breadcrumb popover lists hidden ancestors in path order. When the header
+  cannot fit both labels, the current task keeps the space and its parent
+  joins the popover. The pills are Status, Project (read-only on a subtask), Due,
   Starts, Estimate (whole minutes in a popover; 0 clears), the task's tags with
   a `+` (`TagPicker`, writing `updateTask({ tagIds })`) and, on a parent, the
   checklist progress. Below: the description, the subtasks as a checklist (a tick is
@@ -204,7 +207,13 @@ whose parent is missing rather than dropping it.
   by `Overview | Tasks`. Overview shares the task page's editable title,
   then property pills (status, subject, dates, progress and tags), calendar
   link, About editor and upcoming tasks. Board / Table / Timeline sit
-  below the tabs when Tasks is selected. `isView` in
+  below the tabs when Tasks is selected. The board and table use the same
+  `TasksView` as `/tasks`, with search, filters, sorting and the Display menu.
+  Project and Subject start hidden; Tags stays shown. Project Display choices
+  are separate from the global page (`oculus-project-tasks-display`), and users
+  can show either identity field through Properties. Custom columns keep their
+  own names and ids in filtering, sorting, grouping and dragging; new tasks
+  are added in the board column or below the table. `isView` in
   `ProjectPage.tsx` sends an unknown stored `oculus-project-view` to the
   board.
 - **`TasksLayout` wraps every route in the section** with a resizable, foldable
@@ -218,6 +227,11 @@ whose parent is missing rather than dropping it.
   `BreadcrumbItems`; hidden ancestors open in a popover. Segments are
   buttons with `data-tab-href` (`app/src/lib/shell/newTabClicks.ts`) so
   ⌘-click opens a tab.
+- **Task and project lists share `TaskToolbar`.** Below 52rem of available
+  pane width, search takes its own full-width row and the filters sit below
+  in a horizontal strip with scroll fades. Wide panes keep one row with a
+  readable minimum search width; long filter selections scroll within their
+  strip. The toolbar stays outside the table's horizontal scroller.
 - **The index is one `GridTable`**, with the Tasks page's Name, Tags,
   Subject, Due and Updated columns and sortable headers. Projects open their
   task rows in place; parents can open their subtasks. `TaskRow` owns the
@@ -256,7 +270,7 @@ whose parent is missing rather than dropping it.
 
 ## Cards drag on pointer events and settle before swapping
 
-Boards and the project table drag with `useCardDrag` on the shared
+Task boards drag with `useCardDrag` on the shared
 `usePointerDrag` gesture, not HTML5 drag-and-drop: in WebKit a text selection
 starting on a card's `<span>` pre-empts the element drag. The WebKit
 rules are in [ui.md](./ui.md#gotchas) — never cancel `pointerdown` (it kills the
@@ -268,7 +282,6 @@ to its gap, the view keeps drawing the list it had at release
 (`useSettledList`), and the two swap only when the glide has run *and* the new
 list (`settleOn`) has arrived. A drop handler must report whether it wrote;
 a refused drop springs back instead of waiting for an order that never comes.
-Row numbers fade for the gesture.
 
 **A card is fixed-size and the whole of it opens the task.** `CardTitle`
 wraps unbreakable tokens (`break-words` in a `min-w-0` child), clamps to three
@@ -318,13 +331,13 @@ independent layers, all predicates and orderings over one `getAllTasks`.
   Archived project choices count the tasks selecting them would reveal.
   Their lists keep a scrollbar gutter, so a popover never changes width.
 - **Display shapes the result** (`components/projects/display/`): view, grouping
-  (none, status, project, tag, due), sort, show completed and which table
+  (none, status, project, tag, due), sort, show completed and which task
   properties show, in what order, plus Group subtasks — one JSON object under `oculus-tasks-display-v2`,
   validated field by field on read, so a property added later starts hidden and
   an unknown stored one is dropped. The default is due date ascending with
   finished tasks hidden; a stored object overrides every default, so changing
-  one means bumping the key. Grouping and properties are table-only; a
-  task with several tags appears under each tag group. Name is always first and
+  one means bumping the key. Grouping is table-only; properties control table columns and board card
+  metadata, including tags and dates. A task with several tags appears under each tag group. Name is always first and
   cannot be hidden. A column header sets the same sort, so there is one source
   of truth. Group subtasks is table-only and starts off: visible children nest
   beneath their visible parent with a disclosure, in the Display sort's
@@ -338,7 +351,9 @@ independent layers, all predicates and orderings over one `getAllTasks`.
 - **It does not use `projectsStore`**, which holds one open project.
   `useTaskList` reads `getAllTasks` plus the project list (a column id means
   nothing without its board) and reloads on `PROJECTS_UPDATED_EVENT`.
-  `getUnfiledTasks` resolves an unfiled task's page.
+  `getUnfiledTasks` resolves an unfiled task's page. Project pages use the
+  same hook with a project id (`getTasks`), so each pane owns its task list
+  and a response for an earlier scope cannot replace the current one.
 - **Its columns are `DEFAULT_COLUMNS`** (Planning / Todo / In progress / Done),
   aliased as `UNIVERSAL_COLUMNS`.
   - `universalColumnOf` places a card **id first, kind second**: its own
@@ -384,13 +399,18 @@ independent layers, all predicates and orderings over one `getAllTasks`.
     alone is refused;
   - appends at the destination column's end, then places via `moveTask`.
 
-## Boards share rendering while each view owns placement
+## Task views share their cards, rows and display controls
 
-`BoardView` in `app/src/components/projects/board/BoardParts.tsx` composes columns,
-draggable cards and the lifted copy. Project and universal boards supply the
-card body, ordered rows and drop policy; parent/sibling placement stays in
-`app/src/components/projects/tasks/taskTree.ts`. Tables and timelines share the
-subtask disclosure control in `app/src/components/projects/tasks/TaskMarks.tsx`.
+`TasksView` selects `TasksBoard` or `TasksTable` for both the universal page and
+project Tasks tabs. `TaskCard` draws every board card, including its lifted
+copy; `BoardView` owns the columns and drag chrome. A project's scope supplies
+its columns and task creation callback. Cross-project boards resolve default
+columns back to the task's own board. Both use the Display sort, so a drag
+within the current column writes nothing; a cross-column drop appends on the
+task's own board. Tables use the same inline status, tag and project editors.
+Progress always counts the unfiltered subtasks. The timeline uses the same
+project search and filters and shares the subtask disclosure control in
+`app/src/components/projects/tasks/TaskMarks.tsx`.
 
 Project and task patches bind values through `app/src/lib/planning/sqlPatch.ts`.
 `undefined` leaves a field alone, `null` clears it, and an empty patch neither

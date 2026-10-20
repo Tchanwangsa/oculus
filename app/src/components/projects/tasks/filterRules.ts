@@ -57,9 +57,9 @@ export function isDefaultFilter(filter: TaskFilter): boolean {
 
 /** Empty means Any: picking one starts a selection, clearing the last
  * restores Any. Explicit Select all can be narrowed by unchecking a chip. */
-export function toggleStatusFilter(status: readonly string[], id: string): readonly string[] {
+export function toggleStatusFilter(status: readonly string[], id: string, columns: readonly ProjectColumn[] = UNIVERSAL_COLUMNS): readonly string[] {
   const next = status.includes(id) ? status.filter((value) => value !== id) : [...status, id];
-  return next.length ? UNIVERSAL_COLUMNS.filter((c) => next.includes(c.id)).map((c) => c.id) : DEFAULT_FILTER.status;
+  return next.length ? columns.filter((c) => next.includes(c.id)).map((c) => c.id) : DEFAULT_FILTER.status;
 }
 
 /** Choosing Custom counts as a changed filter even before either end is set. */
@@ -88,9 +88,9 @@ export function isFiltered(filter: TaskFilter): boolean {
   return activeFilterCount(filter) > 0;
 }
 
-export function filteredColumns(filter: TaskFilter): readonly ProjectColumn[] {
-  if (filter.status.length === 0) return UNIVERSAL_COLUMNS;
-  return UNIVERSAL_COLUMNS.filter((c) => filter.status.includes(c.id));
+export function filteredColumns(filter: TaskFilter, columns: readonly ProjectColumn[] = UNIVERSAL_COLUMNS): readonly ProjectColumn[] {
+  if (filter.status.length === 0) return columns;
+  return columns.filter((c) => filter.status.includes(c.id));
 }
 
 /** `now` is passed in so one pass over the list reads one clock. */
@@ -99,9 +99,10 @@ export function matchesFilter(
   filter: TaskFilter,
   projectById: Map<number, DbProject>,
   now: number,
+  project?: DbProject,
 ): boolean {
-  if (!filter.showArchived && task.project_id != null && projectById.get(task.project_id)?.status === "archived") return false;
-  if (filter.status.length > 0 && !filter.status.includes(universalColumnOf(task, projectById).id)) return false;
+  if (!project && !filter.showArchived && task.project_id != null && projectById.get(task.project_id)?.status === "archived") return false;
+  if (filter.status.length > 0 && !filter.status.includes(project ? task.column_id : universalColumnOf(task, projectById).id)) return false;
 
   if (filter.project === "unfiled") {
     if (task.project_id != null) return false;

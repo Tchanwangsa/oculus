@@ -1,10 +1,9 @@
 import { useTaskFilterState } from "@/components/projects/tasks/useTaskFilterState";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { TasksBoard } from "@/components/projects/board/TasksBoard";
+import { TasksView } from "@/components/projects/tasks/TasksView";
 import { DisplayMenu } from "@/components/projects/display/DisplayMenu";
 import { DISPLAY_KEY, readDisplay, writeDisplay } from "@/components/projects/display/settings";
-import { TasksTable } from "@/components/projects/lists/TasksTable";
 import { NewTaskButton } from "@/components/projects/nav/NewTaskButton";
 import { useCreateTask } from "@/components/projects/nav/useCreateTask";
 import { SectionHeader } from "@/components/projects/page/SectionHeader";
@@ -17,7 +16,7 @@ import { taskFilterCounts } from "@/components/projects/tasks/filterCounts";
 import { ProjectFilter } from "@/components/projects/tasks/ProjectFilter";
 import { SubjectFilter } from "@/components/projects/tasks/SubjectFilter";
 import { TaskFilters } from "@/components/projects/tasks/TaskFilters";
-import { TaskSearch } from "@/components/projects/tasks/TaskSearch";
+import { TaskToolbar } from "@/components/projects/tasks/TaskToolbar";
 import { sortTasks } from "@/components/projects/tasks/taskSort";
 import {
   matchesSearch,
@@ -114,28 +113,21 @@ export default function TasksPage() {
         </span>
       </SectionHeader>
 
-      <div className="shrink-0 flex h-11 items-center gap-2 px-5">
-        <TaskSearch value={query} onChange={setQuery} />
-        <span className="flex-1" />
+      <TaskToolbar value={query} onChange={setQuery}>
         <TaskFilters filter={filter} tags={tags} onChange={setFilter} />
         <ProjectFilter filter={filter} projects={projects} counts={counts} onChange={setFilter} />
         <SubjectFilter filter={filter} counts={counts} onChange={setFilter} />
         <DisplayMenu display={display} onChange={setDisplay} />
-      </div>
+      </TaskToolbar>
 
       <div className="min-h-0 flex-1">
         {!loaded ? (
           <div className="flex h-full items-center justify-center px-6">
             <p className="text-xs text-muted-foreground">Loading…</p>
           </div>
-        ) : display.view === "board" && shown.length === 0 ? (
-          <div className="flex h-full items-start justify-center px-6 py-16">
-            <p className="max-w-sm text-center text-xs text-muted-foreground">{empty}</p>
-          </div>
-        ) : display.view === "board" ? (
-          <TasksBoard tasks={shown} columns={columns} projectById={projectById} tagById={tagById} onMove={actions.onMove} />
         ) : (
-          <TasksTable
+          <TasksView
+            columns={columns}
             tasks={shown}
             allTasks={tasks}
             projects={projects}

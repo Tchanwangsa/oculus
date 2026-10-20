@@ -1,8 +1,8 @@
 import { TableGroup } from "@/components/ui/table/TableGroup";
 import { TaskTableHeaders } from "./TaskTableHeaders";
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { GridTable } from "@/components/ui/table/GridTable";
-import type { DbProject, DbTaskTag, DbTaskWithProject } from "@/lib/planning/projects";
+import type { DbProject, DbTaskTag, DbTaskWithProject, ProjectColumn } from "@/lib/planning/projects";
 import { type TasksDisplay } from "../display/settings";
 import { TagDot } from "../tags/TagDot";
 import { subtaskProgress, taskTree } from "../tasks/taskTree";
@@ -37,8 +37,12 @@ export function TasksTable({
   onSort,
   empty,
   actions,
+  footer,
+  statusColumns = UNIVERSAL_COLUMNS,
 }: {
   tasks: DbTaskWithProject[];
+  footer?: ReactNode;
+  statusColumns?: readonly ProjectColumn[];
   /** Unfiltered tasks, so hidden completed children still count as progress. */
   allTasks?: DbTaskWithProject[];
   /** Archived included; `projectById` is the same list keyed by id. */
@@ -68,8 +72,8 @@ export function TasksTable({
     () =>
       display.group === "none"
         ? null
-        : groupTasks(display.groupSubtasks ? nodes.map((n) => n.task) : tasks, display.group, { projectById, tags, now: now.getTime() }),
-    [tasks, nodes, display.group, display.groupSubtasks, projectById, tags, now],
+        : groupTasks(display.groupSubtasks ? nodes.map((n) => n.task) : tasks, display.group, { projectById, tags, now: now.getTime(), columns: statusColumns === UNIVERSAL_COLUMNS ? undefined : statusColumns }),
+    [tasks, nodes, display.group, display.groupSubtasks, projectById, tags, now, statusColumns],
   );
 
   // Local and unsaved: groups open again on the next visit.
@@ -131,6 +135,7 @@ export function TasksTable({
           <GroupSection
             key={group.key}
             group={group}
+            columns={statusColumns}
             open={!collapsed.has(collapseKey(group.key))}
             onToggle={() => toggle(collapseKey(group.key))}
           >
@@ -140,6 +145,7 @@ export function TasksTable({
       ) : (
         <div className="divide-y divide-border-subtle">{rows(display.groupSubtasks ? nodes.map((n) => n.task) : tasks)}</div>
       )}
+      {footer}
     </GridTable>
   );
 }
@@ -149,15 +155,17 @@ function GroupSection({
   open,
   onToggle,
   children,
+  columns,
 }: {
+  columns: readonly ProjectColumn[];
   group: TaskGroup;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
 }) {
-  const status = UNIVERSAL_COLUMNS.find((c) => c.id === group.key);
+  const status = columns.find((c) => c.id === group.key);
   return <TableGroup label={group.label} count={group.tasks.length} open={open} onToggle={onToggle}
-    icon={<>{group.tag && <TagDot color={group.tag.color} />}{status && <TaskGlyph variant={columnVariant(UNIVERSAL_COLUMNS, status.id)} />}</>}>
+    icon={<>{group.tag && <TagDot color={group.tag.color} />}{status && <TaskGlyph variant={columnVariant(columns, status.id)} />}</>}>
     {children}
   </TableGroup>;
 }

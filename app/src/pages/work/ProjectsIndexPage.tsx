@@ -12,7 +12,7 @@ import { matchesProjectFilter, projectSubjectCounts } from "@/components/project
 import { projectTableData } from "@/components/projects/lists/projectTableData";
 import { projectHref } from "@/components/projects/nav/projectHref";
 import { useProjectActions } from "@/components/projects/lists/useProjectActions";
-import { TaskSearch } from "@/components/projects/tasks/TaskSearch";
+import { TaskToolbar } from "@/components/projects/tasks/TaskToolbar";
 import { useTaskActions } from "@/components/projects/tasks/useTaskActions";
 import type { TaskSort } from "@/components/projects/tasks/taskSort";
 import { useSubjects } from "@/hooks/data/useSubjects";
@@ -64,9 +64,7 @@ export default function ProjectsIndexPage() {
       <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">{branches.length} {branches.length === 1 ? "project" : "projects"}</span>
       <NewProjectButton subjects={subjects} onCreate={create} />
     </SectionHeader>
-    <div className="flex h-11 shrink-0 items-center gap-2 px-5">
-      <TaskSearch value={query} onChange={setQuery} placeholder="Search projects and tasks" />
-      <span className="flex-1" />
+    <TaskToolbar value={query} onChange={setQuery} placeholder="Search projects and tasks">
       <TaskFilters filter={filter} tags={tags} onChange={setFilter} target="projects" />
       <SubjectFilter filter={filter} counts={counts} onChange={setFilter} />
       <Button variant="ghost" size="sm" disabled={!branches.length || Boolean(query.trim())}
@@ -75,7 +73,7 @@ export default function ProjectsIndexPage() {
           for (const {project} of branches) { if (allExpanded) next.delete(String(project.id)); else next.add(String(project.id)); }
           return next;
         })}>{allExpanded ? "Collapse all" : "Expand all"}</Button>
-    </div>
+    </TaskToolbar>
     <div className="min-h-0 flex-1">
       {!loaded ? <p className="px-6 py-16 text-center text-xs text-muted-foreground">Loading…</p> :
         <ProjectsIndexTable branches={branches} tasks={tasks} projects={projects} projectById={projectById}

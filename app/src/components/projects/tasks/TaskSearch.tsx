@@ -12,7 +12,7 @@ export function TaskSearch({
   placeholder?: string;
 }) {
   return (
-    <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-full border border-input bg-card px-3 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25 sm:max-w-72">
+    <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-full border border-input bg-card px-3 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25">
       <MagnifyingGlass size={13} className="shrink-0 text-muted-foreground" />
       <input
         value={value}
