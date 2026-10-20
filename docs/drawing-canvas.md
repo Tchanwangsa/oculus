@@ -437,7 +437,9 @@ four places, all opening the same overlay textarea on the label box:
 double-click a shape (including the inside of a hollow one), click a shape
 with the Text tool, Enter with one shape selected, and Enter or double-click
 on standalone text. The shape stays selected while its label is edited so the
-inspector shows its text options. Escape, Cmd/Ctrl+Enter or blur commits.
+inspector shows its text options. Escape, Cmd/Ctrl+Enter or leaving the text
+and inspector commits. Inspector fields and portaled pickers keep the draft
+open, including empty text, so formatting can be chosen before typing.
 An empty label removes `text` and keeps the shape; empty standalone
 text is removed.
 

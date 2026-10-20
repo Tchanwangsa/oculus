@@ -48,8 +48,8 @@ function CanvasTextInput({ draft, viewport, onInput, onCommit }: { draft: TextDr
     : { left: element.x * zoom + viewport.x, top: element.y * zoom + viewport.y };
   return <textarea ref={input} aria-label={box ? 'Shape label' : 'Canvas text'} data-selectable="true" className={cn('canvas-text-input absolute z-20', box && 'canvas-label-input')} rows={1} defaultValue={draft.text}
     onInput={event => { resize(); onInput(event.currentTarget.value); }}
-    style={{ ...position, color: element.stroke, fontFamily: CANVAS_FONT_STACKS[element.fontFamily ?? CANVAS_DEFAULTS.fontFamily], fontSize: (element.fontSize ?? CANVAS_DEFAULTS.fontSize) * zoom, textAlign: textAlignOf(element) }}
-    onBlur={commit} onKeyDown={event => {
+    style={{ ...position, color: element.stroke, opacity: element.opacity ?? CANVAS_DEFAULTS.opacity, fontFamily: CANVAS_FONT_STACKS[element.fontFamily ?? CANVAS_DEFAULTS.fontFamily], fontSize: (element.fontSize ?? CANVAS_DEFAULTS.fontSize) * zoom, textAlign: textAlignOf(element) }}
+    onKeyDown={event => {
       event.stopPropagation();
       if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) { event.preventDefault(); commit(); }
     }} />;
@@ -120,7 +120,11 @@ export function CanvasSurface({ document, onChange, onViewportChange }: { docume
     finally { setExporting(false); }
   };
   return <div ref={editor.root} data-canvas-editor="true" tabIndex={0} aria-label="Infinite canvas editor" className="canvas-editor relative h-full min-h-0 w-full overflow-hidden bg-card outline-none"
-    onKeyDown={editor.keyDown} onKeyUp={editor.keyUp} onBlur={editor.blur} onCopy={editor.copy} onCut={editor.cut} onPaste={editor.paste}>
+    onKeyDown={editor.keyDown} onKeyUp={editor.keyUp} onBlur={event => {
+      editor.blur();
+      // Inspector fields and their portaled pickers belong to the open text edit.
+      if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.canvas-text-input, [data-canvas-inspector]'))) editor.commitText();
+    }} onCopy={editor.copy} onCut={editor.cut} onPaste={editor.paste}>
     <canvas ref={editor.canvas} draggable={false} aria-label="Drawing canvas" className="absolute inset-0 block h-full w-full" style={{ cursor: editor.cursor }}
       onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp} onPointerCancel={editor.pointerCancel} onPointerLeave={editor.pointerLeave} onDoubleClick={editor.doubleClick} onContextMenu={event => event.preventDefault()} />
     {current.elements.length === 0 && editor.tool === 'select' && !editor.textDraft ? <CanvasEmpty onStart={() => { editor.setTool('freedraw'); editor.root.current?.focus(); }} /> : null}
