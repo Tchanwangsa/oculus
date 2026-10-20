@@ -47,7 +47,7 @@ export function NativeShareButton({ link }: { link: string }) {
         onMouseDown={(event) => { if (event.button === 0) void share(event.currentTarget); }}
         onClick={(event) => { if (event.detail === 0) void share(event.currentTarget); }}
         aria-label="Share link using macOS" title={opening ? "Share sheet open…" : "Share link using macOS"}
-        className="rounded-none border-l border-border-subtle text-muted-foreground">
+        className="rounded-none border-l border-border-subtle text-muted-foreground will-change-[opacity]">
         <ShareFatIcon />
       </Button>
       {error && <p role="alert" className="absolute top-full right-0 z-10 mt-1 max-w-full rounded-md border border-border bg-card p-2 text-xs text-destructive shadow-sm">{error}</p>}

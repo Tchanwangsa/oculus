@@ -17,7 +17,8 @@ export function ShareLink({ link }: { link: string }) {
   const copy = async () => setCopied((await copyText(link)) ? "copied" : "failed");
   return (
     <div className="relative min-w-0 flex-1">
-      <div className="flex h-9 min-w-0 items-center overflow-hidden rounded-lg border border-input bg-card shadow-xs focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25">
+      {/* Keep the rounded clip composited as its buttons fade; see docs/ui.md. */}
+      <div className="flex h-9 min-w-0 items-center overflow-hidden rounded-lg border border-input bg-card shadow-xs will-change-transform focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25">
         <input
           readOnly value={link} aria-label="Share link" spellCheck={false}
           onFocus={(event) => event.currentTarget.select()}
@@ -26,7 +27,7 @@ export function ShareLink({ link }: { link: string }) {
         <Button size="icon-sm" variant="ghost" onClick={() => void copy()} aria-live="polite"
           aria-label={copied === "copied" ? "Link copied" : copied === "failed" ? "Copy failed" : "Copy link"}
           title={copied === "copied" ? "Copied" : copied === "failed" ? "Copy failed" : "Copy link"}
-          className="rounded-none border-l border-border-subtle text-muted-foreground">
+          className="rounded-none border-l border-border-subtle text-muted-foreground will-change-[opacity]">
           {copied === "copied" ? <CheckIcon /> : <CopyIcon />}
         </Button>
         <NativeShareButton link={link} />
