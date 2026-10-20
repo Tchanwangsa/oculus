@@ -2,9 +2,10 @@ import { Outlet, useOutletContext } from "react-router-dom";
 
 import { TASKS_NAV_PANEL } from "@/components/projects/nav/panel";
 import { TasksNav } from "@/components/projects/nav/TasksNav";
-import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
+import { useSideNavPanel } from "@/hooks/ui/useSideNavPanel";
+import { SideNavShell } from "@/components/ui/layout/SideNavShell";
 
-type Panel = ReturnType<typeof useResizablePanel>;
+type Panel = ReturnType<typeof useSideNavPanel>;
 
 /**
  * Everything under Tasks and Projects: the nav column beside the page. The
@@ -12,15 +13,14 @@ type Panel = ReturnType<typeof useResizablePanel>;
  * toggle (`useTasksPanel`).
  */
 export default function TasksLayout() {
-  const panel = useResizablePanel(TASKS_NAV_PANEL);
+  const panel = useSideNavPanel(TASKS_NAV_PANEL);
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <TasksNav panel={panel} />
+    <SideNavShell panel={panel} nav={<TasksNav panel={panel} />}>
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <Outlet context={panel satisfies Panel} />
       </div>
-    </div>
+    </SideNavShell>
   );
 }
 

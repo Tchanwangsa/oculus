@@ -1,6 +1,11 @@
+import { shortcut } from "@/lib/platform";
 import { useEffect, useRef } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
+import { SideNavShell } from "@/components/ui/layout/SideNavShell";
+import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
+import { PageHeader, PaneTitle } from "@/components/tabs/PaneHeader";
+import { useSideNavPanel } from "@/hooks/ui/useSideNavPanel";
 import SettingsNav from "@/components/settings/SettingsNav";
 import { SETTINGS_PAGES, type SettingsJump } from "@/lib/search/settings";
 import { settingsSectionId } from "@/components/settings/shared/section";
@@ -15,6 +20,7 @@ const JUMP_OFFSET = 16;
 /** Everything under /settings: the settings nav column beside the page. */
 export default function SettingsLayout() {
   const location = useLocation();
+  const panel = useSideNavPanel({ defaultWidth: 208, minWidth: 208, maxWidth: 208, storageKey: "oculus-settings-nav-width" });
   const scrollerRef = useRef<HTMLDivElement>(null);
   const lastPath = useRef(location.pathname);
   const segment = location.pathname.split("/").filter(Boolean).pop();
@@ -62,25 +68,26 @@ export default function SettingsLayout() {
   }, [location]);
 
   return (
-    <div className="settings-shell h-full overflow-hidden">
-      <div className="settings-layout flex h-full overflow-hidden">
-        <SettingsNav />
+    <SideNavShell panel={panel} nav={<SettingsNav panel={panel} />}>
+      <PageHeader>
+        <SideNavCollapseToggle collapsed={panel.collapsed} onToggle={panel.toggle} shortcut={shortcut("mod+alt+B")} />
+        <PaneTitle>Settings</PaneTitle>
+      </PageHeader>
 
-        {fullBleed ? (
-          // A table page scrolls its own rows (`GridTable`); with no scroller
-          // here, a jump is the page's to handle.
-          <div className="settings-content flex min-h-0 min-w-0 flex-1 flex-col">
+      {fullBleed ? (
+        // A table page scrolls its own rows (`GridTable`); with no scroller
+        // here, a jump is the page's to handle.
+        <div className="settings-content flex min-h-0 min-w-0 flex-1 flex-col">
+          <Outlet />
+        </div>
+      ) : (
+        // `scroll`, not `auto` + `scrollbar-gutter`, which reserves nothing in WebKit.
+        <div ref={scrollerRef} className="settings-content min-h-0 min-w-0 flex-1 overflow-y-scroll">
+          <div className="settings-gutters mx-auto max-w-3xl py-6">
             <Outlet />
           </div>
-        ) : (
-          // `scroll`, not `auto` + `scrollbar-gutter`, which reserves nothing in WebKit.
-          <div ref={scrollerRef} className="settings-content min-h-0 min-w-0 flex-1 overflow-y-scroll">
-            <div className="settings-gutters mx-auto max-w-3xl py-6">
-              <Outlet />
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </SideNavShell>
   );
 }

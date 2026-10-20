@@ -170,11 +170,17 @@ export default function TopTabBar({
     const tab = tabs[tabs.length - 1];
     if (tab) switchTo(tab.id);
   };
-  const sideOpen = !!activeTab?.side;
+  const sideOpen = !!activeTab?.side && !activeTab.side.hidden;
+  const hiddenSideCount = activeTab?.side?.hidden ? activeTab.side.items.length : 0;
+  const sideLabel = sideOpen
+    ? "Hide side panel"
+    : hiddenSideCount > 0
+      ? `Show side panel (${hiddenSideCount} hidden ${hiddenSideCount === 1 ? "tab" : "tabs"})`
+      : "Open side panel";
   // ⌃Tab / ⌃⇧Tab walk the side panel's list, only while it has focus: the
   // strip's own keys are ⌘-keys.
   const stepSide = (delta: 1 | -1) => {
-    if (!activeTab?.side || activeTab.focus !== "side") return;
+    if (!activeTab?.side || activeTab.side.hidden || activeTab.focus !== "side") return;
     frontSide(activeTab.id, stepItem(activeTab.side, delta));
   };
 
@@ -294,22 +300,28 @@ export default function TopTabBar({
         <TooltipTrigger asChild>
           <button
             onClick={side}
-            aria-label={sideOpen ? "Close side panel" : "Open side panel"}
+            aria-label={sideLabel}
             aria-pressed={sideOpen}
             className={cn(
               barButton,
+              "relative",
               sideOpen && "bg-sidebar-item-active text-foreground",
             )}
           >
             {/* Mirrored sidebar glyph; a two-column icon reads as "pause". */}
             <SidebarSimple size={17} className="scale-x-[-1]" />
+            {hiddenSideCount > 0 && (
+              <span aria-hidden className="absolute -right-1 -top-1 flex size-3.5 items-center justify-center rounded-full bg-foreground text-[9px] font-medium tabular-nums text-background ring-2 ring-background">
+                {hiddenSideCount}
+              </span>
+            )}
           </button>
         </TooltipTrigger>
         <TooltipContent
           side="bottom"
           className="flex flex-col items-start gap-0.5"
         >
-          {sideOpen ? "Close side panel" : "Open side panel"}
+          {sideLabel}
           <span className="text-[11px] text-background/60">{shortcut(sidePanelShortcut)}</span>
         </TooltipContent>
       </Tooltip>

@@ -6,10 +6,8 @@ import { TagsGroup } from "@/components/projects/nav/TagsGroup";
 import { TasksNavRow } from "@/components/projects/nav/TasksNavRow";
 import { useCreateTask } from "@/components/projects/nav/useCreateTask";
 import { parseSubjectParam, parseTagParam, parseView, tasksHref, TASK_VIEWS, type TaskViewId } from "@/components/projects/tasks/taskViews";
-import { useTabActive } from "@/components/tabs/TabContext";
 import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
 import { SIDE_NAV_FOLDS, SideNav, SideNavHeading } from "@/components/ui/layout/SideNav";
-import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { useTaskList } from "@/hooks/data/useTaskList";
 import { useTaskTags } from "@/hooks/data/useTaskTags";
 import type { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
@@ -49,16 +47,6 @@ export function TasksNav({ panel }: { panel: ReturnType<typeof useResizablePanel
     }
     return byTag;
   }, [tasks, subject]);
-
-  // Every tab stays mounted, so only the one in front answers the chord.
-  // `e.code`, not `e.key`: on macOS ⌥B arrives as `∫`.
-  const active = useTabActive();
-  useWindowEvent("keydown", (e) => {
-    const k = e as KeyboardEvent;
-    if (!active || !k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
-    k.preventDefault();
-    panel.toggle();
-  });
 
   return (
     <>

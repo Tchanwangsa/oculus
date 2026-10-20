@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { focusedPane, pane, panesOf } from "@/stores/shell/tabs/panes";
 import {
   SIDE_CAP,
   frontItem,
@@ -122,6 +123,33 @@ describe("bringing forward and removing", () => {
 });
 
 describe("restoring", () => {
+  test("a hidden panel retains its items, front and width across reloads, with focus on main", () => {
+    const { side } = pushed([file(1), file(2), "/browse/9"]);
+    const hidden = { ...frontItem(side, 100), ratio: 0.65, hidden: true };
+    const restored = restoreSide(JSON.parse(JSON.stringify(storeSide(hidden))), undefined, 1)!;
+    expect(restored.hidden).toBe(true);
+    expect(restored.items.map((i) => [i.id, i.path])).toEqual(hidden.items.map((i) => [i.id, i.path]));
+    expect(restored.front).toBe(100);
+    expect(restored.ratio).toBe(0.65);
+    expect(restoreFocus("side", restored)).toBe("main");
+    const tab = { ...pane(1, "/chat"), side: restored, focus: "side" as const };
+    expect(focusedPane(tab).id).toBe(1);
+    // Hidden browser items still belong to their pane during reconciliation.
+    expect(panesOf(tab).map((p) => p.path)).toContain("/browse/9");
+  });
+
+  test("opening beside reveals a hidden stack and reuses an existing item", () => {
+    const { side, newId } = pushed([file(1), file(2)]);
+    const hidden = { ...side, hidden: true };
+    const hit = pushItem(hidden, file(1), newId);
+    expect(hit.side.hidden).toBeFalsy();
+    expect(hit.side.items).toHaveLength(2);
+    expect(hit.side.front).toBe(100);
+    const fresh = pushItem(hidden, file(3), newId);
+    expect(fresh.side.hidden).toBeFalsy();
+    expect(fresh.side.items).toHaveLength(3);
+  });
+
   test("a stored side panel round-trips, front and ratio included", () => {
     const { side } = pushed([file(1), file(2), file(3)]);
     const stored = frontItem({ ...side, ratio: 0.6 }, 101);

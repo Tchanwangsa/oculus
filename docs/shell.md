@@ -17,6 +17,7 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Search (⌘K and the new-tab field), the new-tab page's Recent list | `app/src/lib/search/`, `app/src/lib/search/filters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/shell/recentTabsStore.ts` |
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/files/openFile.ts`, `app/src/pages/subject/files/FilePage.tsx`, `app/src/hooks/find/useLocateHighlight.ts` |
 | ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/menu/find.ts`, `app/src/hooks/find/useDomFind.ts`, `app/src/lib/menu/findText.ts`, `app/src/components/ui/search/FindBar.tsx`, `app/src/components/ui/search/PageFind.tsx`, `app/src/components/documents/editor/chrome/useEditorFind.ts` |
+| Shared page navigation: responsive drawer and desktop panel | `app/src/components/ui/layout/SideNavShell.tsx`, `app/src/hooks/ui/useSideNavPanel.ts` |
 | Subject page: the nav column, subject switcher and `/subjects` redirect | `app/src/layouts/SubjectLayout.tsx`, `app/src/components/subjects/SubjectNav.tsx`, `app/src/pages/start/SubjectsRedirect.tsx` |
 | Home: sections, the Recent row's query, the Activity chart and its pings | `app/src/pages/start/HomePage.tsx`, `app/src/components/home/`, `app/src/lib/activity/home.ts`, `app/src/lib/activity/usage/`, `app/src/lib/activity/usageContext.ts`, `app/src/hooks/backend/useActivityPing.ts` |
 | Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/search/settings.ts` |
@@ -123,13 +124,26 @@ indexing, a brand dot on Subjects while any subject has never-opened files
 (`newFilesStore`), and a brand dot on Studio while any video renders
 ([studio-page.md](./studio-page.md)). ⌘B and the title bar's button collapse it to zero width.
 
+## Page navigation overlays narrow panes
+
+Chat, Subjects, Tasks, Studio and Settings use `SideNavShell` with
+`useSideNavPanel`. Below 768 CSS pixels of the shell's own width, navigation
+starts closed and opens over the page with a dismissing backdrop. Split panes
+and page zoom follow the same rule. Links, New thread, route changes, Escape,
+the close button and clicking the backdrop dismiss it; leaving the tab also
+resets it. Hidden navigation and covered content are inert. Opening focuses
+the close button; dismissal restores the previous focus when still visible.
+
+The drawer's open state is local and temporary. Wide panes retain their saved
+width and fold through `useResizablePanel`; narrowing or using the drawer
+never changes those preferences. Resize handles are hidden in the drawer.
+The header toggle and ⌘⌥B go through the same panel in both modes.
+
 ## Settings has its own nav column
 
 `/settings` is one route with a page per nav row; `SettingsLayout` puts
-`SettingsNav` beside the page, the rows grouped from `SETTINGS_PAGES`. Below
-42rem of available pane width, the navigation becomes a page picker above
-the content ([ui.md](./ui.md)). Its wide-layout
-search reads a hand-kept list in `app/src/lib/search/settings.ts`, because the
+`SettingsNav` beside the page, the rows grouped from `SETTINGS_PAGES`,
+with the shared drawer on narrow panes. Its search reads a hand-kept list in `app/src/lib/search/settings.ts`, because the
 pages are lazy and unmounted: entry titles are the on-screen text, and each
 names the `Section` title it jumps to. Rename a section or row and update the
 list. A jump travels as router state, and the layout scrolls the section's id
@@ -180,12 +194,14 @@ while Ctrl+Shift+Z is Redo.
   it the stock `undo:` / `redo:`; otherwise `menu-undo` / `menu-redo` go to
   `routeEdit` (`app/src/lib/menu/editRouting.ts`): a note editor's history
   (`app/src/components/documents/editor/core/undoRouting.ts`, which also remembers the last focused note and acts only
-  while it is visible), else `execCommand` on the focused input.
+  while it is visible), else `execCommand` on the focused input. `routeEdit`
+  does nothing while `document.hasFocus()` is false: the app's DOM keeps its
+  active element (the note) when native focus moves to a browser page.
 - **Back and Forward (⌘[ / ⌘]) can be claimed.** `menu-back` / `menu-forward`
   step the pane's history unless a handler registered with `onBackForward`
   (`app/src/lib/menu/backForwardRouting.ts`) takes them first; a drawing
-  canvas with a selection does, to step its layer order. No handler is
-  offered the key while `document.hasFocus()` is false.
+  canvas with a selection does, to step its layer order. Like `routeEdit`, no
+  handler is offered the key while `document.hasFocus()` is false.
 - **Select All is a custom item too**, because WebKit's `selectAll:` with no
   field focused selects the whole window. A focused browser page gets the
   native `selectAll:`; otherwise `menu-select-all` goes to `routeSelectAll`:
@@ -281,7 +297,8 @@ while Ctrl+Shift+Z is Redo.
 
 Left is the tab's main page; right is its side panel (`tab.side`, pure logic in
 `app/src/lib/shell/sideStack.ts`), a stack of up to `SIDE_CAP` (8) panes. The side-panel shortcut on a
-closed panel opens one on `/new`.
+panel with no items opens one on `/new`; a hidden panel reopens its existing
+items with the same front item and width.
 
 - **`openBeside` is what file rows, citations and lecture rows call**
   (`openFileSmart`, `openCitation`, `LecturesPage`, Home's `RecentRow`, the
@@ -301,7 +318,9 @@ closed panel opens one on `/new`.
   stored in `oculus-tabs`.
 - **The header is a switcher** — up to three stacked item icons, then `+N`,
   opening a list with a × per item and a "New side tab" row that pushes `/new`
-  — then expand and ×, which closes the panel and clears the stack. A page with its own top row (file, lecture, task,
+  — then expand and ×, which removes only the front item and shows the most
+  recently viewed item left. Removing the last item closes the panel. A page
+  with its own top row (file, lecture, task,
   project, chat thread) builds it on `PaneHeaderRow`
   (`app/src/components/tabs/PaneHeader.tsx`), which in the side panel claims
   the header slot `TabPane` provides and draws the switcher at the row's start
@@ -310,14 +329,21 @@ closed panel opens one on `/new`.
   `SidePanelHeader` (switcher, front item's title, controls). In a claimed
   row `PaneTrail` makes crumbs and title a sideways scroller with faded edges.
   Subject paths hide their ancestors behind a "…" popover. Planning pages
-  keep the immediate parent and current page visible and put earlier
-  ancestors in the same shared `Breadcrumb` popover
+  give the current page priority: the immediate parent stays beside it only
+  while both fit; otherwise every parent moves into the shared `Breadcrumb` popover
   (`app/src/components/ui/Breadcrumb.tsx`). Selecting a parent navigates
-  without changing the trail's layout. Expand
+  without changing the trail's layout. Breadcrumbs measure their available header
+  width directly rather than using the sideways `PaneTrail` scroller. Expand
   (`expandSide`) makes the front item the main page, or a new tab on ⌘-click,
   and removes it with `handover`: a lecture it owned is claimed for the main
   pane (or the new tab), so whatever comes to the panel's front next waits and
   the expanded lecture plays on, and a browser page stays open.
+- **The strip toggle hides the panel and keeps its stack**. Its badge counts
+  hidden tabs; toggling again restores the same front item. The hidden front
+  page stays mounted at its split width, preserving drafts and scroll, while
+  main takes the full card and receives shell navigation. Native browser
+  views hide without closing their pages; a hidden lecture pauses. Hidden
+  state is stored with the stack in `oculus-tabs`, and opening beside reveals it.
 - **Only the front item is mounted**; the rest are a path and a router. A
   lecture sent to the back pauses; a browser item sent to the back has its
   native view taken down as it unmounts, and a removed one has its page

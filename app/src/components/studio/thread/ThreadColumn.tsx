@@ -73,9 +73,11 @@ export function ThreadColumn({ threadId, onTurnEnd }: { threadId: number; onTurn
     <div ref={columnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
       {/* `overflow-x-hidden` is load-bearing: `overflow-y: auto` makes x `auto`
           too, so one wide row would scroll the whole thread. */}
-      <div ref={scroll.outer} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6">
-        <div ref={scroll.inner} className="mx-auto w-full max-w-[640px]">
-          <Timeline items={items} threadId={threadId} running={running} questions={questions} pending={pending} />
+      <div className="relative min-h-0 flex-1">
+        <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 py-6">
+          <div ref={scroll.inner} className="mx-auto w-full max-w-[640px]">
+            <Timeline items={items} threadId={threadId} running={running} questions={questions} pending={pending} />
+          </div>
         </div>
       </div>
       <div className="shrink-0 px-6 pb-4">
