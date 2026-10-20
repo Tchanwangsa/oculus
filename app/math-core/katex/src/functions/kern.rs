@@ -11,9 +11,7 @@ use crate::mathml_tree::{MathDomNode, SpaceNode};
 use crate::options::Options;
 use crate::parser::parse_node::{AnyParseNode, NodeType, ParseNode, ParseNodeKern};
 use crate::spacing_data::MeasurementStatic;
-use crate::types::{
-    ArgType, CssProperty, ErrorLocationProvider, Mode, ParseError, ParseErrorKind,
-};
+use crate::types::{ArgType, CssProperty, ErrorLocationProvider, Mode, ParseError, ParseErrorKind};
 use crate::units::make_em;
 
 /// Register the kerning functions (\kern, \mkern, \hskip, \mskip)

@@ -96,8 +96,10 @@ fn html_builder(
             .width(Some(width))
             .max_font_size(height * 1.125 * options.size_multiplier)
             .build(Some(options));
-        rule.style.insert(CssProperty::BorderRightWidth, make_em(width));
-        rule.style.insert(CssProperty::BorderTopWidth, make_em(height));
+        rule.style
+            .insert(CssProperty::BorderRightWidth, make_em(width));
+        rule.style
+            .insert(CssProperty::BorderTopWidth, make_em(height));
         rule.style.insert(CssProperty::Bottom, make_em(shift));
         Ok(HtmlDomNode::DomSpan(rule))
     } else {

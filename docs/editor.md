@@ -61,11 +61,23 @@ last updated (`modified_at` or the session's last save) and a word count.
   (`app/src/components/documents/editor/live-preview/table/`): its DOM and input handlers
   use `app/src/components/documents/editor/live-preview/tableModel.ts` for source-preserving
   edits. A cell writes back only its own source range, Tab/Enter move between
-  cells, and the frame scrolls sideways.
-  A drag across cells (or Shift with a click or ↑/↓) selects a block, which
+  cells, and the frame scrolls sideways. A double click on a word selects it
+  natively; a triple click, or a double click off the text, selects the whole
+  cell (`press.ts`), since the native selection would take its padding too.
+  A cell holding markup draws it like the rest of the note — marks, code,
+  links, file chips and `$…$` maths (`table/rich.ts`, parsed with the note
+  grammar): the cell's own element stays the editor, invisible over the
+  drawing, and focusing it shows the source until it blurs.
+  A drag across cells (or Shift with a click or ↑/↓, or any arrow once a cell's
+  text is all selected, which selects just that cell first) selects a block, which
   the scroller holds focus for: Delete empties it, and on a block already
   empty removes the whole rows (never the header) or columns it spans, or
-  the table. ⌘C copies it tab-separated. Edge handles for the row and column
+  the table. ⌘C (or Edit → Copy, on the clipboard event, with `beforecopy` claimed since WebKit would leave Copy off with no text selected) copies it as tab-separated text and an HTML table, and ⌘V
+  into a cell or a selected block fills cells from there with a pasted grid
+  (an HTML table or tab-separated rows), growing the table when it reaches
+  past it (`tableGrid.ts`, `pasteGrid` in `table/edits.ts`). A spreadsheet's
+  or web page's table pasted into the note's text becomes a pipe table
+  (`livePreview/gridPaste.ts`). Edge handles for the row and column
   under the pointer select them on a click and move them on a drag; a moved
   row keeps its bytes, a moved column rewrites rows with outer pipes, and the
   header row never moves (a body row may be short of cells).
@@ -75,8 +87,16 @@ last updated (`modified_at` or the session's last save) and a word count.
   it into the last row, ↓/→ from the line over it into the header, Backspace
   and Delete likewise (deleting an empty line in between when no text would
   end up against the table). Arrows at the grid's edges, and Esc, hand it back.
-  Text typed or pasted at a table's edge goes on its own line, after a blank
-  line below it, since GFM reads a line straight under a table as a row.
+  CodeMirror's cursor there would be as tall as the table, so it is hidden and
+  the table draws a short blinking one of its own at that edge
+  (`tableCaret`, `livePreview/tables.ts`).
+  Text typed, pasted or dropped at a table's edge goes on its own line, after a
+  blank line below it, since GFM reads a line straight under a table as a row.
+  Pasted text that ends in a table gets a blank line after it the same way
+  (`livePreview/tableTail.ts`), wherever it lands. The blank lines beside a table (and a rule) draw as a
+  small gap, not a full line, unless the caret is on one (`shrinkBlanksAround`
+  in `livePreview/blocks.ts`). Lezer reads a line with a pipe in it directly
+  above a table as part of its paragraph, so that blank line above is needed too.
   **Leading YAML frontmatter** parses as `Frontmatter`
   (`app/src/components/documents/editor/syntax/frontmatter.ts`) and draws as a
   Properties card, revealing its source when touched. Only a `---` first line
@@ -224,7 +244,9 @@ selected.
   searches every file, parsed or not, of the host's subject — or of the whole
   library when the host has none, each row then naming its subject — leaving
   out the note itself (`searchNoteLinkFiles`); an empty query lists recently
-  opened files. It is a source in the one `autocompletion()`. Accepting writes
+  opened files. A row's glyph and colour, and the type in its detail
+  (`PDF`, `Discussion`, `File`…), are `fileReferenceAppearance`'s, the same as
+  a task's related-file chip. It is a source in the one `autocompletion()`. Accepting writes
   the backticked library path the chat composer sends,
   `` `courses/<code>/files/week-3.pdf` `` (`syntax/mentionSyntax.ts`). The subject
   and note path reach the editor through `NoteHost`; an editor with no file
@@ -270,9 +292,18 @@ only, with no session, title, Raw mode or AI suggestions; the caller
 supplies the `@` subject, picture resolution and picture writes. At rest it
 reads as prose; focus anywhere in its React tree — including the
 `Toolbar`'s portaled Select and table popover, whose focus events bubble
-through React — shows the brand border and the toolbar below the text. A
-blur is judged a tick later, and a window losing focus (the picture picker)
-is not leaving. Leaving, ⌘↵ and unmounting hand an edited doc to
+through React — shows the brand border and the toolbar above the text. A
+press that gives a field at rest its focus holds the toolbar back until the
+pointer is released, since mounting it pushes the text down and would move the
+line being clicked or dragged over. A blur is judged a tick later, and a window
+losing focus (the picture picker) is not leaving. The field's text scroller
+clips and masks its contents, so `NoteField` passes `noteExtensions` a
+`tooltipParent`: the completion list and maths popover are mounted in
+`document.body` (inside the dialog when the field is in one, which would
+otherwise shut on a click outside it) instead of the editor. `ViewSlot`
+(`editor/core/viewSlot.ts`) keeps the host to one `EditorView`: it destroys any
+view still held before mounting the next and destroys even when the effect's
+own cleanup threw first. Leaving, ⌘↵ and unmounting hand an edited doc to
 `onCommit`; a new `text` replaces an unedited doc, outside history.
 `noteExtensions` takes its placeholder and aria label. An optional `onChange`
 hears the doc on every change, for a caller whose buttons read the text and
@@ -281,6 +312,14 @@ cannot wait on the blur (the chat's pasted text editor,
 `scrollClassName` replaces the text scroller's 420px bound.
 
 ## Gotchas
+
+- **Tooltip rules cannot assume the editor is their ancestor.** With
+  `tooltips({ parent })` CodeMirror mounts them in a container that carries
+  the theme class but not `cm-editor`, so theme rules hang from `tooltipRoot`
+  (`theme/tokens.ts`), never `&.cm-editor`, and state that the editor holds
+  reaches the tooltip as a class on the tooltip itself: the maths popover
+  hides in command mode through `followCommandMode`
+  (`math/tools/mathTools/dom.ts`), not a `cm-math-command` ancestor rule.
 
 - **The selection highlight is our own layer** (`core/selectionLayer.ts`):
   `drawSelection` draws the caret, and its highlight layer is hidden by the
@@ -300,3 +339,8 @@ cannot wait on the blur (the chat's pasted text editor,
   any box whose `scrollHeight` beat `clientHeight`, and under page zoom the
   editor's `overflow: visible` wrappers round a pixel over, so drag-select never
   scrolled `page-scroll`. The sticky toolbar's height is a `scrollMargins` top.
+- **Tooltips are never clipped to the editor** (`core/unclippedTooltips.ts`):
+  CodeMirror adds the toolbar's `scrollMargins` top to the editor's own top
+  when it decides a tooltip's anchor is outside the editor, and parks the
+  tooltip at -10000px, so the `@` and maths lists on the first lines never
+  showed. The plugin sets `clip: false` on tooltips while a top margin exists.
