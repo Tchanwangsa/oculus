@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 
 // The browser companion (`src/companion/`, docs/frontend.md) runs on a paired
 // device with no Tauri: nothing it imports, statically or lazily, may reach the
@@ -34,7 +34,7 @@ function walk(entry: string, aliases: Record<string, string> = {}) {
   const violations: string[] = [];
   const chain = (file: string) => {
     const path: string[] = [];
-    for (let at: string | null | undefined = file; at; at = parent.get(at)) path.unshift(relative(APP, at));
+    for (let at: string | null | undefined = file; at; at = parent.get(at)) path.unshift(relative(APP, at).split(sep).join("/"));
     return path.join(" > ");
   };
   while (queue.length) {
@@ -48,7 +48,7 @@ function walk(entry: string, aliases: Record<string, string> = {}) {
       if (next && !parent.has(next)) { parent.set(next, file); queue.push(next); }
     }
   }
-  return { modules: [...parent.keys()].map((file) => relative(APP, file)), violations };
+  return { modules: [...parent.keys()].map((file) => relative(APP, file).split(sep).join("/")), violations };
 }
 
 test("the companion's module graph never reaches Tauri or the database", () => {
