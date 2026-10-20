@@ -1,4 +1,4 @@
-import { caretUnder, focusCell } from "./caret";
+import { caretUnder, focusCell, overText } from "./caret";
 import { isCell, place, type TableCtx } from "./ctx";
 import { dragRange, selectRange } from "./selection";
 import { ranges } from "./state";
@@ -29,8 +29,14 @@ export function cellMousedown(t: TableCtx, e: MouseEvent) {
     }
     if (from) return;
   }
-  // Double and triple clicks select words and lines natively.
-  if (e.detail > 1) return;
+  if (e.detail > 1) {
+    // A word is selected natively. A triple click, or a double click off the
+    // text, would take the cell's whole block, padding included.
+    if (e.detail === 2 && overText(cell, e.clientX, e.clientY)) return;
+    e.preventDefault();
+    focusCell(cell, "all");
+    return;
+  }
   e.preventDefault();
   // A press on a cell's padding, below a shorter neighbour's text, has no
   // caret under it: the caret goes to the end.

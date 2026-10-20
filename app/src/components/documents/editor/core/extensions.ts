@@ -7,6 +7,7 @@ import {
   dropCursor,
   keymap,
   placeholder,
+  tooltips,
   type ViewUpdate,
 } from "@codemirror/view";
 
@@ -27,6 +28,7 @@ import { rawMode } from "../chrome/rawMode";
 import { editorShadow } from "../shadow";
 import { noteHighlight, noteTheme } from "../theme";
 import { noteUndoRouting } from "./undoRouting";
+import { unclippedTooltips } from "./unclippedTooltips";
 
 /** Live decorations, or Raw's code-editor look in their place. */
 export const liveCompartment = new Compartment();
@@ -60,8 +62,13 @@ export function noteExtensions(opts: {
   onPictures: (files: File[]) => boolean;
   placeholder?: string;
   label?: string;
+  /** Where the completion list and the maths popover are mounted, in place
+   *  of inside the editor, for an editor in a box that clips or masks its
+   *  contents (`NoteField`'s scroller). */
+  tooltipParent?: HTMLElement;
 }): Extension {
   return [
+    opts.tooltipParent ? tooltips({ parent: opts.tooltipParent }) : [],
     history(),
     editorShadow(),
     noteUndoRouting(),
@@ -91,6 +98,7 @@ export function noteExtensions(opts: {
       addToOptions: [mathOptionPreview, mentionOptionIcon],
       optionClass: mentionOptionClass,
     }),
+    unclippedTooltips,
     hostCompartment.of(noteHost.of(opts.host)),
     liveCompartment.of(modeExtension(opts.live)),
     suggestCompartment.of(opts.suggest),

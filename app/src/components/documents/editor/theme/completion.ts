@@ -1,4 +1,4 @@
-import { brand, muted, mono, type ThemeSpec } from "./tokens";
+import { brand, muted, mono, tooltipRoot, type ThemeSpec } from "./tokens";
 
 export const completion: ThemeSpec = {
   "&.cm-editor .cm-content .cm-snippetField": {
@@ -6,14 +6,14 @@ export const completion: ThemeSpec = {
     borderRadius: "3px",
   },
   // Completion list (`autocompletion()` in `extensions.ts`)
-  "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul": {
+  [`${tooltipRoot} .cm-tooltip.cm-tooltip-autocomplete > ul`]: {
     fontFamily: "var(--font-sans)",
     fontSize: "12px",
     minWidth: "220px",
     maxHeight: "16em",
     padding: "4px",
   },
-  "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li": {
+  [`${tooltipRoot} .cm-tooltip.cm-tooltip-autocomplete > ul > li`]: {
     display: "flex",
     alignItems: "center",
     gap: "8px",
@@ -21,7 +21,7 @@ export const completion: ThemeSpec = {
     borderRadius: "6px",
     lineHeight: "24px",
   },
-  "&.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": {
+  [`${tooltipRoot} .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]`]: {
     backgroundColor: "var(--color-accent)",
     color: "var(--color-foreground)",
   },
@@ -45,7 +45,8 @@ export const completion: ThemeSpec = {
     overflow: "hidden",
     fontSize: "10px",
   },
-  // `@` file mentions (`mentions.ts`): a sans title, a muted folder and glyph.
+  // `@` file mentions (`mentions.ts`): a sans title, a muted type and folder,
+  // and a glyph in the file's reference colour.
   ".cm-mention-option": { maxWidth: "420px" },
   ".cm-mention-option .cm-completionLabel": {
     fontFamily: "var(--font-sans)",
@@ -55,5 +56,5 @@ export const completion: ThemeSpec = {
     whiteSpace: "nowrap",
   },
   ".cm-mention-option .cm-completionDetail": { fontFamily: "var(--font-sans)", whiteSpace: "nowrap" },
-  ".cm-mention-icon": { flex: "none", display: "flex", color: muted },
+  ".cm-mention-icon": { flex: "none", display: "flex" },
 };

@@ -91,7 +91,7 @@ export function cellText(layout: TableLayout, r: number, c: number): string {
 
 /** Escape each pipe not already escaped. A trailing odd backslash run would
  *  escape the closing pipe, so a space follows it. */
-function escapeCell(value: string): string {
+export function escapeCell(value: string): string {
   let out = value.replace(/(\\*)\|/g, (m, slashes: string) => (slashes.length % 2 ? m : `${slashes}\\|`));
   const tail = /\\+$/.exec(out);
   if (tail && tail[0].length % 2) out += " ";

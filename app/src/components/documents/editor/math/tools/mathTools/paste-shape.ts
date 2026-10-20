@@ -3,7 +3,7 @@ import { showTooltip, type EditorView, type Rect, type Tooltip, type TooltipView
 
 import { ancestorAt } from "@/components/documents/editor/syntax/syntax";
 import { mathContextOf } from "../../mathContext";
-import { CLOSE_ICON, button, el } from "./dom";
+import { CLOSE_ICON, button, el, followCommandMode } from "./dom";
 import { shapeChange, shapeToggle } from "./shape";
 import type { MathRange } from "./state";
 
@@ -56,10 +56,12 @@ class PastedView implements TooltipView {
   private shape = button("cm-math-pill cm-math-shape", "", () => this.toggle());
   private timer = 0;
   private hovered = false;
+  private stopCommandMode: () => void;
 
   constructor(readonly view: EditorView) {
     this.dom.setAttribute("role", "group");
     this.dom.setAttribute("aria-label", "Pasted maths");
+    this.stopCommandMode = followCommandMode(view, this.dom);
     this.dom.addEventListener("mousedown", (e) => e.preventDefault());
     this.dom.addEventListener("pointerenter", () => {
       this.hovered = true;
@@ -133,5 +135,6 @@ class PastedView implements TooltipView {
 
   destroy() {
     window.clearTimeout(this.timer);
+    this.stopCommandMode();
   }
 }

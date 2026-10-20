@@ -19,7 +19,7 @@ const KATEX_CACHE_MAX = 500;
 /** KaTeX HTML for `source` as the visual field draws it (`fieldHtml`: the
  *  source map on, matrix rows `MATH_ARRAYSTRETCH`), or null if it does not
  *  render. Only once `mathsReady()`. */
-function renderMath(source: string, display: boolean): string | null {
+export function renderMath(source: string, display: boolean): string | null {
   const key = `${display ? "D" : "I"}${source}`;
   const hit = katexCache.get(key);
   if (hit !== undefined) return hit;

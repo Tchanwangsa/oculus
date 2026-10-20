@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use block2::RcBlock;
 use objc2::rc::Retained;
-use objc2::runtime::{Bool, NSObjectProtocol};
-use objc2::{msg_send, ClassType, MainThreadMarker};
+use objc2::runtime::{AnyObject, Bool};
+use objc2::{class, msg_send, ClassType, MainThreadMarker};
 use objc2_app_kit::{NSApplication, NSEvent, NSEventMask, NSEventModifierFlags, NSResponder};
 use objc2_web_kit::WKWebView;
 use tauri::{AppHandle, Manager, Runtime};
@@ -81,8 +81,9 @@ pub(crate) fn app_webview() -> usize {
     APP_WEBVIEW.load(Ordering::Relaxed)
 }
 
-/// The browser page holding keyboard focus: the key window's first responder
-/// when it is a `WKWebView` other than the app's own.
+/// The browser page holding keyboard focus: the `WKWebView` other than the
+/// app's own that is the key window's first responder or, as WebKit sometimes
+/// makes one of its own subviews first responder, the one that contains it.
 pub fn focused_page(mtm: MainThreadMarker) -> Option<Retained<NSResponder>> {
     let app_webview = APP_WEBVIEW.load(Ordering::Relaxed);
     if app_webview == 0 {
@@ -91,7 +92,20 @@ pub fn focused_page(mtm: MainThreadMarker) -> Option<Retained<NSResponder>> {
     let responder = NSApplication::sharedApplication(mtm)
         .keyWindow()?
         .firstResponder()?;
-    let is_page = responder.isKindOfClass(WKWebView::class())
-        && Retained::as_ptr(&responder) as usize != app_webview;
-    is_page.then_some(responder)
+    // Raw `msg_send!`: the typed `NSView` API would need another AppKit feature.
+    let mut view = Retained::as_ptr(&responder) as *mut AnyObject;
+    while !view.is_null() {
+        let is_view: bool = unsafe { msg_send![view, isKindOfClass: class!(NSView)] };
+        if !is_view {
+            return None;
+        }
+        let is_page: bool = unsafe { msg_send![view, isKindOfClass: WKWebView::class()] };
+        if is_page {
+            return (view as usize != app_webview)
+                .then(|| unsafe { Retained::retain(view as *mut NSResponder) })
+                .flatten();
+        }
+        view = unsafe { msg_send![view, superview] };
+    }
+    None
 }

@@ -7,12 +7,13 @@ import { emptyPairToBlock, offerShapeSwitch } from "../../math/tools/mathTools";
 import { ancestorAt } from "../../syntax/syntax";
 import { caretOf } from "./shared";
 import { tableAt, tableBeside } from "./tables";
+import { tailPadding } from "./tableTail";
 
 /** How text put at `pos` is padded to stay off a drawn table. GFM reads a
  *  line straight under a table as a row, so text at its end or on the empty
  *  line under it starts after a blank line; at its start, it gets its own
  *  line. */
-function edgePadding(state: EditorState, pos: number): [string, string] | null {
+export function edgePadding(state: EditorState, pos: number): [string, string] | null {
   if (tableAt(state, pos, "to")) return ["\n\n", ""];
   if (tableAt(state, pos, "from")) return ["", "\n"];
   if (!state.doc.lineAt(pos).length && tableBeside(state, pos, true)) return ["\n", ""];
@@ -84,22 +85,24 @@ export const dollarTyping = Prec.high(EditorView.inputHandler.of((view, typed, t
   return true;
 }));
 
-/** Pasting beside a table, which skips the input handler. */
+/** Pasting or dropping beside a table, which skips the input handler. Text
+ *  ending in a table is padded too, so the line after it is no row. */
 export const edgePaste = EditorState.transactionFilter.of((tr) => {
-  if (!tr.docChanged || !tr.isUserEvent("input.paste")) return tr;
-  const pos = caretOf(tr.startState);
-  if (pos == null) return tr;
+  const event = tr.isUserEvent("input.paste") ? "input.paste" : tr.isUserEvent("input.drop") ? "input.drop" : null;
+  if (!tr.docChanged || !event) return tr;
   const parts: { from: number; to: number; text: string }[] = [];
   tr.changes.iterChanges((from, to, _a, _b, inserted) => parts.push({ from, to, text: inserted.toString() }));
-  if (parts.length !== 1 || parts[0].from !== pos || parts[0].to !== pos) return tr;
-  const pad = edgePadding(tr.startState, pos);
-  if (!pad) return tr;
-  const { text } = parts[0];
+  if (parts.length !== 1 || !parts[0].text) return tr;
+  const { from, to, text } = parts[0];
+  const pad = edgePadding(tr.startState, from);
+  const tail = tailPadding(tr.startState.doc, to, text) || pad?.[1] || "";
+  if (!pad?.[0] && !tail) return tr;
+  const head = pad?.[0] ?? "";
   return {
-    changes: { from: pos, insert: pad[0] + text + pad[1] },
-    selection: { anchor: pos + pad[0].length + text.length },
+    changes: { from, to, insert: head + text + tail },
+    selection: { anchor: from + head.length + text.length },
     scrollIntoView: true,
-    userEvent: "input.paste",
+    userEvent: event,
   };
 });
 

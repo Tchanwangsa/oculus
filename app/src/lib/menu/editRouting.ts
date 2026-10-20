@@ -2,6 +2,7 @@ import { isMac } from "@/lib/platform";
 import { selectAllMaths } from "@/lib/markdown/mathSelection";
 import { OVERLAY, currentFindTarget, selectContents } from "@/lib/menu/find";
 import { expandWithin } from "@/lib/ui/expandable";
+import { EDITABLE } from "./editable";
 
 /**
  * What the Edit menu's Undo, Redo and Select All do (`shell/menu.rs` only emits
@@ -22,8 +23,7 @@ type EditHandler = (redo: boolean) => boolean;
 
 const handlers = new Set<EditHandler>();
 
-export const EDITABLE =
-  "input, textarea, select, [contenteditable=''], [contenteditable='true'], [contenteditable='plaintext-only']";
+export { EDITABLE };
 
 /** Offer undo and redo to `handler` first; it returns whether it took it. */
 export function onEdit(handler: EditHandler): () => void {
@@ -32,6 +32,9 @@ export function onEdit(handler: EditHandler): () => void {
 }
 
 export function routeEdit(redo: boolean): void {
+  // Native focus can sit in a browser page while this document's active
+  // element is still the note; the page's own undo is Rust's (`shell/menu.rs`).
+  if (!document.hasFocus()) return;
   for (const handler of handlers) if (handler(redo)) return;
   const active = document.activeElement;
   if (active?.closest(EDITABLE)) document.execCommand(redo ? "redo" : "undo");
