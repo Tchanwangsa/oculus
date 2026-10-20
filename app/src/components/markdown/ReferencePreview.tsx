@@ -2,7 +2,11 @@ import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { HoverCard } from "radix-ui";
 import { cn } from "@/lib/utils";
 
-export const referenceClass = "rounded-sm px-0.5 py-px text-foreground underline decoration-border underline-offset-[3px] transition-colors hover:bg-accent hover:decoration-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+/** A reference's look at rest; the composer's mentions wear just this, since a
+ *  click there belongs to the caret. */
+export const referenceRestClass = "rounded-sm px-0.5 py-px text-foreground underline decoration-border underline-offset-[3px]";
+
+export const referenceClass = `${referenceRestClass} transition-colors hover:bg-accent hover:decoration-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`;
 
 export interface ReferenceDetails {
   title?: string;

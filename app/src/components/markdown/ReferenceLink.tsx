@@ -21,12 +21,17 @@ export function ReferenceLink({ href, children }: { href?: string; children: Rea
   return <a href={href} className="text-brand underline underline-offset-[3px]" target="_blank" rel="noreferrer">{children}</a>;
 }
 
-function WebReference({ href, children }: { href: string; children: ReactNode }) {
+/** A site's favicon once the browser has seen it, else the globe. */
+export function WebIcon({ href }: { href: string }) {
   const favicon = useBrowserStore((s) => faviconFor(href, s.favicons));
   const [failed, setFailed] = useState<string | null>(null);
-  const icon = favicon && failed !== favicon
+  return favicon && failed !== favicon
     ? <img src={favicon} alt="" onError={() => setFailed(favicon)} className="mr-[0.35em] inline size-[1em] rounded-[2px] object-contain align-[-0.125em]" />
     : <Globe size="1.15em" aria-hidden className="mr-[0.35em] inline align-[-0.18em] text-brand" />;
+}
+
+function WebReference({ href, children }: { href: string; children: ReactNode }) {
+  const icon = <WebIcon href={href} />;
   return (
     <ReferencePreview icon={icon} title={linkText(children) || hostOf(href)} kind="Website" detail={href}>
       <a href={href} className={cn(referenceClass, "text-brand")} target="_blank" rel="noreferrer">{icon}{children}</a>
