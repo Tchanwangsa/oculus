@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use block2::RcBlock;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, Bool, NSObjectProtocol};
+use objc2::runtime::{AnyObject, Bool};
 use objc2::{class, msg_send, ClassType, MainThreadMarker};
 use objc2_app_kit::{NSApplication, NSEvent, NSEventMask, NSEventModifierFlags, NSResponder};
 use objc2_web_kit::WKWebView;
