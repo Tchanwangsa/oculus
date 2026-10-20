@@ -48,4 +48,3 @@ export function CanvasHistory({ undo, redo, canUndo, canRedo }: { undo: () => vo
     <CanvasIconButton label={`Redo (${shortcut('mod+shift+Z')})`} onClick={redo} disabled={!canRedo}><ArrowUUpRightIcon size={17} /></CanvasIconButton>
   </div>;
 }
-

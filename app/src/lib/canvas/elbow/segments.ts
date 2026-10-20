@@ -51,4 +51,3 @@ export function releaseSegment(arrow: CanvasElement, segment: number, lookup: Lo
   if (own === undefined) return arrow;
   return rerouteElbow(withLanes(arrow, lanes.filter((_, k) => k !== own)), lookup);
 }
-
