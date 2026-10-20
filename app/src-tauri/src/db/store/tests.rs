@@ -559,3 +559,66 @@ async fn term_sort_backfill_reads_names_and_keeps_stamped_keys() {
     );
     assert_eq!(backfill_term_sort(&pool, true).await.unwrap(), 0);
 }
+
+#[tokio::test]
+async fn file_rows_follow_touch_rename_and_delete() {
+    let pool = migrated_pool().await;
+    sqlx::raw_sql(
+        "INSERT INTO subjects (id, code, name) VALUES (1, 'A', 'Alpha');
+         INSERT INTO files (id, subject_id, filename, relative_path, file_type, size_bytes)
+           VALUES (9, 1, 'Plan.canvas', 'courses/A/canvases/Plan.canvas', 'canvas', 10);
+         INSERT INTO pages (file_id, page_no) VALUES (9, 1);
+         INSERT INTO document_versions (file_id, kind, text, hash) VALUES (9, 'auto', '', '');",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let row = |pool: SqlitePool| async move {
+        sqlx::query(
+            "SELECT size_bytes, filename, relative_path, modified_at IS NOT NULL AS modified,
+                    content_changed_at IS NOT NULL AS changed, last_accessed_at IS NOT NULL AS seen
+             FROM files WHERE id = 9",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+        .map(|r| {
+            (
+                r.get::<i64, _>(0),
+                r.get::<String, _>(1),
+                r.get::<String, _>(2),
+                (
+                    r.get::<bool, _>(3),
+                    r.get::<bool, _>(4),
+                    r.get::<bool, _>(5),
+                ),
+            )
+        })
+    };
+
+    touch_file_row(&pool, 9, 42, false).await.unwrap();
+    assert_eq!(row(pool.clone()).await.unwrap().3, (true, true, false));
+    touch_file_row(&pool, 9, 43, true).await.unwrap();
+    let (size, _, _, flags) = row(pool.clone()).await.unwrap();
+    assert_eq!((size, flags), (43, (true, true, true)));
+
+    rename_file_row(&pool, 9, "Next.canvas", "courses/A/canvases/Next.canvas")
+        .await
+        .unwrap();
+    let (_, filename, rel, _) = row(pool.clone()).await.unwrap();
+    assert_eq!(
+        (filename.as_str(), rel.as_str()),
+        ("Next.canvas", "courses/A/canvases/Next.canvas")
+    );
+
+    delete_file_row(&pool, 9).await.unwrap();
+    assert!(row(pool.clone()).await.is_none());
+    for table in ["pages", "document_versions"] {
+        let left: i64 =
+            sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE file_id = 9"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(left, 0, "{table}");
+    }
+}

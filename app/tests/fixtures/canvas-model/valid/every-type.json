@@ -1,0 +1,174 @@
+{
+  "type": "oculus-canvas",
+  "version": 1,
+  "elements": [
+    {
+      "id": "rect",
+      "type": "rectangle",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "text": "Label",
+      "fontSize": 20,
+      "verticalAlign": "top"
+    },
+    {
+      "id": "oval",
+      "type": "ellipse",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "#ffc9c9",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7
+    },
+    {
+      "id": "gem",
+      "type": "diamond",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "roundness": "round"
+    },
+    {
+      "id": "line",
+      "type": "line",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 100,
+          "y": 60
+        }
+      ]
+    },
+    {
+      "id": "arrow",
+      "type": "arrow",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 100,
+          "y": 0
+        }
+      ],
+      "startBinding": {
+        "elementId": "rect",
+        "mode": "center"
+      },
+      "endBinding": {
+        "elementId": "oval",
+        "mode": "edge",
+        "anchor": {
+          "x": 0,
+          "y": 0.5
+        }
+      }
+    },
+    {
+      "id": "pen",
+      "type": "freedraw",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "sketch",
+      "seed": 7,
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 3.5,
+          "y": -2.25
+        },
+        {
+          "x": 7,
+          "y": 1
+        }
+      ]
+    },
+    {
+      "id": "note",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "text": "Hello\nworld",
+      "fontSize": 24,
+      "fontFamily": "serif",
+      "textAlign": "right"
+    },
+    {
+      "id": "pic",
+      "type": "image",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "sourceName": "dot.png",
+      "naturalWidth": 1,
+      "naturalHeight": 1
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "background": "#ffffff"
+}

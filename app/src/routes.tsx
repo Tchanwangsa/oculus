@@ -124,6 +124,7 @@ export const routes: RouteObject[] = [
           { path: "appearance", lazy: page(() => import("@/pages/settings/AppearancePage")) },
           { path: "browser", lazy: page(() => import("@/pages/settings/integrations/BrowserPage")) },
           { path: "music", lazy: page(() => import("@/pages/settings/integrations/MusicPage")) },
+          { path: "device-sharing", lazy: page(() => import("@/pages/settings/integrations/DeviceSharingPage")) },
           { path: "messaging", lazy: page(() => import("@/pages/settings/integrations/MessagingPage")) },
           { path: "storage", lazy: page(() => import("@/pages/settings/library/StoragePage")) },
           { path: "agents", lazy: page(() => import("@/pages/settings/integrations/AgentsPage")) },

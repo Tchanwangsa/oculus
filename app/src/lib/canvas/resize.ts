@@ -1,8 +1,21 @@
-import type { CanvasElement } from './model';
+import type { CanvasElement, Point } from './model';
 import type { Bounds } from './geometry';
 import type { ElementChanges } from './changes';
 import { growToFitLabel } from './labels';
 import { scaleFixedSegments } from './elbow/lanes';
+
+/** A single image keeps its displayed proportions around the fixed opposite corner; Shift allows stretching. */
+export function preserveImageAspectRatio(elements: readonly CanvasElement[], ids: ReadonlySet<string>, from: Bounds, point: Point, opposite: Point, free = false): Bounds {
+  let dx = point.x - opposite.x, dy = point.y - opposite.y;
+  const image = ids.size === 1 ? elements.find(element => ids.has(element.id)) : undefined;
+  if (!free && image?.type === 'image' && from.width > 0 && from.height > 0) {
+    const ratio = from.width / from.height;
+    const width = Math.max(Math.abs(dx), Math.abs(dy) * ratio);
+    dx = width * (Math.sign(dx) || (opposite.x <= from.x ? 1 : -1));
+    dy = width / ratio * (Math.sign(dy) || (opposite.y <= from.y ? 1 : -1));
+  }
+  return { x: Math.min(opposite.x, opposite.x + dx), y: Math.min(opposite.y, opposite.y + dy), width: Math.abs(dx), height: Math.abs(dy) };
+}
 
 /**
  * Scales the selected elements from `from` to `to`. Every point of a line,

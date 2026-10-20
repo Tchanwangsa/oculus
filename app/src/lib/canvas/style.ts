@@ -25,7 +25,7 @@ const SHAPES: ElementType[] = ['rectangle', 'ellipse', 'diamond'];
 const OUTLINED: ElementType[] = [...SHAPES, 'line', 'arrow'];
 const TEXTUAL: ElementType[] = ['text', ...SHAPES];
 const KEY_TYPES: Record<StyleKey, readonly ElementType[]> = {
-  stroke: ALL, opacity: ALL, fill: SHAPES, strokeWidth: ALL.filter(type => type !== 'text'), strokeStyle: OUTLINED, style: OUTLINED,
+  stroke: ALL, opacity: [...ALL, 'image'], fill: SHAPES, strokeWidth: ALL.filter(type => type !== 'text'), strokeStyle: OUTLINED, style: OUTLINED,
   fontFamily: TEXTUAL, fontSize: TEXTUAL, textAlign: TEXTUAL, verticalAlign: SHAPES, startArrowhead: ['arrow'], endArrowhead: ['arrow'],
   roundness: ['rectangle', 'diamond'], arrowType: ['arrow'],
 };

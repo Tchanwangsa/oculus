@@ -2,6 +2,7 @@ import { CANVAS_DEFAULTS, hasLabel, roundnessOf, type CanvasDocument, type Canva
 import { diamondCorners, diamondVertices, elementArrowheads, rectangleRadius, selectionBounds, strokeDash } from './geometry';
 import { linePath } from './arrow/path';
 import { CANVAS_FONT_STACKS, layoutShapeLabel, layoutTextElement, measureCanvasText, type TextLayout, type TextMeasure } from './renderText';
+import { isCanvasImageDataUrl } from './imageSource';
 
 const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const number = (value: number) => Math.round(value * 1000) / 1000;
@@ -46,6 +47,10 @@ function outlineSvg(element: CanvasElement, strokeWidth: number, filled: boolean
 function elementSvg(element: CanvasElement, measure: TextMeasure): string {
   const opacity = element.opacity ?? CANVAS_DEFAULTS.opacity;
   const group = `<g transform="translate(${element.x},${element.y})"${opacity !== 1 ? ` opacity="${number(opacity)}"` : ''}>`;
+  if (element.type === 'image') {
+    if (!isCanvasImageDataUrl(element.dataUrl)) throw new Error('Cannot export an image without embedded raster data.');
+    return `${group}<image x="${Math.min(0, element.width)}" y="${Math.min(0, element.height)}" width="${Math.abs(element.width)}" height="${Math.abs(element.height)}" href="${escape(element.dataUrl)}" preserveAspectRatio="none"/></g>`;
+  }
   if (element.type === 'text') return `${group}${textSvg(element, layoutTextElement(element))}</g>`;
   const shape = outlineSvg(element, element.strokeWidth, true);
   const sketch = element.style === 'sketch' && element.type !== 'freedraw' ? `<g opacity="0.55" transform="translate(${Math.sin(element.seed * 1.618) * 1.1},${Math.cos(element.seed) * 0.9}) rotate(${Math.sin(element.seed) * 0.003 * 180 / Math.PI})">${outlineSvg(element, element.strokeWidth * 0.65, false)}</g>` : '';

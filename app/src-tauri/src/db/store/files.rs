@@ -63,6 +63,70 @@ pub async fn upsert_file(pool: &SqlitePool, row: &FileRow<'_>) -> Result<(), Str
     Ok(())
 }
 
+/// A file's bytes changed under the app's hand (`touchFileRow` in
+/// `lib/db/files.ts`). `seen` — the student's own save — also stamps
+/// `last_accessed_at`, so the unseen dot lights only for changes they didn't make.
+pub async fn touch_file_row(
+    pool: &SqlitePool,
+    id: i64,
+    size_bytes: u64,
+    seen: bool,
+) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE files SET size_bytes = ?1, modified_at = datetime('now'),
+                          content_changed_at = datetime('now'),
+                          last_accessed_at = CASE WHEN ?2 THEN datetime('now') ELSE last_accessed_at END
+         WHERE id = ?3",
+    )
+    .bind(size_bytes as i64)
+    .bind(seen)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Follow a file that moved on disk, keeping its id so `pages` stay attached
+/// (`renameFileRow`).
+pub async fn rename_file_row(
+    pool: &SqlitePool,
+    id: i64,
+    filename: &str,
+    relative_path: &str,
+) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE files SET filename = ?1, relative_path = ?2, modified_at = datetime('now')
+         WHERE id = ?3",
+    )
+    .bind(filename)
+    .bind(relative_path)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Drop a file's row with its indexed pages and a note's versions
+/// (`deleteFileRow`). Children are deleted explicitly: `ON DELETE CASCADE`
+/// only fires on a connection with `foreign_keys` on.
+pub async fn delete_file_row(pool: &SqlitePool, id: i64) -> Result<(), String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    for sql in [
+        "DELETE FROM pages WHERE file_id = ?1",
+        "DELETE FROM document_versions WHERE file_id = ?1",
+        "DELETE FROM files WHERE id = ?1",
+    ] {
+        sqlx::query(sql)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())
+}
+
 /// `files.id` for one artifact, needed to hang embedded pages off it.
 pub async fn file_id(
     pool: &SqlitePool,

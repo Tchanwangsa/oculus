@@ -1,0 +1,23 @@
+/* The browser companion's styles: the app's tokens and fonts without the
+   desktop shell's page styles (`app/src/index.css` holds those). */
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/inter/wght-italic.css";
+@import "@fontsource-variable/manrope";
+@import "tw-animate-css";
+
+@import "../styles/colors.css";
+@import "../styles/theme.css";
+@import "../styles/dark.css";
+@import "../styles/base.css";
+@import "../styles/utilities.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* A tablet page: no rubber-band scrolling or text callouts outside text fields. */
+html, body, #root { height: 100%; overflow: hidden; overscroll-behavior: none; }
+/* The shared base makes #root a row flexbox for the desktop shell, so the page would shrink to its
+   content; the canvas root's inline-size containment gives it no content width at all. */
+.companion-shell { flex: 1 1 auto; width: 100%; min-width: 0; }
+.companion-shell { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.companion-shell :is(input, textarea, [contenteditable="true"], [data-selectable="true"]) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }

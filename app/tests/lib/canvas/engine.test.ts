@@ -63,6 +63,21 @@ describe('retained Rust canvas engine', () => {
     expect(hitTest([hollow], { x: 50, y: 50 }, 0)).toBeNull();
     for (const type of ['rectangle', 'ellipse', 'diamond'] as const) expect(hitTest([{ ...hollow, type, text: 'Label' }], { x: 50, y: 50 }, 0)).toBe('hollow');
   });
+  test('images match reference hits and culling throughout their normalized bounds', () => {
+    const images: CanvasElement[] = Array.from({ length: 12 }, (_, i) => ({ ...elements[0], id: `image-${i}`, type: 'image', x: i * 80 - 200, y: i % 2 ? -30 : 50, width: i % 3 ? 100 : -100, height: i % 2 ? -60 : 60, fill: 'transparent', strokeWidth: 0 }));
+    for (let y = -100; y <= 150; y += 7) for (let x = -320; x <= 800; x += 13) {
+      const point = { x, y };
+      expect(hitTest(images, point, 0)).toBe([...images].reverse().find(el => elementHitTest(el, point, 0))?.id ?? null);
+    }
+    for (let x = -350; x < 800; x += 11) {
+      const bounds = { x, y: -75, width: 60, height: 120 };
+      const expected = images.filter(el => {
+        const b = elementBounds(el);
+        return boundsIntersect({ x: b.x - 2, y: b.y - 2, width: b.width + 4, height: b.height + 4 }, bounds);
+      });
+      expect(visibleElements(images, bounds)).toEqual(expected);
+    }
+  });
   test('culls with stroke padding and preserves paint order', () => {
     const bounds = { x: -560, y: -100, width: 800, height: 650 };
     const expected = elements.filter(el => {

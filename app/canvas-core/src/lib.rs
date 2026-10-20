@@ -131,7 +131,7 @@ impl Shape {
         if !b.expand(pad).contains(world) {
             return false;
         }
-        if self.kind == 6 {
+        if self.kind == 6 || self.kind == 7 {
             return true;
         }
         let rx = (b.right - b.x) / 2.0;
@@ -257,6 +257,7 @@ impl CanvasScene {
     /// an arrow's points are its flattened rendered path. `heads` is a bitfield: 1 marks an
     /// arrowhead at the first point, 2 at the last; each head's angle is the direction the
     /// path arrives at its tip. Invalid records are skipped.
+    /// Kinds are rectangle, ellipse, diamond, line, arrow, freedraw, text, image (0..7).
     #[wasm_bindgen(constructor)]
     pub fn new(records: &[f64], coordinates: &[f64]) -> Self {
         let mut shapes = Vec::with_capacity(records.len() / RECORD);
@@ -456,6 +457,20 @@ mod tests {
         assert_eq!(s.hit_test(50.0, 50.0, 2.0), 0);
         assert_eq!(s.hit_test(0.0, 50.0, 2.0), 1);
         assert_eq!(s.hit_test(200.0, 50.0, 2.0), -1);
+    }
+    #[test]
+    fn images_hit_their_whole_bounds_and_normalize_negative_dimensions() {
+        let mut image = rect(100.0, 100.0, false);
+        image[0] = 7.0;
+        image[3] = -100.0;
+        image[4] = -50.0;
+        image[5] = 0.0;
+        let s = scene(&[rect(0.0, 0.0, true), image], &[]);
+        assert_eq!(s.hit_test(50.0, 75.0, 0.0), 1);
+        assert_eq!(s.hit_test(50.0, 49.0, 0.0), 0);
+        assert_eq!(s.hit_test(102.0, 75.0, 0.0), -1);
+        assert_eq!(s.visible_indices(50.0, 75.0, 1.0, 1.0), vec![0, 1]);
+        assert_eq!(s.visible_indices(50.0, 47.0, 1.0, 0.5), vec![0]);
     }
     #[test]
     fn polyline_hits_segments_not_box() {

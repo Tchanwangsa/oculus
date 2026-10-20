@@ -1,3 +1,5 @@
+import { isCanvasImageDataUrl } from './imageSource';
+
 export interface Point { x: number; y: number }
 export type CanvasStrokeStyle = 'solid' | 'dashed' | 'dotted';
 export type CanvasFontFamily = 'sans' | 'serif' | 'mono';
@@ -16,7 +18,7 @@ export interface CanvasViewport { x: number; y: number; zoom: number; [key: stri
 /** Extension fields are retained when reading and saving a document. */
 export interface CanvasElement {
   id: string;
-  type: 'rectangle' | 'ellipse' | 'diamond' | 'line' | 'arrow' | 'freedraw' | 'text';
+  type: 'rectangle' | 'ellipse' | 'diamond' | 'line' | 'arrow' | 'freedraw' | 'text' | 'image';
   x: number;
   y: number;
   width: number;
@@ -24,6 +26,11 @@ export interface CanvasElement {
   points?: Point[];
   text?: string;
   fontSize?: number;
+  /** Embedded raster bytes keep copied elements and saved canvases self-contained. */
+  dataUrl?: string;
+  sourceName?: string;
+  naturalWidth?: number;
+  naturalHeight?: number;
   stroke: string;
   fill: string;
   strokeWidth: number;
@@ -61,7 +68,7 @@ export const arrowTypeOf = (el: CanvasElement): CanvasArrowType => el.arrowType 
 export const arrowheadOf = (el: CanvasElement, end: 'start' | 'end'): CanvasArrowhead =>
   end === 'start' ? el.startArrowhead ?? CANVAS_DEFAULTS.startArrowhead : el.endArrowhead ?? CANVAS_DEFAULTS.endArrowhead;
 
-export type CanvasTool = CanvasElement['type'] | 'select' | 'hand' | 'eraser';
+export type CanvasTool = Exclude<CanvasElement['type'], 'image'> | 'select' | 'hand' | 'eraser';
 
 export interface CanvasDocument {
   type: 'oculus-canvas';
@@ -76,7 +83,7 @@ export function createCanvasDocument(): CanvasDocument {
   return { type: 'oculus-canvas', version: 1, elements: [], viewport: { x: 0, y: 0, zoom: 1 }, background: '#ffffff' };
 }
 
-const TYPES = new Set(['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text']);
+const TYPES = new Set(['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text', 'image']);
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const unit = (v: unknown) => finite(v) && v >= 0 && v <= 1;
@@ -112,6 +119,11 @@ function validate(value: unknown): asserts value is CanvasDocument {
     }
     if (el.fontSize !== undefined && (!finite(el.fontSize) || el.fontSize <= 0)) throw new Error(`Canvas element ${i + 1} has an invalid font size.`);
     if (el.text !== undefined && typeof el.text !== 'string') throw new Error(`Canvas element ${i + 1} has invalid text.`);
+    if ((el.type === 'image' || el.dataUrl !== undefined) && !isCanvasImageDataUrl(el.dataUrl)) throw new Error(`Canvas element ${i + 1} needs an embedded PNG, JPEG, WebP or GIF image.`);
+    if (el.sourceName !== undefined && typeof el.sourceName !== 'string') throw new Error(`Canvas element ${i + 1} has an invalid image source name.`);
+    for (const key of ['naturalWidth', 'naturalHeight']) {
+      if (el[key] !== undefined && (!finite(el[key]) || el[key] <= 0)) throw new Error(`Canvas element ${i + 1} has an invalid ${key}.`);
+    }
     if (el.points !== undefined && (!Array.isArray(el.points) || !el.points.every(p => record(p) && finite(p.x) && finite(p.y)))) {
       throw new Error(`Canvas element ${i + 1} has invalid points.`);
     }

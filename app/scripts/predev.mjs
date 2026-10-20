@@ -1,4 +1,4 @@
-// Dev preflight: dependencies, native binaries, the editor core's wasm, debug CLI, keyd and generated docs.
+// Dev preflight: dependencies, native binaries, the companion page, the editor core's wasm, debug CLI, keyd and generated docs.
 // OCULUS_CLI_WATCH=1 also starts the CLI watcher; OCULUS_SKIP_PREDEV skips it.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
@@ -43,6 +43,16 @@ if (!existsSync(modules) || mtime(modules) < mtime(join(app, "bun.lock"))) {
 //    fetched, and only on macOS.
 for (const script of ["fetch-ffmpeg.mjs", "build-speech.mjs", "build-whisper.mjs", "build-math.mjs", "build-canvas.mjs"]) {
   execFileSync(process.execPath, [join(app, "scripts", script)], { cwd: app, stdio: "inherit" });
+}
+
+// The device-sharing companion page, which tauri dev never builds and the
+// sharing server reads from dist/companion/. Skipped when current; a failed
+// build leaves sharing without its page (the server answers 404), not the app
+// without a start.
+try {
+  execFileSync(process.execPath, [join(app, "scripts", "build-companion.mjs")], { cwd: app, stdio: "inherit" });
+} catch {
+  log("the companion page did not build — shared links show a missing page until it does");
 }
 
 // The editor core's wasm for shadow mode (docs/editor-core.md). Without the wasm32

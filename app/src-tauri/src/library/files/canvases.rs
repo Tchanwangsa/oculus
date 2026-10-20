@@ -1,5 +1,8 @@
 //! Versioned drawing documents under each subject's own canvases folder.
+pub(crate) mod authority;
+pub(crate) mod drafts;
 pub(crate) mod export;
+pub(crate) mod imports;
 
 use super::ImportedFile;
 use std::path::{Path, PathBuf};
@@ -174,7 +177,10 @@ pub async fn read_canvas(relative_path: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn write_canvas(relative_path: String, content: String) -> Result<u64, String> {
     crate::runtime::blocking::run(move || {
-        write_at(&crate::library::paths::data_dir(), &relative_path, &content)
+        let root = crate::library::paths::data_dir();
+        authority::global().unshared(&root, &relative_path, || {
+            write_at(&root, &relative_path, &content)
+        })
     })
     .await
 }
@@ -182,7 +188,10 @@ pub async fn write_canvas(relative_path: String, content: String) -> Result<u64,
 #[tauri::command]
 pub async fn rename_canvas(relative_path: String, title: String) -> Result<ImportedFile, String> {
     crate::runtime::blocking::run(move || {
-        rename_at(&crate::library::paths::data_dir(), &relative_path, &title)
+        let root = crate::library::paths::data_dir();
+        authority::global().unshared(&root, &relative_path, || {
+            rename_at(&root, &relative_path, &title)
+        })
     })
     .await
 }
@@ -206,12 +215,10 @@ pub(super) fn rename_at(root: &Path, rel: &str, title: &str) -> Result<ImportedF
 #[tauri::command]
 pub async fn delete_canvas(relative_path: String) -> Result<(), String> {
     crate::runtime::blocking::run(move || {
-        std::fs::remove_file(checked(
-            &crate::library::paths::data_dir(),
-            &relative_path,
-            false,
-        )?)
-        .map_err(|e| e.to_string())
+        let root = crate::library::paths::data_dir();
+        authority::global().unshared(&root, &relative_path, || {
+            std::fs::remove_file(checked(&root, &relative_path, false)?).map_err(|e| e.to_string())
+        })
     })
     .await
 }

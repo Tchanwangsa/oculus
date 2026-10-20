@@ -23,6 +23,25 @@ export const measureCanvasText: TextMeasure = (line, fontSize, fontFamily) => {
   return measureContext.measureText(line).width;
 };
 
+const baselines = new Map<string, number>();
+/** A line box's top to its alphabetic baseline, read from the DOM: the text editor is a textarea, so drawn text only lines up with it when it uses the baseline the browser's layout (rounding included) picks at that size. */
+export function lineBaseline(fontSize: number, family: CanvasFontFamily): number {
+  const key = `${family}|${fontSize}`;
+  let baseline = baselines.get(key);
+  if (baseline !== undefined) return baseline;
+  if (typeof document === 'undefined' || !document.body) return fontSize * 1.05;
+  const probe = document.createElement('div'), marker = document.createElement('span');
+  probe.style.cssText = `position:fixed;left:0;top:0;visibility:hidden;white-space:pre;font:${canvasFont(fontSize, family)};line-height:${LINE_HEIGHT}`;
+  marker.style.cssText = 'display:inline-block;width:0;height:0';
+  probe.append('x', marker);
+  document.body.append(probe);
+  baseline = marker.getBoundingClientRect().bottom - probe.getBoundingClientRect().top;
+  probe.remove();
+  if (baselines.size > 256) baselines.clear();
+  baselines.set(key, baseline);
+  return baseline;
+}
+
 /** Greedy by words within each explicit line; a word wider than the box breaks between characters. */
 export function wrapLines(text: string, maxWidth: number, measure: (line: string) => number): string[] {
   const lines: string[] = [];
