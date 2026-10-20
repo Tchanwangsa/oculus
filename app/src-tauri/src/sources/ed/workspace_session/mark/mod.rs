@@ -31,6 +31,26 @@ impl Session {
         core.online()
             .ok_or("The workspace is offline: Mark needs Ed's server")?;
         let hash = snapshot::latest(core, &self.out)?;
-        submission::normalise(&core.ed.mark(core.challenge_id, &hash)?)
+        let submission = submission::normalise(&core.ed.mark(core.challenge_id, &hash)?)?;
+        self.complete_slide_if_passed(&submission);
+        Ok(submission)
+    }
+
+    /// Ed's web app completes the lesson slide once a submission passes; a
+    /// Mark from here does the same so the slide is done on Ed too. A failure
+    /// is logged: the submission stands either way.
+    fn complete_slide_if_passed(&self, submission: &Submission) {
+        let Some(slide_id) = self.slide.slide_id else {
+            return;
+        };
+        if !matches!(submission.status.as_str(), "passed" | "submitted") {
+            return;
+        }
+        if let Err(e) = self.core.ed.complete_slide(slide_id) {
+            elog!(
+                "[oculus] ed workspace {}: completing slide {slide_id}: {e}",
+                self.core.challenge_id
+            );
+        }
     }
 }

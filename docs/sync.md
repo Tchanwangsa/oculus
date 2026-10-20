@@ -586,6 +586,11 @@ the working copy; Ed gets each save as an upload.
   is a real submission. Only the workspace's Mark button calls it, after the
   pane's confirm dialogs; a second Mark while one is in flight is refused,
   nothing retries it, and no sync, reconnect, agent or CLI reaches it.
+  A submission whose `status` is `passed` or `submitted` then completes the
+  lesson slide as Ed's web app does (`PUT /lessons/slides/<s>/complete`,
+  `Ed::complete_slide`; `<s>` is the slide's `ed_slide_id`); a refused
+  completion is logged and never fails the Mark. The history read does not
+  complete anything.
   The answer is the pane's `Submission`: camelCase, a testcase's
   `run.output` as `output`, and `diffs`, the lines of every `check_diff`
   check's `value.diff` in order. Ed writes a line as `[[sign], [sign|"=",

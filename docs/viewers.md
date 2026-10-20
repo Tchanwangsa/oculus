@@ -442,6 +442,10 @@ folder is the working copy; Rust owns the session
 ([sync.md](./sync.md) has the state file), the pane only calls the
 commands typed in `app/src/lib/ed/workspace.ts`.
 
+The workspace half keeps a constrained flex height at every width so
+CodeMirror can scroll its file inside the pane, including the narrow stacked
+layout.
+
 - **The brief leaves out the files' copies.** The sync writes each small
   workspace file into the slide's `.md` as a `**<name>**` paragraph over a
   fenced copy, after the Files list; `dropInlineFiles`

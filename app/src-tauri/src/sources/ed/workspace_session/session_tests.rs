@@ -84,6 +84,7 @@ pub(super) fn context(dir: &Path, origin: &str) -> (Arc<Context>, Events) {
 pub(super) fn slide() -> Slide {
     Slide {
         slide_dir: SLIDE_DIR.into(),
+        slide_id: None,
         run_command: None,
         features: Features::default(),
         due_at: None,

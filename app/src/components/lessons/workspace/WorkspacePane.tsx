@@ -6,6 +6,7 @@ import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
 import { PillTabs } from "@/components/ui/table/PillTabs";
 import { useTauriEvent } from "@/hooks/backend/useEvents";
 import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
+import { useNarrowBox } from "@/hooks/ui/useNarrowBox";
 import type { DbFile } from "@/lib/db";
 import { splitListing } from "@/lib/ed/conflicts";
 import {
@@ -22,7 +23,7 @@ import { edUnavailableReason } from "@/lib/ed/workspaceStatus";
 import { cn } from "@/lib/utils";
 
 import { ConflictFrame } from "./conflict/ConflictFrame";
-import { DescriptionColumn, type SideTab } from "./DescriptionColumn";
+import { DescriptionColumn, SIDE_TABS, type SideTab } from "./DescriptionColumn";
 import { MarkButton } from "./mark/MarkButton";
 import { useReplaceFlow } from "./reset/useReplaceFlow";
 import { WorkspaceMenu } from "./reset/WorkspaceMenu";
@@ -43,6 +44,9 @@ const BRIEF_PANEL = {
   storageKey: "oculus-ed-workspace-brief",
 } as const;
 
+/** Under this width the brief and the workspace take turns instead of sitting side by side. */
+const STACK_BELOW = 720;
+
 /** Ed's bottom drawer (terminal and Run), folded until first opened. */
 const DRAWER_PANEL = {
   side: "bottom",
@@ -58,7 +62,9 @@ const DRAWER_PANEL = {
  * with its Feedback tab, the challenge's files in tabs over `CodeEditor` on
  * the right, saving to Ed as you type (`lib/ed/workspaceSaver.ts`), with
  * Run, Mark and a menu (Reset to scaffold) in its header and the terminal
- * drawer under it, each as the challenge's features allow. A `reset` event
+ * drawer under it, each as the challenge's features allow. In a box narrower
+ * than `STACK_BELOW` the two halves take turns under one strip (Description,
+ * Feedback, Workspace) and both stay mounted. A `reset` event
  * (reset or restore) drops every buffer and reads the files again. The session opens on mount and closes after
  * the last pane on it goes (`holdWorkspace`); `ed-workspace` events for this
  * challenge update the connection, the file list, the open file when
@@ -67,10 +73,13 @@ const DRAWER_PANEL = {
  */
 export function WorkspacePane({
   challengeId,
+  slideId,
   brief,
   files,
 }: {
   challengeId: number;
+  /** The challenge's Ed slide. */
+  slideId: number | null;
   /** The slide's `.md`. */
   brief: DbFile;
   /** The subject's files, for links in the brief. */
@@ -88,6 +97,7 @@ export function WorkspacePane({
   const [active, setActive] = useState<string | null>(null);
   const [connection, setConnection] = useState<WorkspaceStatus>({ state: "connecting", reason: null });
   const [save, setSave] = useState<SaveState>({ state: "idle" });
+  const heard = useRef(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [remote, setRemote] = useState(0);
   /** Counts Ed's resets and restores; each remounts the editor to read again. */
@@ -102,12 +112,14 @@ export function WorkspacePane({
     setSave(h.saver.status);
     const off = h.saver.subscribe({ status: setSave });
     let live = true;
+    heard.current = false;
     h.info
       .then((info) => {
         if (!live) return;
         setInfo(info);
         setPaths(info.files);
-        setConnection(info.status);
+        // An event that beat the answer is newer than its snapshot.
+        if (!heard.current) setConnection(info.status);
       })
       .catch((e) => live && setOpenError(String(e)));
     return () => {
@@ -126,6 +138,7 @@ export function WorkspacePane({
     if (payload.challengeId !== challengeId) return;
     switch (payload.kind) {
       case "status":
+        heard.current = true;
         setConnection(payload.status);
         if (payload.status.state === "online") {
           setNotice(null);
@@ -183,6 +196,9 @@ export function WorkspacePane({
   };
 
   const [sideTab, setSideTab] = useState<SideTab>("description");
+  const [box, stacked] = useNarrowBox(STACK_BELOW);
+  /** Which half shows while stacked. */
+  const [turn, setTurn] = useState<"side" | "workspace">("side");
   const [marked, setMarked] = useState<Submission | null>(null);
   const mark = useMarkFlow({
     challengeId,
@@ -192,6 +208,7 @@ export function WorkspacePane({
     onMarked: (submission) => {
       setMarked(submission);
       setSideTab("feedback");
+      setTurn("side");
     },
   });
 
@@ -208,41 +225,75 @@ export function WorkspacePane({
     setActive(path);
   };
 
+  const hasFeedback = !!features && (features.feedback || features.mark);
+  const strip = [...(hasFeedback ? SIDE_TABS : SIDE_TABS.slice(0, 1)), { value: "workspace" as const, label: "Workspace" }];
+  const sideShown = !stacked || turn === "side";
+
   return (
-    <div className="flex min-h-0 flex-1">
+    <div ref={box} className={cn("flex min-h-0 flex-1", stacked && "flex-col")}>
+      {stacked && (
+        <div className="flex h-10 shrink-0 items-center border-b border-border-subtle px-3">
+          <PillTabs
+            tabs={strip}
+            value={turn === "workspace" ? "workspace" : hasFeedback ? sideTab : "description"}
+            onChange={(v) => {
+              if (v === "workspace") setTurn("workspace");
+              else {
+                setSideTab(v);
+                setTurn("side");
+              }
+            }}
+          />
+        </div>
+      )}
       <section
         aria-label="Description"
-        inert={panel.width === 0}
-        style={{ width: panel.width }}
+        inert={stacked ? !sideShown : panel.width === 0}
+        style={stacked ? undefined : { width: panel.width }}
         className={cn(
-          "flex min-h-0 shrink-0 flex-col overflow-hidden",
-          !panel.dragging && "transition-[width] duration-200 ease-out",
+          "flex min-h-0 flex-col overflow-hidden",
+          stacked ? "flex-1" : "shrink-0",
+          !sideShown && "hidden",
+          !stacked && !panel.dragging && "transition-[width] duration-200 ease-out",
         )}
       >
-        <div style={{ width: panel.restWidth }} className="flex min-h-0 flex-1 flex-col">
+        <div style={stacked ? undefined : { width: panel.restWidth }} className="flex min-h-0 flex-1 flex-col">
           <DescriptionColumn
             challengeId={challengeId}
+            slideId={slideId}
             brief={brief}
             files={files}
-            feedback={!!features && (features.feedback || features.mark)}
+            feedback={hasFeedback}
+            stacked={stacked}
             tab={sideTab}
             onTab={setSideTab}
             marked={marked}
             openWorkspaceFile={(path) => {
               if (!tabs?.includes(path)) return false;
               select(path);
+              setTurn("workspace");
               return true;
             }}
           />
         </div>
       </section>
-      <ResizeHandle
-        onMouseDown={panel.onMouseDown}
-        dragging={panel.dragging}
-        label="Resize description"
-        className="-mx-0.5"
-      />
-      <section aria-label="Workspace" className="flex min-w-0 flex-1 flex-col border-l border-border-subtle">
+      {!stacked && (
+        <ResizeHandle
+          onMouseDown={panel.onMouseDown}
+          dragging={panel.dragging}
+          label="Resize description"
+          className="-mx-0.5"
+        />
+      )}
+      <section
+        aria-label="Workspace"
+        inert={stacked && sideShown}
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col",
+          !stacked && "border-l border-border-subtle",
+          stacked && sideShown && "hidden",
+        )}
+      >
         <div className="flex h-10 shrink-0 items-center gap-3 border-b border-border-subtle px-3">
           <div className="min-w-0 flex-1">
             {shown != null && tabs && (
