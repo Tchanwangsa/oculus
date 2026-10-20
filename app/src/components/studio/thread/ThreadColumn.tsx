@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Composer } from "@/components/harness/composer/Composer";
-import { JumpToLatest } from "@/components/harness/timeline/JumpToLatest";
 import { Timeline } from "@/components/harness/timeline/Timeline";
 import { useThreadActions } from "@/components/harness/threads/useThreadActions";
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
@@ -56,7 +55,7 @@ export function ThreadColumn({ threadId, onTurnEnd }: { threadId: number; onTurn
     wasRunning.current = running;
   }, [running, onTurnEnd]);
 
-  const scroll = useStickToBottom(threadId, true, running);
+  const scroll = useStickToBottom(threadId, true);
   useScrollFade(scroll.outer, "y");
 
   const threadRef = useRef(threadId);
@@ -80,7 +79,6 @@ export function ThreadColumn({ threadId, onTurnEnd }: { threadId: number; onTurn
             <Timeline items={items} threadId={threadId} running={running} questions={questions} pending={pending} />
           </div>
         </div>
-        <JumpToLatest show={scroll.showJump} onClick={scroll.scrollToBottom} />
       </div>
       <div className="shrink-0 px-6 pb-4">
         <div className="mx-auto max-w-[640px]">

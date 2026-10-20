@@ -5,7 +5,6 @@ import { Composer } from "@/components/harness/composer/Composer";
 import { RecentThreads } from "@/components/harness/threads/RecentThreads";
 import { THREAD_LIST_PANEL, ThreadList } from "@/components/harness/threads/ThreadList";
 import { ThreadMap } from "@/components/harness/timeline/ThreadMap";
-import { JumpToLatest } from "@/components/harness/timeline/JumpToLatest";
 import { Timeline } from "@/components/harness/timeline/Timeline";
 import { useThreadActions } from "@/components/harness/threads/useThreadActions";
 import { PageHeader, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
@@ -134,7 +133,7 @@ export default function ChatPage() {
   // Borrowed rows belong to the outgoing thread; wait for this thread's
   // history before choosing its initial bottom position.
   const ownRows = items.length === 0 || items[0].thread_id === activeId;
-  const scroll = useStickToBottom(activeId, !fresh && ownRows, running);
+  const scroll = useStickToBottom(activeId, !fresh && ownRows);
   useScrollFade(scroll.outer, "y", !fresh);
   const recentScroll = useRef<HTMLDivElement>(null);
   useScrollFade(recentScroll, "y", fresh);
@@ -260,7 +259,6 @@ export default function ChatPage() {
                 />
               </div>
             </div>
-            <JumpToLatest show={scroll.showJump} onClick={scroll.scrollToBottom} />
             <ThreadMap scrollRef={scroll.outer} contentRef={scroll.inner} markers={markers} />
           </div>
         )}
