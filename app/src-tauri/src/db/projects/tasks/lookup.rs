@@ -1,6 +1,6 @@
 use sqlx::{SqliteConnection, SqlitePool};
 
-use crate::db::projects::rows::{to_task, Task};
+use crate::db::projects::rows::{to_task, Task, TASK_SELECT};
 
 pub(super) async fn has_children(conn: &mut SqliteConnection, id: i64) -> Result<bool, String> {
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM project_tasks WHERE parent_id = ?1")
@@ -12,7 +12,7 @@ pub(super) async fn has_children(conn: &mut SqliteConnection, id: i64) -> Result
 }
 
 /// Bump a project's `updated_at`; a no-op for `None`.
-pub(super) async fn touch_project(
+pub(in crate::db::projects) async fn touch_project(
     conn: &mut SqliteConnection,
     id: Option<i64>,
 ) -> Result<(), String> {
@@ -25,13 +25,29 @@ pub(super) async fn touch_project(
     Ok(())
 }
 
+/// Bump a task's `updated_at`, which a link change does without touching a column.
+pub(in crate::db::projects) async fn touch_task(
+    conn: &mut SqliteConnection,
+    id: i64,
+) -> Result<(), String> {
+    sqlx::query("UPDATE project_tasks SET updated_at = datetime('now') WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub async fn task(pool: &SqlitePool, id: i64) -> Result<Option<Task>, String> {
     let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
     task_on(&mut conn, id).await
 }
 
-pub(super) async fn task_on(conn: &mut SqliteConnection, id: i64) -> Result<Option<Task>, String> {
-    let row = sqlx::query("SELECT * FROM project_tasks WHERE id = ?1")
+pub(in crate::db::projects) async fn task_on(
+    conn: &mut SqliteConnection,
+    id: i64,
+) -> Result<Option<Task>, String> {
+    let row = sqlx::query(&format!("{TASK_SELECT} WHERE t.id = ?1"))
         .bind(id)
         .fetch_optional(&mut *conn)
         .await

@@ -9,7 +9,7 @@
  */
 export { DEFAULT_COLUMNS, boardOf } from "./columns";
 export type { ColumnKind, ProjectColumn } from "./columns";
-export { normaliseTags, taskBodyEdit } from "./rows";
+export { MAX_TAG_NAME, normaliseTagName, normaliseTags, parseTagIds, taskBodyEdit } from "./rows";
 export type {
   DbOpenTask,
   DbProject,
@@ -20,3 +20,14 @@ export * from "./events";
 export * from "./reads";
 export * from "./projectWrites";
 export * from "./taskWrites";
+export {
+  TAG_COLORS,
+  createTaskTag,
+  deleteTaskTag,
+  getTaskTags,
+  isTagColor,
+  setTaskTags,
+  updateTaskTag,
+} from "./tags";
+export type { DbTaskTag, TagColor, UpdateTaskTagInput } from "./tags";
+export * from "./taskFiles";

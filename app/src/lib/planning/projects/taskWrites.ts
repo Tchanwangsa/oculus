@@ -4,6 +4,8 @@ import { boardOf, type ColumnKind, type ProjectColumn } from "./columns";
 import { notifyProjectsUpdated } from "./events";
 import { getProject } from "./reads";
 import type { DbProject } from "./rows";
+import { replaceTaskTagLinks } from "./tags";
+import { projectOfTask, touchProject, touchTask } from "./touch";
 
 /**
  * Resolve a column id against the task's board ({@link boardOf}), or throw. A
@@ -21,27 +23,6 @@ function requireColumn(project: DbProject | null, columnId: string): ProjectColu
   return column;
 }
 
-/** Bump the project's `updated_at` on any task write, as the Rust writers
- *  do. `null` (unfiled, or gone) is a no-op. */
-async function touchProject(projectId: number | null): Promise<void> {
-  if (projectId == null) return;
-  const db = await getDb();
-  await db.execute(
-    `UPDATE projects SET updated_at = datetime('now') WHERE id = $1`,
-    [projectId],
-  );
-}
-
-/** A task's project, or `null` if it is unfiled or gone. */
-async function projectOfTask(id: number): Promise<number | null> {
-  const db = await getDb();
-  const rows = await db.select<{ project_id: number | null }[]>(
-    `SELECT project_id FROM project_tasks WHERE id = $1`,
-    [id],
-  );
-  return rows.length ? rows[0].project_id : null;
-}
-
 export interface CreateTaskInput {
   /** `null` leaves the task unfiled. */
   projectId: number | null;
@@ -54,6 +35,8 @@ export interface CreateTaskInput {
   startsAt?: string | null;
   dueAt?: string | null;
   estimateMinutes?: number | null;
+  /** `task_tags` ids; unknown ids are dropped. */
+  tagIds?: number[];
   source?: string;
 }
 
@@ -100,7 +83,7 @@ async function hasChildren(id: number): Promise<boolean> {
  * column is born finished, as {@link moveTask} would make it.
  *
  * A subtask with no explicit column inherits its parent's, not the board's
- * first (Backlog), which views that list top-level tasks would never draw.
+ * first (Planning), which views that list top-level tasks would never draw.
  * Mirrors `create_tasks` in `app/src-tauri/src/db/projects/tasks/create.rs`.
  */
 export async function createTask(input: CreateTaskInput): Promise<number> {
@@ -150,6 +133,7 @@ export async function createTask(input: CreateTaskInput): Promise<number> {
     ],
   );
   if (res.lastInsertId == null) throw new Error("task insert returned no id");
+  if (input.tagIds?.length) await replaceTaskTagLinks(res.lastInsertId, input.tagIds);
   await touchProject(input.projectId ?? null);
   notifyProjectsUpdated();
   return res.lastInsertId;
@@ -168,6 +152,8 @@ export interface UpdateTaskInput {
   startsAt?: string | null;
   dueAt?: string | null;
   estimateMinutes?: number | null;
+  /** Replaces the task's tags: `undefined` leaves them, `[]` clears them. */
+  tagIds?: number[];
 }
 
 /** Patch a task (`undefined` leaves alone, `null` clears). Re-parenting is
@@ -189,8 +175,12 @@ export async function updateTask(id: number, patch: UpdateTaskInput): Promise<vo
     due_at: patch.dueAt,
     estimate_minutes: patch.estimateMinutes,
   });
-  if (!changed) return;
-  await touchProject(await projectOfTask(id));
+  const tagged = patch.tagIds !== undefined;
+  if (tagged) await replaceTaskTagLinks(id, patch.tagIds ?? []);
+  if (!changed && !tagged) return;
+  // A column patch bumped the task itself; a tags-only write has not yet.
+  if (changed) await touchProject(await projectOfTask(id));
+  else await touchTask(id);
   notifyProjectsUpdated();
 }
 

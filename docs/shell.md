@@ -57,13 +57,15 @@ before leaving a playing lecture.
   (`chatHref`). Every tab has its own router, so two Chat tabs hold two threads
   and a restored tab or Recent row reopens its own; a bare `/chat` is a
   new thread ([harness.md](./harness.md#each-chat-tab-owns-its-conversation-in-its-route)).
-- **`/projects` and `/tasks` are one section**, switched by
-  `app/src/components/projects/page/SectionHeader.tsx`, which *navigates* because
-  crumbs, ⌘-click, restored tabs and `tabInfo` all key off the path; `RailItem`'s
-  `match` lights one sidebar item for both. A project is top-level because it may
-  have no subject; a filed task sits under its project, an unfiled one at
-  `/tasks/:taskId`, so `tabInfo` tests the task route first. The model is
-  [projects.md](./projects.md).
+- **`/projects` and `/tasks` are one section**, under `TasksLayout`
+  (`app/src/layouts/TasksLayout.tsx`): one nav column whose rows *navigate*
+  because crumbs, ⌘-click, restored tabs and `tabInfo` all key off the path.
+  The rail's Tasks item opens `/tasks` and `RailItem`'s `match` lights it on
+  `/projects*` too. A project is top-level because it may have no subject; a
+  filed task sits under its project, an unfiled one at `/tasks/:taskId`, so
+  `tabInfo` tests the task route first. Filed task tabs inherit their project's
+  icon and colour; unfiled task tabs use a checkbox. The model is [projects.md](./projects.md).
+  The Projects breadcrumb uses the same Kanban icon as its tab and search entry.
 - **`SubjectLayout` resolves the subject once** and hands it down as outlet
   context; tab pages must not re-fetch it. Its nav column
   (`app/src/components/subjects/SubjectNav.tsx`) holds the icon picker, the
@@ -301,10 +303,12 @@ closed panel opens one on `/new`.
   and expand and × after the page's buttons. Claims land in a layout effect,
   so any other page — or one still on `LoadingFill` — shows the standalone
   `SidePanelHeader` (switcher, front item's title, controls). In a claimed
-  row `PaneTrail` makes crumbs and title a sideways scroller with faded edges,
-  the subject crumb drops its icon, and every crumb but the subject (or, on a
-  task, the project) folds behind a "…" in place, which expands inline for
-  that page view. Expand
+  row `PaneTrail` makes crumbs and title a sideways scroller with faded edges.
+  Subject paths hide their ancestors behind a "…" popover. Planning pages
+  keep the immediate parent and current page visible and put earlier
+  ancestors in the same shared `Breadcrumb` popover
+  (`app/src/components/ui/Breadcrumb.tsx`). Selecting a parent navigates
+  without changing the trail's layout. Expand
   (`expandSide`) makes the front item the main page, or a new tab on ⌘-click,
   and removes it with `handover`: a lecture it owned is claimed for the main
   pane (or the new tab), so whatever comes to the panel's front next waits and

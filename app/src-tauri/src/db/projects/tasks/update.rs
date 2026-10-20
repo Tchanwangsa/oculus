@@ -1,7 +1,10 @@
 use sqlx::SqlitePool;
 
+use crate::db::projects::tags::{ensure_tags_on, replace_task_tags_on};
+
 use super::create::assert_can_parent;
-use super::lookup::{has_children, task_on, touch_project};
+use super::links::{attach_files_on, detach_files_on, resolve_files_on};
+use super::lookup::{has_children, task_on, touch_project, touch_task};
 
 /// Everything except where a task sits: `column_id`, `position` and `done_at`
 /// are written only by {@link move_task}, which reads the column's kind.
@@ -13,6 +16,13 @@ pub struct TaskPatch {
     pub starts_at: Option<Option<String>>,
     pub due_at: Option<Option<String>>,
     pub estimate_minutes: Option<Option<i64>>,
+    /// Tag names that replace the whole set (`Some(vec![])` clears it); a name
+    /// the registry lacks is made, in the default colour.
+    pub tags: Option<Vec<String>>,
+    /// Library `relative_path`s to attach; one already attached is a no-op.
+    pub attach: Vec<String>,
+    /// Library `relative_path`s to detach; one not attached is a no-op.
+    pub detach: Vec<String>,
 }
 
 pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Result<(), String> {
@@ -32,6 +42,22 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
                     .to_string(),
             );
         }
+    }
+
+    // Resolved before anything is written, so a bad path or name changes nothing.
+    let mut linked = false;
+    if let Some(names) = &patch.tags {
+        let ids = ensure_tags_on(&mut tx, names).await?;
+        replace_task_tags_on(&mut tx, id, &ids).await?;
+        linked = true;
+    }
+    if !patch.attach.is_empty() {
+        let ids = resolve_files_on(&mut tx, &patch.attach).await?;
+        linked |= attach_files_on(&mut tx, id, &ids).await?;
+    }
+    if !patch.detach.is_empty() {
+        let ids = resolve_files_on(&mut tx, &patch.detach).await?;
+        linked |= detach_files_on(&mut tx, id, &ids).await?;
     }
 
     let mut sets: Vec<String> = Vec::new();
@@ -55,6 +81,11 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
         put("estimate_minutes");
     }
     if sets.is_empty() {
+        if linked {
+            touch_task(&mut tx, id).await?;
+            touch_project(&mut tx, existing.project_id).await?;
+            return tx.commit().await.map_err(|e| e.to_string());
+        }
         return Ok(());
     }
     let sql = format!(

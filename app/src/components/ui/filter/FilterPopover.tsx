@@ -14,6 +14,7 @@ export function FilterPopover({
   active,
   icon,
   className,
+  triggerClassName,
   children,
 }: {
   label: string;
@@ -21,6 +22,8 @@ export function FilterPopover({
   icon?: ReactNode;
   /** The popover's width and padding, over `w-56 p-1.5`. */
   className?: string;
+  /** Over the pill's `h-7 px-2.5 text-xs`, e.g. to match the buttons beside it. */
+  triggerClassName?: string;
   children: (close: () => void) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -33,6 +36,7 @@ export function FilterPopover({
           className={cn(
             "h-7 shrink-0 gap-1.5 px-2.5 text-xs font-normal",
             active ? "border-brand/40 text-brand" : "text-foreground",
+            triggerClassName,
           )}
         >
           {icon}
@@ -51,6 +55,7 @@ export function FilterPopover({
 export function FilterRow({
   label,
   hint,
+  count,
   icon,
   selected,
   onPick,
@@ -59,6 +64,7 @@ export function FilterRow({
 }: {
   label: string;
   hint?: string;
+  count?: number;
   icon?: ReactNode;
   selected: boolean;
   onPick: () => void;
@@ -72,7 +78,7 @@ export function FilterRow({
       onClick={onPick}
       disabled={disabled}
       className={cn(
-        "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors disabled:pointer-events-none disabled:opacity-50",
+        "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
         selected
           ? "bg-accent text-foreground"
           : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -82,6 +88,7 @@ export function FilterRow({
       {icon}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {selected && <Check size={12} weight="bold" className="shrink-0 text-brand" />}
+      {count != null && <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">({count})</span>}
     </button>
   );
 }

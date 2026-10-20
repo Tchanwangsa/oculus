@@ -853,6 +853,51 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_videos_thread
                         "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 47,
+            description: "tasks: a registry of coloured tags, and related library files",
+            // Tags have one registry row with a palette key and a case-insensitive
+            // unique name. File links cascade safely because re-sync keeps file ids.
+            sql: r#"
+CREATE TABLE task_tags (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    color      TEXT    NOT NULL,
+    position   REAL    NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX idx_task_tags_name ON task_tags(name COLLATE NOCASE);
+
+CREATE TABLE task_tag_links (
+    task_id INTEGER NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+    tag_id  INTEGER NOT NULL REFERENCES task_tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (task_id, tag_id)
+);
+CREATE INDEX idx_task_tag_links_tag ON task_tag_links(tag_id);
+
+CREATE TABLE task_files (
+    task_id    INTEGER NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+    file_id    INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (task_id, file_id)
+);
+CREATE INDEX idx_task_files_file ON task_files(file_id);
+
+INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
+    ('Assignment', 'indigo', 1),
+    ('Exam', 'rose', 2),
+    ('Reading', 'green', 3),
+    ('Study', 'amber', 4),
+    ('Admin', 'slate', 5);
+                        "#,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 48,
+            description: "projects and tasks share the tag registry",
+            sql: include_str!("projects/shared_tags.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

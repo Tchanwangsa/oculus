@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Plus } from "@phosphor-icons/react";
+import { cn } from "@/lib/utils";
+import { SIDE_NAV_ROW, SIDE_NAV_ROW_IDLE } from "@/components/ui/layout/SideNav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -9,16 +11,24 @@ import type { DbProject } from "@/lib/planning/projects";
 /**
  * Add a task from the universal page, unfiled by default. The destination pick
  * only sets where it will be created; `createTask` puts it in the board's
- * first column (Backlog).
+ * first column (Planning).
  */
 export function NewTaskButton({
   projects,
   onCreate,
+  align = "end",
+  className,
+  variant = "button",
 }: {
   /** Archived included (`status: "all"`). */
   projects: DbProject[];
   /** `null` is unfiled. */
   onCreate: (projectId: number | null, title: string) => void;
+  /** Which edge of the button the popover lines up with. */
+  align?: "start" | "center" | "end";
+  /** On the button, e.g. `w-full` for a column's pill. */
+  className?: string;
+  variant?: "button" | "nav";
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -42,13 +52,18 @@ export function NewTaskButton({
       }}
     >
       <PopoverTrigger asChild>
-        <Button size="sm" className="shrink-0">
-          <Plus size={13} weight="bold" />
-          New task
-        </Button>
+        {variant === "nav" ? (
+          <button type="button" className={cn(SIDE_NAV_ROW, SIDE_NAV_ROW_IDLE, className)}>
+            <Plus size={16} className="shrink-0" />New task
+          </button>
+        ) : (
+          <Button size="sm" className={cn("shrink-0", className)}>
+            <Plus size={13} weight="bold" />New task
+          </Button>
+        )}
       </PopoverTrigger>
 
-      <PopoverContent align="end" className="w-72 p-3">
+      <PopoverContent align={align} className="w-72 p-3">
         <Input
           autoFocus
           value={title}

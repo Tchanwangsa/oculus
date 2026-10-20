@@ -1,97 +1,42 @@
+import { ProjectIcon } from "../icons/ProjectIcon";
+import { ProjectIconPicker } from "../icons/ProjectIconPicker";
 import { useMemo } from "react";
-import { Badge } from "@/components/ui/badge";
-import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { displayCode } from "@/lib/format/format";
+import { DetailBody } from "@/components/projects/detail/DetailBody";
+import { DetailTitle } from "@/components/projects/detail/DetailTitle";
+import { projectHref } from "@/components/projects/nav/projectHref";
 import type { DbProject, UpdateProjectInput } from "@/lib/planning/projects";
-import { DateTimeField } from "../fields/DateTimeField";
-import { EventLink } from "./EventLink";
-import { TagEditor } from "../fields/TagEditor";
-import { ProgressMeter } from "../tasks/TaskMarks";
 import { boardProgress, type TaskNode } from "../tasks/taskTree";
-import { Brief } from "./Brief";
-import { Heading, Row } from "./overviewParts";
+import { ProjectProperties } from "./ProjectProperties";
+import { Heading } from "./overviewParts";
 import { UpcomingTasks } from "./UpcomingTasks";
 
-/** A project's description, properties and next few dated tasks. */
-
-export function ProjectOverview({
-  project,
-  nodes,
-  onPatch,
-}: {
+/** A project reads as a task document: title, properties, then its rich About. */
+export function ProjectOverview({ project, nodes, onPatch, onRename }: {
   project: DbProject;
   nodes: TaskNode[];
   onPatch: (patch: UpdateProjectInput) => void;
+  onRename: (name: string) => void;
 }) {
   const progress = useMemo(() => boardProgress(nodes), [nodes]);
-
   return (
     <div className="page-scroll">
-      <div className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-6">
-        <section>
+      <div className="mx-auto max-w-3xl px-6 pt-8 pb-16">
+        <div className="flex items-start gap-3">
+          <ProjectIconPicker project={project}>
+            <button type="button" aria-label={`Change icon for ${project.name}`} className="mt-0.5 flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50">
+              <ProjectIcon project={project} size={30} />
+            </button>
+          </ProjectIconPicker>
+          <div className="min-w-0 flex-1"><DetailTitle key={`title-${project.id}`} title={project.name} label="Project name"
+          href={(name) => projectHref({ id: project.id, name })} onRename={onRename} /></div>
+        </div>
+        <ProjectProperties project={project} progress={progress} onPatch={onPatch} />
+        <section className="mt-8">
           <Heading>About</Heading>
-          <Brief project={project} onSave={(brief) => onPatch({ brief })} />
+          <DetailBody key={`about-${project.id}`} text={project.brief} subjectId={project.subject_id}
+            kind="project" className="-mx-2" onSave={(brief) => onPatch({ brief })} />
         </section>
-
-        <section>
-          <Heading>Properties</Heading>
-          <div className="flex flex-col gap-0.5">
-            <Row label="Subject">
-              {/* Read-only: re-scoping moves every task on the calendar. */}
-              <span className="flex min-w-0 items-center gap-1.5 text-xs text-foreground">
-                {project.subject_code ? (
-                  <>
-                    <SubjectIcon code={project.subject_code} size={13} />
-                    {displayCode(project.subject_code)}
-                  </>
-                ) : (
-                  "Personal"
-                )}
-              </span>
-            </Row>
-
-            <Row label="Status">
-              <Badge variant="secondary" className="text-[11px]">
-                {project.status === "archived" ? "Archived" : "Active"}
-              </Badge>
-            </Row>
-
-            <Row label="Starts">
-              <DateTimeField
-                value={project.starts_at}
-                defaultTime="start"
-                onCommit={(startsAt) => onPatch({ startsAt })}
-              />
-            </Row>
-
-            <Row label="Due">
-              <DateTimeField
-                value={project.due_at}
-                defaultTime="end"
-                onCommit={(dueAt) => onPatch({ dueAt })}
-              />
-            </Row>
-
-            <Row label="Tags">
-              <TagEditor tags={project.tags} onChange={(tags) => onPatch({ tags })} />
-            </Row>
-
-            <Row label="Event">
-              <EventLink project={project} onPick={(eventId) => onPatch({ eventId })} />
-            </Row>
-
-            <Row label="Progress">
-              {progress.total === 0 ? (
-                // No zero bar — it reads as stalled (as `ProjectProgress`).
-                <span className="text-[11px] text-muted-foreground/60">Nothing planned yet</span>
-              ) : (
-                <ProgressMeter done={progress.done} total={progress.total} />
-              )}
-            </Row>
-          </div>
-        </section>
-
-        <UpcomingTasks project={project} nodes={nodes} />
+        <div className="mt-8"><UpcomingTasks project={project} nodes={nodes} /></div>
       </div>
     </div>
   );

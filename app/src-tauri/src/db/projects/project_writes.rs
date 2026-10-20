@@ -3,6 +3,7 @@ use sqlx::SqlitePool;
 use super::columns::default_columns;
 use super::rows::normalise_tags;
 
+#[derive(Default)]
 pub struct NewProject {
     pub name: String,
     pub subject_id: Option<i64>,
@@ -10,24 +11,29 @@ pub struct NewProject {
     pub starts_at: Option<String>,
     pub due_at: Option<String>,
     pub tags: Vec<String>,
+    pub event_id: Option<String>,
     /// `manual` | `agent`.
     pub source: String,
 }
 
 /// Create a project at the end of the list with the default board.
 pub async fn create_project(pool: &SqlitePool, input: &NewProject) -> Result<i64, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    if let Some(id) = &input.event_id {
+        super::events::require_event(&mut tx, id).await?;
+    }
     let next: f64 =
         sqlx::query_scalar("SELECT CAST(COALESCE(MAX(position), -1) + 1 AS REAL) FROM projects")
-            .fetch_one(pool)
+            .fetch_one(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
     let columns = serde_json::to_string(&default_columns()).map_err(|e| e.to_string())?;
     let tags = serde_json::to_string(&normalise_tags(input.tags.iter().cloned()))
         .map_err(|e| e.to_string())?;
-    sqlx::query(
+    let id = sqlx::query(
         r#"INSERT INTO projects
-             (subject_id, name, brief, status, starts_at, due_at, columns, tags, position, source)
-           VALUES (?1, ?2, ?3, 'active', ?4, ?5, ?6, ?7, ?8, ?9)"#,
+             (subject_id, name, brief, status, starts_at, due_at, columns, tags, position, source, event_id)
+           VALUES (?1, ?2, ?3, 'active', ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
     )
     .bind(input.subject_id)
     .bind(&input.name)
@@ -38,10 +44,13 @@ pub async fn create_project(pool: &SqlitePool, input: &NewProject) -> Result<i64
     .bind(tags)
     .bind(next)
     .bind(&input.source)
-    .execute(pool)
+    .bind(&input.event_id)
+    .execute(&mut *tx)
     .await
-    .map(|r| r.last_insert_rowid())
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?
+    .last_insert_rowid();
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(id)
 }
 
 /// A patch: `None` leaves a field alone, `Some(None)` clears it, `Some(v)`
@@ -56,6 +65,7 @@ pub struct ProjectPatch {
     pub due_at: Option<Option<String>>,
     /// Replaces the whole set; `Some(vec![])` clears it.
     pub tags: Option<Vec<String>>,
+    pub event_id: Option<Option<String>>,
 }
 
 pub async fn update_project(
@@ -63,6 +73,10 @@ pub async fn update_project(
     id: i64,
     patch: &ProjectPatch,
 ) -> Result<(), String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    if let Some(Some(id)) = &patch.event_id {
+        super::events::require_event(&mut tx, id).await?;
+    }
     // Placeholders numbered as collected: sqlx refuses a statement whose
     // highest parameter is lower than the number of binds.
     let mut sets: Vec<String> = Vec::new();
@@ -87,6 +101,9 @@ pub async fn update_project(
     }
     if patch.tags.is_some() {
         put("tags");
+    }
+    if patch.event_id.is_some() {
+        put("event_id");
     }
     if sets.is_empty() {
         return Ok(());
@@ -122,14 +139,17 @@ pub async fn update_project(
             serde_json::to_string(&normalise_tags(v.iter().cloned())).map_err(|e| e.to_string())?;
         q = q.bind(&tags_json);
     }
+    if let Some(v) = &patch.event_id {
+        q = q.bind(v);
+    }
     let affected = q
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?
         .rows_affected();
     if affected == 0 {
         return Err(format!("project {id} does not exist"));
     }
-    Ok(())
+    tx.commit().await.map_err(|e| e.to_string())
 }

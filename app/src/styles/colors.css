@@ -83,6 +83,33 @@
   --color-reference-lecture:    #bd628a;
   --color-reference-lesson:     #388a82;
 
+  /* Task tags: per palette key a dot, a soft tint behind the chip and the
+     chip's text (4.5:1 on the tint). Muted so a row of chips stays quiet. */
+  --color-tag-slate:         #7b8494;
+  --color-tag-slate-soft:    #eceef1;
+  --color-tag-slate-text:    #4b5361;
+  --color-tag-indigo:        #5e6ad2;
+  --color-tag-indigo-soft:   #eceefb;
+  --color-tag-indigo-text:   #444fb0;
+  --color-tag-green:         #3f9b6e;
+  --color-tag-green-soft:    #e5f3ec;
+  --color-tag-green-text:    #276e4c;
+  --color-tag-amber:         #c98a1c;
+  --color-tag-amber-soft:    #f8efdc;
+  --color-tag-amber-text:    #8a5a0c;
+  --color-tag-rose:          #d0586f;
+  --color-tag-rose-soft:     #fae8ec;
+  --color-tag-rose-text:     #a53a52;
+  --color-tag-purple:        #8f63c9;
+  --color-tag-purple-soft:   #f0e9f9;
+  --color-tag-purple-text:   #6b43a6;
+  --color-tag-teal:          #2f9a9a;
+  --color-tag-teal-soft:     #e0f2f1;
+  --color-tag-teal-text:     #1f6f6f;
+  --color-tag-orange:        #d9712f;
+  --color-tag-orange-soft:   #fbeadf;
+  --color-tag-orange-text:   #a4501a;
+
   /* The sidebar shares the ground; the content card's border separates. */
   --color-sidebar:           #f9f9f9;
   --color-sidebar-border:    #e5e5e5;

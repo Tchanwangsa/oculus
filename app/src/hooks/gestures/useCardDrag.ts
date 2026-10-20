@@ -54,8 +54,8 @@ export interface CardDrop {
   index: number;
   /**
    * Item ids either side of the landing slot (`null` at an end), dragged item
-   * excluded — `moveTask` positions by neighbours, see `siblingDropSlot`. They
-   * are in DOM order; a grouped list re-derives them from `index`.
+   * excluded. These are in DOM order; a grouped list resolves its own
+   * neighbours from `index`.
    */
   before: number | null;
   after: number | null;

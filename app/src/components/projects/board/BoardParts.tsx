@@ -6,9 +6,9 @@ import { cn } from "@/lib/utils";
 import { DRAG_SURFACE, type CardDragHandle, type CardDragState } from "@/hooks/gestures/useCardDrag";
 
 /**
- * The chrome `ProjectBoard` and `TasksBoard` share: a column, a draggable card
- * that opens its task, and the lifted copy that rides the pointer. The boards
- * own what goes on a card and what a drop means; the gesture is `useCardDrag`.
+ * The shared task board's chrome: a column, a draggable card
+ * that opens its task, and the lifted copy that rides the pointer. The board
+ * owns what goes on a card and what a drop means; the gesture is `useCardDrag`.
  */
 
 const BOARD_CARD = cn(

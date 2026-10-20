@@ -4,8 +4,7 @@ import { CaretDown } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 
 /**
- * A board card's task title (shared by `ProjectBoard` and `TasksBoard`),
- * folded to three lines with a Show more toggle only when the fold hid
+ * A board card's task title, folded to three lines with a Show more toggle only when the fold hid
  * something. The fold is measured against the rendered height, re-asked by a
  * `ResizeObserver` as the column width changes.
  */
