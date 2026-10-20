@@ -43,13 +43,15 @@ function nearestEdge(rect: DOMRect, x: number, y: number, sides: boolean): Dock 
  * tab whose floor applies; `keepW` is the width the video keeps beside a side
  * dock, below which the dock draws at the bottom. `side` keeps the dock's side
  * in the caller's own state (the Studio page's, so lectures keep theirs); the
- * size and the folded state stay the player's.
+ * size and the folded state stay the player's. `allowSideDock` keeps a split
+ * lecture's dock below the picture without changing its saved side.
  */
 export function useTranscriptDock(
   containerRef: RefObject<HTMLDivElement | null>,
   dockTab: DockTab,
   keepW = KEEP_W,
   side?: DockSide,
+  allowSideDock = true,
 ) {
   const prefDock = usePlayerPrefs((s) => s.dock);
   const dock = side ? side.value : prefDock;
@@ -70,9 +72,10 @@ export function useTranscriptDock(
   );
 
   const startDockDrag = useCallback((e: React.PointerEvent) => {
+    if (!allowSideDock) return;
     if (!capturePress(e)) return;
     drag.current = { x: e.clientX, y: e.clientY, moved: false };
-  }, []);
+  }, [allowSideDock]);
 
   const [area, setArea] = useState({ width: 0, height: 0 });
   useEffect(() => {
@@ -87,7 +90,8 @@ export function useTranscriptDock(
   }, [containerRef]);
 
   // A side dock that doesn't fit draws at the bottom; the preference is kept.
-  const fitsBeside = area.width === 0 || area.width >= minSize(dockTab, false) + keepW;
+  const fitsBeside = allowSideDock &&
+    (area.width === 0 || area.width >= minSize(dockTab, false) + keepW);
   const drawnDock: Dock = fitsBeside ? dock : "bottom";
   const vertical = isVertical(drawnDock);
 

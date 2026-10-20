@@ -12,6 +12,7 @@ import {
   subscribePlaybackOwner,
 } from "@/lib/lectures/playbackOwner";
 import { usePaneTab, useTabActive, useTabId } from "@/components/tabs/TabContext";
+import { useTabStore } from "@/stores/shell/tabStore";
 import { useLectureChapters } from "@/hooks/lectures/useLectureChapters";
 import { useLectureEnd } from "@/hooks/lectures/useLectureEnd";
 import { PIP_CORNERS, useSourceLayout } from "@/hooks/lectures/useSourceLayout";
@@ -49,6 +50,7 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
    *  `tabId` is the pane. */
   const tabId = useTabId();
   const { tabId: stripTab } = usePaneTab();
+  const splitPane = useTabStore((s) => !!s.tabs.find((t) => t.id === stripTab)?.side);
   const onScreen = useTabActive();
   const owner = useSyncExternalStore(subscribePlaybackOwner, playbackOwner);
   const transcriptVisible = usePlayerPrefs((s) => s.transcriptVisible);
@@ -127,6 +129,7 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
     // Echo360's catalogue length, until the file reports its own.
     fallbackDuration: lecture.duration_seconds,
     dockTab,
+    allowSideDock: !splitPane,
     // Captions come from the cues: no transcript, nothing to toggle.
     hasCaptions: !!lecture.transcript_path,
     elsewhere,
