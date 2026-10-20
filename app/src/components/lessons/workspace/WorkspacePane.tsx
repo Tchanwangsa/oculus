@@ -289,7 +289,7 @@ export function WorkspacePane({
         aria-label="Workspace"
         inert={stacked && sideShown}
         className={cn(
-          "flex min-w-0 flex-1 flex-col",
+          "flex min-h-0 min-w-0 flex-1 flex-col",
           !stacked && "border-l border-border-subtle",
           stacked && sideShown && "hidden",
         )}
