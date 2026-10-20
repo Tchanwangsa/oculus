@@ -112,6 +112,9 @@ export function useMentionMenu({
   const [drop, setDrop] = useState<"up" | "down">("down");
   // Guards against a slow lookup overwriting a newer list.
   const latest = useRef("");
+  /** The token Escape closed. The Escape keyup reports the same text, which
+   *  would reopen it; it stays shut until the text or caret leaves it. */
+  const dismissed = useRef<{ query: string; start: number } | null>(null);
 
   useEffect(() => {
     if (!mention) {
@@ -170,8 +173,15 @@ export function useMentionMenu({
    *  selection is live and the menu lands placed in the same commit. `commit`'s
    *  calls report before re-render but never leave a token open to place. */
   function track(text: string, caret: number) {
-    const next = mentionQuery(text, caret);
-    setMention(next);
+    let next = mentionQuery(text, caret);
+    const shut = dismissed.current;
+    if (shut && next && shut.query === next.query && shut.start === next.start) next = null;
+    else dismissed.current = null;
+    // The box reports on every keyup, arrows included. Keeping the same token
+    // keeps the lookup and the highlighted row from resetting.
+    setMention((prev) =>
+      prev && next && prev.query === next.query && prev.start === next.start ? prev : next,
+    );
     setAnchor(next ? measureAnchor(next.query.length + 1) : null);
   }
 
@@ -206,6 +216,7 @@ export function useMentionMenu({
     }
     if (e.key === "Escape") {
       e.preventDefault();
+      dismissed.current = mention;
       close();
     }
   }

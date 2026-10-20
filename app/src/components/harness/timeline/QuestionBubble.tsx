@@ -1,8 +1,11 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowCounterClockwise, CaretDown, PencilSimple, X } from "@phosphor-icons/react";
 import { FileChip } from "@/components/markdown/FileChip";
+import { LinkChip } from "@/components/markdown/LinkChip";
 import { openCitation, splitLibraryPaths } from "@/lib/files/openFile";
 import { attachmentSrc, splitPastedText } from "@/lib/harness/attachments";
+import { parseLink, splitLinks } from "@/lib/harness/links";
+import { openLink } from "@/lib/shell/tabRouters";
 import { ImageLightbox } from "@/components/ui/lightbox/Lightbox";
 import { useDataDir } from "@/hooks/backend/useDataDir";
 import { Button } from "@/components/ui/button";
@@ -170,7 +173,11 @@ export function QuestionBubble({
               style={long && !open ? { maxHeight: QUESTION_MAX_H } : undefined}
             >
               {prose.map((p, i) => {
-                if (p.kind === "text") return p.text;
+                if (p.kind === "text") {
+                  return splitLinks(p.text).map((l, j) =>
+                    l.kind === "text" ? l.text : <LinkChip key={`${i}-${j}`} raw={l.raw} onClick={(newTab) => void openLink(parseLink(l.raw)?.href ?? l.raw, newTab)} />,
+                  );
+                }
                 if (p.kind !== "path") return null;
                 return (
                   <FileChip

@@ -4,6 +4,7 @@ import { ClockCounterClockwise, NotePencil } from "@phosphor-icons/react";
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ProviderMark } from "@/components/icons/ProviderMark";
+import { JumpToLatest } from "@/components/harness/timeline/JumpToLatest";
 import { Timeline } from "@/components/harness/timeline/Timeline";
 import { useThreadActions } from "@/components/harness/threads/useThreadActions";
 import { LectureChatComposer } from "@/components/lectures/LectureChatComposer";
@@ -143,7 +144,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   }, [model, active, store]);
 
   const empty = items.length === 0 && !running;
-  const scroll = useStickToBottom(threadId, !empty);
+  const scroll = useStickToBottom(threadId, !empty, running);
   useScrollFade(scroll.outer, "y", !empty);
   /** Pictures drop anywhere on the panel, not only on the box. */
   const panelRef = useRef<HTMLDivElement>(null);
@@ -239,28 +240,32 @@ export const LectureChatPanel = memo(function LectureChatPanel({
 
       {/* `overflow-x-hidden`: `overflow-y: auto` makes x `auto` too, and one
           wide row would scroll the whole column. See `RowShell`. */}
-      <div ref={scroll.outer} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2">
-        <div ref={scroll.inner} className="min-w-0 py-1">
-          {empty ? (
-            // No suggestion chips: the dock is too narrow.
-            resolved && (
-              <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-                <ProviderMark provider={activeProvider} className="size-5 text-muted-foreground opacity-60" />
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  Ask about this lecture. Each message can carry the moment you are at.
-                </p>
-              </div>
-            )
-          ) : (
-            <Timeline
-              items={items}
-              threadId={threadId}
-              running={running}
-              questions={questions}
-              pending={pending}
-            />
-          )}
+      <div className="relative min-h-0 flex-1">
+        <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-2">
+          <div ref={scroll.inner} className="min-w-0 py-1">
+            {empty ? (
+              // No suggestion chips: the dock is too narrow.
+              resolved && (
+                <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+                  <ProviderMark provider={activeProvider} className="size-5 text-muted-foreground opacity-60" />
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Ask about this lecture. Each message can carry the moment you are at.
+                  </p>
+                </div>
+              )
+            ) : (
+              <Timeline
+                items={items}
+                threadId={threadId}
+                running={running}
+                questions={questions}
+                pending={pending}
+              />
+            )}
+          </div>
         </div>
+
+        <JumpToLatest show={scroll.showJump} onClick={scroll.scrollToBottom} />
       </div>
 
       <div className="shrink-0 px-2 pb-2">
