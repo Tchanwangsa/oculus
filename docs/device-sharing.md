@@ -26,6 +26,11 @@ which stays the only writer of the file. Sharing is off at launch.
 | Settings → Device sharing | `app/src/pages/settings/integrations/DeviceSharingPage.tsx`, `app/src/components/settings/sharing/` |
 | The companion page's build at each dev start | `app/scripts/build-companion.mjs` |
 
+The selected address's link is one compact input group with copy and, on
+macOS, a Share icon that opens the system share sheet. The sheet's destination
+picker and dismissal are managed by AppKit; the canvas dialog remains open
+behind it.
+
 ## The server runs only while something is shared
 
 `companion_share_start(fileId)` needs the canvas's authority session to be

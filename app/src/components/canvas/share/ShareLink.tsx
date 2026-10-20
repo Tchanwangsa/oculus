@@ -16,17 +16,21 @@ export function ShareLink({ link }: { link: string }) {
   }, [copied]);
   const copy = async () => setCopied((await copyText(link)) ? "copied" : "failed");
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <input
-        readOnly value={link} aria-label="Share link" spellCheck={false}
-        onFocus={(event) => event.currentTarget.select()}
-        className="h-8 min-w-40 flex-1 truncate rounded-md border border-border bg-transparent px-2.5 text-xs text-foreground outline-none select-text focus-visible:ring-[3px] focus-visible:ring-ring/50"
-      />
-      <Button size="sm" variant="outline" onClick={() => void copy()} aria-live="polite">
-        {copied === "copied" ? <CheckIcon /> : <CopyIcon />}
-        {copied === "copied" ? "Copied" : copied === "failed" ? "Copy failed" : "Copy link"}
-      </Button>
-      <NativeShareButton link={link} />
+    <div className="relative min-w-0 flex-1">
+      <div className="flex h-9 min-w-0 items-center overflow-hidden rounded-lg border border-input bg-card shadow-xs focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25">
+        <input
+          readOnly value={link} aria-label="Share link" spellCheck={false}
+          onFocus={(event) => event.currentTarget.select()}
+          className="h-full min-w-0 flex-1 bg-transparent px-3 text-xs text-foreground outline-none select-text"
+        />
+        <Button size="icon-sm" variant="ghost" onClick={() => void copy()} aria-live="polite"
+          aria-label={copied === "copied" ? "Link copied" : copied === "failed" ? "Copy failed" : "Copy link"}
+          title={copied === "copied" ? "Copied" : copied === "failed" ? "Copy failed" : "Copy link"}
+          className="rounded-none border-l border-border-subtle text-muted-foreground">
+          {copied === "copied" ? <CheckIcon /> : <CopyIcon />}
+        </Button>
+        <NativeShareButton link={link} />
+      </div>
     </div>
   );
 }
