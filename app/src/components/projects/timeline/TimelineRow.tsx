@@ -5,7 +5,7 @@ import { fmtClock, sqliteUtcToMs } from "@/lib/format/format";
 import { packLanes } from "@/lib/planning/lanes";
 import type { DbProject, DbProjectTask } from "@/lib/planning/projects";
 import { SubtaskToggle, TaskGlyph } from "../tasks/TaskMarks";
-import { columnOf } from "../tasks/taskTree";
+import { taskVariant } from "../tasks/columnVariant";
 import { BAR_PX, NAME_PX, ROW_PX, SUB_BAR_PX, SUB_ROW_PX } from "./geometry";
 import { laneSpan, type Row } from "./place";
 
@@ -58,7 +58,7 @@ export function TimelineRow({
       >
         <SubtaskToggle expandable={row.depth === 0 && row.expandable} expanded={expanded} onToggle={onToggle} />
         <TaskGlyph
-          kind={columnOf(project, row.task.column_id)?.kind ?? null}
+          variant={taskVariant(project, row.task.column_id)}
           size={row.depth === 0 ? 12 : 10}
         />
         <span

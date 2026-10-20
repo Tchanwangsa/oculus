@@ -7,6 +7,7 @@ use crate::*;
 pub(crate) enum ProjectAction {
     List(ProjectListArgs),
     Show(ProjectShowArgs),
+    Events(ProjectEventsArgs),
     Create(ProjectCreateArgs),
     Update(ProjectUpdateArgs),
 }
@@ -41,6 +42,17 @@ pub(crate) struct ProjectShowArgs {
     pub(crate) id: i64,
 }
 
+/// List calendar events that a project can link to, including past events.
+///
+/// Includes Canvas events, personal calendar notes and fallback lectures, with
+/// the same ids the app uses. Tasks are excluded. Pass an id to --event.
+#[derive(Args)]
+pub(crate) struct ProjectEventsArgs {
+    /// Only this subject's events; omit for every subject and personal events
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    pub(crate) subject: Option<String>,
+}
+
 /// Create a project.
 ///
 /// It opens with the app's default board — `backlog`, `todo`, `doing`, `done`
@@ -64,15 +76,21 @@ pub(crate) struct ProjectCreateArgs {
     /// When work on it starts, ISO 8601
     #[arg(long, value_name = "ISO")]
     pub(crate) starts: Option<String>,
-    /// A paragraph of what it is — the assignment brief, the plan
-    #[arg(long, value_name = "TEXT")]
+    /// Markdown About text; use --brief-file for multiple lines
+    #[arg(long, value_name = "TEXT", conflicts_with = "brief_file")]
     pub(crate) brief: Option<String>,
+    /// Read Markdown About text from a UTF-8 file, or - for stdin
+    #[arg(long, value_name = "FILE")]
+    pub(crate) brief_file: Option<String>,
+    /// Link a calendar event by the id printed by project events
+    #[arg(long, value_name = "ID")]
+    pub(crate) event: Option<String>,
     /// Comma-separated labels for the About page (report,group,week-5)
     #[arg(long, value_name = "TAGS")]
     pub(crate) tags: Option<String>,
 }
 
-/// Change a project's name, dates, brief, tags or status.
+/// Change a project's name, subject, dates, brief, tags, calendar link or status.
 ///
 /// Only the flags you pass are written; everything else is left alone. Pass an
 /// **empty string** to clear a field: `--due ""` takes the due date off.
@@ -87,6 +105,17 @@ pub(crate) struct ProjectUpdateArgs {
     /// Rename it
     #[arg(long, value_name = "NAME")]
     pub(crate) name: Option<String>,
+    /// Move the project to this subject; its tasks follow
+    #[arg(
+        short = 's',
+        long,
+        value_name = "SUBJECT_CODE",
+        conflicts_with = "personal"
+    )]
+    pub(crate) subject: Option<String>,
+    /// Make the project personal (clear its subject)
+    #[arg(long)]
+    pub(crate) personal: bool,
     /// Due date, ISO 8601, or "" to clear
     #[arg(long, value_name = "ISO")]
     pub(crate) due: Option<String>,
@@ -94,8 +123,14 @@ pub(crate) struct ProjectUpdateArgs {
     #[arg(long, value_name = "ISO")]
     pub(crate) starts: Option<String>,
     /// Replace the brief, or "" to clear it
-    #[arg(long, value_name = "TEXT")]
+    #[arg(long, value_name = "TEXT", conflicts_with = "brief_file")]
     pub(crate) brief: Option<String>,
+    /// Read Markdown About text from a UTF-8 file, or - for stdin; empty clears
+    #[arg(long, value_name = "FILE")]
+    pub(crate) brief_file: Option<String>,
+    /// Link a calendar event (project events lists ids), or "" to unlink
+    #[arg(long, value_name = "ID")]
+    pub(crate) event: Option<String>,
     /// active or archived
     #[arg(long, value_parser = ["active", "archived"])]
     pub(crate) status: Option<String>,
@@ -107,13 +142,31 @@ pub(crate) struct ProjectUpdateArgs {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum TagAction {
+    List(TagListArgs),
+    Add(TagAddArgs),
+    Rm(TagRmArgs),
+    Rename(TagRenameArgs),
+    Color(TagColorArgs),
+}
+
+#[derive(Subcommand)]
 pub(crate) enum TaskAction {
     List(TaskListArgs),
+    Show(TaskShowArgs),
     Add(TaskAddArgs),
     Update(TaskUpdateArgs),
     Move(TaskMoveArgs),
     Refile(TaskRefileArgs),
     Rm(TaskRmArgs),
+}
+
+/// Show a task's full Markdown notes, properties, subtasks and related files.
+#[derive(Args)]
+pub(crate) struct TaskShowArgs {
+    /// Task id
+    #[arg(value_name = "ID")]
+    pub(crate) id: i64,
 }
 
 /// List tasks — one project's, or every task there is.
@@ -125,6 +178,10 @@ pub(crate) enum TaskAction {
 /// belong to none, printed as one board per project under its name, with the
 /// unfiled ones first. `--unfiled` lists only those: the pile with no board of
 /// its own, which is the one that needs looking at.
+///
+/// A task's tags follow its title as `#Name`, then its due date, estimate and
+/// how many library files are attached (`2 files`). `--tag` keeps only the
+/// tasks carrying one tag.
 #[derive(Args)]
 pub(crate) struct TaskListArgs {
     /// Which project (omit for every task in the library)
@@ -141,6 +198,9 @@ pub(crate) struct TaskListArgs {
     /// pass the same shape the dates were written in (UTC, usually).
     #[arg(long, value_name = "ISO")]
     pub(crate) due_before: Option<String>,
+    /// Only tasks with this tag (its name, any case; `oculus tag list` has them)
+    #[arg(long, value_name = "NAME")]
+    pub(crate) tag: Option<String>,
 }
 
 /// Add one task, or a whole breakdown in one call.
@@ -162,6 +222,12 @@ pub(crate) struct TaskListArgs {
 /// `--parent` makes the task a subtask. Subtasks are one level deep: a subtask
 /// cannot itself be given children.
 ///
+/// `--tags "Assignment,Exam"` tags it by name, ignoring case; a name the
+/// registry (`oculus tag list`) lacks is created on the spot in the default
+/// colour. `--file PATH` (repeatable) attaches a library file by the path
+/// `oculus files` prints; a path that matches no file, or more than one, is
+/// refused.
+///
 /// BREAKDOWNS: `--batch -` reads a JSON array of tasks from stdin (or a file,
 /// `--batch tasks.json`) and writes them in one call — use it for anything
 /// past two or three:
@@ -170,7 +236,8 @@ pub(crate) struct TaskListArgs {
 ///   {"title":"Outline","key":"outline"}, {"title":"Draft intro","parent":"outline"}]
 ///
 /// Per task: `title` (required), `column`, `body`, `due`, `starts`,
-/// `estimate` (minutes), `parent`, `key`. `parent` is either an existing
+/// `estimate` (minutes), `tags` (an array of tag names), `files` (an array of
+/// library paths), `parent`, `key`. `parent` is either an existing
 /// task's id (a number) or the `key` of an **earlier task in the same batch**,
 /// which is how a parent and its subtasks go in together. `key` is never
 /// stored. An unknown field is an error rather than a silent no-op.
@@ -204,18 +271,33 @@ pub(crate) struct TaskAddArgs {
     /// How long you think it will take, in minutes
     #[arg(long, value_name = "MIN")]
     pub(crate) estimate: Option<i64>,
-    /// Notes on the task
-    #[arg(long, value_name = "TEXT")]
+    /// Markdown notes; use --body-file for multiple lines
+    #[arg(long, value_name = "TEXT", conflicts_with = "body_file")]
     pub(crate) body: Option<String>,
+    /// Read Markdown notes from a UTF-8 file, or - for stdin
+    #[arg(long, value_name = "FILE")]
+    pub(crate) body_file: Option<String>,
+    /// Comma-separated tag names (Assignment,Exam); new names are created
+    #[arg(long, value_name = "NAMES")]
+    pub(crate) tags: Option<String>,
+    /// Attach a library file by its relative path; repeat for several
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: Vec<String>,
     /// Read a JSON array of tasks from stdin (-) or a file
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["title", "column", "parent", "due", "starts", "estimate", "body"])]
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["title", "column", "parent", "due", "starts", "estimate", "body", "body_file", "tags", "file"])]
     pub(crate) batch: Option<String>,
 }
 
-/// Change a task's title, notes, dates or estimate.
+/// Change a task's title, notes, dates, estimate, tags or attached files.
 ///
 /// Only the flags you pass are written. Pass an **empty string** to clear a
-/// field: `--due ""`, `--estimate ""`.
+/// field: `--due ""`, `--estimate ""`, `--tags ""`.
+///
+/// `--tags "A,B"` **replaces** the whole tag set (names, any case; unknown
+/// ones are created). `--attach PATH` and `--detach PATH` add or remove one
+/// library file by the path `oculus files` prints, and may be repeated;
+/// attaching a file already attached, or detaching one that is not, changes
+/// nothing.
 ///
 /// Where a task *sits* is not here: column, order and done-ness are one fact,
 /// and `oculus task move` is their only writer — it is the command that reads
@@ -229,8 +311,11 @@ pub(crate) struct TaskUpdateArgs {
     #[arg(long, value_name = "TEXT")]
     pub(crate) title: Option<String>,
     /// Replace the notes, or "" to clear
-    #[arg(long, value_name = "TEXT")]
+    #[arg(long, value_name = "TEXT", conflicts_with = "body_file")]
     pub(crate) body: Option<String>,
+    /// Read Markdown notes from a UTF-8 file, or - for stdin; empty clears
+    #[arg(long, value_name = "FILE")]
+    pub(crate) body_file: Option<String>,
     /// Due date, ISO 8601, or "" to clear
     #[arg(long, value_name = "ISO")]
     pub(crate) due: Option<String>,
@@ -240,6 +325,15 @@ pub(crate) struct TaskUpdateArgs {
     /// Minutes, or "" to clear
     #[arg(long, value_name = "MIN")]
     pub(crate) estimate: Option<String>,
+    /// Replace every tag with this comma-separated list of names, or "" to clear them
+    #[arg(long, value_name = "NAMES")]
+    pub(crate) tags: Option<String>,
+    /// Attach a library file by its relative path; repeat for several
+    #[arg(long, value_name = "PATH")]
+    pub(crate) attach: Vec<String>,
+    /// Detach a library file by its relative path; repeat for several
+    #[arg(long, value_name = "PATH")]
+    pub(crate) detach: Vec<String>,
 }
 
 /// Move a task to another column, or reorder it within one.
@@ -306,4 +400,66 @@ pub(crate) struct TaskRmArgs {
     /// Task id
     #[arg(value_name = "ID")]
     pub(crate) id: i64,
+}
+
+/// List the tags a task can carry.
+///
+/// One registry shared by every task, in the order the app shows it: id, name,
+/// colour, and how many tasks carry it. The names are what `oculus task add
+/// --tags` and `oculus task list --tag` take.
+#[derive(Args)]
+pub(crate) struct TagListArgs {}
+
+/// Add a tag to the registry.
+///
+/// A name that matches an existing tag, ignoring case, changes nothing and
+/// reports that tag. Names are at most 40 characters. `--color` is a palette
+/// key: slate (the default), indigo, green, amber, rose, purple, teal or
+/// orange. A task is tagged with `oculus task add --tags` or `oculus task
+/// update --tags`, which create missing tags themselves.
+#[derive(Args)]
+pub(crate) struct TagAddArgs {
+    /// What the tag is called
+    #[arg(value_name = "NAME")]
+    pub(crate) name: String,
+    /// Palette key: slate, indigo, green, amber, rose, purple, teal or orange
+    #[arg(long, value_name = "KEY")]
+    pub(crate) color: Option<String>,
+}
+
+/// Delete a tag, taking it off every task that carries it.
+///
+/// There is no undo; the tasks stay and only lose the tag.
+#[derive(Args)]
+pub(crate) struct TagRmArgs {
+    /// The tag's name, any case
+    #[arg(value_name = "NAME")]
+    pub(crate) name: String,
+}
+
+/// Rename a tag everywhere.
+///
+/// Refused when another tag already has the new name, ignoring case.
+#[derive(Args)]
+pub(crate) struct TagRenameArgs {
+    /// The tag's current name, any case
+    #[arg(value_name = "OLD")]
+    pub(crate) old: String,
+    /// Its new name
+    #[arg(value_name = "NEW")]
+    pub(crate) new: String,
+}
+
+/// Recolour a tag.
+///
+/// KEY is a palette key: slate, indigo, green, amber, rose, purple, teal or
+/// orange.
+#[derive(Args)]
+pub(crate) struct TagColorArgs {
+    /// The tag's name, any case
+    #[arg(value_name = "NAME")]
+    pub(crate) name: String,
+    /// Palette key: slate, indigo, green, amber, rose, purple, teal or orange
+    #[arg(value_name = "KEY")]
+    pub(crate) key: String,
 }

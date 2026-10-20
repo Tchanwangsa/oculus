@@ -1,6 +1,6 @@
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
-use super::rows::{to_project, to_task, Project, Task, PROJECT_SELECT};
+use super::rows::{to_project, to_task, Project, Task, PROJECT_SELECT, TASK_SELECT};
 
 /// `Personal` is `subject_id IS NULL`.
 pub enum SubjectFilter {
@@ -59,9 +59,9 @@ pub(super) async fn project_on(
 /// Every task of one project in `position` order. Not ordered by `column_id`
 /// (that is alphabetical); the board's order is `columns` and the caller groups.
 pub async fn tasks(pool: &SqlitePool, project_id: i64) -> Result<Vec<Task>, String> {
-    let rows = sqlx::query(
-        "SELECT * FROM project_tasks WHERE project_id = ?1 ORDER BY position ASC, id ASC",
-    )
+    let rows = sqlx::query(&format!(
+        "{TASK_SELECT} WHERE t.project_id = ?1 ORDER BY t.position ASC, t.id ASC"
+    ))
     .bind(project_id)
     .fetch_all(pool)
     .await
@@ -81,11 +81,11 @@ pub enum TaskScope {
 pub async fn all_tasks(pool: &SqlitePool, scope: TaskScope) -> Result<Vec<Task>, String> {
     let filter = match scope {
         TaskScope::All => "",
-        TaskScope::Unfiled => " WHERE project_id IS NULL",
+        TaskScope::Unfiled => " WHERE t.project_id IS NULL",
     };
     let rows = sqlx::query(&format!(
-        "SELECT * FROM project_tasks{filter}
-          ORDER BY project_id IS NOT NULL, project_id ASC, position ASC, id ASC"
+        "{TASK_SELECT}{filter}
+          ORDER BY t.project_id IS NOT NULL, t.project_id ASC, t.position ASC, t.id ASC"
     ))
     .fetch_all(pool)
     .await

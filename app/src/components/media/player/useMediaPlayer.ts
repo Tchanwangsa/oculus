@@ -25,6 +25,8 @@ export interface MediaPlayerOptions {
   dockKeepWidth?: number;
   /** The dock's side, when the caller keeps it rather than the shared prefs. */
   dockSide?: DockSide;
+  /** Side docks draw at the bottom while false; fullscreen keeps the saved side. */
+  allowSideDock?: boolean;
   /** C has something to show. */
   hasCaptions: boolean;
   /** On screen while another pane plays this recording: Space calls
@@ -45,6 +47,7 @@ export function useMediaPlayer({
   dockTab,
   dockKeepWidth,
   dockSide,
+  allowSideDock = true,
   hasCaptions,
   elsewhere = false,
   onClaim,
@@ -87,7 +90,10 @@ export function useMediaPlayer({
   const claimRef = useRef(onClaim);
   claimRef.current = onClaim;
 
-  const dock = useTranscriptDock(containerRef, dockTab, dockKeepWidth, dockSide);
+  const { isFullscreen, isFullscreenRef, toggleFullscreen } = useFullscreen();
+  const dock = useTranscriptDock(
+    containerRef, dockTab, dockKeepWidth, dockSide, allowSideDock || isFullscreen,
+  );
 
   // Reset per recording; where playback resumes is the caller's call.
   useEffect(() => {
@@ -105,7 +111,6 @@ export function useMediaPlayer({
 
   const { controlsVisible, revealControls, onPanelOpenChange, holds } =
     useControlsVisibility(isPlaying, videoRef);
-  const { isFullscreen, isFullscreenRef, toggleFullscreen } = useFullscreen();
   useKeyboardShortcuts({
     focused,
     toggleFullscreen,

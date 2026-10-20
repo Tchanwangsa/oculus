@@ -45,7 +45,7 @@ export function ProjectTimeline({
       return next;
     });
 
-  // Backlog tasks (and their subtasks) are uncommitted, so not scheduled.
+  // Planning tasks (and their subtasks) are uncommitted, so not scheduled.
   const onBoard = useMemo(
     () => nodes.filter((n) => columnOf(project, n.task.column_id)?.kind !== "backlog"),
     [nodes, project],

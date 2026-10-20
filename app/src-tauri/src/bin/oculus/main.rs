@@ -70,16 +70,25 @@ fn main() {
         Some(Command::Project { action }) => match action {
             ProjectAction::List(a) => ctx.project_list(&a),
             ProjectAction::Show(a) => ctx.project_show(&a),
+            ProjectAction::Events(a) => ctx.project_events(&a),
             ProjectAction::Create(a) => ctx.project_create(&a),
             ProjectAction::Update(a) => ctx.project_update(&a),
         },
         Some(Command::Task { action }) => match action {
             TaskAction::List(a) => ctx.task_list(&a),
+            TaskAction::Show(a) => ctx.task_show(&a),
             TaskAction::Add(a) => ctx.task_add(&a),
             TaskAction::Update(a) => ctx.task_update(&a),
             TaskAction::Move(a) => ctx.task_move(&a),
             TaskAction::Refile(a) => ctx.task_refile(&a),
             TaskAction::Rm(a) => ctx.task_rm(&a),
+        },
+        Some(Command::Tag { action }) => match action {
+            TagAction::List(a) => ctx.tag_list(&a),
+            TagAction::Add(a) => ctx.tag_add(&a),
+            TagAction::Rm(a) => ctx.tag_rm(&a),
+            TagAction::Rename(a) => ctx.tag_rename(&a),
+            TagAction::Color(a) => ctx.tag_color(&a),
         },
         Some(Command::Lecture { action }) => match action {
             LectureAction::Candidates(a) => ctx.lecture_candidates(&a),

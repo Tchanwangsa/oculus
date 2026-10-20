@@ -4,7 +4,8 @@ import ReactDOM from "react-dom/client";
 import "./lib/platform/tauriEvents";
 import "./index.css";
 import App from "./App";
-import { loadIconCatalogue } from "./components/subjects/SubjectIcon";
+import { loadIconCatalogue } from "./components/ui/icon/CatalogueIcon";
+import { useProjectIconStore } from "./stores/planning/projectIconStore";
 import { useSubjectIconStore } from "./stores/planning/subjectIconStore";
 import { watchMathSelect, watchMathSelection } from "./lib/markdown/mathSelection";
 import { loadMaths } from "./lib/maths";
@@ -63,9 +64,9 @@ function render() {
   );
 }
 
-// A stored custom glyph would first paint as a Book, so its catalogue loads
+// A stored custom glyph needs its catalogue ready
 // before the first render. The store hydrates from localStorage synchronously;
 // without a custom icon the catalogue stays off the startup path.
-const customIcon = Object.values(useSubjectIconStore.getState().prefs).some((p) => p.icon);
+const customIcon = [...Object.values(useSubjectIconStore.getState().prefs), ...Object.values(useProjectIconStore.getState().prefs)].some(p => p.icon);
 if (customIcon) void loadIconCatalogue().catch(() => {}).finally(render);
 else render();

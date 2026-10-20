@@ -17,7 +17,7 @@ pub struct Column {
 /// The frontend's `DEFAULT_COLUMNS`; also the board of an unfiled task.
 pub fn default_columns() -> Vec<Column> {
     [
-        ("backlog", "Backlog", "backlog"),
+        ("backlog", "Planning", "backlog"),
         ("todo", "Todo", "active"),
         ("doing", "In progress", "active"),
         ("done", "Done", "done"),

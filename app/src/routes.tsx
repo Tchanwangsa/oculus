@@ -5,8 +5,10 @@ import { RouteError } from "@/components/ErrorBoundary";
 import SubjectLayout from "@/layouts/SubjectLayout";
 import SettingsLayout from "@/layouts/SettingsLayout";
 import StudioLayout from "@/layouts/StudioLayout";
+import TasksLayout from "@/layouts/TasksLayout";
 import HomePage from "@/pages/start/HomePage";
 import NewTabPage from "@/pages/start/NewTabPage";
+import SubjectTasksRedirect from "@/pages/work/SubjectTasksRedirect";
 import SubjectsRedirect from "@/pages/start/SubjectsRedirect";
 
 /** Paths stay synchronous for matching and ⌘-click; page modules load only
@@ -34,15 +36,23 @@ export const routes: RouteObject[] = [
       { path: "new", element: <NewTabPage /> },
       { path: "chat", lazy: page(() => import("@/pages/tools/ChatPage")) },
       { path: "calendar", lazy: page(() => import("@/pages/tools/CalendarPage")) },
-      { path: "projects", lazy: page(() => import("@/pages/work/ProjectsIndexPage")) },
-      { path: "projects/:projectId", lazy: page(() => import("@/pages/work/ProjectPage")) },
-      // Nested under the project, whose columns define its statuses.
-      { path: "projects/:projectId/tasks/:taskId", lazy: page(() => import("@/pages/work/TaskPage")) },
-      { path: "tasks", lazy: page(() => import("@/pages/work/TasksPage")) },
-      // An unfiled task: same page, with a null project and the default board.
-      { path: "tasks/:taskId", lazy: page(() => import("@/pages/work/TaskPage")) },
+      {
+        // One nav column beside the projects and tasks pages.
+        element: <TasksLayout />,
+        children: [
+          { path: "projects", lazy: page(() => import("@/pages/work/ProjectsIndexPage")) },
+          { path: "projects/:projectId", lazy: page(() => import("@/pages/work/ProjectPage")) },
+          // Nested under the project, whose columns define its statuses.
+          { path: "projects/:projectId/tasks/:taskId", lazy: page(() => import("@/pages/work/TaskPage")) },
+          { path: "tasks", lazy: page(() => import("@/pages/work/TasksPage")) },
+          // An unfiled task: same page, with a null project and the default board.
+          { path: "tasks/:taskId", lazy: page(() => import("@/pages/work/TaskPage")) },
+        ],
+      },
       // No page: reopens the last subject (SubjectsRedirect).
       { path: "subjects", element: <SubjectsRedirect /> },
+      { path: "subjects/:subjectId/projects", element: <SubjectTasksRedirect /> },
+      { path: "subjects/:subjectId/tasks", element: <SubjectTasksRedirect /> },
       // A file or lecture as a whole page (a tab, or the side panel), outside
       // SubjectLayout's tabs.
       { path: "subjects/:subjectId/file", lazy: page(() => import("@/pages/subject/files/FilePage")) },
@@ -74,7 +84,6 @@ export const routes: RouteObject[] = [
           { path: "assignments", lazy: page(() => import("@/pages/subject/content/AssignmentsPage")) },
           { path: "discussion", lazy: page(() => import("@/pages/subject/content/DiscussionPage")) },
           { path: "lessons", lazy: page(() => import("@/pages/subject/content/LessonsPage")) },
-          { path: "projects", lazy: page(() => import("@/pages/work/ProjectsPage")) },
           // Legacy paths that restored tabs and Recent entries may carry.
           { path: "downloads", element: <Navigate to="../files/downloads" replace /> },
           { path: "uploads", element: <Navigate to="../files/uploads" replace /> },

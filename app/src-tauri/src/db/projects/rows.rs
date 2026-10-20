@@ -17,8 +17,7 @@ pub struct Project {
     pub columns: Vec<Column>,
     /// Parsed from JSON; `[]` when untagged, never null.
     pub tags: Vec<String>,
-    /// A `CalEvent.id` (`app/src/lib/planning/calendar/`). Read-only here: pinning is
-    /// the app's.
+    /// A non-task `CalEvent.id` (`app/src/lib/planning/calendar/`).
     pub event_id: Option<String>,
     pub position: f64,
     pub source: String,
@@ -43,7 +42,26 @@ pub struct Task {
     pub source: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Effective registry ids: own links, or project tags when there are no links.
+    pub tag_ids: Vec<i64>,
+    /// How many library files are attached (`task_files`).
+    pub file_count: i64,
 }
+
+/// Every read that builds a {@link Task} selects through this, so the tags and the
+/// file count are gathered in one place. Callers filter on the `t` alias.
+pub(super) const TASK_SELECT: &str = r#"SELECT t.id, t.project_id, t.parent_id, t.title, t.body,
+       t.column_id, t.position, t.starts_at, t.due_at, t.estimate_minutes, t.done_at,
+       t.source, t.created_at, t.updated_at,
+       (SELECT json_group_array(tag_id) FROM (
+          SELECT g.id AS tag_id FROM task_tags g
+           WHERE g.id IN (SELECT l.tag_id FROM task_tag_links l WHERE l.task_id = t.id)
+              OR (NOT EXISTS (SELECT 1 FROM task_tag_links l WHERE l.task_id = t.id)
+                  AND g.name COLLATE NOCASE IN (
+                    SELECT j.value FROM projects p, json_each(p.tags) j WHERE p.id = t.project_id))
+           ORDER BY g.position ASC, g.id ASC)) AS tag_ids,
+       (SELECT COUNT(*) FROM task_files f WHERE f.task_id = t.id) AS file_count
+  FROM project_tasks t"#;
 
 pub(super) const PROJECT_SELECT: &str = r#"SELECT p.id, p.subject_id, s.code AS subject_code, p.name, p.brief,
        p.status, p.starts_at, p.due_at, p.columns, p.tags, p.event_id, p.position,
@@ -118,5 +136,7 @@ pub(super) fn to_task(r: &sqlx::sqlite::SqliteRow) -> Task {
         source: r.get("source"),
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
+        tag_ids: serde_json::from_str(&r.get::<String, _>("tag_ids")).unwrap_or_default(),
+        file_count: r.get("file_count"),
     }
 }

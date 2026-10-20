@@ -1,268 +1,171 @@
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowElbowDownRight, CaretDown, CaretUp } from "@phosphor-icons/react";
-import { cn } from "@/lib/utils";
-import { usePagedRows } from "@/components/ui/table/TablePagination";
+import { TableGroup } from "@/components/ui/table/TableGroup";
+import { TaskTableHeaders } from "./TaskTableHeaders";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { GridTable } from "@/components/ui/table/GridTable";
-import { sqliteUtcToMs } from "@/lib/format/format";
-import type { DbProject, DbTaskWithProject } from "@/lib/planning/projects";
-import { ProjectPicker } from "../nav/ProjectPicker";
-import { StatusPill } from "../board/StatusPill";
-import { taskHref } from "../nav/taskHref";
-import { AgentMark, DueChip, TaskGlyph, TaskSubject } from "../tasks/TaskMarks";
-import {
-  UNIVERSAL_COLUMNS,
-  projectLabel,
-  projectOf,
-  universalColumnOf,
-} from "../tasks/universalTasks";
+import type { DbProject, DbTaskTag, DbTaskWithProject, ProjectColumn } from "@/lib/planning/projects";
+import { type TasksDisplay } from "../display/settings";
+import { TagDot } from "../tags/TagDot";
+import { subtaskProgress, taskTree } from "../tasks/taskTree";
+import { groupTasks, type TaskGroup } from "../tasks/taskGroups";
+import type { TaskSort } from "../tasks/taskSort";
+import { columnVariant } from "../tasks/columnVariant";
+import { TaskGlyph } from "../tasks/TaskMarks";
+import { UNIVERSAL_COLUMNS } from "../tasks/universalTasks";
+import type { CellActions } from "./TaskCells";
+import { TaskRow } from "./TaskRow";
+import { columnIds, gridTemplate, tableMinWidth } from "./tasksColumns";
 
 /**
- * Every task in the library as one flat `GridTable`. Sortable, not
- * drag-reorderable: `position` only compares within one project's column
- * (`../tasks/universalTasks.ts`). Subtasks are flat rows marked with their parent.
- * Status and Project cells write; a subtask's Project is text, since
- * `refileTask` won't move one alone.
+ * Every task in the library as one `GridTable` whose columns follow the
+ * Display settings: Name, then the shown properties. Rows arrive filtered and
+ * sorted; this groups them if asked. Not drag-reorderable — `position` only
+ * compares within one project's column (`../tasks/universalTasks.ts`).
+ * Subtasks can be flat rows or nested under their visible parent. A child
+ * whose parent is filtered out stays visible as a top-level row.
  */
 
-const COLS =
-  "grid grid-cols-[28px_minmax(0,1fr)_150px_110px_130px_120px] items-center gap-3 px-5";
-
-const PAGE_SIZE = 25;
-
-type SortKey = "title" | "project" | "subject" | "status" | "due";
-
-interface Sort {
-  key: SortKey;
-  dir: "asc" | "desc";
-}
-
-const HEADERS: ReadonlyArray<{ key: SortKey | null; label: string }> = [
-  { key: null, label: "" },
-  { key: "title", label: "Title" },
-  { key: "project", label: "Project" },
-  { key: "subject", label: "Subject" },
-  { key: "status", label: "Status" },
-  { key: "due", label: "Due" },
-];
-
-/** `UNIVERSAL_ORDER` from `app/src/lib/planning/projects/reads.ts`, mirrored by hand — keep
- *  the two in step. The tiebreak under every sort; Due ascending reproduces
- *  the arrival order. */
-function defaultCmp(a: DbTaskWithProject, b: DbTaskWithProject): number {
-  const due = dueCmp(a, b);
-  if (due !== 0) return due;
-  // Unfiled first.
-  if ((a.project_id == null) !== (b.project_id == null)) return a.project_id == null ? -1 : 1;
-  if (a.project_id != null && b.project_id != null && a.project_id !== b.project_id) {
-    return a.project_id - b.project_id;
-  }
-  return a.position - b.position || a.id - b.id;
-}
-
-/** Undated last. Parsed, not string-compared: `due_at` is ISO from the UI or
- *  SQLite's "YYYY-MM-DD HH:MM:SS" from the CLI, which don't sort together. */
-function dueCmp(a: DbTaskWithProject, b: DbTaskWithProject): number {
-  const am = sqliteUtcToMs(a.due_at);
-  const bm = sqliteUtcToMs(b.due_at);
-  if (am == null || bm == null) return am == null ? (bm == null ? 0 : 1) : -1;
-  return am - bm;
-}
+const COLS = "grid items-center gap-3 px-5";
 
 export function TasksTable({
   tasks,
+  allTasks = tasks,
   projects,
   projectById,
+  tags,
+  tagById,
+  display,
+  onSort,
   empty,
-  onMove,
-  onRefile,
+  actions,
+  footer,
+  statusColumns = UNIVERSAL_COLUMNS,
 }: {
   tasks: DbTaskWithProject[];
+  footer?: ReactNode;
+  statusColumns?: readonly ProjectColumn[];
+  /** Unfiltered tasks, so hidden completed children still count as progress. */
+  allTasks?: DbTaskWithProject[];
   /** Archived included; `projectById` is the same list keyed by id. */
   projects: DbProject[];
   projectById: Map<number, DbProject>;
-  empty: string;
-  /** A column id from the task's own board. */
-  onMove: (task: DbTaskWithProject, columnId: string) => void;
-  /** `null` unfiles. Top-level tasks only. */
-  onRefile: (task: DbTaskWithProject, projectId: number | null) => void;
+  tags: DbTaskTag[];
+  tagById: Map<number, DbTaskTag>;
+  display: TasksDisplay;
+  /** A click on a sortable header. */
+  onSort: (sort: TaskSort) => void;
+  empty: string | false;
+  actions: CellActions;
 }) {
-  const [sort, setSort] = useState<Sort>({ key: "due", dir: "asc" });
+  const columns = useMemo(() => columnIds(display.properties), [display.properties]);
+  const colsStyle = useMemo<CSSProperties>(() => ({ gridTemplateColumns: gridTemplate(columns) }), [columns]);
 
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+  // One clock per pass, so "Today" and "overdue" agree across rows.
+  const now = useMemo(() => new Date(), [tasks]);
 
-  const sorted = useMemo(() => {
-    const keyCmp = (a: DbTaskWithProject, b: DbTaskWithProject): number => {
-      switch (sort.key) {
-        case "title":
-          return a.title.localeCompare(b.title);
-        // By the cell's text, so "Unfiled" sorts among the names.
-        case "project":
-          return projectLabel(a).localeCompare(projectLabel(b));
-        // By code, so subject-less rows (Personal and unfiled) group.
-        case "subject":
-          return (a.project_subject_code ?? "").localeCompare(b.project_subject_code ?? "");
-        // By board column order — not by name, and not by kind (Todo and In
-        // progress share a kind but are separate columns).
-        case "status":
-          return (
-            UNIVERSAL_COLUMNS.indexOf(universalColumnOf(a, projectById)) -
-            UNIVERSAL_COLUMNS.indexOf(universalColumnOf(b, projectById))
-          );
-        case "due":
-          return dueCmp(a, b);
-      }
-    };
-    const rows = [...tasks];
-    rows.sort((a, b) => {
-      // Undated stays last in both directions.
-      if (sort.key === "due") {
-        const am = a.due_at == null;
-        const bm = b.due_at == null;
-        if (am !== bm) return am ? 1 : -1;
-      }
-      const k = keyCmp(a, b);
-      if (k !== 0) return sort.dir === "asc" ? k : -k;
-      return defaultCmp(a, b);
+  const progressById = useMemo(() => new Map(taskTree(allTasks).map((node) => [node.task.id, subtaskProgress(node)])), [allTasks]);
+  const nodes = useMemo(() => taskTree(tasks), [tasks]);
+  const nodeById = useMemo(() => new Map(nodes.map((n) => [n.task.id, n])), [nodes]);
+  const [foldedParents, setFoldedParents] = useState<ReadonlySet<number>>(new Set());
+
+  const groups = useMemo(
+    () =>
+      display.group === "none"
+        ? null
+        : groupTasks(display.groupSubtasks ? nodes.map((n) => n.task) : tasks, display.group, { projectById, tags, now: now.getTime(), columns: statusColumns === UNIVERSAL_COLUMNS ? undefined : statusColumns }),
+    [tasks, nodes, display.group, display.groupSubtasks, projectById, tags, now, statusColumns],
+  );
+
+  // Local and unsaved: groups open again on the next visit.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  // Keyed by the grouping too: "No date" and "No tag" are both "none".
+  const collapseKey = (key: string) => `${display.group}:${key}`;
+  const toggle = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
     });
-    return rows;
-  }, [tasks, sort, projectById]);
 
-  const { page, pageCount, setPage, pageRows } = usePagedRows(sorted, PAGE_SIZE);
+  const row = (task: DbTaskWithProject, nested = false) => (
+    <TaskRow
+      key={task.id}
+      task={task}
+      parent={task.parent_id != null ? byId.get(task.parent_id) ?? null : null}
+      nested={nested}
+      reserveToggle={display.groupSubtasks}
+      childrenProgress={progressById.get(task.id)}
+      childrenCount={display.groupSubtasks ? nodeById.get(task.id)?.children.length ?? 0 : 0}
+      childrenOpen={!foldedParents.has(task.id)}
+      onToggleChildren={() => setFoldedParents((prev) => {
+        const next = new Set(prev);
+        if (!next.delete(task.id)) next.add(task.id);
+        return next;
+      })}
+      properties={display.properties}
+      cols={COLS}
+      colsStyle={colsStyle}
+      now={now}
+      projects={projects}
+      projectById={projectById}
+      tags={tags}
+      tagById={tagById}
+      actions={actions}
+    />
+  );
 
-  // No "unsorted" third state: Due ascending is the natural order.
-  const pick = (key: SortKey) =>
-    setSort((prev) =>
-      prev.key === key
-        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: "asc" },
-    );
+  const rows = (items: DbTaskWithProject[]) => {
+    if (!display.groupSubtasks) return items.map((task) => row(task));
+    return items.flatMap((task) => [
+      row(task),
+      ...(!foldedParents.has(task.id) ? (nodeById.get(task.id)?.children ?? []).map((child) => row(child, true)) : []),
+    ]);
+  };
 
   return (
     <GridTable
       cols={COLS}
-      header={HEADERS.map((h, i) =>
-        h.key == null ? (
-          <span key={i} />
-        ) : (
-          <button
-            key={h.key}
-            type="button"
-            onClick={() => pick(h.key as SortKey)}
-            className={cn(
-              "flex cursor-pointer items-center gap-1 text-left text-[11px] font-medium transition-colors",
-              sort.key === h.key
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <span className="truncate">{h.label}</span>
-            {sort.key === h.key &&
-              (sort.dir === "asc" ? (
-                <CaretUp size={9} weight="bold" className="shrink-0" />
-              ) : (
-                <CaretDown size={9} weight="bold" className="shrink-0" />
-              ))}
-          </button>
-        ),
-      )}
+      colsStyle={colsStyle}
+      minWidth={tableMinWidth(columns)}
+      header={<TaskTableHeaders columns={columns} sort={display.sort} onSort={onSort} />}
       empty={tasks.length === 0 && empty}
-      pagination={{ page, pageCount, onPage: setPage, total: sorted.length, unit: "task" }}
     >
-      <div className="divide-y divide-border-subtle">
-        {pageRows.map((task, i) => {
-          const project = projectOf(task, projectById);
-          const parent =
-            task.parent_id != null ? byId.get(task.parent_id) ?? null : null;
-          return (
-            <div
-              key={task.id}
-              className={cn(COLS, "py-2 transition-colors hover:bg-surface/60")}
-            >
-              <span className="text-[11px] tabular-nums text-muted-foreground/60">
-                {(page - 1) * PAGE_SIZE + i + 1}
-              </span>
-
-              <div className="flex min-w-0 items-center gap-1.5">
-                <TaskGlyph kind={universalColumnOf(task, projectById).kind} />
-                {parent && (
-                  <span
-                    title={`Subtask of ${parent.title}`}
-                    className="shrink-0 text-muted-foreground/60"
-                  >
-                    <ArrowElbowDownRight size={11} />
-                  </span>
-                )}
-                <Link
-                  to={taskHref(task.project_id, task)}
-                  className={cn(
-                    "truncate text-xs hover:underline",
-                    task.done_at
-                      ? "text-muted-foreground line-through"
-                      : "text-foreground",
-                  )}
-                >
-                  {task.title}
-                </Link>
-                <AgentMark source={task.source} />
-              </div>
-
-              {/* Gated on `parent_id`, not on the parent being in this
-                  list: `refileTask` refuses any subtask. */}
-              {task.parent_id != null ? (
-                <span
-                  className={cn(
-                    "truncate text-[11px]",
-                    task.project_id == null
-                      ? "text-muted-foreground/60"
-                      : "text-foreground",
-                  )}
-                  title={`${projectLabel(task)} — a subtask sits in its parent's project`}
-                >
-                  {projectLabel(task)}
-                </span>
-              ) : (
-                <ProjectPicker
-                  projects={projects}
-                  value={task.project_id}
-                  label="Move to"
-                  unfiledHint="Take it out of every project"
-                  onPick={(projectId) => onRefile(task, projectId)}
-                >
-                  <button
-                    type="button"
-                    aria-label="Change project"
-                    title={`${projectLabel(task)} — click to refile`}
-                    className={cn(
-                      "min-w-0 cursor-pointer truncate rounded-md px-1.5 py-0.5 text-left text-[11px] transition-colors hover:bg-accent",
-                      task.project_id == null
-                        ? "text-muted-foreground/60"
-                        : "text-foreground",
-                    )}
-                  >
-                    {projectLabel(task)}
-                  </button>
-                </ProjectPicker>
-              )}
-
-              <TaskSubject code={task.project_subject_code} unfiled={task.project_id == null} />
-
-              {/* The task's own board — the default four when unfiled. */}
-              <StatusPill
-                project={project}
-                columnId={task.column_id}
-                onPick={(columnId) => onMove(task, columnId)}
-              />
-
-              {task.due_at ? (
-                <DueChip dueAt={task.due_at} />
-              ) : (
-                <span className="text-[11px] text-muted-foreground/50">—</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {groups ? (
+        groups.map((group) => (
+          <GroupSection
+            key={group.key}
+            group={group}
+            columns={statusColumns}
+            open={!collapsed.has(collapseKey(group.key))}
+            onToggle={() => toggle(collapseKey(group.key))}
+          >
+            {rows(group.tasks)}
+          </GroupSection>
+        ))
+      ) : (
+        <div className="divide-y divide-border-subtle">{rows(display.groupSubtasks ? nodes.map((n) => n.task) : tasks)}</div>
+      )}
+      {footer}
     </GridTable>
   );
+}
+
+function GroupSection({
+  group,
+  open,
+  onToggle,
+  children,
+  columns,
+}: {
+  columns: readonly ProjectColumn[];
+  group: TaskGroup;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const status = columns.find((c) => c.id === group.key);
+  return <TableGroup label={group.label} count={group.tasks.length} open={open} onToggle={onToggle}
+    icon={<>{group.tag && <TagDot color={group.tag.color} />}{status && <TaskGlyph variant={columnVariant(columns, status.id)} />}</>}>
+    {children}
+  </TableGroup>;
 }

@@ -1,3 +1,5 @@
+import { ProjectIcon } from "@/components/projects/icons/ProjectIcon";
+import { parseSubjectParam } from "@/components/projects/tasks/taskViews";
 import { useCallback } from "react";
 import {
   ArrowClockwise,
@@ -109,17 +111,18 @@ export function tabInfo(
   if (pathname.startsWith("/calendar"))
     return { title: "Calendar", icon: <CalendarBlank size={size} /> };
   // Task routes are tested before their prefix routes (project, task list).
-  if (/^\/projects\/\d+\/tasks\/\d+/.test(pathname)) {
+  const task = /^\/projects\/(\d+)\/tasks\/\d+/.exec(pathname);
+  if (task) {
     return {
       title: new URLSearchParams(search).get("n") || "Task",
-      icon: <CheckSquare size={size} />,
+      icon: <ProjectIcon project={{ id: Number(task[1]) }} size={size} />,
     };
   }
   const proj = /^\/projects\/(\d+)/.exec(pathname);
   if (proj) {
     return {
       title: new URLSearchParams(search).get("n") || "Project",
-      icon: <Kanban size={size} />,
+      icon: <ProjectIcon project={{ id: Number(proj[1]) }} size={size} />,
     };
   }
   if (pathname.startsWith("/projects"))
@@ -130,8 +133,12 @@ export function tabInfo(
       icon: <CheckSquare size={size} />,
     };
   }
-  if (pathname.startsWith("/tasks"))
-    return { title: "Tasks", icon: <ListChecks size={size} /> };
+  if (pathname.startsWith("/tasks")) {
+    const scope = parseSubjectParam(new URLSearchParams(search).get("subject"));
+    const subject = typeof scope === "number" ? subjects.find(s => s.id === scope) : null;
+    const title = scope === "personal" ? "Personal · Tasks" : subject ? `${displayCode(subject.code)} · Tasks` : "Tasks";
+    return { title, icon: <ListChecks size={size} /> };
+  }
   if (pathname.startsWith("/studio")) {
     // A video is titled by `?n=` when the link carries it, else by its slug.
     const video = /^\/studio\/videos\/([^/]+)/.exec(pathname);

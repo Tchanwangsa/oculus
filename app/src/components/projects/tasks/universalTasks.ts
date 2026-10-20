@@ -3,9 +3,11 @@ import {
   DEFAULT_COLUMNS,
   type ColumnKind,
   type DbProject,
+  type DbProjectTask,
   type DbTaskWithProject,
   type ProjectColumn,
 } from "@/lib/planning/projects";
+import { columnVariant, type ColumnVariant } from "./columnVariant";
 import { columnOf } from "./taskTree";
 
 /**
@@ -31,7 +33,7 @@ const HOME_OF_KIND: Record<ColumnKind, string> = {
 
 /** The task's project, or `null` when unfiled (the default board). */
 export function projectOf(
-  task: DbTaskWithProject,
+  task: Pick<DbProjectTask, "project_id">,
   projectById: Map<number, DbProject>,
 ): DbProject | null {
   return task.project_id != null ? projectById.get(task.project_id) ?? null : null;
@@ -40,10 +42,10 @@ export function projectOf(
 /**
  * Which of {@link UNIVERSAL_COLUMNS} a task is drawn in: same id first (keeps
  * Todo and In progress apart — both are `active`), then the kind's home. A
- * column its board no longer has falls to Backlog rather than vanishing.
+ * column its board no longer has falls to Planning rather than vanishing.
  */
 export function universalColumnOf(
-  task: DbTaskWithProject,
+  task: Pick<DbProjectTask, "project_id" | "column_id">,
   projectById: Map<number, DbProject>,
 ): ProjectColumn {
   const backlog = UNIVERSAL_COLUMNS[0];
@@ -54,6 +56,14 @@ export function universalColumnOf(
     UNIVERSAL_COLUMNS.find((c) => c.id === HOME_OF_KIND[own.kind]) ??
     backlog
   );
+}
+
+/** The glyph and pill variant of the universal column the task is drawn in. */
+export function universalVariant(
+  task: DbTaskWithProject,
+  projectById: Map<number, DbProject>,
+): ColumnVariant | null {
+  return columnVariant(UNIVERSAL_COLUMNS, universalColumnOf(task, projectById).id);
 }
 
 /**
@@ -93,5 +103,5 @@ export function appendNeighbour(
 }
 
 export function projectLabel(task: DbTaskWithProject): string {
-  return task.project_name ?? "Unfiled";
+  return task.project_name ?? "No project";
 }

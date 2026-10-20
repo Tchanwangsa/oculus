@@ -5,7 +5,8 @@ import { sqliteUtcToMs } from "@/lib/format/format";
 import type { DbProject, DbProjectTask } from "@/lib/planning/projects";
 import { DueChip, TaskGlyph } from "../tasks/TaskMarks";
 import { taskHref } from "../nav/taskHref";
-import { columnOf, type TaskNode } from "../tasks/taskTree";
+import { taskVariant } from "../tasks/columnVariant";
+import type { TaskNode } from "../tasks/taskTree";
 import { Heading } from "./overviewParts";
 
 const MAX_UPCOMING = 5;
@@ -44,8 +45,8 @@ export function UpcomingTasks({ project, nodes }: { project: DbProject; nodes: T
         <Heading>Upcoming tasks</Heading>
         <p className="px-0.5 text-xs text-muted-foreground">
           {anyTasks
-            ? "Nothing here has a date on it yet. A task needs a due date before it can be next — and before the calendar can draw it."
-            : "No tasks yet. Break this down on the Tasks tab and what is next will show up here."}
+            ? "Add a due date to a task to see what’s next."
+            : "Add your first task on the Tasks tab."}
         </p>
       </section>
     );
@@ -55,7 +56,7 @@ export function UpcomingTasks({ project, nodes }: { project: DbProject; nodes: T
     <Section title="Upcoming tasks">
       {rows.map(({ task, parentTitle }) => (
         <Link key={task.id} to={taskHref(project.id, task)} className={ROW}>
-          <TaskGlyph kind={columnOf(project, task.column_id)?.kind ?? null} />
+          <TaskGlyph variant={taskVariant(project, task.column_id)} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[12px] text-foreground">{task.title}</span>
             {parentTitle && (

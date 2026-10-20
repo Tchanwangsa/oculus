@@ -119,6 +119,13 @@ export function fmtShortDate(d: Date): string {
   return d.toLocaleDateString(displayLocale, { day: "numeric", month: "short" });
 }
 
+/** "12 Aug", with the year when it is not this one. */
+export function fmtDay(d: Date): string {
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(displayLocale, opts);
+}
+
 /** "Sat 16 Aug — Today", "Fri 15 Aug — Yesterday", else "Thu 14 Aug" (+ year). */
 export function fmtDayHeading(ms: number): string {
   const d = new Date(ms);
@@ -155,6 +162,21 @@ export function fmtRecent(ms: number, now: Date = new Date()): string {
   );
   if (daysAgo === 0) return `today, ${fmtTime(ms)}`;
   if (daysAgo === 1) return `yesterday, ${fmtTime(ms)}`;
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(displayLocale, opts);
+}
+
+/** "Today", "Yesterday", a weekday for the rest of the past week, else
+ *  "15 Aug" (+ year when it is not this one). Pass `now` to pin the clock. */
+export function fmtRelativeDay(ms: number, now: Date = new Date()): string {
+  const d = new Date(ms);
+  const daysAgo = Math.round(
+    (startOfDay(now).getTime() - startOfDay(d).getTime()) / 86_400_000,
+  );
+  if (daysAgo === 0) return "Today";
+  if (daysAgo === 1) return "Yesterday";
+  if (daysAgo > 1 && daysAgo < 7) return d.toLocaleDateString(displayLocale, { weekday: "long" });
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
   if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
   return d.toLocaleDateString(displayLocale, opts);

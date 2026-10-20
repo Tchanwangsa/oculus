@@ -420,7 +420,9 @@ whose list has slides (`useLessonIndex`), its body is `LessonView`
   `useSlideStatusStore` (`lib/ed/slideStatus.ts`). The sidebar, its count and
   the Lessons tab's rows read the index through it (`useLiveLessonIndex`),
   which only ever raises a status, so a tick shows at once rather than at
-  the next sync.
+  the next sync. A challenge slide is completed on Ed by a passing Mark
+  ([sync.md](./sync.md)); the sidebar ticks from the submission's status
+  without waiting for it.
 - **A lesson file without front matter** (every slide in one file) renders
   as plain markdown, like any library file.
 
@@ -430,7 +432,11 @@ whose list has slides (`useLessonIndex`), its body is `LessonView`
 layout: the slide's `.md` (the brief and its Files list, `BriefMarkdown`) in
 a left column, drag-resizable and remembered
 (`useResizablePanel`), and the challenge's files on the right as `PillTabs`
-over `CodeEditor`, the first file open. Run and Mark sit in the editor's
+over `CodeEditor`, the first file open. In a box under 720px wide
+(`useNarrowBox`) the halves take turns instead, as in Ed's small layout: one
+strip of Description, Feedback (when the challenge has it) and Workspace,
+both halves staying mounted; Mark's result and a link in the brief's Files
+list switch to the half they open. Run and Mark sit in the editor's
 header and the terminal drawer under it, each only where the challenge's
 `features` (from `ed_workspace_open`) allow. The library copy under the slide's
 folder is the working copy; Rust owns the session
@@ -449,7 +455,9 @@ commands typed in `app/src/lib/ed/workspace.ts`.
 - **One session per challenge, shared by every pane on it**
   (`holdWorkspace` in `workspaceHandles.ts`). The first hold calls
   `ed_workspace_open`, which returns the file list, the challenge's settings
-  and `connecting` at once; the last release writes what is unsaved, then
+  and `connecting` at once. A pane mounting on a session already held asks
+  again (the answer is the live status and files, not the first snapshot), and
+  a status event that beats an answer wins over it. The last release writes what is unsaved, then
   calls `ed_workspace_close` a tick later, so a remount keeps the session. A
   new open waits for its challenge's close still in flight.
 - **Files are read on first open** (`ed_workspace_read`) into the saver's
@@ -564,8 +572,13 @@ commands typed in `app/src/lib/ed/workspace.ts`.
   with the submission's date, then replaces the workspace with its code
   (`ed_workspace_restore`) through the same flow as Reset; disabled while a
   status event says Ed is unreachable. Every submission is listed below as
-  Ed's table — its number, when it went in, testcases passed and ✓ or ✗ —
-  to pick from.
+  Ed's table — its number, when it went in, testcases passed and ✓ or ✗ from
+  the submission's `status` (`passed` / `failed`, else the status as text),
+  as Ed's table reads it — to pick from. A listed submission whose status
+  completes the slide (`completesSlide`: `passed` or `submitted`, Ed's own
+  rule after a mark) records the slide `completed` in `useSlideStatusStore`,
+  so the lesson sidebar ticks without a sync. The tick is local: Rust does not
+  send Ed's slide completion for a challenge.
 
 ## One code editor for source files
 
@@ -679,7 +692,11 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   for Transcribe. `useTranscriptDock` raises
   the floor for Chat and caps the drawn size by the container (`KEEP_W` /
   `KEEP_H`), dropping a side dock to the bottom when it can't fit — without
-  rewriting the preference.
+  rewriting the preference. While the tab's side panel is open, lectures in
+  either pane draw the dock at the bottom, including when it is reopened.
+  Closing the side panel, expanding the lecture to a full-width tab, or entering
+  player fullscreen restores the saved side when there is room. Dock-edge
+  dragging is unavailable while the lecture is split.
 - **The transcript is virtualised** (~2500 cues a lecture) through `FollowList`.
   Following is tracked by pointer *intent*, since the follow-scroll fires
   `scroll` too, and runs off the active-cue index rather than `timeupdate`.
