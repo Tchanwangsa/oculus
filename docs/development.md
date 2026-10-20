@@ -203,47 +203,48 @@ guaranteed to exist: `--staged` runs the sidecar `stage-cli` just wrote rather
 than building again, which would recompile the app because tauri-build reruns
 whenever a sidecar changes.
 
-## CI proves a fresh checkout builds; releases are cut by hand
+## CI selects checks by build inputs; releases are cut by hand
 
-The Windows x64 job repeats formatting, frozen dependency installation,
-frontend and script tests, the frontend build, ffmpeg and keyd/CLI staging,
-`cargo test --release --locked`, keyd core with all features, and keyd's debug
-tests with and without `dev`, plus the maths workspace's formatting and tests.
-Both Windows workflows install the WASM target and the locked `wasm-bindgen`
-CLI; the frontend checks build the maths WASM. CI builds the current-user NSIS
-installer with a second `--config` that nulls `beforeBuildCommand`: the earlier
-steps already bundle the frontend and stage every sidecar, and rerunning
-`stage-cli` would compile the app again, about four minutes;
-`bundle-config.test.mjs` checks those steps come first. It then validates the GUI and sidecars, and retains `oculus-windows-x64-ci`
-for VM testing. This workflow artifact does not create a GitHub release.
-It installs sccache before any cargo build.
-`app/scripts/test.mjs` enumerates script tests in Node so no shell has to
-expand `scripts/*.test.mjs`. Windows also checks the packaging PowerShell
-script's syntax; a Windows SDK run remains necessary to validate a real MSIX.
+`.github/workflows/ci.yml` runs on pushes to `master`, pull requests and
+manual dispatch. Every run checks Rust formatting, frontend and script tests,
+types and the frontend bundle on Ubuntu. The same job builds the frontend's WASM and runs the portable Rust crates'
+clippy and tests. Cargo caches retain their
+compiled dependencies. `app/scripts/test.mjs` enumerates script tests without
+shell glob expansion.
 
-`ci.yml` runs on every push to `master` and every pull request, on a macOS
-runner with nothing cached but crates: `cargo fmt --check` (the app, keyd,
-keyd core and `app/math-core`'s own crates), `bun run test`, `bun run build`
-(both build the maths wasm, so the runner gets the wasm target and the locked
-`wasm-bindgen`), the ffmpeg fetch, the
-speech helper and `whisper-cli`, `stage-keyd` (a real release build and signature
-of keyd, as the bundle carries it), `stage-cli`, clippy with `-D warnings` over
-every target of the app, keyd core (every feature), keyd (with and without
-`dev`) and the maths engine's own crates (`--no-deps`, so not the vendored
-`katex/`; the bridge for `wasm32-unknown-unknown` too), `cargo test --release --locked`,
-keyd core's tests with every feature and keyd's with and without `dev`, the
-maths engine's `cargo test --locked`, then
-`docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
-reference fails. A second job, `keyd-linux`, checks and tests keyd core and
-checks keyd on Ubuntu, where only the unsupported adapter exists
-([below](#keyds-os-code-lives-in-one-adapter)); keyd's own tests bind a socket
-through an OS adapter, so the macOS and Windows jobs run them. `stage-cli`
-comes before any cargo call of the app because tauri-build refuses to compile
-until every `externalBin` exists, and it is what writes the CLI's on a clean
-tree. keyd's macOS helper is no `externalBin`, so no cargo build waits on it;
-Windows keyd is a sidecar, so it is staged before the CLI. The release profile is shared with that
-CLI build, so clippy reuses its build scripts and the tests its artifacts. sccache is installed because
-`app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
+The `changes` job selects additional checks from the changed files. Pull
+requests compare with their base; pushes compare with the state before the
+whole push. Manual dispatch runs every job. `CI passes` collects the results,
+allowing jobs skipped by the filters and failing if any selected job fails or
+is cancelled; use this as the required branch-protection check.
+
+- The macOS and Windows jobs run for changes under `app/src-tauri`, keyd,
+  Studio, maths or canvas, build scripts, package dependencies, Rust toolchain
+  configuration, the CI/release workflows, or the generated CLI reference.
+  Frontend-only changes skip both jobs.
+- The keyd Linux seam check runs for changes to keyd or Rust build configuration.
+  It tests core with every feature and checks keyd against its unsupported
+  adapter, proving OS calls stay in `app/keyd/core/src/platform/`.
+- The editor-core Linux job runs for editor, frontend source or dependency
+  changes. It checks the workspace and WASM bridge, then compares the oracles
+  with CodeMirror and Lezer using the run number as the random seed. Replay a
+  failure with the seed it prints. The frontend bundle builds without the
+  editor core's dev-only WASM.
+- Studio's standalone tests run for Studio or its KaTeX dependency changes on
+  macOS, where its Apple Silicon golden frames were rendered.
+
+All filters include the CI workflow and Rust configuration. When adding a
+build input or path dependency, update the filters; `app/scripts/ci.test.mjs`
+checks representative frontend, native and shared-dependency changes.
+
+Native jobs download the frontend job's bundle, retained for one day, rather
+than compiling it again. They install sccache before Cargo, fetch or build
+native helpers, stage the real release keyd and CLI, and run the app's release
+Rust tests plus keyd's core, release-policy and dev tests. macOS also runs
+clippy and verifies the CLI reference using `docs:cli --staged`, reading the
+CLI already built. `stage-keyd` precedes `stage-cli`, which bootstraps the CLI
+sidecar before tauri-build checks every `externalBin`. Native CI checks code
+and staging; installer creation and validation run in `release.yml`.
 
 The app's Windows dev-dependency enables keyd core's `test-support` for scripted
 brokers in release tests. `app/src-tauri/src/test_support/keyd.rs` registers
@@ -252,25 +253,10 @@ endpoint still requires the pipe server's live PID to be this test process;
 unregistered endpoints retain MSIX verification, and the production pipe
 cannot be registered. Normal app and CLI builds select only `client`.
 
-A second job, on Linux because the crate is portable, checks
-`app/editor-core` ([editor-core.md](./editor-core.md)) and its wasm bridge:
-`cargo fmt --check`, clippy with `-D warnings` over every target and feature
-(so the `oracle` binary too) and over the bridge for `wasm32-unknown-unknown`,
-`cargo test --locked --workspace`, then installs the `wasm-bindgen` CLI at the
-pinned version (skipped when the cached `~/.cargo/bin` already has it), builds
-the wasm, and runs the oracles — four at a few thousand cases each, `shadow`
-at 300 — seeded with the run number so each run tries new cases. Replay a
-failure locally with the seed it prints. The first job's `bun run build` never
-builds the editor core's wasm, so it proves the frontend builds without it.
-
-The `studio-core` job runs `cargo fmt --check`, clippy with `-D warnings`
-over every target and `cargo test --locked` in `app/studio-core`
-([studio.md](./studio.md)) on macOS, because its golden frames are rendered
-on Apple Silicon.
-
 `release.yml` is `workflow_dispatch` only. To cut a release, bump `version` in
 `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml` together, push,
-then run **Release** from the Actions tab. `tauri-apps/tauri-action` runs
+then run **Release** from the Actions tab. Windows checks the packaging
+PowerShell script's syntax before building. `tauri-apps/tauri-action` runs
 `tauri build` (so `beforeBuildCommand` fetches natives, compiles the speech
 helper, builds the maths wasm and stages keyd and the CLI),
 creates tag `v<version>` on that commit, and attaches the `.dmg` and `.app` to
