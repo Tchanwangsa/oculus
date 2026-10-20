@@ -1,0 +1,66 @@
+{
+  "type": "oculus-canvas",
+  "version": 1,
+  "elements": [
+    {
+      "id": "ext",
+      "type": "rectangle",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "plugin": {
+        "nested": [
+          1,
+          "two",
+          {
+            "three": null
+          }
+        ]
+      },
+      "customFlag": true,
+      "label": null
+    },
+    {
+      "id": "img",
+      "type": "image",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "sourceName": "dot.png",
+      "naturalWidth": 1,
+      "naturalHeight": 1,
+      "cropping": {
+        "top": 0.1
+      },
+      "caption": "kept"
+    }
+  ],
+  "viewport": {
+    "x": 10,
+    "y": -20,
+    "zoom": 1.5,
+    "extraViewportField": "kept"
+  },
+  "background": "#ffffff",
+  "meta": {
+    "author": "test",
+    "tags": [
+      "a",
+      "b"
+    ]
+  },
+  "z-order-hint": 3
+}

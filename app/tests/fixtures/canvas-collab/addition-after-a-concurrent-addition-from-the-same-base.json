@@ -1,0 +1,115 @@
+{
+  "name": "addition after a concurrent addition from the same base",
+  "document": {
+    "type": "oculus-canvas",
+    "version": 1,
+    "elements": [
+      {
+        "id": "a",
+        "type": "rectangle",
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 60,
+        "stroke": "#1e1e1e",
+        "fill": "transparent",
+        "strokeWidth": 2,
+        "style": "clean",
+        "seed": 7
+      },
+      {
+        "id": "remote",
+        "type": "rectangle",
+        "x": 300,
+        "y": 0,
+        "width": 100,
+        "height": 60,
+        "stroke": "#1e1e1e",
+        "fill": "transparent",
+        "strokeWidth": 2,
+        "style": "clean",
+        "seed": 7
+      }
+    ],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "background": "#ffffff"
+  },
+  "transaction": {
+    "edits": [
+      {
+        "id": "b",
+        "before": null,
+        "after": {
+          "id": "b",
+          "type": "rectangle",
+          "x": 100,
+          "y": 0,
+          "width": 100,
+          "height": 60,
+          "stroke": "#1e1e1e",
+          "fill": "transparent",
+          "strokeWidth": 2,
+          "style": "clean",
+          "seed": 7
+        }
+      }
+    ]
+  },
+  "expect": {
+    "ok": {
+      "type": "oculus-canvas",
+      "version": 1,
+      "elements": [
+        {
+          "id": "a",
+          "type": "rectangle",
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 60,
+          "stroke": "#1e1e1e",
+          "fill": "transparent",
+          "strokeWidth": 2,
+          "style": "clean",
+          "seed": 7
+        },
+        {
+          "id": "remote",
+          "type": "rectangle",
+          "x": 300,
+          "y": 0,
+          "width": 100,
+          "height": 60,
+          "stroke": "#1e1e1e",
+          "fill": "transparent",
+          "strokeWidth": 2,
+          "style": "clean",
+          "seed": 7
+        },
+        {
+          "id": "b",
+          "type": "rectangle",
+          "x": 100,
+          "y": 0,
+          "width": 100,
+          "height": 60,
+          "stroke": "#1e1e1e",
+          "fill": "transparent",
+          "strokeWidth": 2,
+          "style": "clean",
+          "seed": 7
+        }
+      ],
+      "viewport": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1
+      },
+      "background": "#ffffff"
+    }
+  }
+}

@@ -26,7 +26,8 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/auth/keyd/` |
 | Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/providers/credentials/`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/voyage.rs`, `app/src-tauri/src/providers/groq.rs`, `app/src-tauri/src/auth/okta/` |
 | Lecture video server | `app/src-tauri/src/lectures/media.rs` |
-| This machine's addresses, observed once for the process and subscribed to by music | `app/src-tauri/src/runtime/network/` |
+| This machine's addresses, observed once for the process (music and device sharing subscribe) | `app/src-tauri/src/runtime/network/` |
+| Device-sharing server, on the LAN only while a canvas is shared ([device-sharing.md](./device-sharing.md)) | `app/src-tauri/src/companion/` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/runtime/bundled.rs` |
 | ONNX Runtime (static): the CPU session and pinned, checksummed model-pack downloads | `app/src-tauri/src/runtime/onnx/` |
@@ -67,7 +68,7 @@ Both are HTTPS calls from inside the Rust process: MinerU for parsing, Voyage
 for embeddings. Parsing has a second engine, a MinerU server on
 `127.0.0.1:8000` — but that is a program the user installed and started, which
 Oculus never launches, supervises or ships. Same boundary as the cloud, different
-hostname. Nothing listens for calls back into the app. The engine choice and
+hostname. Neither engine calls back into the app. The engine choice and
 its failure rules are in [parsing.md](./parsing.md).
 
 ## The frontend and Rust talk only through commands and events
@@ -293,10 +294,13 @@ watcher and is never restarted. It starts with the first `snapshot()` or
 reaches subscribers at once; the first edge of a burst opens a 1 s window,
 after which the interface list (`if-addrs`, which names each address's
 interface) is re-read, and a list that moved gets the next `generation`
-and a `Changed`. `refresh()` re-reads at once when the app returns to the
-foreground. A stream error is logged once and ends the stream; the list then
-moves only on `refresh()`. Music ([music.md](./music.md)) nudges a reconnect
-on `Up`. Nothing polls an OS command.
+and a `Changed`. `refresh()` re-reads at once: on window focus
+(`lib.rs`), when the Share dialog asks for endpoints, and on a Host the
+list does not hold. A stream error is logged once and ends the stream; the
+list then moves only on `refresh()`. Music
+([music.md](./music.md)) nudges a reconnect on `Up`; device sharing
+([device-sharing.md](./device-sharing.md#network-changes)) rebuilds its
+links and Host allow-list on `Changed`. Nothing polls an OS command.
 
 ## Lecture video streams over localhost HTTP
 
@@ -317,11 +321,13 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
 - `oculus.db` — SQLite, everything structured.
 - `courses/<code>/…` — scraped files in Canvas's layout, with the parser's
   `.md`, `.pages.json` and `<stem>_images/` siblings and the embedder's
-  `.emb.json`. Two subfolders are the student's own, never written by a sync:
-  `uploads/` (copied in by `import_uploads`) and `documents/` (notes written in
+  `.emb.json`. Three subfolders are the student's own, never written by a sync:
+  `uploads/` (copied in by `import_uploads`), `documents/` (notes written in
   the app by `create_document`, with pasted images in `documents/assets/`),
-  both in `app/src-tauri/src/library/files/`. Rename and delete commands are scoped
-  to those shapes (`is_document_rel` in `app/src-tauri/src/library/paths/own_files.rs`), which is
+  `canvases/` (versioned drawing documents; [drawing-canvas.md](./drawing-canvas.md)),
+  all in `app/src-tauri/src/library/files/`. Rename and delete commands are scoped
+  to those shapes (`is_document_rel` in `app/src-tauri/src/library/paths/own_files.rs`
+  and the canvas guard in `app/src-tauri/src/library/files/canvases.rs`), which is
   what makes deleting there safe.
 - `lectures/<uuid>/` — Echo360 media (`source1.mp4`, optionally
   `source2.mp4`) and `transcript.vtt`, plus regenerable `frames/` and

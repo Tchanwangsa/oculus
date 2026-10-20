@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { getFilesForSubject, type DbFile } from "@/lib/db";
 import { FILE_ACCESSED_EVENT } from "@/lib/files/openFile";
+import { CANVASES_CHANGED_EVENT } from "@/lib/canvas/files";
 import { DOCUMENTS_CHANGED_EVENT } from "@/lib/notes/documents";
 import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { createPendingReader } from "@/lib/platform/pendingRead";
@@ -9,6 +10,7 @@ const readFiles = createPendingReader(getFilesForSubject);
 
 export function useSubjectFiles(subjectId: number | null) {
   const [files, setFiles] = useState<DbFile[]>([]);
+  const [loadedSubjectId, setLoadedSubjectId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
 
@@ -18,7 +20,7 @@ export function useSubjectFiles(subjectId: number | null) {
     setLoading(true);
     try {
       const rows = await readFiles(id, fresh);
-      if (token === run.current) setFiles(rows);
+      if (token === run.current) { setFiles(rows); setLoadedSubjectId(id); }
       return rows;
     } finally {
       if (token === run.current) setLoading(false);
@@ -39,7 +41,7 @@ export function useSubjectFiles(subjectId: number | null) {
 
   // Both events change `files` rows (an open stamps last_accessed_at), so every
   // list of a subject's files refetches here rather than page by page.
-  useWindowEvent([FILE_ACCESSED_EVENT, DOCUMENTS_CHANGED_EVENT], (event) => {
+  useWindowEvent([FILE_ACCESSED_EVENT, DOCUMENTS_CHANGED_EVENT, CANVASES_CHANGED_EVENT], (event) => {
     const changedId = (event as CustomEvent<{ subjectId?: number } | undefined>).detail?.subjectId;
     if (changedId == null || changedId === subjectId) reload();
   });
@@ -47,7 +49,7 @@ export function useSubjectFiles(subjectId: number | null) {
   const byCategory = useMemo(() => {
     const groups = {
       home: [] as DbFile[], module: [] as DbFile[], page: [] as DbFile[],
-      file: [] as DbFile[], upload: [] as DbFile[], document: [] as DbFile[],
+      file: [] as DbFile[], upload: [] as DbFile[], document: [] as DbFile[], canvas: [] as DbFile[],
       announcement: [] as DbFile[], assignment: [] as DbFile[], quiz: [] as DbFile[],
       ed: [] as DbFile[], lessons: [] as DbFile[], image: [] as DbFile[], syllabus: [] as DbFile[],
     };
@@ -60,5 +62,5 @@ export function useSubjectFiles(subjectId: number | null) {
     return groups;
   }, [files]);
 
-  return { files, loading, byCategory, reload };
+  return { files, loading, loaded: subjectId != null && loadedSubjectId === subjectId, byCategory, reload };
 }

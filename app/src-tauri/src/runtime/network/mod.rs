@@ -2,13 +2,15 @@
 //! `if-watch` stream (a second watcher is unsafe on macOS, whose watcher
 //! thread cannot be restarted) wakes a re-read of the interface list
 //! (`if-addrs`, which names each address's interface). Music subscribes to
-//! cut a reconnect backoff short. No OS commands are polled.
+//! cut a reconnect backoff short, device sharing to keep its links and Host
+//! allow-list current. No OS commands are polled.
 //!
 //! - `snapshot()` is the list now, with a `generation` that moves only when
 //!   the list does. The first call starts the observer.
 //! - `subscribe` delivers `Up`/`Down` as the OS reports them and `Changed`
 //!   once a burst has been quiet for `DEBOUNCE`.
-//! - `refresh()` re-reads at once when the app returns to the foreground.
+//! - `refresh()` re-reads at once (app focus, the Share dialog, a Host the
+//!   list does not hold).
 //!
 //! The parts take an injected provider and stream, so tests drive a fake
 //! network; the real ones are only in `global()`.

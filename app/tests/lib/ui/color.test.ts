@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { hsvToRgb, parseHex, rgbToHsv, toHex, unit } from "@/lib/ui/color";
+import { colorShades, hsvToRgb, parseHex, rgbToHsv, toHex, unit } from "@/lib/ui/color";
 
 describe("parseHex", () => {
   test("reads the three forms a theme accepts, with or without #", () => {
@@ -49,5 +49,16 @@ describe("HSV", () => {
 
   test("unit clamps", () => {
     expect([unit(-1), unit(0.25), unit(3)]).toEqual([0, 0.25, 1]);
+  });
+});
+
+describe("colorShades", () => {
+  test("runs lightest to darkest with the colour itself fourth", () => {
+    const shades = colorShades("#5E6AD2")!;
+    expect(shades).toHaveLength(5);
+    expect(shades[3]).toBe("#5e6ad2");
+    expect(shades[0]).toBe("#e7e9f8");
+    expect(colorShades("#ffffff")![0]).toBe("#ffffff");
+    expect(colorShades("transparent")).toBeNull();
   });
 });

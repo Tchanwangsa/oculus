@@ -1,0 +1,86 @@
+{
+  "type": "oculus-canvas",
+  "version": 1,
+  "elements": [
+    {
+      "id": "zeros",
+      "type": "rectangle",
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 0,
+      "style": "clean",
+      "seed": 7,
+      "opacity": 0
+    },
+    {
+      "id": "ones",
+      "type": "rectangle",
+      "x": -1000000,
+      "y": 1.7976931348623157e+308,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": -42,
+      "opacity": 1
+    },
+    {
+      "id": "tiny",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "text": "",
+      "fontSize": 0.001
+    },
+    {
+      "id": "nopoints",
+      "type": "line",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "points": []
+    },
+    {
+      "id": "fraction",
+      "type": "image",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "sourceName": "dot.png",
+      "naturalWidth": 0.5,
+      "naturalHeight": 1000000000
+    }
+  ],
+  "viewport": {
+    "x": -1e-9,
+    "y": 1e+300,
+    "zoom": 1e-9
+  },
+  "background": ""
+}

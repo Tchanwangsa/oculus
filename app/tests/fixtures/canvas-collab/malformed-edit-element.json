@@ -1,0 +1,28 @@
+{
+  "name": "malformed edit element",
+  "document": {
+    "type": "oculus-canvas",
+    "version": 1,
+    "elements": [],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "background": "#ffffff"
+  },
+  "transaction": {
+    "edits": [
+      {
+        "id": "a",
+        "before": null,
+        "after": {
+          "id": "a"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "invalid"
+  }
+}

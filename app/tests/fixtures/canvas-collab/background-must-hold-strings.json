@@ -1,0 +1,24 @@
+{
+  "name": "background must hold strings",
+  "document": {
+    "type": "oculus-canvas",
+    "version": 1,
+    "elements": [],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "background": "#ffffff"
+  },
+  "transaction": {
+    "edits": [],
+    "background": {
+      "before": "#ffffff",
+      "after": 3
+    }
+  },
+  "expect": {
+    "error": "invalid"
+  }
+}

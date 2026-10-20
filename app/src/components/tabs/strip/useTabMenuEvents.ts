@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { claimBackForward } from "@/lib/menu/backForwardRouting";
 
 export interface TabMenuActions {
   newTab: () => void;
@@ -33,8 +34,8 @@ export function useTabMenuEvents(actions: TabMenuActions) {
       listen("menu-side-panel", () => menuActions.current.side()),
       listen("menu-side-next", () => menuActions.current.stepSide(1)),
       listen("menu-side-prev", () => menuActions.current.stepSide(-1)),
-      listen("menu-back", () => menuActions.current.go(-1)),
-      listen("menu-forward", () => menuActions.current.go(1)),
+      listen("menu-back", () => { if (!claimBackForward(-1)) menuActions.current.go(-1); }),
+      listen("menu-forward", () => { if (!claimBackForward(1)) menuActions.current.go(1); }),
     ];
     return () => {
       for (const p of pending) p.then((un) => un()).catch(() => {});

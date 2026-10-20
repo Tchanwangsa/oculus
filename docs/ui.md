@@ -23,7 +23,7 @@ Read this before any UI work.
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
 | Flat divided lists, table chrome | `app/src/components/ui/layout/PageParts.tsx`, `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/TableGroup.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
 | Toolbar filters: pill popovers, checklists, applied-filter chips | `app/src/components/ui/filter/` |
-| The colour control: a swatch that opens a pad, hue and opacity strips and hex text (`opaque` drops the opacity strip) | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
+| The colour control: a swatch that opens a pad, hue and opacity strips and hex text (`opaque` drops the opacity strip), or with a `palette` a grid of colours, their shades and the hex code with the pad behind Custom | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
 | Identity icons, shared picker and colour palette | `app/src/components/ui/icon/`, `app/src/lib/ui/iconPreferences.ts` |
 | A titled block that folds, its state kept by the caller | `app/src/components/ui/CollapsibleSection.tsx` |
 
@@ -242,7 +242,9 @@ glyph; subject and project crumbs retain their custom identity icons.
 - **No native colour inputs** — `<input type="color">` opens the OS panel
   and has no alpha; use `ColorField` (`app/src/components/ui/color/`), whose
   pad and strips measure the pointer as a fraction of their own box, so page
-  zoom cannot skew them.
+  zoom cannot skew them. Its popover stays inside the viewport with a 12px
+  collision inset and scrolls when height is limited. Controls on a left edge
+  can open it to the right with start alignment.
 - **No native date/time inputs** — segmented hover, an OS picker in Buddhist-era
   years, and a half-typed value reads empty. Use
   `app/src/components/projects/fields/DateTimeField.tsx`; bare `type="time"` is fine.
@@ -261,6 +263,10 @@ glyph; subject and project crumbs retain their custom identity icons.
   `transition-opacity` / `transition-transform` on an icon, or on a row holding
   one, gets `will-change-[opacity]` (or `[opacity,transform]`)** — grep for
   `transition-` before finishing UI work, and check at zoom 1.1 and 1.3, not 1.0.
+  A rounded `overflow-hidden` ancestor also needs `will-change-transform`
+  when its children composite: the share-link field keeps its clip promoted
+  through hover and the native share button's disabled fade. Promoting only
+  the buttons or their SVGs leaves the ancestor's clip free to re-snap.
 - **Never `transition-all`** — inactive tabs hide with `visibility: hidden`
   (`app/src/components/tabs/TabPane.tsx`), and `all` transitions the inherited
   `visibility` too: going hidden it stays `visible` for the whole duration, so

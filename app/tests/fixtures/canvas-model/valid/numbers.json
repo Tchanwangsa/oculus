@@ -1,0 +1,13 @@
+{
+  "type": "oculus-canvas",
+  "version": 1.0,
+  "elements": [
+    {"id": "n", "type": "rectangle", "x": -0, "y": 1E2, "width": 1e21, "height": 1e20, "stroke": "#000", "fill": "#fff",
+     "strokeWidth": 5.0, "style": "clean", "seed": 1.50, "opacity": 0.1, "fontSize": 1e-7, "naturalWidth": 0.000001,
+     "points": [{"x": 123456789012345678901, "y": -1.5e-10}, {"x": 9007199254740993, "y": 0.30000000000000004},
+                {"x": 123.45678901234568, "y": 2.2250738585072014e-308}, {"x": 7.000000000000001e22, "y": 1.7976931348623157e308}],
+     "text": "tab\tquote\"slash\\ctl\u0001\u001f é ✓ \u2028"}
+  ],
+  "viewport": {"x": 0.0, "y": -0.0, "zoom": 2.5e0},
+  "background": "#ffffff"
+}

@@ -3,6 +3,7 @@ mod elog;
 
 pub mod agents;
 pub mod auth;
+pub mod companion;
 pub mod db;
 pub mod embed;
 pub mod harness;
@@ -74,6 +75,8 @@ pub fn run() {
             app.manage(lectures::media::start_media_server(
                 library::paths::data_dir(),
             ));
+            // Device sharing: off until a canvas is shared (docs/device-sharing.md).
+            app.manage(companion::Companion::for_app(app.handle()));
 
             sources::echo360::cleanup_partial_downloads(&library::paths::data_dir());
 
@@ -185,6 +188,31 @@ pub fn run() {
             library::files::commands::scan_parsed_files,
             library::files::uploads::import_uploads,
             library::files::uploads::delete_upload,
+            library::files::canvases::export::export_canvas_image,
+            library::files::canvases::imports::canvas_open_library_pdf,
+            library::files::canvases::imports::canvas_render_pdf_page,
+            library::files::canvases::imports::canvas_close_pdf,
+            library::files::canvases::create_canvas,
+            library::files::canvases::read_canvas,
+            library::files::canvases::drafts::read_canvas_draft,
+            library::files::canvases::drafts::write_canvas_draft,
+            library::files::canvases::drafts::delete_canvas_draft,
+            library::files::canvases::write_canvas,
+            library::files::canvases::rename_canvas,
+            library::files::canvases::delete_canvas,
+            library::files::canvases::list_canvases,
+            library::files::canvases::authority::commands::canvas_authority_open,
+            library::files::canvases::authority::commands::canvas_authority_commit,
+            library::files::canvases::authority::commands::canvas_authority_snapshot,
+            library::files::canvases::authority::commands::canvas_authority_resolve_external,
+            library::files::canvases::authority::commands::canvas_authority_rename,
+            library::files::canvases::authority::commands::canvas_authority_delete,
+            library::files::canvases::authority::commands::canvas_authority_close,
+            companion::commands::companion_share_start,
+            companion::commands::companion_share_stop,
+            companion::commands::companion_stop_all,
+            companion::commands::companion_shares,
+            companion::commands::companion_endpoints,
             library::files::documents::create_document,
             library::files::documents::write_document,
             library::files::documents::rename_document,
@@ -325,6 +353,8 @@ pub fn run() {
             library::storage::storage_report,
             library::storage::start_over::storage_start_over,
             shell::usage::usage_activity,
+            shell::sharing::native_share_link,
+            shell::sharing::native_share_close,
             shell::browser::commands::browser_open_url,
             shell::browser::commands::browser_state,
             shell::browser::commands::browser_place,
@@ -390,6 +420,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            // Back at the front: re-read this Mac's addresses, in case the
+            // watcher missed a change while the app sat in the background.
             if matches!(
                 event,
                 tauri::RunEvent::WindowEvent {
@@ -399,11 +431,13 @@ pub fn run() {
             ) {
                 tauri::async_runtime::spawn_blocking(runtime::network::refresh);
             }
-            // Don't let a CLI agent outlive the window, or the Spotify
-            // device linger in Spotify's device list.
+            // Don't let a CLI agent outlive the window, the Spotify device
+            // linger in Spotify's device list, or a canvas share outlive the app.
             if matches!(event, tauri::RunEvent::Exit) {
                 harness::app::shutdown(app_handle);
                 music::shutdown(app_handle);
+                companion::commands::shutdown(app_handle);
+                library::files::canvases::authority::global().close_all();
             }
         });
 }

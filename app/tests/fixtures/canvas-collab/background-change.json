@@ -1,0 +1,34 @@
+{
+  "name": "background change",
+  "document": {
+    "type": "oculus-canvas",
+    "version": 1,
+    "elements": [],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "background": "#ffffff"
+  },
+  "transaction": {
+    "edits": [],
+    "background": {
+      "before": "#ffffff",
+      "after": "dots"
+    }
+  },
+  "expect": {
+    "ok": {
+      "type": "oculus-canvas",
+      "version": 1,
+      "elements": [],
+      "viewport": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1
+      },
+      "background": "dots"
+    }
+  }
+}

@@ -46,6 +46,8 @@ function viewFor(target: EventTarget | null): EditorView | null {
   const el = target instanceof Element ? target : null;
   const dom = el?.closest(".cm-editor");
   if (dom instanceof HTMLElement) return EditorView.findFromDOM(dom);
+  // A canvas owns its history, including the native Edit menu.
+  if (el?.closest("[data-canvas-editor]")) return null;
   // Another text control (the title, a composer) undoes itself.
   if (el?.closest(EDITABLE)) return null;
   const active = document.activeElement;

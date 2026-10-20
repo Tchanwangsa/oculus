@@ -30,6 +30,8 @@ the root `CLAUDE.md` holds only the rules.
 | [music.md](./music.md) | Spotify played natively through librespot: the session task, credentials in keyd, the `music-state` snapshot, Settings → Music, the rail tile and `/music` player, commands that control the device playing (here or another one), the output on this Mac, and why music and lecture audio never play together |
 | [music-library.md](./music-library.md) | Playlists (the rootlist, in Spotify's library order from pathfinder `libraryV3`), their tracks and made covers (playlist contents, batched track metadata), Recently played (pathfinder `recents`' tracks merged by day with the tracks Oculus played, the `music_recent_tracks` row), search (pathfinder `searchDesktop`) and the 429 gate over the session's spclient, the queue and up next, and the Connect device list and transfer |
 | [viewers.md](./viewers.md) | Markdown, PDFs, source files, an Ed lesson's slides and a challenge's workspace, the media player (lectures, Up Next and library videos), transcription and the in-app browser |
+| [drawing-canvas.md](./drawing-canvas.md) | Drive and drawing canvases: the open `.canvas` format, editor, shape labels, the contextual inspector, arrow binding and arrowheads, shared save sessions, the shared-canvas authority, and Rust/WebAssembly geometry |
+| [device-sharing.md](./device-sharing.md) | Sharing a canvas with a browser on another device: the LAN server's lifecycle, ports and addresses, the wire protocol, the security boundary and limits, the share dialog with its local QR code, Settings → Device sharing |
 | [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |
 | [editor-maths.md](./editor-maths.md) | Maths in the note editor: the visual field, the toolbox, shorthands |
 | [editor-core.md](./editor-core.md) | The Rust editor core, its oracles, and shadow mode checking it against every note editor in dev |
@@ -48,6 +50,7 @@ the root `CLAUDE.md` holds only the rules.
 | `app/src-tauri/src/` | Rust: Tauri commands, scrape engine, parsing, embedding, retrieval, the harness |
 | `app/src-tauri/src/bin/oculus/` | The headless CLI over the same engine |
 | `app/keyd/` | `oculus-keyd`, the credential broker, and `core/`, its OS-free logic and OS adapters — a separate cargo root |
+| `app/canvas-core/` | Infinite drawing canvas geometry, built to WebAssembly for the frontend — a separate Cargo root |
 | `app/editor-core/` | A standalone Rust port of the note editor's text model and markdown parser, checked against CodeMirror and Lezer; in dev builds, as WebAssembly, against every note editor |
 | `app/studio-core/` | Studio's scene renderer: TSX components in a QuickJS sandbox, laid out with taffy and parley and drawn with vello_cpu, maths typeset by `app/math-core`'s KaTeX port — a separate cargo root the CLI links |
 | `app/src-tauri/templates/` | The agent-facing docs and skills written into the library |

@@ -40,7 +40,7 @@ studio_core = { package = "oculus-studio-core", path = "../studio-core" }
 serde = { version = "1", features = ["derive"] }
 # `raw_value`: `harness/providers/antigravity/rules.rs` rewrites two lists in agy's
 # settings file and hands every other value back verbatim, in file order.
-serde_json = { version = "1", features = ["raw_value", "preserve_order"] }
+serde_json = { version = "1", features = ["raw_value", "preserve_order", "float_roundtrip"] }
 tiny_http = "0.12"
 url = "2"
 ureq = { version = "2", features = ["cookies"] }
@@ -65,7 +65,19 @@ rpassword = "7"
 # `sync` is for the oneshots, watches and semaphores commands await (e.g.
 # src/library/pdf_render/render.rs). `time` is the usage ticker's interval
 # (src/shell/usage/ticker.rs).
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+# The device-sharing server (`src/companion/`, docs/device-sharing.md): hyper's
+# HTTP/1 server with upgrades on a private tokio runtime, WebSocket framing
+# over the upgraded socket, the listeners' socket options and this Mac's
+# addresses. All already in the lock tree.
+hyper = { version = "1", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+http-body-util = { version = "0.1", default-features = false }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+socket2 = { version = "0.6", default-features = false }
+bytes = { version = "1", default-features = false, features = ["std"] }
+if-addrs = { version = "0.15", default-features = false }
 # Local time for the usage table's hour keys.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 scraper = "0.27"
@@ -120,8 +132,8 @@ cpal = "0.16"
 rodio = { version = "0.21", default-features = false, features = ["playback"] }
 # Reads librespot's dealer stream of Connect cluster updates
 # (`src/music/devices.rs`) and fetches playlist headers four at a time
-# (`src/music/library/mod.rs`).
-futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+# (`src/music/library/mod.rs`); `sink` sends the companion's WebSocket frames.
+futures-util = { version = "0.3", default-features = false, features = ["alloc", "sink"] }
 # ONNX Runtime for Studio's narration aligner (`src/runtime/onnx/`,
 # `src/studio/timing/`). Links ORT 1.28 statically on macOS arm64, fetched by
 # ort-sys's build script; pinned exactly because rc releases change the API.
@@ -137,12 +149,11 @@ sha2 = "0.10"
 # The G2P guesser's NFKD and combining-mark stripping (`src/studio/voice/g2p/guess/`).
 # Already in the lock tree.
 unicode-normalization = "0.1.25"
-# A network coming back cuts the music session's reconnect backoff short
-# (`src/music/netwatch.rs`): if-watch over netwatcher because on macOS it
+# The process's one address observer (`src/runtime/network/`), which music's
+# reconnects and device sharing's links follow: if-watch over netwatcher because on macOS it
 # builds on the system-configuration already in the lock (SCDynamicStore),
 # with the same address-change stream on Windows and Linux.
 if-watch = { version = "3.2.2", features = ["tokio"] }
-if-addrs = { version = "0.15", default-features = false }
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_sessions` in src/shell/browser/seed.rs). WebKit cookie ordering uses

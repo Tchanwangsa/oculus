@@ -1,0 +1,13 @@
+{
+  "type": "oculus-canvas",
+  "version": 1,
+  "elements": [
+    "rect"
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "background": "#ffffff"
+}

@@ -446,8 +446,9 @@ Options:
           Restrict to these subjects; prefix codes are fine. Repeatable
 
   -c, --category <CATEGORY>
-          Only these categories (home, syllabus, upload, document, page, assignment,
-          quiz, announcement, ed, lessons, file, module, image, other). Repeatable
+          Only these categories (home, syllabus, upload, document, canvas, page,
+          assignment, quiz, announcement, ed, lessons, file, module, image, other).
+          Repeatable
 
   -F, --fixed
           Treat the pattern as literal text, not a regular expression
@@ -517,8 +518,9 @@ Options:
           Only this extension (pdf, md, pptx, docx, png …)
 
   -c, --category <CATEGORY>
-          Only these categories (home, syllabus, upload, document, page, assignment,
-          quiz, announcement, ed, lessons, file, module, image, other). Repeatable
+          Only these categories (home, syllabus, upload, document, canvas, page,
+          assignment, quiz, announcement, ed, lessons, file, module, image, other).
+          Repeatable
 
   -m, --match <TEXT>
           Only paths containing this text (case-insensitive)
