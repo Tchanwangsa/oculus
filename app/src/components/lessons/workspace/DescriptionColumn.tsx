@@ -10,7 +10,7 @@ import { FeedbackPanel } from "./feedback/FeedbackPanel";
 
 export type SideTab = "description" | "feedback";
 
-const TABS: ReadonlyArray<{ value: SideTab; label: string }> = [
+export const SIDE_TABS: ReadonlyArray<{ value: SideTab; label: string }> = [
   { value: "description", label: "Description" },
   { value: "feedback", label: "Feedback" },
 ];
@@ -22,6 +22,7 @@ const TABS: ReadonlyArray<{ value: SideTab; label: string }> = [
  */
 export function DescriptionColumn({
   challengeId,
+  slideId,
   brief,
   files,
   feedback,
@@ -29,8 +30,10 @@ export function DescriptionColumn({
   onTab,
   marked,
   openWorkspaceFile,
+  stacked,
 }: {
   challengeId: number;
+  slideId: number | null;
   brief: DbFile;
   files: DbFile[];
   /** Whether the Feedback tab exists. */
@@ -40,6 +43,8 @@ export function DescriptionColumn({
   marked: Submission | null;
   /** Opens a workspace file's tab from the brief's Files list. */
   openWorkspaceFile: (path: string) => boolean;
+  /** The pane's own strip carries Description and Feedback, so this one is left out. */
+  stacked: boolean;
 }) {
   const shown: SideTab = feedback ? tab : "description";
   const [opened, setOpened] = useState(shown === "feedback");
@@ -51,13 +56,15 @@ export function DescriptionColumn({
   if (!feedback) return viewer;
   return (
     <>
-      <div className="flex h-10 shrink-0 items-center border-b border-border-subtle px-3">
-        <PillTabs tabs={TABS} value={shown} onChange={onTab} />
-      </div>
+      {!stacked && (
+        <div className="flex h-10 shrink-0 items-center border-b border-border-subtle px-3">
+          <PillTabs tabs={SIDE_TABS} value={shown} onChange={onTab} />
+        </div>
+      )}
       <div className={cn("flex min-h-0 flex-1 flex-col", shown !== "description" && "hidden")}>{viewer}</div>
       {opened && (
         <div className={cn("min-h-0 flex-1", shown !== "feedback" && "hidden")}>
-          <FeedbackPanel challengeId={challengeId} active={shown === "feedback"} marked={marked} />
+          <FeedbackPanel challengeId={challengeId} slideId={slideId} active={shown === "feedback"} marked={marked} />
         </div>
       )}
     </>

@@ -18,6 +18,8 @@ const HEAD_BYTES: u64 = 16 * 1024;
 pub struct Slide {
     /// The workspace folder, data-dir-relative.
     pub slide_dir: String,
+    /// The lesson slide's Ed id (`ed_slide_id`), which a passing Mark completes.
+    pub slide_id: Option<i64>,
     pub run_command: Option<String>,
     pub features: Features,
     pub due_at: Option<String>,
@@ -92,16 +94,21 @@ fn read(data_dir: &Path, md: &str, challenge_id: i64) -> Option<Slide> {
     if front.get("ed_challenge_id")?.as_i64()? != challenge_id {
         return None;
     }
-    Some(snapshot(slide_workspace_dir(md)?, &front["challenge"]))
+    Some(snapshot(
+        slide_workspace_dir(md)?,
+        front.get("ed_slide_id").and_then(Value::as_i64),
+        &front["challenge"],
+    ))
 }
 
 /// The sync's `challenge` snapshot; a missing one (its read failed) leaves
 /// every feature off.
-fn snapshot(slide_dir: &str, challenge: &Value) -> Slide {
+fn snapshot(slide_dir: &str, slide_id: Option<i64>, challenge: &Value) -> Slide {
     let feature = |name: &str| challenge["features"][name].as_bool().unwrap_or(false);
     let text = |v: &Value| v.as_str().filter(|s| !s.is_empty()).map(str::to_string);
     Slide {
         slide_dir: slide_dir.to_string(),
+        slide_id,
         run_command: text(&challenge["run_command"]),
         features: Features {
             run: feature("run"),

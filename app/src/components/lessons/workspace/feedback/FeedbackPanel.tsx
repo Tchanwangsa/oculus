@@ -17,6 +17,7 @@ import {
   type WorkspaceEvent,
 } from "@/lib/ed/workspace";
 import { heldSaver } from "@/lib/ed/workspaceHandles";
+import { completesSlide, recordSlideStatus } from "@/lib/ed/slideStatus";
 import { edUnavailableReason } from "@/lib/ed/workspaceStatus";
 
 import { useReplaceFlow } from "../reset/useReplaceFlow";
@@ -37,14 +38,17 @@ const VIEWS: ReadonlyArray<{ value: View; label: string }> = [
  * opens; one shown in full — its feedback, or its code read-only — and all
  * listed to pick from. Restore replaces the workspace with the shown one's
  * code, after asking. A new mark (`marked`) joins the list and is shown at
- * once, without reloading the others.
+ * once, without reloading the others. A passed submission ticks the slide.
  */
 export function FeedbackPanel({
   challengeId,
+  slideId,
   active,
   marked,
 }: {
   challengeId: number;
+  /** The challenge's Ed slide, ticked in the lesson sidebar once a submission passes. */
+  slideId: number | null;
   /** The tab is showing. */
   active: boolean;
   /** The submission the last Mark returned. */
@@ -89,6 +93,11 @@ export function FeedbackPanel({
     setList((prev) => (prev ? [marked, ...prev.filter((s) => s.id !== marked.id)] : prev));
     setSelected(marked.id);
   }, [marked]);
+
+  const completed = list?.some((s) => completesSlide(s.status)) ?? false;
+  useEffect(() => {
+    if (completed && slideId != null) recordSlideStatus(slideId, "completed");
+  }, [completed, slideId]);
 
   const subs = list ?? [];
   const shown = subs.find((s) => s.id === selected) ?? subs[0] ?? null;
