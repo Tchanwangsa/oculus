@@ -14,7 +14,8 @@ const json = (p) => JSON.parse(readFileSync(p, "utf8"));
 const base = json(join(rust, "tauri.conf.json"));
 const macos = json(join(rust, "tauri.macos.conf.json"));
 const pkg = json(join(app, "package.json"));
-const ci = readFileSync(join(app, "..", ".github", "workflows", "ci.yml"), "utf8");
+const ci = Bun.YAML.parse(readFileSync(join(app, "..", ".github", "workflows", "ci.yml"), "utf8"));
+const release = Bun.YAML.parse(readFileSync(join(app, "..", ".github", "workflows", "release.yml"), "utf8"));
 
 const baseBins = base.bundle.externalBin;
 const macosBins = macos.bundle.externalBin;
@@ -80,7 +81,11 @@ test("every producer is a package script over a script that exists", () => {
 });
 
 test("CI builds and stages keyd's helper as the bundle would carry it", () => {
-  expect(ci).toContain("bun run stage-keyd");
+  for (const name of ["check", "windows"]) {
+    const runs = ci.jobs[name].steps.map((step) => step.run ?? "");
+    expect(runs).toContain("bun run stage-keyd");
+    expect(runs.indexOf("bun run stage-keyd")).toBeLessThan(runs.indexOf("bun run stage-cli"));
+  }
 });
 
 test("the bundled keyd is built without the dev feature, and the dev one with it", () => {
@@ -99,17 +104,12 @@ test("the bundle is signed hardened, with library validation on", () => {
   expect(mac.entitlements).toBeUndefined();
 });
 
-test("CI's Windows job stages what beforeBuildCommand would before skipping it", () => {
-  const job = ci.slice(ci.indexOf("\n  windows:"), ci.indexOf("\n  keyd-linux:"));
-  const build = job.indexOf("tauri build");
-  expect(job.slice(build)).toContain(`"beforeBuildCommand":null`);
-  // speech and whisper exit early off macOS; docs:cli writes a repo doc the
-  // bundle doesn't carry.
-  for (const step of ["bun run build", "bun run ffmpeg", "bun run stage-keyd", "bun run stage-cli"]) {
-    expect(before, step).toContain(step);
-    const at = job.indexOf(step);
-    expect(at, step).toBeGreaterThan(-1);
-    expect(at, step).toBeLessThan(build);
+test("release packaging runs the complete beforeBuildCommand on both platforms", () => {
+  for (const name of ["bundle", "windows"]) {
+    const build = release.jobs[name].steps.find((step) => step.uses?.startsWith("tauri-apps/tauri-action@"));
+    expect(build, name).toBeDefined();
+    expect(build.with.projectPath).toBe("app");
+    expect(build.with.args ?? "").not.toContain("beforeBuildCommand");
   }
 });
 

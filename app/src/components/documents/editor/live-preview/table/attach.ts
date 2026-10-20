@@ -1,13 +1,16 @@
 import { redo, undo } from "@codemirror/commands";
 import type { EditorView } from "@codemirror/view";
 
-import { type TableCtx, isCell } from "./ctx";
+import { clipboardGrid } from "../tableGrid";
+import { type TableCtx, isCell, place } from "./ctx";
 import { placeHandles } from "./dom";
-import { addColumn, addRow, write as writeCell } from "./edits";
+import { addColumn, addRow, pasteGrid, write as writeCell } from "./edits";
 import { aim, handlePress } from "./handles";
 import { cellKeydown } from "./keys";
 import { cellMousedown } from "./press";
-import { clearRange } from "./selection";
+import { paintRich, showSource } from "./rich";
+import { blockHeld, clearRange, copyBlock } from "./selection";
+import { bounds, cellValue, ranges } from "./state";
 
 /** Wires one table element's events. Everything is delegated from the root,
  *  which outlives the grid inside it. */
@@ -47,11 +50,30 @@ export function attach(dom: HTMLElement, view: EditorView) {
     }
   });
 
+  // WebKit leaves Copy, Cut and Paste off while nothing is selected, unless
+  // the page claims them: a selected block of cells has no text selection.
+  for (const type of ["beforecopy", "beforecut", "beforepaste"]) {
+    dom.addEventListener(type, (e) => {
+      if (blockHeld(t, e)) e.preventDefault();
+    });
+  }
+  dom.addEventListener("copy", (e) => copyBlock(t, e, false));
+  dom.addEventListener("cut", (e) => copyBlock(t, e, true));
+
   dom.addEventListener("paste", (e) => {
-    if (!isCell(e.target)) return;
+    const range = ranges.get(dom);
+    const cell = isCell(e.target) ? e.target : null;
+    if (!cell && !(range && e.target === scroll)) return;
     e.preventDefault();
+    // A grid fills cells from this one, or from a selected block's corner.
+    const grid = clipboardGrid(e.clipboardData, false);
+    if (grid && (grid.length > 1 || grid[0].length > 1)) {
+      const { r0, c0 } = range ? bounds(range) : { r0: place(cell!).r, c0: place(cell!).c };
+      pasteGrid(t, r0, c0, grid);
+      return;
+    }
     const text = (e.clipboardData?.getData("text/plain") ?? "").replace(/\s*\r?\n\s*/g, " ");
-    if (text) document.execCommand("insertText", false, text);
+    if (cell && text) document.execCommand("insertText", false, text);
   });
 
   dom.addEventListener("keydown", (e) => cellKeydown(t, e));
@@ -61,7 +83,12 @@ export function attach(dom: HTMLElement, view: EditorView) {
     if (cell && dom.contains(cell)) aim(t, cell);
   });
   dom.addEventListener("focusin", (e) => {
-    if (isCell(e.target)) aim(t, e.target);
+    if (!isCell(e.target)) return;
+    showSource(e.target);
+    aim(t, e.target);
+  });
+  dom.addEventListener("focusout", (e) => {
+    if (isCell(e.target)) paintRich(e.target, cellValue(e.target), false);
   });
   scroll.addEventListener("scroll", () => placeHandles(dom));
 

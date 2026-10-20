@@ -390,6 +390,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::WindowEvent {
+                    event: tauri::WindowEvent::Focused(true),
+                    ..
+                }
+            ) {
+                tauri::async_runtime::spawn_blocking(runtime::network::refresh);
+            }
             // Don't let a CLI agent outlive the window, or the Spotify
             // device linger in Spotify's device list.
             if matches!(event, tauri::RunEvent::Exit) {

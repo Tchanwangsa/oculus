@@ -164,6 +164,7 @@ dependencies = [
  "half",
  "hayro",
  "hound",
+ "if-addrs",
  "if-watch",
  "image",
  "imagesize",

@@ -82,7 +82,7 @@ export function LessonView({
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {workspace != null && md ? (
-          <WorkspacePane key={workspace} challengeId={workspace} brief={md} files={files} />
+          <WorkspacePane key={workspace} challengeId={workspace} slideId={slide.id ?? null} brief={md} files={files} />
         ) : shown ? (
           /* In-slide links open the linked file beside this page. */
           <FileViewer key={shown.id} file={shown} files={files} onOpenFile={openFileSmart} />

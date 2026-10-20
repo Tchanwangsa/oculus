@@ -142,6 +142,7 @@ unicode-normalization = "0.1.25"
 # builds on the system-configuration already in the lock (SCDynamicStore),
 # with the same address-change stream on Windows and Linux.
 if-watch = { version = "3.2.2", features = ["tokio"] }
+if-addrs = { version = "0.15", default-features = false }
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_sessions` in src/shell/browser/seed.rs). WebKit cookie ordering uses

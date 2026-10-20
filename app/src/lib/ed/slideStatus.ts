@@ -15,6 +15,11 @@ type StatusMap = ReadonlyMap<number, string>;
  */
 export const useSlideStatusStore = create<{ byId: StatusMap }>(() => ({ byId: new Map() }));
 
+/** Whether a submission of this Ed status completes its challenge's slide,
+ *  as Ed's web app does after a mark: passed, or submitted without marking. */
+export const completesSlide = (submissionStatus: string) =>
+  submissionStatus === "passed" || submissionStatus === "submitted";
+
 /** Record Ed's `status` for slide `id`; a status never moves back. */
 export function recordSlideStatus(id: number, status: string): void {
   useSlideStatusStore.setState((s) => {
