@@ -17,6 +17,7 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Search (⌘K and the new-tab field), the new-tab page's Recent list | `app/src/lib/search/`, `app/src/lib/search/filters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/shell/recentTabsStore.ts` |
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/files/openFile.ts`, `app/src/pages/subject/files/FilePage.tsx`, `app/src/hooks/find/useLocateHighlight.ts` |
 | ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/menu/find.ts`, `app/src/hooks/find/useDomFind.ts`, `app/src/lib/menu/findText.ts`, `app/src/components/ui/search/FindBar.tsx`, `app/src/components/ui/search/PageFind.tsx`, `app/src/components/documents/editor/chrome/useEditorFind.ts` |
+| Shared page navigation: responsive drawer and desktop panel | `app/src/components/ui/layout/SideNavShell.tsx`, `app/src/hooks/ui/useSideNavPanel.ts` |
 | Subject page: the nav column, subject switcher and `/subjects` redirect | `app/src/layouts/SubjectLayout.tsx`, `app/src/components/subjects/SubjectNav.tsx`, `app/src/pages/start/SubjectsRedirect.tsx` |
 | Home: sections, the Recent row's query, the Activity chart and its pings | `app/src/pages/start/HomePage.tsx`, `app/src/components/home/`, `app/src/lib/activity/home.ts`, `app/src/lib/activity/usage/`, `app/src/lib/activity/usageContext.ts`, `app/src/hooks/backend/useActivityPing.ts` |
 | Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/search/settings.ts` |
@@ -125,11 +126,26 @@ indexing, a brand dot on Subjects while any subject has never-opened files
 
 ## Settings has its own nav column
 
+## Page navigation overlays narrow panes
+
+Chat, Subjects, Tasks, Studio and Settings use `SideNavShell` with
+`useSideNavPanel`. Below 768 CSS pixels of the shell's own width, navigation
+starts closed and opens over the page with a dismissing backdrop. Split panes
+and page zoom follow the same rule. Links, New thread, route changes, Escape,
+the close button and clicking the backdrop dismiss it; leaving the tab also
+resets it. Hidden navigation and covered content are inert. Opening focuses
+the close button; dismissal restores the previous focus when still visible.
+
+The drawer's open state is local and temporary. Wide panes retain their saved
+width and fold through `useResizablePanel`; narrowing or using the drawer
+never changes those preferences. Resize handles are hidden in the drawer.
+The header toggle and ⌘⌥B go through the same panel in both modes.
+
+## Settings has its own nav column
+
 `/settings` is one route with a page per nav row; `SettingsLayout` puts
-`SettingsNav` beside the page, the rows grouped from `SETTINGS_PAGES`. Below
-42rem of available pane width, the navigation becomes a page picker above
-the content ([ui.md](./ui.md)). Its wide-layout
-search reads a hand-kept list in `app/src/lib/search/settings.ts`, because the
+`SettingsNav` beside the page, the rows grouped from `SETTINGS_PAGES`,
+with the shared drawer on narrow panes. Its search reads a hand-kept list in `app/src/lib/search/settings.ts`, because the
 pages are lazy and unmounted: entry titles are the on-screen text, and each
 names the `Section` title it jumps to. Rename a section or row and update the
 list. A jump travels as router state, and the layout scrolls the section's id

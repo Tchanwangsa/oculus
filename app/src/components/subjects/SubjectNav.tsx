@@ -15,9 +15,7 @@ import {
 } from "@/components/ui/layout/SideNav";
 import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useWindowEvent } from "@/hooks/backend/useEvents";
-import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
-import { useTabActive } from "@/components/tabs/TabContext";
+import type { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
 import type { Subject } from "@/lib/db";
 import { displayCode, displayName } from "@/lib/format/format";
 import { cn } from "@/lib/utils";
@@ -64,15 +62,6 @@ export function SubjectNav({
   const openFirst = useRef<() => void>(() => {});
   useEffect(() => setQuery(""), [subject.id]);
   const { collapsed } = panel;
-  // Every tab stays mounted, so only the one in front answers the chord.
-  // `e.code`, not `e.key`: on macOS ⌥B arrives as `∫`.
-  const active = useTabActive();
-  useWindowEvent("keydown", (e) => {
-    const k = e as KeyboardEvent;
-    if (!active || !k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
-    k.preventDefault();
-    panel.toggle();
-  });
 
   return (
     <>
@@ -146,8 +135,7 @@ export function SubjectNav({
 }
 
 /** The column's shape while the subject loads. */
-export function SubjectNavSkeleton() {
-  const panel = useResizablePanel(SUBJECT_NAV_PANEL);
+export function SubjectNavSkeleton({ panel }: { panel: Panel }) {
   return (
     <SideNav
       width={panel.width}

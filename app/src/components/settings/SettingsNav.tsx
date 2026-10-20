@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
@@ -18,16 +18,7 @@ import {
   type SettingsJump,
 } from "@/lib/search/settings";
 import { cn } from "@/lib/utils";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import type { useSideNavPanel } from "@/hooks/ui/useSideNavPanel";
 import { useJobAttention } from "@/stores/agents/jobAttentionStore";
 
 /**
@@ -35,7 +26,7 @@ import { useJobAttention } from "@/stores/agents/jobAttentionStore";
  * groups while it is empty. A result navigates with `SettingsJump` state, which
  * `SettingsLayout` turns into a scroll to the section.
  */
-export default function SettingsNav() {
+export default function SettingsNav({ panel }: { panel: ReturnType<typeof useSideNavPanel> }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [query, setQuery] = useState("");
@@ -51,97 +42,74 @@ export default function SettingsNav() {
   };
 
   return (
-    <>
-      <div className="settings-compact-nav border-b border-border-subtle px-4 py-3">
-        <Select value={pathname.split("/").pop()} onValueChange={(page) => navigate(page)}>
-          <SelectTrigger aria-label="Settings page" className="w-full">
-            <SelectValue placeholder="Settings" />
-          </SelectTrigger>
-          <SelectContent scrollFade viewportClassName="max-h-[min(20rem,var(--radix-select-content-available-height))]">
-            {SETTINGS_GROUPS.map((group, index) => (
-              <Fragment key={group}>
-                {index > 0 && <SelectSeparator className="mx-1 bg-border" />}
-                <SelectGroup>
-                  <SelectLabel>{group}</SelectLabel>
-                  {SETTINGS_PAGES.filter((page) => page.group === group).map((page) => (
-                    <SelectItem key={page.id} value={page.id} textValue={page.label}>
-                      <page.icon size={16} aria-hidden />
-                      {page.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </Fragment>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="settings-nav h-full shrink-0">
-        <SideNav
-          header={
-            <>
-              <div className="px-4 pt-4 pb-3">
-                <h1 className="font-display text-[16px] font-semibold leading-none tracking-tight text-foreground">
-                  Settings
-                </h1>
-              </div>
+    <SideNav
+      aria-label="Settings"
+      width={panel.width}
+      collapsed={panel.collapsed}
+      animate={!panel.dragging}
+      header={
+        <>
+          <div className="px-4 pt-4 pb-3">
+            <h1 className="font-display text-[16px] font-semibold leading-none tracking-tight text-foreground">
+              Settings
+            </h1>
+          </div>
 
-              <SideNavSearch
-                value={query}
-                onChange={setQuery}
-                onEnter={() => results[0] && open(results[0])}
-                placeholder="Search settings"
-              />
-            </>
-          }
-        >
-          {searching ? (
-            results.length > 0 ? (
-              results.map((entry) => {
-                const page = settingsPage(entry.page);
-                return (
-                  <button
-                    key={`${entry.page}/${entry.section ?? ""}/${entry.title}`}
-                    type="button"
-                    onClick={() => open(entry)}
-                    className={cn(SIDE_NAV_ROW, SIDE_NAV_ROW_IDLE, "items-start text-left")}
-                  >
-                    <page.icon size={16} className="mt-px shrink-0" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate">{entry.title}</span>
-                      <span className="block truncate text-[11px] text-muted-foreground">
-                        {entry.section ? page.label : page.group}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })
-            ) : (
-              <p className="px-2 py-1.5 text-[12.5px] text-muted-foreground">No matching settings</p>
-            )
-          ) : (
-            <div className="space-y-3">
-              {SETTINGS_GROUPS.map((group) => (
-                <div key={group}>
-                  <SideNavGroupLabel>{group}</SideNavGroupLabel>
-                  {SETTINGS_PAGES.filter((p) => p.group === group).map((page) => (
-                    <SideNavLink
-                      key={page.id}
-                      to={page.id}
-                      icon={page.icon}
-                      label={page.label}
-                      trailing={
-                        page.id === "jobs" && jobsNeedAttention ? (
-                          <span className="size-1.5 rounded-full bg-destructive" />
-                        ) : null
-                      }
-                    />
-                  ))}
-                </div>
+          <SideNavSearch
+            value={query}
+            onChange={setQuery}
+            onEnter={() => results[0] && open(results[0])}
+            placeholder="Search settings"
+          />
+        </>
+      }
+    >
+      {searching ? (
+        results.length > 0 ? (
+          results.map((entry) => {
+            const page = settingsPage(entry.page);
+            return (
+              <button
+                key={`${entry.page}/${entry.section ?? ""}/${entry.title}`}
+                type="button"
+                onClick={() => open(entry)}
+                className={cn(SIDE_NAV_ROW, SIDE_NAV_ROW_IDLE, "items-start text-left")}
+              >
+                <page.icon size={16} className="mt-px shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{entry.title}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {entry.section ? page.label : page.group}
+                  </span>
+                </span>
+              </button>
+            );
+          })
+        ) : (
+          <p className="px-2 py-1.5 text-[12.5px] text-muted-foreground">No matching settings</p>
+        )
+      ) : (
+        <div className="space-y-3">
+          {SETTINGS_GROUPS.map((group) => (
+            <div key={group}>
+              <SideNavGroupLabel>{group}</SideNavGroupLabel>
+              {SETTINGS_PAGES.filter((p) => p.group === group).map((page) => (
+                <SideNavLink
+                  key={page.id}
+                  to={page.id}
+                  icon={page.icon}
+                  label={page.label}
+                  trailing={
+                    page.id === "jobs" && jobsNeedAttention ? (
+                      <span className="size-1.5 rounded-full bg-destructive" />
+                    ) : null
+                  }
+                />
               ))}
             </div>
-          )}
-        </SideNav>
-      </div>
-    </>
+          ))}
+        </div>
+      )}
+    </SideNav>
   );
 }

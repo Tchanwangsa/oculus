@@ -1,9 +1,11 @@
 import { Navigate, useNavigate } from "react-router-dom";
 import { BookOpen } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { SubjectNavSkeleton } from "@/components/subjects/SubjectNav";
+import { SUBJECT_NAV_PANEL, SubjectNavSkeleton } from "@/components/subjects/SubjectNav";
 import { SubjectEmpty } from "@/components/subjects/SubjectPage";
 import { useSubjects } from "@/hooks/data/useSubjects";
+import { useSideNavPanel } from "@/hooks/ui/useSideNavPanel";
+import { SideNavShell } from "@/components/ui/layout/SideNavShell";
 import { lastSubjectId } from "@/layouts/SubjectLayout";
 
 /**
@@ -14,13 +16,12 @@ import { lastSubjectId } from "@/layouts/SubjectLayout";
 export default function SubjectsRedirect() {
   const { subjects, current, past, loading } = useSubjects();
   const navigate = useNavigate();
+  const panel = useSideNavPanel(SUBJECT_NAV_PANEL);
 
   // The shape SubjectLayout loads with, so the hand-off doesn't flash.
   if (loading) {
     return (
-      <div className="flex h-full overflow-hidden">
-        <SubjectNavSkeleton />
-      </div>
+      <SideNavShell panel={panel} nav={<SubjectNavSkeleton panel={panel} />}><div /></SideNavShell>
     );
   }
 

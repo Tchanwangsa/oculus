@@ -3,10 +3,11 @@ import { Outlet, useOutletContext } from "react-router-dom";
 
 import { StudioNav } from "@/components/studio/nav/StudioNav";
 import { STUDIO_NAV_PANEL } from "@/components/studio/nav/panel";
-import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
+import { useSideNavPanel } from "@/hooks/ui/useSideNavPanel";
+import { SideNavShell } from "@/components/ui/layout/SideNavShell";
 import { useVideosStore } from "@/stores/studio/videosStore";
 
-type Panel = ReturnType<typeof useResizablePanel>;
+type Panel = ReturnType<typeof useSideNavPanel>;
 
 /**
  * Everything under /studio: the nav column beside the page. The column's width
@@ -15,18 +16,17 @@ type Panel = ReturnType<typeof useResizablePanel>;
  * and the grid.
  */
 export default function StudioLayout() {
-  const panel = useResizablePanel(STUDIO_NAV_PANEL);
+  const panel = useSideNavPanel(STUDIO_NAV_PANEL);
   useEffect(() => {
     void useVideosStore.getState().reload();
   }, []);
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <StudioNav panel={panel} />
+    <SideNavShell panel={panel} nav={<StudioNav panel={panel} />}>
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <Outlet context={panel satisfies Panel} />
       </div>
-    </div>
+    </SideNavShell>
   );
 }
 

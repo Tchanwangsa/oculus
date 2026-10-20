@@ -17,8 +17,8 @@ Read this before any UI work.
 | Persisted view state and collapsed groups | `app/src/hooks/ui/useStoredState.ts` |
 | Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/layout/PageParts.tsx` |
 | Page headers, titles and breadcrumb parent popovers | `app/src/components/tabs/PaneHeader.tsx` (`PageHeader`, `PaneTitle`, `PaneTrail`), `app/src/components/ui/Breadcrumb.tsx` |
-| A page's nav column (Settings, subjects, Chat) | `app/src/components/ui/layout/SideNav.tsx` |
-| Settings pane layout, stacking rows and compact navigation | `app/src/styles/settings.css`, `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx` |
+| Page navigation and its responsive shell | `app/src/components/ui/layout/SideNav.tsx`, `app/src/components/ui/layout/SideNavShell.tsx`, `app/src/hooks/ui/useSideNavPanel.ts` |
+| Settings pane layout and stacking rows | `app/src/styles/settings.css`, `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx` |
 | Drag gestures | `app/src/hooks/gestures/usePointerDrag.ts`, `app/src/hooks/gestures/useCardDrag.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
 | Flat divided lists, table chrome | `app/src/components/ui/layout/PageParts.tsx`, `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/TableGroup.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
@@ -131,10 +131,8 @@ themes are opt-in and keep the same structure.
   gutter so a page that starts overflowing doesn't jog sideways.
 - **Settings respond to their pane's width**, including split panes and page
   zoom. `settings.css` stacks `settings-row` labels and controls below 34rem
-  and replaces the nav column with a page picker below 42rem, keeping page
-  icons and labelled groups separated by dividers. The picker scrolls within
-  20rem or the available popup height; it and the page scroller use
-  `useScrollFade`. Use
+  and uses the shared navigation drawer described below. The page scroller
+  uses `useScrollFade`. Use
   `settings-controls` for bounded fields and `settings-actions` for wrapping
   button groups. Descriptions are short hints; errors and confirmation copy
   retain the detail needed to act. Dense tables scroll sideways with readable
@@ -168,13 +166,15 @@ themes are opt-in and keep the same structure.
   reserved) with `FilterFold` for a collapsed group such as Archived. Rows
   and fold triggers draw keyboard focus inside their bounds, so the list
   cannot clip the highlight when the popover focuses its first option.
-- **Settings, subjects and Chat share one nav column**, `SideNav`: a 208px column
+- **Settings, subjects, Chat, Tasks and Studio share one nav column**, `SideNav`: a 208px column
   on the window's `background` beside the page, a pinned header, rows with a
   16px icon and the active row filled, never an underline strip, and
   `SideNavSearch`, the pill search field under the header. Rows that are not
-  links take its exported row classes. The subject and Chat columns are
-  drag-resizable and fold away to nothing (`useResizablePanel`, width and
-  fold remembered) from ⌘⌥B, from `SideNavCollapseToggle` at the start of the
+  links take its exported row classes. `SideNavShell` and `useSideNavPanel`
+  own the responsive behavior ([shell.md](./shell.md#page-navigation-overlays-narrow-panes)).
+  The subject, Chat, Tasks and Studio columns are drag-resizable and fold
+  away to nothing (`useResizablePanel`, width and fold remembered) from ⌘⌥B,
+  from `SideNavCollapseToggle` at the start of the
   page's 48px header row, beside its title, or by dragging it narrow. Labels
   fade as the width eases shut (`SIDE_NAV_FOLDS`). Drag samples are coalesced
   into one width update per animation frame; release applies the last sample

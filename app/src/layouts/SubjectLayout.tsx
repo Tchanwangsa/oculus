@@ -1,7 +1,8 @@
 import { shortcut } from "@/lib/platform";
 import { useEffect, useMemo } from "react";
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
-import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
+import { useSideNavPanel } from "@/hooks/ui/useSideNavPanel";
+import { SideNavShell } from "@/components/ui/layout/SideNavShell";
 import { useSubjects } from "@/hooks/data/useSubjects";
 import { SubjectCrumbs } from "@/components/subjects/SubjectCrumbs";
 import {
@@ -45,7 +46,7 @@ export default function SubjectLayout() {
   const { subjectId } = useParams();
   const id = Number(subjectId);
   const { subjects, current, past, loading } = useSubjects();
-  const panel = useResizablePanel(SUBJECT_NAV_PANEL);
+  const panel = useSideNavPanel(SUBJECT_NAV_PANEL);
   const { pathname } = useLocation();
 
   const subject = useMemo(
@@ -69,9 +70,7 @@ export default function SubjectLayout() {
 
   if (loading && !subject) {
     return (
-      <div className="flex h-full overflow-hidden">
-        <SubjectNavSkeleton />
-      </div>
+      <SideNavShell panel={panel} nav={<SubjectNavSkeleton panel={panel} />}><div /></SideNavShell>
     );
   }
 
@@ -80,8 +79,7 @@ export default function SubjectLayout() {
   if (!subject) return <Navigate to="/subjects" replace />;
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <SubjectNav subject={subject} current={current} past={past} panel={panel} />
+    <SideNavShell panel={panel} nav={<SubjectNav subject={subject} current={current} past={past} panel={panel} />}>
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <PaneHeaderRow className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
@@ -102,7 +100,7 @@ export default function SubjectLayout() {
           <Outlet context={subject satisfies Subject} />
         </div>
       </div>
-    </div>
+    </SideNavShell>
   );
 }
 

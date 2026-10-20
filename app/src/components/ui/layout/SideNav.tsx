@@ -100,6 +100,7 @@ export function SideNavCollapseToggle({
         <button
           type="button"
           aria-label={label}
+          aria-expanded={!collapsed}
           onClick={onToggle}
           className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-item-hover hover:text-foreground"
         >
