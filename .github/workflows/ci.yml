@@ -1,8 +1,5 @@
-# Checks fresh macOS and Windows checkouts: formatting, frontend and Rust tests,
-# maths WASM, sidecars and bundle staging. Linux checks keyd seams and editor
-# core oracles. macOS again checks Studio's renderer against its golden frames.
-# See
-# docs/development.md#ci-proves-a-fresh-checkout-builds-releases-are-cut-by-hand.
+# Quick checks run on every change; native jobs run for their build inputs.
+# Installer packaging lives in release.yml. See docs/development.md.
 name: CI
 
 on:
@@ -13,14 +10,136 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Changed build inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      native: ${{ steps.filter.outputs.native }}
+      keyd: ${{ steps.filter.outputs.keyd }}
+      editor: ${{ steps.filter.outputs.editor }}
+      studio: ${{ steps.filter.outputs.studio }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          # On master, compare all commits in this push; PRs use their base.
+          base: ${{ github.ref }}
+          filters: |
+            native:
+              - 'app/src-tauri/**'
+              - 'app/keyd/**'
+              - 'app/studio-core/**'
+              - 'app/math-core/**'
+              - 'app/canvas-core/**'
+              - 'app/scripts/**'
+              - 'app/package.json'
+              - 'app/bun.lock'
+              - 'app/patches/**'
+              - '**/.cargo/**'
+              - '**/rust-toolchain*'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
+              - 'docs/cli-reference.md'
+            keyd:
+              - 'app/keyd/**'
+              - '**/.cargo/**'
+              - '**/rust-toolchain*'
+              - '.github/workflows/ci.yml'
+            editor:
+              - 'app/editor-core/**'
+              - 'app/src/**'
+              - 'app/package.json'
+              - 'app/bun.lock'
+              - 'app/patches/**'
+              - 'app/scripts/build-editor-wasm.mjs'
+              - '**/.cargo/**'
+              - '**/rust-toolchain*'
+              - '.github/workflows/ci.yml'
+            studio:
+              - 'app/studio-core/**'
+              - 'app/math-core/katex/**'
+              - '**/.cargo/**'
+              - '**/rust-toolchain*'
+              - '.github/workflows/ci.yml'
+
+  frontend:
+    name: Frontend and portable Rust (Linux)
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: app/package.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            app/math-core -> target
+            app/canvas-core -> target
+      - name: Rust is formatted
+        run: |
+          (cd src-tauri && cargo fmt --check)
+          (cd keyd && cargo fmt --check)
+          (cd keyd/core && cargo fmt --check)
+          if [ -d canvas-core ]; then (cd canvas-core && cargo fmt --check); fi
+          # The vendored katex/ keeps upstream's formatting.
+          (cd math-core && cargo fmt --check -p oculus-math -p oculus-math-edit -p oracle)
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+      - name: Frontend and script tests
+        run: bun run test
+      - name: Type-check and bundle the frontend
+        run: bun run build
+      # Native release-profile tests embed this same frontend through Tauri.
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.native == 'true'
+        with:
+          name: frontend-dist
+          path: app/dist
+          if-no-files-found: error
+          retention-days: 1
+      - name: Portable Rust clippy
+        run: |
+          if [ -d canvas-core ]; then
+            (cd canvas-core && cargo clippy --locked --all-targets -- -D warnings)
+            (cd canvas-core && cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings)
+          fi
+          (cd math-core && cargo clippy --locked --all-targets --no-deps -p oculus-math -p oculus-math-edit -p oracle -- -D warnings)
+          (cd math-core && cargo clippy --locked --no-deps -p oculus-math --target wasm32-unknown-unknown -- -D warnings)
+      - name: Canvas engine tests
+        if: hashFiles('app/canvas-core/Cargo.toml') != ''
+        working-directory: app/canvas-core
+        run: cargo test --locked
+      - name: Maths engine tests
+        working-directory: app/math-core
+        run: cargo test --locked
+
   check:
     name: Check (macOS)
+    needs: [changes, frontend]
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.native == 'true'
     runs-on: macos-latest
     timeout-minutes: 60
     defaults:
@@ -39,11 +158,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          targets: wasm32-unknown-unknown
-      # scripts/build-math.mjs needs the CLI at math-core/Cargo.lock's wasm-bindgen.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-bindgen@0.2.129
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
@@ -52,22 +166,12 @@ jobs:
           # crowd the repo's cache quota.
           cache-targets: false
 
-      - name: Rust is formatted
-        working-directory: app
-        run: |
-          (cd src-tauri && cargo fmt --check)
-          (cd keyd && cargo fmt --check)
-          (cd keyd/core && cargo fmt --check)
-          # Only our crates: the vendored katex/ keeps upstream's formatting.
-          (cd canvas-core && cargo fmt --check)
-          (cd math-core && cargo fmt --check -p oculus-math -p oculus-math-edit -p oracle)
-
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
-      - name: Frontend and script tests
-        run: bun run test
-      - name: Type-check and bundle the frontend
-        run: bun run build
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: app/dist
 
       - name: Fetch ffmpeg, build the speech helper and whisper-cli
         run: bun run ffmpeg && bun run speech && bun run whisper
@@ -86,11 +190,6 @@ jobs:
           (cd keyd/core && cargo clippy --locked --all-targets --all-features -- -D warnings)
           (cd keyd && cargo clippy --locked --all-targets -- -D warnings)
           (cd keyd && cargo clippy --locked --all-targets --features dev -- -D warnings)
-          # --no-deps keeps the vendored katex/ out, as the fmt check does.
-          (cd canvas-core && cargo clippy --locked --all-targets -- -D warnings)
-          (cd canvas-core && cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings)
-          (cd math-core && cargo clippy --locked --all-targets --no-deps -p oculus-math -p oculus-math-edit -p oracle -- -D warnings)
-          (cd math-core && cargo clippy --locked --no-deps -p oculus-math --target wasm32-unknown-unknown -- -D warnings)
       - name: Rust tests
         working-directory: app/src-tauri
         run: cargo test --release --locked
@@ -100,20 +199,15 @@ jobs:
       - name: keyd tests, release policy and dev
         working-directory: app/keyd
         run: cargo test --locked && cargo test --locked --features dev
-      - name: Canvas engine tests
-        working-directory: app/canvas-core
-        run: cargo test --locked
-      - name: Maths engine tests
-        working-directory: app/math-core
-        run: cargo test --locked
-
       - name: CLI reference matches the binary
         run: |
-          bun run docs:cli
+          bun run docs:cli --staged
           git diff --exit-code -- ../docs/cli-reference.md
 
   windows:
     name: Check (Windows x64)
+    needs: [changes, frontend]
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.native == 'true'
     runs-on: windows-latest
     timeout-minutes: 120
     # Write is what lets the token see draft releases; the Windows ffmpeg
@@ -132,12 +226,6 @@ jobs:
         with:
           bun-version-file: app/package.json
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-          targets: wasm32-unknown-unknown
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-bindgen@0.2.129
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
@@ -146,27 +234,12 @@ jobs:
             app/keyd -> target
             app/keyd/core -> target
           cache-targets: false
-      - name: App Rust is formatted
-        working-directory: app/src-tauri
-        run: cargo fmt --check
-      - name: keyd Rust is formatted
-        working-directory: app/keyd
-        run: cargo fmt --check
-      - name: keyd core Rust is formatted
-        working-directory: app/keyd/core
-        run: cargo fmt --check
-      - name: Canvas Rust is formatted
-        working-directory: app/canvas-core
-        run: cargo fmt --check
-      - name: Maths Rust is formatted
-        working-directory: app/math-core
-        run: cargo fmt --check -p oculus-math -p oculus-math-edit -p oracle
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
-      - name: Frontend and script tests
-        run: bun run test
-      - name: Type-check and bundle the frontend
-        run: bun run build
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: app/dist
       # fetch-ffmpeg.mjs downloads anonymously, which a draft release refuses.
       # gh fetches the asset with the job's token; the script then checks its
       # SHA-256 and keeps it.
@@ -197,43 +270,14 @@ jobs:
       - name: keyd tests with dev admission
         working-directory: app/keyd
         run: cargo test --locked --features dev
-      - name: Canvas engine tests
-        working-directory: app/canvas-core
-        run: cargo test --locked
-      - name: Maths engine tests
-        working-directory: app/math-core
-        run: cargo test --locked
-      - name: MSIX PowerShell script parses
-        run: |
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/package-msix.ps1", [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors.Count) { throw ($errors | Out-String) }
-      - name: Prepare Windows installer resources
-        run: bun scripts/package-msix.mjs --prepare-release
-      # The steps above already bundled the frontend and staged every sidecar
-      # beforeBuildCommand would (speech and whisper are macOS-only, and the
-      # CLI reference isn't bundled); rerunning stage-cli would recompile the
-      # app.
-      - name: Build the Windows NSIS installer
-        shell: bash
-        run: bun run tauri build --config src-tauri/target/windows-release.conf.json --config '{"build":{"beforeBuildCommand":null}}' -- --locked
-      - name: Validate the Windows GUI, sidecars and installer
-        run: bun scripts/package-msix.mjs --check-release
-      - name: Retain the Windows installer for VM testing
-        uses: actions/upload-artifact@v4
-        with:
-          name: oculus-windows-x64-ci
-          if-no-files-found: error
-          path: |
-            app/src-tauri/target/release/bundle/nsis/*.exe
-            app/src-tauri/ffmpeg-notices/FFMPEG-*.txt
 
   # keyd's core and keyd itself on a target with no adapter: the build
   # proves no OS call has leaked out of app/keyd/core/src/platform/, and
   # core's tests run there over the in-memory endpoint.
   keyd-linux:
     name: keyd seams (Linux)
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.keyd == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -241,9 +285,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            app/keyd -> target
+            app/keyd/core -> target
       - name: Check and test keyd core
         working-directory: app/keyd/core
-        run: cargo check --locked --all-features && cargo test --locked --all-features
+        run: cargo test --locked --all-features
       # keyd's own tests (tests/serve_local/) bind a real endpoint through the
       # OS adapter, which `unsupported` refuses; macOS and Windows run them.
       - name: Check keyd
@@ -252,6 +301,8 @@ jobs:
 
   editor-core:
     name: Editor core (Linux)
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.editor == 'true'
     runs-on: ubuntu-latest
     # An uncached run also compiles the wasm-bindgen CLI.
     timeout-minutes: 30
@@ -313,6 +364,8 @@ jobs:
   # rendered on Apple Silicon, so this runs on macOS like the app's job.
   studio-core:
     name: Studio core (macOS)
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.studio == 'true'
     runs-on: macos-latest
     timeout-minutes: 30
     defaults:
@@ -335,3 +388,19 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Unit, error, determinism and golden-frame tests
         run: cargo test --locked
+
+  ci:
+    name: CI passes
+    if: always()
+    needs: [changes, frontend, check, windows, keyd-linux, editor-core, studio-core]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All selected checks passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          if [[ "$RESULTS" == *failure* || "$RESULTS" == *cancelled* ]]; then
+            echo "A required check failed or was cancelled: $RESULTS"
+            exit 1
+          fi

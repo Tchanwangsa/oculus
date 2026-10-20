@@ -1,7 +1,7 @@
 # Builds the desktop bundle with tauri-action and attaches it to a draft GitHub
 # release tagged from the app version (v<version>). Run by hand from the
 # Actions tab after bumping the version. See
-# docs/development.md#ci-proves-a-fresh-checkout-builds-releases-are-cut-by-hand.
+# docs/development.md#ci-selects-checks-by-build-inputs-releases-are-cut-by-hand.
 name: Release
 
 on:
@@ -110,6 +110,13 @@ jobs:
       - name: Install frontend dependencies
         working-directory: app
         run: bun install --frozen-lockfile
+      - name: MSIX PowerShell script parses
+        working-directory: app
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/package-msix.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
       - name: Prepare Windows distribution notices
         id: distribution
         working-directory: app
