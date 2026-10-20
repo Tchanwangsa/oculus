@@ -8,6 +8,7 @@ import {
   Lightning,
   MusicNotes,
   PaintBrush,
+  ShareNetwork,
   Robot,
   SpeakerHigh,
   Timer,
@@ -32,6 +33,7 @@ export type SettingsPageId =
   | "appearance"
   | "browser"
   | "music"
+  | "device-sharing"
   | "messaging"
   | "storage"
   | "agents"
@@ -63,6 +65,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "appearance", label: "Appearance", icon: PaintBrush, group: "General" },
   { id: "browser", label: "Browser", icon: Globe, group: "General" },
   { id: "music", label: "Music", icon: MusicNotes, group: "General" },
+  { id: "device-sharing", label: "Device sharing", icon: ShareNetwork, group: "General" },
   { id: "messaging", label: "Messaging", icon: ChatsCircle, group: "General" },
   { id: "storage", label: "Storage", icon: HardDrives, group: "General" },
   { id: "agents", label: "Agents", icon: Robot, group: "AI" },
@@ -153,6 +156,11 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["Log in with Spotify", ["account", "status", "connected as", "login", "connect", "disconnect"]],
     ["Sign out", ["log out", "forget login"]],
     ["Device", ["device name", "spotify connect"]],
+  ]),
+
+  page("device-sharing", ["share", "ipad", "phone", "tablet", "pencil", "qr code", "link", "network", "lan", "vpn", "companion"]),
+  ...section("device-sharing", "Active shares", ["shared canvases", "devices", "connected", "addresses"], [
+    ["Stop all", ["stop sharing", "revoke", "end sharing"]],
   ]),
 
   page("messaging", ["dock", "chat", "direct messages", "dm", "social"]),
