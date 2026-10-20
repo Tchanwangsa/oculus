@@ -76,7 +76,7 @@ before leaving a playing lecture.
   (`newFilesStore`); a switcher row's is the sum of its subject's tabs. A switch
   navigates the pane's router to the same top-level tab of the other subject;
   anything deeper lands on that tab's default. Files is one tab whose sub-tabs are
-  routes (`files/downloads`, `files/media`, `files/uploads`, `files/documents`),
+  routes (`files/downloads`, `files/media`, `files/uploads`, `files/drive`),
   and its `useFilesTab()` context *extends* the subject, because
   `useOutletContext` reads the nearest Outlet and a different shape would make
   `useSubject()` lie. Downloads and Media split the `file` rows: Media lists the
@@ -123,8 +123,6 @@ item's corner: a spinner on Chat while an agent turn runs, on Sync while
 indexing, a brand dot on Subjects while any subject has never-opened files
 (`newFilesStore`), and a brand dot on Studio while any video renders
 ([studio-page.md](./studio-page.md)). ⌘B and the title bar's button collapse it to zero width.
-
-## Settings has its own nav column
 
 ## Page navigation overlays narrow panes
 
@@ -196,7 +194,14 @@ while Ctrl+Shift+Z is Redo.
   it the stock `undo:` / `redo:`; otherwise `menu-undo` / `menu-redo` go to
   `routeEdit` (`app/src/lib/menu/editRouting.ts`): a note editor's history
   (`app/src/components/documents/editor/core/undoRouting.ts`, which also remembers the last focused note and acts only
-  while it is visible), else `execCommand` on the focused input.
+  while it is visible), else `execCommand` on the focused input. `routeEdit`
+  does nothing while `document.hasFocus()` is false: the app's DOM keeps its
+  active element (the note) when native focus moves to a browser page.
+- **Back and Forward (⌘[ / ⌘]) can be claimed.** `menu-back` / `menu-forward`
+  step the pane's history unless a handler registered with `onBackForward`
+  (`app/src/lib/menu/backForwardRouting.ts`) takes them first; a drawing
+  canvas with a selection does, to step its layer order. Like `routeEdit`, no
+  handler is offered the key while `document.hasFocus()` is false.
 - **Select All is a custom item too**, because WebKit's `selectAll:` with no
   field focused selects the whole window. A focused browser page gets the
   native `selectAll:`; otherwise `menu-select-all` goes to `routeSelectAll`:
@@ -324,10 +329,11 @@ items with the same front item and width.
   `SidePanelHeader` (switcher, front item's title, controls). In a claimed
   row `PaneTrail` makes crumbs and title a sideways scroller with faded edges.
   Subject paths hide their ancestors behind a "…" popover. Planning pages
-  keep the immediate parent and current page visible and put earlier
-  ancestors in the same shared `Breadcrumb` popover
+  give the current page priority: the immediate parent stays beside it only
+  while both fit; otherwise every parent moves into the shared `Breadcrumb` popover
   (`app/src/components/ui/Breadcrumb.tsx`). Selecting a parent navigates
-  without changing the trail's layout. Expand
+  without changing the trail's layout. Breadcrumbs measure their available header
+  width directly rather than using the sideways `PaneTrail` scroller. Expand
   (`expandSide`) makes the front item the main page, or a new tab on ⌘-click,
   and removes it with `handover`: a lecture it owned is claimed for the main
   pane (or the new tab), so whatever comes to the panel's front next waits and
