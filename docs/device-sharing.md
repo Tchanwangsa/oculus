@@ -300,11 +300,13 @@ runs. `app/src/lib/sharing/` is desktop-only (it calls Tauri), and
   address, using an NSURL so the full fragment key survives. The user chooses
   the destination in macOS; opening or cancelling the sheet sends nothing.
   The action opens on mouse-down (or keyboard activation), as AppKit requires.
-  One interaction stays active through service completion or cancellation;
-  further presses cannot stack pickers over an AirDrop window. The retained
-  delegate supplies the Oculus source window, and completion releases the picker
-  and service together. Closing the dialog or changing the selected link dismisses
-  an unchosen picker; a selected service keeps its own macOS cancellation controls.
+  One interaction stays active until it ends; further presses cannot stack
+  pickers over an AirDrop sheet. The retained delegate supplies the Oculus
+  source window. AirDrop reports its result while its sheet is still up, and
+  the sheet's Done button needs the picker, service and delegate alive, so they
+  stay retained until the window's sheet ends (`NSWindowDidEndSheetNotification`).
+  Closing the dialog or changing the selected link ends any interaction without
+  an open sheet; an open sheet keeps its own macOS controls.
   Failures appear beside the action; transfer feedback belongs to macOS.
   The bridge is `shell/sharing/` and is restricted to the main webview.
 - **The QR code is drawn locally** by `app/src/lib/qr/`: ISO/IEC 18004 byte

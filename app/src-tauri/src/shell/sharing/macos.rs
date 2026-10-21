@@ -1,9 +1,9 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol};
 use objc2::{
-    class, define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly, Message,
+    class, define_class, msg_send, sel, DefinedClass, MainThreadMarker, MainThreadOnly, Message,
 };
 use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString, NSURL};
 
@@ -11,7 +11,8 @@ use super::ShareAnchor;
 
 thread_local! {
     // Picker and service delegates are weak. Retain one complete interaction
-    // until cancellation or completion, including AirDrop's separate window.
+    // until its sheet ends: AirDrop reports a result while its sheet is still
+    // up, and its Done button needs the service and delegate alive.
     static ACTIVE: RefCell<Option<ActiveShare>> = const { RefCell::new(None) };
 }
 
@@ -26,6 +27,7 @@ struct ShareIvars {
     window: Retained<AnyObject>,
     service: RefCell<Option<Retained<AnyObject>>>,
     completion: RefCell<Option<Completion>>,
+    observing: Cell<bool>,
 }
 
 define_class!(
@@ -47,6 +49,7 @@ define_class!(
         fn chose_service(&self, _picker: &AnyObject, service: Option<&AnyObject>) {
             if let Some(service) = service {
                 *self.ivars().service.borrow_mut() = Some(service.retain());
+                self.observe_sheet();
             } else {
                 let choosing = self.ivars().service.borrow().is_none();
                 if choosing { self.finish(Ok(())); }
@@ -76,11 +79,48 @@ define_class!(
                 Err("The Mac could not finish sharing the link. Try again or copy the link.".into())
             });
         }
+
+        #[unsafe(method(windowDidEndSheet:))]
+        fn sheet_ended(&self, _notification: &AnyObject) {
+            self.end();
+        }
     }
 );
 
 impl ShareDelegate {
+    /// Reports the result now; the interaction ends with its sheet, if any.
     fn finish(&self, result: Result<(), String>) {
+        if let Some(completion) = self.ivars().completion.borrow_mut().take() {
+            let _ = completion.send(result);
+        }
+        if !self.sheet_open() {
+            self.end();
+        }
+    }
+
+    fn sheet_open(&self) -> bool {
+        let sheet: *mut AnyObject = unsafe { msg_send![&*self.ivars().window, attachedSheet] };
+        !sheet.is_null()
+    }
+
+    fn observe_sheet(&self) {
+        if self.ivars().observing.replace(true) {
+            return;
+        }
+        let name = NSString::from_str("NSWindowDidEndSheetNotification");
+        unsafe {
+            let center: *mut AnyObject = msg_send![class!(NSNotificationCenter), defaultCenter];
+            let _: () = msg_send![
+                center,
+                addObserver: self,
+                selector: sel!(windowDidEndSheet:),
+                name: &*name,
+                object: &*self.ivars().window
+            ];
+        }
+    }
+
+    fn end(&self) {
         // Keep the callback receiver alive while clearing its weak delegates.
         let active = ACTIVE.with(|slot| {
             let mut slot = slot.borrow_mut();
@@ -95,13 +135,18 @@ impl ShareDelegate {
         });
         if let Some(active) = active {
             unsafe {
+                if self.ivars().observing.replace(false) {
+                    let center: *mut AnyObject =
+                        msg_send![class!(NSNotificationCenter), defaultCenter];
+                    let _: () = msg_send![center, removeObserver: self];
+                }
                 let _: () = msg_send![&*active.picker, setDelegate: std::ptr::null::<AnyObject>()];
                 if let Some(service) = self.ivars().service.borrow_mut().take() {
                     let _: () = msg_send![&*service, setDelegate: std::ptr::null::<AnyObject>()];
                 }
             }
             if let Some(completion) = self.ivars().completion.borrow_mut().take() {
-                let _ = completion.send(result);
+                let _ = completion.send(Ok(()));
             }
         }
     }
@@ -114,15 +159,15 @@ pub(super) fn close() {
             .map(|active| (active.picker.clone(), active.delegate.clone()))
     });
     if let Some((picker, delegate)) = active {
-        // Closing a picker cannot cancel a service's independent window.
-        // Keep that service alive and prevent another picker until it finishes.
-        let choosing = delegate.ivars().service.borrow().is_none();
-        if choosing {
-            unsafe {
-                let _: () = msg_send![&*picker, close];
-            }
-            delegate.finish(Ok(()));
+        // A service's sheet keeps its own controls and ends the interaction.
+        // Without one, nothing else could end it and every later share fails.
+        if delegate.sheet_open() {
+            return;
         }
+        unsafe {
+            let _: () = msg_send![&*picker, close];
+        }
+        delegate.end();
     }
 }
 
@@ -201,6 +246,7 @@ unsafe fn present(
         window: Retained::retain(window).ok_or("The Oculus window is not visible.")?,
         service: RefCell::new(None),
         completion: RefCell::new(completion.take()),
+        observing: Cell::new(false),
     });
     let delegate: Retained<ShareDelegate> = msg_send![super(delegate), init];
     let _: () = msg_send![&*picker, setDelegate: &*delegate];
