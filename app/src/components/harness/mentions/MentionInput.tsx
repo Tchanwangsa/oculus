@@ -2,6 +2,7 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type
 import { FileChip } from "@/components/markdown/FileChip";
 import { LinkChip } from "@/components/markdown/LinkChip";
 import { imageFiles } from "@/lib/harness/attachments";
+import { hasControlChars } from "@/lib/harness/controlChars";
 import {
   caretChunk,
   chipText,
@@ -71,6 +72,18 @@ export function MentionInput({
   /** The pending `repaintCaret`; one is enough for a burst of line breaks. */
   const repaint = useRef(0);
   useEffect(() => () => cancelAnimationFrame(repaint.current), []);
+
+  // Native `beforeinput`: React's `onBeforeInput` is a `textInput` shim with no `inputType`.
+  // Refuses a control character offered as text (see `controlChars`).
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const refuse = (e: InputEvent) => {
+      if (e.inputType === "insertText" && e.data != null && hasControlChars(e.data)) e.preventDefault();
+    };
+    el.addEventListener("beforeinput", refuse);
+    return () => el.removeEventListener("beforeinput", refuse);
+  }, [version]);
 
   function point(el: HTMLElement): Point | null {
     const sel = window.getSelection();
