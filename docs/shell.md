@@ -255,7 +255,12 @@ while Ctrl+Shift+Z is Redo.
   through a capture handler in `AppLayout`: `openLink`
   (`app/src/lib/shell/tabRouters.ts`) puts the page in the side panel, and
   ⌘-click gives it a tab of its own. The system browser only when Settings →
-  Browser asks for it, or as the fallback when an in-app page fails. Every
+  Browser asks for it, or as the fallback when an in-app page fails. The
+  destination tab is captured before native creation. A focused side panel
+  claims the browser route in the store before its lazy module loads, so
+  native snapshots cannot adopt that page again during the first load. If a
+  snapshot already made a strip tab, removing it returns focus to the owning
+  tab only while that stand-in is active. Every
   "Open in Canvas"/"Open in Ed" icon is the one `OpenOriginal`
   (`app/src/components/files/OpenOriginal.tsx`) and opens the same way.
 - **A new tab lands on `/new`**, not Home: a search field, a browser door, a

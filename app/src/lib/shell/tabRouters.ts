@@ -229,7 +229,11 @@ export async function openUrlInFocusedPane(url: string): Promise<void> {
   }
   // The main pane: the tab the reconcile makes is the answer.
   if (!tab || !pane || pane.id === tab.id) return;
-  navigateInTab(pane.id, browsePath(pageId));
+  const path = browsePath(pageId);
+  navigateInTab(pane.id, path);
+  // Claim the page before the lazy route commits, so native snapshots cannot
+  // adopt it again while this pane still renders its new-tab page.
+  useTabStore.getState().setPath(pane.id, path, { canBack: true, canForward: false });
   dropStrayTab(pageId, tab.id);
 }
 
@@ -237,10 +241,14 @@ export async function openUrlInFocusedPane(url: string): Promise<void> {
  *  before it was placed elsewhere. `closeTab`, not `browser.close`: only the
  *  stand-in goes, the page lives on where it was placed. */
 function dropStrayTab(pageId: number, keep?: number): void {
-  const stray = useTabStore
-    .getState()
-    .tabs.find((t) => t.id !== keep && browseId(t.path) === pageId);
-  if (stray) useTabStore.getState().closeTab(stray.id);
+  const { tabs, activeId, setActive, closeTab } = useTabStore.getState();
+  const stray = tabs.find((t) => t.id !== keep && browseId(t.path) === pageId);
+  if (!stray) return;
+  // An early snapshot may have focused the stand-in. Return to its owner
+  // before closing it, rather than selecting an unrelated neighbouring tab.
+  if (activeId === stray.id && keep != null && tabs.some((t) => t.id === keep))
+    setActive(keep);
+  closeTab(stray.id);
 }
 
 /**
@@ -251,6 +259,7 @@ function dropStrayTab(pageId: number, keep?: number): void {
  */
 export async function openLink(url: string, newTab = false): Promise<void> {
   if (opensLinksInSystem()) return openExternal(url, true);
+  const front = useTabStore.getState().activeId;
   let pageId: number;
   try {
     pageId = await browser.open(url);
@@ -261,7 +270,8 @@ export async function openLink(url: string, newTab = false): Promise<void> {
   }
   // A new tab: the one the reconcile makes is the answer.
   if (newTab) return;
-  const front = useTabStore.getState().activeId;
-  openBeside(browsePath(pageId));
+  const { tabs, pushSide } = useTabStore.getState();
+  if (!tabs.some((t) => t.id === front)) return;
+  pushSide(front, browsePath(pageId));
   dropStrayTab(pageId, front);
 }
