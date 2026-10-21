@@ -174,12 +174,36 @@ fn from_json(raw: &str, job: Job) -> Vec<JobSelection> {
         .ok()
         .and_then(|v| v.as_object()?.get(job.key()).cloned());
     match entry {
-        Some(serde_json::Value::Array(items)) => items.into_iter().filter_map(one).collect(),
+        Some(serde_json::Value::Array(items)) => {
+            one_per_agent(items.into_iter().filter_map(one).collect())
+        }
         Some(item @ serde_json::Value::Object(_)) => {
             one(item).map_or_else(|| default_chain(job), |s| vec![s])
         }
         _ => default_chain(job),
     }
+}
+
+/// An agent's models draw on one usage limit, so a second one cannot take
+/// over once the first has run out. opencode fronts many providers, each with
+/// a limit of its own. Mirrors `sharesUsage` in `app/src/components/settings/jobs/chain.ts`.
+fn shares_usage(provider: Provider) -> bool {
+    provider != Provider::Opencode
+}
+
+/// A stored list keeps the first entry of each agent that shares usage, and the
+/// first of each opencode model. Must match `onePerAgent` in `jobModels.ts`.
+fn one_per_agent(chain: Vec<JobSelection>) -> Vec<JobSelection> {
+    let mut kept: Vec<JobSelection> = Vec::new();
+    for s in chain {
+        let clash = kept
+            .iter()
+            .any(|k| k.provider == s.provider && (shares_usage(s.provider) || k.model == s.model));
+        if !clash {
+            kept.push(s);
+        }
+    }
+    kept
 }
 
 /// One stored selection, if it parses and names a model.
@@ -309,6 +333,29 @@ mod tests {
             ["openrouter/b", "claude-opus-5", "gpt-5.6-luna"]
         );
         assert_eq!(chain[0].provider, Provider::Opencode);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn a_second_model_of_one_agent_is_dropped_except_on_opencode() {
+        let chain = json(
+            r#"{"lectureChapters":[
+                {"provider":"claude","model":"claude-haiku-5-5","reasoningEffort":null},
+                {"provider":"claude","model":"claude-opus-5-5","reasoningEffort":"high"},
+                {"provider":"opencode","model":"openrouter/a","reasoningEffort":null},
+                {"provider":"opencode","model":"openrouter/b","reasoningEffort":null},
+                {"provider":"opencode","model":"openrouter/a","reasoningEffort":null},
+                {"provider":"codex","model":"gpt-6-luna","reasoningEffort":"low"}]}"#,
+        );
+        assert_eq!(
+            models(&chain),
+            [
+                "claude-haiku-5-5",
+                "openrouter/a",
+                "openrouter/b",
+                "gpt-6-luna"
+            ]
+        );
     }
 
     #[test]

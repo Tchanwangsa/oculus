@@ -707,6 +707,14 @@ A turn that reports an error fails even if it spoke first: Claude's "session
 limit" notice arrives as a reply plus an error, and is never kept as the job's
 answer.
 
+A list holds one model per agent, because an agent's models share one usage
+limit and a second Claude model can't take over from a spent first. opencode
+is the exception: it fronts many providers, each with a limit of its own, so it
+takes several (never the same model twice). `withEntry` enforces it in the
+dialog, where the add menu offers only the agents the list doesn't hold yet;
+both parsers (`one_per_agent`, `onePerAgent`) keep the first of a stored list's
+clashing entries.
+
 An empty list switches the job off: it fails with "No model is set", and thread
 naming is skipped. It never falls back to the default, which can be an
 expensive model. The registry is one `settings` value, `job_models`, read by

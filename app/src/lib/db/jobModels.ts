@@ -163,13 +163,27 @@ export async function getJobModels(): Promise<JobModels> {
   for (const job of JOBS) {
     const value = stored[job.id];
     if (Array.isArray(value)) {
-      out[job.id] = value.map(parseSelection).filter((s): s is JobSelection => s !== null);
+      out[job.id] = onePerAgent(
+        value.map(parseSelection).filter((s): s is JobSelection => s !== null),
+      );
     } else if (value && typeof value === "object") {
       const one = parseSelection(value);
       if (one) out[job.id] = [one];
     }
   }
   return out;
+}
+
+/** Keeps the first entry of each agent whose models share a usage limit, and
+ *  the first of each opencode model (`one_per_agent` in `harness::jobs`). */
+function onePerAgent(chain: JobChain): JobChain {
+  const seen = new Set<string>();
+  return chain.filter((s) => {
+    const key = s.provider === "opencode" ? `${s.provider}/${s.model}` : s.provider;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** The chains as they are written: entries with no model yet dropped. */

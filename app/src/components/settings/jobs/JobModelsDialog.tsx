@@ -14,7 +14,7 @@ import { DEFAULT_JOB_MODELS, type JobChain, type JobId, type JobSelection } from
 import type { PickerProvider, Provider } from "@/lib/harness";
 import { ChainPicker } from "./ChainPicker";
 import { ChainList } from "./ChainList";
-import { withEntry, withoutEntry } from "./chain";
+import { providersFor, withEntry, withoutEntry } from "./chain";
 
 /** Edits apply as they are made, through the same save as the job's row, so
  *  there is nothing to confirm or cancel. A `perAgent` job lists a model per
@@ -41,11 +41,13 @@ export function JobModelsDialog({
   onClose: () => void;
 }) {
   const offered = perAgent ? providers.filter((p) => perAgent.includes(p.id)) : providers;
-  const addProvider = chain[chain.length - 1]?.provider ?? DEFAULT_JOB_MODELS[job][0].provider;
   // The entry the open "add" menu just appended, so the menu stays on it for
   // its level and a second pick replaces it rather than appending again.
   // Cleared when the menu closes.
   const [added, setAdded] = useState<number | null>(null);
+  // Agents the chain doesn't hold yet; the one just added still counts as free.
+  const addable = providersFor(offered, chain, added ?? -1);
+  const addProvider = addable[0]?.id ?? DEFAULT_JOB_MODELS[job][0].provider;
   const addPick = (pick: JobSelection) => {
     const at = added ?? chain.length;
     // A pick already in the chain moves there (`withEntry`), so find it again.
@@ -62,7 +64,7 @@ export function JobModelsDialog({
           <DialogDescription>
             {perAgent
               ? "A chat agent's helpers run on the first model here for that agent. An agent with none does the work itself."
-              : "Runs on the first model. If a run fails for any reason, the next one takes over. With none, the job is off."}
+              : "Runs on the first model. If a run fails for any reason, the next one takes over. Each agent takes one, as its models share a usage limit; opencode can take several. With none, the job is off."}
           </DialogDescription>
         </DialogHeader>
 
@@ -77,24 +79,26 @@ export function JobModelsDialog({
               onRemove={(i) => onChange((c) => withoutEntry(c, i))}
             />
           )}
-          <ChainPicker
-            providers={offered}
-            entry={added === null ? null : (chain[added] ?? null)}
-            fallbackProvider={addProvider}
-            onPick={addPick}
-            onView={onView}
-            onOpenChange={(open) => !open && setAdded(null)}
-            emptyLabel={
-              chain.length > (added === null ? 0 : 1)
-                ? perAgent
-                  ? "Add a model for another agent"
-                  : "Add a fallback"
-                : "Add a model"
-            }
-            emptyIcon={<Plus className="size-3.5 shrink-0" />}
-            keepEmptyTrigger
-            className="ml-1"
-          />
+          {(addable.length > 0 || added !== null) && (
+            <ChainPicker
+              providers={addable}
+              entry={added === null ? null : (chain[added] ?? null)}
+              fallbackProvider={addProvider}
+              onPick={addPick}
+              onView={onView}
+              onOpenChange={(open) => !open && setAdded(null)}
+              emptyLabel={
+                chain.length > (added === null ? 0 : 1)
+                  ? perAgent
+                    ? "Add a model for another agent"
+                    : "Add a fallback"
+                  : "Add a model"
+              }
+              emptyIcon={<Plus className="size-3.5 shrink-0" />}
+              keepEmptyTrigger
+              className="ml-1"
+            />
+          )}
         </div>
 
         <DialogFooter>

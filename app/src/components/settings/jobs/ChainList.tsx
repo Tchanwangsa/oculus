@@ -5,10 +5,10 @@ import type { JobChain, JobSelection } from "@/lib/db";
 import type { PickerProvider, Provider } from "@/lib/harness";
 import { cn } from "@/lib/utils";
 import { ChainEntryRow } from "./ChainEntryRow";
-import { modelLabel, moveEntry } from "./chain";
+import { modelLabel, moveEntry, providersFor } from "./chain";
 
-/** A chain never names an agent and model twice (`withEntry`), so the pair
- *  is a stable key for the drag. */
+/** A chain never holds a clashing pair (`withEntry`), so agent and model
+ *  make a stable key for the drag. */
 const entryKey = (e: JobSelection) => `${e.provider}/${e.model}`;
 
 /**
@@ -91,7 +91,7 @@ export function ChainList({
               position={i + 1}
               count={chain.length}
               entry={entry}
-              providers={providers}
+              providers={providersFor(providers, chain, i)}
               rowRef={strip.itemRef(key)}
               handleRef={(node) => {
                 if (node) handles.current.set(key, node);
