@@ -332,9 +332,9 @@ fn the_pause_from_a_retry_after_is_actually_served() {
     let gate = RateGate::with_calm(ledger_at(&dir), Duration::from_secs(3600));
     // Tier-1 numbers, so the drained buckets refill in milliseconds and
     // only the pause is measured.
-    gate.throttled(Some(1.0), "rate limit of 2000 RPM and 2000000 TPM");
-
+    // Persisting the learned tier can consume part of the pause.
     let start = Instant::now();
+    gate.throttled(Some(1.0), "rate limit of 2000 RPM and 2000000 TPM");
     gate.admit(1);
     assert!(
         start.elapsed() >= Duration::from_millis(900),
