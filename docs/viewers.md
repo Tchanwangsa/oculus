@@ -53,6 +53,11 @@ classes work even when there are no dollar delimiters.
   first. An inline `<code>` holding only a citation (`app/src/lib/citations/`)
   renders as `FileChip`. `![alt](path)` naming a library picture or HTML
   page renders it in place (`OutputEmbed.tsx`).
+- **A fenced code block is syntax-coloured** by `HighlightedCode`
+  (`app/src/components/markdown/HighlightedCode.tsx`) with the note editor's
+  grammars and palette (`codeLanguage`, `codeStyle`). The fence's tag picks the
+  grammar and an untagged fence is guessed; a block stays plain until its
+  grammar's import lands, when it has no grammar, and above 30 000 characters.
 - **Inline references share a glyph and a hover card.** `FileChip` preserves
   citation paths for copying and the composer's atomic mentions; clickable
   references use an understated underline and content-specific Phosphor colours

@@ -8,6 +8,7 @@ import { CanvasVideoCard } from "@/components/markdown/embed/CanvasVideoCard";
 import { EmbedVideoCard } from "@/components/markdown/embed/EmbedVideoCard";
 import { WebVideoCard } from "@/components/markdown/embed/WebVideoCard";
 import { FileChip } from "@/components/markdown/FileChip";
+import { HighlightedCode } from "@/components/markdown/HighlightedCode";
 import { ReferenceLink } from "@/components/markdown/ReferenceLink";
 import { Mermaid } from "@/components/markdown/Mermaid";
 import { OutputEmbed, embedKind } from "@/components/markdown/OutputEmbed";
@@ -129,12 +130,14 @@ function codeRenderer(pictures: boolean) {
   // as a FileChip, or as the picture for an attachment; anything else stays code.
   return ({ className, children, ...p }: any) => {
     const isBlock = /language-/.test(className ?? "") || String(children).includes("\n");
-    if (isBlock)
+    if (isBlock) {
+      const info = /(?:^|\s)language-(\S+)/.exec(className ?? "")?.[1] ?? "";
       return (
         <code className="block p-3 rounded-lg bg-surface-raised text-[13px] font-mono text-foreground overflow-x-auto" {...p}>
-          {children}
+          {typeof children === "string" ? <HighlightedCode info={info} code={children} /> : children}
         </code>
       );
+    }
     const span = String(children);
     const att = pictures ? attachmentPath(span) : null;
     if (att) return <LibraryImage path={att} alt="Attached picture" />;
