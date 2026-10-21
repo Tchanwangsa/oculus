@@ -8,6 +8,15 @@
   background-color: transparent;
 }
 
+/* The source map draws an empty slot (an `align` cell, `{}`) as a `□` for
+ * the edit field's caret. Read-only maths draws nothing there and takes no
+ * width, as KaTeX does; the zero-width box keeps the selection geometry. */
+.katex .oc-placeholder:not(.cm-math-view *) {
+  display: inline-block;
+  width: 0;
+  visibility: hidden;
+}
+
 /* A formula's source while the maths engine loads (`rehypeMaths`); the
  * component re-renders it as maths once it is ready. */
 .md-math-pending {
