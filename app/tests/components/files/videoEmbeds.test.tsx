@@ -6,10 +6,11 @@ import { tagSource, videoDisplayName } from "@/components/markdown/embed/card/ta
 import { webVideoUrl } from "@/stores/lectures/webVideoStore";
 
 // The components' imports reach modules that listen on `window` and
-// `document` at load; tests run without a DOM.
+// `document` at load (CodeMirror reads `document.documentElement.style`);
+// tests run without a DOM.
 const globals = globalThis as { window?: unknown; document?: unknown };
 const stubbed = (["window", "document"] as const).filter((k) => !(k in globals));
-for (const k of stubbed) globals[k] = new EventTarget();
+for (const k of stubbed) globals[k] = Object.assign(new EventTarget(), { documentElement: { style: {} } });
 afterAll(() => {
   for (const k of stubbed) delete globals[k];
 });

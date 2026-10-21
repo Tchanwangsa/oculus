@@ -1,6 +1,19 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { lessonProgress, type LessonIndex, type LessonSlide } from "@/lib/ed/lessons";
-import { completesSlide, recordSlideStatus, useSlideStatusStore, withSlideStatuses } from "@/lib/ed/slideStatus";
+
+// The store persists to localStorage, which a test process has none of.
+const globals = globalThis as { localStorage?: unknown };
+const hadStorage = "localStorage" in globals;
+const memory = new Map<string, string>();
+globals.localStorage ??= {
+  getItem: (k: string) => memory.get(k) ?? null,
+  setItem: (k: string, v: string) => void memory.set(k, v),
+  removeItem: (k: string) => void memory.delete(k),
+};
+afterAll(() => {
+  if (!hadStorage) delete globals.localStorage;
+});
+const { completesSlide, recordSlideStatus, useSlideStatusStore, withSlideStatuses } = await import("@/lib/ed/slideStatus");
 
 const slide = (id: number | null, status: string | null): LessonSlide => ({
   id,

@@ -4,13 +4,15 @@ import { browser, browsePath } from "@/lib/browser";
 import { pane } from "@/stores/shell/tabs/panes";
 
 
-// Playback installs a pagehide listener when the shell is imported.
+// Playback installs a pagehide listener when the shell is imported, and
+// CodeMirror reads `document.documentElement.style`. Earlier files may leave a
+// bare `window` or `document` behind, so this file always installs its own.
 const oldWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
 const oldDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-if (!oldDocument) Object.defineProperty(globalThis, "document", {
-  configurable: true, value: { addEventListener() {} },
+Object.defineProperty(globalThis, "document", {
+  configurable: true, value: { addEventListener() {}, documentElement: { style: {} } },
 });
-if (!oldWindow) Object.defineProperty(globalThis, "window", {
+Object.defineProperty(globalThis, "window", {
   configurable: true, value: { addEventListener() {}, setTimeout, clearTimeout },
 });
 const { dropTabRouter, openLink, openUrlInFocusedPane, routerFor } = await import("@/lib/shell/tabRouters");
@@ -18,8 +20,10 @@ const { sideFront, useTabStore } = await import("@/stores/shell/tabStore");
 const originalState = useTabStore.getState();
 afterAll(() => {
   useTabStore.setState(originalState);
-  if (!oldWindow) Reflect.deleteProperty(globalThis, "window");
-  if (!oldDocument) Reflect.deleteProperty(globalThis, "document");
+  if (oldWindow) Object.defineProperty(globalThis, "window", oldWindow);
+  else Reflect.deleteProperty(globalThis, "window");
+  if (oldDocument) Object.defineProperty(globalThis, "document", oldDocument);
+  else Reflect.deleteProperty(globalThis, "document");
 });
 
 const parentId = 1000;
