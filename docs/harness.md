@@ -830,6 +830,9 @@ structural changes (bumping `key`), and `revealCaret` scrolls the box because
 a contenteditable follows its caret only for edits it made. The menu anchors
 on a range over the `@` token, since a collapsed range's rect can be zeros in
 WebKit.
+The box refuses control characters (`lib/harness/controlChars.ts`): WebKit can
+turn an arrow key into text (U+001D for Right Arrow), which draws as tofu, so a
+native `beforeinput` cancels it and a stored draft is stripped on load.
 A web link (`https://…` or `[words](https://…)`, `lib/harness/links.ts`) draws
 the same way (`LinkChip`: the site's icon and its words or host) in the
 composer and in the sent bubble. It becomes one when pasted or when the space

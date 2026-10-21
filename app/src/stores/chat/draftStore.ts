@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { PastedText } from "@/lib/harness/attachments";
+import { stripControlChars } from "@/lib/harness/controlChars";
 
 /** One string per composer: an empty box is no entry. */
 type Drafts = Record<string, string>;
@@ -63,7 +64,11 @@ interface DraftState {
  * (`PastedText`) are kept the same way, under the same key.
  */
 export const useDraftStore = create<DraftState>((set, get) => ({
-  drafts: read(KEY, isString),
+  drafts: Object.fromEntries(
+    Object.entries(read(KEY, isString))
+      .map(([key, text]) => [key, stripControlChars(text)])
+      .filter(([, text]) => text),
+  ),
   pastes: read(PASTES_KEY, isPastes),
   setDraft: (key, text) => {
     const prev = get().drafts;
