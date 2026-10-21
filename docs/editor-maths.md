@@ -42,7 +42,11 @@ trap: `readsCleanly`). Until the engine has loaded, the rendering is the
 maths' source in muted text (`cm-math-pending`), and `mathsWatcher` redraws it
 once it is ready. When it has, the rendering is the engine's KaTeX markup,
 cached by source and options ([viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface)), which
-the field draws too, so entering maths moves neither it nor its line.
+the field draws too, so entering maths moves neither it nor its line. The
+one difference is an empty slot (an `align` cell, `{}`): the field draws its
+`□` for the caret, and every rendering outside the field (notes, chat,
+files) hides it at zero width (`styles/math.css`), so a formula with one
+widens there on entering.
 
 `MathView` is the field over the edit model (`MathField` in
 `app/src/lib/maths/field.ts`). It draws the maths with the source map on
