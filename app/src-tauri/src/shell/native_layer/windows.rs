@@ -25,7 +25,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use super::gdi;
 use super::region::{page_region, Cover, Hole, PageRegion, Px};
-use crate::shell::{browser, dock};
+use crate::shell::browser;
 
 /// The frontend's latest holes and covers, and the region each container
 /// last got, so an unchanged one is not set (and redrawn) again.
@@ -92,13 +92,11 @@ pub fn refresh_page(webview: &Webview<tauri::Wry>) {
     with_container(webview, apply);
 }
 
-/// Every browser tab and dock page in the main window.
+/// Every browser tab in the main window.
 fn pages(app: &AppHandle) -> Vec<Webview<tauri::Wry>> {
     app.webviews()
         .into_iter()
-        .filter(|(label, _)| {
-            label.starts_with(browser::LABEL_PREFIX) || label.starts_with(dock::LABEL_PREFIX)
-        })
+        .filter(|(label, _)| label.starts_with(browser::LABEL_PREFIX))
         .map(|(_, webview)| webview)
         .collect()
 }

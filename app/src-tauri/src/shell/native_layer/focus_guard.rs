@@ -1,9 +1,9 @@
 //! A page nobody can see never takes the keyboard.
 //!
 //! WebKit makes a page first responder whenever its script focuses an
-//! element, visible or not: a parked dock page focusing its composer, or a
-//! backgrounded browser tab, would take every keystroke and ⌘-key from what is
-//! in front, and the page it took them from loses its selection on resigning.
+//! element, visible or not: a backgrounded browser tab would take every
+//! keystroke and ⌘-key from what is in front, and the page it took them from
+//! loses its selection on resigning.
 //! The main window refuses `makeFirstResponder:` for a responder inside a page
 //! that is hidden or off the window, so the steal never happens.
 //!
@@ -109,8 +109,7 @@ unsafe fn in_unseen_page(window: &AnyObject, responder: *mut AnyObject) -> bool 
     false
 }
 
-/// Not hidden and overlapping the content view: parked dock pages sit left of
-/// the window, backgrounded browser tabs are hidden.
+/// Not hidden and overlapping the content view; background browser tabs are hidden.
 unsafe fn shown(content: *mut AnyObject, page: *mut AnyObject) -> bool {
     let hidden: bool = msg_send![page, isHiddenOrHasHiddenAncestor];
     if hidden {

@@ -165,18 +165,14 @@ block2 = "0.6"
 objc2 = "0.6"
 # `NSBundle`, `NSProcessInfo` and `NSData` name WebKit's application and hand
 # it the WebCrypto master key (`src/shell/webcrypto/`).
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSData", "NSDictionary", "NSHTTPCookie", "NSProcessInfo", "NSString", "NSURL", "NSUUID"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSData", "NSDictionary", "NSHTTPCookie", "NSProcessInfo", "NSString", "NSURL"] }
 # A local key-down monitor gives a focused browser page ⌘-keys before the
 # menu, and Undo/Redo/Select All reach it as AppKit actions (see `src/shell/keys.rs`).
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSResponder", "NSWindow"] }
 # `WKWebView` and the two `WKFind*` types are the browser toolbar's: the
 # back/forward list and find-in-page have no Tauri API, so they are read
 # and driven on the WKWebView directly (see `src/shell/browser/page.rs`).
-# `WKWebViewConfiguration`, `NSURL` and `NSUUID` set up each messaging-dock
-# page's data store (`src/shell/dock/page.rs`); the `WKScriptMessage*`,
-# `WKFrameInfo` and `WKSecurityOrigin` types are its `dock` message handler
-# (`src/shell/dock/channel.rs`).
-objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "WKWebsiteDataStore", "WKWebView", "WKWebViewConfiguration", "WKNavigation", "WKFindConfiguration", "WKFindResult", "WKScriptMessage", "WKScriptMessageHandler", "WKUserContentController", "WKFrameInfo", "WKSecurityOrigin"] }
+objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "WKWebsiteDataStore", "WKWebView", "WKNavigation", "WKFindConfiguration", "WKFindResult", "WKScriptMessage", "WKScriptMessageHandler", "WKUserContentController"] }
 
 [dev-dependencies]
 # Writes the synthetic PDFs the tests parse and rasterise.

@@ -33,7 +33,7 @@ transcript, and a web page.
 | Settings → Transcription: the language, the engine list and each engine's dialog | `app/src/components/settings/transcription/TranscriptionSection.tsx`, `app/src/components/settings/transcription/GroqDialog.tsx`, `app/src/components/settings/transcription/OnDeviceSpeech.tsx`, `app/src/components/settings/transcription/LocalWhisper.tsx` |
 | The on-device speech helper | `app/src-tauri/speech/main.swift`, `app/scripts/build-speech.mjs`, `app/src-tauri/src/transcribe/engines/apple.rs` |
 | Local Whisper: the engine, its model files | `app/src-tauri/src/transcribe/engines/whisper.rs`, `app/src-tauri/src/transcribe/engines/whisper_models/`, `app/scripts/build-whisper.mjs` |
-| Native light/dark preference for browser and messaging pages | `app/src-tauri/src/shell/native_layer/page_theme.rs`, `app/src/lib/ui/themes/apply.ts` |
+| Native light/dark preference for browser pages | `app/src-tauri/src/shell/native_layer/page_theme.rs`, `app/src/lib/ui/themes/apply.ts` |
 | In-app browser | `app/src/pages/tools/BrowserPage.tsx`, `app/src/hooks/shell/useBrowserTabs.ts`, `app/src/lib/browser/history/`, `app/src-tauri/src/shell/browser/` |
 
 ## One markdown renderer serves every surface
@@ -965,7 +965,7 @@ macOS, WebView2 on Windows) that
 through a hole the app opens ([architecture.md](./architecture.md#native-pages-show-through-holes-the-app-opens)).
 Canvas refuses iframes.
 
-Browser and messaging pages receive the app's light/dark preference at
+Browser pages receive the app's light/dark preference at
 creation and whenever Appearance changes, including System mode. macOS sets
 each child WKWebView's `NSAppearance`; the main webview keeps the OS
 appearance so its System media query remains independent. On Windows,

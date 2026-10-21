@@ -1,7 +1,6 @@
 import { shortcut } from "@/lib/platform";
 import {
   Chat,
-  ChatsCircle,
   CalendarBlank,
   ArrowsClockwise,
   BookOpen,
@@ -19,10 +18,6 @@ import { newCountForSubject, useNewFilesStore } from "@/stores/sync/newFilesStor
 import { anyRendering, useRenderStore } from "@/stores/studio/renderStore";
 import { usePaletteStore } from "@/stores/shell/paletteStore";
 import { useRailOrder, type RailSection } from "@/stores/shell/railOrderStore";
-import { useDockPrefsStore } from "@/stores/shell/dockPrefsStore";
-import { totalUnread, useDockStore } from "@/stores/shell/dockStore";
-import { NewCountBadge } from "@/components/NewCountBadge";
-import { DOCK_ROOT } from "@/lib/dock";
 import { DRAG_SURFACE, useStripReorder } from "@/hooks/gestures/usePointerDrag";
 import { cn } from "@/lib/utils";
 import RailItem, { railButton, railIdle } from "./RailItem";
@@ -40,7 +35,7 @@ interface SidebarProps {
 const WIDTH = 52;
 
 /**
- * An icon rail: search, the sections, Messaging while a service is on and
+ * An icon rail: search, the sections,
  * Spotify's tile while music is on, and Sync and Settings pinned to the foot.
  * The sections drag into any order, kept in `railOrderStore`. Collapsed
  * animates to zero width; the title bar's button is the only toggle. No fill
@@ -173,33 +168,13 @@ function Sections() {
   );
 }
 
-/** Messaging while any service is on (its page switches between them),
- *  badged with the unread total across them, then Spotify's tile, under one
- *  seam shown while either is. */
+/** Spotify's tile, separated from the sections while music is on. */
 function AppItems() {
-  const enabled = useDockPrefsStore((s) => s.enabled);
-  const unread = useDockStore((s) => totalUnread(s.pages, enabled));
   const music = useMusicTileShown();
-  const messaging = enabled.length > 0;
-  if (!messaging && !music) return null;
+  if (!music) return null;
   return (
     <>
       <Rule />
-      {messaging && (
-        <RailItem
-          to={DOCK_ROOT}
-          icon={ChatsCircle}
-          label="Messaging"
-          indicator={
-            unread > 0 ? (
-              // Out to the button's corner: a count is wider than the slot's dots.
-              <span className="-mt-1 -mr-1 flex">
-                <NewCountBadge count={unread} />
-              </span>
-            ) : null
-          }
-        />
-      )}
       <MusicTile />
     </>
   );

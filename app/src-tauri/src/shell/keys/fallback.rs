@@ -18,7 +18,7 @@ use objc2_foundation::NSString;
 use objc2_web_kit::{WKScriptMessage, WKScriptMessageHandler, WKUserContentController, WKWebView};
 use tauri::webview::Webview;
 
-/// Injected into every frame of every browser and dock page.
+/// Injected into every frame of every browser page.
 pub(crate) const SCRIPT: &str = include_str!("fallback.js");
 
 const HANDLER: &str = "oculusKeys";

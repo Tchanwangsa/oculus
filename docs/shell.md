@@ -106,14 +106,15 @@ before leaving a playing lecture.
   them a trail back, as buttons with `data-tab-href` rather than `Link`s so a
   click goes through `navigateActive`.
 
+Saved tabs and Recent entries with an unknown route return to Home.
+
 ## The sidebar is an icon rail
 
 `app/src/components/sidebar/Sidebar.tsx` is a 52px column of icon buttons,
 each named by a tooltip on its right: Search (opens ⌘K), then Home, Chat,
 Calendar, Tasks, Subjects and Studio, and Sync and Settings pinned to the foot under a
-short hairline. Messaging, while any service is on ([dock.md](./dock.md)), and
-Spotify's tile, while music is on, sit together under a rule after the
-sections; the tile opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The six sections drag into any order on `useStripReorder`'s
+short hairline. Spotify's tile, while music is on, sits under a rule after the
+sections; it opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The six sections drag into any order on `useStripReorder`'s
 vertical axis, and the order is kept in `localStorage` (`railOrderStore`); a
 section the stored order lacks is appended. A `RailItem` is a button with `data-tab-href` that goes
 through `navigateActive`, since the sidebar sits outside every pane's router,
@@ -185,8 +186,8 @@ while Ctrl+Shift+Z is Redo.
   to the menu. The app's tab and window keys (⌘T, ⌘W, ⌘N, ⌘K, ⌘L, ⌘1–9 and
   their ⇧/⌥ variants) never go to the page. The monitor is Rust's
   (`app/src-tauri/src/shell/keys/`). WebKit never hands an unhandled key back,
-  so the fall-through is ours: a script in every frame of every browser and
-  dock page reports a ⌘-keydown the page didn't cancel, and the menu gets
+  so the fall-through is ours: a script in every frame of every browser
+  page reports a ⌘-keydown the page didn't cancel, and the menu gets
   the key the user just sent that page (`keys/fallback.rs`).
 - **Undo and Redo are menu items that emit, not the predefined ones.** The
   predefined items hand ⌘Z to WebKit's own undo stack, which a note's
@@ -353,7 +354,7 @@ items with the same front item and width.
   becomes the strip's `sideRatio`, which every new or reopened panel takes
   (half, `SIDE_RATIO`, before any drag). A stored `split` pane restores as a
   one-item panel.
-- **Nothing floats over a pane**: a native browser or dock page shows through
+- **Nothing floats over a pane**: a native browser page shows through
   a hole the app opens, which hides anything inside `#root` drawn over the page
   ([architecture.md](./architecture.md#native-pages-show-through-holes-the-app-opens)),
   so the controls sit in the header and the focus marker on the seam.
@@ -425,7 +426,7 @@ navigates the pane. Its field is `SideNavSearch`
 (`app/src/components/ui/layout/SideNav.tsx`), shared with Settings.
 
 `app/src/lib/search/filters.ts` owns the filter catalogue, tokens and resolution
-without database or navigation effects. ⌘K takes Discord-style filters: `in:<subject>` and `type:<kind>`. Typing
+without database or navigation effects. ⌘K takes filters: `in:<subject>` and `type:<kind>`. Typing
 the colon turns the key into a chip with the caret inside it, and the list shows
 only its values; picking one (or a space after an unambiguous value) fixes the
 chip, one per key. Backspace at a field's start drops the chip being typed, or

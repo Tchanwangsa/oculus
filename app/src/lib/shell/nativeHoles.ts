@@ -5,7 +5,7 @@ import { sendRegions } from "./nativeRegions";
 
 /**
  * Holes the app cuts through itself onto the native pages under it. Every
- * browser tab and dock page is a WKWebView Rust places below the app's
+ * browser tab is a WKWebView Rust places below the app's
  * transparent webview (`app/src-tauri/src/shell/`); a slot shows its page only
  * while a hole is open over it. The holes are one `clip-path` on `#root`, so
  * portals, which are children of `body`, still draw over a page.

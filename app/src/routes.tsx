@@ -111,10 +111,6 @@ export const routes: RouteObject[] = [
       { path: "sync", lazy: page(() => import("@/pages/tools/SyncPage")) },
       // The id names a native WebView Rust places under this content area.
       { path: "browse/:id", lazy: page(() => import("@/pages/tools/BrowserPage")) },
-      // Messaging: one service's native WebView, placed under this content
-      // area. Bare `/dock` opens the last service shown.
-      { path: "dock", lazy: page(() => import("@/pages/tools/DockPage")) },
-      { path: "dock/:service", lazy: page(() => import("@/pages/tools/DockPage")) },
       {
         path: "settings",
         element: <SettingsLayout />,
@@ -125,7 +121,6 @@ export const routes: RouteObject[] = [
           { path: "browser", lazy: page(() => import("@/pages/settings/integrations/BrowserPage")) },
           { path: "music", lazy: page(() => import("@/pages/settings/integrations/MusicPage")) },
           { path: "device-sharing", lazy: page(() => import("@/pages/settings/integrations/DeviceSharingPage")) },
-          { path: "messaging", lazy: page(() => import("@/pages/settings/integrations/MessagingPage")) },
           { path: "storage", lazy: page(() => import("@/pages/settings/library/StoragePage")) },
           { path: "agents", lazy: page(() => import("@/pages/settings/integrations/AgentsPage")) },
           { path: "opencode", lazy: page(() => import("@/pages/settings/integrations/OpencodePage")) },
@@ -145,6 +140,8 @@ export const routes: RouteObject[] = [
       },
       // Legacy path with no subject.
       { path: "lectures", element: <Navigate to="/subjects" replace /> },
+      // A saved tab or Recent entry can point at a route the app doesn't have.
+      { path: "*", element: <Navigate to="/" replace /> },
     ],
   },
 ];

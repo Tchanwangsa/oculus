@@ -29,7 +29,7 @@ WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-
 | Credential entry UI (Settings → Canvas, and onboarding's *Never sign in again*) | `app/src/components/settings/web/AutoSignIn.tsx`, `app/src/components/onboarding/canvas/NeverSignInAgain.tsx` |
 | Spotify's stored credentials: the `music.spotify` vault entry, keyd's app-only `get`, and the music module that writes and reads it | `app/keyd/core/src/names.rs` (`READABLE`), `app/keyd/core/src/ops/get.rs`, `app/src-tauri/src/music/credentials.rs` ([music.md](./music.md)) |
 | WebKit's WebCrypto master key: the per-build names and items, the key's text form, keyd's `webcrypto_key` and its import, the client call | `app/keyd/core/src/names.rs` (`WEBCRYPTO`), `app/keyd/core/src/webcrypto.rs`, `app/keyd/core/src/ops/webcrypto.rs`, `app/keyd/core/src/client/webcrypto.rs`, the app's reader `app/src-tauri/src/shell/webcrypto/mod.rs` (`fetch`) |
-| Handing the key to WebKit: the data-store delegate, its once-per-process cache, where it is installed | `app/src-tauri/src/shell/webcrypto/delegate.rs`, `app/src-tauri/src/shell/webcrypto/cache.rs`, `install_default` in `app/src-tauri/src/shell/webcrypto/mod.rs` (called first in `app/src-tauri/src/lib.rs`'s setup), `configure_store` in `app/src-tauri/src/shell/dock/page.rs` |
+| Handing the key to WebKit: the data-store delegate, its once-per-process cache, where it is installed | `app/src-tauri/src/shell/webcrypto/delegate.rs`, `app/src-tauri/src/shell/webcrypto/cache.rs`, `install_default` in `app/src-tauri/src/shell/webcrypto/mod.rs` (called first in `app/src-tauri/src/lib.rs`'s setup) |
 | Institution profile: the Canvas address, sign-in detection, the UniMelb migration, telling keyd | `app/src-tauri/src/sources/institution/` |
 | The site keyd sends the session to, and `site_set` | `app/keyd/core/src/site.rs`, `app/keyd/core/src/ops/site.rs` |
 | The check every credential call through keyd passes first: keyd's client side and the app's | `app/keyd/core/src/client/bound.rs`, `app/src-tauri/src/sources/institution/keyd.rs` |
@@ -492,9 +492,8 @@ Connect device id, as JSON) has a read-back of its own.
 
 ## WebKit's WebCrypto master key comes from keyd, per build
 
-WebKit wraps every `CryptoKey` a page saves to IndexedDB (WhatsApp's and
-Messenger's logins among them) with one 16-byte master key, which it keeps in
-a login-keychain item of its own. An ad-hoc signed dev build is a new program
+WebKit wraps every `CryptoKey` a page saves to IndexedDB with one 16-byte
+master key, which it keeps in a login-keychain item of its own. An ad-hoc signed dev build is a new program
 to that item's access list after every rebuild, so its prompt comes back each
 time. keyd keeps a copy of the key and serves it to the app, and the app
 hands it to WebKit through each data store's delegate, so WebKit never reads
@@ -511,7 +510,7 @@ its item.
   only for the application the caller is: the peer check names it
   (`Caller::application`: the bundle's `CFBundleIdentifier`, or the dev
   executable's file name), and any other `app` is `caller`. A wrong key fails
-  silently (IndexedDB returns `undefined` and those services sign out), so
+  silently (IndexedDB returns `undefined` for encrypted records), so
   neither build can be handed the other's. An `app` with no entry is `request`.
 - **The key travels as text**: the padded standard base64 of the 16 bytes,
   24 characters, as WebKit's item holds it (`crate::webcrypto`). keyd stores
@@ -540,12 +539,10 @@ its item.
   `-[WKWebsiteDataStore set_delegate:]`, macOS 15+) with
   `webCryptoMasterKey:`, for page, dedicated-worker and service-worker
   IndexedDB alike. One delegate (`shell/webcrypto/delegate.rs`) is set on
-  every store the app's webviews use: the default store (the main webview,
-  browser tabs and the Canvas sign-in window, whose `data_directory` WKWebView
-  ignores) first thing in setup, and each dock store in `configure_store`, in
-  the same main-thread turn that creates its page. Both run before the run
-  loop turns, and WebKit asks only when a web process does, over the run
-  loop, so no page can ask first. The delegate answers the 16 raw bytes, or
+  the default store (the main webview, browser tabs and the Canvas sign-in
+  window, whose `data_directory` WKWebView ignores) first thing in setup,
+  before the run loop turns. WebKit asks only when a web process does, over
+  the run loop, so no page can ask first. The delegate answers the 16 raw bytes, or
   nil, which sends WebKit to its own item. A store without `set_delegate:` is
   left to WebKit, logged once.
 - **keyd is asked once per process.** WebKit asks on the main thread, on
@@ -731,7 +728,7 @@ existing query 403s, as does the bare URL.
 - `/login/session_token` answers 403 to a cookie session; it wants an access token, which is disabled here.
 - The data store's delegate setter is `set_delegate:`; `_setDelegate:` does not exist and throws.
 - The navigation delegate's `_webCryptoMasterKeyForWebView:` misses service workers, which read WebKit's keychain item (and create it if absent); only the data store's delegate covers every IndexedDB.
-- A wrong WebCrypto master key fails silently: IndexedDB `get` resolves `undefined`, the records stay, and WhatsApp and Messenger sign out. Answer keyd's key or nil, nothing else.
+- A wrong WebCrypto master key fails silently: IndexedDB `get` resolves `undefined`, the encrypted records stay unreadable. Answer keyd's key or nil, nothing else.
 - WebKit holds the data store's delegate weakly, so the delegate lives for the process; and it checks each `webCryptoMasterKey:` handler is called exactly once.
 - Ed's LTI redirect walk jars cookies per host, and Canvas's legs go through keyd, which attaches the cookie only to Canvas; it must never reach edstem.org.
 - UniMelb's `/login` is a portal page, not its IdP — detection tries `/login/saml` after it, and UniMelb's profile keeps `/login/saml` as its login path.

@@ -296,8 +296,10 @@ async fn oversized_commits_are_refused_before_they_are_read() {
         (413, json!("too-large"))
     );
     let mut chunked = Vec::new();
-    for _ in 0..3 {
-        let chunk = vec![b' '; 512 * 1024];
+    // Cross the cap by one byte. A large unread tail makes Windows reset
+    // the socket on close, which can discard the rejection being asserted.
+    for len in [512 * 1024, 512 * 1024, 1] {
+        let chunk = vec![b' '; len];
         chunked.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
         chunked.extend_from_slice(&chunk);
         chunked.extend_from_slice(b"\r\n");

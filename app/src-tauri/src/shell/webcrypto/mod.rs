@@ -1,9 +1,8 @@
 //! WebKit's WebCrypto master key from oculus-keyd (`docs/auth.md`), handed
 //! to WebKit by a website data store delegate (`delegate.rs`) installed on
-//! every store the app's webviews use: the default store here, at setup, and
-//! each dock store in `shell/dock/page.rs`. `fetch` blocks on keyd, which can
-//! wait on a keychain prompt, so the delegate calls it off the main thread,
-//! once per process (`cache.rs`).
+//! the default store shared by the app's webviews, at setup. `fetch` blocks on
+//! keyd, which can wait on a keychain prompt, so the delegate calls it off the
+//! main thread, once per process (`cache.rs`).
 
 mod cache;
 mod delegate;
