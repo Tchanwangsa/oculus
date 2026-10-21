@@ -291,6 +291,11 @@ export function MentionInput({
         // y=auto computes x to auto, and always-on scrollbars paint a bar across a one-line box.
         className="max-h-[160px] min-h-[16px] w-full overflow-x-hidden overflow-y-auto break-words whitespace-pre-wrap select-text text-[13px] leading-[16px] outline-none"
         onInput={input}
+        // `overflow-x-hidden` still scrolls: WebKit's own caret reveal can nudge a
+        // few px sideways and clip the first letters of every line.
+        onScroll={(e) => {
+          if (e.currentTarget.scrollLeft) e.currentTarget.scrollLeft = 0;
+        }}
         onKeyUp={sync}
         onClick={sync}
         onKeyDown={keyDown}
