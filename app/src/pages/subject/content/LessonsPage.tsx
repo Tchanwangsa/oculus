@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { CaretDown, CaretRight, ChalkboardTeacher } from "@phosphor-icons/react";
 import { SubjectLoading, SubjectPage, SubjectEmpty } from "@/components/subjects/SubjectPage";
 import { useSubjectFiles } from "@/hooks/data/useSubjectFiles";
@@ -6,6 +6,7 @@ import { useCourseFileData } from "@/hooks/data/useCourseFileData";
 import { useCollapsedGroups } from "@/hooks/shell/useCollapsedGroups";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { groupLessons, isLessonDoc, parseEdLesson } from "@/lib/ed/lessons";
+import { refreshSlideStatuses } from "@/lib/ed/views";
 import { LessonRow } from "./lessons/LessonRow";
 
 const COLLAPSED_KEY = "oculus-lessons-modules-collapsed";
@@ -27,6 +28,13 @@ export default function SubjectLessonsPage() {
     return groupLessons(files.map((file) => byId.get(file.id) ?? parseEdLesson("", file)));
   }, [files, lessons]);
   const { folded, setOpen } = useCollapsedGroups(COLLAPSED_KEY);
+  const lessonIds = useMemo(
+    () => (lessons ?? []).flatMap((lesson) => (lesson.index && lesson.lessonId > 0 ? [lesson.lessonId] : [])),
+    [lessons],
+  );
+  const idsKey = lessonIds.join(",");
+  // Ed's statuses, not the last sync's: the rows' counts read them.
+  useEffect(() => refreshSlideStatuses(lessonIds), [idsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if ((loading && files.length === 0) || (files.length > 0 && groups == null)) {
     return <SubjectLoading count={5} />;

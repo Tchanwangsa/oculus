@@ -143,6 +143,7 @@ pub fn run() {
             sources::institution::commands::institution_get,
             sources::institution::commands::institution_configure,
             sources::ed::views::ed_mark_viewed,
+            sources::ed::views::ed_slide_statuses,
             sources::ed::workspace_session::commands::ed_workspace_open,
             sources::ed::workspace_session::commands::ed_workspace_close,
             sources::ed::workspace_session::commands::ed_workspace_read,

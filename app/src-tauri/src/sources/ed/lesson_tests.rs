@@ -6,7 +6,7 @@ use super::lesson_md::{
     lesson_index_md, lesson_url, slide_md, slide_url, sorted_slides, LessonPlace, LinkedFile,
     SlideExtras, SlideFile,
 };
-use super::lessons::{order_lessons, workspace_host};
+use super::lessons::{order_lessons, slide_statuses_of, workspace_host};
 use super::threads::thread_url;
 use super::workspace::{unpack, MAX_ENTRY_BYTES};
 use super::Ed;
@@ -76,6 +76,21 @@ fn slides_go_by_index_then_id() {
         .map(|s| s["id"].as_i64().unwrap())
         .collect();
     assert_eq!(ids, [8, 7, 9, 4]);
+}
+
+#[test]
+fn slide_statuses_skip_slides_without_an_id_or_status() {
+    let l = lesson_of(json!([
+        {"id": 1, "status": "completed"},
+        {"id": 2, "status": "seen"},
+        {"id": 3, "status": null},
+        {"id": 4},
+        {"status": "unseen"}
+    ]));
+    assert_eq!(
+        slide_statuses_of(&l),
+        [(1, "completed".to_string()), (2, "seen".to_string())]
+    );
 }
 
 const STEM: &str = "lessons/120619-assignment-2";

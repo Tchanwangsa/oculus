@@ -360,6 +360,14 @@ answers, so neither is sent one, nor is a type Oculus does not know. The
 command answers with the status Ed now holds, which the lesson view shows at
 once ([viewers.md](./viewers.md)).
 
+The index's slide statuses are only as new as the last sync, so the Lessons
+tab reads Ed's on open: `ed_slide_statuses`
+(`app/src/lib/ed/views.ts` `refreshSlideStatuses`; `views.rs`, `Ed::slide_statuses`
+in `lessons.rs`) takes the Ed lesson ids and answers `{id, status}` for every
+slide, one `GET /lessons/<l>` each and no `?view=1`. A lesson Ed refuses is
+logged and left out; the command fails only when every lesson failed. The
+tab asks at most once per two minutes for the same set of lessons.
+
 ## Ed Lessons are an index per lesson and a file per slide
 
 The Ed phase resolves the subject's Ed course once and runs lessons, threads or

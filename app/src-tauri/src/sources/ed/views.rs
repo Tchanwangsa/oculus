@@ -76,3 +76,26 @@ pub async fn ed_mark_viewed(
     .await
     .map_err(|e| e.to_string())?
 }
+
+/// One slide's Ed status, as `ed_slide_statuses` answers.
+#[derive(serde::Serialize)]
+pub struct SlideStatus {
+    pub id: i64,
+    pub status: String,
+}
+
+/// What Ed holds as the student's status on every slide of `lesson_ids`.
+/// The Lessons tab reads it on open so its counts need no sync.
+#[tauri::command]
+pub async fn ed_slide_statuses(lesson_ids: Vec<i64>) -> Result<Vec<SlideStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let ed = Ed::open(&crate::library::paths::data_dir());
+        ed.slide_statuses(&lesson_ids).map(|all| {
+            all.into_iter()
+                .map(|(id, status)| SlideStatus { id, status })
+                .collect()
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

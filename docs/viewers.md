@@ -420,7 +420,10 @@ whose list has slides (`useLessonIndex`), its body is `LessonView`
   `useSlideStatusStore` (`lib/ed/slideStatus.ts`). The sidebar, its count and
   the Lessons tab's rows read the index through it (`useLiveLessonIndex`),
   which only ever raises a status, so a tick shows at once rather than at
-  the next sync. A challenge slide is completed on Ed by a passing Mark
+  the next sync. The store is persisted (`oculus-ed-slide-statuses` in the
+  webview's storage), so a restart keeps what it learned, and the Lessons
+  tab fills it on open with Ed's own statuses for the subject's lessons
+  (`refreshSlideStatuses`, [sync.md](./sync.md)). A challenge slide is completed on Ed by a passing Mark
   ([sync.md](./sync.md)); the sidebar ticks from the submission's status
   without waiting for it.
 - **A lesson file without front matter** (every slide in one file) renders

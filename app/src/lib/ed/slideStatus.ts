@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { LessonIndex } from "./lessons";
 
 /** Ed's slide statuses in the one direction they move. */
@@ -9,11 +10,26 @@ const rank = (status: string | null | undefined) => (status == null ? -1 : (RANK
 type StatusMap = ReadonlyMap<number, string>;
 
 /**
- * What Ed answered this app session for slides opened here (`markSlideOpened`
- * in `views.ts`), by Ed slide id: the index on disk only learns it at the
- * next sync, and the sidebar's ticks should not wait for one.
+ * What Ed answered for slides opened here (`markSlideOpened` in `views.ts`),
+ * what the Lessons tab read on open (`refreshSlideStatuses`) and what a
+ * passing submission proved, by Ed slide id. The index on disk only learns
+ * a status at the next sync, so the sidebar's ticks and the Lessons tab's
+ * counts read this over it. It is kept in the webview's storage, so a
+ * restart does not drop what only this store knows.
  */
-export const useSlideStatusStore = create<{ byId: StatusMap }>(() => ({ byId: new Map() }));
+export const useSlideStatusStore = create<{ byId: StatusMap }>()(
+  persist<{ byId: StatusMap }, [], [], { byId: [number, string][] }>(
+    () => ({ byId: new Map<number, string>() }),
+    {
+      name: "oculus-ed-slide-statuses",
+      partialize: (s) => ({ byId: [...s.byId] }),
+      merge: (saved, current) => ({
+        ...current,
+        byId: new Map((saved as { byId?: [number, string][] } | undefined)?.byId ?? []),
+      }),
+    },
+  ),
+);
 
 /** Whether a submission of this Ed status completes its challenge's slide,
  *  as Ed's web app does after a mark: passed, or submitted without marking. */

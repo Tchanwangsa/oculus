@@ -62,6 +62,27 @@ impl Ed {
         }
     }
 
+    /// Ed's status (`unseen`, `seen`, `completed`) for each slide of the
+    /// lessons, by slide id. A lesson Ed refuses or cannot answer is logged
+    /// and left out; the reads send no `?view=1`.
+    pub fn slide_statuses(&self, lesson_ids: &[i64]) -> Result<Vec<(i64, String)>, String> {
+        let mut statuses = Vec::new();
+        let mut failure = None;
+        for &id in lesson_ids {
+            match self.lesson(id) {
+                Ok(lesson) => statuses.extend(slide_statuses_of(&lesson)),
+                Err(e) => {
+                    elog!("[oculus] ed lesson {id} statuses: {e}");
+                    failure.get_or_insert(e);
+                }
+            }
+        }
+        match failure {
+            Some(e) if statuses.is_empty() => Err(e),
+            _ => Ok(statuses),
+        }
+    }
+
     /// A quiz slide's questions in Ed's order. Ed leaves out each `solution`
     /// until the lesson's solutions are released.
     pub fn quiz_questions(&self, slide_id: i64) -> Result<Vec<serde_json::Value>, String> {
@@ -115,6 +136,16 @@ impl Ed {
         let ticket = self.download_ticket(&connected.workspace_id, ".")?;
         download(&format!("https://{host}/download/{}", ticket.expose()))
     }
+}
+
+/// `(slide id, status)` for every slide of `lesson` that has both.
+pub fn slide_statuses_of(lesson: &serde_json::Value) -> Vec<(i64, String)> {
+    lesson["slides"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| Some((s["id"].as_i64()?, s["status"].as_str()?.to_string())))
+        .collect()
 }
 
 /// Module order (as Ed lists the modules; a lesson in none comes last), then
