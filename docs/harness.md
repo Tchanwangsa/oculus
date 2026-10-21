@@ -703,6 +703,10 @@ model's failure. Only the model's turn is retried: chaptering does not detect
 or grab frames again, and document suggestions keep their warm spare for the
 first model only.
 
+A turn that reports an error fails even if it spoke first: Claude's "session
+limit" notice arrives as a reply plus an error, and is never kept as the job's
+answer.
+
 An empty list switches the job off: it fails with "No model is set", and thread
 naming is skipped. It never falls back to the default, which can be an
 expensive model. The registry is one `settings` value, `job_models`, read by

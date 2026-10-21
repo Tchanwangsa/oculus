@@ -38,12 +38,8 @@ impl Harness {
             .map(|()| turn.wait(timeout, "naming the thread"));
         turn.close();
         let answer = answer?;
-        let text = answer.message_or_streamed();
-        match (clean_title(text), &answer.failed) {
-            (Some(t), _) => Ok(t),
-            (None, Some(e)) => Err(e.clone()),
-            (None, None) => Err(format!("no usable name in the reply: {text:?}")),
-        }
+        let text = answer.answered()?;
+        clean_title(text).ok_or_else(|| format!("no usable name in the reply: {text:?}"))
     }
 
     /// One tool-less turn outside any thread ([`Harness::one_off`]): `prompt`
@@ -62,13 +58,8 @@ impl Harness {
             .send(prompt)
             .map(|()| turn.wait(None, "answering"));
         turn.close();
-        let answer = answer?;
-        let text = answer.message_or_streamed();
-        match &answer.failed {
-            Some(e) if text.trim().is_empty() => Err(e.clone()),
-            None if text.trim().is_empty() => Err("the agent replied with nothing".to_string()),
-            _ => Ok(text.to_string()),
-        }
+        let text = answer?.answered()?.to_string();
+        Ok(text)
     }
 
     /// A tool-less session outside any thread, on `sel`'s agent, model and
@@ -171,6 +162,21 @@ pub(in crate::harness) struct OneOffReply {
 }
 
 impl OneOffReply {
+    /// The reply's text, if the turn succeeded. A failed turn is a failure
+    /// even when it carried text: Claude reports a spent session as an
+    /// assistant message ("You've hit your session limit") plus an error, and
+    /// that message is not an answer a job may keep or a fallback may skip.
+    pub(in crate::harness) fn answered(&self) -> Result<&str, String> {
+        if let Some(e) = &self.failed {
+            return Err(e.clone());
+        }
+        let text = self.message_or_streamed();
+        if text.trim().is_empty() {
+            return Err("the agent replied with nothing".to_string());
+        }
+        Ok(text)
+    }
+
     pub(in crate::harness) fn message_or_streamed(&self) -> &str {
         if self.message.trim().is_empty() {
             &self.streamed
@@ -257,7 +263,12 @@ fn drain_turn(
         on_event(&ev);
         match ev {
             HarnessEvent::Error { message, .. } => failed = Some(message),
-            HarnessEvent::TurnFinished { .. } => break,
+            HarnessEvent::TurnFinished { status } => {
+                if status == "failed" {
+                    failed.get_or_insert(format!("the turn failed before {doing}"));
+                }
+                break;
+            }
             HarnessEvent::Exited { code } => {
                 failed.get_or_insert(format!("provider exited (code {code:?}) before {doing}"));
                 break;
@@ -266,4 +277,32 @@ fn drain_turn(
         }
     }
     failed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reply(message: &str, failed: Option<&str>) -> OneOffReply {
+        OneOffReply {
+            message: message.into(),
+            streamed: String::new(),
+            failed: failed.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn a_failed_turn_fails_even_when_it_carried_text() {
+        let spent = reply(
+            "You've hit your session limit · resets 5am",
+            Some("You've hit your session limit · resets 5am"),
+        );
+        assert!(spent.answered().is_err());
+    }
+
+    #[test]
+    fn a_clean_reply_is_its_text_and_an_empty_one_fails() {
+        assert_eq!(reply("Hello.", None).answered().unwrap(), "Hello.");
+        assert!(reply("  ", None).answered().is_err());
+    }
 }
