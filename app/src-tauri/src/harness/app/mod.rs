@@ -13,6 +13,7 @@ pub mod proposal_jobs;
 mod send;
 pub mod setup;
 pub mod suggest;
+mod thought_clock;
 pub mod turns;
 
 pub use lifecycle::{init, reconcile, shutdown, sweep_strays};

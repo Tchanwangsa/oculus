@@ -75,8 +75,9 @@ pub async fn apply(
                 .await
                 .map(Some)
         }
-        HarnessEvent::Thinking { text } => {
-            insert_item(pool, thread_id, "thinking", None, Some(text), None)
+        HarnessEvent::Thinking { text, ms } => {
+            let meta = ms.map(|ms| serde_json::json!({ "ms": ms }).to_string());
+            insert_item(pool, thread_id, "thinking", None, Some(text), meta)
                 .await
                 .map(Some)
         }

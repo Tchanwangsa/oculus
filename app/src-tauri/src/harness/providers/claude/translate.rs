@@ -240,7 +240,7 @@ impl Translator {
                         Some("thinking") => {
                             let t = str_of(block, "thinking");
                             if !t.trim().is_empty() {
-                                out.push(HarnessEvent::Thinking { text: t });
+                                out.push(HarnessEvent::Thinking { text: t, ms: None });
                             }
                         }
                         Some("tool_use") => {

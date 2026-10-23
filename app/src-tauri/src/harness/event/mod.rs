@@ -127,6 +127,10 @@ pub enum HarnessEvent {
     /// A finished block of reasoning text. Persisted, collapsed by default.
     Thinking {
         text: String,
+        /// How long the block streamed, from its first delta. Bridges leave it
+        /// `None`; the consumer loop times it (`app/thought_clock.rs`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ms: Option<u64>,
     },
     ToolStarted {
         /// Provider's id for the call; [`Self::ToolFinished`] closes on it.

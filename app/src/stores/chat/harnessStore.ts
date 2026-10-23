@@ -324,7 +324,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           live = { ...prev, streaming: "" };
           break;
         case "thinking":
-          push(rowFrom(env, "thinking", event.text));
+          push(rowFrom(env, "thinking", event.text, event.ms == null ? undefined : { ms: event.ms }));
           live = { ...prev, thinking: "" };
           break;
         case "tool_started":

@@ -143,3 +143,28 @@ async fn pruning_removes_cards_with_foreign_keys_off_but_preserves_the_journal()
         1
     );
 }
+
+#[tokio::test]
+async fn a_timed_thought_keeps_its_duration() {
+    let pool = migrated_pool().await;
+    let thread = create_thread(&pool, Provider::Claude, None, None, None, "hi")
+        .await
+        .unwrap();
+    let thought = |ms| HarnessEvent::Thinking {
+        text: "hmm".into(),
+        ms,
+    };
+    let timed = apply(&pool, thread, &thought(Some(1200)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(meta(&pool, timed).await["ms"], 1200);
+    let untimed = apply(&pool, thread, &thought(None)).await.unwrap().unwrap();
+    let raw: Option<String> = sqlx::query("SELECT meta FROM harness_items WHERE id = ?1")
+        .bind(untimed)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get("meta");
+    assert_eq!(raw, None);
+}

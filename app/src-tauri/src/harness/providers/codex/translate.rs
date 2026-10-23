@@ -186,6 +186,7 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
                     if !parts.is_empty() {
                         out.push(HarnessEvent::Thinking {
                             text: parts.join("\n\n"),
+                            ms: None,
                         });
                     }
                 }

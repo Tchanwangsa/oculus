@@ -1,7 +1,7 @@
 import { memo, useMemo } from "react";
-import { parseErrorMeta, parseToolMeta, type HarnessItem, type Provider } from "@/lib/harness";
+import { parseErrorMeta, parseToolMeta, thoughtMs, type HarnessItem, type Provider } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
-import { ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
+import { CLI_ICON, ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
 import { Reply, Stopped, Unprompted, User } from "./Messages";
 import { PermissionCard } from "./PermissionCard";
 import { bundleLabel } from "./rows";
@@ -43,7 +43,7 @@ export const Item = memo(function Item({
     case "assistant":
       return <Reply item={item} asked={asked} actions={actions} />;
     case "thinking":
-      return <ThinkingRow text={item.content ?? ""} dim={dim} />;
+      return <ThinkingRow text={item.content ?? ""} ms={thoughtMs(item)} dim={dim} />;
     case "tool":
       return <Tool item={item} dim={dim} />;
     case "error":
@@ -62,7 +62,12 @@ export const Item = memo(function Item({
 export const Bundle = memo(function Bundle({ items }: { items: HarnessItem[] }) {
   const { label, icon } = useMemo(() => bundleLabel(items), [items]);
   return (
-    <RowShell icon={TOOL_ICON[icon]} title={label} expandable dim>
+    <RowShell
+      icon={icon == null ? undefined : "cli" in icon ? CLI_ICON[icon.cli] : TOOL_ICON[icon.tool]}
+      title={label}
+      expandable
+      dim
+    >
       <div className="relative my-0.5 pl-3 before:absolute before:bottom-1 before:left-1.5 before:top-0 before:w-px before:bg-border before:content-['']">
         <div className="flex flex-col">
           {items.map((i) => (

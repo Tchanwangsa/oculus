@@ -50,6 +50,25 @@
   margin-block-end: 0;
 }
 
+/* A reasoning row's thought: a step smaller and muted, tighter paragraphs,
+ * headings no bigger than the text, so it reads as an aside to the reply. */
+.md-compact.md-thought {
+  font-size: 12.5px;
+  color: var(--color-muted-foreground);
+}
+.md-thought :is(p, ul, ol, blockquote, h1, h2, h3, h4) {
+  color: inherit;
+  margin-block: 0.4rem;
+  font-size: inherit;
+}
+.md-thought h2 {
+  padding-bottom: 0;
+  border: 0;
+}
+.md-thought strong {
+  color: color-mix(in srgb, var(--color-foreground) 75%, transparent);
+}
+
 /* KaTeX sized for 13px text; a display formula scrolls rather than widening
  * the panel. One step more specific than KaTeX's own sheet. */
 .md-compact .katex {
