@@ -12,6 +12,7 @@ pub mod library;
 pub mod music;
 pub mod pages;
 pub mod parse;
+pub mod proposals;
 pub mod providers;
 pub mod runtime;
 pub mod shell;
@@ -136,6 +137,14 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            proposals::proposal_open,
+            proposals::proposal_edit,
+            proposals::proposal_apply,
+            proposals::proposal_discard,
+            proposals::proposal_undo,
+            proposals::proposal_inspect,
+            harness::app::proposal_jobs::metadata::proposal_job_info,
+            harness::app::proposal_jobs::lifecycle::proposal_job_start,
             auth::commands::get_auth_status,
             auth::commands::check_canvas_session,
             auth::commands::launch_canvas_auth,

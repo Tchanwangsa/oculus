@@ -27,6 +27,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
 | Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
+| Proposal dispatch context and confirmed jobs | `app/src-tauri/src/harness/app/proposal_context.rs`, `app/src-tauri/src/harness/app/proposal_jobs/` |
 | Interactive reply fences, study widgets and their persisted progress | `app/src/components/markdown/openui/`, `app/src/stores/chat/widgetStore.ts` |
 | Model picker and its catalogue hook | `app/src/components/harness/composer/ModelPicker.tsx`, `app/src/hooks/agents/useProviderModels.ts` |
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/integrations/OpencodePage.tsx`, `app/src/components/settings/agents/opencode/`, `app/src/components/settings/agents/OpencodeConnectDialog.tsx`, `app/src/lib/harness/opencodeCatalogue.ts` |
@@ -54,7 +55,7 @@ Settings row directs installation and updates to a terminal.
 Every bridge translates into `HarnessEvent` (session, user message, turn,
 unprompted turn, text/reasoning deltas, tool started/output/finished, usage,
 rate limits, error, exited). `ThreadTitled`, `Queued`/`Unqueued`, `Rewound` and
-`TurnAnchor` have no provider behind them but ride the same path so they are
+`TurnAnchor` and `Proposal` have no provider behind them but ride the same path so they are
 persisted the same way. `classify` in `event/classify.rs` is the one tool table.
 
 | CLI | Process shape | Resumed by |
@@ -104,8 +105,8 @@ protected paths are one list in `protected.rs`: the library folders, the root fi
   last; a path inside the session directory is written relative to it.
 - **Antigravity**: [below](#antigravity-keeps-its-rules-in-the-students-global-settings).
 
-**The database is the first hole, three files wide.** `oculus project`/`task`
-write the board ([projects.md](./projects.md)), and a sandbox that opens
+**The database is the first hole, three files wide.** The CLI reads the board
+and permits Studio metadata writes ([cli.md](./cli.md)), and a sandbox that opens
 `oculus.db` but not `-wal` fails "attempt to write a readonly database". So
 `library::paths::db_write_paths` names `oculus.db`, `-wal`, `-shm`: `allowWrite` for
 Claude; `writableRoots` on the turn's `sandboxPolicy` plus
@@ -133,9 +134,10 @@ sandbox's `denyWrite`, so an `oculus.db*` deny would cancel the grant; instead
 opencode keeps its `oculus.db*` deny. `Bash(oculus:*)` is allowed by name
 because Claude's sandbox auto-allows only Bash it can statically vouch for,
 and one refusal (a multi-line `--brief`) auto-denies the rest of the session.
-The board notices an agent write because `useBackendEvents` matches the
-finished command's text against `oculus project|task` — `is_oculus_cli` only
-checks the first words, and `cd … && oculus task add` reads as Bash.
+`useBackendEvents` refreshes planning data after a finished `oculus
+project|task` call. `is_oculus_cli` only checks the first words, and
+`cd … && oculus task list` reads as Bash. Proposal commands also notify
+open boards after their committed writes.
 
 **The child's environment is edited.** `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`
 are stripped so a shell key cannot move a subscription onto API billing, and so
@@ -143,7 +145,14 @@ opencode (which reads both) shows the same catalogue from a terminal as from
 the Dock. `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT` are stripped because the CLI
 refuses to nest. The `oculus` binary's directory goes first on PATH, so a
 stale dev binary shows up as `unrecognized subcommand`
-([development.md](./development.md)). Claude's auto-memory is off.
+([development.md](./development.md)). Claude's auto-memory is off. Every child also gets `OCULUS_AGENT=1`:
+student-owned writes and long jobs are refused by the CLI with the proposal
+component to use. Sign-in and keyd commands are refused outright. This applies
+to one-off jobs and catalogue/sign-in subprocesses too; they invoke provider
+CLIs, not gated Oculus write verbs. The app's native job paths do not use this
+environment. Codex's shared app-server receives the environment at spawn and
+sets `shell_environment_policy.set.OCULUS_AGENT` on each thread; opencode's
+shared server inherits it at spawn for its shell children.
 
 **Each sandbox lets `oculus` reach `oculus-keyd` its own way.** `oculus search`
 and the other keyed commands connect to keyd's Unix socket from inside the
@@ -990,6 +999,41 @@ theme, subject library and length target read from video.json and the link,
 and the order of work (direct it with the skill, draft, ask before the
 final). It is the per-thread half the opencode and `agy` bridges send ahead
 of the first message.
+
+## Proposal context is read at dispatch, and confirmation lives in Rust
+
+`chat_proposals` owns a card's edited fields, inclusion ticks and status.
+Open/edit/apply/discard/undo commands publish its committed snapshot as a
+`Proposal` harness event. Reloading and a second view read that same row;
+localStorage holds only study-widget progress. The transaction and journal
+contract are in [projects.md](./projects.md).
+
+Every `start_turn` reads pending cards and newly decided statuses after the
+lecture moment, appending "Cards in this thread" to the provider prompt.
+The user row keeps only the student's typed text. Pending cards repeat on
+every send; decided cards repeat until a send is accepted. A conditional
+`told` write matches the exact status and state sent, so an edit or Undo while
+a provider accepts the request cannot mark a newer version seen. Queued
+messages read cards when released, after any intervening Create click.
+Registering a replacement for a pending card carries the student's explicit
+inclusion ticks forward on matching rows, including subtasks. Existing rows
+match by id; new rows match by title or name and occurrence. Proposed field
+values still come from the replacement; a decided card supplies no baseline.
+
+Rewind explicitly deletes proposals at or after the removed item, and thread
+deletion clears its proposals and timeline rows even when SQLite foreign keys
+are off. `agent_changes` remains: removing conversation context does not undo
+student data.
+
+Confirmed jobs use `proposal_job_start`, which atomically decides a pending
+card before launching the app's native job. Transcription and downloads
+await those commands; lecture jobs follow their terminal events; sync and
+parse retain the existing progress events. The row's `job` state persists
+running, complete or error across views. Completion clears `told` so the next
+message reports the outcome. Startup marks interrupted runs as errors and
+keeps the card decided, avoiding an accidental second billed launch. Jobs
+have no Undo or amendments.
+
 
 ## Gotchas
 

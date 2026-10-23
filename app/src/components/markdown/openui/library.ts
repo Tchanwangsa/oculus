@@ -9,6 +9,7 @@ import { Stack } from "./components/Stack";
 import { Step, Steps } from "./components/Steps";
 import { Text } from "./components/Text";
 import { functions } from "./functions";
+import { proposalComponents, jobComponents } from "./proposals/definitions";
 
 /**
  * The components an agent may use in an ```openui fence: a few study widgets,
@@ -18,7 +19,7 @@ import { functions } from "./functions";
  */
 export const library = createLibrary({
   root: "Stack",
-  components: [Stack, Text, Flashcards, Card, Quiz, Question, Option, Steps, Step, Explorer, Slider, Value, Chart, PageRef, Ask],
+  components: [Stack, Text, Flashcards, Card, Quiz, Question, Option, Steps, Step, Explorer, Slider, Value, Chart, PageRef, Ask, ...proposalComponents, ...jobComponents],
   functions,
   componentGroups: [
     { name: "Root", components: ["Stack", "Text"] },
@@ -40,5 +41,8 @@ export const library = createLibrary({
       ],
     },
     { name: "Links", components: ["PageRef", "Ask"] },
+    { name: "Create", components: ["NewTasks", "NewProject", "Task", "Under", "NewEvents", "Event", "NewNote"], notes: ["- Use one proposal per openui fence. Nothing is written until the student clicks Create.", "- Look up existing ids in the CLI; never guess. Optional arguments may be null to skip a middle argument.", "- amends is the app's pending card id from Cards in this thread, always the last argument."] },
+    { name: "Change", components: ["Change", "TaskChanges", "ProjectChanges", "EventChanges", "TagChanges", "NewTag", "DeleteTag", "DeleteTasks", "DeleteEvents"], notes: ["- Change(id, from, to) uses the same keys in from and to. Null clears a field.", "- Task keys: title, body, due, starts, estimate, tags, files, column, project. Project keys: name, subject, due, starts, brief, tags, event, status. Event keys: title, start, end, kind, subject, notes. Tag keys: name, color.", "- Only local_<id> events may be changed/deleted; Canvas events are read-only."] },
+    { name: "Jobs", components: ["Sync", "Reparse", "Transcribe", "LectureChapters", "LectureEnd", "Download"], notes: ["- Ask with a job card before starting long, billed or downloaded work. One job per fence. No Undo."] },
   ],
 });

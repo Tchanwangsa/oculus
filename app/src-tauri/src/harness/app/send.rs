@@ -123,6 +123,9 @@ async fn start_turn(
         None => text.to_string(),
     };
 
+    let cards = super::proposal_context::read(&pool, thread_id).await?;
+    let text = format!("{text}{}", cards.section);
     let (h, sink) = (harness.clone(), sink.clone());
-    blocking(move || h.send(thread_id, provider, resume.as_deref(), &opts, &text, sink)).await
+    blocking(move || h.send(thread_id, provider, resume.as_deref(), &opts, &text, sink)).await?;
+    super::proposal_context::accepted(&pool, cards).await
 }

@@ -371,8 +371,10 @@ oculus studio narrate shor-breaks-rsa
 It reads Settings → Studio → Narration; pass no `--engine`, `--server`, `--model` or
 `--voice` unless the student asks. If it fails for want of a server, model, voice or
 the word-timing model, **stop and tell the student** what to set in
-Settings → Studio (Narration, or Word timing for the aligner). Never run `oculus studio aligner download` (378 MB) or
-`oculus studio voices download` (Kokoro's packs and voices, 101 MB or more): their call. If
+Settings → Studio (Narration, or Word timing for the aligner). If they ask
+to download missing packs, propose Download("aligner") or Download("voices")
+in an `openui` fence using `oculus-plan` / `oculus-ui`; the card shows the
+size and the student confirms. If
 the server does not answer, say so; do not retry in a loop.
 
 **Check the guessed words.** With the Kokoro engine, narrate ends with a

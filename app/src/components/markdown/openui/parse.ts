@@ -1,5 +1,6 @@
 import { createParser, type ParseResult } from "@openuidev/react-lang";
 import { library } from "./library";
+import { validateCardTree } from "./proposals/model";
 
 /** One parser for the app's lifetime: it is built from the library's JSON
  *  Schema, which `toJSONSchema` rebuilds on every call. */
@@ -34,5 +35,7 @@ export function parseProgram(source: string): Verdict {
       result,
     };
   if (!result.root && !result.rootExpression) return { ok: false, reason: "empty", errors: [], result };
+  try { validateCardTree(result.root); }
+  catch (error) { return { ok: false, reason: "invalid", errors: [String(error)], result }; }
   return { ok: true, result };
 }

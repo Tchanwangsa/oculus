@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { sqliteUtcToMs } from "@/lib/format/format";
 import { displayLocale } from "@/lib/format/locale";
 import { PILL } from "./pill";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const Calendar = lazy(() =>
   import("@/components/ui/calendar").then((module) => ({ default: module.Calendar })),
@@ -19,11 +20,12 @@ const DEFAULT_TIME: Record<"start" | "end", { h: number; m: number }> = {
 
 /** "15 Sep, 11:59 pm", with the year when it is not this one (which
  *  `fmtClock` never prints). */
-function label(d: Date): string {
+function label(d: Date, dateOnly = false): string {
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
   if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
   const time = d.toLocaleTimeString(displayLocale, { hour: "numeric", minute: "2-digit" });
-  return `${d.toLocaleDateString(displayLocale, opts)}, ${time}`;
+  const day = d.toLocaleDateString(displayLocale, opts);
+  return dateOnly ? day : `${day}, ${time}`;
 }
 
 /** `HH:mm`: the time input's value is 24-hour whatever it displays. */
@@ -42,10 +44,12 @@ export function DateTimeField({
   icon: Glyph = CalendarBlank,
   label: fieldLabel,
   className,
+  dateOnly: dateOnlyOverride,
+  allowAllDay = false,
 }: {
-  /** As stored: SQLite's naive UTC, or an ISO instant. `null` is unset. */
+  /** As stored: a date-only day, SQLite's naive UTC, or an ISO instant. */
   value: string | null;
-  /** A full ISO 8601 instant (`check_iso8601`'s contract), `null` when cleared. */
+  /** An ISO date or instant (`check_iso8601`'s contract), null when cleared. */
   onCommit: (iso: string | null) => void;
   defaultTime?: "start" | "end";
   placeholder?: string;
@@ -57,15 +61,21 @@ export function DateTimeField({
   /** What the date is ("Due date"), for the trigger's tooltip and name. */
   label?: string;
   className?: string;
+  /** Preserve a date-only ISO value and omit the time control. */
+  dateOnly?: boolean;
+  /** Offer date-only values alongside explicit times, as proposal cards do. */
+  allowAllDay?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const dateOnly = dateOnlyOverride ?? (value != null && /^\d{4}-\d\d-\d\d$/.test(value));
 
   const ms = sqliteUtcToMs(value);
-  const current = ms == null ? null : new Date(ms);
+  const parts = dateOnly && value ? /^(\d{4})-(\d\d)-(\d\d)$/.exec(value) : null;
+  const current = parts ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])) : ms == null ? null : new Date(ms);
 
   // A `Date` built from local parts is the instant meant; `toISOString` is the
   // only place a zone is applied. Never round-trip via `toISOString().slice()`.
-  const commit = (d: Date) => onCommit(d.toISOString());
+  const commit = (d: Date) => onCommit(dateOnly ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` : d.toISOString());
 
   const pickDay = (day: Date | undefined) => {
     if (!day) return;
@@ -92,7 +102,7 @@ export function DateTimeField({
           type="button"
           title={fieldLabel}
           aria-label={
-            fieldLabel ? `${fieldLabel}: ${current ? label(current) : "not set"}` : undefined
+            fieldLabel ? `${fieldLabel}: ${current ? label(current, dateOnly) : "not set"}` : undefined
           }
           className={cn(
             variant === "pill"
@@ -111,7 +121,7 @@ export function DateTimeField({
           )}
         >
           <Glyph size={13} className="shrink-0 text-muted-foreground" />
-          <span className="truncate">{current ? label(current) : placeholder}</span>
+          <span className="truncate">{current ? label(current, dateOnly) : placeholder}</span>
         </button>
       </PopoverTrigger>
 
@@ -130,7 +140,16 @@ export function DateTimeField({
           </Suspense>
         )}
         <div className="flex items-center gap-2 border-t border-border-subtle px-2 py-1.5">
-          <span className="text-[11px] text-muted-foreground">Time</span>
+          {allowAllDay && <label className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground"><Checkbox aria-label="All day" checked={dateOnly} onCheckedChange={(checked) => {
+            const next = new Date(current ?? new Date());
+            if (checked) onCommit(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`);
+            else {
+              const { h, m } = DEFAULT_TIME[defaultTime];
+              next.setHours(h, m, 0, 0);
+              onCommit(next.toISOString());
+            }
+          }} />All day</label>}
+          {!dateOnly && <><span className="text-[11px] text-muted-foreground">Time</span>
           <input
             type="time"
             value={current ? clockValue(current) : ""}
@@ -140,6 +159,7 @@ export function DateTimeField({
               "transition-colors focus:border-brand/40 focus:bg-card",
             )}
           />
+          </>}
           <span className="flex-1" />
           {current && (
             <button

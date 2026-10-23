@@ -27,6 +27,7 @@ Read this before any UI work.
 | Identity icons, shared picker and colour palette | `app/src/components/ui/icon/`, `app/src/lib/ui/iconPreferences.ts` |
 | A titled block that folds, its state kept by the caller | `app/src/components/ui/CollapsibleSection.tsx` |
 | Study widgets in markdown replies | `app/src/components/markdown/openui/components/` |
+| Proposal cards, typed editors and result links | `app/src/components/markdown/openui/proposals/` |
 
 ## Study widgets use the reply's primitives and semantic tokens
 
@@ -44,6 +45,30 @@ contract are in [harness.md](./harness.md#openui-fences-draw-interactive-study-w
 before a letter, plus newline escapes inside dollar-delimited maths. It cannot
 recover a lost backslash or distinguish an intended line break inside maths;
 the agent must still double TeX backslashes in strings.
+
+## Proposal cards show a decision before a write
+
+Each proposal or job has its own OpenUI fence. The same rounded frame holds
+editable creation rows, before → after changes, deletions and confirmed
+results. Five rows fit a page; paging retains edits and inclusion ticks.
+Subtasks group beneath their existing parent's live title, status and due
+date. A single small proposal starts as one line; its title opens the editor.
+Project creation edits the project's name in the heading.
+
+`DateTimeField` preserves date-only values as local calendar days, without
+inventing a clock time. Proposal date pickers offer All day; turning it off
+chooses an explicit time. Status names and column choices come from the real
+board, including custom done columns. A stale change starts excluded and has
+a warning tooltip with its live values; explicitly ticking it uses those
+values as the new guarded baseline. Reverting every field removes that row
+from the changes to apply.
+
+Create, Apply, Discard and Undo show errors in the card. Confirmed results
+link to the actual items and deletion results have no Open action. A valid
+amendment collapses its predecessor to Updated below and dots the changed
+fields against the student's saved card. Decided cards keep their state
+through reloads and multiple views; their database and send contracts are in
+[harness.md](./harness.md#proposal-context-is-read-at-dispatch-and-confirmation-lives-in-rust).
 
 ## One colour, two fonts, and a floating card
 

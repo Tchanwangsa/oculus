@@ -25,7 +25,7 @@ export function EventLink({
   project,
   onPick,
 }: {
-  project: DbProject;
+  project: Pick<DbProject, "event_id" | "subject_id">;
   /** A `CalEvent.id`, or `null` to unpin. */
   onPick: (eventId: string | null) => void;
 }) {
@@ -144,7 +144,7 @@ function EventPicker({
   events,
   onPick,
 }: {
-  project: DbProject;
+  project: Pick<DbProject, "event_id" | "subject_id">;
   /** `null` while loading. */
   events: CalEvent[] | null;
   onPick: (eventId: string) => void;

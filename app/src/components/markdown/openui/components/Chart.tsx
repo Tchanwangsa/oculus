@@ -33,7 +33,7 @@ export const Chart = defineComponent({
   description:
     "A line (default) or bar chart of {x, y} points, usually computed from sliders with @Each(@Range(...), \"t\", {x: t, y: ...}).",
   props: z.object({
-    points: z.array(z.object({ x: z.number(), y: z.number().nullable() })),
+    points: z.array(z.object({ x: z.number(), y: z.number().nullish() })),
     xLabel: z.string().optional(),
     yLabel: z.string().optional(),
     kind: z.enum(["line", "bar"]).optional(),

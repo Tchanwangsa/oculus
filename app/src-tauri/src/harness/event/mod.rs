@@ -182,6 +182,10 @@ pub enum HarnessEvent {
     TurnAnchor {
         anchor: String,
     },
+    /// A committed proposal snapshot, shared by every view of its thread.
+    Proposal {
+        proposal: crate::db::proposals::Proposal,
+    },
     /// Rows from `from_item_id` on are gone: an edited question rewound the thread.
     Rewound {
         from_item_id: i64,

@@ -20,6 +20,7 @@ use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 use tokio::runtime::Runtime;
 
+mod agent_guard;
 mod args;
 mod commands;
 mod output;
@@ -34,6 +35,17 @@ fn main() {
     // No credential goes through keyd until it serves the profile's university.
     keyd_core::client::bound::bind(app_lib::sources::institution::bound);
     let cli = Cli::parse();
+    if let Err(e) = agent_guard::check(
+        cli.command.as_ref(),
+        std::env::var_os("OCULUS_AGENT").is_some(),
+    ) {
+        if cli.json {
+            eprintln!("{}", serde_json::json!({"error": e}));
+        } else {
+            eprintln!("{e}");
+        }
+        std::process::exit(1);
+    }
     let ctx = Ctx::new(cli.json);
 
     let result = match cli.command {

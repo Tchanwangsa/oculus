@@ -164,6 +164,7 @@ pub(crate) async fn check_start(
 pub(crate) fn spawn_job(
     tag: &'static str,
     job: crate::harness::jobs::Job,
+    on_error: impl FnOnce(String) + Send + 'static,
     body: impl FnOnce(&tokio::runtime::Runtime, &sqlx::SqlitePool, Vec<crate::harness::jobs::JobSelection>)
         + Send
         + 'static,
@@ -171,11 +172,11 @@ pub(crate) fn spawn_job(
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Runtime::new() {
             Ok(rt) => rt,
-            Err(e) => return elog!("[oculus] {tag}: {e}"),
+            Err(e) => return on_error(format!("{tag}: {e}")),
         };
         let pool = match rt.block_on(crate::db::store::open_pool()) {
             Ok(p) => p,
-            Err(e) => return elog!("[oculus] {tag}: {e}"),
+            Err(e) => return on_error(format!("{tag}: {e}")),
         };
         let chain = rt.block_on(crate::harness::jobs::chain(&pool, job));
         body(&rt, &pool, chain);

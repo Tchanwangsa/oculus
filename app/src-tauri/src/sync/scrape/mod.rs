@@ -30,6 +30,23 @@ impl Default for ScrapeCancel {
     }
 }
 
+static SCRAPING: AtomicBool = AtomicBool::new(false);
+
+struct ScrapeClaim;
+impl ScrapeClaim {
+    fn take() -> Result<Self, String> {
+        SCRAPING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map(|_| Self)
+            .map_err(|_| "A sync is already running".into())
+    }
+}
+impl Drop for ScrapeClaim {
+    fn drop(&mut self) {
+        SCRAPING.store(false, Ordering::SeqCst);
+    }
+}
+
 #[tauri::command]
 pub fn cancel_scrape(cancel: tauri::State<ScrapeCancel>) -> Result<(), String> {
     cancel.0.store(true, Ordering::SeqCst);
@@ -44,6 +61,7 @@ pub async fn scrape_content(
     options: Option<SyncOptions>,
     cancel: tauri::State<'_, ScrapeCancel>,
 ) -> Result<(), String> {
+    let claim = ScrapeClaim::take()?;
     if subjects.is_empty() {
         return Err("No subjects selected.".to_string());
     }
@@ -70,6 +88,7 @@ pub async fn scrape_content(
 
     // Returns immediately; the frontend follows the events.
     std::thread::spawn(move || {
+        let _claim = claim;
         let reporter = AppReporter {
             app: app.clone(),
             cancel: Arc::clone(&flag),
@@ -199,4 +218,81 @@ pub fn parse_skip(relative_path: String, subject_id: i64, skip: bool) -> Result<
         crate::parse::Skips::shared().clear(&key);
     }
     Ok(())
+}
+
+/// Await the same native work for a confirmed job card, so its durable result
+/// reflects completion rather than the point at which a worker was spawned.
+pub(crate) async fn confirmed(
+    app: AppHandle,
+    targets: Vec<Subject>,
+    lectures: bool,
+) -> Result<(), String> {
+    let _claim = ScrapeClaim::take()?;
+    if lectures {
+        for target in targets {
+            use tauri::Manager;
+            let lectures = crate::lectures::commands::echo360_sync_lectures(
+                app.state::<crate::lectures::Echo360Cache>(),
+                target.id,
+            )
+            .await?;
+            let pool = crate::db::store::open_pool().await?;
+            crate::db::store::upsert_lectures(&pool, target.id, &lectures).await?;
+            app.emit("lectures-changed", ()).ok();
+        }
+        return Ok(());
+    }
+    use tauri::Manager;
+    let flag = Arc::clone(&app.state::<ScrapeCancel>().0);
+    flag.store(false, Ordering::SeqCst);
+    let pool = crate::db::store::open_pool().await?;
+    let codes: Vec<String> = targets.iter().map(|s| s.code.clone()).collect();
+    let run_id = crate::db::store::start_run(&pool, &codes).await?;
+    app.emit("scrape-started",serde_json::json!({"runId":run_id,"subjects":targets.iter().map(|s|serde_json::json!({"id":s.id,"code":s.code})).collect::<Vec<_>>()})).ok();
+    let completion = app.clone();
+    let outcome = crate::runtime::blocking::run(move || {
+        let reporter = AppReporter {
+            app: app.clone(),
+            cancel: flag.clone(),
+        };
+        let engine = Engine::new(&crate::library::paths::data_dir(), Box::new(reporter));
+        engine.canvas.check_keyd().map_err(|e| e.to_string())?;
+        let count = engine.scrape(&targets);
+        let cancelled = flag.load(Ordering::SeqCst);
+        app.emit(
+            "scrape-complete",
+            serde_json::json!({"count":count,"cancelled":cancelled}),
+        )
+        .ok();
+        if cancelled {
+            return Err("Sync cancelled".into());
+        }
+        if let Some(error) = engine.canvas.expired() {
+            return Err(error.to_string());
+        }
+        if count != targets.len() {
+            return Err(format!("Synced {count} of {} subjects", targets.len()));
+        }
+        Ok(())
+    })
+    .await;
+    if let Err(error) = &outcome {
+        completion.emit("scrape-error", error).ok();
+        crate::db::store::finish_run(&pool, run_id, "failed", 0, Some(error)).await?;
+    } else {
+        crate::db::store::finish_run(&pool, run_id, "completed", codes.len(), None).await?;
+    }
+    outcome
+}
+
+#[cfg(test)]
+mod claim_tests {
+    use super::*;
+    #[test]
+    fn one_sync_owns_the_cancel_flag_until_it_finishes() {
+        let first = ScrapeClaim::take().unwrap();
+        assert!(ScrapeClaim::take().is_err());
+        drop(first);
+        assert!(ScrapeClaim::take().is_ok());
+    }
 }

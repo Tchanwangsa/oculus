@@ -54,7 +54,7 @@ export const Value = defineComponent({
   description: "A computed number shown large, e.g. Value(\"Balance\", $p * @Pow(1 + $r / 100, $n), \"$\", 2).",
   props: z.object({
     label: z.string(),
-    value: z.number().nullable(),
+    value: z.number().nullish(),
     unit: z.string().optional(),
     decimals: z.number().optional(),
   }),

@@ -3,6 +3,7 @@ import type { Provider } from "./providers";
 import type { BridgeHealth, QueuedMessage } from "./types";
 import type { StudioSend } from "@/lib/studio/videos";
 import { openNotebookContext } from "@/lib/canvas/openNotebooks";
+import { useProposalStore } from "@/stores/chat/proposalStore";
 
 export interface SendOptions {
   model?: string | null;
@@ -19,6 +20,25 @@ export interface SendOptions {
   studio?: StudioSend;
 }
 
+type MessagingInvoke = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
+
+/** Keep prompt dispatch behind card saves for every entry point. Explicit
+ * dependencies let this ordering be checked without mocking global IPC. */
+export function createHarnessMessaging(invokeCommand: MessagingInvoke, flushThread: (thread: number) => Promise<void>) {
+  return {
+    send: async (threadId: number | null, provider: Provider, text: string, options: SendOptions): Promise<number> => {
+      if (threadId != null) await flushThread(threadId);
+      return invokeCommand<number>("harness_send", { threadId, provider, text, options });
+    },
+    editResend: async (threadId: number, itemId: number, text: string, options: SendOptions): Promise<void> => {
+      await flushThread(threadId);
+      return invokeCommand("harness_edit_resend", { threadId, itemId, text, options });
+    },
+  };
+}
+
+const messaging = createHarnessMessaging(invoke, (thread) => useProposalStore.getState().flushThread(thread));
+
 export function harnessSend(
   threadId: number | null,
   provider: Provider,
@@ -27,19 +47,12 @@ export function harnessSend(
 ): Promise<number> {
   const notebooks = openNotebookContext();
   const context = [options.context, notebooks].filter(Boolean).join("\n\n") || null;
-  return invoke<number>("harness_send", { threadId, provider, text, options: notebooks ? { ...options, context } : options });
+  return messaging.send(threadId, provider, text, notebooks ? { ...options, context } : options);
 }
 
 /** Rewind to a question and send new text in its place. See docs/harness.md
  *  "Going back" for when the agent's own context cannot follow. */
-export function harnessEditResend(
-  threadId: number,
-  itemId: number,
-  text: string,
-  options: SendOptions,
-): Promise<void> {
-  return invoke("harness_edit_resend", { threadId, itemId, text, options });
-}
+export const harnessEditResend = messaging.editResend;
 
 /** `harnessEditResend` without the send: resolves to the question's text. */
 export function harnessRewind(threadId: number, itemId: number): Promise<string> {

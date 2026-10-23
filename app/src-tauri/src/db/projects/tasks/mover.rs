@@ -56,12 +56,24 @@ pub async fn move_task(
     below: Option<i64>,
 ) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let existing = task_on(&mut tx, id)
+    move_task_on(&mut tx, id, column_id, above, below).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub async fn move_task_on(
+    conn: &mut SqliteConnection,
+    id: i64,
+    column_id: &str,
+    above: Option<i64>,
+    below: Option<i64>,
+) -> Result<(), String> {
+    let existing = task_on(conn, id)
         .await?
         .ok_or_else(|| format!("task {id} does not exist"))?;
     let project = match existing.project_id {
         Some(id) => Some(
-            project_on(&mut tx, id)
+            project_on(conn, id)
                 .await?
                 .ok_or_else(|| format!("project {id} does not exist"))?,
         ),
@@ -70,7 +82,7 @@ pub async fn move_task(
     let done = require_column(project.as_ref(), column_id)?.kind == "done";
 
     for neighbour in [above, below].into_iter().flatten() {
-        let row = task_on(&mut tx, neighbour)
+        let row = task_on(conn, neighbour)
             .await?
             .ok_or_else(|| format!("task {neighbour} does not exist"))?;
         if row.project_id != existing.project_id {
@@ -86,10 +98,10 @@ pub async fn move_task(
         }
     }
 
-    let mut position = midpoint(&mut tx, above, below).await?;
+    let mut position = midpoint(conn, above, below).await?;
     if position.is_none() {
-        renumber_column(&mut tx, existing.project_id, column_id).await?;
-        position = midpoint(&mut tx, above, below).await?;
+        renumber_column(conn, existing.project_id, column_id).await?;
+        position = midpoint(conn, above, below).await?;
     }
     let position = position.ok_or("could not find a position for the task")?;
 
@@ -105,12 +117,12 @@ pub async fn move_task(
     .bind(position)
     .bind(i64::from(done))
     .bind(id)
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
 
-    touch_project(&mut tx, existing.project_id).await?;
-    tx.commit().await.map_err(|e| e.to_string())
+    touch_project(conn, existing.project_id).await?;
+    Ok(())
 }
 
 /// `None` means the neighbours are too close together to fit anything between.

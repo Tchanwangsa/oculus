@@ -5,7 +5,7 @@ or none, broken into tasks with one level of subtask. It opens on an
 **Overview**, reads its tasks as a board, table or timeline, and gives each
 task a page. `/tasks` is every task at once, including those filed under no
 project. Nothing here is scraped: every row is the student's own planning or a
-plan the chat agent wrote through the `oculus` CLI, so nothing upstream can
+plan the student accepted from a chat proposal, so nothing upstream can
 repair a bad row.
 
 ## Where
@@ -14,7 +14,8 @@ repair a bad row.
 | --- | --- |
 | Tables: `projects`, `project_tasks` (27), tags + `event_id` (33), nullable `project_id` (37), `task_tags` + `task_tag_links` + `task_files` (47), shared tag triggers (48) | `app/src-tauri/src/db/migrations.rs`, `UNFILED_TASKS_SQL` in `app/src-tauri/src/db/projects/migration37.rs` |
 | Frontend reads and writes (direct SQL) | `app/src/lib/planning/projects/` (`reads.ts`, `taskWrites.ts`, `projectWrites.ts`, `columns.ts`, `rows.ts`, `events.ts`, `tags.ts`, `taskFiles.ts`, `touch.ts`) |
-| Headless writes (CLI, and so the agent) | `app/src-tauri/src/db/projects/` (`tasks/`, `tags.rs`, `tasks/links.rs`, `project_writes.rs`, `columns.rs`, `rows.rs`) |
+| Shared Rust writes (CLI and accepted chat proposals) | `app/src-tauri/src/db/projects/` (`tasks/`, `tags.rs`, `tasks/links.rs`, `project_writes.rs`, `columns.rs`, `rows.rs`) |
+| Proposal transactions, live comparisons and guarded Undo | `app/src-tauri/src/db/proposals/`, `app/src-tauri/src/proposals/` |
 | `oculus project` / `oculus task` / `oculus tag` | `app/src-tauri/src/bin/oculus/commands/planning/`, `app/src-tauri/src/bin/oculus/args/planning.rs` |
 | Linkable calendar ids for the CLI | `app/src-tauri/src/db/projects/events.rs` (`project events` and pin validation; mirrors the non-task layers in `loadCalendar`) |
 | Writes and the task detail's open project | `app/src/stores/planning/projectsStore.ts` |
@@ -109,10 +110,23 @@ inline in the migration so its test runs the exact string the app runs.
 
 ## Two writers enforce the same rules
 
-The frontend writes over `getDb()` in `app/src/lib/planning/projects/` (no Tauri
-command — nothing here needs the network or a subprocess); headless,
+The board writes over `getDb()` in `app/src/lib/planning/projects/`; headless,
 `app/src-tauri/src/db/projects/` writes the same rows with the same rules. Change
 a table and both move with the migration. Neither creates the database.
+
+Rust writers expose connection-taking `_on` variants. CLI commands wrap one
+call in a fresh transaction; `proposal_apply` owns one transaction for the
+whole card, including its durable status and `agent_changes` journal. A new
+project and all its tasks therefore commit together. The apply path validates
+the payload again and compares each changed field with the agent's `from`
+value before writing.
+
+Undo checks every affected row and relation against the journal's `after`
+snapshot before restoring any of them. Task snapshots include subtasks and
+tag/file links; project and tag snapshots also guard dependent memberships.
+An external edit, added subtask or new use of an implicitly created tag refuses
+Undo instead of discarding the student's work. Journal rows survive chat
+rewind and deletion; those actions remove only the proposal cards.
 
 - **`moveTask` / `move_task` is the only writer of `column_id`, `position` and
   `done_at`** — one fact in three columns. `done_at` is derived from the
@@ -139,7 +153,8 @@ components showing project data reload on it. The store's write wrappers
 deliberately do not re-read: a second refresh path doubled a drag's reads and
 could land out of order.
 
-The agent writes from a subprocess nothing in the webview notices, so
+Accepted proposals broadcast their committed row over the harness bus and
+refresh the same planning views. For CLI tool writes,
 `app/src/hooks/backend/useBackendEvents.ts` watches the harness stream and fires the
 same event when a tool call whose **command text** contains `oculus project` /
 `oculus task` finishes. It matches text rather than the tool's kind because
@@ -195,7 +210,7 @@ whose parent is missing rather than dropping it.
   makes unchanged text write nothing and empty text write `null`. The page keys the body by task (`body-<id>`, the
   related files being `files-<id>`), so switching tasks saves to the task left;
   the two keys differ because siblings sharing one are not unmounted, and each
-  task left would keep its body on the page. A write from elsewhere (the agent through the CLI)
+  task left would keep its body on the page. A write from elsewhere (an accepted chat proposal)
   replaces the text while the field is at rest; while it is edited, the
   user's text stands.
 - **Dates go through `DateTimeField`**, never a native input

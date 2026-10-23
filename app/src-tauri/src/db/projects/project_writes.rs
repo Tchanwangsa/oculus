@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use super::columns::default_columns;
 use super::rows::normalise_tags;
@@ -19,12 +19,21 @@ pub struct NewProject {
 /// Create a project at the end of the list with the default board.
 pub async fn create_project(pool: &SqlitePool, input: &NewProject) -> Result<i64, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let result = create_project_on(&mut tx, input).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+pub async fn create_project_on(
+    conn: &mut SqliteConnection,
+    input: &NewProject,
+) -> Result<i64, String> {
     if let Some(id) = &input.event_id {
-        super::events::require_event(&mut tx, id).await?;
+        super::events::require_event(conn, id).await?;
     }
     let next: f64 =
         sqlx::query_scalar("SELECT CAST(COALESCE(MAX(position), -1) + 1 AS REAL) FROM projects")
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
     let columns = serde_json::to_string(&default_columns()).map_err(|e| e.to_string())?;
@@ -45,11 +54,10 @@ pub async fn create_project(pool: &SqlitePool, input: &NewProject) -> Result<i64
     .bind(next)
     .bind(&input.source)
     .bind(&input.event_id)
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?
     .last_insert_rowid();
-    tx.commit().await.map_err(|e| e.to_string())?;
     Ok(id)
 }
 
@@ -74,8 +82,18 @@ pub async fn update_project(
     patch: &ProjectPatch,
 ) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    update_project_on(&mut tx, id, patch).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub async fn update_project_on(
+    conn: &mut SqliteConnection,
+    id: i64,
+    patch: &ProjectPatch,
+) -> Result<(), String> {
     if let Some(Some(id)) = &patch.event_id {
-        super::events::require_event(&mut tx, id).await?;
+        super::events::require_event(conn, id).await?;
     }
     // Placeholders numbered as collected: sqlx refuses a statement whose
     // highest parameter is lower than the number of binds.
@@ -144,12 +162,12 @@ pub async fn update_project(
     }
     let affected = q
         .bind(id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| e.to_string())?
         .rows_affected();
     if affected == 0 {
         return Err(format!("project {id} does not exist"));
     }
-    tx.commit().await.map_err(|e| e.to_string())
+    Ok(())
 }

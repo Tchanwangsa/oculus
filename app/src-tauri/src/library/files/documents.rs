@@ -107,22 +107,57 @@ fn same_entry(current: &Path, wanted: &Path) -> bool {
 /// Create an empty note under a subject.
 #[tauri::command]
 pub fn create_document(subject_code: String, title: String) -> Result<ImportedFile, String> {
-    let data_dir = crate::library::paths::data_dir();
-    let dir = documents_dir(&data_dir, &subject_code);
-    // Never "ours": an existing empty note is still another note.
-    let name = step_aside(&dir, &document_name(&title), |_| false);
-    let (rel, size, _) = crate::library::paths::write_course_bytes(
-        &data_dir,
+    create_document_body_in(
+        &crate::library::paths::data_dir(),
         &subject_code,
-        &format!("{}/{name}", crate::library::paths::DOCUMENTS_DIR),
+        &title,
         b"",
-    )?;
-    Ok(document_file(rel, size))
+    )
+}
+
+/// Reserve a distinct note and write its complete body. `create_new` is the
+/// final authority, so two views choosing the same title never overwrite one
+/// another or an existing document.
+pub(crate) fn create_document_body_in(
+    data_dir: &Path,
+    code: &str,
+    title: &str,
+    body: &[u8],
+) -> Result<ImportedFile, String> {
+    use std::io::Write;
+    let dir = documents_dir(data_dir, code);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    loop {
+        let name = step_aside(&dir, &document_name(title), |_| false);
+        let path = dir.join(&name);
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        };
+        if let Err(e) = file.write_all(body).and_then(|_| file.sync_all()) {
+            drop(file);
+            let _ = std::fs::remove_file(&path);
+            return Err(e.to_string());
+        }
+        return Ok(document_file(
+            format!(
+                "courses/{}/{}/{name}",
+                crate::library::paths::safe_dir(code),
+                crate::library::paths::DOCUMENTS_DIR
+            ),
+            body.len() as u64,
+        ));
+    }
 }
 
 /// The hidden sibling a note's text is staged in. It ends in `.tmp`, never
 /// `.md`, so `is_document_rel` rejects a leftover and it never becomes a row.
-pub(super) fn note_temp_path(note: &Path) -> Result<std::path::PathBuf, String> {
+pub(crate) fn note_temp_path(note: &Path) -> Result<std::path::PathBuf, String> {
     let dir = note
         .parent()
         .ok_or_else(|| format!("{} has no folder", note.display()))?;

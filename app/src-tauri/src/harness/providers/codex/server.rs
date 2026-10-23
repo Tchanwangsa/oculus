@@ -211,6 +211,7 @@ impl CodexServer {
         let mut config = json!({
             // A native question has nowhere to go and would hang the turn.
             "features.default_mode_request_user_input": false,
+            "shell_environment_policy.set": {"OCULUS_AGENT":"1"},
             // `thread/start` takes a mode, not a policy, so the writable files
             // go in as config here and as `sandboxPolicy` on `turn/start`.
             "sandbox_workspace_write.writable_roots": opts.writable_roots,

@@ -1,11 +1,11 @@
 ---
 name: oculus-ui
-description: Draws interactive study widgets (flashcards, quizzes, step-by-step worked problems, formula explorers with sliders and charts, links to library pages) in a chat reply by writing a fenced `openui` code block. Use when the student asks to be drilled, quizzed, walked through a problem, or to explore how a formula behaves.
+description: Draws interactive study widgets and editable proposal cards in an Oculus chat using fenced OpenUI programs. Use for flashcards, quizzes, worked problems, formula explorers, creating or changing tasks, projects, tags, calendar events or notes, and confirming sync, parse, transcription, lecture or download jobs.
 ---
 
-# Study widgets
+# Chat widgets and proposal cards
 
-Oculus draws a fenced code block tagged `openui` in your reply as a live study widget. Write it when doing beats reading: flashcards to drill, a quiz to check understanding, a worked problem to try step by step, or a formula to explore with sliders. Everything else in the reply stays ordinary markdown. One widget block per reply, after a sentence or two of prose; never wrap the block in other text or explain its syntax. If the block does not parse, the student sees the raw code, so follow the grammar below exactly.
+Oculus draws a fenced code block tagged `openui` in your reply as a live study widget or a proposal the student reviews and confirms. Use study widgets when doing beats reading: flashcards to drill, a quiz to check understanding, a worked problem to try step by step, or a formula to explore with sliders. Always use a proposal before creating, changing or deleting the student's tasks, projects, tags, calendar events or notes, or starting a long or billed job. Nothing is written until the student clicks. Everything else in the reply stays ordinary markdown. Keep surrounding prose to a sentence or two. Each proposal or job needs its own fence; study widgets may share a Stack. If a block does not parse, the student sees the raw code, so follow the grammar below exactly.
 
 The block holds a program in OpenUI Lang:
 
@@ -32,11 +32,11 @@ The block holds a program in OpenUI Lang:
 ## Component Signatures
 
 Arguments marked with ? are optional. Sub-components can be inline or referenced; prefer references for better streaming.
-Props typed `ActionExpression` accept one @step, or Action([@steps...]) for several. See the Action section for available steps (@ToAssistant, @Set, @Reset).
+Props typed `ActionExpression` accept one @step, or Action([@steps...]) for several. See the Action section for available steps (@ToAssistant, @OpenUrl, @Set, @Reset).
 Props marked `$binding<type>` accept a `$variable` reference for two-way binding.
 
 ### Root
-Stack(items: (Flashcards | Quiz | Steps | Explorer | Text | PageRef | Ask)[]) — The root: study widgets top to bottom. Ask and PageRef items line up in a row.
+Stack(items: (Flashcards | Quiz | Steps | Explorer | Text | PageRef | Ask | NewTasks | NewProject | NewEvents | NewNote | TaskChanges | ProjectChanges | EventChanges | TagChanges | DeleteTasks | DeleteEvents | Sync | Reparse | Transcribe | LectureChapters | LectureEnd | Download)[]) — The root: study widgets top to bottom. Ask and PageRef items line up in a row.
 Text(text: string, tone?: "normal" | "muted") — A short line of markdown; $…$ for maths. Strings may be built with + from $variables.
 
 ### Recall
@@ -63,6 +63,41 @@ Chart(points: {x: number, y: number | null}[], xLabel?: string, yLabel?: string,
 ### Links
 PageRef(path: string, page?: number, label?: string) — A link to a page of a library file, e.g. PageRef("courses/MAST10006/Lecture 4.pdf", 12, "Chain rule"); same paths you cite in prose.
 Ask(label: string, action?: ActionExpression) — A button that sends a follow-up message as the student, e.g. Ask("Harder questions", @ToAssistant("Give me five harder Big-O questions")). Without an action it sends its label.
+
+### Create
+NewTasks(project: number | null, items: (Task | Under)[], amends?: string) — Propose creating tasks in an existing project, or null for unfiled. The student edits and confirms.
+NewProject(name: string, subject: string | null, tasks: Task[], due?: string, brief?: string, starts?: string, tags?: string[], event?: string, amends?: string) — Propose a new project and its tasks together. Nothing is written until Create.
+Task(title: string, due?: string, estimate?: number, column?: string, subtasks?: Task[], tags?: string[], body?: string, starts?: string, files?: string[]) — A new task; subtasks may nest only one level. Used only inside a creation card.
+Under(task: number, subtasks: Task[]) — New subtasks grouped under an existing task; only in NewTasks.
+NewEvents(events: Event[], amends?: string) — Propose the student's own calendar events, confirmed together.
+Event(title: string, start: string, end?: string, kind?: "note" | "due" | "class", subject?: string, notes?: string) — A proposed calendar event. A study session uses kind class and an end. Other kinds cannot have an end.
+NewNote(subject: string, title: string, body: string, amends?: string) — Propose a note in a subject, with its complete markdown body.
+- Use one proposal per openui fence. Nothing is written until the student clicks Create.
+- Look up existing ids in the CLI; never guess. Optional arguments may be null to skip a middle argument.
+- amends is the app's pending card id from Cards in this thread, always the last argument.
+
+### Change
+Change(id: number | string, from: Record<string, any>, to: Record<string, any>) — An existing id, the exact fields read from it, and replacement values for those same fields. Null clears a field.
+TaskChanges(changes: Change[], amends?: string) — Propose task field changes, moves or refile. Each Change carries matching from and to keys.
+ProjectChanges(changes: Change[], amends?: string) — Propose changes to projects, including archiving.
+EventChanges(changes: Change[], amends?: string) — Propose changes only to the student's local_<id> events; Canvas events are read-only.
+TagChanges(changes: (Change | NewTag | DeleteTag)[], amends?: string) — Propose shared tag changes, creations or removals.
+NewTag(name: string, color: "slate" | "indigo" | "green" | "amber" | "rose" | "purple" | "teal" | "orange") — A proposed shared tag and its palette colour key.
+DeleteTag(tag: number) — Remove a shared tag by id, including its links on tasks and projects.
+DeleteTasks(tasks: number[], amends?: string) — Propose deleting tasks and their subtasks; Undo restores them if nothing has changed.
+DeleteEvents(events: string[], amends?: string) — Propose deleting only the student's local_<id> calendar events.
+- Change(id, from, to) uses the same keys in from and to. Null clears a field.
+- Task keys: title, body, due, starts, estimate, tags, files, column, project. Project keys: name, subject, due, starts, brief, tags, event, status. Event keys: title, start, end, kind, subject, notes. Tag keys: name, color.
+- Only local_<id> events may be changed/deleted; Canvas events are read-only.
+
+### Jobs
+Sync(subjects: string[], lectures?: boolean) — Ask before syncing subjects and optionally lectures.
+Reparse(files: string[]) — Ask before reparsing and embedding the listed PDF library paths.
+Transcribe(file: string) — Ask before transcribing a media file using the configured engine.
+LectureChapters(lecture: string) — Ask before finding chapters using the configured job model.
+LectureEnd(lecture: string) — Ask before finding a lecture's content end using the configured model.
+Download(item: string) — Ask before downloading aligner, voices starter pack or a voice id.
+- Ask with a job card before starting long, billed or downloaded work. One job per fence. No Undo.
 
 ## Built-in Functions
 
@@ -96,24 +131,37 @@ IMPORTANT @Each rule: The loop variable (e.g. "item") is ONLY available inside t
 CORRECT: `list = @Each(rows, "t", Comp(t.name))`
 WRONG: `item = Comp(t.name)` then `list = @Each(rows, "t", item)`, because t is undefined in item.
 
-## Ask actions
+## Action — Button Behavior
 
-`Ask("Quiz me on these")` sends its label as the student's next message.
-`Ask("Harder questions", @ToAssistant("Give me five harder questions"))`
-sends the given message. It appears only in a conversation that is idle.
-Use at most two, phrased as the student.
+An action wires a button click to operations. Pass one @-prefixed step bare, e.g. Button("Ask", @ToAssistant("Tell me more")). Put several steps in Action([...]), e.g. Button("Read", Action([@OpenUrl("https://example.com"), @ToAssistant("Summarize this page")])). Steps execute in order.
+Buttons without an action automatically send their label to the assistant (equivalent to @ToAssistant(label)).
 
-`Action([@Set($rate, 5), @ToAssistant("Explain this rate")])` runs steps in
-order. `@Set($variable, value)` changes a slider's value and
-`@Reset($variable)` restores its declared default. These and `@ToAssistant`
-are the available actions. Use `PageRef` for library links.
+Available steps:
+- @ToAssistant(message: string, context?: any) — Send a message to the assistant (for conversational buttons like "Tell me more", "Explain this"). The optional context is any value (object, array, string, number) passed to the assistant as hidden data, e.g. @ToAssistant("Show details", {orderId: 42})
+- @OpenUrl(url: string) — Navigate to a URL
+- @Set(variable: $variable, value: any) — Set a $variable to a specific value
+- @Reset(variable: $variable) — Reset $variables to their declared defaults; pass several to reset each (e.g. @Reset($title, $priority) restores $title="" and $priority="medium")
 
-## Complete programs appear after streaming pauses
+Example — simple nav:
+```
+viewBtn = Button("View", @OpenUrl("https://example.com"))
+```
 
-Put `root = Stack(...)` first, then $variable defaults, then the widgets and
-data. Forward references are allowed. Oculus waits 150 ms after the source
-stops changing, and draws only complete, valid programs. Incomplete or invalid
-programs stay visible as code. Progress survives reopening the conversation.
+- An action can be assigned to a variable or inlined: Button("Go", onSubmit) and Button("Go", Action([...])) both work
+
+## Hoisting & Streaming (CRITICAL)
+
+openui-lang supports hoisting: a reference can be used BEFORE it is defined. The parser resolves all references after the full input is parsed.
+
+During streaming, the output is re-parsed on every chunk. Undefined references are temporarily unresolved and appear once their definitions stream in. This creates a progressive top-down reveal — structure first, then data fills in.
+
+**Recommended statement order for optimal streaming:**
+1. `root = Stack(...)` — UI shell appears immediately
+2. $variable declarations — state ready for bindings
+3. Component definitions — fill in with data already available
+4. Data values — leaf content last
+
+Always write the root = Stack(...) statement first so the UI shell appears immediately, even before child data has streamed in.
 
 ## Examples
 
@@ -153,12 +201,40 @@ ex = Explorer("Kinetic energy", [Text("$E_k = \\tfrac{1}{2} m v^2$"), Slider($m,
 curve = @Each(@Range(0, 20), "s", {x: s, y: 0.5 * $m * @Pow(s, 2)})
 ```
 
-## Before sending
+Tasks to review and create:
 
-- Every named reference is defined and reachable from `root`.
-- Every `$binding` has a literal numeric default.
-- Each quiz question has exactly one correct option.
-- Strings are one line, with `\n` for a newline. Double every TeX backslash:
-  `"$\\frac{a}{b}$"`. Do not rely on the runtime's limited repair of JSON escapes.
-- Cite real library paths. Never invent a page or a component.
-- Keep prose outside the fence; use widgets when interaction helps the student.
+```openui
+root = Stack([NewTasks(12, [Task("Read the specification", "2026-10-27", 30), Task("Implement the parser", "2026-10-28", 120, null, [Task("Handle malformed input")])])])
+```
+
+A guarded date change:
+
+```openui
+root = Stack([TaskChanges([Change(42, {due: "2026-10-27"}, {due: "2026-10-30"})])])
+```
+
+A study session on the calendar:
+
+```openui
+root = Stack([NewEvents([Event("Past-paper practice", "2026-10-27T14:00:00+11:00", "2026-10-27T16:00:00+11:00", "class", "COMP30026")])])
+```
+
+## Important Rules
+- Choose components that best represent the content (tables for comparisons, charts for trends, forms for input, etc.)
+
+## Final Verification
+Before finishing, walk your output and verify:
+1. root = Stack(...) is the FIRST line (for optimal streaming).
+2. Every referenced name is defined. Every defined name (other than root) is reachable from root.
+3. Every $binding appears in at least one component or expression.
+
+- Start the program with `root = Stack([...])` and list every widget in it.
+- Strings are double-quoted on one line; write a newline as \n and a double quote as \". Maths goes in $…$ inside strings, e.g. "$\\frac{a}{b}$" (backslashes doubled).
+- Take facts from the student's own library when you can, and point to the page with PageRef using the same path you would cite in prose.
+- $variables are only for Explorer: declare each with a literal number default, e.g. `$rate = 5`, and bind it as a Slider's first argument.
+- Ask buttons are optional follow-ups the student may want next, phrased as the student ("Quiz me on the ones I missed"). At most two.
+- Never use a component or @function not listed here.
+- Optional arguments may be null to skip one in the middle. Project/task/tag ids are numbers, subjects are course code strings or null for personal, calendar ids are strings; only local_<id> events may be changed or deleted. Look up existing ids through the CLI, never guess.
+- Dates are ISO 8601; estimates are whole minutes. Tags are arrays of names. Task subtasks nest only one level. Event kind defaults to note; only class may have an end.
+- Change from and to must have exactly the same permitted keys. Use the values read from the CLI in from, replacements in to; null clears a field.
+- To amend a pending card, pass the app's id from Cards in this thread as the last argument. Preserve the student's edits and excluded rows; decided cards need a fresh Changes proposal on the made ids.

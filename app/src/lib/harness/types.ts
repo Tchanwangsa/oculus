@@ -1,5 +1,6 @@
 import type { Provider } from "./providers";
 import type { ToolKind } from "./meta";
+import type { Proposal } from "./proposals";
 
 /** Whether a provider's CLI is available to model pickers. */
 export type ProviderHealth = "unknown" | "installed" | "missing";
@@ -12,6 +13,7 @@ export interface RateWindow {
 
 /** `HarnessEvent` in `app/src-tauri/src/harness/event/mod.rs`, serde-tagged on `type`. */
 type HarnessEvent =
+  | { type: "proposal"; proposal: Proposal }
   | { type: "session_started"; provider_session_id: string; model: string | null; cwd: string }
   /** `at`: playhead second for a message sent from the lecture dock. */
   | { type: "user_message"; text: string; at?: number | null }

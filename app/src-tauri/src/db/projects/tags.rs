@@ -116,7 +116,7 @@ async fn tag_on(conn: &mut SqliteConnection, id: i64) -> Result<TaskTag, String>
 /// The tag with this name, made at the end of the registry if none matches
 /// ignoring case. An existing tag is returned as it is: `color` only applies to
 /// a new one, so a repeated `tag add` never recolours.
-pub(super) async fn ensure_tag_on(
+pub async fn ensure_tag_on(
     conn: &mut SqliteConnection,
     name: &str,
     color: Option<&str>,
@@ -185,10 +185,21 @@ pub async fn update_tag(
     color: Option<&str>,
 ) -> Result<TaskTag, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    tag_on(&mut tx, id).await?;
+    let result = update_tag_on(&mut tx, id, name, color).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+pub async fn update_tag_on(
+    conn: &mut SqliteConnection,
+    id: i64,
+    name: Option<&str>,
+    color: Option<&str>,
+) -> Result<TaskTag, String> {
+    tag_on(conn, id).await?;
     if let Some(name) = name {
         let name = normalise_tag_name(name)?;
-        if let Some(other) = find_tag_on(&mut tx, &name).await? {
+        if let Some(other) = find_tag_on(conn, &name).await? {
             if other.id != id {
                 return Err(format!(
                     "a tag called \"{}\" already exists (tag {})",
@@ -199,7 +210,7 @@ pub async fn update_tag(
         sqlx::query("UPDATE task_tags SET name = ?1 WHERE id = ?2")
             .bind(&name)
             .bind(id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
     }
@@ -208,12 +219,11 @@ pub async fn update_tag(
         sqlx::query("UPDATE task_tags SET color = ?1 WHERE id = ?2")
             .bind(&color)
             .bind(id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
     }
-    let tag = tag_on(&mut tx, id).await?;
-    tx.commit().await.map_err(|e| e.to_string())?;
+    let tag = tag_on(conn, id).await?;
     Ok(tag)
 }
 
@@ -221,14 +231,20 @@ pub async fn update_tag(
 /// `updated_at` moves (and their projects'), as for any other link change.
 pub async fn delete_tag(pool: &SqlitePool, id: i64) -> Result<i64, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let tag = tag_on(&mut tx, id).await?;
+    let result = delete_tag_on(&mut tx, id).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+pub async fn delete_tag_on(conn: &mut SqliteConnection, id: i64) -> Result<i64, String> {
+    let tag = tag_on(conn, id).await?;
     sqlx::query(
         "UPDATE projects SET updated_at = datetime('now') WHERE id IN
            (SELECT t.project_id FROM project_tasks t
               JOIN task_tag_links l ON l.task_id = t.id WHERE l.tag_id = ?1)",
     )
     .bind(id)
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
     sqlx::query(
@@ -236,22 +252,21 @@ pub async fn delete_tag(pool: &SqlitePool, id: i64) -> Result<i64, String> {
            (SELECT task_id FROM task_tag_links WHERE tag_id = ?1)",
     )
     .bind(id)
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
     // The foreign key would cascade these; deleting them first keeps the
     // delete correct on a connection that has foreign keys off.
     sqlx::query("DELETE FROM task_tag_links WHERE tag_id = ?1")
         .bind(id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM task_tags WHERE id = ?1")
         .bind(id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| e.to_string())?;
-    tx.commit().await.map_err(|e| e.to_string())?;
     Ok(tag.uses)
 }
 

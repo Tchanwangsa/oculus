@@ -97,7 +97,7 @@ embedded the page images.
   that spends anything.
 - **It fails loudly rather than returning nothing.** An empty index, or one
   built by a retired embedding model, exits non-zero and names
-  `oculus index`. Do not read that as "the library has no answer" — it means
+  the index. Do not read that as "the library has no answer" — it means
   try `oculus grep`, which searches the same text with no model at all.
 - `-s` takes one subject code here, not a repeated list. `--full` prints each
   hit's whole page instead of a snippet.
@@ -120,17 +120,14 @@ what retrieval can see.
 
 **The `indexed` column is how many pages are searchable.** A PDF showing none
 has never been parsed — a real state, not a bug, and not something to work
-around by reading the raw file. It is fixed by `oculus index <SUBJECT_CODE>`,
-which takes minutes per file and is the student's call, not a thing to launch
-mid-answer.
+around by reading the raw file. Propose a Reparse card with the exact file paths when the student asks to
+index them; it takes minutes per file, so the student confirms before it starts.
 
 **A video's words are in `<video>.vtt` beside it**, when there is one. A video
-without it has no transcript yet; `oculus transcribe <video>` makes one with
-the first engine, in the order the student set in Settings, that can take it:
-Groq when they saved a key, which spends their free-tier allowance; Whisper
-run locally on a model downloaded in Settings; or the Mac's on-device speech
-recognition, which takes about a minute an hour of audio. Run it only when
-asked to.
+without it has no transcript yet. When asked, propose Transcribe(file) in an
+`openui` fence; the card names the engine order from Settings and warns when
+Groq uploads audio. The student confirms before the job starts. See
+`oculus-plan` and `oculus-ui` for the card syntax.
 
 ## `oculus read` — the text of one file
 

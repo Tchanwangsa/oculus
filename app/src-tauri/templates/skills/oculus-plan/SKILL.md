@@ -1,163 +1,114 @@
 ---
 name: oculus-plan
-description: Manages projects and tasks in an Oculus course library, including Markdown descriptions, dates, calendar links, tags and related library files. Use for requests to put work on the board, break down an assignment, update project properties, attach files, move or refile tasks, or mark work done.
+description: Proposes projects, tasks, tags, calendar events and notes as editable confirmation cards in an Oculus chat. Use for planning work, breaking down an assignment, changing due dates, finishing or refiling tasks, scheduling study blocks, writing a note, or proposing sync, parse, transcription, lecture or download jobs.
 ---
 
-# Planning
+# Planning with confirmation cards
 
-`oculus project` and `oculus task` write the **same rows the app's board
-draws**, so a task added here appears there immediately. Nothing upstream has
-a copy of this — unlike a course file, a deleted task does not come back on
-the next sync.
+The student reviews a card, edits or unticks rows, then clicks Create or
+Apply. Always propose first, even when asked to "just add them". The app
+applies the selected items together and offers Undo. Do not call CLI write
+verbs: chat runs with `OCULUS_AGENT=1`, which refuses them.
 
-## The shape of a breakdown
+Read `oculus-ui` for OpenUI syntax and the exact positional signatures. One
+proposal per fence, at the root inside `Stack`. A malformed fence stays code,
+so use only documented components and functions. A line of prose around a
+card is enough; do not repeat its rows in the reply.
 
-Create the project, inspect its board, then add its tasks:
+## Look up ids and the current values
 
-```bash
-oculus project create "INFO30006 Assignment 2" -s INFO30006 --due 2026-10-03T23:59:00Z --tags "Assignment" --brief-file agents/brief.md
+- `oculus project list`, `project show ID`: project ids, fields and board
+  columns. Column ids are board-specific; never guess an older board's ids.
+- `oculus task list`, `task show ID`: task ids, fields, effective tags,
+  related library paths and subtasks. No project filter spans all tasks.
+- `oculus tag list`: numeric ids, names and palette colours.
+- `oculus calendar`, `project events`: event ids; only `local_<id>` can be
+  changed or deleted. Canvas events are read-only.
+- `oculus files CODE`: exact library paths for task attachments and jobs.
+
+Project/task/tag ids are numbers; event and lecture ids are strings. A
+subject is its code, a path starts at the library root (`courses/…`). Use
+ISO dates; a time includes its intended offset or `Z`. Estimates are whole
+minutes. Optional middle arguments use `null`, optional trailing ones can
+be omitted. Tags are names; a missing name is registered on Create.
+
+## Break an assignment into a project and tasks
+
+Use NewProject for a project and its tasks in one confirmation. Choose a
+real subject code or null for Personal; subtasks nest one level only.
+
+```openui
+root = Stack([NewProject("Assignment 2", "INFO30006", [outline, draft], "2026-10-27")])
+outline = Task("Outline the argument", "2026-10-25", 45, "todo", [Task("Read the brief"), Task("Collect sources")])
+draft = Task("Write the first draft", "2026-10-26", 90)
 ```
 
-```bash
-oculus project show 7
+For tasks on an existing project, use NewTasks(projectId, tasks). A task
+needs no project: NewTasks(null, [Task("Email the tutor")]) files it nowhere.
+Do not invent an Inbox project. Under(existingTaskId, [Task(…)]) adds
+subtasks under an existing parent; look up the parent's real id first.
+
+## Change only the fields that need changing
+
+Read the item immediately before proposing. Change(id, from, to) carries
+matching keys: `from` is exactly what the CLI returned, `to` is the desired
+value. The card flags anything that changed since, and apply refuses stale
+writes. `null` clears a field. Omitted keys stay untouched.
+
+```openui
+root = Stack([TaskChanges([Change(42, {due: "2026-10-27"}, {due: "2026-10-30"})])])
 ```
 
-```bash
-oculus task add -p 7 --batch agents/tasks.json
+Task fields: title, body, due, starts, estimate, tags, files, column, project.
+Completing a task is changing column to the board's done column. Refiling
+changes project; null unfiles. A parent takes its subtasks with it; a lone
+subtask cannot be refiled. A move goes at the end of its destination column.
+
+Project fields: name, subject, due, starts, brief, tags, event, status
+(active or archived). Archiving keeps its tasks. Event fields: title, start,
+end, kind, subject, notes. Tag fields: name, color. Unknown keys are refused.
+TagChanges also accepts NewTag(name,color) and DeleteTag(numericId).
+DeleteTasks([ids]) lists the subtasks that go too. DeleteEvents takes local
+ids only. Use deletion only when asked; finishing a task is a column change.
+
+## Put study blocks around a deadline
+
+Read the calendar before scheduling. Event kinds are note (default), due
+and class. Only class accepts an end; a study block is a class event. A
+date-only start is all day. Each event may name a subject or null.
+
+```openui
+root = Stack([NewEvents([Event("Past paper practice", "2026-10-26T14:00:00+11:00", "2026-10-26T15:30:00+11:00", "class", "INFO30006")])])
 ```
 
-`project show` is not optional. It prints each column's **id** in brackets
-after the heading, and `--column` takes that id. A new project opens with
-`backlog`, `todo`, `doing`, `done`, but an older one or a hand-made board need
-not, and an unknown column is **refused** — a task filed under a column that
-does not exist is drawn by nothing, in any view.
+NewNote(subject,title,body) writes a note only on Create. Preserve Markdown
+with `\n` in strings and double every TeX backslash. No direct course writes.
 
-## Markdown and project properties
+## Amend from the student's edits
 
-Write multiline Markdown to a UTF-8 file under `agents/`, then pass its path:
+The app appends "Cards in this thread" with pending cards and each newly
+decided state. Use those current fields, including excluded rows, rather
+than reconstructing the original proposal. To replace a pending card, pass
+its app id (for example `"812.0"`) as the final `amends` argument. The old
+card becomes Updated below; only the replacement can apply. Never invent a
+card id. A decided card cannot be amended: use its made ids in a new change
+card. Rewind removes later cards but does not undo their writes.
 
-```bash
-oculus project update 7 --brief-file agents/brief.md
-oculus task update 12 --body-file agents/task-notes.md
-```
+## Ask before a long or billed job
 
-`project create` also takes `--brief-file`; `task add` takes `--body-file`.
-Both accept `-` for stdin when the calling tool can supply it. The file's
-newlines, lists, maths and code fences are preserved. Inline `--brief` and
-`--body` suit short text; avoid literal newlines in shell arguments because
-an agent's shell permission analyser can refuse them. Do not flatten a
-formatted description into one paragraph to get around that.
+Use the job cards, one per fence:
 
-- Create with `-s CODE` for a subject, or omit it for Personal. On an existing
-  project, `project update 7 -s CODE` changes subject and `--personal` clears
-  it; its tasks stay on the project.
-- Project create/update accept `--due`, `--starts` (ISO 8601) and `--tags`.
-  Dates with a time should include the intended timezone offset or `Z`.
-- `project update 7 --status archived` archives it; `--status active` restores
-  it. Progress is calculated from tasks, never set directly.
-- `oculus project events -s CODE` lists calendar ids, including past events.
-  Omit `-s` to reach other subjects and personal events. Pass an exact id to
-  `project create ... --event ID` or `project update 7 --event ID`; `--event ""`
-  unlinks it. Tasks and hidden fallback recordings cannot be pinned.
-- An empty inline value or empty file clears About/notes on update. Omitted
-  flags leave existing fields alone. Choose inline text or file input per field.
-- Project icons and colours are app appearance preferences; board columns
-  use the project's existing configuration, as `project show` prints it.
+- Sync(subjects,lectures?): codes to sync, true for lecture lists.
+- Reparse(files): exact library paths, using Settings → Parsing and
+  Embeddings; this can take minutes or use credits.
+- Transcribe(file): a library video; the card names Settings' engine order
+  and explains when Groq uploads audio.
+- LectureChapters(lecture) / LectureEnd(lecture): real lecture ids; the card
+  names Settings' job models.
+- Download(item): "aligner", "voices" for the starter pack, or a voice id
+  from `oculus studio voices`; the card names its size.
 
-## The `--batch` contract
-
-`--batch -` reads a JSON array from stdin and writes it in **one
-transaction**. Anything past two or three tasks goes in this way; a command
-per task is what leaves half a plan on the board when one is rejected.
-
-```json
-[
-  {"title": "Read the brief", "column": "todo", "due": "2026-09-22T23:59:00Z", "body": "## Read\n\n- Mark requirements\n- Note questions", "tags": ["Assignment"], "files": ["courses/INFO30006/assignments/brief.pdf"]},
-  {"title": "Outline", "key": "outline"},
-  {"title": "Draft intro", "parent": "outline"}
-]
-```
-
-Per task: `title` (**required**), `column`, `body`, `due`, `starts`,
-`estimate` (minutes), `tags` (array of names), `files` (array of library
-relative paths), `parent`, `key`.
-
-- `parent` is either an existing task's numeric id or the `key` of an
-  **earlier item in the same array** — that is how a parent and its subtasks
-  go in together. `key` is never stored.
-- Subtasks are **one level deep**. A subtask cannot be given children.
-- An unknown field is a hard error, not a silent no-op.
-- All or nothing: a bad item writes none of them and says which one failed.
-  Fix it and re-send.
-
-Write the JSON to a file and pass the path. Encode newlines inside JSON
-strings as `\n`; literal newlines inside a JSON string are invalid JSON.
-`--batch` supplies all per-task properties, so it cannot be mixed with
-single-task flags such as `--body-file` or `--file`.
-
-## Related files and shared tags
-
-Discover the real library paths before attaching them:
-
-```bash
-oculus files INFO30006 --match brief
-oculus task add "Read the brief" -p 7 --file "courses/INFO30006/assignments/brief.pdf" --tags "Reading"
-oculus task update 12 --attach "courses/INFO30006/lectures/week1.pdf"
-oculus task show 12 --json
-oculus task update 12 --detach "courses/INFO30006/lectures/week1.pdf"
-```
-
-Use exact `relative_path` values from `oculus files`, not invented paths or
-absolute filesystem paths. These are links to existing library files, not
-uploads. Repeat `--file` on creation or `--attach` / `--detach` on update for
-several files. In a batch, use `files: ["path", ...]`. Duplicate attachment is
-a no-op; an unknown or ambiguous path rejects the write, and a bad batch
-rolls back every task. `task show` prints full notes and related paths;
-`--json` returns `task`, effective `tags`, `files` and `subtasks` for checking.
-
-`--tags "Reading,Assignment"` works on project and task create/update; on
-update it replaces the whole set and `--tags ""` clears it. Names match
-ignoring case; missing names are registered automatically. Tasks without
-explicit tags inherit the project's current tags; clearing task tags resumes
-inheritance. `oculus tag list` shows the shared registry; `tag add`, `rename`,
-`color` and `rm` manage it (`--help` lists their arguments and colour palette).
-
-## Moving, finishing, filing
-
-- **`oculus task move` is the only thing that changes where a task sits.** Its
-  column, its order and whether it is finished are one fact; `task update`
-  deliberately cannot touch them. **Finishing something is moving it into a
-  `done` column**, not setting a flag.
-- **`oculus task refile` is the only thing that changes which project a task
-  is on**, and it takes the task's **subtasks with it**. A lone subtask is
-  refused and told to refile its parent. The column maps across by *kind*, and
-  a destination with no column of that kind is refused rather than given the
-  nearest one; the task lands at the end, so `task move` is how it is placed.
-- `oculus task update` is for the title, notes, dates, estimate, tags and
-  related-file links. An **empty
-  string clears** a field: `--due ""`.
-
-## A task does not need a project
-
-```bash
-oculus task add "email the tutor about the extension"
-```
-
-With no `-p` this is an **unfiled** task — the absence of a project, not a
-project called Inbox. It is the right answer to "write this down, I have not
-decided where it goes", and it is what the app's Tasks page writes by default.
-`oculus task refile 12 -p 7` files it later.
-
-**Do not invent an "Inbox" project.** There is nothing to clean up if an
-unfiled task is never filed.
-
-`oculus task list` with no `-p` spans the library, unfiled first;
-`--unfiled` is that pile alone. `--column` still needs `-p`, since a column id
-only means something against one board.
-
-## Before you write
-
-Rows written here are marked `source: agent`, so the board can show what it
-did not write itself — but that is a label, not an undo. `oculus task rm` has
-none at all. When a breakdown is a guess rather than a request, say what you
-would add and let the student agree to it first.
+Jobs have their own progress and error, no amendments or Undo. If a previous
+run failed or the app closed, inspect the domain's result before proposing
+another run. Never call auth or keyd from chat. Memory commands and Studio
+video work remain the agent's workspace and need no proposal card.

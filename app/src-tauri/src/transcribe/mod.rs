@@ -20,4 +20,4 @@ mod vtt;
 pub use engine::{engine_label, Engine, EngineError, Segment, ENGINES};
 pub use engines::whisper_models;
 pub use pipeline::{resolve, run, vtt_path, Outcome, Step};
-pub(crate) use settings::Settings;
+pub(crate) use settings::{settings_from, Settings};
