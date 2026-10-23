@@ -26,6 +26,24 @@ Read this before any UI work.
 | The colour control: a swatch that opens a pad, hue and opacity strips and hex text (`opaque` drops the opacity strip), or with a `palette` a grid of colours, their shades and the hex code with the pad behind Custom | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
 | Identity icons, shared picker and colour palette | `app/src/components/ui/icon/`, `app/src/lib/ui/iconPreferences.ts` |
 | A titled block that folds, its state kept by the caller | `app/src/components/ui/CollapsibleSection.tsx` |
+| Study widgets in markdown replies | `app/src/components/markdown/openui/components/` |
+
+## Study widgets use the reply's primitives and semantic tokens
+
+OpenUI widgets use the same inline markdown and maths engine as replies,
+`CitationCode` / `CitationLink` for PageRef, and the shared Radix Slider.
+`Frame` supplies a rounded card with a hairline border, a wrapping title and
+counter, and a footer of small pill controls. Quiz choices are ordinary
+keyboard-focusable toggle buttons. Chart draws one SVG series with semantic
+chart, border and muted-text tokens; controls use primary, brand, success and
+destructive tokens. Nothing inside the widget sets a fixed pixel width, so
+the cards reflow with the chat pane and page zoom. The runtime and its state
+contract are in [harness.md](./harness.md#openui-fences-draw-interactive-study-widgets).
+
+`Rich` repairs JSON's form-feed, tab, backspace and carriage-return escapes
+before a letter, plus newline escapes inside dollar-delimited maths. It cannot
+recover a lost backslash or distinguish an intended line break inside maths;
+the agent must still double TeX backslashes in strings.
 
 ## One colour, two fonts, and a floating card
 

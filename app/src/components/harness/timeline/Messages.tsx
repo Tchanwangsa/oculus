@@ -6,6 +6,7 @@ import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { Action, Assistant, CopyAction, MessageActions } from "./MessageActions";
 import { QuestionBubble } from "./QuestionBubble";
 import type { QuestionActions } from "./types";
+import { WidgetRow } from "@/components/markdown/openui/state";
 
 /** Busy is read from the store here, not passed in: it changes twice a turn,
  *  and a prop would re-render every committed row. */
@@ -48,7 +49,9 @@ export const Reply = memo(function Reply({
   const retry = actions?.retry;
   return (
     <div className="group/msg flex w-full min-w-0 flex-col">
-      <Assistant text={text} />
+      <WidgetRow.Provider value={{ thread: item.thread_id, row: item.id }}>
+        <Assistant text={text} />
+      </WidgetRow.Provider>
       <MessageActions when={fmtClock(sqliteUtcToMs(item.created_at))} side="left">
         <CopyAction text={text} />
         {retry && asked && !busy && (

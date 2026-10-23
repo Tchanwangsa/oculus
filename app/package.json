@@ -41,6 +41,8 @@
     "@lezer/common": "^1.5.3",
     "@lezer/highlight": "^1.2.5",
     "@lezer/markdown": "^1.7.2",
+    "@openuidev/lang-core": "1.0.1",
+    "@openuidev/react-lang": "1.0.1",
     "@phosphor-icons/react": "^2.1.10",
     "@tanstack/react-virtual": "^3.14.11",
     "@tauri-apps/api": "^2",
@@ -68,6 +70,7 @@
     "style-mod": "^4.1.4",
     "tailwind-merge": "^3.6.0",
     "unist-util-visit-parents": "^6.0.2",
+    "zod": "^4.6.7",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
