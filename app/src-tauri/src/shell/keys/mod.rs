@@ -6,8 +6,10 @@
 //! responder. WebKit answers YES and never hands a key the page leaves back
 //! to the menu, so `fallback.rs` does: the page reports the keydown it didn't
 //! cancel, and the menu gets that event. The app's own webview is left alone,
-//! and so are the `RESERVED` chrome keys.
+//! and so are the `RESERVED` chrome keys. No webview goes back on Backspace
+//! (`backspace.rs`).
 
+mod backspace;
 mod fallback;
 
 pub(crate) use fallback::{install as install_fallback, SCRIPT as FALLBACK_SCRIPT};
@@ -37,7 +39,13 @@ const RESERVED: [u16; 19] = [
 pub fn install<R: Runtime>(app: &AppHandle<R>) {
     if let Some(webview) = app.get_webview("main") {
         webview
-            .with_webview(|pv| APP_WEBVIEW.store(pv.inner() as usize, Ordering::Relaxed))
+            .with_webview(|pv| {
+                let ptr = pv.inner() as *mut WKWebView;
+                APP_WEBVIEW.store(ptr as usize, Ordering::Relaxed);
+                if let Some(view) = unsafe { ptr.as_ref() } {
+                    backspace::disable(view);
+                }
+            })
             .ok();
     }
 

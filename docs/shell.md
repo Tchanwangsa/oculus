@@ -189,6 +189,11 @@ while Ctrl+Shift+Z is Redo.
   so the fall-through is ours: a script in every frame of every browser
   page reports a ⌘-keydown the page didn't cancel, and the menu gets
   the key the user just sent that page (`keys/fallback.rs`).
+- **Backspace never navigates back** on macOS. WebKit's
+  `BackspaceKeyNavigationEnabled` is on by default in a `WKWebView`, so a
+  Backspace a page heard but didn't cancel (a circuit editor deleting a part)
+  went back a page. It is off on every browser page and the app's own webview
+  (`keys/backspace.rs`); Back is ⌘[ and the toolbar button.
 - **Undo and Redo are menu items that emit, not the predefined ones.** The
   predefined items hand ⌘Z to WebKit's own undo stack, which a note's
   CodeMirror history never fills. While a browser page holds focus Rust sends

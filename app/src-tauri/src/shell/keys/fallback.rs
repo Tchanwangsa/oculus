@@ -99,7 +99,8 @@ fn replay(mtm: MainThreadMarker, event: &NSEvent) {
     }
 }
 
-/// Adds the handler to `page`'s user content controller.
+/// Adds the handler to `page`'s user content controller, and turns off
+/// Backspace-goes-back (`backspace.rs`).
 pub(crate) fn install(page: &Webview<tauri::Wry>) {
     page.with_webview(|platform| unsafe {
         let ptr = platform.inner() as *mut WKWebView;
@@ -109,6 +110,7 @@ pub(crate) fn install(page: &Webview<tauri::Wry>) {
         if ptr.is_null() {
             return;
         }
+        super::backspace::disable(&*ptr);
         let controller = (*ptr).configuration().userContentController();
         let handler = KeyFallback::new(mtm);
         controller.addScriptMessageHandler_name(
