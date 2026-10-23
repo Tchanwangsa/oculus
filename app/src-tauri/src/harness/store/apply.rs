@@ -238,6 +238,7 @@ pub async fn apply(
         | HarnessEvent::ToolOutputDelta { .. }
         | HarnessEvent::Queued { .. }
         | HarnessEvent::Unqueued { .. }
+        | HarnessEvent::Proposal { .. }
         | HarnessEvent::Rewound { .. }
         | HarnessEvent::RateLimits { .. } => Ok(None),
     }

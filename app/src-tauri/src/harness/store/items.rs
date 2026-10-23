@@ -86,11 +86,20 @@ pub async fn newest_anchor(pool: &SqlitePool, thread_id: i64) -> Result<Option<S
 /// Delete this row and everything after it — the local half of a rewind
 /// (`Harness::rewind` rewinds the provider's session).
 pub async fn truncate_from(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Result<u64, String> {
-    sqlx::query("DELETE FROM harness_items WHERE thread_id = ?1 AND id >= ?2")
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM chat_proposals WHERE thread_id = ?1 AND item_id >= ?2")
         .bind(thread_id)
         .bind(item_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
-        .map(|r| r.rows_affected())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    let removed = sqlx::query("DELETE FROM harness_items WHERE thread_id = ?1 AND id >= ?2")
+        .bind(thread_id)
+        .bind(item_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected();
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(removed)
 }

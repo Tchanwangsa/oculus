@@ -50,5 +50,25 @@ pub fn child_env() -> Vec<(String, String)> {
         env.retain(|(k, _)| k != "PATH");
         env.push(("PATH".into(), joined.to_string_lossy().into_owned()));
     }
+    env.retain(|(key, _)| key != "OCULUS_AGENT");
+    env.push(("OCULUS_AGENT".into(), "1".into()));
     env
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_provider_child_has_the_confirmation_gate_and_no_api_billing_keys() {
+        let env = super::child_env();
+        let agent: Vec<_> = env
+            .iter()
+            .filter(|(key, _)| key == "OCULUS_AGENT")
+            .collect();
+        assert_eq!(agent.len(), 1);
+        assert_eq!(agent[0].1, "1");
+        assert!(!env.iter().any(|(key, _)| matches!(
+            key.as_str(),
+            "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "CLAUDECODE" | "CLAUDE_CODE_ENTRYPOINT"
+        )));
+    }
 }

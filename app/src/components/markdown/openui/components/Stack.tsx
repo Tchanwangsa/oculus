@@ -8,6 +8,7 @@ import { Quiz } from "./Quiz";
 import { Steps } from "./Steps";
 import { Text } from "./Text";
 import { WidgetIndex } from "../state";
+import { NewTasks, NewProject, NewEvents, NewNote, TaskChanges, ProjectChanges, EventChanges, TagChanges, DeleteTasks, DeleteEvents, Sync, Reparse, Transcribe, LectureChapters, LectureEnd, Download } from "../proposals/definitions";
 
 /** The program's root: widgets top to bottom, with Ask buttons and PageRefs
  *  gathered onto one wrapping row so they read as a footer, not a list. */
@@ -15,7 +16,7 @@ export const Stack = defineComponent({
   name: "Stack",
   description: "The root: study widgets top to bottom. Ask and PageRef items line up in a row.",
   props: z.object({
-    items: z.array(z.union([Flashcards.ref, Quiz.ref, Steps.ref, Explorer.ref, Text.ref, PageRef.ref, Ask.ref])),
+    items: z.array(z.union([Flashcards.ref, Quiz.ref, Steps.ref, Explorer.ref, Text.ref, PageRef.ref, Ask.ref, NewTasks.ref, NewProject.ref, NewEvents.ref, NewNote.ref, TaskChanges.ref, ProjectChanges.ref, EventChanges.ref, TagChanges.ref, DeleteTasks.ref, DeleteEvents.ref, Sync.ref, Reparse.ref, Transcribe.ref, LectureChapters.ref, LectureEnd.ref, Download.ref])),
   }),
   component: function StackView({ props, renderNode }) {
     const items = Array.isArray(props.items) ? props.items : [];

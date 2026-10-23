@@ -43,6 +43,23 @@ pub async fn lecture_find_end(
     spawn_job(
         "lecture end",
         crate::harness::jobs::Job::LectureEnd,
+        {
+            let app = app.clone();
+            let id = lecture_id.clone();
+            move |error| {
+                app.emit(
+                    LECTURE_END_EVENT,
+                    Finished {
+                        lecture_id: id,
+                        status: "error",
+                        seconds: None,
+                        quote: None,
+                        error: Some(error),
+                    },
+                )
+                .ok();
+            }
+        },
         move |rt, pool, chain| {
             let outcome = prepare(&lecture).and_then(|p| find(&harness, &chain, &p));
             let finished = match rt

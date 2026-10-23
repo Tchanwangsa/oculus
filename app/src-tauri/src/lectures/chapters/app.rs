@@ -25,6 +25,24 @@ struct Finished {
     error: Option<String>,
 }
 
+static CHAPTER_RUNS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+struct ChapterClaim(String);
+impl ChapterClaim {
+    fn take(id: &str) -> Result<Self, String> {
+        let mut runs = CHAPTER_RUNS.lock().unwrap();
+        if runs.iter().any(|run| run == id) {
+            return Err("that lecture is already being chaptered".into());
+        }
+        runs.push(id.into());
+        Ok(Self(id.into()))
+    }
+}
+impl Drop for ChapterClaim {
+    fn drop(&mut self) {
+        CHAPTER_RUNS.lock().unwrap().retain(|id| id != &self.0);
+    }
+}
+
 /// Chapter a lecture with the agent the `lectureChapters` job is
 /// configured with. Returns once the run is claimed; the end arrives as
 /// [`LECTURE_CHAPTERS_EVENT`].
@@ -35,6 +53,7 @@ pub async fn lecture_find_chapters(
     force: Option<bool>,
     source: Option<u8>,
 ) -> Result<(), String> {
+    let claim = ChapterClaim::take(&lecture_id)?;
     check_start(
         &lecture_id,
         source,
@@ -48,7 +67,24 @@ pub async fn lecture_find_chapters(
     spawn_job(
         "chapters",
         crate::harness::jobs::Job::LectureChapters,
+        {
+            let app = app.clone();
+            let id = lecture_id.clone();
+            move |error| {
+                app.emit(
+                    LECTURE_CHAPTERS_EVENT,
+                    Finished {
+                        lecture_id: id,
+                        status: "error",
+                        chapters: 0,
+                        error: Some(error),
+                    },
+                )
+                .ok();
+            }
+        },
         move |rt, pool, chain| {
+            let _claim = claim;
             let emit = {
                 let app = app.clone();
                 move |p: Progress| {
@@ -293,4 +329,17 @@ pub fn reconcile(_app: &AppHandle) {
     reconcile_status("chapters", |pool| async move {
         crate::db::store::reconcile_chapter_status(&pool).await
     });
+}
+
+#[cfg(test)]
+mod claim_tests {
+    use super::*;
+    #[test]
+    fn one_chapter_job_per_lecture_is_claimed_before_spawning() {
+        let first = ChapterClaim::take("claim-test-lecture").unwrap();
+        assert!(ChapterClaim::take("claim-test-lecture").is_err());
+        assert!(ChapterClaim::take("claim-test-other").is_ok());
+        drop(first);
+        assert!(ChapterClaim::take("claim-test-lecture").is_ok());
+    }
 }

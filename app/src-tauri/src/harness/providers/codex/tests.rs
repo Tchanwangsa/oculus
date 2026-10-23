@@ -75,6 +75,10 @@ fn a_thread_may_write_the_database_and_studio_and_nothing_else_outside_its_cwd()
     let thread = CodexServer::thread_params(&opts);
     assert_eq!(thread["sandbox"], "workspace-write");
     assert_eq!(
+        thread["config"]["shell_environment_policy.set"]["OCULUS_AGENT"],
+        "1"
+    );
+    assert_eq!(
         thread["cwd"],
         library.join("agents").to_string_lossy().as_ref()
     );
@@ -111,6 +115,10 @@ fn every_thread_and_turn_keeps_the_sandbox_network_open() {
         };
         let thread = CodexServer::thread_params(&opts);
         assert_eq!(thread["sandbox"], "workspace-write");
+        assert_eq!(
+            thread["config"]["shell_environment_policy.set"]["OCULUS_AGENT"],
+            "1"
+        );
         assert_eq!(
             thread["config"]["sandbox_workspace_write.network_access"],
             true

@@ -6,6 +6,10 @@
 pub mod dictation;
 pub mod lifecycle;
 pub mod models;
+mod proposal_context;
+#[cfg(test)]
+mod proposal_context_tests;
+pub mod proposal_jobs;
 mod send;
 pub mod setup;
 pub mod suggest;
@@ -53,4 +57,17 @@ impl HarnessState {
     fn sink(&self, thread_id: i64, provider: Provider) -> Sink {
         sink_for(&self.bus, thread_id, provider)
     }
+}
+
+/// Proposal writes already committed in Rust; forward the row to every thread view.
+pub async fn publish_proposal(
+    app: &tauri::AppHandle,
+    proposal: crate::db::proposals::Proposal,
+) -> Result<(), String> {
+    use tauri::Manager;
+    let pool = crate::db::store::open_pool().await?;
+    let row = crate::harness::store::thread(&pool, proposal.thread_id).await?;
+    app.state::<HarnessState>()
+        .sink(proposal.thread_id, row.provider)(HarnessEvent::Proposal { proposal });
+    Ok(())
 }

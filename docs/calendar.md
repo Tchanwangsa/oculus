@@ -12,6 +12,7 @@ database, so it works offline.
 | `calendar_events` (migration 19), `local_events` (22), `projects.event_id` (33) | `app/src-tauri/src/db/migrations.rs` |
 | Headless writes (CLI) | `app/src-tauri/src/db/store/calendar.rs` |
 | Frontend reads + writes | `app/src/lib/db/calendar.ts`, `app/src/lib/db/localEvents.ts` |
+| Accepted chat proposals and reversible local-event writes | `app/src-tauri/src/db/proposals/` |
 | Event model, `loadCalendar`, colours, date maths | `app/src/lib/planning/calendar/` |
 | The task layer's read | `getAllOpenTasks` in `app/src/lib/planning/projects/reads.ts` |
 | New/edit event dialog | `app/src/components/calendar/EventDialog.tsx`, `app/src/stores/planning/eventEditorStore.ts` |
@@ -34,8 +35,8 @@ database, so it works offline.
   straight back. **Notes are both**, because nothing else will clean them up.
   **Tasks are neither** here: the calendar only reads `project_tasks`, so the
   card links to the task's project, and an unfiled task links nowhere.
-- `EventDialog` writes notes with `source = 'manual'`; older rows may say
-  `automation`, and the card shows which. An edit leaves `source` alone.
+- `EventDialog` writes notes with `source = 'manual'`; accepted chat cards
+  write `source = 'agent'`. An edit leaves `source` alone.
 - The dialog is mounted once in `app/src/layouts/AppLayout.tsx` and raised
   through `eventEditorStore`, because its two openers — the page header and
   `EventPopover`, which Home's Upcoming card also renders — share no subtree.
@@ -71,6 +72,11 @@ database, so it works offline.
   *after* Canvas and lectures, so a local `class` cannot suppress recordings.
   Its `subject_id` is nullable (`ON DELETE SET NULL`); subject-less rows file
   under a "Personal" key kept out of the subject palette.
+- Chat cards address these rows as `local_<id>`, the same ids printed by
+  `oculus calendar` and `oculus project events`. Rust refuses other event ids
+  for changes or deletes. A date-only start is all day; only `class` events
+  accept an end. Apply and Undo share the proposal transaction and stale-row
+  checks described in [projects.md](./projects.md#two-writers-enforce-the-same-rules).
 - Tasks are read live through `getAllOpenTasks` (undated and finished dropped
   in SQL, project joined LEFT so unfiled tasks survive), never copied into
   `local_events`: a copy would outlive the task being re-dated, finished or

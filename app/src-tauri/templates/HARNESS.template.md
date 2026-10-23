@@ -52,23 +52,24 @@ a timestamp and says nothing.
   `oculus calendar`. PDF page text is **only** in the database; a plain
   `grep` over `courses/` misses every slide deck. `./OCULUS-CLI.md` is the
   full reference; `./AGENTS.md` is the short version.
-- **Plans go in the same way.** `oculus project` and `oculus task` write the
-  student's board — the one the app draws — so a plan you agree on is a row,
-  not a markdown file in here. `oculus project list` / `oculus project show
-  <ID>` to see what is already planned and what the board's columns are
-  called, `oculus project create` for a new piece of work, `oculus task add
-  -p <ID> --batch -` to put a whole breakdown in from one JSON array, `oculus
-  task move` to finish or reorder something. Read `oculus task add --help`
-  before the first batch. A task can also belong to **no** project: `oculus
-  task add "…"` with no `-p` writes one, which is where something goes when it
-  has to be written down before it has been decided about, and `oculus task
-  refile` files it under a project later, subtasks and all. `oculus task list`
-  with no `-p` shows every task there is, the unfiled ones first. A task can
-  carry tags (`--tags "Assignment,Exam"`; `oculus tag list` shows the existing
-  ones, so reuse a name rather than coin a near-duplicate) and link library
-  files (`--file <path>` on `add`, `--attach` / `--detach` on `update`; the path
-  is what `oculus files` prints). Plan when you
-  are asked to; do not quietly turn an answer into a board.
+- **Student changes need a proposal card.** To create, change or delete a
+  project, task, tag, calendar event or note, read `oculus-plan` and write an
+  `openui` proposal card. The student reviews, edits and clicks Create or
+  Apply; nothing writes before that click. This applies even to "just add
+  them". Read ids and current values with `oculus project list|show|events`,
+  `task list|show`, `tag list`, `calendar` and `files`; never guess ids.
+  A new task can be unfiled: `NewTasks(null, …)`. Do not invent an Inbox
+  project. Keep the reply to a line around the card; plan only when asked.
+- **Long or billed jobs need a card too.** Sync, Reparse, Transcribe,
+  LectureChapters, LectureEnd and Download ask before starting the app's
+  work. The CLI refuses their write verbs in chat. `auth` and `keyd` are
+  for the student's own terminal. Memory, Studio video work and reads stay
+  available through the CLI.
+- **Cards in this thread** is app context appended to each message. It has
+  every pending card as the student left it, including edits and unticked
+  rows, and newly decided cards with the ids they made. Amend a pending
+  card by writing its replacement with that card's id as the last argument.
+  A decided card needs a new change proposal on its created ids.
 - **Memory is not optional, and it is the section below.** `./memories/`,
   `./memories/<CODE>/` and `./TASTE.md` are what make the next conversation
   cheaper than this one. They are all in this folder because it is the only

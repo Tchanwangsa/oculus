@@ -16,6 +16,9 @@ import { NO_ERROR, parseStatuses, pipeline } from "./pipelineEvents";
 
 /** Sync (scrape) events: progress, per-file results, the run's end. */
 export function useScrapeEvents() {
+  useTauriEvent<{ runId: number; subjects: { id: number; code: string }[] }>("scrape-started", (e) => {
+    useSyncStore.getState().begin(e.payload.runId, e.payload.subjects);
+  });
   useTauriEvent<SyncProgress>("scrape-progress", (e) => {
     if (e.payload.phase === "complete") return;
     useSyncStore.getState().setProgress(e.payload);

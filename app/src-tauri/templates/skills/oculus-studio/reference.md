@@ -839,7 +839,7 @@ Warnings name the time span and the words said in it:
 | `component_not_found` | No component by that name | Use one the message lists, or write it in `components/`. |
 | `transpile` | The TSX does not compile, or uses `import` | Fix the syntax at `loc`. |
 | `image`, `font`, `budget` | A missing asset, an unknown font, or a component doing too much work | Add the file; use `theme.font`; remove the loop. |
-| `lint` | Kokoro's G2P pack is not downloaded | Stop and tell the student (`oculus studio voices download`). |
+| `lint` | Kokoro's G2P pack is not downloaded | Propose Download("voices") using `oculus-plan`; the student confirms. |
 | `lint` | A `lexicon.json` entry names a phoneme Kokoro lacks, or a respelling part the dictionary lacks | Tell the student which file and entry; never edit a lexicon yourself. |
 | `script` | Kokoro: a word with no phonemes, a `$`, or a sentence too long to say in one go | Reword: spell it out, or split the sentence or add a comma. |
 

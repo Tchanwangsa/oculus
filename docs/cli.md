@@ -177,9 +177,11 @@ rewriting itself in place is how a long run is told from a stuck one.
 - With `--json`, success is one document on stdout and failure is
   `{"error": "..."}` on stderr with exit 1.
 
-## `project`, `task` and `tag` are the agent's only door to the board
+## Terminal writes and chat proposals share the board
 
-The app's board reads these rows live, so no agent opens `oculus.db`. The rules
+The app's board reads these rows live, so no agent opens `oculus.db`. Chat
+agents propose editable confirmation cards; the student's terminal retains
+the write commands below. The rules
 are in [projects.md](./projects.md); the CLI-shaped parts:
 
 - `task add` with no `-p` writes an **unfiled** task, belonging to no project,
@@ -223,6 +225,21 @@ are in [projects.md](./projects.md); the CLI-shaped parts:
   file/stdin reader in `main.rs`; `-` is stdin and each command retains its
   own input validation.
 - Every project and task it writes is marked `source: agent`.
+- `calendar` combines Canvas events and the student's `local_events`, prints
+  each id in text and JSON, and keeps personal events in an unscoped query.
+  JSON includes end times, all-day state and the student's notes so change
+  proposals can name the fields they read. Personal subjects are null.
+  Only `local_<id>` events can be changed by a proposal. Timed events filter
+  by their instant; an all-day local event stays visible on its local day.
+
+Chat provider children carry `OCULUS_AGENT=1`. Before opening the database,
+the CLI refuses project create/update; task add/update/move/refile/rm; tag
+add/rename/color/rm; run, index, transcribe; lecture chapters/end; and Studio
+voice/aligner downloads. Its error names the corresponding card. Auth and
+keyd commands must be run by the student. Reads, memory, tooling and Studio
+video work remain available. This gate is a confirmation rule, not a sandbox
+security boundary: [harness.md](./harness.md) describes the containment and
+how shared provider servers propagate it.
 
 ## `oculus docs` writes the agents folder
 

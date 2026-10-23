@@ -89,9 +89,9 @@ column, which is for matching a chapter's `start` to a detected boundary.
 
 `oculus lecture chapters` and `oculus lecture end` **generate** things — they
 drive a model, cost quota (chapters take minutes to an hour), and leave an
-existing result alone unless given `--force`. They are not lookups. Reach for
-them only when asked to produce chapters or a lecture's end, never to find out
-what was said.
+existing result alone unless given `--force`. They are not lookups. When asked to produce chapters or a lecture's end, propose LectureChapters
+or LectureEnd in an `openui` fence and let the student confirm. See
+`oculus-plan` and `oculus-ui`. Never generate them to find out what was said.
 
 `oculus lecture candidates` is free and writes nothing, but it returns
 boundary moments with no words attached — `outline.md` already has those

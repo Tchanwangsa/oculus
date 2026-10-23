@@ -898,6 +898,12 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
             sql: include_str!("projects/shared_tags.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 49,
+            description: "chat proposals and their reversible changes",
+            sql: include_str!("proposals/schema.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

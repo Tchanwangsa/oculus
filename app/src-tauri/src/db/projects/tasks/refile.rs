@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::db::projects::columns::board_of;
 use crate::db::projects::read::project_on;
@@ -22,7 +22,17 @@ pub async fn refile_task(
     project_id: Option<i64>,
 ) -> Result<u64, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let existing = task_on(&mut tx, id)
+    let result = refile_task_on(&mut tx, id, project_id).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+pub async fn refile_task_on(
+    conn: &mut SqliteConnection,
+    id: i64,
+    project_id: Option<i64>,
+) -> Result<u64, String> {
+    let existing = task_on(conn, id)
         .await?
         .ok_or_else(|| format!("task {id} does not exist"))?;
 
@@ -38,7 +48,7 @@ pub async fn refile_task(
 
     let source = match existing.project_id {
         Some(pid) => Some(
-            project_on(&mut tx, pid)
+            project_on(conn, pid)
                 .await?
                 .ok_or_else(|| format!("project {pid} does not exist"))?,
         ),
@@ -46,7 +56,7 @@ pub async fn refile_task(
     };
     let target = match project_id {
         Some(pid) => Some(
-            project_on(&mut tx, pid)
+            project_on(conn, pid)
                 .await?
                 .ok_or_else(|| format!("project {pid} does not exist"))?,
         ),
@@ -58,7 +68,7 @@ pub async fn refile_task(
         "{TASK_SELECT} WHERE t.parent_id = ?1 ORDER BY t.position ASC, t.id ASC"
     ))
     .bind(id)
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
     let mut moving: Vec<Task> = Vec::with_capacity(rows.len() + 1);
@@ -94,7 +104,7 @@ pub async fn refile_task(
         )
         .bind(project_id)
         .bind(&column.id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -112,13 +122,12 @@ pub async fn refile_task(
         .bind(next)
         .bind(i64::from(done))
         .bind(row.id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| e.to_string())?;
     }
 
-    touch_project(&mut tx, existing.project_id).await?;
-    touch_project(&mut tx, project_id).await?;
-    tx.commit().await.map_err(|e| e.to_string())?;
+    touch_project(conn, existing.project_id).await?;
+    touch_project(conn, project_id).await?;
     Ok(moving.len() as u64)
 }

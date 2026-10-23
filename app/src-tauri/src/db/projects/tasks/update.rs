@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::db::projects::tags::{ensure_tags_on, replace_task_tags_on};
 
@@ -27,7 +27,17 @@ pub struct TaskPatch {
 
 pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let existing = task_on(&mut tx, id)
+    update_task_on(&mut tx, id, patch).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub async fn update_task_on(
+    conn: &mut SqliteConnection,
+    id: i64,
+    patch: &TaskPatch,
+) -> Result<(), String> {
+    let existing = task_on(conn, id)
         .await?
         .ok_or_else(|| format!("task {id} does not exist"))?;
 
@@ -35,8 +45,8 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
         if parent == id {
             return Err("a task cannot be its own parent".to_string());
         }
-        assert_can_parent(&mut tx, parent, existing.project_id).await?;
-        if has_children(&mut tx, id).await? {
+        assert_can_parent(conn, parent, existing.project_id).await?;
+        if has_children(conn, id).await? {
             return Err(
                 "subtasks are one level deep: a task with children cannot have a parent"
                     .to_string(),
@@ -47,17 +57,17 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
     // Resolved before anything is written, so a bad path or name changes nothing.
     let mut linked = false;
     if let Some(names) = &patch.tags {
-        let ids = ensure_tags_on(&mut tx, names).await?;
-        replace_task_tags_on(&mut tx, id, &ids).await?;
+        let ids = ensure_tags_on(conn, names).await?;
+        replace_task_tags_on(conn, id, &ids).await?;
         linked = true;
     }
     if !patch.attach.is_empty() {
-        let ids = resolve_files_on(&mut tx, &patch.attach).await?;
-        linked |= attach_files_on(&mut tx, id, &ids).await?;
+        let ids = resolve_files_on(conn, &patch.attach).await?;
+        linked |= attach_files_on(conn, id, &ids).await?;
     }
     if !patch.detach.is_empty() {
-        let ids = resolve_files_on(&mut tx, &patch.detach).await?;
-        linked |= detach_files_on(&mut tx, id, &ids).await?;
+        let ids = resolve_files_on(conn, &patch.detach).await?;
+        linked |= detach_files_on(conn, id, &ids).await?;
     }
 
     let mut sets: Vec<String> = Vec::new();
@@ -82,9 +92,9 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
     }
     if sets.is_empty() {
         if linked {
-            touch_task(&mut tx, id).await?;
-            touch_project(&mut tx, existing.project_id).await?;
-            return tx.commit().await.map_err(|e| e.to_string());
+            touch_task(conn, id).await?;
+            touch_project(conn, existing.project_id).await?;
+            return Ok(());
         }
         return Ok(());
     }
@@ -113,32 +123,37 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
         q = q.bind(*v);
     }
     q.bind(id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| e.to_string())?;
 
-    touch_project(&mut tx, existing.project_id).await?;
-    tx.commit().await.map_err(|e| e.to_string())
+    touch_project(conn, existing.project_id).await?;
+    Ok(())
 }
 
 /// Deletes the task and (by cascade) its subtasks; returns how many rows went.
 pub async fn delete_task(pool: &SqlitePool, id: i64) -> Result<u64, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let existing = task_on(&mut tx, id)
+    let result = delete_task_on(&mut tx, id).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+pub async fn delete_task_on(conn: &mut SqliteConnection, id: i64) -> Result<u64, String> {
+    let existing = task_on(conn, id)
         .await?
         .ok_or_else(|| format!("task {id} does not exist"))?;
     let children: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM project_tasks WHERE parent_id = ?1")
             .bind(id)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM project_tasks WHERE id = ?1")
         .bind(id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| e.to_string())?;
-    touch_project(&mut tx, existing.project_id).await?;
-    tx.commit().await.map_err(|e| e.to_string())?;
+    touch_project(conn, existing.project_id).await?;
     Ok(children as u64 + 1)
 }

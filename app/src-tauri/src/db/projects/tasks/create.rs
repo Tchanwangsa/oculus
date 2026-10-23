@@ -54,13 +54,24 @@ pub async fn create_tasks(
     items: &[NewTask],
     source: &str,
 ) -> Result<Vec<i64>, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let result = create_tasks_on(&mut tx, project_id, items, source).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+pub async fn create_tasks_on(
+    conn: &mut SqliteConnection,
+    project_id: Option<i64>,
+    items: &[NewTask],
+    source: &str,
+) -> Result<Vec<i64>, String> {
     if items.is_empty() {
         return Err("no tasks given".to_string());
     }
-    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     let project = match project_id {
         Some(id) => Some(
-            project_on(&mut tx, id)
+            project_on(conn, id)
                 .await?
                 .ok_or_else(|| format!("project {id} does not exist"))?,
         ),
@@ -92,7 +103,7 @@ pub async fn create_tasks(
         let mut parent_column: Option<String> = None;
         if let Some(parent) = parent_id {
             parent_column = Some(
-                assert_can_parent(&mut tx, parent, project_id)
+                assert_can_parent(conn, parent, project_id)
                     .await
                     .map_err(|e| format!("{}{e}", where_()))?,
             );
@@ -120,7 +131,7 @@ pub async fn create_tasks(
         )
         .bind(project_id)
         .bind(&column.id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -142,12 +153,12 @@ pub async fn create_tasks(
         .bind(item.estimate)
         .bind(i64::from(done))
         .bind(source)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| format!("{}{e}", where_()))?
         .last_insert_rowid();
 
-        link_new_task(&mut tx, id, item)
+        link_new_task(conn, id, item)
             .await
             .map_err(|e| format!("{}{e}", where_()))?;
 
@@ -157,8 +168,7 @@ pub async fn create_tasks(
         ids.push(id);
     }
 
-    touch_project(&mut tx, project_id).await?;
-    tx.commit().await.map_err(|e| e.to_string())?;
+    touch_project(conn, project_id).await?;
     Ok(ids)
 }
 

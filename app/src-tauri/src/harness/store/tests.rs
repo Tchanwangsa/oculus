@@ -98,3 +98,48 @@ async fn reconcile_idles_running_threads_and_closes_open_tool_rows() {
     let again = reconcile(&pool).await.unwrap();
     assert_eq!((again.threads, again.tools), (0, 0));
 }
+
+#[tokio::test]
+async fn pruning_removes_cards_with_foreign_keys_off_but_preserves_the_journal() {
+    let pool = migrated_pool().await;
+    sqlx::query("PRAGMA foreign_keys=OFF")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let thread = create_thread(&pool, Provider::Claude, None, None, None, "test")
+        .await
+        .unwrap();
+    let early = insert_item(&pool, thread, "assistant", None, Some("card"), None)
+        .await
+        .unwrap();
+    let later = insert_item(&pool, thread, "assistant", None, Some("card"), None)
+        .await
+        .unwrap();
+    for item in [early, later] {
+        sqlx::query("INSERT INTO chat_proposals(item_id,block,thread_id,kind,status,state,initial_state) VALUES(?1,0,?2,'NewTasks','created','{}','{}')").bind(item).bind(thread).execute(&pool).await.unwrap();
+    }
+    sqlx::query("INSERT INTO agent_changes(thread_id,proposal_id,entity,entity_id,op,after) VALUES(?1,?2,'task','42','create','{}')").bind(thread).bind(format!("{later}.0")).execute(&pool).await.unwrap();
+    assert_eq!(truncate_from(&pool, thread, later).await.unwrap(), 1);
+    let cards: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chat_proposals")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cards, 1);
+    delete_thread(&pool, thread).await.unwrap();
+    for table in ["chat_proposals", "harness_items", "harness_threads"] {
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM agent_changes")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
+    );
+}

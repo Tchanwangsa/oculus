@@ -3,7 +3,7 @@ import { Renderer, type ActionEvent, type OpenUIError } from "@openuidev/react-l
 import { useAssistantSend } from "./assistant";
 import { library } from "./library";
 import { parseProgram } from "./parse";
-import { useWidgetRow } from "./state";
+import { useWidgetRow, WidgetFence } from "./state";
 import { useWidgetStore, widgetKey } from "@/stores/chat/widgetStore";
 
 /**
@@ -48,11 +48,13 @@ export default function OpenUIBlock({ source, fallback, blockIndex }: { source: 
   return (
     <Boundary fallback={fallback}>
       <div data-md={`\`\`\`openui\n${source}\n\`\`\``} className="openui-block">
+        <WidgetFence.Provider value={blockIndex}>
         <Renderer response={source} library={library} onAction={onAction} onError={onError}
           initialState={initialState} onStateUpdate={onStateUpdate} onParseResult={onParseResult}
           publishObservability={false}>
           {ready && <Renderer.Content />}
         </Renderer>
+        </WidgetFence.Provider>
       </div>
     </Boundary>
   );

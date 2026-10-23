@@ -129,6 +129,9 @@ pub fn reconcile(app: &AppHandle) {
     let _ = app;
     tauri::async_runtime::spawn(async {
         if let Ok(pool) = crate::db::store::open_pool().await {
+            if let Err(error) = super::proposal_jobs::reconcile(&pool).await {
+                elog!("[oculus] proposal jobs: {error}");
+            }
             if let Ok(r) = store::reconcile(&pool).await {
                 if r.threads > 0 || r.tools > 0 {
                     elog!(

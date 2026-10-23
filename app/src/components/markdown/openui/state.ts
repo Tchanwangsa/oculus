@@ -4,3 +4,4 @@ export const WidgetRow = createContext<{ thread: number; row: number } | null>(n
 export const useWidgetRow = () => useContext(WidgetRow);
 
 export const WidgetIndex = createContext(0);
+export const WidgetFence = createContext(0);
