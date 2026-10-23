@@ -27,6 +27,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
 | Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
+| Interactive reply fences, study widgets and their persisted progress | `app/src/components/markdown/openui/`, `app/src/stores/chat/widgetStore.ts` |
 | Model picker and its catalogue hook | `app/src/components/harness/composer/ModelPicker.tsx`, `app/src/hooks/agents/useProviderModels.ts` |
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/integrations/OpencodePage.tsx`, `app/src/components/settings/agents/opencode/`, `app/src/components/settings/agents/OpencodeConnectDialog.tsx`, `app/src/lib/harness/opencodeCatalogue.ts` |
 | Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db/jobModels.ts`, `app/src/components/settings/jobs/`, `app/src/hooks/agents/useJobAudit.ts` |
@@ -380,6 +381,34 @@ still update the picker.
 `Harness::name_thread` runs one on the `threadNaming` job's model;
 `harness::store::claim_naming` flips `title_generated` atomically so only one turn pays
 and a failure never retries; `clean_title` rejects prose.
+
+## OpenUI fences draw interactive study widgets
+
+`MD_COMPONENTS.pre` catches `openui` and `openui-lang` fences beside mermaid.
+`OpenUIFence` waits 150 ms after the source stops changing before loading the
+runtime. The library in `app/src/components/markdown/openui/library.ts` admits
+Flashcards, Quiz, Steps, Explorer (sliders, values and charts), PageRef and Ask,
+with Stack and Text for composition. Any parse error, unresolved reference,
+incomplete source or runtime failure keeps the ordinary code fence visible.
+Widgets render only after the runtime commits its initial state, so computed
+values start with the declared defaults.
+
+`remarkWidgets` numbers fences in syntax order. A committed reply supplies its
+thread and row through `WidgetRow`; `widgetStore` keeps the runtime snapshot
+under that thread/row/fence key in localStorage (`oculus.chatWidgets`), as
+composer drafts do. Flashcard progress, quiz answers and scores, revealed
+steps and slider bindings all use the runtime state. The saved program must
+match before hydration; changed source starts fresh. Delete and rewind prune
+the corresponding snapshots. A streaming tail has no committed row yet and
+does not persist progress.
+
+`Timeline` supplies `AssistantSend` from its follow-up action, so an Ask
+button's `@ToAssistant` uses the same thread in Chat, Studio and the lecture
+dock. Ask is hidden while running and outside a conversation. `PageRef` uses
+the ordinary citation chips and file-opening path. The agent learns the fence
+grammar from `app/src-tauri/templates/skills/oculus-ui/SKILL.md`, registered in
+`app/src-tauri/src/agents/docs.rs` and named in the harness brief. Widget primitives follow the
+[UI tokens](./ui.md#study-widgets-use-the-replys-primitives-and-semantic-tokens).
 
 ## The timeline mounts its newest rows and holds the view still
 

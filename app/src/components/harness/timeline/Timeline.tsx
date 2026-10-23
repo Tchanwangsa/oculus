@@ -13,6 +13,7 @@ import type { PendingActions, QuestionActions } from "./types";
 import { useRowWindow } from "./useRowWindow";
 import { useRowVisibility } from "./useRowVisibility";
 import { RetainedRow } from "./RetainedRow";
+import { AssistantSend } from "@/components/markdown/openui/assistant";
 
 /** A committed row: an anchor for `useStickToBottom`, with off-screen layout
  *  skipped by `useRowVisibility`. Padding on all edges preserves focus rings. */
@@ -74,49 +75,51 @@ export const Timeline = memo(function Timeline({
   useRowVisibility(rootRef, threadId);
   const shown = start ? rows.slice(start) : rows;
   return (
-    <div
-      ref={rootRef}
-      {...{ [EXPANDABLE]: "" }}
-      className="flex min-w-0 flex-col gap-2"
-      onCopy={copyAsMarkdown}
-      onDragStart={dragAsMarkdown}
-    >
-      {start > 0 && <div ref={sentinelRef} aria-hidden className="h-px shrink-0" />}
-      {shown.map((r) =>
-        r.kind === "bundle" ? (
-          <RetainedRow key={r.id} className={ROW}>
-            <Bundle items={r.items} />
-          </RetainedRow>
-        ) : (
-          <RetainedRow key={r.item.id} className={ROW} questionId={r.item.kind === "user" ? r.item.id : undefined}>
-            <Item
-              item={r.item}
-              dim={r.dim}
-              actions={questions}
-              asked={asked.get(r.item.id)}
-              onSignIn={setSignIn}
-              latest={r.item.id === latestPermission}
-            />
-          </RetainedRow>
-        ),
-      )}
-      {threadId != null && <ContextDrift threadId={threadId} />}
-      {threadId != null && <LiveTail threadId={threadId} />}
-      {threadId != null && pending && <Pending threadId={threadId} actions={pending} />}
-      {signIn && (
-        <SignInDialog
-          provider={signIn}
-          run={run.run?.provider === signIn ? run.run : null}
-          onStart={() => run.start(signIn)}
-          onCode={(code) => run.submitCode(code)}
-          onCancel={() => run.cancel()}
-          onClose={() => {
-            // Clear a finished run; keep one in flight so reopening resumes it.
-            if (run.run?.result) run.clear();
-            setSignIn(null);
-          }}
-        />
-      )}
-    </div>
+    <AssistantSend.Provider value={running ? null : questions?.followUp ?? null}>
+      <div
+        ref={rootRef}
+        {...{ [EXPANDABLE]: "" }}
+        className="flex min-w-0 flex-col gap-2"
+        onCopy={copyAsMarkdown}
+        onDragStart={dragAsMarkdown}
+      >
+        {start > 0 && <div ref={sentinelRef} aria-hidden className="h-px shrink-0" />}
+        {shown.map((r) =>
+          r.kind === "bundle" ? (
+            <RetainedRow key={r.id} className={ROW}>
+              <Bundle items={r.items} />
+            </RetainedRow>
+          ) : (
+            <RetainedRow key={r.item.id} className={ROW} questionId={r.item.kind === "user" ? r.item.id : undefined}>
+              <Item
+                item={r.item}
+                dim={r.dim}
+                actions={questions}
+                asked={asked.get(r.item.id)}
+                onSignIn={setSignIn}
+                latest={r.item.id === latestPermission}
+              />
+            </RetainedRow>
+          ),
+        )}
+        {threadId != null && <ContextDrift threadId={threadId} />}
+        {threadId != null && <LiveTail threadId={threadId} />}
+        {threadId != null && pending && <Pending threadId={threadId} actions={pending} />}
+        {signIn && (
+          <SignInDialog
+            provider={signIn}
+            run={run.run?.provider === signIn ? run.run : null}
+            onStart={() => run.start(signIn)}
+            onCode={(code) => run.submitCode(code)}
+            onCancel={() => run.cancel()}
+            onClose={() => {
+              // Clear a finished run; keep one in flight so reopening resumes it.
+              if (run.run?.result) run.clear();
+              setSignIn(null);
+            }}
+          />
+        )}
+      </div>
+    </AssistantSend.Provider>
   );
 });

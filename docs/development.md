@@ -569,6 +569,11 @@ rebuild. Which files are overwritten versus merged is in
 
 ## A UI change is verified by screenshot, not by `tsc`
 
+The OpenUI runtime packages are pinned at 1.0.1. `@openuidev/lang-core` ships a
+PostHog install-telemetry postinstall; keep it out of `trustedDependencies`.
+Bun blocks it by default. Use `bun install --ignore-scripts` when installing
+these dependencies; the widgets require no install script.
+
 - Frontend type-check and bundle: `cd app && bun run build`, which ends by
   building the device-sharing companion page into `app/dist/companion/`
   ([frontend.md](./frontend.md#the-companion-page-is-a-second-entry)); editor, shared

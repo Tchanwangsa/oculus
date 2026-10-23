@@ -11,6 +11,8 @@ import { FileChip } from "@/components/markdown/FileChip";
 import { HighlightedCode } from "@/components/markdown/HighlightedCode";
 import { ReferenceLink } from "@/components/markdown/ReferenceLink";
 import { Mermaid } from "@/components/markdown/Mermaid";
+import { OPENUI_LANGS, OpenUIFence } from "@/components/markdown/openui/OpenUIFence";
+import { remarkWidgets } from "@/components/markdown/openui/remarkWidgets";
 import { OutputEmbed, embedKind } from "@/components/markdown/OutputEmbed";
 import { attachmentPath, attachmentSrc } from "@/lib/harness/attachments";
 import { useDataDir } from "@/hooks/backend/useDataDir";
@@ -77,10 +79,15 @@ export function TerminalLine({ lines, className }: { lines: string[]; className?
  *  trailing newline is dropped — some mermaid grammars read it as an empty
  *  statement. */
 function mermaidSource(children: React.ReactNode): string | null {
+  return fenceSource(children, /(^|\s)language-mermaid(\s|$)/);
+}
+
+/** The source of the fence a `<pre>` wraps when its tag matches `lang`. */
+function fenceSource(children: React.ReactNode, lang: RegExp): string | null {
   const el = Array.isArray(children) ? children.find(isValidElement) : children;
   if (!isValidElement(el)) return null;
   const props = el.props as { className?: string; children?: React.ReactNode };
-  if (!/(^|\s)language-mermaid(\s|$)/.test(props.className ?? "")) return null;
+  if (!lang.test(props.className ?? "")) return null;
   const source = String(props.children ?? "").replace(/\n+$/, "");
   return source.trim() ? source : null;
 }
@@ -200,14 +207,20 @@ export const MD_COMPONENTS: Components = {
   code: codeRenderer(true),
   // Mermaid is caught at `pre`, not `code`: inside a `<pre>`, `white-space:
   // pre` renders the gaps in mermaid's SVG. `Mermaid` falls back to the `<pre>`.
+  // A ```openui fence is a study widget (`openui/OpenUIFence.tsx`), caught
+  // here for the same reason; it too falls back to the `<pre>`.
   pre: ({ children, ...p }: any) => {
-    const chart = mermaidSource(children);
     const block = (
       <pre className="my-3" {...p}>
         {children}
       </pre>
     );
-    return chart ? <Mermaid code={chart}>{block}</Mermaid> : block;
+    const chart = mermaidSource(children);
+    if (chart) return <Mermaid code={chart}>{block}</Mermaid>;
+    const widget = fenceSource(children, OPENUI_LANGS);
+    const el = Array.isArray(children) ? children.find(isValidElement) : children;
+    const index = isValidElement(el) ? Number((el.props as Record<string, unknown>)["data-widget-index"] ?? 0) : 0;
+    return widget ? <OpenUIFence source={widget} blockIndex={index}>{block}</OpenUIFence> : block;
   },
   hr: (p: any) => <hr className="my-5 border-border" {...p} />,
   img: MdImage,
@@ -253,8 +266,8 @@ const isTaskList = (className: unknown) =>
   typeof className === "string" && className.split(" ").includes("contains-task-list");
 
 /** Hoisted for stable array identity across re-renders. */
-const PLAIN = [remarkGfm, remarkProsePaths];
-const WITH_MATH = [remarkGfm, remarkMath, remarkProsePaths];
+const PLAIN = [remarkGfm, remarkProsePaths, remarkWidgets];
+const WITH_MATH = [remarkGfm, remarkMath, remarkProsePaths, remarkWidgets];
 const MATHS = [rehypeMaths];
 const NO_PLUGINS: never[] = [];
 
