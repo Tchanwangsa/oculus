@@ -7,7 +7,7 @@ Read this before any UI work.
 
 | Piece | Location |
 | --- | --- |
-| Tokens, base resets, utilities (`page-scroll`, `skip-offscreen`, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
+| Tokens, base resets, utilities (`page-scroll`, `skip-offscreen`, `text-shimmer` for text still at work, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
 | Themes, appearance prefs and the frame | `app/src/lib/ui/themes/` (`samplesLight.ts`, `samplesDark.ts` for the palettes, `derive.ts` for the tokens, `store.ts` for the prefs) |
 | Settings → Appearance: mode, theme cards, accent, window frame, code font | `app/src/pages/settings/AppearancePage.tsx`, `app/src/components/settings/appearance/` |
 | Platform detection and shortcut labels | `app/src/lib/platform.ts` |

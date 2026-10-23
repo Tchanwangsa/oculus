@@ -25,7 +25,7 @@ type HarnessEvent =
   | { type: "assistant_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "assistant_message"; text: string }
-  | { type: "thinking"; text: string }
+  | { type: "thinking"; text: string; ms?: number | null }
   | { type: "tool_started"; id: string; kind: ToolKind; name: string; title: string; input: unknown }
   | { type: "tool_output_delta"; id: string; text: string }
   | { type: "tool_finished"; id: string; ok: boolean; output: string; title?: string | null }

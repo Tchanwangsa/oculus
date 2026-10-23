@@ -7,6 +7,7 @@ use crate::harness::{jobs, opencode, store};
 use crate::harness::{Harness, HarnessEvent, Provider, Queue};
 
 use super::send::dispatch;
+use super::thought_clock::ThoughtClock;
 use super::{sink_for, Envelope, HarnessState};
 
 /// One consumer thread folds every event, from every thread, in order:
@@ -26,7 +27,9 @@ pub fn init(app: &AppHandle) -> HarnessState {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let mut pool: Option<SqlitePool> = None;
-        for (thread_id, provider, ev) in rx {
+        let mut clock = ThoughtClock::default();
+        for (thread_id, provider, mut ev) in rx {
+            clock.observe(thread_id, &mut ev);
             if pool.is_none() {
                 pool = rt.block_on(crate::db::store::open_pool()).ok();
             }

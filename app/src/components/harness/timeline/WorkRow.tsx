@@ -1,30 +1,42 @@
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
-  Brain,
   BookOpen,
+  BookmarkSimple,
+  CalendarBlank,
   CaretRight,
+  CheckSquare,
   CircleNotch,
   FileText,
+  FilmSlate,
+  FolderSimple,
   Globe,
+  Kanban,
   ListChecks,
   MagnifyingGlass,
   PencilSimpleLine,
   SignIn,
+  Tag,
   Terminal,
   UsersThree,
+  VideoCamera,
   Warning,
   Wrench,
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { CodeText } from "@/components/markdown/MdComponents";
+import { CodeText, CompactMd } from "@/components/markdown/MdComponents";
 import { ImageLightbox } from "@/components/ui/lightbox/Lightbox";
 import { isImagePath } from "@/lib/harness/attachments";
 import {
+  describeOculusCli,
+  latestThought,
   parseToolMeta,
   providerLabel,
+  summariseOculusCli,
+  thoughtLabel,
   toolVerb,
+  type CliIcon,
   type HarnessItem,
   type Provider,
   type ToolKind,
@@ -48,10 +60,26 @@ export const TOOL_ICON: Record<ToolKind, Icon> = {
   other: Wrench,
 };
 
+export const CLI_ICON: Record<CliIcon, Icon> = {
+  memory: BookmarkSimple,
+  search: MagnifyingGlass,
+  file: FileText,
+  folder: FolderSimple,
+  calendar: CalendarBlank,
+  task: CheckSquare,
+  project: Kanban,
+  tag: Tag,
+  lecture: VideoCamera,
+  studio: FilmSlate,
+  library: BookOpen,
+};
+
 export function RowShell({
   icon: IconC,
   title,
   em,
+  note,
+  live,
   trailing,
   expandable,
   dim,
@@ -59,10 +87,15 @@ export function RowShell({
   children,
   defaultOpen = false,
 }: {
-  icon: Icon;
+  /** None for a reasoning row, which is words only. */
+  icon?: Icon;
   title: string;
   /** Emphasised part after the title (the command, the path). */
   em?: string;
+  /** Muted text after the title, truncating (a live thought's latest line). */
+  note?: string;
+  /** Still at work: the title shimmers. */
+  live?: boolean;
   trailing?: React.ReactNode;
   expandable: boolean;
   dim?: boolean;
@@ -101,16 +134,17 @@ export function RowShell({
             canOpen ? "cursor-pointer" : "cursor-default",
           )}
         >
-          <IconC size={14} className="shrink-0" />
-          {/* With an `em`, the verb holds and the `em` truncates; without one the
-              title is the long part and must truncate, or a narrow dock's
-              scroller gains a horizontal axis. */}
+          {IconC && <IconC size={14} className="shrink-0" />}
+          {/* With an `em` or a `note`, the verb holds and that truncates;
+              without one the title is the long part and must truncate, or a
+              narrow dock's scroller gains a horizontal axis. */}
           <span
-            className={cn("min-w-0", em ? "shrink-0" : "truncate")}
-            title={em ? undefined : title}
+            className={cn("min-w-0", em || note ? "shrink-0" : "truncate", live && "text-shimmer")}
+            title={em || note ? undefined : title}
           >
             {title}
           </span>
+          {note && <span className="min-w-0 truncate">{note}</span>}
           {em && !path && (
             <span className="min-w-0 truncate font-medium text-foreground/80" title={em}>
               {em}
@@ -211,15 +245,23 @@ export const ToolRow = memo(function ToolRow({
   const readPath =
     kind === "read" ? entries.find(([k]) => k === "file_path" || k === "path")?.[1] : undefined;
   const picture = readPath && !pictureFailed && isImagePath(readPath) ? readPath : null;
+  // An `oculus …` call says what it did ("Saved a memory"); its command
+  // stays in the detail below.
+  const cliActions = useMemo(
+    () => (kind === "oculus_cli" ? describeOculusCli(item.content ?? "") : []),
+    [kind, item.content],
+  );
+  const cli = summariseOculusCli(cliActions, done);
   return (
     <RowShell
-      icon={TOOL_ICON[kind]}
-      title={toolVerb(kind, done, meta.name)}
-      em={item.content ?? undefined}
+      icon={cli ? CLI_ICON[cli.icon] : TOOL_ICON[kind]}
+      title={cli ? cli.title : toolVerb(kind, done, meta.name)}
+      em={cli ? cli.em : (item.content ?? undefined)}
+      live={!!cli && !done}
       dim={dim && done}
       expandable={entries.length > 0 || output.length > 0}
       trailing={
-        !done ? (
+        cli && !done ? null : !done ? (
           <CircleNotch size={12} className="shrink-0 animate-spin" />
         ) : failed ? (
           <span className="shrink-0 text-[11px] text-destructive">failed</span>
@@ -252,29 +294,41 @@ export const ToolRow = memo(function ToolRow({
   );
 });
 
+/** The thought itself, opened: rendered markdown beside a hairline. */
+function Thought({ text }: { text: string }) {
+  return (
+    <div className="ml-1.5 border-l border-border pl-3">
+      <CompactMd text={text} className="md-thought leading-relaxed" />
+    </div>
+  );
+}
+
+/** A finished reasoning block: "Thought for 12s", words only. */
 export const ThinkingRow = memo(function ThinkingRow({
   text,
-  live,
+  ms,
   dim,
 }: {
   text: string;
-  live?: boolean;
+  ms: number | null;
   dim?: boolean;
 }) {
   return (
-    <RowShell
-      icon={Brain}
-      title={live ? "Thinking…" : "Thought"}
-      dim={dim}
-      expandable={text.trim().length > 0}
-      trailing={live ? <CircleNotch size={12} className="shrink-0 animate-spin" /> : null}
-    >
-      <div data-selectable className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-l border-border pl-3 text-[11.5px] leading-relaxed text-muted-foreground">
-        {text}
-      </div>
+    <RowShell title={thoughtLabel(ms)} dim={dim} expandable={text.trim().length > 0}>
+      <Thought text={text} />
     </RowShell>
   );
 });
+
+/** The block still streaming: a shimmering "Thinking" and its latest sentence.
+ *  Only `LiveTail` draws it, so it re-renders per fold, never per token. */
+export function LiveThinkingRow({ text }: { text: string }) {
+  return (
+    <RowShell title="Thinking" live note={latestThought(text)} expandable={text.trim().length > 0}>
+      <Thought text={text} />
+    </RowShell>
+  );
+}
 
 /** A turn that failed for lack of credentials: a fixable state, so `brand` and
  *  a Sign in button rather than a destructive error row. */

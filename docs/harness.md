@@ -25,6 +25,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
+| Row titles: a reasoning block's "Thought for 12s" and latest line, an `oculus …` command's "Saved a memory" | `app/src/lib/harness/thought.ts`, `app/src/lib/harness/oculusCli.ts`, `app/src-tauri/src/harness/app/thought_clock.rs` |
 | Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
 | Proposal dispatch context and confirmed jobs | `app/src-tauri/src/harness/app/proposal_context.rs`, `app/src-tauri/src/harness/app/proposal_jobs/` |
@@ -351,6 +352,19 @@ still update the picker.
 - **A row decides what truncates** (`RowShell` in `WorkRow.tsx`) — it draws at
   760px and in the dock's 300px. Both scrollers carry `overflow-x-hidden`:
   `overflow-y: auto` makes x `auto` too, and one wide row slides the thread.
+- **A reasoning row is words only.** Finished, it reads "Thought for 12s"
+  and opens to the thought as muted markdown; while it streams, `LiveTail`
+  shows a shimmering "Thinking" (`text-shimmer`) and the thought's latest
+  readable sentence (`latestThought`). The duration is the row's `meta.ms`:
+  opencode's part clock, else the consumer loop's `ThoughtClock` from the
+  block's first delta. A block with no deltas, or a row from before, reads
+  "Thought". A bundle of thoughts alone sums them.
+- **An `oculus …` row says what it did** — "Saved a memory", "Searched the
+  library for", "Moved 7 tasks to" — from `describeOculusCli`, which reads
+  the shell line (chains counted, pipes and redirects dropped) and gives each
+  command a glyph and a bundle clause ("saved 2 memories"). The command is
+  still the opened row's detail; a running one shimmers its verb. An
+  unrecognised command reads "Ran oculus" with its subcommand.
 - **A Read of a picture expands to the picture** (`ReadPicture` in
   `WorkRow.tsx`), click for the lightbox. It loads over the asset protocol, so
   only `courses/`, `lectures/` and `agents/` under the data dir show; any other

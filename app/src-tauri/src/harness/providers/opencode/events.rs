@@ -252,8 +252,14 @@ pub(super) fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<Harne
                         map.remove(&id);
                         let text = s(part, "text");
                         if !text.trim().is_empty() {
+                            // The part's own clock, in epoch milliseconds.
+                            let time = &part["time"];
+                            let ms = time["end"]
+                                .as_u64()
+                                .zip(time["start"].as_u64())
+                                .map(|(end, start)| end.saturating_sub(start));
                             out.push(if thinking {
-                                HarnessEvent::Thinking { text }
+                                HarnessEvent::Thinking { text, ms }
                             } else {
                                 HarnessEvent::AssistantMessage { text }
                             });

@@ -72,7 +72,7 @@ impl AgentPrinter {
                     );
                 }
             }
-            HarnessEvent::Thinking { text } => {
+            HarnessEvent::Thinking { text, .. } => {
                 end_line(&mut mid, &mut out);
                 let first = text.lines().next().unwrap_or("");
                 let _ = writeln!(out, "{}", paint(&format!("  thinking: {first}"), DIM));

@@ -175,7 +175,7 @@ fn folds_a_recorded_v1_reasoning_turn() {
     let thinking: Vec<&str> = events
         .iter()
         .filter_map(|e| match e {
-            HarnessEvent::Thinking { text } => Some(text.as_str()),
+            HarnessEvent::Thinking { text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect();

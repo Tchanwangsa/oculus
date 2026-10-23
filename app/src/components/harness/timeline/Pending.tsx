@@ -3,7 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { cn } from "@/lib/utils";
-import { ThinkingRow } from "./WorkRow";
+import { LiveThinkingRow } from "./WorkRow";
 import { Assistant } from "./MessageActions";
 import { QuestionBubble } from "./QuestionBubble";
 import type { PendingActions } from "./types";
@@ -21,7 +21,7 @@ export function LiveTail({ threadId }: { threadId: number }) {
   if (!thinking && !streaming && !quiet) return null;
   return (
     <div className={cn(ANCHOR_ROW, "flex flex-col gap-2")}>
-      {thinking && <ThinkingRow text={thinking} live />}
+      {thinking && <LiveThinkingRow text={thinking} />}
       {streaming && <Assistant text={streaming} />}
       {quiet && (
         <div className="mt-1 flex items-center gap-2 px-2 text-xs text-muted-foreground">

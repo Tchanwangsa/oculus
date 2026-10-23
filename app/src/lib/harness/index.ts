@@ -9,6 +9,8 @@ export * from "./models";
 export * from "./registry";
 export * from "./route";
 export * from "./meta";
+export * from "./thought";
+export * from "./oculusCli";
 export * from "./types";
 export * from "./reads";
 export * from "./commands";
