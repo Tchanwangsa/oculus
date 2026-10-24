@@ -13,6 +13,7 @@
 //! [`Field::run`] gives a typed key and Esc to `crate::shortcut` first;
 //! the commands here call [`Field::run_plain`], which never expands one.
 
+mod alignment;
 mod command_mode;
 mod delete;
 mod glue;
@@ -189,13 +190,16 @@ pub fn finish(field: &Field, source: String, target: &Target) -> Outcome {
         return Outcome::none(field);
     };
     new.set_selection(Selection::caret(caret));
-    Outcome {
-        changes: vec![diff(field.source(), new.source())],
-        field: new,
-        isolate: false,
-        rewrite: None,
-        effect: None,
-    }
+    alignment::normalize(
+        field,
+        Outcome {
+            changes: vec![diff(field.source(), new.source())],
+            field: new,
+            isolate: false,
+            rewrite: None,
+            effect: None,
+        },
+    )
 }
 
 /// The outcome of a run of commands as one: the field after the last,

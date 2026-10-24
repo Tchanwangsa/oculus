@@ -139,6 +139,51 @@ describe("the Rust field's writes", () => {
     expect(note.doc).toBe("Let $a+sinxb$ go");
   });
 
+  test("removing an alignment point writes plain rows and undoes as one edit", () => {
+    const source = String.raw`\begin{aligned}a&=b\\c&=d\\e&=f\end{aligned}`;
+    const original = "Top\n$$\n" + source + "\n$$\nEnd";
+    const note = new Note(original, original.indexOf("c&") + 2);
+    const f = new Field(note);
+    f.field = f.field.caretAt(source.indexOf("c&") + 2, true);
+    const step = f.run("backspace");
+    expect(step.isolate).toBe(true);
+    expect(f.field.source).toBe(String.raw`\begin{aligned}a&=b\end{aligned}\\c=d\\\begin{aligned}e&=f\end{aligned}`);
+    expect(f.field.source.slice(f.caret)).toStartWith("=d");
+    expect(note.doc).toContain("\\end{aligned}\\\\c=d\\\\\\begin{aligned}");
+    expect(undoDepth(note.state)).toBe(1);
+    note.undo();
+    expect(note.doc).toBe(original);
+    f.sync();
+    expect(f.field.source).toBe(source);
+    note.redo();
+    f.sync();
+    expect(f.field.source).toContain("\\end{aligned}\\\\c=d\\\\\\begin{aligned}");
+  });
+
+  test("typing &= starts display alignment and a removed point can be reinserted", () => {
+    const note = new Note("$$\na\n$$", 4);
+    const f = new Field(note);
+    f.type("&=");
+    expect(f.field.source).toBe(String.raw`\begin{aligned}a&=\end{aligned}`);
+    expect(note.doc).toContain("a&=");
+
+    const source = String.raw`\begin{aligned}a&=b\\c&=d\\e&=f\end{aligned}`;
+    const original = "$$\n" + source + "\n$$";
+    const edited = new Note(original, original.indexOf("c&") + 2);
+    const g = new Field(edited);
+    g.field = g.field.caretAt(source.indexOf("c&") + 2, true);
+    g.run("backspace");
+    const unaligned = edited.doc;
+    const step = g.run({ insert: "&" });
+    expect(step.isolate).toBe(true);
+    expect(g.field.source).toBe(source);
+    expect(edited.doc).toBe(original);
+    edited.undo();
+    expect(edited.doc).toBe(unaligned);
+    edited.redo();
+    expect(edited.doc).toBe(original);
+  });
+
   test("a matrix edit is an undo step of its own", () => {
     const note = new Note("M $($.", 4);
     const f = new Field(note);
