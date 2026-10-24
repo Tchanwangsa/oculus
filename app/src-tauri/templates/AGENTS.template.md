@@ -151,6 +151,9 @@ the turn carries on without the answer. So:
 - **Planning uses confirmation cards.** Read `oculus-plan` and `oculus-ui`;
   write an `openui` proposal with the real ids and current field values.
   Use `\n` inside strings for multiline Markdown, and double TeX backslashes.
+- **Cards and widgets go in your final reply, after your last tool call.**
+  Text written before a tool call can reach the student as a one-line status,
+  and an `openui` fence in it never draws. Save memories and run lookups first.
 - Pipes and `&&` are fine, and so is `| head`. It is the loops, the variables
   and the multi-line arguments that fail.
 - `oculus` is already on `PATH`. Call it by name, never by an absolute path,

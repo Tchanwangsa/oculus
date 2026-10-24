@@ -1086,6 +1086,7 @@ Live Task/TaskList, Deadline/Upcoming, Lecture, StudioVideo, CheatNote and Revie
 - `providers::opencode::sweep` (`strays.rs`) kills strays at startup by `SERVE_ARGS` *and* `ppid == 1` — drop either and it kills a living app's or a hand-run server.
 - Codex: `thread/start` takes `sandbox` (string), `turn/start` takes `sandboxPolicy` (object); effort is thread config; a resumed thread replays stale usage first.
 - Claude: take tool inputs from the `assistant` line, not `input_json_delta`s; `content_block_start` can carry text the deltas don't repeat.
+- Claude's API can turn text written before a tool call into a `narration` thinking block streamed as a one-line summary; the real text never reaches the app, so a card in it never draws, while the model believes it showed it. Display `updates` (the CLI's default) and `summarized` both did it. Sessions spawn with `CLAUDE_CODE_THINKING_DISPLAY_UPDATES=0`, which sends no display, and `AGENTS.template.md` and `oculus-ui` put every `openui` fence in the final reply, after the last tool call.
 - Don't cache sign-in status in Rust — a stale "signed out" after a sign-in is the wrong answer that matters.
 - The ⌘⌥B column fold tests `e.code` — ⌥B types `∫` — and `AppLayout`'s ⌘B returns early on ⌥, or one chord closes both panels.
 - Never give an agent's HTML embed `allow-same-origin` — the page would run with the app's origin and reach the Tauri IPC.
