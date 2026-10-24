@@ -311,7 +311,18 @@ cannot wait on the blur (the chat's pasted text editor,
 [harness.md](./harness.md#pasted-text-is-a-card-sent-inline));
 `scrollClassName` replaces the text scroller's 420px bound.
 
+`NoteField` mounts its CodeMirror view in a layout effect, before paint, so
+swapping prose for the field cannot expose an empty editor mount point.
+The shared `Toolbar` stays on one line at every pane width: its controls keep
+their sizes inside a horizontal scroller with `useScrollFade` edge masks.
+The scroller's scrollbar is hidden so overflow cannot change the bar's height;
+menus and tooltips remain portaled outside its mask.
+
 ## Gotchas
+
+- **Pass editor views to the toolbar through `getView`.** React's dev profiler
+  recursively inspects object props; `EditorView.observer.win` reaches sandboxed
+  frames and throws a cross-origin access error. Resolve the view only in handlers.
 
 - **Tooltip rules cannot assume the editor is their ancestor.** With
   `tooltips({ parent })` CodeMirror mounts them in a container that carries
