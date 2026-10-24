@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowCounterClockwise, CalendarBlank, Check, CheckSquare, FileText, FolderSimple, SpinnerGap, Tag } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
+import { ViewTabs } from "@/components/ui/table/ViewTabs";
 import { DEFAULT_COLUMNS } from "@/lib/planning/projects/columns";
 import { useWidgetProgress } from "../progress";
-import { Fields } from "./Fields";
+import { ProjectAttributes } from "./ProjectAttributes";
 import { Pager, dateShift, displayValue, ChangedSince } from "./ProposalParts";
 import { CreationRow, ChangeRow, NoteProposal, replaceAt, viewRows } from "./ProposalRows";
 import { Results } from "./Results";
@@ -87,6 +87,7 @@ export function ProposalCard({ kind, input }: { kind: string; input: Row }) {
   const [validation, setValidation] = useState<string>();
   const version = useProposalVersions(kind, card, () => setValidation(undefined));
   const [expanded, setExpanded] = useState(false);
+  const [tab, setTab] = useState<"attributes" | "tasks">("attributes");
   const listing = useMemo(() => key ? viewRows(kind, state, key).filter((item) => !item.row.from || Object.keys(effectiveChanges(item.row)).length > 0) : [], [kind, state, key]);
   const page = Math.min(Math.max(0, Number(progress.value) || 0), Math.max(0, Math.ceil(listing.length / 5) - 1));
   const pending = !proposal || proposal.status === "pending";
@@ -136,16 +137,20 @@ export function ProposalCard({ kind, input }: { kind: string; input: Row }) {
     <header className="flex min-w-0 items-start gap-2.5 px-4 py-3">
       <Icon size={18} className="mt-0.5 shrink-0 text-brand" />
       <div className="min-w-0 flex-1">
-        {pending && kind === "NewProject" ? <div className="font-display text-[13px] leading-7 font-semibold">Create project “<Input aria-label="Project name" disabled={disabled} value={String(state.name ?? "")} onChange={(event) => change({ ...state, name: event.target.value })} className="inline h-7 max-w-full border-0 bg-transparent p-0 text-[13px] font-semibold shadow-none" style={{ width: `${Math.max(4, String(state.name ?? "").length)}ch` }} />” with {plural(total, "task")}?</div> : <div role="heading" aria-level={4} className="font-display text-[13px] leading-relaxed font-semibold break-words">{pending ? title : resultTitle(proposal!, data.project)}</div>}
+        <div role="heading" aria-level={4} className="font-display text-[13px] leading-relaxed font-semibold break-words">{pending ? title : resultTitle(proposal!, data.project)}</div>
         {data.project?.subject != null && <p className="mt-0.5 text-xs text-muted-foreground">{String(data.project.subject)}</p>}
         {pending && <VersionControl version={version} disabled={disabled} />}
       </div>
-      {pending && total > 1 && <span className="mt-0.5 shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{count} of {total}</span>}
+      {pending && total > 1 && kind !== "NewProject" && <span className="mt-0.5 shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{count} of {total}</span>}
     </header>
     {pending ? <>
-      {kind === "NewProject" && <fieldset key={`project:${version.generation}`} disabled={disabled} className="border-t border-border-subtle px-4"><Fields row={state} names={["subject", "due", "starts", "tags", "event", "brief"]} onChange={change} /></fieldset>}
+      {kind === "NewProject" && <div className="border-b border-border-subtle px-4">
+        <ViewTabs value={tab} onChange={setTab} tabs={[{ value: "attributes", label: "Attributes" }, { value: "tasks", label: "Tasks", badge: <span className="rounded-full bg-surface px-1.5 text-[11px] tabular-nums text-muted-foreground">{count === total ? total : `${count} of ${total}`}</span> }]} />
+      </div>}
+      {kind === "NewProject" && tab === "attributes" && <ProjectAttributes key={`project:${version.generation}`} state={state} disabled={disabled} onChange={change} />}
       {kind === "NewNote" && <NoteProposal key={`note:${version.generation}`} state={state} disabled={disabled} onChange={change} />}
-      {listing.slice(page * 5, page * 5 + 5).map((item, visibleIndex, visible) => {
+      {/* Under the tab strip's own rule, the first row drops its top border. */}
+      {(kind !== "NewProject" || tab === "tasks") && <div className={cn("contents", kind === "NewProject" && "block [&>*:first-child]:border-t-0")}>{listing.slice(page * 5, page * 5 + 5).map((item, visibleIndex, visible) => {
         const live = data.live[item.row.entity ? liveKey(item.row) : String(rowId(item.row) ?? item.parent?.task)];
         const previousRows = key && card.amended ? viewRows(kind, card.amended, key) : [];
         const previous = previousRows.find((old) => (rowId(item.row) != null && liveKey(old.row) === liveKey(item.row)) || (item.row.title != null && old.row.title === item.row.title))?.row ?? previousRows.find((old) => JSON.stringify(old.path) === JSON.stringify(item.path))?.row;
@@ -154,7 +159,7 @@ export function ProposalCard({ kind, input }: { kind: string; input: Row }) {
         if (kind === "NewCheatNotes") return <CheatRow key={editorKey} row={item.row} allowed={item.allowed} previous={card.amended ? previous : undefined} topics={data.topics} disabled={disabled} onChange={edit} />;
         return kind.startsWith("New") ? <CreationRow key={editorKey} kind={kind} item={{ ...item, showParent: visibleIndex === 0 || JSON.stringify(visible[visibleIndex - 1].parentPath) !== JSON.stringify(item.parentPath) }} live={live} previous={card.amended ? previous : undefined} columns={columns(item.parent?.task != null ? live : data.project)} topics={data.topics} disabled={disabled} onChange={edit} /> : <ChangeRow key={editorKey} kind={kind} row={item.row} previous={card.amended ? previous : undefined} live={live} topics={data.topics} loaded={data.loaded} columns={columns(live)} disabled={disabled} onChange={edit} />;
       })}
-      <Pager page={page} count={total} onChange={(next) => progress.setValue(next)} />
+      <Pager page={page} count={total} onChange={(next) => progress.setValue(next)} /></div>}
     </> : <Results proposal={proposal!} />}
     {(card.error || validation || data.error) && <p role="alert" className="border-t border-border-subtle px-4 py-2 text-xs leading-relaxed text-destructive">{card.error ?? validation ?? data.error}</p>}
     <footer className={cn("flex flex-wrap items-center justify-end gap-2 border-t border-border-subtle bg-surface/40 px-4", pending ? "py-3" : "py-2")}>

@@ -28,6 +28,6 @@ export function freshColumns(): ProjectColumn[] {
  * or the default for an unfiled task (whose `column_id` is still NOT NULL and
  * names a default column id). Mirrors `board_of` in `app/src-tauri/src/db/projects/columns.rs`.
  */
-export function boardOf(project: DbProject | null | undefined): ProjectColumn[] {
+export function boardOf(project: Pick<DbProject, "columns"> | null | undefined): ProjectColumn[] {
   return project?.columns ?? freshColumns();
 }

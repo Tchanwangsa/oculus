@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { ArrowRight } from "@phosphor-icons/react";
 import { DateTimeField } from "@/components/projects/fields/DateTimeField";
+import { StatusPill } from "@/components/projects/board/StatusPill";
+import type { ProjectColumn } from "@/lib/planning/projects";
 import type { RevisionTopic } from "@/lib/revision/types";
 import { topicNames } from "./RevisionFields";
 import { cn } from "@/lib/utils";
@@ -42,17 +44,19 @@ export function CreationRow({ kind, item, live, previous, columns, topics, disab
   const events = kind === "NewEvents";
   const dateField = events ? "start" : "due";
   const changed = previous && Object.keys(row).filter((key) => key !== "included" && JSON.stringify(row[key]) !== JSON.stringify(previous[key]));
+  // The column Create would use: a subtask inherits its parent's, else the board's first.
+  const inherited = item.parent ? item.parent.task != null ? live?.column : item.parent.column : null;
+  const status = String(row.column ?? inherited ?? columns[0]?.id ?? "backlog");
   return <div className={cn("border-t border-border-subtle px-4 py-2.5", item.parent && "pl-7")}>
     {item.parent && item.showParent && <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground"><span>Under {String(parentTitle)}</span>{live?.column != null && <span className="rounded-full bg-surface px-2 py-0.5">{columns.find((column) => column.id === live.column)?.name as string ?? String(live.column)}</span>}{live?.due != null && <span>Due {displayValue(live.due, "due")}</span>}</div>}
     <div className="flex min-w-0 items-start gap-3">
       <Include title={title} checked={on} disabled={disabled || !item.allowed} onChange={(checked) => onChange({ ...row, included: checked })} />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5"><button type="button" disabled={disabled} onClick={() => setBefore(before ?? row)} className={cn("min-w-0 cursor-pointer text-left text-[13px] break-words hover:text-brand", !on && "text-muted-foreground line-through")}>{title}</button>{changed?.includes("title") && <span className="size-1.5 shrink-0 rounded-full bg-brand" aria-label="Updated title" />}</div>
+        <div className="flex items-center gap-1.5">{!events && <fieldset disabled={disabled} className="contents"><StatusPill glyphOnly project={{ columns: columns as unknown as ProjectColumn[] }} columnId={status} onPick={(column) => onChange({ ...row, column })} className="-ml-0.5" /></fieldset>}<button type="button" disabled={disabled} onClick={() => setBefore(before ?? row)} className={cn("min-w-0 cursor-pointer text-left text-[13px] break-words hover:text-brand", !on && "text-muted-foreground line-through")}>{title}</button>{changed?.includes("title") && <span className="size-1.5 shrink-0 rounded-full bg-brand" aria-label="Updated title" />}</div>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <DateTimeField allowAllDay value={typeof row[dateField] === "string" ? row[dateField] as string : null} label={events ? "Start" : "Due"} placeholder={events ? "Set start" : "No due date"} defaultTime={events ? "start" : "end"} onCommit={(value) => { if (!disabled) onChange({ ...row, [dateField]: value }); }} />
           {changed?.includes(dateField) && <span className="size-1.5 rounded-full bg-brand" aria-label={`Updated ${dateField}`} />}
           {row.estimate != null && <span className="rounded-full bg-surface px-2 py-0.5">{String(row.estimate)} min</span>}
-          {row.column != null && <span className="rounded-full bg-surface px-2 py-0.5">{columns.find((column) => column.id === row.column)?.name as string ?? String(row.column)}</span>}
           {events && row.kind != null && <span>{String(row.kind)}</span>}
           {row.subject != null && <span>{String(row.subject)}</span>}
         </div>
