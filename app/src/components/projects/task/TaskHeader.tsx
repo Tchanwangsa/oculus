@@ -31,7 +31,7 @@ export function TaskHeader({
 
   return (
     <PageHeader>
-      {panel && <SideNavCollapseToggle collapsed={panel.collapsed} onToggle={panel.toggle} />}
+      {panel && <SideNavCollapseToggle panel={panel} />}
       {!inSide && (
         <button
           type="button"

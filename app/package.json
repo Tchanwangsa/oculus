@@ -26,7 +26,8 @@
     "stage-cli": "node scripts/stage-cli.mjs",
     "docs:cli": "node scripts/gen-cli-docs.mjs",
     "studio:hashes": "node scripts/gen-starter-hashes.mjs",
-    "canvas": "node scripts/build-canvas.mjs"
+    "canvas": "node scripts/build-canvas.mjs",
+    "docs:widgets": "bun scripts/gen-widget-prompt.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -69,6 +70,7 @@
     "remark-math": "^6.0.0",
     "style-mod": "^4.1.4",
     "tailwind-merge": "^3.6.0",
+    "ts-fsrs": "5.4.2",
     "unist-util-visit-parents": "^6.0.2",
     "zod": "^4.6.7",
     "zustand": "^5.0.14"

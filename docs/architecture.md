@@ -368,7 +368,10 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
 Schema is the append-only, numbered migration list in
 `app/src-tauri/src/db/migrations.rs`; the highest `version` is the current schema.
 An applied migration's SQL, comments and whitespace included, is frozen;
-editing it fails `Database.load` with a checksum mismatch.
+editing it fails `Database.load` with a checksum mismatch, and no later
+migration runs. The plugin gives its migrations to the first load only, so
+`getDb` (`app/src/lib/db/connection.ts`) keeps a failed migration as its
+answer rather than retrying into a database without them.
 In the app the *frontend* writes the scrape tables, upserting through
 `app/src/lib/db/` as scrape events arrive. Headless, `app/src-tauri/src/db/store/` writes the
 same rows with the same SQL, so a CLI sync looks like an app sync. The CLI

@@ -54,8 +54,10 @@ pub async fn on(conn: &mut SqliteConnection, id: &str) -> Result<Proposal, Strin
         serde_json::from_str(&row.get::<String, _>("state")).map_err(|e| e.to_string())?;
     let initial: Value =
         serde_json::from_str(&row.get::<String, _>("initial_state")).map_err(|e| e.to_string())?;
-    let changes = sqlx::query("SELECT entity, entity_id, op, before, after FROM agent_changes WHERE proposal_id=?1 ORDER BY id")
-        .bind(id).fetch_all(&mut *conn).await.map_err(|e| e.to_string())?;
+    // An undone card lists what it reverted; a live one only its current writes,
+    // since an undone cheat card returns to pending and can be added again.
+    let changes = sqlx::query("SELECT entity, entity_id, op, before, after FROM agent_changes WHERE proposal_id=?1 AND (reverted_at IS NULL OR ?2='undone') ORDER BY id")
+        .bind(id).bind(row.get::<String, _>("status")).fetch_all(&mut *conn).await.map_err(|e| e.to_string())?;
     let kind: String = row.get("kind");
     let made = changes
         .iter()
@@ -67,6 +69,11 @@ pub async fn on(conn: &mut SqliteConnection, id: &str) -> Result<Proposal, Strin
                 "NewProject" => (entity == "project" || entity == "task") && op == "create",
                 "NewEvents" => entity == "event" && op == "create",
                 "NewNote" => entity == "note",
+                "NewCheatNotes" => entity == "cheat",
+                "EditItems" => matches!(
+                    entity.as_str(),
+                    "cheat" | "question" | "quiz" | "artifact" | "topic"
+                ),
                 "TaskChanges" => entity == "task",
                 "ProjectChanges" => entity == "project",
                 "TagChanges" => entity == "tag",
@@ -86,6 +93,7 @@ pub async fn on(conn: &mut SqliteConnection, id: &str) -> Result<Proposal, Strin
                 .and_then(|v| {
                     v.pointer("/row/title")
                         .or_else(|| v.pointer("/row/name"))
+                        .or_else(|| v.pointer("/row/prompt"))
                         .or_else(|| v.get("title"))
                 })
                 .and_then(Value::as_str)
@@ -219,8 +227,11 @@ pub fn kind_keys(kind: &str) -> Result<&'static [&'static str], String> {
             "name", "subject", "tasks", "due", "brief", "starts", "tags", "event", "amends",
         ],
         "NewEvents" => &["events", "amends"],
+        "NewCheatNotes" => &["notes", "amends"],
         "NewNote" => &["subject", "title", "body", "amends"],
-        "TaskChanges" | "ProjectChanges" | "EventChanges" | "TagChanges" => &["changes", "amends"],
+        "TaskChanges" | "ProjectChanges" | "EventChanges" | "TagChanges" | "EditItems" => {
+            &["changes", "amends"]
+        }
         "DeleteTasks" => &["tasks", "amends"],
         "DeleteEvents" => &["events", "amends"],
         "Sync" => &["subjects", "lectures"],

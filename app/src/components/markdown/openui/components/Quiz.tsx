@@ -1,3 +1,4 @@
+import { SaveQuestions } from "@/components/revision/SaveWidget";
 import { defineComponent } from "@openuidev/react-lang";
 import { z } from "zod/v4";
 import { CheckCircle, XCircle } from "@phosphor-icons/react";
@@ -64,8 +65,9 @@ export const Quiz = defineComponent({
       <Frame
         title={typeof props.title === "string" ? props.title : undefined}
         meta={done ? `${score} / ${total}` : `${at + 1} of ${total} · ${score} right`}
-        footer={
-          done ? (
+        footer={<>
+          <SaveQuestions items={questions.map(q=>{const options=(q.options??[]).map(o=>o.props??{});return {kind:"choice",prompt:String(q.prompt??""),answer:String(options.find(o=>o.correct===true)?.text??""),options:options.map(o=>String(o.text??""))};})}/>
+          {done ? (
             <Pill onClick={restart}>Try again</Pill>
           ) : checked ? (
             <Pill tone="primary" onClick={next}>
@@ -76,7 +78,7 @@ export const Quiz = defineComponent({
               Check
             </Pill>
           )
-        }
+        }</>}
       >
         {done ? (
           <p className="py-4 text-center text-sm text-foreground">

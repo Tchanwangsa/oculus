@@ -58,7 +58,8 @@ export function CitationLink({
   children,
 }: {
   shape: CitationShape;
-  children: ReactNode;
+  /** The chip's label; omitted, it is the file's name and page. */
+  children?: ReactNode;
 }) {
   const cite = useCitation(shape);
   const [open, lightbox] = useOpener(cite);

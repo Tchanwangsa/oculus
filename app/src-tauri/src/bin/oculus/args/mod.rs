@@ -11,6 +11,7 @@ mod memory;
 mod misc;
 mod planning;
 mod query;
+mod revision;
 mod studio;
 
 pub(crate) use lecture::*;
@@ -18,6 +19,7 @@ pub(crate) use memory::*;
 pub(crate) use misc::*;
 pub(crate) use planning::*;
 pub(crate) use query::*;
+pub(crate) use revision::*;
 pub(crate) use studio::*;
 
 #[derive(Parser)]
@@ -30,7 +32,8 @@ pub(crate) struct Cli {
     /// Print machine-readable JSON instead of formatted text
     ///
     /// Honoured by every command that prints: status, list, search, grep,
-    /// read, files, calendar, project, task, tag, keyd and studio. On failure the JSON is
+    /// read, files, calendar, project, task, tag, cheat, quiz, artifact, topic,
+    /// keyd and studio. On failure the JSON is
     /// `{"error": "..."}` on stderr and the exit code is 1.
     #[arg(long, global = true)]
     pub(crate) json: bool,
@@ -95,6 +98,26 @@ pub(crate) enum Command {
     Studio {
         #[command(subcommand)]
         action: StudioAction,
+    },
+    /// Keep condensed concepts in the Revision cheat sheet
+    Cheat {
+        #[command(subcommand)]
+        action: CheatAction,
+    },
+    /// Draft questions, inspect their due queue and assemble quizzes
+    Quiz {
+        #[command(subcommand)]
+        action: QuizAction,
+    },
+    /// Save and inspect interactive OpenUI programs in Revision
+    Artifact {
+        #[command(subcommand)]
+        action: ArtifactAction,
+    },
+    /// Shared subject topics for every kind of Revision entry
+    Topic {
+        #[command(subcommand)]
+        action: TopicAction,
     },
     Docs(DocsArgs),
     Agent(AgentArgs),

@@ -904,6 +904,24 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
             sql: include_str!("proposals/schema.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 50,
+            description: "revision notes, questions, reviews, quiz sets and artifacts",
+            sql: include_str!("revision/schema.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 51,
+            description: "shared revision topic memberships",
+            sql: include_str!("revision/topics.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 52,
+            description: "cheat sheet tags: a registry of coloured tags",
+            sql: include_str!("revision/tags.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

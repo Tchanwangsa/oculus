@@ -17,6 +17,7 @@ import {
 } from "@/lib/harness";
 import { getSubjects, type Subject } from "@/lib/db";
 import { useWidgetStore } from "./widgetStore";
+import { useProposalVersionStore } from "./proposalVersionStore";
 import { useProposalStore } from "./proposalStore";
 
 /** A thread's mid-turn streams, which are not yet rows in the database. */
@@ -204,6 +205,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   removed: (id) => {
     pending.delete(id);
     useWidgetStore.getState().prune(id);
+    useProposalVersionStore.getState().prune(id);
     useProposalStore.getState().prune(id);
     set((s) => {
       const queued = { ...s.queued };
@@ -261,6 +263,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     const { threadId, event } = env;
     if (event.type === "rewound") {
       useWidgetStore.getState().prune(threadId, event.from_item_id);
+      useProposalVersionStore.getState().prune(threadId, event.from_item_id);
       useProposalStore.getState().prune(threadId, event.from_item_id);
     }
     if (event.type === "proposal") {

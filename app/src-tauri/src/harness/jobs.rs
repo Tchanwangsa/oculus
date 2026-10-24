@@ -34,6 +34,7 @@ pub enum Job {
     DocumentSuggestions,
     /// Turns dictated speech into a readable message.
     DictationCleanup,
+    RevisionMarking,
     /// A chat agent's subagent that reads lecture material for a video
     /// (`harness::studio_agents`).
     StudioResearch,
@@ -50,6 +51,7 @@ impl Job {
             Job::ThreadNaming => "threadNaming",
             Job::DocumentSuggestions => "documentSuggestions",
             Job::DictationCleanup => "dictationCleanup",
+            Job::RevisionMarking => "revisionMarking",
             Job::StudioResearch => "studioResearch",
             Job::StudioScene => "studioScene",
         }
@@ -63,6 +65,7 @@ impl Job {
             Job::ThreadNaming => "Chat thread names",
             Job::DocumentSuggestions => "Document suggestions",
             Job::DictationCleanup => "Dictation cleanup",
+            Job::RevisionMarking => "Revision marking",
             Job::StudioResearch => "Studio research",
             Job::StudioScene => "Studio scenes",
         }
@@ -112,6 +115,7 @@ pub fn default_chain(job: Job) -> Vec<JobSelection> {
         Job::DocumentSuggestions => {
             vec![one(Provider::Claude, "claude-sonnet-5-5", Some("medium"))]
         }
+        Job::RevisionMarking => vec![one(Provider::Codex, "gpt-6-luna", Some("medium"))],
         Job::DictationCleanup => vec![one(Provider::Claude, "claude-haiku-5-5", None)],
         // Small and fast: notes from a slice of a lecture.
         Job::StudioResearch => vec![

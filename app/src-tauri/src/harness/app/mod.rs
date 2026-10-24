@@ -10,6 +10,7 @@ mod proposal_context;
 #[cfg(test)]
 mod proposal_context_tests;
 pub mod proposal_jobs;
+pub mod revision;
 mod send;
 pub mod setup;
 pub mod suggest;

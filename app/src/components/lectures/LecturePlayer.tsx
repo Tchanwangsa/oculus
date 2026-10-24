@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { CircleNotch, DownloadSimple } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { downloadLecture } from "@/stores/lectures/lectureDownloadStore";
@@ -33,6 +33,7 @@ import { VideoFrame } from "@/components/lectures/player/VideoFrame";
 
 interface LecturePlayerProps {
   lecture: Lecture;
+  startAt?: number;
   /** Fired after anything persisted changes (progress, downloads). */
   onRefresh: () => void;
 }
@@ -42,7 +43,7 @@ interface LecturePlayerProps {
  * (`lib/lectures/playback/`), with what only a lecture has — two sources, the
  * pane that owns playback, chapters, chat and downloads.
  */
-export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
+export function LecturePlayer({ lecture, onRefresh, startAt }: LecturePlayerProps) {
   const [error, setError] = useState<string | null>(null);
 
   /** Every tab stays mounted and there is one `<video>` per source app-wide, so
@@ -142,7 +143,17 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
   const { attach, currentTime, atRef, duration, seek, following, onScrollAway, onBackToLive } =
     player;
 
+  const requested = useRef<string | null>(null);
+  useEffect(() => {
+    if (!onScreen || !mainSrc || startAt == null || !Number.isFinite(startAt) || startAt < 0) return;
+    const key = `${lecture.id}:${startAt}`;
+    if (requested.current === key) return;
+    requested.current = key;
+    startRef.current = { at: startAt };
+    claimPlayback(tabId, stripTab, lecture.id);
+  }, [lecture.id, startAt, onScreen, mainSrc, tabId, stripTab]);
   const pipAspect = useSharedElement({
+    requestAt: startAt,
     lecture,
     tabId,
     stripTab,

@@ -155,6 +155,22 @@ pub(super) async fn restore(
 ) -> Result<(), String> {
     let table = super::inspect::table(entity)?;
     let n = super::inspect::numeric(entity, id)?;
+    if before.is_null() && entity == "topic" {
+        // A topic the card created stays if the student has filed more under it.
+        let used: i64 = sqlx::query_scalar(
+            "SELECT (SELECT COUNT(*) FROM revision_note_topics WHERE topic_id=?1)
+                  + (SELECT COUNT(*) FROM revision_item_topics WHERE topic_id=?1)
+                  + (SELECT COUNT(*) FROM revision_set_topics WHERE topic_id=?1)
+                  + (SELECT COUNT(*) FROM revision_artifact_topics WHERE topic_id=?1)",
+        )
+        .bind(n)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| e.to_string())?;
+        if used > 0 {
+            return Ok(());
+        }
+    }
     if before.is_null() {
         if entity == "task" {
             for table in ["task_tag_links", "task_files"] {
@@ -170,6 +186,14 @@ pub(super) async fn restore(
             .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
+        if let Some(kind) = super::inspect::revision_entity(entity) {
+            let (links, key) = kind.memberships();
+            sqlx::query(&format!("DELETE FROM {links} WHERE {key}=?1"))
+                .bind(n)
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
         return Ok(());
     }
     let row = before["row"].as_object().ok_or("invalid journal row")?;
@@ -212,6 +236,15 @@ pub(super) async fn restore(
         };
     }
     query.execute(&mut *conn).await.map_err(|e| e.to_string())?;
+    if let Some(kind) = super::inspect::revision_entity(entity) {
+        let ids = before["topic_ids"]
+            .as_array()
+            .ok_or("invalid topic snapshot")?
+            .iter()
+            .map(super::state::id)
+            .collect::<Result<Vec<_>, _>>()?;
+        crate::db::revision::topics::replace_on(conn, kind, n, &ids).await?;
+    }
     if entity == "task" {
         for (field, table, key) in [
             ("tags", "task_tag_links", "tag_id"),

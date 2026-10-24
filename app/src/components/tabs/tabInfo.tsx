@@ -15,6 +15,7 @@ import {
   Globe,
   House,
   Kanban,
+  Lightbulb,
   ListChecks,
   MusicNotes,
   Palette,
@@ -81,6 +82,7 @@ export function tabInfo(
     };
   }
   if (pathname === "/") return { title: "Home", icon: <House size={size} /> };
+  if (pathname.startsWith("/revision")) return { title: pathname.includes("/review") ? "Review" : pathname.includes("/quizzes") ? "Quizzes" : pathname.includes("/artifacts") ? "Artifacts" : "Cheat sheet", icon: <Lightbulb size={size} /> };
   if (pathname === "/new")
     return { title: "New tab", icon: <FileDashed size={size} /> };
   // Chat, project and task titles ride in `?n=` (this has no lists to look up).

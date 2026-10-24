@@ -6,6 +6,7 @@ import {
   BookOpen,
   CircleNotch,
   FilmSlate,
+  Lightbulb,
   ListChecks,
   MagnifyingGlass,
   GearSix,
@@ -129,6 +130,7 @@ function Sections() {
         indicator={anyNew ? <span className="size-1.5 rounded-full bg-brand" /> : null}
       />
     ),
+    revision: <RailItem to="/revision" icon={Lightbulb} label="Revision" />,
     studio: (
       <RailItem
         to="/studio"

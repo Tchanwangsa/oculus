@@ -1,6 +1,6 @@
 import type { ProposalState } from "@/lib/harness/proposals";
 
-export const PROPOSAL_KINDS = new Set(["NewTasks", "NewProject", "NewEvents", "NewNote", "TaskChanges", "ProjectChanges", "EventChanges", "TagChanges", "DeleteTasks", "DeleteEvents"]);
+export const PROPOSAL_KINDS = new Set(["EditItems", "NewCheatNotes", "NewTasks", "NewProject", "NewEvents", "NewNote", "TaskChanges", "ProjectChanges", "EventChanges", "TagChanges", "DeleteTasks", "DeleteEvents"]);
 export const JOB_KINDS = new Set(["Sync", "Reparse", "Transcribe", "LectureChapters", "LectureEnd", "Download"]);
 export type Row = Record<string, unknown>;
 export const object = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -22,10 +22,30 @@ export function initialProposal(kind: string, input: Row): ProposalState {
     const key = kind === "DeleteTasks" ? "tasks" : "events";
     state[key] = (state[key] as unknown[]).map((id) => ({ id, included: true }));
   }
+  if (kind === "NewCheatNotes" && Array.isArray(state.notes)) state.notes = rows(state.notes).map(sourceFromTags);
   return state;
 }
 
+const PATH = /[/\\]|\.(?:pdf|md|pptx?|docx?|txt)(?:#|$)/i;
+
+/** A library path among the tags is the entry's source passed one argument
+ * early, which Add would refuse: it becomes the source, taking the page from
+ * a label like "Lecture 17 p14" left where the path belonged. */
+export function sourceFromTags(note: Row): Row {
+  if (!Array.isArray(note.tags)) return note;
+  const paths = note.tags.filter((tag): tag is string => typeof tag === "string" && PATH.test(tag));
+  if (!paths.length) return note;
+  const tags = note.tags.filter((tag) => !paths.includes(tag as string));
+  const label = typeof note.source === "string" ? note.source : "";
+  if (label && PATH.test(label)) return { ...note, tags };
+  const page = /\b(?:p|pp|page)\.?\s*(\d+)\b/i.exec(label)?.[1];
+  const path = paths[0];
+  return { ...note, tags, source: page && !path.includes("#") ? `${path}#page=${page}` : path };
+}
+
 export function rowKey(kind: string): string | null {
+  if (kind === "EditItems") return "changes";
+  if (kind === "NewCheatNotes") return "notes";
   if (kind === "NewTasks") return "items";
   if (kind === "NewProject" || kind === "DeleteTasks") return "tasks";
   if (kind === "NewEvents" || kind === "DeleteEvents") return "events";
@@ -35,6 +55,7 @@ export function rowKey(kind: string): string | null {
 
 export const entityFor = (kind: string) => kind.includes("Project") ? "project" : kind.includes("Event") ? "event" : kind.includes("Tag") ? "tag" : "task";
 export const rowId = (row: Row) => row.id ?? row.task ?? row.tag;
+export const liveKey = (row: Row) => row.entity ? `${row.entity}:${rowId(row)}` : String(rowId(row));
 export const included = (row: Row) => row.included !== false;
 
 export function equal(a: unknown, b: unknown): boolean {
@@ -67,6 +88,13 @@ const KEYS: Record<string, string[]> = {
   EventChanges: ["title", "start", "end", "kind", "subject", "notes"],
   TagChanges: ["name", "color"],
 };
+const EDIT_KEYS: Record<string, string[]> = {
+  cheat: ["title", "body", "subject_id", "tags", "position", "topic_ids"],
+  question: ["subject_id", "kind", "prompt", "answer", "options", "tolerance", "rubric", "level", "topic", "style_ref", "status", "topic_ids"],
+  quiz: ["title", "description", "subject_id", "topic_ids"],
+  artifact: ["title", "program", "state", "subject_id", "topic_ids"],
+  topic: ["name", "description", "position"],
+};
 const DATE = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:[Tt ](?:[01]\d|2[0-3]):[0-5]\d(?::(?:[0-5]\d|60))?(?:\.\d+)?(?:[Zz]|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?$/;
 const fail = (message: string): never => { throw new Error(message); };
 const numericId = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v > 0;
@@ -88,6 +116,17 @@ function checkTask(task: Row, depth = 0) {
 export function validateProposal(kind: string, state: Row): void {
   const array = rowKey(kind);
   if (array && !Array.isArray(state[array])) fail(`${kind} requires ${array}`);
+  if (kind === "EditItems") rows(state.changes).forEach((change) => {
+    const allowed = EDIT_KEYS[String(change.entity)];
+    if (!allowed || !numericId(change.id)) fail("Invalid Revision edit target");
+    const from = object(change.from), to = object(change.to), keys = Object.keys(to);
+    if (!keys.length || !equal(Object.keys(from).sort(), [...keys].sort())) fail("Edit from and to must hold the same keys");
+    for (const key of keys) {
+      if (!allowed.includes(key)) fail(`Unknown ${change.entity} field: ${key}`);
+      if (key === "topic_ids" && [from[key], to[key]].some((ids) => !Array.isArray(ids) || !ids.every(numericId))) fail("Topics must be a list of numeric ids");
+    }
+  });
+  if (kind === "NewCheatNotes") rows(state.notes).forEach(note => { if (typeof note.title!=="string" || !note.title.trim() || typeof note.body!=="string" || !note.body.trim()) fail("Cheat entries need a title and body"); if(!strings(note.tags)) fail("Tags must be strings"); if(!strings(note.topics)) fail("Topics must be names"); });
   if (kind === "NewTasks") {
     if (!("project" in state) || state.project === undefined) fail("NewTasks requires project; use null for unfiled");
     if (state.project != null && !numericId(state.project)) fail("Invalid project id");
@@ -139,7 +178,8 @@ export function validateProposal(kind: string, state: Row): void {
   });
 }
 
-export function validateCardTree(root: unknown): void {
+/** Throws on a malformed tree; says whether it holds a proposal or job card. */
+export function validateCardTree(root: unknown): boolean {
   let count = 0;
   const visit = (node: unknown) => {
     if (Array.isArray(node)) { node.forEach(visit); return; }
@@ -157,4 +197,5 @@ export function validateCardTree(root: unknown): void {
     } else Object.values(item).forEach((value) => { if (value && typeof value === "object") visit(value); });
   };
   visit(root);
+  return count > 0;
 }

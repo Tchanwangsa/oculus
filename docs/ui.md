@@ -54,6 +54,8 @@ results. Five rows fit a page; paging retains edits and inclusion ticks.
 Subtasks group beneath their existing parent's live title, status and due
 date. A single small proposal starts as one line; its title opens the editor.
 Project creation edits the project's name in the heading.
+Proposal headings use `role="heading"` so the surrounding reply's markdown
+heading styles cannot add spacing or override the card's title type.
 
 `DateTimeField` preserves date-only values as local calendar days, without
 inventing a clock time. Proposal date pickers offer All day; turning it off
@@ -65,10 +67,15 @@ from the changes to apply.
 
 Create, Apply, Discard and Undo show errors in the card. Confirmed results
 link to the actual items and deletion results have no Open action. A valid
-amendment collapses its predecessor to Updated below and dots the changed
-fields against the student's saved card. Decided cards keep their state
+amendment collapses its predecessor to its version number and a newer-version
+link, and dots changed fields against the student's saved card. Pending cards
+offer a V1/V2 selector, Modified indicator and Reset; their snapshot and draft
+contract is in [harness.md](./harness.md#proposal-context-is-read-at-dispatch-and-confirmation-lives-in-rust).
+Decided cards keep their state
 through reloads and multiple views; their database and send contracts are in
 [harness.md](./harness.md#proposal-context-is-read-at-dispatch-and-confirmation-lives-in-rust).
+
+Revision uses these same cards and Live-mode fields for cheat entries, a focused question surface for reviews, and a widget grid for artifacts. Nothing is added to every reply or to a text selection; the agent offers entries as a card. See [revision.md](./revision.md).
 
 ## One colour, two fonts, and a floating card
 
@@ -215,10 +222,12 @@ themes are opt-in and keep the same structure.
   `SideNavSearch`, the pill search field under the header. Rows that are not
   links take its exported row classes. `SideNavShell` and `useSideNavPanel`
   own the responsive behavior ([shell.md](./shell.md#page-navigation-overlays-narrow-panes)).
-  The subject, Chat, Tasks and Studio columns are drag-resizable and fold
-  away to nothing (`useResizablePanel`, width and fold remembered) from ⌘⌥B,
-  from `SideNavCollapseToggle` at the start of the
-  page's 48px header row, beside its title, or by dragging it narrow. Labels
+  The subject, Chat, Tasks, Studio and Revision columns are drag-resizable and
+  fold away to nothing (`useResizablePanel`, width and fold remembered) from
+  ⌘⌥B, from `SideNavCollapseToggle` at the start of the
+  page's 48px header row, beside its title, or by dragging it narrow. The
+  toggle takes the panel itself; `useSideNavPanel` binds ⌘⌥B and names it in
+  the panel's `shortcut`, so every toggle's tooltip shows it. Labels
   fade as the width eases shut (`SIDE_NAV_FOLDS`). Drag samples are coalesced
   into one width update per animation frame; release applies the last sample
   even before that frame arrives. The width and fold are saved to storage

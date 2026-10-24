@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { CaretRight, CaretUpDown } from "@phosphor-icons/react";
 import { NewCountBadge } from "@/components/NewCountBadge";
@@ -31,13 +31,52 @@ export function SubjectSwitcher({
   current: Subject[];
   past: Subject[];
 }) {
+  const { pathname } = useLocation();
+  return (
+    <SubjectSwitcherMenu
+      label={displayCode(subject.code)}
+      selected={String(subject.id)}
+      current={current}
+      past={past}
+      hrefFor={(s) => switchPath(pathname, s.id)}
+      newCounts
+    />
+  );
+}
+
+/**
+ * The header's switcher: `label` as a button spanning the row that opens
+ * current subjects, then past ones folded. Without
+ * `icon` the slot stays empty for a trigger the caller draws over it. `field`
+ * draws the trigger as the pill field that sits under a column's heading.
+ */
+export function SubjectSwitcherMenu({
+  label,
+  icon,
+  selected,
+  current,
+  past,
+  hrefFor,
+  field = false,
+  newCounts = false,
+}: {
+  label: string;
+  icon?: ReactNode;
+  /** The open subject's id. */
+  selected: string;
+  current: Subject[];
+  past: Subject[];
+  hrefFor: (s: Subject) => string;
+  field?: boolean;
+  /** Each subject's unopened-file count, as the Subjects section shows it. */
+  newCounts?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const { pathname } = useLocation();
 
-  const go = (path: string) => {
+  const go = (key: string, href: string) => {
     setOpen(false);
-    navigate(path);
+    if (key !== selected) navigate(href);
   };
 
   return (
@@ -47,12 +86,26 @@ export function SubjectSwitcher({
           type="button"
           title="Switch subject"
           aria-label="Switch subject"
-          className="flex w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-2 py-1 text-left transition-colors hover:bg-sidebar-item-hover"
+          className={cn(
+            "flex w-full min-w-0 items-center overflow-hidden text-left transition-colors",
+            field
+              ? cn("h-8 gap-2 rounded-full border border-input bg-card px-3 hover:border-ring/60", SIDE_NAV_FOLDS)
+              : "gap-2.5 rounded-md px-2 py-1 hover:bg-sidebar-item-hover",
+          )}
         >
-          {/* The icon's slot; its button is drawn over it by the header. */}
-          <span aria-hidden className="size-4 shrink-0" />
-          <span className={cn("min-w-0 flex-1 truncate font-display text-[16px] font-semibold leading-none tracking-tight text-foreground", SIDE_NAV_FOLDS)}>
-            {displayCode(subject.code)}
+          <span aria-hidden className="flex size-4 shrink-0 items-center justify-center">
+            {icon}
+          </span>
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-foreground",
+              field
+                ? "text-[13px] font-medium"
+                : "font-display text-[16px] font-semibold leading-none tracking-tight",
+              SIDE_NAV_FOLDS,
+            )}
+          >
+            {label}
           </span>
           <CaretUpDown size={12} className={cn("shrink-0 text-muted-foreground/60", SIDE_NAV_FOLDS)} />
         </button>
@@ -65,11 +118,12 @@ export function SubjectSwitcher({
         className="w-(--radix-popover-trigger-width) p-1.5"
       >
         <SwitcherList
-          subject={subject}
+          selected={selected}
           current={current}
           past={past}
-          hrefFor={(s) => switchPath(pathname, s.id)}
-          onPick={(s) => (s.id === subject.id ? setOpen(false) : go(switchPath(pathname, s.id)))}
+          hrefFor={hrefFor}
+          newCounts={newCounts}
+          onPick={go}
         />
       </PopoverContent>
     </Popover>
@@ -82,41 +136,49 @@ const SWITCH_ROW_IDLE = "text-muted-foreground hover:bg-accent hover:text-foregr
 
 /** Its own component so the scroller's ref exists when the fade hook runs. */
 function SwitcherList({
-  subject,
+  selected,
   current,
   past,
   hrefFor,
+  newCounts,
   onPick,
 }: {
-  subject: Subject;
+  selected: string;
   current: Subject[];
   past: Subject[];
   hrefFor: (s: Subject) => string;
-  onPick: (s: Subject) => void;
+  newCounts: boolean;
+  onPick: (key: string, href: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollFade(scrollRef);
   const counts = useNewFilesStore((s) => s.bySubject);
   // Collapsed unless the open subject is itself a past one, so it stays visible.
-  const [pastOpen, setPastOpen] = useState(() => past.some((s) => s.id === subject.id));
+  const [pastOpen, setPastOpen] = useState(() => past.some((s) => String(s.id) === selected));
 
-  const row = (s: Subject) => {
-    const selected = s.id === subject.id;
-    return (
-      <button
-        key={s.id}
-        type="button"
-        title={displayName(s.name, s.code)}
-        data-tab-href={hrefFor(s)}
-        onClick={() => onPick(s)}
-        className={cn(SWITCH_ROW, selected ? "bg-accent text-foreground" : SWITCH_ROW_IDLE)}
-      >
-        <SubjectIcon code={s.code} size={14} />
-        <span className="min-w-0 flex-1 truncate">{displayCode(s.code)}</span>
-        <NewCountBadge count={newCountForSubject(counts, s.id)} />
-      </button>
+  const option = (key: string, label: string, title: string, icon: ReactNode, href: string, trailing?: ReactNode) => (
+    <button
+      key={key}
+      type="button"
+      title={title}
+      data-tab-href={href}
+      onClick={() => onPick(key, href)}
+      className={cn(SWITCH_ROW, key === selected ? "bg-accent text-foreground" : SWITCH_ROW_IDLE)}
+    >
+      {icon}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {trailing}
+    </button>
+  );
+  const row = (s: Subject) =>
+    option(
+      String(s.id),
+      displayCode(s.code),
+      displayName(s.name, s.code),
+      <SubjectIcon code={s.code} size={14} />,
+      hrefFor(s),
+      newCounts && <NewCountBadge count={newCountForSubject(counts, s.id)} />,
     );
-  };
 
   // `will-change` keeps the scroller composited from the start: WebKit only
   // promotes it once it overflows, which re-snaps every icon by half a pixel

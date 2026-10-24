@@ -62,7 +62,7 @@ export default function SubjectLecturePage() {
           <PaneTitle>{lecture.title}</PaneTitle>
         </PaneTrail>
       </PaneHeaderRow>
-      <LecturePlayer lecture={lecture} onRefresh={refresh} />
+      <LecturePlayer lecture={lecture} onRefresh={refresh} startAt={searchParams.has("at") ? Number(searchParams.get("at")) : undefined} />
     </div>
   );
 }

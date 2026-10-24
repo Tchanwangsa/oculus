@@ -54,6 +54,12 @@
       "description": "The Oculus coursework agent",
       "prompt": "{{PROMPT}}"
     },
+    "oculus-revision-marker": {
+      "mode": "primary", "hidden": true,
+      "description": "Marks one submitted revision answer",
+      "prompt": "{{REVISION_PROMPT}}",
+      "permission": { "*": "deny" }
+    },
     "oculus-namer": {
       "mode": "primary",
       "hidden": true,

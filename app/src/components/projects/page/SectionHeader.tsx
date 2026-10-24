@@ -1,7 +1,6 @@
 import { PageHeader, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import { useTasksPanel } from "@/layouts/TasksLayout";
-import { shortcut } from "@/lib/platform";
 
 /**
  * The Tasks/Projects pages' 48px header row: the nav column's fold toggle at
@@ -19,13 +18,7 @@ export function SectionHeader({
 
   return (
     <PageHeader>
-      {panel && (
-        <SideNavCollapseToggle
-          collapsed={panel.collapsed}
-          onToggle={panel.toggle}
-          shortcut={shortcut("mod+alt+B")}
-        />
-      )}
+      {panel && <SideNavCollapseToggle panel={panel} />}
       {title && <PaneTrail><PaneTitle>{title}</PaneTitle></PaneTrail>}
       {children}
     </PageHeader>

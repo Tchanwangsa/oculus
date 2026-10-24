@@ -21,7 +21,6 @@ import { useProjectActions } from "@/components/projects/lists/useProjectActions
 import { PageHeader } from "@/components/tabs/PaneHeader";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import { useTasksPanel } from "@/layouts/TasksLayout";
-import { shortcut } from "@/lib/platform";
 import { useProjectsStore } from "@/stores/planning/projectsStore";
 
 /** Overview ("what was this again") and Tasks ("what now"). */
@@ -124,7 +123,7 @@ export default function ProjectPage() {
 
   const titleRow = (
     <PageHeader>
-      {panel && <SideNavCollapseToggle collapsed={panel.collapsed} onToggle={panel.toggle} shortcut={shortcut("mod+alt+B")} />}
+      {panel && <SideNavCollapseToggle panel={panel} />}
       <Breadcrumb items={[...projectParents(project), { label: project.name, icon: <ProjectIcon project={project} size={14} /> }]} />
       {tab === "tasks" && <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{progress.done}/{progress.total} done</span>}
       <ProjectMenu

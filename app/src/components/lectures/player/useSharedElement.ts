@@ -15,6 +15,7 @@ import type { Layout } from "@/stores/lectures/playerPrefsStore";
 
 interface SharedElementArgs {
   lecture: Lecture;
+  requestAt?: number;
   tabId: number;
   stripTab: number;
   onScreen: boolean;
@@ -38,6 +39,7 @@ interface SharedElementArgs {
  *  picture's own aspect. */
 export function useSharedElement({
   lecture,
+  requestAt,
   tabId,
   stripTab,
   onScreen,
@@ -107,7 +109,7 @@ export function useSharedElement({
       parkLectureVideos(claim);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lecture.id, urls[1], urls[2], layout, mainSource, onScreen, adoptable, tabId, stripTab]);
+  }, [lecture.id, requestAt, urls[1], urls[2], layout, mainSource, onScreen, adoptable, tabId, stripTab]);
 
   // Unmounting paused gives playback up, so the other pane's player can take it.
   useEffect(() => () => releaseLecturePlayer(tabId), [tabId]);

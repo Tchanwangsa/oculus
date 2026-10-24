@@ -4,6 +4,32 @@ use crate::*;
 use app_lib::harness::{jobs, Provider};
 
 impl Ctx {
+    pub(crate) fn lecture_list(&self, args: &LectureListArgs) -> Result<(), String> {
+        let pool = self.db().ok_or("lectures live in the database")?;
+        let subject = args
+            .subject
+            .as_deref()
+            .map(|s| self.one_subject(&pool, s))
+            .transpose()?;
+        let rows = self.rt.block_on(lecture_list_rows(&pool, subject))?;
+        if self.json {
+            return self.emit(&rows);
+        }
+        if rows.is_empty() {
+            println!("no lectures on record");
+        }
+        for row in rows {
+            println!(
+                "{}  {}  {}  {}",
+                row.id,
+                row.subject_code.as_deref().unwrap_or("unknown subject"),
+                clock(row.duration_seconds.max(0) as u32),
+                row.title
+            );
+        }
+        Ok(())
+    }
+
     /// Topic-change candidates from the recording; nothing stored unless
     /// `--frames`. See `app_lib::lectures::chapters`.
     pub(crate) fn lecture_candidates(&self, args: &LectureCandidatesArgs) -> Result<(), String> {
@@ -513,5 +539,96 @@ impl Ctx {
             row.get("video_path"),
             row.get("transcript_path"),
         ))
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ListedLecture {
+    id: String,
+    title: String,
+    subject_id: i64,
+    subject_code: Option<String>,
+    date: String,
+    duration_seconds: i64,
+    has_video: bool,
+    has_transcript: bool,
+}
+
+async fn lecture_list_rows(
+    pool: &SqlitePool,
+    subject: Option<i64>,
+) -> Result<Vec<ListedLecture>, String> {
+    let rows = sqlx::query(
+        "SELECT l.id,l.title,l.subject_id,s.code AS subject_code,l.date,l.duration_seconds,l.video_path,l.transcript_path
+         FROM lectures l LEFT JOIN subjects s ON s.id=l.subject_id
+         WHERE (?1 IS NULL OR l.subject_id=?1) ORDER BY l.date,l.id",
+    ).bind(subject).fetch_all(pool).await.map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|row| ListedLecture {
+            id: row.get("id"),
+            title: row.get("title"),
+            subject_id: row.get("subject_id"),
+            subject_code: row.get("subject_code"),
+            date: row.get("date"),
+            duration_seconds: row.get("duration_seconds"),
+            has_video: row.get::<Option<String>, _>("video_path").is_some(),
+            has_transcript: row.get::<Option<String>, _>("transcript_path").is_some(),
+        })
+        .collect())
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn lecture_list_preserves_full_ids_and_filters_subject_without_media() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::raw_sql("CREATE TABLE subjects (id INTEGER PRIMARY KEY,code TEXT); CREATE TABLE lectures (id TEXT PRIMARY KEY,subject_id INTEGER,title TEXT,date TEXT,duration_seconds INTEGER,video_path TEXT,transcript_path TEXT); INSERT INTO subjects VALUES (1,'TEST101_2026'),(2,'TEST102_2026'); INSERT INTO lectures VALUES ('lecture-full-id-a',1,'Limits','2026-10-20',3600,NULL,NULL),('lecture-full-id-b',2,'Proofs','2026-10-19',5400,'video.mp4','captions.vtt');").execute(&pool).await.unwrap();
+        let rows = lecture_list_rows(&pool, None).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, "lecture-full-id-b");
+        let rows = lecture_list_rows(&pool, Some(1)).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let json = serde_json::to_value(&rows[0]).unwrap();
+        assert_eq!(json["id"], "lecture-full-id-a");
+        assert_eq!(json["subject_code"], "TEST101_2026");
+        assert_eq!(json["duration_seconds"], 3600);
+        assert_eq!(json["has_video"], false);
+        assert_eq!(json["has_transcript"], false);
+        assert!(lecture_list_rows(&pool, Some(3)).await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn lecture_list_subject_flag_is_available_without_requiring_media() {
+        let cli = Cli::try_parse_from([
+            "oculus",
+            "--json",
+            "lecture",
+            "list",
+            "--subject",
+            "TEST101",
+        ])
+        .unwrap();
+        let Some(Command::Lecture {
+            action: LectureAction::List(args),
+        }) = cli.command
+        else {
+            panic!("expected lecture list");
+        };
+        assert_eq!(args.subject.as_deref(), Some("TEST101"));
+        assert!(crate::agent_guard::check(
+            Some(&Command::Lecture {
+                action: LectureAction::List(args)
+            }),
+            true
+        )
+        .is_ok());
+        assert!(Cli::try_parse_from(["oculus", "lecture", "list", "--general"]).is_err());
     }
 }

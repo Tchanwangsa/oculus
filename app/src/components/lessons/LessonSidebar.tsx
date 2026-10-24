@@ -66,7 +66,7 @@ export function LessonSidebar({
     >
       <div style={{ width: panel.restWidth }} className="flex h-full min-h-0 flex-col">
         <div className="flex items-start gap-1.5 px-[7px] pt-1 pb-2">
-          <SideNavCollapseToggle collapsed={collapsed} onToggle={panel.toggle} />
+          <SideNavCollapseToggle panel={panel} />
           <div className={cn("min-w-0 flex-1 pt-1.5", SIDE_NAV_FOLDS)}>
             <h2 className="text-[13px] font-semibold leading-snug text-foreground">{title}</h2>
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">

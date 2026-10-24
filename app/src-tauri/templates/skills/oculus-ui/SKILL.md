@@ -36,7 +36,7 @@ Props typed `ActionExpression` accept one @step, or Action([@steps...]) for seve
 Props marked `$binding<type>` accept a `$variable` reference for two-way binding.
 
 ### Root
-Stack(items: (Flashcards | Quiz | Steps | Explorer | Text | PageRef | Ask | NewTasks | NewProject | NewEvents | NewNote | TaskChanges | ProjectChanges | EventChanges | TagChanges | DeleteTasks | DeleteEvents | Sync | Reparse | Transcribe | LectureChapters | LectureEnd | Download)[]) — The root: study widgets top to bottom. Ask and PageRef items line up in a row.
+Stack(items: (Task | TaskList | Deadline | Upcoming | Lecture | StudioVideo | CheatNote | ReviewDue | NewCheatNotes | EditItems | Flashcards | Quiz | Steps | Explorer | Text | PageRef | Ask | NewTasks | NewProject | NewEvents | NewNote | TaskChanges | ProjectChanges | EventChanges | TagChanges | DeleteTasks | DeleteEvents | Sync | Reparse | Transcribe | LectureChapters | LectureEnd | Download)[]) — The root: study widgets top to bottom. Ask and PageRef items line up in a row.
 Text(text: string, tone?: "normal" | "muted") — A short line of markdown; $…$ for maths. Strings may be built with + from $variables.
 
 ### Recall
@@ -60,6 +60,15 @@ Chart(points: {x: number, y: number | null}[], xLabel?: string, yLabel?: string,
 - A Slider's first argument is a $variable declared with a literal default; Values and Charts compute from those $variables.
 - There is no ^ operator: write @Pow(base, exponent).
 
+### Live
+TaskList(projectId: number) — Live tasks in an existing project; read the project id from the CLI.
+Deadline(eventId: string) — A live calendar event by its exact CLI event id.
+Upcoming(subject?: number | string, days?: number) — Live upcoming calendar items for a subject id or code; null shows all subjects. Days defaults to 7.
+Lecture(id: string, at?: number) — A lecture's live title and chapter, with a link to play from at seconds. Read its id with the CLI.
+StudioVideo(slug: string) — A Studio video's live title and poster, opening its player. Read the slug from studio list.
+CheatNote(id: number) — A live cheat sheet entry by id.
+ReviewDue(subject?: string | number) — Due review count for a subject code or id, null for all.
+
 ### Links
 PageRef(path: string, page?: number, label?: string) — A link to a page of a library file, e.g. PageRef("courses/MAST10006/Lecture 4.pdf", 12, "Chain rule"); same paths you cite in prose.
 Ask(label: string, action?: ActionExpression) — A button that sends a follow-up message as the student, e.g. Ask("Harder questions", @ToAssistant("Give me five harder Big-O questions")). Without an action it sends its label.
@@ -67,11 +76,13 @@ Ask(label: string, action?: ActionExpression) — A button that sends a follow-u
 ### Create
 NewTasks(project: number | null, items: (Task | Under)[], amends?: string) — Propose creating tasks in an existing project, or null for unfiled. The student edits and confirms.
 NewProject(name: string, subject: string | null, tasks: Task[], due?: string, brief?: string, starts?: string, tags?: string[], event?: string, amends?: string) — Propose a new project and its tasks together. Nothing is written until Create.
-Task(title: string, due?: string, estimate?: number, column?: string, subtasks?: Task[], tags?: string[], body?: string, starts?: string, files?: string[]) — A new task; subtasks may nest only one level. Used only inside a creation card.
+Task(title: string | number, due?: string, estimate?: number, column?: string, subtasks?: Task[], tags?: string[], body?: string, starts?: string, files?: string[]) — Task(numericId) shows a live task. Task(title, due, ...) describes a new task inside a creation card; subtasks nest one level.
 Under(task: number, subtasks: Task[]) — New subtasks grouped under an existing task; only in NewTasks.
 NewEvents(events: Event[], amends?: string) — Propose the student's own calendar events, confirmed together.
 Event(title: string, start: string, end?: string, kind?: "note" | "due" | "class", subject?: string, notes?: string) — A proposed calendar event. A study session uses kind class and an end. Other kinds cannot have an end.
 NewNote(subject: string, title: string, body: string, amends?: string) — Propose a note in a subject, with its complete markdown body.
+NewCheatNotes(notes: CheatEntry[], amends?: string) — Propose condensed definitions, formulas or examples for the cheat sheet. The student edits and clicks Add.
+CheatEntry(title: string, body: string, subject?: string, tags?: string[], source?: string, topics?: string[]) — A condensed cheat sheet entry, used inside NewCheatNotes. subject is a subject code; null files it under the thread's subject. topics are topic names in that subject: reuse an existing name or give a new one, which is created when the student clicks Add. The topic carries the grouping, so never prefix the title with it. tags are one or two names from `oculus cheat tags` (such as Definition, Formula, Theorem, Method, Worked example, Note), spelled as listed; a new name joins the registry, so add one only when none fits, and never a path. source is the library path the entry came from, with #page=N for a PDF page.
 - Use one proposal per openui fence. Nothing is written until the student clicks Create.
 - Look up existing ids in the CLI; never guess. Optional arguments may be null to skip a middle argument.
 - amends is the app's pending card id from Cards in this thread, always the last argument.
@@ -86,6 +97,8 @@ NewTag(name: string, color: "slate" | "indigo" | "green" | "amber" | "rose" | "p
 DeleteTag(tag: number) — Remove a shared tag by id, including its links on tasks and projects.
 DeleteTasks(tasks: number[], amends?: string) — Propose deleting tasks and their subtasks; Undo restores them if nothing has changed.
 DeleteEvents(events: string[], amends?: string) — Propose deleting only the student's local_<id> calendar events.
+EditItems(changes: Edit[], amends?: string) — Edit existing Revision entries, questions, quizzes, artifacts or topics together. Uses the same guarded from/to editing flow for content and topic assignments.
+Edit(entity: "cheat" | "question" | "quiz" | "artifact" | "topic", id: number, from: Record<string, any>, to: Record<string, any>) — An ordinary Revision edit: entity, existing id, exact current fields, and replacements. topic_ids assigns shared topic buckets; [] selects Unsorted.
 - Change(id, from, to) uses the same keys in from and to. Null clears a field.
 - Task keys: title, body, due, starts, estimate, tags, files, column, project. Project keys: name, subject, due, starts, brief, tags, event, status. Event keys: title, start, end, kind, subject, notes. Tag keys: name, color.
 - Only local_<id> events may be changed/deleted; Canvas events are read-only.
@@ -233,6 +246,7 @@ Before finishing, walk your output and verify:
 - Take facts from the student's own library when you can, and point to the page with PageRef using the same path you would cite in prose.
 - $variables are only for Explorer: declare each with a literal number default, e.g. `$rate = 5`, and bind it as a Slider's first argument.
 - Ask buttons are optional follow-ups the student may want next, phrased as the student ("Quiz me on the ones I missed"). At most two.
+- Task(number) reads a live existing task; Task(string, ...) describes a new task inside a proposal. Read ids with task list, lecture list and studio list; never guess. After explaining a concept, offer condensed CheatEntry items in NewCheatNotes, never the entire reply or task/sync chatter.
 - Never use a component or @function not listed here.
 - Optional arguments may be null to skip one in the middle. Project/task/tag ids are numbers, subjects are course code strings or null for personal, calendar ids are strings; only local_<id> events may be changed or deleted. Look up existing ids through the CLI, never guess.
 - Dates are ISO 8601; estimates are whole minutes. Tags are arrays of names. Task subtasks nest only one level. Event kind defaults to note; only class may have an end.

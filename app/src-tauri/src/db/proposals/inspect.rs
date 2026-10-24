@@ -7,6 +7,11 @@ pub(super) fn table(entity: &str) -> Result<&'static str, String> {
         "project" => "projects",
         "tag" => "task_tags",
         "event" => "local_events",
+        "cheat" => "revision_notes",
+        "question" => "revision_items",
+        "quiz" => "revision_sets",
+        "artifact" => "revision_artifacts",
+        "topic" => "revision_topics",
         _ => return Err("unknown proposal entity".into()),
     })
 }
@@ -75,6 +80,9 @@ pub(super) async fn snapshot(
         return Ok(Value::Null);
     };
     let mut result = json!({"row":raw(&row)?});
+    if let Some(kind) = revision_entity(entity) {
+        result["topic_ids"] = json!(crate::db::revision::topics::ids_on(conn, kind, n).await?);
+    }
     if entity == "task" {
         result["tags"] = raw_rows(
             conn,
@@ -176,6 +184,15 @@ pub(super) async fn current(
         return Ok(Value::Null);
     }
     let mut row = snap["row"].clone();
+    if revision_entity(entity).is_some() {
+        row["topic_ids"] = snap["topic_ids"].clone();
+        for key in ["tags", "options", "rubric", "topic", "state"] {
+            if let Some(value) = row.get(key).and_then(Value::as_str) {
+                let decoded: Value = serde_json::from_str(value).map_err(|e| e.to_string())?;
+                row[key] = decoded;
+            }
+        }
+    }
     let n = numeric(entity, id)?;
     if entity == "task" {
         for (name, column) in [
@@ -232,4 +249,15 @@ pub(super) async fn current(
         };
     }
     Ok(row)
+}
+
+pub(super) fn revision_entity(entity: &str) -> Option<crate::db::revision::Entity> {
+    use crate::db::revision::Entity;
+    match entity {
+        "cheat" => Some(Entity::Note),
+        "question" => Some(Entity::Item),
+        "quiz" => Some(Entity::Set),
+        "artifact" => Some(Entity::Artifact),
+        _ => None,
+    }
 }

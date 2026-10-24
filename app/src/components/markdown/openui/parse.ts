@@ -7,7 +7,7 @@ import { validateCardTree } from "./proposals/model";
 let parser: ReturnType<typeof createParser> | null = null;
 
 export type Verdict =
-  | { ok: true; result: ParseResult }
+  | { ok: true; result: ParseResult; card: boolean }
   | { ok: false; reason: "empty" | "incomplete" | "invalid"; errors: string[]; result: ParseResult | null };
 
 /**
@@ -35,7 +35,8 @@ export function parseProgram(source: string): Verdict {
       result,
     };
   if (!result.root && !result.rootExpression) return { ok: false, reason: "empty", errors: [], result };
-  try { validateCardTree(result.root); }
+  let card: boolean;
+  try { card = validateCardTree(result.root); }
   catch (error) { return { ok: false, reason: "invalid", errors: [String(error)], result }; }
-  return { ok: true, result };
+  return { ok: true, result, card };
 }

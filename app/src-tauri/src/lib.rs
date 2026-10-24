@@ -14,6 +14,7 @@ pub mod pages;
 pub mod parse;
 pub mod proposals;
 pub mod providers;
+pub mod revision;
 pub mod runtime;
 pub mod shell;
 pub mod sources;
@@ -247,6 +248,15 @@ pub fn run() {
             transcribe::dictation::dictation_status,
             transcribe::dictation::dictation_transcribe,
             harness::app::dictation::dictation_cleanup,
+            harness::app::revision::revision_mark_answer,
+            revision::revision_record_review,
+            revision::revision_save_items,
+            revision::revision_create_set,
+            revision::revision_create_entity,
+            revision::revision_update_entity,
+            revision::revision_create_topic,
+            revision::revision_update_topic,
+            revision::revision_delete_topic,
             transcribe::app::apple_speech_status,
             transcribe::app::whisper_models,
             transcribe::app::whisper_download_model,

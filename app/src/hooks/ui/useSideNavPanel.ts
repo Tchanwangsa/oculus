@@ -5,6 +5,7 @@ import { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
 import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { useNarrowBox } from "@/hooks/ui/useNarrowBox";
 import { activePane } from "@/stores/shell/tabStore";
+import { shortcut } from "@/lib/platform";
 
 /** The drawer's temporary state never overwrites the desktop width or fold. */
 export function useSideNavPanel(options: Parameters<typeof useResizablePanel>[0]) {
@@ -44,5 +45,7 @@ export function useSideNavPanel(options: Parameters<typeof useResizablePanel>[0]
     width: overlay ? (open ? desktop.restWidth : 0) : desktop.width,
     toggle,
     setCollapsed,
+    /** The fold key bound above, for the toggle's tooltip. */
+    shortcut: shortcut("mod+alt+B"),
   };
 }

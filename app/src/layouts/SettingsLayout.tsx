@@ -1,4 +1,3 @@
-import { shortcut } from "@/lib/platform";
 import { useEffect, useRef } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
@@ -70,7 +69,7 @@ export default function SettingsLayout() {
   return (
     <SideNavShell panel={panel} nav={<SettingsNav panel={panel} />}>
       <PageHeader>
-        <SideNavCollapseToggle collapsed={panel.collapsed} onToggle={panel.toggle} shortcut={shortcut("mod+alt+B")} />
+        <SideNavCollapseToggle panel={panel} />
         <PaneTitle>Settings</PaneTitle>
       </PageHeader>
 

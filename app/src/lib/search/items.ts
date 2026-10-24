@@ -2,6 +2,7 @@ import {
   ArrowsClockwise,
   CalendarBlank,
   Chat,
+  BookOpen,
   GearSix,
   Globe,
   Kanban,
@@ -27,6 +28,7 @@ import { FILTER_KEYS, filterId, kindOf, type SearchFilter } from "./filters";
 import type { IconSpec, SearchItem, SnippetPart } from "./types";
 
 export const PLACES: { label: string; path: string; icon: PhosphorIcon }[] = [
+  { label: "Revision", path: "/revision", icon: BookOpen },
   { label: "Chat", path: "/chat", icon: Chat },
   { label: "Calendar", path: "/calendar", icon: CalendarBlank },
   { label: "Projects", path: "/projects", icon: Kanban },

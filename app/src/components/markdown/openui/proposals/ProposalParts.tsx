@@ -1,4 +1,4 @@
-import { CaretLeft, CaretRight, Warning } from "@phosphor-icons/react";
+import { CaretLeft, CaretRight, Check, PencilSimple, Trash, Warning, X } from "@phosphor-icons/react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,6 +17,15 @@ export function Pager({ page, count, onChange }: { page: number; count: number; 
 
 export function Include({ title, checked, disabled, onChange }: { title: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
   return <Checkbox className="mt-1" checked={checked} disabled={disabled} aria-label={`Include ${title}`} onCheckedChange={(value) => onChange(value === true)} />;
+}
+
+export function RowActions({ title, editing, disabled, canRemove, onEdit, onSave, onCancel, onRemove }: {
+  title: string; editing: boolean; disabled: boolean; canRemove: boolean; onEdit: () => void; onSave: () => void; onCancel: () => void; onRemove: () => void;
+}) {
+  const action = (label: string, icon: React.ReactNode, onClick: () => void, off = disabled) => <Button variant="ghost" size="icon-xs" disabled={off} aria-label={`${label} ${title}`} onClick={onClick}>{icon}</Button>;
+  return <div className="flex shrink-0 items-center">
+    {editing ? <>{action("Cancel editing", <X size={14} />, onCancel)}{action("Save", <Check size={14} />, onSave)}</> : <>{action("Edit", <PencilSimple size={14} />, onEdit)}{action("Remove", <Trash size={14} />, onRemove, disabled || !canRemove)}</>}
+  </div>;
 }
 
 export function ChangedSince({ fields, live }: { fields: string[]; live: Row | null | undefined }) {

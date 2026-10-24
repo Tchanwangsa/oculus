@@ -48,7 +48,7 @@ export const Reply = memo(function Reply({
   const text = item.content ?? "";
   const retry = actions?.retry;
   return (
-    <div className="group/msg flex w-full min-w-0 flex-col">
+    <div data-revision-row={item.id} className="group/msg flex w-full min-w-0 flex-col">
       <WidgetRow.Provider value={{ thread: item.thread_id, row: item.id }}>
         <Assistant text={text} />
       </WidgetRow.Provider>

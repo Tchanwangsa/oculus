@@ -6,7 +6,8 @@ interface ProposalStore {
   drafts: Record<string, ProposalState>;
   busy: Record<string, boolean>;
   errors: Record<string, string | undefined>;
-  receive: (row: Proposal) => void;
+  /** `undone` marks the reply to Undo, which may reopen a card as pending. */
+  receive: (row: Proposal, undone?: boolean) => void;
   open: (thread: number, item: number, block: number, kind: string, state: ProposalState, amends?: string | null) => Promise<void>;
   edit: (id: string, state: ProposalState) => void;
   flush: (id: string) => Promise<void>;
@@ -33,10 +34,11 @@ export function createProposalStore(api: ProposalApi = proposalApi, delay = 300)
     const fail = (id: string, error: unknown) => set((s) => ({ errors: { ...s.errors, [id]: String(error) } }));
     return {
       rows: {}, drafts: {}, busy: {}, errors: {},
-      receive: (row) => {
+      receive: (row, undone = false) => {
         const previous = get().rows[row.id];
         if (previous && ["undone", "discarded", "superseded"].includes(previous.status) && row.status !== previous.status) return;
-        if (row.status === "pending" && previous && previous.status !== "pending") return;
+        // Undoing cheat entries reopens the card; any other late pending row is stale.
+        if (row.status === "pending" && previous && previous.status !== "pending" && !undone) return;
         const phase = (state: ProposalState) => (state.job as { phase?: string } | undefined)?.phase;
         if (previous?.status === "created" && ["complete", "error"].includes(phase(previous.state) ?? "") && phase(row.state) === "running") return;
         if (row.status !== "pending") cancel(row.id);
@@ -45,9 +47,10 @@ export function createProposalStore(api: ProposalApi = proposalApi, delay = 300)
           if (row.status !== "pending") delete drafts[row.id];
           return { rows: { ...s.rows, [row.id]: row }, drafts };
         });
-        if (previous?.status !== row.status && ["created", "undone"].includes(row.status) && typeof window !== "undefined") {
+        if (previous?.status !== row.status && (["created", "undone"].includes(row.status) || undone) && typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("oculus:projects-updated"));
           window.dispatchEvent(new CustomEvent("oculus:calendar-updated"));
+          if (row.kind === "NewCheatNotes" || row.kind === "EditItems") window.dispatchEvent(new CustomEvent("oculus:revision-updated"));
           if (row.kind === "NewNote") window.dispatchEvent(new CustomEvent("oculus:documents-changed"));
         }
       },
@@ -106,7 +109,7 @@ export function createProposalStore(api: ProposalApi = proposalApi, delay = 300)
             const generation = generations.get(row.thread_id) ?? 0;
             const state = get().drafts[id] ?? row.state;
             const next = action === "apply" ? await api.apply(id, state) : await api[action](id);
-            if ((generations.get(row.thread_id) ?? 0) === generation) get().receive(next);
+            if ((generations.get(row.thread_id) ?? 0) === generation) get().receive(next, action === "undo");
           });
         } catch (error) { fail(id, error); }
         finally { set((s) => s.rows[id] ? { busy: { ...s.busy, [id]: false } } : {}); }

@@ -39,7 +39,11 @@ pub async fn apply_in(
             .await?;
         } else {
             let mut journal = journal::Journal::default();
-            super::mutations::run(&mut tx, &row.kind, value, &mut journal).await?;
+            if row.kind == "NewCheatNotes" {
+                super::cheats::create(&mut tx, &row, value, &mut journal).await?;
+            } else {
+                super::mutations::run(&mut tx, &row.kind, value, &mut journal).await?;
+            }
             if journal.finish(&mut tx, row.thread_id, id).await? == 0 {
                 return Err("select at least one item that changes something".into());
             }
@@ -75,16 +79,27 @@ pub async fn undo(pool: &SqlitePool, id: &str) -> Result<Proposal, String> {
 pub async fn undo_in(pool: &SqlitePool, root: &Path, id: &str) -> Result<Proposal, String> {
     let (item, block) = state::key(id)?;
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let changed=sqlx::query("UPDATE chat_proposals SET status='undone',updated_at=datetime('now') WHERE item_id=?1 AND block=?2 AND status='created'").bind(item).bind(block).execute(&mut *tx).await.map_err(|e|e.to_string())?.rows_affected();
-    if changed != 1 {
-        return Err("only a created proposal can be undone".into());
-    }
-    let changes = journal::changes(&mut tx, id).await?;
+    let kind: String = sqlx::query_scalar(
+        "SELECT kind FROM chat_proposals WHERE item_id=?1 AND block=?2 AND status='created'",
+    )
+    .bind(item)
+    .bind(block)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("only a created proposal can be undone")?;
+    // Undoing cheat entries returns the card to its proposal, ready to Add again.
+    let cheats = kind == "NewCheatNotes";
+    sqlx::query("UPDATE chat_proposals SET status=?3,updated_at=datetime('now') WHERE item_id=?1 AND block=?2")
+        .bind(item).bind(block).bind(if cheats { "pending" } else { "undone" })
+        .execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    let mut changes = journal::changes(&mut tx, id).await?;
     if changes.is_empty() {
         return Err("this proposal has no reversible changes".into());
     }
     // Check every row before restoring any: tag triggers and cascades can alter
     // the next row, but cannot make an unrelated live edit safe to overwrite.
+    let mut gone = vec![];
     for change in &changes {
         let entity = change["entity"].as_str().ok_or("invalid journal entity")?;
         let entity_id = change["id"].as_str().ok_or("invalid journal id")?;
@@ -93,25 +108,34 @@ pub async fn undo_in(pool: &SqlitePool, root: &Path, id: &str) -> Result<Proposa
         } else {
             inspect::snapshot(&mut tx, entity, entity_id).await?
         };
+        // An added cheat entry is removed as it is now, edits and all; one the
+        // student already deleted has nothing left to undo.
+        if cheats && entity == "cheat" && change["before"].is_null() {
+            if live.is_null() {
+                gone.push(entity_id.to_owned());
+            }
+            continue;
+        }
         if live != change["after"] {
             return Err(format!(
                 "{entity} {entity_id} changed since this proposal; Undo would discard your edits"
             ));
         }
     }
+    changes.retain(|c| !(c["entity"] == "cheat" && gone.iter().any(|id| c["id"] == id.as_str())));
     let mut removed = vec![];
     let restored=async {
         // Remove creations in dependency order, then restore registry/project
         // rows before tasks and their links. The reverse journal order is kept
         // within each dependency class.
-        for entity in ["note","task","project","event","tag"] {
+        for entity in ["note","cheat","question","quiz","artifact","topic","task","project","event","tag"] {
             for c in changes.iter().filter(|c|c["entity"]==entity&&c["before"].is_null()) {
                 let id=c["id"].as_str().ok_or("invalid journal id")?;
                 if entity=="note"{removed.push(notes::remove(&mut tx,root,id,&c["after"]).await?);}
                 else {journal::restore(&mut tx,entity,id,&Value::Null).await?;}
             }
         }
-        for entity in ["tag","project","event","task"] {
+        for entity in ["tag","project","event","task","topic","cheat","question","quiz","artifact"] {
             let mut restoring:Vec<_>=changes.iter().filter(|c|c["entity"]==entity&&!c["before"].is_null()).collect();
             if entity=="task"{restoring.sort_by_key(|c|(c["before"]["row"]["parent_id"].as_i64().is_some(),c["before"]["row"]["id"].as_i64()));}
             for c in restoring {journal::restore(&mut tx,entity,c["id"].as_str().ok_or("invalid journal id")?,&c["before"]).await?;}

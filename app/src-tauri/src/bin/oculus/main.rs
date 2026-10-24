@@ -103,6 +103,7 @@ fn main() {
             TagAction::Color(a) => ctx.tag_color(&a),
         },
         Some(Command::Lecture { action }) => match action {
+            LectureAction::List(a) => ctx.lecture_list(&a),
             LectureAction::Candidates(a) => ctx.lecture_candidates(&a),
             LectureAction::Chapters(a) => ctx.lecture_chapters(&a),
             LectureAction::End(a) => ctx.lecture_end(&a),
@@ -118,6 +119,10 @@ fn main() {
         },
         Some(Command::Transcribe(args)) => ctx.transcribe(&args),
         Some(Command::Studio { action }) => ctx.studio(action),
+        Some(Command::Cheat { action }) => ctx.cheat(action),
+        Some(Command::Quiz { action }) => ctx.quiz(action),
+        Some(Command::Artifact { action }) => ctx.artifact(action),
+        Some(Command::Topic { action }) => ctx.topic(action),
         Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
     };
