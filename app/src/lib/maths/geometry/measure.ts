@@ -57,6 +57,10 @@ export function measure(layout: Layout, field: FieldShape): Measured {
   for (let id = 0; id < n; id++) {
     const o = field.stops[id];
     const slot = field.slots[field.stopSlots[id]];
+    if (slot.transparent) {
+      out.x[id] = out.top[id] = out.bottom[id] = NaN;
+      continue;
+    }
     let before: MappedBox | null = null;
     let after: MappedBox | null = null;
     let marker: MappedBox | null = null;

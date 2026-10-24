@@ -4,7 +4,7 @@
 use super::{select::widen, template::place};
 use crate::{
     field::{Direction, Effect, Field, Outcome, Selection},
-    slot::StopId,
+    slot::{SlotId, SlotKind, StopId},
 };
 
 /// ← (`right` false) or → by one stop. Past the first or last stop the
@@ -19,11 +19,23 @@ pub fn horizontal(field: &Field, right: bool, extend: bool) -> Outcome {
         let caret = if right { hi } else { lo };
         return Outcome::moved(field.clone().select(Selection::caret(caret)));
     }
-    let next = if right {
+    let mut next = if right {
         stops.next(selection.head)
     } else {
         stops.prev(selection.head)
     };
+    if !extend {
+        while let Some(id) = next {
+            if !stops.slot(stops.stop(id).slot).transparent {
+                break;
+            }
+            next = if right {
+                stops.next(id)
+            } else {
+                stops.prev(id)
+            };
+        }
+    }
     match next {
         Some(head) if extend => extend_to(field, head, right),
         Some(head) => Outcome::moved(field.clone().select(Selection::caret(head))),
@@ -41,7 +53,7 @@ pub fn horizontal(field: &Field, right: bool, extend: bool) -> Outcome {
 
 /// The selection with its head moved to `head` and widened, the head
 /// going toward the end of the formula when `toward_end`.
-fn extend_to(field: &Field, head: StopId, toward_end: bool) -> Outcome {
+pub(super) fn extend_to(field: &Field, head: StopId, toward_end: bool) -> Outcome {
     let anchor = field.selection().anchor;
     let (anchor, head) = widen(field.stops(), anchor, head, Some(toward_end));
     let mut moved = field.clone();
@@ -55,7 +67,15 @@ pub fn home_end(field: &Field, end: bool, extend: bool) -> Outcome {
     let stops = field.stops();
     let head = field.selection().head;
     let target = if field.display() {
-        let row = stops.row_of(stops.stop(head).slot);
+        let slot = stops.stop(head).slot;
+        if let Some(target) = cell_edge(field, slot, end) {
+            return if extend {
+                extend_to(field, target, end)
+            } else {
+                Outcome::moved(field.clone().select(Selection::caret(target)))
+            };
+        }
+        let row = stops.row_of(slot);
         if end {
             stops.last_stop(row)
         } else {
@@ -70,6 +90,28 @@ pub fn home_end(field: &Field, end: bool, extend: bool) -> Outcome {
         extend_to(field, target, end)
     } else {
         Outcome::moved(field.clone().select(Selection::caret(target)))
+    }
+}
+
+/// The edge of the nearest enclosing environment row, across its columns.
+fn cell_edge(field: &Field, slot: SlotId, end: bool) -> Option<StopId> {
+    let stops = field.stops();
+    let cell = stops
+        .ancestors(slot)
+        .into_iter()
+        .find(|&id| matches!(stops.slot(id).kind, SlotKind::Cell { .. }))?;
+    let (parent, atom) = stops.owner(cell)?;
+    let SlotKind::Cell { row, .. } = stops.slot(cell).kind else {
+        return None;
+    };
+    let cells = stops.atom_slots(parent, atom);
+    let mut row_cells = cells
+        .into_iter()
+        .filter(|&id| matches!(stops.slot(id).kind, SlotKind::Cell { row: r, .. } if r == row));
+    if end {
+        row_cells.next_back().map(|id| stops.last_stop(id))
+    } else {
+        row_cells.next().map(|id| stops.first_stop(id))
     }
 }
 

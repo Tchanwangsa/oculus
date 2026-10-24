@@ -29,7 +29,7 @@ function slotBoxes(layout: Layout, field: FieldShape, measured: Measured): (Box 
 
 /** The slot's top-level row: the root it hangs from. */
 function rootOf(field: FieldShape, slot: number): number {
-  for (let p = field.slots[slot].parent; p != null; p = field.slots[p].parent) slot = p;
+  for (let p = field.slots[slot].parent; p != null && !field.slots[p].transparent; p = field.slots[p].parent) slot = p;
   return slot;
 }
 
@@ -46,16 +46,28 @@ export function stopAt(layout: Layout, field: FieldShape, measured: Measured, x:
   let gap = Infinity;
   field.slots.forEach((slot, i) => {
     const box = boxes[i];
-    if (slot.parent != null || !box) return;
+    if (slot.transparent || rootOf(field, i) !== i || !box) return;
     const d = y < box.top ? box.top - y : y > box.bottom ? y - box.bottom : 0;
     if (d < gap) [row, gap] = [i, d];
   });
   if (row < 0) return null;
+  const sameRow = (i: number) => {
+    const a = field.slots[rootOf(field, i)], b = field.slots[row];
+    return a === b || (a.kind === "cell" && b.kind === "cell" && a.parent === b.parent && a.row === b.row);
+  };
+  // Alignment columns share one visual line, including its empty padding.
   let best = row;
+  let horizontalGap = Infinity;
+  field.slots.forEach((slot, i) => {
+    const box = boxes[i];
+    if (slot.transparent || rootOf(field, i) !== i || !sameRow(i) || !box) return;
+    const d = Math.max(box.left - x, 0, x - box.right);
+    if (d < horizontalGap) [best, horizontalGap] = [i, d];
+  });
   let size = Infinity;
   field.slots.forEach((slot, i) => {
     const box = boxes[i];
-    if (slot.parent == null || !box || rootOf(field, i) !== row || !holds(box, x, y, SLOT_REACH)) return;
+    if (slot.transparent || !box || !sameRow(i) || !holds(box, x, y, SLOT_REACH)) return;
     const a = area(box);
     if (a < size) [best, size] = [i, a];
   });

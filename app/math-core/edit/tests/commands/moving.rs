@@ -137,3 +137,111 @@ fn tab_or_right_at_the_end_of_text_goes_back_to_maths() {
 fn escape_leaves() {
     check_all(&[("a|", &["esc"], "a|  => Leave(Right)")], false);
 }
+
+#[test]
+fn aligned_carets_stay_in_rows_and_command_arrows_cross_columns() {
+    check_all(
+        &[
+            (
+                r"|\begin{aligned}a&=b\\P&=\sin^{2}(\theta)\end{aligned}",
+                &["t:x"],
+                r"\begin{aligned}x|a&=b\\P&=\sin^{2}(\theta)\end{aligned}",
+            ),
+            (
+                r"\begin{aligned}a&=b\\P&=\sin^{2}(\theta|)\end{aligned}",
+                &["home"],
+                r"\begin{aligned}a&=b\\|P&=\sin^{2}(\theta)\end{aligned}",
+            ),
+            (
+                r"\begin{aligned}a&=b\\P&=\sin^{2|}(\theta)\end{aligned}",
+                &["end"],
+                r"\begin{aligned}a&=b\\P&=\sin^{2}(\theta)|\end{aligned}",
+            ),
+            (
+                r"\begin{aligned}a&=b\\P&=x|\end{aligned}",
+                &["s-home"],
+                r"\begin{aligned}a&=b\\›P&=x‹\end{aligned}",
+            ),
+            (
+                r"\begin{aligned}|a&=b\\P&=x\end{aligned}",
+                &["left"],
+                r"\begin{aligned}|a&=b\\P&=x\end{aligned}  => Leave(Left)",
+            ),
+            (
+                r"\begin{aligned}a&=b\\P&=x|\end{aligned}",
+                &["right"],
+                r"\begin{aligned}a&=b\\P&=x|\end{aligned}  => Leave(Right)",
+            ),
+            (
+                r"\begin{aligned}a&=b|\\P&=x\end{aligned}",
+                &["right"],
+                r"\begin{aligned}a&=b\\|P&=x\end{aligned}",
+            ),
+            (
+                r"\begin{aligned}a&=b\\|P&=x\end{aligned}",
+                &["left"],
+                r"\begin{aligned}a&=b|\\P&=x\end{aligned}",
+            ),
+            (
+                r"\begin{aligned}a&=b\\P&=x|\end{aligned}",
+                &["all"],
+                r"‹\begin{aligned}a&=b\\P&=x\end{aligned}›",
+            ),
+        ],
+        true,
+    );
+}
+
+#[test]
+fn option_arrows_jump_runs_structures_and_text_words() {
+    check_all(
+        &[(r"\text{สวัสดี| ไทย}", &["opt-left"], r"\text{|สวัสดี ไทย}")],
+        false,
+    );
+    check_all(
+        &[
+            (r"\frac{a{bc|}d}{e}", &["opt-left"], r"\frac{a{|bc}d}{e}"),
+            (r"\frac{a{|bc}d}{e}", &["opt-left"], r"\frac{a|{bc}d}{e}"),
+            (
+                r"\frac{a|{bc}d}{e}",
+                &["opt-left", "opt-left"],
+                r"|\frac{a{bc}d}{e}",
+            ),
+            (r"\frac{a{b|c}d}{e}", &["opt-right"], r"\frac{a{bc|}d}{e}"),
+            (r"\frac{a{bc|}d}{e}", &["opt-right"], r"\frac{a{bc}|d}{e}"),
+            (r"\frac{a{bc}d|}{e}", &["opt-right"], r"\frac{a{bc}d}{e}|"),
+            (r"x|\frac{a}{b}+cd", &["opt-right"], r"x\frac{a}{b}|+cd"),
+            ("ab+cd|", &["opt-left"], "ab+|cd"),
+            ("ab+|cd", &["opt-left"], "ab|+cd"),
+            (
+                r"\text{hello big wor|ld}",
+                &["opt-left"],
+                r"\text{hello big |world}",
+            ),
+            (
+                r"\text{hello big |world}",
+                &["opt-left"],
+                r"\text{hello |big world}",
+            ),
+            (
+                r"\text{hel|lo big world}",
+                &["opt-right"],
+                r"\text{hello| big world}",
+            ),
+            (
+                r"\text{hello| big world}",
+                &["opt-right"],
+                r"\text{hello big| world}",
+            ),
+            (r"\text{สวั|สดี ไทย}", &["opt-left"], r"\text{|สวัสดี ไทย}"),
+            (
+                r"\text{hello wor|ld}",
+                &["s-opt-left"],
+                r"\text{hello ›wor‹ld}",
+            ),
+            (r"x|\frac{ab}{c}", &["s-opt-right"], r"x‹\frac{ab}{c}›"),
+            ("ab|", &["opt-right"], "ab|  => Leave(Right)"),
+        ],
+        false,
+    );
+}

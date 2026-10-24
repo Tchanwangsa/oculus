@@ -33,6 +33,8 @@ export type FieldCommand =
   | "deleteLine"
   | { left: { extend?: boolean } }
   | { right: { extend?: boolean } }
+  | { wordLeft: { extend?: boolean } }
+  | { wordRight: { extend?: boolean } }
   /** ↑ and ↓: each stop's rendered x, by stop id; `NaN` or `null` where
    *  unmeasured. A plain array: a typed array does not stringify as one. */
   | { up: (number | null)[] }
@@ -85,6 +87,8 @@ export interface FieldSlot {
   bounds: "delimited" | "bare" | "open";
   /** A text run: a stop between every character. */
   text: boolean;
+  /** A sole alignment whose cells own the visible caret. */
+  transparent: boolean;
   /** The content's UTF-16 range, inside its braces; empty for an empty slot. */
   from: number;
   to: number;

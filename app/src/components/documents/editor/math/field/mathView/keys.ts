@@ -9,9 +9,9 @@ function commandFor(view: MathView, e: KeyboardEvent): FieldCommand | null {
   const extend = e.shiftKey;
   switch (e.key) {
     case "ArrowLeft":
-      return mod ? { home: { extend } } : { left: { extend } };
+      return mod ? { home: { extend } } : e.altKey ? { wordLeft: { extend } } : { left: { extend } };
     case "ArrowRight":
-      return mod ? { end: { extend } } : { right: { extend } };
+      return mod ? { end: { extend } } : e.altKey ? { wordRight: { extend } } : { right: { extend } };
     case "ArrowUp":
     case "ArrowDown": {
       const xs = Array.from(view.measured.x);

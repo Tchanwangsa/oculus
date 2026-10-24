@@ -46,6 +46,21 @@ impl Stops {
         out
     }
 
+    /// Redirect a caret beside a sole alignment into its first or last cell.
+    #[must_use]
+    pub fn caret_stop(&self, id: StopId) -> StopId {
+        let slot = self.stop(id).slot;
+        if !self.slot(slot).transparent {
+            return id;
+        }
+        let cells = self.atom_slots(slot, 0);
+        if self.at_slot_start(id) {
+            cells.first().map_or(id, |&cell| self.first_stop(cell))
+        } else {
+            cells.last().map_or(id, |&cell| self.last_stop(cell))
+        }
+    }
+
     /// The top-level row `slot` is in.
     #[must_use]
     pub fn row_of(&self, slot: SlotId) -> SlotId {

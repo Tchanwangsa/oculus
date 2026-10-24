@@ -86,6 +86,9 @@ pub struct Slot {
     pub bounds: Bounds,
     /// A text-mode run: a stop between every character, spaces included.
     pub text: bool,
+    /// A sole alignment environment: its cells take caret input while
+    /// the outer stops remain available for selecting the whole source.
+    pub transparent: bool,
     pub path: SlotPath,
     /// Byte range of the content: inside the braces of a group, the cell's
     /// own range, the row between its `\\`s. Empty for an empty slot.
