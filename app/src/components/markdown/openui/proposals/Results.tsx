@@ -1,16 +1,24 @@
 import { useEffect, useState } from "react";
-import { ArrowSquareOut } from "@phosphor-icons/react";
+import { ArrowSquareOut, CaretDown, CaretUp } from "@phosphor-icons/react";
+import { Button } from "@/components/ui/button";
 import { proposalInspect, type Proposal } from "@/lib/harness/proposals";
 import { navigateActive } from "@/lib/shell/tabRouters";
 import { openLibraryPath } from "@/lib/files/openFile";
 import { taskHref } from "@/components/projects/nav/taskHref";
 import { projectHref } from "@/components/projects/nav/projectHref";
 import { cn } from "@/lib/utils";
+import { StatusPill } from "@/components/projects/board/StatusPill";
+import { ProjectIcon } from "@/components/projects/icons/ProjectIcon";
+import { moveTask, type ProjectColumn } from "@/lib/planning/projects";
 import { object, type Row } from "./model";
+
+/** Rows shown before Show more; a project's results run to dozens of tasks. */
+const SHOWN = 6;
 
 export function Results({ proposal }: { proposal: Proposal }) {
   const [live, setLive] = useState<Record<string, Row | null>>({});
   const [error, setError] = useState<string>();
+  const [all, setAll] = useState(false);
   const key = JSON.stringify(proposal.made);
   useEffect(() => {
     let active = true;
@@ -52,18 +60,23 @@ export function Results({ proposal }: { proposal: Proposal }) {
     else { const to = href(item); if (to) navigateActive(to); }
   };
   return <div className="border-t border-border-subtle px-4 py-2">
-    {proposal.made.map((item, i) => {
+    {(all ? proposal.made : proposal.made.slice(0, SHOWN)).map((item, i) => {
       const key = `${item.entity}:${item.id}`;
       // A made row read back as missing was deleted since; it keeps its title, struck through.
       const gone = proposal.status === "created" && item.op !== "delete" && key in live && live[key] === null;
       const current = object(live[key]);
       const title = String(current.title ?? current.name ?? item.title ?? item.id);
+      const present = proposal.status === "created" && !gone && current.id != null;
       return <div key={`${key}:${i}`} className="flex min-w-0 items-center gap-2 py-1 text-[13px]">
+      {/* A task leads with its live status, editable as in the tasks table; a project with its icon. */}
+      {item.entity === "task" && <span className="flex size-5 shrink-0 items-center justify-center">{present && typeof current.column === "string" && <StatusPill glyphOnly project={{ columns: current.columns as ProjectColumn[] }} columnId={current.column} onPick={(column) => moveTask(Number(item.id), column, null, null).catch((e) => setError(String(e)))} />}</span>}
+      {item.entity === "project" && <span className="flex size-5 shrink-0 items-center justify-center"><ProjectIcon project={{ id: Number(item.id) }} size={15} /></span>}
       <span className={cn("min-w-0 flex-1 break-words", gone && "text-muted-foreground line-through")}>{title}</span>
       {gone && <span className="shrink-0 text-xs text-muted-foreground">Deleted</span>}
       {proposal.status === "created" && item.op !== "delete" && !gone && !proposal.kind.startsWith("Delete") && !(proposal.kind === "TagChanges" && Array.isArray(proposal.state.changes) && proposal.state.changes.some((change) => String(object(change).tag) === item.id)) && <button type="button" data-tab-href={href(item) ?? undefined} onClick={(e) => open(item, e.metaKey || e.ctrlKey)} onAuxClick={(e) => { if (e.button === 1) open(item, true); }} className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-xs text-brand hover:bg-brand-muted" aria-label={`Open ${title}`}>Open <ArrowSquareOut size={12} /></button>}
     </div>;
     })}
+    {proposal.made.length > SHOWN && <Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground" onClick={() => setAll(!all)}>{all ? <><CaretUp />Show less</> : <><CaretDown />Show {proposal.made.length - SHOWN} more</>}</Button>}
     {error && <p className="text-xs text-destructive">Could not load current links: {error}</p>}
   </div>;
 }

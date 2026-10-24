@@ -53,7 +53,14 @@ editable creation rows, before → after changes, deletions and confirmed
 results. Five rows fit a page; paging retains edits and inclusion ticks.
 Subtasks group beneath their existing parent's live title, status and due
 date. A single small proposal starts as one line; its title opens the editor.
-Project creation edits the project's name in the heading.
+Project creation splits into Attributes and Tasks tabs: Attributes holds the
+name field and the project page's property pills (subject, due, start, tags,
+with tags named against the task tag registry and created only on Create),
+then the calendar event and brief. A result list longer than six rows ends in
+Show more. A proposed task leads with the tasks table's status glyph, set to
+the column Create would use (its own, its parent's, else the board's first)
+and editable there; a created task leads with its live status, which moves
+the task as the table's glyph does, and a created project with its icon.
 Proposal headings use `role="heading"` so the surrounding reply's markdown
 heading styles cannot add spacing or override the card's title type.
 

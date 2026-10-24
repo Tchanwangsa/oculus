@@ -3,8 +3,6 @@ import { CompactMd } from "@/components/markdown/MdComponents";
 import { SourceLink } from "@/components/revision/SourceLink";
 import { BODY, PICKER, TITLE, TOPIC } from "@/components/revision/cheat/CheatEntry";
 import { CheatTags } from "@/components/revision/cheat/CheatTags";
-import { FilterPopover, FilterRow } from "@/components/ui/filter/FilterPopover";
-import { FilterList } from "@/components/ui/filter/FilterList";
 import { useSubjects } from "@/hooks/data/useSubjects";
 import { displayCode } from "@/lib/format/format";
 import type { RevisionTopic } from "@/lib/revision/types";
@@ -12,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { scrollParent } from "@/lib/ui/scrollAnchor";
 import { Include, RowActions } from "./ProposalParts";
 import { TopicNamesField } from "./RevisionFields";
+import { SubjectPicker } from "./SubjectPicker";
 import { included, type Row } from "./model";
 
 const loadField = () => import("@/components/revision/MarkdownField").then((m) => ({ default: m.MarkdownField }));
@@ -102,7 +101,7 @@ export function CheatRow({ row, allowed, previous, topics = [], disabled, onChan
           : body && <div onDoubleClick={start} className={cn("mt-1", BODY, !on && "opacity-60")}>{rendered}</div>}
         {(editing || subject || names.length > 0 || tags.length > 0 || source) && <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
           {editing ? <>
-            <SubjectChip value={subject} onChange={(code) => onChange({ ...row, subject: code })} />
+            <SubjectPicker value={subject} triggerClassName={PICKER} onChange={(code) => onChange({ ...row, subject: code })} />
             <TopicNamesField value={row.topics} topics={topics} subject={subject} triggerClassName={PICKER} onChange={(next) => onChange({ ...row, topics: next })} />
           </> : <>
             {subject && <span className={TOPIC}>{displayCode(subject)}</span>}
@@ -114,13 +113,4 @@ export function CheatRow({ row, allowed, previous, topics = [], disabled, onChan
       </div>
     </div>
   </div>;
-}
-
-function SubjectChip({ value, onChange }: { value: string | null; onChange: (code: string) => void }) {
-  const { subjects } = useSubjects();
-  const known = subjects.find((s) => s.code === value);
-  return <FilterPopover label={value ? displayCode(value) : "Subject"} active={value != null} className="w-64" triggerClassName={PICKER}>{(close) => <FilterList>
-    {value && !known && <FilterRow label={displayCode(value)} hint={value} selected onPick={close} />}
-    {subjects.map((s) => <FilterRow key={s.id} label={`${displayCode(s.code)}${s.term_name ? ` · ${s.term_name}` : ""}`} hint={s.name} selected={s.code === value} onPick={() => { onChange(s.code); close(); }} />)}
-  </FilterList>}</FilterPopover>;
 }

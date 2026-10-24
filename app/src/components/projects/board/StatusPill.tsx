@@ -34,8 +34,8 @@ export function StatusPill({
   chevron = false,
   className,
 }: {
-  /** `null` for an unfiled task (default board). */
-  project: DbProject | null;
+  /** Its board; `null` for an unfiled task (default board). */
+  project: Pick<DbProject, "columns"> | null;
   columnId: string;
   onPick: (columnId: string) => void;
   /** Only the clickable status glyph, for the table's Name cell. */

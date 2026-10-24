@@ -87,7 +87,7 @@ export function Field({ name, value, onChange, columns, subject, topics = [], su
   } else if (LISTS.has(name)) control = <ListField name={name} value={value} onChange={onChange} />;
   else if (LONG.has(name)) control = <Textarea aria-label={label} className="min-h-20 text-[13px]" value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} />;
   else control = <Input aria-label={label} className="h-8 text-[13px]" type={name === "estimate" ? "number" : "text"} min={name === "estimate" ? 0 : undefined} step={name === "estimate" ? 1 : undefined} value={Array.isArray(value) ? value.join(", ") : String(value ?? "")} onChange={(e) => onChange(LISTS.has(name) ? e.target.value.split(",").map((v) => v.trim()).filter(Boolean) : name === "estimate" ? (e.target.value === "" ? null : Number(e.target.value)) : e.target.value)} />;
-  return <label className={`flex min-w-0 flex-col gap-1 text-xs text-muted-foreground ${LONG.has(name) || name === "files" ? "col-span-full" : ""}`}><span>{label}</span>{control}</label>;
+  return <label className={`flex min-w-0 flex-col gap-1 text-xs ${LONG.has(name) || name === "files" ? "col-span-full" : ""}`}><span className="text-muted-foreground">{label}</span>{control}</label>;
 }
 
 export function Fields({ row, names, onChange, columns, topics, subjectId, entity }: { row: Row; names: string[]; onChange: (row: Row) => void; columns?: Row[]; topics?: RevisionTopic[]; subjectId?: number | null; entity?: string }) {
