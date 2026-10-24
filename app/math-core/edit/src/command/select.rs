@@ -29,8 +29,17 @@ pub fn widen(
     if a_slot == h_slot {
         return (anchor, head);
     }
-    let a_chain = stops.ancestors(a_slot);
-    let h_chain = stops.ancestors(h_slot);
+    // Alignment cells select like lines. Retain the wrapper only when
+    // an endpoint explicitly selects its outer source (such as select all).
+    let chain = |slot| {
+        stops
+            .ancestors(slot)
+            .into_iter()
+            .take_while(|&id| id == slot || !stops.slot(id).transparent)
+            .collect::<Vec<_>>()
+    };
+    let a_chain = chain(a_slot);
+    let h_chain = chain(h_slot);
     let common = a_chain
         .iter()
         .enumerate()

@@ -167,7 +167,7 @@ impl Field {
     /// error: the view edits it as TeX.
     pub fn new(source: &str, display: bool) -> Result<Self, ParseError> {
         let stops = stops(source, display)?;
-        let last = StopId(stops.stops().len() - 1);
+        let last = stops.caret_stop(StopId(stops.stops().len() - 1));
         Ok(Self {
             source: source.to_owned(),
             display,
@@ -201,7 +201,7 @@ impl Field {
             clamp(selection.head),
             None,
         );
-        self.selection = Selection { anchor, head };
+        self.set_selection(Selection { anchor, head });
         self
     }
 
@@ -230,8 +230,12 @@ impl Field {
         })
     }
 
-    pub(crate) const fn set_selection(&mut self, selection: Selection) {
-        self.selection = selection;
+    pub(crate) fn set_selection(&mut self, selection: Selection) {
+        self.selection = if selection.is_caret() {
+            Selection::caret(self.stops.caret_stop(selection.head))
+        } else {
+            selection
+        };
     }
 
     pub(crate) fn shortcut(&self) -> Option<&Run> {

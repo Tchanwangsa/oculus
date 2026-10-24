@@ -16,6 +16,8 @@ enum Json {
     DeleteLine,
     Left(Extend),
     Right(Extend),
+    WordLeft(Extend),
+    WordRight(Extend),
     /// Each stop's rendered x by stop id; `null` (what `JSON.stringify`
     /// writes for NaN) where the view has none.
     Up(Vec<Option<f64>>),
@@ -52,6 +54,8 @@ pub fn command(json: &str) -> Result<Command, String> {
         Json::DeleteLine => Command::DeleteLine,
         Json::Left(Extend { extend }) => Command::Left { extend },
         Json::Right(Extend { extend }) => Command::Right { extend },
+        Json::WordLeft(Extend { extend }) => Command::WordLeft { extend },
+        Json::WordRight(Extend { extend }) => Command::WordRight { extend },
         Json::Up(x) => Command::Up { xs: xs(x) },
         Json::Down(x) => Command::Down { xs: xs(x) },
         Json::Home(Extend { extend }) => Command::Home { extend },

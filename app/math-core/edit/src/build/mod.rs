@@ -116,6 +116,16 @@ impl<'n> Builder<'_> {
             kind: spec.kind,
             bounds: spec.bounds,
             text: spec.text,
+            transparent: parent.is_none()
+                && atoms.len() == 1
+                && matches!(atoms[0].item, Item::Node(AnyParseNode::Array(_)))
+                && [
+                    r"\begin{aligned}",
+                    r"\begin{alignedat}",
+                    r"\begin{gathered}",
+                ]
+                .iter()
+                .any(|env| self.src.text(atoms[0].range.clone()).starts_with(env)),
             path: path.clone(),
             interior: interior.clone(),
             atoms: atoms.iter().map(|atom| atom.range.clone()).collect(),

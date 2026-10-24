@@ -1,3 +1,4 @@
+import type { MathField } from "@/lib/maths";
 import { redo, undo } from "@codemirror/commands";
 
 import { newlineBeside } from "../fieldNote";
@@ -44,11 +45,13 @@ export function enterSide(
   e: Pick<KeyboardEvent, "key" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey">,
   block: boolean,
   mode: "math" | "text" | "command",
-  field: { anchor: number; head: number },
+  field: Pick<MathField, "anchor" | "head"> & Partial<Pick<MathField, "stopSlots" | "slots">>,
 ): "before" | "after" | null {
   if (e.key !== "Enter" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return null;
   if (!block || mode === "command") return null;
-  return field.anchor === 0 && field.head === 0 ? "before" : "after";
+  let first = 0;
+  while (field.slots?.[field.stopSlots?.[first] ?? -1]?.transparent) first++;
+  return field.anchor === first && field.head === first ? "before" : "after";
 }
 
 /** The note's history steps; the widget then reloads the field from the

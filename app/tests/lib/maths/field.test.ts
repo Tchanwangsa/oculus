@@ -144,3 +144,14 @@ describe("maths field", () => {
     expect(step.field.source).toBe("ac+b");
   });
 });
+
+
+test("word navigation survives the wasm boundary and preserves UTF-16 text", () => {
+  const source = String.raw`\text{𝒜b hello world}`;
+  const field = MathField.open(source, false).caretAt(source.indexOf("world") + 3);
+  const left = field.run({ wordLeft: {} });
+  expect(left.field.selected).toEqual([source.indexOf("world"), source.indexOf("world")]);
+  expect(left.changes).toEqual([]);
+  const right = left.field.run({ wordRight: { extend: true } });
+  expect(right.field.selected).toEqual([source.indexOf("world"), source.length - 1]);
+});

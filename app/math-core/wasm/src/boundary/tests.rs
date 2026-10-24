@@ -129,6 +129,14 @@ fn commands_decode_by_name() {
         command(r#"{"end": {}}"#),
         Ok(Command::End { extend: false })
     );
+    assert_eq!(
+        command(r#"{"wordLeft": {}}"#),
+        Ok(Command::WordLeft { extend: false })
+    );
+    assert_eq!(
+        command(r#"{"wordRight": {"extend": true}}"#),
+        Ok(Command::WordRight { extend: true })
+    );
     assert_eq!(command(r#""deleteLine""#), Ok(Command::DeleteLine));
     assert_eq!(command(r#""shiftTab""#), Ok(Command::ShiftTab));
     assert_eq!(
@@ -173,7 +181,7 @@ fn slots_carry_kind_interior_and_parent() {
     assert_eq!(kinds, ["row", "text", "sup", "numer", "denom"]);
     assert_eq!(
         slots[0],
-        json!({"kind": "row", "row": 0, "bounds": "open", "text": false, "from": 0, "to": 24, "parent": null})
+        json!({"kind": "row", "row": 0, "bounds": "open", "text": false, "transparent": false, "from": 0, "to": 24, "parent": null})
     );
     // The text run's interior in UTF-16: ไทย is three units.
     assert_eq!(slots[1]["from"], json!(6));

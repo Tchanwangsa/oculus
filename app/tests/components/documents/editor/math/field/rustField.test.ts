@@ -299,6 +299,9 @@ describe("Enter in a field", () => {
     expect(enterSide(key(), true, "math", at(3))).toBe("after");
     expect(enterSide(key(), true, "text", at(1))).toBe("after");
     expect(enterSide(key(), true, "math", at(0))).toBe("before");
+    const aligned = MathField.open(String.raw`\begin{aligned}a&=b\end{aligned}`, true).caretAt(0);
+    expect(enterSide(key(), true, "math", aligned)).toBe("before");
+
     expect(enterSide(key(), true, "math", { anchor: 0, head: 2 })).toBe("after");
   });
 

@@ -1,3 +1,6 @@
+import { keyDown } from "@/components/documents/editor/math/field/mathView/keys";
+import type { MathView } from "@/components/documents/editor/math/field/mathView";
+import type { FieldCommand } from "@/lib/maths";
 import { describe, expect, test } from "bun:test";
 import { fieldHtml, unhugMap } from "@/components/documents/editor/math/field/mathView/render";
 import { huggedArrays } from "@/components/documents/editor/math/hugArrays";
@@ -22,4 +25,21 @@ describe("the field's rendering", () => {
     const html = '<a data-s="0" data-e="1"></a><b data-s="1" data-e="12"></b><c data-s="12" data-e="13"></c>';
     expect(unhugMap(html, [1])).toBe('<a data-s="0" data-e="1"></a><b></b><c data-s="1" data-e="2"></c>');
   });
+});
+
+
+test("modifier arrows dispatch row and structural movement, including Shift", () => {
+  const commands: FieldCommand[] = [];
+  const view = { field: { mode: "math" }, host: {}, run: (command: FieldCommand) => commands.push(command) } as unknown as MathView;
+  for (const [key, mods, expected] of [
+    ["ArrowLeft", { altKey: true }, { wordLeft: { extend: false } }],
+    ["ArrowRight", { altKey: true, shiftKey: true }, { wordRight: { extend: true } }],
+    ["ArrowLeft", { metaKey: true }, { home: { extend: false } }],
+    ["ArrowRight", { metaKey: true, shiftKey: true }, { end: { extend: true } }],
+  ] as const) {
+    let prevented = false;
+    keyDown(view, { key, ...mods, shiftKey: "shiftKey" in mods && mods.shiftKey, preventDefault: () => { prevented = true; }, stopPropagation() {} } as KeyboardEvent);
+    expect(commands.at(-1)).toEqual(expected);
+    expect(prevented).toBe(true);
+  }
 });

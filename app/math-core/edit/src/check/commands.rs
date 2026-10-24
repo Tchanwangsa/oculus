@@ -136,7 +136,7 @@ const TEMPLATES: &[&str] = &[
 const PASTES: &[&str] = &["x^2", r"\frac12", r"a\\b", r"\frac{", "}"];
 
 /// How many kinds of command [`commands`] picks from.
-const KINDS: u64 = 25;
+const KINDS: u64 = 26;
 
 /// The commands `pick` stands for at `field`: one command, or a
 /// shortcut's keys typed one by one (then Esc, for odd picks); `None` for
@@ -188,6 +188,8 @@ fn command(field: &Field, pick: u64) -> Option<Command> {
         20 => Command::Tab,
         21 => Command::Enter,
         22 => Command::Escape,
+        23 => Command::WordLeft { extend },
+        25 => Command::WordRight { extend },
         _ => return None,
     })
 }

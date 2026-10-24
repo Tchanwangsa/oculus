@@ -6,7 +6,7 @@ export interface FieldShape {
   readonly source: string;
   readonly stops: ArrayLike<number>;
   readonly stopSlots: ArrayLike<number>;
-  readonly slots: readonly Pick<FieldSlot, "from" | "to" | "parent">[];
+  readonly slots: readonly (Pick<FieldSlot, "from" | "to" | "parent"> & Partial<Pick<FieldSlot, "transparent" | "kind" | "row">>)[];
 }
 
 /** Whether the item lies inside the slot's interior. A parent atom's range

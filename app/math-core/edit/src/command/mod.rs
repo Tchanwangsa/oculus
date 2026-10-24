@@ -25,6 +25,7 @@ mod splice;
 mod template;
 mod text;
 mod vertical;
+mod word;
 
 use core::{cmp::Reverse, ops::Range};
 
@@ -66,6 +67,13 @@ pub enum Command {
         extend: bool,
     },
     Right {
+        extend: bool,
+    },
+    /// Option+←/→: words in text, sibling runs and structures in maths.
+    WordLeft {
+        extend: bool,
+    },
+    WordRight {
         extend: bool,
     },
     /// ↑ and ↓: `xs` is the rendered x of each stop, by stop index (NaN
@@ -127,6 +135,8 @@ fn dispatch(field: &Field, command: &Command) -> Outcome {
         Command::DeleteLine => delete::line(field),
         Command::Left { extend } => motion::horizontal(field, false, *extend),
         Command::Right { extend } => motion::horizontal(field, true, *extend),
+        Command::WordLeft { extend } => word::horizontal(field, false, *extend),
+        Command::WordRight { extend } => word::horizontal(field, true, *extend),
         Command::Up { xs } => vertical::vertical(field, false, xs),
         Command::Down { xs } => vertical::vertical(field, true, xs),
         Command::Home { extend } => motion::home_end(field, false, *extend),

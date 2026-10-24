@@ -277,6 +277,34 @@ describe("stopAt", () => {
     expect(stopAt(layout, f, mm, 100, 49)).toBe(stopOf(f, 11, 2));
     expect(stopAt(layout, f, mm, 0, 17)).toBe(stopOf(f, 5, 1));
   });
+
+  test("aligned padding targets the nearest row and column, with no outer caret", () => {
+    const source = String.raw`\begin{aligned}a&=b\\P&=x\end{aligned}`;
+    const f = MathField.open(source, true);
+    const layout: Layout = { items: [
+      item(0, source.length, box(0, 10, 80, 22), box(0, 0, 80, 40)),
+      ...["a", "=b", "P", "=x"].map((text, i) => {
+        const from = source.indexOf(text);
+        return { ...item(from, from + text.length, box(i % 2 * 40, Math.floor(i / 2) * 28, i % 2 * 40 + text.length * 10, Math.floor(i / 2) * 28 + 12)), parent: 0 };
+      }),
+    ] };
+    const mm = measure(layout, f);
+    expect(Number.isNaN(mm.x[0])).toBe(true);
+    expect(Number.isNaN(mm.x[f.stops.length - 1])).toBe(true);
+    for (const [x, y, offset] of [
+      [-80, 32, source.indexOf("P")],
+      [200, 32, source.indexOf("=x") + 2],
+      [-80, 3, source.indexOf("a&")],
+      [200, 3, source.indexOf("=b") + 2],
+      [200, 200, source.indexOf("=x") + 2],
+    ]) {
+      const id = stopAt(layout, f, mm, x, y);
+      expect(id).not.toBeNull();
+      expect(f.stops[id!]).toBe(offset);
+    }
+    expect(f.stops[f.head]).toBe(source.indexOf(String.raw`\end`));
+  });
+
 });
 
 describe("bands", () => {

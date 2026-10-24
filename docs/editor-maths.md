@@ -127,6 +127,17 @@ The field and read-only rendering share `unitAt` and `extendUnit` in
 and those and ↑/↓ from the line beside a block (below), enter it at that
 end.
 
+A sole `aligned`, `alignedat` or `gathered` environment edits directly in
+its cells: ordinary carets skip the outer environment boundaries, and a
+press beside a row reaches that row's nearest edge. The outer stops remain
+for selecting and copying the whole formula. ⌘←/→ (Home/End) in display
+maths goes to the current row's first/last cell, across its alignment
+columns and out of any nested structure; Shift extends the selection.
+⌥←/→ jumps over sibling runs and whole structures without entering them;
+at an argument's edge it exits that structure, so nested groups can be left
+one level at a time. Inside `\text{…}` it moves by words and whitespace.
+⌥⇧←/→ extends by the same jumps.
+
 The edit model owns every key but the toolbox's, ⌘⇧M, undo and Enter in a
 block (`rustField/keys.ts`) and the pending `\command` list's (below): Esc
 (once any toolbox is closed: leave, or revert a shortcut just expanded), an
