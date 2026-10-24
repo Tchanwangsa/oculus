@@ -1,5 +1,5 @@
 import { shortcut } from "@/lib/platform";
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useRef, useState, type ComponentType, type ReactNode } from "react";
 import type { StateCommand } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import {
@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useScrollFade } from "@/hooks/ui/useScrollFade";
 
 import {
   insertDivider,
@@ -70,18 +71,22 @@ const keepFocus = (e: React.MouseEvent) => e.preventDefault();
  */
 export function Toolbar({
   ref,
-  view,
+  getView,
   active,
   onImage,
   className,
 }: {
   ref?: React.Ref<HTMLDivElement>;
-  view: EditorView | null;
+  /** Keep the view's DOM/window graph out of React's dev prop inspection. */
+  getView: () => EditorView | null;
   active: ActiveFormats;
   onImage: () => void;
   className?: string;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useScrollFade(scrollRef, "x");
   const run = (command: StateCommand) => {
+    const view = getView();
     if (!view) return;
     command(view);
     view.focus();
@@ -93,87 +98,94 @@ export function Toolbar({
     <div
       ref={ref}
       className={cn(
-        "sticky top-0 z-10 -mx-2 mt-3 flex flex-wrap items-center gap-0.5 border-b border-border-subtle bg-card px-2 py-1.5",
+        "sticky top-0 z-10 -mx-2 mt-3 border-b border-border-subtle bg-card px-2",
         className,
       )}
     >
-      <Select
-        value={heading ? active.block : ""}
-        onValueChange={(v) => run(setBlockType(v as BlockType))}
-      >
-        <SelectTrigger
-          size="sm"
-          aria-label="Block type"
-          className="h-7 w-32 rounded-md border-0 px-2 text-[12px] shadow-none"
-          onMouseDown={keepFocus}
-        >
-          <SelectValue placeholder={`Heading ${active.block.slice(1)}`} />
-        </SelectTrigger>
-        <SelectContent
-          onCloseAutoFocus={(e) => {
-            e.preventDefault();
-            view?.focus();
-          }}
-        >
-          {BLOCKS.map((b) => (
-            <SelectItem key={b.value} value={b.value}>
-              <b.Icon />
-              {b.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div ref={scrollRef} data-note-toolbar className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex w-max min-w-full items-center gap-0.5 py-1.5 [&>*]:shrink-0">
+          <Select
+            value={heading ? active.block : ""}
+            onValueChange={(v) => run(setBlockType(v as BlockType))}
+          >
+            <SelectTrigger
+              size="sm"
+              aria-label="Block type"
+              className="h-7 w-32 rounded-md border-0 px-2 text-[12px] shadow-none"
+              onMouseDown={keepFocus}
+            >
+              <SelectValue placeholder={`Heading ${active.block.slice(1)}`} />
+            </SelectTrigger>
+            <SelectContent
+              onCloseAutoFocus={(e) => {
+                e.preventDefault();
+                getView()?.focus();
+              }}
+            >
+              {BLOCKS.map((b) => (
+                <SelectItem key={b.value} value={b.value}>
+                  <b.Icon />
+                  {b.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-      <Divider />
-      <Tool label="Bold" keys={shortcut("mod+B")} on={active.bold} onRun={() => run(toggleBold)}>
-        <TextB weight="bold" />
-      </Tool>
-      <Tool label="Italic" keys={shortcut("mod+I")} on={active.italic} onRun={() => run(toggleItalic)}>
-        <TextItalic />
-      </Tool>
-      <Tool label="Strikethrough" keys={shortcut("mod+shift+X")} on={active.strike} onRun={() => run(toggleStrike)}>
-        <TextStrikethrough />
-      </Tool>
-      <Tool label="Inline code" keys={shortcut("mod+E")} on={active.code} onRun={() => run(toggleCode)}>
-        <CodeSimple />
-      </Tool>
-      <Tool label="Link" keys={shortcut("mod+K")} on={active.link} onRun={() => run(toggleLink)}>
-        <LinkSimple />
-      </Tool>
+          <Divider />
+          <Tool label="Bold" keys={shortcut("mod+B")} on={active.bold} onRun={() => run(toggleBold)}>
+            <TextB weight="bold" />
+          </Tool>
+          <Tool label="Italic" keys={shortcut("mod+I")} on={active.italic} onRun={() => run(toggleItalic)}>
+            <TextItalic />
+          </Tool>
+          <Tool label="Strikethrough" keys={shortcut("mod+shift+X")} on={active.strike} onRun={() => run(toggleStrike)}>
+            <TextStrikethrough />
+          </Tool>
+          <Tool label="Inline code" keys={shortcut("mod+E")} on={active.code} onRun={() => run(toggleCode)}>
+            <CodeSimple />
+          </Tool>
+          <Tool label="Link" keys={shortcut("mod+K")} on={active.link} onRun={() => run(toggleLink)}>
+            <LinkSimple />
+          </Tool>
 
-      <Divider />
-      <Tool label="Bulleted list" on={active.bullet} onRun={() => run(toggleList("bullet"))}>
-        <ListBullets />
-      </Tool>
-      <Tool label="Numbered list" on={active.ordered} onRun={() => run(toggleList("ordered"))}>
-        <ListNumbers />
-      </Tool>
-      <Tool label="Checklist" on={active.task} onRun={() => run(toggleList("task"))}>
-        <ListChecks />
-      </Tool>
-      <Tool label="Quote" on={active.quote} onRun={() => run(toggleList("quote"))}>
-        <Quotes />
-      </Tool>
+          <Divider />
+          <Tool label="Bulleted list" on={active.bullet} onRun={() => run(toggleList("bullet"))}>
+            <ListBullets />
+          </Tool>
+          <Tool label="Numbered list" on={active.ordered} onRun={() => run(toggleList("ordered"))}>
+            <ListNumbers />
+          </Tool>
+          <Tool label="Checklist" on={active.task} onRun={() => run(toggleList("task"))}>
+            <ListChecks />
+          </Tool>
+          <Tool label="Quote" on={active.quote} onRun={() => run(toggleList("quote"))}>
+            <Quotes />
+          </Tool>
 
-      <Divider />
-      <Tool label="Code block" on={active.codeBlock} onRun={() => run(toggleCodeBlock)}>
-        <CodeBlock />
-      </Tool>
-      <Tool
-        label={active.math ? "Maths tools" : "Equation"}
-        keys={active.math ? "Space" : undefined}
-        on={active.math}
-        onRun={() => view && (toggleMathTools(view) || (!active.math && run(insertMath)))}
-      >
-        <Sigma />
-      </Tool>
-      <TablePicker onPick={(rows, cols) => run(insertTable(rows, cols))} onClose={() => view?.focus()} />
-      <Tool label="Image" onRun={onImage}>
-        <Image />
-      </Tool>
-      <Tool label="Divider" onRun={() => run(insertDivider)}>
-        <Minus />
-      </Tool>
+          <Divider />
+          <Tool label="Code block" on={active.codeBlock} onRun={() => run(toggleCodeBlock)}>
+            <CodeBlock />
+          </Tool>
+          <Tool
+            label={active.math ? "Maths tools" : "Equation"}
+            keys={active.math ? "Space" : undefined}
+            on={active.math}
+            onRun={() => {
+              const view = getView();
+              if (view) toggleMathTools(view) || (!active.math && run(insertMath));
+            }}
+          >
+            <Sigma />
+          </Tool>
+          <TablePicker onPick={(rows, cols) => run(insertTable(rows, cols))} onClose={() => getView()?.focus()} />
+          <Tool label="Image" onRun={onImage}>
+            <Image />
+          </Tool>
+          <Tool label="Divider" onRun={() => run(insertDivider)}>
+            <Minus />
+          </Tool>
+        </div>
+      </div>
     </div>
   );
 }

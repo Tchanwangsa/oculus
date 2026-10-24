@@ -174,7 +174,7 @@ export function DocumentEditor({
           {/* The find row sticks with the toolbar; both are the caret's top margin. */}
           <div ref={toolbarRef} className="sticky top-0 z-10 -mx-2 mt-3 bg-card">
             <Toolbar
-              view={view}
+              getView={() => view}
               active={active}
               onImage={pickImages}
               className="static z-auto mx-0 mt-0"

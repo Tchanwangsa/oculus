@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { syntaxTree } from "@codemirror/language";
 import { Prec, Transaction } from "@codemirror/state";
 import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
@@ -183,7 +183,9 @@ export function NoteField({
     })();
   };
 
-  useEffect(() => {
+  // Mount before paint: replacing rendered prose with an empty field would
+  // briefly shrink the chat and clamp its scroll position to the bottom.
+  useLayoutEffect(() => {
     const parent = editorRef.current;
     if (!parent) return;
     const onUpdate = (u: ViewUpdate) => {
@@ -350,7 +352,7 @@ export function NoteField({
             }}
           >
             <Toolbar
-              view={view}
+              getView={() => view}
               active={formats}
               onImage={() =>
                 pickDocumentImages(pickerTitle)
