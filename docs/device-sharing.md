@@ -256,6 +256,9 @@ its separate disk recovery record is described in [drawing-canvas.md](./drawing-
 - A changed address is not followed by a device: one that only knows a
   vanished address cannot find the Mac again; the Mac shows the new link
   and the device rejoins under a new origin, whose drafts do not follow.
+- A shared notebook edits like any canvas, and a page added on the device reaches
+  the Mac. Creating a notebook, copying a PDF into one and exporting it as a PDF
+  are desktop-only: the device's page has no library and no save dialog.
 - Replay is guaranteed only inside a live epoch. Stopping and restarting a
   share makes a new key.
 

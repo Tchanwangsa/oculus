@@ -1,11 +1,13 @@
 //! Content transactions, ported from `app/src/lib/canvas/collaboration.ts`:
-//! `{edits:[{id,before,after,afterId?}], order?, background?}`. Preconditions
+//! `{edits:[{id,before,after,afterId?}], order?, background?, paper?}`. Preconditions
 //! compare only the touched objects, so independent edits from the same old
 //! revision merge; an edit already in place is skipped, and a failure applies
 //! nothing. An addition's `afterId` places it above that element (`null`: at
 //! the bottom); without one, or when that element is gone, it goes on top.
-//! `order` and `background` count as absent when JavaScript would treat them
-//! as falsy, which the shared fixtures pin down.
+//! `order`, `background` and `paper` count as absent when JavaScript would
+//! treat them as falsy, which the shared fixtures pin down. A `paper` edit
+//! (`{before, after}`, whole papers) conflicts under the background's code:
+//! the page setup is the canvas's background layer.
 
 use super::error::{AuthorityError, Code};
 use super::model;
@@ -69,7 +71,7 @@ pub fn validate(value: &Value) -> Result<(), AuthorityError> {
     let edits = tx.get("edits").and_then(Value::as_array);
     if tx
         .keys()
-        .any(|k| !matches!(k.as_str(), "edits" | "order" | "background"))
+        .any(|k| !matches!(k.as_str(), "edits" | "order" | "background" | "paper"))
         || edits.is_none_or(|e| e.len() > MAX_EDITS)
     {
         return Err(invalid("Invalid canvas transaction fields."));
@@ -143,6 +145,17 @@ pub fn validate(value: &Value) -> Result<(), AuthorityError> {
             return Err(invalid("Invalid background edit."));
         }
     }
+    if truthy(tx.get("paper")) {
+        let paper = tx.get("paper").and_then(Value::as_object);
+        let side = |key| {
+            paper
+                .and_then(|p| p.get(key))
+                .is_some_and(|p| model::validate_paper(p).is_ok())
+        };
+        if !side("before") || !side("after") {
+            return Err(invalid("Invalid paper edit."));
+        }
+    }
     Ok(())
 }
 
@@ -154,8 +167,9 @@ pub fn apply(document: &Value, transaction: &Value) -> Result<(Value, Value), Au
     let edits: &[Value] = transaction["edits"].as_array().map_or(&[], Vec::as_slice);
     let order = Some(&transaction["order"]).filter(|o| truthy(Some(o)));
     let background = Some(&transaction["background"]).filter(|b| truthy(Some(b)));
+    let paper = Some(&transaction["paper"]).filter(|p| truthy(Some(p)));
     let mut effective = Map::new();
-    if edits.is_empty() && order.is_none() && background.is_none() {
+    if edits.is_empty() && order.is_none() && background.is_none() && paper.is_none() {
         effective.insert("edits".into(), Value::Array(Vec::new()));
         return Ok((document.clone(), Value::Object(effective)));
     }
@@ -286,6 +300,20 @@ pub fn apply(document: &Value, transaction: &Value) -> Result<(Value, Value), Au
         }
         result.insert("background".into(), after.clone());
     }
+    if let Some(paper) = paper {
+        let current = &document["paper"];
+        let (before, after) = (&paper["before"], &paper["after"]);
+        if !same_value(current, before) && !same_value(current, after) {
+            return Err(AuthorityError::new(
+                Code::ConflictBackground,
+                "A collaborator changed the pages. Your draft is kept.",
+            ));
+        }
+        if !same_value(current, after) {
+            effective.insert("paper".into(), paper.clone());
+        }
+        result.insert("paper".into(), after.clone());
+    }
     let elements: Vec<Value> = ordered
         .into_iter()
         .filter_map(|id| elements.remove(id))
@@ -304,6 +332,7 @@ pub fn has_changes(transaction: &Value) -> bool {
         .is_some_and(|e| !e.is_empty())
         || truthy(transaction.get("order"))
         || truthy(transaction.get("background"))
+        || truthy(transaction.get("paper"))
 }
 
 /// `diffCanvasContent`: the transaction from `before` to `after`, viewport excluded.
@@ -356,6 +385,14 @@ pub fn diff(before: &Value, after: &Value) -> Value {
             "background".into(),
             json!({"before": before["background"], "after": after["background"]}),
         );
+    }
+    if let (Some(old), Some(new)) = (
+        before.get("paper").filter(|p| p.is_object()),
+        after.get("paper").filter(|p| p.is_object()),
+    ) {
+        if !same_value(old, new) {
+            transaction.insert("paper".into(), json!({"before": old, "after": new}));
+        }
     }
     Value::Object(transaction)
 }

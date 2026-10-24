@@ -7,17 +7,26 @@ use image::ImageDecoder;
 use tauri_plugin_dialog::DialogExt;
 
 const MAX_EXPORT_BYTES: usize = 64 * 1024 * 1024;
+/// A notebook's pages are one picture each, so its PDF is far larger than a drawing's image.
+const MAX_PDF_BYTES: usize = 512 * 1024 * 1024;
 
 fn extension(format: &str) -> Result<&'static str, String> {
     match format {
         "png" => Ok("png"),
         "svg" => Ok("svg"),
-        _ => Err("Canvas export supports PNG and SVG".into()),
+        "pdf" => Ok("pdf"),
+        _ => Err("Canvas export supports PNG, SVG and PDF".into()),
     }
 }
 
 fn validate(format: &str, bytes: &[u8]) -> Result<(), String> {
     extension(format)?;
+    if format == "pdf" {
+        if bytes.len() > MAX_PDF_BYTES || !bytes.starts_with(b"%PDF-") {
+            return Err("Invalid PDF document".into());
+        }
+        return Ok(());
+    }
     if bytes.is_empty() || bytes.len() > MAX_EXPORT_BYTES {
         return Err("Canvas image must be between 1 byte and 64 MB".into());
     }
@@ -82,7 +91,7 @@ fn destination(path: &Path, format: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn write_chosen(path: &Path, format: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+pub(super) fn write_chosen(path: &Path, format: &str, bytes: &[u8]) -> Result<PathBuf, String> {
     validate(format, bytes)?;
     let path = destination(path, format)?;
     let temporary = path.with_file_name(format!(

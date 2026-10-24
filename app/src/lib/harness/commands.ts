@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Provider } from "./providers";
 import type { BridgeHealth, QueuedMessage } from "./types";
 import type { StudioSend } from "@/lib/studio/videos";
+import { openNotebookContext } from "@/lib/canvas/openNotebooks";
 
 export interface SendOptions {
   model?: string | null;
@@ -10,7 +11,7 @@ export interface SendOptions {
   subjectId?: number | null;
   /** Only read on creation; overrides `subjectId`. */
   lectureId?: string | null;
-  /** The lecture moment, appended to the prompt but never to the message. */
+  /** What the student has open (a lecture's moment, a notebook), appended to the prompt but never to the message. */
   context?: string | null;
   /** Playhead second; stored on the user row's `meta` as `{ at }`. */
   at?: number | null;
@@ -24,7 +25,9 @@ export function harnessSend(
   text: string,
   options: SendOptions,
 ): Promise<number> {
-  return invoke<number>("harness_send", { threadId, provider, text, options });
+  const notebooks = openNotebookContext();
+  const context = [options.context, notebooks].filter(Boolean).join("\n\n") || null;
+  return invoke<number>("harness_send", { threadId, provider, text, options: notebooks ? { ...options, context } : options });
 }
 
 /** Rewind to a question and send new text in its place. See docs/harness.md

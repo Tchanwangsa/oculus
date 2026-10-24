@@ -4,6 +4,8 @@ import type { DbFile } from "@/lib/db";
 import { fileTitle } from "@/lib/files/openFile";
 import { parseCanvasDocument, serializeCanvasDocument, type CanvasDocument } from "@/lib/canvas/model";
 import { canvasSessions } from "@/lib/canvas/sessionRuntime";
+import { noteNotebookPage, registerOpenNotebook } from "@/lib/canvas/openNotebooks";
+import { useNotebookSnapshots } from "@/hooks/canvas/useNotebookSnapshots";
 import { saveCanvasCopy } from "@/lib/canvas/files";
 import { errorMessage } from "@/lib/canvas/authority";
 import type { CanvasSnapshot } from "@/lib/canvas/sessions";
@@ -65,6 +67,15 @@ export default function CanvasEditor({ file }: { file: DbFile }) {
   const clients = snapshot.authority === "live" && share?.clients ? ` · ${devices(share.clients)}` : "";
   const sharing = SHARING[snapshot.authority] && `${SHARING[snapshot.authority]}${clients}`;
   const blocked = !!snapshot.recovery || !!snapshot.conflict;
+  const snapshotError = useNotebookSnapshots(session.file, parsed.document);
+  const pageCount = parsed.document?.paper?.pages.length;
+  const pageInView = useRef(0);
+  const openTitle = fileTitle(session.file), openPath = session.file.relative_path;
+  // While a notebook is open, a chat message tells the agent which one and where to read it.
+  useEffect(() => {
+    if (!pageCount) return;
+    return registerOpenNotebook(file.id, { path: openPath, title: openTitle, pages: pageCount, page: pageInView.current + 1 });
+  }, [file.id, openPath, openTitle, pageCount]);
 
   if (snapshot.text == null && snapshot.status !== "error") return <LoadingFill />;
   if (!parsed.document) return (
@@ -92,6 +103,7 @@ export default function CanvasEditor({ file }: { file: DbFile }) {
       </div>
       {shareMounted && <CanvasShareDialog session={session} open={shareOpen} onOpenChange={setShareOpen} />}
       {(snapshot.error || renameError) && <p role="alert" className="shrink-0 border-b border-border-subtle px-4 py-2 text-xs text-destructive">{renameError ?? snapshot.error}</p>}
+      {snapshotError && <p role="alert" className="shrink-0 border-b border-border-subtle px-4 py-2 text-xs text-destructive">The page pictures a chat agent reads could not be updated: {snapshotError}</p>}
       {notice && <p role={notice.failed ? "alert" : "status"} className={`shrink-0 border-b border-border-subtle px-4 py-2 text-xs ${notice.failed ? "text-destructive" : "text-muted-foreground"}`}>{notice.text}</p>}
       {snapshot.recovery && <div className="flex shrink-0 gap-2 px-4 py-2">
         <Button size="sm" variant="outline" disabled={!snapshot.recovery.valid} onClick={() => session.recoverDraft()}>Use recovery copy</Button>
@@ -107,7 +119,7 @@ export default function CanvasEditor({ file }: { file: DbFile }) {
       </div>}
       <div className="relative min-h-0 flex-1">
         {snapshot.recoveryError && <p role="status" className="absolute right-3 bottom-16 left-3 z-30 rounded-xl border border-border-subtle bg-card px-3 py-2 text-xs text-muted-foreground">{snapshot.recoveryError}</p>}
-        <div inert={blocked} className="h-full"><CanvasSurface document={parsed.document} onChange={(document) => { const text = serializeCanvasDocument(document); lastDocument.current = { text, document }; session.update(text); }} /></div>
+        <div inert={blocked} className="h-full"><CanvasSurface document={parsed.document} title={openTitle} onPageChange={(index) => { pageInView.current = index; noteNotebookPage(file.id, index + 1); }} onChange={(document) => { const text = serializeCanvasDocument(document); lastDocument.current = { text, document }; session.update(text); }} /></div>
       </div>
     </div>
   );

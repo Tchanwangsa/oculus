@@ -156,3 +156,31 @@ fn additions_carry_their_placement_through_diff_and_the_ack() {
     assert_eq!(effective["edits"][1]["afterId"], "a");
     assert!(effective["edits"][3].get("afterId").is_none());
 }
+
+#[test]
+fn a_paper_edit_travels_through_diff_and_leaves_out_what_was_already_applied() {
+    let page = |id: &str| serde_json::json!({"id": id, "width": 595, "height": 842});
+    let doc = |pages: &[&str]| {
+        serde_json::json!({"type": "oculus-canvas", "version": 1, "elements": [],
+            "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#fff",
+            "paper": {"pages": pages.iter().map(|id| page(id)).collect::<Vec<_>>()}})
+    };
+    let tx = transaction::diff(&doc(&["p1"]), &doc(&["p1", "p2"]));
+    assert!(transaction::has_changes(&tx));
+    assert_eq!(tx["paper"]["after"]["pages"].as_array().unwrap().len(), 2);
+
+    let (result, effective) = transaction::apply(&doc(&["p1"]), &tx).unwrap();
+    assert!(transaction::same_value(&result, &doc(&["p1", "p2"])));
+    assert!(effective.get("paper").is_some());
+
+    // A replay finds the pages already in place: it applies, but reports no change.
+    let (_, replayed) = transaction::apply(&doc(&["p1", "p2"]), &tx).unwrap();
+    assert!(!transaction::has_changes(&replayed));
+
+    // Documents with no paper at either end produce no paper edit.
+    let whiteboard = serde_json::json!({"type": "oculus-canvas", "version": 1, "elements": [],
+        "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#fff"});
+    assert!(transaction::diff(&whiteboard, &whiteboard)
+        .get("paper")
+        .is_none());
+}

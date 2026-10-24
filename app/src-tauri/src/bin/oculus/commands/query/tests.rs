@@ -189,3 +189,106 @@ fn the_category_help_lists_what_the_flag_accepts() {
         assert!(help.contains(c), "{c:?} missing from {help:?}");
     }
 }
+
+mod notebook_read {
+    use super::super::notebook::{age, notebook_view};
+    use app_lib::library::paths::{
+        notebook_page_image, notebook_pages_dir, NotebookPage, NotebookPages, PAGES_MANIFEST,
+    };
+
+    fn root(name: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("oculus-cli-{name}-{}", std::process::id()));
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// A notebook with `pages` pictures written the way the app writes them.
+    fn written(root: &std::path::Path, id: i64, pages: usize, missing: &[usize]) {
+        let dir = notebook_pages_dir(root, id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let entries: Vec<NotebookPage> = (1..=pages)
+            .map(|page| NotebookPage {
+                page,
+                id: format!("p{page}"),
+                image: notebook_page_image(page),
+                updated_at: 1_000 + page as u64,
+            })
+            .collect();
+        for entry in entries.iter().filter(|e| !missing.contains(&e.page)) {
+            std::fs::write(dir.join(&entry.image), b"png").unwrap();
+        }
+        let manifest = NotebookPages {
+            canvas: "courses/X/canvases/Work.canvas".into(),
+            page_count: pages,
+            pages: entries,
+        };
+        std::fs::write(
+            dir.join(PAGES_MANIFEST),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn lists_every_page_with_its_picture_and_age() {
+        let root = root("nb-list");
+        written(&root, 7, 3, &[]);
+        let view = notebook_view(&root, 7, "courses/X/canvases/Work.canvas", None, 1_060).unwrap();
+        assert_eq!(view.page_count, 3);
+        assert_eq!(
+            view.pages.iter().map(|p| p.page).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        assert!(view.pages[0].image.ends_with("canvas-pages/7/page-001.png"));
+        assert_eq!(view.pages[0].age_seconds, 59);
+        assert_eq!(view.pages[2].age_seconds, 57);
+    }
+
+    #[test]
+    fn pages_narrows_the_list_and_a_missing_page_names_the_range() {
+        let root = root("nb-pages");
+        written(&root, 7, 3, &[]);
+        let path = "courses/X/canvases/Work.canvas";
+        let two = notebook_view(&root, 7, path, Some(&[(2, 2)]), 2_000).unwrap();
+        assert_eq!(two.pages.iter().map(|p| p.page).collect::<Vec<_>>(), [2]);
+        let error = notebook_view(&root, 7, path, Some(&[(9, 9)]), 2_000)
+            .err()
+            .unwrap();
+        assert!(error.contains("has pages 1-3"), "{error}");
+    }
+
+    #[test]
+    fn a_notebook_with_no_pictures_yet_says_how_to_get_them() {
+        let root = root("nb-none");
+        let error = notebook_view(&root, 7, "courses/X/canvases/Work.canvas", None, 1)
+            .err()
+            .unwrap();
+        assert!(
+            error.contains("no page pictures yet") && error.contains("open it there"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_picture_that_has_gone_missing_is_left_out_not_listed() {
+        let root = root("nb-missing");
+        written(&root, 7, 3, &[2]);
+        let view = notebook_view(&root, 7, "courses/X/canvases/Work.canvas", None, 5_000).unwrap();
+        assert_eq!(
+            view.pages.iter().map(|p| p.page).collect::<Vec<_>>(),
+            [1, 3]
+        );
+        written(&root, 8, 1, &[1]);
+        assert!(notebook_view(&root, 8, "courses/X/canvases/Work.canvas", None, 5_000).is_err());
+    }
+
+    #[test]
+    fn ages_read_naturally() {
+        assert_eq!(age(0), "just now");
+        assert_eq!(age(30), "30s ago");
+        assert_eq!(age(150), "2m ago");
+        assert_eq!(age(7_300), "2h ago");
+        assert_eq!(age(200_000), "2d ago");
+    }
+}

@@ -1,4 +1,5 @@
 import { isCanvasImageDataUrl } from './imageSource';
+import { paperProblem, type Paper } from './paper';
 
 export interface Point { x: number; y: number }
 export type CanvasStrokeStyle = 'solid' | 'dashed' | 'dotted';
@@ -49,6 +50,8 @@ export interface CanvasElement {
   endBinding?: CanvasBinding;
   /** An elbow arrow's placed segments in path order (`elbow/lanes.ts`). */
   fixedSegments?: CanvasFixedSegment[];
+  /** A backdrop (an assignment's page image): drawn, but never selected, moved or erased (`paper.ts`). */
+  locked?: boolean;
   [key: string]: unknown;
 }
 
@@ -76,6 +79,8 @@ export interface CanvasDocument {
   elements: CanvasElement[];
   viewport: CanvasViewport;
   background: string;
+  /** Set on a notebook: fixed-size pages stacked down the canvas. Absent on a whiteboard. */
+  paper?: Paper;
   [key: string]: unknown;
 }
 
@@ -106,6 +111,10 @@ function validate(value: unknown): asserts value is CanvasDocument {
     throw new Error('Canvas viewport must have finite coordinates and a positive zoom.');
   }
   if (typeof value.background !== 'string') throw new Error('Canvas background must be a colour.');
+  if (value.paper !== undefined) {
+    const problem = paperProblem(value.paper);
+    if (problem) throw new Error(problem);
+  }
   const ids = new Set<string>();
   for (const [i, el] of value.elements.entries()) {
     if (!record(el) || typeof el.id !== 'string' || !el.id || ids.has(el.id)) throw new Error(`Canvas element ${i + 1} needs a unique ID.`);
@@ -128,6 +137,7 @@ function validate(value: unknown): asserts value is CanvasDocument {
       throw new Error(`Canvas element ${i + 1} has invalid points.`);
     }
     if (el.opacity !== undefined && !unit(el.opacity)) throw new Error(`Canvas element ${i + 1} has an invalid opacity.`);
+    if (el.locked !== undefined && typeof el.locked !== 'boolean') throw new Error(`Canvas element ${i + 1} has an invalid locked flag.`);
     for (const [key, values] of Object.entries(CHOICES)) {
       if (el[key] !== undefined && !values.includes(el[key] as string)) throw new Error(`Canvas element ${i + 1} has an invalid ${key}.`);
     }

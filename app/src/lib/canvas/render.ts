@@ -1,5 +1,7 @@
 import { CANVAS_DEFAULTS, hasLabel, LABELLED_TYPES, roundnessOf, type CanvasDocument, type CanvasElement, type Point } from './model';
-import { diamondCorners, diamondVertices, elementArrowheads, elementBounds, rectangleRadius, selectionBounds, strokeDash, type Bounds } from './geometry';
+import { boundsIntersect, diamondCorners, diamondVertices, elementArrowheads, elementBounds, rectangleRadius, selectionBounds, strokeDash, type Bounds } from './geometry';
+import { pageRects } from './paper';
+import { PAGE_COLOR, exportBounds, paintPaper, paintTemplate } from './renderPaper';
 import { linePath } from './arrow/path';
 import { pointHandles } from './arrow/handles';
 import { canvasFont, LINE_HEIGHT, layoutShapeLabel, layoutTextElement, lineBaseline, type TextLayout } from './renderText';
@@ -189,7 +191,7 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   context.clearRect(0, 0, width, height);
   context.fillStyle = document.background;
   context.fillRect(0, 0, width, height);
-  if (grid) {
+  if (grid && !document.paper) {
     let step = 24 * zoom;
     while (step < 16) step *= 4;
     context.fillStyle = selectionColor;
@@ -203,6 +205,7 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   }
   context.translate(x, y); context.scale(zoom, zoom);
   const viewport = { x: -x / zoom, y: -y / zoom, width: width / zoom, height: height / zoom };
+  if (document.paper) paintPaper(context, document.paper, viewport, zoom);
   const draw = (element: CanvasElement) => {
     if (element.id !== options.editingId) drawElement(context, element);
     else if (element.type !== 'text') drawElement(context, element, false);
@@ -238,7 +241,7 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
 }
 
 export async function exportCanvasPng(document: CanvasDocument): Promise<Blob | null> {
-  const bounds = selectionBounds(document.elements);
+  const bounds = exportBounds(document);
   if (!bounds) return null;
   await loadCanvasImages(document.elements);
   const padding = 32;
@@ -251,7 +254,29 @@ export async function exportCanvasPng(document: CanvasDocument): Promise<Blob | 
   context.scale(ratio, ratio);
   context.fillStyle = document.background; context.fillRect(0, 0, canvas.width / ratio, canvas.height / ratio);
   context.translate(padding - bounds.x, padding - bounds.y);
+  if (document.paper) paintPaper(context, document.paper, bounds, ratio);
   for (const element of document.elements) drawElement(context, element);
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+}
+
+/** One notebook page as a PNG at `scale` pixels per point: its sheet, template and every element on it, clipped to the page. */
+export async function renderPagePng(document: CanvasDocument, pageId: string, scale = 2): Promise<Blob | null> {
+  const rect = document.paper && pageRects(document.paper).find(page => page.id === pageId);
+  if (!rect) return null;
+  const elements = document.elements.filter(element => boundsIntersect(elementBounds(element), rect));
+  await loadCanvasImages(elements);
+  const ratio = Math.min(scale, 4096 / Math.max(rect.width, rect.height));
+  const canvas = window.document.createElement('canvas');
+  canvas.width = Math.ceil(rect.width * ratio);
+  canvas.height = Math.ceil(rect.height * ratio);
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+  context.scale(ratio, ratio);
+  context.translate(-rect.x, -rect.y);
+  context.fillStyle = PAGE_COLOR; context.fillRect(rect.x, rect.y, rect.width, rect.height);
+  paintTemplate(context, rect, ratio);
+  context.beginPath(); context.rect(rect.x, rect.y, rect.width, rect.height); context.clip();
+  for (const element of elements) drawElement(context, element);
   return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
 }
 

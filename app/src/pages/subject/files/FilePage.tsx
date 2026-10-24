@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "
 import { isWebUrl } from "@/lib/browser";
 import { edThreadId } from "@/lib/ed/links";
 import { OpenOriginal } from "@/components/files/OpenOriginal";
+import { WriteOnCopy } from "@/components/canvas/WriteOnCopy";
 import { markEdViewed } from "@/lib/ed/views";
 import {
   DocumentControls,
@@ -174,6 +175,8 @@ export default function SubjectFilePage() {
             <MarkdownUnavailable file={file} openSeq={parseDetails} />
           ))
         )}
+        {/* A PDF can be copied into a notebook to write on. */}
+        {!isDocument && !isCanvas && /\.pdf$/i.test(file.filename) && <WriteOnCopy file={file} />}
         {/* A synced page is our markdown of a Canvas page or an Ed thread;
             this opens the original, embeds and styling included, in a
             browser tab. The lesson view has its own, for the shown slide. */}

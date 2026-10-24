@@ -18,6 +18,8 @@ import { placeCanvasImages, type CanvasImageSource } from '@/lib/canvas/mediaPla
 import { TouchViewportGesture } from '@/lib/canvas/touchViewport';
 import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, sameValue, type CanvasTransaction } from '@/lib/canvas/collaboration';
 import { secureId } from '@/lib/canvas/ids';
+import { isLocked, pageAt, pageView, selectableElements } from '@/lib/canvas/paper';
+import { addPage as addNotebookPage, removePage as removeNotebookPage } from '@/lib/canvas/pages';
 import {
   adoptElementStyle, colorLabel, DEFAULT_DRAWING_STYLE, inspectorSections, inspectorTarget, inspectorValues, newElementStyle, patchDrawingStyle,
   patchElementStyle, type DrawingStyle, type InspectorTarget, type StylePatch,
@@ -111,6 +113,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const future = useRef<HistoryEntry[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const viewSave = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** A notebook opens fitted to its page width once, when its camera is still the untouched default. */
+  const fitted = useRef(false);
   const paintOptions = useRef({ grid, editingId: textDraft?.element.id });
   paintOptions.current = { grid, editingId: textDraft?.element.id };
 
@@ -254,6 +258,11 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       size.current = { width: rect.width, height: rect.height, pixelRatio };
       element.width = Math.round(rect.width * pixelRatio);
       element.height = Math.round(rect.height * pixelRatio);
+      const { paper, viewport } = documentRef.current;
+      if (paper && !fitted.current && rect.width > 0) {
+        fitted.current = true;
+        if (viewport.x === 0 && viewport.y === 0 && viewport.zoom === 1) { setView(pageView(paper, rect)); setRevision(value => value + 1); }
+      }
       redraw();
     };
     const observer = new ResizeObserver(resize);
@@ -356,7 +365,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     return commitChanges(changes);
   };
   const eraseAt = (elements: CanvasElement[], point: Point) => {
-    const erasable = elements.filter(element => element.type !== 'image' && overrides.current.get(element.id) !== null);
+    const erasable = elements.filter(element => element.type !== 'image' && !isLocked(element) && overrides.current.get(element.id) !== null);
     const id = hitTest(erasable, point, 10 / documentRef.current.viewport.zoom);
     if (id) previewChanges(new Map([[id, null]]));
   };
@@ -409,7 +418,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const selectedElements = current.elements.filter(element => selected.current.has(element.id));
       const handle = bounds ? elementResizeHandles(selectedElements, bounds).findIndex(p => Math.hypot(p.x - point.x, p.y - point.y) < 10 / current.viewport.zoom) : -1;
       const editing = pointEditTarget(selectedElements), pointHandle = editing && pointHandleAt(editing, point, current.viewport.zoom);
-      const id = hitTest(current.elements, point, 6 / current.viewport.zoom);
+      const id = hitTest(selectableElements(current.elements), point, 6 / current.viewport.zoom);
       if (editing && pointHandle) {
         initial.id = editing.id;
         if (pointHandle.kind === 'segment') Object.assign(initial, { mode: 'segment', base: editing, index: pointHandle.segment });
@@ -548,7 +557,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       if (!active.moved && active.id) {
         if (ids.has(active.id)) ids.delete(active.id); else ids.add(active.id);
       } else {
-        for (const element of active.original.elements) if (boundsContain(bounds, elementBounds(element))) ids.add(element.id);
+        for (const element of active.original.elements) if (!isLocked(element) && boundsContain(bounds, elementBounds(element))) ids.add(element.id);
       }
       choose(ids);
     } else if (overrides.current.size && (active.moved || active.mode === 'erase' || (active.mode === 'draw' && overrides.current.get(active.id!)?.type === 'freedraw'))) {
@@ -627,7 +636,32 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     else previewChanges(stylePatchChanges(documentRef.current.elements, selected.current, patch));
     redraw();
   };
+  const currentPageIndex = () => {
+    const { paper, viewport } = documentRef.current;
+    return paper ? pageAt(paper, screenToWorld({ x: size.current.width / 2, y: size.current.height / 2 }, viewport)).index : 0;
+  };
+  const goToPage = (index: number) => {
+    const { paper, viewport } = documentRef.current;
+    if (paper) updateViewport(pageView(paper, size.current, index, viewport.zoom));
+  };
+  const addPage = () => {
+    if (gesture.current || !documentRef.current.paper) return;
+    flushDraft();
+    publish(addNotebookPage(documentRef.current), true);
+    goToPage(documentRef.current.paper!.pages.length - 1);
+  };
+  const removePage = (index: number) => {
+    if (gesture.current) return;
+    flushDraft();
+    const current = documentRef.current, page = current.paper?.pages[index];
+    const next = page ? removeNotebookPage(current, page.id) : current;
+    if (next === current) return;
+    choose([]);
+    publish(next, true);
+    goToPage(Math.min(index, next.paper!.pages.length - 1));
+  };
   const fit = () => {
+    if (documentRef.current.paper) { updateViewport(pageView(documentRef.current.paper, size.current, currentPageIndex())); return; }
     const bounds = selectionBounds(documentRef.current.elements);
     if (!bounds) { updateViewport({ x: 0, y: 0, zoom: 1 }); return; }
     const zoom = Math.min(2, Math.max(0.1, Math.min((size.current.width - 160) / Math.max(bounds.width, 1), (size.current.height - 180) / Math.max(bounds.height, 1))));
@@ -641,7 +675,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     else if (key === ' ') { event.preventDefault(); setSpace(true); }
     else if (mod && key === 'z') { event.preventDefault(); history(event.shiftKey); }
     else if (mod && key === 'y') { event.preventDefault(); history(true); }
-    else if (mod && key === 'a') { event.preventDefault(); choose(documentRef.current.elements.map(element => element.id)); }
+    else if (mod && key === 'a') { event.preventDefault(); choose(documentRef.current.elements.filter(element => !isLocked(element)).map(element => element.id)); }
     else if (mod && key === 'd') {
       event.preventDefault();
       const source = documentRef.current.elements.filter(element => selected.current.has(element.id));
@@ -725,5 +759,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     history, canUndo: past.current.length > 0, canRedo: future.current.length > 0, historyError, clearHistoryError: () => setHistoryError(null),
     deleteSelected, insertImages, reorder, layerMoves, fit, zoom, resetZoom: () => updateViewport(zoomAt(documentRef.current.viewport, { x: size.current.width / 2, y: size.current.height / 2 }, 1)), redraw,
     zoomPercent: Math.round(documentRef.current.viewport.zoom * 100),
+    /** A notebook's page controls; null on a whiteboard. */
+    pages: documentRef.current.paper ? { count: documentRef.current.paper.pages.length, index: currentPageIndex(), go: goToPage, add: addPage, remove: removePage } : null,
   };
 }
