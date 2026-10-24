@@ -19,6 +19,10 @@ const TYPES: [&str; 8] = [
     "image",
 ];
 const ARROWHEADS: &[&str] = &["none", "arrow", "triangle", "dot", "bar", "diamond"];
+const PAPER_TEMPLATES: [&str; 4] = ["blank", "grid", "ruled", "dotted"];
+const MAX_PAGES: usize = 500;
+const MAX_SIDE: f64 = 14400.0;
+const MAX_GAP: f64 = 1000.0;
 const CHOICES: [(&str, &[&str]); 8] = [
     ("strokeStyle", &["solid", "dashed", "dotted"]),
     ("fontFamily", &["sans", "serif", "mono"]),
@@ -81,9 +85,59 @@ pub fn validate(value: &Value) -> Result<(), String> {
     if !doc.get("background").is_some_and(Value::is_string) {
         return Err("Canvas background must be a colour.".into());
     }
+    if let Some(paper) = doc.get("paper") {
+        validate_paper(paper)?;
+    }
     let mut ids = HashSet::new();
     for (i, el) in elements.iter().enumerate() {
         validate_element(el, i, &mut ids)?;
+    }
+    Ok(())
+}
+
+/// A notebook's `paper`, as `paperProblem` in `app/src/lib/canvas/paper.ts`
+/// accepts it: 1 to `MAX_PAGES` pages with unique IDs, positive sizes and a
+/// known template, and a non-negative gap.
+pub fn validate_paper(value: &Value) -> Result<(), String> {
+    let Some(paper) = value.as_object() else {
+        return Err("Canvas paper must be an object.".into());
+    };
+    if paper.contains_key("gap")
+        && !finite(paper.get("gap")).is_some_and(|gap| (0.0..=MAX_GAP).contains(&gap))
+    {
+        return Err("Canvas paper has an invalid gap.".into());
+    }
+    let pages = paper.get("pages").and_then(Value::as_array);
+    let Some(pages) = pages.filter(|p| !p.is_empty() && p.len() <= MAX_PAGES) else {
+        return Err(format!(
+            "Canvas paper needs between 1 and {MAX_PAGES} pages."
+        ));
+    };
+    let mut ids = HashSet::new();
+    for (i, page) in pages.iter().enumerate() {
+        let n = i + 1;
+        let page = page.as_object();
+        let id = page
+            .and_then(|p| p.get("id"))
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty());
+        let (Some(page), Some(id)) = (page, id) else {
+            return Err(format!("Canvas page {n} needs a unique ID."));
+        };
+        if !ids.insert(id) {
+            return Err(format!("Canvas page {n} needs a unique ID."));
+        }
+        for key in ["width", "height"] {
+            if !finite(page.get(key)).is_some_and(|side| side > 0.0 && side <= MAX_SIDE) {
+                return Err(format!("Canvas page {n} has an invalid {key}."));
+            }
+        }
+        if page
+            .get("template")
+            .is_some_and(|t| !t.as_str().is_some_and(|t| PAPER_TEMPLATES.contains(&t)))
+        {
+            return Err(format!("Canvas page {n} has an invalid template."));
+        }
     }
     Ok(())
 }
@@ -172,6 +226,9 @@ pub fn validate_element<'a>(
     }
     if el.contains_key("opacity") && !unit(el.get("opacity")) {
         return Err(format!("Canvas element {n} has an invalid opacity."));
+    }
+    if el.get("locked").is_some_and(|v| !v.is_boolean()) {
+        return Err(format!("Canvas element {n} has an invalid locked flag."));
     }
     for (key, values) in CHOICES {
         if let Some(v) = el.get(key) {

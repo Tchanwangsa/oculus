@@ -21,6 +21,8 @@ export interface CanvasPlatform {
   searchPdfs(query: string): Promise<CanvasLibraryPdf[]>;
   /** Opens a library result for picking pages. */
   openPdf(relativePath: string): Promise<CanvasImportPdf>;
+  /** Saves a notebook as a PDF, one page per picture, each as large in points as its page. Absent where only the desktop can. */
+  exportPdf?(title: string, pages: { width: number; height: number; png: Blob }[]): Promise<void>;
 }
 
 export const PDF_NEEDS_DESKTOP = "Open Oculus desktop to import PDF pages. You can add image files here.";

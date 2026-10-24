@@ -1,0 +1,90 @@
+{
+  "name": "paper already applied",
+  "document": {
+    "type": "oculus-canvas",
+    "version": 1,
+    "elements": [],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "background": "#ffffff",
+    "paper": {
+      "pages": [
+        {
+          "id": "p1",
+          "width": 595,
+          "height": 842,
+          "template": "grid"
+        },
+        {
+          "id": "p2",
+          "width": 595,
+          "height": 842,
+          "template": "grid"
+        }
+      ]
+    }
+  },
+  "transaction": {
+    "edits": [],
+    "paper": {
+      "before": {
+        "pages": [
+          {
+            "id": "p1",
+            "width": 595,
+            "height": 842,
+            "template": "grid"
+          }
+        ]
+      },
+      "after": {
+        "pages": [
+          {
+            "id": "p1",
+            "width": 595,
+            "height": 842,
+            "template": "grid"
+          },
+          {
+            "id": "p2",
+            "width": 595,
+            "height": 842,
+            "template": "grid"
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "ok": {
+      "type": "oculus-canvas",
+      "version": 1,
+      "elements": [],
+      "viewport": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1
+      },
+      "background": "#ffffff",
+      "paper": {
+        "pages": [
+          {
+            "id": "p1",
+            "width": 595,
+            "height": 842,
+            "template": "grid"
+          },
+          {
+            "id": "p2",
+            "width": 595,
+            "height": 842,
+            "template": "grid"
+          }
+        ]
+      }
+    }
+  }
+}

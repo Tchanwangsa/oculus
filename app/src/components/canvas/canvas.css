@@ -9,6 +9,7 @@
   .canvas-short-hint { display: none; }
   .canvas-toolbox { gap: 0; padding: 4px; }
   .canvas-toolbox button { width: 34px; height: 38px; }
+  .canvas-pages { left: 10px; bottom: 64px; transform: none; translate: none; }
 }
 @container (max-width: 450px) {
   .canvas-toolbox button { width: 29px; }

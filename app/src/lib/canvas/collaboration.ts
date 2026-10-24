@@ -1,4 +1,5 @@
 import { parseCanvasDocument, type CanvasDocument, type CanvasElement } from './model';
+import { paperProblem, type Paper } from './paper';
 
 /** `afterId`, only on an addition, places it just above that element (`null`: at the bottom);
  * without it, or when that element is gone, the addition goes on top. */
@@ -7,6 +8,8 @@ export interface CanvasTransaction {
   edits: ElementEdit[];
   order?: { before: string[]; after: string[] };
   background?: { before: string; after: string };
+  /** A notebook's page setup changing (a page added or removed); both sides are whole papers. */
+  paper?: { before: Paper; after: Paper };
 }
 
 /** Object-key order is irrelevant to conflict checks; arrays retain their order. */
@@ -38,15 +41,17 @@ export function diffCanvasContent(before: CanvasDocument, after: CanvasDocument)
   const transaction: CanvasTransaction = { edits };
   if (!sameValue(oldOrder, newOrder)) transaction.order = { before: oldOrder, after: newOrder };
   if (before.background !== after.background) transaction.background = { before: before.background, after: after.background };
+  // A paper is never added or taken away after creation, so only a change from one paper to another travels.
+  if (before.paper && after.paper && !sameValue(before.paper, after.paper)) transaction.paper = { before: before.paper, after: after.paper };
   return transaction;
 }
 
-export const hasCanvasChanges = (transaction: CanvasTransaction) => !!(transaction.edits.length || transaction.order || transaction.background);
+export const hasCanvasChanges = (transaction: CanvasTransaction) => !!(transaction.edits.length || transaction.order || transaction.background || transaction.paper);
 
 function validateTransaction(value: unknown): asserts value is CanvasTransaction {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid canvas transaction.');
   const tx = value as CanvasTransaction;
-  if (Object.keys(tx).some(key => !['edits', 'order', 'background'].includes(key)) || !Array.isArray(tx.edits) || tx.edits.length > 10000) throw new Error('Invalid canvas transaction fields.');
+  if (Object.keys(tx).some(key => !['edits', 'order', 'background', 'paper'].includes(key)) || !Array.isArray(tx.edits) || tx.edits.length > 10000) throw new Error('Invalid canvas transaction fields.');
   const ids = new Set<string>();
   for (const edit of tx.edits) {
     if (!edit || typeof edit.id !== 'string' || !edit.id || ids.has(edit.id) || (edit.before === null && edit.after === null)) throw new Error('Invalid element edit.');
@@ -63,6 +68,7 @@ function validateTransaction(value: unknown): asserts value is CanvasTransaction
     if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length || before.some(id => typeof id !== 'string' || !id) || new Set(before).size !== before.length || new Set(after).size !== after.length || after.some(id => !before.includes(id))) throw new Error('Invalid layer order.');
   }
   if (tx.background && (typeof tx.background.before !== 'string' || typeof tx.background.after !== 'string')) throw new Error('Invalid background edit.');
+  if (tx.paper && (typeof tx.paper !== 'object' || Array.isArray(tx.paper) || paperProblem(tx.paper.before) || paperProblem(tx.paper.after))) throw new Error('Invalid paper edit.');
 }
 
 /** Compare only touched objects: independent edits merge even from the same old revision. */
@@ -100,7 +106,12 @@ export function applyCanvasTransaction(document: CanvasDocument, value: unknown)
     if (background !== transaction.background.before && background !== transaction.background.after) throw new Error('A collaborator changed the background. Your draft is kept.');
     background = transaction.background.after;
   }
-  const result = { ...document, elements: ordered, background };
+  let paper = document.paper;
+  if (transaction.paper) {
+    if (!sameValue(paper, transaction.paper.before) && !sameValue(paper, transaction.paper.after)) throw new Error('A collaborator changed the pages. Your draft is kept.');
+    paper = transaction.paper.after;
+  }
+  const result = { ...document, elements: ordered, background, ...(transaction.paper ? { paper } : {}) };
   parseCanvasDocument(JSON.stringify(result));
   return result;
 }

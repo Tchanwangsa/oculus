@@ -12,7 +12,7 @@ the course folders are at `../courses/<CODE>/`, and everything below is about
 them.
 
 Oculus fills this folder by syncing Canvas, Ed (Discussion and Lessons) and
-Echo360 from the desktop app. Only `uploads/` and `documents/` are the student's own.
+Echo360 from the desktop app. Only `uploads/`, `documents/` and `canvases/` are the student's own.
 
 ```
 ./
@@ -36,6 +36,10 @@ Echo360 from the desktop app. Only `uploads/` and `documents/` are the student's
   uploads/         the student's own files, added by hand
   documents/       the student's own notes, written in the app — markdown
                    you may read; they are the student's to write
+  canvases/        the student's drawings and notebooks: `.canvas` files,
+                   not text. A notebook is where they write their working
+                   by hand; read it with `oculus read` (see the library
+                   skill), never by opening the file
   agents/          yours: INSTRUCTIONS.md, and memories/ linked to the
                    library's store (see Memory)
 ```

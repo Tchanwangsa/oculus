@@ -1,0 +1,16 @@
+{
+  "type": "oculus-canvas",
+  "version": 1,
+  "elements": [],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "background": "#ffffff",
+  "paper": {
+    "pages": [
+      "p1"
+    ]
+  }
+}
