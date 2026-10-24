@@ -9,7 +9,7 @@ pub(super) fn inherit(kind: &str, previous_kind: &str, next: &mut Value, previou
     if family(kind) != family(previous_kind) || family(kind).is_none() {
         return;
     }
-    let keys = ["items", "tasks", "events", "changes"];
+    let keys = ["items", "tasks", "events", "changes", "notes"];
     let old_rows = keys
         .iter()
         .find_map(|key| previous.get(key).and_then(Value::as_array));
@@ -26,11 +26,16 @@ fn family(kind: &str) -> Option<&'static str> {
         "NewTasks" | "NewProject" | "TaskChanges" | "DeleteTasks" => Some("task"),
         "NewEvents" | "EventChanges" | "DeleteEvents" => Some("event"),
         "TagChanges" => Some("tag"),
+        "NewCheatNotes" => Some("cheat"),
+        "EditItems" => Some("revision"),
         _ => None,
     }
 }
 
 fn identity(row: &Value) -> Option<String> {
+    if let (Some(entity), Some(id)) = (row.get("entity").and_then(Value::as_str), row.get("id")) {
+        return Some(format!("{entity}:{id}"));
+    }
     if row.is_number() || row.is_string() {
         return Some(format!("id:{row}"));
     }

@@ -311,6 +311,14 @@ cannot wait on the blur (the chat's pasted text editor,
 [harness.md](./harness.md#pasted-text-is-a-card-sent-inline));
 `scrollClassName` replaces the text scroller's 420px bound.
 
+`compact` sets the field in `CompactMd`'s type: 13px at 1.6, maths at its
+1.05em, and blank lines between top-level blocks shrunk to its 0.6rem
+paragraph gap (`live-preview/livePreview/paragraphGaps.ts`) unless the caret
+is on one. `inline` is for a caller whose own card shows it is being edited
+(a cheat sheet entry): no border, padding or height bound, and the toolbar up
+for the field's whole life, so switching the card to editing moves nothing
+but the toolbar.
+
 `NoteField` mounts its CodeMirror view in a layout effect, before paint, so
 swapping prose for the field cannot expose an empty editor mount point.
 The shared `Toolbar` stays on one line at every pane width: its controls keep

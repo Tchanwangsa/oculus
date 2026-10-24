@@ -6,6 +6,23 @@ pub(super) fn check(command: Option<&Command>, agent: bool) -> Result<(), String
     if !agent {
         return Ok(());
     }
+    let revision_deletion = matches!(
+        command,
+        Some(
+            Command::Cheat {
+                action: CheatAction::Rm(_)
+            } | Command::Quiz {
+                action: QuizAction::Rm(_)
+            } | Command::Artifact {
+                action: ArtifactAction::Rm(_)
+            } | Command::Topic {
+                action: TopicAction::Rm(_)
+            }
+        )
+    );
+    if revision_deletion {
+        return Err("Revision deletion belongs to the student in Revision or their terminal; propose ordinary field changes with `EditItems`".into());
+    }
     let card = match command {
         Some(Command::Auth { .. } | Command::Keyd { .. }) => return Err("authentication and credential broker commands must be run by the student in their terminal".into()),
         Some(Command::Project { action: ProjectAction::Create(_) }) => Some("NewProject"),
@@ -17,6 +34,11 @@ pub(super) fn check(command: Option<&Command>, agent: bool) -> Result<(), String
             _ => None,
         },
         Some(Command::Tag { action }) if !matches!(action, TagAction::List(_)) => Some("TagChanges"),
+        Some(Command::Cheat { action: CheatAction::Add(_) }) => Some("NewCheatNotes"),
+        Some(Command::Cheat { action: CheatAction::Update(_) }
+            | Command::Quiz { action: QuizAction::Update(_) | QuizAction::Set { action: QuizSetAction::Update(_) } }
+            | Command::Artifact { action: ArtifactAction::Update(_) }
+            | Command::Topic { action: TopicAction::Update(_) }) => Some("EditItems"),
         Some(Command::Run(_)) => Some("Sync"),
         Some(Command::Index(_)) => Some("Reparse"),
         Some(Command::Transcribe(_)) => Some("Transcribe"),
@@ -26,9 +48,16 @@ pub(super) fn check(command: Option<&Command>, agent: bool) -> Result<(), String
         _ => None,
     };
     match card {
-        Some(card) => Err(format!(
-            "propose this with `{card}` — see the `oculus-plan` skill"
-        )),
+        Some(card) => {
+            let skill = if matches!(card, "EditItems" | "NewCheatNotes") {
+                "oculus-revision"
+            } else {
+                "oculus-plan"
+            };
+            Err(format!(
+                "propose this with `{card}` — see the `{skill}` skill"
+            ))
+        }
         None => Ok(()),
     }
 }
@@ -70,6 +99,87 @@ mod tests {
                 "{args}"
             );
             assert!(check(cli.command.as_ref(), false).is_ok());
+        }
+    }
+
+    #[test]
+    fn agents_draft_questions_and_propose_ordinary_revision_edits() {
+        for args in [
+            vec!["quiz", "update", "1", "--patch", r#"{"status":"active"}"#],
+            vec!["quiz", "update", "1", "--patch", r#"{"prompt":"Changed"}"#],
+            vec!["quiz", "rm", "1"],
+        ] {
+            let cli = Cli::try_parse_from(std::iter::once("oculus").chain(args)).unwrap();
+            let error = check(cli.command.as_ref(), true).unwrap_err();
+            assert!(error.contains("EditItems") || error.contains("student"));
+            assert!(check(cli.command.as_ref(), false).is_ok());
+        }
+        for args in [
+            vec!["quiz", "add", "--subject", "MATH", "--batch", "-"],
+            vec![
+                "quiz",
+                "set",
+                "add",
+                "--subject",
+                "MATH",
+                "--title",
+                "Week 1",
+                "--items",
+                "1,2",
+            ],
+            vec!["quiz", "list", "--due"],
+            vec!["quiz", "show", "1"],
+            vec![
+                "topic",
+                "add",
+                "--subject",
+                "MATH",
+                "--name",
+                "Differentiation",
+            ],
+            vec!["topic", "list"],
+            vec!["topic", "show", "1"],
+            vec!["cheat", "list", "--topic", "1"],
+            vec!["cheat", "tags"],
+        ] {
+            let cli = Cli::try_parse_from(std::iter::once("oculus").chain(args)).unwrap();
+            assert!(check(cli.command.as_ref(), true).is_ok());
+        }
+    }
+
+    #[test]
+    fn revision_topic_and_content_updates_share_edit_items() {
+        for args in [
+            vec!["cheat", "update", "1", "--topics", "2"],
+            vec!["quiz", "update", "1", "--patch", r#"{"topic_ids":[2]}"#],
+            vec![
+                "quiz",
+                "set",
+                "update",
+                "1",
+                "--patch",
+                r#"{"topic_ids":[2]}"#,
+            ],
+            vec!["artifact", "update", "1", "--patch", r#"{"topic_ids":[2]}"#],
+            vec![
+                "topic",
+                "update",
+                "1",
+                "--patch",
+                r#"{"name":"Derivatives"}"#,
+            ],
+        ] {
+            let cli = Cli::try_parse_from(std::iter::once("oculus").chain(args)).unwrap();
+            assert!(check(cli.command.as_ref(), true)
+                .unwrap_err()
+                .contains("EditItems"));
+            assert!(check(cli.command.as_ref(), false).is_ok());
+        }
+        for command in ["cheat", "quiz", "artifact", "topic"] {
+            let cli = Cli::try_parse_from(["oculus", command, "rm", "1"]).unwrap();
+            assert!(check(cli.command.as_ref(), true)
+                .unwrap_err()
+                .contains("student"));
         }
     }
 

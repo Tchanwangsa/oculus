@@ -572,3 +572,96 @@ async fn amendments_preserve_existing_row_unticks_but_ignored_decided_amends_do_
     assert!(standalone.state["changes"][0].get("included").is_none());
     assert_eq!(standalone.amended_from, None);
 }
+
+#[tokio::test]
+async fn cheat_undo_removes_edited_entries_and_reopens_the_card() {
+    let (pool, t, i) = setup().await;
+    let input = json!({"notes":[{"title":"Chain rule","body":"Differentiate the outside, multiply by the inside derivative.","subject":"COMP10001","tags":["calculus"]}]});
+    let p = card(&pool, t, i, "NewCheatNotes", &input).await;
+    let applied = apply(&pool, &p.id, &input).await.unwrap();
+    assert_eq!(applied.made.len(), 1);
+    assert_eq!(applied.made[0].entity, "cheat");
+    assert!(apply(&pool, &p.id, &input).await.is_err());
+    let id: i64 = applied.made[0].id.parse().unwrap();
+    sqlx::query("UPDATE revision_notes SET body='Student edit' WHERE id=?1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let undone = undo(&pool, &p.id).await.unwrap();
+    assert_eq!(undone.status, "pending");
+    assert!(undone.made.is_empty());
+    assert_eq!(undone.state, input);
+    assert_eq!(count(&pool, "revision_notes").await, 0);
+    let again = apply(&pool, &p.id, &input).await.unwrap();
+    assert_eq!(again.made.len(), 1);
+    assert_eq!(count(&pool, "revision_notes").await, 1);
+}
+#[tokio::test]
+async fn cheat_undo_skips_entries_the_student_deleted() {
+    let (pool, t, i) = setup().await;
+    let input = json!({"notes":[{"title":"One","body":"a","subject":"COMP10001"},{"title":"Two","body":"b","subject":"COMP10001"}]});
+    let p = card(&pool, t, i, "NewCheatNotes", &input).await;
+    let applied = apply(&pool, &p.id, &input).await.unwrap();
+    sqlx::query("DELETE FROM revision_notes WHERE id=?1")
+        .bind(applied.made[0].id.parse::<i64>().unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    undo(&pool, &p.id).await.unwrap();
+    assert_eq!(count(&pool, "revision_notes").await, 0);
+}
+#[tokio::test]
+async fn cheat_tags_take_the_registry_spelling() {
+    let (pool, t, i) = setup().await;
+    let input = json!({"notes":[{"title":"Sum","body":"$a+b$","subject":"COMP10001","tags":["formula","FORMULA","Grover"]}]});
+    let p = card(&pool, t, i, "NewCheatNotes", &input).await;
+    apply(&pool, &p.id, &input).await.unwrap();
+    let tags: String = sqlx::query_scalar("SELECT tags FROM revision_notes")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(tags, r#"["Formula","Grover"]"#);
+    let path = json!({"notes":[{"title":"Bad","body":"x","subject":"COMP10001","tags":["courses/A/files/x.pdf"]}]});
+    let q = card(&pool, t, reply(&pool, t).await, "NewCheatNotes", &path).await;
+    assert!(apply(&pool, &q.id, &path).await.is_err());
+}
+#[tokio::test]
+async fn cheat_proposal_undo_removes_only_unchanged_entries() {
+    let (pool, t, i) = setup().await;
+    let input = json!({"notes":[{"title":"Formula","body":"$a+b$"}]});
+    let p = card(&pool, t, i, "NewCheatNotes", &input).await;
+    apply(&pool, &p.id, &input).await.unwrap();
+    undo(&pool, &p.id).await.unwrap();
+    assert_eq!(count(&pool, "revision_notes").await, 0);
+}
+#[tokio::test]
+async fn cheat_cards_create_named_topics_and_undo_removes_them() {
+    let (pool, t, i) = setup().await;
+    let input = json!({"notes":[
+        {"title":"The angle","body":"$\\sin\\theta=\\sqrt{M/N}$","subject":"COMP10001","topics":["Grover's algorithm"]},
+        {"title":"Iterations","body":"$K\\approx\\frac{\\pi}{4}\\sqrt{N/M}$","subject":"COMP10001","topics":["grover's algorithm"]}
+    ]});
+    let p = card(&pool, t, i, "NewCheatNotes", &input).await;
+    apply(&pool, &p.id, &input).await.unwrap();
+    let topics: Vec<i64> =
+        sqlx::query_scalar("SELECT id FROM revision_topics WHERE name='Grover''s algorithm'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(topics.len(), 1);
+    let filed: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM revision_note_topics WHERE topic_id=?1")
+            .bind(topics[0])
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(filed, 2);
+    undo(&pool, &p.id).await.unwrap();
+    assert_eq!(count(&pool, "revision_notes").await, 0);
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM revision_topics WHERE is_unsorted=0")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}

@@ -91,6 +91,11 @@ impl Harness {
             std::fs::create_dir_all(&dir)
                 .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
         }
+        // Skills are this build's; sync alone would leave a thread reading the
+        // copy an older build wrote.
+        if let Err(e) = crate::agents::ensure_library_docs(&self.data_dir) {
+            elog!("[oculus] agent docs: {e}");
+        }
         let raw_log = RawLog::open(&self.data_dir, thread_id);
         let base = |cwd: PathBuf| -> Result<ThreadSpawn, String> {
             Ok(ThreadSpawn {

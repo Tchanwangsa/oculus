@@ -1,4 +1,8 @@
 import { createLibrary } from "@openuidev/react-lang";
+import { TaskList } from "./components/LiveTasks";
+import { Deadline, Upcoming } from "./components/LiveCalendar";
+import { Lecture, StudioVideo } from "./components/LiveMedia";
+import { CheatNote, ReviewDue } from "./components/LiveRevision";
 import { Ask } from "./components/Ask";
 import { Chart } from "./components/Chart";
 import { Explorer, Slider, Value } from "./components/Explorer";
@@ -19,7 +23,7 @@ import { proposalComponents, jobComponents } from "./proposals/definitions";
  */
 export const library = createLibrary({
   root: "Stack",
-  components: [Stack, Text, Flashcards, Card, Quiz, Question, Option, Steps, Step, Explorer, Slider, Value, Chart, PageRef, Ask, ...proposalComponents, ...jobComponents],
+  components: [TaskList, Deadline, Upcoming, Lecture, StudioVideo, CheatNote, ReviewDue, Stack, Text, Flashcards, Card, Quiz, Question, Option, Steps, Step, Explorer, Slider, Value, Chart, PageRef, Ask, ...proposalComponents, ...jobComponents],
   functions,
   componentGroups: [
     { name: "Root", components: ["Stack", "Text"] },
@@ -40,9 +44,10 @@ export const library = createLibrary({
         "- There is no ^ operator: write @Pow(base, exponent).",
       ],
     },
+    { name: "Live", components: ["TaskList", "Deadline", "Upcoming", "Lecture", "StudioVideo", "CheatNote", "ReviewDue"] },
     { name: "Links", components: ["PageRef", "Ask"] },
-    { name: "Create", components: ["NewTasks", "NewProject", "Task", "Under", "NewEvents", "Event", "NewNote"], notes: ["- Use one proposal per openui fence. Nothing is written until the student clicks Create.", "- Look up existing ids in the CLI; never guess. Optional arguments may be null to skip a middle argument.", "- amends is the app's pending card id from Cards in this thread, always the last argument."] },
-    { name: "Change", components: ["Change", "TaskChanges", "ProjectChanges", "EventChanges", "TagChanges", "NewTag", "DeleteTag", "DeleteTasks", "DeleteEvents"], notes: ["- Change(id, from, to) uses the same keys in from and to. Null clears a field.", "- Task keys: title, body, due, starts, estimate, tags, files, column, project. Project keys: name, subject, due, starts, brief, tags, event, status. Event keys: title, start, end, kind, subject, notes. Tag keys: name, color.", "- Only local_<id> events may be changed/deleted; Canvas events are read-only."] },
+    { name: "Create", components: ["NewTasks", "NewProject", "Task", "Under", "NewEvents", "Event", "NewNote", "NewCheatNotes", "CheatEntry"], notes: ["- Use one proposal per openui fence. Nothing is written until the student clicks Create.", "- Look up existing ids in the CLI; never guess. Optional arguments may be null to skip a middle argument.", "- amends is the app's pending card id from Cards in this thread, always the last argument."] },
+    { name: "Change", components: ["Change", "TaskChanges", "ProjectChanges", "EventChanges", "TagChanges", "NewTag", "DeleteTag", "DeleteTasks", "DeleteEvents", "EditItems", "Edit"], notes: ["- Change(id, from, to) uses the same keys in from and to. Null clears a field.", "- Task keys: title, body, due, starts, estimate, tags, files, column, project. Project keys: name, subject, due, starts, brief, tags, event, status. Event keys: title, start, end, kind, subject, notes. Tag keys: name, color.", "- Only local_<id> events may be changed/deleted; Canvas events are read-only."] },
     { name: "Jobs", components: ["Sync", "Reparse", "Transcribe", "LectureChapters", "LectureEnd", "Download"], notes: ["- Ask with a job card before starting long, billed or downloaded work. One job per fence. No Undo."] },
   ],
 });

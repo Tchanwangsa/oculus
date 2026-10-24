@@ -4,6 +4,7 @@ import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { RouteError } from "@/components/ErrorBoundary";
 import SubjectLayout from "@/layouts/SubjectLayout";
 import SettingsLayout from "@/layouts/SettingsLayout";
+import RevisionLayout from "@/layouts/RevisionLayout";
 import StudioLayout from "@/layouts/StudioLayout";
 import TasksLayout from "@/layouts/TasksLayout";
 import HomePage from "@/pages/start/HomePage";
@@ -35,6 +36,12 @@ export const routes: RouteObject[] = [
       // Where the + button and ⌘T land.
       { path: "new", element: <NewTabPage /> },
       { path: "chat", lazy: page(() => import("@/pages/tools/ChatPage")) },
+      { path: "revision", element: <RevisionLayout />, children: [
+        { index: true, lazy: page(() => import("@/pages/revision/CheatSheetPage")) },
+        { path: "review", lazy: page(() => import("@/pages/revision/ReviewPage")) },
+        { path: "quizzes", lazy: page(() => import("@/pages/revision/QuizzesPage")) },
+        { path: "artifacts", lazy: page(() => import("@/pages/revision/ArtifactsPage")) },
+      ] },
       { path: "calendar", lazy: page(() => import("@/pages/tools/CalendarPage")) },
       {
         // One nav column beside the projects and tasks pages.

@@ -9,6 +9,7 @@ mod lecture;
 mod memory;
 mod planning;
 pub(crate) mod query;
+mod revision;
 mod run;
 mod status;
 mod studio;

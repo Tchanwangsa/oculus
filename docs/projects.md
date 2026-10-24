@@ -125,7 +125,9 @@ Undo checks every affected row and relation against the journal's `after`
 snapshot before restoring any of them. Task snapshots include subtasks and
 tag/file links; project and tag snapshots also guard dependent memberships.
 An external edit, added subtask or new use of an implicitly created tag refuses
-Undo instead of discarding the student's work. Journal rows survive chat
+Undo instead of discarding the student's work. Cheat sheet cards are the
+exception, described in [revision.md](./revision.md#cheat-entries-are-database-rows):
+their Undo removes edited entries too and reopens the card. Journal rows survive chat
 rewind and deletion; those actions remove only the proposal cards.
 
 - **`moveTask` / `move_task` is the only writer of `column_id`, `position` and

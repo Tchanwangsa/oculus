@@ -14,6 +14,7 @@ export type JobId =
   | "threadNaming"
   | "dictationCleanup"
   | "documentSuggestions"
+  | "revisionMarking"
   | "studioResearch"
   | "studioScene";
 
@@ -71,6 +72,7 @@ export const JOBS: {
     description:
       "Suggest note completions as you type.",
   },
+  { id: "revisionMarking", label: "Revision marking", description: "Mark submitted answers against their model answer and rubric." },
   {
     id: "studioResearch",
     label: "Studio research",
@@ -101,6 +103,7 @@ export const DEFAULT_JOB_MODELS: JobModels = {
   threadNaming: [{ provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null }],
   dictationCleanup: [{ provider: "claude", model: "claude-haiku-5-5", reasoningEffort: null }],
   documentSuggestions: [{ provider: "claude", model: "claude-sonnet-5-5", reasoningEffort: "medium" }],
+  revisionMarking: [{ provider: "codex", model: "gpt-6-luna", reasoningEffort: "medium" }],
   studioResearch: [
     { provider: "claude", model: "claude-haiku-5-5", reasoningEffort: null },
     { provider: "codex", model: "gpt-6-luna", reasoningEffort: "medium" },

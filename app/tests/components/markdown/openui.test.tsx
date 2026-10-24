@@ -157,7 +157,7 @@ describe("proposal signatures", () => {
   });
   test("generated grammar keeps null-skip optional markers and recursive Task type", () => {
     const prompt = generateOculusUiPrompt();
-    expect(prompt).toContain("Task(title: string, due?: string, estimate?: number, column?: string, subtasks?: Task[]");
+    expect(prompt).toContain("Task(title: string | number, due?: string, estimate?: number, column?: string, subtasks?: Task[]");
     expect(prompt).toContain("NewTasks(project: number | null, items: (Task | Under)[], amends?: string)");
     expect(prompt).toContain("NewProject(name: string, subject: string | null,");
     expect(prompt).toContain("Value(label: string, value: number | null,");
@@ -193,6 +193,14 @@ describe("proposal signatures", () => {
     expect(original.from.due).toBe("2026-10-27");
     expect(effectiveChanges({ from: { due: null }, to: { due: null } })).toEqual({});
   });
+  test("a library path passed as a cheat tag becomes the source", () => {
+    const path = "courses/MULT20015_2026_SM2/files/MULT20015_Lecture_17.pdf";
+    const state = initialProposal("NewCheatNotes", { notes: [{ title: "T", body: "B", tags: [path, "Formula"], source: "Lecture 17 p14" }] });
+    expect(state.notes).toEqual([{ title: "T", body: "B", tags: ["Formula"], source: `${path}#page=14` }]);
+    const kept = initialProposal("NewCheatNotes", { notes: [{ title: "T", body: "B", tags: [path], source: `${path}#page=3` }] });
+    expect(kept.notes).toEqual([{ title: "T", body: "B", tags: [], source: `${path}#page=3` }]);
+    expect(initialProposal("NewCheatNotes", { notes: [{ title: "T", body: "B", tags: ["Worked example"] }] }).notes).toEqual([{ title: "T", body: "B", tags: ["Worked example"] }]);
+  });
   test("delete exclusions become durable row state", () => {
     expect(initialProposal("DeleteEvents", { events: ["local_5"] })).toEqual({ events: [{ id: "local_5", included: true }] });
   });
@@ -218,4 +226,12 @@ describe("proposal signatures", () => {
     expect(parseProgram(`root = Stack([Explorer("Missing", [Value("No result")])])`).ok).toBe(false);
     expect(parseProgram(`root = Stack([Explorer("Missing", [Chart([{x:0},{x:1,y:2}])])])`).ok).toBe(false);
   });
+});
+
+describe("Revision and live widgets",()=>{
+ for(const [name,source] of Object.entries({
+  live:'root = Stack([Task(42), TaskList(12), Deadline("local_1"), Upcoming(null, 7), Lecture("abc", 723), StudioVideo("example"), CheatNote(1), ReviewDue(null)])',
+  cheat:'root = Stack([NewCheatNotes([CheatEntry("Chain rule", "Multiply by the inner derivative", "COMP10001", ["Calculus"])])])',
+ })) test(`${name} parses`,()=>{const result=parseProgram(source);if(!result.ok)throw new Error(result.errors.join("; "));});
+ test("cheat proposals require condensed content",()=>{expect(()=>validateProposal("NewCheatNotes",{notes:[{title:"",body:"text"}]})).toThrow();});
 });

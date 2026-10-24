@@ -594,6 +594,8 @@ The parser and embedder are settings (Settings → Parsing and Settings →
 Embeddings) and their keys live in `oculus-keyd`'s vault, or the keychain
 without keyd — neither is an environment variable.
 
+The OpenUI skill signatures can be regenerated with `bun run docs:widgets` after changing the component library. Revision’s offline scheduler, parser and transaction tests run with the ordinary suites; provider calibration is an explicitly invoked ignored test, described in [revision.md](./revision.md).
+
 ## Gotchas
 
 - A Rust build sitting at 0% CPU is macOS scanning each new build script and proc-macro (`syspolicyd`). Add every app that starts builds (terminal, editor) under System Settings → Privacy & Security → Developer Tools, then relaunch it. Claude Code runs its agents under its own bundle, not Claude.app: add `~/Library/Application Support/Claude/claude-code/<version>/<hash>/claude.app` (⌘⇧G in the picker). A build with no `GK evaluateScanResult` line for its `build_script_build` in `/usr/bin/log show --predicate 'process == "syspolicyd"'` is exempt. Every compile runs under one shared sccache server, which belongs to whichever app started it, so restart it (`sccache --stop-server`) after adding one.

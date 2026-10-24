@@ -11,6 +11,7 @@ pub(super) async fn run(
 ) -> Result<(), String> {
     state::validate_shape(kind, value)?;
     match kind {
+        "EditItems" => super::edits::run(conn, value, journal).await?,
         "NewTasks" => {
             let project = state::nullable_id(value.get("project"))?;
             if let Some(id) = project {

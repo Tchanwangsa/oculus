@@ -213,6 +213,7 @@ fn stubs_are_written_once_and_then_left_alone() {
             "oculus-library",
             "oculus-plan",
             "oculus-ui",
+            "oculus-revision",
             "oculus-studio"
         ]
     );

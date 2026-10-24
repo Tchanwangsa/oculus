@@ -12,9 +12,9 @@ function shapeKey(s: CitationShape): string {
 /** A tail's file, already looked up: the citation, null for no unique hit,
  *  undefined while unknown. */
 export function resolvedNow(shape: CitationShape): Citation | null | undefined {
-  if (shape.kind === "path") return { path: shape.path, line: shape.line, page: shape.page };
+  if (shape.kind === "path") return { path: shape.path, line: shape.line, page: shape.page, ...(shape.at != null ? { at: shape.at } : {}) };
   const hit = resolved.get(shapeKey(shape));
-  return hit === undefined ? undefined : hit && { ...hit, line: shape.line, page: shape.page };
+  return hit === undefined ? undefined : hit && { ...hit, line: shape.line, page: shape.page, ...(shape.at != null ? { at: shape.at } : {}) };
 }
 
 /** The library path a tail names, accepting only a unique hit. A parsed
@@ -50,5 +50,5 @@ export function resolveCitation(shape: CitationShape): Promise<Citation | null> 
       });
     resolving.set(key, p);
   }
-  return p.then((c) => c && { ...c, line: shape.line, page: shape.page });
+  return p.then((c) => c && { ...c, line: shape.line, page: shape.page, ...(shape.at != null ? { at: shape.at } : {}) });
 }

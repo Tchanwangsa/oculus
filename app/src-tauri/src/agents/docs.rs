@@ -53,6 +53,13 @@ pub(super) const SKILLS: &[Skill] = &[
         )],
     },
     Skill {
+        name: "oculus-revision",
+        files: &[(
+            SKILL_DOC_NAME,
+            include_str!("../../templates/skills/oculus-revision/SKILL.md"),
+        )],
+    },
+    Skill {
         name: "oculus-studio",
         files: &[
             (

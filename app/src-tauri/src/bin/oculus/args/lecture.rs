@@ -1,13 +1,21 @@
-//! Arguments of the `lecture` commands, which decode a recording already on
-//! disk: no database, no network.
+//! Arguments for listing recorded lectures and inspecting their local media.
 
 use crate::*;
 
 #[derive(Subcommand)]
 pub(crate) enum LectureAction {
+    List(LectureListArgs),
     Candidates(LectureCandidatesArgs),
     Chapters(LectureChaptersArgs),
     End(LectureEndArgs),
+}
+
+/// List real lecture ids for citations and live widgets, across every subject.
+#[derive(Args)]
+pub(crate) struct LectureListArgs {
+    /// Only this subject; unique prefixes work, with the current term preferred
+    #[arg(short, long, value_name = "SUBJECT_CODE")]
+    pub(crate) subject: Option<String>,
 }
 
 /// Find where a recording plausibly changes topic

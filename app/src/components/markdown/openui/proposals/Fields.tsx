@@ -11,11 +11,13 @@ import { Button } from "@/components/ui/button";
 import { displayValue } from "./ProposalParts";
 import { object, type Row } from "./model";
 
-const LONG = new Set(["body", "brief", "notes"]);
+import { TopicsField, TopicNamesField, JsonField } from "./RevisionFields";
+import type { RevisionTopic } from "@/lib/revision/types";
+const LONG = new Set(["body", "brief", "notes", "prompt", "answer", "description", "program"]);
 const EventLink = lazy(() => import("@/components/projects/page/EventLink").then((module) => ({ default: module.EventLink })));
 const DATES = new Set(["due", "starts", "start", "end"]);
-const LISTS = new Set(["tags", "files"]);
-const LABELS: Record<string, string> = { due: "Due", starts: "Starts", estimate: "Estimate (minutes)", column: "Column", body: "Description", files: "Related files", event: "Calendar event" };
+const LISTS = new Set(["tags", "files", "topic"]);
+const LABELS: Record<string, string> = { topic_ids: "Topics", topics: "Topics", subject_id: "Subject id", due: "Due", starts: "Starts", estimate: "Estimate (minutes)", column: "Column", body: "Description", files: "Related files", event: "Calendar event" };
 export const fieldLabel = (key: string) => LABELS[key] ?? key[0].toUpperCase() + key.slice(1);
 
 function ListField({ name, value, onChange }: { name: string; value: unknown; onChange: (value: unknown) => void }) {
@@ -63,10 +65,18 @@ function EventField({ value, subject, onChange }: { value: unknown; subject: unk
   return <div><Suspense fallback={<span className="text-xs text-muted-foreground">Loading calendar…</span>}><EventLink project={{ event_id: typeof value === "string" ? value : null, subject_id: match?.id ?? null }} onPick={onChange} /></Suspense>{error && <p className="text-xs text-destructive">{error}</p>}</div>;
 }
 
-export function Field({ name, value, onChange, columns, subject }: { name: string; value: unknown; onChange: (value: unknown) => void; columns?: Row[]; subject?: unknown }) {
+export function Field({ name, value, onChange, columns, subject, topics = [], subjectId, entity }: { name: string; value: unknown; onChange: (value: unknown) => void; columns?: Row[]; subject?: unknown; topics?: RevisionTopic[]; subjectId?: number | null; entity?: string }) {
   const label = fieldLabel(name);
   let control;
-  if (DATES.has(name)) control = <DateTimeField allowAllDay value={typeof value === "string" ? value : null} onCommit={onChange} label={label} defaultTime={name === "starts" || name === "start" ? "start" : "end"} />;
+  if (name === "topic_ids") control = <TopicsField value={value} topics={topics} subjectId={subjectId} subject={subject} onChange={onChange} />;
+  else if (name === "topics") control = <TopicNamesField value={value} topics={topics} subject={subject} onChange={onChange} />;
+  else if (["options", "rubric", "state"].includes(name)) control = <JsonField label={label} value={value} onChange={onChange} />;
+  else if (["subject_id", "position", "tolerance"].includes(name)) control = <Input aria-label={label} type="number" value={value == null ? "" : String(value)} onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))} />;
+  else if (entity === "question" && ["kind", "status", "level"].includes(name)) {
+    const options = name === "kind" ? ["card", "choice", "numeric", "short", "structured"] : name === "status" ? ["draft", "active", "suspended"] : ["easy", "medium", "hard"];
+    control = <Options value={value} options={options.map((id) => ({ id, label: id }))} label={label} onChange={onChange} />;
+  }
+  else if (DATES.has(name)) control = <DateTimeField allowAllDay value={typeof value === "string" ? value : null} onCommit={onChange} label={label} defaultTime={name === "starts" || name === "start" ? "start" : "end"} />;
   else if (name === "project") control = <ProjectField value={value} onChange={onChange} />;
   else if (name === "subject") control = <SubjectField value={value} onChange={onChange} />;
   else if (name === "event") control = <EventField value={value} subject={subject} onChange={onChange} />;
@@ -80,8 +90,8 @@ export function Field({ name, value, onChange, columns, subject }: { name: strin
   return <label className={`flex min-w-0 flex-col gap-1 text-xs text-muted-foreground ${LONG.has(name) || name === "files" ? "col-span-full" : ""}`}><span>{label}</span>{control}</label>;
 }
 
-export function Fields({ row, names, onChange, columns }: { row: Row; names: string[]; onChange: (row: Row) => void; columns?: Row[] }) {
-  return <div className="grid min-w-0 grid-cols-1 gap-3 py-2 @sm/proposal:grid-cols-2">{names.map((name) => <Field key={name} name={name} value={row[name]} subject={row.subject} columns={columns} onChange={(value) => onChange({ ...row, [name]: value })} />)}</div>;
+export function Fields({ row, names, onChange, columns, topics, subjectId, entity }: { row: Row; names: string[]; onChange: (row: Row) => void; columns?: Row[]; topics?: RevisionTopic[]; subjectId?: number | null; entity?: string }) {
+  return <div className="grid min-w-0 grid-cols-1 gap-3 py-2 @sm/proposal:grid-cols-2">{names.map((name) => <Field key={name} name={name} value={row[name]} subject={row.subject} columns={columns} topics={topics} subjectId={subjectId} entity={entity} onChange={(value) => onChange({ ...row, [name]: value })} />)}</div>;
 }
 
 export function TextDiff({ before, after }: { before: unknown; after: unknown }) {

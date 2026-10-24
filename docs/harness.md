@@ -1018,9 +1018,25 @@ of the first message.
 
 `chat_proposals` owns a card's edited fields, inclusion ticks and status.
 Open/edit/apply/discard/undo commands publish its committed snapshot as a
-`Proposal` harness event. Reloading and a second view read that same row;
-localStorage holds only study-widget progress. The transaction and journal
+`Proposal` harness event. Reloading and a second view read that same active
+draft. The transaction and journal
 contract are in [projects.md](./projects.md).
+
+Pending proposals number reciprocal amendments of the same kind V1, V2, …,
+using each row's immutable `initial_state` through
+`app/src/lib/harness/proposalVersions.ts`. The selector in
+`app/src/components/markdown/openui/proposals/VersionControl.tsx` switches the
+active draft to that version's content. Modified compares it with that
+version's original; Reset restores the original fields, rows and inclusion
+ticks. Restoring content preserves the active card's amendment link and
+confirmation identity. It never applies student-data writes on its own.
+
+`app/src/stores/chat/proposalVersionStore.ts` parks each version's edits and
+selection in localStorage (`oculus.proposalVersions`), so switching away and
+back or relaunching retains them. A shared revision counter invalidates
+outgoing editors in every mounted view: their final blur/unmount callbacks
+cannot overwrite a reset or switch. Rewind and thread deletion prune parked
+drafts alongside widget progress. Original snapshots stay in SQLite.
 
 Every `start_turn` reads pending cards and newly decided statuses after the
 lecture moment, appending "Cards in this thread" to the provider prompt.
@@ -1048,6 +1064,12 @@ message reports the outcome. Startup marks interrupted runs as errors and
 keeps the card decided, avoiding an accidental second billed launch. Jobs
 have no Undo or amendments.
 
+
+## Revision writes and submitted answers have separate paths
+
+The `oculus-revision` skill drafts course-style questions as unaccepted items and offers condensed `NewCheatNotes` proposals after concept explanations. The `revisionMarking` job marks a submitted written answer in one tool-less turn, with strict rubric JSON validation. State, scheduling and error behavior are in [revision.md](./revision.md).
+
+Live Task/TaskList, Deadline/Upcoming, Lecture, StudioVideo, CheatNote and ReviewDue widgets read current rows by CLI-supplied id. `Task(number)` is live; `Task(string, ...)` remains a proposed new task. Lecture citations accept `lectures/<id>#t=<seconds>` and open the player at that moment.
 
 ## Gotchas
 

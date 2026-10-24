@@ -84,14 +84,10 @@ export function SideNavHeading({ icon: Icon, children }: { icon: Icon; children:
 /** Folds or unfolds the column, from the page's header row beside its title,
  *  so it stays in one place in both states. */
 export function SideNavCollapseToggle({
-  collapsed,
-  onToggle,
-  shortcut,
+  panel: { collapsed, toggle, shortcut },
 }: {
-  collapsed: boolean;
-  onToggle: () => void;
-  /** Shown after the label in the tooltip, e.g. "⌘⌥B". */
-  shortcut?: string;
+  /** `useSideNavPanel` binds a fold key and names it in `shortcut`. */
+  panel: { collapsed: boolean; toggle: () => void; shortcut?: string };
 }) {
   const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
   return (
@@ -101,7 +97,7 @@ export function SideNavCollapseToggle({
           type="button"
           aria-label={label}
           aria-expanded={!collapsed}
-          onClick={onToggle}
+          onClick={toggle}
           className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-item-hover hover:text-foreground"
         >
           <SidebarSimple size={16} />

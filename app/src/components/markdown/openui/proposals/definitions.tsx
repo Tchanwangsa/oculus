@@ -1,5 +1,6 @@
 import { defineComponent } from "@openuidev/react-lang";
 import { z } from "zod/v4";
+import { LiveTask } from "../components/LiveTasks";
 import { ProposalCard } from "./ProposalCard";
 import { JobCard } from "./JobCard";
 
@@ -11,11 +12,11 @@ const silent = () => null;
 const nestedTask: z.ZodType = z.lazy((): z.ZodType => Task.ref as unknown as z.ZodType);
 
 export const Task = defineComponent({
-  name: "Task", description: "A new task; subtasks may nest only one level. Used only inside a creation card.",
+  name: "Task", description: "Task(numericId) shows a live task. Task(title, due, ...) describes a new task inside a creation card; subtasks nest one level.",
   props: z.object({
-    title: z.string(), due: text(), estimate: z.number().int().nonnegative().nullish(), column: text(),
+    title: z.union([z.string(), z.number().int().positive()]), due: text(), estimate: z.number().int().nonnegative().nullish(), column: text(),
     subtasks: z.array(nestedTask).nullish(), tags: list(), body: text(), starts: text(), files: list(),
-  }), component: silent,
+  }), component: ({ props }) => typeof props.title === "number" ? <LiveTask id={props.title} /> : null,
 });
 export const Under = defineComponent({
   name: "Under", description: "New subtasks grouped under an existing task; only in NewTasks.",
@@ -47,9 +48,21 @@ export const NewNote = defineComponent({
   component: ({ props }) => <ProposalCard kind="NewNote" input={props} />,
 });
 
+export const CheatEntry = defineComponent({ name: "CheatEntry", description: `A condensed cheat sheet entry, used inside NewCheatNotes. subject is a subject code; null files it under the thread's subject. topics are topic names in that subject: reuse an existing name or give a new one, which is created when the student clicks Add. The topic carries the grouping, so never prefix the title with it. tags are one or two names from \`oculus cheat tags\` (such as Definition, Formula, Theorem, Method, Worked example, Note), spelled as listed; a new name joins the registry, so add one only when none fits, and never a path. source is the library path the entry came from, with #page=N for a PDF page.`, props: z.object({title:z.string(),body:z.string(),subject:text(),tags:list(),source:text(),topics:list()}), component:silent });
+export const NewCheatNotes = defineComponent({ name:"NewCheatNotes", description:"Propose condensed definitions, formulas or examples for the cheat sheet. The student edits and clicks Add.",props:z.object({notes:z.array(CheatEntry.ref),amends:amends()}),component:({props})=><ProposalCard kind="NewCheatNotes" input={props}/> });
+
 export const Change = defineComponent({
   name: "Change", description: "An existing id, the exact fields read from it, and replacement values for those same fields. Null clears a field.",
   props: z.object({ id: z.union([id(), z.string()]), from: z.record(z.string(), z.unknown()), to: z.record(z.string(), z.unknown()) }), component: silent,
+});
+export const Edit = defineComponent({
+  name: "Edit", description: "An ordinary Revision edit: entity, existing id, exact current fields, and replacements. topic_ids assigns shared topic buckets; [] selects Unsorted.",
+  props: z.object({ entity: z.enum(["cheat", "question", "quiz", "artifact", "topic"]), id: id(), from: z.record(z.string(), z.unknown()), to: z.record(z.string(), z.unknown()) }), component: silent,
+});
+export const EditItems = defineComponent({
+  name: "EditItems", description: "Edit existing Revision entries, questions, quizzes, artifacts or topics together. Uses the same guarded from/to editing flow for content and topic assignments.",
+  props: z.object({ changes: z.array(Edit.ref), amends: amends() }),
+  component: ({ props }) => <ProposalCard kind="EditItems" input={props} />,
 });
 export const NewTag = defineComponent({
   name: "NewTag", description: "A proposed shared tag and its palette colour key.",
@@ -97,5 +110,5 @@ export const LectureChapters = defineComponent({ name: "LectureChapters", descri
 export const LectureEnd = defineComponent({ name: "LectureEnd", description: "Ask before finding a lecture's content end using the configured model.", props: z.object({ lecture: z.string() }), component: ({ props }) => <JobCard kind="LectureEnd" input={props} /> });
 export const Download = defineComponent({ name: "Download", description: "Ask before downloading aligner, voices starter pack or a voice id.", props: z.object({ item: z.string() }), component: ({ props }) => <JobCard kind="Download" input={props} /> });
 
-export const proposalComponents = [Task, Under, NewTasks, NewProject, Event, NewEvents, NewNote, Change, NewTag, DeleteTag, TaskChanges, ProjectChanges, EventChanges, TagChanges, DeleteTasks, DeleteEvents];
+export const proposalComponents = [CheatEntry, NewCheatNotes, Task, Under, NewTasks, NewProject, Event, NewEvents, NewNote, Change, Edit, EditItems, NewTag, DeleteTag, TaskChanges, ProjectChanges, EventChanges, TagChanges, DeleteTasks, DeleteEvents];
 export const jobComponents = [Sync, Reparse, Transcribe, LectureChapters, LectureEnd, Download];

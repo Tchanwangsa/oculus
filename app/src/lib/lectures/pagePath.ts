@@ -3,8 +3,9 @@ import type { Lecture } from "@/lib/db";
 /** The full-page player route; `t` titles the tab. */
 export function lecturePagePath(
   lec: Pick<Lecture, "id" | "subject_id" | "title">,
+  at?: number,
 ): string {
-  return `/subjects/${lec.subject_id}/lecture?id=${encodeURIComponent(lec.id)}&t=${encodeURIComponent(lec.title)}`;
+  return `/subjects/${lec.subject_id}/lecture?id=${encodeURIComponent(lec.id)}&t=${encodeURIComponent(lec.title)}${at != null && Number.isFinite(at) && at >= 0 ? `&at=${at}` : ""}`;
 }
 
 /** The lecture id a `lecturePagePath` route names, or null for any other path. */

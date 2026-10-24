@@ -10,6 +10,7 @@ export interface LineRange {
 export interface CiteLocation {
   line?: LineRange;
   page?: number;
+  at?: number;
 }
 
 /** A citation whose file is known: `path` is data-dir-relative, under
@@ -25,8 +26,8 @@ export type CitationShape =
   | ({ kind: "tail"; tail: string } & CiteLocation);
 
 /** `:97`, `:97-120`, `:L97`, `:L97-L120`, `#L97`, `#L97-L120`, `#L97-120`,
- *  `#page=12`. */
-const SUFFIX = /(?::L?(\d+)(?:-L?(\d+))?|#L(\d+)(?:-L?(\d+))?|#page=(\d+))$/;
+ *  `#page=12`, or a lecture moment `#t=723`. */
+const SUFFIX = /(?::L?(\d+)(?:-L?(\d+))?|#L(\d+)(?:-L?(\d+))?|#page=(\d+)|#t=(\d+(?:\.\d+)?))$/;
 
 export const ROOTS = "(?:courses|agents|lectures)";
 
@@ -71,6 +72,7 @@ function decodePath(raw: string): string {
 
 function location(m: RegExpExecArray | null): CiteLocation {
   if (!m) return {};
+  if (m[6]) return { at: Number(m[6]) };
   if (m[5]) return { page: Number(m[5]) };
   const from = Number(m[1] ?? m[3]);
   const to = Number(m[2] ?? m[4] ?? from);
@@ -115,7 +117,7 @@ export function parseCitation(
 /** A citation with its file known from the shape alone, or null. */
 export function fullCitation(raw: string | null | undefined): Citation | null {
   const c = parseCitation(raw, { tails: false });
-  return c?.kind === "path" ? { path: c.path, line: c.line, page: c.page } : null;
+  return c?.kind === "path" ? { path: c.path, line: c.line, page: c.page, ...(c.at != null ? { at: c.at } : {}) } : null;
 }
 
 /** The citation as one string, `path` plus `:97-120` or `#page=12` — what a
@@ -125,6 +127,7 @@ export function citationText(c: Citation): string {
     const { from, to } = c.line;
     return `${c.path}:${from}${to !== from ? `-${to}` : ""}`;
   }
+  if (c.at != null) return `${c.path}#t=${c.at}`;
   return c.page ? `${c.path}#page=${c.page}` : c.path;
 }
 

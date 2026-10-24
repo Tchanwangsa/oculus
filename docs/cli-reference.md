@@ -31,6 +31,10 @@ Commands:
   transcribe  Transcribe a video that has no captions, on Groq or on this Mac
   studio      Make, render, check and narrate Studio videos: TSX scenes drawn frame by
               frame
+  cheat       Keep condensed concepts in the Revision cheat sheet
+  quiz        Draft questions, inspect their due queue and assemble quizzes
+  artifact    Save and inspect interactive OpenUI programs in Revision
+  topic       Shared subject topics for every kind of Revision entry
   docs        Write the agent-facing docs into the library
   agent       Run one prompt through a CLI agent (Claude Code, Codex, opencode or
               Antigravity)
@@ -41,8 +45,9 @@ Options:
           Print machine-readable JSON instead of formatted text
 
           Honoured by every command that prints: status, list, search, grep, read,
-          files, calendar, project, task, tag, keyd and studio. On failure the JSON is
-          `{"error": "..."}` on stderr and the exit code is 1.
+          files, calendar, project, task, tag, cheat, quiz, artifact, topic, keyd and
+          studio. On failure the JSON is `{"error": "..."}` on stderr and the exit code
+          is 1.
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1463,12 +1468,28 @@ Look inside a downloaded lecture recording
 Usage: oculus lecture <COMMAND>
 
 Commands:
+  list        List real lecture ids for citations and live widgets, across every subject
   candidates  Find where a recording plausibly changes topic
   chapters    Name a recording's chapters with a CLI agent, and store them
   end         Find where a recording's lecture ends, before its Q&A and dead air
   help        Print this message or the help of the given subcommand(s)
 
 Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus lecture list`
+
+```
+List real lecture ids for citations and live widgets, across every subject
+
+Usage: oculus lecture list [OPTIONS]
+
+Options:
+  -s, --subject <SUBJECT_CODE>
+          Only this subject; unique prefixes work, with the current term preferred
+
   -h, --help
           Print help (see a summary with '-h')
 ```
@@ -2776,6 +2797,618 @@ Options:
 Delete the aligner model and any partial download
 
 Usage: oculus studio aligner delete
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus cheat`
+
+```
+Keep condensed concepts in the Revision cheat sheet
+
+Usage: oculus cheat <COMMAND>
+
+Commands:
+  add
+  list
+  show
+  update
+  rm      Permanently delete an entry; there is no undo
+  tags    The cheat sheet's tag registry: name, colour and how many entries carry it
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus cheat add`
+
+```
+Usage: oculus cheat add [OPTIONS] --title <TITLE> --subject <SUBJECT>
+
+Options:
+      --title <TITLE>
+
+
+      --body <BODY>
+
+
+      --body-file <BODY_FILE>
+          UTF-8 Markdown file, or - for stdin
+
+  -s, --subject <SUBJECT>
+          Subject code; every Revision entry belongs to one subject
+
+      --tags <TAGS>
+          Comma-separated tag names from `oculus cheat tags`; a new name joins the
+          registry
+
+      --topics <TOPICS>
+          Topic ids, comma-separated; omitted or empty assigns Unsorted
+
+      --source <SOURCE>
+          Provenance, e.g. courses/CODE/files/notes.pdf#page=3
+
+      --source-kind <SOURCE_KIND>
+          [default: manual]
+          [possible values: manual, chat, file, lecture, agent]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus cheat list`
+
+```
+Usage: oculus cheat list [OPTIONS]
+
+Options:
+  -s, --subject <SUBJECT>
+          Subject code, with unique prefixes accepted
+
+      --topic <TOPIC>
+          Only entries assigned to this topic id
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus cheat show`
+
+```
+Usage: oculus cheat show <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus cheat update`
+
+```
+Usage: oculus cheat update [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+      --title <TITLE>
+
+
+      --body <BODY>
+
+
+      --body-file <BODY_FILE>
+
+
+  -s, --subject <SUBJECT>
+          Move the entry to another subject; it returns to that subject's Unsorted
+
+      --tags <TAGS>
+
+
+      --topics <TOPICS>
+          Replace topic memberships; an empty string assigns Unsorted
+
+      --source <SOURCE>
+
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus cheat rm`
+
+```
+Permanently delete an entry; there is no undo
+
+Usage: oculus cheat rm <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus cheat tags`
+
+```
+The cheat sheet's tag registry: name, colour and how many entries carry it
+
+Usage: oculus cheat tags
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus quiz`
+
+```
+Draft questions, inspect their due queue and assemble quizzes
+
+Usage: oculus quiz <COMMAND>
+
+Commands:
+  add     Add questions as drafts; --batch reads JSON lines atomically
+  list
+  show
+  update  Patch question fields from a JSON object; scheduling state is read-only
+  rm      Permanently delete a question and its review history; there is no undo
+  set
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus quiz add`
+
+```
+Add questions as drafts; --batch reads JSON lines atomically
+
+Usage: oculus quiz add [OPTIONS] --subject <SUBJECT>
+
+Options:
+      --batch <BATCH>
+          JSON lines file, or - for stdin. Also accepts a JSON array
+
+  -s, --subject <SUBJECT>
+          Subject code, applied to every question added
+
+      --prompt <PROMPT>
+
+
+      --answer <ANSWER>
+
+
+      --kind <KIND>
+          [possible values: card, choice, numeric, short, structured]
+
+      --level <LEVEL>
+          [possible values: easy, medium, hard]
+
+      --options <OPTIONS>
+          JSON string array of choice options; answer is the correct option text
+
+      --tolerance <TOLERANCE>
+
+
+      --rubric <RUBRIC>
+          JSON array of {point, marks}
+
+      --topics <TOPICS>
+          Topic ids, comma-separated; omitted or empty assigns Unsorted
+
+      --topic <TOPIC>
+          Legacy topic labels (prefer --topics ids)
+
+      --style-ref <STYLE_REF>
+
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus quiz list`
+
+```
+Usage: oculus quiz list [OPTIONS]
+
+Options:
+  -s, --subject <SUBJECT>
+          Subject code, with unique prefixes accepted
+
+      --topic <TOPIC>
+          Only entries assigned to this topic id
+
+      --due
+          Only active items that are due now
+
+      --level <LEVEL>
+          [possible values: easy, medium, hard]
+
+      --set <SET>
+
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus quiz show`
+
+```
+Usage: oculus quiz show <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus quiz update`
+
+```
+Patch question fields from a JSON object; scheduling state is read-only
+
+Usage: oculus quiz update [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+      --patch <PATCH>
+          JSON object containing replacement values for the fields being edited
+
+      --patch-file <PATCH_FILE>
+
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus quiz rm`
+
+```
+Permanently delete a question and its review history; there is no undo
+
+Usage: oculus quiz rm <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus quiz set`
+
+```
+Usage: oculus quiz set <COMMAND>
+
+Commands:
+  add
+  list
+  show
+  update  Patch title, description, subject_id or topic_ids with JSON
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus quiz set add`
+
+```
+Usage: oculus quiz set add [OPTIONS] --title <TITLE> --subject <SUBJECT>
+
+Options:
+      --title <TITLE>
+
+
+  -s, --subject <SUBJECT>
+          Subject code
+
+      --description <DESCRIPTION>
+          [default: ""]
+
+      --topics <TOPICS>
+          Topic ids, comma-separated; omitted or empty assigns Unsorted
+
+      --items <ITEMS>
+          Ordered question ids, comma-separated
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus quiz set list`
+
+```
+Usage: oculus quiz set list [OPTIONS]
+
+Options:
+  -s, --subject <SUBJECT>
+          Subject code, with unique prefixes accepted
+
+      --topic <TOPIC>
+          Only entries assigned to this topic id
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus quiz set show`
+
+```
+Usage: oculus quiz set show <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `oculus quiz set update`
+
+```
+Patch title, description, subject_id or topic_ids with JSON
+
+Usage: oculus quiz set update [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+      --patch <PATCH>
+          JSON object containing replacement values for the fields being edited
+
+      --patch-file <PATCH_FILE>
+
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus artifact`
+
+```
+Save and inspect interactive OpenUI programs in Revision
+
+Usage: oculus artifact <COMMAND>
+
+Commands:
+  save
+  update  Patch title, program, state, subject_id, source_ref or topic_ids with JSON
+  list
+  show
+  rm      Permanently delete a saved artifact; there is no undo
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus artifact save`
+
+```
+Usage: oculus artifact save [OPTIONS] --title <TITLE> --program-file <PROGRAM_FILE> --subject <SUBJECT>
+
+Options:
+      --title <TITLE>
+
+
+      --program-file <PROGRAM_FILE>
+          OpenUI Lang source file, or - for stdin
+
+  -s, --subject <SUBJECT>
+          Subject code
+
+      --topics <TOPICS>
+          Topic ids, comma-separated; omitted or empty assigns Unsorted
+
+      --state <STATE>
+          JSON widget state; omitted means initial state
+
+      --source <SOURCE>
+
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus artifact update`
+
+```
+Patch title, program, state, subject_id, source_ref or topic_ids with JSON
+
+Usage: oculus artifact update [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+      --patch <PATCH>
+          JSON object containing replacement values for the fields being edited
+
+      --patch-file <PATCH_FILE>
+
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus artifact list`
+
+```
+Usage: oculus artifact list [OPTIONS]
+
+Options:
+  -s, --subject <SUBJECT>
+          Subject code, with unique prefixes accepted
+
+      --topic <TOPIC>
+          Only entries assigned to this topic id
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus artifact show`
+
+```
+Usage: oculus artifact show <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus artifact rm`
+
+```
+Permanently delete a saved artifact; there is no undo
+
+Usage: oculus artifact rm <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus topic`
+
+```
+Shared subject topics for every kind of Revision entry
+
+Usage: oculus topic <COMMAND>
+
+Commands:
+  add     Create a shared Revision bucket; existing names in the same scope are reused
+  list
+  show
+  update  Patch name, description or position with JSON
+  rm      Remove a topic; entries without another topic return to Unsorted
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus topic add`
+
+```
+Create a shared Revision bucket; existing names in the same scope are reused
+
+Usage: oculus topic add [OPTIONS] --name <NAME> --subject <SUBJECT>
+
+Options:
+      --name <NAME>
+
+
+  -s, --subject <SUBJECT>
+          Subject code; a topic belongs to one subject
+
+      --description <DESCRIPTION>
+          [default: ""]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus topic list`
+
+```
+Usage: oculus topic list [OPTIONS]
+
+Options:
+  -s, --subject <SUBJECT>
+          Subject code, with unique prefixes accepted
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus topic show`
+
+```
+Usage: oculus topic show <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus topic update`
+
+```
+Patch name, description or position with JSON
+
+Usage: oculus topic update [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+      --patch <PATCH>
+          JSON object containing replacement values for the fields being edited
+
+      --patch-file <PATCH_FILE>
+
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus topic rm`
+
+```
+Remove a topic; entries without another topic return to Unsorted
+
+Usage: oculus topic rm <ID>
+
+Arguments:
+  <ID>
+
 
 Options:
   -h, --help

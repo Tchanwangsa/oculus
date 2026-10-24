@@ -218,12 +218,12 @@ export function openCitation(cite: Citation, newTab = false): void {
 
 async function openCitationAsync(cite: Citation, newTab: boolean): Promise<void> {
   const system = () => invoke<void>("open_course_file", { relativePath: cite.path });
-  const lectureId = /^lectures\/([^/]+)\//.exec(cite.path)?.[1];
+  const lectureId = /^lectures\/([^/]+)(?:\/|$)/.exec(cite.path)?.[1];
   if (lectureId) {
     const lecture = await getLecture(lectureId);
     if (!lecture) return system();
-    if (newTab) useTabStore.getState().addTab(lecturePagePath(lecture));
-    else openBeside(lecturePagePath(lecture));
+    if (newTab) useTabStore.getState().addTab(lecturePagePath(lecture, cite.at));
+    else openBeside(lecturePagePath(lecture, cite.at));
     return;
   }
   if (!cite.path.startsWith("courses/")) return system();

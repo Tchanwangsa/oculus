@@ -44,6 +44,10 @@ fn render_config(library: &Path, prompt: &str, one_off: &OneOffPrompts, subagent
             &json_fragment(&crate::library::paths::slash_path(library)),
         )
         .replace("\"{{PROMPT}}\"", &json_string(prompt))
+        .replace(
+            "\"{{REVISION_PROMPT}}\"",
+            &json_string(crate::harness::app::revision::INSTRUCTIONS),
+        )
         .replace("\"{{NAMING_PROMPT}}\"", &json_string(one_off.naming))
         .replace("\"{{WRITER_PROMPT}}\"", &json_string(one_off.writer))
         .replace(
@@ -70,7 +74,9 @@ fn json_fragment(s: &str) -> String {
 mod tests {
     use serde_json::{json, Value};
 
-    use super::super::{AGENT, DICTATION_AGENT, LECTURE_END_AGENT, NAMING_AGENT, WRITER_AGENT};
+    use super::super::{
+        AGENT, DICTATION_AGENT, LECTURE_END_AGENT, NAMING_AGENT, REVISION_AGENT, WRITER_AGENT,
+    };
     use super::*;
 
     /// opencode has no OS sandbox, so `oculus` reaches keyd's socket with no
@@ -269,6 +275,7 @@ mod tests {
                 DICTATION_AGENT,
                 crate::harness::app::dictation::INSTRUCTIONS,
             ),
+            (REVISION_AGENT, crate::harness::app::revision::INSTRUCTIONS),
             (NAMING_AGENT, "You name conversations."),
             (WRITER_AGENT, "You complete \"notes\"."),
             (LECTURE_END_AGENT, "You find where lectures end."),

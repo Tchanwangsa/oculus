@@ -1,3 +1,4 @@
+import { SaveQuestions } from "@/components/revision/SaveWidget";
 import { defineComponent } from "@openuidev/react-lang";
 import { z } from "zod/v4";
 import { ArrowCounterClockwise, Check, X } from "@phosphor-icons/react";
@@ -55,8 +56,9 @@ export const Flashcards = defineComponent({
       <Frame
         title={typeof props.title === "string" ? props.title : undefined}
         meta={`${known} of ${total} known${misses ? ` · ${misses} missed` : ""}`}
-        footer={
-          card ? (
+        footer={<>
+          <SaveQuestions items={cards.map(c=>({kind:"card",prompt:String(c.front??""),answer:String(c.back??"")}))}/>
+          {card ? (
             flipped ? (
               <>
                 <Pill onClick={() => mark(false)}>
@@ -74,7 +76,7 @@ export const Flashcards = defineComponent({
               <ArrowCounterClockwise size={13} /> Start again
             </Pill>
           )
-        }
+        }</>}
       >
         {card ? (
           <button

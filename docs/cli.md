@@ -286,7 +286,9 @@ directory, and opencode reads a `skills.paths` config key. Nothing is written
 to a home directory. Both memory buckets sit under `agents/` because it is the
 only folder a chat thread may write.
 
-A sync links only the course folders it scraped (`link_course`); `oculus docs`
+Generated docs and skills are rewritten by every sync, `oculus docs` and each
+chat thread's start (`manager/session.rs`), so a thread reads this build's
+skills. A sync links only the course folders it scraped (`link_course`); `oculus docs`
 sweeps them all (`link_all`) and is the only writer of `OCULUS-CLI.md`. Help is rendered at 88 columns with colour off (clap's `wrap_help`), so output
 depends on the binary, not the terminal; the global `--json` is hidden below
 the root so it is not repeated under every subcommand. `OCULUS-CLI.md` is a
@@ -304,3 +306,5 @@ pull document that `AGENTS.md` says when to open.
 The app and CLI share `%USERPROFILE%/Oculus` on Windows. Database and IPC
 relative paths use `/`, filenames avoid Windows device names and trailing
 dots, and authentication prompts use hidden terminal input on both platforms.
+
+Revision commands (`cheat`, `quiz`, `artifact`) share validated database writers; draft acceptance and review scheduling belong to the frontend. See [revision.md](./revision.md#cli-writes-refresh-open-revision-views).

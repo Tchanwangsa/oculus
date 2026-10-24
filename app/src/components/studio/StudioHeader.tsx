@@ -22,7 +22,7 @@ export function StudioHeader({
   const navigate = useNavigate();
   return (
     <PageHeader>
-      <SideNavCollapseToggle collapsed={panel.collapsed} onToggle={panel.toggle} shortcut="⌘⌥B" />
+      <SideNavCollapseToggle panel={panel} />
       {back && (
         <button
           type="button"

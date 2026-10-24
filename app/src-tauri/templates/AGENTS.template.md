@@ -147,6 +147,7 @@ the turn carries on without the answer. So:
   subject code is short; expanding it saves nothing and costs the command. A
   code with spaces is quoted (`-s "CS 101"`) or written with `_` or `-`
   instead — the CLI matches them alike.
+- **Revision keeps what the student learns.** Read `oculus-revision` for course-style practice questions and condensed cheat sheet proposals after concept explanations. Use `NewCheatNotes` for additions; the student clicks Add.
 - **Planning uses confirmation cards.** Read `oculus-plan` and `oculus-ui`;
   write an `openui` proposal with the real ids and current field values.
   Use `\n` inside strings for multiline Markdown, and double TeX backslashes.

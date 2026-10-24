@@ -4,6 +4,8 @@
 mod amendments;
 mod apply;
 mod changes;
+mod cheats;
+mod edits;
 mod inspect;
 mod journal;
 mod lifecycle;

@@ -4,14 +4,14 @@
 use crate::*;
 
 impl Ctx {
-    pub(super) fn planning_db(&self) -> Result<SqlitePool, String> {
+    pub(crate) fn planning_db(&self) -> Result<SqlitePool, String> {
         self.db()
             .ok_or_else(|| "projects live in the database".to_string())
     }
 
     /// One subject id from a code (prefix match, as `run` uses). A code that
     /// matches two terms prefers the current one; any other tie is an error.
-    pub(super) fn one_subject(&self, pool: &SqlitePool, code: &str) -> Result<i64, String> {
+    pub(crate) fn one_subject(&self, pool: &SqlitePool, code: &str) -> Result<i64, String> {
         let subjects = self.rt.block_on(store::subjects(pool))?;
         let matched = filter_subjects(&subjects, &[code.to_string()], false)?;
         if matched.len() == 1 {

@@ -23,12 +23,35 @@ import {
 import { noteExtensions } from "./editor/core/extensions";
 import { hostCompartment, noteHost, type NoteHost } from "./editor/core/host";
 import { ViewSlot } from "./editor/core/viewSlot";
+import { paragraphGaps } from "./editor/live-preview/livePreview/paragraphGaps";
 import { Toolbar } from "./editor/chrome/Toolbar";
 import { useEditorFind } from "./editor/chrome/useEditorFind";
 
 /** The document page's `.cm-content` is half a screen tall; a field is a
- *  few lines. Highest precedence: CodeMirror mounts it after `noteTheme`. */
-const fieldTheme = Prec.highest(EditorView.theme({ ".cm-content": { minHeight: "6rem" } }));
+ *  few lines, and an inline one as tall as its text. Highest precedence:
+ *  CodeMirror mounts it after `noteTheme`. */
+const minHeight = (height: string) => Prec.highest(EditorView.theme({ ".cm-content": { minHeight: height } }));
+const FIELD_HEIGHT = minHeight("6rem");
+const COMPACT_HEIGHT = minHeight("3rem");
+const INLINE_HEIGHT = minHeight("0");
+/** Chat-reply size, for a field inside a chat card: `CompactMd`'s type,
+ *  maths size and gaps (`styles/markdown.css`), so the text keeps its size
+ *  and place when the card switches to editing. A gap plus a display
+ *  formula's padding makes `.katex-display`'s 0.7rem margin and 2px padding. */
+const compactTheme = Prec.highest(
+  EditorView.theme({
+    "&": { fontSize: "13px" },
+    ".cm-scroller": { lineHeight: "1.6" },
+    ".cm-line.cm-block-gap": { lineHeight: "0.6rem" },
+    ".cm-math .katex, .cm-math-view": { fontSize: "1.05em" },
+    ".cm-math-display, .cm-math-view-block": { padding: "calc(0.1rem + 2px) 0" },
+    // Hidden as `.katex-display` hides it: the thinner padding lets a
+    // fraction's overhang raise a vertical scrollbar. Not on the field's
+    // block, whose palette popover hangs below it.
+    ".cm-math-display": { overflowY: "hidden" },
+  }),
+);
+const NO_SCROLLER = { current: null };
 
 /**
  * A markdown field on the note editor (`./editor/`) in Live mode — a short
@@ -61,6 +84,8 @@ export function NoteField({
   onChange,
   className,
   scrollClassName,
+  compact = false,
+  inline = false,
 }: {
   /** The stored text; read at mount, then followed while at rest. */
   text: string;
@@ -83,6 +108,12 @@ export function NoteField({
   className?: string;
   /** The text scroller's height bound, in place of 420px. */
   scrollClassName?: string;
+  /** 13px text, read at mount. */
+  compact?: boolean;
+  /** For a caller whose own card shows it is being edited: no border,
+   *  padding or height bound of its own, and the toolbar always up, so the
+   *  text sits where its rendering did and only the toolbar moves it. */
+  inline?: boolean;
 }) {
   const [view, setView] = useState<EditorView | null>(null);
   const [formats, setFormats] = useState<ActiveFormats>(NO_FORMATS);
@@ -225,7 +256,8 @@ export function NoteField({
               label,
               tooltipParent,
             }),
-            fieldTheme,
+            inline ? INLINE_HEIGHT : compact ? COMPACT_HEIGHT : FIELD_HEIGHT,
+            compact ? [compactTheme, paragraphGaps] : [],
             Prec.highest(
               keymap.of([
                 {
@@ -255,7 +287,7 @@ export function NoteField({
         setView(null);
       }
     };
-    // Placeholder and label are fixed for a field's life.
+    // Placeholder, label, compact and inline are fixed for a field's life.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commit, embed, slot]);
 
@@ -280,7 +312,7 @@ export function NoteField({
    *  gives a field at rest its focus holds the toolbar back until it ends:
    *  the caret lands, or a drag selects, on text that has not yet moved. */
   const onPointerDown = () => {
-    if (editingRef.current || releasePress.current) return;
+    if (inline || editingRef.current || releasePress.current) return;
     const release = () => {
       window.removeEventListener("pointerup", release);
       window.removeEventListener("pointercancel", release);
@@ -320,7 +352,8 @@ export function NoteField({
   };
 
   const dropping = useFileDrop(rootRef, attachPaths);
-  useScrollFade(scrollRef);
+  // An inline field never scrolls, so a formula's overhang mustn't fade it.
+  useScrollFade(inline ? NO_SCROLLER : scrollRef);
   const find = useEditorFind(view, rootRef);
 
   return (
@@ -338,13 +371,14 @@ export function NoteField({
           viewRef.current?.focus();
         }}
         className={cn(
-          "relative cursor-text rounded-lg border transition-colors",
-          editing ? "border-brand/40 bg-card" : "border-transparent hover:border-border-subtle",
+          "relative cursor-text rounded-lg transition-colors",
+          !inline && "border",
+          !inline && (editing ? "border-brand/40 bg-card" : "border-transparent hover:border-border-subtle"),
           dropping && "border-brand ring-[3px] ring-brand/25",
         )}
       >
         {/* In the card, so focus in the bar still counts as editing. */}
-        {editing && !pressing && (
+        {(inline || (editing && !pressing)) && (
           <div
             onMouseDown={(e) => {
               // A click between the buttons must not blur the editor.
@@ -359,14 +393,20 @@ export function NoteField({
                   .then(attachPaths)
                   .catch((e) => setError(String(e)))
               }
-              className="static z-auto mx-0 mt-0 cursor-default rounded-t-lg"
+              className={cn(
+                "static z-auto mt-0 cursor-default",
+                inline ? "-mx-2 mb-1.5" : "mx-0 rounded-t-lg",
+              )}
             />
           </div>
         )}
         {/* Bounded so a long text scrolls inside and what follows stays reachable. */}
         <div
           ref={scrollRef}
-          className={cn("max-h-[420px] overflow-x-hidden overflow-y-auto px-2 py-1.5", scrollClassName)}
+          className={cn(
+            !inline && "max-h-[420px] overflow-x-hidden overflow-y-auto px-2 py-1.5",
+            scrollClassName,
+          )}
         >
           <div ref={editorRef} data-selectable />
         </div>

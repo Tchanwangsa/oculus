@@ -20,6 +20,7 @@ the root `CLAUDE.md` holds only the rules.
 | [retrieval.md](./retrieval.md) | Page-image embeddings, the `pages` table, query flow |
 | [harness.md](./harness.md) | Chat as a CLI agent: the four bridges, containment, the timeline, per-job models and subagents |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
+| [revision.md](./revision.md) | Cheat sheet rows, draft questions, FSRS reviews, practice quizzes, written-answer marking and saved widgets |
 | [projects.md](./projects.md) | Projects and tasks: the Overview, board, table, timeline and the universal Tasks view |
 | [chapters.md](./chapters.md) | Lecture chapters and where a lecture ends: the detector and the two model jobs |
 | [onboarding.md](./onboarding.md) | First-run setup: the launch gate, the `onboarding` settings row, the steps, *Run setup again* |
