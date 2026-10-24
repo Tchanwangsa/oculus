@@ -3,12 +3,13 @@ use std::path::Path;
 use crate::test_support::Scratch;
 
 use super::bucket::{bucket_dir, resolve_subject};
+use super::fold::{append, fold};
 use super::frontmatter::{parse, render};
 use super::maintain::{reindex, relocate, remove};
 use super::query::{find, list};
 use super::slug::slug;
 use super::write::{write, WriteSpec};
-use super::INDEX_NAME;
+use super::{CAP, INDEX_NAME};
 
 fn scratch(name: &str) -> Scratch {
     let root = Scratch::new(&format!("memory-{name}"));
@@ -399,4 +400,148 @@ fn front_matter_round_trips_including_what_this_build_does_not_know() {
     );
     assert_eq!(front2.meta("provenance"), Some("thread 26"));
     assert_eq!(body2.trim(), body.trim());
+}
+
+fn fill(root: &Path, code: Option<&str>, n: usize) {
+    for i in 0..n {
+        write(
+            root,
+            code,
+            spec(&format!("Fact number {i}"), "Something true.", "reference"),
+        )
+        .unwrap();
+    }
+}
+
+/// A full bucket refuses a new name and says where the fact can go instead.
+#[test]
+fn a_full_bucket_refuses_a_new_memory_but_not_an_update() {
+    let root = scratch("cap");
+    fill(&root, None, CAP);
+
+    let err = write(&root, None, spec("One more", "Episode.", "reference")).unwrap_err();
+    assert!(err.contains(&format!("keeps {CAP} at most")), "{err}");
+    assert!(
+        err.contains("fact-number-0"),
+        "the refusal names what is filed: {err}"
+    );
+
+    let mut update = spec("Fact number 3", "Rewritten.", "reference");
+    update.name = Some("fact-number-3".into());
+    assert!(
+        write(&root, None, update).is_ok(),
+        "a name already filed is still an update"
+    );
+}
+
+/// A line lands in the page it belongs to, and a later one can change it.
+#[test]
+fn append_adds_a_line_and_replace_changes_one() {
+    let root = scratch("append");
+    let err = append(
+        &root,
+        None,
+        "gaps",
+        "QPE: why controlled powers",
+        None,
+        None,
+    )
+    .unwrap_err();
+    assert!(err.contains("--about"), "{err}");
+
+    let start = Some(("What the student finds hard".into(), "reference".into()));
+    let out = append(
+        &root,
+        None,
+        "gaps",
+        "QPE: why controlled powers",
+        None,
+        start,
+    )
+    .unwrap();
+    assert!(out.written.created);
+    append(
+        &root,
+        None,
+        "gaps",
+        "Grover: dummy qubit vs counting qubits — open",
+        None,
+        None,
+    )
+    .unwrap();
+
+    let body = find(&root, "gaps", None).unwrap().body.unwrap();
+    assert!(
+        body.contains("- QPE: why controlled powers\n- Grover: dummy qubit"),
+        "a list continues without a gap: {body}"
+    );
+
+    append(
+        &root,
+        None,
+        "gaps",
+        "Grover: dummy qubit vs counting qubits — got it",
+        Some("dummy qubit"),
+        None,
+    )
+    .unwrap();
+    let body = find(&root, "gaps", None).unwrap().body.unwrap();
+    assert!(body.contains("counting qubits — got it") && !body.contains("— open"));
+
+    let removed = append(&root, None, "gaps", "", Some("controlled powers"), None).unwrap();
+    assert!(removed.line.contains("controlled powers"));
+    assert!(!find(&root, "gaps", None)
+        .unwrap()
+        .body
+        .unwrap()
+        .contains("controlled powers"));
+
+    let err = append(&root, None, "gaps", "x", Some("nothing like it"), None).unwrap_err();
+    assert!(err.contains("no line contains"), "{err}");
+}
+
+/// A fold is one memory written and its sources gone, in a full bucket too.
+#[test]
+fn fold_writes_one_memory_and_deletes_its_sources() {
+    let root = scratch("fold");
+    fill(&root, None, CAP);
+
+    let mut merged = spec(
+        "Facts 0 to 2, folded",
+        "What holds across them.",
+        "reference",
+    );
+    merged.name = Some("early-facts".into());
+    let out = fold(
+        &root,
+        None,
+        &[
+            "fact-number-0".into(),
+            "fact-number-1".into(),
+            "fact-number-2".into(),
+        ],
+        merged,
+    )
+    .unwrap();
+
+    assert_eq!(out.removed.len(), 3);
+    assert_eq!(out.written.indexed, CAP - 2);
+    let index = index(&root, None);
+    assert!(index.contains("early-facts.md") && !index.contains("fact-number-1.md"));
+    assert!(find(&root, "fact-number-0", None).is_err());
+
+    let err = fold(
+        &root,
+        None,
+        &["fact-number-3".into()],
+        WriteSpec {
+            name: Some("fact-number-4".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("merged memory"),
+        "a fold needs its body: {err}"
+    );
 }

@@ -181,6 +181,20 @@ function describeOne(sub: string[], a: Args): CliAction {
             verb: verbs("Saving a memory", "Saved a memory", (n) => [`Saving ${n} memories`, `Saved ${n} memories`]),
             tally: counted("saved a memory", (n) => `saved ${n} memories`),
           };
+        case "append":
+          return {
+            key: "memory-write", icon: "memory", em: name ? humanizeSlug(name) : undefined,
+            verb: verbs("Saving a memory", "Saved a memory", (n) => [`Saving ${n} memories`, `Saved ${n} memories`]),
+            tally: counted("saved a memory", (n) => `saved ${n} memories`),
+          };
+        case "fold": {
+          const into = flag(a, "--into");
+          return {
+            key: "memory-fold", icon: "memory", em: into ? humanizeSlug(into) : undefined,
+            verb: verbs("Folding memories into", "Folded memories into"),
+            tally: once("folded memories"),
+          };
+        }
         case "read":
           return {
             key: "memory-read", icon: "memory", em: name,

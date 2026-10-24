@@ -179,6 +179,10 @@ mod tests {
             "and written with it"
         );
         assert!(
+            general.contains("oculus memory append"),
+            "a new fact is a line in a page that exists"
+        );
+        assert!(
             general.contains("`./TASTE.md`"),
             "the standing preferences are named too"
         );
