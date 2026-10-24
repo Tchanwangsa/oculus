@@ -91,7 +91,11 @@ impl ClaudeSession {
             .env_clear()
             .envs(base.env.iter().map(|(k, v)| (k, v)))
             // The CLI gates some behaviour on its entrypoint.
-            .env("CLAUDE_CODE_ENTRYPOINT", "cli");
+            .env("CLAUDE_CODE_ENTRYPOINT", "cli")
+            // Otherwise the CLI asks for thinking display "updates" (and
+            // `--thinking-display summarized` is no better), which can stream
+            // text written before a tool call as a one-line narration summary.
+            .env("CLAUDE_CODE_THINKING_DISPLAY_UPDATES", "0");
         let (proc, stdout) = ChildProc::spawn("claude", &mut cmd, true)?;
 
         let interrupting = Arc::new(AtomicBool::new(false));
