@@ -16,7 +16,7 @@ function errorCode(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('same shape')) return 'conflict-shape';
   if (message.includes('same layer order')) return 'conflict-order';
-  if (message.includes('changed the background')) return 'conflict-background';
+  if (message.includes('changed the background') || message.includes('changed the pages')) return 'conflict-background';
   return 'invalid';
 }
 

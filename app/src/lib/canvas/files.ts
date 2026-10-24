@@ -5,6 +5,7 @@ import type { ImportedFile } from "@/lib/files/uploads";
 import { authorityCode, toAuthorityError, type CanvasAuthorityAck, type CanvasAuthorityEvent, type CanvasAuthorityIO, type CanvasAuthoritySnapshot } from "./authority";
 import type { CanvasTransaction } from "./collaboration";
 import { createCanvasDocument, serializeCanvasDocument } from "./model";
+import { forgetPageSnapshots } from "./snapshots";
 
 export const CANVASES_CHANGED_EVENT = "oculus:canvases-changed";
 const announce = (subjectId: number) => window.dispatchEvent(new CustomEvent(CANVASES_CHANGED_EVENT, { detail: { subjectId } }));
@@ -42,6 +43,7 @@ export async function renameCanvasFile(file: DbFile, title: string): Promise<DbF
 export async function deleteCanvasFile(file: DbFile): Promise<void> {
   await invoke("delete_canvas", { relativePath: file.relative_path });
   await deleteFileRow(file.id);
+  forgetPageSnapshots(file.id);
   announce(file.subject_id);
 }
 
@@ -98,6 +100,7 @@ export const canvasAuthority: CanvasAuthorityIO<DbFile> = {
   async remove(file) {
     await authorityCall<void>("canvas_authority_delete", { fileId: file.id });
     await deleteFileRow(file.id);
+    forgetPageSnapshots(file.id);
     announce(file.subject_id);
   },
   close: (file) => authorityCall<void>("canvas_authority_close", { fileId: file.id }),
@@ -121,6 +124,6 @@ export async function reconcileCanvases(subject: { id: number; code: string }): 
     if (!row) { await rowFor(subject.id, file); changed = true; }
     else if (row.size_bytes !== file.size_bytes) { await touchFileRow(row.id, file.size_bytes, false); changed = true; }
   }
-  for (const row of existing.values()) { await deleteFileRow(row.id); changed = true; }
+  for (const row of existing.values()) { await deleteFileRow(row.id); forgetPageSnapshots(row.id); changed = true; }
   if (changed) announce(subject.id);
 }

@@ -8,6 +8,7 @@ mod files;
 mod grep;
 mod library;
 mod loaders;
+mod notebook;
 mod read;
 mod search;
 mod subjects;

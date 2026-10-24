@@ -1,0 +1,79 @@
+{
+  "type": "oculus-canvas",
+  "version": 1,
+  "elements": [
+    {
+      "id": "backdrop",
+      "type": "image",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "sourceName": "assignment.pdf",
+      "naturalWidth": 1,
+      "naturalHeight": 1,
+      "locked": true
+    },
+    {
+      "id": "ink",
+      "type": "rectangle",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 60,
+      "stroke": "#1e1e1e",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 7,
+      "locked": false
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "background": "#ffffff",
+  "paper": {
+    "gap": 32,
+    "pages": [
+      {
+        "id": "p1",
+        "width": 595,
+        "height": 842,
+        "template": "grid"
+      },
+      {
+        "id": "p2",
+        "width": 612,
+        "height": 792,
+        "template": "ruled"
+      },
+      {
+        "id": "p3",
+        "width": 595,
+        "height": 842,
+        "template": "dotted"
+      },
+      {
+        "id": "p4",
+        "width": 595,
+        "height": 842,
+        "template": "blank"
+      },
+      {
+        "id": "p5",
+        "width": 595,
+        "height": 842
+      }
+    ],
+    "extra": "kept"
+  }
+}

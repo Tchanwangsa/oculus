@@ -13,6 +13,11 @@ impl Ctx {
 
         let wanted = args.pages.as_deref().map(parse_page_spec).transpose()?;
 
+        // A notebook has no text: its pages are pictures the app redraws as the student writes.
+        if file.file_type == "canvas" {
+            return self.read_notebook(file, wanted.as_deref());
+        }
+
         #[derive(Serialize)]
         struct Page {
             page_no: i64,

@@ -921,7 +921,8 @@ chapter list inline — rebuilt on every send and before any spawn.
 
 - **The moment rides the prompt, never the message.** `buildMoment` in
   `LecturePlayer.tsx` goes out as `SendOptions.context`; the row stores the
-  typed text plus `at`.
+  typed text plus `at`. `harness/app/send.rs` appends it under "What the student
+  had open when this was sent", which an open notebook shares.
 - **`lecture_grab_frames` grabs every stream** — either can hold the teaching —
   at `LIVE_GRAB_WIDTH` (1536), not chaptering's 768, since a whiteboard is
   unreadable at 768. A failed frame drops its line; the message still sends.
@@ -930,6 +931,19 @@ chapter list inline — rebuilt on every send and before any spawn.
   so nothing re-renders the memoised transcript. Lecture docks and Chat tabs
   use counted `hold`/`unhold` ownership of cached rows; closing one view does
   not release a thread still displayed by another.
+
+## A notebook the student has open rides the prompt
+
+`harnessSend` (`app/src/lib/harness/commands.ts`) adds `openNotebookContext()`
+to `SendOptions.context` whenever a notebook is open in the editor
+(`app/src/lib/canvas/openNotebooks.ts`, registered by `CanvasEditor`): each
+notebook's title, the page in view and the `oculus read` command that lists its
+page pictures, most recently touched first, at most three. So "is my working on
+page 2 right?" needs no `@`, in any thread. Like the lecture's moment it rides
+the prompt under "What the student had open when this was sent" and never the
+row. The `oculus-library` skill tells the agent what to do with it: open the
+page's picture, comment on the student's own working, not rewrite it, and not
+touch `canvases/` ([drawing-canvas.md](./drawing-canvas.md#what-a-chat-agent-sees)).
 
 ## A Studio thread carries its video
 

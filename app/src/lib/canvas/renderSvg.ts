@@ -1,5 +1,6 @@
 import { CANVAS_DEFAULTS, hasLabel, roundnessOf, type CanvasDocument, type CanvasElement } from './model';
-import { diamondCorners, diamondVertices, elementArrowheads, rectangleRadius, selectionBounds, strokeDash } from './geometry';
+import { diamondCorners, diamondVertices, elementArrowheads, rectangleRadius, strokeDash } from './geometry';
+import { exportBounds, paperSvg } from './renderPaper';
 import { linePath } from './arrow/path';
 import { CANVAS_FONT_STACKS, layoutShapeLabel, layoutTextElement, measureCanvasText, type TextLayout, type TextMeasure } from './renderText';
 import { isCanvasImageDataUrl } from './imageSource';
@@ -60,7 +61,7 @@ function elementSvg(element: CanvasElement, measure: TextMeasure): string {
 
 /** `measure` wraps shape labels; tests pass a deterministic one. */
 export function exportCanvasSvg(document: CanvasDocument, measure: TextMeasure = measureCanvasText): string {
-  const bounds = selectionBounds(document.elements) ?? { x: 0, y: 0, width: 800, height: 600 };
+  const bounds = exportBounds(document) ?? { x: 0, y: 0, width: 800, height: 600 };
   const x = bounds.x - 32, y = bounds.y - 32, width = bounds.width + 64, height = bounds.height + 64;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}"><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${escape(document.background)}"/>${document.elements.map(element => elementSvg(element, measure)).join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}"><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${escape(document.background)}"/>${document.paper ? paperSvg(document.paper) : ''}${document.elements.map(element => elementSvg(element, measure)).join('')}</svg>`;
 }

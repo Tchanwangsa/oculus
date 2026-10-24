@@ -1,10 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowsInSimpleIcon, ArrowSquareOutIcon, DownloadSimpleIcon, FileImageIcon, FileSvgIcon, GridFourIcon, MinusIcon, PlusIcon, QuestionIcon, SlidersHorizontalIcon, SpinnerGapIcon } from '@phosphor-icons/react';
+import { ArrowsInSimpleIcon, ArrowSquareOutIcon, DownloadSimpleIcon, FileImageIcon, FilePdfIcon, FileSvgIcon, GridFourIcon, MinusIcon, PlusIcon, QuestionIcon, SlidersHorizontalIcon, SpinnerGapIcon } from '@phosphor-icons/react';
 import { CANVAS_DEFAULTS, textAlignOf, type CanvasDocument } from '@/lib/canvas/model';
 import { loadCanvasEngine } from '@/lib/canvas/engine';
 import { installBrowserSelectionGuard } from '@/lib/canvas/browserSelectionGuard';
 import { loadCanvasToolPreferences, saveCanvasToolPreferences, type CanvasToolPreferences } from '@/lib/canvas/toolPreferences';
-import { exportCanvasPng } from '@/lib/canvas/render';
+import { exportCanvasPng, renderPagePng } from '@/lib/canvas/render';
+import { pageRects } from '@/lib/canvas/paper';
 import { exportCanvasSvg } from '@/lib/canvas/renderSvg';
 import { subscribeCanvasImages } from '@/lib/canvas/renderImages';
 import { CANVAS_FONT_STACKS, labelBox } from '@/lib/canvas/renderText';
@@ -18,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { useCanvasPlatform } from '@/lib/canvas/platform';
 import { CanvasHistory, CanvasIconButton, CanvasToolbar } from './CanvasToolbar';
 import { CanvasStylePanel } from './CanvasStylePanel';
+import { CanvasPageBar } from './CanvasPageBar';
 import { CanvasImageDialog } from './CanvasImageDialog';
 import { inspectorPopoverProps } from './inspector/popoverGuards';
 import './canvas.css';
@@ -97,7 +99,7 @@ function CanvasDrawingPreferences({ preferences, onChange }: { preferences: Canv
 }
 
 /** `onViewportChange` keeps pan and zoom with the host instead of saving them in the document. */
-export function CanvasSurface({ document, onChange, onViewportChange }: { document: CanvasDocument; onChange: (document: CanvasDocument) => void; onViewportChange?: (viewport: CanvasDocument['viewport']) => void }) {
+export function CanvasSurface({ document, onChange, onViewportChange, onPageChange, title }: { document: CanvasDocument; onChange: (document: CanvasDocument) => void; onViewportChange?: (viewport: CanvasDocument['viewport']) => void; onPageChange?: (index: number) => void; title?: string }) {
   const platform = useCanvasPlatform();
   const [toolPreferences, setToolPreferences] = useState(loadCanvasToolPreferences);
   const editor = useCanvasInteraction(document, onChange, { onViewportChange, eraserAutoReturn: toolPreferences.eraserAutoReturn });
@@ -108,6 +110,8 @@ export function CanvasSurface({ document, onChange, onViewportChange }: { docume
   const [exporting, setExporting] = useState(false);
   const [imageDialogOpen, setImageDialogOpen] = useState(false);
   useEffect(() => subscribeCanvasImages(editor.redraw), [editor.redraw]);
+  const pageInView = editor.pages?.index;
+  useEffect(() => { if (pageInView !== undefined) onPageChange?.(pageInView); }, [pageInView, onPageChange]);
   useEffect(() => { let mounted = true; loadCanvasEngine().then(() => { if (mounted) editor.redraw(); }).catch(error => { if (mounted) setEngineError(String(error)); }); return () => { mounted = false; }; }, [editor.redraw]);
   const current = editor.documentRef.current;
   const exportImage = async (format: 'png' | 'svg') => {
@@ -119,6 +123,22 @@ export function CanvasSurface({ document, onChange, onViewportChange }: { docume
     } catch (error) { setExportError(error instanceof Error ? error.message : String(error)); }
     finally { setExporting(false); }
   };
+  /** A notebook's pages, each drawn on white at about 180 dpi, one PDF page apiece. */
+  const exportPdf = async () => {
+    const exportPages = platform.exportPdf, snapshot = editor.documentRef.current;
+    if (!exportPages || !snapshot.paper) return;
+    setExporting(true); setExportError(null);
+    try {
+      const pages = [];
+      for (const rect of pageRects(snapshot.paper)) {
+        const png = await renderPagePng(snapshot, rect.id, 2.5);
+        if (!png) throw new Error('A page could not be drawn for the PDF.');
+        pages.push({ width: rect.width, height: rect.height, png });
+      }
+      await exportPages(title ?? 'Notebook', pages);
+    } catch (error) { setExportError(error instanceof Error ? error.message : String(error)); }
+    finally { setExporting(false); }
+  };
   return <div ref={editor.root} data-canvas-editor="true" tabIndex={0} aria-label="Infinite canvas editor" className="canvas-editor relative h-full min-h-0 w-full overflow-hidden bg-card outline-none"
     onKeyDown={editor.keyDown} onKeyUp={editor.keyUp} onBlur={event => {
       editor.blur();
@@ -127,7 +147,7 @@ export function CanvasSurface({ document, onChange, onViewportChange }: { docume
     }} onCopy={editor.copy} onCut={editor.cut} onPaste={editor.paste}>
     <canvas ref={editor.canvas} draggable={false} aria-label="Drawing canvas" className="absolute inset-0 block h-full w-full" style={{ cursor: editor.cursor }}
       onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp} onPointerCancel={editor.pointerCancel} onPointerLeave={editor.pointerLeave} onDoubleClick={editor.doubleClick} onContextMenu={event => event.preventDefault()} />
-    {current.elements.length === 0 && editor.tool === 'select' && !editor.textDraft ? <CanvasEmpty onStart={() => { editor.setTool('freedraw'); editor.root.current?.focus(); }} /> : null}
+    {current.elements.length === 0 && !current.paper && editor.tool === 'select' && !editor.textDraft ? <CanvasEmpty onStart={() => { editor.setTool('freedraw'); editor.root.current?.focus(); }} /> : null}
     <CanvasToolbar tool={editor.tool} onTool={tool => { editor.setTool(tool); editor.root.current?.focus({ preventScroll: true }); }} onAddImage={() => setImageDialogOpen(true)} />
     <CanvasImageDialog open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImport={editor.insertImages} />
     {editor.inspector.sections.length ? <CanvasStylePanel {...editor.inspector} onChange={editor.changeStyle} onPreview={editor.previewStyle} selectionCount={editor.selection.length} onDelete={editor.deleteSelected} layerMoves={editor.layerMoves} onReorder={editor.reorder} /> : null}
@@ -137,19 +157,21 @@ export function CanvasSurface({ document, onChange, onViewportChange }: { docume
         <CanvasIconButton label="Zoom out (−)" onClick={() => editor.zoom(1 / 1.2)} disabled={editor.zoomPercent <= 10}><MinusIcon size={15} /></CanvasIconButton>
         <Tooltip><TooltipTrigger asChild><button type="button" className="min-w-12 cursor-pointer rounded-md px-1 py-1.5 text-[12px] tabular-nums text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-brand" aria-label={`Zoom ${editor.zoomPercent} percent; reset to 100 percent`} onClick={editor.resetZoom}>{editor.zoomPercent}%</button></TooltipTrigger><TooltipContent side="top" sideOffset={8}>Reset zoom (0)</TooltipContent></Tooltip>
         <CanvasIconButton label="Zoom in (+)" onClick={() => editor.zoom(1.2)} disabled={editor.zoomPercent >= 800}><PlusIcon size={15} /></CanvasIconButton>
-        <div className="canvas-reset-view ml-1 border-l border-border-subtle pl-1"><CanvasIconButton label="Fit drawing (1)" onClick={editor.fit}><ArrowsInSimpleIcon size={17} /></CanvasIconButton></div>
+        <div className="canvas-reset-view ml-1 border-l border-border-subtle pl-1"><CanvasIconButton label={current.paper ? 'Fit page width (1)' : 'Fit drawing (1)'} onClick={editor.fit}><ArrowsInSimpleIcon size={17} /></CanvasIconButton></div>
       </div>
       <CanvasHistory undo={() => editor.history()} redo={() => editor.history(true)} canUndo={editor.canUndo} canRedo={editor.canRedo} />
     </div>
+    {editor.pages ? <div className="canvas-pages absolute bottom-4 left-1/2 z-10 -translate-x-1/2"><CanvasPageBar pages={editor.pages} /></div> : null}
     <div className="canvas-short-hint pointer-events-none absolute right-0 bottom-[4.7rem] left-0 text-center text-[11px] text-muted-foreground/65">{hints[editor.tool]}</div>
     <div className="absolute right-4 bottom-4 z-10 flex items-center gap-1.5 rounded-xl border border-border-subtle bg-card p-1 shadow-xs">
       <CanvasDrawingPreferences preferences={toolPreferences} onChange={changeToolPreferences} />
-      <CanvasIconButton label="Toggle grid (G)" active={editor.grid} aria-pressed={editor.grid} onClick={() => editor.setGrid(value => !value)}><GridFourIcon size={17} /></CanvasIconButton>
-      <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Export drawing" disabled={!current.elements.length || exporting} className="rounded-lg text-muted-foreground">{exporting ? <SpinnerGapIcon className="animate-spin" /> : <DownloadSimpleIcon size={17} />}</Button></PopoverTrigger>
+      {current.paper ? null : <CanvasIconButton label="Toggle grid (G)" active={editor.grid} aria-pressed={editor.grid} onClick={() => editor.setGrid(value => !value)}><GridFourIcon size={17} /></CanvasIconButton>}
+      <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Export drawing" disabled={(!current.elements.length && !current.paper) || exporting} className="rounded-lg text-muted-foreground">{exporting ? <SpinnerGapIcon className="animate-spin" /> : <DownloadSimpleIcon size={17} />}</Button></PopoverTrigger>
         <PopoverContent side="top" align="end" className="w-52 p-1.5"><div className="px-2.5 py-2 text-xs font-medium">Export drawing</div>
           <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportImage('png')}><FileImageIcon />PNG image<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button>
           <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportImage('svg')}><FileSvgIcon />SVG vector<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button>
-          <p className="px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">Exports the whole drawing without the grid or selection.</p>
+          {current.paper && platform.exportPdf ? <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportPdf()}><FilePdfIcon />PDF document<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button> : null}
+          <p className="px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">{current.paper ? 'Exports every page, without the selection. The PDF has one page for each notebook page.' : 'Exports the whole drawing without the grid or selection.'}</p>
         </PopoverContent>
       </Popover>
       <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Canvas shortcuts" className="rounded-lg text-muted-foreground"><QuestionIcon size={17} /></Button></PopoverTrigger>

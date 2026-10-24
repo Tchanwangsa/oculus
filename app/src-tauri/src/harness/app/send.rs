@@ -110,14 +110,16 @@ async fn start_turn(
         ..opts
     };
     let resume = row.provider_session_id;
-    // The row is what the student typed; the moment's text rides only
-    // the prompt, or the timeline would show a transcript excerpt.
+    // The row is what the student typed; what they had open (a lecture's moment,
+    // a notebook) rides only the prompt, or the timeline would show it.
     sink(HarnessEvent::UserMessage {
         text: text.to_string(),
         at: opts.at,
     });
     let text = match &opts.context {
-        Some(c) => format!("{text}\n\n---\n\n## The moment this was sent at\n\n{c}"),
+        Some(c) => {
+            format!("{text}\n\n---\n\n## What the student had open when this was sent\n\n{c}")
+        }
         None => text.to_string(),
     };
 

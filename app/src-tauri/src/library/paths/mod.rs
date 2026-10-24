@@ -8,6 +8,7 @@ mod categories;
 mod course;
 mod db;
 mod file_types;
+mod notebook;
 mod own_files;
 mod studio;
 #[cfg(test)]
@@ -17,6 +18,7 @@ pub use categories::*;
 pub use course::*;
 pub use db::*;
 pub use file_types::*;
+pub use notebook::*;
 pub use own_files::*;
 pub use studio::*;
 

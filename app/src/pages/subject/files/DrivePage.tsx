@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CaretDown, CircleNotch, FolderSimple, NotePencil, Plus, Scribble, Trash, Warning } from "@phosphor-icons/react";
+import { CaretDown, CircleNotch, FolderSimple, Notebook, NotePencil, Plus, Scribble, Trash, Warning } from "@phosphor-icons/react";
 import { DropdownMenu } from "radix-ui";
 
 import { SubjectPage } from "@/components/subjects/SubjectPage";
@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState, ListCard, SkeletonRows } from "@/components/ui/layout/PageParts";
 import { PillTabs } from "@/components/ui/table/PillTabs";
 import { FileRecency } from "@/components/files/FileRecency";
+import { NotebookDialog } from "@/components/canvas/NotebookDialog";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { useSubjectFiles } from "@/hooks/data/useSubjectFiles";
 import type { DbFile } from "@/lib/db";
@@ -42,6 +43,7 @@ export default function SubjectDrivePage() {
   const { byCategory, loading } = useSubjectFiles(subject.id);
   const [filter, setFilter] = useState<Filter>("all");
   const [creating, setCreating] = useState(false);
+  const [notebookOpen, setNotebookOpen] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DbFile | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -81,7 +83,7 @@ export default function SubjectDrivePage() {
             <h2 className="text-[13px] font-medium text-foreground">Drive</h2>
             <p className="mt-0.5 text-[12px] text-muted-foreground">Your notes, diagrams and sketches, together.</p>
           </div>
-          <NewFileMenu busy={creating} onCreate={create} />
+          <NewFileMenu busy={creating} onCreate={create} onNotebook={() => setNotebookOpen(true)} />
         </header>
 
         {problem && <Alert variant="warning" className="mb-3 w-auto px-2.5 py-2">
@@ -111,6 +113,9 @@ export default function SubjectDrivePage() {
         )}
       </SubjectPage>
 
+      <NotebookDialog open={notebookOpen} onOpenChange={setNotebookOpen} subject={subject}
+        onCreated={row => navigateActive(filePagePath(subject.id, row.relative_path))} />
+
       <ConfirmDialog
         open={!!pendingDelete}
         onCancel={() => setPendingDelete(null)}
@@ -130,7 +135,7 @@ export default function SubjectDrivePage() {
   );
 }
 
-function NewFileMenu({ busy, onCreate }: { busy: boolean; onCreate: (kind: DriveKind) => void }) {
+function NewFileMenu({ busy, onCreate, onNotebook }: { busy: boolean; onCreate: (kind: DriveKind) => void; onNotebook: () => void }) {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
@@ -147,6 +152,9 @@ function NewFileMenu({ busy, onCreate }: { busy: boolean; onCreate: (kind: Drive
               <Icon size={15} className="text-reference-page" aria-hidden />{label}
             </DropdownMenu.Item>;
           })}
+          <DropdownMenu.Item onSelect={onNotebook} className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] outline-none data-highlighted:bg-accent">
+            <Notebook size={15} className="text-reference-page" aria-hidden />Notebook…
+          </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

@@ -24,6 +24,14 @@ beside another page.
 | Canvas2D drawing and image export | `app/src/lib/canvas/render.ts`, `app/src/lib/canvas/renderSvg.ts` |
 | Text fonts, measuring, wrapping and label layout | `app/src/lib/canvas/renderText.ts` |
 | Versioned document model and coordinate helpers | `app/src/lib/canvas/model.ts`, `app/src/lib/canvas/geometry.ts` |
+| Notebook pages: the `paper` field, page layout, templates, locked backdrops, the page camera | `app/src/lib/canvas/paper.ts` |
+| Adding and removing a page | `app/src/lib/canvas/pages.ts`, `app/src/components/canvas/CanvasPageBar.tsx` |
+| Drawing pages and templates; page pictures and the notebook's export bounds | `app/src/lib/canvas/renderPaper.ts`, `renderPagePng` and `paintCanvas` in `app/src/lib/canvas/render.ts`, `paperSvg` in `renderSvg.ts` |
+| New notebook: blank paper or a copy of a library PDF | `app/src/components/canvas/NotebookDialog.tsx`, `app/src/components/canvas/WriteOnCopy.tsx`, `app/src/lib/canvas/notebook.ts` |
+| Page pictures for chat agents: change detection, writer, hook, Rust commands and manifest | `app/src/lib/canvas/snapshots.ts`, `app/src/hooks/canvas/useNotebookSnapshots.ts`, `app/src-tauri/src/library/files/canvases/snapshots.rs`, `app/src-tauri/src/library/paths/notebook.rs` |
+| Which notebooks are open, for the chat message | `app/src/lib/canvas/openNotebooks.ts` (read by `harnessSend` in `app/src/lib/harness/commands.ts`) |
+| `oculus read` on a notebook | `app/src-tauri/src/bin/oculus/commands/query/notebook.rs` |
+| PDF export | `app/src-tauri/src/library/files/canvases/export_pdf.rs`, `exportPdf` in `app/src/lib/canvas/platform/` |
 | Style fields, which element types take them, inspector sections | `app/src/lib/canvas/style.ts` |
 | Contextual inspector sections, palettes and popover guards | `app/src/components/canvas/inspector/` |
 | Colour palette popover | `app/src/components/ui/color/ColorPalette.tsx` |
@@ -93,9 +101,106 @@ version stays 1, and an absent field means its default (`CANVAS_DEFAULTS` in
 | `startBinding`, `endBinding` | `{elementId, mode: 'center'}` or `{elementId, mode: 'edge', anchor}` with `anchor` x/y in 0..1 of the target’s bounds | arrow |
 | `fixedSegments` | an array in path order of `{x}` (a vertical segment on that line) or `{y}` (a horizontal one), local to the element’s x/y (none) | elbow arrow |
 | `text`, `fontSize` on rectangle, ellipse, diamond | the shape’s label | shapes |
+| `locked` | boolean (false) | every element |
 
 A binding’s target ID is not checked at load, so a dangling binding never
 blocks opening a file; its end stays where it is.
+
+## A notebook is a canvas with pages
+
+A document with a top-level `paper` is a notebook: fixed-size pages stacked
+down the canvas. One without it is a whiteboard, and nothing else about the
+file differs.
+
+```jsonc
+"paper": { "gap": 24, "pages": [ { "id": "p1", "width": 595, "height": 842, "template": "grid" } ] }
+```
+
+- **Layout.** A page's rectangle is derived from its place in `pages`, never
+  stored: world units are points (A4 is 595 × 842), pages stack top to bottom
+  separated by `gap` (24), each centred on x = 0. `pageRects` in `paper.ts` is
+  the one layout; `pageAt` and `pageOfElement` answer which page a point or an
+  element belongs to (the page holding the centre of its bounds).
+- **Fields.** `pages` has 1 to 500 entries with unique non-empty `id`s and a
+  `width` and `height` above 0 and up to 14400. `template` is `blank` (the
+  default), `grid`, `ruled` or `dotted`; `gap` is 0 to 1000. Other fields are
+  kept. `paperProblem` and `validate_paper` in `authority/model.rs` apply the
+  same rule, and the model fixtures hold them together.
+- **Locked elements.** `locked: true` marks a backdrop, such as a page image
+  taken from an assignment. It is drawn like any element, but the pointer
+  never picks it: no click, box or select-all selects it, nothing moves, resizes
+  or erases it, and layer moves treat locked elements as a fixed bottom layer,
+  so ink is never sent beneath a page image. `selectableElements` hands the
+  hit test the unlocked elements, returning the same array when none is
+  locked so a whiteboard's cached geometry is reused.
+- **Sharing.** A change to the pages (one added or removed) travels in a
+  transaction as `paper: { before, after }`, both whole papers, and merges like
+  the background: it applies when the current paper equals either side, and
+  otherwise fails with `conflict-background`. A document with no paper never
+  gains or loses one through a transaction.
+
+### Drawing, pages and the camera
+
+- **Drawing.** `paintCanvas` paints each page on screen as a white sheet with a
+  soft shadow on the desk (the document's `background`), then its template, then
+  the elements; the whiteboard's dot grid and its toggle are off. Templates are
+  a line or dot every 14 points (ruled: 23, below a 60-point top margin).
+  `templateMarks` is the one geometry for the screen, the SVG export
+  (`paperSvg`) and the thumbnails; a pattern finer than 4 screen pixels a step
+  is skipped.
+- **Camera.** A notebook opens fitted to its page width (up to 140%) once, while
+  its camera is still the untouched default; Fit and the page controls use
+  `pageView`. The page in view is the one at the centre of the screen.
+- **Adding and removing pages.** `addPage` appends a page like the last one.
+  `removePage` deletes the page and every element whose centre is on it, and
+  moves the pages below, with their elements, up into its place, so a
+  notebook is never left with a gap. Both are one undo step, taken through the
+  same transactions as a stroke, so a page added on the iPad appears on the Mac.
+  A notebook keeps at least one page.
+- **Export.** PNG and SVG cover every page and anything drawn past a page's edge.
+  PDF (desktop only, `CanvasPlatform.exportPdf`) draws each page on white at
+  2.5 pixels a point and `canvas_export_pdf` writes one PDF page per notebook
+  page at its size: the picture is stored as PNG's own compressed rows (a Flate
+  stream with a PNG predictor), so nothing is recompressed.
+
+### Creating a notebook
+
+Drive's New file menu has Notebook…, a dialog with two starts. **Blank paper**
+is one A4 page, portrait or landscape, in a template. **From a PDF** lists the
+subject's PDFs and copies their pages: each is rendered as for any PDF import
+(`canvas_open_library_pdf`, `canvas_render_pdf_page`) and laid on its own page
+as a `locked` image the size of the PDF page, so the original is only read and
+the notebook outlives it. A PDF over 100 pages, or whose pages come to over
+64 MB, is refused with a sentence that says so. The new file is
+`courses/<code>/canvases/<name>.canvas` like any canvas, and Drive lists it
+beside them. A PDF's own page has a **Write on a copy** button (`WriteOnCopy`)
+that does the same for that file and opens the notebook beside it.
+
+### What a chat agent sees
+
+An agent reads no `.canvas` file: it is JSON holding every stroke and the
+assignment's pictures. While a notebook is open, `useNotebookSnapshots` redraws
+the pages that changed 1.5 seconds after the content stops changing and sends
+only those to `canvas_write_page_snapshots`.
+
+- **Change detection** is by page, from the elements that touch it
+  (`pageFingerprints`), so a stroke on page 2 redraws page 2, and a pan, a
+  zoom or a stroke elsewhere redraws nothing. Writes run one at a time and the
+  last scheduled document wins; a failed write is shown in the editor and tried
+  again on the next change.
+- **Storage** is `canvas-pages/<file id>/` under the library: `page-NNN.png`
+  per page (2 pixels a point, about 1190 × 1680 for A4) and `pages.json`, the
+  notebook's path, page count and, for each page, its id, picture and the Unix
+  time it was last redrawn (`library::paths::notebook`). It is keyed by the
+  `files` row, so a rename only rewrites the manifest, and it is removed when
+  the canvas is deleted or reconciled away. The command refuses a path that is
+  not a canvas's, a page the notebook does not have, anything but a PNG, and a
+  symlinked folder.
+- **`oculus read <notebook>`** prints each page's picture path and how long
+  ago it was redrawn; `--pages` picks pages. A whiteboard, or a notebook never
+  opened since it was made, has no pictures and the command says so. The
+  agent opens the PNG with its own image tool
+  ([harness.md](./harness.md#a-notebook-the-student-has-open-rides-the-prompt)).
 
 ## The pointer stays local and Rust answers geometry queries
 
@@ -169,7 +274,7 @@ commands remain scoped to notes.
 While a canvas is shared, the canvas authority
 (`library/files/canvases/authority/`) is the only writer of its file. Desktop
 panes and paired devices send content transactions (`collaboration.ts`:
-per-element `before`/`after`, an optional layer order and background); the
+per-element `before`/`after`, an optional layer order, background and paper); the
 viewport never travels in one. An added element (`before: null`) goes on top
 unless the edit names `afterId`, the element just below it in the sender's
 scene (`null` for the bottom); it is then inserted above that element, or on

@@ -2,7 +2,9 @@
 pub(crate) mod authority;
 pub(crate) mod drafts;
 pub(crate) mod export;
+pub(crate) mod export_pdf;
 pub(crate) mod imports;
+pub(crate) mod snapshots;
 
 use super::ImportedFile;
 use std::path::{Path, PathBuf};
