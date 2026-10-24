@@ -11,6 +11,7 @@
 //! `oculus.db`, but may write files under `agents/`.
 
 mod bucket;
+mod fold;
 mod frontmatter;
 mod maintain;
 mod query;
@@ -20,6 +21,7 @@ mod tests;
 mod write;
 
 pub use bucket::{bucket_dir, buckets, resolve_subject};
+pub use fold::{append, fold, Appended, Folded};
 pub use frontmatter::{parse, render, Entry, Front};
 pub use maintain::{reindex, relocate, remove};
 pub use query::{find, list};
@@ -29,6 +31,10 @@ pub use write::{write, WriteSpec, Written};
 /// The four kinds a memory can be, the templates' vocabulary. `feedback` and
 /// `project` also owe a **Why** and a **How to apply** — see [`WriteSpec`].
 pub const TYPES: [&str; 4] = ["user", "feedback", "project", "reference"];
+
+/// The most memories one bucket keeps. Past it a new name is refused, so the
+/// store stays a few pages edited in place rather than a log of episodes.
+pub const CAP: usize = 12;
 
 /// The generated half of a `MEMORY.md` starts here; prose above it is kept.
 const INDEX_MARK: &str =

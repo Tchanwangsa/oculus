@@ -856,11 +856,25 @@ call, from `oculus studio agents`.
 Nothing carries between threads but `agents/` — `TASTE.md`, `memories/`,
 `memories/<CODE>/` (`app/src-tauri/src/agents/`) — and the app never reads it
 into a prompt. The contract is in the brief, not a skill, because nobody asks
-for a memory and a skill would never trigger; it says read first, then write
-on four triggers (a brief naming only a location left 9 memories over 51
-threads). `oculus memory` (`app/src-tauri/src/agents/memory/`, [cli.md](./cli.md))
-writes file and index in one call, since the index line is the write an agent
-skips.
+for a memory and a skill would never trigger. `oculus memory`
+(`app/src-tauri/src/agents/memory/`, [cli.md](./cli.md)) writes file and index
+in one call, since the index line is the write an agent skips.
+
+**A bucket is a few pages, not a log.** Write triggers alone grew a log: 113
+writes against 48 reads over 124 threads, one file per misconception or per
+assignment question, and under a quarter of them ever read again. So a bucket
+keeps `CAP` (12) memories and `write` refuses a new name past it, listing the
+bucket; the brief names the pages a subject needs (`gaps`, one per live
+assessment, `course`, `style`). `append` adds or `--replace`s one line of a
+page, and `fold` rewrites several into one with the caller's merged body
+(`fold.rs`); `move` honours the cap too. `list` heads each bucket with how full
+it is.
+
+**The memory comes after the reply.** An agent that works its answer out in
+thinking and then saves a memory can end the turn having told the student only
+that it saved one. So the brief says the reply is the text written out, and a
+save is never mentioned in it: the CLI row already shows it. A card has the
+further rule of going after the last tool call; see the narration gotcha below.
 
 ## Subject scope and `@`
 

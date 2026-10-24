@@ -112,6 +112,8 @@ fn main() {
             MemoryAction::List(a) => ctx.memory_list(&a),
             MemoryAction::Read(a) => ctx.memory_read(&a),
             MemoryAction::Write(a) => ctx.memory_write(&a),
+            MemoryAction::Append(a) => ctx.memory_append(&a),
+            MemoryAction::Fold(a) => ctx.memory_fold(&a),
             MemoryAction::Rm(a) => ctx.memory_rm(&a),
             MemoryAction::Move(a) => ctx.memory_move(&a),
             MemoryAction::Reindex(a) => ctx.memory_reindex(&a),

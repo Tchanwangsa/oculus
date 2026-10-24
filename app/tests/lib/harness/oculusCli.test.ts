@@ -20,6 +20,10 @@ describe("oculus CLI row titles", () => {
       .toEqual({ title: "Read memory", em: "tensor-factor-working-style", icon: "memory" });
     expect(title(`oculus memory list -s MULT20015_2026_SM2`)?.em).toBe("MULT20015");
     expect(title(`oculus memory list --all`)?.em).toBe("all subjects");
+    expect(title(`oculus memory append gaps "Grover: dummy vs counting qubits — open" -s MULT20015`))
+      .toEqual({ title: "Saved a memory", em: "Gaps", icon: "memory" });
+    expect(title(`oculus memory fold a2-q4c-period-method a2-q4a-rsa-answer --into assignment-2 --body /tmp/a2.md`))
+      .toEqual({ title: "Folded memories into", em: "Assignment 2", icon: "memory" });
   });
 
   test("library searches and reads name the query, file and subject", () => {

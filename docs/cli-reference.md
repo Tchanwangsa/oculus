@@ -1200,6 +1200,8 @@ Commands:
   list     What is already known, as the index shows it
   read     Print one memory in full
   write    Write a memory — front matter, dates and index included
+  append   Add one line to a memory, or change or remove one
+  fold     Fold several memories into one and delete the rest
   rm       Delete a memory that turned out to be wrong
   move     File a memory under a different bucket
   reindex  Rebuild a bucket's `MEMORY.md` from the files in it
@@ -1218,7 +1220,7 @@ What is already known, as the index shows it.
 
 Read this before answering, not after: it is a few hundred bytes and it is the only
 thing that carries between conversations. Without `-s` it lists the cross-subject
-bucket; `--all` walks every bucket there is.
+bucket; `--all` walks every bucket there is. Each bucket's heading says how full it is.
 
 Each line leads with the **name**, which is what `read`, `rm`, `move` and `--link` take,
 and what a second `write` under updates rather than duplicates. Its one-line description
@@ -1288,6 +1290,10 @@ themselves and for what spans subjects.
 and anything this call leaves out. That is what makes the store a record of what is true
 rather than a log of what was said.
 
+**A bucket keeps twelve at most.** Past that a new name is refused with the names filed
+there: the fact is a line in one of them (`memory append`), a rewrite of one, or room
+made by `memory fold`.
+
 The body is one line as `--text`, or a file with `--body` (`-` for stdin) — the shell an
 in-app agent runs through refuses a newline inside an argument, so anything with
 paragraphs in it is written to a file first.
@@ -1347,6 +1353,111 @@ Options:
 
       --meta <K=V>
           Any other front-matter field, as key=value. Repeatable
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus memory append`
+
+```
+Add one line to a memory, or change or remove one.
+
+For the pages a subject keeps adding to — `gaps`, one assessment's page — so a new fact
+is a line where it belongs rather than a file of its own. The line becomes a list item.
+`--replace` swaps the one line containing that text instead (an empty LINE removes it),
+which is how a gap becomes "got it".
+
+oculus memory append gaps "Quantum counting: the dummy qubit doubles N; the counting
+qubits set the precision (L17 p11) — open" -s MULT20015
+
+oculus memory append gaps "Quantum counting: dummy vs counting qubits — got it 27 Oct"
+--replace "dummy qubit" -s MULT20015
+
+Usage: oculus memory append [OPTIONS] <NAME> <LINE>
+
+Arguments:
+  <NAME>
+          Which memory, by its exact name
+
+  <LINE>
+          The line to add, or the replacement with --replace ("" removes it)
+
+Options:
+      --replace <TEXT>
+          Change the one line containing this text instead of adding one
+
+  -s, --subject <CODE>
+          Look only in this subject's bucket
+
+      --about <TEXT>
+          Start the memory with this index line when it is not filed yet
+
+          [alias: --description]
+
+      --type <TYPE>
+          Its type, when starting it
+
+          [possible values: user, feedback, project, reference]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus memory fold`
+
+```
+Fold several memories into one and delete the rest.
+
+For a bucket that has become a log — one file per question, per session, per slip — or
+one that is full. **The body is yours to write**: what holds across them, each episode
+at most a line of evidence, not the files pasted together. The result keeps the earliest
+`created` date; `--into` may be one of the sources, which is then rewritten rather than
+deleted. All of them must be in the one bucket `-s` names.
+
+oculus memory fold a2-q4c-period-method a2-q4c-split-by-factors a2-q4a-rsa-answer --into
+assignment-2 --about "A2: what is settled, what is owed" --body /tmp/a2.md -s MULT20015
+
+Usage: oculus memory fold [OPTIONS] --into <NAME> <NAME>...
+
+Arguments:
+  <NAME>...
+          The memories to fold
+
+Options:
+      --into <NAME>
+          The memory they become — a new name, or one of them
+
+  -s, --subject <CODE>
+          The bucket they are all in
+
+      --about <TEXT>
+          The index line (default: --into's own, when it is filed already)
+
+          [alias: --description]
+
+      --type <TYPE>
+          Its type (default: the one the sources share)
+
+          [possible values: user, feedback, project, reference]
+
+      --title <TEXT>
+          What the index calls it
+
+      --text <TEXT>
+          The merged memory, on one line
+
+      --body <FILE>
+          The merged memory, from a file — or `-` for stdin
+
+      --why <TEXT>
+          Why it is true, or why it matters. Required for feedback and project
+
+      --how <TEXT>
+          What a later session should do about it. Required for feedback and project
+
+      --source <TEXT>
+          Where the facts came from
 
   -h, --help
           Print help (see a summary with '-h')

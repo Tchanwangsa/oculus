@@ -5,7 +5,7 @@ use super::bucket::bucket_dir;
 use super::frontmatter::{parse, render, Entry, Front};
 use super::query::{find, list};
 use super::slug::humanize;
-use super::write::Written;
+use super::write::{ensure_room, Written};
 use super::{INDEX_MARK, INDEX_NAME};
 
 /// Delete one memory and rewrite the index without it.
@@ -18,11 +18,13 @@ pub fn remove(data_dir: &Path, name: &str, code: Option<&str>) -> Result<Entry, 
 
 /// Move a memory from the bucket it is in to another one.
 ///
-/// Both indexes are rewritten and the file carried across unchanged.
+/// Both indexes are rewritten and the file carried across unchanged. A full
+/// bucket refuses it, as it would a new write.
 pub fn relocate(data_dir: &Path, entry: &Entry, to: Option<&str>) -> Result<Written, String> {
     if entry.subject.as_deref() == to {
         return Err(format!("{} is already filed there", entry.front.name));
     }
+    ensure_room(data_dir, to)?;
     let dir = bucket_dir(data_dir, to);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let path = dir.join(format!("{}.md", entry.front.name));
@@ -120,8 +122,9 @@ fn preamble(old: &str, code: Option<&str>) -> String {
             .to_string(),
     };
     format!(
-        "{scope}\nThe list below is written by `oculus memory` from the files beside it, so it\n\
-         cannot fall behind them. Everything above the marker is yours.\n"
+        "{scope}\nIt keeps twelve memories at most: pages edited in place, not a log. The list\n\
+         below is written by `oculus memory` from the files beside it, so it cannot\n\
+         fall behind them. Everything above the marker is yours.\n"
     )
 }
 

@@ -28,7 +28,7 @@ agent queries and plans through. Flags are in
 | `run`, `index`, `auth` | Copies of what the university has | A bad run is repaired by running it again |
 | `search`, `grep`, `read`, `files`, `calendar`, `list`, `status` | Nothing | Safe for any caller |
 | `project`, `task`, `tag` | The student's own plans | No upstream copy: unknown columns are refused, batches are one transaction, `task rm` and `tag rm` say in `--help` there is no undo |
-| `memory` | Agents' notes in `agents/memories/` | Files, not rows, because the thread writing them cannot open the database ([harness.md](./harness.md)) |
+| `memory` | Agents' notes in `agents/memories/` | Files, not rows, because the thread writing them cannot open the database. A bucket keeps 12; `append` and `fold` keep it to pages ([harness.md](./harness.md)) |
 | `lecture chapters`, `lecture end` | Derived rows, regenerable from the recording | They spend model quota, so an existing result is kept unless `--force` |
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
 | `studio new` | A video folder, `<app data>/studio/videos/<slug>/` | Refuses a slug that exists ([studio.md](./studio.md#videos-live-in-the-data-directory)) |

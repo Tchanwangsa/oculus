@@ -196,6 +196,8 @@ mod tests {
             "studio voices",
             "docs",
             "memory reindex",
+            "memory append gaps a-line",
+            "memory fold a b --into c --text merged",
         ] {
             let cli = Cli::try_parse_from(std::iter::once("oculus").chain(args.split_whitespace()))
                 .unwrap();

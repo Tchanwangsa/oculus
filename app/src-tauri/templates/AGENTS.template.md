@@ -83,24 +83,33 @@ cannot go missing from the index and there is no second write to remember.
 
 ```bash
 oculus memory list -s <CODE>            # what is already known about this subject
-oculus memory read tchan-study-workflow # one of them in full
+oculus memory read gaps -s <CODE>       # one of them in full
+oculus memory append gaps "the idea — where it is taught — open" -s <CODE>
 oculus memory write "the-name" --type reference --about "the line the index shows" --text "the fact" -s <CODE>
+oculus memory fold a b --into a --body merged.md -s <CODE>   # two that overlap become one
 oculus memory rm the-name               # it turned out wrong; no undo
 oculus memory move the-name -s <CODE>   # it was filed in the wrong bucket
 ```
 
-**Write the moment something is true**, not in a sweep at the end of a session
-that never comes: I said something about myself or my plan that the library
-does not record; you worked out something that cost real effort; I corrected
-you; a due date or a scope moved.
+**A bucket is a few pages edited in place, not a log** — twelve at most, and
+the command refuses a thirteenth. A subject keeps `gaps` (what I find hard, one
+line per idea, `open` or `got it`), a page per live assessment, `course` (where
+things live, staff rulings) and `style` (how I want this subject written). A
+new fact is a line in one of those (`append`, or `--replace` to change a line);
+a new name is for what none of them covers.
+
+**Write the moment something is true**, after you have answered: I said
+something about myself or my plan that the library does not record; I had an
+idea wrong; you worked out something that cost real effort; I corrected you; a
+due date or a scope moved. Not what happened this session, one question's
+answer, or progress through an assignment step by step.
 
 **Filing is the `-s` flag.** With it, the fact goes in that subject's bucket —
 anything that names one subject does, including when it came up while working
 on something else. Without it, the cross-subject bucket: facts about me, and
 what holds across subjects. A `feedback` or `project` memory also wants
 `--why` and `--how`, because an instruction a later session cannot act on is
-not worth keeping. Passing a name that is already filed updates it in place,
-which is what makes this a store of what is true rather than a log.
+not worth keeping. Passing a name that is already filed updates it in place.
 
 Standing preferences are the exception: they live in `../../agents/TASTE.md`,
 one bullet under `Writing`, `Working` or `Study`, and that file says when

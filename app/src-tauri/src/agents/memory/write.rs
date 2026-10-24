@@ -3,8 +3,9 @@ use std::path::Path;
 use super::bucket::bucket_dir;
 use super::frontmatter::{parse, render};
 use super::maintain::{order_meta, reindex};
+use super::query::list;
 use super::slug::{name_from, slug};
-use super::TYPES;
+use super::{CAP, TYPES};
 
 /// What `oculus memory write` was asked for. Absent fields are kept from the
 /// existing file or derived.
@@ -39,8 +40,19 @@ pub struct Written {
 ///
 /// An upsert: an existing name is updated in place, keeping its `created` and
 /// anything the caller did not pass — the templates' "update the file that
-/// already covers it".
+/// already covers it". A new name in a bucket already at [`CAP`] is refused.
 pub fn write(data_dir: &Path, code: Option<&str>, spec: WriteSpec) -> Result<Written, String> {
+    upsert(data_dir, code, spec, true)
+}
+
+/// [`write`], with the room check optional for a fold, which only ever shrinks
+/// the bucket.
+pub(super) fn upsert(
+    data_dir: &Path,
+    code: Option<&str>,
+    spec: WriteSpec,
+    check_room: bool,
+) -> Result<Written, String> {
     let dir = bucket_dir(data_dir, code);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 
@@ -59,6 +71,9 @@ pub fn write(data_dir: &Path, code: Option<&str>, spec: WriteSpec) -> Result<Wri
     let path = dir.join(format!("{name}.md"));
     let existing = std::fs::read_to_string(&path).ok().and_then(|t| parse(&t));
     let created = existing.is_none();
+    if created && check_room {
+        ensure_room(data_dir, code)?;
+    }
 
     let (mut front, old_body) = existing.unwrap_or_default();
     front.name = name.clone();
@@ -144,4 +159,23 @@ pub fn write(data_dir: &Path, code: Option<&str>, spec: WriteSpec) -> Result<Wri
         created,
         indexed,
     })
+}
+
+/// Refuses a new memory in a full bucket, naming what is filed there so the
+/// fact can go into one of them instead.
+pub(super) fn ensure_room(data_dir: &Path, code: Option<&str>) -> Result<(), String> {
+    let filed = list(data_dir, code)?;
+    if filed.len() < CAP {
+        return Ok(());
+    }
+    let names: Vec<&str> = filed.iter().map(|e| e.front.name.as_str()).collect();
+    Err(format!(
+        "{} holds {} memories and keeps {CAP} at most, so this is not a new one. \
+         Add it as a line to the memory it belongs to (`oculus memory append <name> \"<line>\"`), \
+         rewrite that memory, or fold two that overlap (`oculus memory fold <a> <b> --into <a> --body <file>`). \
+         Filed there: {}",
+        code.unwrap_or("The cross-subject bucket"),
+        filed.len(),
+        names.join(", ")
+    ))
 }

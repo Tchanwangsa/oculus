@@ -46,7 +46,8 @@ impl Ctx {
                     .subject
                     .clone()
                     .unwrap_or_else(|| "across subjects".into());
-                println!("{}", paint(&name, BOLD));
+                let filed = all.iter().filter(|e| e.subject == entry.subject).count();
+                println!("{}  {}", paint(&name, BOLD), paint(&fullness(filed), DIM));
                 current = Some(entry.subject.clone());
             }
             let kind = entry.front.meta("type").unwrap_or("—");
@@ -130,10 +131,84 @@ impl Ctx {
             .clone()
             .unwrap_or_else(|| "across subjects".into());
         println!(
-            "{} {} in {where_} ({} filed there now)",
+            "{} {} in {where_} ({})",
             paint(if written.created { "wrote" } else { "updated" }, GREEN),
             written.name,
-            written.indexed
+            fullness(written.indexed)
+        );
+        Ok(())
+    }
+
+    pub(crate) fn memory_append(&self, args: &MemoryAppendArgs) -> Result<(), String> {
+        let bucket = self.memory_bucket(&args.subject)?;
+        let start = args.about.clone().zip(args.r#type.clone());
+        let out = memory::append(
+            &self.data_dir,
+            bucket.as_deref(),
+            &args.name,
+            &args.line,
+            args.replace.as_deref(),
+            start,
+        )?;
+        if self.json {
+            return self.emit(&out);
+        }
+        let verb = match (
+            out.replaced,
+            args.line.trim().is_empty(),
+            out.written.created,
+        ) {
+            (true, true, _) => "removed from",
+            (true, false, _) => "changed in",
+            (false, _, true) => "started",
+            (false, _, false) => "added to",
+        };
+        println!(
+            "{} {}: {}",
+            paint(verb, GREEN),
+            out.written.name,
+            paint(&out.line, DIM)
+        );
+        Ok(())
+    }
+
+    pub(crate) fn memory_fold(&self, args: &MemoryFoldArgs) -> Result<(), String> {
+        let bucket = self.memory_bucket(&args.subject)?;
+        let body = match (&args.text, &args.body) {
+            (Some(text), _) => Some(text.clone()),
+            (None, Some(source)) => Some(read_input(source, "memory")?),
+            (None, None) => None,
+        };
+        let spec = memory::WriteSpec {
+            name: Some(args.into.clone()),
+            title: args.title.clone(),
+            description: args.about.clone(),
+            kind: args.r#type.clone(),
+            body,
+            why: args.why.clone(),
+            how: args.how.clone(),
+            source: args.source.clone(),
+            ..Default::default()
+        };
+        let out = memory::fold(&self.data_dir, bucket.as_deref(), &args.names, spec)?;
+        if self.json {
+            return self.emit(&out);
+        }
+        let where_ = out
+            .written
+            .subject
+            .clone()
+            .unwrap_or_else(|| "across subjects".into());
+        println!(
+            "{} {} into {} in {where_} ({})",
+            paint("folded", GREEN),
+            if out.removed.is_empty() {
+                "nothing else".to_string()
+            } else {
+                out.removed.join(", ")
+            },
+            out.written.name,
+            fullness(out.written.indexed)
         );
         Ok(())
     }
@@ -276,5 +351,17 @@ impl Ctx {
             );
         }
         Ok(())
+    }
+}
+
+/// "9 of 12", and what to do when it is over.
+fn fullness(filed: usize) -> String {
+    if filed > memory::CAP {
+        format!(
+            "{filed} of {} — over; fold before anything new is filed",
+            memory::CAP
+        )
+    } else {
+        format!("{filed} of {}", memory::CAP)
     }
 }
