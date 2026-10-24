@@ -5,7 +5,7 @@
 use core::ops::Range;
 
 use super::{
-    Target, finish, grid,
+    Target, alignment, finish, grid,
     splice::splice,
     template::selection_slot,
     text::{cluster_after, cluster_before},
@@ -43,6 +43,9 @@ fn erase(field: &Field, back: bool) -> Outcome {
         stops.at_slot_end(head)
     };
     if at_edge {
+        if let Some(outcome) = alignment::boundary(field, slot, back) {
+            return outcome;
+        }
         return slot_edge(field, slot, back);
     }
     let text = stops.slot(slot).text;

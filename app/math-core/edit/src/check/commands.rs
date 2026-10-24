@@ -327,8 +327,8 @@ fn check_outcome(before: &Field, outcome: &Outcome, step: usize, failures: &mut 
 /// or macro output next to it into one atom); nor a combining mark or a character before
 /// one (Backspace takes the whole cluster). Nor a grid key's edit (an
 /// undo step of its own: Backspace in the new cell takes a column or row,
-/// or steps back), `&` in an array cell (a new cell, which Backspace
-/// steps back out of), or a template leaving the caret in an array cell
+/// or steps back), `&` in an array cell (whose removal can unwrap an
+/// alignment), or a template leaving the caret in an array cell
 /// (Backspace in an empty matrix cell is the grid's). Nor a key a
 /// shortcut expanded (the expansion is an undo step of its own), nor any
 /// edit in a formula that defines a macro (a typed `.` can become the

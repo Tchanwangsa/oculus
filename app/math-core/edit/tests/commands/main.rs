@@ -12,6 +12,7 @@
     reason = "LaTeX's braces, not format arguments"
 )]
 
+mod alignment;
 mod deleting;
 mod harness;
 mod matrices;

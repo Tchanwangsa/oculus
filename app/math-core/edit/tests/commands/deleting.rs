@@ -106,18 +106,10 @@ fn rows_join_at_their_edges() {
 }
 
 #[test]
-fn cells_step_to_their_neighbour_at_their_edges() {
+fn deleting_an_alignment_point_joins_the_cells() {
     let cases: &[Case] = &[
-        (
-            r"\begin{aligned}a&|=b\end{aligned}",
-            &["bs"],
-            r"\begin{aligned}a|&=b\end{aligned}",
-        ),
-        (
-            r"\begin{aligned}a|&=b\end{aligned}",
-            &["del"],
-            r"\begin{aligned}a&|=b\end{aligned}",
-        ),
+        (r"\begin{aligned}a&|=b\end{aligned}", &["bs"], "a|=b"),
+        (r"\begin{aligned}a|&=b\end{aligned}", &["del"], "a|=b"),
     ];
     check_all(cases, true);
 }

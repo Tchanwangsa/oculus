@@ -210,7 +210,11 @@ is a whole display formula goes one row per line (`\begin{env}`, `row
 \\` lines, `\end{env}`), as Enter's new rows do. Empty cells are stored
 empty; a one-column matrix's empty last row is kept with a `\\` after it
 (KaTeX drops it otherwise). `&` in any array cell is a raw `&` (a new
-cell), `\&` elsewhere. `space_free()` is false where Space is a grid key.
+cell). In a plain display row it starts an `aligned` row and joins adjacent
+aligned runs; in text, inline maths and argument slots it is `\&`.
+Backspace after a point or Delete before it removes it, with the alignment
+covering only consecutive rows that still have points. `space_free()` is
+false where Space is a grid key.
 
 **Shortcuts** (`edit/src/shortcut/`) expand typed keys: `sin` → `\sin`,
 `->` → `\to`, `@a` → `\alpha`, `xsr` → `x^2`, `sqrt` → `\sqrt{}` with the

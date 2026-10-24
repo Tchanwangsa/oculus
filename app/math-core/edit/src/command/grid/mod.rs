@@ -18,7 +18,7 @@ mod space;
 mod write;
 
 use super::{
-    Target, finish,
+    Target, alignment, finish,
     template::{place, selection_slot},
 };
 use crate::{
@@ -29,6 +29,7 @@ use find::grid_at;
 use model::Model;
 
 pub use enter::array_row;
+pub(super) use find::read_array;
 pub use layout::top_break;
 
 /// Which end of a cell the caret goes to.
@@ -100,9 +101,13 @@ pub fn takes_space(field: &Field) -> bool {
 }
 
 /// `&`: in an array cell (any array: `aligned` too) a raw `&`, starting a
-/// new cell, the caret at its start; elsewhere, or where a new cell would
+/// new cell, the caret at its start. A plain display row starts alignment
+/// and joins adjacent aligned rows; elsewhere, or where a new cell would
 /// not render, `\&`.
 pub fn ampersand(field: &Field) -> Outcome {
+    if let Some(outcome) = alignment::insert(field) {
+        return outcome;
+    }
     let (slot, range) = selection_slot(field);
     let stops = field.stops();
     if matches!(stops.slot(slot).kind, SlotKind::Cell { .. }) {

@@ -138,6 +138,25 @@ at an argument's edge it exits that structure, so nested groups can be left
 one level at a time. Inside `\text{…}` it moves by words and whitespace.
 ⌥⇧←/→ extends by the same jumps.
 
+Typing `&` in a plain display row starts an `aligned` row at the caret,
+so `&=` creates an aligned equals sign. Adjacent aligned runs join into
+one shared environment; unrelated rows stay outside it. Reinsert `&`
+before an existing equals sign to restore a removed alignment point.
+Text runs, inline maths and nested argument slots keep a literal `\&`;
+`\&` typed as a control symbol is literal in display maths too.
+
+Backspace at the start of an `aligned` cell, or Delete at the end of the
+cell before it, removes the `&` and joins those cells. A row leaves the
+alignment once its last point is gone: only consecutive rows still holding
+points share an `aligned` wrapper. Removing every point leaves plain
+`\\` rows. Removing points through a selection does the same cleanup,
+and removing a point plus its wrappers is one undo step. Cleanup belongs
+to `app/math-core/edit/src/command/alignment/` and runs on edits that remove
+alignment points, keeping imported source untouched on opening. Inside a
+fraction, scripts or surrounding maths, grouping is retained where needed;
+a multi-line group without alignment uses `gathered`. Literal `\&`, nested
+matrices and other environments keep their own meaning.
+
 The edit model owns every key but the toolbox's, ⌘⇧M, undo and Enter in a
 block (`rustField/keys.ts`) and the pending `\command` list's (below): Esc
 (once any toolbox is closed: leave, or revert a shortcut just expanded), an

@@ -6,6 +6,8 @@
 /// `katex/tests/source_locs.rs`'s formulas: one of each construct the
 /// source mapping knows.
 pub const FORMULAS: &[&str] = &[
+    r"\begin{aligned}a&=b\\c&=d\\e&=f\end{aligned}",
+    r"\frac{\begin{aligned}a&=b\\c=d\end{aligned}}{x}",
     "ab",
     r"\frac{a}{b}",
     r"\frac ab",
