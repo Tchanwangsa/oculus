@@ -240,7 +240,8 @@ mod notebook_read {
             view.pages.iter().map(|p| p.page).collect::<Vec<_>>(),
             [1, 2, 3]
         );
-        assert!(view.pages[0].image.ends_with("canvas-pages/7/page-001.png"));
+        assert!(std::path::Path::new(&view.pages[0].image)
+            .ends_with(std::path::Path::new("canvas-pages/7/page-001.png")));
         assert_eq!(view.pages[0].age_seconds, 59);
         assert_eq!(view.pages[2].age_seconds, 57);
     }
