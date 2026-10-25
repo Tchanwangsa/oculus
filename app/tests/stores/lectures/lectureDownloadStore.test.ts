@@ -1,10 +1,12 @@
 import { expect, mock, test } from "bun:test";
+import * as tauriEvent from "@tauri-apps/api/event";
 import type { EventCallback } from "@tauri-apps/api/event";
 import type { DlProgress } from "@/lib/lectures";
 
 let callback: EventCallback<DlProgress>;
 let unlistened = false;
 mock.module("@tauri-apps/api/event", () => ({
+  ...tauriEvent,
   listen: async (_name: string, fn: EventCallback<DlProgress>) => {
     callback = fn;
     return () => { unlistened = true; };

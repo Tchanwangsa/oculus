@@ -1,9 +1,10 @@
 import { afterAll, expect, mock, spyOn, test } from "bun:test";
+import * as tauriEvent from "@tauri-apps/api/event";
 import * as db from "@/lib/db";
 import type { TranscribeEngine } from "@/lib/lectures/transcribe";
 
 mock.module("@tauri-apps/api/core", () => ({ invoke: async () => null }));
-mock.module("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
+mock.module("@tauri-apps/api/event", () => ({ ...tauriEvent, listen: async () => () => {} }));
 let stored: string | null = null;
 const read = spyOn(db, "getSetting").mockImplementation(async () => stored);
 const write = spyOn(db, "setSetting").mockImplementation(async (_, value) => {
