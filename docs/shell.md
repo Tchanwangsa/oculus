@@ -349,8 +349,10 @@ items with the same front item and width.
   and removes it with `handover`: a lecture it owned is claimed for the main
   pane (or the new tab), so whatever comes to the panel's front next waits and
   the expanded lecture plays on, and a browser page stays open.
-- **The strip toggle hides the panel and keeps its stack**. Its badge counts
-  hidden tabs; toggling again restores the same front item. The hidden front
+- **The strip toggle hides saved pages and discards `/new` placeholders**.
+  An empty stack closes the panel. Its badge counts retained hidden pages;
+  toggling again restores the front item, or the most recently viewed saved
+  page if the front was a placeholder. The hidden front
   page stays mounted at its split width, preserving drafts and scroll, while
   main takes the full card and receives shell navigation. Native browser
   views hide without closing their pages; a hidden lecture pauses. Hidden

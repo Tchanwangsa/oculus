@@ -4,6 +4,7 @@ import {
   SIDE_CAP,
   frontItem,
   frontOf,
+  hidePanel,
   pushItem,
   removeItem,
   restoreClosedSide,
@@ -123,6 +124,41 @@ describe("bringing forward and removing", () => {
 });
 
 describe("restoring", () => {
+  test("hiding a panel of new-tab placeholders closes it without hidden tabs", () => {
+    const { side } = pushed(["/new", "/new"]);
+    const hidden = hidePanel(side);
+    expect(hidden.side).toBeNull();
+    expect(hidden.dropped.map((i) => i.id)).toEqual([101, 100]);
+  });
+
+  test("hiding drops placeholders and preserves real pages, width and viewing order", () => {
+    const { side } = pushed([file(1), file(2), "/new", "/browse/9", "/new"]);
+    const viewed = frontItem(frontItem({ ...side, ratio: 0.65 }, 100), 104);
+    const hidden = hidePanel(viewed);
+    expect(hidden.dropped.map((i) => i.id)).toEqual([104, 102]);
+    expect(paths(hidden.side)).toEqual(["/browse/9", file(2), file(1)]);
+    expect(hidden.side?.hidden).toBe(true);
+    expect(hidden.side?.front).toBe(100);
+    expect(hidden.side?.ratio).toBe(0.65);
+    expect(hidden.side?.items.at(-1)).toBe(viewed.items.at(-1));
+  });
+
+  test("hiding keeps the current real page when a placeholder is in the back", () => {
+    const { side } = pushed(["/new", file(1)]);
+    expect(hidePanel(side).side?.front).toBe(side.front);
+  });
+
+  test("restoring hidden placeholders discards them but keeps an open new-tab page", () => {
+    const { side } = pushed(["/new"]);
+    expect(restoreSide(storeSide({ ...side, hidden: true }), undefined, 1)).toBeNull();
+    expect(paths(restoreSide(storeSide(side), undefined, 1))).toEqual(["/new"]);
+    const mixed = pushed([file(1), "/new"]).side;
+    const restored = restoreSide(storeSide({ ...mixed, hidden: true }), undefined, 1)!;
+    expect(paths(restored)).toEqual([file(1)]);
+    expect(restored.front).toBe(100);
+    expect(restored.hidden).toBe(true);
+  });
+
   test("a hidden panel retains its items, front and width across reloads, with focus on main", () => {
     const { side } = pushed([file(1), file(2), "/browse/9"]);
     const hidden = { ...frontItem(side, 100), ratio: 0.65, hidden: true };
