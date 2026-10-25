@@ -1,4 +1,5 @@
 import { afterAll, expect, mock, spyOn, test } from "bun:test";
+import * as tauriEvent from "@tauri-apps/api/event";
 import * as db from "@/lib/db";
 
 const calls: string[] = [];
@@ -9,7 +10,7 @@ mock.module("@tauri-apps/api/core", () => ({
     return answer(cmd);
   },
 }));
-mock.module("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
+mock.module("@tauri-apps/api/event", () => ({ ...tauriEvent, listen: async () => () => {} }));
 const file = { id: 3, relative_path: "courses/X/files/talk.mp4" } as db.DbFile;
 const lookup = spyOn(db, "getFileByRelativePath").mockResolvedValue(file);
 // The store waits on a window event for the row; tests run without a DOM.
