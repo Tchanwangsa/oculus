@@ -175,6 +175,9 @@ new `connect/` over it) must carry across:
   itself. It feeds the device list
   ([music-library.md](./music-library.md#the-device-list-is-spotifys-pushed-cluster))
   and the resume after a reconnect.
+- **`Spirc::refresh`**: requests the cluster with `PICKER_OPENED` through
+  the existing device and connection, including while inactive. Its reply
+  goes to the caller without activating or transferring playback.
 
 librespot's `Cache` is never constructed: no `credentials.json`, no audio file
 cache, no volume file. While a track streams, librespot buffers it in a
@@ -375,10 +378,13 @@ pure function, picks what the command does:
   Volume is `PUT /connect-state/v1/connect/volume/from/<own>/to/<active>`
   with `{"volume": 0–65535}`. The play/pause toggle sends `pause` or `resume`
   by the other device's playing state; repeat off clears both repeats, as
-  here. A command is sent once: a non-2xx fails it with "Spotify refused the
-  command on <device> (<status>)" and is logged with the start of Spotify's
-  answer, and nothing falls back to pulling playback here. The outcome
-  arrives with the next cluster push.
+  here. A 404, 409 or 410 refreshes the cluster through `Spirc::refresh`
+  and retries once if the same remote device is still active. A changed
+  device stops the command; rate limits, auth refusals and transport failures
+  are not retried. A final non-2xx fails with "Spotify refused the command on
+  <device> (<status>)" and is logged with the start of Spotify's answer.
+  Nothing falls back to pulling playback here. The outcome arrives with the
+  next cluster push.
 - **Pull**: `Spirc::transfer`, which asks Spotify to move the current
   playback here. It lands later as a dealer request, so a command sent at
   once would still be dropped; the command waits up to 5 s for `active`,
@@ -428,6 +434,15 @@ track they play (`title`, `album_title`, `artist_name`, `image_large_url` or
 `image_url`) when it is there, then from the library's row for its URI
 (`music_tracks`' cache): a row already kept fills it at once; otherwise the
 row is fetched once per URI and the snapshot goes out again when it comes.
+The cluster listener reads the account from its shared session on each
+update: it subscribes before authentication, when the username is empty,
+and track rows belong to the signed-in account.
+The lookup starts after the cluster is installed, so a fast response finds
+the new track. Transient failures get up to two retries, five seconds apart
+(a 429 waits its `Retry-After`), only while the same track and connection
+remain current. Opening the player while another device is active also
+refreshes its cluster, with a 15-second wait limit, and can retry an unresolved
+description.
 
 ## The output on this Mac moves mid-track without rebuilding the player
 

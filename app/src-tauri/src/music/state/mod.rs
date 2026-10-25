@@ -435,6 +435,34 @@ pub(super) fn session(app: &AppHandle) -> Option<Session> {
     with(app, |inner| inner.session.clone())
 }
 
+/// Starts a cluster refresh while holding the handle's lock, then releases
+/// it before the caller waits for Spotify.
+pub(super) struct ClusterRefresh {
+    pub id: u64,
+    pub session: Session,
+    pub reply: tokio::sync::oneshot::Receiver<
+        Result<librespot_protocol::connect::Cluster, librespot_core::Error>,
+    >,
+}
+
+pub(super) fn refresh_cluster(app: &AppHandle) -> Result<ClusterRefresh, String> {
+    with(app, |inner| {
+        let run = inner.run.as_ref().ok_or("Not connected to Spotify")?;
+        let session = inner.session.clone().ok_or("Not connected to Spotify")?;
+        let reply = inner
+            .spirc
+            .as_ref()
+            .ok_or("Not connected to Spotify")?
+            .refresh()
+            .map_err(|e| e.to_string())?;
+        Ok(ClusterRefresh {
+            id: run.id,
+            session,
+            reply,
+        })
+    })
+}
+
 /// Stops the running session task, if any: the device leaves Spotify's list
 /// and the task shuts its session down on its own. Its later writes are
 /// ignored. True when one was running.

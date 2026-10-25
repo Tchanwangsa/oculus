@@ -402,8 +402,8 @@ With nothing active both are refused with "Play something first".
   `queue_revision`. A push without a player state keeps the last one for
   the same device; nothing active, or the connection dropping, clears it.
   The entry is the one at `index` among the catalogue tracks, or, when the
-  list moved since the snapshot, the first with that URI; none is "That
-  track is no longer up next". `skip_next` names that track (`uri`, and
+  list moved since the snapshot, the first with that URI; an absent track
+  fails the command. `skip_next` names that track (`uri`, and
   `uid` and `provider` when listed); `set_queue` sends every next track but
   that one (episodes and delimiters too), the previous tracks unchanged, and
   the kept revision.
@@ -433,6 +433,10 @@ its own.
   (`Fold::cluster`). `music_devices` reads the kept cluster; the menu asks
   once when it opens. Offline devices are left out; Oculus is
   listed first, then the active device, then by name.
+- **Opening the player while another device is active refreshes the cluster**
+  through `Spirc::refresh`, as does a remote command rejected with a stale
+  route (404, 409 or 410). This uses the existing connection without moving
+  playback ([music.md](./music.md#commands-control-the-device-playing-wherever-it-is)).
 - **A transfer to Oculus is a pull** then play, the same as "Play here"
   ([music.md](./music.md#commands-control-the-device-playing-wherever-it-is)).
 - **A cluster also carries the active device's player state**, which becomes

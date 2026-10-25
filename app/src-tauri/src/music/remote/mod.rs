@@ -8,9 +8,9 @@
 //!
 //! A command is one request through the library's spclient sender, from this
 //! device's id to the active one's: Spotify's connect-state player command
-//! API, or its volume endpoint (`command.rs`). It is sent once; a non-2xx
-//! fails the command with the device's name and is logged, and nothing falls
-//! back to pulling playback here.
+//! API, or its volume endpoint (`command.rs`). A stale route refreshes the
+//! cluster and retries once on the same device. Other failures reach the
+//! player and nothing falls back to pulling playback here.
 
 mod command;
 mod playback;
@@ -20,11 +20,11 @@ mod tests;
 use tauri::AppHandle;
 
 pub(super) use command::{ListedTrack, RemoteCommand};
-pub(super) use playback::{describe, from_cluster, with_row, RemotePlayback};
+pub(super) use playback::{describe, fetch_description, from_cluster, with_row, RemotePlayback};
 
 use super::library::spclient::{self, Method, Target};
 use super::library::LibraryError;
-use super::state;
+use super::{devices, state};
 
 /// The device a remote command goes to, as the last cluster push left it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,10 +46,46 @@ pub(super) async fn send(
     device: &Device,
     command: RemoteCommand,
 ) -> Result<(), String> {
-    let session = state::session(app).ok_or("Not connected to Spotify")?;
-    let endpoint = command::path(&command, &device.from, &device.to);
-    let body = serde_json::to_vec(&command::body(&command)).map_err(|e| e.to_string())?;
-    let method = match &command {
+    match request(app, device, &command).await {
+        Ok(()) => return Ok(()),
+        Err(e) if stale_route(&e) => {
+            elog!(
+                "[music] {} on {} has a stale route: {e}; refreshing",
+                command.label(),
+                device.name
+            );
+            if let Err(refresh) = devices::refresh(app).await {
+                elog!("[music] refreshing the remote command route failed: {refresh}");
+                return Err(refused(&device.name, &e));
+            }
+            // A refresh must never redirect a click to another device.
+            if state::cluster(app).is_none_or(|c| c.active_id != device.to)
+                || state::session(app).is_none_or(|s| s.device_id() != device.from)
+            {
+                return Err("Spotify's playback device changed; try the command again".into());
+            }
+        }
+        Err(e) => return Err(refused(&device.name, &e)),
+    }
+    request(app, device, &command)
+        .await
+        .map_err(|e| refused(&device.name, &e))
+}
+
+pub(super) fn stale_route(e: &LibraryError) -> bool {
+    matches!(e, LibraryError::Status(404 | 409 | 410))
+}
+
+async fn request(
+    app: &AppHandle,
+    device: &Device,
+    command: &RemoteCommand,
+) -> Result<(), LibraryError> {
+    let session = state::session(app).ok_or(LibraryError::NotConnected)?;
+    let endpoint = command::path(command, &device.from, &device.to);
+    let body = serde_json::to_vec(&command::body(command))
+        .map_err(|e| LibraryError::Unreadable(e.to_string()))?;
+    let method = match command {
         RemoteCommand::Volume(_) => Method::PutJson(body),
         _ => Method::PostJson(body),
     };
@@ -57,7 +93,7 @@ pub(super) async fn send(
         Ok(_) => Ok(()),
         Err(e) => {
             elog!("[music] {} on {} failed: {e}", command.label(), device.name);
-            Err(refused(&device.name, &e))
+            Err(e)
         }
     }
 }

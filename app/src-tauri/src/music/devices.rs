@@ -30,6 +30,19 @@ use super::state::{self, percent, up_next, NextTrack, DEVICE_NAME};
 
 const CLUSTER_URI: &str = "hm://connect-state/v1/cluster";
 
+/// Re-reads Spotify's cluster through the existing Spirc. A rejected stale
+/// route and opening the player can recover without moving playback.
+pub(super) async fn refresh(app: &AppHandle) -> Result<(), String> {
+    let state::ClusterRefresh { id, session, reply } = state::refresh_cluster(app)?;
+    let cluster = tokio::time::timeout(std::time::Duration::from_secs(15), reply)
+        .await
+        .map_err(|_| "Spotify's device refresh timed out".to_string())?
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    Fold::new(app, id, &session).cluster(&cluster);
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Device {
     pub id: String,
@@ -209,7 +222,8 @@ struct Fold {
     id: u64,
     session_id: String,
     own_id: String,
-    account: String,
+    // The listener is installed before authentication fills the username.
+    session: Session,
     /// The track `remote::describe` last asked a row for.
     asked: Option<String>,
 }
@@ -221,17 +235,21 @@ impl Fold {
             id,
             session_id: session.session_id(),
             own_id: session.device_id().to_string(),
-            account: session.username(),
+            session: session.clone(),
             asked: None,
         }
     }
 
     fn cluster(&mut self, cluster: &ClusterProto) {
         let mut cluster = from_cluster(cluster, &self.own_id);
-        if let Some(remote) = cluster.remote.as_mut() {
-            remote::describe(&self.app, self.id, &self.account, remote, &mut self.asked);
-        }
+        let fetch = cluster
+            .remote
+            .as_mut()
+            .and_then(|remote| remote::describe(&self.app, &self.session, remote, &mut self.asked));
         state::set_cluster(&self.app, self.id, &self.session_id, cluster);
+        if let Some(uri) = fetch {
+            remote::fetch_description(&self.app, self.id, self.session_id.clone(), uri);
+        }
     }
 }
 

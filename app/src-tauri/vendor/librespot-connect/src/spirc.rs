@@ -34,7 +34,7 @@ use crate::{
 };
 use futures_util::StreamExt;
 use librespot_protocol::context_page::ContextPage;
-use protobuf::MessageField;
+use protobuf::{Message as _, MessageField};
 use std::{
     future::Future,
     sync::Arc,
@@ -43,7 +43,7 @@ use std::{
 };
 use thiserror::Error;
 use tokio::{
-    sync::{mpsc, watch},
+    sync::{mpsc, oneshot, watch},
     time::sleep,
 };
 
@@ -124,6 +124,7 @@ static SPIRC_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug)]
 enum SpircCommand {
+    Refresh(oneshot::Sender<Result<Cluster, Error>>),
     Play,
     PlayPause,
     Pause,
@@ -305,6 +306,13 @@ impl Spirc {
     /// sender closes when the Spirc's task ends (Oculus addition).
     pub fn announced(&self) -> watch::Receiver<Option<Cluster>> {
         self.announced.clone()
+    }
+
+    /// Requests the current cluster without activating or transferring playback.
+    pub fn refresh(&self) -> Result<oneshot::Receiver<Result<Cluster, Error>>, Error> {
+        let (reply, result) = oneshot::channel();
+        self.commands.send(SpircCommand::Refresh(reply))?;
+        Ok(result)
     }
 
     /// Safely shutdowns the spirc.
@@ -752,6 +760,15 @@ impl SpircTask {
     async fn handle_command(&mut self, cmd: SpircCommand) -> Result<(), Error> {
         trace!("Received SpircCommand::{cmd:?}");
         match cmd {
+            SpircCommand::Refresh(reply) => {
+                let result = self
+                    .connect_state
+                    .refresh(&self.session)
+                    .await
+                    .and_then(|body| Cluster::parse_from_bytes(&body).map_err(Into::into));
+                let _ = reply.send(result);
+                return Ok(());
+            }
             SpircCommand::Shutdown => {
                 trace!("Received SpircCommand::Shutdown");
                 self.handle_pause();

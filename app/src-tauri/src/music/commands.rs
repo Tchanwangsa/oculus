@@ -83,12 +83,21 @@ pub fn music_connect(app: AppHandle) {
 /// What opening the rail's player or `/music` sends, on every open, so the
 /// connection is sound when the user looks: the session task checks its
 /// session now (a closed one reconnects) and a backoff is cut short.
+/// Another device playing also refreshes its cluster through the Spirc.
 /// Sleep is not its to check: the link reconnects on waking by itself. With no session, one starts from
 /// the stored login while Settings → Music is on, unless a login is needed
 /// or the user disconnected. Otherwise nothing, and no network call.
 #[tauri::command]
 pub async fn music_wake(app: AppHandle) {
-    if state::wake(&app) || !state::may_start(&app) {
+    if state::wake(&app) {
+        if state::snapshot(&app).playing_on.is_some() {
+            if let Err(e) = devices::refresh(&app).await {
+                elog!("[music] refreshing remote playback failed: {e}");
+            }
+        }
+        return;
+    }
+    if !state::may_start(&app) {
         return;
     }
     let enabled = blocking::run(|| Ok(startup::enabled()))

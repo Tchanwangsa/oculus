@@ -480,6 +480,12 @@ impl ConnectState {
         res
     }
 
+    /// Requests a full cluster for the device picker without taking playback.
+    pub async fn refresh(&mut self, session: &Session) -> SpClientResult {
+        self.send_with_reason(session, PutStateReason::PICKER_OPENED)
+            .await
+    }
+
     /// Notifies the remote server about a new device
     pub async fn notify_new_device_appeared(&mut self, session: &Session) -> SpClientResult {
         self.send_with_reason(session, PutStateReason::NEW_DEVICE)

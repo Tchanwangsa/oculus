@@ -222,6 +222,23 @@ fn a_refused_command_names_the_device_and_status() {
     );
 }
 
+#[test]
+fn only_stale_route_refusals_allow_a_refresh_and_retry() {
+    for status in [404, 409, 410] {
+        assert!(super::stale_route(&LibraryError::Status(status)));
+    }
+    for error in [
+        LibraryError::Unauthorized,
+        LibraryError::Forbidden,
+        LibraryError::RateLimited(30),
+        LibraryError::Status(400),
+        LibraryError::Status(500),
+        LibraryError::Transport("connection lost".into()),
+    ] {
+        assert!(!super::stale_route(&error));
+    }
+}
+
 fn device(name: &str, volume: u32) -> DeviceInfo {
     DeviceInfo {
         name: name.into(),
@@ -381,6 +398,42 @@ fn the_library_row_names_the_track_keeping_the_metadatas_cover_and_duration() {
         Some("https://i.scdn.co/image/ab67616d00001e02aa")
     );
     assert_eq!(track.duration_ms, 199_000);
+}
+
+#[tokio::test]
+async fn a_listener_created_before_login_uses_the_signed_in_accounts_track_cache() {
+    let session = librespot_core::Session::new(Default::default(), None);
+    let listener = session.clone();
+    assert!(listener.username().is_empty());
+    // Authentication happens after the dealer's listener is installed.
+    session.set_username("alice");
+    let mut cluster = phone_playing();
+    cluster
+        .player_state
+        .as_mut()
+        .unwrap()
+        .track
+        .as_mut()
+        .unwrap()
+        .metadata
+        .clear();
+    let mut asked = Some(T1.to_string());
+    for _ in 0..2 {
+        let mut remote = from_cluster(&cluster, "me").unwrap();
+        assert!(remote.track.is_none());
+        let fetch =
+            super::playback::describe_with(&listener, &mut remote, &mut asked, |account, uri| {
+                // The metadata request cached the row under the authenticated account.
+                (account == "alice" && uri == T1).then(|| Some(row(T1)))
+            });
+        assert_eq!(fetch, None);
+        let track = remote
+            .track
+            .expect("each phone push keeps the cached song title");
+        assert_eq!(track.name, "Song (Remastered)");
+        assert_eq!(track.artists, ["Artist"]);
+        assert!(track.cover_url.is_some());
+    }
 }
 
 #[test]

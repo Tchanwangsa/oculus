@@ -4,6 +4,7 @@
 //! then from the library's track row (`library::track_rows`), fetched once
 //! per URI and kept like any row.
 
+use librespot_core::Session;
 use librespot_protocol::connect::Cluster as ClusterProto;
 use librespot_protocol::player::{PlayerState, ProvidedTrack};
 use serde::Serialize;
@@ -129,34 +130,80 @@ pub(in crate::music) fn with_row(remote: &mut RemotePlayback, row: &TrackRow) {
     });
 }
 
-/// Fills `remote`'s track from a row the library keeps; without one, asks
-/// for it once per URI (`asked` holds the last URI asked) and lays it on
-/// run `id`'s snapshot when it comes. A row Spotify had nothing for leaves
-/// the metadata's track.
+/// Fills the track from a kept row, or returns the URI to fetch after the
+/// snapshot is installed. `asked` prevents duplicate fetches from pushes;
+/// a row Spotify had nothing for leaves the metadata's track.
 pub(in crate::music) fn describe(
     app: &AppHandle,
-    id: u64,
-    account: &str,
+    session: &Session,
     remote: &mut RemotePlayback,
     asked: &mut Option<String>,
-) {
+) -> Option<String> {
+    describe_with(session, remote, asked, |account, uri| {
+        library::kept_row(app, account, uri)
+    })
+}
+
+pub(super) fn describe_with(
+    session: &Session,
+    remote: &mut RemotePlayback,
+    asked: &mut Option<String>,
+    lookup: impl FnOnce(&str, &str) -> Option<Option<TrackRow>>,
+) -> Option<String> {
     if !remote.uri.starts_with("spotify:track:") {
-        return;
+        return None;
     }
-    match library::kept_row(app, account, &remote.uri) {
+    // A listener's Session is cloned before login fills its username.
+    match lookup(&session.username(), &remote.uri) {
         Some(Some(row)) => with_row(remote, &row),
         Some(None) => {}
         None if asked.as_deref() == Some(remote.uri.as_str()) => {}
         None => {
             *asked = Some(remote.uri.clone());
-            let app = app.clone();
-            let uri = remote.uri.clone();
-            tauri::async_runtime::spawn(async move {
-                let rows = library::track_rows(&app, std::slice::from_ref(&uri)).await;
-                if let Some(row) = rows.ok().and_then(|mut rows| rows.remove(&uri)) {
-                    state::set_remote_row(&app, id, &row);
-                }
-            });
+            return Some(remote.uri.clone());
         }
     }
+    None
+}
+
+/// Starts after the cluster is installed, so a fast lookup cannot arrive
+/// before the snapshot names the new track. Transient failures retry while
+/// that track and connection remain current.
+pub(in crate::music) fn fetch_description(
+    app: &AppHandle,
+    id: u64,
+    session_id: String,
+    uri: String,
+) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        for attempt in 0..3 {
+            if state::session(&app).is_none_or(|s| s.session_id() != session_id)
+                || state::snapshot(&app).remote.is_none_or(|r| r.uri != uri)
+            {
+                return;
+            }
+            match library::track_rows(&app, std::slice::from_ref(&uri)).await {
+                Ok(mut rows) => {
+                    if let Some(row) = rows.remove(&uri) {
+                        if state::session(&app).is_some_and(|s| s.session_id() == session_id) {
+                            state::set_remote_row(&app, id, &row);
+                        }
+                    }
+                    return;
+                }
+                Err(e) => {
+                    elog!("[music] remote track description failed: {e}");
+                    if e.is_lasting() || attempt == 2 {
+                        return;
+                    }
+                    let delay = match e {
+                        library::LibraryError::RateLimited(seconds) => seconds.max(1),
+                        _ => 5,
+                    };
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                }
+            }
+        }
+    });
 }

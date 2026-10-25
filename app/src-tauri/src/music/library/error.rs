@@ -26,7 +26,7 @@ impl LibraryError {
     /// An answer asking again would not change — a refusal, another status,
     /// a body that will not decode — as against a rate limit, a token or the
     /// connection.
-    pub(super) fn is_lasting(&self) -> bool {
+    pub(in crate::music) fn is_lasting(&self) -> bool {
         matches!(
             self,
             Self::Forbidden | Self::Status(_) | Self::Unreadable(_)
