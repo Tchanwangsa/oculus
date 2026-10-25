@@ -159,6 +159,17 @@ export function removeItem(side: SidePanel, id: number): SidePanel | null {
   return { ...side, items, front: next.id };
 }
 
+/** Hides saved pages, discarding empty new-tab placeholders and choosing the
+ *  most recently viewed page if the front was a placeholder. */
+export function hidePanel(side: SidePanel): { side: SidePanel | null; dropped: SideItem[] } {
+  const dropped = side.items.filter((i) => i.path === "/new");
+  let next: SidePanel | null = side;
+  for (const item of dropped) {
+    if (next) next = removeItem(next, item.id);
+  }
+  return { side: next ? { ...next, hidden: true } : null, dropped };
+}
+
 /** A side panel built from paths in list order, the first in front. Stamps
  *  follow the list, so the cap drops from its end. */
 function fromPanes(
@@ -227,8 +238,7 @@ export function restoreSide(stored: unknown, split: unknown, mainId: number): Si
   const frontId = panes.some((p) => p.id === front) ? (front as number) : panes[0].id;
   const r = typeof ratio === "number" && Number.isFinite(ratio) ? clampRatio(ratio) : SIDE_RATIO;
   const side = fromPanes(panes, frontId, r);
-  if ((stored as StoredSide | null)?.hidden === true) side.hidden = true;
-  return side;
+  return (stored as StoredSide | null)?.hidden === true ? hidePanel(side).side : side;
 }
 
 /** A stored `focus`: the side panel only if there is one. `"split"` is the

@@ -5,6 +5,7 @@ import { hasTabRouter, dropTabRouter, navigateInTab } from "@/lib/shell/tabRoute
 import {
   clampRatio,
   frontItem,
+  hidePanel,
   pushItem,
   removeItem,
   retargetItem,
@@ -77,7 +78,7 @@ interface TabState {
   reopenTab: () => void;
   /** Reveals and focuses the side panel, creating `/new` only when empty. */
   openSide: (tabId: number) => void;
-  /** Hides the side panel, retaining its items and routers. */
+  /** Hides saved side pages and releases empty new-tab placeholders. */
   hideSide: (tabId: number) => void;
   /** ⌥⌘T and the strip button: reveal or hide the side panel. */
   toggleSide: (tabId: number) => void;
@@ -163,8 +164,10 @@ export const useTabStore = create<TabState>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab?.side || tab.side.hidden) return;
     leaveFront(tab.side, null);
+    const { side, dropped } = hidePanel(tab.side);
+    for (const item of dropped) releaseItem(item);
     set((s) => withTab(s, tabId, (t) => ({
-      ...t, side: { ...t.side!, hidden: true }, focus: "main",
+      ...t, side, focus: "main",
     })));
   },
 
