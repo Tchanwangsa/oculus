@@ -55,7 +55,7 @@ export const VideoDock = memo(function VideoDock({
   open: boolean;
   resizing: boolean;
   onClose: () => void;
-  onHeaderPointerDown: (e: React.PointerEvent) => void;
+  onHeaderPointerDown?: (e: React.PointerEvent) => void;
   following: boolean;
   onScrollAway: () => void;
   onBackToLive: () => void;

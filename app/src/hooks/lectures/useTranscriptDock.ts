@@ -71,12 +71,6 @@ export function useTranscriptDock(
     null,
   );
 
-  const startDockDrag = useCallback((e: React.PointerEvent) => {
-    if (!allowSideDock) return;
-    if (!capturePress(e)) return;
-    drag.current = { x: e.clientX, y: e.clientY, moved: false };
-  }, [allowSideDock]);
-
   const [area, setArea] = useState({ width: 0, height: 0 });
   useEffect(() => {
     const el = containerRef.current;
@@ -94,6 +88,11 @@ export function useTranscriptDock(
     (area.width === 0 || area.width >= minSize(dockTab, false) + keepW);
   const drawnDock: Dock = fitsBeside ? dock : "bottom";
   const vertical = isVertical(drawnDock);
+
+  const startDockDrag = useCallback((e: React.PointerEvent) => {
+    if (!fitsBeside || !capturePress(e)) return;
+    drag.current = { x: e.clientX, y: e.clientY, moved: false };
+  }, [fitsBeside]);
 
   // The stored size clamped between the tab's floor and the container's room,
   // without rewriting the preference.
@@ -144,7 +143,7 @@ export function useTranscriptDock(
         return;
       }
 
-      if (drag.current && rect) {
+      if (drag.current && rect && fitsBeside) {
         if (
           !drag.current.moved &&
           Math.abs(e.clientX - drag.current.x) < DRAG_SLOP &&
@@ -168,7 +167,7 @@ export function useTranscriptDock(
         setResizing(false);
       }
       if (drag.current) {
-        if (drag.current.moved && dropTargetRef.current) {
+        if (fitsBeside && drag.current.moved && dropTargetRef.current) {
           if (side) side.set(dropTargetRef.current);
           else setPrefs({ dock: dropTargetRef.current });
         }
@@ -187,8 +186,8 @@ export function useTranscriptDock(
     width,
     size: drawn,
     resizing,
-    dropTarget,
-    startDockDrag,
+    dropTarget: fitsBeside ? dropTarget : null,
+    startDockDrag: fitsBeside ? startDockDrag : undefined,
     startResize,
   };
 }

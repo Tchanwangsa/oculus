@@ -29,8 +29,8 @@ interface MediaDockProps<T extends string> {
   /** Fold the dock away. The control bar fades with the video, so the header
    *  needs its own close. */
   onClose: () => void;
-  /** Header press — begins the drag-to-dock gesture. */
-  onHeaderPointerDown: (e: React.PointerEvent) => void;
+  /** Absent while layout fixes the dock at the bottom. */
+  onHeaderPointerDown?: (e: React.PointerEvent) => void;
   /** The tab in front. */
   children: ReactNode;
 }
@@ -89,18 +89,23 @@ export function MediaDock<T extends string>({
             captures the pointer, retargeting pointerup so a click never lands. */}
         <div
           onPointerDown={onHeaderPointerDown}
-          className="px-2 h-9 flex items-center gap-1.5 border-b border-border shrink-0 cursor-grab active:cursor-grabbing select-none"
+          className={cn(
+            "px-2 h-9 flex items-center gap-1.5 border-b border-border shrink-0 select-none",
+            onHeaderPointerDown && "cursor-grab active:cursor-grabbing",
+          )}
         >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* Lifted to the tabs' text, which sits above centre by half the
-                  underline's padding. */}
-              <span className="mb-2 flex items-center text-muted-foreground hover:text-foreground transition-colors">
-                <DotsSixVertical size={12} className="opacity-50" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>Drag to dock left, right, top or bottom</TooltipContent>
-          </Tooltip>
+          {onHeaderPointerDown && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* Lifted to the tabs' text, which sits above centre by half the
+                    underline's padding. */}
+                <span className="mb-2 flex items-center text-muted-foreground hover:text-foreground transition-colors">
+                  <DotsSixVertical size={12} className="opacity-50" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Drag to dock left, right, top or bottom</TooltipContent>
+            </Tooltip>
+          )}
           {/* No visible scrollbar (classic scrollbars here); the fades carry it. */}
           <div className="min-w-0">
             <div
