@@ -59,7 +59,7 @@ interface TranscriptPanelProps {
    *  needs its own close. */
   onClose: () => void;
   /** Header press — begins the drag-to-dock gesture. */
-  onHeaderPointerDown: (e: React.PointerEvent) => void;
+  onHeaderPointerDown?: (e: React.PointerEvent) => void;
   /** The list is tracking playback rather than being read by hand. */
   following: boolean;
   /** A hand-scroll pushed the playing cue out of frame — stop following. */

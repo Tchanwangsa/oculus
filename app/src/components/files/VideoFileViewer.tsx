@@ -180,7 +180,7 @@ const TranscriptDock = memo(function TranscriptDock({
   resizing: boolean;
   onSeek: (seconds: number) => void;
   onClose: () => void;
-  onHeaderPointerDown: (e: React.PointerEvent) => void;
+  onHeaderPointerDown?: (e: React.PointerEvent) => void;
   following: boolean;
   onScrollAway: () => void;
   onBackToLive: () => void;

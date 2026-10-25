@@ -706,9 +706,10 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   `KEEP_H`), dropping a side dock to the bottom when it can't fit — without
   rewriting the preference. While the tab's side panel is open, lectures in
   either pane draw the dock at the bottom, including when it is reopened.
-  Closing the side panel, expanding the lecture to a full-width tab, or entering
-  player fullscreen restores the saved side when there is room. Dock-edge
-  dragging is unavailable while the lecture is split.
+  Hiding or closing the side panel, expanding the lecture to a full-width tab,
+  or entering player fullscreen restores the saved side when there is room.
+  The header offers a dock drag grip only when all four edges are available;
+  split and narrow players stay at the bottom with no grip or grab cursor.
 - **The transcript is virtualised** (~2500 cues a lecture) through `FollowList`.
   Following is tracked by pointer *intent*, since the follow-scroll fires
   `scroll` too, and runs off the active-cue index rather than `timeupdate`.

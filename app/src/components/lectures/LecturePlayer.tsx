@@ -50,7 +50,10 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
    *  `tabId` is the pane. */
   const tabId = useTabId();
   const { tabId: stripTab } = usePaneTab();
-  const splitPane = useTabStore((s) => !!s.tabs.find((t) => t.id === stripTab)?.side);
+  const splitPane = useTabStore((s) => {
+    const side = s.tabs.find((t) => t.id === stripTab)?.side;
+    return !!side && !side.hidden;
+  });
   const onScreen = useTabActive();
   const owner = useSyncExternalStore(subscribePlaybackOwner, playbackOwner);
   const transcriptVisible = usePlayerPrefs((s) => s.transcriptVisible);
