@@ -39,7 +39,7 @@ describe("block document", () => {
     expect(doc.text).toBe(normalizeMath(md));
     // Every block chunk starts where its text does after normalising.
     expect(refAt(doc, doc.text.indexOf("Inline"))).toEqual({ page: 1, block: 1 });
-    expect(refAt(doc, doc.text.indexOf("$$y$$"))).toEqual({ page: 1, block: 2 });
+    expect(refAt(doc, doc.text.indexOf("$$\ny\n$$"))).toEqual({ page: 1, block: 2 });
     expect(refAt(doc, doc.text.indexOf("Next page"))).toEqual({ page: 2, block: 0 });
   });
 
