@@ -16,12 +16,15 @@ export function hasMath(text: string): boolean {
 }
 
 const DISPLAY = /\\\[([\s\S]+?)\\\]/g;
+/** A line that is one `$$…$$` formula, which remark-math reads as inline. */
+const DISPLAY_LINE = /^([ \t]*)\$\$((?:(?!\$\$)[^\n])+)\$\$[ \t]*$/gm;
 const INLINE = /\\\(([\s\S]+?)\\\)/g;
 
 /**
  * Rewrite `\(…\)` / `\[…\]` to `$…$` / `$$…$$`. CommonMark treats `\(` as an
  * escaped `(` and eats the backslash before remark-math sees a delimiter.
- * Code spans and fences are left alone.
+ * A line holding only `$$…$$` becomes a display block, as the note editor
+ * draws it. Code spans and fences are left alone.
  */
 export function normalizeMath(text: string): string {
   if (!hasMath(text)) return text;
@@ -30,7 +33,10 @@ export function normalizeMath(text: string): string {
     .map((part, i) =>
       i % 2 === 1
         ? part
-        : part.replace(DISPLAY, (_, m) => `$$${m}$$`).replace(INLINE, (_, m) => `$${m}$`),
+        : part
+            .replace(DISPLAY, (_, m) => `$$${m}$$`)
+            .replace(INLINE, (_, m) => `$${m}$`)
+            .replace(DISPLAY_LINE, (_, indent, m) => `\n${indent}$$\n${indent}${m}\n${indent}$$\n`),
     )
     .join("");
 }
