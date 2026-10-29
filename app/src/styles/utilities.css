@@ -48,3 +48,22 @@
     background-position: 0 0;
   }
 }
+
+/* Bouncing dots for the quiet gap before the chat agent emits its next row. */
+@utility chat-loading-dot {
+  animation: chat-dot-bounce 500ms ease-in-out infinite alternate;
+  will-change: transform;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    will-change: auto;
+  }
+}
+
+@keyframes chat-dot-bounce {
+  from {
+    transform: translateY(28%);
+  }
+  to {
+    transform: translateY(-72%);
+  }
+}

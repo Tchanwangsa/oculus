@@ -338,6 +338,11 @@ thread, so each Chat tab and the lecture dock hold their own. Retry links retain
 their original question row object, and work bundles compare their constituent
 row identities; appending a row leaves earlier rows memoised. `LiveTail` reads
 only running, thinking and assistant text, so tool output updates its tool row.
+When the turn is running with neither text nor reasoning, `LiveTail` in
+`app/src/components/harness/timeline/Pending.tsx` shows three CSS bouncing dots
+beside a steady “Working…” status. The dots inherit the muted text colour and
+stay still under reduced motion; chat, lecture and Studio timelines share this
+indicator.
 
 The model picker keeps a memo boundary around its catalogue: the provider list
 and selection callbacks have stable identities, so composer draft keystrokes

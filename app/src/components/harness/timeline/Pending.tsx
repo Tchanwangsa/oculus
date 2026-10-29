@@ -1,4 +1,3 @@
-import { CircleNotch } from "@phosphor-icons/react";
 import { useShallow } from "zustand/react/shallow";
 import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
@@ -24,9 +23,17 @@ export function LiveTail({ threadId }: { threadId: number }) {
       {thinking && <LiveThinkingRow text={thinking} />}
       {streaming && <Assistant text={streaming} />}
       {quiet && (
-        <div className="mt-1 flex items-center gap-2 px-2 text-xs text-muted-foreground">
-          <CircleNotch size={13} className="animate-spin" />
-          <span className="animate-pulse">Working…</span>
+        <div role="status" className="mt-1 flex items-center gap-2 px-2 text-xs text-muted-foreground">
+          <span aria-hidden="true" className="flex h-4 shrink-0 items-center gap-0.5">
+            {[0, 1, 2].map((dot) => (
+              <span
+                key={dot}
+                className="chat-loading-dot size-[3px] rounded-full bg-current"
+                style={{ animationDelay: `${(dot - 3) / 6}s` }}
+              />
+            ))}
+          </span>
+          <span>Working…</span>
         </div>
       )}
     </div>
