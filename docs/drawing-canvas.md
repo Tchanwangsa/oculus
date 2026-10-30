@@ -422,7 +422,10 @@ A selection box includes an element only when its entire bounds fit inside,
 in either drag direction. Dragging on an unselected image or PDF page starts
 a selection box for its annotations. Clicking the page selects it; dragging
 an already selected page moves it. Shift adds enclosed elements to the current
-selection.
+selection. Dragging anywhere inside the current dashed selection frame moves
+the selected elements together, including the empty gaps between strokes and
+areas over an unselected page. A tap inside keeps the selection; Shift keeps
+its element-toggle and add-to-selection behaviour.
 
 Corner handles scale a selection proportionally, including every image in a
 group. The four edge handles stretch only width or height; Shift on an edge

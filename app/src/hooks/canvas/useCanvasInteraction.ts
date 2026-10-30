@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type MouseEvent, type ClipboardEvent } from 'react';
 import { LABELLED_TYPES, type CanvasDocument, type CanvasElement, type CanvasTool, type CanvasViewport, type Point } from '@/lib/canvas/model';
-import { boundsContain, elementBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/canvas/geometry';
+import { boundsContain, elementBounds, pointInBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/canvas/geometry';
 import { hitTest } from '@/lib/canvas/engine';
 import { paintCanvas, pointEditTarget, elementResizeHandles, selectedBounds } from '@/lib/canvas/render';
 import { pointDrag, pointHandleAt } from '@/lib/canvas/arrow/handles';
@@ -498,6 +498,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
         if (pointHandle.kind === 'segment') Object.assign(initial, { mode: 'segment', base: editing, index: pointHandle.segment });
         else { initial.mode = 'point'; Object.assign(initial, pointDrag(editing, pointHandle)); }
       } else if (handle >= 0 && bounds) { initial.mode = 'resize'; initial.bounds = bounds; initial.handle = handle; }
+      else if (!event.shiftKey && bounds && !editing && pointInBounds(point, bounds, 5 / current.viewport.zoom)) initial.mode = 'move';
       else if (id) {
         const found = current.elements.find(element => element.id === id);
         // A page is a backdrop for annotations: drag on an unselected page to
@@ -552,7 +553,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
         const bounds = selectedBounds(current, selected.current);
         const elements = current.elements.filter(element => selected.current.has(element.id));
         const handle = bounds ? elementResizeHandles(elements, bounds).findIndex(p => Math.hypot(p.x - point.x, p.y - point.y) < 10 / current.viewport.zoom) : -1;
-        setResizeCursor(handle < 0 ? null : ['nwse-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize', 'ns-resize', 'ew-resize', 'ns-resize', 'ew-resize'][handle]);
+        const inside = !event.shiftKey && bounds && !pointEditTarget(elements) && pointInBounds(point, bounds, 5 / current.viewport.zoom);
+        setResizeCursor(handle < 0 ? inside ? 'move' : null : ['nwse-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize', 'ns-resize', 'ew-resize', 'ns-resize', 'ew-resize'][handle]);
       }
       // Hovering with the arrow tool shows where a new arrow's start would bind.
       if (tool !== 'arrow') return;
