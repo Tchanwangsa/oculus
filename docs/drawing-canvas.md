@@ -510,7 +510,9 @@ drag ends when its line is removed.
 The camera belongs to the pane. Without `onViewportChange`, pan and zoom are
 saved in the document (a pan when it ends, wheel and buttons after 180 ms) as
 the file's initial view. With it, they go only to that callback and never
-through `onChange`, for a host that keeps its camera local.
+through `onChange`, for a host that keeps its camera local. The desktop editor
+and the companion both pass one, so scrolling never marks a canvas unsaved; the
+camera reaches the file only inside the next real edit's document.
 
 ## Images and PDF pages are saved inside the canvas
 
