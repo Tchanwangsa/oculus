@@ -603,6 +603,7 @@ The OpenUI skill signatures can be regenerated with `bun run docs:widgets` after
 - `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
 - rust-analyzer sharing `app/src-tauri/target/` takes cargo's build lock and stalls the preflight's builds. The repo's `.zed/settings.json` sets rust-analyzer's `cargo.targetDir` to `true`, which moves it to `target/rust-analyzer`; other editors need the same setting.
 - Anything under `app/src-tauri/` changing, templates included, rebuilds and relaunches the dev app.
+- React's dev build records a `performance.measure` entry per component render and WebKit never drops them, so without clearing the dev webview grows by gigabytes over a session. `app/src/lib/platform/devPerfEntries.ts` clears them in dev; a production build records none.
 - A dev rebuild SIGTERMs the app past Tauri's Exit event, so agent subprocesses can outlive it ([harness.md](./harness.md)).
 - `eprintln!` panics once stderr is a closed pipe, as it is for an app a dead `tauri dev` left running, and a panic inside a WebKit or Objective-C callback aborts the app. The app crate logs with `elog!` (`app/src-tauri/src/elog.rs`), which drops the write error; tests and the CLI binary keep `eprintln!`.
 - Adding `app/keyd` to a workspace, or building it outside `app/keyd`, changes its bytes and brings back the keychain prompt.

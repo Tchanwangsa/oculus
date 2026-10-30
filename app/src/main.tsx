@@ -1,4 +1,5 @@
 import "./lib/platform/noOpenUIDevtools";
+import "./lib/platform/devPerfEntries";
 import React from "react";
 import ReactDOM from "react-dom/client";
 // Before ./App: the shim has to be in place ahead of the first `listen()`.
