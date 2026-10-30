@@ -4,17 +4,32 @@ import type { ElementChanges } from './changes';
 import { growToFitLabel } from './labels';
 import { scaleFixedSegments } from './elbow/lanes';
 
-/** A single image keeps its displayed proportions around the fixed opposite corner; Shift allows stretching. */
-export function preserveImageAspectRatio(elements: readonly CanvasElement[], ids: ReadonlySet<string>, from: Bounds, point: Point, opposite: Point, free = false): Bounds {
-  let dx = point.x - opposite.x, dy = point.y - opposite.y;
-  const image = ids.size === 1 ? elements.find(element => ids.has(element.id)) : undefined;
-  if (!free && image?.type === 'image' && from.width > 0 && from.height > 0) {
-    const ratio = from.width / from.height;
-    const width = Math.max(Math.abs(dx), Math.abs(dy) * ratio);
-    dx = width * (Math.sign(dx) || (opposite.x <= from.x ? 1 : -1));
-    dy = width / ratio * (Math.sign(dy) || (opposite.y <= from.y ? 1 : -1));
+/** Corners scale uniformly; edges stretch one axis, or scale uniformly with Shift.
+ * Handle order is NW, NE, SE, SW, N, E, S, W, matching `resizeHandles`.
+ */
+export function resizeBounds(from: Bounds, handle: number, point: Point, shift = false): Bounds {
+  const right = from.x + from.width, bottom = from.y + from.height;
+  if (handle < 4) {
+    const left = handle === 0 || handle === 3, top = handle < 2;
+    const opposite = { x: left ? right : from.x, y: top ? bottom : from.y };
+    const dx = point.x - opposite.x, dy = point.y - opposite.y;
+    const scale = Math.max(from.width > 0 ? Math.abs(dx) / from.width : 0, from.height > 0 ? Math.abs(dy) / from.height : 0, 0.01);
+    const width = from.width * scale, height = from.height * scale;
+    return { x: opposite.x + ((Math.sign(dx) || (left ? -1 : 1)) < 0 ? -width : 0), y: opposite.y + ((Math.sign(dy) || (top ? -1 : 1)) < 0 ? -height : 0), width, height };
   }
-  return { x: Math.min(opposite.x, opposite.x + dx), y: Math.min(opposite.y, opposite.y + dy), width: Math.abs(dx), height: Math.abs(dy) };
+  const horizontal = handle === 5 || handle === 7, leading = handle === 4 || handle === 7;
+  const anchor = horizontal ? (leading ? right : from.x) : (leading ? bottom : from.y);
+  const delta = (horizontal ? point.x : point.y) - anchor;
+  const extent = Math.max(Math.abs(delta), 1);
+  const scale = extent / Math.max(horizontal ? from.width : from.height, 1);
+  const width = horizontal ? extent : shift ? from.width * scale : from.width;
+  const height = horizontal ? (shift ? from.height * scale : from.height) : extent;
+  const start = anchor + ((Math.sign(delta) || (leading ? -1 : 1)) < 0 ? -extent : 0);
+  return {
+    x: horizontal ? start : from.x + (from.width - width) / 2,
+    y: horizontal ? from.y + (from.height - height) / 2 : start,
+    width, height,
+  };
 }
 
 /**

@@ -3,7 +3,7 @@ import { createCanvasDocument, parseCanvasDocument, serializeCanvasDocument, typ
 import { isCanvasImageDataUrl } from '../../../src/lib/canvas/imageSource';
 import { elementBounds, elementHitTest } from '../../../src/lib/canvas/geometry';
 import { cloneCanvasElements, parseCanvasClipboard, serializeCanvasClipboard } from '../../../src/lib/canvas/renderClipboard';
-import { preserveImageAspectRatio, resizeElements } from '../../../src/lib/canvas/resize';
+import { resizeElements } from '../../../src/lib/canvas/resize';
 import { exportCanvasSvg } from '../../../src/lib/canvas/renderSvg';
 import { inspectorSections, inspectorTarget, patchElementStyle } from '../../../src/lib/canvas/style';
 import { drawElement, exportCanvasPng } from '../../../src/lib/canvas/render';
@@ -56,16 +56,6 @@ describe('portable canvas images', () => {
   test('offers opacity and layer editing without shape or text appearance controls', () => {
     expect(inspectorSections([inspectorTarget(image)])).toEqual(['opacity']);
     expect(patchElementStyle(image, { opacity: 0.3, fill: '#ff0000', strokeWidth: 10 })).toEqual({ ...image, opacity: 0.3 });
-  });
-
-  test('corner resizing preserves a single image aspect ratio in every drag direction, with Shift to stretch', () => {
-    const from = { x: 0, y: 0, width: 200, height: 100 }, ids = new Set([image.id]);
-    expect(preserveImageAspectRatio([image], ids, from, { x: 300, y: 200 }, { x: 0, y: 0 })).toEqual({ x: 0, y: 0, width: 400, height: 200 });
-    expect(preserveImageAspectRatio([image], ids, from, { x: -100, y: -200 }, { x: 200, y: 100 })).toEqual({ x: -400, y: -200, width: 600, height: 300 });
-    expect(preserveImageAspectRatio([image], ids, from, { x: 100, y: -100 }, { x: 0, y: 100 })).toEqual({ x: 0, y: -100, width: 400, height: 200 });
-    const stretched = { x: 0, y: 0, width: 300, height: 200 };
-    expect(preserveImageAspectRatio([image], ids, from, { x: 300, y: 200 }, { x: 0, y: 0 }, true)).toEqual(stretched);
-    expect(preserveImageAspectRatio([{ ...image, type: 'rectangle' }], ids, from, { x: 300, y: 200 }, { x: 0, y: 0 })).toEqual(stretched);
   });
 
   test('SVG embeds raster pixels with opacity and normalized dimensions in layer order', () => {

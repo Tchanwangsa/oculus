@@ -35,3 +35,10 @@ describe('canvas image placement', () => {
     expect(() => placeCanvasImages([source('bad', 0)], { x: 0, y: 0, zoom: 1 }, { width: 800, height: 600 })).toThrow('dimensions');
   });
 });
+
+test('a dropped batch centres its first image at the world drop point regardless of pan and zoom', () => {
+  const images = placeCanvasImages([source('first'), source('second')], { x: -300, y: 80, zoom: 1.3 }, { width: 900, height: 700 }, { x: 1300, y: -250 });
+  expect(images[0].x + images[0].width / 2).toBe(1300);
+  expect(images[0].y + images[0].height / 2).toBe(-250);
+  expect(images[1].y).toBe(images[0].y + images[0].height + 24);
+});

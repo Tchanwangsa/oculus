@@ -34,11 +34,13 @@ export function installBrowserSelectionGuard(root: HTMLElement): () => void {
   root.addEventListener('selectstart', preventCanvasChromeSelection, true);
   root.addEventListener('contextmenu', preventCanvasChromeSelection, true);
   root.addEventListener('touchstart', preventNativeCanvasTouch, { capture: true, passive: false });
+  root.addEventListener('touchmove', preventNativeCanvasTouch, { capture: true, passive: false });
   root.addEventListener('touchend', preventNativeCanvasTouch, { capture: true, passive: false });
   return () => {
     root.removeEventListener('selectstart', preventCanvasChromeSelection, true);
     root.removeEventListener('contextmenu', preventCanvasChromeSelection, true);
     root.removeEventListener('touchstart', preventNativeCanvasTouch, true);
+    root.removeEventListener('touchmove', preventNativeCanvasTouch, true);
     root.removeEventListener('touchend', preventNativeCanvasTouch, true);
   };
 }

@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
-import type { CanvasImportPdf } from "../importMedia";
+import type { CanvasImportedImage, CanvasImportPdf } from "../importMedia";
+import type { Point } from '../model';
 
 /**
  * What the drawing surface needs from the host beyond the page itself. The
@@ -15,6 +16,8 @@ export interface CanvasLibraryPdf {
 }
 
 export interface CanvasPlatform {
+  watchFileDrop?(target: HTMLElement, onHover: (paths: string[], at: Point | null) => void, onDrop: (paths: string[], at: Point) => void): () => void;
+  readDroppedImages?(paths: string[], signal?: AbortSignal): Promise<CanvasImportedImage[]>;
   /** Saves an exported PNG or SVG. */
   saveExport(blob: Blob, format: "png" | "svg"): Promise<void>;
   /** Searches library PDFs by filename and subject; an empty query lists recent files. */

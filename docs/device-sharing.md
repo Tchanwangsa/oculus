@@ -25,11 +25,25 @@ which stays the only writer of the file. Sharing is off at launch.
 | The QR encoder and its checks | `app/src/lib/qr/`, `app/tests/lib/qr/`, `app/tests/qr/` |
 | Settings → Device sharing | `app/src/pages/settings/integrations/DeviceSharingPage.tsx`, `app/src/components/settings/sharing/` |
 | The companion page's build at each dev start | `app/scripts/build-companion.mjs` |
+| Shared canvas shell, fullscreen / focus mode and browser policy | `app/src/companion/App.tsx`, `app/src/companion/useCanvasFocus.ts`, `app/src/companion/fullscreenPolicy.ts` |
 
 The selected address's link is one compact input group with copy and, on
 macOS, a Share icon that opens the system share sheet. The sheet's destination
 picker and dismissal are managed by AppKit; the canvas dialog remains open
 behind it.
+
+The shared page's **Expand canvas** button hides the Oculus header, outer
+padding and rounded frame. On iPad and iPhone it uses a fixed viewport-sized
+focus view: [WebKit's native fullscreen dismissal gesture](https://bugs.webkit.org/show_bug.cgi?id=227387)
+competes with drawing and panning. The policy recognises iPadOS's desktop Mac
+identity using its touch points. Other browsers also request native fullscreen
+when available, keeping focus mode if it is unavailable or refused. The
+top-right **Exit expanded canvas** button or Escape restores the shell.
+The drawing paints to the viewport edges; safe-area insets move the floating
+controls instead of reserving blank bands above and below the drawing.
+Conflict and recovery notices remain visible, and an unsaved or reconnecting
+state stays visible with Retry. Browser-owned tabs and address bars can only
+be hidden when the browser grants fullscreen.
 
 ## The server runs only while something is shared
 

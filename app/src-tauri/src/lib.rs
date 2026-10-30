@@ -198,6 +198,7 @@ pub fn run() {
             library::files::uploads::delete_upload,
             library::files::canvases::export::export_canvas_image,
             library::files::canvases::imports::canvas_open_library_pdf,
+            library::files::canvases::images::canvas_read_dropped_image,
             library::files::canvases::imports::canvas_render_pdf_page,
             library::files::canvases::imports::canvas_close_pdf,
             library::files::canvases::create_canvas,

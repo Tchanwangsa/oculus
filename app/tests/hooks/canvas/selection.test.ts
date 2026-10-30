@@ -65,3 +65,16 @@ describe('box selection encloses whole objects', () => {
     expect(h.editor.selection).toEqual(['dot']);
   });
 });
+
+test('a canvas press clears the chat selection before giving the drawing focus', () => {
+  const previousWindow = globalThis.window;
+  const calls: string[] = [];
+  Object.assign(globalThis, { window: { getSelection: () => ({ removeAllRanges: () => calls.push('clear caret') }) } });
+  try {
+    const h = setup();
+    h.editor.root.current = { focus: () => calls.push('focus canvas') } as unknown as HTMLDivElement;
+    h.editor.pointerDown(pointer(1, 'mouse', 300, 300));
+    expect(calls).toEqual(['clear caret', 'focus canvas']);
+    h.editor.pointerUp(pointer(1, 'mouse', 300, 300));
+  } finally { Object.assign(globalThis, { window: previousWindow }); }
+});

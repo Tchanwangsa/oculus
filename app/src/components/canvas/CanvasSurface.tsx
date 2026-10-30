@@ -10,6 +10,7 @@ import { exportCanvasSvg } from '@/lib/canvas/renderSvg';
 import { subscribeCanvasImages } from '@/lib/canvas/renderImages';
 import { CANVAS_FONT_STACKS, labelBox } from '@/lib/canvas/renderText';
 import { useCanvasInteraction, type TextDraft } from '@/hooks/canvas/useCanvasInteraction';
+import { useCanvasMediaDrop } from '@/hooks/canvas/useCanvasMediaDrop';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
@@ -103,6 +104,7 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
   const platform = useCanvasPlatform();
   const [toolPreferences, setToolPreferences] = useState(loadCanvasToolPreferences);
   const editor = useCanvasInteraction(document, onChange, { onViewportChange, eraserAutoReturn: toolPreferences.eraserAutoReturn });
+  const media = useCanvasMediaDrop(editor.root, editor.documentRef, editor.insertImages);
   const changeToolPreferences = (preferences: CanvasToolPreferences) => { setToolPreferences(preferences); saveCanvasToolPreferences(preferences); };
   useEffect(() => { const element = editor.root.current; return element ? installBrowserSelectionGuard(element) : undefined; }, [editor.root]);
   const [engineError, setEngineError] = useState<string | null>(null);
@@ -144,9 +146,14 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
       editor.blur();
       // Inspector fields and their portaled pickers belong to the open text edit.
       if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.canvas-text-input, [data-canvas-inspector]'))) editor.commitText();
-    }} onCopy={editor.copy} onCut={editor.cut} onPaste={editor.paste}>
+    }} onCopy={editor.copy} onCut={editor.cut} onPaste={event => { media.paste(event); if (!event.defaultPrevented) editor.paste(event); }}>
     <canvas ref={editor.canvas} draggable={false} aria-label="Drawing canvas" className="absolute inset-0 block h-full w-full" style={{ cursor: editor.cursor }}
+      onDragEnter={media.dragOver} onDragOver={media.dragOver} onDragLeave={media.dragLeave} onDrop={media.drop}
       onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp} onPointerCancel={editor.pointerCancel} onPointerLeave={editor.pointerLeave} onDoubleClick={editor.doubleClick} onContextMenu={event => event.preventDefault()} />
+    {media.preview ? <div className="pointer-events-none absolute inset-0 z-20" aria-label="Image drop preview">
+      {media.boxes.length ? media.boxes.map((box, index) => <div key={index} className="absolute border-2 border-dashed border-brand bg-brand/10" style={{ left: box.x * current.viewport.zoom + current.viewport.x, top: box.y * current.viewport.zoom + current.viewport.y, width: box.width * current.viewport.zoom, height: box.height * current.viewport.zoom }}><img src={box.dataUrl} alt="" className="h-full w-full opacity-50" /></div>)
+        : <div className="absolute flex h-28 w-44 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-xl border-2 border-dashed border-brand bg-card/90 text-xs text-brand shadow-sm" style={{ left: media.preview.at.x, top: media.preview.at.y }}>Drop images here</div>}
+    </div> : null}
     {current.elements.length === 0 && !current.paper && editor.tool === 'select' && !editor.textDraft ? <CanvasEmpty onStart={() => { editor.setTool('freedraw'); editor.root.current?.focus(); }} /> : null}
     <CanvasToolbar tool={editor.tool} onTool={tool => { editor.setTool(tool); editor.root.current?.focus({ preventScroll: true }); }} onAddImage={() => setImageDialogOpen(true)} />
     <CanvasImageDialog open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImport={editor.insertImages} />
@@ -162,8 +169,8 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
       <CanvasHistory undo={() => editor.history()} redo={() => editor.history(true)} canUndo={editor.canUndo} canRedo={editor.canRedo} />
     </div>
     {editor.pages ? <div className="canvas-pages absolute bottom-4 left-1/2 z-10 -translate-x-1/2"><CanvasPageBar pages={editor.pages} /></div> : null}
-    <div className="canvas-short-hint pointer-events-none absolute right-0 bottom-[4.7rem] left-0 text-center text-[11px] text-muted-foreground/65">{hints[editor.tool]}</div>
-    <div className="absolute right-4 bottom-4 z-10 flex items-center gap-1.5 rounded-xl border border-border-subtle bg-card p-1 shadow-xs">
+    <div className="canvas-short-hint pointer-events-none absolute right-0 bottom-[4.7rem] left-0 text-center text-[11px] text-muted-foreground/65">{editor.tool === 'select' && editor.selection.length ? 'Corners scale proportionally · Edges stretch · Shift + edge scales proportionally' : hints[editor.tool]}</div>
+    <div className="canvas-utilities absolute right-4 bottom-4 z-10 flex items-center gap-1.5 rounded-xl border border-border-subtle bg-card p-1 shadow-xs">
       <CanvasDrawingPreferences preferences={toolPreferences} onChange={changeToolPreferences} />
       {current.paper ? null : <CanvasIconButton label="Toggle grid (G)" active={editor.grid} aria-pressed={editor.grid} onClick={() => editor.setGrid(value => !value)}><GridFourIcon size={17} /></CanvasIconButton>}
       <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Export drawing" disabled={(!current.elements.length && !current.paper) || exporting} className="rounded-lg text-muted-foreground">{exporting ? <SpinnerGapIcon className="animate-spin" /> : <DownloadSimpleIcon size={17} />}</Button></PopoverTrigger>
@@ -176,11 +183,11 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
       </Popover>
       <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Canvas shortcuts" className="rounded-lg text-muted-foreground"><QuestionIcon size={17} /></Button></PopoverTrigger>
         <PopoverContent side="top" align="end" className="w-64"><div className="mb-3 text-[13px] font-medium">A little room to move</div><dl className="space-y-2 text-xs text-muted-foreground">
-          {[["Pan", 'Space + drag'], ['Zoom', `${shortcut('mod')} + scroll`], ['Multiple selection', 'Shift + click'], ['Write in a shape', 'Enter'], ['Constrain shape', 'Shift + drag'], ['Place arrow freely', `${shortcut('mod')} + drag`], ['Duplicate', shortcut('mod+D')], ['Layer up / down', `${shortcut('mod+]')} / ${shortcut('mod+[')}`], ['Layer to front / back', `${shortcut('mod+shift+]')} / ${shortcut('mod+shift+[')}`], ['Undo', shortcut('mod+Z')], ['Fit drawing', '1']].map(([label, key]) => <div key={label} className="flex justify-between gap-4"><dt>{label}</dt><dd className="text-foreground">{key}</dd></div>)}
+          {[["Pan", 'Space + drag'], ['Zoom', `${shortcut('mod')} + scroll`], ['Multiple selection', 'Shift + click'], ['Write in a shape', 'Enter'], ['Constrain shape', 'Shift + drag'], ['Scale selection', 'Drag a corner'], ['Stretch selection', 'Drag an edge'], ['Scale from an edge', 'Shift + drag edge'], ['Place arrow freely', `${shortcut('mod')} + drag`], ['Duplicate', shortcut('mod+D')], ['Layer up / down', `${shortcut('mod+]')} / ${shortcut('mod+[')}`], ['Layer to front / back', `${shortcut('mod+shift+]')} / ${shortcut('mod+shift+[')}`], ['Undo', shortcut('mod+Z')], ['Fit drawing', '1']].map(([label, key]) => <div key={label} className="flex justify-between gap-4"><dt>{label}</dt><dd className="text-foreground">{key}</dd></div>)}
         </dl></PopoverContent>
       </Popover>
     </div>
-    {engineError || exportError || editor.historyError ? <div role="alert" className="absolute top-[5.5rem] right-4 z-30 max-w-80 rounded-xl border border-destructive/20 bg-card p-3 text-xs text-destructive shadow-sm">{engineError ?? exportError ?? editor.historyError}<button type="button" className="mt-2 block cursor-pointer text-foreground underline" onClick={() => { setEngineError(null); setExportError(null); editor.clearHistoryError(); }}>Dismiss</button></div> : null}
+    {engineError || exportError || editor.historyError || media.error ? <div role="alert" className="absolute top-[5.5rem] right-4 z-30 max-w-80 rounded-xl border border-destructive/20 bg-card p-3 text-xs text-destructive shadow-sm">{engineError ?? exportError ?? editor.historyError ?? media.error}<button type="button" className="mt-2 block cursor-pointer text-foreground underline" onClick={() => { setEngineError(null); setExportError(null); editor.clearHistoryError(); media.clearError(); }}>Dismiss</button></div> : null}
   </div>;
 }
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { LABELLED_TYPES, type CanvasDocument, type CanvasElement, type CanvasTool, type CanvasViewport, type Point } from '@/lib/canvas/model';
 import { boundsContain, elementBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/canvas/geometry';
 import { hitTest, simplifyPoints } from '@/lib/canvas/engine';
-import { paintCanvas, pointEditTarget, resizeHandles, elementResizeHandles, selectedBounds } from '@/lib/canvas/render';
+import { paintCanvas, pointEditTarget, elementResizeHandles, selectedBounds } from '@/lib/canvas/render';
 import { pointDrag, pointHandleAt } from '@/lib/canvas/arrow/handles';
 import { endAt, movePoint, removePoint } from '@/lib/canvas/arrow/points';
 import { EDITABLE, onEdit } from '@/lib/menu/editRouting';
@@ -13,7 +13,7 @@ import { canReorder, reorderElements, type LayerMove } from '@/lib/canvas/layers
 import { bindArrowEnd, findBindingSnap, followBindings, moveElements, sameSnap, sceneLookup, type BindingSnap } from '@/lib/canvas/bindings';
 import { moveSegment, releaseSegment } from '@/lib/canvas/elbow/segments';
 import { commitTextEdit, labelTargetAt, stylePatchChanges } from '@/lib/canvas/labels';
-import { preserveImageAspectRatio, resizeElements } from '@/lib/canvas/resize';
+import { resizeBounds, resizeElements } from '@/lib/canvas/resize';
 import { placeCanvasImages, type CanvasImageSource } from '@/lib/canvas/mediaPlacement';
 import { TouchViewportGesture } from '@/lib/canvas/touchViewport';
 import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, sameValue, type CanvasTransaction } from '@/lib/canvas/collaboration';
@@ -96,6 +96,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const [selection, setSelection] = useState<string[]>([]);
   const [revision, setRevision] = useState(0);
   const [space, setSpace] = useState(false);
+  const [resizeCursor, setResizeCursor] = useState<string | null>(null);
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   /** The open draft and its latest text, read synchronously so a style change can commit it first and a later blur is a no-op. */
   const draftRef = useRef<TextDraft | null>(null);
@@ -395,6 +396,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     } else if (touchViewport.current.active) { event.preventDefault(); return; }
     if (gesture.current || textDraft) return;
     event.preventDefault();
+    // WebKit can paste at a contenteditable's retained caret despite the canvas having DOM focus.
+    globalThis.window?.getSelection()?.removeAllRanges();
     root.current?.focus({ preventScroll: true });
     capturePointer(event);
     const { point, screen } = coordinates(event);
@@ -466,6 +469,13 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     }
     const active = gesture.current;
     if (!active) {
+      if (tool === 'select') {
+        const { point } = coordinates(event), current = documentRef.current;
+        const bounds = selectedBounds(current, selected.current);
+        const elements = current.elements.filter(element => selected.current.has(element.id));
+        const handle = bounds ? elementResizeHandles(elements, bounds).findIndex(p => Math.hypot(p.x - point.x, p.y - point.y) < 10 / current.viewport.zoom) : -1;
+        setResizeCursor(handle < 0 ? null : ['nwse-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize', 'ns-resize', 'ew-resize', 'ns-resize', 'ew-resize'][handle]);
+      }
       // Hovering with the arrow tool shows where a new arrow's start would bind.
       if (tool !== 'arrow') return;
       const { point } = coordinates(event), current = documentRef.current;
@@ -519,8 +529,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       previewChanges(new Map([[active.base.id, moveSegment(active.base, active.index, delta, sceneLookup(documentRef.current.elements, overrides.current))]]));
     } else if (active.mode === 'resize' && active.bounds && active.handle !== undefined) {
       const original = active.bounds;
-      const opposite = resizeHandles(original)[(active.handle + 2) % 4];
-      previewChanges(resizeElements(active.original.elements, selected.current, original, preserveImageAspectRatio(active.original.elements, selected.current, original, point, opposite, event.shiftKey)));
+      previewChanges(resizeElements(active.original.elements, selected.current, original, resizeBounds(original, active.handle, point, event.shiftKey)));
     } else if (active.mode === 'marquee') marquee.current = normalize(active.start, point);
     else if (active.mode === 'erase') {
       eraseAt(active.original.elements, point);
@@ -600,10 +609,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     requestAnimationFrame(() => root.current?.focus({ preventScroll: true }));
   };
   const flushDraft = () => { if (draftRef.current) commitText(draftValue.current); };
-  const insertImages = (images: readonly CanvasImageSource[]) => {
+  const insertImages = (images: readonly CanvasImageSource[], at?: Point) => {
     if (gesture.current || !images.length) return;
     flushDraft();
-    const elements = placeCanvasImages(images, documentRef.current.viewport, size.current);
+    const elements = placeCanvasImages(images, documentRef.current.viewport, size.current, at);
     commitChanges(new Map(elements.map(element => [element.id, element])));
     choose(elements.map(element => element.id));
     setTool('select');
@@ -753,9 +762,9 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     root, canvas, documentRef, tool, setTool: chooseTool, inspector, changeStyle, previewStyle, grid, setGrid, selection,
     textDraft, commitText, editText: (text: string) => { draftValue.current = text; },
     pointerDown: (event: PointerEvent<HTMLCanvasElement>) => pointerDown(event), pointerMove, pointerUp, pointerCancel, cancelGesture,
-    pointerLeave: () => { if (!gesture.current && bindHint.current) { bindHint.current = null; redraw(); } }, doubleClick, keyDown, copy, cut: (event: ClipboardEvent<HTMLDivElement>) => copy(event, true), paste,
+    pointerLeave: () => { setResizeCursor(null); if (!gesture.current && bindHint.current) { bindHint.current = null; redraw(); } }, doubleClick, keyDown, copy, cut: (event: ClipboardEvent<HTMLDivElement>) => copy(event, true), paste,
     keyUp: (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === ' ') setSpace(false); },
-    blur: () => setSpace(false), cursor: space || tool === 'hand' ? 'grab' : tool === 'select' ? 'default' : tool === 'text' ? 'text' : 'crosshair',
+    blur: () => setSpace(false), cursor: space || tool === 'hand' ? 'grab' : tool === 'select' ? resizeCursor ?? 'default' : tool === 'text' ? 'text' : 'crosshair',
     history, canUndo: past.current.length > 0, canRedo: future.current.length > 0, historyError, clearHistoryError: () => setHistoryError(null),
     deleteSelected, insertImages, reorder, layerMoves, fit, zoom, resetZoom: () => updateViewport(zoomAt(documentRef.current.viewport, { x: size.current.width / 2, y: size.current.height / 2 }, 1)), redraw,
     zoomPercent: Math.round(documentRef.current.viewport.zoom * 100),

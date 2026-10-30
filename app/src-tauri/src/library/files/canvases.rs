@@ -3,6 +3,7 @@ pub(crate) mod authority;
 pub(crate) mod drafts;
 pub(crate) mod export;
 pub(crate) mod export_pdf;
+pub(crate) mod images;
 pub(crate) mod imports;
 pub(crate) mod snapshots;
 

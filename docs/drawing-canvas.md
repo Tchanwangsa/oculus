@@ -43,6 +43,7 @@ beside another page.
 | Scaling a selection | `app/src/lib/canvas/resize.ts` |
 | Image import modal, library PDF search and selectable pages | `app/src/components/canvas/CanvasImageDialog.tsx`, `app/src/components/canvas/CanvasLibraryPdfs.tsx`, `app/src/components/canvas/CanvasPdfPages.tsx` |
 | Image decoding and batch placement; native PDF import sessions | `app/src/lib/canvas/importMedia.ts`, `app/src/lib/canvas/mediaPlacement.ts`; `app/src/lib/canvas/importPdf.ts` |
+| Image drops, placement previews and raster paste | `app/src/hooks/canvas/useCanvasMediaDrop.ts`, `app/src/lib/ui/nativeFileDrop.ts`, `app/src-tauri/src/library/files/canvases/images.rs` |
 | What the surface takes from its host (export saving, library PDF search and opening): the browser default and the desktop's | `app/src/lib/canvas/platform/` |
 | Embedded raster validation and Canvas2D image cache | `app/src/lib/canvas/imageSource.ts`, `app/src/lib/canvas/renderImages.ts` |
 | Scoped library PDF sessions and page rasterisation | `app/src-tauri/src/library/files/canvases/imports.rs` |
@@ -423,9 +424,16 @@ a selection box for its annotations. Clicking the page selects it; dragging
 an already selected page moves it. Shift adds enclosed elements to the current
 selection.
 
+Corner handles scale a selection proportionally, including every image in a
+group. The four edge handles stretch only width or height; Shift on an edge
+scales proportionally around the opposite edge's midpoint. Single lines and
+arrows keep their point-editing handles.
+
 The canvas root scopes shortcuts and participates in native Edit menu
 routing. A visible note editor must not claim undo while a canvas owns focus.
-Text inputs keep their own native editing behavior. Drawing gestures capture
+Text inputs keep their own native editing behavior. Pressing the drawing takes
+focus and clears retained DOM selections, so WebKit cannot send clipboard
+commands to a chat's old contenteditable caret. Drawing gestures capture
 the active pointer and suppress WebKit text selection: `installBrowserSelectionGuard`
 on the canvas root cancels `selectstart` and `contextmenu` outside text fields and
 the native touch defaults on the canvas element itself, which is not draggable.
@@ -508,8 +516,17 @@ and recently opened files first. The database filters to PDFs before limiting
 results; parsing is not required. Selecting a result opens its page thumbnails
 with a selection that survives moving between page groups. Import adds the selected pages in document order as
 independent image elements. A batch is one undo step, stacked vertically with the first page centred in
-the current view, and selected for moving or resizing. A single image keeps its
-proportions while resizing; Shift allows stretching it.
+the current view, and selected for moving or resizing.
+
+Dropping images onto the drawing centres the first image at the pointer's
+world position and stacks a batch below it as one undo step. Finder drags use
+the desktop platform's webview listener and bounded raster reader; decoded
+images preview their exact placement before release. Browser file drags show
+a placement marker until file bytes become available on drop. Embedded or
+local-asset images dragged from chat use the same decoder. Pasted raster images
+are inserted at the view centre; canvas clipboard envelopes keep their cloning
+and binding rules. Text fields keep their own paste behavior. Async reads are
+cancelled on replacement or unmount, and errors leave the drawing intact.
 
 An image element stores a base64 raster `dataUrl`, its source name and natural
 dimensions alongside its world bounds. The `.canvas` stays self-contained:

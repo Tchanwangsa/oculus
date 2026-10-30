@@ -1,10 +1,10 @@
-import type { CanvasElement, CanvasViewport } from './model';
+import type { CanvasElement, CanvasViewport, Point } from './model';
 import { secureId } from './ids';
 
 export interface CanvasImageSource { dataUrl: string; width: number; height: number; name: string }
 
-/** Stack a batch in reading order, with its first page centred in the visible view. */
-export function placeCanvasImages(images: readonly CanvasImageSource[], viewport: CanvasViewport, size: { width: number; height: number }): CanvasElement[] {
+/** Stack a batch in reading order, centring its first image at `at` or the view centre. */
+export function placeCanvasImages(images: readonly CanvasImageSource[], viewport: CanvasViewport, size: { width: number; height: number }, at?: Point): CanvasElement[] {
   if (!images.length) return [];
   const gap = 24;
   const maxWidth = Math.min(480, Math.max(160, (size.width - 96) / viewport.zoom));
@@ -14,8 +14,8 @@ export function placeCanvasImages(images: readonly CanvasImageSource[], viewport
     const scale = Math.min(1, maxWidth / image.width, maxHeight / image.height);
     return { width: image.width * scale, height: image.height * scale };
   });
-  const centre = (size.width / 2 - viewport.x) / viewport.zoom;
-  let top = (size.height / 2 - viewport.y) / viewport.zoom - boxes[0].height / 2;
+  const centre = at?.x ?? (size.width / 2 - viewport.x) / viewport.zoom;
+  let top = (at?.y ?? (size.height / 2 - viewport.y) / viewport.zoom) - boxes[0].height / 2;
   return images.map((image, index) => {
     const box = boxes[index];
     const y = top;

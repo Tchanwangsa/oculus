@@ -49,7 +49,7 @@ test('text node targets, plaintext hosts and explicitly noneditable islands are 
 });
 
 test('native touch defaults are blocked only on the canvas while events keep propagating', () => {
-  for (const type of ['touchstart', 'touchend']) {
+  for (const type of ['touchstart', 'touchmove', 'touchend']) {
     for (const [target, blocked] of [[element('canvas'), true], [element('button'), false], [element('textarea'), false], [element('input'), false], [element('a'), false], [element('canvas', undefined, element('div', 'true')), false]] as const) {
       const event = selectionEvent(target, type);
       preventNativeCanvasTouch(event);
@@ -67,8 +67,9 @@ test('installation uses nonpassive canvas touch listeners and cleans up without 
     removeEventListener: (type: string) => removed.push(type),
   } as unknown as HTMLElement;
   const cleanup = installBrowserSelectionGuard(root);
-  expect(added).toEqual(['selectstart', 'contextmenu', 'touchstart', 'touchend']);
+  expect(added).toEqual(['selectstart', 'contextmenu', 'touchstart', 'touchmove', 'touchend']);
   expect(options.get('touchstart')).toEqual({ capture: true, passive: false });
+  expect(options.get('touchmove')).toEqual({ capture: true, passive: false });
   expect(options.get('touchend')).toEqual({ capture: true, passive: false });
   cleanup();
   expect(removed).toEqual(added);

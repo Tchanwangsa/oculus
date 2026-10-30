@@ -126,6 +126,8 @@ export function resizeHandles(bounds: Bounds): Point[] {
   return [
     { x: bounds.x, y: bounds.y }, { x: bounds.x + bounds.width, y: bounds.y },
     { x: bounds.x + bounds.width, y: bounds.y + bounds.height }, { x: bounds.x, y: bounds.y + bounds.height },
+    { x: bounds.x + bounds.width / 2, y: bounds.y }, { x: bounds.x + bounds.width, y: bounds.y + bounds.height / 2 },
+    { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height }, { x: bounds.x, y: bounds.y + bounds.height / 2 },
   ];
 }
 
