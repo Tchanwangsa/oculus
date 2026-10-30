@@ -52,7 +52,7 @@ pub fn native_set_page_theme(
 #[cfg(target_os = "macos")]
 pub(crate) fn apply(page: &Webview<tauri::Wry>) {
     let app = page.app_handle().clone();
-    let result = page.with_webview(move |platform| {
+    let result = crate::shell::wk::with_view(page, move |view| {
         let Some(dark) = *app
             .state::<PageTheme>()
             .0
@@ -66,10 +66,7 @@ pub(crate) fn apply(page: &Webview<tauri::Wry>) {
             use objc2::{class, msg_send};
             use objc2_foundation::ns_string;
 
-            let view: *mut AnyObject = platform.inner().cast();
-            if view.is_null() {
-                return;
-            }
+            let view = view as *const _ as *mut AnyObject;
             let name = if dark {
                 ns_string!("NSAppearanceNameDarkAqua")
             } else {

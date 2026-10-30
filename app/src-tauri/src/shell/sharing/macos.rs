@@ -177,18 +177,16 @@ pub(super) async fn show(
     anchor: ShareAnchor,
 ) -> Result<(), String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    webview
-        .with_webview(move |platform| {
-            let mut completion = Some(tx);
-            if let Err(error) =
-                unsafe { present(platform.inner().cast(), &link, anchor, &mut completion) }
-            {
-                if let Some(tx) = completion.take() {
-                    let _ = tx.send(Err(error));
-                }
+    crate::shell::wk::with_view(&webview, move |view| {
+        let mut completion = Some(tx);
+        let view = view as *const _ as *mut AnyObject;
+        if let Err(error) = unsafe { present(view, &link, anchor, &mut completion) } {
+            if let Some(tx) = completion.take() {
+                let _ = tx.send(Err(error));
             }
-        })
-        .map_err(|_| "Could not open the macOS share sheet. Try again.".to_owned())?;
+        }
+    })
+    .map_err(|_| "Could not open the macOS share sheet. Try again.".to_owned())?;
     rx.await
         .map_err(|_| "The Oculus window closed before sharing finished.".to_owned())?
 }

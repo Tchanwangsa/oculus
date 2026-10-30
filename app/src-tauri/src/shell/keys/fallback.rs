@@ -15,7 +15,7 @@ use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{NSApplication, NSEvent, NSResponder};
 use objc2_foundation::NSString;
-use objc2_web_kit::{WKScriptMessage, WKScriptMessageHandler, WKUserContentController, WKWebView};
+use objc2_web_kit::{WKScriptMessage, WKScriptMessageHandler, WKUserContentController};
 use tauri::webview::Webview;
 
 /// Injected into every frame of every browser page.
@@ -102,16 +102,12 @@ fn replay(mtm: MainThreadMarker, event: &NSEvent) {
 /// Adds the handler to `page`'s user content controller, and turns off
 /// Backspace-goes-back (`backspace.rs`).
 pub(crate) fn install(page: &Webview<tauri::Wry>) {
-    page.with_webview(|platform| unsafe {
-        let ptr = platform.inner() as *mut WKWebView;
+    crate::shell::wk::with_view(page, |view| unsafe {
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
-        if ptr.is_null() {
-            return;
-        }
-        super::backspace::disable(&*ptr);
-        let controller = (*ptr).configuration().userContentController();
+        super::backspace::disable(view);
+        let controller = view.configuration().userContentController();
         let handler = KeyFallback::new(mtm);
         controller.addScriptMessageHandler_name(
             ProtocolObject::from_ref(&*handler),

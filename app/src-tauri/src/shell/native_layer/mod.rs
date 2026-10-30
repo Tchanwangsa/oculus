@@ -82,13 +82,11 @@ pub fn init(app: &AppHandle) {
         elog!("[oculus] native layer: no main webview at setup; pages will cover the app");
         return;
     };
-    if let Err(e) = webview.with_webview(|platform| unsafe {
-        let view: *mut objc2::runtime::AnyObject = platform.inner().cast();
+    if let Err(e) = crate::shell::wk::with_view(&webview, |view| unsafe {
+        let view = view as *const _ as *mut objc2::runtime::AnyObject;
         hit_test::install(view);
         glass::install(view);
-        if !view.is_null() {
-            focus_guard::install(objc2::msg_send![view, window]);
-        }
+        focus_guard::install(objc2::msg_send![view, window]);
     }) {
         elog!("[oculus] native layer: {e}");
     }
@@ -111,39 +109,35 @@ pub fn adopt_page(webview: &Webview<tauri::Wry>) {
     /// `NSWindowAbove`; with a sibling, directly above it.
     const NS_WINDOW_ABOVE: isize = 1;
 
-    webview
-        .with_webview(|platform| unsafe {
-            let view: *mut AnyObject = platform.inner().cast();
-            if view.is_null() {
-                return;
-            }
-            let parent: *mut AnyObject = msg_send![view, superview];
-            if parent.is_null() {
-                return;
-            }
-            // Re-adding detaches the view for a moment; hold it across that.
-            let Some(_held) = Retained::retain(view) else {
-                return;
-            };
-            let glass = glass::view();
-            let glass_parent: *mut AnyObject = if glass.is_null() {
-                std::ptr::null_mut()
-            } else {
-                msg_send![glass, superview]
-            };
-            let (order, sibling) = if !glass.is_null() && glass_parent == parent {
-                (NS_WINDOW_ABOVE, glass)
-            } else {
-                (NS_WINDOW_BELOW, std::ptr::null_mut())
-            };
-            let _: () = msg_send![
-                parent,
-                addSubview: view,
-                positioned: order,
-                relativeTo: sibling,
-            ];
-        })
-        .ok();
+    crate::shell::wk::with_view(webview, |view| unsafe {
+        let view = view as *const _ as *mut AnyObject;
+        let parent: *mut AnyObject = msg_send![view, superview];
+        if parent.is_null() {
+            return;
+        }
+        // Re-adding detaches the view for a moment; hold it across that.
+        let Some(_held) = Retained::retain(view) else {
+            return;
+        };
+        let glass = glass::view();
+        let glass_parent: *mut AnyObject = if glass.is_null() {
+            std::ptr::null_mut()
+        } else {
+            msg_send![glass, superview]
+        };
+        let (order, sibling) = if !glass.is_null() && glass_parent == parent {
+            (NS_WINDOW_ABOVE, glass)
+        } else {
+            (NS_WINDOW_BELOW, std::ptr::null_mut())
+        };
+        let _: () = msg_send![
+            parent,
+            addSubview: view,
+            positioned: order,
+            relativeTo: sibling,
+        ];
+    })
+    .ok();
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]

@@ -38,15 +38,11 @@ const RESERVED: [u16; 19] = [
 /// Records the app's webview and installs the monitor for the app's life.
 pub fn install<R: Runtime>(app: &AppHandle<R>) {
     if let Some(webview) = app.get_webview("main") {
-        webview
-            .with_webview(|pv| {
-                let ptr = pv.inner() as *mut WKWebView;
-                APP_WEBVIEW.store(ptr as usize, Ordering::Relaxed);
-                if let Some(view) = unsafe { ptr.as_ref() } {
-                    backspace::disable(view);
-                }
-            })
-            .ok();
+        crate::shell::wk::with_view(&webview, |view| {
+            APP_WEBVIEW.store(view as *const WKWebView as usize, Ordering::Relaxed);
+            backspace::disable(view);
+        })
+        .ok();
     }
 
     let handler = RcBlock::new(|event: std::ptr::NonNull<NSEvent>| -> *mut NSEvent {

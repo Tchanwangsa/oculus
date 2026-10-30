@@ -84,8 +84,7 @@ pub async fn native_share_close(webview: tauri::Webview) -> Result<(), String> {
     }
     #[cfg(target_os = "macos")]
     {
-        webview
-            .with_webview(|_| macos::close())
+        crate::shell::wk::with_view(&webview, |_| macos::close())
             .map_err(|_| "Could not close the share picker.".to_owned())?;
     }
     Ok(())

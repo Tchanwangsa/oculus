@@ -11,6 +11,8 @@
 //!   popovers draw over a live page (`shell/native_layer`).
 //! - Back/forward and find go through the WKWebView directly;
 //!   `with_webview` returns nothing, so answers are pushed as events.
+//! - **A tab backgrounded for a while loses its page, not its place**
+//!   (`discard.rs`); showing it again loads its URL in a new one.
 //!
 //! `canvas_session` is HttpOnly and session-scoped, so the browser loses it
 //! on quit; `seed_sessions` restores it and the SSO session from oculus-keyd
@@ -20,11 +22,15 @@
 #[cfg(test)]
 mod capabilities_test;
 pub(crate) mod commands;
+mod discard;
+#[cfg(test)]
+mod discard_test;
 mod favicon;
 mod layout;
 mod page;
 pub(crate) mod scope;
 mod seed;
+mod teardown;
 #[cfg(test)]
 mod tests;
 #[cfg(any(target_os = "windows", test))]
@@ -35,6 +41,7 @@ pub use seed::{clear_sessions, seed_sessions};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, EventTarget, Manager};
@@ -107,9 +114,36 @@ struct Inner {
     /// Placed and not hidden since. A UniMelb page is created only once its
     /// cookies are seeded, which can be after its slot mounted.
     shown: HashSet<u32>,
+    /// When each tab not in `shown` was last hidden, or opened.
+    backgrounded: HashMap<u32, Instant>,
+    /// Tabs whose page was destroyed while backgrounded; the tab stays.
+    discarded: HashSet<u32>,
     /// One favicon attempt per host per run, found or not; the frontend
     /// persists what was found.
     favicons_tried: HashSet<String>,
+}
+
+impl Inner {
+    fn show(&mut self, id: u32) {
+        self.shown.insert(id);
+        self.backgrounded.remove(&id);
+    }
+
+    /// A no-op for a closed tab, whose slot unmounts after it is gone.
+    fn hide(&mut self, id: u32, now: Instant) {
+        self.shown.remove(&id);
+        if self.tabs.iter().any(|t| t.id == id) {
+            self.backgrounded.insert(id, now);
+        }
+    }
+
+    fn forget(&mut self, id: u32) {
+        self.tabs.retain(|t| t.id != id);
+        self.viewports.remove(&id);
+        self.shown.remove(&id);
+        self.backgrounded.remove(&id);
+        self.discarded.remove(&id);
+    }
 }
 
 #[derive(Default)]

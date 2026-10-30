@@ -9,3 +9,5 @@ pub(crate) mod usage;
 pub mod webcrypto;
 #[cfg(any(windows, test))]
 pub(crate) mod window;
+#[cfg(target_os = "macos")]
+pub(crate) mod wk;

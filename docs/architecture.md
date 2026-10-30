@@ -472,6 +472,11 @@ JavaScript.
 - Back-list state, find matches and zoom live only in the page, and
   `with_webview` dispatches to the main thread and returns nothing. So
   `shell::browser` *pushes* each answer as an event rather than returning it.
+- On macOS `with_webview` hands its closure the WKWebView, its user content
+  controller and its window as raw pointers that each carry a retain, which
+  nothing releases. `shell::wk::with_view` takes them back after the
+  closure, so every macOS `with_webview` goes through it; one bare call
+  keeps a closed page's WKWebView and its WebContent process alive.
 - WebKit has no public favicon API, so Rust fetches the icon beside each page
   load and emits `browser-favicon`; the frontend owns the `browser_favicons`
   rows. Rust sees events, the frontend owns rows — the same split as history.

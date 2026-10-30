@@ -1,8 +1,12 @@
+use std::time::Instant;
+
 use tauri::AppHandle;
 
+use super::discard::restore;
 use super::layout::{hide_all, layout_tab, page, parse};
 use super::page::{find_string, go_history, reload_page, ZOOM_MAX, ZOOM_MIN};
 use super::seed::wants_sessions;
+use super::teardown::destroy;
 use super::{broadcast, open_tab, seed_sessions, snapshot, with_state, Snapshot, Viewport};
 
 #[tauri::command]
@@ -16,13 +20,15 @@ pub fn browser_state(app: AppHandle) -> Snapshot {
     snapshot(&app)
 }
 
-/// A slot for tab `id` has mounted: place and show that page only.
+/// A slot for tab `id` has mounted: place and show that page only. A
+/// discarded tab's page is made again, and shows once it exists.
 #[tauri::command]
 pub fn browser_place(app: AppHandle, id: u32, viewport: Viewport) {
     with_state(&app, |s| {
         s.viewports.insert(id, viewport);
-        s.shown.insert(id);
+        s.show(id);
     });
+    restore(&app, id);
     layout_tab(&app, id);
     if let Some(page) = page(&app, id) {
         page.show().ok();
@@ -39,10 +45,10 @@ pub fn browser_set_viewport(app: AppHandle, id: u32, viewport: Viewport) {
     layout_tab(&app, id);
 }
 
-/// Hidden, not destroyed.
+/// Hidden, not destroyed until it has stayed hidden a while (`discard`).
 #[tauri::command]
 pub fn browser_hide_tab(app: AppHandle, id: u32) {
-    with_state(&app, |s| s.shown.remove(&id));
+    with_state(&app, |s| s.hide(id, Instant::now()));
     if let Some(page) = page(&app, id) {
         page.hide().ok();
     }
@@ -57,7 +63,24 @@ pub fn browser_hide(app: AppHandle) {
 #[tauri::command]
 pub fn browser_navigate(app: AppHandle, id: u32, url: String) -> Result<(), String> {
     let target = parse(&url)?;
-    let webview = page(&app, id).ok_or("no such tab")?;
+    let Some(webview) = page(&app, id) else {
+        // A discarded tab loads it when it is shown again.
+        let kept = with_state(&app, |s| {
+            let discarded = s.discarded.contains(&id);
+            match s.tabs.iter_mut().find(|t| t.id == id) {
+                Some(tab) if discarded => {
+                    tab.url = target.to_string();
+                    true
+                }
+                _ => false,
+            }
+        });
+        if !kept {
+            return Err("no such tab".into());
+        }
+        broadcast(&app);
+        return Ok(());
+    };
     if wants_sessions(&target) {
         seed_sessions(&app, move || {
             webview.navigate(target).ok();
@@ -130,29 +153,13 @@ pub fn browser_find_clear(app: AppHandle, id: u32) {
     }
 }
 
-/// **`close()` alone does not stop the page.** wry's macOS `Drop` leaks the
-/// WKWebView (`removeFromSuperview` + `retain`), which keeps playing media
-/// unreachably. So tear the document down while this handle still exists.
+/// The page is stopped and closed for good (`teardown`), so it plays,
+/// runs and holds memory no longer.
 #[tauri::command]
 pub fn browser_close_tab(app: AppHandle, id: u32) {
     if let Some(webview) = page(&app, id) {
-        // Pause lands immediately; `about:blank` commits later, on the
-        // leaked view, and destroys the media elements.
-        webview
-            .eval(
-                "for (const m of document.querySelectorAll('video,audio')) \
-                 { try { m.pause(); m.removeAttribute('src'); m.load(); } catch {} }",
-            )
-            .ok();
-        if let Ok(blank) = "about:blank".parse() {
-            webview.navigate(blank).ok();
-        }
-        webview.close().ok();
+        destroy(&webview);
     }
-    with_state(&app, |s| {
-        s.tabs.retain(|t| t.id != id);
-        s.viewports.remove(&id);
-        s.shown.remove(&id);
-    });
+    with_state(&app, |s| s.forget(id));
     broadcast(&app);
 }

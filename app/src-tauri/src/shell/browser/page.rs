@@ -7,6 +7,8 @@ use tauri::{AppHandle, Emitter, EventTarget};
 
 use super::layout::page;
 use super::{broadcast, with_state, MAIN};
+#[cfg(target_os = "macos")]
+use crate::shell::wk::with_view;
 
 #[derive(Clone, Serialize)]
 struct FindResult {
@@ -17,21 +19,12 @@ struct FindResult {
 
 #[cfg(target_os = "macos")]
 pub(super) fn refresh_nav(app: &AppHandle, id: u32) {
-    use objc2_web_kit::WKWebView;
-
     let Some(page) = page(app, id) else {
         return;
     };
     let app = app.clone();
-    page.with_webview(move |platform| {
-        let ptr = platform.inner() as *mut WKWebView;
-        if ptr.is_null() {
-            return;
-        }
-        let (back, forward) = unsafe {
-            let view = &*ptr;
-            (view.canGoBack(), view.canGoForward())
-        };
+    with_view(&page, move |view| {
+        let (back, forward) = unsafe { (view.canGoBack(), view.canGoForward()) };
         let changed = with_state(&app, |s| {
             let Some(tab) = s.tabs.iter_mut().find(|t| t.id == id) else {
                 return false;
@@ -71,17 +64,10 @@ pub(super) fn refresh_nav(app: &AppHandle, id: u32) {
 /// `history` or run no script.
 #[cfg(target_os = "macos")]
 pub(super) fn go_history(app: &AppHandle, id: u32, delta: i32) {
-    use objc2_web_kit::WKWebView;
-
     let Some(page) = page(app, id) else {
         return;
     };
-    page.with_webview(move |platform| {
-        let ptr = platform.inner() as *mut WKWebView;
-        if ptr.is_null() {
-            return;
-        }
-        let view = unsafe { &*ptr };
+    with_view(&page, move |view| {
         for _ in 0..delta.unsigned_abs() {
             unsafe {
                 if delta < 0 {
@@ -104,23 +90,14 @@ pub(super) fn go_history(app: &AppHandle, id: u32, delta: i32) {
 
 #[cfg(target_os = "macos")]
 pub(super) fn reload_page(app: &AppHandle, id: u32, hard: bool) {
-    use objc2_web_kit::WKWebView;
-
     let Some(page) = page(app, id) else {
         return;
     };
-    page.with_webview(move |platform| {
-        let ptr = platform.inner() as *mut WKWebView;
-        if ptr.is_null() {
-            return;
-        }
-        let view = unsafe { &*ptr };
-        unsafe {
-            if hard {
-                view.reloadFromOrigin();
-            } else {
-                view.reload();
-            }
+    with_view(&page, move |view| unsafe {
+        if hard {
+            view.reloadFromOrigin();
+        } else {
+            view.reload();
         }
     })
     .ok();
@@ -145,21 +122,16 @@ pub(super) fn find_string(app: &AppHandle, id: u32, query: String, backwards: bo
     use block2::RcBlock;
     use objc2::MainThreadMarker;
     use objc2_foundation::NSString;
-    use objc2_web_kit::{WKFindConfiguration, WKFindResult, WKWebView};
+    use objc2_web_kit::{WKFindConfiguration, WKFindResult};
 
     let Some(page) = page(app, id) else {
         return;
     };
     let app = app.clone();
-    page.with_webview(move |platform| {
-        let ptr = platform.inner() as *mut WKWebView;
+    with_view(&page, move |view| {
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
-        if ptr.is_null() {
-            return;
-        }
-        let view = unsafe { &*ptr };
         let needle = NSString::from_str(&query);
         let config = unsafe { WKFindConfiguration::new(mtm) };
         unsafe {

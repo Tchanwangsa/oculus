@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use tauri::webview::{NewWindowResponse, PageLoadEvent, Webview, WebviewBuilder};
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window, WindowEvent};
 
@@ -9,13 +11,15 @@ use super::PAGE_USER_AGENT;
 use super::{broadcast, label, seed_sessions, with_state, Tab, Viewport, LABEL_PREFIX, MAIN};
 use crate::shell::native_layer::{adopt_page, refresh_page};
 
-/// Seeds the cookie jar and hooks the main window's resize. From `setup`.
+/// Seeds the cookie jar, hooks the main window's resize and starts
+/// discarding idle tabs. From `setup`.
 pub fn init(app: &AppHandle) {
     #[cfg(target_os = "windows")]
     if let Some(main) = app.get_webview(MAIN) {
         crate::shell::menu::windows::install(&main, false);
     }
     seed_sessions(app, || {});
+    super::discard::start(app);
     let Some(window) = app.get_window(MAIN) else {
         elog!("[oculus] browser: no main window at setup; pages will not follow resizes");
         return;
@@ -112,9 +116,9 @@ pub(super) fn layout_tab(app: &AppHandle, id: u32) {
     refresh_page(&page);
 }
 
-/// Attaches a page webview to a tab. It starts hidden until the frontend
-/// places it.
-fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
+/// Attaches a page webview to a tab, a new one or a discarded one's. It
+/// starts hidden until the frontend places it.
+pub(super) fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     let window = app.get_window(MAIN).ok_or("no main window")?;
 
     let load_app = app.clone();
@@ -202,6 +206,11 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     crate::shell::native_layer::apply_page_theme(&webview);
     #[cfg(target_os = "macos")]
     crate::shell::keys::install_fallback(&webview);
+    // A restored tab keeps the zoom it had.
+    let zoom = with_state(app, |s| s.tabs.iter().find(|t| t.id == id).map(|t| t.zoom));
+    if let Some(zoom) = zoom.filter(|z| *z != 1.0) {
+        webview.set_zoom(zoom).ok();
+    }
     if with_state(app, |s| s.shown.contains(&id)) {
         webview.show().ok();
         webview.set_focus().ok();
@@ -212,7 +221,12 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
 }
 
 pub(super) fn hide_all(app: &AppHandle) {
-    with_state(app, |s| s.shown.clear());
+    let now = Instant::now();
+    with_state(app, |s| {
+        for id in std::mem::take(&mut s.shown) {
+            s.hide(id, now);
+        }
+    });
     for page in pages(app) {
         page.hide().ok();
     }
@@ -223,6 +237,7 @@ pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
     let id = with_state(app, |s| {
         s.next_id += 1;
         s.tabs.push(Tab::new(s.next_id, url.to_string()));
+        s.backgrounded.insert(s.next_id, Instant::now());
         s.next_id
     });
     elog!("[oculus] browser: opening tab {id} → {url}");
@@ -236,14 +251,14 @@ pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
             }
             if let Err(e) = create_page(&app, id, url) {
                 elog!("[oculus] browser: tab {id}: {e}");
-                with_state(&app, |s| s.tabs.retain(|t| t.id != id));
+                with_state(&app, |s| s.forget(id));
                 broadcast(&app);
             }
         });
         return Ok(id);
     }
     if let Err(e) = create_page(app, id, url) {
-        with_state(app, |s| s.tabs.retain(|t| t.id != id));
+        with_state(app, |s| s.forget(id));
         return Err(e);
     }
     broadcast(app);

@@ -164,6 +164,9 @@ if-watch = { version = "3.2.2", features = ["tokio"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
 block2 = "0.6"
+# A memory-pressure dispatch source discards background browser tabs
+# (`src/shell/browser/discard.rs`).
+dispatch2 = "0.3"
 objc2 = "0.6"
 # `NSBundle`, `NSProcessInfo` and `NSData` name WebKit's application and hand
 # it the WebCrypto master key (`src/shell/webcrypto/`).
@@ -183,6 +186,9 @@ keyring = { version = "3", features = ["windows-native"] }
 dunce = "1"
 junction = "1"
 webview2-com = "0.38.2"
+# `Interface::cast` and `BOOL` for WebView2's newer interfaces, at the
+# version webview2-com builds on (`src/shell/browser/teardown.rs`).
+windows-core = "0.61"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi"] }
 
 [target.'cfg(windows)'.dev-dependencies]

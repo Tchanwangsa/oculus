@@ -993,6 +993,27 @@ without a dark theme retain their own colours.
   Popovers and the address suggestions (`AddressSuggestions`, a portal) draw
   over the live page. Hiding throttles a page's timers, and `browser_place`
   focuses it, so nothing else hides or re-places it.
+- **Closing a tab ends its page at once** (`teardown.rs`). On macOS the
+  page stops loading, its media pauses and leaves fullscreen and
+  picture-in-picture, and WebKit's `_close` closes it in the WebContent
+  process before `close()` drops the view; on Windows dropping the view
+  calls WebView2's `Close()`. Nothing keeps the WKWebView alive after
+  that, because every macOS `with_webview` goes through `shell::wk::with_view`
+  ([architecture.md](./architecture.md#the-main-window-holds-one-webview-per-browser-tab)).
+- **A tab backgrounded for 15 minutes loses its page, not its tab**
+  (`discard.rs`), as in Safari or Chrome's Memory Saver. "Backgrounded" is
+  Rust's own record: no pane or side panel has placed it since it was last
+  hidden or opened. One thread checks every minute, and on macOS a
+  memory-pressure dispatch source (warning or critical) discards every
+  backgrounded tab at once. A page playing media or capturing the camera or
+  microphone is kept (WebView2 reports audio only). The page goes through
+  the same teardown as closing; the tab stays in `browser-state` with its
+  URL, title and zoom, so the strip and `useBrowserTabs` see no change.
+  `browser_place` on a discarded tab makes a new page at that URL the way a
+  new tab's is made (seeded cookies, theme, user agent, init scripts), off
+  the main thread, and shows it once it exists. Back/forward history does
+  not survive a discard. Navigating a discarded tab only changes the URL it
+  will load.
 - **Windows page creation runs off the main event loop.** `browser_open_url`
   is an async command so its tab ID or creation error reaches the caller without
   blocking WebView2. Popup tabs and the continuation after cookie seeding stay
