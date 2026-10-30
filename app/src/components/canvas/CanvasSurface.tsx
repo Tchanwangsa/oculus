@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { useCanvasPlatform } from '@/lib/canvas/platform';
 import { CanvasHistory, CanvasIconButton, CanvasToolbar } from './CanvasToolbar';
 import { CanvasStylePanel } from './CanvasStylePanel';
+import { CanvasRegionActions } from './CanvasRegionActions';
 import { CanvasPageBar } from './CanvasPageBar';
 import { CanvasImageDialog } from './CanvasImageDialog';
 import { inspectorPopoverProps } from './inspector/popoverGuards';
@@ -75,7 +76,7 @@ function CanvasEmpty({ onStart }: { onStart: () => void }) {
 }
 
 const hints: Record<string, string> = {
-  select: 'Drag to select · Double-click a shape or text to write in it', hand: 'Drag to move around',
+  select: 'Drag to select · Double-click an image to crop', capture: 'Drag an area · Adjust its edges · ' + shortcut('mod+C') + ' to copy', crop: 'Drag edges or corners to crop · Enter to apply · Escape to cancel', hand: 'Drag to move around',
   rectangle: 'Drag to draw · Hold Shift for a square', ellipse: 'Drag to draw · Hold Shift for a circle',
   diamond: 'Drag to draw · Hold Shift to constrain', line: 'Drag to draw · Hold Shift to snap angle',
   arrow: `Drag to connect · Hold Shift to snap angle · Hold ${shortcut('mod')} to place freely`, freedraw: 'Draw freely · Escape to select',
@@ -157,7 +158,8 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
     {current.elements.length === 0 && !current.paper && editor.tool === 'select' && !editor.textDraft ? <CanvasEmpty onStart={() => { editor.setTool('freedraw'); editor.root.current?.focus(); }} /> : null}
     <CanvasToolbar tool={editor.tool} onTool={tool => { editor.setTool(tool); editor.root.current?.focus({ preventScroll: true }); }} onAddImage={() => setImageDialogOpen(true)} />
     <CanvasImageDialog open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImport={editor.insertImages} />
-    {editor.inspector.sections.length ? <CanvasStylePanel {...editor.inspector} onChange={editor.changeStyle} onPreview={editor.previewStyle} selectionCount={editor.selection.length} onDelete={editor.deleteSelected} layerMoves={editor.layerMoves} onReorder={editor.reorder} /> : null}
+    {editor.region ? <CanvasRegionActions key={JSON.stringify(editor.region.bounds)} region={editor.region} viewport={current.viewport} onCopy={editor.copyRegion} copyState={editor.regionCopyState} copyError={editor.regionError} /> : null}
+    {editor.inspector.sections.length ? <CanvasStylePanel {...editor.inspector} onChange={editor.changeStyle} onPreview={editor.previewStyle} selectionCount={editor.selection.length} onDelete={editor.deleteSelected} onCrop={editor.canCrop ? () => editor.startCrop() : undefined} layerMoves={editor.layerMoves} onReorder={editor.reorder} /> : null}
     {editor.textDraft ? <CanvasTextInput key={editor.textDraft.element.id} draft={editor.textDraft} viewport={current.viewport} onInput={editor.editText} onCommit={editor.commitText} /> : null}
     <div className="canvas-bottom absolute bottom-4 left-4 z-10 flex items-center gap-2">
       <div className="flex items-center rounded-xl border border-border-subtle bg-card p-1 shadow-xs" role="group" aria-label="Canvas zoom">

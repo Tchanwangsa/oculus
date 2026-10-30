@@ -1,4 +1,5 @@
-import { TrashIcon } from '@phosphor-icons/react';
+import { CropIcon, TrashIcon } from '@phosphor-icons/react';
+import { Button } from '@/components/ui/button';
 import type { InspectorSection, StylePatch, StyleValues } from '@/lib/canvas/style';
 import type { LayerMove } from '@/lib/canvas/layers';
 import { CanvasIconButton } from '../CanvasToolbar';
@@ -22,12 +23,13 @@ export interface InspectorProps {
   onPreview: (patch: StylePatch) => void;
   selectionCount: number;
   onDelete: () => void;
+  onCrop?: () => void;
   layerMoves: LayerMove[];
   onReorder: (move: LayerMove) => void;
 }
 
 /** Sections come from what is selected (or the tool's next element), in a fixed order; Layer shows with a selection. */
-export function InspectorControls({ sections, values, colorLabel, onChange, onPreview, selectionCount, onDelete, layerMoves, onReorder }: InspectorProps) {
+export function InspectorControls({ sections, values, colorLabel, onChange, onPreview, selectionCount, onDelete, onCrop, layerMoves, onReorder }: InspectorProps) {
   const has = (section: InspectorSection) => sections.includes(section);
   const props = { values, onChange };
   return <div className="flex flex-col gap-3.5 text-xs">
@@ -41,6 +43,7 @@ export function InspectorControls({ sections, values, colorLabel, onChange, onPr
     {has('arrowType') ? <ArrowTypeSection {...props} /> : null}
     {has('arrowheads') ? <ArrowheadSection {...props} /> : null}
     {has('opacity') ? <OpacitySection {...props} onPreview={onPreview} /> : null}
+    {onCrop ? <Button variant="outline" size="sm" onClick={onCrop}><CropIcon size={16} />Crop image</Button> : null}
     {selectionCount ? <LayerSection moves={layerMoves} onReorder={onReorder} /> : null}
     {selectionCount ? <div className="flex items-center justify-between border-t border-border-subtle pt-2.5">
       <span className="text-[11px] text-muted-foreground tabular-nums">{selectionCount} selected</span>

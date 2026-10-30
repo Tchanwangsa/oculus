@@ -1,4 +1,4 @@
-import { ArrowRightIcon, ArrowUUpLeftIcon, ArrowUUpRightIcon, CircleIcon, CursorIcon, DiamondIcon, EraserIcon, HandIcon, ImageIcon, LineSegmentIcon, PencilSimpleIcon, RectangleIcon, TextTIcon, type Icon } from '@phosphor-icons/react';
+import { ArrowRightIcon, ArrowUUpLeftIcon, ArrowUUpRightIcon, CircleIcon, ScanIcon, CursorIcon, DiamondIcon, EraserIcon, HandIcon, ImageIcon, LineSegmentIcon, PencilSimpleIcon, RectangleIcon, TextTIcon, type Icon } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CanvasTool } from '@/lib/canvas/model';
@@ -8,6 +8,7 @@ import type { ReactNode, ComponentProps } from 'react';
 
 export const canvasTools: { tool: CanvasTool; label: string; key: string; icon: Icon }[] = [
   { tool: 'select', label: 'Select', key: 'V', icon: CursorIcon },
+  { tool: 'capture', label: 'Capture area', key: 'S', icon: ScanIcon },
   { tool: 'hand', label: 'Hand', key: 'H', icon: HandIcon },
   { tool: 'rectangle', label: 'Rectangle', key: 'R', icon: RectangleIcon },
   { tool: 'ellipse', label: 'Ellipse', key: 'O', icon: CircleIcon },
@@ -30,7 +31,7 @@ export function CanvasIconButton({ label, children, active, className, ...props 
 
 export function CanvasToolbar({ tool, onTool, onAddImage }: { tool: CanvasTool; onTool: (tool: CanvasTool) => void; onAddImage: () => void }) {
   return <div className="canvas-toolbox absolute top-4 left-1/2 z-10 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded-2xl border border-border-subtle bg-card p-1.5 shadow-sm" role="toolbar" aria-label="Drawing tools">
-    {canvasTools.map(({ tool: value, label, key, icon: Glyph }, index) => <div key={value} className={cn('flex', index === 2 && 'ml-1 border-l border-border-subtle pl-1')}>
+    {canvasTools.map(({ tool: value, label, key, icon: Glyph }, index) => <div key={value} className={cn('flex', index === 3 && 'ml-1 border-l border-border-subtle pl-1')}>
       <CanvasIconButton label={`${label} (${key})`} active={tool === value} aria-pressed={tool === value} onClick={() => onTool(value)} className="relative size-10">
         <Glyph size={19} weight={tool === value ? 'fill' : 'regular'} />
         <span className="absolute right-1.5 bottom-0.5 text-[8px] leading-none opacity-45" aria-hidden="true">{key.toLowerCase()}</span>

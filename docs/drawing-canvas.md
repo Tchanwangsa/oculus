@@ -45,6 +45,7 @@ beside another page.
 | Image decoding and batch placement; native PDF import sessions | `app/src/lib/canvas/importMedia.ts`, `app/src/lib/canvas/mediaPlacement.ts`; `app/src/lib/canvas/importPdf.ts` |
 | Image drops, placement previews and raster paste | `app/src/hooks/canvas/useCanvasMediaDrop.ts`, `app/src/lib/ui/nativeFileDrop.ts`, `app/src-tauri/src/library/files/canvases/images.rs` |
 | What the surface takes from its host (export saving, library PDF search and opening): the browser default and the desktop's | `app/src/lib/canvas/platform/` |
+| Area captures, crop geometry and clipped PNG rendering | `app/src/lib/canvas/region.ts`, `app/src/components/canvas/CanvasRegionActions.tsx` |
 | Embedded raster validation and Canvas2D image cache | `app/src/lib/canvas/imageSource.ts`, `app/src/lib/canvas/renderImages.ts` |
 | Scoped library PDF sessions and page rasterisation | `app/src-tauri/src/library/files/canvases/imports.rs` |
 | Element edits as replaceable maps | `app/src/lib/canvas/changes.ts` |
@@ -464,6 +465,7 @@ neither cancels nor redirects a Pencil stroke.
   until every finger has lifted, whatever the tool. The Text tool opens its
   overlay on a finger's release, not its press, so the second finger can still
   arrive.
+- Selection drags wait for 4 screen pixels of mouse movement or 10 with a pen or finger. Small Pencil movements select the image beneath them without moving it or starting a box selection; ink keeps its own sampling.
 - The release is the stroke's last sample, so a down and up with no move
   between still draws, and a freedraw tap commits a dot. Coalesced pen samples
   stay in the committed stroke. Committing keeps the preview’s points unchanged,
@@ -533,10 +535,51 @@ dimensions alongside its world bounds. The `.canvas` stays self-contained:
 reopening, copying and exporting do not depend on the original source file.
 Remote URLs and SVG input are rejected. Images use their rectangular bounds
 for selection and culling in both the JavaScript reference and Rust core.
-The inspector offers opacity and layer controls for images. The eraser skips
+The inspector offers opacity, layer controls and Crop image for a single image. The eraser skips
 images, including imported PDF pages, and erases shapes and ink through them.
 To delete an image, select it and use the inspector's trash button or Delete;
 that deletion is one undo step.
+
+### Capture duplicates an area; cropping trims an image
+
+**Capture area** (S) drags a rectangle anywhere on the canvas. The resulting
+PNG includes the background, paper, images and annotations inside that area,
+clipped at its edges, without tool overlays or the whiteboard grid. The area
+stays selected with a dashed border and eight handles; the rest of the viewport
+dims while the captured pixels stay clear. Drag its edges or
+corners to adjust it, or drag inside to move the selection. Clicking outside
+starts a new selection; an outside tap or Escape dismisses it. **Copy**, a
+small icon action on an opaque, blurred card beside the area, or Cmd/Ctrl+C
+writes a PNG to the system
+clipboard where the browser supports image writes. Paste inserts that image
+through the ordinary image-paste path. Clipboard encoding starts as a promise during the button click so Safari keeps user
+activation while images decode.
+
+On iPad, holding inside the area for 450 ms before dragging lifts a captured
+copy. Its pixels preview under the pointer and dropping adds one image at that
+position, leaving the source content in place. A short drag just moves the
+selection; handles always adjust its bounds. Pencil and finger movement below
+10 screen pixels does not start either drag, and two fingers still navigate.
+
+**Crop image** opens from the inspector, including its narrow-screen Style
+popover on iPad, or by double-clicking an image on desktop. The full image
+starts framed by eight visible handles: corners crop both axes freely, edges
+crop one, and dragging inside repositions the crop rectangle. The discarded
+area dims and the kept area shows thirds. Handles stay within the original
+image and have larger hit targets for Pencil and touch. Enter applies the
+crop and Escape discards its preview. A Pencil or touch handle release applies
+the crop immediately; Undo restores the original image. Applying replaces only
+the image's raster and bounds, preserving its ID and opacity; annotations stay
+separate. There is no crop action panel. A locked notebook backdrop cannot be
+cropped.
+
+Captures render at two pixels per world unit; crops use the source's pixel
+density and preserve transparency. Both are capped at 8192 pixels a side and
+32 million pixels. Rendering waits for decoded images and fonts. Each dropped
+capture copy or applied crop is one undo step and uses the same shared content
+transactions as other edits. Cancel and Escape discard the preview; a late
+encoding result cannot commit after cancellation or a changed rectangle. A
+crop also refuses to overwrite an image changed or removed by another device.
 
 PDF imports use the native viewer's renderer without running the document
 through the parse pipeline. A scoped library path opens a session owned by

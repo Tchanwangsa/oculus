@@ -18,6 +18,9 @@ export interface CanvasPaintOptions {
   selected: Set<string>;
   selectionColor: string;
   marquee?: Bounds;
+  cropSource?: Bounds;
+  captureSelection?: boolean;
+  captureGhost?: { snapshot: CanvasDocument; from: Bounds; to: Bounds };
   /** Text being edited is hidden; a shape being labelled draws without its label, which the overlay replaces. */
   editingId?: string;
   overrides?: Map<string, CanvasElement | null>;
@@ -235,10 +238,63 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
       context.beginPath(); context.roundRect(handle.x - 4 / zoom, handle.y - 4 / zoom, 8 / zoom, 8 / zoom, 2 / zoom); context.fill(); context.stroke();
     }
   }
+  if (options.captureGhost) {
+    const { snapshot, from, to } = options.captureGhost;
+    context.save(); context.beginPath(); context.rect(to.x, to.y, to.width, to.height); context.clip();
+    context.translate(to.x - from.x, to.y - from.y);
+    context.fillStyle = snapshot.background; context.fillRect(from.x, from.y, from.width, from.height);
+    if (snapshot.paper) paintPaper(context, snapshot.paper, from, zoom);
+    for (const element of visibleElements(snapshot.elements, from)) drawElement(context, element);
+    context.restore();
+  }
   if (options.marquee) {
     const bounds = options.marquee;
-    context.globalAlpha = 0.1; context.fillStyle = selectionColor; context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-    context.globalAlpha = 1; context.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    const source = options.cropSource;
+    if (options.captureSelection) {
+      context.save(); context.beginPath();
+      context.rect(viewport.x, viewport.y, viewport.width, viewport.height);
+      context.rect(bounds.x, bounds.y, bounds.width, bounds.height);
+      context.clip('evenodd'); context.fillStyle = '#000000'; context.globalAlpha = 0.22;
+      context.fillRect(viewport.x, viewport.y, viewport.width, viewport.height);
+      context.restore();
+    }
+    if (source) {
+      context.fillStyle = '#000000'; context.globalAlpha = 0.35;
+      context.fillRect(source.x, source.y, source.width, Math.max(0, bounds.y - source.y));
+      context.fillRect(source.x, bounds.y + bounds.height, source.width, Math.max(0, source.y + source.height - bounds.y - bounds.height));
+      context.fillRect(source.x, bounds.y, Math.max(0, bounds.x - source.x), bounds.height);
+      context.fillRect(bounds.x + bounds.width, bounds.y, Math.max(0, source.x + source.width - bounds.x - bounds.width), bounds.height);
+    } else if (!options.captureSelection) { context.globalAlpha = 0.1; context.fillStyle = selectionColor; context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height); }
+    context.globalAlpha = 1;
+    if (options.captureSelection) context.setLineDash([5 / zoom, 4 / zoom]);
+    context.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height); context.setLineDash([]);
+    if (options.captureSelection) {
+      for (const handle of resizeHandles(bounds)) {
+        context.fillStyle = document.background; context.lineWidth = 1.5 / zoom;
+        context.beginPath(); context.roundRect(handle.x - 3.5 / zoom, handle.y - 3.5 / zoom, 7 / zoom, 7 / zoom, 1 / zoom); context.fill(); context.stroke();
+      }
+    }
+    if (source) {
+      const handles = resizeHandles(bounds), length = Math.min(16 / zoom, bounds.width / 4, bounds.height / 4);
+      context.beginPath();
+      for (let index = 0; index < 4; index++) {
+        const corner = handles[index], dx = index === 0 || index === 3 ? 1 : -1, dy = index < 2 ? 1 : -1;
+        context.moveTo(corner.x + dx * length, corner.y); context.lineTo(corner.x, corner.y); context.lineTo(corner.x, corner.y + dy * length);
+      }
+      for (let index = 4; index < 8; index++) {
+        const edge = handles[index], horizontal = index === 4 || index === 6;
+        context.moveTo(edge.x - (horizontal ? length / 2 : 0), edge.y - (horizontal ? 0 : length / 2));
+        context.lineTo(edge.x + (horizontal ? length / 2 : 0), edge.y + (horizontal ? 0 : length / 2));
+      }
+      context.lineWidth = 5 / zoom; context.strokeStyle = '#000000'; context.stroke();
+      context.lineWidth = 3 / zoom; context.strokeStyle = '#ffffff'; context.stroke();
+      context.globalAlpha = 0.4; context.lineWidth = 1 / zoom; context.beginPath();
+      for (const fraction of [1 / 3, 2 / 3]) {
+        context.moveTo(bounds.x + bounds.width * fraction, bounds.y); context.lineTo(bounds.x + bounds.width * fraction, bounds.y + bounds.height);
+        context.moveTo(bounds.x, bounds.y + bounds.height * fraction); context.lineTo(bounds.x + bounds.width, bounds.y + bounds.height * fraction);
+      }
+      context.stroke(); context.globalAlpha = 1;
+    }
   }
 }
 

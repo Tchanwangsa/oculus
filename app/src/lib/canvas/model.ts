@@ -71,7 +71,7 @@ export const arrowTypeOf = (el: CanvasElement): CanvasArrowType => el.arrowType 
 export const arrowheadOf = (el: CanvasElement, end: 'start' | 'end'): CanvasArrowhead =>
   end === 'start' ? el.startArrowhead ?? CANVAS_DEFAULTS.startArrowhead : el.endArrowhead ?? CANVAS_DEFAULTS.endArrowhead;
 
-export type CanvasTool = Exclude<CanvasElement['type'], 'image'> | 'select' | 'hand' | 'eraser';
+export type CanvasTool = Exclude<CanvasElement['type'], 'image'> | 'select' | 'hand' | 'eraser' | 'capture' | 'crop';
 
 export interface CanvasDocument {
   type: 'oculus-canvas';
