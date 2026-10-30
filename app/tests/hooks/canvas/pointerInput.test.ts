@@ -148,13 +148,45 @@ describe('Pencil and touch pointer lifecycle', () => {
     expect(last()?.elements).toHaveLength(41);
     expect(new Set(last()?.elements.map(element => element.id)).size).toBe(41);
   });
-  test('coalesced samples stay in a curved stroke before simplification', () => {
+  test('coalesced samples stay in the committed curved stroke', () => {
     editor().pointerDown(pointer(1));
     editor().pointerMove(pointer(1, 'pen', 40, 10, {}, [{ clientX: 20, clientY: 40 }, { clientX: 30, clientY: 10 }]));
     editor().pointerUp(pointer(1, 'pen', 50, 40));
     const points = last()?.elements[0].points;
     expect(points).toContainEqual({ x: 10, y: 30 });
     expect(points?.[points.length - 1]).toEqual({ x: 40, y: 30 });
+  });
+  test('lifting the Pencil preserves every captured point at different zoom levels, including through undo and redo', () => {
+    for (const zoom of [0.125, 1, 8]) {
+      setup();
+      editor().zoom(zoom); h.render();
+      editor().pointerDown(pointer(1, 'pen', 0, 0));
+      editor().pointerMove(pointer(1, 'pen', 32, 0, {}, [
+        { clientX: 8, clientY: 0.25 }, { clientX: 16, clientY: 0 }, { clientX: 24, clientY: 0.25 },
+      ]));
+      editor().pointerUp(pointer(1, 'pen', 32, 0));
+      const ink = last()!.elements[0];
+      expect(ink.points).toEqual([
+        { x: 0, y: 0 }, { x: 0, y: 0 },
+        { x: 8 / zoom, y: 0.25 / zoom }, { x: 16 / zoom, y: 0 },
+        { x: 24 / zoom, y: 0.25 / zoom }, { x: 32 / zoom, y: 0 },
+      ]);
+      expect(last()!.viewport.zoom).toBe(zoom);
+      h.render(); editor().history(); h.render();
+      expect(last()!.elements).toEqual([]);
+      editor().history(true); h.render();
+      expect(last()!.elements).toEqual([ink]);
+    }
+  });
+  test('recovering a lost pen release preserves the previous stroke samples', () => {
+    editor().pointerDown(pointer(1, 'pen', 0, 0));
+    editor().pointerMove(pointer(1, 'pen', 16, 0, {}, [{ clientX: 8, clientY: 0.25 }]));
+    editor().pointerDown(pointer(1, 'pen', 100, 100));
+    expect(last()!.elements[0].points).toEqual([
+      { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 8, y: 0.25 }, { x: 16, y: 0 },
+    ]);
+    editor().pointerUp(pointer(1, 'pen', 110, 110));
+    expect(last()!.elements).toHaveLength(2);
   });
   test('an acknowledgement with a fresh identity does not reset the next stroke', () => {
     stroke(1); const ack = structuredClone(last()!);

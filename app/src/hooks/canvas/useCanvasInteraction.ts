@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type MouseEvent, type ClipboardEvent } from 'react';
 import { LABELLED_TYPES, type CanvasDocument, type CanvasElement, type CanvasTool, type CanvasViewport, type Point } from '@/lib/canvas/model';
 import { boundsContain, elementBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/canvas/geometry';
-import { hitTest, simplifyPoints } from '@/lib/canvas/engine';
+import { hitTest } from '@/lib/canvas/engine';
 import { paintCanvas, pointEditTarget, elementResizeHandles, selectedBounds } from '@/lib/canvas/render';
 import { pointDrag, pointHandleAt } from '@/lib/canvas/arrow/handles';
 import { endAt, movePoint, removePoint } from '@/lib/canvas/arrow/points';
@@ -356,15 +356,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   };
   /** Drops the gesture's preview without committing it; the scene was never changed during the gesture. */
   const dropGesture = () => { gesture.current = null; overrides.current.clear(); marquee.current = undefined; bindHint.current = null; };
-  /** Commits the gesture's previews: a freedraw stroke is simplified first. Returns whether the scene changed. */
-  const commitGesture = (active: Gesture) => {
-    const changes = new Map(overrides.current);
-    if (active.mode === 'draw' && active.id) {
-      const element = changes.get(active.id);
-      if (element?.type === 'freedraw' && element.points) changes.set(element.id, { ...element, points: simplifyPoints(element.points, 0.5 / documentRef.current.viewport.zoom) });
-    }
-    return commitChanges(changes);
-  };
+  /** Commits the preview unchanged so lifting the pointer preserves the ink already drawn. */
+  const commitGesture = () => commitChanges(new Map(overrides.current));
   const eraseAt = (elements: CanvasElement[], point: Point) => {
     const erasable = elements.filter(element => element.type !== 'image' && !isLocked(element) && overrides.current.get(element.id) !== null);
     const id = hitTest(erasable, point, 10 / documentRef.current.viewport.zoom);
@@ -378,7 +371,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const previous = gesture.current;
       if (previous?.pointerType === 'pen') {
         const element = previous.mode === 'draw' && previous.id ? overrides.current.get(previous.id) : undefined;
-        if (element?.type === 'freedraw' && element.points) { gesture.current = null; commitGesture(previous); }
+        if (element?.type === 'freedraw' && element.points) { gesture.current = null; commitGesture(); }
         dropGesture();
       }
       // A palm or finger can land just before the Pencil; it must not claim the pen's stroke.
@@ -571,7 +564,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       choose(ids);
     } else if (overrides.current.size && (active.moved || active.mode === 'erase' || (active.mode === 'draw' && overrides.current.get(active.id!)?.type === 'freedraw'))) {
       // A freedraw tap is a dot, so it commits without moving.
-      commitGesture(active);
+      commitGesture();
       if (active.mode === 'draw' && active.id && tool !== 'freedraw') { choose([active.id]); setTool('select'); }
     }
     if (active.mode === 'erase' && optionsRef.current.eraserAutoReturn) chooseTool(previousTool.current);

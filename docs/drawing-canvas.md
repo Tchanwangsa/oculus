@@ -211,10 +211,9 @@ The committed elements array changes at a gesture boundary. A cached Path2D
 per immutable element avoids rebuilding its path during panning.
 
 The Rust core is compiled to WebAssembly and loaded with the editor. A
-retained BVH indexes the scene for hit testing and viewport culling; Rust
-also simplifies completed freehand strokes. Geometry is packed into numeric
-buffers once per committed scene, with scalar coordinates for subsequent
-queries. There is no Tauri round trip for a pointer event. Rust scene storage
+retained BVH indexes the scene for hit testing and viewport culling. Geometry
+is packed into numeric buffers once per committed scene, with scalar
+coordinates for subsequent queries. There is no Tauri round trip for a pointer event. Rust scene storage
 is capped at eight scene arrays independently of undo history.
 
 Each shape is a record of 14 floats (`engine.ts`, documented on
@@ -467,7 +466,8 @@ neither cancels nor redirects a Pencil stroke.
   arrive.
 - The release is the stroke's last sample, so a down and up with no move
   between still draws, and a freedraw tap commits a dot. Coalesced pen samples
-  are kept before the stroke is simplified.
+  stay in the committed stroke. Committing keeps the preview’s points unchanged,
+  so lifting the pointer preserves the curve already drawn.
 - A pen move with its contact button down and no gesture starts the stroke
   that WebKit's lost pointerdown should have; hover never inks. A fresh pen down
   while a pen stroke is open commits that stroke's ink as its own stroke rather
