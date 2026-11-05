@@ -65,7 +65,10 @@ export function useMediaPlayer({
     setFileDuration,
     handleTimeUpdate,
     handleLoadedMetadata,
+    seekTo,
   } = usePlaybackEvents(cues, videoRef);
+  const seekToRef = useRef(seekTo);
+  seekToRef.current = seekTo;
   const [isPlaying, setIsPlaying] = useState(false);
   /** The element's own failure; callers show theirs beside it. */
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +119,8 @@ export function useMediaPlayer({
     toggleFullscreen,
     isFullscreenRef,
     videoRef,
+    atRef,
+    seekToRef,
     elsewhereRef,
     claimRef,
     togglePlayRef,
@@ -138,14 +143,14 @@ export function useMediaPlayer({
 
   // A seek from the dock while the other pane has the video takes it over.
   const seek = useCallback((seconds: number) => {
-    if (videoRef.current) videoRef.current.currentTime = seconds;
+    if (videoRef.current) seekToRef.current(seconds);
     else if (elsewhereRef.current) claimRef.current?.(seconds);
   }, []);
 
   /** The scrub bar's seek: the clock moves before the element reports it. */
   const scrub = (seconds: number) => {
     setCurrentTime(seconds);
-    if (videoRef.current) videoRef.current.currentTime = seconds;
+    seekTo(seconds);
   };
 
   const togglePlay = () => {

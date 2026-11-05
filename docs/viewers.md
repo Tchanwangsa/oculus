@@ -619,6 +619,11 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
 (`app/src/lib/lectures/media/src.ts`, absolute or library-relative), not `convertFileSrc`
 ([architecture.md](./architecture.md)).
 
+- **A paused seek moves the picture** — scrub bar, arrow keys and the dock all
+  go through `seekTo` (`usePlaybackEvents.ts`): one seek in flight, the newest
+  target winning, a keyframe `fastSeek` and then the exact time, the way the
+  scrub preview seeks. The clock holds the target until it lands. Playing, a
+  seek is a plain `currentTime`.
 - **`LecturePlayer` adds the lecture's layers**: the shared elements and their
   owner (below), two sources with PiP and stack, chapters, chat, downloads and
   progress.

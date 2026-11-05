@@ -5,6 +5,9 @@ interface KeyboardShortcutsArgs {
   toggleFullscreen: () => void;
   isFullscreenRef: RefObject<boolean>;
   videoRef: RefObject<HTMLVideoElement | null>;
+  /** The clock, which leads the element while a paused seek is landing. */
+  atRef: RefObject<number>;
+  seekToRef: RefObject<(seconds: number) => void>;
   // The handler registers once and reaches actions through refs.
   elsewhereRef: RefObject<boolean>;
   claimRef: RefObject<((at?: number) => void) | undefined>;
@@ -20,6 +23,8 @@ export function useKeyboardShortcuts({
   toggleFullscreen,
   isFullscreenRef,
   videoRef,
+  atRef,
+  seekToRef,
   elsewhereRef,
   claimRef,
   togglePlayRef,
@@ -50,15 +55,11 @@ export function useKeyboardShortcuts({
           break;
         case "ArrowLeft":
           e.preventDefault();
-          if (videoRef.current)
-            videoRef.current.currentTime = Math.max(
-              0,
-              videoRef.current.currentTime - 5,
-            );
+          if (videoRef.current) seekToRef.current(Math.max(0, atRef.current - 5));
           break;
         case "ArrowRight":
           e.preventDefault();
-          if (videoRef.current) videoRef.current.currentTime += 5;
+          if (videoRef.current) seekToRef.current(atRef.current + 5);
           break;
         case "f":
           if (!e.ctrlKey && !e.metaKey && !e.altKey) {
