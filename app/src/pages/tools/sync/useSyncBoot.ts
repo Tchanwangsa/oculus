@@ -18,7 +18,7 @@ import { SEED_RETRY_MS } from "./constants";
  * Loads the subjects and run table when the tab opens, keeps the run counts
  * live while a sync scrapes, and backfills the pipeline table from the DB.
  */
-export function useSyncBoot(active: boolean, scraping: boolean) {
+export function useSyncBoot(active: boolean, scraping: boolean, focusRunId: number | null = null) {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [runs, setRuns] = useState<SyncRunSummary[]>([]);
@@ -27,13 +27,13 @@ export function useSyncBoot(active: boolean, scraping: boolean) {
   const loadFromDb = useCallback(async () => {
     const [rows, runRows] = await Promise.all([
       getSubjects(),
-      getSyncRunSummaries(),
+      getSyncRunSummaries(50, focusRunId),
     ]);
     setSubjects(rows);
     setRuns(runRows);
     // Selection lives in the DB (`subjects.selected`).
     setSelectedIds(new Set(rows.filter((s) => s.selected).map((s) => s.id)));
-  }, []);
+  }, [focusRunId]);
 
   useEffect(() => {
     if (active) loadFromDb();
@@ -42,11 +42,11 @@ export function useSyncBoot(active: boolean, scraping: boolean) {
   // While a run is scraping, keep the history table's counts live.
   useEffect(() => {
     if (!scraping || !active) return;
-    const tick = () => getSyncRunSummaries().then(setRuns).catch(() => {});
+    const tick = () => getSyncRunSummaries(50, focusRunId).then(setRuns).catch(() => {});
     tick();
     const t = setInterval(tick, 2000);
     return () => clearInterval(t);
-  }, [scraping, active]);
+  }, [scraping, active, focusRunId]);
 
   // Backfill the pipeline table with every pipeline file on record. The DB's
   // parse_status can lag disk (e.g. CLI parses), so disk is consulted for

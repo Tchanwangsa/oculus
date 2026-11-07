@@ -92,6 +92,7 @@ pub async fn scrape_content(
         let reporter = AppReporter {
             app: app.clone(),
             cancel: Arc::clone(&flag),
+            run_id: None,
         };
         let engine =
             Engine::new(&data_dir, Box::new(reporter)).with_options(options.unwrap_or_default());
@@ -112,11 +113,16 @@ pub async fn scrape_content(
 struct AppReporter {
     app: AppHandle,
     cancel: Arc<AtomicBool>,
+    run_id: Option<i64>,
 }
 
 impl Reporter for AppReporter {
     fn progress(&self, p: &Progress) {
-        self.app.emit("scrape-progress", p).ok();
+        let mut progress = serde_json::to_value(p).unwrap();
+        if let Some(run_id) = self.run_id {
+            progress["runId"] = serde_json::json!(run_id);
+        }
+        self.app.emit("scrape-progress", progress).ok();
     }
 
     fn file_start(&self, f: &FileStart) {
@@ -222,14 +228,28 @@ pub fn parse_skip(relative_path: String, subject_id: i64, skip: bool) -> Result<
 
 /// Await the same native work for a confirmed job card, so its durable result
 /// reflects completion rather than the point at which a worker was spawned.
-pub(crate) async fn confirmed(
+pub(crate) async fn confirmed<F, Fut>(
     app: AppHandle,
     targets: Vec<Subject>,
     lectures: bool,
-) -> Result<(), String> {
+    on_started: F,
+) -> Result<(), String>
+where
+    F: FnOnce(i64) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
     let _claim = ScrapeClaim::take()?;
+    let pool = crate::db::store::open_pool().await?;
+    let codes: Vec<String> = targets.iter().map(|s| s.code.clone()).collect();
+    let run_id = crate::db::store::start_run(&pool, &codes).await?;
+    if let Err(error) = on_started(run_id).await {
+        crate::db::store::finish_run(&pool, run_id, "failed", 0, Some(&error)).await?;
+        return Err(error);
+    }
     if lectures {
-        for target in targets {
+        let outcome = async {
+        for (done, target) in targets.iter().enumerate() {
+            app.emit("scrape-progress", serde_json::json!({"course":target.code,"phase":"lectures","done":done,"total":targets.len(),"runId":run_id})).ok();
             use tauri::Manager;
             let lectures = crate::lectures::commands::echo360_sync_lectures(
                 app.state::<crate::lectures::Echo360Cache>(),
@@ -240,20 +260,32 @@ pub(crate) async fn confirmed(
             crate::db::store::upsert_lectures(&pool, target.id, &lectures).await?;
             app.emit("lectures-changed", ()).ok();
         }
-        return Ok(());
+        Ok(())
+        }.await;
+        crate::db::store::finish_run(
+            &pool,
+            run_id,
+            if outcome.is_ok() {
+                "completed"
+            } else {
+                "failed"
+            },
+            if outcome.is_ok() { targets.len() } else { 0 },
+            outcome.as_ref().err().map(String::as_str),
+        )
+        .await?;
+        return outcome;
     }
     use tauri::Manager;
     let flag = Arc::clone(&app.state::<ScrapeCancel>().0);
     flag.store(false, Ordering::SeqCst);
-    let pool = crate::db::store::open_pool().await?;
-    let codes: Vec<String> = targets.iter().map(|s| s.code.clone()).collect();
-    let run_id = crate::db::store::start_run(&pool, &codes).await?;
     app.emit("scrape-started",serde_json::json!({"runId":run_id,"subjects":targets.iter().map(|s|serde_json::json!({"id":s.id,"code":s.code})).collect::<Vec<_>>()})).ok();
     let completion = app.clone();
     let outcome = crate::runtime::blocking::run(move || {
         let reporter = AppReporter {
             app: app.clone(),
             cancel: flag.clone(),
+            run_id: Some(run_id),
         };
         let engine = Engine::new(&crate::library::paths::data_dir(), Box::new(reporter));
         engine.canvas.check_keyd().map_err(|e| e.to_string())?;

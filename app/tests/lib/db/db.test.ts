@@ -2,7 +2,7 @@ import { afterAll, expect, spyOn, test } from "bun:test";
 import { Database as SQLite } from "bun:sqlite";
 import Database from "@tauri-apps/plugin-sql";
 import { searchLibraryFiles } from "@/lib/db/search";
-import { getDb, getSubjects, setParseStatus } from "@/lib/db";
+import { getDb, getSubjects, getSyncRunSummaries, setParseStatus } from "@/lib/db";
 
 const sqlite = new SQLite(":memory:");
 const fakeDb = {
@@ -97,4 +97,18 @@ test("library PDF search filters before the limit and matches filename plus subj
   expect((await searchLibraryFiles('notes')).map(file => file.id)).toEqual([1]);
   expect(await pdfs('%')).toEqual([]);
   expect((await pdfs('geometry'))[0]).toMatchObject({ subject_code: 'A', relative_path: 'courses/A/geometry.pdf' });
+});
+
+
+test("a job's history link includes its older run without duplicating recent rows", async () => {
+  sqlite.exec(`DROP TABLE sync_runs;
+    CREATE TABLE sync_runs (id INTEGER PRIMARY KEY, started_at TEXT, status TEXT);
+    CREATE TABLE sync_run_files (id INTEGER PRIMARY KEY, run_id INTEGER, action TEXT);
+    INSERT INTO sync_runs VALUES (1, '2026-01-01', 'completed'), (2, '2026-02-01', 'completed'), (3, '2026-03-01', 'running');
+    INSERT INTO sync_run_files VALUES (1, 1, 'new'), (2, 1, 'updated'), (3, 3, 'unchanged');`);
+  expect((await getSyncRunSummaries(1)).map((run) => run.id)).toEqual([3]);
+  const linked = await getSyncRunSummaries(1, 1);
+  expect(linked.map((run) => run.id)).toEqual([3, 1]);
+  expect(linked[1]).toMatchObject({ new_count: 1, updated_count: 1, file_count: 2 });
+  expect((await getSyncRunSummaries(1, 3)).map((run) => run.id)).toEqual([3]);
 });

@@ -19,7 +19,9 @@ export function useScrapeEvents() {
   useTauriEvent<{ runId: number; subjects: { id: number; code: string }[] }>("scrape-started", (e) => {
     useSyncStore.getState().begin(e.payload.runId, e.payload.subjects);
   });
-  useTauriEvent<SyncProgress>("scrape-progress", (e) => {
+  useTauriEvent<SyncProgress & { runId?: number }>("scrape-progress", (e) => {
+    // A tagged progress event belongs only to the run this store tracks.
+    if (e.payload.runId != null && e.payload.runId !== useSyncStore.getState().runId) return;
     if (e.payload.phase === "complete") return;
     useSyncStore.getState().setProgress(e.payload);
   });

@@ -746,7 +746,7 @@ write. A receipt already used starts nothing; `harness_send` returns early on
 one, and `begin_run` refuses one.
 
 The question's `UserMessage` carries the run (never serialized), so the
-consumer stores no second row and `app/run_scope.rs` opens that run for the
+consumer stores no second row and `app/src-tauri/src/harness/app/run_scope.rs` opens that run for the
 thread. The bridges keep the sink they were spawned with, so ownership is
 assigned there, on the one ordered consumer: every later row on the thread
 gets the run, the attempt and a weak attempt-local `entity_ref` (`weak:0`,
@@ -1367,13 +1367,28 @@ student data.
 Confirmed jobs use `proposal_job_start`, which atomically decides a pending
 card before launching the app's native job. Transcription and downloads
 await those commands; lecture jobs follow their terminal events; sync and
-parse retain the existing progress events. The row's `job` state persists
-running, complete or error across views; the card draws running as its
-applying phase, complete as created and error as failed (phases in
-[ui.md](./ui.md#proposal-cards-show-a-decision-before-a-write)). Completion clears `told` so the next
-message reports the outcome. Startup marks interrupted runs as errors and
-keeps the card decided, avoiding an accidental second billed launch. Jobs
-have no Undo or amendments.
+parse retain the existing progress events. The row's JSON `job` state persists
+`phase`, `started_at`, `finished_at`, a one-line `result` on success, or `error`
+on failure. The card draws running as its applying phase, complete as created
+and error as failed (phases in
+[ui.md](./ui.md#proposal-cards-show-a-decision-before-a-write)). Sync also records its own `run_id` before scraping starts; a second
+card refused by the sync claim cannot adopt the active run. A late start reply
+cannot erase the identity event from the proposal store. Live progress stays
+in memory, never in proposal rows. Completion clears `told` so the next message
+reports the outcome. Startup preserves the run identity and start time, marks
+interrupted jobs as errors with the reason, and keeps the card decided. Its
+finish stamp is reconciliation time, so an interrupted card shows no duration.
+Jobs have no Undo or amendments; retry needs a fresh proposal and confirmation.
+
+`proposals/jobProgress.ts` under `app/src/components/markdown/openui/` maps Sync
+to its owned run's subject and phase, Reparse to parse-store file counts and
+fresh failures, Transcribe to completed chunks, Download to Studio byte events,
+and LectureChapters to its lecture's step events. LectureEnd reports the
+transcript-reading step because it emits only a terminal event. `JobProgress.tsx`
+there reuses the onboarding sync line, ticks elapsed time, and shows only existing
+cancel actions (Sync and active Studio downloads). Terminal cards show the saved
+result or error once. Sync links use `/sync?run=<id>`: history includes that run
+even outside its recent window, selects its page and expands its row.
 
 
 ## Revision writes and submitted answers have separate paths

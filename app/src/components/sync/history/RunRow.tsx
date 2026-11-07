@@ -28,7 +28,7 @@ export function RunRow({
   const interrupted = run.error === INTERRUPTED_SYNC_ERROR;
 
   return (
-    <div>
+    <div data-sync-run={run.id}>
       <div
         role="button"
         tabIndex={0}

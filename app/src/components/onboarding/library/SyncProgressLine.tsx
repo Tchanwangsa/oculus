@@ -2,7 +2,7 @@ import { ArrowsClockwise, CheckCircle, WarningCircle } from "@phosphor-icons/rea
 import { Progress } from "@/components/ui/progress";
 import { displayCode } from "@/lib/format/format";
 import { cn } from "@/lib/utils";
-import { useSyncStore } from "@/stores/sync/syncStore";
+import { type SyncProgress, useSyncStore } from "@/stores/sync/syncStore";
 import { useFirstSync } from "./firstSync";
 
 /** Canvas's phase names as the Sync page words them. */
@@ -13,6 +13,7 @@ const PHASE: Record<string, string> = {
   assignments: "assignments",
   ed: "Ed threads",
   ed_lessons: "Ed lessons",
+  lectures: "lecture lists",
 };
 
 /**
@@ -31,28 +32,7 @@ export function SyncProgressLine({ className }: { className?: string }) {
   const row = cn("flex min-w-0 items-center gap-2 text-xs text-muted-foreground", className);
 
   if (scraping) {
-    const phase = progress?.phase ? (PHASE[progress.phase] ?? progress.phase) : null;
-    return (
-      <div className={row} role="status">
-        <ArrowsClockwise size={13} className="shrink-0 animate-spin" />
-        <span className="min-w-0 truncate">
-          {progress?.course
-            ? `Syncing ${displayCode(progress.course)}${phase ? ` — ${phase}` : ""}`
-            : "Syncing your subjects…"}
-        </span>
-        {progress && progress.total > 0 && (
-          <>
-            <Progress
-              value={(progress.done / progress.total) * 100}
-              className="ml-auto h-1 w-20 shrink-0"
-            />
-            <span className="shrink-0 tabular-nums">
-              {progress.done}/{progress.total}
-            </span>
-          </>
-        )}
-      </div>
-    );
+    return <SyncProgressDetails progress={progress} className={className} />;
   }
 
   if (!started) return null;
@@ -81,4 +61,14 @@ export function SyncProgressLine({ className }: { className?: string }) {
   }
 
   return null;
+}
+
+/** The shared live line accepts an explicitly owned run's progress. */
+export function SyncProgressDetails({ progress, className }: { progress: SyncProgress | null; className?: string }) {
+  const phase = progress?.phase ? (PHASE[progress.phase] ?? progress.phase) : null;
+  return <div className={cn("flex min-w-0 items-center gap-2 text-xs text-muted-foreground", className)} role="status">
+    <ArrowsClockwise size={13} className="shrink-0 animate-spin" />
+    <span className="min-w-0 truncate">{progress?.course ? `Syncing ${displayCode(progress.course)}${phase ? ` — ${phase}` : ""}` : "Syncing your subjects…"}</span>
+    {progress && progress.total > 0 && <><Progress value={progress.done / progress.total * 100} className="ml-auto h-1 w-20 shrink-0" /><span className="shrink-0 tabular-nums">{progress.done}/{progress.total}</span></>}
+  </div>;
 }

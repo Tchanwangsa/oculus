@@ -70,8 +70,8 @@ export async function addSyncRunFile(
   );
 }
 
-/** Recent runs, newest first, each with its file ledger rolled up. */
-export async function getSyncRunSummaries(limit = 50): Promise<SyncRunSummary[]> {
+/** Recent runs plus a linked run outside that window, with each file ledger rolled up. */
+export async function getSyncRunSummaries(limit = 50, includeId: number | null = null): Promise<SyncRunSummary[]> {
   const db = await getDb();
   return db.select<SyncRunSummary[]>(
     `SELECT r.*,
@@ -81,10 +81,11 @@ export async function getSyncRunSummaries(limit = 50): Promise<SyncRunSummary[]>
             COUNT(f.id)                              AS file_count
      FROM sync_runs r
      LEFT JOIN sync_run_files f ON f.run_id = r.id
+     WHERE r.id IN (SELECT id FROM sync_runs ORDER BY started_at DESC, id DESC LIMIT $1)
+        OR r.id = $2
      GROUP BY r.id
-     ORDER BY r.started_at DESC, r.id DESC
-     LIMIT $1`,
-    [limit],
+     ORDER BY r.started_at DESC, r.id DESC`,
+    [limit, includeId],
   );
 }
 

@@ -98,3 +98,16 @@ test("thread flush also waits for an Undo already in flight", async () => {
   await Promise.all([undo, flush]);
   expect(store.getState().rows["10.0"].status).toBe("undone");
 });
+
+
+test("a late job start response cannot erase the sync run identity event", async () => {
+  const response = deferred<Proposal>();
+  const store = createProposalStore(api({ start: async () => response.promise }));
+  store.getState().receive(row({ kind: "Sync", state: { subjects: ["CS101"] } }));
+  const starting = store.getState().act("10.0", "start");
+  await Promise.resolve();
+  store.getState().receive(row({ kind: "Sync", status: "created", state: { subjects: ["CS101"], job: { phase: "running", run_id: 42 } } }));
+  response.resolve(row({ kind: "Sync", status: "created", state: { subjects: ["CS101"], job: { phase: "running" } } }));
+  await starting;
+  expect(store.getState().rows["10.0"].state.job).toEqual({ phase: "running", run_id: 42 });
+});

@@ -41,6 +41,9 @@ export function createProposalStore(api: ProposalApi = proposalApi, delay = 300)
         if (row.status === "pending" && previous && previous.status !== "pending" && !undone) return;
         const phase = (state: ProposalState) => (state.job as { phase?: string } | undefined)?.phase;
         if (previous?.status === "created" && ["complete", "error"].includes(phase(previous.state) ?? "") && phase(row.state) === "running") return;
+        const runId = (state: ProposalState) => (state.job as { run_id?: number } | undefined)?.run_id;
+        // The start command's running snapshot can arrive after the run-id event.
+        if (previous?.status === "created" && phase(previous.state) === "running" && phase(row.state) === "running" && runId(previous.state) != null && runId(row.state) == null) return;
         if (row.status !== "pending") cancel(row.id);
         set((s) => {
           const drafts = { ...s.drafts };

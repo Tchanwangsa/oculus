@@ -3,7 +3,7 @@ use crate::harness::app::HarnessState;
 use serde_json::Value;
 use sqlx::Row;
 use tauri::{AppHandle, Listener, Manager};
-async fn lecture(app: &AppHandle, kind: &str, id: String) -> Result<(), String> {
+async fn lecture(app: &AppHandle, kind: &str, id: String) -> Result<String, String> {
     let event = if kind == "LectureChapters" {
         "lecture-chapters"
     } else {
@@ -12,6 +12,7 @@ async fn lecture(app: &AppHandle, kind: &str, id: String) -> Result<(), String> 
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let sender = std::sync::Mutex::new(Some(sender));
     let expected = id.clone();
+    let kind_is_chapters = kind == "LectureChapters";
     let listener = app.listen(event, move |event| {
         let Ok(payload) = serde_json::from_str::<Value>(event.payload()) else {
             return;
@@ -27,7 +28,20 @@ async fn lecture(app: &AppHandle, kind: &str, id: String) -> Result<(), String> 
                     .unwrap_or("lecture job failed")
                     .to_owned())
             } else {
-                Ok(())
+                Ok(if kind_is_chapters {
+                    format!(
+                        "{} chapters found",
+                        payload["chapters"].as_u64().unwrap_or(0)
+                    )
+                } else if let Some(seconds) = payload["seconds"].as_u64() {
+                    format!(
+                        "Lecture content ends at {}:{:02}",
+                        seconds / 60,
+                        seconds % 60
+                    )
+                } else {
+                    "No lecture end found".into()
+                })
             };
             let _ = sender.send(result);
         }
@@ -51,40 +65,54 @@ async fn lecture(app: &AppHandle, kind: &str, id: String) -> Result<(), String> 
     result
 }
 
-pub(super) async fn run(app: &AppHandle, kind: &str, state: &Value) -> Result<(), String> {
+pub(super) async fn run(
+    app: &AppHandle,
+    proposal_id: &str,
+    kind: &str,
+    state: &Value,
+) -> Result<String, String> {
     match kind {
         "Transcribe" => {
             crate::transcribe::app::transcribe_video(app.clone(), text(state, "file")?.into())
                 .await
-                .map(|_| ())
+                .map(|_| "Transcript saved".into())
         }
         "LectureChapters" | "LectureEnd" => {
             lecture(app, kind, text(state, "lecture")?.into()).await
         }
-        "Download" => match text(state, "item")? {
-            "aligner" => {
-                crate::studio::commands::aligner::studio_aligner_download(app.clone()).await
-            }
-            "voices" => {
-                crate::studio::commands::kokoro::studio_voice_packs_download(app.clone()).await?;
-                for id in ["af_heart", "am_michael"] {
+        "Download" => {
+            let item = text(state, "item")?;
+            match item {
+                "aligner" => {
+                    crate::studio::commands::aligner::studio_aligner_download(app.clone()).await
+                }
+                "voices" => {
+                    crate::studio::commands::kokoro::studio_voice_packs_download(app.clone())
+                        .await?;
+                    for id in ["af_heart", "am_michael"] {
+                        crate::studio::commands::voice_files::studio_voice_download(
+                            app.clone(),
+                            id.into(),
+                        )
+                        .await?;
+                    }
+                    Ok(())
+                }
+                id => {
                     crate::studio::commands::voice_files::studio_voice_download(
                         app.clone(),
                         id.into(),
                     )
-                    .await?;
-                }
-                Ok(())
-            }
-            id => {
-                crate::studio::commands::voice_files::studio_voice_download(app.clone(), id.into())
                     .await
+                }
             }
-        },
+            .map(|()| format!("{item} downloaded"))
+        }
         "Reparse" => reparse(strings(state, "files")?).await,
         "Sync" => {
             sync(
                 app.clone(),
+                proposal_id,
                 strings(state, "subjects")?,
                 state
                     .get("lectures")
@@ -97,8 +125,9 @@ pub(super) async fn run(app: &AppHandle, kind: &str, state: &Value) -> Result<()
     }
 }
 
-async fn reparse(files: Vec<String>) -> Result<(), String> {
+async fn reparse(files: Vec<String>) -> Result<String, String> {
     let pool = crate::db::store::open_pool().await?;
+    let count = files.len();
     for rel in files {
         let row = sqlx::query("SELECT id,subject_id FROM files WHERE relative_path=?1")
             .bind(&rel)
@@ -122,10 +151,15 @@ async fn reparse(files: Vec<String>) -> Result<(), String> {
         .await?;
         crate::pages::retrieval::commands::embed_file(file, subject, rel, Some(false)).await?;
     }
-    Ok(())
+    Ok(format!("{count} files parsed and embedded"))
 }
 
-async fn sync(app: AppHandle, codes: Vec<String>, lectures: bool) -> Result<(), String> {
+async fn sync(
+    app: AppHandle,
+    proposal_id: &str,
+    codes: Vec<String>,
+    lectures: bool,
+) -> Result<String, String> {
     let pool = crate::db::store::open_pool().await?;
     let subjects = crate::db::store::subjects(&pool).await?;
     let mut targets = Vec::new();
@@ -152,5 +186,41 @@ async fn sync(app: AppHandle, codes: Vec<String>, lectures: bool) -> Result<(), 
             code: selected.code.clone(),
         });
     }
-    crate::sync::scrape::confirmed(app, targets, lectures).await
+    let counts = std::sync::Arc::new(std::sync::Mutex::new((0_u64, 0_u64)));
+    let mut listener = None;
+    let app_ref = &app;
+    let counts_ref = &counts;
+    let listener_ref = &mut listener;
+    let result =
+        crate::sync::scrape::confirmed(app.clone(), targets, lectures, |run_id| async move {
+            let app = app_ref;
+            super::lifecycle::record_run(app, proposal_id, run_id).await?;
+            let counts = counts_ref.clone();
+            *listener_ref = Some(app.listen("scrape-file", move |event| {
+                let Ok(file) = serde_json::from_str::<Value>(event.payload()) else {
+                    return;
+                };
+                if file["action"] != "new" {
+                    return;
+                }
+                let mut counts = counts.lock().unwrap();
+                if file["category"] == "ed" {
+                    counts.1 += 1;
+                } else {
+                    counts.0 += 1;
+                }
+            }));
+            Ok(())
+        })
+        .await;
+    if let Some(listener) = listener {
+        app.unlisten(listener);
+    }
+    result?;
+    let (files, threads) = *counts.lock().unwrap();
+    Ok(if lectures {
+        "Lecture lists refreshed".into()
+    } else {
+        format!("{files} new files, {threads} new Ed threads")
+    })
 }

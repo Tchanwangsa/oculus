@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CaretRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import type { SyncRunSummary } from "@/lib/db";
@@ -20,13 +20,30 @@ const PAGE_SIZE = 25;
 export function SyncHistoryTable({
   runs,
   progress,
+  focusRunId = null,
 }: {
   runs: SyncRunSummary[];
   progress: SyncProgress | null;
+  focusRunId?: number | null;
 }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
   const { page, pageCount, setPage, pageRows } = usePagedRows(runs, PAGE_SIZE);
+
+  const focusIndex = runs.findIndex((run) => run.id === focusRunId);
+  useEffect(() => {
+    if (focusRunId == null || focusIndex < 0) return;
+    setPage(Math.floor(focusIndex / PAGE_SIZE) + 1);
+    setExpanded((previous) => new Set(previous).add(focusRunId));
+    setCollapsedDays(new Set());
+  }, [focusRunId, focusIndex, setPage]);
+  const scrolledRun = useRef<number | null>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focusRunId == null || scrolledRun.current === focusRunId) return;
+    const row = rowsRef.current?.querySelector(`[data-sync-run="${focusRunId}"]`);
+    if (row) { row.scrollIntoView({ block: "nearest" }); scrolledRun.current = focusRunId; }
+  }, [focusRunId, pageRows]);
 
   const toggle = (id: number) =>
     setExpanded((prev) => {
@@ -54,7 +71,7 @@ export function SyncHistoryTable({
       empty={runs.length === 0 && "No sync runs yet — pick your subjects above and run one."}
       pagination={{ page, pageCount, onPage: setPage, total: runs.length, unit: "sync run" }}
     >
-      <div className="divide-y divide-border-subtle">
+      <div ref={rowsRef} className="divide-y divide-border-subtle">
         {groupByDay(pageRows).map((group) => {
           const collapsed = collapsedDays.has(group.key);
           return (

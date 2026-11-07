@@ -48,7 +48,7 @@ pub async fn canvas_download_video(
         };
         let engine = Engine::new(
             &crate::library::paths::data_dir(),
-            Box::new(AppReporter { app: app.clone(), cancel: Arc::new(AtomicBool::new(false)) }),
+            Box::new(AppReporter { app: app.clone(), cancel: Arc::new(AtomicBool::new(false)), run_id: None }),
         );
         let result = engine.download_video(
             &Subject { id: subject_id, code: subject_code },

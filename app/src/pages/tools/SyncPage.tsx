@@ -1,6 +1,7 @@
+import { useSearchParams } from "react-router-dom";
 import { useStoredState } from "@/hooks/ui/useStoredState";
 import { useTabActive } from "@/components/tabs/TabContext";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { WarningCircle, XCircle, Broom, Play } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,9 @@ import { useSyncBoot } from "./sync/useSyncBoot";
 import { useSyncEvents } from "./sync/useSyncEvents";
 
 export default function SyncPage() {
+  const [search] = useSearchParams();
+  const requestedRun = Number(search.get("run"));
+  const focusRunId = Number.isSafeInteger(requestedRun) && requestedRun > 0 ? requestedRun : null;
   const { status: authStatus, error: authError, connect } = useAuth();
   const institution = useInstitution();
   const active = useTabActive();
@@ -34,6 +38,8 @@ export default function SyncPage() {
   const [view, setView] = useStoredState<ActivityView>(VIEW_KEY, (stored) =>
     stored === "pipeline" ? "pipeline" : "history",
   );
+
+  useEffect(() => { if (focusRunId != null) setView("history"); }, [focusRunId, setView]);
 
   // Sync progress lives in the global store (survives navigation).
   const scraping = useSyncStore((s) => s.scraping);
@@ -47,7 +53,7 @@ export default function SyncPage() {
   const clearFinished = usePipelineStore((s) => s.clearFinished);
 
   const { subjects, selectedIds, setSelectedIds, runs, setRuns, loadFromDb, requestSeed, activeRef } =
-    useSyncBoot(active, scraping);
+    useSyncBoot(active, scraping, focusRunId);
 
   const items = useMemo(() => Object.values(pipelineItems), [pipelineItems]);
   const counts = useMemo(() => countPhases(items, embedStage), [items, embedStage]);
@@ -258,7 +264,7 @@ export default function SyncPage() {
 
       <div className="flex-1 min-h-0">
         {view === "history" ? (
-          <SyncHistoryTable runs={runs} progress={progress} />
+          <SyncHistoryTable runs={runs} progress={progress} focusRunId={focusRunId} />
         ) : (
           <PipelineTable items={items} onResume={resumeItem} onSkip={skipItem} />
         )}
