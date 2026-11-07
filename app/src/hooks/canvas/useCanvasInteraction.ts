@@ -1,3 +1,4 @@
+import { measureCanvas, traceCanvas } from '@/lib/canvas/diagnostics';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type MouseEvent, type ClipboardEvent } from 'react';
 import { LABELLED_TYPES, type CanvasDocument, type CanvasElement, type CanvasTool, type CanvasViewport, type Point } from '@/lib/canvas/model';
 import { boundsContain, elementBounds, pointInBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/canvas/geometry';
@@ -198,7 +199,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
 
   const redraw = useCallback(() => {
     if (frame.current) return;
-    frame.current = requestAnimationFrame(() => {
+    frame.current = requestAnimationFrame(() => measureCanvas('canvas.paint', () => {
       frame.current = 0;
       const context = canvas.current?.getContext('2d');
       if (!context) return;
@@ -207,7 +208,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
         selectionColor: getComputedStyle(root.current!).getPropertyValue('--color-brand').trim() || '#5e6ad2',
         marquee: marquee.current ?? regionRef.current?.bounds, captureSelection: regionRef.current?.kind === 'capture' || gesture.current?.mode === 'capture', captureGhost: captureGhost.current, cropSource: regionRef.current?.source ? elementBounds(regionRef.current.source) : undefined, overrides: overrides.current, bindingHint: bindHint.current,
       });
-    });
+    }, { elements: documentRef.current.elements.length, overrides: overrides.current.size }));
   }, []);
 
   const choose = useCallback((ids: Iterable<string>) => {
@@ -497,7 +498,9 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       setCaptureHold({ point: active.start, phase: 'lifted' }); setResizeCursor('grabbing'); redraw();
     }, CAPTURE_LIFT_DELAY_MS);
   };
+  useEffect(() => { traceCanvas('tool.committed', { tool }); }, [tool]);
   const chooseTool = (next: CanvasTool) => {
+    traceCanvas('tool.request', { previous: tool, next, gesture: gesture.current?.mode ?? 'none' });
     if (next === 'crop') { startCrop(); return; }
     if (regionRef.current) { cancelGesture(); updateRegion(null); }
     if (next === 'eraser' && tool !== 'eraser') previousTool.current = tool;
@@ -517,7 +520,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     try { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   };
   /** Drops the gesture's preview without committing it; the scene was never changed during the gesture. */
-  const dropGesture = () => { clearCaptureHold(); captureGhost.current = undefined; gesture.current = null; overrides.current.clear(); marquee.current = undefined; bindHint.current = null; };
+  const dropGesture = () => { traceCanvas('gesture.drop', { gesture: gesture.current?.mode ?? 'none' }); clearCaptureHold(); captureGhost.current = undefined; gesture.current = null; overrides.current.clear(); marquee.current = undefined; bindHint.current = null; };
   /** Commits the preview unchanged so lifting the pointer preserves the ink already drawn. */
   const commitGesture = () => commitChanges(new Map(overrides.current));
   const eraseAt = (elements: CanvasElement[], point: Point) => {
@@ -526,6 +529,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (id) previewChanges(new Map([[id, null]]));
   };
   const pointerDown = (event: PointerEvent<HTMLCanvasElement>, recoveringContact = false) => {
+    traceCanvas('gesture.down', { tool, pointerId: event.pointerId, pointerType: event.pointerType, recoveringContact, gesture: gesture.current?.mode ?? 'none', penSeen: penSeen.current, touches: touchViewport.current.count });
     if (!recoveringContact && event.button !== 0 && event.button !== 1) return;
     if (!recoveringContact) refusedPointer.current = null;
     if (event.pointerType === 'pen') {
@@ -550,7 +554,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
         dropGesture(); redraw(); return;
       }
     } else if (touchViewport.current.active) { event.preventDefault(); return; }
-    if (gesture.current || textDraft) return;
+    if (gesture.current || textDraft) { traceCanvas('input.ignored', { reason: textDraft ? 'text-draft' : 'active-gesture', gesture: gesture.current?.mode ?? 'none' }); return; }
     event.preventDefault();
     // WebKit can paste at a contenteditable's retained caret despite the canvas having DOM focus.
     globalThis.window?.getSelection()?.removeAllRanges();
@@ -752,6 +756,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     return true;
   };
   const pointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
+    traceCanvas('gesture.up', { tool, pointerId: event.pointerId, gesture: gesture.current?.mode ?? 'none', gesturePointerId: gesture.current?.pointerId ?? -1 });
     if (refusedPointer.current === event.pointerId) refusedPointer.current = null;
     if (endTouch(event)) return;
     const active = gesture.current;
@@ -811,6 +816,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     dropGesture(); marquee.current = regionRef.current?.bounds; redraw();
   };
   const pointerCancel = (event: PointerEvent<HTMLCanvasElement>) => {
+    traceCanvas('gesture.cancel', { tool, pointerId: event.pointerId, gesture: gesture.current?.mode ?? 'none' });
     if (refusedPointer.current === event.pointerId) refusedPointer.current = null;
     if (endTouch(event)) return;
     // Only the contact that owns the gesture cancels it; a palm's cancel leaves the pen's stroke alone.
@@ -1023,7 +1029,9 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     region, startCrop, cancelRegion, completeRegion, copyRegion, duplicateRegion, captureHold, regionCopyState, regionError,
     canCrop: selection.length === 1 && documentRef.current.elements.some(item => selected.current.has(item.id) && item.type === 'image' && !isLocked(item)),
     textDraft, commitText, editText: (text: string) => { draftValue.current = text; },
-    pointerDown: (event: PointerEvent<HTMLCanvasElement>) => pointerDown(event), pointerMove, pointerUp, pointerCancel, cancelGesture,
+    pointerDown: (event: PointerEvent<HTMLCanvasElement>) => measureCanvas('handler.pointerdown', () => pointerDown(event)),
+    pointerMove: (event: PointerEvent<HTMLCanvasElement>) => measureCanvas('handler.pointermove', () => pointerMove(event), { tool, gesture: gesture.current?.mode ?? 'none' }),
+    pointerUp: (event: PointerEvent<HTMLCanvasElement>) => measureCanvas('handler.pointerup', () => pointerUp(event)), pointerCancel, cancelGesture,
     pointerLeave: () => { setResizeCursor(null); if (!gesture.current && bindHint.current) { bindHint.current = null; redraw(); } }, doubleClick, keyDown, copy, cut: (event: ClipboardEvent<HTMLDivElement>) => copy(event, true), paste,
     keyUp: (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === ' ') setSpace(false); },
     blur: () => setSpace(false), cursor: space || tool === 'hand' ? 'grab' : tool === 'select' || tool === 'crop' || (tool === 'capture' && region) ? resizeCursor ?? 'default' : tool === 'text' ? 'text' : 'crosshair',

@@ -19,7 +19,7 @@ export function preventCanvasChromeSelection(event: Event): void {
   if (!isCanvasTextEditorTarget(event.target)) event.preventDefault();
 }
 
-/** Suppress native Safari canvas touch defaults; drawing uses Pointer Events.
+/** Suppress native Safari canvas touch and gesture defaults; drawing uses Pointer Events.
  * Restricting this to the canvas preserves toolbar clicks and text editor controls.
  */
 export function preventNativeCanvasTouch(event: Event): void {
@@ -27,20 +27,25 @@ export function preventNativeCanvasTouch(event: Event): void {
 }
 
 /** Scope to the canvas app shell, alongside user-select/touch-callout CSS.
- * Touch cancellation is confined to the actual canvas. Events continue propagating,
+ * Touch and native gesture cancellation is confined to the actual canvas. Events continue propagating,
  * and the drawing/pan handlers continue to consume Pointer Events normally.
  */
-export function installBrowserSelectionGuard(root: HTMLElement): () => void {
+export function installBrowserSelectionGuard(root: HTMLElement, { suppressNativeGestures = false, touchEventRoot = root }: { suppressNativeGestures?: boolean; touchEventRoot?: HTMLElement } = {}): () => void {
   root.addEventListener('selectstart', preventCanvasChromeSelection, true);
   root.addEventListener('contextmenu', preventCanvasChromeSelection, true);
-  root.addEventListener('touchstart', preventNativeCanvasTouch, { capture: true, passive: false });
-  root.addEventListener('touchmove', preventNativeCanvasTouch, { capture: true, passive: false });
-  root.addEventListener('touchend', preventNativeCanvasTouch, { capture: true, passive: false });
+  // A body listener gives the companion a stable touch region across canvas repaints.
+  const touch = (event: Event) => {
+    const target = targetElement(event.target);
+    if (touchEventRoot === root || (target && root.contains(target))) preventNativeCanvasTouch(event);
+  };
+  for (const type of ['touchstart', 'touchmove', 'touchend']) touchEventRoot.addEventListener(type, touch, { capture: true, passive: false });
+  // The companion owns native gestures; desktop WebKit needs them for trackpad zoom.
+  const nativeGestures = suppressNativeGestures ? ['gesturestart', 'gesturechange', 'gestureend'] : [];
+  for (const type of nativeGestures) root.addEventListener(type, preventNativeCanvasTouch, { capture: true, passive: false });
   return () => {
     root.removeEventListener('selectstart', preventCanvasChromeSelection, true);
     root.removeEventListener('contextmenu', preventCanvasChromeSelection, true);
-    root.removeEventListener('touchstart', preventNativeCanvasTouch, true);
-    root.removeEventListener('touchmove', preventNativeCanvasTouch, true);
-    root.removeEventListener('touchend', preventNativeCanvasTouch, true);
+    for (const type of ['touchstart', 'touchmove', 'touchend']) touchEventRoot.removeEventListener(type, touch, true);
+    for (const type of nativeGestures) root.removeEventListener(type, preventNativeCanvasTouch, true);
   };
 }

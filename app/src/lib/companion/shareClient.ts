@@ -1,8 +1,9 @@
+import { measureCanvas, traceCanvas } from "@/lib/canvas/diagnostics";
 import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, type CanvasTransaction } from "@/lib/canvas/collaboration";
 import { clientPendingTransactions, containsClientTransaction, reconcileClientDocument } from "@/lib/canvas/clientReconciliation";
 import { parseCanvasDocument, serializeCanvasDocument, type CanvasDocument } from "@/lib/canvas/model";
 import { ShareApi, ShareHttpError } from "./api";
-import { clearRecovery, readDraft, readRecovery, writeDraft, writeRecovery, type ShareDraftRecord, type ShareRecovery } from "./drafts";
+import { clearRecovery, readDraft, readRecovery, writeDraft, writeDrawingDraft, writeRecovery, LatestWriter, type ShareOpRecord, type ShareDraftRecord, type ShareRecovery } from "./drafts";
 import { backoffDelay, type ShareClientEnv, type ShareLifecycleEvent, type WebSocketLike } from "./env";
 import { redactSecret, type ShareCredentials } from "./link";
 import { parseFrame, type ServerFrame, type ShareAck, type ShareKind, type ShareOp, type ShareSnapshot } from "./protocol";
@@ -45,7 +46,7 @@ export interface ShareClientState {
 export interface ShareClientOptions {
   /** No frame for this long means the socket is dead (the server pings every 20 s). */
   deadManMs?: number;
-  /** Debounce for writing the draft after an edit. */
+  /** Debounce for writing the operation record after an edit. */
   persistDelayMs?: number;
 }
 
@@ -110,13 +111,19 @@ export class ShareClient {
   private pumping = false;
   private pumpAgain = false;
   private persistTimer: unknown = null;
-  private persistence: Promise<void> = Promise.resolve();
-  private persistVersion = 0;
+  private draftTimer: unknown = null;
+  private recoveryPersistence: Promise<void> = Promise.resolve();
+  private readonly opWriter: LatestWriter<ShareOpRecord>;
+  private readonly draftWriter: LatestWriter<ShareRecovery | null>;
+  private opStorageFailed = false;
+  private draftStorageFailed = false;
+  private savedAt = 0;
   private restored: ShareDraftRecord | null = null;
   private restoring: Promise<void> | null = null;
 
   private lastError: string | null = null;
   private storageWarning: string | null = null;
+  private tracedState = "";
   private recovery: ShareRecovery | null = null;
   private started = false;
   private disposed = false;
@@ -128,6 +135,14 @@ export class ShareClient {
     this.api = new ShareApi(env.origin, credentials.shareId, credentials.secret, env.fetch);
     this.deadManMs = options.deadManMs ?? 45_000;
     this.persistDelayMs = options.persistDelayMs ?? 400;
+    this.opWriter = new LatestWriter(record => writeDraft(env.storage, credentials.shareId, record), kept => {
+      this.opStorageFailed = !kept;
+      this.updateStorageWarning();
+    });
+    this.draftWriter = new LatestWriter(record => writeDrawingDraft(env.storage, credentials.shareId, record), kept => {
+      this.draftStorageFailed = !kept;
+      this.updateStorageWarning();
+    });
     this.clientId = env.newId();
     this.state = this.compute();
   }
@@ -150,12 +165,13 @@ export class ShareClient {
     return this.restoring ??= Promise.all([
       readDraft(this.env.storage, this.credentials.shareId),
       readRecovery(this.env.storage, this.credentials.shareId),
-    ]).then(([record, recovery]) => { this.restored = record; this.recovery = recovery; });
+    ]).then(([record, recovery]) => { this.restored = record; this.savedAt = Math.max(record?.savedAt ?? 0, record?.draftSavedAt ?? 0); this.recovery = recovery; });
   }
 
   dispose(): void {
     if (this.disposed) return;
-    this.persistNow();
+    void this.persistNow();
+    void this.persistDraft();
     this.disposed = true;
     this.stopLifecycle?.();
     this.closeSocket();
@@ -171,6 +187,7 @@ export class ShareClient {
     if (this.inflight) this.dirty = true;
     this.publish();
     this.schedulePersist();
+    this.scheduleDraft();
     void this.pump();
   }
 
@@ -188,6 +205,7 @@ export class ShareClient {
     this.lastError = null;
     this.local = { ...this.canonical, viewport: this.local?.viewport ?? this.canonical.viewport };
     this.persistNow();
+    void this.persistDraft();
     this.publish();
     void this.pump();
   }
@@ -201,7 +219,7 @@ export class ShareClient {
 
   dismissRecovery(): void {
     this.recovery = null;
-    this.persistence = this.persistence.then(() => clearRecovery(this.env.storage, this.credentials.shareId));
+    this.recoveryPersistence = this.recoveryPersistence.then(() => clearRecovery(this.env.storage, this.credentials.shareId));
     this.publish();
   }
 
@@ -241,6 +259,11 @@ export class ShareClient {
   private publish(): void {
     if (this.disposed) return;
     this.state = this.compute();
+    const marker = `${this.state.status}:${this.revision}:${this.state.pendingOps}:${!!this.storageWarning}`;
+    if (marker !== this.tracedState) {
+      this.tracedState = marker;
+      traceCanvas('share.state', { status: this.state.status, revision: this.revision, pendingOps: this.state.pendingOps, blocked: !!this.conflict || this.ended, storageWarning: !!this.storageWarning });
+    }
     for (const listener of this.listeners) listener();
   }
 
@@ -260,7 +283,7 @@ export class ShareClient {
   }
 
   private onLifecycle(event: ShareLifecycleEvent): void {
-    if (event === "pagehide") { this.persistNow(); return; }
+    if (event === "pagehide" || event === "hidden") { this.persistNow(); void this.persistDraft(); return; }
     if (this.ended || this.disposed) return;
     const silent = this.socket !== null && this.env.clock.now() - this.lastFrame >= this.deadManMs;
     if (silent) this.closeSocket();
@@ -305,6 +328,7 @@ export class ShareClient {
     this.closeSocket();
     this.clearRetry();
     this.persistNow();
+    void this.persistDraft();
     this.publish();
   }
 
@@ -345,13 +369,14 @@ export class ShareClient {
     this.revision = this.announced = snapshot.revision;
     this.everLoaded = true;
     const record = this.restored;
+    const draft = record ? this.restoredDrawing(record, document, snapshot) : null;
     if (record && record.epoch === snapshot.epoch) {
       this.clientId = record.clientId;
       this.nextSeq = record.seqFloor;
       this.inflight = record.inflight;
-      if (record.draft && (record.conflict || (!record.pending && !record.inflight))) {
+      if (draft && (record.conflict || (!record.pending && !record.inflight))) {
         this.setConflict(record.conflict ?? "This device has a kept draft. Download it or use the shared canvas.");
-        try { this.local = parseCanvasDocument(record.draft); } catch { /* keep the shared canvas */ }
+        try { this.local = parseCanvasDocument(draft); } catch { /* keep the shared canvas */ }
       } else if (record.pending || (record.inflight && record.afterInflight !== undefined)) {
         try {
           const seen = record.inflightRevision !== undefined && record.inflightRevision <= snapshot.revision;
@@ -366,13 +391,13 @@ export class ShareClient {
         }
         catch (error) {
           this.setConflict((error as Error).message);
-          if (record.draft) try { this.local = parseCanvasDocument(record.draft); } catch { /* keep the shared canvas */ }
+          if (draft) try { this.local = parseCanvasDocument(draft); } catch { /* keep the shared canvas */ }
         }
       }
-    } else if (record?.draft) {
-      this.recovery = { epoch: record.epoch, draft: record.draft, savedAt: record.savedAt };
+    } else if (record && draft) {
+      this.recovery = { epoch: record.epoch, draft, savedAt: record.savedAt };
       const recovery = this.recovery;
-      this.persistence = this.persistence.then(async () => {
+      this.recoveryPersistence = this.recoveryPersistence.then(async () => {
         if (!await writeRecovery(this.env.storage, this.credentials.shareId, recovery)) {
           this.storageWarning = STORAGE_FAILED;
           this.publish();
@@ -380,6 +405,8 @@ export class ShareClient {
       });
     }
     this.persistNow();
+    if (this.conflict) void this.persistDraft();
+    else this.scheduleDraft();
     this.publish();
   }
 
@@ -387,7 +414,25 @@ export class ShareClient {
   private restoreEndedDraft(): void {
     const record = this.restored;
     if (!record?.draft || this.local) return;
-    try { this.local = parseCanvasDocument(record.draft); this.epoch = record.epoch; } catch { /* nothing to offer */ }
+    try {
+      const stored = parseCanvasDocument(record.draft);
+      this.local = parseCanvasDocument(this.restoredDrawing(record, stored)!);
+      this.epoch = record.epoch;
+    } catch { /* nothing to offer */ }
+  }
+
+  private restoredDrawing(record: ShareDraftRecord, snapshotDoc: CanvasDocument, snapshot?: ShareSnapshot): string | null {
+    if ((record.draftSavedAt ?? 0) < record.savedAt && (record.pending || record.inflight)) {
+      // Operation records can be newer than the debounced drawing; rebuild before using the fallback.
+      try {
+        const seen = snapshot?.epoch === record.epoch && record.inflightRevision !== undefined && record.inflightRevision <= snapshot.revision;
+        const pending = record.inflight && record.afterInflight !== undefined
+          ? [...(!seen ? [record.inflight.transaction] : []), ...(record.afterInflight ? [record.afterInflight] : [])]
+          : record.pending ? [record.pending] : record.inflight ? [record.inflight.transaction] : [];
+        return JSON.stringify(reconcileClientDocument(snapshotDoc, pending, snapshotDoc));
+      } catch { /* retain the last complete drawing if the snapshot cannot accept these edits */ }
+    }
+    return record.draft;
   }
 
   private openSocket(): void {
@@ -504,6 +549,10 @@ export class ShareClient {
 
   /** Keeps this device's edits (the difference from `before`) on top of the new shared canvas. */
   private rebase(before: CanvasDocument, own = false): void {
+    measureCanvas('share.rebase', () => this.rebaseContent(before, own), { revision: this.revision, own });
+  }
+
+  private rebaseContent(before: CanvasDocument, own = false): void {
     if (!this.local || !this.canonical) return;
     if (this.conflict) { this.publish(); return; }
     try {
@@ -511,10 +560,11 @@ export class ShareClient {
       const pending = clientPendingTransactions(before, this.local, inflight);
       const next = reconcileClientDocument(this.canonical, own && inflight ? pending.slice(1) : pending, this.local);
       if (own && this.inflight) this.inflightSeen = true;
-      if (next !== this.local) { this.local = next; this.schedulePersist(); }
+      if (next !== this.local) { this.local = next; this.schedulePersist(); this.scheduleDraft(); }
     } catch (error) {
       this.setConflict((error as Error).message);
       this.persistNow();
+      void this.persistDraft();
     }
     this.publish();
   }
@@ -629,7 +679,8 @@ export class ShareClient {
   private send(op: ShareOp): Promise<ShareAck> {
     const controller = new AbortController();
     const timer = this.env.clock.setTimeout(() => controller.abort(), commitTimeout(op));
-    return this.api.commit(op, controller.signal).finally(() => this.env.clock.clearTimeout(timer));
+    traceCanvas("share.commit-start", { seq: op.seq, edits: op.transaction.edits.length });
+    return this.api.commit(op, controller.signal).finally(() => traceCanvas("share.commit-finish", { seq: op.seq })).finally(() => this.env.clock.clearTimeout(timer));
   }
 
   /** Decides what a refused or unanswered commit means; true sends again at once. */
@@ -663,6 +714,7 @@ export class ShareClient {
         // conflict-*, invalid, too-large: this draft cannot be shared as it is.
         this.setConflict(error.message);
         this.persistNow();
+        void this.persistDraft();
         this.publish();
         // The server holds something newer than this page has seen.
         if (error.code.startsWith("conflict-")) void this.catchUp(true);
@@ -684,41 +736,59 @@ export class ShareClient {
   }
 
   private persistNow(): Promise<void> {
+    return measureCanvas('share.persist-operations', () => this.persistOperations());
+  }
+
+  private persistOperations(): Promise<void> {
     if (this.persistTimer !== null) { this.env.clock.clearTimeout(this.persistTimer); this.persistTimer = null; }
-    if (this.disposed || !this.epoch) return this.persistence;
+    if (this.disposed || !this.epoch) return Promise.resolve();
     const unconfirmed = this.unconfirmed();
     let pending: CanvasTransaction | null = null;
     let afterInflight: CanvasTransaction | null | undefined;
-    if (unconfirmed && this.canonical && this.local && !this.conflict) {
+    if (unconfirmed && this.canonical && this.local) {
       const transaction = diffCanvasContent(this.canonical, this.local);
       pending = hasCanvasChanges(transaction) ? transaction : null;
-      if (this.inflight) {
+      if (this.inflight && !this.conflict) {
         // Keep the undo separately even when the aggregate pending diff is empty.
         const base = this.inflightSeen ? this.canonical : applyCanvasTransaction(this.canonical, this.inflight.transaction);
         const after = diffCanvasContent(base, this.local);
         afterInflight = hasCanvasChanges(after) ? after : null;
       }
     }
-    let draft: string | null = null;
-    if (unconfirmed && this.local) {
-      try { draft = serializeCanvasDocument(this.local); } catch { draft = null; }
-    }
-    const record: ShareDraftRecord = {
+    const record: ShareOpRecord = {
       v: 1, epoch: this.epoch, clientId: this.clientId,
       seqFloor: this.inflight ? Math.max(this.nextSeq, this.inflight.seq + 1) : this.nextSeq,
       inflight: this.inflight, pending, afterInflight,
       ...(this.inflight && this.inflightSeen ? { inflightRevision: this.revision } : {}),
       ...(this.conflict ? { conflict: this.conflict } : {}),
-      draft, savedAt: this.env.clock.now(),
+      savedAt: this.saveTime(),
     };
-    const version = ++this.persistVersion;
-    this.persistence = this.persistence.then(async () => {
-      const kept = await writeDraft(this.env.storage, this.credentials.shareId, record);
-      if (version !== this.persistVersion) return;
-      const warning = !this.unconfirmed() || kept ? null : STORAGE_FAILED;
-      if (warning !== this.storageWarning) { this.storageWarning = warning; this.publish(); }
-    });
-    return this.persistence;
+    return this.opWriter.store(record);
+  }
+
+  private saveTime(): number {
+    return this.savedAt = Math.max(this.env.clock.now(), this.savedAt + 1);
+  }
+
+  private scheduleDraft(): void {
+    if (this.draftTimer !== null) this.env.clock.clearTimeout(this.draftTimer);
+    if (this.disposed) return;
+    this.draftTimer = this.env.clock.setTimeout(() => { this.draftTimer = null; void this.persistDraft(); }, 3000);
+  }
+
+  private persistDraft(): Promise<void> {
+    if (this.draftTimer !== null) { this.env.clock.clearTimeout(this.draftTimer); this.draftTimer = null; }
+    if (this.disposed || !this.epoch) return Promise.resolve();
+    let record: ShareRecovery | null = null;
+    if (this.unconfirmed() && this.local) {
+      record = { epoch: this.epoch, savedAt: this.saveTime(), draft: measureCanvas("share.serialize-drawing", () => JSON.stringify(this.local)) };
+    }
+    return this.draftWriter.store(record);
+  }
+
+  private updateStorageWarning(): void {
+    const warning = this.unconfirmed() && (this.opStorageFailed || this.draftStorageFailed) ? STORAGE_FAILED : null;
+    if (warning !== this.storageWarning) { this.storageWarning = warning; this.publish(); }
   }
 }
 

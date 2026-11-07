@@ -520,7 +520,18 @@ focus and clears retained DOM selections, so WebKit cannot send clipboard
 commands to a chat's old contenteditable caret. Drawing gestures capture
 the active pointer and suppress WebKit text selection: `installBrowserSelectionGuard`
 on the canvas root cancels `selectstart` and `contextmenu` outside text fields and
-the native touch defaults on the canvas element itself, which is not draggable.
+native touch defaults on the drawing element. In the companion these touch
+listeners attach to the page body, with a target check for this surface's canvas,
+so touch tracking covers a stable ancestor across canvas repaints. Toolbar taps
+and other surfaces keep their defaults. The desktop listeners stay on the editor
+root. The companion opts into
+`suppressNativeGestures` on `CanvasSurface`: Safari's `gesturestart`,
+`gesturechange` and `gestureend` defaults are cancelled there so native
+pinch/rotation does not compete with the Pointer Events camera. The desktop
+leaves those events alone for WebKit trackpad zoom. This suppresses
+browser tap gestures while Pointer Events keep driving drawing,
+pan and pinch. Toolbar taps and text fields keep their native defaults. The
+canvas and editor also declare `touch-action: none`; the canvas is not draggable.
 
 PNG and SVG export cover the whole drawing with padding, excluding editor
 chrome, selection, binding hints and grid. The surface saves an export and

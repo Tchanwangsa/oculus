@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { createCanvasDocument, type CanvasElement } from '../../../src/lib/canvas/model';
 import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, sameValue } from '../../../src/lib/canvas/collaboration';
 import { reconcileClientDocument } from '../../../src/lib/canvas/clientReconciliation';
@@ -8,6 +8,19 @@ const empty = createCanvasDocument();
 const scene = (...elements: CanvasElement[]) => ({ ...empty, elements });
 
 describe('shared drawing transactions', () => {
+  test('a stroke on a PDF-sized drawing serializes only the changed element', () => {
+    const image: CanvasElement = { ...shape('page'), type: 'image', dataUrl: 'data:image/png;base64,' + 'A'.repeat(5 * 1024 * 1024), naturalWidth: 1, naturalHeight: 1 };
+    const original = scene(image);
+    const stroke: CanvasElement = { ...shape('ink'), type: 'freedraw', points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] };
+    const stringify = spyOn(JSON, 'stringify');
+    try {
+      const result = applyCanvasTransaction(original, { edits: [{ id: stroke.id, before: null, after: stroke }] });
+      expect(result.elements[0]).toBe(image);
+      expect(result.elements[1]).toBe(stroke);
+      expect(stringify.mock.calls.length).toBe(1);
+      for (const call of stringify.mock.results) expect((call.value as string).length).toBeLessThan(100_000);
+    } finally { stringify.mockRestore(); }
+  });
   test('simultaneous additions based on the same snapshot survive in either arrival order', () => {
     const a = diffCanvasContent(empty, scene(shape('alice'))), b = diffCanvasContent(empty, scene(shape('bob')));
     for (const transactions of [[a, b], [b, a]]) {

@@ -247,10 +247,15 @@ both tabs use loopback.
 
 The browser keeps unconfirmed edits, the in-flight operation identity and a
 complete drawing for download in IndexedDB, scoped to the page origin and share
-ID. LocalStorage records migrate only after the IndexedDB transaction commits.
-Embedded PDF pages stay in the recovery record; there is no small character
-limit that drops them. Writes run in order, and an operation is recorded before
-it is sent, so a lost reply and reload can resend the same operation safely.
+ID. The small operation record (sent operation and pending edits) is stored
+before each send, so a lost reply and reload can resend the same operation safely.
+The complete drawing, including embedded PDF pages, is stored as compact JSON
+under its own `:draft` key after a three-second pause in editing and when the
+page is hidden or closed, sharing ends, or a conflict appears. Each key coalesces
+writes to one active write and the newest waiting record. Pending edits rebuild
+a drawing whose saved copy trails the operation record. LocalStorage records
+migrate only after the IndexedDB transaction commits; inline single-key drafts
+are also readable. There is no small character limit that drops embedded pages.
 The sent operation, its observed revision, and edits made after it are stored
 separately; an immediate undo survives a delayed confirmation and reload. A kept
 conflict also survives reload as a downloadable draft until explicitly resolved.
@@ -262,6 +267,10 @@ The header has a fixed height, and notices overlay the canvas instead of adding
 rows above it. Saving, reconnecting and storage notices cannot change the
 canvas's position or size while the person writes. The Mac owns the saved file;
 its separate disk recovery record is described in [drawing-canvas.md](./drawing-canvas.md#one-save-session-owns-every-pane-editing-a-file).
+
+For timestamped input and freeze traces on the Mac, see
+[companion-diagnostics.md](./companion-diagnostics.md). Its optional receiver
+operates independently of canvas recovery and the sharing server.
 
 ## What sharing does not promise
 

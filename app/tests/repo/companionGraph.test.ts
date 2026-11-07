@@ -70,3 +70,11 @@ test("the desktop entry does not bundle the companion page or its transport", ()
   const { modules } = walk("src/main.tsx");
   expect(modules.filter((file) => file.startsWith("src/companion/") || file.startsWith("src/lib/companion/shareClient"))).toEqual([]);
 });
+
+
+test("the input comparison page does not load the notebook, sharing client or React", () => {
+  const { modules, violations } = walk("src/companion/diagnostics/inputTest.ts", COMPANION_ALIASES);
+  expect(violations).toEqual([]);
+  expect(modules.some(file => file.includes('CanvasSurface') || file.includes('shareClient') || file.endsWith('/App.tsx'))).toBe(false);
+  for (const file of modules) expect(readFileSync(join(APP, file), 'utf8')).not.toMatch(/from ["'](?:react|react-dom)(?:["'/])/);
+});

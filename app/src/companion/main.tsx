@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "./companion.css";
 import { takeBrowserShareCredentials } from "@/lib/companion/link";
+import { startCompanionDiagnostics } from "./diagnostics";
 import { App } from "./App";
 
 /**
@@ -12,6 +13,7 @@ import { App } from "./App";
 
 // First, before anything renders: take the secret out of the address bar.
 const credentials = takeBrowserShareCredentials();
+if (credentials) void startCompanionDiagnostics(credentials);
 
 // The desktop theme lives in Tauri-backed prefs; a paired device follows its own system.
 const dark = window.matchMedia?.("(prefers-color-scheme: dark)");

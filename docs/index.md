@@ -32,6 +32,7 @@ the root `CLAUDE.md` holds only the rules.
 | [viewers.md](./viewers.md) | Markdown, PDFs, source files, an Ed lesson's slides and a challenge's workspace, the media player (lectures, Up Next and library videos), transcription and the in-app browser |
 | [drawing-canvas.md](./drawing-canvas.md) | Drive's two drawing kinds, canvases (`.canvas`, an infinite whiteboard) and notebooks (`.notebook`, paper pages): the open format, editor, shape labels, the contextual inspector, arrow binding and arrowheads, a notebook's page-bound camera and pen, page tools, the Draw button on a PDF, the page pictures chat agents read, PDF export, shared save sessions, the shared-canvas authority, and Rust/WebAssembly geometry |
 | [device-sharing.md](./device-sharing.md) | Sharing a canvas or notebook with a browser on another device: the LAN server's lifecycle, ports and addresses, the wire protocol, the security boundary and limits, the share dialog with its local QR code, Settings → Device sharing |
+| [companion-diagnostics.md](./companion-diagnostics.md) | Timestamped browser input, gesture, tool and stall traces on the Mac; independent watchdog and local receiver |
 | [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |
 | [editor-maths.md](./editor-maths.md) | Maths in the note editor: the visual field, the toolbox, shorthands |
 | [editor-core.md](./editor-core.md) | The Rust editor core, its oracles, and shadow mode checking it against every note editor in dev |

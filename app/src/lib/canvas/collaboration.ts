@@ -1,3 +1,4 @@
+import { measureCanvas } from './diagnostics';
 import { parseCanvasDocument, type CanvasDocument, type CanvasElement } from './model';
 import { paperProblem, type Paper } from './paper';
 
@@ -22,7 +23,7 @@ export function sameValue(a: unknown, b: unknown): boolean {
 }
 
 /** Only drawing content crosses the network. Viewports remain local to each tab. */
-export function diffCanvasContent(before: CanvasDocument, after: CanvasDocument): CanvasTransaction {
+function diffContent(before: CanvasDocument, after: CanvasDocument): CanvasTransaction {
   const old = new Map(before.elements.map(element => [element.id, element]));
   const next = new Map(after.elements.map(element => [element.id, element]));
   const edits: ElementEdit[] = [];
@@ -72,7 +73,7 @@ function validateTransaction(value: unknown): asserts value is CanvasTransaction
 }
 
 /** Compare only touched objects: independent edits merge even from the same old revision. */
-export function applyCanvasTransaction(document: CanvasDocument, value: unknown): CanvasDocument {
+function applyTransaction(document: CanvasDocument, value: unknown): CanvasDocument {
   validateTransaction(value);
   const transaction = value;
   if (!hasCanvasChanges(transaction)) return document;
@@ -112,6 +113,13 @@ export function applyCanvasTransaction(document: CanvasDocument, value: unknown)
     paper = transaction.paper.after;
   }
   const result = { ...document, elements: ordered, background, ...(transaction.paper ? { paper } : {}) };
-  parseCanvasDocument(JSON.stringify(result));
+  if (ordered.length !== elements.size || ordered.some(element => element === undefined)) throw new Error('Invalid canvas transaction.');
   return result;
+}
+
+export function diffCanvasContent(before: CanvasDocument, after: CanvasDocument): CanvasTransaction {
+  return measureCanvas('canvas.diff', () => diffContent(before, after), { elements: before.elements.length });
+}
+export function applyCanvasTransaction(document: CanvasDocument, value: unknown): CanvasDocument {
+  return measureCanvas('canvas.apply-transaction', () => applyTransaction(document, value), { elements: document.elements.length });
 }

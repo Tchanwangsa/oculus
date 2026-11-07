@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createCanvasDocument, parseCanvasDocument, type CanvasDocument, type CanvasElement } from "@/lib/canvas/model";
 import { ShareApi } from "@/lib/companion/api";
 import { BACKOFF_MAX_MS, backoffDelay, type DraftStorage } from "@/lib/companion/env";
-import { draftKey } from "@/lib/companion/drafts";
+import { draftKey, drawingDraftKey, readDraft } from "@/lib/companion/drafts";
 import { parseShareFragment, takeShareCredentials } from "@/lib/companion/link";
 import { ShareClient, type ShareClientOptions } from "@/lib/companion/shareClient";
 import { FakeClock, FakeShareServer, flush, MemoryStorage, throwingStorage } from "./fakeShareServer";
@@ -360,13 +360,210 @@ describe("ShareClient", () => {
     await clock.advance(450);
     expect(a.getState().storageWarning).toBeNull();
     const stored = JSON.parse(memory.getItem(draftKey(server.shareId))!);
-    expect(parseCanvasDocument(stored.draft).elements[0].dataUrl).toBe(dataUrl);
+    expect(stored.draft).toBeUndefined();
+    expect(memory.getItem(drawingDraftKey(server.shareId))).toBeNull();
+    await clock.advance(2550);
+    const drawing = JSON.parse(memory.getItem(drawingDraftKey(server.shareId))!);
+    expect(drawing.draft.elements[0].dataUrl).toBe(dataUrl);
     expect(stored.pending.edits).toHaveLength(1);
     a.dispose(); await flush();
     server.down = false;
     const { client: reloaded } = await connected(storage);
     expect(reloaded.getState().document!.elements[0].dataUrl).toBe(dataUrl);
     expect(server.doc.elements[0].dataUrl).toBe(dataUrl);
+  });
+
+  test("only the newest waiting operation record is written during a slow save", async () => {
+    const memory = new MemoryStorage();
+    let hold = false, active = 0, maxActive = 0, writes = 0;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const { client: a } = await connected({
+      getItem: key => memory.getItem(key),
+      setItem: async (key, value) => {
+        if (key === draftKey(server.shareId) && hold) {
+          writes++; active++; maxActive = Math.max(maxActive, active);
+          await gate;
+          active--;
+        }
+        memory.setItem(key, value);
+      },
+      removeItem: key => memory.removeItem(key),
+    });
+    server.down = true;
+    for (const socket of [...server.sockets]) socket.serverClose();
+    await flush();
+    hold = true;
+    for (let i = 0; i < 20; i++) {
+      a.edit(withElements(a.getState().document!, rect(`ink-${i}`)));
+      await clock.advance(400);
+    }
+    expect(writes).toBe(1);
+    release(); await flush();
+    expect(maxActive).toBe(1);
+    expect(writes).toBeLessThanOrEqual(3);
+    const stored = JSON.parse(memory.getItem(draftKey(server.shareId))!);
+    expect(stored.pending.edits.map((edit: { id: string }) => edit.id)).toEqual(ids(a.getState().document));
+  });
+
+  test("a burst of strokes and acknowledgements does no full-drawing work until a pause", async () => {
+    const memory = new MemoryStorage();
+    const page: CanvasElement = { ...rect("page"), type: "image", dataUrl: bigPng(5 * 1024 * 1024), naturalWidth: 1, naturalHeight: 1 };
+    server.doc = withElements(createCanvasDocument(), page);
+    const writes: string[] = [];
+    const { client: a } = await connected({
+      getItem: key => memory.getItem(key),
+      setItem: (key, value) => { writes.push(key); memory.setItem(key, value); },
+      removeItem: key => memory.removeItem(key),
+    });
+    const stringify = spyOn(JSON, "stringify");
+    try {
+      for (let i = 0; i < 10; i++) {
+        a.edit(withElements(a.getState().document!, rect(`ink-${i}`)));
+        await flush();
+        await clock.advance(100);
+      }
+      expect(a.getState().status).toBe("connected");
+      server.down = true;
+      for (const socket of [...server.sockets]) socket.serverClose();
+      await flush();
+      a.edit(withElements(a.getState().document!, rect("offline")));
+      await clock.advance(2999);
+      expect(writes.filter(key => key === drawingDraftKey(server.shareId))).toHaveLength(0);
+      for (const result of stringify.mock.results) expect((result.value as string).length).toBeLessThan(100_000);
+    } finally { stringify.mockRestore(); }
+    await clock.advance(1);
+    expect(writes.filter(key => key === drawingDraftKey(server.shareId))).toHaveLength(1);
+    expect(ids(JSON.parse(memory.getItem(drawingDraftKey(server.shareId))!).draft)).toEqual(ids(a.getState().document));
+  });
+
+  for (const event of ["hidden", "pagehide"] as const) {
+    test(`${event} saves the complete drawing immediately`, async () => {
+      const storage = new MemoryStorage();
+      const { client: a, env } = await connected(storage);
+      server.down = true;
+      a.edit(withElements(a.getState().document!, rect("latest")));
+      env.emit(event);
+      await flush();
+      expect(ids(JSON.parse(storage.getItem(drawingDraftKey(server.shareId))!).draft)).toEqual(["latest"]);
+      expect(clock.now()).toBe(1_000_000);
+    });
+  }
+
+  for (const otherEpoch of [false, true]) {
+    test(`an inline single-key draft survives upgrade in ${otherEpoch ? "another epoch" : "a kept conflict"}`, async () => {
+      const storage = new MemoryStorage();
+      const draft = JSON.stringify(withElements(createCanvasDocument(), rect("legacy")));
+      storage.setItem(draftKey(server.shareId), JSON.stringify({
+        v: 1, epoch: otherEpoch ? "earlier" : server.epoch, clientId: "old-client", seqFloor: 1,
+        inflight: null, pending: null, conflict: "Keep this drawing", draft, savedAt: clock.now(),
+      }));
+      const { client: a } = client(storage);
+      a.start(); await flush();
+      expect(ids(parseCanvasDocument((otherEpoch ? a.recoveryText() : a.draftText())!))).toEqual(["legacy"]);
+      expect(a.getState().status).toBe(otherEpoch ? "connected" : "conflict");
+      expect(server.commits()).toHaveLength(0);
+    });
+  }
+
+  for (const mode of ["pending", "conflict", "other-epoch", "ended"] as const) {
+    test(`newer operation records rebuild a stale complete drawing for ${mode}`, async () => {
+      const storage = new MemoryStorage();
+      const base = withElements(createCanvasDocument(), rect("base"));
+      server.doc = base;
+      const { client: a, env } = await connected(storage);
+      server.down = true;
+      for (const socket of [...server.sockets]) socket.serverClose();
+      await flush();
+      a.edit(withElements(a.getState().document!, rect("first")));
+      env.emit("hidden"); await flush();
+      a.edit(withElements(a.getState().document!, rect("second")));
+      await clock.advance(400);
+      // Simulate a reload without letting dispose flush a fresh complete drawing.
+      const copy = new MemoryStorage();
+      for (const [key, value] of storage.map) copy.setItem(key, value);
+      const record = JSON.parse(copy.getItem(draftKey(server.shareId))!);
+      if (mode === "conflict") { record.conflict = "Kept"; copy.setItem(draftKey(server.shareId), JSON.stringify(record)); }
+      a.dispose(); await flush();
+      server.down = false;
+      if (mode === "other-epoch") server.restart(base);
+      if (mode === "ended") server.stopped = true;
+      const { client: restored } = client(copy);
+      restored.start(); await flush();
+      const text = mode === "other-epoch" ? restored.recoveryText() : restored.draftText();
+      expect(ids(parseCanvasDocument(text!))).toEqual(["base", "first", "second"]);
+      if (mode === "other-epoch" || mode === "ended" || mode === "conflict") expect(server.commits()).toHaveLength(0);
+    });
+  }
+
+  test("a confirmed operation record ignores a leftover older drawing", async () => {
+    const storage = new MemoryStorage();
+    storage.setItem(draftKey(server.shareId), JSON.stringify({ v: 1, epoch: server.epoch, clientId: "old", seqFloor: 1, inflight: null, pending: null, savedAt: 20 }));
+    storage.setItem(drawingDraftKey(server.shareId), JSON.stringify({ epoch: server.epoch, savedAt: 10, draft: withElements(createCanvasDocument(), rect("stale")) }));
+    const { client: a } = await connected(storage);
+    expect(a.getState().hasDraft).toBe(false);
+    expect(ids(a.getState().document)).toEqual([]);
+  });
+
+  test("a separate drawing must match the operation record epoch", async () => {
+    const storage = new MemoryStorage();
+    storage.setItem(draftKey(server.shareId), JSON.stringify({ v: 1, epoch: server.epoch, clientId: "old", seqFloor: 1, inflight: null, pending: null, savedAt: 20 }));
+    storage.setItem(drawingDraftKey(server.shareId), JSON.stringify({ epoch: "earlier", savedAt: 30, draft: createCanvasDocument() }));
+    expect((await readDraft(storage, server.shareId))?.draft).toBeNull();
+  });
+
+  test("a slow complete drawing write does not delay operation storage or sending", async () => {
+    const memory = new MemoryStorage();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const { client: a, env } = await connected({
+      getItem: key => memory.getItem(key),
+      setItem: async (key, value) => {
+        if (key === drawingDraftKey(server.shareId)) await gate;
+        memory.setItem(key, value);
+      },
+      removeItem: key => memory.removeItem(key),
+    });
+    server.down = true;
+    for (const socket of [...server.sockets]) socket.serverClose();
+    await flush();
+    a.edit(withElements(a.getState().document!, rect("saved-before-send")));
+    env.emit("hidden"); await flush();
+    expect(memory.getItem(drawingDraftKey(server.shareId))).toBeNull();
+    server.down = false;
+    env.emit("online"); await flush();
+    expect(a.getState().status).toBe("connected");
+    expect(ids(server.doc)).toEqual(["saved-before-send"]);
+    expect(server.commits()).toHaveLength(1);
+    // A newer clear coalesces behind the drawing already being written.
+    env.emit("hidden");
+    release(); await flush();
+    expect(memory.getItem(drawingDraftKey(server.shareId))).toBeNull();
+  });
+
+  test("a failed complete drawing write stays visible across successful operation writes", async () => {
+    const memory = new MemoryStorage();
+    let failDrawing = true;
+    const { client: a, env } = await connected({
+      getItem: key => memory.getItem(key),
+      setItem: (key, value) => {
+        if (key === drawingDraftKey(server.shareId) && failDrawing) throw new Error("Quota exceeded");
+        memory.setItem(key, value);
+      },
+      removeItem: key => memory.removeItem(key),
+    });
+    server.down = true;
+    for (const socket of [...server.sockets]) socket.serverClose();
+    await flush();
+    a.edit(withElements(a.getState().document!, rect("first")));
+    env.emit("hidden"); await flush();
+    expect(a.getState().storageWarning).toContain("not keeping a copy");
+    a.edit(withElements(a.getState().document!, rect("second")));
+    await clock.advance(400);
+    expect(a.getState().storageWarning).toContain("not keeping a copy");
+    failDrawing = false;
+    env.emit("hidden"); await flush();
+    expect(a.getState().storageWarning).toBeNull();
   });
 
   test("the in-flight identity reaches recovery storage before the commit is sent", async () => {

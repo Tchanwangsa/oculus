@@ -20,6 +20,8 @@ function companionIndex(): Plugin {
     generateBundle(_options, bundle) {
       const page = bundle["companion.html"];
       if (page) page.fileName = "index.html";
+      const inputTest = bundle["input-test.html"];
+      if (inputTest) inputTest.fileName = "assets/input-test.html";
     },
   };
 }
@@ -41,13 +43,14 @@ export default defineConfig({
   clearScreen: false,
   build: {
     outDir: "dist/companion",
+    sourcemap: "hidden",
     emptyOutDir: true,
     assetsDir: "assets",
     // Fonts and the wasm stay files the server serves with their own MIME, never data: URLs.
     assetsInlineLimit: 0,
     // React, Radix and the canvas in one chunk the page needs at once.
     chunkSizeWarningLimit: 700,
-    rollupOptions: { input: path.resolve(__dirname, "companion.html") },
+    rollupOptions: { input: [path.resolve(__dirname, "companion.html"), path.resolve(__dirname, "input-test.html")] },
   },
   server: { port: 1431, strictPort: true },
   preview: { port: 1431, strictPort: true },

@@ -60,7 +60,7 @@ function SharedCanvas({ credentials }: { credentials: ShareCredentials }) {
         {focus.focused && state.status === 'ended' && state.hasDraft ? <Button variant="outline" size="sm" className="self-start bg-card" onClick={() => saveDraft(client.draftText(), draftName(state))}>Download draft</Button> : null}
       </div>
       {state.document
-        ? <div inert={blocked} className="h-full"><CanvasSurface document={state.document} kind={state.kind} onChange={(document) => client.edit(document)} onViewportChange={keepCameraLocal} /></div>
+        ? <div inert={blocked} className="h-full"><CanvasSurface suppressNativeGestures document={state.document} kind={state.kind} onChange={(document) => client.edit(document)} onViewportChange={keepCameraLocal} /></div>
         : <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
           {state.status === "ended" ? "This canvas is no longer shared." : <><SpinnerGapIcon className="animate-spin" aria-hidden />Opening the canvas from the Mac…</>}
         </div>}

@@ -106,13 +106,13 @@ function CanvasDrawingPreferences({ preferences, onChange }: { preferences: Canv
  * `onViewportChange` keeps pan and zoom with the host instead of saving them in the document. `kind="notebook"` binds the
  * document to its pages (`useCanvasInteraction`) and adds the page tools; a `canvas` is a whiteboard whatever it holds.
  */
-export function CanvasSurface({ document, onChange, onViewportChange, onPageChange, title, kind = 'canvas' }: { document: CanvasDocument; onChange: (document: CanvasDocument) => void; onViewportChange?: (viewport: CanvasDocument['viewport']) => void; onPageChange?: (index: number) => void; title?: string; kind?: CanvasKind }) {
+export function CanvasSurface({ document, onChange, onViewportChange, onPageChange, title, kind = 'canvas', suppressNativeGestures = false }: { document: CanvasDocument; onChange: (document: CanvasDocument) => void; onViewportChange?: (viewport: CanvasDocument['viewport']) => void; onPageChange?: (index: number) => void; title?: string; kind?: CanvasKind; suppressNativeGestures?: boolean }) {
   const platform = useCanvasPlatform();
   const [toolPreferences, setToolPreferences] = useState(loadCanvasToolPreferences);
   const editor = useCanvasInteraction(document, onChange, { onViewportChange, eraserAutoReturn: toolPreferences.eraserAutoReturn, kind });
   const media = useCanvasMediaDrop(editor.root, editor.documentRef, editor.insertImages, editor.notebook);
   const changeToolPreferences = (preferences: CanvasToolPreferences) => { setToolPreferences(preferences); saveCanvasToolPreferences(preferences); };
-  useEffect(() => { const element = editor.root.current; return element ? installBrowserSelectionGuard(element) : undefined; }, [editor.root]);
+  useEffect(() => { const element = editor.root.current; return element ? installBrowserSelectionGuard(element, { suppressNativeGestures, touchEventRoot: suppressNativeGestures ? element.ownerDocument.body : element }) : undefined; }, [editor.root, suppressNativeGestures]);
   const [engineError, setEngineError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);

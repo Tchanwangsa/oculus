@@ -28,8 +28,8 @@ export interface DraftStorage {
 }
 
 /** Page lifecycle moments that matter to a connection: `visible` is a
- * `visibilitychange` to visible; `pagehide` flushes the draft. */
-export type ShareLifecycleEvent = "online" | "visible" | "pageshow" | "pagehide";
+ * `visibilitychange` to visible; `hidden` and `pagehide` flush the draft. */
+export type ShareLifecycleEvent = "online" | "visible" | "pageshow" | "pagehide" | "hidden";
 export type ShareLifecycle = (listener: (event: ShareLifecycleEvent) => void) => () => void;
 
 export interface ShareClientEnv {
@@ -90,7 +90,7 @@ export function browserShareEnv(page: SharePage = window): ShareClientEnv {
       const online = () => listener("online");
       const pageshow = () => listener("pageshow");
       const pagehide = () => listener("pagehide");
-      const visibility = () => { if (document.visibilityState === "visible") listener("visible"); };
+      const visibility = () => listener(document.visibilityState === "visible" ? "visible" : "hidden");
       page.addEventListener("online", online);
       page.addEventListener("pageshow", pageshow);
       page.addEventListener("pagehide", pagehide);
