@@ -6,6 +6,7 @@ use sqlx::Row;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::harness::event::answer::Replies;
 use crate::harness::{self, HarnessEvent};
 
 pub struct Run<'a> {
@@ -70,15 +71,16 @@ pub(crate) async fn source(pool: &sqlx::SqlitePool, id: &str) -> Result<Source, 
     })
 }
 
-/// One agent turn on the job's selected model, returning the assistant's text.
-/// `on_event` still sees every event, so a caller can show progress.
+/// One agent turn on the job's selected model, returning its selected answer
+/// (`harness::event::answer`). `on_event` still sees every event, so a caller
+/// can show progress.
 pub(crate) fn reply(
     data_dir: &Path,
     selection: &harness::jobs::JobSelection,
     prompt: &str,
     on_event: impl Fn(&HarnessEvent) + Send + Sync + 'static,
 ) -> Result<String, String> {
-    let reply = Arc::new(Mutex::new(String::new()));
+    let reply = Arc::new(Mutex::new(Replies::default()));
     let collect = reply.clone();
     let options = harness::SendOptions {
         model: Some(selection.model.clone()),
@@ -91,13 +93,11 @@ pub(crate) fn reply(
         &options,
         prompt,
         move |event| {
-            if let HarnessEvent::AssistantMessage { text } = event {
-                collect.lock().unwrap().push_str(text);
-            }
+            collect.lock().unwrap().observe(event);
             on_event(event);
         },
     )?;
-    let text = reply.lock().unwrap().clone();
+    let text = reply.lock().unwrap().answer().to_string();
     Ok(text)
 }
 

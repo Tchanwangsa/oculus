@@ -2,9 +2,9 @@ import { memo, useMemo } from "react";
 import { parseErrorMeta, parseToolMeta, thoughtMs, type HarnessItem, type Provider } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { CLI_ICON, ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
-import { Reply, Stopped, Unprompted, User } from "./Messages";
+import { Compacted, DeliveryNotice, FoldedReply, Reply, Stopped, Unprompted, User } from "./Messages";
 import { PermissionCard } from "./PermissionCard";
-import { bundleLabel } from "./rows";
+import { bundleLabel, type ReplyRole } from "./rows";
 import type { QuestionActions } from "./types";
 
 /** A running tool's output streams in; it subscribes itself so only this row
@@ -25,6 +25,8 @@ export const Item = memo(function Item({
   asked,
   onSignIn,
   latest,
+  role,
+  folded,
 }: {
   item: HarnessItem;
   dim: boolean;
@@ -36,12 +38,16 @@ export const Item = memo(function Item({
   onSignIn?: (provider: Provider) => void;
   /** For a `permission` row: the latest refusal carries the allow button. */
   latest?: boolean;
+  /** For a reply: how its run settled it (`buildRows`). */
+  role?: ReplyRole;
+  /** Inside a run's fold: a reply is work, drawn without its widget fences. */
+  folded?: boolean;
 }) {
   switch (item.kind) {
     case "user":
       return <User item={item} actions={actions} />;
     case "assistant":
-      return <Reply item={item} asked={asked} actions={actions} />;
+      return folded ? <FoldedReply item={item} /> : <Reply item={item} asked={asked} actions={actions} role={role} />;
     case "thinking":
       return <ThinkingRow text={item.content ?? ""} ms={thoughtMs(item)} dim={dim} />;
     case "tool":
@@ -54,28 +60,40 @@ export const Item = memo(function Item({
       return <Stopped />;
     case "unprompted":
       return <Unprompted item={item} />;
+    case "delivery_notice":
+      return <DeliveryNotice item={item} />;
+    case "compaction":
+      return <Compacted />;
     case "permission":
       return <PermissionCard item={item} actionable={!!latest} onFollowUp={actions?.followUp} />;
   }
 });
 
-export const Bundle = memo(function Bundle({ items }: { items: HarnessItem[] }) {
+/** Two or more steps under one summary header; opened, the steps line up
+ *  with the header rather than nesting under it. */
+export const Bundle = memo(function Bundle({
+  items,
+  dim = true,
+}: {
+  items: HarnessItem[];
+  /** Fade it until hovered; off inside a run's fold, whose rows read alike. */
+  dim?: boolean;
+}) {
   const { label, icon } = useMemo(() => bundleLabel(items), [items]);
   return (
     <RowShell
       icon={icon == null ? undefined : "cli" in icon ? CLI_ICON[icon.cli] : TOOL_ICON[icon.tool]}
       title={label}
       expandable
-      dim
+      dim={dim}
+      flush
     >
-      <div className="relative my-0.5 pl-3 before:absolute before:bottom-1 before:left-1.5 before:top-0 before:w-px before:bg-border before:content-['']">
-        <div className="flex flex-col">
-          {items.map((i) => (
-            <Item key={i.id} item={i} dim={false} />
-          ))}
-        </div>
+      <div className="flex flex-col">
+        {items.map((i) => (
+          <Item key={i.id} item={i} dim={false} />
+        ))}
       </div>
     </RowShell>
   );
-}, (prev, next) => prev.items.length === next.items.length &&
+}, (prev, next) => prev.dim === next.dim && prev.items.length === next.items.length &&
   prev.items.every((item, i) => item === next.items[i]));

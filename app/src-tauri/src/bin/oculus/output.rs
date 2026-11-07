@@ -58,7 +58,7 @@ impl AgentPrinter {
                     *mid = true;
                 }
             }
-            HarnessEvent::AssistantMessage { text } => {
+            HarnessEvent::AssistantMessage { text, .. } => {
                 if self.show_text {
                     end_line(&mut mid, &mut out);
                 } else {

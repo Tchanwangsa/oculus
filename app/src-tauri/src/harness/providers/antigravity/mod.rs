@@ -35,3 +35,6 @@ pub struct AntigravitySpawn {
     /// [`install::install`].
     pub approved: Option<Vec<String>>,
 }
+
+#[cfg(test)]
+pub(in crate::harness) mod replay;

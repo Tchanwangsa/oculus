@@ -1,6 +1,7 @@
 import { getDb, getSetting } from "@/lib/db";
 import type { Provider } from "./providers";
-import type { HarnessItem, HarnessThread, RateWindow } from "./types";
+import { runFromRow, type RunRow } from "./runs";
+import type { HarnessItem, HarnessRun, HarnessThread, RateWindow } from "./types";
 
 export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
   const db = await getDb();
@@ -21,17 +22,21 @@ export async function getLectureThreads(lectureId: string, limit = 100): Promise
   );
 }
 
-/** Each thread's latest reply, flattened to one line of plain text — the
- *  empty Chat page's recent list. Threads with no reply yet are absent. */
+/** Each thread's latest answer, flattened to one line of plain text — the
+ *  empty Chat page's recent list. An answer is a run's selected one, or a
+ *  reply with no run (history from before runs, a turn the provider started
+ *  itself), as thread naming reads it. Threads with none yet are absent. */
 export async function getThreadPreviews(ids: number[]): Promise<Map<number, string>> {
   if (!ids.length) return new Map();
   const db = await getDb();
   const marks = ids.map((_, i) => `$${i + 1}`).join(", ");
   const rows = await db.select<{ thread_id: number; content: string | null }[]>(
     `SELECT thread_id, content FROM harness_items
-      WHERE id IN (SELECT MAX(id) FROM harness_items
-                    WHERE kind = 'assistant' AND thread_id IN (${marks})
-                    GROUP BY thread_id)`,
+      WHERE id IN (SELECT MAX(i.id) FROM harness_items i
+                     LEFT JOIN harness_runs r ON r.id = i.run_id
+                    WHERE i.kind = 'assistant' AND (i.run_id IS NULL OR r.answer_item_id = i.id)
+                      AND i.thread_id IN (${marks})
+                    GROUP BY i.thread_id)`,
     ids,
   );
   const out = new Map<number, string>();
@@ -55,6 +60,18 @@ export async function getHarnessItems(threadId: number): Promise<HarnessItem[]> 
     `SELECT * FROM harness_items WHERE thread_id = $1 ORDER BY id ASC`,
     [threadId],
   );
+}
+
+/** A thread's runs, keyed by id; a run that never started reads from its request. */
+export async function getHarnessRuns(threadId: number): Promise<Record<number, HarnessRun>> {
+  const db = await getDb();
+  const rows = await db.select<RunRow[]>(
+    `SELECT id, execution_status, delivery_state, answer_item_id,
+            COALESCE(started_at, requested_at) AS started_at, ended_at
+       FROM harness_runs WHERE thread_id = $1`,
+    [threadId],
+  );
+  return Object.fromEntries(rows.map((r) => [r.id, runFromRow(r)]));
 }
 
 export async function getHarnessRateLimits(provider: Provider): Promise<RateWindow[]> {

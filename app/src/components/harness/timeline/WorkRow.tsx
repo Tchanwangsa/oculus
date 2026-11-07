@@ -1,8 +1,10 @@
 import { memo, useMemo, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
+  CaretDown,
   BookOpen,
   BookmarkSimple,
+  Brain,
   CalendarBlank,
   CaretRight,
   CheckSquare,
@@ -43,9 +45,12 @@ import {
 } from "@/lib/harness";
 import { libraryPath, openLibraryPath } from "@/lib/files/openFile";
 import { cn } from "@/lib/utils";
+import { useOverflows } from "./useOverflows";
 
 /** Timeline work rows (tool call, reasoning, error): `[icon] [title] [status]`,
- *  expanding to detail on click. */
+ *  expanding to detail on click. Rows stack flat wherever they sit — a run's
+ *  fold, a bundle, a bare step — with no guide line or extra indent; detail
+ *  opens beneath at the row's own edge. */
 
 export const TOOL_ICON: Record<ToolKind, Icon> = {
   read: FileText,
@@ -77,6 +82,7 @@ export const CLI_ICON: Record<CliIcon, Icon> = {
 export function RowShell({
   icon: IconC,
   title,
+  code,
   em,
   note,
   live,
@@ -86,10 +92,13 @@ export function RowShell({
   tone = "default",
   children,
   defaultOpen = false,
+  flush,
 }: {
-  /** None for a reasoning row, which is words only. */
   icon?: Icon;
   title: string;
+  /** A command that is the whole label, drawn as code in place of `title`;
+   *  it wraps in full while the row is open. */
+  code?: string;
   /** Emphasised part after the title (the command, the path). */
   em?: string;
   /** Muted text after the title, truncating (a live thought's latest line). */
@@ -102,9 +111,13 @@ export function RowShell({
   tone?: "default" | "error";
   children?: React.ReactNode;
   defaultOpen?: boolean;
+  /** Children are rows themselves (a bundle's steps): no inset, so they line
+   *  up with the header. */
+  flush?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const canOpen = expandable && !!children;
+  const canOpen = expandable && (!!children || !!code);
+  const wrap = !!code && open;
   // A library path in `em` becomes a link that opens the file.
   const path = libraryPath(em);
   const tint =
@@ -118,7 +131,8 @@ export function RowShell({
       {/* Sibling controls, not nested buttons: the path link and the disclosure. */}
       <div
         className={cn(
-          "group/row flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-left text-xs leading-5 transition-colors",
+          "group/row flex w-full min-w-0 gap-1.5 rounded-md px-2 py-0.5 text-left text-xs leading-5 transition-colors",
+          wrap ? "items-start" : "items-center",
           tint,
           // `hover:`, not `group-hover/row:` — this *is* the group.
           tone !== "error" && "hover:text-foreground",
@@ -130,20 +144,34 @@ export function RowShell({
           aria-expanded={open}
           onClick={() => canOpen && setOpen((o) => !o)}
           className={cn(
-            "flex min-w-0 shrink items-center gap-1.5 text-left",
+            "flex min-w-0 shrink gap-1.5 text-left",
+            wrap ? "items-start" : "items-center",
             canOpen ? "cursor-pointer" : "cursor-default",
           )}
         >
-          {IconC && <IconC size={14} className="shrink-0" />}
+          {IconC && <IconC size={14} className={cn("shrink-0", wrap && "mt-[3px]")} />}
           {/* With an `em` or a `note`, the verb holds and that truncates;
               without one the title is the long part and must truncate, or a
               narrow dock's scroller gains a horizontal axis. */}
-          <span
-            className={cn("min-w-0", em || note ? "shrink-0" : "truncate", live && "text-shimmer")}
-            title={em || note ? undefined : title}
-          >
-            {title}
-          </span>
+          {code ? (
+            <span
+              className={cn(
+                "min-w-0 font-mono text-[11.5px] text-foreground/80",
+                wrap ? "whitespace-pre-wrap break-all" : "truncate",
+                live && "text-shimmer",
+              )}
+              title={wrap ? undefined : code}
+            >
+              {code}
+            </span>
+          ) : (
+            <span
+              className={cn("min-w-0", em || note ? "shrink-0" : "truncate", live && "text-shimmer")}
+              title={em || note ? undefined : title}
+            >
+              {title}
+            </span>
+          )}
           {note && <span className="min-w-0 truncate">{note}</span>}
           {em && !path && (
             <span className="min-w-0 truncate font-medium text-foreground/80" title={em}>
@@ -168,7 +196,7 @@ export function RowShell({
             aria-hidden
             tabIndex={-1}
             onClick={() => setOpen((o) => !o)}
-            className="ml-auto shrink-0 cursor-pointer"
+            className={cn("ml-auto shrink-0 cursor-pointer", wrap && "mt-[5px]")}
           >
             <CaretRight
               size={11}
@@ -180,7 +208,7 @@ export function RowShell({
           </button>
         )}
       </div>
-      {open && children && <div className="px-2 pb-1 pt-0.5">{children}</div>}
+      {open && children && <div className={flush ? undefined : "px-2 pb-1 pt-0.5"}>{children}</div>}
     </div>
   );
 }
@@ -221,6 +249,46 @@ function ReadPicture({ path, onFail }: { path: string; onFail: () => void }) {
   );
 }
 
+/** Taller detail than this folds behind Show more: the timeline is the only
+ *  scroller on the page. */
+const DETAIL_MAX_H = 288;
+
+/** A tool's detail on a quiet surface: an optional muted lead (the call's
+ *  command or arguments) and its output, sized to content up to
+ *  `DETAIL_MAX_H`. */
+function ToolDetail({ lead, output }: { lead?: string; output: string }) {
+  const [open, setOpen] = useState(false);
+  const [body, long] = useOverflows(`${lead ?? ""}\n${output}`, true, DETAIL_MAX_H);
+  const clipped = long && !open;
+  return (
+    <div className="rounded-md bg-surface">
+      <div
+        ref={body}
+        className={cn(
+          "px-3 py-2",
+          clipped && "overflow-hidden [mask-image:linear-gradient(to_bottom,#000_calc(100%-2.25rem),transparent)]",
+        )}
+        style={clipped ? { maxHeight: DETAIL_MAX_H } : undefined}
+      >
+        {lead && <CodeText className="text-muted-foreground">{lead}</CodeText>}
+        {output && <CodeText className={cn("text-foreground/85", lead && "mt-1.5")}>{output}</CodeText>}
+      </div>
+      {long && (
+        <button
+          type="button"
+          data-copy-skip
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className="flex cursor-pointer items-center gap-1 px-3 pb-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {open ? "Show less" : "Show more"}
+          <CaretDown size={11} className={cn("transition-transform will-change-transform", open && "rotate-180")} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export const ToolRow = memo(function ToolRow({
   item,
   liveOutput,
@@ -252,11 +320,15 @@ export const ToolRow = memo(function ToolRow({
     [kind, item.content],
   );
   const cli = summariseOculusCli(cliActions, done);
+  // A plain command is its own label; the detail is then its output alone.
+  const label = !cli && command ? command : undefined;
+  const lead = label ? undefined : command ?? (entries.length > 0 ? entries.map(([k, v]) => `${k}: ${v}`).join("\n") : undefined);
   return (
     <RowShell
       icon={cli ? CLI_ICON[cli.icon] : TOOL_ICON[kind]}
       title={cli ? cli.title : toolVerb(kind, done, meta.name)}
-      em={cli ? cli.em : (item.content ?? undefined)}
+      code={label}
+      em={label ? undefined : cli ? cli.em : (item.content ?? undefined)}
       live={!!cli && !done}
       dim={dim && done}
       expandable={entries.length > 0 || output.length > 0}
@@ -270,40 +342,24 @@ export const ToolRow = memo(function ToolRow({
     >
       {picture ? (
         <ReadPicture path={picture} onFail={() => setPictureFailed(true)} />
-      ) : (
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <div className="max-h-72 overflow-auto px-3 py-2">
-          {command ? (
-            <CodeText className="text-muted-foreground">$ {command}</CodeText>
-          ) : (
-            entries.length > 0 && (
-              <CodeText className="text-muted-foreground">
-                {entries.map(([k, v]) => `${k}: ${v}`).join("\n")}
-              </CodeText>
-            )
-          )}
-          {output && (
-            <CodeText className={cn((command || entries.length) && "mt-2 border-t border-border pt-2")}>
-              {output}
-            </CodeText>
-          )}
-        </div>
-      </div>
-      )}
+      ) : lead || output ? (
+        <ToolDetail lead={lead} output={output} />
+      ) : null}
     </RowShell>
   );
 });
 
-/** The thought itself, opened: rendered markdown beside a hairline. */
+/** The thought itself, opened: rendered markdown under the row's label
+ *  (past the 14px icon and its gap), with no rule beside it. */
 function Thought({ text }: { text: string }) {
   return (
-    <div className="ml-1.5 border-l border-border pl-3">
+    <div className="pl-5">
       <CompactMd text={text} className="md-thought leading-relaxed" />
     </div>
   );
 }
 
-/** A finished reasoning block: "Thought for 12s", words only. */
+/** A finished reasoning block: "Thought for 12s". */
 export const ThinkingRow = memo(function ThinkingRow({
   text,
   ms,
@@ -314,7 +370,7 @@ export const ThinkingRow = memo(function ThinkingRow({
   dim?: boolean;
 }) {
   return (
-    <RowShell title={thoughtLabel(ms)} dim={dim} expandable={text.trim().length > 0}>
+    <RowShell icon={Brain} title={thoughtLabel(ms)} dim={dim} expandable={text.trim().length > 0}>
       <Thought text={text} />
     </RowShell>
   );
@@ -324,7 +380,7 @@ export const ThinkingRow = memo(function ThinkingRow({
  *  Only `LiveTail` draws it, so it re-renders per fold, never per token. */
 export function LiveThinkingRow({ text }: { text: string }) {
   return (
-    <RowShell title="Thinking" live note={latestThought(text)} expandable={text.trim().length > 0}>
+    <RowShell icon={Brain} title="Thinking" live note={latestThought(text)} expandable={text.trim().length > 0}>
       <Thought text={text} />
     </RowShell>
   );

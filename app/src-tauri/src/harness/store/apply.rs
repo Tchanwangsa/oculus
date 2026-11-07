@@ -1,8 +1,9 @@
 use sqlx::{Row, SqlitePool};
 
-use crate::harness::event::HarnessEvent;
+use crate::harness::event::{HarnessEvent, Source};
 
 use super::items::{insert_item, set_status};
+use super::Owner;
 
 /// A tool row's `meta`: everything the expanded row shows but the title.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -14,13 +15,59 @@ struct ToolMeta {
     output: Option<String>,
 }
 
+/// The row an event wrote or updated, and its weak id within the run.
+#[derive(Default)]
+pub struct Stored {
+    pub item_id: Option<i64>,
+    /// A new row, which took the owner's next ordinal.
+    pub inserted: bool,
+    pub entity: Option<String>,
+}
+
+impl Stored {
+    fn row(id: i64) -> Self {
+        Stored {
+            item_id: Some(id),
+            inserted: true,
+            entity: None,
+        }
+    }
+}
+
 /// Fold one event into the tables. Returns the id of the row it inserted,
 /// when it inserted one, so the frontend can key the timeline on it.
 pub async fn apply(
     pool: &SqlitePool,
     thread_id: i64,
     ev: &HarnessEvent,
+    owner: Option<&Owner>,
 ) -> Result<Option<i64>, String> {
+    apply_event(pool, thread_id, ev, owner)
+        .await
+        .map(|s| s.item_id)
+}
+
+/// [`apply`], saying whether the row is new. A new row belongs to `owner`,
+/// the run the consumer has open on this thread.
+pub async fn apply_event(
+    pool: &SqlitePool,
+    thread_id: i64,
+    ev: &HarnessEvent,
+    owner: Option<&Owner>,
+) -> Result<Stored, String> {
+    let mut stored = apply_rows(pool, thread_id, ev, owner).await?;
+    if stored.inserted {
+        stored.entity = owner.map(|o| o.entity.clone());
+    }
+    Ok(stored)
+}
+
+async fn apply_rows(
+    pool: &SqlitePool,
+    thread_id: i64,
+    ev: &HarnessEvent,
+    owner: Option<&Owner>,
+) -> Result<Stored, String> {
     match ev {
         HarnessEvent::SessionStarted {
             provider_session_id,
@@ -36,25 +83,25 @@ pub async fn apply(
             .execute(pool)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(None)
+            Ok(Stored::default())
         }
-        HarnessEvent::UserMessage { text, at } => {
-            set_status(pool, thread_id, "running").await?;
-            // `content` is only what the student typed; the playhead second is
-            // a fact about the message, so it goes in `meta` ("at 3:40").
-            let meta = at.map(|at| serde_json::json!({ "at": at }).to_string());
-            insert_item(pool, thread_id, "user", None, Some(text), meta)
-                .await
-                .map(Some)
-        }
-        HarnessEvent::TurnStarted => set_status(pool, thread_id, "running").await.map(|_| None),
+        // `store::begin_run` wrote this question with its run, and set the
+        // thread running; the consumer makes no question without one.
+        HarnessEvent::UserMessage { run, .. } => run
+            .map(|run| Stored {
+                item_id: Some(run.item_id),
+                ..Stored::default()
+            })
+            .ok_or_else(|| "a question with no run".to_string()),
+        // `begin_run` or `UnpromptedTurn` already set the thread running.
+        HarnessEvent::TurnStarted => Ok(Stored::default()),
         // A row, so a reload still shows why the agent went on unasked.
         HarnessEvent::UnpromptedTurn { after } => {
             set_status(pool, thread_id, "running").await?;
             let meta = serde_json::json!({ "after": after }).to_string();
-            insert_item(pool, thread_id, "unprompted", None, None, Some(meta))
+            insert_item(pool, thread_id, "unprompted", None, None, Some(meta), owner)
                 .await
-                .map(Some)
+                .map(Stored::row)
         }
         HarnessEvent::TurnAnchor { anchor } => {
             // The newest question is this turn's: one turn per thread runs at a time.
@@ -68,18 +115,47 @@ pub async fn apply(
             .execute(pool)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(None)
+            Ok(Stored::default())
         }
-        HarnessEvent::AssistantMessage { text } => {
-            insert_item(pool, thread_id, "assistant", None, Some(text), None)
-                .await
-                .map(Some)
+        HarnessEvent::AssistantMessage { text, source } => {
+            text_row(
+                pool,
+                thread_id,
+                "assistant",
+                text,
+                None,
+                source.as_ref(),
+                owner,
+            )
+            .await
         }
-        HarnessEvent::Thinking { text, ms } => {
+        HarnessEvent::Thinking { text, ms, source } => {
             let meta = ms.map(|ms| serde_json::json!({ "ms": ms }).to_string());
-            insert_item(pool, thread_id, "thinking", None, Some(text), meta)
-                .await
-                .map(Some)
+            text_row(
+                pool,
+                thread_id,
+                "thinking",
+                text,
+                meta,
+                source.as_ref(),
+                owner,
+            )
+            .await
+        }
+        HarnessEvent::DeliveryGap { source, cause } => {
+            sqlx::query(
+                "INSERT INTO harness_delivery_gaps (thread_id, run_id, attempt_id, source_ref, cause)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .bind(thread_id)
+            .bind(owner.map(|o| o.run_id))
+            .bind(owner.map(|o| o.attempt_id))
+            .bind(source)
+            .bind(cause.as_str())
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(Stored::default())
         }
         HarnessEvent::ToolStarted {
             id,
@@ -107,9 +183,10 @@ pub async fn apply(
                 Some(id),
                 Some(title),
                 serde_json::to_string(&meta).ok(),
+                owner,
             )
             .await
-            .map(Some)
+            .map(Stored::row)
         }
         HarnessEvent::ToolFinished {
             id,
@@ -127,7 +204,7 @@ pub async fn apply(
             .await
             .map_err(|e| e.to_string())?;
             let Some(row) = row else {
-                return Ok(None);
+                return Ok(Stored::default());
             };
             let item_id: i64 = row.get("id");
             let mut meta: ToolMeta = row
@@ -152,15 +229,15 @@ pub async fn apply(
             .execute(pool)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(None)
+            Ok(Stored::default())
         }
         // `meta` records which provider's credentials failed, so a reload can
         // redraw the sign-in card.
         HarnessEvent::Error { message, auth } => {
             let meta = auth.map(|p| serde_json::json!({ "auth": p.as_str() }).to_string());
-            insert_item(pool, thread_id, "error", None, Some(message), meta)
+            insert_item(pool, thread_id, "error", None, Some(message), meta, owner)
                 .await
-                .map(Some)
+                .map(Stored::row)
         }
         // Its own row, not an error: the turn ended normally, and a reload must
         // offer the rule again. `content` is the refused target.
@@ -183,9 +260,10 @@ pub async fn apply(
                 None,
                 target.as_deref(),
                 Some(meta.to_string()),
+                owner,
             )
             .await
-            .map(Some)
+            .map(Stored::row)
         }
         HarnessEvent::Usage {
             input_tokens,
@@ -207,7 +285,7 @@ pub async fn apply(
                 .execute(pool)
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(None)
+            Ok(Stored::default())
         }
         HarnessEvent::ThreadTitled { title } => {
             sqlx::query("UPDATE harness_threads SET title = ?2 WHERE id = ?1")
@@ -216,22 +294,48 @@ pub async fn apply(
                 .execute(pool)
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(None)
+            Ok(Stored::default())
         }
         HarnessEvent::TurnFinished { status } => {
-            let s = if status == "failed" { "error" } else { "idle" };
-            set_status(pool, thread_id, s).await?;
+            // A run's settlement sets the thread's status with its own; only
+            // a turn with no run (one the provider started) sets it here.
+            if owner.is_none() {
+                let s = if status == "failed" { "error" } else { "idle" };
+                set_status(pool, thread_id, s).await?;
+            }
             // A stopped turn leaves a mark, so a cut-off answer reads as stopped.
             if status == "interrupted" {
-                return insert_item(pool, thread_id, "interrupted", None, None, None)
+                return insert_item(pool, thread_id, "interrupted", None, None, None, owner)
                     .await
-                    .map(Some);
+                    .map(Stored::row);
             }
-            Ok(None)
+            Ok(Stored::default())
         }
         HarnessEvent::Exited { .. } => {
             // A mid-turn exit already produced a failed TurnFinished.
-            Ok(None)
+            Ok(Stored::default())
+        }
+        // One row per compaction: a re-sent snapshot of it adds none.
+        HarnessEvent::Compaction { source } => {
+            if let Some(source) = source {
+                let known: Option<i64> = sqlx::query_scalar(
+                    "SELECT id FROM harness_items WHERE thread_id = ?1 AND kind = 'compaction' AND ref_id = ?2",
+                )
+                .bind(thread_id)
+                .bind(source)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+                if let Some(id) = known {
+                    return Ok(Stored {
+                        item_id: Some(id),
+                        ..Stored::default()
+                    });
+                }
+            }
+            insert_item(pool, thread_id, "compaction", source.as_deref(), None, None, owner)
+                .await
+                .map(Stored::row)
         }
         // No rows: a queued message has none until sent, and a rewind already deleted its.
         HarnessEvent::AssistantDelta { .. }
@@ -241,6 +345,81 @@ pub async fn apply(
         | HarnessEvent::Unqueued { .. }
         | HarnessEvent::Proposal { .. }
         | HarnessEvent::Rewound { .. }
-        | HarnessEvent::RateLimits { .. } => Ok(None),
+        // The consumer writes and emits these itself, at settlement.
+        | HarnessEvent::RunSettled { .. }
+        | HarnessEvent::DeliveryNotice { .. }
+        | HarnessEvent::RateLimits { .. } => Ok(Stored::default()),
     }
+}
+
+/// A message or reasoning row. Within a run, the same provider source again
+/// (a re-sent or closing snapshot) replaces its row's text instead of adding one.
+async fn text_row(
+    pool: &SqlitePool,
+    thread_id: i64,
+    kind: &'static str,
+    text: &str,
+    meta: Option<String>,
+    source: Option<&Source>,
+    owner: Option<&Owner>,
+) -> Result<Stored, String> {
+    let (Some(source), Some(owner)) = (source, owner) else {
+        return insert_item(pool, thread_id, kind, None, Some(text), meta, owner)
+            .await
+            .map(Stored::row);
+    };
+    let lifecycle = if source.partial {
+        "partial"
+    } else {
+        "complete"
+    };
+    let phase = (kind == "assistant").then(|| source.phase.as_str());
+    let known = sqlx::query(
+        "SELECT id, entity_ref FROM harness_items WHERE attempt_id = ?1 AND kind = ?2 AND source_ref = ?3",
+    )
+    .bind(owner.attempt_id)
+    .bind(kind)
+    .bind(&source.id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if let Some(row) = known {
+        let id: i64 = row.get("id");
+        sqlx::query(
+            "UPDATE harness_items SET content = ?2, meta = COALESCE(?3, meta), native_phase = ?4, lifecycle = ?5
+              WHERE id = ?1",
+        )
+        .bind(id)
+        .bind(text)
+        .bind(meta)
+        .bind(phase)
+        .bind(lifecycle)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        return Ok(Stored {
+            item_id: Some(id),
+            inserted: false,
+            entity: row.get("entity_ref"),
+        });
+    }
+    sqlx::query(
+        "INSERT INTO harness_items
+           (thread_id, kind, content, meta, run_id, attempt_id, entity_ref, source_ref, native_phase, lifecycle)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )
+    .bind(thread_id)
+    .bind(kind)
+    .bind(text)
+    .bind(meta)
+    .bind(owner.run_id)
+    .bind(owner.attempt_id)
+    .bind(&owner.entity)
+    .bind(&source.id)
+    .bind(phase)
+    .bind(lifecycle)
+    .execute(pool)
+    .await
+    .map(|r| Stored::row(r.last_insert_rowid()))
+    .map_err(|e| e.to_string())
 }

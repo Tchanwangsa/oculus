@@ -36,6 +36,9 @@ pub struct SendOptions {
     /// (`antigravity_rules::install`). `None` keeps the last ones written.
     #[serde(skip)]
     pub antigravity_rules: Option<Vec<String>>,
+    /// The caller's id for this send. A repeat of one already accepted starts
+    /// nothing; none gets a fresh one (`store::fresh_receipt`).
+    pub receipt: Option<String>,
 }
 
 /// The video a thread is created for, as `StudioSend` in

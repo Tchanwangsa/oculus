@@ -2,7 +2,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { isValidElement, memo } from "react";
-import { CaretRight } from "@phosphor-icons/react";
+import { ArrowDown, CaretRight } from "@phosphor-icons/react";
 import { CitationCode } from "@/components/markdown/Citation";
 import { CanvasVideoCard } from "@/components/markdown/embed/CanvasVideoCard";
 import { EmbedVideoCard } from "@/components/markdown/embed/EmbedVideoCard";
@@ -12,7 +12,9 @@ import { HighlightedCode } from "@/components/markdown/HighlightedCode";
 import { ReferenceLink } from "@/components/markdown/ReferenceLink";
 import { Mermaid } from "@/components/markdown/Mermaid";
 import { OPENUI_LANGS, OpenUIFence } from "@/components/markdown/openui/OpenUIFence";
-import { remarkWidgets } from "@/components/markdown/openui/remarkWidgets";
+import { remarkFenceSplit, remarkWidgets, type FenceSplit } from "@/components/markdown/openui/remarkWidgets";
+import { WIDGET_LANG } from "@/components/markdown/widget/constants";
+import { WidgetFence } from "@/components/markdown/widget/WidgetFence";
 import { OutputEmbed, embedKind } from "@/components/markdown/OutputEmbed";
 import { attachmentPath, attachmentSrc } from "@/lib/harness/attachments";
 import { useDataDir } from "@/hooks/backend/useDataDir";
@@ -85,11 +87,16 @@ function mermaidSource(children: React.ReactNode): string | null {
 /** The source of the fence a `<pre>` wraps when its tag matches `lang`. */
 function fenceSource(children: React.ReactNode, lang: RegExp): string | null {
   const el = Array.isArray(children) ? children.find(isValidElement) : children;
-  if (!isValidElement(el)) return null;
-  const props = el.props as { className?: string; children?: React.ReactNode };
-  if (!lang.test(props.className ?? "")) return null;
+  if (!isFence(el, lang)) return null;
+  const props = el.props as { children?: React.ReactNode };
   const source = String(props.children ?? "").replace(/\n+$/, "");
   return source.trim() ? source : null;
+}
+
+/** Whether `el` is a fence's `<code>` tagged `lang`. */
+function isFence(el: unknown, lang: RegExp): el is React.ReactElement {
+  if (!isValidElement(el)) return false;
+  return lang.test((el.props as { className?: string }).className ?? "");
 }
 
 /**
@@ -138,7 +145,9 @@ function codeRenderer(pictures: boolean) {
   return ({ className, children, ...p }: any) => {
     const isBlock = /language-/.test(className ?? "") || String(children).includes("\n");
     if (isBlock) {
-      const info = /(?:^|\s)language-(\S+)/.exec(className ?? "")?.[1] ?? "";
+      const tag = /(?:^|\s)language-(\S+)/.exec(className ?? "")?.[1] ?? "";
+      // A ```widget fence is TSX (`widget/WidgetFence.tsx`).
+      const info = tag === "widget" ? "tsx" : tag;
       return (
         <code className="block p-3 rounded-lg bg-surface-raised text-[13px] font-mono text-foreground overflow-x-auto" {...p}>
           {typeof children === "string" ? <HighlightedCode info={info} code={children} /> : children}
@@ -208,7 +217,9 @@ export const MD_COMPONENTS: Components = {
   // Mermaid is caught at `pre`, not `code`: inside a `<pre>`, `white-space:
   // pre` renders the gaps in mermaid's SVG. `Mermaid` falls back to the `<pre>`.
   // A ```openui fence is a study widget (`openui/OpenUIFence.tsx`), caught
-  // here for the same reason; it too falls back to the `<pre>`.
+  // here for the same reason; it too falls back to the `<pre>`. A ```widget
+  // fence is a sandboxed TSX widget (`widget/WidgetFence.tsx`), which shows
+  // the `<pre>` only behind its Source toggle.
   pre: ({ children, ...p }: any) => {
     const block = (
       <pre className="my-3" {...p}>
@@ -217,10 +228,13 @@ export const MD_COMPONENTS: Components = {
     );
     const chart = mermaidSource(children);
     if (chart) return <Mermaid code={chart}>{block}</Mermaid>;
-    const widget = fenceSource(children, OPENUI_LANGS);
     const el = Array.isArray(children) ? children.find(isValidElement) : children;
     const index = isValidElement(el) ? Number((el.props as Record<string, unknown>)["data-widget-index"] ?? 0) : 0;
-    return widget ? <OpenUIFence source={widget} blockIndex={index}>{block}</OpenUIFence> : block;
+    const widget = fenceSource(children, OPENUI_LANGS);
+    if (widget) return <OpenUIFence source={widget} blockIndex={index}>{block}</OpenUIFence>;
+    // Matched before it has a line, so a fence just opened never shows as code.
+    if (isFence(el, WIDGET_LANG)) return <WidgetFence source={fenceSource(children, WIDGET_LANG) ?? ""} blockIndex={index} code={block} />;
+    return block;
   },
   hr: (p: any) => <hr className="my-5 border-border" {...p} />,
   img: MdImage,
@@ -250,6 +264,16 @@ export const MD_COMPONENTS: Components = {
       {children}
     </summary>
   ),
+  // Where a folded reply's widget fence was: it is drawn once, below the
+  // run's work (`remarkFenceSplit`).
+  ...({
+    "widget-pointer": (p: any) => (
+      <p className="my-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <ArrowDown size={12} className="shrink-0" />
+        {p["data-lang"] === "widget" ? "Widget shown below" : "Card shown below"}
+      </p>
+    ),
+  } as Components),
   // The sync's video tags (docs/viewers.md). Not HTML tags, so `Components`
   // doesn't list them; hast keeps the attribute names, so the props are
   // `link-id`, `file-id`, `video-id`. Only library files parse raw HTML.
@@ -268,6 +292,18 @@ const isTaskList = (className: unknown) =>
 /** Hoisted for stable array identity across re-renders. */
 const PLAIN = [remarkGfm, remarkProsePaths, remarkWidgets];
 const WITH_MATH = [remarkGfm, remarkMath, remarkProsePaths, remarkWidgets];
+/** The same pipelines with a reply split around its widget fences, so their
+ *  numbering is the whole reply's. */
+const SPLIT: Record<FenceSplit, { plain: typeof PLAIN; math: typeof WITH_MATH }> = {
+  artifacts: {
+    plain: [...PLAIN, [remarkFenceSplit, "artifacts"]] as typeof PLAIN,
+    math: [...WITH_MATH, [remarkFenceSplit, "artifacts"]] as typeof WITH_MATH,
+  },
+  prose: {
+    plain: [...PLAIN, [remarkFenceSplit, "prose"]] as typeof PLAIN,
+    math: [...WITH_MATH, [remarkFenceSplit, "prose"]] as typeof WITH_MATH,
+  },
+};
 const MATHS = [rehypeMaths];
 const NO_PLUGINS: never[] = [];
 
@@ -312,13 +348,23 @@ const INLINE_COMPONENTS: Components = {
  * `index.css` scales the document-sized components down; it is unlayered so
  * it beats their utilities.
  */
-export const CompactMd = memo(function CompactMd({ text, className }: { text: string; className?: string }) {
+export const CompactMd = memo(function CompactMd({
+  text,
+  className,
+  split,
+}: {
+  text: string;
+  className?: string;
+  /** Draw only the widget fences, or only what surrounds them. */
+  split?: FenceSplit;
+}) {
   useMathsReady();
   const math = hasMath(text);
+  const plugins = split ? SPLIT[split][math ? "math" : "plain"] : math ? WITH_MATH : PLAIN;
   return (
     <div data-selectable className={cn("md-compact min-w-0", className)}>
       <ReactMarkdown
-        remarkPlugins={math ? WITH_MATH : PLAIN}
+        remarkPlugins={plugins}
         rehypePlugins={math ? MATHS : NO_PLUGINS}
         components={MD_COMPONENTS}
       >

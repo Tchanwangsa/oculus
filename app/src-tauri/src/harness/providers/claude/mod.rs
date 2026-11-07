@@ -35,3 +35,6 @@ pub struct ClaudeSpawn {
     /// servers, and no session kept in the student's `claude --resume` list.
     pub one_off: bool,
 }
+
+#[cfg(test)]
+pub(in crate::harness) mod replay;

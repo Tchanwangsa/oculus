@@ -1,20 +1,19 @@
 use std::sync::{mpsc, Arc, Mutex};
 
-use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::harness::{jobs, opencode, store};
 use crate::harness::{Harness, HarnessEvent, Provider, Queue};
 
+use super::consumer::ConsumerIo;
 use super::send::dispatch;
-use super::thought_clock::ThoughtClock;
-use super::{sink_for, Envelope, HarnessState};
+use super::{sink_for, BusMsg, Envelope, HarnessState};
 
 /// One consumer thread folds every event, from every thread, in order:
 /// a row is written before the webview hears about it, and a tool's
 /// finish can never overtake its start.
 pub fn init(app: &AppHandle) -> HarnessState {
-    let (tx, rx) = mpsc::channel::<(i64, Provider, HarnessEvent)>();
+    let (tx, rx) = mpsc::channel::<BusMsg>();
     let handle = app.clone();
     let harness = Arc::new(Harness::new(crate::library::paths::data_dir()));
     let queue: Arc<Mutex<Queue>> = Arc::new(Mutex::new(Queue::default()));
@@ -25,93 +24,72 @@ pub fn init(app: &AppHandle) -> HarnessState {
     // so it is written and forwarded by this same loop.
     let (namer, bus, queued) = (harness.clone(), tx.clone(), queue.clone());
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-        let mut pool: Option<SqlitePool> = None;
-        let mut clock = ThoughtClock::default();
-        for (thread_id, provider, mut ev) in rx {
-            clock.observe(thread_id, &mut ev);
-            if pool.is_none() {
-                pool = rt.block_on(crate::db::store::open_pool()).ok();
-            }
-            let mut item_id = None;
-            if let Some(p) = &pool {
-                if thread_id > 0 {
-                    match rt.block_on(store::apply(p, thread_id, &ev)) {
-                        Ok(id) => item_id = id,
-                        Err(e) => elog!("[oculus] harness store: {e}"),
-                    }
-                }
-                if let Err(e) = rt.block_on(store::save_rate_limits(p, provider, &ev)) {
-                    elog!("[oculus] harness rate limits: {e}");
-                }
-                // A finished first exchange is when a thread is named. The
-                // claim is atomic (asks at most once); the naming turn runs
-                // off this loop, which every thread's events wait behind.
-                if thread_id > 0
-                    && matches!(&ev, HarnessEvent::TurnFinished { status } if status == "completed")
-                {
-                    match rt.block_on(store::claim_naming(p, thread_id)) {
-                        Ok(Some(seed)) => {
-                            let chain = rt.block_on(jobs::chain(p, jobs::Job::ThreadNaming));
-                            // An empty list switches naming off; the thread stays as it is.
-                            if !chain.is_empty() {
-                                let (namer, bus) = (namer.clone(), bus.clone());
-                                std::thread::spawn(move || {
-                                    match jobs::try_each(jobs::Job::ThreadNaming, &chain, |sel| {
-                                        namer.name_thread(sel, &seed.first_message, &seed.reply)
-                                    }) {
-                                        Ok(title) => {
-                                            let _ = bus.send((
-                                                thread_id,
-                                                provider,
-                                                HarnessEvent::ThreadTitled { title },
-                                            ));
-                                        }
-                                        Err(e) => elog!("[oculus] harness title: {e}"),
-                                    }
-                                });
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(e) => elog!("[oculus] harness title: {e}"),
-                    }
-                }
-            }
-            // A turn the provider started itself holds the thread like a
-            // send, so a message typed meanwhile waits its own turn.
-            if thread_id > 0 && matches!(&ev, HarnessEvent::UnpromptedTurn { .. }) {
-                queued.lock().unwrap().hold(thread_id);
-            }
-            // A closed turn releases the next queued message; its send is
-            // spawned, since a send may start a process.
-            if thread_id > 0 && matches!(&ev, HarnessEvent::TurnFinished { .. }) {
-                let next = queued.lock().unwrap().next(thread_id);
-                if let Some((msg, opts)) = next {
-                    let (h, b) = (namer.clone(), bus.clone());
-                    let _ = b.send((thread_id, provider, HarnessEvent::Unqueued { id: msg.id }));
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(e) = dispatch(h, b, thread_id, provider, opts, msg.text).await {
-                            elog!("[oculus] harness queued send: {e}");
-                        }
-                    });
-                }
-            }
-
-            let _ = handle.emit(
-                "harness-event",
-                Envelope {
-                    thread_id,
-                    provider,
-                    item_id,
-                    event: ev,
-                },
-            );
-        }
+        super::consumer::consume(rx, queued, &mut AppIo { handle, namer, bus });
     });
     HarnessState {
         harness,
         bus: tx,
         queue,
+    }
+}
+
+struct AppIo {
+    handle: AppHandle,
+    namer: Arc<Harness>,
+    bus: super::Bus,
+}
+
+impl ConsumerIo for AppIo {
+    fn open_pool(&mut self, rt: &tokio::runtime::Runtime) -> Option<sqlx::SqlitePool> {
+        rt.block_on(crate::db::store::open_pool()).ok()
+    }
+
+    fn name(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        chain: Vec<jobs::JobSelection>,
+        seed: store::NamingSeed,
+    ) {
+        let (namer, bus) = (self.namer.clone(), self.bus.clone());
+        std::thread::spawn(move || {
+            match jobs::try_each(jobs::Job::ThreadNaming, &chain, |sel| {
+                namer.name_thread(sel, &seed.first_message, &seed.reply)
+            }) {
+                Ok(title) => {
+                    let _ = bus.send(BusMsg::Event(
+                        thread_id,
+                        provider,
+                        HarnessEvent::ThreadTitled { title },
+                    ));
+                }
+                Err(e) => elog!("[oculus] harness title: {e}"),
+            }
+        });
+    }
+
+    fn dispatch(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        msg: crate::harness::QueuedMessage,
+        opts: crate::harness::SendOptions,
+    ) {
+        let (h, b) = (self.namer.clone(), self.bus.clone());
+        let _ = b.send(BusMsg::Event(
+            thread_id,
+            provider,
+            HarnessEvent::Unqueued { id: msg.id },
+        ));
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = dispatch(h, b, thread_id, provider, opts, msg.text).await {
+                elog!("[oculus] harness queued send: {e}");
+            }
+        });
+    }
+
+    fn emit(&mut self, envelope: Envelope) {
+        let _ = self.handle.emit("harness-event", envelope);
     }
 }
 

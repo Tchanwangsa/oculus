@@ -34,6 +34,8 @@ pub(super) const SERVE_ARGS: [&str; 6] = [
 
 pub struct OpencodeServer {
     pub(super) proc: ChildProc,
+    #[cfg(test)]
+    pub(super) replay: Option<crate::harness::testkit::outbound::Http>,
     pub(super) base: String,
     pub(super) directory: PathBuf,
     /// With a timeout. `stream` has none: it would cut a healthy idle stream.
@@ -93,6 +95,8 @@ impl OpencodeServer {
 
         let server = Arc::new(OpencodeServer {
             proc,
+            #[cfg(test)]
+            replay: None,
             base: format!("http://127.0.0.1:{port}"),
             directory: cfg.directory.clone(),
             api: ureq::AgentBuilder::new()
@@ -190,7 +194,7 @@ impl OpencodeServer {
         self.proc.kill();
     }
 
-    fn on_exit(&self) {
+    pub(super) fn on_exit(&self) {
         let code = self.proc.reap();
         self.fail_open_turns(
             &self

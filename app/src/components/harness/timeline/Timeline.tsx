@@ -6,7 +6,8 @@ import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
 import { EXPANDABLE } from "@/lib/ui/expandable";
 import { SignInDialog, useSignIn } from "../SignInDialog";
 import { Bundle, Item } from "./ItemRows";
-import { ContextDrift } from "./Messages";
+import { ArtifactRow, ContextDrift } from "./Messages";
+import { RunWorkGroup } from "./RunWorkGroup";
 import { LiveTail, Pending } from "./Pending";
 import { buildRows } from "./rows";
 import type { PendingActions, QuestionActions } from "./types";
@@ -14,6 +15,7 @@ import { useRowWindow } from "./useRowWindow";
 import { useRowVisibility } from "./useRowVisibility";
 import { RetainedRow } from "./RetainedRow";
 import { AssistantSend } from "@/components/markdown/openui/assistant";
+import { useHarnessStore } from "@/stores/chat/harnessStore";
 
 /** A committed row: an anchor for `useStickToBottom`, with off-screen layout
  *  skipped by `useRowVisibility`. Padding on all edges preserves focus rings. */
@@ -22,15 +24,16 @@ const ROW = `${ANCHOR_ROW} skip-offscreen min-w-0 min-h-0`;
 export type { PendingActions, QuestionActions } from "./types";
 
 /**
- * The thread as a list. Messages are the spine; the tool calls and reasoning
- * between them are a *step*, and a finished step of two or more rows folds
- * into one summary row ("Explored 3 files, ran 2 commands"). The step in
- * progress stays unfolded; finished rows are dimmed.
+ * The thread as a list. Each run is its question, one "Worked for 12s" fold
+ * of its work, the widget fences of folded replies, then its one answer and
+ * any outcome row (`buildRows`). Rows from before runs, and turns the agent
+ * started itself, keep the older shape: a finished step of two or more tool
+ * or reasoning rows folds into one summary row ("Explored 3 files").
  *
  * **Nothing here re-renders for the turn in flight.** Committed rows never
- * change, so all are memoised; only `LiveTail` and a running `Tool` subscribe
- * to the stream. Only the newest rows mount until the reader scrolls up
- * (`useRowWindow`).
+ * change, so all are memoised; only `LiveTail`, a running `Tool` and a running
+ * fold's clock subscribe to the stream or a timer. Only the newest rows mount
+ * until the reader scrolls up (`useRowWindow`).
  */
 export const Timeline = memo(function Timeline({
   items,
@@ -52,19 +55,13 @@ export const Timeline = memo(function Timeline({
   const { recheck } = useSignInStatus();
   const run = useSignIn(recheck);
 
-  const rows = useMemo(() => buildRows(items, running), [items, running]);
-  // Which question each answer answered, for Retry. A turn the agent started
-  // itself answered none of the student's.
-  const asked = useMemo(() => {
-    const map = new Map<number, HarnessItem>();
-    let last: HarnessItem | undefined;
-    for (const i of items) {
-      if (i.kind === "user") last = i;
-      else if (i.kind === "unprompted") last = undefined;
-      else if (i.kind === "assistant" && last) map.set(i.id, last);
-    }
-    return map;
-  }, [items]);
+  const runs = useHarnessStore((s) => (threadId == null ? undefined : s.runs[threadId]));
+  // Flips twice a reply, not per token.
+  const streaming = useHarnessStore((s) => threadId != null && !!s.live[threadId]?.streaming);
+  const rows = useMemo(() => buildRows(items, running, { runs, streaming }), [items, running, runs, streaming]);
+  const last = rows[rows.length - 1];
+  // A working fold already says so; the tail's "Working…" would repeat it.
+  const folding = last?.kind === "work" && last.state === "running";
   // Only the newest refusal is still a question; the ones above it are what
   // happened. Allowing is idempotent, so this is tidiness, not safety.
   const latestPermission = useMemo(() => {
@@ -89,21 +86,30 @@ export const Timeline = memo(function Timeline({
             <RetainedRow key={r.id} className={ROW}>
               <Bundle items={r.items} />
             </RetainedRow>
+          ) : r.kind === "work" ? (
+            <RetainedRow key={r.id} className={ROW}>
+              <RunWorkGroup fold={r} />
+            </RetainedRow>
+          ) : r.kind === "artifacts" ? (
+            <RetainedRow key={r.id} className={ROW}>
+              <ArtifactRow item={r.item} />
+            </RetainedRow>
           ) : (
             <RetainedRow key={r.item.id} className={ROW} questionId={r.item.kind === "user" ? r.item.id : undefined}>
               <Item
                 item={r.item}
                 dim={r.dim}
                 actions={questions}
-                asked={asked.get(r.item.id)}
+                asked={r.asked}
                 onSignIn={setSignIn}
                 latest={r.item.id === latestPermission}
+                role={r.role}
               />
             </RetainedRow>
           ),
         )}
         {threadId != null && <ContextDrift threadId={threadId} />}
-        {threadId != null && <LiveTail threadId={threadId} />}
+        {threadId != null && <LiveTail threadId={threadId} quiet={!folding} />}
         {threadId != null && pending && <Pending threadId={threadId} actions={pending} />}
         {signIn && (
           <SignInDialog

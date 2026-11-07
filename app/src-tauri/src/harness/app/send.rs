@@ -12,7 +12,7 @@ use crate::harness::{
 };
 use crate::runtime::blocking::run as blocking;
 
-use super::{sink_for, Bus};
+use super::{sink_for, Bus, BusMsg};
 
 /// A send the queue has let go. A failure still closes the turn (an error
 /// row, then `TurnFinished`), so nothing queued behind it is stranded.
@@ -25,7 +25,17 @@ pub(super) async fn dispatch(
     text: String,
 ) -> Result<(), String> {
     let sink = sink_for(&bus, thread_id, provider);
-    match start_turn(&harness, thread_id, provider, opts, &text, sink.clone()).await {
+    match start_turn(
+        &harness,
+        &bus,
+        thread_id,
+        provider,
+        opts,
+        &text,
+        sink.clone(),
+    )
+    .await
+    {
         Ok(()) => Ok(()),
         Err(e) => {
             sink(HarnessEvent::error(e.clone()));
@@ -71,6 +81,7 @@ pub(super) async fn studio_brief(pool: &SqlitePool, thread_id: i64) -> Option<St
 
 async fn start_turn(
     harness: &Arc<Harness>,
+    bus: &Bus,
     thread_id: i64,
     provider: Provider,
     opts: SendOptions,
@@ -112,10 +123,16 @@ async fn start_turn(
     let resume = row.provider_session_id;
     // The row is what the student typed; what they had open (a lecture's moment,
     // a notebook) rides only the prompt, or the timeline would show it.
-    sink(HarnessEvent::UserMessage {
+    let intent = store::SendIntent {
+        thread_id,
+        provider,
+        model: opts.model.clone(),
+        native_session: resume.clone(),
+        receipt: opts.receipt.clone().unwrap_or_else(store::fresh_receipt),
         text: text.to_string(),
         at: opts.at,
-    });
+    };
+    let run = begin_run(bus, intent).await?;
     let text = match &opts.context {
         Some(c) => {
             format!("{text}\n\n---\n\n## What the student had open when this was sent\n\n{c}")
@@ -127,5 +144,22 @@ async fn start_turn(
     let text = format!("{text}{}", cards.section);
     let (h, sink) = (harness.clone(), sink.clone());
     blocking(move || h.send(thread_id, provider, resume.as_deref(), &opts, &text, sink)).await?;
+    if let Err(e) = store::mark_sent(&pool, &run).await {
+        elog!("[oculus] harness run {}: {e}", run.run_id);
+    }
     super::proposal_context::accepted(&pool, cards).await
+}
+
+/// Persist the send's run and question on the consumer, before any provider
+/// write. An `Err` wrote nothing, and the caller must not send.
+pub(in crate::harness) async fn begin_run(
+    bus: &Bus,
+    intent: store::SendIntent,
+) -> Result<store::RunStart, String> {
+    let (reply, answer) = tokio::sync::oneshot::channel();
+    bus.send(BusMsg::Begin { intent, reply })
+        .map_err(|_| "the harness consumer has stopped".to_string())?;
+    answer
+        .await
+        .map_err(|_| "the harness consumer has stopped".to_string())?
 }

@@ -2,14 +2,15 @@ import { memo, useState } from "react";
 import { Check, Copy } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import { CompactMd } from "@/components/markdown/MdComponents";
+import type { FenceSplit } from "@/components/markdown/openui/remarkWidgets";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fmtClockSecs } from "@/lib/lectures/media";
 import { cn, copyText } from "@/lib/utils";
 
 // Memoised: a committed reply never changes, and re-parsing it per streamed
 // token is what makes the thread jitter.
-export const Assistant = memo(function Assistant({ text }: { text: string }) {
-  return <CompactMd text={text} className="px-2 text-[13px] leading-relaxed" />;
+export const Assistant = memo(function Assistant({ text, split }: { text: string; split?: FenceSplit }) {
+  return <CompactMd text={text} split={split} className="px-2 text-[13px] leading-relaxed" />;
 });
 
 /** One action under a message: an icon with a tooltip. */

@@ -9,11 +9,19 @@ use super::server::OpencodeServer;
 
 impl OpencodeServer {
     pub(super) fn get(&self, path: &str) -> Result<Value, String> {
+        #[cfg(test)]
+        if let Some(replay) = &self.replay {
+            return Ok(replay("GET", path, Value::Null));
+        }
         self.finish(self.api.get(&format!("{}{path}", self.base)).call(), path)
     }
 
     /// `send_string`: ureq's `json` feature is off in this crate.
     pub(super) fn post(&self, path: &str, body: Value) -> Result<Value, String> {
+        #[cfg(test)]
+        if let Some(replay) = &self.replay {
+            return Ok(replay("POST", path, body.clone()));
+        }
         self.finish(
             self.api
                 .post(&format!("{}{path}", self.base))
@@ -25,10 +33,18 @@ impl OpencodeServer {
 
     /// A `POST` with no body, for endpoints that declare none (`/abort`).
     pub(super) fn post_empty(&self, path: &str) -> Result<Value, String> {
+        #[cfg(test)]
+        if let Some(replay) = &self.replay {
+            return Ok(replay("POST", path, Value::Null));
+        }
         self.finish(self.api.post(&format!("{}{path}", self.base)).call(), path)
     }
 
     pub(super) fn delete(&self, path: &str) -> Result<Value, String> {
+        #[cfg(test)]
+        if let Some(replay) = &self.replay {
+            return Ok(replay("DELETE", path, Value::Null));
+        }
         self.finish(
             self.api.delete(&format!("{}{path}", self.base)).call(),
             path,
@@ -66,6 +82,11 @@ impl OpencodeServer {
     /// No `?directory=`: `/auth/{id}` is machine-wide, not instance-scoped.
     pub(super) fn put_auth(&self, provider: &str, body: Value) -> Result<(), String> {
         let path = format!("/auth/{}", urlencode(provider));
+        #[cfg(test)]
+        if let Some(replay) = &self.replay {
+            replay("PUT", &path, body);
+            return Ok(());
+        }
         let v = self.finish(
             self.api
                 .put(&format!("{}{path}", self.base))

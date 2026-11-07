@@ -19,6 +19,8 @@ the root `CLAUDE.md` holds only the rules.
 | [parsing.md](./parsing.md) | PDFs to markdown: the parser seam, the two MinerU engines, failures |
 | [retrieval.md](./retrieval.md) | Page-image embeddings, the `pages` table, query flow |
 | [harness.md](./harness.md) | Chat as a CLI agent: the four bridges, containment, the timeline, per-job models and subagents |
+| [harness-replay.md](./harness-replay.md) | Offline provider-frame replay, fixture manifests, scratch isolation and executable turn-model release gates |
+| [widgets.md](./widgets.md) | ` ```widget ` fences: agent-written TSX in a sandboxed frame, the `oculus/*` kit, its CSP and messages, sizing without scroll, state and Ask to fix, `oculus/ask` (a model call or a chat message the student allows, the Widget questions job, the schema subset), and the `oculus-widgets` skill, its gallery and `oculus widget check` |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [revision.md](./revision.md) | Cheat sheet rows, draft questions, FSRS reviews, practice quizzes, written-answer marking and saved widgets |
 | [projects.md](./projects.md) | Projects and tasks: the Overview, board, table, timeline and the universal Tasks view |
@@ -54,6 +56,7 @@ the root `CLAUDE.md` holds only the rules.
 | `app/canvas-core/` | Infinite drawing canvas geometry, built to WebAssembly for the frontend — a separate Cargo root |
 | `app/editor-core/` | A standalone Rust port of the note editor's text model and markdown parser, checked against CodeMirror and Lezer; in dev builds, as WebAssembly, against every note editor |
 | `app/studio-core/` | Studio's scene renderer: TSX components in a QuickJS sandbox, laid out with taffy and parley and drawn with vello_cpu, maths typeset by `app/math-core`'s KaTeX port — a separate cargo root the CLI links |
+| `app/widget-kit/` | The kit chat widgets run on (`oculus/ui`, `oculus/state`, `oculus/2d`, `oculus/math`, `oculus/3d` with `three` and `@react-three/fiber`, `oculus/ask`, the runtime), built to `dist/widget-kit/` |
 | `app/src-tauri/templates/` | The agent-facing docs and skills written into the library |
 | `app/scripts/` | Dev preflight, native-binary fetchers, CLI staging and reference generation |
 | `docs/` | These pages |

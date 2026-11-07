@@ -1,0 +1,40 @@
+{
+  "provider": "opencode",
+  "cli_version": "1.18.31",
+  "protocol": "v1 HTTP/SSE",
+  "model": "openrouter/openai/gpt-4.1-nano-does-not-exist",
+  "capture_date": "Existing fixture; original timestamps retained; exact capture date not recorded",
+  "source": "fixtures/harness/opencode-v1-error.ndjson",
+  "redaction": "Existing committed recording reused unchanged; no new private thread content.",
+  "scenario": "opencode-v1-error",
+  "frames": 10,
+  "sha256": "2267423a755bf07e7e319b4101e1b0415a486301d5863695c4d2dcd9ba536daf",
+  "expected_outbound": [
+    {
+      "frame": {
+        "method": "POST",
+        "path": "/session/ses_f5227e04dffeFrDfMm54dmrVdl/prompt_async?directory=$SCRATCH/agents",
+        "body": {
+          "agent": "oculus",
+          "parts": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../opencode-v1-error.ndjson",
+  "native_session": "ses_f5227e04dffeFrDfMm54dmrVdl",
+  "settings": {
+    "recorded_agent": "oculus-namer",
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": "oculus",
+    "replay_scope": "existing recorded session route; scratch cwd; no startup/configuration probe"
+  }
+}

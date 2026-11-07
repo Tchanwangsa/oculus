@@ -4,7 +4,9 @@ use serde_json::{json, Value};
 
 use crate::harness::child::str_of as s;
 use crate::harness::event::cap_output;
-use crate::harness::event::{classify, HarnessEvent, Provider, RateWindow, ToolKind};
+use crate::harness::event::{
+    classify, GapCause, HarnessEvent, Phase, Provider, RateWindow, Source, ToolKind,
+};
 
 use super::ThreadState;
 
@@ -44,6 +46,42 @@ pub(super) fn rate_windows(rl: &Value) -> Vec<RateWindow> {
     windows
 }
 
+/// Streamed text whose `item/completed` never came, kept as partial.
+fn partial(st: &mut ThreadState) -> Option<(String, String)> {
+    let text = std::mem::take(&mut st.partial_message);
+    let item = st.partial_item.take().unwrap_or_default();
+    (!text.trim().is_empty()).then_some((text, item))
+}
+
+/// A stopped turn's streamed text: partial, and expected to be.
+fn stopped(st: &mut ThreadState) -> Vec<HarnessEvent> {
+    partial(st)
+        .map(|(text, item)| HarnessEvent::AssistantMessage {
+            text,
+            source: Source::partial(item),
+        })
+        .into_iter()
+        .collect()
+}
+
+/// The turn ended without the message's close (or the server died): the
+/// streamed text is kept as partial, with a gap for what never came.
+pub(super) fn cut_off(st: &mut ThreadState) -> Vec<HarnessEvent> {
+    let Some((text, item)) = partial(st) else {
+        return Vec::new();
+    };
+    vec![
+        HarnessEvent::AssistantMessage {
+            text,
+            source: Source::partial(item.clone()),
+        },
+        HarnessEvent::DeliveryGap {
+            source: Some(item),
+            cause: GapCause::MissingSnapshot,
+        },
+    ]
+}
+
 pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent> {
     let mut out = Vec::new();
     match method {
@@ -56,6 +94,7 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
             st.open_items.clear();
             st.streamed_messages.clear();
             st.partial_message.clear();
+            st.partial_item = None;
             out.push(HarnessEvent::TurnStarted);
         }
         "turn/completed" => {
@@ -70,9 +109,11 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
             }
             // Commit what a cut-short turn had said; a normal turn already
             // cleared this on `item/completed`.
-            let partial = std::mem::take(&mut st.partial_message);
-            if !partial.trim().is_empty() {
-                out.push(HarnessEvent::AssistantMessage { text: partial });
+            // Only a stop explains a message with no `item/completed`.
+            if status == "interrupted" {
+                out.extend(stopped(st));
+            } else {
+                out.extend(cut_off(st));
             }
             out.push(HarnessEvent::TurnFinished {
                 status: status.into(),
@@ -143,6 +184,7 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
             st.streamed_messages.insert(s(p, "itemId"));
             let text = s(p, "delta");
             if !text.is_empty() {
+                st.partial_item = Some(s(p, "itemId"));
                 st.partial_message.push_str(&text);
                 out.push(HarnessEvent::AssistantDelta { text });
             }
@@ -169,9 +211,23 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
             match s(item, "type").as_str() {
                 "agentMessage" => {
                     st.partial_message.clear();
+                    st.partial_item = None;
                     let text = s(item, "text");
                     if !text.trim().is_empty() {
-                        out.push(HarnessEvent::AssistantMessage { text });
+                        // Codex labels a message itself; absent means unknown.
+                        let phase = match item["phase"].as_str() {
+                            Some("commentary") => Phase::Commentary,
+                            Some("final_answer") => Phase::FinalAnswer,
+                            _ => Phase::Unknown,
+                        };
+                        out.push(HarnessEvent::AssistantMessage {
+                            text,
+                            source: Some(Source {
+                                id,
+                                phase,
+                                partial: false,
+                            }),
+                        });
                     }
                 }
                 "reasoning" => {
@@ -187,13 +243,28 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
                         out.push(HarnessEvent::Thinking {
                             text: parts.join("\n\n"),
                             ms: None,
+                            source: Source::of(id),
                         });
                     }
                 }
+                "contextCompaction" => out.push(HarnessEvent::Compaction { source: Some(id) }),
+                // A plan is work, not an answer: a plan row, folded by default.
                 "plan" => {
                     let text = s(item, "text");
                     if !text.trim().is_empty() {
-                        out.push(HarnessEvent::AssistantMessage { text });
+                        out.push(HarnessEvent::ToolStarted {
+                            id: id.clone(),
+                            kind: ToolKind::Plan,
+                            name: "plan".into(),
+                            title: "Plan".into(),
+                            input: Value::Null,
+                        });
+                        out.push(HarnessEvent::ToolFinished {
+                            id,
+                            ok: true,
+                            output: cap_output(&text),
+                            title: None,
+                        });
                     }
                 }
                 "commandExecution" => {

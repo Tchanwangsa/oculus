@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::harness::event::{cap_output, classify, HarnessEvent, Provider};
+use crate::harness::event::{cap_output, classify, GapCause, HarnessEvent, Provider, Source};
 
 /// Per-process translation state, keyed by `step_index`.
 #[derive(Default)]
@@ -17,6 +17,8 @@ pub(super) struct Translator {
     pub(super) step_index: Option<i64>,
     /// Steps whose `ToolStarted` went out (`tool_info` repeats every update).
     pub(super) started_tools: std::collections::HashSet<i64>,
+    /// Response steps already closed this turn; a repeated update is ignored.
+    pub(super) done_steps: std::collections::HashSet<i64>,
     /// A step already emitted `PermissionNeeded`; skip `denied_actions`.
     pub(super) refused: bool,
     pub(super) interrupting: Arc<AtomicBool>,
@@ -32,12 +34,33 @@ impl Translator {
     }
 
     /// Close the open assistant step, if there is one with anything in it.
-    fn flush_text(&mut self, out: &mut Vec<HarnessEvent>) {
+    /// Without its `DONE` the text is partial, and unless the turn was
+    /// stopped, its close is missing.
+    fn flush_text(&mut self, out: &mut Vec<HarnessEvent>, done: bool, stopped: bool) {
         let text = std::mem::take(&mut self.step_text);
-        if !text.trim().is_empty() {
-            out.push(HarnessEvent::AssistantMessage { text });
+        if let (false, Some(index)) = (text.trim().is_empty(), self.step_index) {
+            let id = format!("step-{index}");
+            let source = if done {
+                Source::of(id.clone())
+            } else {
+                Source::partial(id.clone())
+            };
+            out.push(HarnessEvent::AssistantMessage { text, source });
+            if !done && !stopped {
+                out.push(HarnessEvent::DeliveryGap {
+                    source: Some(id),
+                    cause: GapCause::MissingSnapshot,
+                });
+            }
         }
         self.step_index = None;
+    }
+
+    /// The process is gone: a reply still streaming is kept as partial.
+    pub(super) fn close(&mut self) -> Vec<HarnessEvent> {
+        let mut out = Vec::new();
+        self.flush_text(&mut out, false, false);
+        out
     }
 
     pub(super) fn translate(&mut self, v: &Value) -> Vec<HarnessEvent> {
@@ -66,7 +89,16 @@ impl Translator {
             }
             "result" => {
                 let r = v.get("result").cloned().unwrap_or(Value::Null);
-                self.flush_text(&mut out);
+                // Seven statuses onto three; anything unexpected is a failure.
+                let status = r.get("status").and_then(|s| s.as_str()).unwrap_or("");
+                let interrupted = self.interrupting.swap(false, Ordering::SeqCst);
+                let mapped = match status {
+                    _ if interrupted => "interrupted",
+                    "SUCCESS" => "completed",
+                    "INTERRUPTED" | "CANCELED" => "interrupted",
+                    _ => "failed",
+                };
+                self.flush_text(&mut out, false, mapped == "interrupted");
                 if let Some(u) = r.get("usage") {
                     out.push(usage_event(u));
                 }
@@ -89,15 +121,6 @@ impl Translator {
                         });
                     }
                 }
-                // Seven statuses onto three; anything unexpected is a failure.
-                let status = r.get("status").and_then(|s| s.as_str()).unwrap_or("");
-                let interrupted = self.interrupting.swap(false, Ordering::SeqCst);
-                let mapped = match status {
-                    _ if interrupted => "interrupted",
-                    "SUCCESS" => "completed",
-                    "INTERRUPTED" | "CANCELED" => "interrupted",
-                    _ => "failed",
-                };
                 if mapped == "failed" {
                     let why = r
                         .get("error")
@@ -108,6 +131,7 @@ impl Translator {
                     out.push(HarnessEvent::error_for(Provider::Antigravity, why));
                 }
                 self.turn_open = false;
+                self.done_steps.clear();
                 self.expecting.store(false, Ordering::SeqCst);
                 out.push(HarnessEvent::TurnFinished {
                     status: mapped.into(),
@@ -126,10 +150,11 @@ impl Translator {
         let kind = su.get("step_type").and_then(|s| s.as_str()).unwrap_or("");
 
         if self.step_index.is_some_and(|i| i != index) {
-            self.flush_text(out);
+            self.flush_text(out, false, false);
         }
 
         match kind {
+            "agent_response" if self.done_steps.contains(&index) => {}
             "agent_response" => {
                 self.step_index = Some(index);
                 if let Some(d) = su.get("text_delta").and_then(|s| s.as_str()) {
@@ -139,7 +164,8 @@ impl Translator {
                     }
                 }
                 if state == "DONE" {
-                    self.flush_text(out);
+                    self.flush_text(out, true, false);
+                    self.done_steps.insert(index);
                 }
             }
             "tool" => {

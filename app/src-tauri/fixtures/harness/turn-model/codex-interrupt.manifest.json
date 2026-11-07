@@ -1,0 +1,54 @@
+{
+  "provider": "codex",
+  "cli_version": "0.153 (bridge protocol)",
+  "protocol": "app-server JSON-RPC",
+  "model": null,
+  "capture_date": "Existing fixture; original timestamps retained; exact capture date not recorded",
+  "source": "fixtures/harness/codex-interrupt.ndjson",
+  "redaction": "Existing committed recording reused unchanged; no new private thread content.",
+  "scenario": "codex-interrupt",
+  "frames": 13,
+  "sha256": "cddc3901bbca87fe1296f64b4191b0e8792ba9615a5c65742beb22896430b94d",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a09ebd-3374-7100-bb0f-c42308e70fba",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "never",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "replay-turn"
+        }
+      }
+    }
+  ],
+  "input": "../codex-interrupt.ndjson",
+  "native_session": "01a09ebd-3374-7100-bb0f-c42308e70fba",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "existing recorded session route; scratch cwd; no startup/configuration probe"
+  }
+}

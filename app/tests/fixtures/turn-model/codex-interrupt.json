@@ -1,0 +1,250 @@
+{
+  "case": "codex-interrupt",
+  "restarted": false,
+  "envelopes": [
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": 1,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072940,
+      "event": {
+        "type": "user_message",
+        "text": "Replay request"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072941,
+      "event": {
+        "type": "turn_anchor",
+        "anchor": "replay-turn"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072942,
+      "event": {
+        "type": "turn_started"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072943,
+      "event": {
+        "type": "assistant_delta",
+        "text": "1"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072944,
+      "event": {
+        "type": "assistant_delta",
+        "text": "."
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072945,
+      "event": {
+        "type": "assistant_delta",
+        "text": " Set"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072946,
+      "event": {
+        "type": "assistant_delta",
+        "text": " the"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072947,
+      "event": {
+        "type": "assistant_delta",
+        "text": " night"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072948,
+      "event": {
+        "type": "assistant_delta",
+        "text": " before"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072949,
+      "event": {
+        "type": "assistant_delta",
+        "text": " an"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": 2,
+      "runId": 1,
+      "attemptId": 1,
+      "entityId": "weak:0",
+      "sequence": 1794054812072950,
+      "event": {
+        "type": "assistant_message",
+        "text": "1. Set the night before an",
+        "source": {
+          "id": "msg_01f7497d92524c08016aa79cff71d887d08e6559ffffd3c105",
+          "phase": "unknown",
+          "partial": true
+        }
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812072951,
+      "event": {
+        "type": "run_settled",
+        "answer_item_id": 2,
+        "work_item_ids": [],
+        "delivery": "incomplete",
+        "status": "interrupted",
+        "started_at": "2026-11-07 12:33:32",
+        "ended_at": "2026-11-07 12:33:32"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": 3,
+      "runId": 1,
+      "attemptId": 1,
+      "entityId": "weak:1",
+      "sequence": 1794054812072952,
+      "event": {
+        "type": "turn_finished",
+        "status": "interrupted"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "sequence": 1794054812072953,
+      "event": {
+        "type": "exited",
+        "code": null
+      }
+    }
+  ],
+  "reopened": [
+    {
+      "id": 1,
+      "thread_id": 1,
+      "kind": "user",
+      "ref_id": null,
+      "content": "Replay request",
+      "meta": null,
+      "created_at": "2026-11-07 12:33:32",
+      "anchor": "replay-turn",
+      "run_id": 1,
+      "attempt_id": null,
+      "entity_ref": null,
+      "source_ref": null,
+      "native_phase": null,
+      "lifecycle": null,
+      "display_role": null
+    },
+    {
+      "id": 2,
+      "thread_id": 1,
+      "kind": "assistant",
+      "ref_id": null,
+      "content": "1. Set the night before an",
+      "meta": null,
+      "created_at": "2026-11-07 12:33:32",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": 1,
+      "entity_ref": "weak:0",
+      "source_ref": "msg_01f7497d92524c08016aa79cff71d887d08e6559ffffd3c105",
+      "native_phase": "unknown",
+      "lifecycle": "partial",
+      "display_role": "answer"
+    },
+    {
+      "id": 3,
+      "thread_id": 1,
+      "kind": "interrupted",
+      "ref_id": null,
+      "content": null,
+      "meta": null,
+      "created_at": "2026-11-07 12:33:32",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": 1,
+      "entity_ref": "weak:1",
+      "source_ref": null,
+      "native_phase": null,
+      "lifecycle": null,
+      "display_role": null
+    }
+  ],
+  "runs": [
+    {
+      "id": 1,
+      "initiating_item_id": 1,
+      "binding_id": 1,
+      "active_attempt_id": 1,
+      "execution_status": "interrupted",
+      "origin": "student",
+      "delivery_state": "incomplete",
+      "answer_item_id": 2,
+      "started_at": "2026-11-07 12:33:32",
+      "ended_at": "2026-11-07 12:33:32"
+    }
+  ]
+}

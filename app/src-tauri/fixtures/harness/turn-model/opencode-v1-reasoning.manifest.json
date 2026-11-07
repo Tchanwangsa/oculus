@@ -1,0 +1,40 @@
+{
+  "provider": "opencode",
+  "cli_version": "1.18.31",
+  "protocol": "v1 HTTP/SSE",
+  "model": "opencode/nemotron-3-ultra-free",
+  "capture_date": "Existing fixture; original timestamps retained; exact capture date not recorded",
+  "source": "fixtures/harness/opencode-v1-reasoning.ndjson",
+  "redaction": "Existing committed recording reused unchanged; no new private thread content.",
+  "scenario": "opencode-v1-reasoning",
+  "frames": 36,
+  "sha256": "d571d91c9ef4faee859ea0c9e2ebcc75e192ae280733629179cfaeb1ef606e50",
+  "expected_outbound": [
+    {
+      "frame": {
+        "method": "POST",
+        "path": "/session/ses_f522971fdffeevIe1nd76cLbKt/prompt_async?directory=$SCRATCH/agents",
+        "body": {
+          "agent": "oculus",
+          "parts": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../opencode-v1-reasoning.ndjson",
+  "native_session": "ses_f522971fdffeevIe1nd76cLbKt",
+  "settings": {
+    "recorded_agent": "oculus-namer",
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": "oculus",
+    "replay_scope": "existing recorded session route; scratch cwd; no startup/configuration probe"
+  }
+}

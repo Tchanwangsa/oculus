@@ -7,16 +7,17 @@ import { Assistant } from "./MessageActions";
 import { QuestionBubble } from "./QuestionBubble";
 import type { PendingActions } from "./types";
 
-/** The turn in flight: reasoning and text with no row yet, or "Working…".
- *  One anchor row, never `skip-offscreen`: it changes size every fold and is
- *  on screen whenever it is read. */
-export function LiveTail({ threadId }: { threadId: number }) {
+/** The turn in flight: reasoning and text with no row yet, or "Working…"
+ *  (`quiet`; off while the run's fold shows its own clock). One anchor row,
+ *  never `skip-offscreen`: it changes size every fold and is on screen
+ *  whenever it is read. */
+export function LiveTail({ threadId, quiet: allowQuiet = true }: { threadId: number; quiet?: boolean }) {
   const { running, streaming, thinking } = useHarnessStore(useShallow((s) => ({
     running: s.live[threadId]?.running ?? false,
     streaming: s.live[threadId]?.streaming ?? "",
     thinking: s.live[threadId]?.thinking ?? "",
   })));
-  const quiet = running && !streaming && !thinking;
+  const quiet = allowQuiet && running && !streaming && !thinking;
   if (!thinking && !streaming && !quiet) return null;
   return (
     <div className={cn(ANCHOR_ROW, "flex flex-col gap-2")}>

@@ -33,6 +33,10 @@ pub(super) struct SessionState {
     /// that never got its closing snapshot, and is committed rather than lost.
     pub(super) text: HashMap<String, String>,
     pub(super) reasoning: HashMap<String, String>,
+    /// Deltas for parts no snapshot has said are text or reasoning yet.
+    pub(super) unknown: HashMap<String, String>,
+    /// Part ids in first-seen order, for whatever is left at close.
+    pub(super) order: Vec<String>,
     /// `callID` → tool name.
     pub(super) tools: HashMap<String, String>,
     pub(super) open_tools: std::collections::HashSet<String>,

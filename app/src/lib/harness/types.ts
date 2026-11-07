@@ -49,6 +49,23 @@ type HarnessEvent =
       target: string | null;
       rule: string | null;
     }
+  /** Rust's settlement of a student's run: its one answer row (none when no
+   *  text arrived), the earlier replies that are now work, how it ended and
+   *  its stored interval (SQLite UTC). */
+  | {
+      type: "run_settled";
+      answer_item_id: number | null;
+      work_item_ids: number[];
+      delivery: string;
+      status?: RunStatus;
+      started_at?: string | null;
+      ended_at?: string | null;
+    }
+  /** The row saying an answer, or part of it, did not arrive. */
+  | { type: "delivery_notice"; text: string }
+  | { type: "compaction"; source?: string }
+  /** Stored evidence of missing text; the timeline shows `delivery_notice` instead. */
+  | { type: "delivery_gap"; source?: string; cause: string }
   | { type: "turn_finished"; status: "completed" | "interrupted" | "failed" }
   /** `auth` names the provider when the CLI has no usable credentials; the
    *  timeline draws a sign-in card instead of an error. */
@@ -60,6 +77,13 @@ export interface HarnessEnvelope {
   /** For account-scoped events on `threadId` 0 (rate limits), whose account. */
   provider: Provider;
   itemId: number | null;
+  /** The student run this event belongs to; absent for an unprompted turn
+   *  and for account-scoped events. */
+  runId?: number;
+  attemptId?: number;
+  entityId?: string;
+  /** Increases with every envelope; a repeat is ignored. */
+  sequence?: number;
   event: HarnessEvent;
 }
 
@@ -101,7 +125,10 @@ type ItemKind =
   /** `meta` is `PermissionMeta`. */
   | "permission"
   /** Marks a turn the agent started itself; `meta` is `{ after: string[] }`. */
-  | "unprompted";
+  | "unprompted"
+  /** A run whose answer, or part of it, never arrived; `content` says which. */
+  | "delivery_notice"
+  | "compaction";
 
 /** Held in Rust's memory, not the database, until it goes out. */
 export interface QueuedMessage {
@@ -130,6 +157,26 @@ export interface HarnessItem {
   /** JSON `ToolMeta` for tools. */
   meta: string | null;
   created_at: string;
+  /** Set when Rust settles a run: its one `answer`, earlier replies `commentary`. */
+  display_role?: "answer" | "commentary" | null;
+  /** The student run that wrote it; null for an unprompted turn and for rows
+   *  from before runs existed. */
+  run_id?: number | null;
+}
+
+/** `harness_runs.execution_status`. */
+export type RunStatus = "preparing" | "running" | "completed" | "interrupted" | "failed";
+
+/** What the timeline needs of a `harness_runs` row: how it ended, its answer
+ *  and its stored wall-clock interval. */
+export interface HarnessRun {
+  id: number;
+  status: RunStatus;
+  delivery: string;
+  answer_item_id: number | null;
+  /** Epoch ms; null when unknown. */
+  started_ms: number | null;
+  ended_ms: number | null;
 }
 
 export interface BridgeHealth {

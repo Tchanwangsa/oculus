@@ -4,6 +4,7 @@
 //! it, the frontend renders it and the CLI prints it. A new provider is one
 //! translator to here, not a timeline change.
 
+pub mod answer;
 mod classify;
 
 pub use classify::{cap_output, classify, MAX_TOOL_OUTPUT};
@@ -85,6 +86,82 @@ pub struct RateWindow {
     pub resets_at: Option<i64>,
 }
 
+/// Where a message or reasoning block came from: the provider's own id for it,
+/// scoped to the attempt that produced it (docs/harness.md, "Each send is a run").
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Source {
+    pub id: String,
+    #[serde(default)]
+    pub phase: Phase,
+    /// Its closing snapshot never came: the text is what streamed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub partial: bool,
+}
+
+impl Source {
+    pub fn of(id: impl Into<String>) -> Option<Self> {
+        Some(Source {
+            id: id.into(),
+            phase: Phase::Unknown,
+            partial: false,
+        })
+    }
+
+    pub fn partial(id: impl Into<String>) -> Option<Self> {
+        Some(Source {
+            id: id.into(),
+            phase: Phase::Unknown,
+            partial: true,
+        })
+    }
+}
+
+/// The provider's own label for a message. Only Codex sends one; `Unknown`
+/// is a real value, not commentary.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Phase {
+    #[default]
+    Unknown,
+    Commentary,
+    FinalAnswer,
+}
+
+impl Phase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Phase::Unknown => "unknown",
+            Phase::Commentary => "commentary",
+            Phase::FinalAnswer => "final_answer",
+        }
+    }
+}
+
+/// What a [`HarnessEvent::DeliveryGap`] was observed from.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum GapCause {
+    /// Claude sent a narration block with no text.
+    EmptyNarration,
+    /// Text streamed, but the turn ended without its closing snapshot.
+    MissingSnapshot,
+    /// Streamed text the provider never said was answer or reasoning.
+    UnknownProtocol,
+    /// Oculus could not save a row the provider sent.
+    StorageFailure,
+}
+
+impl GapCause {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GapCause::EmptyNarration => "empty_narration",
+            GapCause::MissingSnapshot => "missing_snapshot",
+            GapCause::UnknownProtocol => "unknown_protocol",
+            GapCause::StorageFailure => "storage_failure",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HarnessEvent {
@@ -100,6 +177,9 @@ pub enum HarnessEvent {
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<i64>,
+        /// The run whose question row is already written; never serialized.
+        #[serde(skip)]
+        run: Option<super::store::RunStart>,
     },
     /// The provider began a turn nobody sent a message for (Claude picking up
     /// a background task that finished). Holds the thread like a sent message
@@ -121,8 +201,11 @@ pub enum HarnessEvent {
         text: String,
     },
     /// A finished block of assistant text: persisted, where deltas are display only.
+    /// The same `source` again is the same message, re-sent or completed.
     AssistantMessage {
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<Source>,
     },
     /// A finished block of reasoning text. Persisted, collapsed by default.
     Thinking {
@@ -131,6 +214,16 @@ pub enum HarnessEvent {
         /// `None`; the consumer loop times it (`app/thought_clock.rs`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<Source>,
+    },
+    /// Evidence that public text the provider meant to send did not arrive.
+    /// Stored for the run, whose settlement shows it as a notice; nothing resends.
+    DeliveryGap {
+        /// The message or block it concerns, when the provider named one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        cause: GapCause,
     },
     ToolStarted {
         /// Provider's id for the call; [`Self::ToolFinished`] closes on it.
@@ -207,6 +300,34 @@ pub enum HarnessEvent {
         target: Option<String>,
         /// A rule that would allow it (`command(python3)`), when readable off the refusal.
         rule: Option<String>,
+    },
+    /// The provider compacted the conversation's context. A row of its own:
+    /// never an answer, and its summary is never shown as the student's prose.
+    Compaction {
+        /// The provider's id for it; the same one again is the same compaction.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+    },
+    /// A student's run ended: which row is its one answer (none when no
+    /// text arrived), which earlier replies are work, and whether everything
+    /// the provider meant to say arrived (`delivered`, `incomplete`,
+    /// `not_applicable`). Rust decides; the webview only applies it. `status`
+    /// and the stored interval let the timeline fold the run's work.
+    RunSettled {
+        answer_item_id: Option<i64>,
+        work_item_ids: Vec<i64>,
+        delivery: String,
+        #[serde(default)]
+        status: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        started_at: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ended_at: Option<String>,
+    },
+    /// A completed run whose answer, or part of it, never reached Oculus.
+    /// Persisted as a row; never followed by a resend.
+    DeliveryNotice {
+        text: String,
     },
     /// The provider stopped working on the user's message, or on its own turn.
     TurnFinished {

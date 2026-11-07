@@ -3,6 +3,7 @@
 //! and releases queued messages as turns close. One module per command
 //! family, registered in `lib.rs` by the module that defines it.
 
+pub(in crate::harness) mod consumer;
 pub mod dictation;
 pub mod lifecycle;
 pub mod models;
@@ -11,7 +12,8 @@ mod proposal_context;
 mod proposal_context_tests;
 pub mod proposal_jobs;
 pub mod revision;
-mod send;
+mod run_scope;
+pub(in crate::harness) mod send;
 pub mod setup;
 pub mod suggest;
 mod thought_clock;
@@ -27,19 +29,40 @@ use crate::harness::{Harness, HarnessEvent, Provider, Queue, Sink};
 
 /// What the webview gets on `harness-event`, plus the row id when the
 /// event became a row. Account-scoped events arrive with `threadId` 0,
-/// hence the provider.
+/// hence the provider. A student send's events also name its run and
+/// attempt, and a row it made its weak `entityId`; the timeline reads none yet.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct Envelope {
-    thread_id: i64,
-    provider: Provider,
-    item_id: Option<i64>,
-    event: HarnessEvent,
+pub(in crate::harness) struct Envelope {
+    pub(in crate::harness) thread_id: i64,
+    pub(in crate::harness) provider: Provider,
+    pub(in crate::harness) item_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(in crate::harness) run_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(in crate::harness) attempt_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(in crate::harness) entity_id: Option<String>,
+    /// Increases with every envelope; the webview ignores one it has seen.
+    pub(in crate::harness) sequence: u64,
+    pub(in crate::harness) event: HarnessEvent,
 }
 
-/// Where every bridge's events go, tagged with the thread they belong
-/// to. One consumer reads it; see [`init`].
-type Bus = mpsc::Sender<(i64, Provider, HarnessEvent)>;
+/// What the one consumer reads, in order; see [`init`]. Events, the hot path,
+/// stay unboxed as they were before `Begin` joined them.
+#[allow(clippy::large_enum_variant)]
+pub(in crate::harness) enum BusMsg {
+    /// A bridge's event, tagged with its thread.
+    Event(i64, Provider, HarnessEvent),
+    /// A send to persist before its provider write. On the consumer, so every
+    /// row already queued for the thread is written before the question's.
+    Begin {
+        intent: crate::harness::store::SendIntent,
+        reply: tokio::sync::oneshot::Sender<Result<crate::harness::store::RunStart, String>>,
+    },
+}
+
+type Bus = mpsc::Sender<BusMsg>;
 
 pub struct HarnessState {
     pub harness: Arc<Harness>,
@@ -51,7 +74,7 @@ pub struct HarnessState {
 fn sink_for(bus: &Bus, thread_id: i64, provider: Provider) -> Sink {
     let bus = bus.clone();
     Arc::new(move |ev| {
-        let _ = bus.send((thread_id, provider, ev));
+        let _ = bus.send(BusMsg::Event(thread_id, provider, ev));
     })
 }
 

@@ -1,7 +1,7 @@
 //! Naming a thread once, the provider accounts' rate-limit windows, and the
-//! startup sweep of threads and tool rows a crash left `running`.
+//! startup sweep of threads, runs and tool rows a crash left `running`.
 
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 
 use crate::harness::event::{HarnessEvent, Provider};
 
@@ -11,33 +11,42 @@ pub struct NamingSeed {
     pub reply: String,
 }
 
-/// The first or last non-empty row of one kind. `order` is a literal, never
-/// user input.
-async fn one_item(
-    pool: &SqlitePool,
-    thread_id: i64,
-    kind: &str,
-    order: &'static str,
-) -> Result<Option<String>, String> {
-    sqlx::query(&format!(
+/// The thread's first non-empty question.
+async fn first_question(pool: &SqlitePool, thread_id: i64) -> Result<Option<String>, String> {
+    sqlx::query_scalar(
         "SELECT content FROM harness_items
-         WHERE thread_id = ?1 AND kind = ?2 AND content IS NOT NULL AND content != ''
-         ORDER BY id {order} LIMIT 1"
-    ))
+         WHERE thread_id = ?1 AND kind = 'user' AND content IS NOT NULL AND content != ''
+         ORDER BY id LIMIT 1",
+    )
     .bind(thread_id)
-    .bind(kind)
     .fetch_optional(pool)
     .await
     .map_err(|e| e.to_string())
-    .map(|r| r.and_then(|r| r.get::<Option<String>, _>("content")))
+}
+
+/// The thread's newest answer: a run's selected one, or a reply with no run
+/// (history from before runs, or a turn the provider started itself).
+const LAST_ANSWER: &str = "SELECT i.content FROM harness_items i
+      LEFT JOIN harness_runs r ON r.id = i.run_id
+     WHERE i.thread_id = ?1 AND i.kind = 'assistant'
+       AND (i.run_id IS NULL OR r.answer_item_id = i.id)
+       AND i.content IS NOT NULL AND trim(i.content) != ''
+     ORDER BY i.id DESC LIMIT 1";
+
+async fn last_answer(pool: &SqlitePool, thread_id: i64) -> Result<Option<String>, String> {
+    sqlx::query_scalar(LAST_ANSWER)
+        .bind(thread_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Claim the right to name this thread and return what to name it from. The
 /// claim flips `title_generated` 0→1 atomically, so a thread is named once; a
 /// failed naming turn is not retried, since each costs a real turn.
 pub async fn claim_naming(pool: &SqlitePool, thread_id: i64) -> Result<Option<NamingSeed>, String> {
-    let first_message = one_item(pool, thread_id, "user", "ASC").await?;
-    let reply = one_item(pool, thread_id, "assistant", "DESC").await?;
+    let first_message = first_question(pool, thread_id).await?;
+    let reply = last_answer(pool, thread_id).await?;
     let (Some(first_message), Some(reply)) = (first_message, reply) else {
         // Nothing was said back — a failed first turn. Leave the claim open.
         return Ok(None);
@@ -104,6 +113,19 @@ pub async fn reconcile(pool: &SqlitePool) -> Result<Reconciled, String> {
     .await
     .map_err(|e| e.to_string())?
     .rows_affected();
+    // Their process is gone: what streamed is kept, and they end interrupted.
+    super::runs::recover(&mut tx).await?;
+    for sql in [
+        "UPDATE harness_attempts SET status = 'interrupted', ended_at = datetime('now')
+          WHERE status IN ('preparing', 'running')",
+        "UPDATE harness_runs SET execution_status = 'interrupted', ended_at = datetime('now')
+          WHERE execution_status IN ('preparing', 'running')",
+    ] {
+        sqlx::query(sql)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(Reconciled { threads, tools })
 }

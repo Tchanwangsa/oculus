@@ -27,6 +27,37 @@ pub struct CodexServer {
 }
 
 impl CodexServer {
+    /// stdout reached EOF: every thread mid-turn keeps what streamed and fails.
+    pub(super) fn closed(&self) {
+        let code = self.proc.reap();
+        self.pending.lock().unwrap().clear();
+        let routes: Vec<Arc<ThreadRoute>> = self
+            .routes
+            .lock()
+            .unwrap()
+            .drain()
+            .map(|(_, r)| r)
+            .collect();
+        for r in routes {
+            let cut_off = {
+                let mut st = r.state.lock().unwrap();
+                st.active_turn
+                    .take()
+                    .map(|_| super::translate::cut_off(&mut st))
+            };
+            if let Some(events) = cut_off {
+                for ev in events {
+                    (r.sink)(ev);
+                }
+                let msg = self
+                    .proc
+                    .with_tail(format!("codex app-server exited (code {code:?})"));
+                child::fail_turn(&r.sink, Provider::Codex, msg);
+            }
+            (r.sink)(HarnessEvent::Exited { code });
+        }
+    }
+
     pub fn spawn(cfg: CodexSpawn) -> Result<Arc<Self>, String> {
         let mut cmd = crate::runtime::platform::cli_command(&cfg.bin)?;
         cmd.arg("app-server")
@@ -46,25 +77,7 @@ impl CodexServer {
         let raw_log = cfg.raw_log;
         std::thread::spawn(move || {
             child::read_json_lines(stdout, raw_log.as_ref(), |v| reader.dispatch(v));
-            let code = reader.proc.reap();
-            reader.pending.lock().unwrap().clear();
-            let routes: Vec<Arc<ThreadRoute>> = reader
-                .routes
-                .lock()
-                .unwrap()
-                .drain()
-                .map(|(_, r)| r)
-                .collect();
-            for r in routes {
-                let mid_turn = r.state.lock().unwrap().active_turn.take().is_some();
-                if mid_turn {
-                    let msg = reader
-                        .proc
-                        .with_tail(format!("codex app-server exited (code {code:?})"));
-                    child::fail_turn(&r.sink, Provider::Codex, msg);
-                }
-                (r.sink)(HarnessEvent::Exited { code });
-            }
+            reader.closed();
         });
 
         server.initialize()?;

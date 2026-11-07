@@ -243,7 +243,7 @@ fn a_stopped_turn_keeps_what_was_said() {
         .collect();
     assert!(!deltas.is_empty(), "the fixture streams an answer");
     let message = events.iter().find_map(|e| match e {
-        HarnessEvent::AssistantMessage { text } => Some(text.clone()),
+        HarnessEvent::AssistantMessage { text, .. } => Some(text.clone()),
         _ => None,
     });
     assert_eq!(

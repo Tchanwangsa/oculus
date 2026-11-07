@@ -14,6 +14,7 @@ pub(super) fn settings_json(
     cwd: &Path,
     oculus: Option<&Path>,
     hosts: &[String],
+    thinking_summaries: bool,
 ) -> String {
     let root = library.display().to_string();
     let abs = root.trim_start_matches('/');
@@ -53,7 +54,7 @@ pub(super) fn settings_json(
     if !hosts.is_empty() {
         network["allowedDomains"] = serde_json::json!(hosts);
     }
-    serde_json::json!({
+    let mut settings = serde_json::json!({
         "permissions": { "allow": allow, "deny": deny },
         "sandbox": {
             "enabled": true,
@@ -64,8 +65,11 @@ pub(super) fn settings_json(
             "filesystem": { "allowWrite": write },
         },
         "autoMemoryEnabled": false,
-    })
-    .to_string()
+    });
+    if thinking_summaries {
+        settings["showThinkingSummaries"] = true.into();
+    }
+    settings.to_string()
 }
 
 #[cfg(all(test, unix))]
@@ -73,11 +77,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tool_less_settings_do_not_request_thinking_summaries() {
+        let library = Path::new("/scratch/library");
+        let settings: serde_json::Value = serde_json::from_str(&settings_json(
+            library,
+            &library.join("agents"),
+            None,
+            &[],
+            false,
+        ))
+        .unwrap();
+        assert!(settings.get("showThinkingSummaries").is_none());
+    }
+
+    #[test]
     fn the_settings_document_opens_the_database_and_studio_and_nothing_else() {
         let library = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
         let cwd = library.join("agents");
-        let v: serde_json::Value = serde_json::from_str(&settings_json(library, &cwd, None, &[]))
-            .expect("valid settings JSON");
+        let v: serde_json::Value =
+            serde_json::from_str(&settings_json(library, &cwd, None, &[], true))
+                .expect("valid settings JSON");
 
         let write = v.pointer("/sandbox/filesystem/allowWrite").unwrap();
         assert_eq!(
@@ -97,6 +116,7 @@ mod tests {
         );
         assert_eq!(v["sandbox"]["enabled"], true);
         assert_eq!(v["autoMemoryEnabled"], false);
+        assert_eq!(v["showThinkingSummaries"], true);
         assert_eq!(
             v.pointer("/sandbox/network/allowUnixSockets").unwrap(),
             &serde_json::json!(["/Users/x/Library/Application Support/com.tchan.oculus/keyd.sock"]),
@@ -163,6 +183,7 @@ mod tests {
             &cwd,
             Some(Path::new("/opt/oculus/bin/oculus")),
             &[],
+            true,
         ))
         .expect("valid settings JSON");
         let allow2: Vec<&str> = v2
@@ -180,9 +201,14 @@ mod tests {
     #[test]
     fn studio_is_writable_and_no_deny_covers_it() {
         let library = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
-        let v: serde_json::Value =
-            serde_json::from_str(&settings_json(library, &library.join("agents"), None, &[]))
-                .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&settings_json(
+            library,
+            &library.join("agents"),
+            None,
+            &[],
+            true,
+        ))
+        .unwrap();
         let write = v.pointer("/sandbox/filesystem/allowWrite").unwrap();
         for dir in crate::library::paths::agent_write_dirs(library) {
             let dir = dir.to_str().unwrap();
@@ -224,6 +250,7 @@ mod tests {
             &library.join("agents"),
             None,
             &["127.0.0.1:8880".to_owned()],
+            true,
         ))
         .unwrap();
         assert_eq!(
@@ -241,9 +268,14 @@ mod tests {
             "/d",
         ] {
             let library = Path::new(lib);
-            let v: serde_json::Value =
-                serde_json::from_str(&settings_json(library, &library.join("agents"), None, &[]))
-                    .unwrap();
+            let v: serde_json::Value = serde_json::from_str(&settings_json(
+                library,
+                &library.join("agents"),
+                None,
+                &[],
+                true,
+            ))
+            .unwrap();
             let socket = keyd_core::paths::socket(library);
             assert_eq!(
                 v.pointer("/sandbox/network/allowUnixSockets").unwrap(),

@@ -18,7 +18,7 @@ it is named. Nothing is asserted that the picture does not show.
 
 ## Contents
 
-- The files beside this one; where things are; shell rules
+- The files beside this one; where things are
 - Helpers: who does what, and how your CLI starts one
 - Making a video: the checklist
 - Research: what a research helper reads and writes
@@ -67,15 +67,8 @@ From your working directory (`agents/`):
 Every `oculus studio` command takes the video's **slug** where its usage
 says `DIR`. File tools need the folder: `oculus studio new` prints it.
 
-## Shell rules
-
-- **One command per call.** No `for`, `while`, `$(…)`, backticks, shell
-  variables or `cd`. Write values out.
-- `oculus` is on `PATH`. Add `--json` for output you parse; `lint --json`
-  prints `[]` when clean.
-- **On opencode, `bash` is allow-listed to `oculus …` and `ls …` only.**
-  Write files with the write and edit tools, read text and PNGs with the
-  read tool, search with the grep tool.
+For machine-readable output, add `--json`; `lint --json` prints `[]` when
+clean. The Oculus chat instructions own shell restrictions.
 
 ## Helpers
 
@@ -463,8 +456,7 @@ The student watches to understand, not to be told.
   keeps its key in both, so it moves instead of fading.
 - **No colour, font or spacing literals.** Read them from `theme`; "The
   theme" in `reference.md` lists the token names.
-- **Look before you report.** Never hand over a render you have not seen
-  as frames.
+- **Inspect every render as frames.**
 
 ## Moving maths
 

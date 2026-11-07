@@ -69,7 +69,7 @@ pub(super) fn messages(events: &[HarnessEvent]) -> Vec<&str> {
     events
         .iter()
         .filter_map(|e| match e {
-            HarnessEvent::AssistantMessage { text } => Some(text.as_str()),
+            HarnessEvent::AssistantMessage { text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect()

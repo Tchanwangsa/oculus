@@ -5,10 +5,12 @@ import {
   providerAvailability,
   parseItemMeta,
   getHarnessItems,
+  getHarnessRuns,
   getHarnessThreads,
   harnessQueued,
   type HarnessEnvelope,
   type HarnessItem,
+  type HarnessRun,
   type HarnessThread,
   type Provider,
   type QueuedMessage,
@@ -16,9 +18,11 @@ import {
   type ThreadUsage,
 } from "@/lib/harness";
 import { getSubjects, type Subject } from "@/lib/db";
+import { sqliteUtcToMs } from "@/lib/format/format";
 import { useWidgetStore } from "./widgetStore";
 import { useProposalVersionStore } from "./proposalVersionStore";
 import { useProposalStore } from "./proposalStore";
+import { forgetFolds } from "./runFolds";
 
 /** A thread's mid-turn streams, which are not yet rows in the database. */
 export interface LiveTurn {
@@ -33,6 +37,7 @@ const IDLE: LiveTurn = { running: false, streaming: "", thinking: "", toolOutput
 /** One shared empty array: zustand compares by reference, so a fresh `[]`
  *  would re-render the timeline on every store write. */
 const EMPTY: HarnessItem[] = [];
+const NO_RUNS: Record<number, HarnessRun> = {};
 
 interface HarnessState {
   threads: HarnessThread[];
@@ -46,6 +51,9 @@ interface HarnessState {
   holds: Record<number, number>;
   /** Rows per thread: any number of Chat tabs and the lecture dock hold one. */
   items: Record<number, HarnessItem[]>;
+  /** Each held thread's runs by id, read with its rows and kept by
+   *  `user_message` and `run_settled`; the timeline folds by them. */
+  runs: Record<number, Record<number, HarnessRun>>;
   live: Record<number, LiveTurn>;
   rateLimits: Partial<Record<Provider, RateWindow[]>>;
   /** Composer selection for the *next* thread; an open thread keeps its own. */
@@ -77,6 +85,8 @@ interface HarnessState {
   setSubject: (id: number | null) => void;
   loadSubjects: () => Promise<void>;
   apply: (env: HarnessEnvelope) => void;
+  /** `apply` without the repeat check; `load` re-folds what arrived during its read. */
+  fold: (env: HarnessEnvelope) => void;
   /** Fold the buffered deltas into `live` now. */
   flushLive: () => void;
   removed: (id: number) => void;
@@ -96,6 +106,13 @@ interface PendingDeltas {
 }
 
 const pending = new Map<number, PendingDeltas>();
+
+/** The newest envelope applied; Rust numbers them in order. */
+let lastSequence = 0;
+/** Envelopes per thread that arrived while `load` was reading its rows. */
+const loading = new Map<number, HarnessEnvelope[]>();
+/** Folded into `live` only; re-folding them after a read would repeat text. */
+const LIVE_ONLY = new Set(["assistant_delta", "thinking_delta", "tool_output_delta"]);
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 function buffer(threadId: number): PendingDeltas {
@@ -118,6 +135,7 @@ function rowFrom(env: HarnessEnvelope, kind: HarnessItem["kind"], content: strin
     content,
     meta: meta === undefined ? null : JSON.stringify(meta),
     created_at: new Date().toISOString(),
+    run_id: env.runId ?? null,
   };
 }
 
@@ -126,6 +144,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   threadsLoaded: false,
   holds: {},
   items: {},
+  runs: {},
   live: {},
   rateLimits: {},
   queued: {},
@@ -176,8 +195,18 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     if (!(id in get().items)) set((s) => ({ items: { ...s.items, [id]: EMPTY } }));
     // Guard against a release mid-read. A failed read still writes `[]` to
     // replace any borrowed rows.
-    const rows = await getHarnessItems(id).catch(() => [] as HarnessItem[]);
-    if (id in get().items) set((s) => ({ items: { ...s.items, [id]: rows } }));
+    // What arrives during the read may be newer than it: re-fold it on top.
+    const during: HarnessEnvelope[] = [];
+    loading.set(id, during);
+    const [rows, runs] = await Promise.all([
+      getHarnessItems(id).catch(() => [] as HarnessItem[]),
+      getHarnessRuns(id).catch(() => NO_RUNS),
+    ]);
+    loading.delete(id);
+    if (id in get().items) {
+      set((s) => ({ items: { ...s.items, [id]: rows }, runs: { ...s.runs, [id]: runs } }));
+      for (const env of during) get().fold(env);
+    }
     const waiting = await harnessQueued(id).catch(() => [] as QueuedMessage[]);
     if (id in get().items) set((s) => ({ queued: { ...s.queued, [id]: waiting } }));
   },
@@ -199,7 +228,9 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       if (s.holds[id] || !(id in s.items)) return s;
       const items = { ...s.items };
       delete items[id];
-      return { items };
+      const runs = { ...s.runs };
+      delete runs[id];
+      return { items, runs };
     }),
 
   removed: (id) => {
@@ -212,6 +243,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       delete queued[id];
       const items = { ...s.items };
       delete items[id];
+      const runs = { ...s.runs };
+      delete runs[id];
       const live = { ...s.live };
       delete live[id];
       const holds = { ...s.holds };
@@ -223,6 +256,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         // this list and walks itself back to the empty composer (`ChatPage`).
         threads: s.threads.filter((t) => t.id !== id),
         items,
+        runs,
         queued,
         live,
         holds,
@@ -260,8 +294,19 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   },
 
   apply: (env) => {
+    if (env.sequence != null) {
+      if (env.sequence <= lastSequence) return;
+      lastSequence = env.sequence;
+    }
+    const during = loading.get(env.threadId);
+    if (during && !LIVE_ONLY.has(env.event.type)) during.push(env);
+    get().fold(env);
+  },
+
+  fold: (env) => {
     const { threadId, event } = env;
     if (event.type === "rewound") {
+      forgetFolds(threadId);
       useWidgetStore.getState().prune(threadId, event.from_item_id);
       useProposalVersionStore.getState().prune(threadId, event.from_item_id);
       useProposalStore.getState().prune(threadId, event.from_item_id);
@@ -294,9 +339,16 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       let live: LiveTurn | null = null;
       let rows = s.items[threadId] ?? EMPTY;
       let threads = s.threads;
+      let runs = s.runs[threadId] ?? NO_RUNS;
+      const setRun = (run: HarnessRun) => {
+        if (held) runs = { ...runs, [run.id]: run };
+      };
 
+      // A row Rust updated in place (the same provider message again) replaces its copy.
       const push = (row: HarnessItem) => {
-        if (held) rows = [...rows, row];
+        if (!held) return;
+        const at = env.itemId == null ? -1 : rows.findIndex((r) => r.id === env.itemId);
+        rows = at < 0 ? [...rows, row] : rows.map((r, i) => (i === at ? row : r));
       };
       const touchThread = (patch: Partial<HarnessThread>) => {
         const i = threads.findIndex((t) => t.id === threadId);
@@ -310,8 +362,41 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         case "user_message":
           // Live rows carry the same `meta` Rust stores (`store::apply`).
           push(rowFrom(env, "user", event.text, event.at == null ? undefined : { at: event.at }));
+          // Until `run_settled` brings the stored interval, the clock is ours.
+          if (env.runId != null) {
+            setRun({ id: env.runId, status: "running", delivery: "unknown", answer_item_id: null, started_ms: Date.now(), ended_ms: null });
+          }
           live = { ...prev, running: true };
           touchThread({ status: "running" });
+          break;
+        case "run_settled": {
+          if (!held) break;
+          if (env.runId != null) {
+            const before = runs[env.runId];
+            setRun({
+              id: env.runId,
+              status: event.status ?? "completed",
+              delivery: event.delivery,
+              answer_item_id: event.answer_item_id,
+              started_ms: sqliteUtcToMs(event.started_at ?? null) ?? before?.started_ms ?? null,
+              ended_ms: sqliteUtcToMs(event.ended_at ?? null) ?? Date.now(),
+            });
+          }
+          const work = new Set(event.work_item_ids);
+          rows = rows.map((r) =>
+            r.id === event.answer_item_id
+              ? { ...r, display_role: "answer" }
+              : work.has(r.id)
+                ? { ...r, display_role: "commentary" }
+                : r,
+          );
+          break;
+        }
+        case "delivery_notice":
+          push(rowFrom(env, "delivery_notice", event.text));
+          break;
+        case "compaction":
+          push(rowFrom(env, "compaction", ""));
           break;
         case "unprompted_turn":
           push(rowFrom(env, "unprompted", "", { after: event.after }));
@@ -393,16 +478,14 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           const drift = event.context
             ? s.contextDrift
             : { ...s.contextDrift, [threadId]: true };
+          const keep = (i: HarnessItem) => i.id > 0 && i.id < event.from_item_id;
+          const kept = rows.filter(keep);
+          // Rust deleted the runs asked from the removed rows.
+          const gone = new Set(rows.filter((i) => !keep(i) && i.run_id != null).map((i) => i.run_id));
+          const left = Object.fromEntries(Object.entries(runs).filter(([id]) => !gone.has(Number(id))));
           return {
             contextDrift: drift,
-            ...(held
-              ? {
-                  items: {
-                    ...s.items,
-                    [threadId]: rows.filter((i) => i.id > 0 && i.id < event.from_item_id),
-                  },
-                }
-              : {}),
+            ...(held ? { items: { ...s.items, [threadId]: kept }, runs: { ...s.runs, [threadId]: left } } : {}),
           };
         }
         case "usage": {
@@ -444,6 +527,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
 
       return {
         items: held && rows !== s.items[threadId] ? { ...s.items, [threadId]: rows } : s.items,
+        runs: held && runs !== (s.runs[threadId] ?? NO_RUNS) ? { ...s.runs, [threadId]: runs } : s.runs,
         threads,
         live: live ? { ...s.live, [threadId]: live } : s.live,
       };
@@ -453,5 +537,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
 
 export const itemsFor = (id: number | null, items: Record<number, HarnessItem[]>): HarnessItem[] =>
   (id != null && items[id]) || EMPTY;
+
+export const runsFor = (id: number | null, runs: Record<number, Record<number, HarnessRun>>) =>
+  (id != null && runs[id]) || NO_RUNS;
 
 export const anyRunning = (live: Record<number, LiveTurn>) => Object.values(live).some((l) => l.running);

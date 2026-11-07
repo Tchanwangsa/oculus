@@ -7,15 +7,20 @@ pub(super) async fn insert_item(
     ref_id: Option<&str>,
     content: Option<&str>,
     meta: Option<String>,
+    owner: Option<&super::Owner>,
 ) -> Result<i64, String> {
     let res = sqlx::query(
-        "INSERT INTO harness_items (thread_id, kind, ref_id, content, meta) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO harness_items (thread_id, kind, ref_id, content, meta, run_id, attempt_id, entity_ref)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )
     .bind(thread_id)
     .bind(kind)
     .bind(ref_id)
     .bind(content)
     .bind(meta)
+    .bind(owner.map(|o| o.run_id))
+    .bind(owner.map(|o| o.attempt_id))
+    .bind(owner.map(|o| o.entity.as_str()))
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
@@ -84,9 +89,25 @@ pub async fn newest_anchor(pool: &SqlitePool, thread_id: i64) -> Result<Option<S
 }
 
 /// Delete this row and everything after it — the local half of a rewind
-/// (`Harness::rewind` rewinds the provider's session).
+/// (`Harness::rewind` rewinds the provider's session). Runs asked from those
+/// rows go too; explicit deletes, since a connection may lack `foreign_keys`.
 pub async fn truncate_from(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Result<u64, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let runs = "SELECT id FROM harness_runs WHERE thread_id = ?1 AND initiating_item_id >= ?2";
+    for sql in [
+        format!("DELETE FROM harness_command_receipts WHERE run_id IN ({runs})"),
+        format!("DELETE FROM harness_delivery_gaps WHERE run_id IN ({runs})"),
+        format!("DELETE FROM harness_stream_drafts WHERE run_id IN ({runs})"),
+        format!("DELETE FROM harness_attempts WHERE run_id IN ({runs})"),
+        "DELETE FROM harness_runs WHERE thread_id = ?1 AND initiating_item_id >= ?2".into(),
+    ] {
+        sqlx::query(&sql)
+            .bind(thread_id)
+            .bind(item_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     sqlx::query("DELETE FROM chat_proposals WHERE thread_id = ?1 AND item_id >= ?2")
         .bind(thread_id)
         .bind(item_id)

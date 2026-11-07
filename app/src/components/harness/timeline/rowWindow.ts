@@ -1,11 +1,11 @@
-import type { ViewRow } from "./rows";
+import { rowItems, type ViewRow } from "./rows";
 
 /**
  * Which rows `Timeline` mounts: from the row holding item `from` to the end,
  * or every row when `from` is null. An item id, not a row index: rows fold
- * into bundles and append, and an index would drift with both. Matched by
- * membership, not `>=`, because a live row without a stored id has a
- * negative one.
+ * into bundles and run folds and append, and an index would drift with all
+ * of them. Matched by membership (`rowItems`, folded rows included), not
+ * `>=`, because a live row without a stored id has a negative one.
  */
 
 /** Rows mounted on open, and added per load as the reader scrolls up. */
@@ -15,12 +15,13 @@ export const PAGE = 30;
 export type From = number | null;
 
 export function firstId(row: ViewRow): number {
-  return row.kind === "bundle" ? row.items[0].id : row.item.id;
+  return rowItems(row)[0].id;
 }
 
-/** The row holding item `id`, a bundle included whole; -1 when gone. */
+/** The first row holding item `id`, a bundle or fold included whole; -1 when
+ *  gone. A folded reply's fence row comes after its fold, so it finds the fold. */
 function rowOf(rows: ViewRow[], id: number): number {
-  return rows.findIndex((r) => (r.kind === "bundle" ? r.items.some((i) => i.id === id) : r.item.id === id));
+  return rows.findIndex((r) => rowItems(r).some((i) => i.id === id));
 }
 
 /** The newest `PAGE` rows, or every row when there are no more. */

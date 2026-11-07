@@ -9,12 +9,94 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use base64::Engine;
 use serde_json::Value;
 
 use crate::harness::child::str_of;
-use crate::harness::event::{cap_output, classify, HarnessEvent, Provider, RateWindow};
+use crate::harness::event::{
+    cap_output, classify, GapCause, HarnessEvent, Provider, RateWindow, Source,
+};
 
 use super::transcript::{anchor_for, tool_result_text, transcript_path};
+
+fn varint(bytes: &mut &[u8]) -> Option<u64> {
+    let mut value = 0;
+    for shift in (0..70).step_by(7) {
+        let (&byte, rest) = bytes.split_first()?;
+        *bytes = rest;
+        if shift == 63 && byte > 1 {
+            return None;
+        }
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn protobuf_bytes(mut bytes: &[u8], field: u64) -> Option<&[u8]> {
+    let mut found = None;
+    while !bytes.is_empty() {
+        let tag = varint(&mut bytes)?;
+        if tag >> 3 == 0 {
+            return None;
+        }
+        let len = match tag & 7 {
+            0 => {
+                varint(&mut bytes)?;
+                continue;
+            }
+            1 => 8,
+            2 => usize::try_from(varint(&mut bytes)?).ok()?,
+            5 => 4,
+            _ => return None,
+        };
+        let value = bytes.get(..len)?;
+        bytes = bytes.get(len..)?;
+        if tag >> 3 == field && tag & 7 == 2 {
+            found = Some(value);
+        }
+    }
+    found
+}
+
+fn is_narration(frame: &Value, index: usize, block: &Value) -> bool {
+    if let Some(indexes) = frame
+        .get("narration_block_indexes")
+        .and_then(Value::as_array)
+    {
+        return indexes.iter().any(|i| i.as_u64() == Some(index as u64));
+    }
+    // The CLI's signature kind is protobuf path 2 → 1 → 8. Unknown or
+    // malformed envelopes stay reasoning; ciphertext is never searched.
+    let kind = || {
+        let signature = block.get("signature")?.as_str()?;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(signature)
+            .ok()?;
+        let envelope = protobuf_bytes(&decoded, 2)?;
+        let header = protobuf_bytes(envelope, 1)?;
+        Some(protobuf_bytes(header, 8)? == b"narration")
+    };
+    kind().unwrap_or(false)
+}
+
+/// Emit the text blocks gathered so far as one message, named by its first block.
+fn flush_text(text: &mut String, first: &mut Option<String>, out: &mut Vec<HarnessEvent>) {
+    let text = std::mem::take(text).trim().to_string();
+    let source = first.take().and_then(Source::of);
+    if !text.is_empty() {
+        out.push(HarnessEvent::AssistantMessage { text, source });
+    }
+}
+
+/// A content block's id: the line's uuid (each `assistant` line is a snapshot)
+/// and the block's index in it. No uuid, no id.
+fn block_ref(frame: &Value, index: usize) -> Option<String> {
+    let uuid = frame.get("uuid")?.as_str().filter(|u| !u.is_empty())?;
+    Some(format!("{uuid}/{index}"))
+}
 
 /// A tool the CLI runs in the background, from its `task_started` to its
 /// `task_notification`.
@@ -226,7 +308,8 @@ impl Translator {
                     }
                 }
                 let mut text = String::new();
-                for block in content {
+                let mut first = None;
+                for (index, block) in content.iter().enumerate() {
                     match block.get("type").and_then(|t| t.as_str()) {
                         Some("text") => {
                             let t = str_of(block, "text");
@@ -235,15 +318,35 @@ impl Translator {
                                     text.push('\n');
                                 }
                                 text.push_str(&t);
+                                first = first.or_else(|| block_ref(v, index));
                             }
                         }
                         Some("thinking") => {
+                            flush_text(&mut text, &mut first, &mut out);
                             let t = str_of(block, "thinking");
+                            let source = block_ref(v, index);
+                            let narration = is_narration(v, index, block);
                             if !t.trim().is_empty() {
-                                out.push(HarnessEvent::Thinking { text: t, ms: None });
+                                let source = source.and_then(Source::of);
+                                if narration {
+                                    out.push(HarnessEvent::AssistantMessage { text: t, source });
+                                } else {
+                                    out.push(HarnessEvent::Thinking {
+                                        text: t,
+                                        ms: None,
+                                        source,
+                                    });
+                                }
+                            } else if narration {
+                                // Public narration the CLI sent with no text.
+                                out.push(HarnessEvent::DeliveryGap {
+                                    source,
+                                    cause: GapCause::EmptyNarration,
+                                });
                             }
                         }
                         Some("tool_use") => {
+                            flush_text(&mut text, &mut first, &mut out);
                             let id = str_of(block, "id");
                             if id.is_empty() || !self.started_tools.insert(id.clone()) {
                                 continue;
@@ -262,10 +365,7 @@ impl Translator {
                         _ => {}
                     }
                 }
-                let text = text.trim().to_string();
-                if !text.is_empty() {
-                    out.push(HarnessEvent::AssistantMessage { text });
-                }
+                flush_text(&mut text, &mut first, &mut out);
             }
             "user" => {
                 // Only tool results; the user's own text is what we sent.
@@ -429,6 +529,10 @@ mod tests {
     const BACKGROUND_FAST: &str =
         include_str!("../../../../fixtures/harness/claude-background-agent-fast.ndjson");
     const AGENT: &str = "toolu_01RHoJhb1LDywxCL6b82JR7C";
+    // Converted from T3's events.import-claudeagent-23e1f96c-…log,
+    // lines 1328, 1331, 1334 and 2614: decoded payloads as stream-json frames.
+    const NARRATION: &str =
+        include_str!("../../../../fixtures/harness/claude-summarized-narration.ndjson");
 
     fn lines(raw: &str) -> Vec<Value> {
         raw.lines()
@@ -475,7 +579,7 @@ mod tests {
         events
             .iter()
             .filter_map(|e| match e {
-                HarnessEvent::AssistantMessage { text } => Some(text.as_str()),
+                HarnessEvent::AssistantMessage { text, .. } => Some(text.as_str()),
                 _ => None,
             })
             .collect()
@@ -483,6 +587,154 @@ mod tests {
 
     fn agent_finished(e: &HarnessEvent) -> bool {
         matches!(e, HarnessEvent::ToolFinished { id, .. } if id == AGENT)
+    }
+
+    #[test]
+    fn summarized_narration_is_assistant_text_before_its_tool() {
+        let frames = lines(NARRATION);
+        let (_, events) = replay(frames.clone());
+        assert!(matches!(events[0], HarnessEvent::TurnStarted));
+        assert!(matches!(
+            &events[1], HarnessEvent::Thinking { text, .. }
+                if text == frames[0]["message"]["content"][0]["thinking"].as_str().unwrap()
+        ));
+        assert!(matches!(
+            &events[2], HarnessEvent::AssistantMessage { text, .. }
+                if text == frames[1]["message"]["content"][0]["thinking"].as_str().unwrap()
+        ));
+        assert!(matches!(events[3], HarnessEvent::ToolStarted { .. }));
+        assert!(matches!(
+            &events[4], HarnessEvent::AssistantMessage { text, .. }
+                if text == frames[3]["message"]["content"][0]["thinking"].as_str().unwrap()
+        ));
+        assert_eq!(events.len(), 5);
+    }
+
+    #[test]
+    fn completed_block_order_is_preserved_across_text_narration_reasoning_and_tools() {
+        let frame = serde_json::json!({
+            "type": "assistant",
+            "narration_block_indexes": [1],
+            "message": {"content": [
+                {"type": "text", "text": "Before"},
+                {"type": "thinking", "thinking": "Update"},
+                {"type": "text", "text": "Between"},
+                {"type": "thinking", "thinking": "Reasoning"},
+                {"type": "text", "text": "Calling"},
+                {"type": "tool_use", "id": "tool", "name": "Bash", "input": {}},
+                {"type": "text", "text": "After"}
+            ]}
+        });
+        let (_, events) = replay(vec![frame]);
+        let actual: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                HarnessEvent::AssistantMessage { text, .. } => Some(("assistant", text.as_str())),
+                HarnessEvent::Thinking { text, .. } => Some(("thinking", text.as_str())),
+                HarnessEvent::ToolStarted { id, .. } => Some(("tool", id.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                ("assistant", "Before"),
+                ("assistant", "Update"),
+                ("assistant", "Between"),
+                ("thinking", "Reasoning"),
+                ("assistant", "Calling"),
+                ("tool", "tool"),
+                ("assistant", "After")
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_narration_is_a_delivery_gap_not_text_or_reasoning() {
+        for empty in ["", " \n\t"] {
+            let mut frame = lines(NARRATION).remove(1);
+            frame["message"]["content"][0]["thinking"] = empty.into();
+            let (_, events) = replay(vec![frame]);
+            assert!(matches!(
+                events.as_slice(),
+                [
+                    HarnessEvent::TurnStarted,
+                    // This recording's lines carry no uuid, so no block id.
+                    HarnessEvent::DeliveryGap {
+                        source: None,
+                        cause: GapCause::EmptyNarration
+                    }
+                ]
+            ));
+        }
+    }
+
+    #[test]
+    fn narration_indexes_take_precedence_over_signatures() {
+        let frames = lines(NARRATION);
+        let mut thinking = frames[0].clone();
+        thinking["narration_block_indexes"] = serde_json::json!([0]);
+        let mut narration = frames[1].clone();
+        narration["narration_block_indexes"] = serde_json::json!([]);
+        let (_, events) = replay(vec![thinking, narration]);
+        assert!(matches!(events[1], HarnessEvent::AssistantMessage { .. }));
+        assert!(matches!(events[2], HarnessEvent::Thinking { .. }));
+    }
+
+    #[test]
+    fn signature_fallback_only_promotes_the_narration_kind() {
+        let frames = lines(NARRATION);
+        let narration = &frames[1]["message"]["content"][0]["signature"];
+        let thinking = &frames[0]["message"]["content"][0]["signature"];
+        for (signature, promotes) in [
+            (narration.clone(), true),
+            (thinking.clone(), false),
+            (Value::from("garbage!"), false),
+            (Value::from(""), false),
+            (Value::Null, false),
+            (
+                Value::from(base64::engine::general_purpose::STANDARD.encode(b"narration")),
+                false,
+            ),
+        ] {
+            let frame = serde_json::json!({
+                "type": "assistant",
+                "message": {"content": [{
+                    "type": "thinking", "thinking": "Summary", "signature": signature
+                }]}
+            });
+            let (_, events) = replay(vec![frame]);
+            assert_eq!(
+                matches!(events[1], HarnessEvent::AssistantMessage { .. }),
+                promotes
+            );
+            assert_eq!(
+                matches!(events[1], HarnessEvent::Thinking { .. }),
+                !promotes
+            );
+        }
+    }
+
+    #[test]
+    fn signature_fallback_rejects_malformed_protobuf_without_panicking() {
+        // A minimal 2 → 1 → 8 envelope, without optional trailing fields.
+        let bytes = b"\x12\x0d\x0a\x0b\x42\x09narration";
+        let complete = serde_json::json!({
+            "signature": base64::engine::general_purpose::STANDARD.encode(bytes)
+        });
+        assert!(is_narration(&Value::Null, 0, &complete));
+        for truncated in 0..bytes.len() {
+            let block = serde_json::json!({
+                "signature": base64::engine::general_purpose::STANDARD.encode(&bytes[..truncated])
+            });
+            assert!(!is_narration(&Value::Null, 0, &block));
+        }
+        for malformed in [&[0xff; 11][..], &[0x12, 0xff], &[0x0b], &[0]] {
+            let block = serde_json::json!({
+                "signature": base64::engine::general_purpose::STANDARD.encode(malformed)
+            });
+            assert!(!is_narration(&Value::Null, 0, &block));
+        }
     }
 
     /// Recorded from `claude 2.1.267` asked to `ls` the library.
@@ -523,7 +775,7 @@ mod tests {
             })
             .collect();
         let message = events.iter().find_map(|e| match e {
-            HarnessEvent::AssistantMessage { text } => Some(text.clone()),
+            HarnessEvent::AssistantMessage { text, .. } => Some(text.clone()),
             _ => None,
         });
         assert_eq!(
@@ -573,7 +825,7 @@ mod tests {
             })
             .collect();
         let message = events.iter().find_map(|e| match e {
-            HarnessEvent::AssistantMessage { text } => Some(text.clone()),
+            HarnessEvent::AssistantMessage { text, .. } => Some(text.clone()),
             _ => None,
         });
         assert_eq!(message.as_deref(), Some(deltas.trim()));
@@ -623,7 +875,7 @@ mod tests {
         assert_eq!(unprompted, vec![started[1] - 1]);
         let pong = positions(
             &events,
-            |e| matches!(e, HarnessEvent::AssistantMessage { text } if text == "PONG"),
+            |e| matches!(e, HarnessEvent::AssistantMessage { text, .. } if text == "PONG"),
         );
         assert!(pong[0] > unprompted[0]);
 

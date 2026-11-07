@@ -18,7 +18,7 @@ impl ThoughtClock {
         self.observe_at(thread_id, ev, Instant::now());
     }
 
-    fn observe_at(&mut self, thread_id: i64, ev: &mut HarnessEvent, now: Instant) {
+    pub(super) fn observe_at(&mut self, thread_id: i64, ev: &mut HarnessEvent, now: Instant) {
         match ev {
             HarnessEvent::ThinkingDelta { .. } => {
                 self.since.entry(thread_id).or_insert(now);
@@ -49,6 +49,7 @@ mod tests {
         HarnessEvent::Thinking {
             text: "x".into(),
             ms,
+            source: None,
         }
     }
 

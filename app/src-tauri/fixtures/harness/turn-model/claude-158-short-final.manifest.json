@@ -1,0 +1,35 @@
+{
+  "provider": "claude",
+  "cli_version": "not recorded",
+  "protocol": "Claude print stream-json",
+  "model": "claude-opus-5-5",
+  "capture_date": "2026-11-06T18:15:19.979Z (first timestamp in excerpt)",
+  "source": "thread-158.ndjson:1680-1924",
+  "redaction": "Stable character substitution of private string values; retain punctuation, whitespace, scalar/chunk counts, ids, parent links, signatures and frame order. Input-JSON chunks keep keys, escapes and primitive syntax. Non-ASCII private characters become \u25c7; UTF-8 byte widths may change. No full thread copied.",
+  "scenario": "long answer followed by short final",
+  "frames": 245,
+  "signature_frames": 3,
+  "sha256": "af76fd4770d8249d4dd8973f933d4659ccf80867b87f47c8023811b0917b9c6e",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    }
+  ],
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "existing recorded session route; scratch cwd; no startup/configuration probe"
+  }
+}

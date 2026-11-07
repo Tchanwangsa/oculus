@@ -1,0 +1,36 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.294",
+  "protocol": "Claude print stream-json",
+  "model": "claude-haiku-4-5-20251001",
+  "capture_date": "2026-10-12T06:11:56.634Z (first timestamp in excerpt)",
+  "source": "fixtures/harness/claude-background-agent-fast.ndjson",
+  "redaction": "Existing committed recording reused unchanged; no new private thread content.",
+  "scenario": "claude-background-agent-fast",
+  "frames": 63,
+  "sha256": "e28d61f9905369e5abd0f3a1b68557c83a84e617727934feec8233c3cdca0775",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-background-agent-fast.ndjson",
+  "native_session": "",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "existing recorded session route; scratch cwd; no startup/configuration probe"
+  }
+}

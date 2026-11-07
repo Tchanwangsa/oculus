@@ -1,6 +1,7 @@
 //! One `claude -p` process per thread: spawn, send, interrupt, rewind.
 
 use std::collections::HashMap;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
@@ -14,6 +15,15 @@ use crate::harness::Sink;
 use super::settings::settings_json;
 use super::translate::Translator;
 use super::ClaudeSpawn;
+
+fn configure_thinking(cmd: &mut Command, one_off: bool) {
+    if one_off {
+        // Tool-less jobs consume final output and keep their existing display policy.
+        cmd.env("CLAUDE_CODE_THINKING_DISPLAY_UPDATES", "0");
+    } else {
+        cmd.args(["--thinking", "adaptive", "--thinking-display", "summarized"]);
+    }
+}
 
 pub struct ClaudeSession {
     pub(super) proc: ChildProc,
@@ -78,7 +88,13 @@ impl ClaudeSession {
         };
         cmd.args([
             "--settings",
-            &settings_json(&base.library, &base.cwd, cfg.oculus.as_deref(), &hosts),
+            &settings_json(
+                &base.library,
+                &base.cwd,
+                cfg.oculus.as_deref(),
+                &hosts,
+                !cfg.one_off,
+            ),
         ]);
         // The Studio subagents, on the models Settings → Jobs gives Claude.
         if !cfg.one_off {
@@ -91,11 +107,8 @@ impl ClaudeSession {
             .env_clear()
             .envs(base.env.iter().map(|(k, v)| (k, v)))
             // The CLI gates some behaviour on its entrypoint.
-            .env("CLAUDE_CODE_ENTRYPOINT", "cli")
-            // Otherwise the CLI asks for thinking display "updates" (and
-            // `--thinking-display summarized` is no better), which can stream
-            // text written before a tool call as a one-line narration summary.
-            .env("CLAUDE_CODE_THINKING_DISPLAY_UPDATES", "0");
+            .env("CLAUDE_CODE_ENTRYPOINT", "cli");
+        configure_thinking(&mut cmd, cfg.one_off);
         let (proc, stdout) = ChildProc::spawn("claude", &mut cmd, true)?;
 
         let interrupting = Arc::new(AtomicBool::new(false));
@@ -125,23 +138,28 @@ impl ClaudeSession {
                     sink(ev);
                 }
             });
-            for ev in state.close() {
-                sink(ev);
-            }
-            reader_session.proc.finish(&sink, Provider::Claude, || {
-                let sent = expecting.swap(false, Ordering::SeqCst);
-                // A send that raced a turn the CLI started itself: both
-                // claims need their `TurnFinished`.
-                if sent && state.turn_open {
-                    sink(HarnessEvent::TurnFinished {
-                        status: "failed".into(),
-                    });
-                }
-                sent || state.turn_open
-            });
+            reader_session.closed(&mut state, &sink);
         });
 
         Ok(session)
+    }
+
+    /// stdout reached EOF: fail what is open, then announce the exit.
+    pub(super) fn closed(&self, state: &mut Translator, sink: &Sink) {
+        for ev in state.close() {
+            sink(ev);
+        }
+        self.proc.finish(sink, Provider::Claude, || {
+            let sent = self.expecting.swap(false, Ordering::SeqCst);
+            // A send that raced a turn the CLI started itself: both
+            // claims need their `TurnFinished`.
+            if sent && state.turn_open {
+                sink(HarnessEvent::TurnFinished {
+                    status: "failed".into(),
+                });
+            }
+            sent || state.turn_open
+        });
     }
 
     pub fn is_alive(&self) -> bool {
@@ -228,5 +246,35 @@ impl ClaudeSession {
 
     pub fn kill(&self) {
         self.proc.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_requests_summaries_without_overriding_the_updates_environment() {
+        let mut cmd = Command::new("claude");
+        configure_thinking(&mut cmd, false);
+        assert_eq!(
+            cmd.get_args().collect::<Vec<_>>(),
+            ["--thinking", "adaptive", "--thinking-display", "summarized"]
+        );
+        assert_eq!(cmd.get_envs().count(), 0);
+    }
+
+    #[test]
+    fn tool_less_jobs_keep_their_display_policy() {
+        let mut cmd = Command::new("claude");
+        configure_thinking(&mut cmd, true);
+        assert_eq!(cmd.get_args().count(), 0);
+        assert_eq!(
+            cmd.get_envs().collect::<Vec<_>>(),
+            vec![(
+                std::ffi::OsStr::new("CLAUDE_CODE_THINKING_DISPLAY_UPDATES"),
+                Some(std::ffi::OsStr::new("0"))
+            )]
+        );
     }
 }

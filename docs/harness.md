@@ -13,7 +13,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | --- | --- |
 | Manager, queue, `run_once`, per-thread `instructions` | `app/src-tauri/src/harness/manager/` (`queue.rs`, `one_off.rs`, `instructions.rs`) |
 | Tauri commands (setup, models, turns, suggestions) | `app/src-tauri/src/harness/app/` |
-| The event enum and tool classification (`classify`) | `app/src-tauri/src/harness/event/mod.rs`, `app/src-tauri/src/harness/event/classify.rs` |
+| The event enum, tool classification (`classify`) and answer selection | `app/src-tauri/src/harness/event/mod.rs`, `app/src-tauri/src/harness/event/classify.rs`, `app/src-tauri/src/harness/event/answer.rs` |
 | Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy --print=`) | `app/src-tauri/src/harness/providers/claude/`, `app/src-tauri/src/harness/providers/codex/`, `app/src-tauri/src/harness/providers/opencode/`, `app/src-tauri/src/harness/providers/antigravity/` |
 | Paths no agent may write; opencode's ruleset; agy's rules | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/rules.rs` |
 | Finding, installing, updating and signing in the CLIs | `app/src-tauri/src/harness/cli/discover/`, `app/src-tauri/src/harness/cli/install/`, `app/src-tauri/src/harness/cli/update/`, `app/src-tauri/src/harness/cli/signin/` |
@@ -21,6 +21,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Hidden native processes, Windows job ownership and npm shim resolution | `app/src-tauri/src/runtime/platform/` |
 | Process pipes, JSON lines and terminal turn failures shared by the bridges | `app/src-tauri/src/harness/child.rs` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store/` |
+| Runs, attempts, provider bindings and send receipts; which run owns each event | `app/src-tauri/src/harness/store/runs.rs`, `app/src-tauri/src/harness/store/runs.sql`, `app/src-tauri/src/harness/app/run_scope.rs` |
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents/mod.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
@@ -34,7 +35,8 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/integrations/OpencodePage.tsx`, `app/src/components/settings/agents/opencode/`, `app/src/components/settings/agents/OpencodeConnectDialog.tsx`, `app/src/lib/harness/opencodeCatalogue.ts` |
 | Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db/jobModels.ts`, `app/src/components/settings/jobs/`, `app/src/hooks/agents/useJobAudit.ts` |
 | Subagents (Studio's research and scene helpers) | `app/src-tauri/src/harness/studio_agents.rs`, `app/src-tauri/templates/STUDIO_*.template.md`, `oculus studio agents` (`app/src-tauri/src/bin/oculus/commands/studio/agents.rs`) |
-| One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends | `app/src-tauri/src/harness/manager/one_off.rs`, `app/src-tauri/src/harness/app/suggest.rs`, `app/src-tauri/src/harness/suggest/`, `app/src-tauri/src/lectures/lecture_end/` |
+| One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends, a widget's `ask` (stoppable by id) | `app/src-tauri/src/harness/manager/one_off.rs`, `app/src-tauri/src/harness/manager/stoppable.rs`, `app/src-tauri/src/harness/app/suggest.rs`, `app/src-tauri/src/harness/suggest/`, `app/src-tauri/src/lectures/lecture_end/`, `app/src-tauri/src/widgets/ask/` |
+| The JSON in a model's reply (whole reply, fences, balanced brackets), for the jobs that want JSON back | `app/src-tauri/src/harness/reply_json.rs` |
 | `@` menu and mention input | `app/src/components/harness/mentions/useMentionMenu.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
 | Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
 | Voice dictation, microphone capture and cleanup job | `app/src/components/harness/dictation/`, `app/src/lib/dictation/recording.ts`, `app/src-tauri/src/harness/app/dictation.rs` |
@@ -66,6 +68,19 @@ persisted the same way. `classify` in `event/classify.rs` is the one tool table.
 | opencode | one `opencode serve` per app, a v1 HTTP session per thread, one SSE stream routed by `sessionID` | session id |
 | Antigravity | one `agy --print=` per thread | `--conversation` |
 
+Claude chat sessions and tool-enabled headless `run_once` jobs (chapters) request
+`--thinking adaptive --thinking-display summarized` and inline
+`showThinkingSummaries: true` so server narration carries its summary text.
+Completed frames' `narration_block_indexes` identify narration, with a
+defensive signature-kind fallback when that metadata is absent: narration is
+assistant text in block order, ordinary thinking is reasoning, and empty
+narration is a `DeliveryGap` (see [Each send is a run](#each-send-is-a-run)), never text. Summaries do not guarantee verbatim prose or rendered
+fences, so `HARNESS.template.md`'s Output section says a card belongs in text
+written after the last tool call; it prescribes no other ordering.
+Tool-less one-off jobs (including thread naming and lecture-end) retain their
+display policy: no thinking flags or summary setting, with
+`CLAUDE_CODE_THINKING_DISPLAY_UPDATES=0`.
+
 - **Rust writes the rows; the webview folds the stream.** One consumer thread
   writes every event to `harness_threads`/`harness_items`, then emits
   `harness-event` with the row id — a tool's finish never overtakes its start,
@@ -82,7 +97,9 @@ persisted the same way. `classify` in `event/classify.rs` is the one tool table.
   is why `harness-event` carries the provider.
 - **Every raw line is kept** in `agents/threads/<id>.ndjson` (the fixtures).
 - **`run_once` is the headless shape** — no thread, no rows; its jobs
-  ([chapters.md](./chapters.md)) do their own database write in Rust.
+  ([chapters.md](./chapters.md)) keep the turn's selected answer
+  (`lecture_jobs::reply`, see [One answer per run](#one-answer-per-run)) and
+  do their own database write in Rust.
 - Chat's old tables (`llm_usage`, `chats`, `chat_messages`) have no readers.
 
 ## Every thread runs from `agents/`, and that is the containment
@@ -221,9 +238,26 @@ PascalCase (`CommandLine`, `AbsolutePath`).
 `HARNESS.template.md` goes in as `--append-system-prompt` (Claude) or
 `developerInstructions` (Codex). opencode's agent `prompt` *replaces* the
 system prompt, so the brief is the `oculus` agent's prompt in
-`agents/opencode.json`, rewritten on every server start. Codex, opencode and
-`agy` read `agents/AGENTS.md` natively; where there is no per-call append
-(opencode, `agy`) the per-thread half rides the first user message.
+`agents/opencode.json`, rewritten on every server start. Where there is no
+per-call append (opencode, `agy`), the per-thread half rides the first user
+message.
+
+**Each instruction has one owner.** `AGENTS.template.md` holds library use,
+teaching and memory for both terminal and in-app agents. The brief references
+`./AGENTS.md` and asks the agent to read it if it is not already loaded.
+Codex, opencode and `agy` discover it natively; Claude Code supports it under
+its [Project instructions setting](https://code.claude.com/docs/en/memory#agentsmd),
+with `CLAUDE.md` taking precedence in the default fallback mode. The explicit
+read instruction also covers sessions without native loading.
+
+`HARNESS.template.md` holds only app context, sandbox rules and output:
+rendered fence placement, maths, citations, attachments and visual selection.
+Skills hold domain workflows and syntax: `oculus-ui` owns OpenUI signatures,
+`oculus-plan` owns planning and amendments, `oculus-revision` owns study
+content and filing, and `oculus-widgets` owns TSX widgets and validation.
+`TASTE.template.md` owns standing preference promotion. A skill references
+these owners rather than restating their rules. The generated subject section
+in `manager/instructions.rs` supplies only the subject and its guidance path.
 
 **Skills are one directory, found three ways.** Claude scans
 `<cwd>/.claude/skills`, Codex `<cwd>/.agents/skills` — each a relative link to
@@ -234,6 +268,8 @@ CLI puts the skill index in every turn, headless jobs included.
 **A skill is a folder of files.** `agents::docs::SKILLS` lists each skill's
 name and its files, `SKILL.md` first; `oculus-studio` also ships
 `reference.md`, `build.md` and `studio.d.ts` (`app/studio-core/studio.d.ts`),
+and `oculus-widgets` ships `widget.d.ts` (`app/widget-kit/widget.d.ts`) and
+four gallery widgets ([widgets.md](./widgets.md#the-agent-learns-widgets-from-oculus-widgets)),
 which `SKILL.md` tells the agent to open when it needs them, so only the
 index line costs a turn. Every write rewrites each file and deletes anything else
 in the skill's folder: the folders are app-owned and agents may not write
@@ -331,7 +367,8 @@ else. The live check of this route is the ignored test in
 `harnessStore` buffers deltas and folds them every 48ms (a row-committing
 event flushes first, so text never lands after its row); committed rows are
 memoised and only `LiveTail` and the one tool row still receiving output read
-the store per delta; stick-to-bottom (`useStickToBottom`) is a
+the store per delta (a delta replaces only its own stream or tool output, never
+`items` or `runs`, so no fold or history row is rebuilt); stick-to-bottom (`useStickToBottom`) is a
 `ResizeObserver`, not a `scrollTo` per delta. On a 38-row thread that took 400
 deltas from 402 commits / 6.2s of render to 34 / 55ms. `items` is keyed by
 thread, so each Chat tab and the lecture dock hold their own. Retry links retain
@@ -357,7 +394,15 @@ still update the picker.
 - **A row decides what truncates** (`RowShell` in `WorkRow.tsx`) — it draws at
   760px and in the dock's 300px. Both scrollers carry `overflow-x-hidden`:
   `overflow-y: auto` makes x `auto` too, and one wide row slides the thread.
-- **A reasoning row is words only.** Finished, it reads "Thought for 12s"
+- **Work rows stack flat.** In a run's fold, a bundle or a bare step, rows
+  share one left edge with no guide line; an opened bundle's steps line up
+  with its header. Detail opens beneath its row: a thought's text under the
+  label, a tool's output on a quiet `bg-surface` block with no header or
+  divider, sized to content and folded behind Show more past 288px, never a
+  scroller of its own.
+- **A shell command is its own label**, in mono, wrapping in full while
+  open; its detail is the output alone.
+- **A reasoning row has the Brain glyph.** Finished, it reads "Thought for 12s"
   and opens to the thought as muted markdown; while it streams, `LiveTail`
   shows a shimmering "Thinking" (`text-shimmer`) and the thought's latest
   readable sentence (`latestThought`). The duration is the row's `meta.ms`:
@@ -367,8 +412,8 @@ still update the picker.
 - **An `oculus …` row says what it did** — "Saved a memory", "Searched the
   library for", "Moved 7 tasks to" — from `describeOculusCli`, which reads
   the shell line (chains counted, pipes and redirects dropped) and gives each
-  command a glyph and a bundle clause ("saved 2 memories"). The command is
-  still the opened row's detail; a running one shimmers its verb. An
+  command a glyph and a bundle clause ("saved 2 memories"). The command
+  leads the opened row's detail, muted above the output; a running one shimmers its verb. An
   unrecognised command reads "Ran oculus" with its subcommand.
 - **A Read of a picture expands to the picture** (`ReadPicture` in
   `WorkRow.tsx`), click for the lightbox. It loads over the asset protocol, so
@@ -391,7 +436,29 @@ still update the picker.
   `allow-scripts`-only sandboxed `srcdoc` iframe (never `allow-same-origin`,
   which would hand it the app's origin and IPC), with an injected `<base>`
   built by hand — `convertFileSrc` encodes `/` — and a height reporter the
-  parent accepts only from its own frame.
+  parent accepts only from its own frame. The inline page takes its full
+  reported height (minimum 120 CSS px, 320 before its first report); the chat
+  is the only scroller. Its prepared document hides root/body overflow so a
+  rounding pixel cannot add a classic scrollbar. Heights stay in the frame's
+  CSS px, without page-zoom scaling.
+  `app/src/components/markdown/embed/pagePrepare.ts` counts three matching
+  positive resize responses (successive deltas within 1 CSS px). A response
+  counts only if the measured viewport height increased to the last accepted
+  frame height (within 1 CSS px), with unchanged content revision and width;
+  the first report establishes that baseline. Before the third response, the
+  guard holds the last accepted height. A content revision, width change,
+  smaller height or document reload clears the guard. Revisions advance on
+  DOM mutations, resource load/error, font loading completion, input/change,
+  and animation/transition completion or cancellation. These changes report
+  even at unchanged height, as do viewport resizes, so later content growth
+  is distinct from a resize response. Equally sized rows can arrive without
+  hitting the guard, and new content releases a held page. Other growth
+  stops at 100,000 CSS px (about 178 screens at 560 px), a last stop for
+  nonlinear runaway layout; an isolated long report below that gets its full
+  height. Expand keeps the page's normal full-window layout and scrolling;
+  Open externally opens the original file. The brief asks for one screen of
+  content, no viewport sizing, and several pictures or a widget on `Pages`
+  for longer material.
 - **Codex web search** completes with no `status` — absent means it ran — and
   `ToolFinished`'s optional `title` fills in the query `item/started` lacked.
 - **Copy/drag out is markdown** (`lib/markdown/selection.ts`).
@@ -421,21 +488,28 @@ incomplete source or runtime failure keeps the ordinary code fence visible.
 Widgets render only after the runtime commits its initial state, so computed
 values start with the declared defaults.
 
-`remarkWidgets` numbers fences in syntax order. A committed reply supplies its
+A ` ```widget ` fence is a different kind: agent-written TSX run in a
+sandboxed frame, for illustration rather than app data
+([widgets.md](./widgets.md)). `remarkWidgets` numbers both kinds in syntax
+order with one counter. A committed reply supplies its
 thread and row through `WidgetRow`; `widgetStore` keeps the runtime snapshot
 under that thread/row/fence key in localStorage (`oculus.chatWidgets`), as
 composer drafts do. Flashcard progress, quiz answers and scores, revealed
 steps and slider bindings all use the runtime state. The saved program must
 match before hydration; changed source starts fresh. Delete and rewind prune
 the corresponding snapshots. A streaming tail has no committed row yet and
-does not persist progress.
+does not persist progress. Both kinds offer Save to Revision
+([revision.md](./revision.md#saved-artifacts-retain-the-widget-state)).
 
 `Timeline` supplies `AssistantSend` from its follow-up action, so an Ask
 button's `@ToAssistant` uses the same thread in Chat, Studio and the lecture
 dock. Ask is hidden while running and outside a conversation. `PageRef` uses
 the ordinary citation chips and file-opening path. The agent learns the fence
 grammar from `app/src-tauri/templates/skills/oculus-ui/SKILL.md`, registered in
-`app/src-tauri/src/agents/docs.rs` and named in the harness brief. Widget primitives follow the
+`app/src-tauri/src/agents/docs.rs` and named in the harness brief, whose
+"Showing a picture or a page" sends recall, the student's data and changes
+to ` ```openui `, an illustration the student plays with to ` ```widget `
+(the `oculus-widgets` skill) and a static picture or page to `outputs/`. Widget primitives follow the
 [UI tokens](./ui.md#study-widgets-use-the-replys-primitives-and-semantic-tokens).
 
 ## The timeline mounts its newest rows and holds the view still
@@ -445,8 +519,9 @@ Opening a long thread mounts only its newest 30 rows (`PAGE` in
 maths-heavy replies mounts a page at a time.
 
 - **The window is an item id, not a row index.** A row mounts from the row
-  holding item `from` onwards; rows fold into bundles and append, and an
-  index would drift with both. A bundle mounts whole. Appended rows never move
+  holding item `from` onwards; rows fold into bundles and run folds and
+  append, and an index would drift with all of them. A bundle or fold mounts
+  whole, and matching counts the items folded inside (`rowItems`). Appended rows never move
   the boundary; a rewind or edit that took its item re-opens on the newest
   page. The boundary is kept per thread, since a tab's `Timeline` outlives a
   thread switch.
@@ -455,12 +530,31 @@ maths-heavy replies mounts a page at a time.
   a viewport of top margin, so each page lands before the reader reaches it.
   The observer is re-hung per boundary, so a sentinel still in reach after a
   short page loads the next.
-- **Following yields on any upward input.** `followTimeline` opens a thread at
-  its latest row, then follows size changes only during an active reply while
-  the reader is at the bottom (1px rounding tolerance). Upward wheel, touch
-  or navigation-key input releases immediately, before native scrolling; any
-  upward scroll movement also releases, including fractional pixels. Only a
-  downward return to the bottom or the floating arrow re-arms following.
+- **Following yields on any upward input.** `followTimeline` follows size
+  changes while the reader is at the bottom (1px rounding tolerance) during an
+  active reply, and after a jump to the bottom (opening a thread, the arrow,
+  a reply) until the reader's next pointer, wheel, touch or key input in the
+  timeline, so a thread's late layout and a finished reply redrawing as a
+  committed row stay followed. A reader at the bottom also stays there when
+  the scroller itself is resized. A new question row (the reader's own send)
+  jumps to the bottom (`useStickToBottom` watches the newest `user` item).
+  Upward wheel, touch or navigation-key input releases immediately, before
+  native scrolling, and any upward scroll movement within 250ms of input
+  anywhere in the window, or while a pointer is held (a scrollbar drag), also
+  releases, including fractional pixels. A keystroke in a text field is not
+  that input: typing resizes the composer, and the clamp as it re-measures
+  would otherwise unpin. Find, typed into its field, declares its jumps with
+  `noteScrollIntent`. Upward movement with no input is the
+  browser clamping `scrollTop` during a layout where content shrank and
+  regrew between frames, and keeps following. A native contenteditable deletion
+  may clamp and restore within one edit without changing the final viewport
+  size; a pinned thread restores its bottom immediately, before publishing the
+  arrow state. Typing clears the recent click's scroll-intent timestamp, so
+  editing immediately after focusing the composer follows the same rule.
+  Only a downward return to
+  within 32px of the bottom (the bottom moves every fold, so landing on it
+  exactly is luck; during a reply the rest is closed at once) or the floating
+  arrow re-arms following.
   `JumpToLatest` is shared by Chat, the lecture dock and Studio: an arrow over
   a nearly opaque, blurred surface. It appears after 16px of separation,
   stays at a fixed position, and fades out at the bottom over 150ms (instantly
@@ -469,14 +563,17 @@ maths-heavy replies mounts a page at a time.
   Resize handling samples pending native movement before correcting layout,
   so it cannot undo a scroll whose event has not arrived yet.
 - **The view is anchored by hand**, because WebKit has no `overflow-anchor`.
-  While reading, `followTimeline` records on each scroll the first
+  While reading, `followTimeline` records on each scroll the first drawn
   anchor row (`ANCHOR_ROW`) crossing the scroller's top, refined down to the
-  block child being read, and its `ResizeObserver` scrolls by however far that
-  node moved: rows above re-wrapping as the column is resized, growing, or
-  arriving from the sentinel. It ignores a scroll event at the position it
-  last wrote itself (`at`): that event arrives a frame later, when the next
-  resize may have changed layout, and measuring then would lose the
-  correction or unpin. Rects scale with page zoom and `scrollTop` doesn't, so
+  block child being read; a press in the timeline anchors the pressed
+  element instead (its row if it re-renders), so what it opens or answers
+  grows around it. Before each scroll, resize or release re-picks, it scrolls
+  by however far that node moved less the scroller's own movement since:
+  rows above re-wrapping as the column is resized, growing, drawing at their
+  real height, or arriving from the sentinel. Subtracting the scroller's
+  movement makes the correction hold mid-scroll, and leaves native movement
+  whose event has not arrived for the follow logic. It ignores a scroll event
+  at the position it last wrote itself (`at`). Rects scale with page zoom and `scrollTop` doesn't, so
   rect deltas are divided by the scroller's rect height over `offsetHeight`;
   `ThreadMap`'s tops do the same. A placeholder anchor is refined to the
   paragraph being read when its host reconnects.
@@ -489,7 +586,10 @@ maths-heavy replies mounts a page at a time.
   native scroll offsets inside the host are recorded on scroll and restored.
   Frames and media stay connected with their layout skipped, because
   detaching an iframe destroys its browsing context. A focused or selected
-  row and the row holding the scroll anchor stay connected. Height and
+  row and the row holding the scroll anchor stay connected. A row added after
+  the first pass (a committed reply, a page of history) starts drawn, since
+  `content-visibility: auto` would lay it out at its 160px estimate for the
+  frame after the anchoring ran. Height and
   intersection observers are shared, and adding rows scans direct children.
   `LiveTail` stays connected without a placeholder because its size changes
   on every fold. `useOverflows` retains a disconnected question's fold state
@@ -507,7 +607,9 @@ maths-heavy replies mounts a page at a time.
   reveals that question before reading its bubble's position.
 - **Find, Select All and rail jumps mount what they need first**, through
   `app/src/lib/ui/expandable.ts`: `Timeline`'s root is marked expandable, and
-  `expandWithin` asks every marked element in a root to mount. DOM find and
+  `expandWithin` asks every marked element in a root to mount, outer ones
+  first, then what they mounted (a run's fold, which opens for a find that
+  matches it). DOM find and
   Select All mount everything, synchronously, so the walk and the selection
   (and its markdown copy) see every message; they also reconnect
   detached row content before the DOM walk. A jump to an unmounted question
@@ -517,22 +619,33 @@ maths-heavy replies mounts a page at a time.
 
 ## One-off turns
 
-Naming, the editor's suggestions and the lecture-end job share
-`Harness::one_off`: a session outside any thread, no rows, no raw log, closed
-(an opencode session deleted) after its turn. Its brief is Claude's
+Naming, the editor's suggestions, the lecture-end job and a widget's `ask`
+share `Harness::one_off`: a session outside any thread, no rows, no raw log,
+closed (an opencode session deleted) after its turn. Its brief is Claude's
 `--append-system-prompt`, Codex's `developerInstructions` or the head of
 `agy`'s first message; opencode takes it as a hidden agent's prompt
-(`oculus-namer`, `oculus-writer`, `oculus-lecture-end` in
-`agents/opencode.json`). Claude runs with `--tools ""`, no skills, no MCP and
+(`oculus-namer`, `oculus-writer`, `oculus-lecture-end`, `oculus-widget` and
+the others in `agents/opencode.json`). Claude runs with `--tools ""`, no skills, no MCP and
 no persisted session, and Codex's thread is `ephemeral`; the opencode agents
 end on a `"*": "deny"`. Codex and `agy` cannot drop their tools, so the brief
 forbids them.
 
-`Harness::one_turn` is the plain shape — prompt in, reply text out, no
-timeout — for a job whose prompt carries everything inline. The app passes
+`Harness::one_turn` is the plain shape — prompt in, answer text out, no
+timeout — for a job whose prompt carries everything inline. A one-off turn's
+text is its selected answer (`OneOff::wait`, by the rule in
+[One answer per run](#one-answer-per-run)), never its replies joined. The app passes
 its own harness, so Codex and opencode reuse the running server; the CLI makes
 one per command and shuts it down after. Naming keeps its own 90-second
 timeout.
+
+A turn the student can stop runs inside a `StopScope`
+(`Harness::stop_scope(id)`, `manager/stoppable.rs`).
+`Harness::stop_one_off(id)` cancels its turn the way suggestions are
+cancelled (below), repeats the cancel after the prompt is written, keeps any
+later turn under that id from starting (so no fallback model runs), and the
+stopped turn answers None. Dropping the scope frees the id; quitting stops
+every open one. A widget's `ask` is its one user
+([widgets.md](./widgets.md#oculusask-asks-a-model-or-the-chat-once-the-student-allows-it)).
 
 **Suggestions** (`document_suggest`, the `documentSuggestions` job) are one
 short turn per pause in typing. The prompt carries the note's path, up to
@@ -617,6 +730,171 @@ would type it into every Chat tab. Codex never completes an interrupted message,
 bridge commits the streamed text itself; Claude's closing `result` claims an
 error, so `terminal_reason: "aborted_streaming"` decides and its zeroed usage
 is skipped.
+
+## Each send is a run
+
+A student send is written before the provider hears of it. `send::begin_run`
+puts a `BusMsg::Begin` on the consumer's bus and waits for its answer, so
+every row already queued for the thread is written first and the question's
+id comes after them. There `store::begin_run` inserts, in one transaction, the question's row, a
+`harness_runs` row (origin `student`, the next per-thread ordinal), its first
+`harness_attempts` row, the `harness_bindings` row for the provider session it
+resumes, and a `harness_command_receipts` row keyed by `SendOptions.receipt`
+(a fresh id when the caller sends none). Any failure writes nothing and the
+send stops there: an error row and a failed `TurnFinished`, no provider
+write. A receipt already used starts nothing; `harness_send` returns early on
+one, and `begin_run` refuses one.
+
+The question's `UserMessage` carries the run (never serialized), so the
+consumer stores no second row and `app/run_scope.rs` opens that run for the
+thread. The bridges keep the sink they were spawned with, so ownership is
+assigned there, on the one ordered consumer: every later row on the thread
+gets the run, the attempt and a weak attempt-local `entity_ref` (`weak:0`,
+`weak:1`, …), which is no provider id. Envelopes add `runId`, `attemptId` and
+a row's `entityId`; the webview stamps `runId` on the rows it makes live, as
+`run_id` is stored, and folds by it (below). `SessionStarted`
+gives the binding its native session (a different one opens a new binding),
+and `TurnFinished` settles the run (below). A turn the provider starts
+itself (`UnpromptedTurn`) is unowned, as is every row from before migration
+54: their delivery stays `unknown`. `begin_run` sets the thread `running` and
+settlement sets it back; only an unowned turn's `UnpromptedTurn` and
+`TurnFinished` set it themselves. A rewind deletes runs asked from the
+removed rows (and their gaps and drafts).
+
+Each bridge names what it sends. `AssistantMessage` and `Thinking` carry a
+`Source`: the provider's id for the block, its `phase` and whether it is
+`partial` (stored as `source_ref`, `native_phase`, `lifecycle`). Within an
+attempt the same source again replaces its row's text and keeps its id, so a
+re-sent or closing snapshot never adds a row; the webview replaces a row that
+comes back under an `itemId` it already has.
+
+| Bridge | Source id | Phase | Partial, and when it is a gap |
+| --- | --- | --- | --- |
+| Claude | the `assistant` line's `uuid` / block index; none without a uuid | unknown | an empty narration block is a gap (`empty_narration`) |
+| Codex | the item id | `commentary` / `final_answer` from `agentMessage.phase`, else unknown | streamed text with no `item/completed` by `turn/completed`; a gap unless the turn was interrupted |
+| opencode | the part id | unknown | text with no closing snapshot by the turn's close; deltas for a part no snapshot classified are never shown as text and become an `unknown_protocol` gap |
+| Antigravity | `step-<index>` | unknown | a response step with no `DONE`; a repeated update after `DONE` is ignored |
+
+`DeliveryGap` rows go in `harness_delivery_gaps` for the open run, state
+`unresolved`; nothing resends. Codex `plan` items are a `Plan` tool row
+(work), and `contextCompaction` a `compaction` row ("Context compacted"),
+neither ever an answer.
+
+### One answer per run
+
+`store::settle_run` runs on the run's `TurnFinished`, in one transaction, and
+only once: a repeated terminal settles nothing. A `TurnFinished` with no run
+or unprompted turn open and no queue claim on the thread is dropped before it
+is stored, so it cannot release a queued message twice. Settlement:
+
+1. Closes the attempt and run as `completed`, `interrupted` or `failed`, and
+   sets the thread `idle` (`error` for a failed run).
+2. Selects the answer among the attempt's assistant rows
+   (`harness/event/answer.rs`): the last Codex
+   `final_answer`, else the last non-empty reply not marked `commentary`,
+   even one before a tool (`answer_reason` `native_final` /
+   `terminal_fallback`). Length, wording and tool names never decide, so an
+   answer followed by a short "Saved." selects "Saved." and folds the answer.
+3. Marks it `display_role = 'answer'` and the attempt's other replies
+   `commentary`; stores `answer_item_id` on the run.
+4. Judges `delivery_state`: `delivered` (completed, an answer, no unresolved
+   gap), `not_applicable` (compaction only), else `incomplete`.
+5. For a completed run that is `incomplete` with no error row, writes one
+   `delivery_notice` row: "The agent finished, but its answer did not reach
+   Oculus." (no answer) or "Some earlier reply text did not reach Oculus.
+   This reply may be incomplete." (a gap). A stop or failure already has its
+   row, so it gets none.
+
+The consumer then emits `DeliveryNotice` (with its row) and `RunSettled`
+(answer id, work ids, delivery, the run's status and its stored
+`started_at`/`ended_at`) before the terminal's envelope, and only then
+releases the queue. The webview sets `display_role` and the thread's run
+(`harnessStore.runs`) from `RunSettled`. Previews (`getThreadPreviews`) and
+thread naming (`claim_naming`) read a thread's newest answer: a run's
+`answer_item_id`, or a reply with no run. One-off turns and `run_once` jobs,
+which have no rows, pick from their replies by the same rule, and the same
+source again replaces its text.
+
+A row the store cannot write is never shown as written: the run gets one
+error row and a `storage_failure` gap, and later failed rows of that turn are
+dropped. Answer text that streams but is not yet a row is kept per run in
+`harness_stream_drafts`. Startup `reconcile` turns each run a dead process
+left open into an interrupted run whose draft becomes a partial answer row,
+with a notice: "Oculus closed before this reply finished. What arrived is
+kept."
+
+Each bridge's EOF path closes an open turn as failed through the same code in
+the app and the replay (`ClaudeSession::closed`, `CodexServer::closed`,
+`OpencodeServer::on_exit`, `AntigravitySession::closed`), keeping streamed
+text as partial with a gap.
+
+Envelopes carry a `sequence` that rises with each one (seeded from the clock
+at startup); `harnessStore.apply` ignores one it has seen. `load` re-folds
+the envelopes that arrived while it read the rows, so a slow read cannot
+overwrite newer rows.
+
+### A run's work folds above its answer
+
+`buildRows` (`app/src/components/harness/timeline/rows.ts`) is a pure
+projection of the rows and the thread's runs. A run's contiguous rows become,
+in order: its question; one fold (`RunWorkGroup.tsx`) holding every earlier
+reply, reasoning and tool row; one `artifacts` row per folded reply that may
+hold a widget fence; then its answer and its outcome rows (delivery notice,
+stop, error, refusal, compaction) in their stored order. The answer is the
+run's `answer_item_id`, so a reply startup recovery left without a role
+still folds. A run with no work (a plain reply) has no fold. The answer row
+carries its run's question (`asked`), which Retry sends again.
+
+| Run | Fold | Answer |
+| --- | --- | --- |
+| Working (the thread's last run, live) | "Working for 8s", shimmering, open; a running step stays unbundled; the tail's "Working…" defers to it | the latest committed reply, without Copy or Retry; none while text streams |
+| Completed | "Worked for 23s", closed | Copy and Retry |
+| Stopped | "You stopped after 23s", open | headed "Partial response", then "You stopped the response" |
+| Failed | "Failed after 23s", open | "Partial response", then the error or sign-in card |
+| Ended with no stored interval | "Work details" | as its status says |
+
+The duration is the run's stored wall-clock interval (`harness_runs`, read by
+`getHarnessRuns` beside the rows on load; until `RunSettled`, the clock
+started at the question's envelope), never a sum of tool or thought times.
+The working clock is its own component, so the second hand re-renders one
+line. A student's open or close of a fold is kept per thread and run in
+`stores/chat/runFolds.ts`, so it survives the row leaving the window and the
+run settling, and a rewind forgets the thread's choices. The header carries a
+full-width hairline under it, open or closed; the fold's rows sit flush
+beneath it as one list. Inside an open fold, two or more tool or reasoning
+rows in a row fold into one bundle, drawn at full strength (a bundle outside
+a fold fades until hovered).
+
+**Widget fences never fold.** A folded reply that may hold an `openui` or
+`widget` fence (`mayHoldWidget`, a superset test, so uncertainty shows rather
+than hides) gets an `ArtifactRow` after the fold: the same reply through the
+same markdown pipeline with `remarkFenceSplit("artifacts")` after
+`remarkWidgets`, which keeps only the numbered fences. Inside the fold the
+reply renders with `remarkFenceSplit("prose")`, each fence replaced by
+"Card shown below" / "Widget shown below". Both parse the whole reply, so a
+fence keeps its original index and `WidgetRow` keeps the originating row:
+`widgetKey`, the proposal id (`row.block`) and Undo are those the unfolded
+reply had, and the card mounts once whether the fold is open or not. Nothing
+is reserialised or evaluated to split; an invalid fence falls back to its
+source in the artifacts row, and other fences stay in the prose. A reply
+moving from provisional answer to folded work remounts its card under the
+same keys (state is in `widgetStore`; opening a proposal is idempotent).
+
+Rows with no run — unprompted turns and history from before runs — keep the
+step shape: a finished step of two or more tool or reasoning rows folds into
+a bundle; nothing is regrouped by guesswork. Each reply there carries Copy and
+Retry, Retry asking the question above it; a reply after an unprompted row
+answers none. A run that is neither ended nor
+the running tail (its runs failed to load) is drawn the same way.
+
+Find, Copy and the window treat folded rows as present. `rowItems` gives every
+item a row stands for, so the row window, `includeId` and a rail jump reach a
+folded reply by mounting its fold. `expandWithin` reaches nested expandables
+after the timeline has mounted its rows, and passes find's `query`: a fold
+whose replies' prose holds it (`foldFindText`: fences and markdown marks
+removed; tool and reasoning text is not searched, since those rows stay
+closed) opens until the query stops matching. Select All leaves folds as they
+are. An answer's Copy copies that reply alone.
 
 ## Going back rewinds the agent too
 
@@ -747,12 +1025,14 @@ opencode uses the hidden, tool-denied `oculus-dictation` agent.
 
 Windows starts new chats with Codex. Job defaults use `gpt-5.6-luna`: lecture
 chapters takes `xhigh`, and the other jobs take `medium`, except the two Studio
-jobs, which keep their Codex entry and drop Claude's. A stored Claude job
+jobs, which keep their Codex entry and drop Claude's, and Widget questions,
+which has no default anywhere. A stored Claude job
 selection resolves to its Windows default in memory without rewriting the
 stored setting; supported provider selections keep their saved model and level.
 
-Chaptering, the lecture end, thread naming and document suggestions each
-name an ordered list of models (agent, model and level) in a Settings → Jobs
+Chaptering, the lecture end, thread naming, dictation cleanup, document
+suggestions, revision marking and widget questions each name an ordered list
+of models (agent, model and level) in a Settings → Jobs
 row using `ModelPicker`. The first runs; when its run fails for any reason —
 the CLI won't start, the turn errors, the reply is empty or rejected (an empty
 suggestion is an answer, not a failure) — the next one runs (`jobs::try_each`), and when all fail the error names each
@@ -773,7 +1053,14 @@ both parsers (`one_per_agent`, `onePerAgent`) keep the first of a stored list's
 clashing entries.
 
 An empty list switches the job off: it fails with "No model is set", and thread
-naming is skipped. It never falls back to the default, which can be an
+naming is skipped. **Widget questions** (`widgetAsk`) starts off — its default
+is `[]` on both sides, so a missing key is off too — because agent-written
+widget code spends on it; the student opts in by picking a model, and until
+then a widget's `ask` rejects with "No model is set for Widget questions —
+choose one in Settings → Jobs." A row with no entry opens its picker on the
+job default's agent, or the first agent offered when the default is empty
+(`startingProvider`). The audit only looks at entries a chain holds, so an
+off-by-default job never shows a notice. It never falls back to the default, which can be an
 expensive model. The registry is one `settings` value, `job_models`, read by
 `jobs.rs` and written by `jobModels.ts`, which must parse it alike: each job's
 key holds an array (entries that don't parse are dropped one by one), or a
@@ -856,30 +1143,26 @@ A change in Settings → Jobs reaches Claude's definitions at the thread's
 next spawn and opencode's at its server's next start; Codex reads it per
 call, from `oculus studio agents`.
 
+Studio role prompts reuse the brief's Chat shell section through
+`studio_agents.rs`'s section extractor. They receive sandbox rules without
+the chat's teaching, proposal or output instructions.
+
 ## Memory
 
-Nothing carries between threads but `agents/` — `TASTE.md`, `memories/`,
-`memories/<CODE>/` (`app/src-tauri/src/agents/`) — and the app never reads it
-into a prompt. The contract is in the brief, not a skill, because nobody asks
-for a memory and a skill would never trigger. `oculus memory`
-(`app/src-tauri/src/agents/memory/`, [cli.md](./cli.md)) writes file and index
-in one call, since the index line is the write an agent skips.
+Memory lives in `agents/` — `TASTE.md`, `memories/`, `memories/<CODE>/`
+(`app/src-tauri/src/agents/`) — and the app never reads it into a prompt.
+`AGENTS.template.md` owns the read, write and answer guidance;
+`TASTE.template.md` owns which preferences earn a standing instruction.
 
-**A bucket is a few pages, not a log.** Write triggers alone grew a log: 113
-writes against 48 reads over 124 threads, one file per misconception or per
-assignment question, and under a quarter of them ever read again. So a bucket
-keeps `CAP` (12) memories and `write` refuses a new name past it, listing the
-bucket; the brief names the pages a subject needs (`gaps`, one per live
-assessment, `course`, `style`). `append` adds or `--replace`s one line of a
-page, and `fold` rewrites several into one with the caller's merged body
-(`fold.rs`); `move` honours the cap too. `list` heads each bucket with how full
-it is.
+`oculus memory` (`app/src-tauri/src/agents/memory/`, [cli.md](./cli.md)) writes
+file and index together. A bucket keeps `CAP` (12) memories; a new name past
+the cap is refused with a list of its existing pages. `append` adds or
+`--replace`s a line; `fold` rewrites overlapping pages with a supplied body,
+and `move` honours the cap. `list` shows each bucket's fullness.
 
-**The memory comes after the reply.** An agent that works its answer out in
-thinking and then saves a memory can end the turn having told the student only
-that it saved one. So the brief says the reply is the text written out, and a
-save is never mentioned in it: the CLI row already shows it. A card has the
-further rule of going after the last tool call; see the narration gotcha below.
+The shared instructions do not prescribe an order between answering and memory saves or other tool work. Rendered fence
+placement comes from the app brief's Output section; skills refer to that
+rule rather than carrying separate versions of it.
 
 ## Subject scope and `@`
 
@@ -1105,7 +1388,7 @@ Live Task/TaskList, Deadline/Upcoming, Lecture, StudioVideo, CheatNote and Revie
 - `providers::opencode::sweep` (`strays.rs`) kills strays at startup by `SERVE_ARGS` *and* `ppid == 1` — drop either and it kills a living app's or a hand-run server.
 - Codex: `thread/start` takes `sandbox` (string), `turn/start` takes `sandboxPolicy` (object); effort is thread config; a resumed thread replays stale usage first.
 - Claude: take tool inputs from the `assistant` line, not `input_json_delta`s; `content_block_start` can carry text the deltas don't repeat.
-- Claude's API can turn text written before a tool call into a `narration` thinking block streamed as a one-line summary; the real text never reaches the app, so a card in it never draws, while the model believes it showed it. Display `updates` (the CLI's default) and `summarized` both did it. Sessions spawn with `CLAUDE_CODE_THINKING_DISPLAY_UPDATES=0`, which sends no display, and `AGENTS.template.md` and `oculus-ui` put every `openui` fence in the final reply, after the last tool call.
+- Claude narration is summarized assistant text, not reasoning or verbatim prose: a card written before a tool call can arrive as a summary ([launch and classification](#four-dialects-become-one-event-stream)).
 - Don't cache sign-in status in Rust — a stale "signed out" after a sign-in is the wrong answer that matters.
 - The ⌘⌥B column fold tests `e.code` — ⌥B types `∫` — and `AppLayout`'s ⌘B returns early on ⌥, or one chord closes both panels.
 - Never give an agent's HTML embed `allow-same-origin` — the page would run with the app's origin and reach the Tauri IPC.

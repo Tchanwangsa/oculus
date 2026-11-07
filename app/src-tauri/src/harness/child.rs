@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 
 use super::event::{HarnessEvent, Provider};
+pub use super::transport::ChildProc;
 use super::{RawLog, Sink};
 
 /// Enough stderr to explain an exit.
@@ -36,7 +37,7 @@ pub struct ThreadSpawn {
 }
 
 /// A spawned CLI, killed on drop. `who` names it in error messages.
-pub struct ChildProc {
+pub(super) struct Process {
     who: &'static str,
     job: crate::runtime::platform::ProcessJob,
     child: Mutex<Child>,
@@ -45,7 +46,7 @@ pub struct ChildProc {
     tail: Arc<Mutex<VecDeque<String>>>,
 }
 
-impl ChildProc {
+impl Process {
     /// Spawn `cmd` with stdout and stderr piped, and stdin too when `stdin`
     /// (else `/dev/null`). stderr feeds the tail; stdout is the caller's.
     pub fn spawn(
@@ -93,7 +94,7 @@ impl ChildProc {
                 }
             });
         }
-        let proc = ChildProc {
+        let proc = Process {
             who,
             job,
             child: Mutex::new(child),
@@ -173,7 +174,7 @@ impl ChildProc {
     }
 }
 
-impl Drop for ChildProc {
+impl Drop for Process {
     fn drop(&mut self) {
         self.job.terminate();
         if let Ok(c) = self.child.get_mut() {

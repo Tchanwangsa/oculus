@@ -21,9 +21,11 @@ pub mod jobs;
 mod manager;
 mod protected;
 mod providers;
+pub mod reply_json;
 pub mod store;
 pub mod studio_agents;
 mod suggest;
+mod transport;
 
 pub use cli::{discover, install, signin, update};
 pub use event::{HarnessEvent, Provider, ToolKind};
@@ -39,3 +41,6 @@ use std::sync::Arc;
 /// Where a bridge hands its events. Called from the bridge's reader thread,
 /// in stream order; must not block on the bridge.
 pub type Sink = Arc<dyn Fn(HarnessEvent) + Send + Sync>;
+
+#[cfg(test)]
+mod testkit;

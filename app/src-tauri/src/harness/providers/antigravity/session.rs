@@ -90,14 +90,20 @@ impl AntigravitySession {
                     sink(ev);
                 }
             });
-            reader_session
-                .proc
-                .finish(&sink, Provider::Antigravity, || {
-                    expecting.swap(false, Ordering::SeqCst) || state.turn_open
-                });
+            reader_session.closed(&mut state, &sink);
         });
 
         Ok(session)
+    }
+
+    /// stdout reached EOF: keep a cut-off reply, fail an open turn, announce the exit.
+    pub(super) fn closed(&self, state: &mut Translator, sink: &Sink) {
+        for ev in state.close() {
+            sink(ev);
+        }
+        self.proc.finish(sink, Provider::Antigravity, || {
+            self.expecting.swap(false, Ordering::SeqCst) || state.turn_open
+        });
     }
 
     pub fn is_alive(&self) -> bool {

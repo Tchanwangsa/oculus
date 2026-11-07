@@ -93,4 +93,9 @@ struct ThreadState {
     /// The answer as it streams; an interrupted turn never sends the
     /// `item/completed` that would commit it.
     partial_message: String,
+    /// The streaming message's item id.
+    partial_item: Option<String>,
 }
+
+#[cfg(test)]
+pub(in crate::harness) mod replay;

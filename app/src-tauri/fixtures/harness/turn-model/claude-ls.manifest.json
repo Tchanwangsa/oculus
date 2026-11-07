@@ -1,0 +1,36 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.267",
+  "protocol": "Claude print stream-json",
+  "model": "claude-sonnet-5",
+  "capture_date": "2026-09-10T12:27:55.062Z (first timestamp in excerpt)",
+  "source": "fixtures/harness/claude-ls.ndjson",
+  "redaction": "Existing committed recording reused unchanged; no new private thread content.",
+  "scenario": "claude-ls",
+  "frames": 46,
+  "sha256": "60221d81a17148790074e931c4d78fc423b6ddbe11d19ba38f044d672470f268",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-ls.ndjson",
+  "native_session": "",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "existing recorded session route; scratch cwd; no startup/configuration probe"
+  }
+}

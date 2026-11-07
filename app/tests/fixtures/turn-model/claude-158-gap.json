@@ -1,0 +1,328 @@
+{
+  "case": "claude-158-gap",
+  "restarted": false,
+  "envelopes": [
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": 1,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717226,
+      "event": {
+        "type": "user_message",
+        "text": "Replay request"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717227,
+      "event": {
+        "type": "turn_started"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717228,
+      "event": {
+        "type": "delivery_gap",
+        "source": "a64793ad-92fc-49bf-98d6-0aa5b5ac5039/0",
+        "cause": "empty_narration"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": 2,
+      "runId": 1,
+      "attemptId": 1,
+      "entityId": "weak:0",
+      "sequence": 1794054811717229,
+      "event": {
+        "type": "tool_started",
+        "id": "toolu_01CMhgZT44BYgJcq4sgm4zng",
+        "kind": "bash",
+        "name": "Bash",
+        "title": "xxxxxx xxxxxx xxxxxx xxxxxx \"xxxxxxx 00 (0 xxx) 'xxxxxxxxxxxx xx x_x xxx xxxx-xxxxxxxxx' xxxxx: xxxxx xxxx xxxx x_x = {<x> : x xxxxxxx <x>} ◇ xxxxxx xx 'xxxx xxx xxxxxx' (xxxxx xxx xxx xxxxx xxx xxx xxxxxxx xxxxxxxx; xxxxxxxx xxxxxxxx ~00:00)\" -x xxxx00000_0000_xx0",
+        "input": {
+          "command": "xxxxxx xxxxxx xxxxxx xxxxxx \"xxxxxxx 00 (0 xxx) 'xxxxxxxxxxxx xx x_x xxx xxxx-xxxxxxxxx' xxxxx: xxxxx xxxx xxxx x_x = {<x> : x xxxxxxx <x>} ◇ xxxxxx xx 'xxxx xxx xxxxxx' (xxxxx xxx xxx xxxxx xxx xxx xxxxxxx xxxxxxxx; xxxxxxxx xxxxxxxx ~00:00)\" -x xxxx00000_0000_xx0",
+          "description": "xxxxxx xxxxx xxxxx xxx x_x xxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717230,
+      "event": {
+        "type": "tool_finished",
+        "id": "toolu_01CMhgZT44BYgJcq4sgm4zng",
+        "ok": true,
+        "output": "xxxxx xx xxxxxx: - xxxxxxx 00 (0 xxx) 'xxxxxxxxxxxx xx x_x xxx xxxx-xxxxxxxxx' xxxxx: xxxxx xxxx xxxx x_x = {<x> : x xxxxxxx <x>} ◇ xxxxxx xx 'xxxx xxx xxxxxx' (xxxxx xxx xxx xxxxx xxx xxx xxxxxxx xxxxxxxx; xxxxxxxx xxxxxxxx ~00:00)"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717231,
+      "event": {
+        "type": "assistant_delta",
+        "text": "x xxxxx"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717232,
+      "event": {
+        "type": "assistant_delta",
+        "text": " xx xxx xx"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717233,
+      "event": {
+        "type": "assistant_delta",
+        "text": "xx00000"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717234,
+      "event": {
+        "type": "assistant_delta",
+        "text": " xxxxxx xxxxx xxxx xxxx"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717235,
+      "event": {
+        "type": "assistant_delta",
+        "text": " xxxxx'x xxxxxxxxxx xx $x"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717236,
+      "event": {
+        "type": "assistant_delta",
+        "text": "_x$ xxxxxx xxx \"xxxx"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717237,
+      "event": {
+        "type": "assistant_delta",
+        "text": " xxx xxxxxx\"."
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": 3,
+      "runId": 1,
+      "attemptId": 1,
+      "entityId": "weak:1",
+      "sequence": 1794054811717238,
+      "event": {
+        "type": "assistant_message",
+        "text": "x xxxxx xx xxx xxxx00000 xxxxxx xxxxx xxxx xxxx xxxxx'x xxxxxxxxxx xx $x_x$ xxxxxx xxx \"xxxx xxx xxxxxx\".",
+        "source": {
+          "id": "686b5a2e-68f4-484f-aebe-ffddbe58b24c/0",
+          "phase": "unknown"
+        }
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717239,
+      "event": {
+        "type": "usage",
+        "input_tokens": 346814,
+        "output_tokens": 1947,
+        "context_tokens": 88784,
+        "context_window": 1000000,
+        "cost_usd": 1.7223328
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": 4,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717240,
+      "event": {
+        "type": "delivery_notice",
+        "text": "Some earlier reply text did not reach Oculus. This reply may be incomplete."
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717241,
+      "event": {
+        "type": "run_settled",
+        "answer_item_id": 3,
+        "work_item_ids": [],
+        "delivery": "incomplete",
+        "status": "completed",
+        "started_at": "2026-11-07 12:33:31",
+        "ended_at": "2026-11-07 12:33:31"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811717242,
+      "event": {
+        "type": "turn_finished",
+        "status": "completed"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "sequence": 1794054811717243,
+      "event": {
+        "type": "exited",
+        "code": null
+      }
+    }
+  ],
+  "reopened": [
+    {
+      "id": 1,
+      "thread_id": 1,
+      "kind": "user",
+      "ref_id": null,
+      "content": "Replay request",
+      "meta": null,
+      "created_at": "2026-11-07 12:33:31",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": null,
+      "entity_ref": null,
+      "source_ref": null,
+      "native_phase": null,
+      "lifecycle": null,
+      "display_role": null
+    },
+    {
+      "id": 2,
+      "thread_id": 1,
+      "kind": "tool",
+      "ref_id": "toolu_01CMhgZT44BYgJcq4sgm4zng",
+      "content": "xxxxxx xxxxxx xxxxxx xxxxxx \"xxxxxxx 00 (0 xxx) 'xxxxxxxxxxxx xx x_x xxx xxxx-xxxxxxxxx' xxxxx: xxxxx xxxx xxxx x_x = {<x> : x xxxxxxx <x>} ◇ xxxxxx xx 'xxxx xxx xxxxxx' (xxxxx xxx xxx xxxxx xxx xxx xxxxxxx xxxxxxxx; xxxxxxxx xxxxxxxx ~00:00)\" -x xxxx00000_0000_xx0",
+      "meta": "{\"kind\":\"bash\",\"name\":\"Bash\",\"input\":{\"command\":\"xxxxxx xxxxxx xxxxxx xxxxxx \\\"xxxxxxx 00 (0 xxx) 'xxxxxxxxxxxx xx x_x xxx xxxx-xxxxxxxxx' xxxxx: xxxxx xxxx xxxx x_x = {<x> : x xxxxxxx <x>} ◇ xxxxxx xx 'xxxx xxx xxxxxx' (xxxxx xxx xxx xxxxx xxx xxx xxxxxxx xxxxxxxx; xxxxxxxx xxxxxxxx ~00:00)\\\" -x xxxx00000_0000_xx0\",\"description\":\"xxxxxx xxxxx xxxxx xxx x_x xxxxxxxxxx\"},\"ok\":true,\"output\":\"xxxxx xx xxxxxx: - xxxxxxx 00 (0 xxx) 'xxxxxxxxxxxx xx x_x xxx xxxx-xxxxxxxxx' xxxxx: xxxxx xxxx xxxx x_x = {<x> : x xxxxxxx <x>} ◇ xxxxxx xx 'xxxx xxx xxxxxx' (xxxxx xxx xxx xxxxx xxx xxx xxxxxxx xxxxxxxx; xxxxxxxx xxxxxxxx ~00:00)\"}",
+      "created_at": "2026-11-07 12:33:31",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": 1,
+      "entity_ref": "weak:0",
+      "source_ref": null,
+      "native_phase": null,
+      "lifecycle": null,
+      "display_role": null
+    },
+    {
+      "id": 3,
+      "thread_id": 1,
+      "kind": "assistant",
+      "ref_id": null,
+      "content": "x xxxxx xx xxx xxxx00000 xxxxxx xxxxx xxxx xxxx xxxxx'x xxxxxxxxxx xx $x_x$ xxxxxx xxx \"xxxx xxx xxxxxx\".",
+      "meta": null,
+      "created_at": "2026-11-07 12:33:31",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": 1,
+      "entity_ref": "weak:1",
+      "source_ref": "686b5a2e-68f4-484f-aebe-ffddbe58b24c/0",
+      "native_phase": "unknown",
+      "lifecycle": "complete",
+      "display_role": "answer"
+    },
+    {
+      "id": 4,
+      "thread_id": 1,
+      "kind": "delivery_notice",
+      "ref_id": null,
+      "content": "Some earlier reply text did not reach Oculus. This reply may be incomplete.",
+      "meta": null,
+      "created_at": "2026-11-07 12:33:31",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": 1,
+      "entity_ref": null,
+      "source_ref": null,
+      "native_phase": null,
+      "lifecycle": null,
+      "display_role": null
+    }
+  ],
+  "runs": [
+    {
+      "id": 1,
+      "initiating_item_id": 1,
+      "binding_id": 1,
+      "active_attempt_id": 1,
+      "execution_status": "completed",
+      "origin": "student",
+      "delivery_state": "incomplete",
+      "answer_item_id": 3,
+      "started_at": "2026-11-07 12:33:31",
+      "ended_at": "2026-11-07 12:33:31"
+    }
+  ]
+}

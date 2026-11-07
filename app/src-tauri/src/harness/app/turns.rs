@@ -63,6 +63,12 @@ pub async fn harness_send(
         }
     };
 
+    // A send already accepted under this receipt (a retried call) starts nothing.
+    if let Some(receipt) = &opts.receipt {
+        if store::receipt_run(&pool, receipt).await?.is_some() {
+            return Ok(id);
+        }
+    }
     if !state.queue.lock().unwrap().try_claim(id) {
         let msg = state.queue.lock().unwrap().push(id, &text, &opts);
         state.sink(id, provider)(HarnessEvent::Queued {

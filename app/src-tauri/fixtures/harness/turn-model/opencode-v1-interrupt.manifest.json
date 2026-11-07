@@ -1,0 +1,40 @@
+{
+  "provider": "opencode",
+  "cli_version": "1.18.31",
+  "protocol": "v1 HTTP/SSE",
+  "model": "openrouter/openai/gpt-4.1-mini",
+  "capture_date": "Existing fixture; original timestamps retained; exact capture date not recorded",
+  "source": "fixtures/harness/opencode-v1-interrupt.ndjson",
+  "redaction": "Existing committed recording reused unchanged; no new private thread content.",
+  "scenario": "opencode-v1-interrupt",
+  "frames": 174,
+  "sha256": "506100ef91c9f6c16d564c4c24da4f1b2336f66dabf1de7aa4b9358dfd1a8c01",
+  "expected_outbound": [
+    {
+      "frame": {
+        "method": "POST",
+        "path": "/session/ses_f5227c838ffeyHqBsGkyEYNKCd/prompt_async?directory=$SCRATCH/agents",
+        "body": {
+          "agent": "oculus",
+          "parts": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../opencode-v1-interrupt.ndjson",
+  "native_session": "ses_f5227c838ffeyHqBsGkyEYNKCd",
+  "settings": {
+    "recorded_agent": "oculus",
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": "oculus",
+    "replay_scope": "existing recorded session route; scratch cwd; no startup/configuration probe"
+  }
+}

@@ -135,23 +135,26 @@ pub async fn set_model(pool: &SqlitePool, id: i64, model: Option<&str>) -> Resul
         .map_err(|e| e.to_string())
 }
 
+/// Explicit dependent deletes, children first: a connection may lack `foreign_keys`.
 pub async fn delete_thread(pool: &SqlitePool, id: i64) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    sqlx::query("DELETE FROM chat_proposals WHERE thread_id = ?1")
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| e.to_string())?;
-    sqlx::query("DELETE FROM harness_items WHERE thread_id = ?1")
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| e.to_string())?;
-    sqlx::query("DELETE FROM harness_threads WHERE id = ?1")
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| e.to_string())?;
+    for sql in [
+        "DELETE FROM chat_proposals WHERE thread_id = ?1",
+        "DELETE FROM harness_items WHERE thread_id = ?1",
+        "DELETE FROM harness_command_receipts WHERE thread_id = ?1",
+        "DELETE FROM harness_delivery_gaps WHERE thread_id = ?1",
+        "DELETE FROM harness_stream_drafts WHERE run_id IN (SELECT id FROM harness_runs WHERE thread_id = ?1)",
+        "DELETE FROM harness_attempts WHERE run_id IN (SELECT id FROM harness_runs WHERE thread_id = ?1)",
+        "DELETE FROM harness_runs WHERE thread_id = ?1",
+        "DELETE FROM harness_bindings WHERE thread_id = ?1",
+        "DELETE FROM harness_threads WHERE id = ?1",
+    ] {
+        sqlx::query(sql)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     tx.commit().await.map_err(|e| e.to_string())
 }
 

@@ -80,6 +80,8 @@ impl Harness {
         {
             return Ok(());
         }
+        #[cfg(test)]
+        assert!(!self.replay_only, "unrecorded provider spawn in replay");
         live.remove(&thread_id);
 
         let cwd = thread_cwd(&self.data_dir);
@@ -226,6 +228,7 @@ impl Harness {
     /// Everything, on quit.
     pub fn shutdown(&self) {
         self.drop_suggestions();
+        self.stop_all_one_offs();
         let ids: Vec<i64> = self.live.lock().unwrap().keys().copied().collect();
         for id in ids {
             self.close(id);

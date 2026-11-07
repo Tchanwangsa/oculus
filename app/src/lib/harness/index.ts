@@ -13,6 +13,7 @@ export * from "./thought";
 export * from "./oculusCli";
 export * from "./types";
 export * from "./reads";
+export * from "./runs";
 export * from "./commands";
 export * from "./signin";
 export * from "./antigravity";

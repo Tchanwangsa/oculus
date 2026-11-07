@@ -5,7 +5,7 @@ use std::time::Instant;
 use serde_json::Value;
 
 use crate::harness::child::str_of as s;
-use crate::harness::event::{cap_output, classify, HarnessEvent, Provider};
+use crate::harness::event::{cap_output, classify, GapCause, HarnessEvent, Provider, Source};
 
 use super::redact::scrub;
 use super::session::SessionState;
@@ -54,6 +54,8 @@ fn is_trace(msg: &str) -> bool {
 fn begin_turn(st: &mut SessionState) -> HarnessEvent {
     st.text.clear();
     st.reasoning.clear();
+    st.unknown.clear();
+    st.order.clear();
     st.tools.clear();
     st.open_tools.clear();
     st.tool_output_len.clear();
@@ -95,14 +97,30 @@ pub(super) fn close_turn(st: &mut SessionState, status: &str) -> Vec<HarnessEven
     st.turn_open = false;
     st.awaiting_step = None;
     let mut out = Vec::new();
-    // Text whose closing snapshot never came (a dropped stream).
-    let mut leftover: Vec<String> = st.text.drain().map(|(_, v)| v).collect();
-    leftover.sort();
-    for text in leftover {
-        if !text.trim().is_empty() {
-            out.push(HarnessEvent::AssistantMessage { text });
+    // Text whose closing snapshot never came (a dropped stream) is kept as
+    // partial; unless the turn was stopped, its close is a missing snapshot.
+    // Deltas never classified are not guessed to be answer text.
+    for id in std::mem::take(&mut st.order) {
+        if let Some(text) = st.text.remove(&id).filter(|t| !t.trim().is_empty()) {
+            out.push(HarnessEvent::AssistantMessage {
+                text,
+                source: Source::partial(id.clone()),
+            });
+            if status != "interrupted" {
+                out.push(HarnessEvent::DeliveryGap {
+                    source: Some(id),
+                    cause: GapCause::MissingSnapshot,
+                });
+            }
+        } else if st.unknown.remove(&id).is_some_and(|t| !t.trim().is_empty()) {
+            out.push(HarnessEvent::DeliveryGap {
+                source: Some(id),
+                cause: GapCause::UnknownProtocol,
+            });
         }
     }
+    st.text.clear();
+    st.unknown.clear();
     st.reasoning.clear();
     st.tool_output_len.clear();
     let open: Vec<String> = st.open_tools.drain().collect();
@@ -247,9 +265,23 @@ pub(super) fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<Harne
                         &mut st.text
                     };
                     if part["time"]["end"].is_null() {
-                        map.entry(id).or_default();
+                        // Deltas that came before this snapshot can now be classified.
+                        let held = st.unknown.remove(&id);
+                        if !st.order.contains(&id) {
+                            st.order.push(id.clone());
+                        }
+                        let acc = map.entry(id).or_default();
+                        if let Some(text) = held.filter(|t| !t.is_empty()) {
+                            acc.push_str(&text);
+                            out.push(if thinking {
+                                HarnessEvent::ThinkingDelta { text }
+                            } else {
+                                HarnessEvent::AssistantDelta { text }
+                            });
+                        }
                     } else {
                         map.remove(&id);
+                        st.unknown.remove(&id);
                         let text = s(part, "text");
                         if !text.trim().is_empty() {
                             // The part's own clock, in epoch milliseconds.
@@ -258,10 +290,11 @@ pub(super) fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<Harne
                                 .as_u64()
                                 .zip(time["start"].as_u64())
                                 .map(|(end, start)| end.saturating_sub(start));
+                            let source = Source::of(id);
                             out.push(if thinking {
-                                HarnessEvent::Thinking { text, ms }
+                                HarnessEvent::Thinking { text, ms, source }
                             } else {
-                                HarnessEvent::AssistantMessage { text }
+                                HarnessEvent::AssistantMessage { text, source }
                             });
                         }
                     }
@@ -321,7 +354,8 @@ pub(super) fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<Harne
                 _ => {}
             }
         }
-        // A part never opened (a reconnect mid-answer) is read as answer text.
+        // A part never opened (a reconnect mid-answer) waits for a snapshot
+        // to say whether it is answer or reasoning; both stream as `text`.
         "message.part.delta" => {
             let text = s(p, "delta");
             if text.is_empty() {
@@ -331,9 +365,14 @@ pub(super) fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<Harne
             if let Some(acc) = st.reasoning.get_mut(&id) {
                 acc.push_str(&text);
                 out.push(HarnessEvent::ThinkingDelta { text });
-            } else {
-                st.text.entry(id).or_default().push_str(&text);
+            } else if let Some(acc) = st.text.get_mut(&id) {
+                acc.push_str(&text);
                 out.push(HarnessEvent::AssistantDelta { text });
+            } else {
+                if !st.order.contains(&id) {
+                    st.order.push(id.clone());
+                }
+                st.unknown.entry(id).or_default().push_str(&text);
             }
         }
         "session.error" => {

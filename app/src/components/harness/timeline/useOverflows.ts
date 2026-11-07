@@ -6,9 +6,9 @@ export const QUESTION_MAX_H = 208;
 /** Below this much hidden, folding would save a line and cost a click. */
 const FOLD_SLACK = 40;
 
-/** Whether a bubble is long enough to fold — measured, since line count
- *  depends on the column's width. */
-export function useOverflows(text: string, shown: boolean) {
+/** Whether a bubble is long enough to fold past `max` px — measured, since
+ *  line count depends on the column's width. */
+export function useOverflows(text: string, shown: boolean, max = QUESTION_MAX_H) {
   const ref = useRef<HTMLDivElement>(null);
   const [over, setOver] = useState(false);
   useLayoutEffect(() => {
@@ -19,12 +19,12 @@ export function useOverflows(text: string, shown: boolean) {
     const measure = () => {
       // Reading a hidden descendant's scrollHeight can force its text layout.
       // Reveal produces another resize; retain the fold until then.
-      if (el.isConnected && !inSkippedSubtree(el)) setOver(el.scrollHeight > QUESTION_MAX_H + FOLD_SLACK);
+      if (el.isConnected && !inSkippedSubtree(el)) setOver(el.scrollHeight > max + FOLD_SLACK);
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [text, shown]);
+  }, [text, shown, max]);
   return [ref, over] as const;
 }

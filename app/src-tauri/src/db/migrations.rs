@@ -922,6 +922,18 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
             sql: include_str!("revision/tags.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 53,
+            description: "revision artifacts name their format: openui or widget",
+            sql: include_str!("revision/format.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 54,
+            description: "agent runs, attempts, provider bindings and send receipts",
+            sql: include_str!("../harness/store/runs.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

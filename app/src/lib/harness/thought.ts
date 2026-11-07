@@ -1,4 +1,5 @@
 import { parseItemMeta } from "./meta";
+import { elapsedText } from "./runs";
 import type { HarnessItem } from "./types";
 
 /** How long a reasoning row streamed, in ms (`ThoughtClock` in Rust, or
@@ -10,11 +11,7 @@ export function thoughtMs(item: HarnessItem): number | null {
 
 /** "Thought for 12s", "Thought for 1m 5s"; "Thought" when untimed. */
 export function thoughtLabel(ms: number | null): string {
-  if (ms == null) return "Thought";
-  const s = Math.max(1, Math.round(ms / 1000));
-  if (s < 60) return `Thought for ${s}s`;
-  const m = Math.floor(s / 60);
-  return `Thought for ${m}m${s % 60 ? ` ${s % 60}s` : ""}`;
+  return ms == null ? "Thought" : `Thought for ${elapsedText(ms)}`;
 }
 
 /** Markdown and maths delimiters off, so a line reads as plain text. */

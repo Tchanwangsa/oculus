@@ -11,6 +11,7 @@ mod options;
 mod queue;
 mod raw_log;
 mod session;
+mod stoppable;
 mod studio;
 
 pub(in crate::harness) use handle::Handle;
@@ -38,6 +39,8 @@ use handle::Live;
 /// The live sessions plus the shared Codex and opencode servers. One per app.
 pub struct Harness {
     data_dir: PathBuf,
+    #[cfg(test)]
+    replay_only: bool,
     live: Mutex<HashMap<i64, Live>>,
     codex: Mutex<Option<Arc<CodexServer>>>,
     opencode: Mutex<Option<Arc<OpencodeServer>>>,
@@ -51,12 +54,16 @@ pub struct Harness {
     claude_models: Mutex<Option<ClaudeCatalogue>>,
     /// The document editor's suggestion turn in flight and its warm spare.
     pub(in crate::harness) suggest: Mutex<crate::harness::suggest::Suggestions>,
+    /// One-off turns stoppable by id (`stoppable.rs`).
+    stoppable: Mutex<stoppable::Stoppable>,
 }
 
 impl Harness {
     pub fn new(data_dir: PathBuf) -> Self {
         Harness {
             data_dir,
+            #[cfg(test)]
+            replay_only: false,
             live: Mutex::new(HashMap::new()),
             codex: Mutex::new(None),
             opencode: Mutex::new(None),
@@ -64,6 +71,7 @@ impl Harness {
             opencode_default_sink: Mutex::new(None),
             claude_models: Mutex::new(None),
             suggest: Mutex::new(crate::harness::suggest::Suggestions::default()),
+            stoppable: Mutex::new(stoppable::Stoppable::default()),
         }
     }
 
@@ -75,5 +83,24 @@ impl Harness {
     /// The same, for opencode's events that name no session.
     pub fn set_opencode_default_sink(&self, sink: Sink) {
         *self.opencode_default_sink.lock().unwrap() = Some(sink);
+    }
+}
+
+#[cfg(test)]
+impl Harness {
+    pub(in crate::harness) fn replay(data_dir: PathBuf) -> Self {
+        let mut harness = Self::new(data_dir);
+        harness.replay_only = true;
+        harness
+    }
+
+    pub(in crate::harness) fn replay_handle(&self, thread: i64, handle: Handle) {
+        self.live.lock().unwrap().insert(
+            thread,
+            Live {
+                handle,
+                effort: None,
+            },
+        );
     }
 }

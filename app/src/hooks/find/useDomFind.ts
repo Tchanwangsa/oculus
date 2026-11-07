@@ -4,6 +4,7 @@ import { nestedFindRoots, onScreen } from "@/lib/menu/find";
 import { buildCorpus, findMatches, locate, type TextSegment } from "@/lib/menu/findText";
 import { expandWithin } from "@/lib/ui/expandable";
 import { inSkippedSubtree } from "@/lib/ui/scrollAnchor";
+import { noteScrollIntent } from "@/lib/ui/followTimeline";
 
 /**
  * Find in rendered DOM: plain-text, case-insensitive, painted with the CSS
@@ -117,6 +118,8 @@ function reveal(range: Range): void {
     const r = rectOf(range);
     const box = el.getBoundingClientRect();
     if (y && (r.top < box.top || r.bottom > box.bottom)) {
+      // Typed into the find field, so a following timeline must not undo it.
+      noteScrollIntent();
       const scale = el.offsetHeight ? box.height / el.offsetHeight : 1;
       el.scrollTop += (r.top + r.height / 2 - (box.top + box.height / 2)) / scale;
     }
@@ -228,7 +231,7 @@ export function useDomFind(rootRef: RefObject<HTMLElement | null>): DomFind {
       }
       // Synchronously: the walk below must see what was windowed out, and
       // nothing re-searches for rows mounted before the observer hangs.
-      expandWithin(root, { sync: true });
+      expandWithin(root, { sync: true, query: s.query });
       const previous = s.ranges[s.current];
       const { nodes, segments } = collect(root);
       const corpus = buildCorpus(segments);

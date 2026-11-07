@@ -48,8 +48,14 @@ async fn reconcile_idles_running_threads_and_closes_open_tool_rows() {
         .execute(&pool)
         .await
         .unwrap();
-    let open = apply(&pool, thread, &started("a")).await.unwrap().unwrap();
-    let done = apply(&pool, thread, &started("b")).await.unwrap().unwrap();
+    let open = apply(&pool, thread, &started("a"), None)
+        .await
+        .unwrap()
+        .unwrap();
+    let done = apply(&pool, thread, &started("b"), None)
+        .await
+        .unwrap()
+        .unwrap();
     apply(
         &pool,
         thread,
@@ -59,12 +65,21 @@ async fn reconcile_idles_running_threads_and_closes_open_tool_rows() {
             output: "file.txt".into(),
             title: None,
         },
+        None,
     )
     .await
     .unwrap();
-    let garbled = insert_item(&pool, thread, "tool", Some("c"), None, Some("{oops".into()))
-        .await
-        .unwrap();
+    let garbled = insert_item(
+        &pool,
+        thread,
+        "tool",
+        Some("c"),
+        None,
+        Some("{oops".into()),
+        None,
+    )
+    .await
+    .unwrap();
 
     let r = reconcile(&pool).await.unwrap();
     assert_eq!((r.threads, r.tools), (1, 1));
@@ -109,10 +124,10 @@ async fn pruning_removes_cards_with_foreign_keys_off_but_preserves_the_journal()
     let thread = create_thread(&pool, Provider::Claude, None, None, None, "test")
         .await
         .unwrap();
-    let early = insert_item(&pool, thread, "assistant", None, Some("card"), None)
+    let early = insert_item(&pool, thread, "assistant", None, Some("card"), None, None)
         .await
         .unwrap();
-    let later = insert_item(&pool, thread, "assistant", None, Some("card"), None)
+    let later = insert_item(&pool, thread, "assistant", None, Some("card"), None, None)
         .await
         .unwrap();
     for item in [early, later] {
@@ -153,13 +168,17 @@ async fn a_timed_thought_keeps_its_duration() {
     let thought = |ms| HarnessEvent::Thinking {
         text: "hmm".into(),
         ms,
+        source: None,
     };
-    let timed = apply(&pool, thread, &thought(Some(1200)))
+    let timed = apply(&pool, thread, &thought(Some(1200)), None)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(meta(&pool, timed).await["ms"], 1200);
-    let untimed = apply(&pool, thread, &thought(None)).await.unwrap().unwrap();
+    let untimed = apply(&pool, thread, &thought(None), None)
+        .await
+        .unwrap()
+        .unwrap();
     let raw: Option<String> = sqlx::query("SELECT meta FROM harness_items WHERE id = ?1")
         .bind(untimed)
         .fetch_one(&pool)

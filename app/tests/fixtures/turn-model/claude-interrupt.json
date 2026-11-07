@@ -1,0 +1,251 @@
+{
+  "case": "claude-interrupt",
+  "restarted": false,
+  "envelopes": [
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": 1,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994045,
+      "event": {
+        "type": "user_message",
+        "text": "Replay request"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994046,
+      "event": {
+        "type": "session_started",
+        "provider_session_id": "1665e77f-a2fb-4943-ab5f-773676a74809",
+        "model": "claude-haiku-4-5",
+        "cwd": "/private/tmp/claude-501/-Users-tanatchanwangsa-Documents-gh-oculus/b03a92df-3e30-4081-a8c7-c60cfa3eceee/scratchpad/probe"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994047,
+      "event": {
+        "type": "turn_started"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994048,
+      "event": {
+        "type": "assistant_delta",
+        "text": "1."
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994049,
+      "event": {
+        "type": "assistant_delta",
+        "text": " Start"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994050,
+      "event": {
+        "type": "assistant_delta",
+        "text": " studying"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994051,
+      "event": {
+        "type": "assistant_delta",
+        "text": ".\n9."
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994052,
+      "event": {
+        "type": "assistant_delta",
+        "text": " Use the Fe"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994053,
+      "event": {
+        "type": "assistant_delta",
+        "text": "ynman Technique"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994054,
+      "event": {
+        "type": "assistant_delta",
+        "text": ": explain concepts"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": 2,
+      "runId": 1,
+      "attemptId": 1,
+      "entityId": "weak:0",
+      "sequence": 1794054811994055,
+      "event": {
+        "type": "assistant_message",
+        "text": "1. Start studying.\n9. Use the Feynman Technique: explain concepts",
+        "source": {
+          "id": "5939c038-db4b-4b87-8590-2bf906fed0ca/0",
+          "phase": "unknown"
+        }
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054811994056,
+      "event": {
+        "type": "run_settled",
+        "answer_item_id": 2,
+        "work_item_ids": [],
+        "delivery": "incomplete",
+        "status": "interrupted",
+        "started_at": "2026-11-07 12:33:31",
+        "ended_at": "2026-11-07 12:33:31"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": 3,
+      "runId": 1,
+      "attemptId": 1,
+      "entityId": "weak:1",
+      "sequence": 1794054811994057,
+      "event": {
+        "type": "turn_finished",
+        "status": "interrupted"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "sequence": 1794054811994058,
+      "event": {
+        "type": "exited",
+        "code": null
+      }
+    }
+  ],
+  "reopened": [
+    {
+      "id": 1,
+      "thread_id": 1,
+      "kind": "user",
+      "ref_id": null,
+      "content": "Replay request",
+      "meta": null,
+      "created_at": "2026-11-07 12:33:31",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": null,
+      "entity_ref": null,
+      "source_ref": null,
+      "native_phase": null,
+      "lifecycle": null,
+      "display_role": null
+    },
+    {
+      "id": 2,
+      "thread_id": 1,
+      "kind": "assistant",
+      "ref_id": null,
+      "content": "1. Start studying.\n9. Use the Feynman Technique: explain concepts",
+      "meta": null,
+      "created_at": "2026-11-07 12:33:31",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": 1,
+      "entity_ref": "weak:0",
+      "source_ref": "5939c038-db4b-4b87-8590-2bf906fed0ca/0",
+      "native_phase": "unknown",
+      "lifecycle": "complete",
+      "display_role": "answer"
+    },
+    {
+      "id": 3,
+      "thread_id": 1,
+      "kind": "interrupted",
+      "ref_id": null,
+      "content": null,
+      "meta": null,
+      "created_at": "2026-11-07 12:33:31",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": 1,
+      "entity_ref": "weak:1",
+      "source_ref": null,
+      "native_phase": null,
+      "lifecycle": null,
+      "display_role": null
+    }
+  ],
+  "runs": [
+    {
+      "id": 1,
+      "initiating_item_id": 1,
+      "binding_id": 1,
+      "active_attempt_id": 1,
+      "execution_status": "interrupted",
+      "origin": "student",
+      "delivery_state": "incomplete",
+      "answer_item_id": 2,
+      "started_at": "2026-11-07 12:33:31",
+      "ended_at": "2026-11-07 12:33:31"
+    }
+  ]
+}

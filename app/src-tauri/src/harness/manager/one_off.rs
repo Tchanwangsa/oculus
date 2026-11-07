@@ -9,6 +9,7 @@ use crate::harness::child::ThreadSpawn;
 use crate::harness::claude::{ClaudeSession, ClaudeSpawn};
 use crate::harness::codex::CodexThreadOpts;
 use crate::harness::discover;
+use crate::harness::event::answer::Replies;
 use crate::harness::jobs;
 use crate::harness::opencode::{self, OpencodeSessionOpts};
 use crate::harness::{HarnessEvent, Provider, Sink};
@@ -153,8 +154,9 @@ pub(in crate::harness) struct OneOff {
     rx: mpsc::Receiver<HarnessEvent>,
 }
 
-/// What a one-off turn said. `streamed` is the deltas, which keep the leading
-/// whitespace Claude's committed message trims off.
+/// What a one-off turn said. `message` is its selected answer, never its
+/// replies joined (`event::answer`); `streamed` is the deltas, which keep the
+/// leading whitespace Claude's committed message trims off.
 pub(in crate::harness) struct OneOffReply {
     pub(in crate::harness) message: String,
     pub(in crate::harness) streamed: String,
@@ -193,14 +195,15 @@ impl OneOff {
         timeout: Option<std::time::Duration>,
         doing: &str,
     ) -> OneOffReply {
-        let (mut message, mut streamed) = (String::new(), String::new());
-        let failed = drain_turn(&self.rx, timeout, doing, |ev| match ev {
-            HarnessEvent::AssistantMessage { text } => message.push_str(text),
-            HarnessEvent::AssistantDelta { text } => streamed.push_str(text),
-            _ => {}
+        let (mut replies, mut streamed) = (Replies::default(), String::new());
+        let failed = drain_turn(&self.rx, timeout, doing, |ev| {
+            replies.observe(ev);
+            if let HarnessEvent::AssistantDelta { text } = ev {
+                streamed.push_str(text);
+            }
         });
         OneOffReply {
-            message,
+            message: replies.answer().to_string(),
             streamed,
             failed,
         }

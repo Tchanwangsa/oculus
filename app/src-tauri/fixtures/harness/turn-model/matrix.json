@@ -1,0 +1,428 @@
+[
+  {
+    "id": "durable-command-and-answer-reference",
+    "fixture": "opencode-v1-text",
+    "mutation": "none",
+    "checks": [
+      "run_before_send",
+      "scoped_identity",
+      "answer_ref",
+      "committed_cursor"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "claude-144-duplicate-a",
+    "fixture": "claude-144-duplicate-a",
+    "mutation": "none",
+    "checks": [
+      "two_messages",
+      "one_answer",
+      "live_reload",
+      "one_settlement",
+      "answer_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "claude-144-duplicate-b",
+    "fixture": "claude-144-duplicate-b",
+    "mutation": "none",
+    "checks": [
+      "two_messages",
+      "one_answer",
+      "live_reload",
+      "one_settlement",
+      "answer_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "edited-second-answer",
+    "fixture": "claude-144-duplicate-a",
+    "mutation": "edited_final",
+    "checks": [
+      "two_messages",
+      "one_answer"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "answer-before-trailing-tool",
+    "fixture": "claude-144-duplicate-a",
+    "mutation": "answer_before_tool",
+    "checks": [
+      "one_answer",
+      "one_message",
+      "live_reload",
+      "answer_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "short-terminal-message",
+    "fixture": "claude-158-short-final",
+    "mutation": "none",
+    "checks": [
+      "two_messages",
+      "one_answer",
+      "answer_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "claude-158-gap",
+    "fixture": "claude-158-gap",
+    "mutation": "none",
+    "checks": [
+      "one_answer",
+      "one_message",
+      "gap_survives_reload",
+      "live_reload",
+      "answer_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "claude-160-gap",
+    "fixture": "claude-160-gap",
+    "mutation": "none",
+    "checks": [
+      "one_answer",
+      "one_message",
+      "gap_survives_reload",
+      "live_reload",
+      "answer_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "claude-159-recovery",
+    "fixture": "claude-159-recovery",
+    "mutation": "none",
+    "checks": [
+      "one_answer",
+      "one_message",
+      "gap_survives_reload",
+      "live_reload",
+      "answer_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "public-narration-mutation",
+    "fixture": "claude-144-duplicate-a",
+    "mutation": "public_narration",
+    "checks": [
+      "narration_is_work"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "claude-ls",
+    "fixture": "claude-ls",
+    "mutation": "none",
+    "checks": [
+      "one_answer",
+      "live_reload",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "codex-ls",
+    "fixture": "codex-ls",
+    "mutation": "none",
+    "checks": [
+      "one_answer",
+      "live_reload",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "opencode-v1-ls",
+    "fixture": "opencode-v1-ls",
+    "mutation": "none",
+    "checks": [
+      "one_answer",
+      "live_reload",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "antigravity-ls",
+    "fixture": "antigravity-ls",
+    "mutation": "none",
+    "checks": [
+      "one_answer",
+      "live_reload",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "claude-ls-repeat-snapshot",
+    "fixture": "claude-ls",
+    "mutation": "repeat_snapshot",
+    "checks": [
+      "one_message",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "codex-ls-repeat-snapshot",
+    "fixture": "codex-ls",
+    "mutation": "repeat_snapshot",
+    "checks": [
+      "two_messages",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "opencode-v1-text-repeat-snapshot",
+    "fixture": "opencode-v1-text",
+    "mutation": "repeat_snapshot",
+    "checks": [
+      "one_message",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "antigravity-ls-repeat-snapshot",
+    "fixture": "antigravity-ls",
+    "mutation": "repeat_snapshot",
+    "checks": [
+      "one_message",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "identical-distinct-messages",
+    "fixture": "claude-ls",
+    "mutation": "identical_distinct",
+    "checks": [
+      "two_messages",
+      "one_answer"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "codex-native-phases-and-plan-mutation",
+    "fixture": "codex-ls",
+    "mutation": "codex_phase",
+    "checks": [
+      "phase_and_plan"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "claude-interrupt",
+    "fixture": "claude-interrupt",
+    "mutation": "none",
+    "checks": [
+      "public_text_durable",
+      "honest_outcome",
+      "one_settlement",
+      "live_reload",
+      "answer_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "codex-interrupt",
+    "fixture": "codex-interrupt",
+    "mutation": "none",
+    "checks": [
+      "public_text_durable",
+      "honest_outcome",
+      "one_settlement",
+      "live_reload",
+      "answer_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "opencode-v1-interrupt",
+    "fixture": "opencode-v1-interrupt",
+    "mutation": "none",
+    "checks": [
+      "public_text_durable",
+      "honest_outcome",
+      "one_settlement",
+      "live_reload"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "opencode-unknown-reasoning-mutation",
+    "fixture": "opencode-v1-reasoning",
+    "mutation": "unknown_reasoning",
+    "checks": [
+      "no_reasoning_as_answer"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "agy-refusal-success-mutation",
+    "fixture": "antigravity-ls",
+    "mutation": "agy_refusal",
+    "checks": [
+      "refusal_visible"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "claude-background-agent",
+    "fixture": "claude-background-agent",
+    "mutation": "none",
+    "checks": [
+      "two_messages",
+      "live_reload",
+      "autonomous_origin"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "claude-background-agent-fast",
+    "fixture": "claude-background-agent-fast",
+    "mutation": "none",
+    "checks": [
+      "two_messages",
+      "live_reload",
+      "autonomous_origin"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "missing-terminal",
+    "fixture": "claude-ls",
+    "mutation": "missing_terminal",
+    "checks": [
+      "settled",
+      "honest_outcome"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "restart-during-stream",
+    "fixture": "codex-ls",
+    "mutation": "partial_only",
+    "checks": [
+      "public_text_durable",
+      "honest_outcome",
+      "answer_outside_fold"
+    ],
+    "expected_failures": [],
+    "restart": true
+  },
+  {
+    "id": "persist-before-emit-failure",
+    "fixture": "opencode-v1-text",
+    "mutation": "none",
+    "checks": [
+      "live_reload",
+      "honest_outcome"
+    ],
+    "expected_failures": [],
+    "fail_write": true
+  },
+  {
+    "id": "repeated-cursor-envelope",
+    "fixture": "opencode-v1-text",
+    "mutation": "none",
+    "checks": [
+      "live_reload"
+    ],
+    "expected_failures": [],
+    "repeat_envelope": true
+  },
+  {
+    "id": "artifact-source-before-tool",
+    "fixture": "claude-144-duplicate-a",
+    "mutation": "artifact",
+    "checks": [
+      "artifact_source_visible",
+      "live_reload",
+      "artifact_state_stable",
+      "card_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "compaction-only-mutation",
+    "fixture": "codex-ls",
+    "mutation": "compaction",
+    "checks": [
+      "one_compaction"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "repeated-root-terminal",
+    "fixture": "claude-ls",
+    "mutation": "repeated_terminal",
+    "checks": [
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "codex-websearch-recording-without-terminal",
+    "fixture": "codex-websearch",
+    "mutation": "none",
+    "checks": [
+      "settled",
+      "honest_outcome"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "runtime-exit-during-stream",
+    "fixture": "codex-ls",
+    "mutation": "partial_only",
+    "checks": [
+      "public_text_durable",
+      "honest_outcome",
+      "one_settlement",
+      "answer_outside_fold"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "persist-before-send-failure",
+    "fixture": "opencode-v1-text",
+    "mutation": "none",
+    "fail_intent": true,
+    "checks": [
+      "no_send_after_failed_intent"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "after-send-before-ack-failure",
+    "fixture": "codex-ls",
+    "mutation": "after_send_before_ack",
+    "checks": [
+      "durable_receipt",
+      "honest_outcome",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "snapshot-N-with-updates-during-load",
+    "fixture": "opencode-v1-text",
+    "mutation": "none",
+    "load_race": true,
+    "checks": [
+      "snapshot_race"
+    ],
+    "expected_failures": []
+  }
+]

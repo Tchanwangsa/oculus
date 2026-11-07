@@ -1,0 +1,36 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.267",
+  "protocol": "Claude print stream-json",
+  "model": "claude-haiku-4-5",
+  "capture_date": "2026-09-14T07:02:53.438Z (first timestamp in excerpt)",
+  "source": "fixtures/harness/claude-interrupt.ndjson",
+  "redaction": "Existing committed recording reused unchanged; no new private thread content.",
+  "scenario": "claude-interrupt",
+  "frames": 14,
+  "sha256": "2d51d0878576da21efad287031b50a767616e933293e382744401980856dea7b",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-interrupt.ndjson",
+  "native_session": "",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "existing recorded session route; scratch cwd; no startup/configuration probe"
+  }
+}

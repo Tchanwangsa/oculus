@@ -1,0 +1,294 @@
+{
+  "case": "compaction-only-mutation",
+  "restarted": false,
+  "envelopes": [
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": 1,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354134,
+      "event": {
+        "type": "user_message",
+        "text": "Replay request"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354135,
+      "event": {
+        "type": "turn_anchor",
+        "anchor": "replay-turn"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354136,
+      "event": {
+        "type": "turn_started"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": 2,
+      "runId": 1,
+      "attemptId": 1,
+      "entityId": "weak:0",
+      "sequence": 1794054812354137,
+      "event": {
+        "type": "compaction",
+        "source": "mutation-compaction"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": 2,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354138,
+      "event": {
+        "type": "compaction",
+        "source": "mutation-compaction"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": 3,
+      "runId": 1,
+      "attemptId": 1,
+      "entityId": "weak:1",
+      "sequence": 1794054812354139,
+      "event": {
+        "type": "tool_started",
+        "id": "exec-68d68d18-ef70-4234-8310-393a012bf528",
+        "kind": "bash",
+        "name": "commandExecution",
+        "title": "/bin/zsh -lc ls",
+        "input": {
+          "command": "/bin/zsh -lc ls",
+          "cwd": "/Users/tanatchanwangsa/Library/Application Support/com.tchan.oculus"
+        }
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": 2,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354140,
+      "event": {
+        "type": "compaction",
+        "source": "mutation-compaction"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354141,
+      "event": {
+        "type": "usage",
+        "input_tokens": 20724,
+        "output_tokens": 81,
+        "context_tokens": 20805,
+        "context_window": 258400,
+        "cost_usd": null
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354142,
+      "event": {
+        "type": "rate_limits",
+        "windows": [
+          {
+            "label": "5-hour",
+            "used_percent": 0.0,
+            "resets_at": 1789061303
+          },
+          {
+            "label": "Weekly",
+            "used_percent": 7.0,
+            "resets_at": 1789542329
+          }
+        ]
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": 2,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354143,
+      "event": {
+        "type": "compaction",
+        "source": "mutation-compaction"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354144,
+      "event": {
+        "type": "usage",
+        "input_tokens": 41603,
+        "output_tokens": 111,
+        "context_tokens": 20909,
+        "context_window": 258400,
+        "cost_usd": null
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354145,
+      "event": {
+        "type": "rate_limits",
+        "windows": [
+          {
+            "label": "5-hour",
+            "used_percent": 0.0,
+            "resets_at": 1789061307
+          },
+          {
+            "label": "Weekly",
+            "used_percent": 7.0,
+            "resets_at": 1789542329
+          }
+        ]
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354146,
+      "event": {
+        "type": "run_settled",
+        "answer_item_id": null,
+        "work_item_ids": [],
+        "delivery": "not_applicable",
+        "status": "completed",
+        "started_at": "2026-11-07 12:33:32",
+        "ended_at": "2026-11-07 12:33:32"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794054812354147,
+      "event": {
+        "type": "turn_finished",
+        "status": "completed"
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "sequence": 1794054812354148,
+      "event": {
+        "type": "exited",
+        "code": null
+      }
+    }
+  ],
+  "reopened": [
+    {
+      "id": 1,
+      "thread_id": 1,
+      "kind": "user",
+      "ref_id": null,
+      "content": "Replay request",
+      "meta": null,
+      "created_at": "2026-11-07 12:33:32",
+      "anchor": "replay-turn",
+      "run_id": 1,
+      "attempt_id": null,
+      "entity_ref": null,
+      "source_ref": null,
+      "native_phase": null,
+      "lifecycle": null,
+      "display_role": null
+    },
+    {
+      "id": 2,
+      "thread_id": 1,
+      "kind": "compaction",
+      "ref_id": "mutation-compaction",
+      "content": null,
+      "meta": null,
+      "created_at": "2026-11-07 12:33:32",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": 1,
+      "entity_ref": "weak:0",
+      "source_ref": null,
+      "native_phase": null,
+      "lifecycle": null,
+      "display_role": null
+    },
+    {
+      "id": 3,
+      "thread_id": 1,
+      "kind": "tool",
+      "ref_id": "exec-68d68d18-ef70-4234-8310-393a012bf528",
+      "content": "/bin/zsh -lc ls",
+      "meta": "{\"kind\":\"bash\",\"name\":\"commandExecution\",\"input\":{\"command\":\"/bin/zsh -lc ls\",\"cwd\":\"/Users/tanatchanwangsa/Library/Application Support/com.tchan.oculus\"},\"ok\":null,\"output\":null}",
+      "created_at": "2026-11-07 12:33:32",
+      "anchor": null,
+      "run_id": 1,
+      "attempt_id": 1,
+      "entity_ref": "weak:1",
+      "source_ref": null,
+      "native_phase": null,
+      "lifecycle": null,
+      "display_role": null
+    }
+  ],
+  "runs": [
+    {
+      "id": 1,
+      "initiating_item_id": 1,
+      "binding_id": 1,
+      "active_attempt_id": 1,
+      "execution_status": "completed",
+      "origin": "student",
+      "delivery_state": "not_applicable",
+      "answer_item_id": null,
+      "started_at": "2026-11-07 12:33:32",
+      "ended_at": "2026-11-07 12:33:32"
+    }
+  ]
+}
